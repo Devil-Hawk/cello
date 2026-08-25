@@ -1,147 +1,56 @@
-# 🎻 Cello
+<img src="apps/web/public/icon.svg" width="64" alt="">
 
-**Career Engine for Leads & Opportunities**
+# Cello
 
-An open-source, AI-powered job hunting tool that helps you stay ahead of the competition. When companies post jobs, early applicants have a significant advantage — Cello ensures you never miss an opportunity.
+I got tired of reading job boards, so I built the thing that reads them for me.
 
-![Next.js](https://img.shields.io/badge/Next.js-14-black?style=flat-square&logo=next.js)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?style=flat-square&logo=typescript)
-![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-green?style=flat-square&logo=supabase)
-![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)
+Cello watches the companies you care about and pulls new postings within the hour: 8 ATS providers (Greenhouse, Lever, Ashby, Workday, and friends), 11 job boards, and a scraper for the career pages that fight back. It scores each posting against your actual resume and shows its reasoning so you can disagree. Then it does the boring parts: tailors the resume, drafts the outreach, finds the one person actually worth emailing (a recruiter at Stripe, the founder at a 12-person startup), preps you for the interview, and watches your Gmail so applications don't quietly die.
 
-## ✨ Features
+Bring your own Supabase project and your own API keys. There's a monthly spend cap, default $10, that no code path can route around. I've read enough "the agent burned my credits overnight" postmortems.
 
-- **🔍 Real-time Job Discovery** — Scout Agent monitors career pages every 15 minutes
-- **🎯 AI-Powered Matching** — Compares jobs to your resume using embeddings
-- **🤖 Intelligent Scraping** — Works with any career page format via LLM extraction
-- **📧 Gmail Integration** — Auto-detects application status from email responses
-- **📊 Kanban Pipeline** — Visual tracking of your entire job search
-- **👻 Ghost Detection** — Alerts when applications go silent too long
-- **🌙 Dark Mode** — Easy on the eyes for those late-night applications
+Under the hood it's LangGraph on a Postgres checkpointer, so runs, chats and refreshes are durable graphs: a serverless timeout pauses work instead of killing it, and a crashed invocation resumes where it stopped. Memory and retrieval are Mem0 plus pgvector, fused with plain Postgres full-text. Scraping is deterministic first; a model only gets involved when parsers genuinely can't. Seventeen agents, one contract: schema-checked in and out, metered, and anything that writes resume or outreach content gets fabrication-checked before it counts.
 
-## Tech Stack
+Some rules are not settings. They're code, and tests fail if you break them:
 
-| Layer | Technology |
-|-------|------------|
-| Frontend | Next.js 14 + TypeScript |
-| Database | Supabase (PostgreSQL + Auth + Realtime) |
-| Scraping | Python + GitHub Actions Cron |
-| AI | Hybrid (Local embeddings + API for analysis) |
-| Hosting | Vercel + GitHub Actions |
+- It never sends mail you haven't read. Delivery is always your click.
+- It never invents a fact about you. Tailored output is diffed against your real resume.
+- It refuses instead of guessing when a model fails or the data is too thin.
+- It cannot overspend. Every model call, including embeddings and judges, passes the cap.
 
-## Quick Start
+## What it looks like
 
-### Prerequisites
+These frames are from a demo workspace. Cello seeds one from an access code, so the companies are fictional and everything else is the real product:
 
-- Node.js 18+
-- pnpm 8+
-- Python 3.11+
-- Supabase account
+![The jobs list, scored and ranked](docs/screenshots/jobs.png)
 
-### Installation
+![Why one job scored 88%, with the evidence](docs/screenshots/match.png)
+
+![The pipeline and the day's summary](docs/screenshots/dashboard.png)
+
+## Run it
+
+Node 20+, pnpm, and a Supabase project. Python 3.11+ if you want the scraper.
 
 ```bash
-# Clone the repository
-git clone https://github.com/Devil-Hawk/cello.git
-cd cello
-
-# Install dependencies
+git clone https://github.com/Devil-Hawk/cello.git && cd cello
 pnpm install
-
-# Set up Python environment
-cd packages/scrapers
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-cd ../..
-
-# Configure environment
-cp apps/web/.env.example apps/web/.env.local
-# Edit .env.local with your Supabase credentials
-
-# Run database migrations
-# (Use Supabase CLI or dashboard)
-
-# Start development server
+cp apps/web/.env.example apps/web/.env.local    # your Supabase URL + keys
+# apply supabase/migrations/ in filename order, then:
 pnpm dev
 ```
 
-## Project Structure
+Add a model key in Settings (OpenRouter, OpenAI or Anthropic). Nothing that costs money runs until you do. Hourly sourcing and the daily digest run from `.github/workflows/` if you set the repo secrets.
 
-```
-cello/
-├── apps/
-│   └── web/                 # Next.js frontend + API routes
-├── packages/
-│   ├── agents/              # AI agent logic (TypeScript)
-│   ├── scrapers/            # Python scraping scripts
-│   └── shared/              # Shared types and constants
-├── supabase/
-│   └── migrations/          # Database migrations
-└── .github/workflows/       # CI/CD pipelines
-```
-
-## Multi-Agent Architecture
-
-| Agent | Purpose |
-|-------|---------|
-| **Orchestrator** | Coordinates all agents |
-| **Scout** | Discovers and monitors career pages |
-| **Matcher** | Scores job-resume fit |
-| **Analyst** | Deep analysis and talking points |
-| **Tracker** | Monitors Gmail for status updates |
-| **Coach** | Suggests follow-ups |
-| **Network** | Finds referral paths |
-
-## Development
+## Hacking on it
 
 ```bash
-# Run all checks
-pnpm lint
-pnpm typecheck
-pnpm test
-
-# Build for production
-pnpm build
+pnpm lint && pnpm typecheck && pnpm test    # 2,500+ tests
 ```
 
-## Observability
+Fair warning before you "fix" a weird test: several suites are source-level scans that read *other* files and fail when new code breaks a guarantee written down elsewhere. Every route that reaches a model must pass the budget guard, every file that puts employer text in a prompt must be in a ledger, and graphs get invoked through exactly one audited door. Each scan is mutation-tested, so if it's red, it's right. Details in [CONTRIBUTING.md](CONTRIBUTING.md); security reports go through [SECURITY.md](SECURITY.md), not public issues.
 
-Error monitoring (Sentry) is fully optional and off by default — see
-[`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) for the one env var that
-enables it, exactly what's scrubbed before anything is sent, and how the
-agent harness logs failures independently of Sentry.
+## Status
 
-## Contributing
+I use it every day for a real job search, which is the only roadmap it has. Development lands on `staging`; `main` gets what survives. It's a self-hosted tool, not a product with a support queue, so expect some sharp edges.
 
-Contributions are welcome! Please read our contributing guidelines before submitting a PR.
-
-## 🔧 GitHub Actions Setup
-
-For automated job scraping every 15 minutes, add these secrets to your repository:
-
-1. Go to **Settings → Secrets → Actions**
-2. Add:
-   - `SUPABASE_URL` — Your Supabase project URL
-   - `SUPABASE_SERVICE_KEY` — Service role key (not anon key)
-   - `OPENROUTER_API_KEY` — (Optional) For AI-powered extraction
-
-## 🚢 Deployment
-
-### Vercel (Recommended)
-
-1. Push to GitHub
-2. Import project in [Vercel](https://vercel.com)
-3. Set root directory to `apps/web`
-4. Add environment variables
-5. Deploy!
-
-## 📝 License
-
-MIT License - see [LICENSE](LICENSE) for details.
-
----
-
-<p align="center">
-  Built with ❤️ for job seekers everywhere
-</p>
+MIT — see [LICENSE](LICENSE).
