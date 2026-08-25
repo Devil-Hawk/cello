@@ -452,9 +452,14 @@ function JobsPageInner() {
 
     if (selectedCompany !== 'all') {
       query = query.eq('company_id', selectedCompany)
-    } else {
-      query = query.in('company_id', companyIds)
     }
+    // No 'all companies' filter: jobs RLS already scopes every row to the
+    // user's own companies (EXISTS companies.id = jobs.company_id AND
+    // companies.user_id = auth.uid()). The old .in('company_id', companyIds)
+    // here re-sent every company id in the querystring, which passed the
+    // gateway's URL limit until the account grew past ~600 companies and then
+    // failed every load with a bare 400. The empty-companies early return
+    // above keeps the zero-companies UX identical.
 
     if (freshness !== 'all') {
       const cutoffIso = new Date(Date.now() - FRESHNESS_HOURS[freshness] * 60 * 60 * 1000).toISOString()
