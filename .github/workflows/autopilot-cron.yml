@@ -1,0 +1,60 @@
+name: Autopilot Cron - Continuous Draft
+
+# Drives the continuous autopilot engine: each tick sources fresh jobs, matches
+# them, and (for opted-in users, above their threshold) tailors them and builds
+# a pending_review application draft with a handoff link. It NEVER submits —
+# see the SAFETY note at the top of lib/harness/autopilot.ts: this path runs
+# fully unattended on an hourly schedule, so there is no human present at any
+# given tick to confirm a real, irreversible submission. Actual submission is
+# a separate, explicit, human-confirmed action outside this cron
+# (lib/harness/chains.ts#buildSubmitConfirmedPlan via the apply UI). "Never
+# stops" = this always-on discovery+drafting schedule, not unattended submits;
+# each tick is still disciplined by the kill switch, dedupe, quality gate, and
+# official-APIs-only boundary baked into lib/harness/autopilot.ts.
+#
+# Guarded by the CRON_SECRET repo secret (must match the CRON_SECRET env var on
+# the Vercel deployment — the same secret harness-cron.yml uses). Target URL
+# defaults to prod but can be overridden with the AUTOPILOT_CRON_URL repo
+# variable (Settings -> Secrets and variables -> Actions -> Variables).
+
+on:
+  schedule:
+    # Hourly, on the half hour (offset from scrape.yml/harness-cron.yml).
+    - cron: '30 * * * *'
+  workflow_dispatch:
+
+# Never let two ticks overlap; guardrails are idempotent but a single in-flight
+# tick keeps the cap accounting clean.
+concurrency:
+  group: autopilot-cron
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    name: Autopilot tick
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger autopilot tick
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          CRON_URL: ${{ vars.AUTOPILOT_CRON_URL || 'https://cello-two.vercel.app/api/harness/autopilot' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET repo secret is not set"
+            exit 1
+          fi
+          echo "POST $CRON_URL"
+          http_code=$(curl -sS -o /tmp/autopilot.out -w '%{http_code}' \
+            -X POST "$CRON_URL" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            --max-time 120)
+          echo "HTTP $http_code"
+          echo "--- response ---"
+          cat /tmp/autopilot.out || true
+          echo
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "::error::Autopilot cron returned HTTP $http_code"
+            exit 1
+          fi

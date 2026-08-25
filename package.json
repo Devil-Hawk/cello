@@ -1,0 +1,25 @@
+{
+  "name": "cello",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Career Engine for Leads & Opportunities - AI-powered job hunting tool",
+  "keywords": ["job-search", "career", "ai", "automation"],
+  "license": "MIT",
+  "author": "Ankit Punjabi <ankitpunjabi89@gmail.com>",
+  "packageManager": "pnpm@8.15.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @cello/web dev",
+    "build": "pnpm --filter @cello/web build",
+    "start": "pnpm --filter @cello/web start",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:migrate": "pnpm --filter @cello/web db:migrate",
+    "db:generate": "pnpm --filter @cello/web db:generate",
+    "clean": "pnpm -r clean && rm -rf node_modules"
+  }
+}

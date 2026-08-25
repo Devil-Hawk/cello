@@ -1,0 +1,45 @@
+name: Harness Cron - Daily Digest
+
+# Triggers the agentic harness cron endpoint, which creates + runs a daily
+# digest agent_run for each active user. Guarded by the CRON_SECRET repo secret
+# (must match the CRON_SECRET env var configured on the Vercel deployment).
+#
+# Does NOT touch scrape.yml. Uses one new repo secret (CRON_SECRET). The target
+# URL defaults to prod but can be overridden with the HARNESS_CRON_URL repo
+# variable (Settings -> Secrets and variables -> Actions -> Variables).
+
+on:
+  schedule:
+    # Daily at 13:00 UTC.
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+
+jobs:
+  digest:
+    name: Daily digest runs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger harness cron
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          CRON_URL: ${{ vars.HARNESS_CRON_URL || 'https://cello-two.vercel.app/api/harness/cron' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET repo secret is not set"
+            exit 1
+          fi
+          echo "POST $CRON_URL"
+          http_code=$(curl -sS -o /tmp/harness-cron.out -w '%{http_code}' \
+            -X POST "$CRON_URL" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            --max-time 120)
+          echo "HTTP $http_code"
+          echo "--- response ---"
+          cat /tmp/harness-cron.out || true
+          echo
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "::error::Harness cron returned HTTP $http_code"
+            exit 1
+          fi

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Cello">
+  <title>Cello</title>
+  <!--
+    FAVICON variant of public/icon.svg (see that file for what the mark is and
+    why it is not orange). Next's App Router picks this up by filename.
+
+    Two deliberate differences from the tile:
+      1. The mark is scaled up. A tab icon is never masked, so the maskable
+         safe zone does not apply, and the extra size is the difference
+         between a legible spiral and a smudge at 16px.
+      2. Stroke is slightly heavier for the same reason — a 7-unit stroke that
+         reads cleanly at 128px closes up and greys out at 16px.
+
+    The icon this replaced was a generic C-and-dot on #0f172a — Tailwind
+    slate-900, a colour that appears nowhere else in this product's palette.
+  -->
+  <rect width="512" height="512" rx="116" fill="#0D0F14"/>
+  <g transform="translate(256 256) scale(7.3) translate(-32 -32)">
+    <path fill="none" stroke="#4FA8A8" stroke-width="7.6" stroke-linecap="round"
+      d="M50 47 C 44 56, 30 58, 20 51 C 9 43, 8 26, 19 17 C 30 8, 46 12, 51 23
+         C 55 32, 49 41, 40 41 C 33 41, 29 35, 32 29"/>
+  </g>
+</svg>

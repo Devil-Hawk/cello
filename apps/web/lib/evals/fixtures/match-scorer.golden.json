@@ -1,0 +1,1746 @@
+{
+  "note": "Labelled match-scorer data snapshotted from production. Positives are jobs the user genuinely applied to (demo-seeded rows excluded at snapshot time). Negatives are scored jobs never applied to. Regenerate: pnpm tsx scripts/snapshot-eval-data.ts",
+  "excludedDemoRows": 16,
+  "cases": [
+    {
+      "id": "5652c880-07c8-4f44-9ab7-b0eedc324063",
+      "score": 15,
+      "positive": true,
+      "label": "Junior Fullstack Engineer (m/w/d) - Festanstellung, Vollzeit München (screen)"
+    },
+    {
+      "id": "1c418968-42a1-4350-b1fe-05f0e327688a",
+      "score": 78,
+      "positive": false,
+      "label": "GenAI Engineer AI Builder AI Agent Associate Specialist"
+    },
+    {
+      "id": "274c0985-cbe1-4f12-8d6c-f0bcff5d2783",
+      "score": 70,
+      "positive": false,
+      "label": "[Job-30506] Mid level Data Analyst/ Business Intelligence , Brazil"
+    },
+    {
+      "id": "b4d2e343-a411-4e26-9959-a920aadd6a58",
+      "score": 68,
+      "positive": false,
+      "label": "Frontier Agents Engineer (Applied AI)"
+    },
+    {
+      "id": "8eb67ea6-384f-4b9e-89dc-6dc0b2c056a7",
+      "score": 62,
+      "positive": false,
+      "label": "AI Infrastructure Engineer"
+    },
+    {
+      "id": "9d31faee-5b37-4215-88f3-48044f2e19f3",
+      "score": 62,
+      "positive": false,
+      "label": "Data Scientist, Analytics (Technical Leadership)"
+    },
+    {
+      "id": "7fcf7f2f-9c37-4a4c-88f5-10f46cd6f8fc",
+      "score": 62,
+      "positive": false,
+      "label": "Data Scientist, Analytics (Technical Leadership)"
+    },
+    {
+      "id": "5049b88e-a135-41f5-8a4a-ec4e39539db0",
+      "score": 62,
+      "positive": false,
+      "label": "Junior Machine Learning Engineer"
+    },
+    {
+      "id": "885d6981-27a4-48f6-9c15-355775f75a4c",
+      "score": 62,
+      "positive": false,
+      "label": "Lead AI Engineer + Agent Builders"
+    },
+    {
+      "id": "c6d83002-c79e-4450-988a-3cce5653ecbc",
+      "score": 62,
+      "positive": false,
+      "label": "Python Developer"
+    },
+    {
+      "id": "96feaa5e-8ccf-4670-a211-746cd11c0800",
+      "score": 62,
+      "positive": false,
+      "label": "Machine Learning Engineer/AI Engineer"
+    },
+    {
+      "id": "f984c4e0-6d83-4a6e-a00c-40705eef9a61",
+      "score": 62,
+      "positive": false,
+      "label": "Azure Data DevOps Engineer"
+    },
+    {
+      "id": "715a6771-4ee2-4c7c-9318-2a89417ace8f",
+      "score": 62,
+      "positive": false,
+      "label": "Software Engineering Advisor – Forward Deployed Engineer (FDE)"
+    },
+    {
+      "id": "8b6d63f5-30e9-4a8b-92e3-c6eecbf7869d",
+      "score": 60,
+      "positive": false,
+      "label": "Senior Backend Software Engineer (USA Remote)"
+    },
+    {
+      "id": "52308a08-bf9e-433b-8940-43c325f42373",
+      "score": 60,
+      "positive": false,
+      "label": "Product Engineer - Brand - Fullstack, Backend or Frontend"
+    },
+    {
+      "id": "fbe57a49-bafe-4bba-b838-0959c87839e4",
+      "score": 60,
+      "positive": false,
+      "label": "AI Engineer"
+    },
+    {
+      "id": "b904da47-e28b-4bcc-b928-77db75185056",
+      "score": 58,
+      "positive": false,
+      "label": "Staff Machine Learning Engineer"
+    },
+    {
+      "id": "4aa1b104-9f8a-46e8-ad8a-77afc70e070a",
+      "score": 58,
+      "positive": false,
+      "label": "Full Stack Software Engineer"
+    },
+    {
+      "id": "25439e2c-f829-44d1-bd24-ffd3fe8088f2",
+      "score": 58,
+      "positive": false,
+      "label": "Product Engineer"
+    },
+    {
+      "id": "44f5d705-b572-415d-a8e5-29a6e16ca3cf",
+      "score": 58,
+      "positive": false,
+      "label": "Forward Deployed Strategist"
+    },
+    {
+      "id": "1ee2546a-1cc3-4683-9c4f-7bd5b3be3e36",
+      "score": 58,
+      "positive": false,
+      "label": "Enterprise Technical Solutions Engineer"
+    },
+    {
+      "id": "da1ee2a8-5c5f-4094-a087-1a6d050d26dd",
+      "score": 58,
+      "positive": false,
+      "label": "AI Product Engineer - ClickStack"
+    },
+    {
+      "id": "847add2a-3e7c-4098-b3a1-28cd4b15b37b",
+      "score": 58,
+      "positive": false,
+      "label": "LLM Engineer Freelancer"
+    },
+    {
+      "id": "23644f2b-62a5-4605-b6bc-1c757d777d2f",
+      "score": 58,
+      "positive": false,
+      "label": "Data Scientist"
+    },
+    {
+      "id": "8035e0eb-0703-40c1-9525-fe75c2355838",
+      "score": 58,
+      "positive": false,
+      "label": "Data Scientist"
+    },
+    {
+      "id": "19643934-0915-466f-a7f5-3001c29a7d0d",
+      "score": 58,
+      "positive": false,
+      "label": "Product Engineer"
+    },
+    {
+      "id": "ac03ce49-6180-4f83-8a96-89f3d270dd4e",
+      "score": 58,
+      "positive": false,
+      "label": "Software Engineer"
+    },
+    {
+      "id": "6c92e665-5dfb-4132-890b-557ef3d148a7",
+      "score": 55,
+      "positive": false,
+      "label": "Software Engineer - Data Aquisition (systems)"
+    },
+    {
+      "id": "c2ecb6b8-8f03-4980-baff-6e4b00144272",
+      "score": 55,
+      "positive": false,
+      "label": "Software Engineering Advisor"
+    },
+    {
+      "id": "50467cac-1e81-4d48-8a71-18da04ab2767",
+      "score": 55,
+      "positive": false,
+      "label": "Data Scientist, GTM"
+    },
+    {
+      "id": "1adfada3-57b6-4926-a8cb-37bc298f8751",
+      "score": 55,
+      "positive": false,
+      "label": "AI Engineer"
+    },
+    {
+      "id": "1b22e675-0a6d-4440-a342-e112a5322950",
+      "score": 55,
+      "positive": false,
+      "label": "Data Scientist"
+    },
+    {
+      "id": "d6e55735-a8ca-455d-82f2-0ac4f1308f54",
+      "score": 55,
+      "positive": false,
+      "label": "Software Engineering Advisor"
+    },
+    {
+      "id": "bdadbd23-9b3b-415b-b76e-68c3663a9c80",
+      "score": 55,
+      "positive": false,
+      "label": "Solutions Architect - Lakebase"
+    },
+    {
+      "id": "b065c6ac-e312-4703-b75a-3b8fdeab7dd3",
+      "score": 55,
+      "positive": false,
+      "label": "Enterprise Outcomes Architect, New YorkNew York, New York"
+    },
+    {
+      "id": "447f7aba-5a27-4de8-a336-fde4770a9f67",
+      "score": 54,
+      "positive": false,
+      "label": "AI Engineer — AWS Bedrock AgentCore & Production Agentic Systems | LATAM & Europe"
+    },
+    {
+      "id": "02d850e8-c2a7-48b8-9ceb-22d46523dfdc",
+      "score": 52,
+      "positive": false,
+      "label": "[BPC] Junior Cloud Engineer"
+    },
+    {
+      "id": "9c14603d-6e30-4b09-bc86-fbe6bcf28f99",
+      "score": 52,
+      "positive": false,
+      "label": "Lead Data Scientist"
+    },
+    {
+      "id": "ba810679-22f5-45d9-bae5-3d79db3f75f1",
+      "score": 52,
+      "positive": false,
+      "label": "Freelance Agent Evaluation Engineer"
+    },
+    {
+      "id": "838650ed-daf1-4b61-91dc-8855a8812a7c",
+      "score": 52,
+      "positive": false,
+      "label": "Python & React Engineer with AI (Remote, Latam)"
+    },
+    {
+      "id": "ecea2790-b043-4bc5-818d-279cdfab1a87",
+      "score": 50,
+      "positive": false,
+      "label": "AI Engineer"
+    },
+    {
+      "id": "2234d5ac-be7c-4916-930b-b4d63e29f1b0",
+      "score": 50,
+      "positive": false,
+      "label": "Field Engineer - India"
+    },
+    {
+      "id": "7b687e45-c083-479a-9c37-a02141fd2fd2",
+      "score": 50,
+      "positive": false,
+      "label": "Senior Consulting Engineer &amp;#8211; Singapore"
+    },
+    {
+      "id": "891f2b61-766e-4224-83f1-497002996458",
+      "score": 50,
+      "positive": false,
+      "label": "Forward Deployed Engineer - Remote"
+    },
+    {
+      "id": "75ce6210-9d87-4e0d-aa56-836587a5b0b9",
+      "score": 48,
+      "positive": false,
+      "label": "Software Engineer, API Multimodal"
+    },
+    {
+      "id": "68959e8f-be83-4f01-b088-78ca3cb475ef",
+      "score": 48,
+      "positive": false,
+      "label": "Solutions Architect - Financial Services (Banking and Payments)"
+    },
+    {
+      "id": "96f955c9-0476-4a3e-bd02-20ad5992847f",
+      "score": 48,
+      "positive": false,
+      "label": "Azure DevOps Engineer (Temporary Contract)"
+    },
+    {
+      "id": "0b7cf4fb-e4f7-491d-8b02-b5e6004460a1",
+      "score": 48,
+      "positive": false,
+      "label": "HPC Infrastructure Engineer"
+    },
+    {
+      "id": "1a4b271d-7b0b-484f-835e-416ea9d5d174",
+      "score": 48,
+      "positive": false,
+      "label": "Snowflake Data Engineer"
+    },
+    {
+      "id": "92165b60-179e-4f32-9609-ba0a80fb500d",
+      "score": 47,
+      "positive": false,
+      "label": "AI Product Engineer - ClickStack"
+    },
+    {
+      "id": "6e487993-e69b-4657-9480-68f9d98a8453",
+      "score": 47,
+      "positive": false,
+      "label": "Junior Data Analyst"
+    },
+    {
+      "id": "4fbc99eb-7222-4ccc-adf0-e2d3e4d87973",
+      "score": 46,
+      "positive": false,
+      "label": "Senior (and above) Backend Engineer"
+    },
+    {
+      "id": "0096f2cc-55c4-4cd9-9be4-f09ddf6adf1d",
+      "score": 45,
+      "positive": false,
+      "label": "Product Education Engineer"
+    },
+    {
+      "id": "9bf258a3-af23-4948-9cd7-188f3a673805",
+      "score": 45,
+      "positive": false,
+      "label": "Solutions Architect"
+    },
+    {
+      "id": "6a8e988c-34d6-47f3-b99c-6ec2a5687d84",
+      "score": 45,
+      "positive": false,
+      "label": "Software Engineer, Enterprise Verticals"
+    },
+    {
+      "id": "7bcaa099-4786-4826-a66b-fb21a53a5da9",
+      "score": 45,
+      "positive": false,
+      "label": "Software Engineer I (Remote Eligible)"
+    },
+    {
+      "id": "c89a8d24-6932-474b-be0a-6a42221a7fe9",
+      "score": 45,
+      "positive": false,
+      "label": "Machine Learning Engineer, Ops (Remote)"
+    },
+    {
+      "id": "16e4b392-31cd-48ff-b7ad-392fe40ab77c",
+      "score": 45,
+      "positive": false,
+      "label": "Full Stack AI Engineer"
+    },
+    {
+      "id": "d80b9850-53b5-4dfe-82af-768f6d9fea88",
+      "score": 45,
+      "positive": false,
+      "label": "Machine Learning Engineer, Computer Vision & Robotics"
+    },
+    {
+      "id": "9bced646-fc8b-41a2-893b-6de477ddb8ce",
+      "score": 45,
+      "positive": false,
+      "label": "Fullstack Engineer-  AWS, Typescript, Java, Spring Boot, React, Next.js (m/f/d)"
+    },
+    {
+      "id": "de542a38-0655-49a2-8905-4c2422e2e616",
+      "score": 45,
+      "positive": false,
+      "label": "Fullstack Engineer-  AWS, Typescript, Java, Spring Boot, React, Next.js (m/f/d)"
+    },
+    {
+      "id": "9840a40d-a943-4469-be21-5ab3dfae7d90",
+      "score": 45,
+      "positive": false,
+      "label": "Data Scientist"
+    },
+    {
+      "id": "19b78ff7-9eee-4dd4-8fe2-d6c28cfacc58",
+      "score": 45,
+      "positive": false,
+      "label": "Fullstack Engineer-  AWS, Typescript, Java, Spring Boot, React, Next.js (m/f/d)"
+    },
+    {
+      "id": "6cea69c7-45f8-48b0-8188-42a0a370b5ac",
+      "score": 45,
+      "positive": false,
+      "label": "Data Steward"
+    },
+    {
+      "id": "97e3949a-4c72-47d2-abaa-4a70d7bf3cf8",
+      "score": 42,
+      "positive": false,
+      "label": "Lead Platform Engineer"
+    },
+    {
+      "id": "b7b133eb-e0cc-41f2-a1eb-3f261d4c1faf",
+      "score": 42,
+      "positive": false,
+      "label": "Software Engineer (Multiple Levels)"
+    },
+    {
+      "id": "93020509-3313-4165-9d44-b5807e4f0bde",
+      "score": 42,
+      "positive": false,
+      "label": "Data Analyst"
+    },
+    {
+      "id": "b3dec406-155c-4aa5-a174-76cc13a51788",
+      "score": 42,
+      "positive": false,
+      "label": "Research Scientist II"
+    },
+    {
+      "id": "c56d16b7-8801-431c-a200-ee379cc26759",
+      "score": 42,
+      "positive": false,
+      "label": "Python Backend Developer"
+    },
+    {
+      "id": "616f77e0-e162-43b9-b370-9b5a5cee08a9",
+      "score": 42,
+      "positive": false,
+      "label": "Mobile Engineer"
+    },
+    {
+      "id": "469d5f29-5981-4409-9db1-ef63e9e1d9f8",
+      "score": 42,
+      "positive": false,
+      "label": "Bioinformatics Software Engineer II"
+    },
+    {
+      "id": "8f0c9977-8089-4069-acc4-ebc58e5c8f46",
+      "score": 42,
+      "positive": false,
+      "label": "AI Platform Engineer"
+    },
+    {
+      "id": "52d1362d-0af2-45c0-b8a4-5fc4ad4db7f4",
+      "score": 40,
+      "positive": false,
+      "label": "Forward Deployed Architect, Japan"
+    },
+    {
+      "id": "e05e70b0-daf9-4796-b5e2-037e0ac132bc",
+      "score": 40,
+      "positive": false,
+      "label": "Lead Backend Engineer"
+    },
+    {
+      "id": "5cc9848d-a59b-4f15-b945-2bae2a36a1f9",
+      "score": 40,
+      "positive": false,
+      "label": "Senior Cloud Software Engineer"
+    },
+    {
+      "id": "ae530ad4-426d-490a-9d2b-44693780fc1a",
+      "score": 40,
+      "positive": false,
+      "label": "Software Engineer, Machine Learning Infrastructure"
+    },
+    {
+      "id": "cbec1e53-a6ad-4911-8387-40bd0b613771",
+      "score": 40,
+      "positive": false,
+      "label": "Software Engineer - Full Stack"
+    },
+    {
+      "id": "68b1062d-7fdf-4889-bb8c-411e0ce9aaa5",
+      "score": 40,
+      "positive": false,
+      "label": "Engineering - ElevenAPI"
+    },
+    {
+      "id": "f3aed2b7-d2c5-4ea8-8241-6785101555d8",
+      "score": 40,
+      "positive": false,
+      "label": "Commercial Solution Engineer"
+    },
+    {
+      "id": "addda807-dce7-48a9-9c64-81f4f1d58cc3",
+      "score": 40,
+      "positive": false,
+      "label": "Full Stack Engineer"
+    },
+    {
+      "id": "29149ca4-4527-4149-aaf0-86532438eb8d",
+      "score": 38,
+      "positive": false,
+      "label": "Software Engineer, AI & Platforms"
+    },
+    {
+      "id": "27f59796-c448-4682-8011-9ca3d2f1dc1c",
+      "score": 38,
+      "positive": false,
+      "label": "Open roles at Draftaid"
+    },
+    {
+      "id": "b7c6b307-33d9-49bb-8915-c202208ef52d",
+      "score": 38,
+      "positive": false,
+      "label": "Multiple Engineering Roles"
+    },
+    {
+      "id": "37678d4a-0c26-4ef0-ab3b-d0e9cf477507",
+      "score": 38,
+      "positive": false,
+      "label": "Senior Software Engineer, Storage"
+    },
+    {
+      "id": "f8f6146b-1611-44ac-97e7-4c508de310e2",
+      "score": 38,
+      "positive": false,
+      "label": "Senior Data Engineer"
+    },
+    {
+      "id": "392c74ab-5289-4b38-8122-078a388c0676",
+      "score": 38,
+      "positive": false,
+      "label": "Software Engineer - Infrastructure"
+    },
+    {
+      "id": "9e97b560-4ef1-4d7e-8efd-135a02d6d666",
+      "score": 38,
+      "positive": false,
+      "label": "Lead Software Engineer"
+    },
+    {
+      "id": "922d45ad-0afc-4fe3-b4f3-d525e3c5464e",
+      "score": 35,
+      "positive": false,
+      "label": "Software Engineer"
+    },
+    {
+      "id": "e4f2c802-6c6b-473e-953d-7b469820ff59",
+      "score": 35,
+      "positive": false,
+      "label": "AI Success Engineer - Healthcare & Life Sciences"
+    },
+    {
+      "id": "41ff600d-57ad-4db5-ab5d-0d124510a6bb",
+      "score": 35,
+      "positive": false,
+      "label": "Release Engineer"
+    },
+    {
+      "id": "e1288a10-9070-4de2-8cee-8372be5c2d3b",
+      "score": 35,
+      "positive": false,
+      "label": "Lead Full Stack Engineer"
+    },
+    {
+      "id": "9102479a-4182-4e64-94bb-bbd7cb146f12",
+      "score": 35,
+      "positive": false,
+      "label": "Software Engineer GO"
+    },
+    {
+      "id": "8fde4c29-756c-447e-a174-eef14b48240c",
+      "score": 35,
+      "positive": false,
+      "label": "Early Access Deployment Engineer"
+    },
+    {
+      "id": "aed2bb56-ac97-4dfc-a090-be3c84c841be",
+      "score": 35,
+      "positive": false,
+      "label": "AI Success Engineer - Healthcare & Life Sciences"
+    },
+    {
+      "id": "4d856989-5caa-4473-a4ec-8d3c48dd63c0",
+      "score": 35,
+      "positive": false,
+      "label": "Systems Engineer, Product Platform Tools"
+    },
+    {
+      "id": "7cea702c-efdf-4b4b-8dfd-bb4a7524ed25",
+      "score": 34,
+      "positive": false,
+      "label": "Freelance Frontend Developer (Landing Pages & Websites)"
+    },
+    {
+      "id": "179dcbbc-98d1-4e11-b1f0-823b630979b0",
+      "score": 34,
+      "positive": false,
+      "label": "Site Reliability Engineer (SRE)"
+    },
+    {
+      "id": "0fd038e9-6f32-44a3-9b1f-ae4c357a8041",
+      "score": 32,
+      "positive": false,
+      "label": "Junior Web Developer / Business Systems Analyst"
+    },
+    {
+      "id": "2dc31afd-fad0-4a9b-8394-db91891810c1",
+      "score": 32,
+      "positive": false,
+      "label": "Founding Deep Learning Engineer"
+    },
+    {
+      "id": "fde5f838-e3d2-4437-b4dc-d4f5ea59616d",
+      "score": 32,
+      "positive": false,
+      "label": "Deployment Strategist"
+    },
+    {
+      "id": "68434d89-6492-490c-8580-c1edabb6b244",
+      "score": 30,
+      "positive": false,
+      "label": "Scaled Outcomes Architect, Dublin, Russian-Speaking"
+    },
+    {
+      "id": "f79303e5-2a12-4a74-a133-0bd5f2e5dd53",
+      "score": 30,
+      "positive": false,
+      "label": "Data Engineer, CPU & Storage"
+    },
+    {
+      "id": "586c8927-c2e3-4c66-83f3-771e6066de37",
+      "score": 30,
+      "positive": false,
+      "label": "Software Engineer"
+    },
+    {
+      "id": "6801e193-d61e-4f1c-9eae-c9749014fdbe",
+      "score": 30,
+      "positive": false,
+      "label": "AI Infrastructure Engineer, Serving Platform"
+    },
+    {
+      "id": "0a598ff2-cd2e-4dc6-9010-c1dd0b8a1e6e",
+      "score": 30,
+      "positive": false,
+      "label": "Software Engineer - Data Infrastructure - Kafka"
+    },
+    {
+      "id": "06b86c28-81ac-4963-8e9b-ed9a89689b7b",
+      "score": 30,
+      "positive": false,
+      "label": "Scaled Outcomes Architect, Dublin, French-Speaking"
+    },
+    {
+      "id": "073ac3bf-6a67-4e76-9ade-2e9a6a5d8eae",
+      "score": 30,
+      "positive": false,
+      "label": "Solution Engineer - Retail/Travel"
+    },
+    {
+      "id": "ec9e8ad5-7a30-4e16-94b3-70a0747b7fd8",
+      "score": 30,
+      "positive": false,
+      "label": "Software Engineer, EAA"
+    },
+    {
+      "id": "a67a50ce-9ad1-4693-bab5-f63d617ad4a7",
+      "score": 30,
+      "positive": false,
+      "label": "PROGRAMADOR/A PYTHON (HIBRIDO)"
+    },
+    {
+      "id": "36c90610-1796-4fb8-b884-6c4c8f088cfd",
+      "score": 30,
+      "positive": false,
+      "label": "Solution Engineer - Emerging Enterprise FSI"
+    },
+    {
+      "id": "664fc226-b76c-4afd-82c2-5eb24788395b",
+      "score": 30,
+      "positive": false,
+      "label": "Founding AI Engineer"
+    },
+    {
+      "id": "7b36ed4f-63bd-41aa-94a3-4f4432bce4a0",
+      "score": 30,
+      "positive": false,
+      "label": "Security Engineer"
+    },
+    {
+      "id": "07bd8ce8-e9e5-40d2-a85c-2b4a46b0730f",
+      "score": 30,
+      "positive": false,
+      "label": "Partner Solutions Architect (AUNZ)"
+    },
+    {
+      "id": "be36468f-2de7-45d3-84cb-50f301dff5fd",
+      "score": 28,
+      "positive": false,
+      "label": "Enterprise Solutions Engineer - ANZ"
+    },
+    {
+      "id": "95b8a924-b940-475a-a723-9fbd1325d639",
+      "score": 28,
+      "positive": false,
+      "label": "Lead Architect, Generative AI"
+    },
+    {
+      "id": "dee8be09-9d8a-45c3-8dec-9884b9027483",
+      "score": 28,
+      "positive": false,
+      "label": "Software Engineer, API Agents"
+    },
+    {
+      "id": "0a063c5e-f9e6-4435-a62e-c4eacbe7fc9f",
+      "score": 28,
+      "positive": false,
+      "label": "Python Engineering Manager, Commercial Systems"
+    },
+    {
+      "id": "921eea7f-1e52-47dc-b31a-72f4813d3807",
+      "score": 28,
+      "positive": false,
+      "label": "Software Engineer"
+    },
+    {
+      "id": "7f8f35d5-77c8-4867-84d1-7e2d111a7cc8",
+      "score": 28,
+      "positive": false,
+      "label": "Site Reliability Engineer"
+    },
+    {
+      "id": "53529b72-45a2-453f-af3a-0fae07efbcf8",
+      "score": 28,
+      "positive": false,
+      "label": "Junior Software Engineer - Backend"
+    },
+    {
+      "id": "2b2a0839-34aa-47e6-96f1-aca0bc4bee37",
+      "score": 28,
+      "positive": false,
+      "label": "Senior Lead Software Engineer, Full Stack"
+    },
+    {
+      "id": "c91a1e2a-be8e-40da-9021-bd543ac8c908",
+      "score": 27,
+      "positive": false,
+      "label": "Senior Data Engineer"
+    },
+    {
+      "id": "037f99f8-7a9c-4952-b495-7c3d9087bf84",
+      "score": 25,
+      "positive": false,
+      "label": "Open roles at Suger"
+    },
+    {
+      "id": "5349b8bf-b167-4b1e-a12a-1845823b3600",
+      "score": 25,
+      "positive": false,
+      "label": "Software Engineer"
+    },
+    {
+      "id": "1964c4ff-aee9-4f08-980a-87d646783b01",
+      "score": 25,
+      "positive": false,
+      "label": "Network Operations Engineer, Network Activation"
+    },
+    {
+      "id": "e8fc5ea4-37bb-4016-8334-49e6139ae496",
+      "score": 25,
+      "positive": false,
+      "label": "Frontend Engineer (React / TypeScript) (m/f/d)"
+    },
+    {
+      "id": "224f3314-77d6-44f1-bf4a-245c1415b9bd",
+      "score": 25,
+      "positive": false,
+      "label": "Java Full Stack Developer"
+    },
+    {
+      "id": "5a4cc09a-f4fe-443c-a09a-a6e304728d8b",
+      "score": 25,
+      "positive": false,
+      "label": "Performance Engineer - Benchmarking"
+    },
+    {
+      "id": "87354491-b240-4e95-93d7-64d7afb0805c",
+      "score": 25,
+      "positive": false,
+      "label": "Performance Engineer - Performance Analysis & Tuning"
+    },
+    {
+      "id": "bd54b507-ee3c-4d19-9331-fd6b9b81db98",
+      "score": 25,
+      "positive": false,
+      "label": "Solutions Architect, Metronome (Startups)"
+    },
+    {
+      "id": "adb6683c-1b54-4865-9efa-4c36e5e6c371",
+      "score": 25,
+      "positive": false,
+      "label": "Product Operations Analyst"
+    },
+    {
+      "id": "81f894b4-4b04-40ff-b17f-1287a5cd21d4",
+      "score": 22,
+      "positive": false,
+      "label": "Software Engineer, Agent Productivity"
+    },
+    {
+      "id": "05a5b86c-701d-4258-99ff-f6e1c60e95d2",
+      "score": 22,
+      "positive": false,
+      "label": "Junior Java Developer"
+    },
+    {
+      "id": "bc62251a-b8e2-477a-ae2d-6137e8da9a63",
+      "score": 22,
+      "positive": false,
+      "label": "Junior DevOps Engineer (m/f/d)"
+    },
+    {
+      "id": "99c335e3-0ef9-409c-9ef3-29295dc2378b",
+      "score": 22,
+      "positive": false,
+      "label": "Senior Typescript Developer (f/m/d)"
+    },
+    {
+      "id": "b84ffa00-5b09-4535-8975-724b44da75b6",
+      "score": 22,
+      "positive": false,
+      "label": "Software Engineer, Web Java"
+    },
+    {
+      "id": "b28d706e-864b-4a62-8c8e-3dac1e10cc0b",
+      "score": 22,
+      "positive": false,
+      "label": "Software Engineer – (Connect Platform)"
+    },
+    {
+      "id": "48233aad-64cf-4dc6-a625-3f51766b236e",
+      "score": 22,
+      "positive": false,
+      "label": "Software Engineer I"
+    },
+    {
+      "id": "033feb3d-fee8-4fac-89db-005fb15aad0e",
+      "score": 22,
+      "positive": false,
+      "label": "Machine Learning Research Engineer, Input Experience, Apple Intelligence"
+    },
+    {
+      "id": "82281817-4289-43ac-a354-69a886a55e04",
+      "score": 22,
+      "positive": false,
+      "label": "Regular Java Developer"
+    },
+    {
+      "id": "51c6f1db-8653-4d73-8719-0872523b72da",
+      "score": 22,
+      "positive": false,
+      "label": "Data Scientist, Inference Capacity Optimization"
+    },
+    {
+      "id": "deef8ce9-3d28-43bf-b4b3-9842cdaad916",
+      "score": 22,
+      "positive": false,
+      "label": "Solutions Engineer, Ads"
+    },
+    {
+      "id": "2efcf705-7316-4031-bb17-6ac6c4d5fd32",
+      "score": 22,
+      "positive": false,
+      "label": "Associate Solution Engineer"
+    },
+    {
+      "id": "c02f3d83-085e-4685-9618-96e67b96f76f",
+      "score": 22,
+      "positive": false,
+      "label": "Junior DevOps Engineer (m/f/d)"
+    },
+    {
+      "id": "3ebf0baf-8efc-4cfc-aa67-7979246fc952",
+      "score": 22,
+      "positive": false,
+      "label": "Open roles at PgDog"
+    },
+    {
+      "id": "c9e7c468-17b6-4de7-ae22-3cb4995841d5",
+      "score": 22,
+      "positive": false,
+      "label": "Associate Solution Engineer"
+    },
+    {
+      "id": "7cd325a0-d1b0-4806-8b7e-3731b4875af2",
+      "score": 22,
+      "positive": false,
+      "label": "Associate Solution Engineer"
+    },
+    {
+      "id": "13daf359-97f4-4684-a145-c10bf3ef4f72",
+      "score": 22,
+      "positive": false,
+      "label": "Lead Backend Developer"
+    },
+    {
+      "id": "82738aba-c3fa-4063-b1aa-9dd3fbc8b899",
+      "score": 22,
+      "positive": false,
+      "label": "Junior Software Developer - (m/w/d)"
+    },
+    {
+      "id": "700ca6b8-420c-44a4-a1e5-35084ec52e44",
+      "score": 22,
+      "positive": false,
+      "label": "Full-Stack Node.js and React Engineer"
+    },
+    {
+      "id": "e9a98bf5-0097-48cd-a0da-08d099182ad7",
+      "score": 22,
+      "positive": false,
+      "label": "Junior Fullstack Engineer (m/w/d) - Festanstellung, Vollzeit München"
+    },
+    {
+      "id": "ea5e046e-4511-489f-a983-5b3b7fd5cac6",
+      "score": 22,
+      "positive": false,
+      "label": "Senior Site Reliability Engineer"
+    },
+    {
+      "id": "e599b6bf-870a-4159-881a-d0f982536dc2",
+      "score": 22,
+      "positive": false,
+      "label": "Software Development Engineer - Backend"
+    },
+    {
+      "id": "0b2f96fb-3151-47eb-8f8b-5c771f031022",
+      "score": 22,
+      "positive": false,
+      "label": "Reliability Engineer"
+    },
+    {
+      "id": "9da77767-3367-44de-82f1-d37abc2c9675",
+      "score": 22,
+      "positive": false,
+      "label": "Big Data Engineer"
+    },
+    {
+      "id": "b5948a92-f4ea-4b16-ad93-c60279ca7984",
+      "score": 22,
+      "positive": false,
+      "label": "Platform Engineer"
+    },
+    {
+      "id": "c4a4b448-d4c3-46ac-9f16-f6f84704d3c0",
+      "score": 22,
+      "positive": false,
+      "label": "DevOps & SRE Engineer"
+    },
+    {
+      "id": "e2d08d12-c803-4f9a-bb66-b3360774f225",
+      "score": 22,
+      "positive": false,
+      "label": "Softwareentwickler (m/w/d)"
+    },
+    {
+      "id": "f0cc37db-3687-46ac-8f84-e0f195086f6d",
+      "score": 22,
+      "positive": false,
+      "label": "Copilot & Power Platform Architect"
+    },
+    {
+      "id": "24ff5840-9382-4b14-a79d-fae092345164",
+      "score": 22,
+      "positive": false,
+      "label": "Software Engineer, Community Support Engineering"
+    },
+    {
+      "id": "2c6fb510-30ca-42e7-a359-931f931489a0",
+      "score": 22,
+      "positive": false,
+      "label": "Senior Product Engineer"
+    },
+    {
+      "id": "0667d7bc-3027-4db2-b265-fbd87e725c21",
+      "score": 22,
+      "positive": false,
+      "label": "Cloud-Native Software / Solutions Architect"
+    },
+    {
+      "id": "13fc7b91-1a45-4f2f-902c-15f1c24bd72f",
+      "score": 22,
+      "positive": false,
+      "label": "Solutions Engineer, AI Privacy Platform (DC)"
+    },
+    {
+      "id": "71d29260-ac15-4e70-8c71-dcb1d3f32a35",
+      "score": 22,
+      "positive": false,
+      "label": "Automation Python Engineer"
+    },
+    {
+      "id": "be1e66fe-6e15-4da6-97de-85f49f052537",
+      "score": 22,
+      "positive": false,
+      "label": "Junior Software Developer - Alexandria"
+    },
+    {
+      "id": "7262535f-0b37-4e86-8f04-eef38f3e163d",
+      "score": 22,
+      "positive": false,
+      "label": "Software Engineer, InfrastructureHyderabad, India"
+    },
+    {
+      "id": "5b4eb552-895a-443e-8ea0-fe55c74a147c",
+      "score": 22,
+      "positive": false,
+      "label": "Java Software Engineer"
+    },
+    {
+      "id": "724b6371-2ab0-446f-bf7f-7d904c69e89b",
+      "score": 22,
+      "positive": false,
+      "label": "Software Developer in Test (JavaScript)"
+    },
+    {
+      "id": "7f6c8d22-edd9-4942-93b5-0c6e329c7949",
+      "score": 20,
+      "positive": false,
+      "label": ".NET / React Developer"
+    },
+    {
+      "id": "e94d8c08-319f-47f2-b246-d73d516f116b",
+      "score": 20,
+      "positive": false,
+      "label": "Product Strategy & Operations"
+    },
+    {
+      "id": "f6d4a5a7-d7bb-48fe-a65b-93375b9cdb65",
+      "score": 20,
+      "positive": false,
+      "label": ".NET Lead Developer"
+    },
+    {
+      "id": "de0e9981-d209-46f3-8248-9b091c2e6aa8",
+      "score": 20,
+      "positive": false,
+      "label": "Research Scientist, Takeoff Intel"
+    },
+    {
+      "id": "3a3ecff9-54aa-4cbc-8936-0a2aff08cbda",
+      "score": 20,
+      "positive": false,
+      "label": "Operations Engineer, BizTech"
+    },
+    {
+      "id": "e4e43877-e43f-4965-ae56-a31e283557f1",
+      "score": 20,
+      "positive": false,
+      "label": "Backend Engineer, Credit Decisions"
+    },
+    {
+      "id": "1c960900-5960-47cc-9e62-1f523c7535e8",
+      "score": 20,
+      "positive": false,
+      "label": "Lead DevOps Engineer"
+    },
+    {
+      "id": "ffb04a40-40df-4dd8-9624-f1f2f540ce15",
+      "score": 20,
+      "positive": false,
+      "label": "Software Engineer"
+    },
+    {
+      "id": "1c0c35db-9492-4539-893d-e0ea7d6d96f9",
+      "score": 18,
+      "positive": false,
+      "label": "Demo Engineer"
+    },
+    {
+      "id": "74410a38-c821-4ede-8f49-408a87fe66bc",
+      "score": 18,
+      "positive": false,
+      "label": "Red Team Security Engineer"
+    },
+    {
+      "id": "2f476345-6deb-49d2-b068-0a9e44b76098",
+      "score": 18,
+      "positive": false,
+      "label": "Desenvolvedor de Sistemas | Fullstack | Java e React | Sistemas 1 | Crédito 1 |C"
+    },
+    {
+      "id": "4f994bc4-7396-491a-b90f-cc440af89fc1",
+      "score": 16,
+      "positive": false,
+      "label": "SEO / GEO Manager (m/w/d) in einer besonderen Online Marketing Agentur"
+    },
+    {
+      "id": "10188faf-c9a9-4825-8335-e9accbd43c3e",
+      "score": 15,
+      "positive": false,
+      "label": "Security Engineer, Public Sector"
+    },
+    {
+      "id": "4aad44ad-a802-46eb-a83c-ab362659e4b1",
+      "score": 15,
+      "positive": false,
+      "label": "Network Security Engineer"
+    },
+    {
+      "id": "c90faefd-81a9-449f-aa1a-835402734c5a",
+      "score": 15,
+      "positive": false,
+      "label": "Solutions Architect (Portuguese Spekaing) Madrid Spain"
+    },
+    {
+      "id": "30b1b519-e174-4f9d-be37-0c4df3a3f42d",
+      "score": 15,
+      "positive": false,
+      "label": "Junior DevOps & Infrastruktur Engineer (m/w/d)"
+    },
+    {
+      "id": "4e47229e-ef74-46fb-9e1b-742dde0ad076",
+      "score": 15,
+      "positive": false,
+      "label": "DevOps Engineer"
+    },
+    {
+      "id": "5081d7a5-99ca-4a12-9de5-19a8b3ba97e8",
+      "score": 15,
+      "positive": false,
+      "label": "(USA) Senior Product Manager"
+    },
+    {
+      "id": "5ef0591a-6fa5-4456-af38-da07cda88c1f",
+      "score": 15,
+      "positive": false,
+      "label": "Infrastructure Security Engineer, Public Sector"
+    },
+    {
+      "id": "815b79b3-ce85-4fa5-b8b0-efeeb010c025",
+      "score": 15,
+      "positive": false,
+      "label": "Solution Engineer - Manufacturing SaaS Platform (all genders)"
+    },
+    {
+      "id": "956fd4fc-dc43-453c-83bf-5f3e157f7be3",
+      "score": 15,
+      "positive": false,
+      "label": "Junior Consultant Softwareentwicklung – Java, Spring*"
+    },
+    {
+      "id": "a44c5e9d-0162-43ee-aa91-dcbefe823473",
+      "score": 15,
+      "positive": false,
+      "label": "Lead Java Full Stack Engineer"
+    },
+    {
+      "id": "089d9acb-c33e-4b6e-a2a7-354b3adde60a",
+      "score": 15,
+      "positive": false,
+      "label": "Infrastructure Engineer – Automation"
+    },
+    {
+      "id": "e7a45e97-09b0-4a0d-9d3c-d4e004f4b363",
+      "score": 15,
+      "positive": false,
+      "label": "Solution Engineer - Manufacturing SaaS Platform (all genders)"
+    },
+    {
+      "id": "50f4325b-7459-41b8-8874-bde55bf25c4d",
+      "score": 15,
+      "positive": false,
+      "label": "DevOps Consultant Kubernetes"
+    },
+    {
+      "id": "9ec58705-94d1-4890-8128-3c966632283f",
+      "score": 15,
+      "positive": false,
+      "label": "Software Developer in Test (JavaScript)"
+    },
+    {
+      "id": "dea5fb48-0976-4cc2-a1b5-378f277bd184",
+      "score": 15,
+      "positive": false,
+      "label": "Technical Lead (f/m/d)"
+    },
+    {
+      "id": "3812dfe7-bacf-4b7a-92e5-38e3568a97ce",
+      "score": 15,
+      "positive": false,
+      "label": "Junior QA Engineer"
+    },
+    {
+      "id": "dcb37644-29a7-438a-af53-c3a0c0aeb9af",
+      "score": 15,
+      "positive": false,
+      "label": "Junior DevOps & Infrastruktur Engineer (m/w/d)"
+    },
+    {
+      "id": "7c1b6ec5-bf76-4ceb-aa3f-87142c56bed7",
+      "score": 15,
+      "positive": false,
+      "label": "New York, NY"
+    },
+    {
+      "id": "c56fa086-32ec-40e5-8dee-4d1f72bf7a1a",
+      "score": 15,
+      "positive": false,
+      "label": "Sr. Software Engineer (Elixir/React)"
+    },
+    {
+      "id": "1450d98f-7ae1-4de6-b4d0-067af468262e",
+      "score": 15,
+      "positive": false,
+      "label": "Treasury Finance AI and Quantitative Analytics, Americas"
+    },
+    {
+      "id": "00d09d12-7d03-431c-9052-c4664a4777ad",
+      "score": 15,
+      "positive": false,
+      "label": "Software Engineer- Postgres"
+    },
+    {
+      "id": "f8cdc6e1-1291-4d93-b235-ab286c16c397",
+      "score": 12,
+      "positive": false,
+      "label": "Junior Security Operations Engineering Consultant (m/w/d)"
+    },
+    {
+      "id": "fcb87ae2-8b3b-45f8-908f-96cbbcf89e0d",
+      "score": 12,
+      "positive": false,
+      "label": "Client Full-Stack Engineer — IM Chat Platform, Android Focus"
+    },
+    {
+      "id": "51c89313-126c-451d-96d4-a375500d2c87",
+      "score": 12,
+      "positive": false,
+      "label": "Network Operations Engineer, Network Activation"
+    },
+    {
+      "id": "5e0ab351-056a-4385-9abf-b56741c5314e",
+      "score": 12,
+      "positive": false,
+      "label": "Software Engineer [Multiple Positions Available]"
+    },
+    {
+      "id": "204c3ebc-bc08-41fa-8967-77156de9a735",
+      "score": 12,
+      "positive": false,
+      "label": "Cloud Infrastructure Engineer – AWS"
+    },
+    {
+      "id": "f673787a-bab1-47c8-8a07-8cbb7a89ae67",
+      "score": 12,
+      "positive": false,
+      "label": "Client Full-Stack Engineer — IM Chat Platform, Android Focus"
+    },
+    {
+      "id": "49647054-c7dd-4d7e-aa28-bff197c3394a",
+      "score": 12,
+      "positive": false,
+      "label": "Senior DevOps/ Cloud Engineer (f/m/d)"
+    },
+    {
+      "id": "22d6f861-2270-40fd-82b5-3b978bd2c132",
+      "score": 12,
+      "positive": false,
+      "label": "Cloud Architect"
+    },
+    {
+      "id": "4e4169d3-10e0-4a1a-9ab8-82a8b9bcd6bb",
+      "score": 12,
+      "positive": false,
+      "label": "Senior Full Stack Developer | Java / React (f/m/d)"
+    },
+    {
+      "id": "5d12186d-aae1-41a1-a814-ebb95764f937",
+      "score": 12,
+      "positive": false,
+      "label": "Principal Software Engineer, Senior Java Engineer - Cloud, Account Executive"
+    },
+    {
+      "id": "c1deaad5-0794-4da7-b09a-24ffd4c06d5c",
+      "score": 12,
+      "positive": false,
+      "label": "Executive Assistant, Observe, Product & Engineering"
+    },
+    {
+      "id": "fa6e8df8-b6b1-46f5-a095-f1aaaa4e71ee",
+      "score": 10,
+      "positive": false,
+      "label": "Embedded Linux  developer (Automation)"
+    },
+    {
+      "id": "275794fb-a358-40bb-8ab2-15ea20624ece",
+      "score": 8,
+      "positive": false,
+      "label": "Hiring Java Developer (Full-Time)"
+    },
+    {
+      "id": "e51fa671-c184-4c4d-90f1-9f7090424f13",
+      "score": 8,
+      "positive": false,
+      "label": "Sr Structured Finance Execution Lead"
+    },
+    {
+      "id": "7f291165-c564-4cd4-abba-12518209cfc9",
+      "score": 8,
+      "positive": false,
+      "label": "Open roles at Codingal"
+    },
+    {
+      "id": "b9182a11-29bb-400f-bfe9-0954835e87c7",
+      "score": 8,
+      "positive": false,
+      "label": "Front-End WordPress Developer"
+    },
+    {
+      "id": "58e527de-7909-4db2-850e-be536eefb813",
+      "score": 8,
+      "positive": false,
+      "label": "Kotlin Full-Stack Engineer (Freelance/Service Agreement)"
+    },
+    {
+      "id": "02acb684-3bf7-479e-88bd-422a30f9139c",
+      "score": 8,
+      "positive": false,
+      "label": "Data Entry Specialist"
+    },
+    {
+      "id": "248fd3ff-e976-4679-aa7e-45f2315edf5e",
+      "score": 8,
+      "positive": false,
+      "label": "Kotlin Backend Engineer - (Freelance/Service Agreement)"
+    },
+    {
+      "id": "af234faa-52d3-4dda-a2f3-aba638a5418f",
+      "score": 8,
+      "positive": false,
+      "label": "Software Engineer (Django + React Native)"
+    },
+    {
+      "id": "7e57e88c-0536-4b45-b36f-5ec56af34fdb",
+      "score": 8,
+      "positive": false,
+      "label": "Enterprise Cloud Architect"
+    },
+    {
+      "id": "61bd827f-f1b7-4ca3-9545-ff1ebf6ce9d3",
+      "score": 8,
+      "positive": false,
+      "label": "Help Desk IT Support Specialist"
+    },
+    {
+      "id": "2ceae7d5-8c08-4231-b6bf-f1ed5c0c6f97",
+      "score": 8,
+      "positive": false,
+      "label": "ELO/ECM Softwareentwickler (m/w/d) Inhouse"
+    },
+    {
+      "id": "3048e1f8-2dc5-46da-b268-c94c7504cb33",
+      "score": 8,
+      "positive": false,
+      "label": "Junior QA Engineer"
+    },
+    {
+      "id": "bb2b1338-3139-4742-bbc0-3bbb49a251da",
+      "score": 8,
+      "positive": false,
+      "label": "Laravel & React Engineer (Remote, Latam)"
+    },
+    {
+      "id": "6911989b-42a7-4352-aec2-b180eff65d09",
+      "score": 8,
+      "positive": false,
+      "label": "Kotlin Backend Engineer - (Freelance/Service Agreement)"
+    },
+    {
+      "id": "7dd74e36-1707-4cf8-9c57-f58ac366fb00",
+      "score": 8,
+      "positive": false,
+      "label": "People Strategy, Engineering"
+    },
+    {
+      "id": "b0b03189-1fb1-4fc6-986f-6d93a78135ea",
+      "score": 8,
+      "positive": false,
+      "label": "Kotlin Full-Stack Engineer (Freelance/Service Agreement)"
+    },
+    {
+      "id": "71c2518f-ceff-4878-9134-6a2a73fddb91",
+      "score": 8,
+      "positive": false,
+      "label": "Senior Software Engineer, Frontend"
+    },
+    {
+      "id": "c566c115-2256-45b4-ac8a-c97f180bc8d5",
+      "score": 6,
+      "positive": false,
+      "label": "iOS Engineer - Mobile Platform"
+    },
+    {
+      "id": "5142e72d-9acf-421a-8c95-5afc349bf84e",
+      "score": 5,
+      "positive": false,
+      "label": "Manual QA Engineer (Junior/Middle) (Remote, Contract)"
+    },
+    {
+      "id": "1ed08a41-3a40-4c62-a3ba-828948dae1fb",
+      "score": 5,
+      "positive": false,
+      "label": "Executive Assistant to Product & Engineering"
+    },
+    {
+      "id": "35fe3843-56dd-4a25-88f2-6dd1b1d957f0",
+      "score": 5,
+      "positive": false,
+      "label": "Technical Recruiter 2026 New Graduate"
+    },
+    {
+      "id": "aacfbf5d-0f71-4ce0-8fc9-74552bab9e03",
+      "score": 5,
+      "positive": false,
+      "label": "Manual QA Engineer (Junior/Middle) (Remote, Contract)"
+    },
+    {
+      "id": "5595af3c-aea8-493c-b562-808675f15b3f",
+      "score": 5,
+      "positive": false,
+      "label": "Brand Designer"
+    },
+    {
+      "id": "c8378d8a-b034-47c6-83b9-08bb3cdd8de9",
+      "score": 5,
+      "positive": false,
+      "label": "Manual QA Engineer (Junior/Middle) (Remote, Contract)"
+    },
+    {
+      "id": "c0af9d5e-9099-4c16-be4a-944f2c869dda",
+      "score": 5,
+      "positive": false,
+      "label": "SAP Integration Solution Architect"
+    },
+    {
+      "id": "eb07325e-3e4d-455c-b16b-dcff4fca38ad",
+      "score": 5,
+      "positive": false,
+      "label": "Analista de Infraestrutura Pleno DevOps"
+    },
+    {
+      "id": "cb03a8c9-533e-4e71-b454-4944c588ac0b",
+      "score": 5,
+      "positive": false,
+      "label": "Manual QA Engineer (Junior/Middle) (Remote, Contract)"
+    },
+    {
+      "id": "497234c9-4006-4d88-ae81-a1ae2b2e5946",
+      "score": 5,
+      "positive": false,
+      "label": "Online Data Analyst United States Spanish Speaker"
+    },
+    {
+      "id": "3f14f275-42d9-4ee2-ada4-619d05e7a660",
+      "score": 5,
+      "positive": false,
+      "label": "Shopify Developer (m/w/d) - in Vollzeit"
+    },
+    {
+      "id": "520ee4df-c73e-4184-a2d6-d49134cfaee1",
+      "score": 5,
+      "positive": false,
+      "label": "Manual QA Engineer (Junior/Middle) (Remote, Contract)"
+    },
+    {
+      "id": "fe17449d-d9d6-4300-9587-e9d190411f8a",
+      "score": 5,
+      "positive": false,
+      "label": "Manual QA Engineer (Junior/Middle) (Remote, Contract)"
+    },
+    {
+      "id": "49caf4e2-5aa9-4685-93a6-e7a5978bc6fa",
+      "score": 5,
+      "positive": false,
+      "label": "Manual QA Engineer (Junior/Middle) (Remote, Contract)"
+    },
+    {
+      "id": "47f59648-7b22-4898-8f88-008f549900f0",
+      "score": 5,
+      "positive": false,
+      "label": "Manual QA Engineer (Junior/Middle) (Remote, Contract)"
+    },
+    {
+      "id": "b8364a6e-6cef-421d-906a-883d5ac7b0ed",
+      "score": 5,
+      "positive": false,
+      "label": "DevSecOps Engineer w/Secret Clearance"
+    },
+    {
+      "id": "9dfca954-0ea5-4169-8cc4-35f49cda64c6",
+      "score": 5,
+      "positive": false,
+      "label": "Bilingual Sales Development Representative German English"
+    },
+    {
+      "id": "9cf623f6-9d56-4ad3-b1e4-781830f8430a",
+      "score": 5,
+      "positive": false,
+      "label": "Android Engineer, Dev Productivity"
+    },
+    {
+      "id": "d17bc0c4-9e3f-4d04-a01e-3e8e88bcc199",
+      "score": 5,
+      "positive": false,
+      "label": "Manual QA Engineer (Junior/Middle) (Remote, Contract)"
+    },
+    {
+      "id": "90584806-9717-44c9-a39c-bccf7073217f",
+      "score": 4,
+      "positive": false,
+      "label": "Enterprise Account Executive"
+    },
+    {
+      "id": "67c8e32b-64c6-4b43-a688-ed44c9c8eccc",
+      "score": 4,
+      "positive": false,
+      "label": "Power Land Developer, Development & Power Projects"
+    },
+    {
+      "id": "2ab0ad36-892f-423d-b4f4-ae3d2399c48a",
+      "score": 4,
+      "positive": false,
+      "label": "Recruiting Coordinator, Robotics"
+    },
+    {
+      "id": "67793c66-cbfe-4c9b-ae86-895c278106d7",
+      "score": 4,
+      "positive": false,
+      "label": "VP Revenue"
+    },
+    {
+      "id": "78a8b6b0-84f0-4fb6-b6ac-f3bf2de9a34d",
+      "score": 3,
+      "positive": false,
+      "label": "Hawg Ops"
+    },
+    {
+      "id": "99d74b62-8f3e-4bac-af9a-9babf1731504",
+      "score": 3,
+      "positive": false,
+      "label": "Mechanical Engineer, Motor Design - 2026 New Graduate"
+    },
+    {
+      "id": "c91dc6e7-aca1-40f6-9e15-e665cb160c87",
+      "score": 3,
+      "positive": false,
+      "label": "Human Resources Generalist"
+    },
+    {
+      "id": "a50bd3b2-4f80-40cf-816f-4bbb8ab7ecce",
+      "score": 3,
+      "positive": false,
+      "label": "Build Engineer, Turbomachinery - 2026 New Graduate"
+    },
+    {
+      "id": "d6eaa75a-ba9d-44d6-9819-a224620f145f",
+      "score": 3,
+      "positive": false,
+      "label": "Compliance Administrator"
+    },
+    {
+      "id": "3b3d5a70-a126-4484-9cff-86b5fef6116c",
+      "score": 3,
+      "positive": false,
+      "label": "Executive Assistant, Engineering"
+    },
+    {
+      "id": "982382f3-4701-4853-8a38-58344bb6da2f",
+      "score": 3,
+      "positive": false,
+      "label": "OFFICE ASSISTANT"
+    },
+    {
+      "id": "2d773612-eaf0-4776-a929-8b71924d6ab7",
+      "score": 3,
+      "positive": false,
+      "label": "Business Development Executive"
+    },
+    {
+      "id": "0d4f266c-1d32-4f66-82bf-b3d4e6af2204",
+      "score": 3,
+      "positive": false,
+      "label": "Performance Marketing Lead"
+    },
+    {
+      "id": "000df693-4f27-4f8c-861c-a2296ec9f628",
+      "score": 3,
+      "positive": false,
+      "label": "Junior Procurement Specialist"
+    },
+    {
+      "id": "8bd7272c-c41a-4851-b33d-141676682392",
+      "score": 3,
+      "positive": false,
+      "label": "Mechanical Engineer, Fluid Systems - 2026 New Graduate"
+    },
+    {
+      "id": "1e3e13ca-cfb1-400d-932a-c117343d5414",
+      "score": 3,
+      "positive": false,
+      "label": "Business Development Manager"
+    },
+    {
+      "id": "699d8625-fac5-4afb-8af8-b591f90f927d",
+      "score": 3,
+      "positive": false,
+      "label": "Digital Designer"
+    },
+    {
+      "id": "2e590e4f-9494-482f-a9d9-0353891127a8",
+      "score": 3,
+      "positive": false,
+      "label": "ADVPL JÃºnior"
+    },
+    {
+      "id": "070a3920-8cfb-4365-8705-ea56e6564e41",
+      "score": 2,
+      "positive": false,
+      "label": "Appointment Setter"
+    },
+    {
+      "id": "93dad90e-1025-453f-a589-0aef0f5267ea",
+      "score": 2,
+      "positive": false,
+      "label": "Asesor Ventas Remoto â¬1.800 Al Mes Remoto Sin Experiencia"
+    },
+    {
+      "id": "00c4b362-3959-4ab9-b187-c92e69cea1e0",
+      "score": 2,
+      "positive": false,
+      "label": "Grab & Go Food Associate"
+    },
+    {
+      "id": "690b82a3-ab11-414e-afde-1373d9d744cc",
+      "score": 2,
+      "positive": false,
+      "label": "Joe Armstrong"
+    },
+    {
+      "id": "0aaf6f16-b7ac-405a-b805-5fc025549935",
+      "score": 2,
+      "positive": false,
+      "label": "Senior Manager, Technical Accounting - M&A and Investments"
+    },
+    {
+      "id": "8a4aac47-fdfb-4e33-af95-77abac30c9ed",
+      "score": 2,
+      "positive": false,
+      "label": "Moving Handy Man"
+    },
+    {
+      "id": "88972c89-01c8-409c-962c-bc29099555e0",
+      "score": 2,
+      "positive": false,
+      "label": "Suporte N1 REMOTO"
+    },
+    {
+      "id": "c07d49f5-4661-49e2-93bc-9607a9574d48",
+      "score": 2,
+      "positive": false,
+      "label": "DiseÃ±ador GrÃ¡fico Junior"
+    },
+    {
+      "id": "62f3f4a6-d2f2-46ec-be72-490c4ad3d716",
+      "score": 1,
+      "positive": false,
+      "label": "Instagram VA"
+    },
+    {
+      "id": "7b5d9dba-45ec-42c0-ae98-be49cbae5461",
+      "score": 1,
+      "positive": false,
+      "label": "Join the Family"
+    },
+    {
+      "id": "63cf911a-a12d-4b62-877e-efa256b087db",
+      "score": 1,
+      "positive": false,
+      "label": "Andrea Crook"
+    },
+    {
+      "id": "06596471-f283-4537-a2ff-2a3a95faae5b",
+      "score": 1,
+      "positive": false,
+      "label": "No positions currently available"
+    },
+    {
+      "id": "01901dac-27a9-43bf-8909-e4d5a13e3879",
+      "score": 0,
+      "positive": false,
+      "label": "Software Engineer"
+    },
+    {
+      "id": "0b619b60-bf64-4fd0-81dc-3585827e6701",
+      "score": 0,
+      "positive": false,
+      "label": "Graduate Full Stack Developer"
+    },
+    {
+      "id": "5e8dbdd0-eb6c-459d-8c64-d0cf37f74e40",
+      "score": 0,
+      "positive": false,
+      "label": "AI Engineer II (Remote)"
+    },
+    {
+      "id": "20bbbcb9-672b-46c5-a36c-99a1f3ea8724",
+      "score": 0,
+      "positive": false,
+      "label": "Backend Python Developer"
+    },
+    {
+      "id": "84801ca6-fbf8-4a0e-8d8b-44fce81a6325",
+      "score": 0,
+      "positive": false,
+      "label": "Platform Engineer, Kubernetes"
+    },
+    {
+      "id": "bc7c0b04-dda9-460d-8d83-5e6124006f94",
+      "score": 0,
+      "positive": false,
+      "label": "Data Scientist | Remote LATAM Only"
+    },
+    {
+      "id": "7e491e0f-4c20-4bd1-a89a-9a6490e2406d",
+      "score": 0,
+      "positive": false,
+      "label": "Software Engineer - Python"
+    },
+    {
+      "id": "3bb557da-d0f1-4d0f-944c-7841b7ab5785",
+      "score": 0,
+      "positive": false,
+      "label": "Python Engineer, Agentic AI"
+    },
+    {
+      "id": "5f90ef85-bcf5-4699-aa63-dd6de94a9f34",
+      "score": 0,
+      "positive": false,
+      "label": "React Native Developer (Latin America, Remote position)"
+    },
+    {
+      "id": "3a762ce0-9aa0-4dda-9bf6-14597be0fe6f",
+      "score": 0,
+      "positive": false,
+      "label": "Applied Data Scientist"
+    }
+  ]
+}

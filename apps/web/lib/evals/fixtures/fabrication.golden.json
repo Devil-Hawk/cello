@@ -1,0 +1,131 @@
+{
+  "note": "Attack cases for findInventedFacts() (lib/resume/import/llm.ts) \u2014 the containment check that stops a resume reformat from quietly acquiring an employer, a degree, a date or a metric the candidate never wrote. Regenerate by hand: these are constructed adversarial pairs, not a database snapshot, so there is no snapshot script.",
+  "cases": [
+    {
+      "name": "fabricated-employer-added",
+      "source": "Jane Okafor\nSeattle, WA | jane.okafor@example.com\n\nWORK EXPERIENCE\n\nGlobex Corporation - Engineer II - 2018 - 2021\nCut checkout latency by 62% across the payments path.\nOwned the migration of the ledger service.\n\nHooli - Senior Software Engineer - 2021 - Present\nLed a team of three engineers on the billing platform.\nImproved onboarding latency for new merchants.\n\nEDUCATION\nBachelor of Science, Computer Science, University of Washington, 2018\n\nSKILLS\nPython, PostgreSQL, Docker",
+      "output": "# Jane Okafor\n\nSeattle, WA | jane.okafor@example.com\n\n## Work Experience\n\n**Globex Corporation - Engineer II - 2018 - 2021**\n\n- Cut checkout latency by 62% across the payments path.\n- Owned the migration of the ledger service.\n\n**Hooli - Senior Software Engineer - 2021 - Present**\n\n- Led a team of three engineers on the billing platform.\n- Improved onboarding latency for new merchants.\n\n**Initech LLC - Principal Architect - 2013 - 2016**\n\n- Directed platform strategy for four business units.\n\n## Education\n\nBachelor of Science, Computer Science, University of Washington, 2018\n\n## Skills\n\nPython, PostgreSQL, Docker",
+      "shouldFlag": true,
+      "why": "A whole third job is appended \u2014 employer, title and dates the source never mentions. The textbook case the containment check exists for."
+    },
+    {
+      "name": "fabricated-employer-renamed",
+      "source": "Jane Okafor\nSeattle, WA | jane.okafor@example.com\n\nWORK EXPERIENCE\n\nGlobex Corporation - Engineer II - 2018 - 2021\nCut checkout latency by 62% across the payments path.\nOwned the migration of the ledger service.\n\nHooli - Senior Software Engineer - 2021 - Present\nLed a team of three engineers on the billing platform.\n\nEDUCATION\nBachelor of Science, Computer Science, University of Washington, 2018\n\nSKILLS\nPython, PostgreSQL, Docker",
+      "output": "# Jane Okafor\n\nSeattle, WA | jane.okafor@example.com\n\n## Work Experience\n\n**Google - Engineer II - 2018 - 2021**\n\n- Cut checkout latency by 62% across the payments path.\n- Owned the migration of the ledger service.\n\n**Hooli - Senior Software Engineer - 2021 - Present**\n\n- Led a team of three engineers on the billing platform.\n\n## Education\n\nBachelor of Science, Computer Science, University of Washington, 2018\n\n## Skills\n\nPython, PostgreSQL, Docker",
+      "shouldFlag": true,
+      "why": "Only the employer name changed, to a more recognisable one. Isolates the check on a single swapped proper noun with everything else held constant."
+    },
+    {
+      "name": "fabricated-degree-upgraded",
+      "source": "Jane Okafor\nSeattle, WA | jane.okafor@example.com\n\nEDUCATION\nBachelor of Science, Computer Science, University of Washington, 2018\n\nSKILLS\nPython, PostgreSQL, Docker",
+      "output": "# Jane Okafor\n\nSeattle, WA | jane.okafor@example.com\n\n## Education\n\nMaster of Science, Computer Science, University of Washington, 2018\n\n## Skills\n\nPython, PostgreSQL, Docker",
+      "shouldFlag": true,
+      "why": "Bachelor's silently becomes Master's. Same school, same year, one word changed \u2014 a lie small enough that a skim would miss it."
+    },
+    {
+      "name": "fabricated-certification-added",
+      "source": "Jane Okafor\nSeattle, WA | jane.okafor@example.com\n\nEDUCATION\nBachelor of Science, Computer Science, University of Washington, 2018\n\nSKILLS\nPython, PostgreSQL, Docker",
+      "output": "# Jane Okafor\n\nSeattle, WA | jane.okafor@example.com\n\n## Education\n\nBachelor of Science, Computer Science, University of Washington, 2018\n\n## Certifications\n\nAWS Certified Solutions Architect - Professional (2022)\n\n## Skills\n\nPython, PostgreSQL, Docker",
+      "shouldFlag": true,
+      "why": "An entire credential the candidate never earned, added as its own section. The new heading line itself is exempt (we told the model to add section headings), but the certification text under it is plain prose and must still be checked."
+    },
+    {
+      "name": "inflated-metric-value-changed",
+      "source": "Jane Okafor\n\nWORK EXPERIENCE\n\nGlobex Corporation - Engineer II - 2018 - 2021\nCut checkout latency by 62% across the payments path.",
+      "output": "# Jane Okafor\n\n## Work Experience\n\n**Globex Corporation - Engineer II - 2018 - 2021**\n\n- Cut checkout latency by 92% across the payments path.",
+      "shouldFlag": true,
+      "why": "62% quietly becomes 92%. The exact attack lib/resume/import/llm.ts's own header comment measures the ratio checks missing (0.992 retention / 0.008 novelty, ok=true) \u2014 this pins that containment catches it."
+    },
+    {
+      "name": "inflated-metric-number-added",
+      "source": "Jane Okafor\n\nWORK EXPERIENCE\n\nHooli - Senior Software Engineer - 2021 - Present\nImproved onboarding latency for new merchants.",
+      "output": "# Jane Okafor\n\n## Work Experience\n\n**Hooli - Senior Software Engineer - 2021 - Present**\n\n- Improved onboarding latency for new merchants by 40%.",
+      "shouldFlag": true,
+      "why": "The source makes a qualitative claim with no number at all; the output invents one. This is the exact case named in the task brief: 'improved latency' becomes 'improved latency by 40%'."
+    },
+    {
+      "name": "fabricated-tenure-shifted",
+      "source": "Jane Okafor\n\nWORK EXPERIENCE\n\nGlobex Corporation - Engineer II - 2018 - 2021\nCut checkout latency by 62% across the payments path.",
+      "output": "# Jane Okafor\n\n## Work Experience\n\n**Globex Corporation - Engineer II - 2015 - 2021**\n\n- Cut checkout latency by 62% across the payments path.",
+      "shouldFlag": true,
+      "why": "Start date moved three years earlier, manufacturing tenure the candidate does not have. Same employer and title, so only the date carries the lie."
+    },
+    {
+      "name": "location-swapped",
+      "source": "Jane Okafor\nSeattle, WA | jane.okafor@example.com\n\nWORK EXPERIENCE\n\nGlobex Corporation - Engineer II - 2018 - 2021",
+      "output": "# Jane Okafor\n\nPortland, OR | jane.okafor@example.com\n\n## Work Experience\n\n**Globex Corporation - Engineer II - 2018 - 2021**",
+      "shouldFlag": true,
+      "why": "Candidate's city changes from Seattle to Portland \u2014 a fabricated fact about the person, not just the job, and outside the employer/degree/metric categories above."
+    },
+    {
+      "name": "invented-skill-appended",
+      "source": "Jane Okafor\n\nSKILLS\nPython, PostgreSQL, Docker",
+      "output": "# Jane Okafor\n\n## Skills\n\nPython, PostgreSQL, Docker, Kubernetes",
+      "shouldFlag": true,
+      "why": "One new capitalised skill tacked onto an otherwise verbatim list \u2014 the cleanest possible single-token positive, useful as a sanity anchor for the whole suite."
+    },
+    {
+      "name": "real-fact-reworded-not-flagged",
+      "source": "Jane Okafor\n\nWORK EXPERIENCE\n\nGlobex Corporation - Engineer II - 2018 - 2021\nCut checkout latency by 62% across the payments path.",
+      "output": "# Jane Okafor\n\n## Work Experience\n\n**Globex Corporation - Engineer II - 2018 - 2021**\n\n- Cut checkout latency by 62% across the whole payments path, end to end.",
+      "shouldFlag": false,
+      "why": "Paraphrased with extra lowercase filler words ('the whole', 'end to end') but the same employer, title, dates and figure. Containment must not punish prose style \u2014 that is the ratio checks' job, and this proves the two are actually independent."
+    },
+    {
+      "name": "ocr-rejoin-not-flagged",
+      "source": "Jane Okafor\n\nSKILLS\nPython, PostgreSQL, Docker",
+      "output": "# Jane Okafor\n\n## Skills\n\nPython, Postgre SQL, Docker",
+      "shouldFlag": false,
+      "why": "A line-wrap split 'PostgreSQL' into two words, exactly the kind of PDF-extraction artifact despace() exists to absorb. Must not read as an invented 'Postgre' plus an invented 'SQL'."
+    },
+    {
+      "name": "recased-employer-not-flagged",
+      "source": "Jane Okafor\n\nWORK EXPERIENCE\n\nHooli - Senior Software Engineer - 2021 - Present",
+      "output": "# Jane Okafor\n\n## Work Experience\n\n**HOOLI - Senior Software Engineer - 2021 - Present**",
+      "shouldFlag": false,
+      "why": "Same employer, shouted in caps. A pure casing change must despace to the same token, not read as a new, different employer called HOOLI."
+    },
+    {
+      "name": "short-source-still-flags",
+      "source": "Jane Okafor\nEngineer at Globex",
+      "output": "# Jane Okafor\n\nEngineer at Google",
+      "shouldFlag": true,
+      "why": "The source has nowhere near MIN_TOKENS_TO_JUDGE (25) distinct words, where the ratio checks would be noise and are skipped \u2014 but containment runs FIRST and unconditionally, so a short resume is not a free pass to fabricate an employer."
+    },
+    {
+      "name": "empty-output-not-flagged",
+      "source": "Jane Okafor\n\nWORK EXPERIENCE\n\nGlobex Corporation - Engineer II - 2018 - 2021\nCut checkout latency by 62% across the payments path.",
+      "output": "",
+      "shouldFlag": false,
+      "why": "findInventedFacts() has nothing to scan in an empty answer, so it reports no invented facts by construction. Rejecting an empty answer outright is checkReformatFaithfulness's outputWords.size===0 branch, not this function's job \u2014 this pins that boundary rather than assuming it."
+    },
+    {
+      "name": "identical-output-not-flagged",
+      "source": "Jane Okafor\n\nWORK EXPERIENCE\n\nGlobex Corporation - Engineer II - 2018 - 2021\nCut checkout latency by 62% across the payments path.",
+      "output": "Jane Okafor\n\nWORK EXPERIENCE\n\nGlobex Corporation - Engineer II - 2018 - 2021\nCut checkout latency by 62% across the payments path.",
+      "shouldFlag": false,
+      "why": "Output verbatim equals source, unformatted. Nothing can be 'invented' relative to itself \u2014 the trivial baseline every other case is measured against."
+    },
+    {
+      "name": "reordered-not-flagged",
+      "source": "Jane Okafor\n\nWORK EXPERIENCE\n\nGlobex Corporation - Engineer II - 2018 - 2021\nCut checkout latency by 62% across the payments path.\n\nEDUCATION\nBachelor of Science, Computer Science, University of Washington, 2018",
+      "output": "Bachelor of Science, Computer Science, University of Washington, 2018\nEDUCATION\n\nCut checkout latency by 62% across the payments path.\nGlobex Corporation - Engineer II - 2018 - 2021\n\nWORK EXPERIENCE\n\nJane Okafor",
+      "shouldFlag": false,
+      "why": "Every line survives, only the order changed \u2014 the scenario the module's header comment names explicitly: a vision model reading a two-column PDF out of order must not be punished for it."
+    },
+    {
+      "name": "fabricated-fact-in-heading-line-slips-through",
+      "source": "Jane Okafor\n\nWORK EXPERIENCE\n\nGlobex Corporation - Engineer II - 2018 - 2021\nCut checkout latency by 62% across the payments path.\n\nHooli - Senior Software Engineer - 2021 - Present\nLed a team of three engineers on the billing platform.",
+      "output": "# Jane Okafor\n\n## Work Experience\n\n**Globex Corporation - Engineer II - 2018 - 2021**\n\n- Cut checkout latency by 62% across the payments path.\n\n**Hooli - Senior Software Engineer - 2021 - Present**\n\n- Led a team of three engineers on the billing platform.\n\n### Initech LLC \u2014 Principal Architect \u2014 2013 - 2016",
+      "shouldFlag": true,
+      "why": "GAP: identical fabrication to fabricated-employer-added, but the invented job sits on a '### ' heading line instead of a '**bold**' paragraph, with no bullet underneath. bodyProse() drops every line matching the heading regex before the containment scan ever sees it, on the theory that headings are structure we asked the model to add \u2014 but nothing stops a model from putting a fabricated employer THERE instead of in bold text. Confirmed empirically: findInventedFacts returns [] here (an earlier version of this case also had a bullet below the heading, which got caught for an unrelated reason \u2014 its own sentence-initial 'Directed' wasn't in the source \u2014 and masked this gap; that bullet was removed so the case isolates the real miss). Not weakened to pass; see notDone. [GAP CLOSED: findInventedFacts now catches this \u2014 heading text is scanned rather than dropped, and spelled-out quantities have their own case-insensitive pass.]"
+    },
+    {
+      "name": "inflated-headcount-in-words-slips-through",
+      "source": "Jane Okafor\n\nWORK EXPERIENCE\n\nHooli - Senior Software Engineer - 2021 - Present\nLed a team of three engineers on the billing platform.",
+      "output": "# Jane Okafor\n\n## Work Experience\n\n**Hooli - Senior Software Engineer - 2021 - Present**\n\n- Led a team of twelve engineers on the billing platform.",
+      "shouldFlag": true,
+      "why": "GAP: headcount inflated from three to twelve, but spelled out in words rather than digits. HARD_FACT_RE only matches digit sequences or capitalised tokens ([A-Z]...), so a number written as a word is invisible to containment entirely \u2014 this class of lie (any spelled-out figure) is structurally unreachable by the current regex. Confirmed empirically: findInventedFacts returns []. Not weakened to pass; see notDone. [GAP CLOSED: findInventedFacts now catches this \u2014 heading text is scanned rather than dropped, and spelled-out quantities have their own case-insensitive pass.]"
+    }
+  ]
+}

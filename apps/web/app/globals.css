@@ -1,0 +1,423 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Cello design tokens — "instrument panel" surface ladder.
+  A single warm signal accent (orange) sits over a four-step neutral ladder so
+  panels, wells, and raised readouts read as depth rather than decoration.
+
+  Ladder (recessed → raised):
+  Light: background #F4F2EC · sunken #ECE8E1 · card #FCFBF9 · raised #FFFFFF · border #E4DFD6
+  Dark:  background #0D0F14 · sunken #171A20 · card #1A1D24 · raised #212530 · border #292E38
+  Accent: #EA580C (deep #C2410C as text on light, #F97B45 on dark).
+*/
+
+@layer base {
+  :root {
+    --background: 42 22% 94%; /* #F4F2EC — the desk the panel rests on */
+    --foreground: 222 24% 12%;
+
+    --card: 40 25% 98%; /* #FCFBF9 — panel face */
+    --card-foreground: 222 24% 12%;
+
+    --raised: 0 0% 100%; /* #FFFFFF — raised readout / active surface */
+    --raised-foreground: 222 24% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 24% 12%;
+
+    --sunken: 40 17% 90%; /* #ECE8E1 — recessed wells + tracks */
+
+    --primary: 222 26% 12%; /* ink — primary buttons stay ink-filled */
+    --primary-foreground: 40 30% 98%;
+
+    --secondary: 40 17% 90%;
+    --secondary-foreground: 222 24% 12%;
+
+    --muted: 40 17% 90%;
+    --muted-foreground: 222 8% 42%;
+
+    /* Brand identity colour — the logo ONLY. Deliberately outside the signal
+       palette: --accent means "live" everywhere in this product, so a mark
+       painted in it competes with every status cue on screen. Petrol keeps the
+       identity distinct from the signal. */
+    --brand: 186 63% 21%; /* #14555A — petrol on paper */
+    --accent: 21 90% 48%; /* #EA580C — the single live signal */
+    --accent-foreground: 0 0% 100%;
+    --accent-deep: 17 87% 39%; /* #C2410C — accent as text on light */
+    --accent-hover: 21 90% 43%; /* filled accent, hover — darkens on light */
+    --accent-active: 21 88% 37%; /* filled accent, pressed */
+
+    --destructive: 0 66% 49%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 40 16% 86%; /* #E4DFD6 */
+    --input: 40 16% 86%;
+    --ring: 21 90% 48%;
+  }
+
+  .dark {
+    --background: 224 22% 7%; /* #0D0F14 */
+    --foreground: 40 18% 93%;
+
+    --card: 222 18% 12%; /* #1A1D24 — panel face */
+    --card-foreground: 40 18% 93%;
+
+    --raised: 220 16% 16%; /* #212530 — raised readout / active surface */
+    --raised-foreground: 40 18% 93%;
+
+    --popover: 222 18% 12%;
+    --popover-foreground: 40 18% 93%;
+
+    --sunken: 220 18% 10%; /* #171A20 — recessed wells + tracks */
+
+    --primary: 40 18% 93%;
+    --primary-foreground: 224 22% 7%;
+
+    --secondary: 220 16% 16%;
+    --secondary-foreground: 40 18% 93%;
+
+    --muted: 220 18% 10%;
+    --muted-foreground: 220 9% 62%;
+
+    --brand: 180 36% 48%; /* #4FA8A8 — petrol lightened for charcoal */
+    --accent: 21 90% 52%;
+    --accent-foreground: 0 0% 100%;
+    --accent-deep: 22 94% 62%; /* #F97B45 — readable orange text on dark */
+    --accent-hover: 21 92% 58%; /* filled accent, hover — brightens on dark */
+    --accent-active: 21 94% 64%; /* filled accent, pressed */
+
+    --destructive: 0 60% 52%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 14% 19%; /* #292E38 */
+    --input: 220 14% 19%;
+    --ring: 21 90% 48%;
+  }
+
+  /*
+    Chart tokens — fixed hex, identical in both themes.
+
+    Reuses the SAME instrument tones as the `pipeline` Tailwind colors above
+    (tailwind.config.ts) rather than inventing a second palette: pipeline.offer
+    for "good" outcomes, pipeline.screen for "uncertain", pipeline.rejected for
+    "bad", pipeline.ghosted for "unknown/neutral" — one visual vocabulary for
+    "how did this go" everywhere in the product (kanban bars, badges, charts).
+    Fixed across themes for the same reason the pipeline ramp is: these are
+    desaturated instrument tones already tuned to read on both the light
+    parchment and dark charcoal card surfaces, not a UI chrome color that
+    should invert with the theme.
+
+    --chart-score-* mirrors the 0-100 match-score bands lib/format.ts
+    matchTone()/toneBadgeClass() already use for badges everywhere else in the
+    app (bad <50, fair 50-69, good 70-84, strong 85+) — the histogram on
+    /insights must read as the same "how good is this match" language as the
+    score badge on a job card, not a second color system for the same number.
+    --chart-trust-* mirrors docs/PRODUCT-VISION.md "Colour and trust
+    semantics": green = externally confirmed, amber = review/ambiguity,
+    neutral = pending/unknown (never red — an unverified source isn't a
+    failure, just unconfirmed).
+  */
+  :root {
+    --chart-score-bad: #c05f5a; /* < 50 — pipeline.rejected */
+    --chart-score-fair: #be9a46; /* 50-69 — pipeline.screen */
+    --chart-score-good: #4b9285; /* 70-84 — pipeline.interview */
+    --chart-score-strong: #4e9a6b; /* 85+ — pipeline.offer */
+    --chart-score-unscored: #7c838f; /* pipeline.ghosted */
+
+    --chart-trust-official: #4e9a6b; /* employer's own board — externally confirmed */
+    --chart-trust-secondhand: #be9a46; /* via aggregator — review/ambiguity */
+    --chart-trust-unverified: #7c838f; /* untagged/unknown — neutral, not a failure */
+
+    --chart-series-total: #5b7c9e; /* pipeline.discovered — raw intake */
+    /* "scored" reuses the live accent (theme-aware, unlike the fixed tones
+       above) — scoring a job is exactly the "progress" signal the vision
+       doc reserves orange for. */
+    --chart-series-scored: hsl(var(--accent));
+
+    --chart-grid: hsl(var(--foreground) / 0.08);
+    --chart-axis: hsl(var(--muted-foreground));
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Focus styles for accessibility */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  /* Selection styling */
+  ::selection {
+    background-color: rgb(249 115 22 / 0.18);
+  }
+
+  /* Respect reduced-motion everywhere (dialogs, dropdowns, toasts) */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* Instrument-panel details — the signature texture + live indicators. */
+@layer components {
+  /* Faint vertical tick ruling for readout housings (the pulse ribbon). */
+  .instrument-ruling {
+    background-image: repeating-linear-gradient(
+      90deg,
+      hsl(var(--foreground) / 0.04) 0,
+      hsl(var(--foreground) / 0.04) 1px,
+      transparent 1px,
+      transparent 28px
+    );
+  }
+
+  /* The Cello mark drawing itself — the loading state IS the logo, so a
+     wait never needs a second, unrelated spinner beside the brand.
+
+     The path carries pathLength="1", so the whole spiral is exactly 1 unit
+     long regardless of its real arc length; dasharray/dashoffset therefore
+     sweep edge to edge even if the curve is later retuned. Offset runs
+     1 -> 0 -> -1: the stroke draws on, then continues off the far end, which
+     reads as the scroll unwinding rather than a stroke that snaps back. */
+  .logo-trace {
+    stroke-dasharray: 1;
+    animation: logo-trace 1.8s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  }
+
+  @keyframes logo-trace {
+    0% { stroke-dashoffset: 1; }
+    45% { stroke-dashoffset: 0; }
+    55% { stroke-dashoffset: 0; }
+    100% { stroke-dashoffset: -1; }
+  }
+
+  /* Reduced motion: a wait still needs to look like a wait, so the mark
+     breathes in opacity instead of freezing solid — no travel, no drawing. */
+  @media (prefers-reduced-motion: reduce) {
+    .logo-trace {
+      stroke-dasharray: none;
+      animation: logo-breathe 2s ease-in-out infinite;
+    }
+    @keyframes logo-breathe {
+      0%, 100% { opacity: 0.45; }
+      50% { opacity: 1; }
+    }
+  }
+
+  /* A live signal dot with a soft breathing halo. */
+  .signal-dot {
+    position: relative;
+    display: inline-block;
+    height: 0.5rem;
+    width: 0.5rem;
+    border-radius: 9999px;
+    background-color: hsl(var(--accent));
+  }
+  .signal-dot::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: 9999px;
+    border: 1.5px solid hsl(var(--accent));
+    opacity: 0;
+    animation: signal-ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+
+  @keyframes signal-ping {
+    0% {
+      transform: scale(0.7);
+      opacity: 0.7;
+    }
+    70%,
+    100% {
+      transform: scale(1.9);
+      opacity: 0;
+    }
+  }
+
+  /*
+   * Ambient depth field — three low-alpha accent radial gradients drifting
+   * very slowly. This is the CSS/SVG substitute for a 3D asset: it reads as
+   * "alive" without a WebGL dependency, and stays subtle (long duration, low
+   * alpha) rather than a "finished" motion-graphics loop. Pairs with
+   * components/ui/gradient-mesh.tsx. Killed automatically by the
+   * prefers-reduced-motion rule above (animation-duration → 0.01ms).
+   */
+  .gradient-mesh {
+    background-image:
+      radial-gradient(38% 55% at 15% 20%, hsl(var(--accent) / 0.16), transparent 70%),
+      radial-gradient(30% 45% at 85% 15%, hsl(var(--accent) / 0.1), transparent 70%),
+      radial-gradient(45% 60% at 60% 100%, hsl(var(--accent) / 0.08), transparent 70%);
+    background-size: 140% 140%;
+    animation: mesh-drift 18s ease-in-out infinite alternate;
+  }
+
+  @keyframes mesh-drift {
+    0% {
+      background-position: 0% 0%, 100% 0%, 50% 100%;
+    }
+    100% {
+      background-position: 10% 8%, 90% 12%, 55% 92%;
+    }
+  }
+}
+
+/* Custom scrollbar */
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.2);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.4);
+  }
+
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Skeleton loading */
+@layer components {
+  .skeleton {
+    @apply relative overflow-hidden rounded-control bg-sunken;
+  }
+
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--foreground) / 0.04),
+      transparent
+    );
+    animation: skeleton-shimmer 1.5s infinite;
+  }
+
+  @keyframes skeleton-shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  /*
+   * "Thinking" — a light sweeping through the word itself, rather than a
+   * spinner beside it.
+   *
+   * Deliberately NOT accent-coloured: the model deliberating is the most
+   * ordinary thing this product does, and painting it in the live signal
+   * (globals.css:41-50) would put orange on screen for most of every run. The
+   * motion carries the liveness; the hue stays muted. Uses background-clip on
+   * the text so the sweep is legible at caption size, where a moving
+   * background block behind the glyphs would just look like a defect.
+   */
+  .thinking-shimmer {
+    background-image: linear-gradient(
+      100deg,
+      hsl(var(--muted-foreground)) 20%,
+      hsl(var(--foreground)) 42%,
+      hsl(var(--foreground)) 50%,
+      hsl(var(--muted-foreground)) 72%
+    );
+    background-size: 220% 100%;
+    background-position: 180% 0;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: thinking-sweep 2.1s ease-in-out infinite;
+  }
+
+  @keyframes thinking-sweep {
+    to {
+      background-position: -80% 0;
+    }
+  }
+
+  /*
+   * The kanban drop-target arrow. Replaces Tailwind's `animate-bounce`, whose
+   * curve overshoots and snaps back — a physical impossibility that reads as
+   * dated. A real object settles; this drifts 3px down and eases back, which
+   * says "release here" without performing. Killed by the reduced-motion rule
+   * above, and the accent border/fill still carries the state on its own.
+   */
+  .drop-nudge {
+    animation: drop-nudge 1.4s ease-in-out infinite;
+  }
+
+  @keyframes drop-nudge {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(3px);
+    }
+  }
+
+  /* Reduced motion: hold a legible static state rather than freezing a
+     mid-sweep gradient, which would leave part of the word near-invisible. */
+  @media (prefers-reduced-motion: reduce) {
+    .thinking-shimmer {
+      animation: none;
+      background-image: none;
+      -webkit-background-clip: border-box;
+      background-clip: border-box;
+      color: hsl(var(--muted-foreground));
+    }
+  }
+}
+
+/* Print styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Cello">
+  <title>Cello</title>
+  <!--
+    THE MARK: a cello scroll — the carved volute at the head of the instrument
+    — drawn so it also closes into a C. The brand initial and the instrument
+    in one form, which is the reason this shape won over the alternatives: a
+    bridge silhouette resolved as a capital A, and a plucked string as an S.
+    Both are the wrong letter for a product called Cello.
+
+    WHY NOT ORANGE. #EA580C is a STATUS colour in this product — PRODUCT-VISION
+    assigns it to "live opportunity, attention, progress". A logo painted in it
+    competes with every live cue on screen and weakens the signal everywhere.
+    The mark is petrol so the accent keeps its job.
+
+    MASKABLE SAFE ZONE: Android and iOS may crop this tile to a circle of 80%
+    diameter (410px centred at 256,256). The mark spans roughly x 96-440,
+    y 112-448 at this scale, which sits inside that circle, so no platform
+    crop clips the spiral.
+  -->
+  <rect width="512" height="512" rx="116" fill="#0D0F14"/>
+  <g transform="translate(256 256) scale(6.4) translate(-32 -32)">
+    <path fill="none" stroke="#4FA8A8" stroke-width="7" stroke-linecap="round"
+      d="M50 47 C 44 56, 30 58, 20 51 C 9 43, 8 26, 19 17 C 30 8, 46 12, 51 23
+         C 55 32, 49 41, 40 41 C 33 41, 29 35, 32 29"/>
+  </g>
+</svg>

@@ -1,0 +1,78 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+.next/
+# Alternate dist dirs used for verification builds (NEXT_DIST_DIR=.next-verify),
+# so a typecheck-and-build pass never has to clobber the running dev server's
+# .next — bare `.next/` above does not match these.
+.next-*/
+out/
+dist/
+build/
+.turbo/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Testing
+coverage/
+.nyc_output/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Supabase
+.supabase/
+
+# Local agent/tooling state — machine-specific, not project config.
+#
+# .impeccable/ is the design-review tool's working directory: local config, a
+# hook cache, and the critique snapshots it writes. The snapshots are ignored
+# deliberately rather than by accident: THIS REPO IS PUBLIC, and a critique
+# enumerates the product's unfixed weaknesses in a live, deployed app — which
+# is a useful working document and a poor thing to publish. Commit a specific
+# snapshot on purpose (`git add -f`) if you decide you want it versioned.
+.codex/
+.impeccable/
+
+# Note: .github/ is intentionally NOT ignored — the CI and cron workflows in
+# there are project configuration and belong in version control.
+
+# Misc
+*.tsbuildinfo
+.vercel/
+.vercel
+.env*
+
+# Agent-skill installer state — written into the repo by local tooling
+# (skill installs), machine-specific, not project code. The supabase skill
+# files that were previously committed here are exactly this.
+.agents/
+.claude/
+skills-lock.json
