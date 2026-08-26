@@ -46,7 +46,7 @@
 // still come up short, and it is reported in `notes` exactly like every
 // other round (see the 'web-search' line below) — never a silent extra step.
 
-import { extractSkillsFromText } from '@cello/agents'
+import { extractSkillsFromText } from '../../jobs/skills'
 import type { AgentFn } from '../types'
 import { SourcerInput } from '../schemas'
 import { ingestLeads, queryAllSources } from '../../sources'

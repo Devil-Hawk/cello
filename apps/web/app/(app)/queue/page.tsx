@@ -3,13 +3,16 @@
 import { autoSubmitEnabled } from '@/lib/automation/capabilities'
 import { useCallback, useEffect, useState } from 'react'
 import { Inbox, Mail, ShieldAlert, ShieldCheck } from 'lucide-react'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Segmented } from '@/components/ui/segmented'
 import { Skeleton } from '@/components/ui/skeleton'
 import { DraftCard, type DraftRow } from '@/components/queue/draft-card'
 import { OutreachCard, type OutreachRow } from '@/components/queue/outreach-card'
+import { QueueList } from '@/components/queue/queue-list'
 import { createClient } from '@/lib/supabase/client'
+import { fetchClientSafePreferences } from '@/lib/preferences/client-safe'
 
 type Tab = 'applications' | 'outreach'
 type ScopeFilter = 'pending' | 'all'
@@ -49,6 +52,13 @@ export default function QueuePage() {
   useEffect(() => {
     load()
     // Policy read for the info banner (from the user's own profile preferences).
+    //
+    // Reads through get_client_safe_preferences() instead of
+    // .from('profiles').select('preferences') — the raw column also carries
+    // api_keys ciphertext and autopilot.atsKeys (an unencrypted ATS board
+    // password, per the audit that found this), and this banner needs three
+    // booleans/numbers, not the whole account's secrets. See
+    // lib/preferences/client-safe.ts.
     ;(async () => {
       try {
         const supabase = createClient()
@@ -56,15 +66,10 @@ export default function QueuePage() {
           data: { user },
         } = await supabase.auth.getUser()
         if (!user) return
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('preferences')
-          .eq('id', user.id)
-          .single()
-        const p = (profile?.preferences ?? {}) as Record<string, unknown>
-        const outreach = (p.outreach ?? {}) as Record<string, unknown>
+        const p = await fetchClientSafePreferences(supabase as unknown as SupabaseClient)
+        const outreach = p?.outreach ?? {}
         setPolicy({
-          autoSubmit: p.autoSubmit === true || p.autoApply === true,
+          autoSubmit: p?.autoSubmit === true || p?.autoApply === true,
           autoSend: outreach.autoSend === true,
           dailyCap: typeof outreach.dailyCap === 'number' ? outreach.dailyCap : 10,
         })
@@ -175,7 +180,17 @@ export default function QueuePage() {
         />
       </div>
 
-      {loading ? (
+      {tab === 'applications' && scope === 'pending' ? (
+        // THE UNMISSABLE VIEW. Not gated by the page's own `loading` — QueueList
+        // fetches app/api/notifications/queue itself and owns its own
+        // loading/empty/error states (see that component's header), because
+        // this is the surface the whole page exists for: every prepared
+        // application still waiting on a human, WHY it's waiting, and the one
+        // action that resolves it. "All" (below) stays on the plain history
+        // list, which also covers approved/submitted/rejected/failed —
+        // states QueueList deliberately does not track.
+        <QueueList onChanged={load} />
+      ) : loading ? (
         <div className="space-y-4">
           {[0, 1, 2].map((i) => (
             <Skeleton key={i} className="h-52 w-full" />

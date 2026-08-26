@@ -34,21 +34,64 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { loadApiKeys } from '@/lib/harness/keys'
-import { callLlm } from '@/lib/harness/llm'
 import { canRunLlm, missingOpenRouterMessage } from '@/lib/harness/llm-key-message'
 import type { AdminClient } from '@/lib/harness/types'
-import { userCompanyIds } from '@/lib/harness/agents/matcher'
-import { runBulkMatch } from '@/lib/harness/agents/bulk_matcher'
+import { userCompanyIds, ownedJobsQuery } from '@/lib/harness/agents/matcher'
+import { runUnitOnce } from '@/lib/graph/oneshot'
+import { resolveTargetTitles } from '@/lib/targeting/titles'
 import { resolveTargeting, type Targeting } from '@/lib/targeting'
-import { REASONING_EFFORTS, type LlmRunner, type ReasoningEffort } from '@/lib/harness/types'
+import { REASONING_EFFORTS, type ReasoningEffort } from '@/lib/harness/types'
+import { BulkMatcherOutput } from '@/lib/harness/schemas'
+import type { z } from 'zod'
 import { isAllowedModel } from '@/lib/models'
 import { QUALITY_REJECT_THRESHOLD } from '@/lib/jobs/classify'
+import { recordDemoEvent } from '@/lib/access/session'
+
+/** Unit output, typed off the same zod schema runAgentUnit validated it
+ *  against (agentSchemas.bulk_matcher.output) — see lib/harness/schemas.ts. */
+type BulkMatcherResult = z.infer<typeof BulkMatcherOutput>
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 const DEFAULT_LIMIT = 200
 const HARD_CAP = 500
+
+/**
+ * One trail row for a bulk-scoring attempt — what it scored, or why it scored
+ * nothing.
+ *
+ * "We should be able to see what someone did with a particular access code",
+ * and bulk scoring is the single most expensive thing a demo visitor can do, so
+ * it is exactly what the owner needs to see. Counts and enums only:
+ * `detail.count` is what the timeline renders as "Scored 40 jobs"
+ * (app/api/access-codes/contract.ts).
+ *
+ * WHAT AWAITING THIS COSTS, STATED HONESTLY. recordDemoEvent writes nothing for
+ * an ordinary user, but it is NOT a no-op for one — it pays an auth round trip
+ * and a service-role profile read before it can know that. It never throws AND
+ * never takes longer than AUDIT_DEADLINE_MS (lib/access/audit.ts): the second
+ * of those is what makes awaiting it safe here, because without a deadline an
+ * unanswered insert would spend whatever is left of this route's 300s
+ * maxDuration and turn a run that had already scored the jobs into a gateway
+ * timeout. It is awaited rather than backgrounded because a Next 14 handler has
+ * no after()/waitUntil, so a floating promise is an event lost whenever the
+ * process is torn down after the response — the same reason the redemption
+ * route awaits its write.
+ */
+async function recordScoringOutcome(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  detail: Record<string, unknown>,
+  headers: Headers
+): Promise<void> {
+  await recordDemoEvent(supabase, {
+    kind: 'action',
+    action: 'jobs.score_batch',
+    target: '/jobs',
+    detail,
+    headers,
+  })
+}
 
 function clampLimit(v: unknown): number {
   const n = typeof v === 'number' ? v : parseInt(String(v ?? ''), 10)
@@ -90,13 +133,14 @@ function facetOrFilter(column: string, values: string[]): string {
  *  `remaining` used to mean (the bug). Kept only to derive `excludedByTargeting`
  *  (= this minus countRemainingInTargeting) — never returned to the client on
  *  its own, so a caller can no longer mistake it for "left to score". */
-async function countUnscoredNoFilter(admin: AdminClient, companyIds: string[]): Promise<number> {
+async function countUnscoredNoFilter(admin: AdminClient, userId: string, companyIds: string[]): Promise<number> {
   if (companyIds.length === 0) return 0
-  const { count, error } = await admin
-    .from('jobs')
-    .select('id', { count: 'exact', head: true })
-    .in('company_id', companyIds)
-    .is('match_score', null)
+  // Ownership via the companies FK join (ownedJobsQuery), not an
+  // .in('company_id', companyIds) array — that breaks past ~600 companies.
+  const { count, error } = await ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', {
+    count: 'exact',
+    head: true,
+  }).is('match_score', null)
   if (error) {
     console.error('[agents/match/batch] unscored-count query failed', error)
     return 0
@@ -107,13 +151,17 @@ async function countUnscoredNoFilter(admin: AdminClient, companyIds: string[]): 
 /** match_score-null rows that ALSO pass the quality + targeting predicate —
  *  see the SYNC WARNING above. This is the number the "Score unscored jobs"
  *  button can actually drive to zero. */
-async function countRemainingInTargeting(admin: AdminClient, companyIds: string[], targeting: Targeting): Promise<number> {
+async function countRemainingInTargeting(
+  admin: AdminClient,
+  userId: string,
+  companyIds: string[],
+  targeting: Targeting
+): Promise<number> {
   if (companyIds.length === 0) return 0
-  let query = admin
-    .from('jobs')
-    .select('id', { count: 'exact', head: true })
-    .in('company_id', companyIds)
-    .is('match_score', null)
+  let query = ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', { count: 'exact', head: true }).is(
+    'match_score',
+    null
+  )
     .or(`quality_score.is.null,quality_score.gte.${QUALITY_REJECT_THRESHOLD}`)
 
   if (targeting.functions.length > 0) query = query.or(facetOrFilter('job_function', targeting.functions))
@@ -155,6 +203,13 @@ export async function POST(request: NextRequest) {
   // actionable message the other LLM routes use — never a bare "missing key".
   const apiKeys = await loadApiKeys(admin, user.id)
   if (!canRunLlm(apiKeys)) {
+    // Journalled: "the visitor tried to score and the workspace had no key" is
+    // a fact about the demo the owner set up, not a non-event.
+    await recordScoringOutcome(
+      supabase,
+      { outcome: 'failed', reason: 'no_key' },
+      request.headers
+    )
     return NextResponse.json(
       { error: missingOpenRouterMessage(apiKeys), skippedReason: 'no-llm-key' },
       { status: 400 }
@@ -168,6 +223,11 @@ export async function POST(request: NextRequest) {
     .single()
   const resume = String((profile?.resume_text as string | null) ?? '').trim()
   if (!resume) {
+    await recordScoringOutcome(
+      supabase,
+      { outcome: 'failed', reason: 'no_resume' },
+      request.headers
+    )
     return NextResponse.json(
       { error: 'No resume uploaded — add one in Settings before matching jobs.', skippedReason: 'no-resume' },
       { status: 400 }
@@ -179,6 +239,10 @@ export async function POST(request: NextRequest) {
   const companyIds = await userCompanyIds(admin, user.id)
 
   if (companyIds.length === 0) {
+    // A 200 that scored nothing. Not a failure — nothing was wrong — but it is
+    // still a click the owner should see, and "Scored 0 jobs · reason: no
+    // companies" is a far better answer than an empty timeline.
+    await recordScoringOutcome(supabase, { count: 0, reason: 'no_companies' }, request.headers)
     return NextResponse.json({
       scored: 0,
       failed: 0,
@@ -192,28 +256,70 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  const llm: LlmRunner = (opts) => callLlm(apiKeys, opts)
-
-  const result = await runBulkMatch({
-    admin,
-    companyIds,
-    resume,
-    targeting,
-    llm,
-    limit,
-    model,
-    effort,
-  })
+  let result: BulkMatcherResult
+  try {
+    // internals now run under runAgentUnit('bulk_matcher') — metered/demo-
+    // gated/journaled the same as every other unit — instead of calling
+    // runBulkMatch directly. No checkpoint thread: the DB's match_score IS
+    // NULL set is already the cursor (see this file's own header), so a
+    // thread would only duplicate that truth. companyIds/targetTitles are
+    // passed explicitly (already resolved above, for the no-resume/
+    // no-companies checks and the post-run stats below) so the unit's own
+    // internal resolution — see lib/harness/registry.ts's bulk_matcher
+    // wrapper, which exists precisely so a caller does NOT have to know
+    // this — is simply handed what this route already has.
+    const unitResult = await runUnitOnce('bulk_matcher', {
+      admin,
+      userId: user.id,
+      goal: 'Score unscored jobs',
+      input: {
+        companyIds,
+        limit,
+        model,
+        effort,
+        // Spend on the most on-target jobs first. Ordering only — nothing is
+        // excluded, so an unusually-titled role is still scored, just later.
+        targetTitles: resolveTargetTitles(prefs),
+      },
+    })
+    result = unitResult.output as BulkMatcherResult
+  } catch (e) {
+    // The unit issues tier-1 and tier-2 LLM calls before it can throw, so
+    // this is money already spent with nothing persisted to show for it — the
+    // single most expensive thing a successes-only trail would have hidden.
+    // Journalled and RETHROWN: what this request returns is exactly what it
+    // returned before, because an audit row is not a licence to change a
+    // handler's behaviour.
+    await recordScoringOutcome(
+      supabase,
+      { outcome: 'failed', reason: 'score_failed' },
+      request.headers
+    )
+    throw e
+  }
 
   // Both counts reflect POST-run state (scoring above may have just cleared
   // some of these rows), computed in parallel — two head-count queries, no
   // LLM spend. See the SYNC WARNING above for what remainingInTargeting must
   // stay aligned with.
   const [remainingInTargeting, totalUnscored] = await Promise.all([
-    countRemainingInTargeting(admin, companyIds, targeting),
-    countUnscoredNoFilter(admin, companyIds),
+    countRemainingInTargeting(admin, user.id, companyIds, targeting),
+    countUnscoredNoFilter(admin, user.id, companyIds),
   ])
   const excludedByTargeting = Math.max(0, totalUnscored - remainingInTargeting)
+
+  // THE DEMO TRAIL — see recordScoringOutcome above for what goes in a row and
+  // what awaiting it costs.
+  await recordScoringOutcome(
+    supabase,
+    {
+      count: result.scored,
+      failed: result.failed,
+      considered: result.candidatesConsidered,
+      remaining: remainingInTargeting,
+    },
+    request.headers
+  )
 
   return NextResponse.json({
     scored: result.scored,

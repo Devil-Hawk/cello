@@ -1,10 +1,10 @@
 // Greenhouse adapter — public boards API, no auth required.
 // GET https://boards-api.greenhouse.io/v1/boards/{board}/jobs
 
-import { htmlToText } from 'html-to-text'
 import type { AtsJob, AtsProvider, DetectInput } from './types'
 import { isValidToken } from './types'
 import { HttpError, assertAllowedHost, fetchJson } from './http'
+import { htmlToPlainText } from './html'
 
 const API_HOSTS = new Set(['boards-api.greenhouse.io', 'boards-api.eu.greenhouse.io'])
 
@@ -40,37 +40,11 @@ function unescapeDoubleEncodedHtml(raw: string): string {
 }
 
 // Convert the (now-real) HTML posting body to the plain text the matcher and
-// classifier actually read, via `html-to-text` (a mature, widely-used
-// HTML→text library) rather than a hand-rolled regex tag stripper.
-// `html-to-text` handles script/style removal and block-vs-inline layout
-// correctly on its own — the only overrides needed are the ones that change
-// what content ends up in the text: link hrefs and image src/alt are
-// dropped (a job description shouldn't read as "Apply here [https://...]"),
-// and heading case is left as-authored instead of the default all-caps
-// ("BENEFITS") to match what a human reading the original posting would see.
-const HTML_TO_TEXT_OPTIONS = {
-  wordwrap: false as const,
-  selectors: [
-    { selector: 'a', options: { ignoreHref: true } },
-    { selector: 'img', format: 'skip' },
-    { selector: 'h1', options: { uppercase: false } },
-    { selector: 'h2', options: { uppercase: false } },
-    { selector: 'h3', options: { uppercase: false } },
-    { selector: 'h4', options: { uppercase: false } },
-    { selector: 'h5', options: { uppercase: false } },
-    { selector: 'h6', options: { uppercase: false } },
-  ],
-}
-
+// classifier actually read. The parse/normalise step itself now lives in
+// ./html.ts, shared with the five adapters added after this one; only the
+// entity-unescape above is Greenhouse-specific.
 function descriptionToText(raw: string): string | undefined {
-  try {
-    const text = htmlToText(unescapeDoubleEncodedHtml(raw), HTML_TO_TEXT_OPTIONS).trim()
-    return text || undefined
-  } catch {
-    // A malformed body should degrade to no description rather than throw
-    // and lose the whole board.
-    return undefined
-  }
+  return htmlToPlainText(unescapeDoubleEncodedHtml(raw))
 }
 
 interface GreenhouseResponse {

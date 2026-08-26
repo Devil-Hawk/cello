@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { AlertCircle, CheckCircle, Cpu, Database, FileWarning, Key, Network, Plug, Search, Server, Target, User } from 'lucide-react'
+import { AlertCircle, CheckCircle, ChevronRight, Cpu, Database, FileWarning, Key, KeyRound, Network, Plug, Search, Server, Target, Terminal, User } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -18,10 +19,11 @@ import { ConnectionsTab } from '@/components/settings/connections-tab'
 import { SourcesTab } from '@/components/settings/sources-tab'
 import { SearchTab } from '@/components/settings/search-tab'
 import { McpTab } from '@/components/settings/mcp-tab'
+import { TokensTab } from '@/components/settings/tokens-tab'
 import type { ResumeStatus } from '@/components/settings/resume-upload-card'
 import { EMPTY_TARGETING, type Targeting } from '@/lib/targeting'
 
-type TabId = 'profile' | 'connections' | 'sources' | 'search' | 'mcp' | 'api-keys' | 'provider' | 'model' | 'targeting'
+type TabId = 'profile' | 'connections' | 'sources' | 'search' | 'mcp' | 'tokens' | 'api-keys' | 'provider' | 'model' | 'targeting'
 
 const TABS: Array<{ id: TabId; label: string; icon: typeof User }> = [
   { id: 'profile', label: 'Profile', icon: User },
@@ -29,6 +31,7 @@ const TABS: Array<{ id: TabId; label: string; icon: typeof User }> = [
   { id: 'sources', label: 'Sources', icon: Database },
   { id: 'search', label: 'Search', icon: Search },
   { id: 'mcp', label: 'MCP', icon: Network },
+  { id: 'tokens', label: 'Access tokens', icon: Terminal },
   { id: 'api-keys', label: 'API keys', icon: Key },
   { id: 'provider', label: 'Provider', icon: Server },
   { id: 'model', label: 'Model', icon: Cpu },
@@ -171,7 +174,11 @@ export default function SettingsPage() {
 
       <div className="flex flex-col gap-6 sm:flex-row">
         {/* Tab nav */}
-        <nav className="w-full shrink-0 space-y-1 sm:w-44">
+        {/* Named, because it is no longer only tabs: it now also contains a real
+            link out to /settings/access, and an unlabelled landmark next to the
+            sidebar's "Primary" one is a coin flip for anyone navigating by
+            landmark. */}
+        <nav aria-label="Settings sections" className="w-full shrink-0 space-y-1 sm:w-44">
           {TABS.map((tab) => (
             <button
               key={tab.id}
@@ -189,6 +196,27 @@ export default function SettingsPage() {
               {tab.label}
             </button>
           ))}
+
+          {/* Demo access is a ROUTE, not a tab — and until now nothing in the
+              app linked to it at all, so the whole feature was unreachable.
+              It stays a separate page because it is the one settings surface
+              that hands out a credential: it deserves a URL you can bookmark
+              mid-demo, a title that names what is happening, and a place for
+              the audit trail. Rendered below a rule and with a chevron so it
+              reads as "leaves this page" rather than as another tab that swaps
+              the panel beside it; the sidebar's Settings sub-item is the other
+              way in (components/layout/nav-items.ts). Focus ring comes from
+              globals.css's `*:focus-visible`, same as every other nav link. */}
+          <div className="mt-2 border-t pt-2">
+            <Link
+              href="/settings/access"
+              className="flex w-full items-center gap-2 rounded-control px-3 py-2 text-body text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <KeyRound className="h-4 w-4 shrink-0" aria-hidden />
+              Demo access
+              <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0" aria-hidden />
+            </Link>
+          </div>
         </nav>
 
         {/* Content */}
@@ -245,6 +273,8 @@ export default function SettingsPage() {
             <SearchTab onStatus={reportStatus} />
           ) : activeTab === 'mcp' ? (
             <McpTab onStatus={reportStatus} />
+          ) : activeTab === 'tokens' ? (
+            <TokensTab onStatus={reportStatus} />
           ) : activeTab === 'api-keys' ? (
             <ApiKeysTab
               initialHasOpenai={hasOpenaiKey}

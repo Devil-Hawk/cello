@@ -29,8 +29,9 @@ vi.mock('@/lib/search', () => ({ webSearch: webSearchMock }))
 vi.mock('./agents/company_researcher', () => ({
   generateDossier: generateDossierMock,
   // Unused by dispatchTool (only generateDossier is called directly), but
-  // executor.ts's registry imports the AgentFn wrapper transitively — a real
-  // implementation isn't needed, just a stub so that import doesn't fail.
+  // lib/harness/registry.ts's UNIT_REGISTRY imports the AgentFn wrapper
+  // transitively — a real implementation isn't needed, just a stub so that
+  // import doesn't fail.
   company_researcher: vi.fn(),
 }))
 
@@ -54,13 +55,26 @@ type Row = Record<string, unknown>
 
 class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
   private rows: Row[]
-  constructor(rows: Row[]) {
+  // Full table set, so an embedded-relation filter (ownedJobsQuery's own
+  // `.eq('companies.user_id', userId)`) can join company_id -> companies
+  // the way PostgREST's `companies!inner(...)` embed actually does — a plain
+  // `r['companies.user_id']` lookup would just be undefined for every row.
+  constructor(
+    rows: Row[],
+    private allTables: Record<string, Row[]> = {}
+  ) {
     this.rows = rows
   }
   select(_cols?: string) {
     return this
   }
   eq(col: string, val: unknown) {
+    if (col.startsWith('companies.')) {
+      const field = col.slice('companies.'.length)
+      const byId = new Map((this.allTables.companies ?? []).map((c) => [c.id, c]))
+      this.rows = this.rows.filter((r) => byId.get(r.company_id as string)?.[field] === val)
+      return this
+    }
     this.rows = this.rows.filter((r) => r[col] === val)
     return this
   }
@@ -75,6 +89,18 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
   ilike(col: string, pattern: string) {
     const needle = pattern.replace(/%/g, '').toLowerCase()
     this.rows = this.rows.filter((r) => String(r[col] ?? '').toLowerCase().includes(needle))
+    return this
+  }
+  // Stand-in for websearch_to_tsquery over jobs.tsv: AND-matches every word
+  // of the query against `title`, case-insensitively — enough to exercise
+  // listJobs' "found via FTS" vs "FTS empty, fall back to trgm" branches
+  // without simulating real tsvector stemming/ranking.
+  textSearch(col: string, query: string, _opts?: unknown) {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+    this.rows = this.rows.filter((r) => {
+      const haystack = String(r[col] ?? r.title ?? '').toLowerCase()
+      return words.every((w) => haystack.includes(w))
+    })
     return this
   }
   order(_col: string, _opts?: unknown) {
@@ -101,11 +127,18 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
 
 /** Build a fake AdminClient over a fixed set of in-memory tables. Each call to
  *  .from(table) starts a fresh FakeQuery over a COPY of that table's rows, so
- *  filters from one call never bleed into another. */
-function fakeAdmin(tables: Record<string, Row[]>): AdminClient {
+ *  filters from one call never bleed into another. `rpc` stands in for the
+ *  trgm-fallback Postgres functions (search_jobs_by_title_trgm,
+ *  search_contacts_by_name_trgm) — keyed by function name, returning that
+ *  function's fixed row set regardless of params (these tests assert on the
+ *  RESULT of the fallback branch firing, not on the RPC's own args). */
+function fakeAdmin(tables: Record<string, Row[]>, rpc: Record<string, Row[]> = {}): AdminClient {
   const admin = {
     from(table: string) {
-      return new FakeQuery([...(tables[table] ?? [])])
+      return new FakeQuery([...(tables[table] ?? [])], tables)
+    },
+    async rpc(fn: string) {
+      return { data: rpc[fn] ?? [], error: null }
     },
   }
   return admin as unknown as AdminClient
@@ -573,5 +606,76 @@ describe('dispatchTool — research_companies (batch: caps, partial failure, bou
     expect(maxInFlight).toBeLessThanOrEqual(RESEARCH_COMPANIES_CONCURRENCY)
     // ...but genuinely parallel, not accidentally serialized to 1-at-a-time.
     expect(maxInFlight).toBeGreaterThan(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// list_jobs / list_contacts: ILIKE retired for FTS + trgm (20260816000009_
+// job_search.sql). One check per branch: FTS match, short-query trgm-direct,
+// FTS-empty trgm-fallback, and list_contacts' own trgm search.
+// ---------------------------------------------------------------------------
+describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
+  const co = { id: 'co-1', name: 'Acme', user_id: 'me', is_dream_company: false }
+  const jobs = [
+    { id: 'job-1', title: 'Staff Backend Engineer', company_id: 'co-1', match_score: 80, is_new: false, location: null, posted_at: null },
+    { id: 'job-2', title: 'Product Designer', company_id: 'co-1', match_score: 60, is_new: false, location: null, posted_at: null },
+  ]
+
+  it('a real word query (>=4 chars) matches via FTS (textSearch), no rpc needed', async () => {
+    const admin = fakeAdmin({ companies: [co], jobs })
+    const ctx = baseCtx(admin)
+
+    const result = (await dispatchTool(ctx, 'list_jobs', { query: 'backend' })) as { jobs: { jobId: string }[] }
+
+    expect(result.jobs).toHaveLength(1)
+    expect(result.jobs[0].jobId).toBe('job-1')
+  })
+
+  it('a short query (<4 chars) skips FTS and goes straight to the trgm rpc', async () => {
+    const admin = fakeAdmin({ companies: [co], jobs }, { search_jobs_by_title_trgm: [{ job_id: 'job-2', score: 0.9 }] })
+    const ctx = baseCtx(admin)
+
+    const result = (await dispatchTool(ctx, 'list_jobs', { query: 'dsn' })) as { jobs: { jobId: string }[] }
+
+    expect(result.jobs).toHaveLength(1)
+    expect(result.jobs[0].jobId).toBe('job-2')
+  })
+
+  it('an FTS miss (typo) falls back to the trgm rpc instead of reporting empty', async () => {
+    // "enginer" matches no title via the FTS stand-in (textSearch is a
+    // straight substring match), but the trgm rpc fixture stands in for
+    // Postgres finding job-1 by similarity anyway.
+    const admin = fakeAdmin({ companies: [co], jobs }, { search_jobs_by_title_trgm: [{ job_id: 'job-1', score: 0.5 }] })
+    const ctx = baseCtx(admin)
+
+    const result = (await dispatchTool(ctx, 'list_jobs', { query: 'enginer' })) as { jobs: { jobId: string }[] }
+
+    expect(result.jobs).toHaveLength(1)
+    expect(result.jobs[0].jobId).toBe('job-1')
+  })
+})
+
+describe('list_contacts — trgm search (ILIKE retired)', () => {
+  it('a query resolves through the trgm rpc, not a substring scan', async () => {
+    const admin = fakeAdmin(
+      { contacts: [{ id: 'c-1', name: 'Dana Okafor', user_id: 'me', email: null, title: null, relationship: null, company_id: null, last_contact_at: null }] },
+      { search_contacts_by_name_trgm: [{ contact_id: 'c-1', score: 0.8 }] }
+    )
+    const ctx = baseCtx(admin)
+
+    const result = (await dispatchTool(ctx, 'list_contacts', { query: 'Dana' })) as { contacts: { id: string }[] }
+
+    expect(result.contacts).toHaveLength(1)
+    expect(result.contacts[0].id).toBe('c-1')
+  })
+
+  it('no rpc matches -> empty result, no error', async () => {
+    const admin = fakeAdmin({ contacts: [] }, { search_contacts_by_name_trgm: [] })
+    const ctx = baseCtx(admin)
+
+    const result = (await dispatchTool(ctx, 'list_contacts', { query: 'nobody' })) as { contacts: unknown[]; count: number }
+
+    expect(result.count).toBe(0)
+    expect(result.contacts).toEqual([])
   })
 })

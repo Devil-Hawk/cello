@@ -184,6 +184,8 @@ export function resolveProviderPreferences(raw: unknown): ProviderPreferences {
     localCli: resolveLocalCliId(r.localCli),
     localServerBaseUrl: typeof r.localServerBaseUrl === 'string' ? r.localServerBaseUrl.trim() : '',
     localServerModel: typeof r.localServerModel === 'string' ? r.localServerModel.trim() : '',
+    localServerEmbeddingModel:
+      typeof r.localServerEmbeddingModel === 'string' ? r.localServerEmbeddingModel.trim() : '',
   }
 }
 

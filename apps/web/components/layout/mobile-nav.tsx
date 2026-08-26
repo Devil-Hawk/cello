@@ -40,6 +40,13 @@ import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { navItems, type NavItem } from '@/components/layout/nav-items'
 
+// Five of navItems' six primary destinations. /resume is deliberately absent:
+// a sixth tab leaves ~65px per item on a 390px phone, which "Opportunities"
+// cannot label without overflowing, and this bar has no truncation by design
+// (a clipped tab label is worse than one fewer tab). Resume is one tap away in
+// the drawer instead, where it renders as the primary item it is — the same
+// deal the contextual sub-destinations already have. Order and identity still
+// come from navItems; this list only chooses which of them fit.
 const MOBILE_NAV_HREFS = ['/dashboard', '/jobs', '/pipeline', '/copilot', '/settings'] as const
 
 const mobileNavItems: NavItem[] = MOBILE_NAV_HREFS.map((href) =>

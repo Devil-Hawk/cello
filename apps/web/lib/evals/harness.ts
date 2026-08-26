@@ -161,6 +161,47 @@ export function scoreSpread(scores: number[]): number {
   return entropy / Math.log2(10)
 }
 
+/**
+ * Of the cases PREDICTED positive, what fraction were actually positive —
+ * e.g. "of the drafts containment flagged as unsupported, how many did the
+ * human actually reject". Refuses (insufficient-data) below
+ * MIN_SAMPLE_PER_CLASS positive predictions, same floor discipline and same
+ * reason as evaluateRanking: a precision computed from a handful of flags is
+ * noise that would get quoted as a rate.
+ */
+export function evaluatePrecision(
+  name: string,
+  cases: { predicted: boolean; actual: boolean }[],
+  threshold: number
+): EvalResult {
+  const flagged = cases.filter((c) => c.predicted)
+  if (flagged.length < MIN_SAMPLE_PER_CLASS) {
+    return {
+      name,
+      verdict: 'insufficient-data',
+      score: null,
+      threshold,
+      n: cases.length,
+      summary:
+        `Not enough positive predictions to judge precision: ${flagged.length}, need ` +
+        `${MIN_SAMPLE_PER_CLASS}. No verdict — a rate from this little would get quoted and would be noise.`,
+    }
+  }
+  const correct = flagged.filter((c) => c.actual).length
+  const precision = correct / flagged.length
+  const pass = precision >= threshold
+  return {
+    name,
+    verdict: pass ? 'pass' : 'fail',
+    score: precision,
+    threshold,
+    n: cases.length,
+    summary: pass
+      ? `Precision ${precision.toFixed(3)} over ${flagged.length} flagged case(s) (threshold ${threshold}).`
+      : `Precision ${precision.toFixed(3)} is below the ${threshold} threshold over ${flagged.length} flagged case(s).`,
+  }
+}
+
 /** Format a result the way a human reads a CI failure: verdict, then why. */
 export function formatEvalResult(r: EvalResult): string {
   const mark = r.verdict === 'pass' ? 'PASS' : r.verdict === 'fail' ? 'FAIL' : 'SKIP'

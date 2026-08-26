@@ -47,6 +47,10 @@ const PRICES: Record<string, { in: number; out: number }> = {
   'moonshotai/kimi-k3': { in: 3, out: 15 },
   'moonshotai/kimi-k2-thinking': { in: 0.6, out: 2.5 },
   'google/gemini-2.5-flash': { in: 0.3, out: 2.5 },
+  // Embeddings only ever consume input tokens (out: 0) — callEmbedding
+  // (lib/harness/llm.ts) always passes completionTokens=0 to recordSpend.
+  // Locked model (2026-08-16 langgraph port spec); OpenAI's published rate.
+  'openai/text-embedding-3-small': { in: 0.02, out: 0 },
 }
 const FALLBACK_PRICE = { in: 5, out: 25 }
 

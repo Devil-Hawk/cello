@@ -14,6 +14,7 @@ import type {
   PlanSchema,
   StepAgentTypeSchema,
   AgentTypeSchema,
+  UnitTypeSchema,
   LoopSpecSchema,
   LoopConditionSchema,
   FanOutSpecSchema,
@@ -28,6 +29,15 @@ export type AgentType = z.infer<typeof AgentTypeSchema>
 
 /** Agent types that can appear as executable DAG steps (everything but planner). */
 export type StepAgentType = z.infer<typeof StepAgentTypeSchema>
+
+/**
+ * Every unit lib/graph/unit.ts#runAgentUnit can run — seventeen total:
+ * StepAgentType's ten plannable agents, the five graph-port stragglers
+ * (bulk_matcher, digest, outreach, resume_optimizer, strategist) that are
+ * real, callable units without being plannable, plus analyst and coach. See
+ * lib/harness/schemas.ts's UNIT_TYPES for the full rationale.
+ */
+export type UnitType = z.infer<typeof UnitTypeSchema>
 
 export type Plan = z.infer<typeof PlanSchema>
 export type PlanStep = Plan['steps'][number]
@@ -77,27 +87,29 @@ export type RunStatus =
    * At least one step FAILED (or the run was aborted on budget/deadline before
    * every step got to run) but at least one other step still completed. A
    * plain 'completed' status is reserved for a run where nothing broke — see
-   * lib/harness/executor.ts's finalStatus computation.
+   * lib/graph/runs.ts's finalStatus computation.
    */
   | 'completed_with_errors'
   /**
-   * The run stopped at its wall-clock deadline (MAX_RUN_MS in
-   * lib/harness/executor.ts) with agent_steps rows still `pending` — a PAUSE,
-   * not a failure. app/api/harness/cron/route.ts's continueIncompleteRuns()
-   * picks up every 'incomplete' run and re-enters runAgentRun for it, which
-   * adopts each already-`completed` step's stored output (so that work is
-   * never redone/thrown away) and only executes what's left — see step 2 of
-   * runAgentRun in executor.ts.
-   *
-   * Budget exhaustion is DIFFERENTLY handled and deliberately never produces
-   * this status: running out of token budget means the user would have to
-   * spend more money to make progress, so there is no free "try again" — the
-   * executor marks a budget-stopped run 'completed_with_errors' (or 'failed'
-   * if nothing at all completed) with its remaining steps 'skipped', exactly
-   * like before this status existed. Only a run whose RunOutcome.aborted was
-   * 'deadline' (never 'budget') can be 'incomplete'.
+   * harnessRun (lib/graph/runs.ts) hit its interrupt({kind:'deadline'})
+   * boundary (or an ask-form/review wait) with a LangGraph checkpoint parked
+   * mid-DAG — a PAUSE, not a failure. Retired the pre-port bespoke
+   * executor's 'incomplete' status, which named a continuation-counter
+   * mechanism as the PRIMARY resume path (bump-and-cap on every attempt);
+   * the stuck-run reaper is fully deleted by the graph port (see
+   * lib/graph/journal.ts#markRunPaused). app/api/harness/cron/route.ts's
+   * resume pass picks up every 'paused' run
+   * (plus any 'running' one stale past its threshold) and re-enters the
+   * thread via invokeGraphForUser with THE RESUME RULE (lib/graph/invoke.ts)
+   * uniformly — no branching on why the thread stopped. Two backstops guard
+   * against a thread that never reaches a terminal state: a checkpoint-count
+   * ceiling for one that keeps legitimately re-pausing, and
+   * agent_runs.continuation_count — reused, not deleted, as a narrower
+   * consecutive-failure-streak cap — for one whose resume attempts fail
+   * before ever producing a checkpoint at all (see continuation_count's own
+   * doc on AgentRunRow and RESUME_ATTEMPT_CEILING in cron/route.ts).
    */
-  | 'incomplete'
+  | 'paused'
   | 'failed'
   | 'cancelled'
 
@@ -117,14 +129,23 @@ export interface AgentRunRow {
   finished_at: string | null
   created_at: string
   /**
-   * How many times app/api/harness/cron/route.ts's continueIncompleteRuns()
-   * has re-entered runAgentRun for this run after it paused with status
-   * 'incomplete'. Bumped durably BEFORE each continuation attempt (not
-   * after), so a continuation that itself gets killed mid-request still
-   * counts against MAX_CONTINUATIONS there — a pathological plan that always
-   * lands back on the deadline cannot loop forever. 0/absent for a run that
-   * has never been continued (including every run that predates this
-   * column — read with `?? 0`, never assume it is present).
+   * Pre-port: how many times app/api/harness/cron/route.ts's
+   * continueIncompleteRuns() had re-entered runAgentRun for this run after it
+   * paused with the now-retired 'incomplete' status (that mechanism is
+   * deleted — see RunStatus's 'paused' doc above).
+   *
+   * Graph port: reused by app/api/harness/cron/route.ts's
+   * resumeCheckpointedRuns() as RESUME_ATTEMPT_CEILING's CONSECUTIVE
+   * resume-attempt failure streak — bumped durably BEFORE each resume attempt
+   * (so an attempt killed mid-request still counts), reset to 0 the instant
+   * an attempt returns without throwing. Bounds a thread whose resume attempt
+   * fails before ever producing a new checkpoint (thread-ownership refusal,
+   * expired demo thread, checkpointer connectivity failure) — the one
+   * pathology CHECKPOINT_CEILING (lib/graph/pg.ts#countThreadCheckpoints)
+   * structurally cannot see, since no checkpoint is ever written on that
+   * path. 0/absent for a run that has never failed a resume attempt
+   * (including every run that predates this column — read with `?? 0`,
+   * never assume it is present).
    */
   continuation_count: number
 }
@@ -222,6 +243,22 @@ export interface ProviderPreferences {
   localServerBaseUrl: string
   /** Model id to request from the local server — server-specific, freeform. */
   localServerModel: string
+  /**
+   * Embedding model id to request from the local server. Separate from
+   * localServerModel (a chat model id) because callEmbedding's fallback chain
+   * (lib/harness/providers/embeddings.ts) is independent of the chat provider
+   * choice above — a local server only ever enters that chain when this is
+   * set. Empty means "not configured", which is how ruling 10 (langgraph port
+   * spec) gates the local-server embedding fallback: no id here, no attempt.
+   * The 1536-dim requirement it also states is enforced at call time
+   * (assertDims in embeddings.ts throws rather than trusting the id).
+   *
+   * Optional (unlike its chat-model sibling above) so every existing literal
+   * ProviderPreferences in this codebase — settings UI, tests fixtures —
+   * keeps compiling unchanged; `undefined` and `''` both read as "not
+   * configured" everywhere this is checked.
+   */
+  localServerEmbeddingModel?: string
 }
 
 export const DEFAULT_PROVIDER_PREFERENCES: ProviderPreferences = {
@@ -229,6 +266,7 @@ export const DEFAULT_PROVIDER_PREFERENCES: ProviderPreferences = {
   localCli: 'claude',
   localServerBaseUrl: '',
   localServerModel: '',
+  localServerEmbeddingModel: '',
 }
 
 export interface LlmRunOptions {
@@ -280,7 +318,14 @@ export interface StepContext {
   userId: string
   runId: string
   stepLabel: string
-  agentType: StepAgentType
+  /**
+   * Widened from StepAgentType to UnitType so lib/graph/unit.ts#runAgentUnit
+   * can build a StepContext-compatible ctx for the five graph-port
+   * stragglers too, without changing what the ten existing StepAgentType
+   * AgentFn implementations receive (StepAgentType ⊂ UnitType — every value
+   * they were already passed still type-checks here unchanged).
+   */
+  agentType: UnitType
   /** Static input declared for this step by the planner. */
   input: unknown
   /** Outputs of dependency steps, keyed by their label. */

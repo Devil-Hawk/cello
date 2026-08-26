@@ -8,7 +8,7 @@ const nextConfig = {
   // static asset and leaves a blank page that looks like an app bug.
   distDir: process.env.NEXT_DIST_DIR || '.next',
 
-  transpilePackages: ['@cello/shared', '@cello/agents'],
+  transpilePackages: ['@cello/shared'],
   typescript: {
     // Type errors fail the build. `tsc --noEmit` is clean, and letting the build
     // skip validation hid a whole class of invalid-route-export errors.
@@ -54,7 +54,7 @@ const nextConfig = {
     // node-only modules and is server-only by nature, so leave it external
     // rather than discover at runtime that a resume upload 500s the way the
     // copilot route did.
-    serverComponentsExternalPackages: ['cheerio', 'undici', 'mammoth'],
+    serverComponentsExternalPackages: ['cheerio', 'undici', 'mammoth', 'mem0ai'],
     // lib/harness/prompts.ts reads apps/web/prompts/*.md at RUNTIME via
     // fs.readFileSync(path.join(process.cwd(), 'prompts', ...)). That call is
     // invisible to Next's build-time file tracer (@vercel/nft walks static

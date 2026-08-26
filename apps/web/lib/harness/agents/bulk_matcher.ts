@@ -31,6 +31,7 @@ import type { AdminClient, LlmRunner, ReasoningEffort } from '../types'
 import { REASONING_EFFORTS } from '../types'
 import { parseJsonLoose, MissingKeyError, TruncatedResponseError } from '../llm'
 import type { Targeting } from '@/lib/targeting'
+import { frameJobTextList } from '@/lib/security/job-text'
 import {
   scoreJobWithLlm,
   buildMatchDetails,
@@ -127,13 +128,29 @@ function buildTier1System(resume: string): string {
   ].join('\n')
 }
 
+/**
+ * INJECTION DEFENCE (lib/security/job-text.ts): up to TIER1_BATCH_SIZE
+ * EMPLOYER-CONTROLLED descriptions share this one prompt — exactly the shape
+ * frameJobTextList exists for: one shared preface instead of repeating it per
+ * job (see that function's doc comment for the token-cost reasoning), and
+ * scrubbing that stops one hostile posting in the batch closing its own fence
+ * or a neighbour's. The compact `[shortId] title @ company (location)` head
+ * lines stay OUTSIDE the fence — that metadata is short and not the payload
+ * this defends against — and correlate with the fenced blocks by the same
+ * shortId.
+ */
 function buildTier1Prompt(items: { shortId: string; job: ScorableJob }[]): string {
-  const lines = items.map(({ shortId, job }) => {
-    const desc = (job.description ?? '').replace(/\s+/g, ' ').trim().slice(0, TIER1_DESC_CHARS)
-    const head = `[${shortId}] ${job.title} @ ${job.companyName || 'Unknown'} (${job.location ?? 'Unspecified'})`
-    return desc ? `${head} — ${desc}` : head
-  })
-  return `Score these ${items.length} jobs:\n${lines.join('\n')}`
+  const heads = items.map(
+    ({ shortId, job }) => `[${shortId}] ${job.title} @ ${job.companyName || 'Unknown'} (${job.location ?? 'Unspecified'})`
+  )
+  const descriptions = frameJobTextList(
+    items.map(({ shortId, job }) => ({
+      id: shortId,
+      text: (job.description ?? '').replace(/\s+/g, ' ').trim().slice(0, TIER1_DESC_CHARS),
+    })),
+    { label: 'JOB DESCRIPTION' }
+  )
+  return `Score these ${items.length} jobs:\n${heads.join('\n')}\n\n${descriptions}`
 }
 
 interface Tier1RawEntry {
@@ -333,7 +350,13 @@ export interface Tier2Result {
  *  the persisted shape is byte-identical to every other caller of that
  *  function (the UI's match-badge/job-detail-modal, autopilot, the on-demand
  *  single-job route). */
-export async function runTier2(llm: LlmRunner, resume: string, jobs: ScorableJob[]): Promise<Tier2Result> {
+export async function runTier2(
+  llm: LlmRunner,
+  resume: string,
+  jobs: ScorableJob[],
+  admin: AdminClient,
+  userId: string
+): Promise<Tier2Result> {
   const matchDetailsByJobId = new Map<string, { score: number; matchDetails: Record<string, unknown> }>()
   const failedJobIds: string[] = []
   let tokensUsed = 0
@@ -344,7 +367,7 @@ export async function runTier2(llm: LlmRunner, resume: string, jobs: ScorableJob
     TIER2_CONCURRENCY,
     async (job) => {
       try {
-        const { verdict, tokensUsed: used } = await scoreJobWithLlm(llm, resume, job)
+        const { verdict, tokensUsed: used } = await scoreJobWithLlm(llm, resume, job, admin, userId)
         tokensUsed += used
         matchDetailsByJobId.set(job.id, {
           score: verdict.score,
@@ -412,6 +435,7 @@ function withModel(llm: LlmRunner, model: string | undefined): LlmRunner {
 
 export interface BulkMatchOptions {
   admin: AdminClient
+  userId: string
   companyIds: string[]
   resume: string
   targeting: Targeting
@@ -424,6 +448,15 @@ export interface BulkMatchOptions {
   effort?: ReasoningEffort
   /** Explicit ids to score instead of the default unscored pool. */
   jobIds?: string[]
+  /**
+   * The titles the user configured (lib/targeting/titles.ts).
+   *
+   * ORDERS the candidate pool so metered scoring is spent on the most on-target
+   * jobs first; it never excludes anything. Without it the pool is simply the
+   * newest unscored rows, which in a corpus where 92.8% of titles match no
+   * target means paying to rate roles the user will never apply to.
+   */
+  targetTitles?: readonly string[]
 }
 
 export interface JobScoreOutcome {
@@ -478,10 +511,14 @@ export async function runBulkMatch(opts: BulkMatchOptions): Promise<BulkMatchRes
 
   const { jobs, candidatesConsidered } = await selectCandidateJobs(
     opts.admin,
-    opts.companyIds,
+    opts.userId,
     opts.targeting,
     opts.limit,
-    opts.jobIds
+    opts.jobIds,
+    // Orders the pool so metered scoring is spent on the jobs most likely to
+    // match, instead of simply the most recently posted. See
+    // lib/jobs/target-relevance.ts — it is an ordering, never a filter.
+    opts.targetTitles ?? []
   )
   if (jobs.length === 0) {
     const reason = candidatesConsidered > 0 ? 'no-candidates-after-targeting-filter' : 'no-candidates'
@@ -529,7 +566,7 @@ export async function runBulkMatch(opts: BulkMatchOptions): Promise<BulkMatchRes
   let tier2TokensUsed = 0
   let tier2: Tier2Result | null = null
   if (winners.length > 0) {
-    tier2 = await runTier2(llm, opts.resume, winners)
+    tier2 = await runTier2(llm, opts.resume, winners, opts.admin, opts.userId)
     tier2TokensUsed = tier2.tokensUsed
     bump('tier2-scoring-failed', tier2.failedJobIds.length)
     if (tier2.missingKey) bump('no-llm-key', 1)

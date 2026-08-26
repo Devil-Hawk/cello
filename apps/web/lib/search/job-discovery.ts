@@ -57,6 +57,11 @@ import { detectFromUrl } from '../ats/detect'
 import { greenhouse } from '../ats/greenhouse'
 import { lever } from '../ats/lever'
 import { ashby } from '../ats/ashby'
+import { workday } from '../ats/workday'
+import { smartrecruiters } from '../ats/smartrecruiters'
+import { workable } from '../ats/workable'
+import { recruitee } from '../ats/recruitee'
+import { personio } from '../ats/personio'
 import type { JobLead } from '../sources/types'
 import type { Targeting } from '../targeting'
 import type { RoleIntentDef } from '../jobs/role-taxonomy'
@@ -124,7 +129,21 @@ export function buildSearchQueries(
 // ATS-host verification (reuses the real adapters)
 // ---------------------------------------------------------------------------
 
-const ATS_PROVIDERS: Record<AtsProviderId, AtsProvider> = { greenhouse, lever, ashby }
+// Typed as a TOTAL Record on purpose: when AtsProviderId grows, this fails to
+// compile until the new adapter is registered here too. That is how the five
+// providers added for the 69.5% detection gap were caught — the union widened
+// in lib/ats/types.ts and this map, in a different subsystem, would otherwise
+// have kept silently verifying only three.
+const ATS_PROVIDERS: Record<AtsProviderId, AtsProvider> = {
+  greenhouse,
+  lever,
+  ashby,
+  workday,
+  smartrecruiters,
+  workable,
+  recruitee,
+  personio,
+}
 
 /** Strip query string/hash/trailing slash so URL variants of the same
  *  posting compare equal (a search result's URL and the ATS API's own

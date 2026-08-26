@@ -34,10 +34,11 @@ import {
   type StarStory,
   type KitStatus,
 } from '@/lib/interview/store'
+import { buildInterviewContext } from '@/lib/context/assemble'
+import { ownedJobsQuery } from './matcher'
 
 const RESUME_LIMIT = 12_000
 const DESC_LIMIT = 6_000
-const DOSSIER_LIMIT = 2_000
 
 export interface InterviewPrepJob {
   id: string
@@ -50,11 +51,6 @@ export interface InterviewPrepJob {
 export interface InterviewPrepCompany {
   id?: string | null
   name?: string | null
-}
-
-export interface InterviewPrepDossier {
-  summary?: string | null
-  signals?: unknown
 }
 
 /** The single hard contract this agent returns (see plan Contract C). */
@@ -71,7 +67,6 @@ export interface InterviewPrepOutput {
 export interface GenerateInterviewKitArgs {
   job: InterviewPrepJob
   company?: InterviewPrepCompany | null
-  dossier?: InterviewPrepDossier | null
   resumeText: string
   admin: AdminClient
   userId: string
@@ -103,23 +98,7 @@ function companyName(company?: InterviewPrepCompany | null): string {
   return (company?.name ?? '').trim() || 'the company'
 }
 
-function dossierBlock(dossier?: InterviewPrepDossier | null): string {
-  if (!dossier) return ''
-  const parts: string[] = []
-  const summary = (dossier.summary ?? '').trim()
-  if (summary) parts.push(summary)
-  if (dossier.signals) {
-    try {
-      parts.push(JSON.stringify(dossier.signals))
-    } catch {
-      /* ignore unserializable signals */
-    }
-  }
-  return parts.join('\n').slice(0, DOSSIER_LIMIT)
-}
-
-function buildPrompt(args: GenerateInterviewKitArgs): string {
-  const dossier = dossierBlock(args.dossier)
+function buildPrompt(args: GenerateInterviewKitArgs, context: string): string {
   return [
     `JOB TITLE: ${args.job.title ?? '(untitled)'}`,
     `COMPANY: ${companyName(args.company)}`,
@@ -129,10 +108,10 @@ function buildPrompt(args: GenerateInterviewKitArgs): string {
     (args.job.description ?? '').slice(0, DESC_LIMIT) ||
       '(none provided — base technical/role-specific questions on the title alone, and flag that in prep_notes)',
     '',
-    dossier
-      ? 'COMPANY CONTEXT (public research — for company-specific questions):'
+    context
+      ? 'COMPANY CONTEXT (public research, prior history, and your resume claims — for company-specific and evidence-grounded questions):'
       : '(no company context provided — skip or generalize company-specific questions, and flag that in prep_notes)',
-    dossier,
+    context,
     '',
     'Produce the interview prep kit as JSON per the system rules.',
   ]
@@ -210,9 +189,15 @@ export async function generateInterviewKit(
       return callLlm(args.apiKeys, opts, args.signal)
     })
 
+  const companyId = args.job.company_id ?? args.company?.id ?? null
+  // lib/context/assemble.ts: stored company pages + dossier (framed) + prior
+  // interaction history + this candidate's own resume claims with evidence —
+  // the ONE fetch that replaces this agent's old ad-hoc dossier-only context.
+  const context = await buildInterviewContext(args.admin, args.userId, companyId)
+
   const res = await run({
     system: buildSystem(resumeText),
-    prompt: buildPrompt({ ...args, resumeText }),
+    prompt: buildPrompt({ ...args, resumeText }, context),
     json: true,
     // 2600 was already close to typical usage for 8-14 questions + 3-5 STAR
     // stories; reasoning tokens are additive on top of that (billed as output),
@@ -239,8 +224,6 @@ export async function generateInterviewKit(
   if (questions.length === 0) {
     throw new Error('interview_prep: model returned no usable questions')
   }
-
-  const companyId = args.job.company_id ?? args.company?.id ?? null
 
   const kit = await upsertKit(args.admin, {
     user_id: args.userId,
@@ -282,16 +265,21 @@ export const interview_prep: AgentFn = async (ctx) => {
   const jobId = typeof input.jobId === 'string' ? input.jobId : ''
   if (!jobId) throw new Error('interview_prep: jobId is required')
 
-  // Job + company.
-  const { data: jobData, error: jobErr } = await ctx.admin
-    .from('jobs')
-    .select('id, title, description, location, company_id, companies(id, name)')
+  // Job + company. ownedJobsQuery's companies!inner + .eq('companies.user_id', ...)
+  // scopes this to jobs the caller actually owns (same guard matcher.ts's
+  // fetchJobsByIds uses) — without it any PAT holder could pull ANY user's
+  // job by guessing/supplying a jobId.
+  const { data: jobData, error: jobErr } = await ownedJobsQuery(
+    ctx.admin,
+    ctx.userId,
+    'id, title, description, location, company_id, companies!inner(id, name)',
+  )
     .eq('id', jobId)
     .single()
   if (jobErr || !jobData) {
     throw new Error(`interview_prep: job ${jobId} not found: ${jobErr?.message ?? 'no row'}`)
   }
-  const job = jobData as JobRow
+  const job = jobData as unknown as JobRow
   const company = firstRel(job.companies)
 
   // Resume: explicit input wins, else the user's stored resume.
@@ -321,23 +309,9 @@ export const interview_prep: AgentFn = async (ctx) => {
     return { output: { ...output, needsKey: true }, tokensUsed: 0 }
   }
 
-  // Optional dossier context for company-specific questions.
-  let dossier: InterviewPrepDossier | null = null
-  if (job.company_id) {
-    const { data: dossierRow } = await ctx.admin
-      .from('company_dossiers')
-      .select('summary, signals')
-      .eq('company_id', job.company_id)
-      .eq('user_id', ctx.userId)
-      .maybeSingle()
-    if (dossierRow) {
-      dossier = {
-        summary: (dossierRow as { summary?: string | null }).summary ?? null,
-        signals: (dossierRow as { signals?: unknown }).signals ?? null,
-      }
-    }
-  }
-
+  // Company/dossier/history/claims context now comes from
+  // generateInterviewKit's own buildInterviewContext(args.admin, args.userId,
+  // companyId) call — no ad-hoc company_dossiers query here.
   const result = await generateInterviewKit({
     job: {
       id: job.id,
@@ -347,7 +321,6 @@ export const interview_prep: AgentFn = async (ctx) => {
       company_id: job.company_id,
     },
     company: company ? { id: company.id ?? null, name: company.name ?? null } : null,
-    dossier,
     resumeText,
     admin: ctx.admin,
     userId: ctx.userId,

@@ -66,6 +66,9 @@ export interface Database {
           // Optional because the additive metadata migration may not be applied yet
           metadata?: Json | null
           created_at: string
+          // Optional because the additive company-identity migration may not be applied yet
+          name_key?: string | null
+          canonical_id?: string | null
         }
         Insert: {
           id?: string
@@ -80,6 +83,8 @@ export interface Database {
           notes?: string | null
           metadata?: Json | null
           created_at?: string
+          name_key?: string | null
+          canonical_id?: string | null
         }
         Update: {
           id?: string
@@ -94,6 +99,8 @@ export interface Database {
           notes?: string | null
           metadata?: Json | null
           created_at?: string
+          name_key?: string | null
+          canonical_id?: string | null
         }
         Relationships: [
           {

@@ -1,0 +1,43 @@
+-- DESTRUCTIVE — DO NOT APPLY YET. Apply only after the langgraph-ported code
+-- (lib/graph/journal.ts writing trace_spans, app/api/harness/run/route.ts
+-- reading trace_spans — see this migration's WHAT THIS DROPS section) has
+-- actually deployed to production. Until that deploy lands, prod still runs
+-- the pre-port executor (lib/harness/executor.ts), which journals into
+-- agent_steps directly — dropping the table out from under a still-running
+-- deployment breaks every in-flight harness run.
+--
+-- WHAT THIS DROPS
+--   public.agent_steps in full — binding ruling 1's endgame: "agent_steps
+--   dies; trace_spans wins... stage 3 swaps journal.ts's backing store to
+--   trace_spans, repoints the UI, drops agent_steps." Landed alongside this
+--   file (same commit): lib/graph/journal.ts's upsert helpers write
+--   trace_spans-shaped rows instead (kind='node', keyed by (run_id, label,
+--   iteration) via attributes, not a dedicated column — see that file's own
+--   header for the shape translation); app/api/harness/run/route.ts's GET
+--   handler and the run-detail/queue UI read trace_spans the same way.
+--   lib/graph/graph-chokepoints.test.ts's "agent_steps has zero readers or
+--   writers" scan is what proves the deployed code no longer touches this
+--   table before this file is ever run for real — a source scan, checked at
+--   CI time, is the actual gate; this comment is a second, human-readable
+--   one.
+--
+-- SAFE TO DROP OUTRIGHT (no data migration needed first)
+--   agent_steps was pure execution history for harness runs — nothing
+--   downstream of a run depends on a PAST step row surviving (unlike, say,
+--   eval_verdicts or resume_claims, which are read-modeled ground truth).
+--   trace_spans is not backfilled from agent_steps by this file: a run that
+--   already finished under the pre-port executor keeps its history exactly
+--   where it always lived, in whatever agent_steps rows exist at drop time
+--   — this statement removes the table, not a user-facing feature reading
+--   old rows out of it (the run-detail UI reads by run_id, so an old run
+--   simply shows zero steps once its rows are gone, same as it does today
+--   for a run whose steps were pruned).
+--
+-- FK: agent_steps.parent_step_id self-references agent_steps.id (added by
+-- 20260728000004_dynamic_runs.sql) — DROP TABLE takes the self-FK and both
+-- indexes (idx_agent_steps_run, idx_agent_steps_parent) with it; no other
+-- table's migration ever added an FK pointing INTO agent_steps.
+
+drop table if exists public.agent_steps;
+
+notify pgrst, 'reload schema';

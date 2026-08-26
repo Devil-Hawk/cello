@@ -1,25 +1,83 @@
 // ATS board discovery.
 //
-// 1. URL parsing: if the company's careers URL is hosted on a known ATS
-//    (job-boards(.eu)?.greenhouse.io/{board}, boards.greenhouse.io/{board},
-//    jobs.(eu.)?lever.co/{slug}, jobs.ashbyhq.com/{org}) the token is read
-//    straight off the URL with no network I/O.
+// 1. URL parsing: if the company's careers URL is hosted on a known ATS the
+//    token is read straight off the URL with no network I/O. Every provider in
+//    URL_DETECT_ORDER participates.
 // 2. Probe fallback: for branded careers pages we derive candidate slugs from
-//    the company domain and name (validated ^[A-Za-z0-9._-]+$) and probe
-//    greenhouse -> lever -> ashby in order; the first board returning >= 1 job
-//    wins. Never throws on a miss — returns null.
+//    the company domain and name (validated ^[A-Za-z0-9._-]+$) and probe the
+//    providers in PROBE_ORDER; the first board returning >= 1 job wins. Never
+//    throws on a miss — returns null.
 //
 // Persistence of the discovered board to companies.metadata.ats is done by the
 // caller (refreshCompany in ./index.ts) through its store, wrapped so the code
 // keeps working when the metadata column does not exist yet.
 
-import type { AtsJob, AtsProviderId } from './types'
+import type { AtsJob, AtsProvider, AtsProviderId } from './types'
 import { isValidToken } from './types'
 import { greenhouse } from './greenhouse'
 import { lever } from './lever'
 import { ashby } from './ashby'
+import { workday } from './workday'
+import { smartrecruiters } from './smartrecruiters'
+import { workable } from './workable'
+import { recruitee } from './recruitee'
+import { personio } from './personio'
 
-const PROBE_ORDER = [greenhouse, lever, ashby] as const
+/**
+ * Every provider, for URL-based detection. Free (no network I/O), so order
+ * here is irrelevant — the host patterns are mutually exclusive.
+ */
+const URL_DETECT_ORDER: readonly AtsProvider[] = [
+  greenhouse,
+  lever,
+  ashby,
+  workday,
+  smartrecruiters,
+  workable,
+  recruitee,
+  personio,
+]
+
+/**
+ * Order for the NETWORK probe, where order is the whole cost model: a company
+ * on the last provider pays a miss against every provider before it, times up
+ * to MAX_PROBE_CANDIDATES slugs.
+ *
+ * Ordered by measured hit rate on this user's watchlist first, then by
+ * measured miss latency. Every miss below is a single request that
+ * classifyError() treats as permanent, so none of them retry:
+ *
+ *   greenhouse       62/133 known boards   404 in 0.11s
+ *   ashby            49/133                404 in 0.12s
+ *   lever            22/133                404 in 0.99s
+ *   workable         unmeasured            404 in 0.12s
+ *   recruitee        unmeasured            404 in 0.29s
+ *   smartrecruiters  unmeasured            200 + totalFound:0 in 0.47s
+ *   personio         unmeasured            307 in 0.65s (see fetchText's
+ *                                          redirect:'manual' — without it this
+ *                                          miss would cost four requests)
+ *
+ * ashby moves ahead of lever on that evidence: it is more than twice as likely
+ * to hit and its miss is ~8x cheaper, so a Lever company now pays one extra
+ * 0.12s miss while every Ashby company saves a 0.99s one.
+ *
+ * The five new providers go after the three measured ones because their hit
+ * rate here is unknown, and among themselves in ascending miss cost. Personio
+ * is last on both counts: slowest miss, and the narrowest slug space (European
+ * SMB boards) of the set.
+ *
+ * workday is absent on purpose — its token needs a data centre and a site id
+ * that cannot be derived from a company name. See ./workday.ts.
+ */
+const PROBE_ORDER: readonly AtsProvider[] = [
+  greenhouse,
+  ashby,
+  lever,
+  workable,
+  recruitee,
+  smartrecruiters,
+  personio,
+]
 
 const MAX_PROBE_CANDIDATES = 4
 
@@ -42,7 +100,7 @@ export function detectFromUrl(input: { careerUrl: string | null; domain: string 
   provider: AtsProviderId
   token: string
 } | null {
-  for (const provider of PROBE_ORDER) {
+  for (const provider of URL_DETECT_ORDER) {
     const hit = provider.detect(input)
     if (hit) return { provider: provider.id, token: hit.token }
   }

@@ -24,30 +24,37 @@
 // Two render shells share one data/loading/error core: `variant="card"` (the
 // company page — a standalone Card) and `variant="plain"` (the job detail
 // modal, which is itself a Dialog surface — no Card-in-a-surface here).
+//
+// The list is RANKED, not chronological: sourcing mines a company's own pages,
+// which is where companies put their executives, so an unranked result is a
+// list of people who will never reply — unless the company is small enough
+// that its founder does the hiring. lib/contacts/relevance.ts makes that call
+// from the company's open-role count (GET /api/contacts/source supplies it),
+// ranked-contacts.tsx renders the groups and the per-row reason.
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Loader2, Mail, Sparkles, Users } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Panel } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/use-toast'
-import { ContactProvenanceBadge } from './provenance-badge'
+import type { SearchReport } from '@/lib/contacts/sources'
+import type { RoleContext } from '@/lib/contacts/relevance'
+import { RankedContactList, type RankableContact } from './ranked-contacts'
+import { ContactSearchReport } from './search-report'
 import { isPersonalRelationship, RELATIONSHIP_LABELS } from './types'
 
-interface NetworkContact {
-  id: string
-  name: string
-  email: string | null
-  title: string | null
-  relationship: string | null
-  source?: string | null
-  confidence?: number | null
-  verified?: boolean | null
-  basis?: string | null
-}
+type NetworkContact = RankableContact
+
+/**
+ * What the ranking assumes when the role context could not be read at all.
+ * `openRoleCount: null` is relevance.ts's honest "unknown", which it treats as
+ * small — so a startup founder is never buried by a failed lookup, and every
+ * reason string says "company size unknown" out loud.
+ */
+const UNKNOWN_ROLE: RoleContext = { jobFunction: null, jobTitle: null, openRoleCount: null }
 
 function SourceButton({ sourcing, onClick }: { sourcing: boolean; onClick: () => void }) {
   return (
@@ -73,9 +80,30 @@ export function ContactNetworkPanel({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [sourcing, setSourcing] = useState(false)
   const [sourceError, setSourceError] = useState<string | null>(null)
+  const [searchReport, setSearchReport] = useState<SearchReport | null>(null)
   const [sourceNote, setSourceNote] = useState<string | null>(null)
+  const [role, setRole] = useState<RoleContext | null>(null)
+  const [roleBasis, setRoleBasis] = useState<string | null>(null)
   const [draftingId, setDraftingId] = useState<string | null>(null)
   const [draftedIds, setDraftedIds] = useState<Set<string>>(new Set())
+
+  // The ranking inputs — read on mount so contacts sourced on an EARLIER run
+  // are ranked too, not just the ones this session happens to find. A failure
+  // here is deliberately not surfaced as an error: ranking degrades to
+  // "company size unknown", which relevance.ts states in every reason string.
+  const loadRole = useCallback(async () => {
+    try {
+      const params = new URLSearchParams({ companyId })
+      if (jobId) params.set('jobId', jobId)
+      const res = await fetch(`/api/contacts/source?${params.toString()}`)
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data?.role) return
+      setRole(data.role as RoleContext)
+      setRoleBasis(typeof data.roleBasis === 'string' ? data.roleBasis : null)
+    } catch {
+      // Keep the unknown-size default; nothing here is worth an error banner.
+    }
+  }, [companyId, jobId])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -94,12 +122,14 @@ export function ContactNetworkPanel({
 
   useEffect(() => {
     load()
-  }, [load])
+    loadRole()
+  }, [load, loadRole])
 
   async function sourceContacts() {
     setSourcing(true)
     setSourceError(null)
     setSourceNote(null)
+    setSearchReport(null)
     try {
       const res = await fetch('/api/contacts/source', {
         method: 'POST',
@@ -108,12 +138,25 @@ export function ContactNetworkPanel({
       })
       const data = await res.json().catch(() => null)
       if (!res.ok || !data) throw new Error(data?.error ?? `Contact sourcing failed (HTTP ${res.status})`)
-      const insertedCount = Array.isArray(data.inserted) ? data.inserted.length : 0
-      setSourceNote(
-        insertedCount > 0
-          ? `Found ${insertedCount} new contact${insertedCount === 1 ? '' : 's'} from public sources.`
-          : 'No new contacts found — nothing usable in the job posting or company research yet.'
-      )
+      // The route reports what it searched (SearchReport) — render THAT, never
+      // a canned "nothing usable" sentence that is indistinguishable from a
+      // broken button. The count-only fallback below exists solely for a
+      // server old enough to predate the report; it still claims nothing about
+      // what was searched.
+      if (data.search) {
+        setSearchReport(data.search as SearchReport)
+      } else {
+        const insertedCount = Array.isArray(data.inserted) ? data.inserted.length : 0
+        setSourceNote(
+          insertedCount > 0
+            ? `Found ${insertedCount} new contact${insertedCount === 1 ? '' : 's'} from public sources.`
+            : 'No new contacts were added.'
+        )
+      }
+      if (data.role) {
+        setRole(data.role as RoleContext)
+        setRoleBasis(typeof data.roleBasis === 'string' ? data.roleBasis : null)
+      }
       await load()
     } catch (e) {
       setSourceError(e instanceof Error ? e.message : 'Contact sourcing failed')
@@ -148,9 +191,8 @@ export function ContactNetworkPanel({
     }
   }
 
-  const warmContacts = (contacts ?? []).filter((c) => isPersonalRelationship(c.relationship))
-  const otherContacts = (contacts ?? []).filter((c) => !isPersonalRelationship(c.relationship))
-  const ordered = [...warmContacts, ...otherContacts]
+  const allContacts = contacts ?? []
+  const warmContacts = allContacts.filter((c) => isPersonalRelationship(c.relationship))
 
   const body = (
     <div className="space-y-3">
@@ -168,8 +210,12 @@ export function ContactNetworkPanel({
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
-      ) : ordered.length === 0 ? (
-        !loadError && (
+      ) : allContacts.length === 0 ? (
+        // Once a run has reported back, the report IS the empty state — it
+        // says what was searched. Telling the user to "source some from public
+        // data" underneath it would be advice they just took.
+        !loadError &&
+        !searchReport && (
           <p className="text-caption text-muted-foreground">
             No contacts on file at this company yet. Source some from public data, or add one on the{' '}
             <Link href="/contacts" className="font-medium text-accent-deep hover:underline">
@@ -197,41 +243,44 @@ export function ContactNetworkPanel({
             </Panel>
           )}
 
-          <ul className="divide-y">
-            {ordered.map((c) => (
-              <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-body font-medium text-foreground">{c.name}</span>
-                    {isPersonalRelationship(c.relationship) && (
-                      <Badge tone="neutral">
-                        {RELATIONSHIP_LABELS[c.relationship as string] ?? c.relationship}
-                      </Badge>
-                    )}
-                    <ContactProvenanceBadge contact={c} />
-                  </div>
-                  <p className="truncate text-caption text-muted-foreground">
-                    {[c.title, c.email].filter(Boolean).join(' · ') || 'No title or email on file'}
-                  </p>
-                </div>
-                {c.email && (
-                  <Button size="sm" variant="outline" disabled={draftingId === c.id} onClick={() => draftOutreach(c)}>
-                    {draftingId === c.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Mail className="h-3.5 w-3.5" />
-                    )}
-                    {draftedIds.has(c.id) ? 'Draft another' : 'Draft outreach'}
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
+          <RankedContactList
+            contacts={allContacts}
+            role={role ?? UNKNOWN_ROLE}
+            renderAction={(c) =>
+              c.email ? (
+                <Button size="sm" variant="outline" disabled={draftingId === c.id} onClick={() => draftOutreach(c)}>
+                  {draftingId === c.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Mail className="h-3.5 w-3.5" />
+                  )}
+                  {draftedIds.has(c.id) ? 'Draft another' : 'Draft outreach'}
+                </Button>
+              ) : null
+            }
+          />
+
+          {/* The ranking's own inputs, stated: which role it ranked for, and
+              the company-size proxy that decides whether a founder leads the
+              list or ends it. */}
+          <p className="text-caption text-muted-foreground">
+            Ranked for {role?.jobTitle ?? 'this role'} · {roleBasis ?? 'company size unknown'}
+          </p>
         </>
       )}
 
       {sourceError && <p className="text-caption text-red-600 dark:text-red-400">{sourceError}</p>}
-      {sourceNote && !sourceError && <p className="text-caption text-muted-foreground">{sourceNote}</p>}
+      {/* Sunken, not accent: the report is provenance for the run that just
+          finished, not a live signal — and it sits under the contact list, so
+          it needs to read as a distinct region rather than more list. */}
+      {searchReport && !sourceError && (
+        <Panel tone="sunken" divider="none" className="rounded-control">
+          <ContactSearchReport report={searchReport} />
+        </Panel>
+      )}
+      {sourceNote && !sourceError && !searchReport && (
+        <p className="text-caption text-muted-foreground">{sourceNote}</p>
+      )}
 
       {draftedIds.size > 0 && (
         <p className="text-caption text-muted-foreground">

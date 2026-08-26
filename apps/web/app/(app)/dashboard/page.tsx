@@ -5,7 +5,9 @@ import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/use-toast'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
+import { fetchClientSafePreferences } from '@/lib/preferences/client-safe'
 import { useAccountStatus } from '@/hooks/use-account-status'
 import { PulseRibbon } from '@/components/dashboard/pulse-ribbon'
 import { OnboardingChecklist } from '@/components/dashboard/onboarding-checklist'
@@ -100,6 +102,10 @@ function DashboardSkeleton() {
 
 export default function DashboardPage() {
   const supabase = createClient()
+  // @cello/shared's generated Database type has no Functions entry for the
+  // RPC below (see lib/preferences/client-safe.ts) — untyped cast, same
+  // pattern jobs/page.tsx uses for tables the generator does not know either.
+  const untypedSupabase = supabase as unknown as SupabaseClient
   const [stats, setStats] = useState<Stats>({
     companiesCount: 0,
     jobsPosted24h: 0,
@@ -113,6 +119,8 @@ export default function DashboardPage() {
   const [recentCompanies, setRecentCompanies] = useState<RecentCompany[]>([])
   const [lastScrapedAt, setLastScrapedAt] = useState<string | null>(null)
   const [lastGmailSyncAt, setLastGmailSyncAt] = useState<string | null>(null)
+  const [gmailMonitor, setGmailMonitor] = useState(false)
+  const [gmailBackgroundReady, setGmailBackgroundReady] = useState(false)
   const [budget, setBudget] = useState<BudgetSummary | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [userName, setUserName] = useState<string | null>(null)
@@ -169,6 +177,13 @@ export default function DashboardPage() {
         .then((res) => (res.ok ? res.json() : null))
         .catch(() => null)
 
+      // Same GET the Settings → Connections tab reads — the STORED grant and
+      // token presence, never this session's own (short-lived) Google
+      // scopes. See components/dashboard/gmail-sync-card.tsx's header.
+      const gmailStatusPromise = fetch('/api/gmail/permissions')
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null)
+
       const [
         companiesCountRes,
         recentRes,
@@ -178,7 +193,8 @@ export default function DashboardPage() {
         applicationsRes,
         followUpsRes,
         runJson,
-        profileRes,
+        gmailStatus,
+        safePreferences,
       ] = await Promise.all([
         supabase.from('companies').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
         supabase
@@ -209,7 +225,13 @@ export default function DashboardPage() {
           .select('id, due_date, is_completed')
           .eq('is_completed', false),
         latestRunPromise,
-        supabase.from('profiles').select('preferences').eq('id', user.id).maybeSingle(),
+        gmailStatusPromise,
+        // NEVER supabase.from('profiles').select('preferences') here — that
+        // returns the WHOLE column (api_keys ciphertext, autopilot.atsKeys —
+        // never encrypted, per the audit that found this) into browser JS for
+        // two fields this card actually needs. Read through the narrow RPC
+        // instead; see lib/preferences/client-safe.ts for the full reasoning.
+        fetchClientSafePreferences(untypedSupabase),
       ])
 
       const applications = applicationsRes.data || []
@@ -252,13 +274,11 @@ export default function DashboardPage() {
           : null
       )
 
-      const preferences = (profileRes.data?.preferences || {}) as Record<string, unknown>
-      const gmailSync = (preferences.gmail_sync || {}) as { lastSyncDate?: string }
-      setLastGmailSyncAt(gmailSync.lastSyncDate ?? null)
+      setLastGmailSyncAt(gmailStatus?.lastSyncAt ?? null)
+      setGmailMonitor(gmailStatus?.permissions?.monitor?.enabled ?? false)
+      setGmailBackgroundReady(gmailStatus?.backgroundReady ?? false)
 
-      const rawBudget = preferences.budget as
-        | { spentUsd?: unknown; monthlyUsd?: unknown; periodStart?: unknown }
-        | undefined
+      const rawBudget = safePreferences?.budget
       setBudget(
         rawBudget && typeof rawBudget.spentUsd === 'number' && typeof rawBudget.monthlyUsd === 'number'
           ? {
@@ -416,7 +436,12 @@ export default function DashboardPage() {
               column so it doesn't compete with the primary pipeline view. Cello
               tracks applications without it; see the card's own description for
               the actual monitoring mechanism. */}
-          <GmailSyncCard onSynced={fetchDashboardData} lastSyncedAt={lastGmailSyncAt} />
+          <GmailSyncCard
+            onSynced={fetchDashboardData}
+            monitor={gmailMonitor}
+            backgroundReady={gmailBackgroundReady}
+            lastSyncAt={lastGmailSyncAt}
+          />
         </div>
       </div>
     </div>

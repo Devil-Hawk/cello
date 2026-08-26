@@ -3,7 +3,15 @@
 // framework-free: no next/* imports, no path aliases, no Node-only APIs
 // beyond global fetch/URL.
 
-export type AtsProviderId = 'greenhouse' | 'lever' | 'ashby'
+export type AtsProviderId =
+  | 'greenhouse'
+  | 'lever'
+  | 'ashby'
+  | 'workday'
+  | 'smartrecruiters'
+  | 'workable'
+  | 'recruitee'
+  | 'personio'
 
 /** A single job posting normalized across providers. */
 export interface AtsJob {

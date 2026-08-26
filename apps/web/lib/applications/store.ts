@@ -21,6 +21,7 @@ import type {
   ReceiptVerificationState,
 } from './types'
 import { toApplicationReceipt } from './types'
+import { recordInteraction } from '../interactions/store'
 
 const RECEIPTS_TABLE = 'application_receipts'
 const APPLICATIONS_TABLE = 'applications'
@@ -55,13 +56,19 @@ export async function getOwnedApplication(
 /** Insert a new receipt row. `provenance` and `verificationState` are
  *  explicit PARAMETERS, not read off `input` — callers (the API route)
  *  decide those, so a client-supplied body can never smuggle a stronger
- *  claim than it's entitled to (see receipts.ts's header). */
+ *  claim than it's entitled to (see receipts.ts's header).
+ *
+ *  `application` is the OwnedApplication every caller has already loaded
+ *  (to validate ownership before calling this) — passed through rather than
+ *  re-fetched so this function can resolve the receipt's company for the
+ *  STEP 5 interactions projection without a redundant applications read. */
 export async function createReceipt(
   client: SupabaseClient,
   userId: string,
   input: NewReceiptInput,
   provenance: ReceiptProvenance,
   verificationState: ReceiptVerificationState,
+  application: OwnedApplication,
   sourceDetail: Record<string, unknown> | null = null
 ): Promise<ApplicationReceipt> {
   const row = {
@@ -80,7 +87,24 @@ export async function createReceipt(
   }
   const { data, error } = await client.from(RECEIPTS_TABLE).insert(row).select('*').single()
   if (error) throw new Error(`createReceipt failed: ${error.message}`)
-  return toApplicationReceipt(data as ApplicationReceiptRow)
+  const receipt = toApplicationReceipt(data as ApplicationReceiptRow)
+
+  const { data: job } = await client.from('jobs').select('company_id').eq('id', application.job_id).maybeSingle()
+
+  await recordInteraction(client, {
+    userId,
+    companyId: (job as { company_id: string | null } | null)?.company_id ?? null,
+    jobId: application.job_id,
+    applicationId: receipt.applicationId,
+    kind: 'application_submitted',
+    occurredAt: receipt.submittedAt,
+    title: `Application submitted — ${input.destination}`,
+    refTable: RECEIPTS_TABLE,
+    refId: receipt.id,
+    metadata: { provenance, verification_state: verificationState },
+  })
+
+  return receipt
 }
 
 /** Every receipt for one application, newest submission first. */

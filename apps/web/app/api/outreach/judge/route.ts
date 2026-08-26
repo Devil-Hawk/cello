@@ -18,8 +18,9 @@ import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { loadApiKeys } from '@/lib/harness/keys'
 import { MissingKeyError } from '@/lib/harness/llm'
 import { getOutreach } from '@/lib/outreach/store'
-import { buildJudgeClient, judgeGroundedness, judgeSpecificity, JUDGE_MODEL } from '@/lib/evals/judge'
-import { assertWithinBudget, recordSpend, BudgetCapError } from '@/lib/harness/spend'
+import { meteredJudgeClient, judgeGroundedness, judgeSpecificity, JUDGE_MODEL } from '@/lib/evals/judge'
+import { writeVerdict } from '@/lib/evals/verdicts'
+import { assertWithinBudget, BudgetCapError } from '@/lib/harness/spend'
 
 export const dynamic = 'force-dynamic'
 // Two short classification calls (a few hundred tokens each) — seconds, not
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest) {
   if (!message) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   const apiKeys = await loadApiKeys(admin, user.id)
-  // buildJudgeClient always calls OpenRouter directly, regardless of which
+  // meteredJudgeClient always calls OpenRouter directly, regardless of which
   // backend the account has selected for drafting/matching (see judge.ts's
   // header comment on why autoevals needs its own OpenAI-compatible client) —
   // so this checks the raw key, not canRunLlm()/the active provider. "No key"
@@ -105,46 +106,85 @@ export async function POST(request: NextRequest) {
     `Job post: ${jobTitle} at ${companyName}.${jobDescription ? ` ${jobDescription}` : ''}`
 
   try {
-    // BUDGET, enforced HERE because this path does not go through
-    // lib/harness/llm.ts.
-    //
-    // spend.ts describes itself as "enforced at the single LLM choke point",
-    // and until this route existed that was true: callLlm was the only way to
-    // reach a model, so assertWithinBudget and recordSpend covered everything.
-    // The judge reaches OpenRouter through autoevals instead, which needs an
-    // OpenAI-compatible client rather than an injectable function — so it
-    // opened a SECOND choke point, and without these two calls a user sitting
-    // at their cap could keep clicking while the spend never entered the
-    // ledger, quietly falsifying the remaining-budget figure every other
-    // metered feature in the product reads.
+    // Fail fast, BEFORE building a client or making any request: a user
+    // already at their cap gets the same 429 they'd get from
+    // meteredJudgeClient's own per-request check below (see judge.ts's
+    // meteredFetch), just without the wasted round trip. Redundant with that
+    // per-call check by design, NOT with its recordSpend half — this route
+    // used to also record its own post-call estimate here, but
+    // meteredJudgeClient's fetch wrapper now records real usage per request
+    // (proven covering both calls below in lib/evals/judge.test.ts), so a
+    // second manual recordSpend would double-bill the same two calls.
     await assertWithinBudget(admin, user.id)
 
-    const client = buildJudgeClient(apiKeys)
+    const client = meteredJudgeClient(admin, user.id, apiKeys)
     const [groundedness, specificity] = await Promise.all([
-      judgeGroundedness(client, { draft: message.body, sourceFacts }),
-      judgeSpecificity(client, { draft: message.body, companyAndRole: `${companyName}, ${jobTitle}` }),
+      judgeGroundedness(client, { draft: message.body, sourceFacts }, { userId: user.id }),
+      judgeSpecificity(
+        client,
+        { draft: message.body, companyAndRole: `${companyName}, ${jobTitle}` },
+        { userId: user.id }
+      ),
     ])
 
-    // Estimated, and deliberately on the HIGH side.
-    //
-    // autoevals returns a score and a rationale but does not surface token
-    // usage, so exact accounting is not available through this path. Silent
-    // under-counting is precisely how a cap stops protecting anyone, so the
-    // estimate errs upward: two calls, each roughly a resume plus a job post
-    // in (~2000 tokens) and a short verdict out (~300). At JUDGE_MODEL's
-    // rates this is a fraction of a cent per click — the point is that it
-    // lands in the ledger at all, not that it is exact.
-    await recordSpend(admin, user.id, JUDGE_MODEL, 4000, 600)
+    // The audited dead end closes here: eval_verdicts is the single verdict
+    // store (design doc), and until now a judged draft's verdict lived only
+    // in the HTTP response — gone the moment the page reloaded. Best-effort
+    // (writeVerdict logs, never throws) so a DB hiccup never hides a judge
+    // result the user already has in front of them.
+    await Promise.all([
+      writeVerdict(admin, {
+        userId: user.id,
+        subjectKind: 'outreach_draft',
+        subjectId: id,
+        judge: 'factuality',
+        verdict: groundedness.verdict,
+        score: groundedness.score,
+        threshold: groundedness.threshold,
+        rationale: groundedness.summary,
+        model: JUDGE_MODEL,
+      }),
+      writeVerdict(admin, {
+        userId: user.id,
+        subjectKind: 'outreach_draft',
+        subjectId: id,
+        judge: 'closed_qa',
+        verdict: specificity.verdict,
+        score: specificity.score,
+        threshold: specificity.threshold,
+        rationale: specificity.summary,
+        model: JUDGE_MODEL,
+      }),
+    ])
 
     return NextResponse.json({ ok: true, groundedness, specificity })
   } catch (e) {
     // The cap is a real answer, not a failure: say so with the same 429 the
     // rest of the product uses for "you have spent your allowance".
     if (e instanceof BudgetCapError) {
+      // REFUSE-OVER-GUESS (invariant 7): the refusal is itself a typed,
+      // persisted verdict, not silence — a reader of eval_verdicts for this
+      // draft can tell "not yet judged" (no row) apart from "judged, and
+      // here is why we couldn't score it" (this row). Both judges are
+      // recorded because Promise.all above rejects on the FIRST rejection —
+      // there is no way to tell from here which of the two calls actually
+      // reached OpenRouter and which never started.
+      await Promise.all(
+        (['factuality', 'closed_qa'] as const).map((judge) =>
+          writeVerdict(admin, {
+            userId: user.id,
+            subjectKind: 'outreach_draft',
+            subjectId: id,
+            judge,
+            verdict: 'insufficient-budget',
+            rationale: e.message,
+          })
+        )
+      )
       return NextResponse.json({ error: e.message, budgetExhausted: true }, { status: 429 })
     }
     // Defense in depth: the apiKeys.openrouter check above already covers the
-    // common case, but buildJudgeClient throws the same error class if that
+    // common case, but meteredJudgeClient throws the same error class if that
     // ever races (e.g. the key is revoked between the check and this call).
     if (e instanceof MissingKeyError) {
       return NextResponse.json({ error: e.message, needsKey: true }, { status: 400 })

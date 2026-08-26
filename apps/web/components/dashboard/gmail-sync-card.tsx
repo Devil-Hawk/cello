@@ -27,21 +27,51 @@ interface GmailSyncResult {
 interface GmailSyncCardProps {
   /** Called after a successful sync so the parent can refetch dashboard data. */
   onSynced?: () => void
-  /** profiles.preferences.gmail_sync.lastSyncDate — null when never synced. */
-  lastSyncedAt?: string | null
+  /** The STORED "monitor mailbox" grant (permissions.monitor.enabled from GET /api/gmail/permissions) — never a live/session Google scope, which can read as granted while nothing is actually stored. */
+  monitor?: boolean
+  /** True when a Gmail refresh token is stored, i.e. sync can run without an open browser tab. monitor can be true with this false — a grant with nothing to exchange it for (see lib/gmail/token.ts). */
+  backgroundReady?: boolean
+  /** gmail_sync.lastSyncDate from the newest run (dashboard click or cron) — null when never synced. */
+  lastSyncAt?: string | null
 }
 
 /**
  * Optional inbox sync — POST /api/gmail/sync. Cello already tracks
  * applications through ATS receipts and browser activity without this; Gmail
  * only adds reply detection on top. Deliberately sized and placed as a
- * secondary utility (see dashboard/page.tsx), not a required setup step, and
- * a missing/expired grant is rendered as a neutral state rather than an
- * error — see the needsReauth branch below.
+ * secondary utility (see dashboard/page.tsx), not a required setup step.
+ *
+ * The header line below renders one of three honest states — off / on but no
+ * background token yet / fully on — from the STORED grant and token
+ * presence the parent fetched via GET /api/gmail/permissions. It never infers
+ * "connected" from this session's own (short-lived) Google scopes, which is
+ * exactly the gap that used to let the card claim a watch that was off.
  */
-export function GmailSyncCard({ onSynced, lastSyncedAt = null }: GmailSyncCardProps) {
+export function GmailSyncCard({
+  onSynced,
+  monitor = false,
+  backgroundReady = false,
+  lastSyncAt = null,
+}: GmailSyncCardProps) {
   const [isSyncing, setIsSyncing] = useState(false)
   const [result, setResult] = useState<GmailSyncResult | null>(null)
+
+  const status = !monitor
+    ? {
+        text: 'Applications are monitored through ATS receipts and browser activity. Inbox monitoring is off.',
+        cta: 'Turn on Gmail monitoring',
+      }
+    : !backgroundReady
+      ? {
+          text: "Inbox monitoring is on, but background sync needs a fresh Google sign-in before it can run on its own.",
+          cta: 'Reconnect Gmail',
+        }
+      : {
+          text: lastSyncAt
+            ? `Last synced ${formatRelativeTime(lastSyncAt)}.`
+            : 'Inbox monitoring is on — the first sync hasn\'t run yet.',
+          cta: null,
+        }
 
   async function syncGmail() {
     setIsSyncing(true)
@@ -76,11 +106,15 @@ export function GmailSyncCard({ onSynced, lastSyncedAt = null }: GmailSyncCardPr
           <Mail className="h-4 w-4 shrink-0 text-muted-foreground" />
           <div>
             <CardTitle className="text-body">Gmail sync</CardTitle>
-            <CardDescription>
-              {lastSyncedAt
-                ? `Last synced ${formatRelativeTime(lastSyncedAt)}.`
-                : 'Applications are monitored through ATS receipts and browser activity. Inbox monitoring is off.'}
-            </CardDescription>
+            <CardDescription>{status.text}</CardDescription>
+            {status.cta && (
+              <Link
+                href="/settings?tab=connections"
+                className="mt-0.5 block text-caption text-accent-deep underline"
+              >
+                {status.cta} in Settings
+              </Link>
+            )}
           </div>
         </div>
         <Button variant="outline" size="sm" onClick={syncGmail} disabled={isSyncing}>

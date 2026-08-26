@@ -25,7 +25,7 @@ import { isPersonalEmailDomain } from '@/lib/gmail/skip-lists'
 import { parseEmailWithAI, classifyWithPatterns } from '@/lib/gmail/classify'
 import { normalizeCompanyName, findBestJobMatch } from '@/lib/gmail/matching'
 import { decideStageTransition, type StageDecision } from '@/lib/gmail/stage'
-import { activityTypeForStatus, buildActivityContent } from '@/lib/gmail/activity'
+import { recordStageActivity } from '@/lib/gmail/activity'
 import { logApiError } from '@/lib/observability/log'
 
 export const dynamic = 'force-dynamic'
@@ -261,8 +261,11 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const activityType = activityTypeForStatus(parsed.status, decision)
-    const content = buildActivityContent({
+    await recordStageActivity(supabase, {
+      userId: user.id,
+      applicationId,
+      companyId: trackedCompany.id,
+      jobId,
       status: parsed.status,
       decision,
       companyName: trackedCompany.name,
@@ -270,13 +273,7 @@ export async function POST(request: NextRequest) {
       subject,
       reasoning: parsed.reasoning,
       interviewDateTime: parsed.interviewDateTime,
-    })
-
-    await supabase.from('activities').insert({
-      application_id: applicationId,
-      type: activityType,
-      title: content.title,
-      description: content.description,
+      occurredAt: receivedAt.toISOString(),
       metadata: {
         share_hash: hash,
         source: 'gmail_share',
@@ -284,8 +281,7 @@ export async function POST(request: NextRequest) {
         subject,
         stage_decision: decision as unknown as Json,
         interview_datetime: parsed.interviewDateTime,
-      } satisfies Json,
-      occurred_at: receivedAt.toISOString(),
+      },
     })
 
     if (parsed.status === 'interview' || parsed.status === 'screen') {

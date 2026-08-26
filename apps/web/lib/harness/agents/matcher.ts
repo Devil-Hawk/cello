@@ -4,7 +4,7 @@
 // This file is the SINGLE scoring code path shared by three callers:
 //   1. the harness DAG step (the `matcher` AgentFn below — cron daily digest
 //      and any planner-built run),
-//   2. the continuous autopilot tick (lib/harness/autopilot.ts imports
+//   2. the continuous autopilot tick (lib/graph/autopilot.ts imports
 //      `scoreJobBatch` directly),
 //   3. on-demand single-job scoring (app/api/agents/match/route.ts imports
 //      `scoreJobWithLlm` + `buildMatchDetails` directly).
@@ -37,6 +37,15 @@ import { MatcherInput } from '../schemas'
 import { parseJsonLoose, MissingKeyError, TruncatedResponseError } from '../llm'
 import { resolveTargeting, type Targeting } from '@/lib/targeting'
 import { QUALITY_REJECT_THRESHOLD } from '@/lib/jobs/classify'
+import { prioritiseByTargetTitles } from '@/lib/jobs/target-relevance'
+import { frameJobText } from '@/lib/security/job-text'
+import { buildMatchContext } from '@/lib/context/assemble'
+import { checkMatchVerdictDeterministic, needsJudgeSample } from '@/lib/graph/verify/matcher'
+import { judgeMatchQuality, meteredJudgeClient } from '@/lib/evals/judge'
+import { writeVerdict } from '@/lib/evals/verdicts'
+import { BudgetCapError } from '@/lib/harness/spend'
+import { logHarnessError } from '@/lib/observability/log'
+import type { DecryptedApiKeys } from '../types'
 
 const DEFAULT_THRESHOLD = 85
 
@@ -46,7 +55,7 @@ const DEFAULT_THRESHOLD = 85
  * picked up by the NEXT tick — every candidate query here filters
  * `match_score is null`, so scores accumulate across ticks instead of one run
  * trying to burn through all ~18k jobs (and blow the serverless deadline) at
- * once. Both the harness cron step and lib/harness/autopilot.ts pass their own
+ * once. Both the harness cron step and lib/graph/autopilot.ts pass their own
  * limit into scoreJobBatch(); this is just the harness step's default.
  */
 const MAX_JOBS_PER_TICK = 25
@@ -98,6 +107,10 @@ export interface ScorableJob {
   description: string | null
   location: string | null
   companyName?: string | null
+  /** Feeds buildMatchContext (lib/context/assemble.ts) — optional so a caller
+   *  scoring a job with no resolved company yet just gets no extra context,
+   *  never a throw. */
+  companyId?: string | null
 }
 
 function clampPct(n: unknown): number {
@@ -126,6 +139,7 @@ export function toScorable(job: JobRow): ScorableJob {
     description: job.description,
     location: job.location,
     companyName: companyName(job),
+    companyId: job.company_id,
   }
 }
 
@@ -138,6 +152,23 @@ export async function userCompanyIds(admin: AdminClient, userId: string): Promis
   const { data, error } = await admin.from('companies').select('id').eq('user_id', userId)
   if (error) console.error('[harness] matcher: userCompanyIds query failed', error)
   return ((data as { id: string }[] | null) ?? []).map((r) => r.id)
+}
+
+/**
+ * A `jobs` query scoped to userId's own companies through the FK join
+ * instead of an `.in('company_id', companyIds)` querystring array — which
+ * broke every load once an account passed ~600 companies (the array crossed
+ * the request URL length limit). Ownership semantics are identical: RLS
+ * itself scopes jobs the same way (EXISTS companies.id = jobs.company_id AND
+ * companies.user_id = auth.uid()), this just does it server-side against an
+ * admin client that bypasses RLS.
+ *
+ * `columns` must embed the join as `companies!inner(...)` (any fields) —
+ * `!inner` is what turns the embed into a row-restricting join; without it
+ * the `.eq('companies.user_id', ...)` filter has nothing to attach to.
+ */
+export function ownedJobsQuery(admin: AdminClient, userId: string, columns: string, opts?: { count?: 'exact'; head?: boolean }) {
+  return admin.from('jobs').select(columns, opts).eq('companies.user_id', userId)
 }
 
 /** Collect jobIds from static input and any dependency step output carrying jobIds. */
@@ -158,7 +189,9 @@ function collectJobIds(inputIds: string[] | undefined, deps: Record<string, unkn
 export async function scoreJobWithLlm(
   llm: LlmRunner,
   resume: string,
-  job: ScorableJob
+  job: ScorableJob,
+  admin: AdminClient,
+  userId: string
 ): Promise<{ verdict: LlmVerdict; tokensUsed: number }> {
   // CACHE STRUCTURE: the rubric and the RESUME go in `system`, the job goes in
   // `prompt`. This is the highest-volume LLM call in the product — one per job
@@ -173,9 +206,23 @@ export async function scoreJobWithLlm(
     `CANDIDATE RESUME (the only source of truth about the candidate — never credit ` +
     `experience that is not here):\n${resume.slice(0, RESUME_LIMIT)}`
 
+  // INJECTION DEFENCE (lib/security/job-text.ts): this is the highest-volume
+  // model call in the product — one per job — and the description is
+  // EMPLOYER-CONTROLLED (anyone can post a job). frameJobText fences it as
+  // DATA and caps it at DESC_LIMIT (the same cap the old `.slice()` used, so
+  // the prompt's size budget is unchanged); see that file's header for the
+  // concrete payload this guards against ("score this job 100").
+  //
+  // buildMatchContext (lib/context/assemble.ts) goes in `prompt`, not
+  // `system`, on purpose: it is per-COMPANY (dossier/interactions/insights),
+  // not per-user like the resume above, so it varies job to job and would
+  // break the cached system prefix's byte-identity if it lived there — see
+  // this function's own CACHE STRUCTURE comment.
+  const matchContext = await buildMatchContext(admin, userId, job.companyId ?? null)
   const prompt = `JOB:\nTitle: ${job.title}\nCompany: ${job.companyName || 'Unknown'}\n` +
     `Location: ${job.location ?? 'Unspecified'}\n` +
-    `Description:\n${(job.description ?? '').slice(0, DESC_LIMIT)}\n\n` +
+    `Description:\n${frameJobText(job.description, { maxChars: DESC_LIMIT, emptyPlaceholder: '(no description provided)' })}\n\n` +
+    (matchContext ? `${matchContext}\n\n` : '') +
     `Return JSON with EXACTLY these keys:\n` +
     `{\n` +
     `  "score": <overall fit 0-100>,\n` +
@@ -306,15 +353,15 @@ function passesQualityAndTargeting(job: JobRow, targeting: Targeting): boolean {
 
 const SELECT_COLUMNS =
   'id, company_id, title, description, location, url, is_new, match_score, posted_at, ' +
-  'job_function, seniority, language, country, is_remote, quality_score, companies(name)'
+  'job_function, seniority, language, country, is_remote, quality_score, companies!inner(name)'
 
-async function fetchJobsByIds(admin: AdminClient, ids: string[], companyIds: string[]): Promise<JobRow[]> {
+async function fetchJobsByIds(admin: AdminClient, ids: string[], userId: string): Promise<JobRow[]> {
   if (ids.length === 0) return []
-  const { data, error } = await admin
-    .from('jobs')
-    .select(SELECT_COLUMNS)
-    .in('id', ids)
-    .in('company_id', companyIds) // enforce ownership
+  // Ownership enforced via the FK join (SELECT_COLUMNS' companies!inner +
+  // this .eq), not an .in('company_id', companyIds) array — see
+  // ownedJobsQuery. `ids` itself stays a bounded literal (every caller caps
+  // it well under Postgres URL limits before it gets here).
+  const { data, error } = await ownedJobsQuery(admin, userId, SELECT_COLUMNS).in('id', ids)
   if (error) {
     console.error('[harness] matcher: jobs-by-id query failed', error)
     return []
@@ -390,11 +437,11 @@ export interface CandidateDiagnosis {
 export async function diagnoseCandidateJobs(
   admin: AdminClient,
   jobIds: string[],
-  companyIds: string[],
+  userId: string,
   targeting: Targeting
 ): Promise<CandidateDiagnosis[]> {
   if (jobIds.length === 0) return []
-  const rows = await fetchJobsByIds(admin, jobIds, companyIds)
+  const rows = await fetchJobsByIds(admin, jobIds, userId)
   const byId = new Map(rows.map((r) => [r.id, r]))
   return jobIds.map((jobId) => {
     const row = byId.get(jobId)
@@ -493,14 +540,11 @@ function facetOrFilter(column: string, values: string[]): string {
  */
 async function fetchDefaultCandidatePool(
   admin: AdminClient,
-  companyIds: string[],
+  userId: string,
   poolSize: number,
   targeting: Targeting
 ): Promise<JobRow[]> {
-  let query = admin
-    .from('jobs')
-    .select(SELECT_COLUMNS)
-    .in('company_id', companyIds)
+  let query = ownedJobsQuery(admin, userId, SELECT_COLUMNS)
     .is('match_score', null)
     // Never spend an LLM call on confirmed junk. Was JS-only; pushed into SQL
     // so it no longer eats into LIMIT before targeting gets a say.
@@ -533,12 +577,11 @@ async function fetchDefaultCandidatePool(
  * Returns null (rather than throwing) when the count query itself fails, so
  * one broken diagnostic query can't take down the caller's real result.
  */
-async function countUnscoredJobs(admin: AdminClient, companyIds: string[]): Promise<number | null> {
-  const { count, error } = await admin
-    .from('jobs')
-    .select('id', { count: 'exact', head: true })
-    .in('company_id', companyIds)
-    .is('match_score', null)
+async function countUnscoredJobs(admin: AdminClient, userId: string): Promise<number | null> {
+  const { count, error } = await ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', {
+    count: 'exact',
+    head: true,
+  }).is('match_score', null)
   if (error) {
     console.error('[harness] matcher: unscored-count query failed', error)
     return null
@@ -560,16 +603,22 @@ async function countUnscoredJobs(admin: AdminClient, companyIds: string[]): Prom
  */
 export async function selectCandidateJobs(
   admin: AdminClient,
-  companyIds: string[],
+  userId: string,
   targeting: Targeting,
   limit: number,
-  explicitJobIds?: string[]
+  explicitJobIds?: string[],
+  /**
+   * The titles the user configured (lib/targeting/titles.ts). Used to ORDER the
+   * pool, never to filter it — an unrecognised title still gets scored, just
+   * later. Optional so existing callers keep their previous behaviour exactly.
+   */
+  targetTitles: readonly string[] = []
 ): Promise<{ jobs: JobRow[]; candidatesConsidered: number; totalUnscored?: number | null }> {
   const poolSize = Math.min(MAX_POOL, Math.max(limit * POOL_MULTIPLIER, 100))
   const usingExplicitIds = !!(explicitJobIds && explicitJobIds.length > 0)
   const pool = usingExplicitIds
-    ? await fetchJobsByIds(admin, explicitJobIds!.slice(0, poolSize), companyIds)
-    : await fetchDefaultCandidatePool(admin, companyIds, poolSize, targeting)
+    ? await fetchJobsByIds(admin, explicitJobIds!.slice(0, poolSize), userId)
+    : await fetchDefaultCandidatePool(admin, userId, poolSize, targeting)
 
   const candidatesConsidered = pool.length
   // Pool is already ordered by posted_at desc (or id-list order); filtering
@@ -580,10 +629,27 @@ export async function selectCandidateJobs(
   // was already applied AFTER targeting for the default pool, so this slice
   // no longer re-truncates a pre-targeting page.
   const filtered = pool.filter((job) => passesQualityAndTargeting(job, targeting))
-  const jobs = filtered.slice(0, limit)
+
+  // SPEND ON THE MOST PROMISING JOBS FIRST.
+  //
+  // The pool above is ordered newest-first, and the SQL facets are coarse —
+  // `job_function = engineering` alone matches 12,924 rows in this workspace,
+  // of which a measured 7.2% mention AI/ML/GenAI/LLM at all. So "the newest N
+  // unscored" is close to an arbitrary N, and every one of them costs a metered
+  // LLM call. That is what the user saw: a score button that "just scores
+  // randomly 25 jobs which you might be bad for".
+  //
+  // Title matching is free and deterministic, so it is used to reorder what was
+  // already fetched before any money is spent. This is strictly an ORDERING
+  // change: nothing new is excluded, so a job whose title matches no target is
+  // still scored — it simply waits its turn behind the ones that do. With no
+  // target titles configured this is a no-op and the freshest-first contract
+  // above is untouched.
+  const prioritised = prioritiseByTargetTitles(filtered, targetTitles)
+  const jobs = prioritised.slice(0, limit)
 
   if (jobs.length === 0 && !usingExplicitIds) {
-    const totalUnscored = await countUnscoredJobs(admin, companyIds)
+    const totalUnscored = await countUnscoredJobs(admin, userId)
     return { jobs, candidatesConsidered, totalUnscored }
   }
   return { jobs, candidatesConsidered }
@@ -609,6 +675,19 @@ export interface ScoreBatchOptions {
   signal?: AbortSignal
   /** Explicit ids to score (e.g. from a sourcer step) instead of the default unscored pool. */
   jobIds?: string[]
+  /** For lib/graph/verify/matcher.ts's judgeMatchQuality sample (best-effort:
+   *  a missing/expired key just means every score in this batch skips the
+   *  judge — writeVerdict's own 'unjudged' path, never a crash). */
+  apiKeys?: DecryptedApiKeys
+  /** The action/auto-triage threshold — every score crossing it joins the
+   *  judge sample (Step 4, item 3), alongside a deterministic 10% of the
+   *  rest. Defaults to DEFAULT_THRESHOLD when the caller doesn't know the
+   *  user's own preference yet (matcher's own AgentFn passes the real one). */
+  judgeThreshold?: number
+  /** The agent_runs row this batch runs under, when there is one — threaded
+   *  into logHarnessError so an unexpected judgeMatchQuality failure (see
+   *  verifyMatchVerdict) attributes to a real run, not a bare jobId. */
+  runId?: string
 }
 
 export interface ScoreBatchResult {
@@ -650,10 +729,81 @@ function buildEmptyPoolReason(candidatesConsidered: number, totalUnscored: numbe
  * Select candidates (prefiltered by quality + targeting) and score them with
  * the LLM, persisting match_score/match_details as it goes. THE shared scoring
  * routine — called by the harness `matcher` step below, by
- * lib/harness/autopilot.ts, and indirectly by the on-demand match route (which
+ * lib/graph/autopilot.ts, and indirectly by the on-demand match route (which
  * calls scoreJobWithLlm directly for a single explicit job, bypassing the
  * targeting prefilter since that's an explicit user action).
  */
+/**
+ * Deterministic postcondition on EVERY verdict (score range, schema-
+ * complete, the fabricated-evidence detector), plus judgeMatchQuality on the
+ * sample needsJudgeSample() selects. Best-effort in every direction: a
+ * writeVerdict failure is already swallowed by that function; a judge that
+ * can't run (no key / over budget) writes 'unjudged' instead of throwing —
+ * scoring an entire batch must never fail because verification couldn't. An
+ * unexpected judge failure (neither MissingKeyError nor BudgetCapError) is
+ * NOT a typed refusal — writeVerdict gets no row for it (same "the score
+ * stands, verification just didn't run" contract as any other skipped
+ * sample) but it is never silent: logHarnessError before continuing, the
+ * same "expected stop vs genuine failure" split every other judge call site
+ * in this stage uses (see lib/graph/verify/cv-tailor.ts, lib/evals/judge.ts).
+ *
+ * Exported for lib/harness/agents/matcher.test.ts's direct integration
+ * coverage of the writeVerdict calls / floor-before-spend / catch branches —
+ * every other caller reaches this only through scoreJobBatch below.
+ */
+export async function verifyMatchVerdict(opts: ScoreBatchOptions, jobId: string, verdict: LlmVerdict, framedJobText: string): Promise<void> {
+  const deterministic = checkMatchVerdictDeterministic(verdict, framedJobText)
+  await writeVerdict(opts.admin, {
+    userId: opts.userId,
+    runId: opts.runId,
+    subjectKind: 'match_score',
+    subjectId: jobId,
+    judge: 'deterministic',
+    verdict: deterministic.ok ? 'pass' : 'fail',
+    rationale: deterministic.ok ? null : deterministic.reasons.join('; '),
+  })
+
+  const threshold = opts.judgeThreshold ?? DEFAULT_THRESHOLD
+  if (!needsJudgeSample(verdict, jobId, threshold)) return
+  if (!opts.apiKeys?.openrouter) return // no key -> 'unjudged' by omission, same as the deterministic-only case
+
+  try {
+    const client = meteredJudgeClient(opts.admin, opts.userId, opts.apiKeys)
+    const verdictSummary =
+      `Score: ${verdict.score}. Summary: ${verdict.summary}\nStrengths: ${verdict.strengths.join('; ')}\n` +
+      `Gaps: ${verdict.gaps.join('; ')}`
+    const jobAndResume = `JOB:\n${framedJobText}\n\nRESUME:\n${opts.resume}`
+    const judged = await judgeMatchQuality(client, { verdictSummary, jobAndResume }, { userId: opts.userId })
+    await writeVerdict(opts.admin, {
+      userId: opts.userId,
+      runId: opts.runId,
+      subjectKind: 'match_score',
+      subjectId: jobId,
+      judge: 'closed_qa',
+      verdict: judged.verdict,
+      score: judged.score,
+      threshold: judged.threshold,
+      rationale: judged.summary,
+    })
+  } catch (err) {
+    if (err instanceof MissingKeyError || err instanceof BudgetCapError) {
+      await writeVerdict(opts.admin, {
+        userId: opts.userId,
+        runId: opts.runId,
+        subjectKind: 'match_score',
+        subjectId: jobId,
+        judge: 'closed_qa',
+        verdict: 'unjudged',
+      })
+      return
+    }
+    logHarnessError(
+      { runId: opts.runId ?? jobId, stepLabel: `match:${jobId}`, agentType: 'matcher', phase: 'judge', userId: opts.userId },
+      err
+    )
+  }
+}
+
 export async function scoreJobBatch(opts: ScoreBatchOptions): Promise<ScoreBatchResult> {
   if (!opts.resume.trim()) {
     return { scored: [], failedCount: 0, candidatesConsidered: 0, skippedReason: 'no-resume' }
@@ -664,7 +814,7 @@ export async function scoreJobBatch(opts: ScoreBatchOptions): Promise<ScoreBatch
 
   const { jobs, candidatesConsidered, totalUnscored } = await selectCandidateJobs(
     opts.admin,
-    opts.companyIds,
+    opts.userId,
     opts.targeting,
     opts.limit,
     opts.jobIds
@@ -684,7 +834,7 @@ export async function scoreJobBatch(opts: ScoreBatchOptions): Promise<ScoreBatch
   for (const job of jobs) {
     if (opts.signal?.aborted) break
     try {
-      const { verdict } = await scoreJobWithLlm(opts.llm, opts.resume, toScorable(job))
+      const { verdict } = await scoreJobWithLlm(opts.llm, opts.resume, toScorable(job), opts.admin, opts.userId)
       const matchDetails = buildMatchDetails(verdict)
       await opts.admin
         .from('jobs')
@@ -698,6 +848,14 @@ export async function scoreJobBatch(opts: ScoreBatchOptions): Promise<ScoreBatch
         gaps: verdict.gaps,
         matchDetails,
       })
+      // VERIFY (Step 4, item 3) — the SCORE STANDS either way; a failed
+      // verification marks the eval_verdicts row, never jobs.match_score.
+      // The SAME framed text scoreJobWithLlm's own prompt showed the model —
+      // re-framed here (cheap, deterministic) rather than threaded back out
+      // of that call, so the fabricated-evidence check tests against exactly
+      // what the model actually saw.
+      const framedJobText = frameJobText(job.description, { maxChars: DESC_LIMIT, emptyPlaceholder: '' })
+      await verifyMatchVerdict(opts, job.id, verdict, framedJobText)
     } catch (err) {
       if (err instanceof MissingKeyError) {
         // No LLM key at all — stop immediately, no point burning the rest of
@@ -750,6 +908,9 @@ export const matcher: AgentFn = async (ctx) => {
     limit: MAX_JOBS_PER_TICK,
     signal: ctx.signal,
     jobIds: explicitJobIds.length > 0 ? explicitJobIds : undefined,
+    apiKeys: ctx.apiKeys,
+    judgeThreshold: threshold,
+    runId: ctx.runId,
   })
 
   console.log(

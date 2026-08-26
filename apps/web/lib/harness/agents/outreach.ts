@@ -31,8 +31,16 @@ export interface OutreachDraftInput {
   /** Matcher highlights ("skills matched") to anchor the concrete reason. */
   matchHighlights?: string[]
   jobDescription?: string | null
+  /** Pre-assembled relationship context — buildOutreachContext
+   *  (lib/context/assemble.ts): chronological history + provenance-constrained
+   *  phrasing rules + reply-pattern insights. Cello's own records and its own
+   *  instruction lines, not employer text, so nothing here needs frameJobText. */
+  relationshipContext?: string | null
   /** 'initial' cold email or a single polite 'follow_up'. */
   kind?: 'initial' | 'follow_up'
+  /** Set by lib/graph/verify/outreach.ts's ONE bounded regeneration when the
+   *  groundedness/specificity judge failed the first draft. */
+  correctiveContext?: string | null
 }
 
 export interface OutreachDraftResult {
@@ -132,6 +140,10 @@ export async function generateOutreachDraft(
     input.jobDescription
       ? `Role description (context only, may inform the one reason you pick):\n${input.jobDescription.slice(0, MAX_JD_CHARS)}`
       : 'No role description supplied — do not invent role specifics beyond the title.',
+    input.relationshipContext ? input.relationshipContext : '',
+    input.correctiveContext
+      ? `CORRECTIVE INSTRUCTION (a prior draft was rejected — fix this before returning): ${input.correctiveContext}`
+      : '',
   ].filter(Boolean)
 
   try {

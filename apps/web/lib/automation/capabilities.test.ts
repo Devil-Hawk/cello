@@ -28,7 +28,7 @@ describe('auto-submit capability', () => {
     // edited by mistake. If someone rewires autopilot to read the capability
     // constant, a single wrong edit could start firing irreversible
     // applications at real employers — so that wiring is forbidden outright.
-    const autopilot = readFileSync(join(root, 'lib/harness/autopilot.ts'), 'utf8')
+    const autopilot = readFileSync(join(root, 'lib/graph/autopilot.ts'), 'utf8')
     expect(autopilot).toMatch(/const autoSubmit = false/)
     expect(autopilot).not.toMatch(/AUTO_SUBMIT_AVAILABLE/)
   })

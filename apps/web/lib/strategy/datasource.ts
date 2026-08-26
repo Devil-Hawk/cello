@@ -19,7 +19,8 @@
 // about independently.
 
 import type { AdminClient } from '../harness/types'
-import { userCompanyIds } from '../harness/agents/matcher'
+import { userCompanyIds, ownedJobsQuery } from '../harness/agents/matcher'
+import { chunkedIn } from '../supabase/chunked-in'
 import { QUALITY_REJECT_THRESHOLD } from '../jobs/classify'
 import type { Targeting } from '../targeting'
 
@@ -106,6 +107,12 @@ interface RawJob {
   match_score: number | null
   job_function: string | null
   seniority: string | null
+  companies?: { name: string | null } | { name: string | null }[] | null
+}
+
+function rawJobCompanyName(job: RawJob): string {
+  const c = job.companies
+  return (Array.isArray(c) ? c[0]?.name : c?.name) ?? 'Unknown company'
 }
 
 // NOTE ON "unclassified passes through": the count queries below express this
@@ -130,20 +137,21 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
       const rawApps = (apps as RawApplication[] | null) ?? []
       if (rawApps.length === 0) return []
 
+      // jobIds is this same user's own application job ids — a genuine
+      // explicit subset (not an ownership fence), just too large in one
+      // .in() past a few hundred applications (URL length limit), so it's
+      // chunked rather than joined. company name is embedded directly here
+      // instead of a second .in('id', companyIds) round trip.
       const jobIds = [...new Set(rawApps.map((a) => a.job_id))]
-      const { data: jobs, error: jobsErr } = await admin
-        .from('jobs')
-        .select('id, company_id, source, posted_at, match_score, job_function, seniority')
-        .in('id', jobIds)
-      if (jobsErr) console.error('[strategy] getApplications: jobs query failed', jobsErr)
-      const jobById = new Map<string, RawJob>(((jobs as RawJob[] | null) ?? []).map((j) => [j.id, j]))
-
-      const companyIds = [...new Set([...jobById.values()].map((j) => j.company_id))]
-      const { data: companies, error: companiesErr } = await admin.from('companies').select('id, name').in('id', companyIds)
-      if (companiesErr) console.error('[strategy] getApplications: companies query failed', companiesErr)
-      const nameByCompany = new Map<string, string>(
-        (((companies as { id: string; name: string }[] | null) ?? []).map((c) => [c.id, c.name]))
-      )
+      const jobs = await chunkedIn(jobIds, async (chunk) => {
+        const { data, error } = await admin
+          .from('jobs')
+          .select('id, company_id, source, posted_at, match_score, job_function, seniority, companies(name)')
+          .in('id', chunk)
+        if (error) console.error('[strategy] getApplications: jobs query failed', error)
+        return (data as RawJob[] | null) ?? []
+      })
+      const jobById = new Map<string, RawJob>(jobs.map((j) => [j.id, j]))
 
       return rawApps
         .map((a): ApplicationRow | null => {
@@ -157,7 +165,7 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
             createdAt: a.created_at,
             applicationSource: a.source,
             companyId: job.company_id,
-            companyName: nameByCompany.get(job.company_id) ?? 'Unknown company',
+            companyName: rawJobCompanyName(job),
             jobSource: job.source,
             jobPostedAt: job.posted_at,
             matchScore: job.match_score,
@@ -170,10 +178,14 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
 
     async getActivities(applicationIds) {
       if (applicationIds.length === 0) return []
+      // applicationIds is always this same user's own application ids (see
+      // runStrategyAnalysis's getApplications() call) — scope by the FK join
+      // instead of replaying that full id list back as an .in() array, which
+      // breaks past a few hundred applications (URL length limit).
       const { data, error } = await admin
         .from('activities')
-        .select('id, application_id, type, occurred_at')
-        .in('application_id', applicationIds)
+        .select('id, application_id, type, occurred_at, applications!inner(user_id)')
+        .eq('applications.user_id', userId)
       if (error) {
         console.error('[strategy] getActivities query failed', error)
         return []
@@ -254,7 +266,9 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
       // AdminClient doc) so the query-builder chain below is `any` end to
       // end, matching every other admin-client query in this codebase.
       const count = async (build: (q: any) => any): Promise<number> => {
-        const base = admin.from('jobs').select('id', { count: 'exact', head: true }).in('company_id', companyIds)
+        // Ownership via the companies FK join, not an .in('company_id',
+        // companyIds) array — that breaks past ~600 companies (URL limit).
+        const base = ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', { count: 'exact', head: true })
         const { count: n, error } = await build(base)
         if (error) {
           console.error('[strategy] getJobScopeCounts count query failed', error)
@@ -322,7 +336,7 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
       // Now compute the TRUE combined pass count (every configured dimension
       // AND'd together, not just the min of the individual passes above,
       // which can overstate the combined pass rate when dimensions overlap).
-      let combined: any = admin.from('jobs').select('id', { count: 'exact', head: true }).in('company_id', companyIds)
+      let combined: any = ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', { count: 'exact', head: true })
       combined = combined.or(`quality_score.is.null,quality_score.gte.${QUALITY_REJECT_THRESHOLD}`)
       if (targeting.functions.length > 0) combined = combined.or(`job_function.is.null,job_function.eq.unknown,job_function.in.(${targeting.functions.join(',')})`)
       if (targeting.seniority.length > 0) combined = combined.or(`seniority.is.null,seniority.eq.unknown,seniority.in.(${targeting.seniority.join(',')})`)
@@ -339,7 +353,7 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
       // set and match in JS, exactly like matcher.ts's own fallback path does.
       let excludedByKeywords: number | null = null
       if (targeting.excludedKeywords.length > 0 || targeting.excludedCompanies.length > 0) {
-        let textQuery: any = admin.from('jobs').select('id, title, description, companies(name)').in('company_id', companyIds)
+        let textQuery: any = ownedJobsQuery(admin, userId, 'id, title, description, companies!inner(name, user_id)')
         textQuery = textQuery.or(`quality_score.is.null,quality_score.gte.${QUALITY_REJECT_THRESHOLD}`)
         if (targeting.functions.length > 0) textQuery = textQuery.or(`job_function.is.null,job_function.eq.unknown,job_function.in.(${targeting.functions.join(',')})`)
         if (targeting.seniority.length > 0) textQuery = textQuery.or(`seniority.is.null,seniority.eq.unknown,seniority.in.(${targeting.seniority.join(',')})`)

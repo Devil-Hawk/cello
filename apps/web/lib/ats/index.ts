@@ -10,11 +10,19 @@ import { isValidToken } from './types'
 import { greenhouse } from './greenhouse'
 import { lever } from './lever'
 import { ashby } from './ashby'
+import { workday } from './workday'
+import { smartrecruiters } from './smartrecruiters'
+import { workable } from './workable'
+import { recruitee } from './recruitee'
+import { personio } from './personio'
 import { detectAts } from './detect'
 // Relative import (not `@/...`): lib/ats/* stays framework-free, and
 // lib/jobs/classify.ts is itself a zero-dependency pure module, so this is
 // safe in both the Next.js route and the plain-tsx scheduled script.
 import { classifyJob, isLowQuality } from '../jobs/classify'
+// Same reasoning as classify above: lib/jobs/mojibake.ts is pure and
+// dependency-free, so importing it here keeps lib/ats framework-free.
+import { repairMojibake } from '../jobs/mojibake'
 
 export type {
   AtsJob,
@@ -25,15 +33,25 @@ export type {
   FetchContext,
 } from './types'
 export { detectAts, detectFromUrl, probeAts, candidateTokens } from './detect'
-export { HttpError, fetchJson, assertAllowedHost } from './http'
+export { HttpError, fetchJson, fetchText, assertAllowedHost, assertAllowedHostSuffix } from './http'
 export { greenhouse } from './greenhouse'
 export { lever } from './lever'
 export { ashby } from './ashby'
+export { workday } from './workday'
+export { smartrecruiters } from './smartrecruiters'
+export { workable } from './workable'
+export { recruitee } from './recruitee'
+export { personio } from './personio'
 
 export const providers: Record<AtsProviderId, AtsProvider> = {
   greenhouse,
   lever,
   ashby,
+  workday,
+  smartrecruiters,
+  workable,
+  recruitee,
+  personio,
 }
 
 /** The company fields refreshCompany needs (subset of the companies row). */
@@ -118,9 +136,37 @@ function readCachedAts(metadata: unknown): { provider: AtsProviderId; token: str
   const record = ats as Record<string, unknown>
   const provider = record.provider
   const token = record.token
-  if (provider !== 'greenhouse' && provider !== 'lever' && provider !== 'ashby') return null
+  // Checked against the registry rather than a hand-written literal list, so
+  // adding a provider cannot silently leave stored pointers unreadable.
+  if (typeof provider !== 'string' || !Object.prototype.hasOwnProperty.call(providers, provider)) return null
   if (!isValidToken(token)) return null
-  return { provider, token }
+  return { provider: provider as AtsProviderId, token }
+}
+
+/**
+ * Undo an upstream UTF-8-as-Latin-1 mis-decode in every text field.
+ *
+ * Cello's own transport is not what breaks this text — fetchJson()'s
+ * Response.json() is a UTF-8 decode even when the server's Content-Type lies
+ * about the charset, and the Greenhouse HTML→text chain round-trips "– · ’"
+ * byte-exactly (both verified). What arrives already broken is what some
+ * boards and every aggregator that republishes them *send*: "9:00 AM â[80][93]
+ * 6:00 PM" instead of "9:00 AM – 6:00 PM". Repairing here — at the one choke
+ * point every provider's jobs pass through, before classification and before
+ * any row is written — means the classifier, the matcher, the stored row and
+ * the UI all see the same repaired text. repairMojibake() returns text that is
+ * already correct unchanged, so this is a no-op for the boards that get it
+ * right (verified against 2,500+ stored Greenhouse/Lever/Ashby descriptions:
+ * zero of them are touched).
+ */
+function repairJobText(job: AtsJob): AtsJob {
+  return {
+    ...job,
+    title: repairMojibake(job.title),
+    description: repairMojibake(job.description),
+    location: repairMojibake(job.location),
+    salary: repairMojibake(job.salary),
+  }
 }
 
 /** Keep only http(s) jobs with a title and an absolute URL; dedup by URL. */
@@ -140,7 +186,7 @@ function sanitizeJobs(jobs: AtsJob[]): AtsJob[] {
     const key = job.externalId || job.url
     if (seen.has(key)) continue
     seen.add(key)
-    clean.push(job)
+    clean.push(repairJobText(job))
   }
   return clean
 }
@@ -332,21 +378,7 @@ export async function refreshCompany(store: AtsStore, company: CompanyInput): Pr
   return result
 }
 
-/** Run fn over items with bounded concurrency, preserving input order. */
-export async function mapWithConcurrency<T, R>(
-  items: readonly T[],
-  limit: number,
-  fn: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results: R[] = new Array(items.length)
-  let next = 0
-  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
-    while (true) {
-      const index = next++
-      if (index >= items.length) return
-      results[index] = await fn(items[index])
-    }
-  })
-  await Promise.all(workers)
-  return results
-}
+// Implementation moved to ./concurrency.ts so the adapters can use it without
+// importing this module back; re-exported here so every existing caller
+// (`import { mapWithConcurrency } from '@/lib/ats'`) keeps working.
+export { mapWithConcurrency } from './concurrency'

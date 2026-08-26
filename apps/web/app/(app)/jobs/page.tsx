@@ -4,9 +4,10 @@ import { LogoMark } from '@/components/brand/logo'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Briefcase, Building2, Loader2, Plus, SearchX, Sparkles } from 'lucide-react'
+import { Briefcase, Building2, Loader2, Plus, SearchX, Sparkles, Target, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -41,6 +42,14 @@ import { JobDetailModal } from '@/components/jobs/job-detail-modal'
 import { ProvenanceSummaryBar } from '@/components/jobs/provenance-summary-bar'
 import { JOB_FUNCTIONS, QUALITY_REJECT_THRESHOLD, SENIORITY_LEVELS } from '@/lib/jobs/classify'
 import { resolveTargeting, type Targeting } from '@/lib/targeting'
+import {
+  MAX_TARGET_TITLES,
+  normalizeTargetTitle,
+  parseTargetTitlesParam,
+  resolveTargetTitles,
+  serializeTargetTitlesParam,
+} from '@/lib/targeting/titles'
+import { rankJobsByTargetTitles, type TitleMatch } from '@/lib/matching/title-rank'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { VisaSignal } from '@/lib/dossier/store'
 
@@ -143,6 +152,130 @@ function computeBudgetHint(preferences: unknown): string | null {
   return `$${remainingUsd.toFixed(2)} of your $${capUsd.toFixed(2)} monthly AI budget left`
 }
 
+/**
+ * The titles the user is looking for, as an add/remove chip list.
+ *
+ * WHY THE DRAFT NEVER TOUCHES THE URL
+ *   This is the same trap the country input fell into (see committedCountry
+ *   below): writing per-keystroke to a searchParams-derived value makes every
+ *   character a router.replace that races the next one. Here the draft is
+ *   plain local state and only a COMPLETED title — Enter, or the + button —
+ *   is committed. Nothing re-ranks while you are still typing the word.
+ */
+function TargetTitlesBar({
+  titles,
+  onChange,
+  sortLabel,
+  matchedCount,
+  rankedCount,
+}: {
+  titles: string[]
+  onChange: (next: string[]) => void
+  sortLabel: string
+  matchedCount: number
+  rankedCount: number
+}) {
+  const [draft, setDraft] = useState('')
+  const atCap = titles.length >= MAX_TARGET_TITLES
+
+  function commit() {
+    const title = normalizeTargetTitle(draft)
+    if (!title || atCap) return
+    // De-dupe case-insensitively so "data scientist" can't shadow the "Data
+    // Scientist" chip already sitting right there.
+    if (!titles.some((t) => t.toLowerCase() === title.toLowerCase())) onChange([...titles, title])
+    setDraft('')
+  }
+
+  return (
+    <div className="rounded-card border bg-card px-4 py-3 shadow-card">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 className="flex items-center gap-2 text-caption font-medium text-foreground">
+          <Target className="h-4 w-4 text-muted-foreground" aria-hidden />
+          Target titles
+        </h2>
+        <p className="text-caption text-muted-foreground">
+          {titles.length === 0 ? (
+            <>Add the roles you actually want and this list gets ranked by them.</>
+          ) : (
+            <>
+              {/* Say exactly what was reordered and what it was reordered
+                  within. Ranking runs over the rows loaded here, not all
+                  {totalCount} — claiming otherwise would be the same kind of
+                  lie as the old "remaining to score" count. */}
+              <span className="font-readout tabular-nums">{matchedCount}</span> of{' '}
+              <span className="font-readout tabular-nums">{rankedCount}</span> loaded jobs match — ranked first, then{' '}
+              {sortLabel.toLowerCase()}.
+            </>
+          )}
+        </p>
+      </div>
+
+      <div className="mt-2.5 flex gap-2">
+        <Input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commit()
+            }
+          }}
+          disabled={atCap}
+          placeholder={atCap ? `${MAX_TARGET_TITLES} titles is the limit` : 'Senior Data Scientist'}
+          aria-label="Add a target job title"
+          className="h-9 max-w-xs"
+        />
+        <Button type="button" variant="outline" size="icon" onClick={commit} disabled={atCap} aria-label="Add target title">
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {titles.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {titles.map((title) => (
+            <span
+              key={title}
+              className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-caption font-medium text-accent-deep"
+            >
+              {title}
+              <button
+                type="button"
+                onClick={() => onChange(titles.filter((t) => t !== title))}
+                aria-label={`Remove target title ${title}`}
+                className="opacity-70 transition-opacity hover:opacity-100"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Why this job sits where it does — the target title it matched, and how well.
+ *
+ * A re-ordered list with no visible reason is indistinguishable from a shuffle,
+ * so every row the ranking MOVED says so on the row itself. Accent is the
+ * product's one "live" signal colour and this is a live, user-driven signal, so
+ * it earns it; rows that matched nothing render nothing and stay quiet.
+ */
+function TitleMatchReason({ match }: { match: TitleMatch }) {
+  if (!match.target) return null
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 pt-2.5 text-caption text-muted-foreground">
+      <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 font-medium text-accent-deep">
+        <Target className="h-3 w-3" aria-hidden />
+        {match.target}
+      </span>
+      <span className="font-readout tabular-nums">{match.score}% title match</span>
+    </p>
+  )
+}
+
 function JobsPageSkeleton() {
   return (
     <div className="space-y-6">
@@ -207,6 +340,10 @@ function JobsPageInner() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [companiesLoaded, setCompaniesLoaded] = useState(false)
   const [targeting, setTargeting] = useState<Targeting | null>(null)
+  // The titles the user wants, as stored in profiles.preferences.targeting.
+  // Kept separate from `targeting` on purpose: titles RANK the list, they never
+  // filter it, so they are not a Targeting facet — see lib/targeting/titles.ts.
+  const [profileTargetTitles, setProfileTargetTitles] = useState<string[]>([])
   // Plain-language remaining monthly AI budget, e.g. "$6.20 of your $10.00
   // monthly AI budget left" — surfaced next to the "calculate match" trigger
   // because that single click fires a real, metered LLM call with no other
@@ -356,6 +493,17 @@ function JobsPageInner() {
         : 'all'
       : (targeting?.languages[0] as LanguageFacet | undefined) ?? 'all'
 
+  // Target titles follow the same override convention as the facets above: the
+  // URL wins when the param is present (deep-linkable, and an empty string is a
+  // real "I cleared them here" answer), otherwise fall back to what the user
+  // configured. Unlike those facets this drives NO server predicate — it never
+  // appears in fetchJobsPage — so changing it re-ranks without a refetch.
+  const titlesParam = searchParams.get('titles')
+  const targetTitles = useMemo(
+    () => (titlesParam !== null ? parseTargetTitlesParam(titlesParam) : profileTargetTitles),
+    [titlesParam, profileTargetTitles]
+  )
+
   const [locationQuery, setLocationQuery] = useState('')
   const [debouncedLocationQuery, setDebouncedLocationQuery] = useState('')
 
@@ -363,6 +511,45 @@ function JobsPageInner() {
     const t = setTimeout(() => setDebouncedLocationQuery(locationQuery), 350)
     return () => clearTimeout(t)
   }, [locationQuery])
+
+  // COUNTRY IS TYPED LOCALLY AND COMMITTED WHEN IT IS COMPLETE.
+  //   It used to write straight to the URL on every keystroke via
+  //   setFacetParam. Because `country` is *derived* from searchParams and feeds
+  //   fetchJobsPage's dependencies, each character triggered a router.replace
+  //   plus a refetch — and the navigation round-trip raced the next keystroke.
+  //   Typing "US" measurably ended with the input holding "U" and the URL at
+  //   ?country=U: the second character was swallowed, and a lone "U" filters
+  //   nothing (the query below requires exactly 2 letters), so the search
+  //   silently reset to unfiltered.
+  const [countryInput, setCountryInput] = useState(country)
+  /** The last value THIS input pushed to the URL, so the sync effect below can
+   *  tell "the URL changed because of me" from "the URL changed elsewhere". */
+  const committedCountry = useRef(country)
+
+  useEffect(() => {
+    // Adopt a country that changed outside this input — Clear filters, a
+    // targeting default, browser back/forward — but never re-seed with a value
+    // this input just wrote, which would fight the user mid-word.
+    if (country !== committedCountry.current) {
+      committedCountry.current = country
+      setCountryInput(country)
+    }
+  }, [country])
+
+  useEffect(() => {
+    const trimmed = countryInput.trim()
+    // Only ever commit something the query can act on: empty (no filter) or a
+    // complete 2-letter code. A half-typed "U" would cost a refetch that
+    // changes no rows and leave a partial code stuck in the address bar.
+    if (trimmed.length !== 0 && trimmed.length !== 2) return
+    if (trimmed === country.trim()) return
+    const t = setTimeout(() => {
+      committedCountry.current = trimmed
+      setFacetParam('country', trimmed)
+    }, 350)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [countryInput, country])
 
   /** Delete-on-default param setter, for the pre-existing shareable filters. */
   function setParam(key: 'fresh' | 'company' | 'sort' | 'visa' | 'undated' | 'showLowQuality', value: string) {
@@ -377,7 +564,7 @@ function JobsPageInner() {
   }
 
   /** Always-write param setter, for facets with a targeting-derived default. */
-  function setFacetParam(key: 'fn' | 'sr' | 'remote' | 'country' | 'lang', value: string) {
+  function setFacetParam(key: 'fn' | 'sr' | 'remote' | 'country' | 'lang' | 'titles', value: string) {
     const params = new URLSearchParams(searchParams.toString())
     params.set(key, value)
     const qs = params.toString()
@@ -431,6 +618,7 @@ function JobsPageInner() {
     }
 
     setTargeting(resolveTargeting(profileRes.data?.preferences))
+    setProfileTargetTitles(resolveTargetTitles(profileRes.data?.preferences))
     setBudgetHint(computeBudgetHint(profileRes.data?.preferences))
 
     setCompaniesLoaded(true)
@@ -759,6 +947,29 @@ function JobsPageInner() {
     return jobs.filter((job) => visaByCompany.get(job.company_id) === visaFilter)
   }, [jobs, visaFilter, visaByCompany])
 
+  // TARGET-TITLE RANKING IS A RE-RANK, NOT A NEW SORT MODE.
+  //   It deliberately does NOT join the `sort` control. A sort mode has to be a
+  //   server ORDER BY, because the server also decides WHICH 30 of ~11,800 rows
+  //   this page holds (see fetchJobsPage's range()). Title similarity isn't a
+  //   jobs column and can't be expressed in that query, so a "Best title match"
+  //   option would claim to sort the whole corpus while only touching the page
+  //   already in memory — the same shape of lie as the old batch "remaining"
+  //   count. Ranking client-side over the loaded rows is exactly as far as the
+  //   data reaches, and TargetTitlesBar says so out loud.
+  //
+  //   It composes with the sort instead: rankJobsByTargetTitles is stable, so
+  //   equal-scoring jobs keep the incoming order — which IS the current sort —
+  //   and a user with no titles configured gets `filteredJobs` back untouched.
+  //   Same client-side-over-the-loaded-page tier as the visa filter above.
+  const rankedJobs = useMemo(
+    () => rankJobsByTargetTitles(filteredJobs, targetTitles),
+    [filteredJobs, targetTitles]
+  )
+  const titleMatchCount = useMemo(
+    () => rankedJobs.reduce((n, r) => n + (r.titleMatch.score > 0 ? 1 : 0), 0),
+    [rankedJobs]
+  )
+
   // Single reason string drives every match/optimize affordance on this page
   // (row trigger, header batch button) — never a boolean that just makes a
   // control vanish. Checked in priority order: a failed status check is
@@ -788,6 +999,11 @@ function JobsPageInner() {
     country.trim() !== '' ||
     language !== 'all' ||
     !hideLowQuality
+  // Target titles are deliberately NOT in hasActiveFilters: they reorder the
+  // list, they never remove a row from it. Counting them would make "Clear
+  // filters" the offered fix for an empty result set that titles cannot
+  // possibly have caused.
+  const sortLabel = sortBy === 'best_match' ? 'Best match' : 'Newest first'
   const canLoadMore = jobs.length < totalCount
   // Derived from the live `jobs` array (not captured by value) so a match
   // calculated from a row, its badge, or a batch run updates this modal
@@ -974,14 +1190,22 @@ function JobsPageInner() {
             onSeniorityChange={(v) => setFacetParam('sr', v)}
             remoteOnly={remoteOnly}
             onRemoteOnlyChange={(v) => setFacetParam('remote', v ? '1' : '0')}
-            country={country}
-            onCountryChange={(v) => setFacetParam('country', v)}
+            country={countryInput}
+            onCountryChange={setCountryInput}
             language={language}
             onLanguageChange={(v) => setFacetParam('lang', v)}
             hideLowQuality={hideLowQuality}
             onHideLowQualityChange={(v) => setParam('showLowQuality', v ? '' : '1')}
             shown={filteredJobs.length}
             total={totalCount}
+          />
+
+          <TargetTitlesBar
+            titles={targetTitles}
+            onChange={(next) => setFacetParam('titles', serializeTargetTitlesParam(next))}
+            sortLabel={sortLabel}
+            matchedCount={titleMatchCount}
+            rankedCount={rankedJobs.length}
           />
 
           {filteredJobs.length === 0 ? (
@@ -1004,28 +1228,34 @@ function JobsPageInner() {
           ) : (
             <>
               <div className="divide-y overflow-hidden rounded-card border bg-card shadow-card">
-                {filteredJobs.map((job) => (
-                  <JobRow
-                    key={job.id}
-                    job={job}
-                    inPipeline={addedToPipeline.has(job.id)}
-                    isAdding={addingToPipeline === job.id}
-                    isCalculating={calculatingMatch === job.id}
-                    calculateDisabled={calculatingAll}
-                    calculateDisabledReason={matchDisabledReason}
-                    onRetryStatus={refetchStatus}
-                    visaSignal={visaByCompany.get(job.company_id) ?? null}
-                    budgetHint={budgetHint}
-                    onOpen={() => {
-                      // Remember what the user activated, so closing can put
-                      // focus back on it. See closeJobModal.
-                      jobTriggerRef.current =
-                        document.activeElement instanceof HTMLElement ? document.activeElement : null
-                      setSelectedJobId(job.id)
-                    }}
-                    onAddToPipeline={() => addToPipeline(job.id)}
-                    onCalculateMatch={() => calculateMatch(job.id)}
-                  />
+                {rankedJobs.map(({ job, titleMatch }) => (
+                  // Wrapper, not a JobRow prop: the reason line belongs to the
+                  // ranking this page owns, and job-row.tsx has no idea target
+                  // titles exist. `divide-y` still separates these wrappers as
+                  // the container's direct children, so the list reads the same.
+                  <div key={job.id}>
+                    <TitleMatchReason match={titleMatch} />
+                    <JobRow
+                      job={job}
+                      inPipeline={addedToPipeline.has(job.id)}
+                      isAdding={addingToPipeline === job.id}
+                      isCalculating={calculatingMatch === job.id}
+                      calculateDisabled={calculatingAll}
+                      calculateDisabledReason={matchDisabledReason}
+                      onRetryStatus={refetchStatus}
+                      visaSignal={visaByCompany.get(job.company_id) ?? null}
+                      budgetHint={budgetHint}
+                      onOpen={() => {
+                        // Remember what the user activated, so closing can put
+                        // focus back on it. See closeJobModal.
+                        jobTriggerRef.current =
+                          document.activeElement instanceof HTMLElement ? document.activeElement : null
+                        setSelectedJobId(job.id)
+                      }}
+                      onAddToPipeline={() => addToPipeline(job.id)}
+                      onCalculateMatch={() => calculateMatch(job.id)}
+                    />
+                  </div>
                 ))}
               </div>
 

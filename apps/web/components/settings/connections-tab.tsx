@@ -58,6 +58,11 @@ export function ConnectionsTab({ onStatus }: ConnectionsTabProps) {
   const [loading, setLoading] = useState(true)
   const [permissions, setPermissions] = useState<GmailPermissionState | null>(null)
   const [legacy, setLegacy] = useState<{ hasSyncHistory: boolean; lastSyncedAt: string | null } | null>(null)
+  // Whether a Gmail refresh token is actually stored — the STORED
+  // prerequisite for background sync, distinct from (and never inferred
+  // from) this session's live Google scopes. See lib/gmail/token.ts.
+  const [backgroundReady, setBackgroundReady] = useState(false)
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null)
   const [provider, setProvider] = useState<string | null>(null)
   const [hasLiveToken, setHasLiveToken] = useState<boolean | null>(null)
   const [liveScopes, setLiveScopes] = useState<string[]>([])
@@ -77,6 +82,8 @@ export function ConnectionsTab({ onStatus }: ConnectionsTabProps) {
         if (!cancelled && res.ok) {
           setPermissions(data.permissions)
           setLegacy(data.legacy)
+          setBackgroundReady(Boolean(data.backgroundReady))
+          setLastSyncAt(data.lastSyncAt ?? null)
         }
       } catch {
         // Leave permissions null — every card below just renders as "off",
@@ -229,6 +236,7 @@ export function ConnectionsTab({ onStatus }: ConnectionsTabProps) {
                 enabled={state?.send.enabled ?? false}
                 busy={busyTier === 'send'}
                 liveTokenCoversTier={liveScopesCoverTier(liveScopes, 'send')}
+                readyWithoutReconnect={liveScopesCoverTier(liveScopes, 'send')}
                 isGoogle={isGoogle}
                 onGrant={() => grantGoogleTier('send')}
                 onConfirmLive={() => persistTier('send', true, 'Send approved messages: turned on.')}
@@ -325,6 +333,7 @@ export function ConnectionsTab({ onStatus }: ConnectionsTabProps) {
                 enabled={state?.monitor.enabled ?? false}
                 busy={busyTier === 'monitor'}
                 liveTokenCoversTier={liveScopesCoverTier(liveScopes, 'monitor')}
+                readyWithoutReconnect={backgroundReady}
                 isGoogle={isGoogle}
                 onGrant={() => grantGoogleTier('monitor')}
                 onConfirmLive={() => persistTier('monitor', true, 'Monitor mailbox: turned on.')}
@@ -332,9 +341,15 @@ export function ConnectionsTab({ onStatus }: ConnectionsTabProps) {
               />
             }
           >
-            {legacy?.lastSyncedAt && (
+            {state?.monitor.enabled && !backgroundReady && (
               <p className="mt-2 text-caption text-muted-foreground">
-                Last sync: {new Date(legacy.lastSyncedAt).toLocaleString()}
+                Monitoring is on, but no background sync token is stored yet — click Reconnect
+                above so sync can run on its own, not just when this tab is open.
+              </p>
+            )}
+            {state?.monitor.enabled && backgroundReady && (
+              <p className="mt-2 text-caption text-muted-foreground">
+                {lastSyncAt ? `Last sync: ${new Date(lastSyncAt).toLocaleString()}` : 'No sync has run yet.'}
               </p>
             )}
           </PermissionCard>
@@ -383,6 +398,7 @@ function GoogleTierAction({
   enabled,
   busy,
   liveTokenCoversTier,
+  readyWithoutReconnect,
   isGoogle,
   onGrant,
   onConfirmLive,
@@ -391,21 +407,29 @@ function GoogleTierAction({
   tier: GoogleTier
   enabled: boolean
   busy: boolean
-  /** True when the CURRENT live Google token already carries this scope (per Google's tokeninfo), independent of what Cello has stored. */
+  /** True when the CURRENT live Google token already carries this scope (per Google's tokeninfo), independent of what Cello has stored. Only used for the not-yet-enabled "confirm" shortcut below — a UX nicety, never a claim about durable state. */
   liveTokenCoversTier: boolean
+  /**
+   * True when this tier is actually usable right now without a fresh
+   * consent screen: for `monitor` this is the STORED refresh token
+   * (backgroundReady) — the live session scope says nothing about whether
+   * background sync can run — for `send` (no background concept) it's the
+   * same live-scope check as above, since sending only ever happens
+   * interactively anyway.
+   */
+  readyWithoutReconnect: boolean
   isGoogle: boolean
   onGrant: () => void
   onConfirmLive: () => void
   onRevoke: () => void
 }) {
-  if (enabled && !liveTokenCoversTier) {
-    // Cello's permission record says this is on, but the LIVE Google token
-    // doesn't carry the scope right now — the normal state for a returning
-    // user, since Supabase only keeps `provider_token` around right after
-    // the OAuth exchange, not across ordinary session refreshes. Reconnect
-    // (same one-click grant, since Cello already has consent-of-record) is
-    // the primary action; turning the permission off entirely stays
-    // reachable but secondary.
+  if (enabled && !readyWithoutReconnect) {
+    // Cello's permission record says this is on, but it cannot actually run
+    // right now — the "Monitor mailbox: enabled but no refresh token stored"
+    // gap this UI used to render as fully connected. Reconnect (same
+    // one-click grant, since Cello already has consent-of-record) is the
+    // primary action; turning the permission off entirely stays reachable
+    // but secondary.
     return (
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" className="h-8" disabled={busy} onClick={onGrant}>

@@ -4,6 +4,7 @@
 
 import { assertAllowedHost, fetchJson, type FetchJsonOptions } from '../ats/http'
 import { classifyJob, isLowQuality, type Classification } from '../jobs/classify'
+import { repairMojibake } from '../jobs/mojibake'
 import type { Targeting } from '../targeting'
 import type { JobLead, SourceQuery } from './types'
 
@@ -20,10 +21,25 @@ export async function getJson<T = unknown>(
   return fetchJson<T>(url, { retries: 2, timeoutMs: 15_000, ...opts })
 }
 
-/** Strip HTML tags + decode a handful of common entities → collapsed plain text. */
+/** Strip HTML tags + decode a handful of common entities → collapsed plain text.
+ *
+ *  Also repairs mojibake, and this is the load-bearing place to do it.
+ *
+ *  A real job description shown to the user read "9:00 AM â 6:00 PM" and
+ *  "Â·  Design, build and maintain" — UTF-8 bytes that some upstream board
+ *  served, or stored, as Latin-1. A survey of the live table found 106 corrupted
+ *  rows and every one of them came in through a lib/sources adapter (all
+ *  source='remoteok'), NOT through lib/ats: the Greenhouse/Lever/Ashby path had
+ *  zero. So repairing inside the ATS layer fixes nothing a user would ever see.
+ *
+ *  Every board adapter funnels its text through here, which makes this the one
+ *  seam that covers all of them at once. repairMojibake is conservative by
+ *  construction — it only rewrites text carrying the mojibake signature and
+ *  leaves correct text (including legitimate "â"/"Â") untouched, so applying it
+ *  to everything is safe. See lib/jobs/mojibake.ts. */
 export function stripHtml(input: string | null | undefined): string {
   if (!input) return ''
-  return input
+  return repairMojibake(input)
     .replace(/<\s*(script|style)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
@@ -44,13 +60,50 @@ export function truncate(text: string, max = 4000): string {
 }
 
 /** Personal/aggregator hosts that are never an employer's own domain. */
-const NON_EMPLOYER_HOSTS = new Set([
+// EVERY HOST ANY SOURCE ADAPTER FETCHES FROM MUST APPEAR HERE.
+//
+// This list decides whether a URL yields an EMPLOYER's domain. When an
+// aggregator's host is missing, employerDomainFromUrl() happily returns it, and
+// ingestLeads stores it as the company's own domain. The damage is not
+// cosmetic:
+//   * ATS detection then probes the aggregator forever — it can never find the
+//     employer's board, so the company returns zero jobs on every refresh;
+//   * company dedupe collapses, because dozens of unrelated employers share one
+//     domain;
+//   * and email inference would synthesize addresses at the AGGREGATOR — a
+//     Capital One contact reached at @themuse.com, which is both wrong and the
+//     kind of invented address that must never go near outreach.
+//
+// MEASURED in the live table: 190 of one user's 436 companies carry an
+// aggregator domain. "Capital One" is stored with domain themuse.com and
+// "ManTech" with jobicy.com. Some of that is legacy, but five adapters shipped
+// AFTER this list was last updated — himalayas.app, jobicy.com,
+// weworkremotely.com, remotive.com and workingnomads.com were all absent, so
+// those were still writing bad domains today.
+//
+// The failure mode is a hand-maintained list drifting from a growing adapter
+// registry, so the fix is to stop maintaining it by hand: SOURCE_FETCH_HOSTS
+// below is the union of what the adapters actually fetch, and a test in
+// util.test.ts fails if an adapter host is missing from it. Adding a
+// thirteenth adapter cannot silently reintroduce this.
+export const SOURCE_FETCH_HOSTS = [
   'themuse.com',
-  'www.themuse.com',
   'arbeitnow.com',
-  'www.arbeitnow.com',
   'remoteok.com',
   'remoteok.io',
+  'himalayas.app',
+  'jobicy.com',
+  'weworkremotely.com',
+  'remotive.com',
+  'workingnomads.com',
+  'echojobs.io',
+  'hn.algolia.com',
+  'yc-oss.github.io',
+] as const
+
+const NON_EMPLOYER_HOSTS = new Set([
+  ...SOURCE_FETCH_HOSTS,
+  ...SOURCE_FETCH_HOSTS.map((h) => `www.${h}`),
   'news.ycombinator.com',
   'ycombinator.com',
   'www.ycombinator.com',

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { assertSsrfSafe } from '@/lib/security/untrusted'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { assertWithinBudget, recordSpend } from '@/lib/harness/spend'
 import OpenAI from 'openai'
@@ -261,8 +262,33 @@ function heuristicVerification(html: string, url: string, domain: string): Omit<
   }
 }
 
+/** Redirect hops allowed while verifying a career page. http -> https -> www. */
+const MAX_VERIFY_REDIRECTS = 3
+
 export async function POST(request: NextRequest) {
   try {
+    // AUTHENTICATE BEFORE FETCHING ANYTHING.
+    //
+    // This route takes a URL from the request body and fetches it. Until now
+    // the only auth.getUser() call sat AFTER that fetch, where it decided
+    // whether to also run AI analysis — so an entirely UNAUTHENTICATED POST
+    // could make this server issue an arbitrary GET and read back a verdict on
+    // what came out. That is a server-side request forgery with a result
+    // oracle, reachable by anyone who can reach the deployment: point it at
+    // 169.254.169.254 or at an internal service and the response tells you
+    // whether it answered and roughly what it said.
+    //
+    // Authentication is not itself the SSRF fix (the guard below is), but an
+    // unauthenticated fetch primitive should not exist at all, and moving this
+    // up costs nothing: every real caller is a signed-in user adding a company.
+    const authClient = await createClient()
+    const {
+      data: { user: requestingUser },
+    } = await authClient.auth.getUser()
+    if (!requestingUser) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     const body = await request.json()
     const { url } = body
 
@@ -314,29 +340,76 @@ export async function POST(request: NextRequest) {
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15',
     ]
 
+    // ONLY http(s). Without this, `file:`, `gopher:` and friends are reachable
+    // through the same primitive, and some of them read local disk.
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      return NextResponse.json({
+        isValid: false,
+        status: 'invalid_url',
+        message: 'Only http and https URLs can be verified.',
+        companyName: null,
+        logoUrl: null,
+        jobCount: 0,
+        confidence: 0,
+        aiVerified: false,
+      } satisfies VerificationResult)
+    }
+
     for (const ua of userAgents) {
       try {
         const controller = new AbortController()
         const timeout = setTimeout(() => controller.abort(), 12000)
 
-        const res = await fetch(normalizedUrl, {
-          signal: controller.signal,
-          headers: {
-            'User-Agent': ua,
-            'Accept': 'text/html,application/xhtml+xml',
-            'Accept-Language': 'en-US,en;q=0.9',
-          },
-          redirect: 'follow',
-        })
+        // Follow redirects BY HAND so every hop is checked.
+        //
+        // `redirect: 'follow'` validated nothing: the caller's URL could be a
+        // perfectly ordinary public host that 302s straight to
+        // http://169.254.169.254/latest/meta-data/, and the fetch would take
+        // that hop without anything looking at it. assertSsrfSafe resolves the
+        // name and refuses loopback, link-local, RFC1918 and cloud-metadata
+        // addresses — which is also what stops a public hostname whose DNS
+        // record simply POINTS at a private address, the case a hostname
+        // allowlist can never catch.
+        //
+        // Its limits are documented in lib/security/untrusted.ts: the check
+        // resolves DNS itself and the fetch resolves again, so a resolver that
+        // answers differently between the two can still slip through. Closing
+        // that needs a connection pinned to the verified address.
+        let target = normalizedUrl
+        let res: Response | null = null
+
+        for (let hop = 0; hop <= MAX_VERIFY_REDIRECTS; hop++) {
+          await assertSsrfSafe(target)
+          const hopRes = await fetch(target, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': ua,
+              'Accept': 'text/html,application/xhtml+xml',
+              'Accept-Language': 'en-US,en;q=0.9',
+            },
+            redirect: 'manual',
+          })
+          if (hopRes.status >= 300 && hopRes.status < 400) {
+            const location = hopRes.headers.get('location')
+            if (!location) break
+            target = new URL(location, target).toString()
+            continue
+          }
+          res = hopRes
+          break
+        }
 
         clearTimeout(timeout)
 
-        if (res.ok) {
+        if (res?.ok) {
           html = await res.text()
           fetchSuccess = true
           break
         }
       } catch {
+        // Includes an SSRF refusal. Falls through to the same "could not fetch"
+        // path as a timeout, so the response body does not become an oracle
+        // distinguishing "blocked" from "unreachable".
         continue
       }
     }

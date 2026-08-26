@@ -1,159 +1,111 @@
+// POST /api/agents/analyze — AI insights for ONE job.
+//
+// HONESTY CONTRACT: this route returns analysis the model actually produced
+// about this job, or it returns an error saying why it could not. There is no
+// third option — see lib/harness/agents/analyst.ts's own header for the full
+// history (a deleted createFallbackResponse() used to answer a parse failure
+// with hardcoded generic advice in the shape of a real analysis).
+//
+// Everything that used to live here — building a Job/Company/UserProfile out
+// of three separate reads, constructing a provider client, and the hand-
+// placed assertWithinBudget/recordSpend this route needed because that
+// client bypassed callLlm entirely — is gone. lib/graph/oneshot.ts#
+// runUnitOnce -> lib/graph/unit.ts#runAgentUnit('analyst') now does the DB
+// reads, the metered/demo-gated model call, and the journaling; this route's
+// only job is auth, the jobId check, and translating whatever the unit threw
+// into the HTTP shape components/jobs/job-detail-modal.tsx already reads.
+
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getDecryptedApiKeys } from '@/lib/apikeys'
-import { AnalystAgent } from '@cello/agents'
-import type { Company, Job, UserProfile, UserPreferences, MatchDetails, Database } from '@cello/shared'
+import { createAdminClient } from '@/lib/harness/supabase-admin'
+import { runUnitOnce } from '@/lib/graph/oneshot'
+import { AnalystError, type AnalystErrorCode } from '@/lib/harness/agents/analyst'
+import { BudgetCapError } from '@/lib/harness/spend'
 
-type ProfileRow = Database['public']['Tables']['profiles']['Row']
-type JobRow = Database['public']['Tables']['jobs']['Row']
-type CompanyRow = Database['public']['Tables']['companies']['Row']
+export const dynamic = 'force-dynamic'
+export const maxDuration = 60
+
+/**
+ * HTTP status per cause. Split by whose problem it is: 400 when the user has
+ * something to fix (no resume, no/bad key), 429 when they must wait (rate
+ * limit), 502 when the model answered with something unusable — that last
+ * group is OUR failure and must never be dressed up as a result.
+ */
+const STATUS_BY_CODE: Record<AnalystErrorCode, number> = {
+  no_resume: 400,
+  no_api_key: 400,
+  provider_auth: 400,
+  rate_limited: 429,
+  provider_error: 502,
+  empty_response: 502,
+  unparseable_response: 502,
+  incomplete_response: 502,
+}
+
+/** Causes whose fix lives in Settings, flagged so the UI can offer that link
+ *  next to the retry — clicking retry changes nothing until the key is fixed. */
+const NEEDS_KEY: ReadonlySet<AnalystErrorCode> = new Set<AnalystErrorCode>(['no_api_key', 'provider_auth'])
+
+function failureResponse(failure: AnalystError) {
+  console.error('[analyze] analysis failed', { code: failure.code, providerStatus: failure.providerStatus })
+  return NextResponse.json(
+    {
+      error: failure.message,
+      reason: failure.code,
+      retryable: failure.retryable,
+      ...(NEEDS_KEY.has(failure.code) ? { needsKey: true } : {}),
+    },
+    { status: STATUS_BY_CODE[failure.code] ?? 500 }
+  )
+}
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  // Only select columns that actually exist. This previously asked for
-  // `resume_embedding` and `api_keys` — NEITHER is a real column (pgvector was
-  // never installed, and keys live encrypted at preferences.api_keys). PostgREST
-  // failed the whole select with 42703, so `profile` came back null and the
-  // route reported "No resume uploaded" to users who had a resume on file.
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('full_name, resume_text, preferences')
-    .eq('id', user.id)
-    .single()
-
-  if (profileError) {
-    console.error('analyze: profile load failed', profileError)
-    return NextResponse.json({ error: 'Could not load your profile' }, { status: 500 })
-  }
-
-  const typedProfile = profile as Pick<ProfileRow, 'full_name' | 'resume_text' | 'preferences'> | null
-
-  // Parse request body
   const body = await request.json()
   const { jobId } = body
-
-  if (!jobId) {
+  if (!jobId || typeof jobId !== 'string') {
     return NextResponse.json({ error: 'jobId is required' }, { status: 400 })
   }
 
-  // Fetch job with company info
-  const { data: job, error: jobError } = await supabase
-    .from('jobs')
-    .select('*, companies(*)')
-    .eq('id', jobId)
-    .single()
-
-  const typedJob = job as (JobRow & { companies: CompanyRow | null }) | null
-
-  if (jobError || !typedJob) {
-    return NextResponse.json({ error: 'Job not found' }, { status: 404 })
-  }
-
-  if (!typedProfile?.resume_text) {
-    return NextResponse.json({ error: 'No resume uploaded' }, { status: 400 })
-  }
-
-  // Keys are encrypted under preferences.api_keys; getDecryptedApiKeys is the
-  // one supported reader for request context.
-  const decrypted = await getDecryptedApiKeys(user.id)
-  const apiKeys = {
-    openai: decrypted.openai,
-    anthropic: decrypted.anthropic,
-    openrouter: decrypted.openrouter,
-  }
-
-  if (!apiKeys.openai && !apiKeys.anthropic && !apiKeys.openrouter) {
-    return NextResponse.json(
-      { error: 'Add an OpenRouter API key in Settings → API keys to generate AI insights.' },
-      { status: 400 }
-    )
-  }
+  const admin = createAdminClient()
 
   try {
-    const agent = new AnalystAgent()
-
-    // Build user profile
-    const userProfile: UserProfile = {
-      id: user.id,
-      email: user.email!,
-      fullName: typedProfile.full_name,
-      avatarUrl: null,
-      resumeText: typedProfile.resume_text,
-      // pgvector is not installed in this project; no embedding is stored.
-      resumeEmbedding: null,
-      preferences: typedProfile.preferences as UserPreferences | null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }
-
-    // Build job object
-    const jobObj: Job = {
-      id: typedJob.id,
-      companyId: typedJob.company_id,
-      title: typedJob.title,
-      description: typedJob.description,
-      url: typedJob.url,
-      location: typedJob.location,
-      salaryRange: typedJob.salary_range,
-      jobType: typedJob.job_type,
-      postedAt: typedJob.posted_at ? new Date(typedJob.posted_at) : null,
-      discoveredAt: new Date(typedJob.discovered_at),
-      matchScore: typedJob.match_score,
-      matchDetails: typedJob.match_details as MatchDetails | null,
-      isNew: typedJob.is_new,
-    }
-
-    // Build company object if available
-    let companyObj: Company | undefined
-    if (typedJob.companies) {
-      const company = typedJob.companies
-      companyObj = {
-        id: company.id,
-        userId: company.user_id,
-        name: company.name,
-        domain: company.domain,
-        logoUrl: company.logo_url,
-        careerUrl: company.career_url,
-        scrapeFrequency: company.scrape_frequency,
-        lastScrapedAt: company.last_scraped_at ? new Date(company.last_scraped_at) : null,
-        isDreamCompany: company.is_dream_company,
-        notes: company.notes,
-        createdAt: new Date(company.created_at),
-      }
-    }
-
-    // Execute analysis using agent context
-    const result = await agent.execute({
-      user: userProfile,
-      jobs: [jobObj],
-      companies: companyObj ? [companyObj] : undefined,
-      apiKeys,
+    const result = await runUnitOnce('analyst', {
+      admin,
+      userId: user.id,
+      goal: `Analyze job ${jobId}`,
+      input: { jobId },
     })
-
-    if (!result.success || !result.data) {
+    // AnalystOutput is exactly {summary, talkingPoints, companyInsights,
+    // interviewTips} — the response IS the unit's output, unwrapped.
+    return NextResponse.json(result.output)
+  } catch (error) {
+    // The cap is an answer, not a crash: the user is told they are out of
+    // allowance, with the same 429 the rest of the product uses.
+    if (error instanceof BudgetCapError) {
       return NextResponse.json(
-        { error: result.error || 'Analysis failed' },
-        { status: 500 }
+        { error: error.message, reason: 'spend_cap', retryable: false, budgetExhausted: true },
+        { status: 429 }
       )
     }
-
-    return NextResponse.json({
-      summary: result.data.summary,
-      talkingPoints: result.data.talkingPoints,
-      companyInsights: result.data.companyInsights,
-      interviewTips: result.data.interviewTips,
-    })
-  } catch (error) {
+    if (error instanceof AnalystError) {
+      return failureResponse(error)
+    }
+    // Unclassified — a schema-validation failure, a journal write error, an
+    // unexpected throw. Never dressed up as a result.
     console.error('Analyze error:', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to analyze job' },
-      { status: 500 }
+      {
+        error: error instanceof Error ? error.message : 'Failed to analyze job',
+        reason: 'provider_error' satisfies AnalystErrorCode,
+        retryable: true,
+      },
+      { status: 502 }
     )
   }
 }

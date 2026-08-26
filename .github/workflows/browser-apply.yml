@@ -1,0 +1,124 @@
+name: Browser Apply - Assisted Apply Runner
+
+# Runs ONE phase (fill or submit) of assisted apply for ONE draft, dispatched
+# by the app itself:
+#   - phase=fill:   app/api/apply/prepare, on the user opening "Fill with
+#                    browser" on a pending_review draft.
+#   - phase=submit: app/api/apply/confirm, ONLY on the human's own click on
+#                    an approved, freshly-reviewed draft (ruling 8 — see that
+#                    route's header for why it is the sole dispatcher).
+#
+# WHY THE DISPATCH INPUTS ARE draft_id + phase ONLY, NEVER A SECRET
+#   GitHub prints every workflow_dispatch input in the run's own log and in
+#   the Actions API response, in plain text, to anyone who can see the run.
+#   draft_id (an opaque uuid) and phase ('fill'|'submit') are both fine to
+#   appear there. Nothing this job needs that IS secret — the browser-runner
+#   identity (BROWSER_RUNNER_SECRET) and the actual credential/profile bundle
+#   — ever travels through an input; the secret lives in this workflow's own
+#   environment (a repo secret, see below) and the bundle is fetched over an
+#   authenticated HTTPS call from inside the job
+#   (packages/scrapers/src/apply_common.py#fetch_bundle). See
+#   supabase/migrations/20260819000003_assisted_apply.sql and
+#   lib/ats-apply/phase-tokens.ts for the full authorization design.
+#
+# SECRETS THIS WORKFLOW NEEDS (repo Settings -> Secrets and variables ->
+# Actions):
+#   BROWSER_RUNNER_SECRET  — shared with the app's BROWSER_RUNNER_SECRET env
+#                            var; proves "this is our GitHub Actions job" to
+#                            app/api/apply/bundle and app/api/apply/state.
+#   OPENROUTER_API_KEY     — same key the rest of this repo's scraping tier
+#                            already uses (scrape.yml), for browser-use's LLM
+#                            agent.
+# VARIABLES (Settings -> Actions -> Variables), same pattern
+# harness-cron.yml/autopilot-cron.yml use for their own target URL:
+#   APP_BASE_URL — defaults to prod, overridable per deployment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft_id:
+        description: 'application_drafts.id to run this phase for'
+        required: true
+        type: string
+      phase:
+        description: 'Which phase to run'
+        required: true
+        type: choice
+        options:
+          - fill
+          - submit
+
+# One run per draft at a time — a fill and a submit racing on the same draft
+# would both be reading/writing application_drafts underneath each other.
+concurrency:
+  group: browser-apply-${{ inputs.draft_id }}
+  cancel-in-progress: false
+
+jobs:
+  fill:
+    if: inputs.phase == 'fill'
+    name: Fill (draft ${{ inputs.draft_id }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies (with browser extra)
+        run: |
+          cd packages/scrapers
+          pip install -e ".[browser]"
+
+      - name: Install Playwright's Chromium
+        run: |
+          cd packages/scrapers
+          playwright install --with-deps chromium
+
+      - name: Run fill
+        env:
+          DRAFT_ID: ${{ inputs.draft_id }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL || 'https://cello-two.vercel.app' }}
+          BROWSER_RUNNER_SECRET: ${{ secrets.BROWSER_RUNNER_SECRET }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          cd packages/scrapers
+          python -m src.apply_fill
+
+  submit:
+    if: inputs.phase == 'submit'
+    name: Submit (draft ${{ inputs.draft_id }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies (with browser extra)
+        run: |
+          cd packages/scrapers
+          pip install -e ".[browser]"
+
+      - name: Install Playwright's Chromium
+        run: |
+          cd packages/scrapers
+          playwright install --with-deps chromium
+
+      - name: Run submit
+        env:
+          DRAFT_ID: ${{ inputs.draft_id }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL || 'https://cello-two.vercel.app' }}
+          BROWSER_RUNNER_SECRET: ${{ secrets.BROWSER_RUNNER_SECRET }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          cd packages/scrapers
+          python -m src.apply_submit

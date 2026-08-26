@@ -16,6 +16,7 @@ import type { AgentFn } from '../types'
 import { EnricherInput } from '../schemas'
 import { readOutreachConfig } from '@/lib/outreach/config'
 import { findContacts } from '@/lib/outreach/hunter'
+import { chunkedIn } from '@/lib/supabase/chunked-in'
 
 const PERSONAL_DOMAINS = new Set([
   'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com',
@@ -52,11 +53,15 @@ export const enricher: AgentFn = async (ctx) => {
   const companyIds = new Set<string>(input.companyIds ?? [])
   const jobToCompany = new Map<string, string>()
   if (input.jobIds && input.jobIds.length > 0) {
-    const { data: jobs } = await ctx.admin
-      .from('jobs')
-      .select('id, company_id')
-      .in('id', input.jobIds)
-    for (const j of (jobs as { id: string; company_id: string }[]) ?? []) {
+    // input.jobIds is caller-supplied (EnricherInput has no max length) — an
+    // explicit id subset, not an ownership fence, so it's chunked rather than
+    // joined; no caller sends more than a handful today, but nothing in the
+    // schema stops one from growing past the URL length limit.
+    const jobs = await chunkedIn(input.jobIds, async (chunk) => {
+      const { data } = await ctx.admin.from('jobs').select('id, company_id').in('id', chunk)
+      return (data as { id: string; company_id: string }[]) ?? []
+    })
+    for (const j of jobs) {
       if (j.company_id) {
         companyIds.add(j.company_id)
         jobToCompany.set(j.id, j.company_id)
@@ -68,12 +73,10 @@ export const enricher: AgentFn = async (ctx) => {
     return { output: { enriched: [] }, tokensUsed: 0 }
   }
 
-  const { data: companyData } = await ctx.admin
-    .from('companies')
-    .select('id, name, domain')
-    .eq('user_id', ctx.userId)
-    .in('id', Array.from(companyIds))
-  const companies = (companyData as CompanyRow[]) ?? []
+  const companies = await chunkedIn(Array.from(companyIds), async (chunk) => {
+    const { data } = await ctx.admin.from('companies').select('id, name, domain').eq('user_id', ctx.userId).in('id', chunk)
+    return (data as CompanyRow[]) ?? []
+  })
   const companyById = new Map(companies.map((c) => [c.id, c]))
 
   // 2) Load the user's OWN contacts once.

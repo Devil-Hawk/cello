@@ -1,0 +1,56 @@
+name: Gmail Cron - Scheduled Sync
+
+# Drives Gmail sync on a schedule instead of only on a dashboard button click:
+# for every user with "Monitor mailbox" enabled AND a stored refresh token
+# (see lib/gmail/token.ts's header), this mines their inbox for
+# job-application email the same way the "Sync now" card does
+# (lib/gmail/sync-core.ts — the exact per-user pipeline, reused not forked).
+#
+# Guarded by the CRON_SECRET repo secret (must match the CRON_SECRET env var
+# on the Vercel deployment — the same secret autopilot-cron.yml/
+# harness-cron.yml use). Target URL defaults to prod but can be overridden
+# with the GMAIL_CRON_URL repo variable (Settings -> Secrets and variables ->
+# Actions -> Variables).
+
+on:
+  schedule:
+    # Hourly, on the quarter hour (offset from scrape.yml/autopilot-cron.yml's
+    # :30 and harness-cron.yml's daily 13:00, so ticks don't pile up).
+    - cron: '15 * * * *'
+  workflow_dispatch:
+
+# Never let two ticks overlap; a single in-flight tick keeps the per-tick cap
+# accounting (and the scannedEmailIds cursor) clean.
+concurrency:
+  group: gmail-cron
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Gmail sync tick
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger Gmail cron
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          CRON_URL: ${{ vars.GMAIL_CRON_URL || 'https://cello-two.vercel.app/api/gmail/cron' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET repo secret is not set"
+            exit 1
+          fi
+          echo "POST $CRON_URL"
+          http_code=$(curl -sS -o /tmp/gmail-cron.out -w '%{http_code}' \
+            -X POST "$CRON_URL" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            --max-time 120)
+          echo "HTTP $http_code"
+          echo "--- response ---"
+          cat /tmp/gmail-cron.out || true
+          echo
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "::error::Gmail cron returned HTTP $http_code"
+            exit 1
+          fi

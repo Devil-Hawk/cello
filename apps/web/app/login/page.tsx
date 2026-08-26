@@ -1,6 +1,7 @@
 'use client'
 
 import { LogoMark } from '@/components/brand/logo'
+import { DemoCodeForm } from '@/components/auth/demo-code-form'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -214,6 +215,12 @@ export default function LoginPage() {
               <p className="text-center text-caption text-muted-foreground">
                 Credentials encrypted. Never sold, never used for training.
               </p>
+
+              {/* Secondary path: a demo code opens an isolated demo workspace,
+                  never anyone's real account. Kept below the trust line and
+                  collapsed by default so it never reads as an alternative way
+                  into your own account. */}
+              <DemoCodeForm />
             </div>
           </div>
         </div>

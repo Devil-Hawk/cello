@@ -13,15 +13,24 @@
 //   gone: the desktop shell is now a full-height left rail plus content, and the
 //   account menu that used to live here moved to the foot of that rail.
 //
-//   It survives below `md` for one reason. The six contextual sub-destinations
-//   (Notifications, Companies, Needs you, Interview prep, Contacts, Insights)
-//   exist only inside the mobile drawer, and this hamburger is the drawer's only
-//   opener — MobileNav's bottom bar carries just the five primary routes. Remove
-//   this and a third of the app becomes unreachable on a phone.
+//   It survives below `md` for one reason. The contextual sub-destinations
+//   (Companies, Needs you, Interview prep, Contacts, Insights) exist only
+//   inside the mobile drawer, and this hamburger is the drawer's only opener —
+//   MobileNav's bottom bar carries just the five primary routes. Remove this
+//   and a third of the app becomes unreachable on a phone.
+//
+// THE BELL
+//   Notifications stopped being a nav destination (see nav-items.ts) and became
+//   the popover in notification-bell.tsx, which is anchored here on phones. It
+//   does NOT resurrect the desktop band: this element is still `md:hidden`, and
+//   the desktop rail mounts its own copy of the bell at its foot (sidebar.tsx).
+//   Only one of the two is ever visible, because exactly one of the two shells
+//   is.
 
 import type { RefObject } from 'react'
 import { Menu } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { NotificationBell } from '@/components/layout/notification-bell'
 
 interface HeaderProps {
   /** Opens the mobile nav drawer (see sidebar.tsx). */
@@ -47,6 +56,11 @@ export function Header({ onOpenNav, menuButtonRef }: HeaderProps) {
       >
         <Menu className="h-[18px] w-[18px]" />
       </Button>
+      {/* Pinned right by `ml-auto` rather than a spacer, so the bar keeps
+          working as a plain flex row if anything is ever added between the
+          two. Opens downward from the top bar, right-aligned to its own edge
+          so a 320px viewport can still show the full popover. */}
+      <NotificationBell className="ml-auto" side="bottom" align="end" />
     </header>
   )
 }

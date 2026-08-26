@@ -15,7 +15,13 @@
 //
 // HOW TO RUN (from apps/web):
 //   RUN_JUDGE_EVALS=1 OPENROUTER_API_KEY=sk-or-... \
+//   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
 //     ./node_modules/.bin/vitest run lib/evals/judged.eval.test.ts
+//
+//   Supabase creds are required as of meteredJudgeClient (Step 3 of the
+//   langgraph port): the judge now pays through the exact same
+//   assertWithinBudget/recordSpend chokepoint every other model path does,
+//   no exception carved for this script — see judge.ts's own header.
 //
 //   Without RUN_JUDGE_EVALS set, every test below reports skipped — this is
 //   the expected, default state (confirmed by running the suite with no env
@@ -23,8 +29,9 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 import type OpenAI from 'openai'
-import { buildJudgeClient, judgeGroundedness, judgeSpecificity } from './judge'
+import { meteredJudgeClient, judgeGroundedness, judgeSpecificity } from './judge'
 import { formatEvalResult } from './harness'
+import { createAdminClient } from '../harness/supabase-admin'
 
 const RUN = Boolean(process.env.RUN_JUDGE_EVALS)
 const HAS_KEY = Boolean(process.env.OPENROUTER_API_KEY)
@@ -80,8 +87,15 @@ describe.skipIf(!RUN)('LLM-as-judge — outreach draft quality (real API calls, 
 
   beforeAll(() => {
     // Guarded so a run with RUN_JUDGE_EVALS set but no key never throws out
-    // of a hook — it.skipIf below turns that into a clean skip instead.
-    if (HAS_KEY) client = buildJudgeClient({ openrouter: process.env.OPENROUTER_API_KEY })
+    // of a hook — it.skipIf below turns that into a clean skip instead. The
+    // userId is a fixed local label, not a real account — this script never
+    // asserts against the ledger, it only needs SOMETHING for
+    // assertWithinBudget/recordSpend to key their profiles lookup on.
+    if (HAS_KEY) {
+      client = meteredJudgeClient(createAdminClient(), 'judged-eval-local-run', {
+        openrouter: process.env.OPENROUTER_API_KEY,
+      })
+    }
   })
 
   it.skipIf(!HAS_KEY)('ranks a generic draft below a genuinely specific one on specificity', async () => {

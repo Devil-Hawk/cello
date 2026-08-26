@@ -27,9 +27,6 @@
       ],
       "@cello/shared": [
         "../../packages/shared/src"
-      ],
-      "@cello/agents": [
-        "../../packages/agents/src"
       ]
     },
     "target": "ES2017"

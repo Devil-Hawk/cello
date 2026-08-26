@@ -99,10 +99,14 @@ const FUTURE_SKEW_MS = 24 * 60 * 60 * 1000
  *  a typo'd year. */
 const EARLIEST_SUBMITTED_AT = new Date('2000-01-01T00:00:00Z').getTime()
 
-const DATA_URL_RE = /^data:image\/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/]+=*)$/i
+// Exported for app/api/apply/state/route.ts, which validates assisted-apply
+// screenshots against the SAME shape/cap as a receipt's confirmation
+// attachment — see supabase/migrations/20260819000003_assisted_apply.sql's
+// header for why screenshots reuse this pattern rather than Storage.
+export const DATA_URL_RE = /^data:image\/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/]+=*)$/i
 
 /** Estimated decoded byte size of a base64 payload, without allocating a Buffer. */
-function base64ByteSize(base64: string): number {
+export function base64ByteSize(base64: string): number {
   const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0
   return Math.floor((base64.length * 3) / 4) - padding
 }

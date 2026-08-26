@@ -9,8 +9,11 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { classifyJob } from '../jobs/classify'
+import { repairMojibake } from '../jobs/mojibake'
 import type { JobLead, SourceAdapter, SourceId, SourceQuery } from './types'
 import { rankAndLimit, sanitizeLeads } from './util'
+import { ownedJobsQuery } from '../harness/agents/matcher'
+import { normalizeCompanyName, resolveCompany, scanMergeCandidates, type ResolvedCompany } from '../entities/companies'
 
 import { themuse } from './themuse'
 import { arbeitnow } from './arbeitnow'
@@ -118,21 +121,11 @@ export interface IngestResult {
   errors: string[]
 }
 
-interface CompanyRow {
-  id: string
-  name: string
-  domain: string | null
-}
-
-/** Normalize a company name for matching (lowercase, strip suffixes/punctuation). */
-export function normalizeCompanyName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[.,]/g, ' ')
-    .replace(/\b(inc|llc|ltd|limited|gmbh|corp|co|company|the)\b/g, ' ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-}
+// Re-exported for backward compatibility — the identity chokepoint
+// (lib/entities/companies.ts) is now its canonical home, since resolveCompany
+// and scanMergeCandidates need it too and this module depends on THAT one
+// (not the other way around, which would cycle).
+export { normalizeCompanyName } from '../entities/companies'
 
 function faviconUrl(domain: string): string {
   return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`
@@ -157,22 +150,59 @@ export async function ingestLeads(
   }
   if (leads.length === 0) return result
 
-  // 1. Existing companies for this user → name/domain lookup maps.
-  const byName = new Map<string, CompanyRow>()
-  const byDomain = new Map<string, CompanyRow>()
-  {
-    const { data, error } = await admin
-      .from('companies')
-      .select('id, name, domain')
-      .eq('user_id', userId)
-    if (error) {
-      result.errors.push(`load companies: ${error.message}`)
-    }
-    for (const c of (data ?? []) as CompanyRow[]) {
-      byName.set(normalizeCompanyName(c.name), c)
-      if (c.domain) byDomain.set(c.domain.toLowerCase().replace(/^www\./, ''), c)
+  // 0. Repair mojibake on every text field, for every adapter, in one place.
+  //
+  //    stripHtml() already covers descriptions, but company and title are only
+  //    .trim()ed by the adapters — which is how "UniversitÃ© de Bordeaux" and
+  //    "CoâStar" reached the companies table as employer names, and a company
+  //    name is not a cosmetic field: it is what the user reads on the row, what
+  //    dedupe keys off, and what outreach addresses. Doing it HERE rather than
+  //    in each of the twelve adapters means a new adapter inherits the repair
+  //    instead of having to remember it.
+  //
+  //    repairMojibake only rewrites text carrying the corruption signature and
+  //    leaves correct text untouched, so this is safe to apply blanket-wise.
+  //    See lib/jobs/mojibake.ts.
+  leads = leads.map((lead) => ({
+    ...lead,
+    company: repairMojibake(lead.company),
+    title: repairMojibake(lead.title),
+    location: repairMojibake(lead.location),
+    description: repairMojibake(lead.description),
+  }))
+
+  // 1. Resolve every distinct company named in this batch through the
+  //    identity chokepoint (lib/entities/companies.ts) instead of a
+  //    per-request map rebuilt from a raw name/domain scan — a company that
+  //    was merged into a survivor resolves straight to the survivor, so a
+  //    later ingest never recreates the duplicate. One resolveCompany() call
+  //    per DISTINCT company in the batch (deduped below), run in parallel —
+  //    not per-lead, and not a single all-companies-for-user fetch.
+  interface LeadCompany {
+    name: string
+    domain: string | null
+    /** The specific lead's own URL — see the create-if-absent comment below for why. */
+    careerUrl: string
+  }
+  const distinct = new Map<string, LeadCompany>() // normalizeCompanyName(name) -> company
+  for (const lead of leads) {
+    const norm = normalizeCompanyName(lead.company)
+    if (!norm) continue
+    const domain = lead.companyDomain?.toLowerCase().replace(/^www\./, '') || null
+    if (!distinct.has(norm)) {
+      distinct.set(norm, { name: lead.company.trim().slice(0, 200), domain, careerUrl: lead.url })
+    } else if (domain && !distinct.get(norm)!.domain) {
+      distinct.get(norm)!.domain = domain // upgrade with a domain if a later lead has one
     }
   }
+
+  const resolved = new Map<string, ResolvedCompany>() // norm -> company
+  await Promise.all(
+    [...distinct.entries()].map(async ([norm, c]) => {
+      const match = await resolveCompany(admin, userId, { name: c.name, domain: c.domain ?? undefined })
+      if (match) resolved.set(norm, match)
+    })
+  )
 
   // 2. Create any companies we don't have yet (deduped across the batch).
   //
@@ -184,62 +214,67 @@ export async function ingestLeads(
   // scraper at homepages and produced nav-link garbage ("epias GmbH").
   // Instead career_url is the specific lead's own URL — a real page that
   // exists, not a guess.
-  interface PendingCompany {
-    name: string
-    domain: string | null
-    career_url: string
-  }
-  const pending = new Map<string, PendingCompany>()
-  for (const lead of leads) {
-    const norm = normalizeCompanyName(lead.company)
-    if (!norm) continue
-    const domain = lead.companyDomain?.toLowerCase().replace(/^www\./, '') || null
-    if (byName.has(norm) || (domain && byDomain.has(domain))) continue
-    if (!pending.has(norm)) {
-      pending.set(norm, {
-        name: lead.company.trim().slice(0, 200),
-        domain,
-        career_url: lead.url,
-      })
-    } else if (domain && !pending.get(norm)!.domain) {
-      pending.get(norm)!.domain = domain // upgrade with a domain if a later lead has one
-    }
-  }
-
-  if (pending.size > 0) {
-    const rows = [...pending.values()].map((c) => ({
+  const toCreate = [...distinct.entries()].filter(([norm]) => !resolved.has(norm))
+  if (toCreate.length > 0) {
+    const rows = toCreate.map(([norm, c]) => ({
       user_id: userId,
       name: c.name,
+      name_key: norm,
       domain: c.domain,
-      career_url: c.career_url,
+      career_url: c.careerUrl,
       logo_url: c.domain ? faviconUrl(c.domain) : null,
       metadata: { suggested: true },
     }))
-    const { data, error } = await admin.from('companies').insert(rows).select('id, name, domain')
+    // ignoreDuplicates + idx_companies_user_name_key_unique (migration
+    // 20260816000002): a concurrent ingestLeads for the same user racing this
+    // one creates its row first, this upsert silently skips that norm instead
+    // of inserting a second live company for it — the check-then-insert race
+    // a plain .insert() couldn't close. Skipped norms come back re-resolved
+    // below so their leads still attach to the row that won.
+    const { data, error } = await admin
+      .from('companies')
+      .upsert(rows, { onConflict: 'user_id,name_key', ignoreDuplicates: true })
+      .select('id, name, domain, name_key')
     if (error) {
       result.errors.push(`create companies: ${error.message}`)
     } else {
-      const created = (data ?? []) as CompanyRow[]
+      const created = (data ?? []) as { id: string; name: string; domain: string | null; name_key: string }[]
       result.createdCompanies = created.length
-      for (const c of created) {
-        byName.set(normalizeCompanyName(c.name), c)
-        if (c.domain) byDomain.set(c.domain.toLowerCase().replace(/^www\./, ''), c)
+      for (const c of created) resolved.set(c.name_key, { id: c.id, name: c.name, domain: c.domain })
+
+      const stillMissing = toCreate.filter(([norm]) => !resolved.has(norm))
+      if (stillMissing.length > 0) {
+        await Promise.all(
+          stillMissing.map(async ([norm, c]) => {
+            const match = await resolveCompany(admin, userId, { name: c.name, domain: c.domain ?? undefined })
+            if (match) resolved.set(norm, match)
+          })
+        )
+      }
+
+      // Enqueue a merge-candidate scan now that new companies exist — a
+      // best-effort background step (identical semantics to how the rest of
+      // this function collects errors instead of throwing): a scan failure
+      // must never fail the ingest that already committed real job rows.
+      try {
+        await scanMergeCandidates(admin, userId)
+      } catch (e) {
+        result.errors.push(`scan merge candidates: ${errMsg(e)}`)
       }
     }
   }
 
   // 3. Existing jobs (by external_id AND url) across the user's companies.
-  const companyIds = [...new Set([...byName.values()].map((c) => c.id))]
+  const companyIds = [...new Set([...resolved.values()].map((c) => c.id))]
   const existing = new Map<string, string>() // dedup-key -> job id
   if (companyIds.length > 0) {
-    const { data, error } = await admin
-      .from('jobs')
-      .select('id, external_id, url')
-      .in('company_id', companyIds)
+    // Ownership via the companies FK join (ownedJobsQuery), not an
+    // .in('company_id', companyIds) array — that breaks past ~600 companies.
+    const { data, error } = await ownedJobsQuery(admin, userId, 'id, external_id, url, companies!inner(user_id)')
     if (error) {
       result.errors.push(`load jobs: ${error.message}`)
     }
-    for (const j of (data ?? []) as { id: string; external_id: string | null; url: string | null }[]) {
+    for (const j of (data ?? []) as unknown as { id: string; external_id: string | null; url: string | null }[]) {
       if (j.external_id) existing.set(j.external_id, j.id)
       if (j.url) existing.set(j.url, j.id)
     }
@@ -251,7 +286,7 @@ export async function ingestLeads(
   const toInsert: Record<string, unknown>[] = []
   for (const lead of leads) {
     const norm = normalizeCompanyName(lead.company)
-    const company = byName.get(norm)
+    const company = resolved.get(norm)
     if (!company) continue // company creation failed
     const existingId = existing.get(lead.externalId) ?? existing.get(lead.url)
     if (existingId) {

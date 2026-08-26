@@ -24,6 +24,14 @@ export interface ConversationRow {
    * simply omit the column; callers should read it as `Boolean(row.bypass_mode)`.
    */
   bypass_mode?: boolean
+  /**
+   * The LangGraph thread (graph_threads.thread_id) backing this conversation
+   * — see supabase/migrations/20260817000004_runs_thread_link.sql. Optional
+   * for the same reason bypass_mode is: a row read before that migration
+   * lands simply omits the column. NULL until lib/graph/copilot.ts's
+   * beginTurn links it on the conversation's first turn.
+   */
+  thread_id?: string | null
   created_at: string
   updated_at: string
 }

@@ -15,6 +15,7 @@ import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { loadApiKeys } from '@/lib/harness/keys'
 import { generateDossier } from '@/lib/harness/agents/company_researcher'
 import { getDossierByCompany, withDisplaySummaryStatus } from '@/lib/dossier/store'
+import { resolveCompanyId } from '@/lib/entities/companies'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -47,7 +48,12 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const companyId = params.id
+  const admin = createAdminClient()
+  // A merge is pure indirection (companies.canonical_id) — a stale/duplicate
+  // id in the URL must still land on the survivor's ONE dossier row, not
+  // regenerate a second, orphaned one keyed to the duplicate. See
+  // lib/entities/companies.ts.
+  const companyId = await resolveCompanyId(admin, params.id)
 
   // RLS-scoped read of the company + its jobs (only the owner sees them).
   const { data: company } = await supabase
@@ -63,7 +69,6 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
     .eq('company_id', companyId)
   const jobs = (jobsData as { salary_range: string | null; title: string | null }[]) ?? []
 
-  const admin = createAdminClient()
   const apiKeys = await loadApiKeys(admin, user.id)
 
   try {

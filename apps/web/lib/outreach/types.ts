@@ -9,6 +9,14 @@ export type OutreachStatus =
 
 export type OutreachKind = 'initial' | 'follow_up'
 
+/**
+ * Coarse polarity for an inbound reply, per supabase/migrations/
+ * 20260818000003_outreach_reply_outcome.sql's CHECK constraint. Deliberately
+ * NOT the job-application stage vocabulary (ApplicationStatus) — see
+ * lib/gmail/stage.ts#classifyReply, the single writer of this column.
+ */
+export type ReplyClassification = 'positive' | 'neutral' | 'negative' | 'bounce'
+
 /** Row shape of public.outreach_messages (hand-declared; not in Database type). */
 export interface OutreachMessageRow {
   id: string
@@ -28,6 +36,11 @@ export interface OutreachMessageRow {
   gmail_thread_id: string | null
   error: string | null
   sent_at: string | null
+  /** When an inbound reply was matched to this thread. NULL = no reply yet. */
+  replied_at: string | null
+  /** Gmail message id of the reply. NULL until replied_at is set. */
+  reply_gmail_message_id: string | null
+  reply_classification: ReplyClassification | null
   created_at: string
   updated_at: string
 }

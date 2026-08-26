@@ -38,9 +38,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Cannot reject an already-submitted application' }, { status: 409 })
   }
 
+  const now = new Date().toISOString()
   const { error: updErr } = await admin
     .from('application_drafts')
-    .update({ status: 'rejected', updated_at: new Date().toISOString() })
+    .update({ status: 'rejected', reviewed_at: now, updated_at: now })
     .eq('id', draftId)
     .eq('user_id', user.id)
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 })

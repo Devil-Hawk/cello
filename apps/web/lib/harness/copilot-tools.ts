@@ -15,11 +15,13 @@
 // Tools reuse EXISTING product code (imports only — this file adds no new
 // harness surface): the standalone modules optimizeResume / generateOutreachDraft
 // / generateDossier / generateInterviewKit, the cv_tailor agent (driven via a
-// lightweight in-file StepContext), and runAgentRun for whole-DAG goals.
+// lightweight in-file StepContext), and harnessRunGraph (via invokeGraphForUser)
+// for whole-DAG goals.
 
 import { callLlm } from './llm'
-import { runAgentRun } from './executor'
-import { addStandingPreference, readStandingPreferences } from './standing-preferences'
+import { invokeGraphForUser, type CompiledGraphLike } from '@/lib/graph/invoke'
+import { harnessRunGraph, markRunPausedOnInterrupt } from '@/lib/graph/runs'
+import { ingestInsight, MAX_PREFERENCE_LENGTH } from '../insights/store'
 // Bounded-concurrency fan-out — reused, not reinvented (see
 // docs/REINVENTION-AUDIT.md's concurrency-limiter finding: lib/ats's
 // mapWithConcurrency and lib/harness/executor.ts's private copy are already
@@ -34,7 +36,7 @@ import { generateInterviewKit } from './agents/interview_prep'
 import { cv_tailor } from './agents/cv_tailor'
 import { sourcer } from './agents/sourcer'
 import { runBulkMatch, type BulkMatchResult } from './agents/bulk_matcher'
-import { userCompanyIds, diagnoseCandidateJobs, type CandidateDiagnosis } from './agents/matcher'
+import { userCompanyIds, diagnoseCandidateJobs, ownedJobsQuery, type CandidateDiagnosis } from './agents/matcher'
 import { canRunLlm, missingOpenRouterMessage } from './llm-key-message'
 import { resolveTargeting } from '@/lib/targeting'
 import { formatKbContext, searchKb } from '@/lib/kb/store'
@@ -70,6 +72,7 @@ export {
   type ToolKind,
   type ToolSpec,
 } from './copilot-tool-catalog'
+
 
 // --- Dispatcher --------------------------------------------------------------
 
@@ -308,11 +311,8 @@ async function loadJobBriefs(ctx: CopilotToolContext, jobIds: string[]): Promise
  *  inside runBulkMatch's own selectCandidateJobs (shared with every other
  *  caller) — this is just picking a bounded id list to hand it, not
  *  re-deciding what counts as scoreable. */
-async function pickUnscoredJobIds(ctx: CopilotToolContext, companyIds: string[], limit: number): Promise<string[]> {
-  const { data } = await ctx.admin
-    .from('jobs')
-    .select('id')
-    .in('company_id', companyIds)
+async function pickUnscoredJobIds(ctx: CopilotToolContext, limit: number): Promise<string[]> {
+  const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, 'id, companies!inner(user_id)')
     .is('match_score', null)
     .order('posted_at', { ascending: false, nullsFirst: false })
     .limit(limit)
@@ -354,24 +354,20 @@ export interface ScoringCandidatePick {
  */
 async function pickScoringCandidateIds(
   ctx: CopilotToolContext,
-  companyIds: string[],
   limit: number,
   query: string
 ): Promise<ScoringCandidatePick> {
   const parsed = parseRelevanceQuery(query)
   if (!hasRelevanceTerms(parsed)) {
-    return { jobIds: await pickUnscoredJobIds(ctx, companyIds, limit) }
+    return { jobIds: await pickUnscoredJobIds(ctx, limit) }
   }
 
   const poolSize = Math.min(RELEVANCE_POOL_MAX, Math.max(limit * RELEVANCE_POOL_MULTIPLIER, 100))
-  const { data } = await ctx.admin
-    .from('jobs')
-    .select('id, title, description')
-    .in('company_id', companyIds)
+  const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, 'id, title, description, companies!inner(user_id)')
     .is('match_score', null)
     .order('posted_at', { ascending: false, nullsFirst: false })
     .limit(poolSize)
-  const rows = (data as { id: string; title: string | null; description: string | null }[] | null) ?? []
+  const rows = (data as unknown as { id: string; title: string | null; description: string | null }[] | null) ?? []
 
   const ranked = rankJobsByRelevance(rows, parsed)
   const matched = ranked.filter((r) => r.relevance.score > 0)
@@ -386,7 +382,7 @@ async function pickScoringCandidateIds(
   // dead-ending on an empty batch (PRODUCT-VISION.md #12: re-plan/broaden
   // automatically rather than stopping and asking).
   return {
-    jobIds: await pickUnscoredJobIds(ctx, companyIds, limit),
+    jobIds: await pickUnscoredJobIds(ctx, limit),
     relevance: { query, poolSize: rows.length, matched: 0, broadened: true },
   }
 }
@@ -466,8 +462,32 @@ export async function dispatchTool(ctx: CopilotToolContext, tool: string, args: 
 
 // --- read tools --------------------------------------------------------------
 
+/** Below this many characters, websearch_to_tsquery's stemming/stopword
+ *  handling has too little to work with (and a 1-3 char query is often a typo
+ *  in progress) — go straight to the trgm fallback. See
+ *  20260816000009_job_search.sql's header for why title search needs both. */
+const JOB_TITLE_FTS_MIN_LENGTH = 4
+
+type JobListRow = {
+  id: string
+  title: string | null
+  company_id: string
+  match_score: number | null
+  is_new: boolean | null
+  location: string | null
+  posted_at: string | null
+}
+
+/** trgm-similarity job ids for `query`, ranked best-first, scoped to this
+ *  user via the RPC's own p_user_id predicate (the admin client bypasses RLS,
+ *  same reasoning as every other ownership check in this file). */
+async function searchJobIdsByTitleTrgm(ctx: CopilotToolContext, query: string, limit: number): Promise<string[]> {
+  const { data } = await ctx.admin.rpc('search_jobs_by_title_trgm', { p_user_id: ctx.userId, p_query: query, p_limit: limit })
+  return ((data as { job_id: string }[] | null) ?? []).map((r) => r.job_id)
+}
+
 async function listJobs(ctx: CopilotToolContext, args: Args) {
-  const query = str(args.query)
+  const query = str(args.query).trim()
   const dreamOnly = args.dreamOnly === true
   const fresh = args.fresh === true
   const limit = clampLimit(args.limit, 8, 15)
@@ -481,27 +501,50 @@ async function listJobs(ctx: CopilotToolContext, args: Args) {
   const ids = (dreamOnly ? companyRows.filter((c) => c.is_dream_company) : companyRows).map((c) => c.id)
   if (ids.length === 0) return { jobs: [], note: dreamOnly ? 'No dream companies tracked yet.' : 'No companies tracked yet.' }
 
-  let q = ctx.admin
-    .from('jobs')
-    .select('id, title, company_id, match_score, is_new, location, posted_at')
-    .in('company_id', ids)
-  if (fresh) q = q.eq('is_new', true)
-  if (query) q = q.ilike('title', `%${query}%`)
-  q = q
-    .order('match_score', { ascending: false, nullsFirst: false })
-    .order('posted_at', { ascending: false, nullsFirst: false })
-    .limit(limit)
+  const SELECT = 'id, title, company_id, match_score, is_new, location, posted_at, companies!inner(user_id, is_dream_company)'
+  // Ownership (and, when dreamOnly, the is_dream_company narrowing) is
+  // pushed into the FK join rather than an .in('company_id', ids) array —
+  // ids can run into the hundreds, past the request URL length limit.
+  const baseQuery = () => {
+    let q = ownedJobsQuery(ctx.admin, ctx.userId, SELECT)
+    if (dreamOnly) q = q.eq('companies.is_dream_company', true)
+    if (fresh) q = q.eq('is_new', true)
+    return q
+  }
 
-  const { data: jobs } = await q
-  const rows = (jobs as {
-    id: string
-    title: string | null
-    company_id: string
-    match_score: number | null
-    is_new: boolean | null
-    location: string | null
-    posted_at: string | null
-  }[]) ?? []
+  let rows: JobListRow[] = []
+  if (query && query.length < JOB_TITLE_FTS_MIN_LENGTH) {
+    // Short query — trgm only, ranked by similarity (no match_score/posted_at
+    // reorder: relevance to the typed text IS the ranking the user asked for).
+    const trgmIds = await searchJobIdsByTitleTrgm(ctx, query, limit)
+    if (trgmIds.length > 0) {
+      const { data } = await baseQuery().in('id', trgmIds)
+      const byId = new Map(((data as unknown as JobListRow[]) ?? []).map((j) => [j.id, j]))
+      rows = trgmIds.map((id) => byId.get(id)).filter((r): r is JobListRow => !!r)
+    }
+  } else {
+    let q = baseQuery()
+    if (query) q = q.textSearch('tsv', query, { type: 'websearch', config: 'english' })
+    q = q
+      .order('match_score', { ascending: false, nullsFirst: false })
+      .order('posted_at', { ascending: false, nullsFirst: false })
+      .limit(limit)
+    const { data } = await q
+    rows = (data as unknown as JobListRow[]) ?? []
+
+    // websearch_to_tsquery found nothing — most likely a typo or a term the
+    // stemmer/stopword list didn't help with. Fall back to trgm rather than
+    // reporting an empty result for a query that IS in the data, just
+    // misspelled.
+    if (query && rows.length === 0) {
+      const trgmIds = await searchJobIdsByTitleTrgm(ctx, query, limit)
+      if (trgmIds.length > 0) {
+        const { data: fallbackData } = await baseQuery().in('id', trgmIds)
+        const byId = new Map(((fallbackData as unknown as JobListRow[]) ?? []).map((j) => [j.id, j]))
+        rows = trgmIds.map((id) => byId.get(id)).filter((r): r is JobListRow => !!r)
+      }
+    }
+  }
 
   return {
     count: rows.length,
@@ -605,15 +648,30 @@ async function getApplication(ctx: CopilotToolContext, args: Args) {
   }
 }
 
+const CONTACT_LIST_COLUMNS = 'id, name, email, title, relationship, company_id, last_contact_at'
+
 async function listContacts(ctx: CopilotToolContext, args: Args) {
-  const query = str(args.query)
-  let q = ctx.admin
-    .from('contacts')
-    .select('id, name, email, title, relationship, company_id, last_contact_at')
-    .eq('user_id', ctx.userId)
-  if (query) q = q.ilike('name', `%${query}%`)
-  const { data } = await q.order('last_contact_at', { ascending: false, nullsFirst: false }).limit(25)
-  const rows = (data as unknown[]) ?? []
+  const query = str(args.query).trim()
+  if (!query) {
+    const { data } = await ctx.admin
+      .from('contacts')
+      .select(CONTACT_LIST_COLUMNS)
+      .eq('user_id', ctx.userId)
+      .order('last_contact_at', { ascending: false, nullsFirst: false })
+      .limit(25)
+    const rows = (data as unknown[]) ?? []
+    return { count: rows.length, contacts: rows, note: rows.length === 0 ? 'No contacts saved yet.' : undefined }
+  }
+
+  // trgm similarity, not ILIKE: `ilike('name', '%query%')` is an unindexed
+  // leading-wildcard scan with no ranking — see 20260816000009_job_search.sql.
+  const { data: matches } = await ctx.admin.rpc('search_contacts_by_name_trgm', { p_user_id: ctx.userId, p_query: query, p_limit: 25 })
+  const contactIds = ((matches as { contact_id: string }[] | null) ?? []).map((r) => r.contact_id)
+  if (contactIds.length === 0) return { count: 0, contacts: [], note: 'No contacts saved yet.' }
+
+  const { data } = await ctx.admin.from('contacts').select(CONTACT_LIST_COLUMNS).eq('user_id', ctx.userId).in('id', contactIds)
+  const byId = new Map(((data as { id: string }[] | null) ?? []).map((c) => [c.id, c]))
+  const rows = contactIds.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => !!r)
   return { count: rows.length, contacts: rows, note: rows.length === 0 ? 'No contacts saved yet.' : undefined }
 }
 
@@ -673,41 +731,41 @@ async function checkSponsorship(args: Args) {
 /**
  * Record a standing preference so it survives this conversation.
  *
- * Read-modify-write on profiles.preferences, for the same reason every other
- * writer of that column does it: the blob also holds api_keys, targeting,
- * budget and model, and replacing it wholesale would destroy the user's saved
- * keys. addStandingPreference owns dedupe, the length limit and eviction.
+ * Writes through lib/insights/store.ts#ingestInsight (kind='preference',
+ * source='user_stated') — the ONE door onto public.insights (binding ruling
+ * 3). ingestInsight owns dedupe; the length guard stays here because it is a
+ * UX ceiling on what the MODEL types into this tool, not a property of every
+ * insight (a reward_loop/judge row may legitimately run longer).
  */
 async function doRememberPreference(ctx: CopilotToolContext, args: Args) {
   const text = str(args.text)
   if (!text) return { error: 'text is required — state the preference in one short sentence.' }
+  if (text.length > MAX_PREFERENCE_LENGTH) {
+    return {
+      error: `Keep a preference under ${MAX_PREFERENCE_LENGTH} characters — this one is ${text.length}. Split it or state it more briefly.`,
+    }
+  }
 
-  const { data: profile, error: readError } = await ctx.admin
-    .from('profiles')
-    .select('preferences')
-    .eq('id', ctx.userId)
-    .maybeSingle()
-  if (readError) return { error: `Could not read your profile: ${readError.message}` }
-
-  const prefs = (profile?.preferences ?? {}) as Record<string, unknown>
-  let next
+  let saved
   try {
-    next = addStandingPreference(readStandingPreferences(prefs), text)
+    saved = await ingestInsight(ctx.admin, ctx.userId, { kind: 'preference', statement: text, source: 'user_stated' })
   } catch (e) {
-    // A PreferenceError is actionable feedback for the model (too long, empty),
-    // so it goes back as a tool error it can correct rather than a throw.
+    // An InsightError is actionable feedback for the model, so it goes back
+    // as a tool error it can correct rather than a throw.
     return { error: errMsg(e) }
   }
 
-  const { error: writeError } = await ctx.admin
-    .from('profiles')
-    .update({ preferences: { ...prefs, standingPreferences: next } })
-    .eq('id', ctx.userId)
-  if (writeError) return { error: `Could not save that preference: ${writeError.message}` }
+  const { count, error: countError } = await ctx.admin
+    .from('insights')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', ctx.userId)
+    .eq('kind', 'preference')
+    .eq('status', 'active')
+  if (countError) return { error: `Could not confirm the save: ${countError.message}` }
 
   return {
-    remembered: text,
-    total: next.length,
+    remembered: saved.statement,
+    total: count ?? undefined,
     note: 'Saved. This will be honoured in future conversations without the user restating it.',
   }
 }
@@ -879,7 +937,7 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
   if (explicitIds.length > 0) {
     jobIds = explicitIds
   } else {
-    const picked = await pickScoringCandidateIds(ctx, companyIds, limit, query)
+    const picked = await pickScoringCandidateIds(ctx, limit, query)
     jobIds = picked.jobIds
     relevanceInfo = picked.relevance
   }
@@ -902,13 +960,14 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
   // selectCandidateJobs (inside runBulkMatch) silently drops it from the
   // candidate list — this is what replaces a bare "2 failed" with a real
   // per-job reason (see ScoreJobsReportRow).
-  const diagnosis = await diagnoseCandidateJobs(ctx.admin, jobIds, companyIds, targeting)
+  const diagnosis = await diagnoseCandidateJobs(ctx.admin, jobIds, ctx.userId, targeting)
   const diagnosisById = new Map<string, CandidateDiagnosis>(diagnosis.map((d) => [d.jobId, d]))
 
   let result: BulkMatchResult
   try {
     result = await runBulkMatch({
       admin: ctx.admin,
+      userId: ctx.userId,
       companyIds,
       resume: resumeText,
       targeting,
@@ -1117,17 +1176,9 @@ async function doPrepInterview(ctx: CopilotToolContext, args: Args) {
   const res = await loadOwnedJob(ctx, jobId, 'id, title, description, location, company_id')
   if ('error' in res) return res
 
-  let dossier: { summary?: string | null; signals?: unknown } | null = null
-  if (res.job.company_id) {
-    const { data: d } = await ctx.admin
-      .from('company_dossiers')
-      .select('summary, signals')
-      .eq('company_id', res.job.company_id)
-      .eq('user_id', ctx.userId)
-      .maybeSingle()
-    if (d) dossier = { summary: (d as { summary?: string | null }).summary ?? null, signals: (d as { signals?: unknown }).signals ?? null }
-  }
-
+  // Company/dossier/history/claims context comes from generateInterviewKit's
+  // own buildInterviewContext(admin, userId, companyId) call — no ad-hoc
+  // company_dossiers query here.
   const result = await generateInterviewKit({
     job: {
       id: res.job.id,
@@ -1137,7 +1188,6 @@ async function doPrepInterview(ctx: CopilotToolContext, args: Args) {
       company_id: res.job.company_id ?? null,
     },
     company: { id: res.job.company_id ?? null, name: res.companyName },
-    dossier,
     resumeText,
     admin: ctx.admin,
     userId: ctx.userId,
@@ -1347,19 +1397,36 @@ async function doTriggerRun(ctx: CopilotToolContext, args: Args) {
   // DO NOT AWAIT THE WHOLE RUN.
   //
   // This used to `await runAgentRun(...)`, which blocks the copilot for as long
-  // as the DAG takes — up to the executor's own multi-minute deadline. The
+  // as the DAG takes — up to the graph's own multi-minute deadline. The
   // copilot would spend its entire turn budget sitting here, then have no time
   // left to answer, and fall back to "ask me to continue" while the run was
   // still going. From the user's side that reads as the product hanging and
   // then handing the work back.
   //
   // Start it and report immediately. The run keeps executing while this request
-  // is alive, and if it is cut short it resumes from its completed steps rather
-  // than restarting (see the executor's resumption path), so nothing is lost by
-  // not waiting here.
-  void runAgentRun(ctx.admin, runId).catch((err) => {
-    console.error('[copilot] background agent run failed', runId, err)
-  })
+  // is alive through invokeGraphForUser (same call site as app/api/harness/run
+  // and cron/route.ts — spec binding ruling 7), and if it is cut short it
+  // resumes from its last checkpoint rather than restarting (THE RESUME RULE),
+  // so nothing is lost by not waiting here. A deadline interrupt isn't an
+  // error — markRunPausedOnInterrupt marks the row 'paused' so cron picks it
+  // back up; only a genuine setup failure (thread ownership, checkpointer) is
+  // logged and marked 'failed' so the run never sits stuck at 'queued'.
+  // Cast at the CALL SITE, not a module-scope alias: this file and
+  // lib/graph/runs.ts import each other, and a top-level `const X =
+  // harnessRunGraph` evaluates mid-cycle — a TDZ ReferenceError under Next's
+  // compiled build (vitest's ESM transform never trips it). The cast itself is
+  // type-only: harnessRunGraph's `invoke` input is narrower than
+  // CompiledGraphLike's `unknown`, same cast app/api/harness/run/route.ts uses.
+  void invokeGraphForUser({ admin: ctx.admin, userId: ctx.userId, surface: 'run', graph: harnessRunGraph as unknown as CompiledGraphLike, input: { runId } })
+    .then(({ result }) => markRunPausedOnInterrupt(ctx.admin, runId, result))
+    .catch(async (err) => {
+      console.error('[copilot] background agent run failed', runId, err)
+      const message = err instanceof Error ? err.message : String(err)
+      await ctx.admin
+        .from('agent_runs')
+        .update({ status: 'failed', error: message, finished_at: new Date().toISOString() })
+        .eq('id', runId)
+    })
 
   return {
     runId,

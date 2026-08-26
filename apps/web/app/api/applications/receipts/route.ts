@@ -101,7 +101,8 @@ export async function POST(request: NextRequest) {
     validated,
     // Forced, never trusted from the request body — see this file's header.
     'manual',
-    'user_confirmed'
+    'user_confirmed',
+    application
   )
 
   await syncApplicationFromReceipt(admin, user.id, application, receipt, input.stage)

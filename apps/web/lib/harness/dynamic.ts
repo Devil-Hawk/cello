@@ -1,16 +1,15 @@
-// Harness runtime — dynamic-graph primitives: loop control-flow, fan-out
-// control-flow, the "upstream produced nothing" contract, and a best-effort
-// dependency-output id auto-fill.
+// Harness runtime — dynamic-graph PURE primitives: loop-condition evaluation,
+// fan-out item resolution, the "upstream produced nothing" contract, and a
+// best-effort dependency-output id auto-fill.
 //
 // Everything in this file is DELIBERATELY DB-free and LLM-free (no AdminClient,
-// no ctx.llm) — it's pure orchestration logic parameterized by callbacks. The
-// executor (lib/harness/executor.ts) supplies callbacks that actually touch the
-// database and run agents; a test can supply stub callbacks and exercise the
-// exact same control flow with no live run. See
-// /tmp/cello-work/dynamic-test.ts for that harness.
+// no ctx.llm). The former runLoop/runFanOut DRIVERS that owned the while-loop
+// and bounded-concurrency control flow are gone — lib/graph/runs.ts's
+// entrypoint now IS that control flow (plain TypeScript in the entrypoint
+// body, per the graph-port spec), reusing only the pure helpers below.
 
 import { ZodError } from 'zod'
-import type { LoopCondition, LoopSpec, FanOutSpec, StepAgentType } from './types'
+import type { LoopCondition, FanOutSpec, StepAgentType } from './types'
 
 // --- dot-path + condition evaluation -----------------------------------------
 
@@ -58,7 +57,10 @@ export function evalLoopCondition(output: unknown, cond: LoopCondition): boolean
   return evalCondition(getByPath(output, cond.key), cond.op, cond.value)
 }
 
-function sameValue(a: unknown, b: unknown): boolean {
+/** Exported for reuse by lib/graph/runs.ts's own no-forward-progress check
+ *  (the entrypoint ports runLoop's while-loop as plain TypeScript per the
+ *  graph-port spec, but this comparison itself is exactly this one). */
+export function sameValue(a: unknown, b: unknown): boolean {
   if (a === b) return true
   try {
     return JSON.stringify(a) === JSON.stringify(b)
@@ -67,155 +69,7 @@ function sameValue(a: unknown, b: unknown): boolean {
   }
 }
 
-// --- loop control-flow ---------------------------------------------------
-
-export interface LoopIterationResult<T = unknown> {
-  status: 'completed' | 'failed'
-  output?: T
-  error?: string
-  /** Optional token cost passthrough for the caller's own accounting. */
-  tokens?: number
-}
-
-export type LoopStopReason =
-  | 'condition-met'
-  | 'max-iterations'
-  | 'no-forward-progress'
-  | 'iteration-failed'
-  | 'aborted'
-
-export interface LoopRunResult<T = unknown> {
-  /** 'completed' iff at least one iteration produced usable output. */
-  status: 'completed' | 'failed'
-  finalOutput: T | null
-  iterations: number
-  stopReason: LoopStopReason
-  totalTokens: number
-  history: { iteration: number; status: 'completed' | 'failed'; conditionValue?: unknown }[]
-}
-
-const NOT_SET = Symbol('loop-progress-not-set')
-
-/**
- * Drive a loop spec to completion. `runIteration(iteration, previousOutput)` is
- * called for iteration 1..maxIterations (1-based) until `spec.until` holds
- * against the latest output, the caller signals abort (budget/deadline), or two
- * consecutive iterations produce the identical `until.key` value without
- * meeting the condition (no forward progress — this is what makes an
- * unsatisfiable condition terminate instead of spinning to maxIterations
- * silently forever being "fine"; it still stops at maxIterations regardless).
- */
-export async function runLoop<T = unknown>(
-  spec: LoopSpec,
-  runIteration: (iteration: number, previousOutput: T | null) => Promise<LoopIterationResult<T>>,
-  opts?: { shouldAbort?: () => boolean }
-): Promise<LoopRunResult<T>> {
-  let iteration = 0
-  let finalOutput: T | null = null
-  let totalTokens = 0
-  let prevProgressValue: unknown = NOT_SET
-  const history: LoopRunResult<T>['history'] = []
-
-  while (iteration < spec.maxIterations) {
-    if (opts?.shouldAbort?.()) {
-      return {
-        status: finalOutput !== null ? 'completed' : 'failed',
-        finalOutput,
-        iterations: iteration,
-        stopReason: 'aborted',
-        totalTokens,
-        history,
-      }
-    }
-
-    iteration += 1
-    const result = await runIteration(iteration, finalOutput)
-    totalTokens += result.tokens ?? 0
-
-    if (result.status === 'failed') {
-      history.push({ iteration, status: 'failed' })
-      return {
-        status: finalOutput !== null ? 'completed' : 'failed',
-        finalOutput,
-        iterations: iteration,
-        stopReason: 'iteration-failed',
-        totalTokens,
-        history,
-      }
-    }
-
-    finalOutput = (result.output ?? null) as T | null
-    const conditionValue = getByPath(result.output, spec.until.key)
-    history.push({ iteration, status: 'completed', conditionValue })
-
-    if (evalCondition(conditionValue, spec.until.op, spec.until.value)) {
-      return { status: 'completed', finalOutput, iterations: iteration, stopReason: 'condition-met', totalTokens, history }
-    }
-
-    if (prevProgressValue !== NOT_SET && sameValue(conditionValue, prevProgressValue)) {
-      return {
-        status: 'completed',
-        finalOutput,
-        iterations: iteration,
-        stopReason: 'no-forward-progress',
-        totalTokens,
-        history,
-      }
-    }
-    prevProgressValue = conditionValue
-  }
-
-  return { status: 'completed', finalOutput, iterations: iteration, stopReason: 'max-iterations', totalTokens, history }
-}
-
-// --- fan-out control-flow -----------------------------------------------
-
-export interface FanOutChildResult<T = unknown> {
-  status: 'completed' | 'failed'
-  output?: T
-  error?: string
-  tokens?: number
-}
-
-export interface FanOutRunResult<T = unknown> {
-  total: number
-  completed: number
-  failed: number
-  totalTokens: number
-  results: (FanOutChildResult<T> & { index: number; item: unknown })[]
-}
-
-/**
- * Run `runChild` over `items` with bounded concurrency. A child that throws is
- * caught and recorded as a failed result for THAT index only — siblings keep
- * running (Promise.all over the whole batch would otherwise abort every
- * in-flight child the moment any one throws).
- */
-export async function runFanOut<T = unknown>(
-  items: unknown[],
-  concurrency: number,
-  runChild: (item: unknown, index: number) => Promise<FanOutChildResult<T>>
-): Promise<FanOutRunResult<T>> {
-  const results: FanOutRunResult<T>['results'] = new Array(items.length)
-  let next = 0
-  const workers = Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, async () => {
-    while (true) {
-      const index = next++
-      if (index >= items.length) return
-      const item = items[index]
-      try {
-        const r = await runChild(item, index)
-        results[index] = { ...r, index, item }
-      } catch (e) {
-        results[index] = { status: 'failed', error: e instanceof Error ? e.message : String(e), index, item }
-      }
-    }
-  })
-  await Promise.all(workers)
-  const completed = results.filter((r) => r.status === 'completed').length
-  const totalTokens = results.reduce((sum, r) => sum + (r.tokens ?? 0), 0)
-  return { total: results.length, completed, failed: results.length - completed, totalTokens, results }
-}
+// --- fan-out item resolution ----------------------------------------------
 
 /** Resolve a fanOut spec's item list from the overDep's journaled output. */
 export function resolveFanOutItems(spec: FanOutSpec, deps: Record<string, unknown>): { items: unknown[]; emptyReason?: string } {

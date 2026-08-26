@@ -15,6 +15,19 @@ export interface GmailMessage {
 export interface SyncState {
   lastSyncDate?: string
   scannedEmailIds?: string[]
+  /**
+   * The Google OAuth refresh token for this account's "monitor mailbox"
+   * grant, encrypted with the same helper api_keys uses (lib/crypto.ts).
+   * Captured once, at the OAuth callback that lands with gmail.readonly
+   * newly granted (app/auth/callback/route.ts) — Supabase's own
+   * provider_token dies in about an hour and is never persisted, so this is
+   * the only thing that makes sync possible outside an active browser
+   * session. See lib/gmail/token.ts for how it gets exchanged for an access
+   * token, and how an invalid_grant clears it.
+   */
+  refreshToken?: string
+  /** ISO 8601. Set when Google refuses to refresh the token above (the owner revoked access) — see lib/gmail/token.ts. */
+  revokedAt?: string | null
 }
 
 /** Statuses the classifier can detect from an inbound email. */

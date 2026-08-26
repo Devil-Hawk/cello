@@ -2,17 +2,21 @@
 // OWN Gmail (request context only, where session.provider_token exists).
 //
 // Guards, in order:
+//   (0) demo sessions: a demo reads its digest in-app, never by email
 //   (1) opt-in: preferences.digest.enabled must be true (unless `force`)
 //   (2) once-per-day: preferences.digest.lastSentDate !== today (unless `force`)
-// Both gates are enforced inside composeAndStoreDigest; the digest is stored
-// regardless so the user can always read it in-app. From/To is always the
-// authenticated account — no spoofing, no external recipients.
+// Gates (1) and (2) are enforced inside composeAndStoreDigest; the digest is
+// stored regardless so the user can always read it in-app. From/To is always
+// the authenticated account — no spoofing, no external recipients.
 
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { readProfileForDemoGuards } from '@/lib/harness/keys'
 import { hasGmailPermission } from '@/lib/gmail/permissions'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { composeAndStoreDigest } from '@/lib/harness/agents/digest'
+import { demoSendGate, type DemoProfileFacts } from '@/lib/access/guardrails'
 import { sendGmailMessage } from '@/lib/outreach/gmail'
 
 export const dynamic = 'force-dynamic'
@@ -32,11 +36,36 @@ export async function POST(request: NextRequest) {
   // a preference; without this check revoking it was cosmetic and the next
   // "Approve & send" still delivered mail. A permission the product displays
   // but does not enforce is a promise it does not keep.
-  const { data: sendPerm } = await supabase
-    .from('profiles')
-    .select('preferences')
-    .eq('id', user.id)
-    .single()
+  //
+  // is_demo / demo_expires_at ride along on the read this route was already
+  // doing, so guardrail (0) below costs no extra query. Selected through an
+  // untyped view of the same client because the access-codes migration's
+  // columns are not in @cello/shared's generated Database type yet.
+  const { row: sendPerm } = await readProfileForDemoGuards(
+    supabase as unknown as SupabaseClient,
+    user.id
+  )
+
+  // Guardrail (0): a demo session never delivers mail.
+  //
+  // This route's recipient is the signed-in account itself, which sounds
+  // harmless — but the message goes out through session.provider_token, i.e.
+  // through a REAL connected Gmail mailbox, and the digest body is composed
+  // from workspace data. Refusing here keeps the rule simple enough to hold:
+  // no demo request ever reaches sendGmailMessage, whoever the To happens to
+  // be. The demo still reads exactly the same digest at GET /api/digest, which
+  // composes it from stored data with no mail involved.
+  //
+  // demoSendGate also refuses an expired demo, and refuses outright when the
+  // profile could not be read — we cannot then prove the caller is not a demo.
+  const demoGate = demoSendGate((sendPerm ?? null) as DemoProfileFacts | null)
+  if (!demoGate.allowed) {
+    return NextResponse.json(
+      { error: demoGate.reason, message: demoGate.message, demo: demoGate.code },
+      { status: 403 }
+    )
+  }
+
   if (!hasGmailPermission(sendPerm?.preferences, 'send')) {
     return NextResponse.json(
       {

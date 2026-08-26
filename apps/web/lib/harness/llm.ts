@@ -29,13 +29,23 @@
 
 import pRetry from 'p-retry'
 import type { DecryptedApiKeys, LlmResult, LlmRunOptions } from './types'
-import { assertWithinBudget, recordSpend } from './spend'
+import { assertWithinBudget, estimateCostUsd, recordSpend } from './spend'
 import { createAdminClient } from './supabase-admin'
-import { resolveProviderId } from './providers'
+import { resolveProviderId, MissingKeyError } from './providers'
 import { callOpenRouter, DEFAULT_MODEL } from './providers/openrouter'
 import { callLocalCli } from './providers/local-cli'
 import { callLocalServer } from './providers/local-server'
 import { isTransient } from '../util/retry'
+import { acquireSpanScope, withSpan } from '../trace/spans'
+import {
+  EMBEDDING_MODEL,
+  EMBEDDING_DIMS,
+  testEmbedding,
+  callOpenRouterEmbedding,
+  callOpenAiDirectEmbedding,
+  callLocalServerEmbedding,
+  type EmbedBatchResult,
+} from './providers/embeddings'
 
 export {
   MissingKeyError,
@@ -52,6 +62,7 @@ export {
   resolveProviderPreferences,
 } from './providers'
 export { DEFAULT_MODEL }
+export { EMBEDDING_MODEL, EMBEDDING_DIMS, testEmbedding }
 
 /**
  * Call the user's configured LLM backend once and return the assistant
@@ -97,29 +108,163 @@ export async function callLlm(
   // through to p-retry itself (not just the provider call) so a user
   // cancel/deadline stops retrying immediately instead of waiting out a
   // queued backoff.
-  const result = await pRetry(
-    () =>
-      provider === 'local-cli'
-        ? callLocalCli(apiKeys, effectiveOpts, signal)
-        : provider === 'local-server'
-          ? callLocalServer(apiKeys, effectiveOpts, signal)
-          : callOpenRouter(apiKeys, effectiveOpts, signal),
-    {
-      retries: 3,
-      factor: 2,
-      minTimeout: 400,
-      maxTimeout: 8_000,
-      randomize: true,
-      signal,
-      shouldRetry: ({ error }) => isTransient(error),
+  const runProviderCall = () =>
+    pRetry(
+      () =>
+        provider === 'local-cli'
+          ? callLocalCli(apiKeys, effectiveOpts, signal)
+          : provider === 'local-server'
+            ? callLocalServer(apiKeys, effectiveOpts, signal)
+            : callOpenRouter(apiKeys, effectiveOpts, signal),
+      {
+        retries: 3,
+        factor: 2,
+        minTimeout: 400,
+        maxTimeout: 8_000,
+        randomize: true,
+        signal,
+        shouldRetry: ({ error }) => isTransient(error),
+      }
+    )
+
+  // Span emission — lib/trace/spans.ts's header explains the AsyncLocalStorage
+  // reuse. Every call that carries a userId gets an 'llm' span, metered or
+  // not (this doubles as chokepoint-coverage insurance: a model call with no
+  // userId at all is invisible to trace_spans the same way it's invisible to
+  // the spend cap — see spend-chokepoints.test.ts for that half of the
+  // guarantee). No userId at all means no user_id to satisfy trace_spans'
+  // NOT NULL column, so there is nothing honest to record.
+  const scope = apiKeys.userId ? acquireSpanScope(apiKeys.userId) : null
+  let result: LlmResult
+  if (scope) {
+    try {
+      result = await withSpan(
+        scope.buffer,
+        { parentSpanId: scope.parentSpanId, runId: scope.runId, kind: 'llm', name: 'llm' },
+        () => runProviderCall(),
+        (r, err) =>
+          r
+            ? {
+                model: r.model,
+                promptTokens: r.promptTokens,
+                completionTokens: r.completionTokens,
+                tokensUsed: r.tokensUsed,
+                costUsd: estimateCostUsd(r.model, r.promptTokens, r.completionTokens),
+                metered,
+                userId: apiKeys.userId,
+              }
+            : {
+                model: effectiveOpts.model ?? DEFAULT_MODEL,
+                metered,
+                userId: apiKeys.userId,
+                error: err instanceof Error ? err.message : String(err),
+              }
+      )
+    } finally {
+      // Only the invocation that CREATED this buffer flushes it — a call
+      // nested inside an ambient graph/unit context leaves flushing to
+      // whichever of those created the buffer (see acquireSpanScope's doc).
+      if (scope.owns) await scope.buffer.flush(admin ?? createAdminClient())
     }
-  )
+  } else {
+    result = await runProviderCall()
+  }
 
   if (admin && apiKeys.userId) {
     await recordSpend(admin, apiKeys.userId, result.model, result.promptTokens, result.completionTokens)
   }
 
   return result
+}
+
+export interface EmbedResult {
+  embeddings: number[][]
+  model: string
+  promptTokens: number
+}
+
+/**
+ * Embed a batch of texts through the same spend chokepoint callLlm lives
+ * behind — lives in THIS file deliberately (same reason as callLlm's own
+ * header: scan roots and reviewer habits already cover lib/harness/llm.ts,
+ * so a second chokepoint file would just be a second thing to remember to
+ * scan). Unlike callLlm, this is a FALLBACK CHAIN, not a single provider
+ * pick — OpenRouter, then OpenAI-direct, then a configured local server (see
+ * ./providers/embeddings) — because text-embedding-3-small produces
+ * identical vectors from OpenRouter and OpenAI-direct (ruling 10), so
+ * falling through between them is free, and a local server only enters the
+ * chain when the user has explicitly pointed one at an embedding model.
+ *
+ * Per attempt: `metered = provider === 'openrouter' && Boolean(apiKeys.userId)`
+ * — the exact same expression callLlm uses — so only the OpenRouter leg is
+ * checked against/recorded to the monthly cap; a self-supplied OpenAI key or
+ * a local server costs Cello's own ledger nothing, mirroring why local-cli/
+ * local-server are unmetered for chat.
+ *
+ * Throws MissingKeyError when no attempt was even possible (no key, no
+ * local-server model configured) or when every attempted backend failed —
+ * the last error is unwrapped and rethrown as-is so a caller can distinguish
+ * BudgetCapError, ProviderUnavailableError, etc.
+ */
+export async function callEmbedding(
+  apiKeys: DecryptedApiKeys,
+  opts: { texts: string[]; model?: string },
+  signal?: AbortSignal
+): Promise<EmbedResult> {
+  if (opts.texts.length === 0) return { embeddings: [], model: opts.model || EMBEDDING_MODEL, promptTokens: 0 }
+
+  const attempts: Array<{ provider: 'openrouter' | 'openai-direct' | 'local-server'; run: () => Promise<EmbedBatchResult> }> = []
+  if (apiKeys.openrouter) {
+    attempts.push({
+      provider: 'openrouter',
+      run: () => callOpenRouterEmbedding(apiKeys, opts.texts, opts.model, signal),
+    })
+  }
+  if (apiKeys.openai) {
+    attempts.push({
+      provider: 'openai-direct',
+      run: () => callOpenAiDirectEmbedding(apiKeys, opts.texts, opts.model, signal),
+    })
+  }
+  if (apiKeys.provider?.localServerEmbeddingModel) {
+    attempts.push({ provider: 'local-server', run: () => callLocalServerEmbedding(apiKeys, opts.texts, signal) })
+  }
+
+  if (attempts.length === 0) {
+    throw new MissingKeyError(
+      'No embedding provider configured — set an OpenRouter or OpenAI key, or a local-server embedding model.'
+    )
+  }
+
+  let lastErr: unknown
+  for (const attempt of attempts) {
+    const metered = attempt.provider === 'openrouter' && Boolean(apiKeys.userId)
+    const admin = metered ? createAdminClient() : null
+
+    let result: EmbedBatchResult
+    try {
+      if (admin && apiKeys.userId) {
+        // Refuse BEFORE spending, same reason as callLlm: a request already
+        // made cannot be refunded. Inside the try (unlike callLlm, which has
+        // only one backend to fail over to): a BudgetCapError on this leg is
+        // still worth falling through on — a self-supplied OpenAI key or a
+        // local server costs Cello's own ledger nothing, so an unrelated
+        // OpenRouter cap must not block them.
+        await assertWithinBudget(admin, apiKeys.userId)
+      }
+      result = await attempt.run()
+    } catch (err) {
+      lastErr = err
+      continue
+    }
+
+    if (admin && apiKeys.userId) {
+      await recordSpend(admin, apiKeys.userId, EMBEDDING_MODEL, result.promptTokens, 0)
+    }
+    return result
+  }
+
+  throw lastErr instanceof Error ? lastErr : new MissingKeyError('No embedding provider reachable')
 }
 
 /** Best-effort JSON extraction from an LLM response (handles ```json fences). */

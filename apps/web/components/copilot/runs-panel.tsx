@@ -36,18 +36,20 @@ import { cn, formatRelativeTime } from '@/lib/utils'
 // 'completed_with_errors' = at least one step failed (or the run was aborted
 // on budget/deadline before finishing) but something still completed — kept
 // distinct from plain 'completed' so this panel never shows a run with a
-// failed step as a plain success. 'incomplete' = the run PAUSED at its own
-// wall-clock deadline with steps still pending — NOT a failure; the cron
-// route auto-resumes it (bounded), which is why it gets its own tone/icon/
-// copy below instead of reusing 'completed_with_errors'. See
-// lib/harness/executor.ts and the RunStatus doc in lib/harness/types.ts.
+// failed step as a plain success. 'paused' = the run hit harnessRunGraph's
+// own deadline interrupt() (or an ask-form/review wait) with a real
+// LangGraph checkpoint behind it, and the cron route's resume pass
+// re-enters that checkpoint, which is why it reads as "will finish on its
+// own" rather than 'completed_with_errors'. 'incomplete' (the pre-port
+// executor's own pause state) is retired — see lib/harness/types.ts's
+// RunStatus.
 type RunStatus =
   | 'queued'
   | 'planning'
   | 'running'
   | 'completed'
   | 'completed_with_errors'
-  | 'incomplete'
+  | 'paused'
   | 'failed'
   | 'cancelled'
 type StepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
@@ -79,12 +81,15 @@ interface AgentStep {
   created_at: string
 }
 
+// 'paused' deliberately excluded: it resumes on a cron tick, not within the
+// next couple of seconds, so 2s polling would just burn requests waiting on
+// something that isn't about to change.
 const ACTIVE_STATUSES: RunStatus[] = ['queued', 'planning', 'running']
 
 /**
  * Everything needed to render a run's status as a badge: label (never a raw
  * enum value — 'completed_with_errors' reads as a sentence, not a token),
- * tone, and icon. 'incomplete' deliberately does NOT reuse 'running'/
+ * tone, and icon. 'paused' deliberately does NOT reuse 'running'/
  * 'planning''s accent tone — that color is this app's single "live right
  * now" signal (see tailwind.config.ts), and a paused run is exactly NOT
  * live right now — nor 'completed_with_errors''s warn tone, since paused
@@ -98,7 +103,7 @@ const STATUS_META: Record<RunStatus, { label: string; tone: BadgeTone; icon: Luc
   running: { label: 'Running', tone: 'accent', icon: Loader2, spin: true },
   completed: { label: 'Completed', tone: 'good', icon: CheckCircle2 },
   completed_with_errors: { label: 'Completed with errors', tone: 'warn', icon: AlertTriangle },
-  incomplete: { label: 'Paused — resuming', tone: 'muted', icon: PauseCircle },
+  paused: { label: 'Paused — resuming', tone: 'muted', icon: PauseCircle },
   failed: { label: 'Failed', tone: 'bad', icon: XCircle },
   cancelled: { label: 'Cancelled', tone: 'muted', icon: Ban },
 }
@@ -219,7 +224,14 @@ export function RunsPanel({ collapsed, onToggleCollapsed, mobile }: RunsPanelPro
         toast({ title: 'Run failed to start', description: data.error ?? 'Unknown error', variant: 'destructive' })
       } else {
         setGoal('')
-        toast({ title: 'Run finished', description: `Status: ${data.run?.status ?? 'done'}` })
+        // `paused` is additive on this response (see app/api/harness/run/
+        // route.ts) — the run hit its deadline interrupt with no RunOutcome
+        // to report yet, so `data.run` is absent on this path; say so
+        // honestly instead of falling through to "Status: done".
+        toast({
+          title: data.paused ? 'Run paused' : 'Run finished',
+          description: data.paused ? 'It will pick back up automatically.' : `Status: ${data.run?.status ?? 'done'}`,
+        })
         await loadRuns()
         if (data.runId) {
           setSelectedId(data.runId)
@@ -373,7 +385,7 @@ export function RunsPanel({ collapsed, onToggleCollapsed, mobile }: RunsPanelPro
                   {/* LEGIBLE PROGRESS: which agent is executing, how far through the
                       plan the run is, and — this is the part that used to be a bare
                       "running…" — plainly say whether a non-active run will finish on
-                      its own (incomplete) or needs a person (failed) or already did
+                      its own (paused) or needs a person (failed) or already did
                       what it could (completed_with_errors). */}
                   {selectedRun.status === 'planning' && (
                     <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-accent-deep">
@@ -396,7 +408,7 @@ export function RunsPanel({ collapsed, onToggleCollapsed, mobile }: RunsPanelPro
                       )}
                     </p>
                   )}
-                  {selectedRun.status === 'incomplete' && (
+                  {selectedRun.status === 'paused' && (
                     <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-muted-foreground">
                       <PauseCircle className="mt-px h-3 w-3 shrink-0" />
                       <span>
@@ -439,13 +451,12 @@ export function RunsPanel({ collapsed, onToggleCollapsed, mobile }: RunsPanelPro
                   </div>
                 </div>
 
-                {/* Raw error detail: skipped for 'incomplete' — the progress line
-                    above already explains the pause plainly, and the executor's
-                    errorSummary for that status is informational, not a problem
-                    (see lib/harness/executor.ts), so it doesn't belong in the
-                    same red "something's wrong" treatment 'failed' and
-                    'completed_with_errors' get. */}
-                {selectedRun.error && selectedRun.status !== 'incomplete' && (
+                {/* Raw error detail: skipped for 'paused' — the progress line
+                    above already explains the pause plainly, and it carries no
+                    error string that means anything went wrong, so it doesn't
+                    belong in the same red "something's wrong" treatment
+                    'failed' and 'completed_with_errors' get. */}
+                {selectedRun.error && selectedRun.status !== 'paused' && (
                   <div className="rounded-control bg-red-50 p-2 text-[11px] text-red-700 dark:bg-red-500/10 dark:text-red-300">
                     {selectedRun.error}
                   </div>

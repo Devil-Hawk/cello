@@ -12,6 +12,7 @@
 //      auto-submitted when the JD raises a knock-out question.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { SubmitAuthorization } from './types'
 import { submitApplication } from './index'
 import { buildHandoffFields, DEFERRED_FIELD_LABELS } from './fields'
 import type { ApplyContent, ApplyProfile } from './types'
@@ -82,6 +83,74 @@ function fakeResumeClient(docs: FakeDoc[]): SupabaseClient {
   return client as unknown as SupabaseClient
 }
 
+/** The submit POST, not the boards-api schema read that now precedes it. */
+// Typed structurally rather than as ReturnType<typeof vi.fn>, which resolves to
+// Mock<any[], unknown>. A mock declared with explicit generics — e.g.
+// vi.fn<[input: unknown], Promise<Response>>() — is NOT assignable to that, so
+// the narrower the caller's mock, the louder this helper complained. All it
+// actually needs is the call log.
+function submitCall(mock: { mock: { calls: unknown[][] } }): [string, RequestInit] {
+  // Filter on METHOD, not host: Greenhouse's submit endpoint lives on
+  // boards-api.greenhouse.io too, so a host filter excludes the very POST it
+  // is meant to find. Only the schema read is a GET.
+  const call = mock.mock.calls.find(([, init]) => (init as RequestInit)?.method === 'POST')
+  if (!call) throw new Error('no submit POST was made')
+  return call as [string, RequestInit]
+}
+
+/**
+ * A fetch mock that answers BOTH calls a submission now makes.
+ *
+ * capability.ts reads the posting's public application form before allowing a
+ * POST, because "greenhouse accepts applications that are missing required
+ * answers without complaining — so sending one blind could put a half-finished
+ * application in your name". A mock that returns the same submit response to
+ * every URL leaves that schema unreadable, which correctly forces a handoff and
+ * hides the resume-attachment behaviour these tests exist to check.
+ *
+ * So: serve a real-shaped, fully answerable form schema for the boards-api
+ * read, and the submit response for the POST.
+ */
+function fetchMockWithForm() {
+  return vi.fn(async (input: unknown) => {
+    const url = String(typeof input === 'string' ? input : (input as Request)?.url ?? '')
+    if (url.includes('boards-api.greenhouse.io')) {
+      return jsonResponse({
+        id: 1234567,
+        questions: [
+          { label: 'First Name', required: true, fields: [{ name: 'first_name', type: 'input_text' }] },
+          { label: 'Last Name', required: true, fields: [{ name: 'last_name', type: 'input_text' }] },
+          { label: 'Email', required: true, fields: [{ name: 'email', type: 'input_text' }] },
+          { label: 'Resume', required: true, fields: [{ name: 'resume', type: 'input_file' }] },
+        ],
+        data_compliance: [],
+        demographic_questions: null,
+      })
+    }
+    return jsonResponse({ id: 999 })
+  })
+}
+
+/**
+ * The per-job human confirmation submitApplication now requires.
+ *
+ * lib/ats-apply/capability.ts added an explicit human gate — "no amount of
+ * readiness anywhere else may stand in for a person saying yes" — so a valid
+ * employer credential is no longer sufficient on its own. The tests below
+ * exercise RESUME ATTACHMENT, not the gate, so they supply a real confirmation
+ * rather than asserting the looser pre-gate behaviour. The gate itself is
+ * covered by capability.test.ts; weakening these assertions to 'handoff' would
+ * have hidden the resume-resolution logic entirely.
+ */
+function humanOk(jobIds: string[]): SubmitAuthorization {
+  return {
+    confirmed: true,
+    source: 'human-approval-route',
+    at: new Date().toISOString(),
+    jobIds,
+  }
+}
+
 describe('submitApplication — unsupported URL always produces HANDOFF, never a blind POST', () => {
   it('an ordinary company career-page URL (not Greenhouse/Lever/Ashby) is a handoff with no ATS attempt', async () => {
     const fetchMock = vi.fn()
@@ -138,7 +207,7 @@ describe('submitApplication — unsupported URL always produces HANDOFF, never a
 
 describe('submitApplication — resolveResumeFullText prefers the tailored resume over the summary blurb', () => {
   it('attaches the tailored resume_documents content, not the cv_tailor summary blurb', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: 999 }))
+    const fetchMock = fetchMockWithForm()
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
     const client = fakeResumeClient([
@@ -154,11 +223,12 @@ describe('submitApplication — resolveResumeFullText prefers the tailored resum
       client,
       userId: 'user-1',
       jobId: 'job-123',
+      authorization: humanOk(['job-123']),
     })
 
     expect(result.outcome).toBe('submitted')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(submitCall(fetchMock)).toBeTruthy()
+    const [, init] = submitCall(fetchMock)
     const sentBody = JSON.parse(String(init.body)) as { resume_content?: string }
     const decoded = Buffer.from(sentBody.resume_content ?? '', 'base64').toString('utf-8')
 
@@ -168,7 +238,7 @@ describe('submitApplication — resolveResumeFullText prefers the tailored resum
   })
 
   it('falls back to the BASE resume version when no tailored version exists for this job', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: 1000 }))
+    const fetchMock = fetchMockWithForm()
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
     const client = fakeResumeClient([
@@ -183,17 +253,24 @@ describe('submitApplication — resolveResumeFullText prefers the tailored resum
       client,
       userId: 'user-1',
       jobId: 'job-456', // no tailored doc under this job id
+      // Supplied for the same reason its sibling tests supply it: the human
+      // gate is now required for ANY submit, and this test's subject is résumé
+      // RESOLUTION, not the gate. Without it submitApplication correctly
+      // returns 'handoff' and the base-résumé fallback below is never exercised.
+      // The gate itself is covered by capability.test.ts — asserting 'handoff'
+      // here instead would have silently deleted this test's actual coverage.
+      authorization: humanOk(['job-456']),
     })
 
     expect(result.outcome).toBe('submitted')
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const [, init] = submitCall(fetchMock)
     const sentBody = JSON.parse(String(init.body)) as { resume_content?: string }
     const decoded = Buffer.from(sentBody.resume_content ?? '', 'base64').toString('utf-8')
     expect(decoded).toBe('BASE RESUME — generic.')
   })
 
   it('an already-set resumeFullText on content is never overwritten by the DB lookup', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: 1 }))
+    const fetchMock = fetchMockWithForm()
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
     const client = fakeResumeClient([
@@ -208,16 +285,36 @@ describe('submitApplication — resolveResumeFullText prefers the tailored resum
       client,
       userId: 'user-1',
       jobId: 'job-123',
+      authorization: humanOk(['job-123']),
     })
     expect(result.outcome).toBe('submitted')
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const [, init] = submitCall(fetchMock)
     const sentBody = JSON.parse(String(init.body)) as { resume_content?: string }
     const decoded = Buffer.from(sentBody.resume_content ?? '', 'base64').toString('utf-8')
     expect(decoded).toBe('CALLER-SUPPLIED FULL TEXT')
   })
 
-  it('a resume_documents lookup failure degrades gracefully to resumeSummary rather than blocking the application', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: 1 }))
+  // WHY THIS ASSERTS handoff, NOT "graceful degradation".
+  //
+  // This test previously expected the lookup failure to fall through to
+  // `resumeSummary` and submit anyway. But resumeSummary is the 2-4 sentence
+  // blurb cv_tailor writes for internal use — the fixture two tests above says
+  // so in its own words, and another asserts the blurb must NEVER be what gets
+  // sent. So "degrading gracefully" meant putting a two-sentence summary in
+  // front of a real employer, as the candidate's résumé, under their name,
+  // with no way to recall it once Greenhouse accepted it.
+  //
+  // The distinction that matters is FAILED vs ABSENT. A user with no stored
+  // résumé is a known state the capability assessment already reports. A lookup
+  // that THREW tells us nothing about what exists, and an irreversible action
+  // taken on an unknown is the one trade never worth making.
+  //
+  // The cost of failing closed — that applications stop during an outage — is
+  // paid by the review queue and its notifications, which is where every
+  // handoff surfaces for the human. Silence is the thing to avoid here, not
+  // refusal.
+  it('a resume_documents lookup failure hands off rather than sending the summary blurb as a résumé', async () => {
+    const fetchMock = fetchMockWithForm()
     globalThis.fetch = fetchMock as unknown as typeof fetch
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
@@ -229,19 +326,27 @@ describe('submitApplication — resolveResumeFullText prefers the tailored resum
 
     const result = await submitApplication({
       jobUrl: 'https://boards.greenhouse.io/acme/jobs/1234567',
-      profile: PROFILE,
+      profile: PROFILE, // no resumeText — the blurb is the ONLY fallback available
       content: { resumeSummary: 'Fallback summary blurb.' },
       credentials: { greenhouse: 'api-key' },
       client: throwingClient,
       userId: 'user-1',
       jobId: 'job-123',
+      authorization: humanOk(['job-123']),
     })
 
-    expect(result.outcome).toBe('submitted') // never blocked by the lookup failure
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    const sentBody = JSON.parse(String(init.body)) as { resume_content?: string }
-    const decoded = Buffer.from(sentBody.resume_content ?? '', 'base64').toString('utf-8')
-    expect(decoded).toBe('Fallback summary blurb.')
+    expect(result.outcome).toBe('handoff')
+    // The load-bearing assertion: nothing was sent at all.
+    // Read structurally: fetchMockWithForm's mock is declared with a one-arg
+    // signature, so `calls` is a 1-tuple and destructuring `[, init]` does not
+    // typecheck against it.
+    const postedToEmployer = (fetchMock.mock.calls as unknown[][]).some(
+      (call) => (call[1] as RequestInit | undefined)?.method === 'POST'
+    )
+    expect(
+      postedToEmployer,
+      'a résumé lookup failure must never result in a POST to an employer'
+    ).toBe(false)
     consoleSpy.mockRestore()
   })
 })

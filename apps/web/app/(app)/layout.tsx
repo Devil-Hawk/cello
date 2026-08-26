@@ -4,6 +4,8 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchClientSafePreferences } from '@/lib/preferences/client-safe'
 import { Sidebar } from '@/components/layout/sidebar'
 import { Header } from '@/components/layout/header'
 import { MobileNav } from '@/components/layout/mobile-nav'
@@ -63,13 +65,26 @@ export default function DashboardLayout({
         // land on the onboarding wizard. Best-effort — never blocks rendering.
         if (pathname !== '/onboarding') {
           try {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('preferences')
-              .eq('id', user.id)
-              .single()
-            const prefs = (profile?.preferences ?? {}) as Record<string, unknown>
-            if (!prefs.onboardedAt) {
+            // NEVER supabase.from('profiles').select('preferences') here.
+            //
+            // PostgREST has no jsonb-path projection, so select('preferences')
+            // returns the WHOLE column — api_keys for every provider, plus
+            // autopilot.atsKeys, which an audit found has never been encrypted
+            // at all. This layout wraps the entire (app) route group, so doing
+            // that here shipped every one of those values to the browser on
+            // EVERY authenticated page load, reachable by any script running in
+            // the page: an XSS, a compromised extension, a bad client-bundle
+            // dependency. It is the single highest-volume instance of the leak.
+            //
+            // The RPC returns a fixed, enumerable set of safe keys built with
+            // jsonb_build_object — not "preferences minus some keys" — so a new
+            // secret added to that column can never start flowing here later.
+            // See lib/preferences/client-safe.ts and migration
+            // 20260803000005_profiles_column_privileges.sql.
+            const prefs = await fetchClientSafePreferences(
+              supabase as unknown as SupabaseClient
+            )
+            if (!prefs?.onboardedAt) {
               const { count } = await supabase
                 .from('companies')
                 .select('id', { count: 'exact', head: true })

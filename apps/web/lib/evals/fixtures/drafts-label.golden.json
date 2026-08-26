@@ -1,0 +1,257 @@
+{
+  "note": "Labelled cv_tailor draft data: judge score (eval_verdicts, subject_kind=cv_tailor_draft, judge=factuality) against the human accept/reject decision (application_drafts.status + reviewed_at) and the containment report (trace_spans, journal.ts's step ledger). This is a SYNTHETIC starter fixture, not a database snapshot \u2014 application_drafts has no real reviewed decisions with a matching judge verdict yet (see scripts/snapshot-drafts-eval-data.ts's own KNOWN GAP note: autopilot.ts only persists a cv_tailor_draft verdict on fail/unjudged today, never on a pass). Regenerate once real judged, reviewed drafts exist: pnpm tsx scripts/snapshot-drafts-eval-data.ts",
+  "cases": [
+    {
+      "id": "accepted-01-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.95,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "approved",
+      "humanAccepted": true
+    },
+    {
+      "id": "accepted-02-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.91,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "approved",
+      "humanAccepted": true
+    },
+    {
+      "id": "accepted-03-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.88,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "submitted",
+      "humanAccepted": true
+    },
+    {
+      "id": "accepted-04-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.9,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "approved",
+      "humanAccepted": true
+    },
+    {
+      "id": "accepted-05-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.86,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "approved",
+      "humanAccepted": true
+    },
+    {
+      "id": "accepted-06-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.83,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "submitted",
+      "humanAccepted": true
+    },
+    {
+      "id": "accepted-07-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.92,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "approved",
+      "humanAccepted": true
+    },
+    {
+      "id": "accepted-08-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.79,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "approved",
+      "humanAccepted": true
+    },
+    {
+      "id": "accepted-09-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.85,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "submitted",
+      "humanAccepted": true
+    },
+    {
+      "id": "accepted-10-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.81,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "approved",
+      "humanAccepted": true
+    },
+    {
+      "id": "accepted-11-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.77,
+      "judgeVerdict": "pass",
+      "containmentOk": false,
+      "containmentReason": "the tailored text makes claims your resume does not support (led a team of nine engineers)",
+      "status": "approved",
+      "humanAccepted": true
+    },
+    {
+      "id": "accepted-12-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.89,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "submitted",
+      "humanAccepted": true
+    },
+    {
+      "id": "accepted-13-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.74,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "approved",
+      "humanAccepted": true
+    },
+    {
+      "id": "accepted-14-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.5,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "approved",
+      "humanAccepted": true
+    },
+    {
+      "id": "rejected-01-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.58,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "rejected",
+      "humanAccepted": false
+    },
+    {
+      "id": "rejected-02-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.44,
+      "judgeVerdict": "fail",
+      "containmentOk": false,
+      "containmentReason": "the tailored text makes claims your resume does not support (managed a $12M budget)",
+      "status": "rejected",
+      "humanAccepted": false
+    },
+    {
+      "id": "rejected-03-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.39,
+      "judgeVerdict": "fail",
+      "containmentOk": false,
+      "containmentReason": "the tailored text makes claims your resume does not support (PMP certified)",
+      "status": "rejected",
+      "humanAccepted": false
+    },
+    {
+      "id": "rejected-04-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.51,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "rejected",
+      "humanAccepted": false
+    },
+    {
+      "id": "rejected-05-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.33,
+      "judgeVerdict": "fail",
+      "containmentOk": false,
+      "containmentReason": "the tailored text makes claims your resume does not support (led the Series B raise)",
+      "status": "failed",
+      "humanAccepted": false
+    },
+    {
+      "id": "rejected-06-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.47,
+      "judgeVerdict": "fail",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "rejected",
+      "humanAccepted": false
+    },
+    {
+      "id": "rejected-07-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.29,
+      "judgeVerdict": "fail",
+      "containmentOk": false,
+      "containmentReason": "the tailored text makes claims your resume does not support (fluent in Mandarin)",
+      "status": "failed",
+      "humanAccepted": false
+    },
+    {
+      "id": "rejected-08-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.36,
+      "judgeVerdict": "fail",
+      "containmentOk": false,
+      "containmentReason": "the tailored text makes claims your resume does not support (patented the algorithm)",
+      "status": "rejected",
+      "humanAccepted": false
+    },
+    {
+      "id": "rejected-09-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.41,
+      "judgeVerdict": "fail",
+      "containmentOk": false,
+      "containmentReason": "the tailored text makes claims your resume does not support (Fortune 500 client roster)",
+      "status": "rejected",
+      "humanAccepted": false
+    },
+    {
+      "id": "rejected-10-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.22,
+      "judgeVerdict": "fail",
+      "containmentOk": false,
+      "containmentReason": "the tailored text makes claims your resume does not support (built the entire platform solo)",
+      "status": "failed",
+      "humanAccepted": false
+    },
+    {
+      "id": "rejected-11-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.55,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "rejected",
+      "humanAccepted": false
+    },
+    {
+      "id": "rejected-12-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.31,
+      "judgeVerdict": "fail",
+      "containmentOk": false,
+      "containmentReason": "the tailored text makes claims your resume does not support (VP of Engineering title)",
+      "status": "rejected",
+      "humanAccepted": false
+    },
+    {
+      "id": "rejected-13-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.6,
+      "judgeVerdict": "pass",
+      "containmentOk": true,
+      "containmentReason": null,
+      "status": "rejected",
+      "humanAccepted": false
+    },
+    {
+      "id": "rejected-14-00000000-0000-0000-0000-000000000000",
+      "judgeScore": 0.18,
+      "judgeVerdict": "fail",
+      "containmentOk": false,
+      "containmentReason": "the tailored text makes claims your resume does not support (Series A to IPO)",
+      "status": "failed",
+      "humanAccepted": false
+    }
+  ]
+}

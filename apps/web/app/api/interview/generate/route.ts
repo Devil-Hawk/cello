@@ -73,27 +73,11 @@ export async function POST(request: NextRequest) {
   const companyRel = (job as { companies?: { id?: string; name?: string } | { id?: string; name?: string }[] | null })
     .companies
   const company = Array.isArray(companyRel) ? companyRel[0] : companyRel
-
-  // Optional company dossier for company-specific questions. Read through the
-  // admin client (company_dossiers isn't in the generated Database type) but
-  // always scoped to this user's id.
-  let dossier: { summary?: string | null; signals?: unknown } | null = null
   const companyId = (job as { company_id?: string | null }).company_id ?? null
-  if (companyId) {
-    const { data: dossierRow } = await admin
-      .from('company_dossiers')
-      .select('summary, signals')
-      .eq('company_id', companyId)
-      .eq('user_id', user.id)
-      .maybeSingle()
-    if (dossierRow) {
-      dossier = {
-        summary: (dossierRow as { summary?: string | null }).summary ?? null,
-        signals: (dossierRow as { signals?: unknown }).signals ?? null,
-      }
-    }
-  }
 
+  // Company/dossier/history/claims context comes from generateInterviewKit's
+  // own buildInterviewContext(admin, userId, companyId) call — no ad-hoc
+  // company_dossiers query here.
   try {
     const result = await generateInterviewKit({
       job: {
@@ -104,7 +88,6 @@ export async function POST(request: NextRequest) {
         company_id: companyId,
       },
       company: company ? { id: company.id ?? null, name: company.name ?? null } : null,
-      dossier,
       resumeText,
       admin,
       userId: user.id,

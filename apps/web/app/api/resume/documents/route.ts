@@ -45,15 +45,76 @@ import {
   getVersionById,
   listVersions,
 } from '@/lib/resume/store'
-import { isResumeSource, type ResumeContentJson } from '@/lib/resume/types'
+import { isResumeSource, type ResumeContentJson, type ResumeSource } from '@/lib/resume/types'
 import { markdownToPlainText } from '@/lib/resume/markdown'
 import { DEFAULT_TEMPLATE_ID, isTemplateId } from '@/lib/resume/templates'
 import { renderResumeVersionPdf } from '@/lib/resume/pdf'
 import { renderResumeVersionDocx } from '@/lib/resume/docx'
+import { recordDemoEvent } from '@/lib/access/session'
 import type { DecryptedApiKeys, LlmRunner } from '@/lib/harness/types'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
+
+// --- the demo trail ----------------------------------------------------
+//
+// "We should be able to see what someone did with a particular access code."
+// The resume surface is where a demo visitor spends most of an evaluation, so
+// every attempt here journals ONE row: what kind of resume work it was, and
+// either the version number it produced or why it produced nothing. Never the
+// resume — not its text, not its title, not the job it was tailored for; those
+// are the visitor's own words and the one thing this table must never hold
+// (see lib/access/audit.ts).
+//
+// FAILURES ARE RECORDED TOO, and that is not decoration. A demo whose tailoring
+// throws has still spent the owner's LLM budget; a demo that hammers the export
+// endpoint has still burned the owner's CPU. Recording successes only leaves the
+// owner unable to tell "did nothing" from "tried forty times and failed", which
+// is the exact question this feature exists to answer.
+//
+// WHAT THESE CALLS COST, STATED HONESTLY. recordDemoEvent writes nothing for an
+// ordinary user, but it is NOT a no-op for one: it pays an auth round trip and a
+// service-role profile read before it can know that. It never throws AND never
+// takes longer than AUDIT_DEADLINE_MS (lib/access/audit.ts), which together are
+// what let it be awaited on a response path at all — without the deadline a
+// hanging insert would spend this handler's whole maxDuration and turn a 200
+// into a gateway timeout. It is awaited rather than backgrounded because this
+// handler has no after()/waitUntil, so a floating promise is an event lost
+// whenever the process is torn down after the response.
+
+/**
+ * The action name for a save, by what the client says it saved. The vocabulary
+ * is app/api/access-codes/contract.ts's; an unlisted verb still renders, just
+ * less prettily, so a new source is not blocked on editing that file.
+ */
+const SAVE_ACTIONS: Record<ResumeSource, string> = {
+  base: 'resume.upload',
+  tailored: 'resume.tailor',
+  edited: 'resume.edit',
+}
+
+/**
+ * One trail row for an attempt that did NOT produce what it promised.
+ *
+ * `reason` is an ENUM THIS FILE CHOOSES, never the caught error's message: a
+ * message is prose, prose is where content hides, and the sanitizer would drop
+ * it anyway (lib/access/scrub.ts's shape rule) leaving a row that says only
+ * "something failed". A fixed vocabulary is both safe and more useful.
+ */
+async function recordDemoFailure(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  action: string,
+  reason: string,
+  headers: Headers
+): Promise<void> {
+  await recordDemoEvent(supabase, {
+    kind: 'action',
+    action,
+    target: '/resume',
+    detail: { outcome: 'failed', reason },
+    headers,
+  })
+}
 
 // --- shared helpers ----------------------------------------------------
 
@@ -118,9 +179,16 @@ export async function GET(request: NextRequest) {
     try {
       doc = await getVersionById(admin, user.id, id)
     } catch (err) {
+      await recordDemoFailure(supabase, 'resume.export', 'load_failed', request.headers)
       return bad(err instanceof Error ? err.message : 'Failed to load resume version', 500)
     }
-    if (!doc) return bad('Resume version not found', 404)
+    if (!doc) {
+      // Recorded, not silent: a demo repeatedly asking for versions that are
+      // not theirs (or no longer exist) is precisely the shape of session the
+      // owner wants to see, and a 404 leaves no other trace of it.
+      await recordDemoFailure(supabase, 'resume.export', 'not_found', request.headers)
+      return bad('Resume version not found', 404)
+    }
 
     let bytes: Uint8Array
     try {
@@ -144,8 +212,23 @@ export async function GET(request: NextRequest) {
       )
     } catch (err) {
       console.error('[resume/documents] export render failed', { id, format, userId: user.id }, err)
+      // The render is the expensive half of an export. A demo that keeps
+      // tripping it is spending the owner's CPU for nothing, which is exactly
+      // what a successes-only trail would have hidden.
+      await recordDemoFailure(supabase, 'resume.export', 'render_failed', request.headers)
       return bad(`Failed to render ${format.toUpperCase()}`, 500)
     }
+
+    // Downloading the tailored resume is the last step of the demo's whole
+    // story, and the one the owner most wants to see reached. Recorded after
+    // the render succeeds, so the row means "they got the file".
+    await recordDemoEvent(supabase, {
+      kind: 'action',
+      action: 'resume.export',
+      target: '/resume',
+      detail: { format, version: doc.version },
+      headers: request.headers,
+    })
 
     return new NextResponse(Buffer.from(bytes), {
       status: 200,
@@ -217,11 +300,11 @@ export async function POST(request: NextRequest) {
 
   switch (body.action) {
     case 'generate':
-      return handleGenerate(admin, supabase, user.id, body)
+      return handleGenerate(admin, supabase, user.id, body, request.headers)
     case 'save':
-      return handleSave(admin, user.id, body)
+      return handleSave(admin, supabase, user.id, body, request.headers)
     case 'delete':
-      return handleDelete(admin, user.id, body)
+      return handleDelete(admin, supabase, user.id, body, request.headers)
     default:
       return bad("action must be one of 'generate', 'save', 'delete'")
   }
@@ -250,8 +333,12 @@ async function handleGenerate(
   admin: ReturnType<typeof createAdminClient>,
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
-  body: Partial<GenerateBody>
+  body: Partial<GenerateBody>,
+  headers: Headers
 ) {
+  // A malformed body is not activity — nothing was attempted and nothing was
+  // spent — so it is the one exit here that journals nothing. Every exit BELOW
+  // this line is a real attempt that produced no document, and each records why.
   const jobId = typeof body.jobId === 'string' ? body.jobId : ''
   if (!jobId) return bad('jobId is required')
 
@@ -262,6 +349,7 @@ async function handleGenerate(
     .single()
   const resumeText = ((profile?.resume_text as string | null) ?? '').trim()
   if (!resumeText) {
+    await recordDemoFailure(supabase, 'resume.tailor', 'no_resume', headers)
     return bad('No resume on file. Upload your resume in Settings first.', 400, { needsResume: true })
   }
 
@@ -273,19 +361,41 @@ async function handleGenerate(
     .select('id, title, description, companies(name)')
     .eq('id', jobId)
     .single()
-  if (!job) return bad('Job not found', 404)
+  if (!job) {
+    await recordDemoFailure(supabase, 'resume.tailor', 'job_not_found', headers)
+    return bad('Job not found', 404)
+  }
 
   const companyRel = (job as { companies?: { name?: string } | { name?: string }[] | null }).companies
   const companyName = Array.isArray(companyRel) ? companyRel[0]?.name : companyRel?.name
 
   const apiKeys = await loadApiKeys(admin, userId)
   if (!canRunLlm(apiKeys)) {
+    await recordDemoFailure(supabase, 'resume.tailor', 'no_key', headers)
     return bad(missingOpenRouterMessage(apiKeys), 400, { needsKey: true })
   }
 
   const { llm, passIndex } = trackedLlm(apiKeys)
+  // ONLY THE FALLIBLE WORK IS IN THE TRY, and here is exactly what that buys —
+  // stated precisely, because the earlier version of this comment credited the
+  // wrong mechanism and an adversarial review caught it.
+  //
+  // WHAT ACTUALLY STOPS A TRAIL WRITE FAILING THE REQUEST is withAuditDeadline
+  // (lib/access/audit.ts): it converts a rejection into a message string rather
+  // than propagating it, so recordDemoEvent resolves whatever the write does.
+  // That is the guarantee. Moving the call out of the try does NOT provide it —
+  // a genuinely throwing trail call would still reject the handler.
+  //
+  // WHAT THE MOVE DOES BUY, which is worth having on its own: the success row
+  // can no longer be caught by this handler's error path, so a failed audit
+  // cannot turn a SUCCEEDED tailoring into a 500 with a misleading message and
+  // a spurious 'failed' row on the owner's timeline. /api/contacts/source had
+  // exactly that bug — its success write sat inside the try, and its catch
+  // recorded {outcome:'failed'} — so this is a real shape, not a hypothetical.
+  // Same reasoning in handleSave, handleDelete and /api/outreach/draft.
+  let generated
   try {
-    const { document, ...optimization } = await optimizeResumeAndSave({
+    generated = await optimizeResumeAndSave({
       resumeText,
       job: { title: job.title as string, company: companyName ?? null, description: job.description as string | null },
       llm,
@@ -294,7 +404,6 @@ async function handleGenerate(
       jobId,
       source: 'tailored',
     })
-    return NextResponse.json({ document, optimization })
   } catch (err) {
     const idx = passIndex()
     const pass = idx >= 1 && idx <= PASS_LABELS.length ? PASS_LABELS[idx - 1] : null
@@ -302,6 +411,15 @@ async function handleGenerate(
     console.error(
       `[resume/documents] generate job=${jobId} user=${userId} pass="${pass ?? 'unknown'}" (call #${idx}) failed:`,
       err
+    )
+    // The expensive failure: `idx` LLM calls were already issued and paid for
+    // before this threw. An owner reading a trail with no row here would
+    // conclude the visitor never tried to tailor anything.
+    await recordDemoFailure(
+      supabase,
+      'resume.tailor',
+      err instanceof MissingKeyError ? 'no_key' : 'optimizer_failed',
+      headers
     )
     if (err instanceof MissingKeyError) {
       return bad(missingOpenRouterMessage(apiKeys), 400, { needsKey: true, pass })
@@ -311,12 +429,29 @@ async function handleGenerate(
       passIndex: idx || null,
     })
   }
+
+  const { document, ...optimization } = generated
+
+  // The version number, not the job id: a demo's job ids are seeded rows the
+  // owner cannot look up anyway, and "v3" is what actually tells them how hard
+  // someone worked the feature.
+  await recordDemoEvent(supabase, {
+    kind: 'action',
+    action: 'resume.tailor',
+    target: '/resume',
+    detail: { source: 'tailored', version: document.version },
+    headers,
+  })
+
+  return NextResponse.json({ document, optimization })
 }
 
 async function handleSave(
   admin: ReturnType<typeof createAdminClient>,
+  supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
-  body: Partial<SaveBody>
+  body: Partial<SaveBody>,
+  headers: Headers
 ) {
   // ONE authored string in, both stored strings derived from it. A caller that
   // sends only `content` predates formatting and is sending plain text, which
@@ -343,10 +478,12 @@ async function handleSave(
   const base =
     body.contentJson && typeof body.contentJson === 'object' ? (body.contentJson as ResumeContentJson) : null
 
+  // Only the fallible work in the try — see handleGenerate for why.
+  let document
   try {
     // createMarkdownVersion derives `content` and content_json itself, so this
     // route has no way to write a plain text that disagrees with the Markdown.
-    const document = await createMarkdownVersion(admin, {
+    document = await createMarkdownVersion(admin, {
       userId,
       jobId,
       title,
@@ -355,26 +492,60 @@ async function handleSave(
       baseContentJson: base,
       source: body.source,
     })
-    return NextResponse.json({ document })
   } catch (err) {
+    // `body.source` is already validated above, so the failure is journalled
+    // under the SAME action its success would have used — a demo whose tailored
+    // saves keep failing shows up on the 'resume.tailor' line, not on some
+    // separate error line the owner has to correlate by hand.
+    await recordDemoFailure(supabase, SAVE_ACTIONS[body.source], 'save_failed', headers)
     return bad(err instanceof Error ? err.message : 'Failed to save resume version', 500)
   }
+
+  await recordDemoEvent(supabase, {
+    kind: 'action',
+    action: SAVE_ACTIONS[body.source],
+    target: '/resume',
+    detail: { source: body.source, version: document.version },
+    headers,
+  })
+
+  return NextResponse.json({ document })
 }
 
 async function handleDelete(
   admin: ReturnType<typeof createAdminClient>,
+  supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
-  body: Partial<DeleteBody>
+  body: Partial<DeleteBody>,
+  headers: Headers
 ) {
   const id = typeof body.id === 'string' ? body.id : ''
   if (!id) return bad('id is required')
 
+  // Only the fallible work in the try — see handleGenerate for why.
+  let existing
   try {
-    const existing = await getVersionById(admin, userId, id)
-    if (!existing) return bad('Resume version not found', 404)
-    await deleteVersion(admin, userId, id)
-    return NextResponse.json({ ok: true })
+    existing = await getVersionById(admin, userId, id)
+    if (existing) await deleteVersion(admin, userId, id)
   } catch (err) {
+    await recordDemoFailure(supabase, 'resume.delete', 'delete_failed', headers)
     return bad(err instanceof Error ? err.message : 'Failed to delete resume version', 500)
   }
+
+  if (!existing) {
+    await recordDemoFailure(supabase, 'resume.delete', 'not_found', headers)
+    return bad('Resume version not found', 404)
+  }
+
+  // A deletion is activity too, and it is the one action whose evidence is
+  // otherwise gone the moment it succeeds.
+  await recordDemoEvent(supabase, {
+    kind: 'action',
+    action: 'resume.delete',
+    target: '/resume',
+    detail: { version: existing.version },
+    headers,
+  })
+
+  return NextResponse.json({ ok: true })
 }

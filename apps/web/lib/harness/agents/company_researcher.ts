@@ -21,6 +21,9 @@ import { collectPublicSignals, type PublicSignals } from '@/lib/dossier/sources'
 import { computeCompIntel } from '@/lib/dossier/comp'
 import { resolveVisaSignal } from '@/lib/dossier/visa'
 import { upsertDossier, type DossierSignals, type SourceRef, type SummaryStatus } from '@/lib/dossier/store'
+import { frameJobText } from '@/lib/security/job-text'
+import { ingestCompanyPage, ingestDossierSummary } from '@/lib/kb/ingest'
+import { captureError } from '@/lib/observability/sentry'
 
 export interface DossierCompany {
   id: string
@@ -73,10 +76,14 @@ function buildSynthPrompt(company: DossierCompany, pub: PublicSignals): string {
   if (pub.wikipediaSummary) parts.push(`WIKIPEDIA:\n${pub.wikipediaSummary}`)
   if (pub.github?.description) {
     const g = pub.github
-    parts.push(
-      `GITHUB ORG: ${g.description ?? ''}` +
-        (g.publicRepos != null ? ` (public repos: ${g.publicRepos})` : '')
-    )
+    // INJECTION DEFENCE (lib/security/job-text.ts): the org description comes
+    // from the public GitHub API, i.e. whatever the company itself wrote
+    // there — third-party text, not a job posting, but every bit as
+    // attacker-adjacent (any org can set its own description). Flagged by a
+    // prior audit as an unframed input alongside job text; framed here with
+    // the same helper for the same reason (see that file's header).
+    const repoNote = g.publicRepos != null ? ` (public repos: ${g.publicRepos})` : ''
+    parts.push(`GITHUB ORG:\n${frameJobText(g.description, { label: 'GITHUB ORG DESCRIPTION' })}${repoNote}`)
   }
   if (pub.homeText) parts.push(`OFFICIAL SITE (home):\n${pub.homeText}`)
   if (pub.aboutText) parts.push(`OFFICIAL SITE (about):\n${pub.aboutText}`)
@@ -123,6 +130,22 @@ function sanitizeErrorDetail(e: unknown): string {
 }
 
 /**
+ * Persist to the KB without ever failing the dossier pipeline over it — a KB
+ * write is a second, searchable copy of data the structured company_dossiers
+ * row already owns, so a write failure here (RLS misconfig, transient DB
+ * error) must never block that row from being upserted.
+ */
+async function persistToKb(label: string, write: () => Promise<void>): Promise<void> {
+  try {
+    await write()
+  } catch (e) {
+    const error = e instanceof Error ? e : new Error(String(e))
+    console.error(`[company_researcher:kb-write-failed] ${label}: ${error.message}`)
+    void captureError(error, { tags: { area: 'kb', phase: 'ingest' }, extra: { label } })
+  }
+}
+
+/**
  * Full dossier pipeline. Provide either `llm` (metered) or `apiKeys` (direct).
  * With no usable key it still runs every free fetch + comp + visa and persists a
  * PARTIAL dossier (summary=null).
@@ -139,6 +162,14 @@ export async function generateDossier(args: GenerateDossierArgs): Promise<Compan
 
   // 1) Free public fetches (keyless).
   const pub = await collectPublicSignals({ name: company.name, domain: company.domain })
+
+  // 1a) Persist the raw page text into the KB BEFORE synthesis (step 4 below
+  // reasons over it, but never sees it again once this function returns) so
+  // contact mining and KB search can read it back — see lib/kb/ingest.ts and
+  // lib/contacts/sources.ts's use of readFreshCompanyPages.
+  if (pub.homeText) await persistToKb(`company=${company.id} page=home`, () => ingestCompanyPage(admin, userId, company.id, 'home', pub.homeText!))
+  if (pub.aboutText) await persistToKb(`company=${company.id} page=about`, () => ingestCompanyPage(admin, userId, company.id, 'about', pub.aboutText!))
+  if (pub.careersText) await persistToKb(`company=${company.id} page=careers`, () => ingestCompanyPage(admin, userId, company.id, 'careers', pub.careersText!))
 
   // 2) Comp intel from first-party posted salary ranges + public baseline.
   const compIntel = computeCompIntel(jobs)
@@ -243,6 +274,11 @@ export async function generateDossier(args: GenerateDossierArgs): Promise<Compan
     signals.summarySource = 'wikipedia'
     signals.summaryUnavailable = null
   }
+
+  // 4a) Persist the synthesized summary (AI or Wikipedia-fallback, whichever
+  // ended up set above) into the KB, AFTER synthesis. company_dossiers below
+  // stays the structured store of record; this is a second, searchable copy.
+  if (summary) await persistToKb(`company=${company.id} dossier-summary`, () => ingestDossierSummary(admin, userId, company.id, summary!))
 
   // 5) Upsert (unique per company_id).
   let dossierId: string | null = null

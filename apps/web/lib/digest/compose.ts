@@ -10,6 +10,7 @@
 // own companies).
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { ownedJobsQuery } from '@/lib/harness/agents/matcher'
 import { STAGE_META, type PipelineStage } from '@/lib/format'
 import {
   utcDateKey,
@@ -89,10 +90,13 @@ export async function composeDigest(
   // 2) Top fresh/high-match jobs across the user's tracked companies.
   let topJobs: DigestTopJob[] = []
   if (companyIds.length > 0) {
-    const { data: jobData } = await admin
-      .from('jobs')
-      .select('id, title, url, match_score, is_new, company_id, discovered_at')
-      .in('company_id', companyIds)
+    // Ownership via the companies FK join (ownedJobsQuery), not an
+    // .in('company_id', companyIds) array — that breaks past ~600 companies.
+    const { data: jobData } = await ownedJobsQuery(
+      admin,
+      userId,
+      'id, title, url, match_score, is_new, company_id, discovered_at, companies!inner(user_id)'
+    )
       .order('match_score', { ascending: false, nullsFirst: false })
       .order('discovered_at', { ascending: false })
       .limit(TOP_JOBS_LIMIT)

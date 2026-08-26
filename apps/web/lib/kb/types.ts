@@ -23,6 +23,10 @@ import type { ChunkOptions } from './chunk'
  *   url             a fetched web page
  *   gmail           message bodies pulled from Gmail
  *   dossier         a generated company dossier
+ *   company_site    a company's own home/about/careers page text, persisted
+ *                    by lib/kb/ingest.ts so contact mining and search can
+ *                    read it back instead of re-fetching (see lib/kb/ingest.ts
+ *                    and lib/contacts/sources.ts)
  */
 export type KbSourceKind =
   | 'resume'
@@ -32,6 +36,7 @@ export type KbSourceKind =
   | 'url'
   | 'gmail'
   | 'dossier'
+  | 'company_site'
 
 export const KB_SOURCE_KINDS = [
   'resume',
@@ -41,6 +46,7 @@ export const KB_SOURCE_KINDS = [
   'url',
   'gmail',
   'dossier',
+  'company_site',
 ] as const
 
 /** Narrowing guard for values arriving from the DB or a request body. */
@@ -100,6 +106,12 @@ export interface KbDocument {
   metadata: Record<string, unknown> | null
   created_at: string
   updated_at: string
+  /** Set when this document is about one company (see supabase/migrations/20260816000003_kb_entity_refs.sql and lib/kb/ingest.ts). */
+  company_id: string | null
+  /** Set when this document is about one contact. No writer sets this yet. */
+  contact_id: string | null
+  /** Set when this document is about one job posting. No writer sets this yet. */
+  job_id: string | null
 }
 
 /**
@@ -144,6 +156,12 @@ export interface UpsertDocumentInput {
   metadata?: Record<string, unknown> | null
   /** Override chunk sizing for this document. Defaults come from ./chunk.ts. */
   chunkOptions?: ChunkOptions
+  /** Stamps kb_documents.company_id — see supabase/migrations/20260816000003_kb_entity_refs.sql. */
+  companyId?: string | null
+  /** Stamps kb_documents.contact_id. No writer sets this yet. */
+  contactId?: string | null
+  /** Stamps kb_documents.job_id. No writer sets this yet. */
+  jobId?: string | null
 }
 
 export interface UpsertDocumentResult {

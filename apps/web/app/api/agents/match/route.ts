@@ -62,11 +62,11 @@ export async function POST(request: NextRequest) {
 
   const { data: job, error: jobError } = await supabase
     .from('jobs')
-    .select('id, title, description, location, companies(name)')
+    .select('id, title, description, location, company_id, companies(name)')
     .eq('id', jobId)
     .single()
 
-  type JobWithCompany = Pick<JobRow, 'id' | 'title' | 'description' | 'location'> & {
+  type JobWithCompany = Pick<JobRow, 'id' | 'title' | 'description' | 'location' | 'company_id'> & {
     companies: { name: string | null } | { name: string | null }[] | null
   }
   const typedJob = job as JobWithCompany | null
@@ -96,13 +96,20 @@ export async function POST(request: NextRequest) {
 
   try {
     const llm: LlmRunner = (opts) => callLlm(apiKeys, opts)
-    const { verdict } = await scoreJobWithLlm(llm, resume, {
-      id: typedJob.id,
-      title: typedJob.title,
-      description: typedJob.description,
-      location: typedJob.location,
-      companyName: companyName ?? null,
-    })
+    const { verdict } = await scoreJobWithLlm(
+      llm,
+      resume,
+      {
+        id: typedJob.id,
+        title: typedJob.title,
+        description: typedJob.description,
+        location: typedJob.location,
+        companyName: companyName ?? null,
+        companyId: typedJob.company_id,
+      },
+      supabase,
+      user.id
+    )
     const matchDetails = buildMatchDetails(verdict)
 
     await supabase

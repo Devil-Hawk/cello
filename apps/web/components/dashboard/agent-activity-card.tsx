@@ -16,14 +16,16 @@ export type AgentRunStatus =
   | 'completed'
   // A run where at least one step FAILED (or the run was aborted on
   // budget/deadline before finishing) but something still completed. Kept
-  // distinct from plain 'completed' — see lib/harness/executor.ts.
+  // distinct from plain 'completed' — see lib/graph/runs.ts's finalStatus
+  // computation.
   | 'completed_with_errors'
-  | 'incomplete'
-  // The run PAUSED at its own wall-clock deadline with steps still pending —
-  // NOT a failure. app/api/harness/cron/route.ts's continueIncompleteRuns()
-  // auto-resumes it (bounded). Mirrors lib/harness/types.ts's RunStatus and
-  // components/copilot/runs-panel.tsx's STATUS_META — keep all three in sync.
-  | 'incomplete'
+  // harnessRunGraph hit its deadline interrupt() (or an ask-form/review
+  // wait) with a real checkpoint behind it; app/api/harness/cron/route.ts's
+  // resume pass re-enters it. NOT a failure. 'incomplete' (the pre-port
+  // executor's own pause state) is retired — see lib/harness/types.ts's
+  // RunStatus. Mirrors that file and components/copilot/runs-panel.tsx's
+  // STATUS_META — keep all three in sync.
+  | 'paused'
   | 'failed'
   | 'cancelled'
 
@@ -44,7 +46,7 @@ const STATUS_META: Record<AgentRunStatus, { label: string; tone: BadgeTone; icon
   completed_with_errors: { label: 'Completed with errors', tone: 'warn', icon: AlertTriangle },
   // Paused at the time limit and will resume itself — a better outcome than
   // 'failed', so deliberately muted rather than warned.
-  incomplete: { label: 'Paused — resuming', tone: 'muted', icon: PauseCircle },
+  paused: { label: 'Paused — resuming', tone: 'muted', icon: PauseCircle },
   failed: { label: 'Failed', tone: 'bad', icon: XCircle },
   cancelled: { label: 'Cancelled', tone: 'muted', icon: Clock },
 }

@@ -15,6 +15,7 @@
 
 import { getJson, stripHtml, truncate } from '@/lib/sources/util'
 import { assertAllowedHost } from '@/lib/ats/http'
+import { assertSsrfSafe } from '@/lib/security/untrusted'
 import type { SourceMatchReason, SourceRef } from './store'
 
 const USER_AGENT = 'cello-job-tracker/1.0 (+https://cello-two.vercel.app)'
@@ -102,40 +103,109 @@ function looksLikeOrganization(text: string): boolean {
   return ORG_HINT_RE.test(text) && !NON_ORG_HINT_RE.test(text)
 }
 
-/** HTML/text fetch that reuses the JSON transport's SSRF guard + no-redirect policy. */
+/** How many redirects to follow before giving up. Apex -> www is one hop; two
+ *  more covers http -> https -> www without opening a redirect maze. */
+const MAX_REDIRECT_HOPS = 3
+
+/**
+ * HTML/text fetch for a company's own site, guarded at every hop.
+ *
+ * WHY THIS IS NOT JUST `assertAllowedHost` + `fetch`
+ *   It used to be, and both halves of that were weaker than they looked.
+ *
+ *   1. THE ALLOWLIST WAS TAUTOLOGICAL AT THE MAIN CALL SITE.
+ *      fetchCompanyPages builds `allow = new Set([host, 'www.' + host])` and
+ *      then fetches `https://${host}` — i.e. it checks the URL against a set
+ *      derived from that same URL. It can never reject anything. It reads like
+ *      a guard and is an assertion that 1 === 1.
+ *
+ *   2. NOTHING RESOLVED DNS. assertAllowedHost compares hostname STRINGS. A
+ *      company domain that resolves to 127.0.0.1, to an RFC1918 address, or to
+ *      169.254.169.254 passed every check, because the hostname never changed —
+ *      only what it pointed at. And `domain` is not trusted input: it is
+ *      derived by employerDomainFromUrl() from scraped job-board data.
+ *      normalizeDomain only requires a dot and an alphabetic TLD, so
+ *      `metadata.google.internal` satisfies it exactly.
+ *
+ *   3. REDIRECTS WERE FOLLOWED BLIND. `redirect: 'follow'` was introduced for
+ *      the very common apex -> www hop, which was the right problem to fix, but
+ *      it moved the trust boundary: the host was validated once on the URL we
+ *      chose, and every hop after that went wherever the server said. The
+ *      sameSite(url, res.url) check afterwards does catch a cross-domain
+ *      landing — but only AFTER the request was issued, and for SSRF the
+ *      request IS the damage.
+ *
+ * WHAT IT DOES NOW
+ *   Redirects are followed BY HAND, and every hop — including the first — is
+ *   re-validated against both the host allowlist and assertSsrfSafe(), which
+ *   resolves the name and refuses loopback, link-local, RFC1918 and cloud
+ *   metadata addresses. A hop that fails either check ends the fetch.
+ *
+ * WHAT IT STILL DOES NOT DO — see lib/security/untrusted.ts's own TOCTOU note.
+ *   assertSsrfSafe resolves DNS itself, and the fetch that follows resolves
+ *   again independently; nothing in stock fetch pins a connection to the
+ *   address just verified. A resolver that answers differently between the two
+ *   can still get through. Closing that needs a custom agent with a pinned
+ *   address, which is a bigger change than this function. Recorded here rather
+ *   than papered over, because a guard whose limits are undocumented is how the
+ *   next reader over-trusts it.
+ */
 async function fetchHtml(
   url: string,
   allowedHosts: ReadonlySet<string>,
-  timeoutMs = 10_000
+  timeoutMs = 10_000,
+  // 4000 is what the dossier summarizer wants and must keep getting. Contact
+  // sourcing asks for more because the thing it is looking for — a published
+  // `careers@` address — lives in the page FOOTER, i.e. exactly the part a
+  // 4k truncation throws away.
+  maxChars = 4000
 ): Promise<string | null> {
-  try {
-    assertAllowedHost(url, allowedHosts)
-  } catch {
-    return null
-  }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { 'user-agent': USER_AGENT, accept: 'text/html,application/xhtml+xml,text/plain' },
-      // Follow redirects. This was `redirect: 'error'`, which threw on the
-      // extremely common apex -> www hop (distyl.ai 308s to www.distyl.ai), so
-      // every page fetch for such a company returned null, leaving the dossier
-      // with no text to summarize and reporting "no signals" for a company
-      // whose site was perfectly reachable.
-      redirect: 'follow',
-      signal: controller.signal,
-    })
-    if (!res.ok) return null
-    // Only trust a redirect that stayed on the same registrable domain, so an
-    // open redirect or a parked-domain hop can't inject third-party content.
-    if (!sameSite(url, res.url)) return null
-    const ct = (res.headers.get('content-type') || '').toLowerCase()
-    if (ct && !/text\/html|application\/xhtml|text\/plain|xml/.test(ct)) return null
-    const raw = await res.text()
-    const text = truncate(stripHtml(raw), 4000)
-    return text || null
+    let current = url
+
+    for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
+      // Both checks, on EVERY hop. The allowlist keeps us on the company's own
+      // site; assertSsrfSafe is the one that looks at where the name actually
+      // points, which is the check this function never had.
+      try {
+        assertAllowedHost(current, allowedHosts)
+        await assertSsrfSafe(current)
+      } catch {
+        return null
+      }
+
+      const res = await fetch(current, {
+        method: 'GET',
+        headers: { 'user-agent': USER_AGENT, accept: 'text/html,application/xhtml+xml,text/plain' },
+        // Manual, so each hop can be validated before it is taken. The apex ->
+        // www case that motivated `follow` still works — it is simply checked.
+        redirect: 'manual',
+        signal: controller.signal,
+      })
+
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get('location')
+        if (!location) return null
+        const next = new URL(location, current).toString()
+        // An open redirect off the company's own registrable domain is not
+        // something we follow, whatever the allowlist would say about it.
+        if (!sameSite(current, next)) return null
+        current = next
+        continue
+      }
+
+      if (!res.ok) return null
+      const ct = (res.headers.get('content-type') || '').toLowerCase()
+      if (ct && !/text\/html|application\/xhtml|text\/plain|xml/.test(ct)) return null
+      const raw = await res.text()
+      const text = truncate(stripHtml(raw), maxChars)
+      return text || null
+    }
+
+    // Ran out of hops.
+    return null
   } catch {
     return null
   } finally {
@@ -381,6 +451,51 @@ export async function fetchCompanyPages(domain: string): Promise<CompanyPageText
     aboutText: aboutText ?? undefined,
     careersText: careersText ?? undefined,
   }
+}
+
+/** One fetched first-party page, tagged with the URL it came from. */
+export interface FetchedPage {
+  url: string
+  text: string
+}
+
+// Pages a company publishes about ITSELF that plausibly name a human or an
+// address a candidate may write to. Deliberately short and first-party only:
+// every one of these is on the company's own domain, publicly readable, and
+// behind no login — the same rule lib/dossier/comp.ts states ("we NEVER scrape
+// levels.fyi / Glassdoor / any paid or login-walled vendor").
+const CONTACT_PAGE_PATHS = ['', '/about', '/about-us', '/team', '/careers', '/contact']
+
+/**
+ * The company's own public pages, each tagged with its URL so a consumer can
+ * CITE where a name or address came from.
+ *
+ * Intentionally a sibling of fetchCompanyPages() rather than a refactor of it:
+ * that function's exact three-page shape is what the dossier pipeline
+ * (lib/harness/agents/company_researcher.ts) stores and summarizes, and
+ * changing it to serve contact sourcing would silently change what every
+ * dossier contains. Both share the same guarded fetchHtml above — the SSRF
+ * host-allowlist (assertAllowedHost), https-only, same-site-redirect-only and
+ * content-type checks all apply here unchanged.
+ */
+export async function fetchCompanyContactPages(
+  domain: string,
+  timeoutMs = 6000,
+  maxCharsPerPage = 12_000
+): Promise<FetchedPage[]> {
+  const host = normalizeDomain(domain)
+  if (!host) return []
+  // Exactly the company's own domain (bare + www variant) — nothing else.
+  const allow = new Set([host, `www.${host}`])
+  const base = `https://${host}`
+  const settled = await Promise.all(
+    CONTACT_PAGE_PATHS.map(async (path) => {
+      const url = `${base}${path}`
+      const text = await fetchHtml(url, allow, timeoutMs, maxCharsPerPage)
+      return text ? { url, text } : null
+    })
+  )
+  return settled.filter((p): p is FetchedPage => p !== null)
 }
 
 /** Derive a plausible GitHub org slug from a company name / domain. */

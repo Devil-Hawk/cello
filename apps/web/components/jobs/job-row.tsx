@@ -154,19 +154,42 @@ export function JobRow({
             {job.title}
             <span className="sr-only"> at {job.companies?.name ?? 'unknown company'} — open details</span>
           </button>
-          <MatchBadge
-            score={job.match_score}
-            details={parseMatchDetails(job.match_details)}
-            onCalculate={onCalculateMatch}
-            isCalculating={isCalculating}
-            disabledReason={
-              // A running batch blocks this row's own trigger too, but that's
-              // transient — still worth a distinct, honest reason.
-              calculateDisabled && !calculateDisabledReason ? 'A batch calculation is already running' : calculateDisabledReason
-            }
-            onRetryStatus={onRetryStatus}
-            budgetHint={budgetHint}
-          />
+          {/* The match badge is a control in its own right, so it must not also
+              fire the row's open-the-job convenience click above. Its unscored
+              variant already stops the event itself; its SCORED variant — a
+              real <button> labelled "press for the full score breakdown" — did
+              not, so the click bubbled and opened the detail modal instead.
+              Verified in a browser before this wrapper existed: clicking an
+              "8 percent match" badge gave dialog=true, tooltip=false. Keyboard
+              users hit the identical bug, since Enter on a <button> dispatches
+              a bubbling click.
+              Guarded, not blanket: only swallow clicks that actually landed on
+              a control, so MatchBadge's purely decorative variant (a plain
+              <span>, rendered when there is no breakdown to show) keeps
+              counting as row whitespace and still opens the row.
+              `contents` keeps the badge a direct flex item of this line — a
+              display:contents wrapper generates no box, but events still bubble
+              through it, which is all this handler needs. */}
+          <span
+            className="contents"
+            onClick={(e) => {
+              if (e.target instanceof Element && e.target.closest('button, a')) e.stopPropagation()
+            }}
+          >
+            <MatchBadge
+              score={job.match_score}
+              details={parseMatchDetails(job.match_details)}
+              onCalculate={onCalculateMatch}
+              isCalculating={isCalculating}
+              disabledReason={
+                // A running batch blocks this row's own trigger too, but that's
+                // transient — still worth a distinct, honest reason.
+                calculateDisabled && !calculateDisabledReason ? 'A batch calculation is already running' : calculateDisabledReason
+              }
+              onRetryStatus={onRetryStatus}
+              budgetHint={budgetHint}
+            />
+          </span>
           <VisaBadge signal={visaSignal} className="shrink-0" />
         </div>
         <p className="mt-0.5 truncate text-caption text-muted-foreground">

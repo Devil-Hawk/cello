@@ -1,0 +1,71 @@
+{
+  "note": "Golden query -> chunk-relevance fixture for lib/evals/retrieval.eval.test.ts. Hand-curated (no behavioral ground-truth table for KB retrieval exists yet — unlike match-scorer.golden.json, which snapshots real applications). Content text is refreshable from live kb_chunks by id via scripts/snapshot-retrieval-eval.ts; the query and relevant labels are human judgments that script never overwrites. The last three queries ('promotion process...', 'on call rotation...', 'diversity equity...') are deliberately adversarial to FTS: the relevant chunk shares NO words with the query (a paraphrase) and the irrelevant chunk repeats the query's own words without answering it (keyword-stuffed) — the exact failure mode hybrid retrieval exists to catch. Regenerate scores, don't hand-edit them: the eval test computes fts/hybrid scores from this content at run time, nothing here is a pre-baked score.",
+  "cases": [
+    {
+      "query": "kubernetes rolling deployment strategy",
+      "chunks": [
+        { "id": "c1", "content": "Our platform team runs kubernetes rolling deployments with a canary strategy for every release, minimizing downtime.", "relevant": true },
+        { "id": "c2", "content": "The company culture emphasizes ownership, autonomy, and a bias toward shipping fast without excessive process.", "relevant": false },
+        { "id": "c3", "content": "We migrated our blue-green rollout process to gradually shift traffic percentages using kubernetes deployment objects and readiness probes.", "relevant": true },
+        { "id": "c4", "content": "Funding history: Series C led by Accel in 2024, total raised 140M, headcount roughly 320 employees.", "relevant": false }
+      ]
+    },
+    {
+      "query": "sponsors work visas for international candidates",
+      "chunks": [
+        { "id": "c5", "content": "The employer confirmed it sponsors H-1B and O-1 visas for qualified engineering candidates relocating internationally.", "relevant": true },
+        { "id": "c6", "content": "Interview process: recruiter screen, technical phone screen, onsite loop of four interviews, then offer.", "relevant": false },
+        { "id": "c7", "content": "Immigration support is offered on a case by case basis; the company has filed several visa petitions for engineers this year.", "relevant": true },
+        { "id": "c8", "content": "Tech stack: TypeScript, Postgres, Kubernetes, React on the frontend, deployed on AWS.", "relevant": false }
+      ]
+    },
+    {
+      "query": "remote-first engineering culture",
+      "chunks": [
+        { "id": "c9", "content": "Fully distributed team across time zones; async communication and written documentation are the default working style, remote-first since founding.", "relevant": true },
+        { "id": "c10", "content": "The office is located in downtown Austin with a mandatory three day in-office policy for all staff engineers.", "relevant": false },
+        { "id": "c11", "content": "No central headquarters — every engineer works from home, with quarterly in-person offsites for the whole company.", "relevant": true },
+        { "id": "c12", "content": "Product roadmap for next quarter focuses on billing infrastructure and a new admin dashboard.", "relevant": false }
+      ]
+    },
+    {
+      "query": "series a startup equity compensation",
+      "chunks": [
+        { "id": "c13", "content": "As an early series A startup, compensation leans toward meaningful equity grants alongside a below-market cash salary.", "relevant": true },
+        { "id": "c14", "content": "The company was acquired by a public enterprise software vendor last year and now operates as a wholly owned subsidiary.", "relevant": false },
+        { "id": "c15", "content": "Recently closed a 12M seed-to-series-A round; offer letters include a standard four year equity vesting schedule with a one year cliff.", "relevant": true },
+        { "id": "c16", "content": "Benefits package: health, dental, vision, 401k match, and unlimited PTO.", "relevant": false }
+      ]
+    },
+    {
+      "query": "layoffs recent headcount reduction",
+      "chunks": [
+        { "id": "c17", "content": "The company reduced headcount by 15 percent in a round of layoffs last quarter, citing a slower funding environment.", "relevant": true },
+        { "id": "c18", "content": "Engineering blog post describing their new event-driven architecture built on Kafka and gRPC services.", "relevant": false },
+        { "id": "c19", "content": "Following two rounds of layoffs this year, the remaining team has consolidated around a smaller core product.", "relevant": true },
+        { "id": "c20", "content": "Glassdoor reviews mention strong mentorship and a healthy on-call rotation with minimal after-hours pages.", "relevant": false }
+      ]
+    },
+    {
+      "query": "promotion process and career growth ladder",
+      "chunks": [
+        { "id": "c21", "content": "Every six months managers and their reports discuss advancement, title changes, and the path toward more senior scope. variant3", "relevant": true },
+        { "id": "c22", "content": "promotion process career growth ladder promotion process career growth ladder is not something we publish externally. variant3", "relevant": false }
+      ]
+    },
+    {
+      "query": "on call rotation and incident response",
+      "chunks": [
+        { "id": "c23", "content": "Engineers take turns carrying a pager for one week at a time, and a runbook walks through paging escalation when something breaks at 3am. variant0", "relevant": true },
+        { "id": "c24", "content": "on call rotation incident response on call rotation incident response — details available upon request only, nothing further to add here. variant0", "relevant": false }
+      ]
+    },
+    {
+      "query": "diversity equity and inclusion initiatives",
+      "chunks": [
+        { "id": "c25", "content": "Employee resource groups meet monthly, and leadership tracks representation across every level of the organization each quarter. variant0", "relevant": true },
+        { "id": "c26", "content": "diversity equity inclusion initiatives diversity equity inclusion initiatives — this page intentionally left blank. variant0", "relevant": false }
+      ]
+    }
+  ]
+}

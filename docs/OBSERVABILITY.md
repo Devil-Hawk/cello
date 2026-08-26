@@ -36,11 +36,13 @@ SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0
 Where it's wired in: `instrumentation.ts` (Next's official boot hook — see
 `experimental.instrumentationHook` in `next.config.js`, required on Next
 14.1) calls `initObservability()` once per server/edge runtime instance.
-From there, individual `app/api/**` route catch blocks and the agent
-harness (`lib/harness/executor.ts`) call `captureError()` /
-`logHarnessError()` / `logApiError()` at the points that matter — this is
-**manual, targeted capture**, not blanket auto-instrumentation of every
-route. We control exactly what's reported.
+From there, individual `app/api/**` route catch blocks call `captureError()` /
+`logApiError()` at the points that matter — this is **manual, targeted
+capture**, not blanket auto-instrumentation of every route. (`logHarnessError()`
+is the harness-level counterpart, wired up when the pre-port executor called
+it directly; today the harness (`lib/graph/unit.ts`) doesn't call it itself —
+its errors propagate up to the route catch block instead.) We control exactly
+what's reported.
 
 There is currently no browser/client-side Sentry init — every high-stakes
 surface in this app (the agent harness, ATS submission, Gmail sync, key
@@ -87,7 +89,8 @@ cd apps/web && npx vitest run lib/observability/scrub.test.ts
 ## Structured harness logging — independent of Sentry, always on
 
 Every `agent_steps` row already records `output.error` on failure — that's
-the audit trail the UI and RESUMPTION (see `lib/harness/executor.ts`) read.
+the audit trail the UI and resume-from-checkpoint (see `lib/graph/journal.ts`,
+`lib/graph/runs.ts`) read.
 But a DB row is invisible to whoever is actually debugging an incident by
 tailing server logs (`docker logs`, `vercel logs`, `journalctl`, ...), which
 historically showed nothing at all for a step failure.
@@ -106,7 +109,7 @@ there). The message is the exact same string already written to
 `agent_steps.output.error`, so this adds *visibility*, not a new leak
 surface. Expected control-flow stops (the monthly spend cap being hit, a run
 being cancelled) are deliberately **not** logged as errors — see the
-comments at each `logHarnessError` call site in `executor.ts` for why.
+comment at the `logHarnessError` call site in `lib/graph/unit.ts` for why.
 
 If `SENTRY_DSN` **is** set, the same call also forwards a scrubbed report to
 Sentry (tagged `area: harness`, `phase`, `agentType`) — additive, not a

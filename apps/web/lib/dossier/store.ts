@@ -6,6 +6,7 @@
 // key is (company_id) and there is intentionally no DELETE policy.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { resolveCompanyId } from '../entities/companies'
 
 const TABLE = 'company_dossiers'
 
@@ -130,16 +131,24 @@ export async function upsertDossier(
   return data as CompanyDossierRow
 }
 
-/** Read the current dossier for a company, scoped to the owning user. */
+/**
+ * Read the current dossier for a company, scoped to the owning user.
+ *
+ * `companyId` is chased through lib/entities/companies.ts#resolveCompanyId
+ * first: a dossier is keyed one-per-company (see upsertDossier's onConflict),
+ * so once two companies merge, only the survivor's row is the real one —
+ * looking a duplicate up by its own raw id must still find it.
+ */
 export async function getDossierByCompany(
   client: SupabaseClient,
   userId: string,
   companyId: string
 ): Promise<CompanyDossierRow | null> {
+  const resolvedCompanyId = await resolveCompanyId(client, companyId)
   const { data } = await client
     .from(TABLE)
     .select('*')
-    .eq('company_id', companyId)
+    .eq('company_id', resolvedCompanyId)
     .eq('user_id', userId)
     .maybeSingle()
   return (data as CompanyDossierRow | null) ?? null

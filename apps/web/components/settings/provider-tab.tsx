@@ -28,6 +28,7 @@ interface CliAvailability {
 
 interface ProviderStatus {
   selfHosted: boolean
+  tracingExportEnabled: boolean
   active: ProviderId
   preferences: {
     active: ProviderId
@@ -159,6 +160,18 @@ export function ProviderTab({ onStatus }: ProviderTabProps) {
             This Cello instance is running on Vercel serverless — local CLI and local server providers
             cannot work here (no binaries, no access to your network). Self-host Cello to use them.
           </span>
+        </div>
+      )}
+
+      {status.tracingExportEnabled && (
+        <div className="rounded-card border bg-sunken p-4 text-caption text-muted-foreground">
+          <p className="font-medium text-foreground">This instance mirrors traces to Langfuse.</p>
+          <p className="mt-1">
+            The operator running this Cello instance has turned on optional Langfuse export. That
+            ships run traces — including prompt content and employer/job text — to a third-party
+            service for debugging and analysis. Postgres remains the complete record either way; ask
+            your operator if you have questions about what leaves this instance.
+          </p>
         </div>
       )}
 

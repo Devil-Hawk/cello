@@ -1,7 +1,7 @@
 'use client'
 
 import { Building2, Check, Linkedin, Loader2, Mail, Pencil, Trash2 } from 'lucide-react'
-import { calculateConnectionStrength, calculateDaysSinceContact } from '@cello/agents'
+import { calculateConnectionStrength, calculateDaysSinceContact } from '@/lib/contacts/network'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn, formatRelativeTime, getInitials } from '@/lib/utils'

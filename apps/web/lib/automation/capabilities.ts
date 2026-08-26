@@ -4,7 +4,7 @@
 //   Onboarding offered an "Auto-submit applications" switch. Turning it on
 //   persisted `preferences.autoSubmit = true`, and the queue page then read
 //   that back and displayed "Auto-submit applications: on". Nothing ever
-//   submitted: lib/harness/autopilot.ts hardcodes `autoSubmit = false` and
+//   submitted: lib/graph/autopilot.ts hardcodes `autoSubmit = false` and
 //   always builds a pending_review draft instead. So the product asked for a
 //   decision, confirmed the decision back to the user, and then silently did
 //   the opposite — which is worse than not offering the switch at all, because

@@ -1,0 +1,9 @@
+{
+  "note": "Labelled outreach reply data: judge groundedness score (eval_verdicts, subject_kind=outreach_draft, judge=factuality) against the actual reply classification (outreach_messages.replied_at + reply_classification). This is a SYNTHETIC starter fixture, not a database snapshot — outreach_messages.reply_classification is a brand-new column (this same langgraph-port stage) with no accumulated real replies yet. Deliberately kept below MIN_SAMPLE_PER_CLASS so lib/evals/reply-label.eval.test.ts reports insufficient-data honestly, exactly as it should today; the eval starts grading for real once scripts/snapshot-reply-eval-data.ts has enough real replied outreach to snapshot. Regenerate then: pnpm tsx scripts/snapshot-reply-eval-data.ts",
+  "cases": [
+    { "id": "reply-01-00000000-0000-0000-0000-000000000000", "judgeScore": 0.86, "replyClassification": "positive" },
+    { "id": "reply-02-00000000-0000-0000-0000-000000000000", "judgeScore": 0.41, "replyClassification": "negative" },
+    { "id": "reply-03-00000000-0000-0000-0000-000000000000", "judgeScore": 0.63, "replyClassification": "neutral" },
+    { "id": "reply-04-00000000-0000-0000-0000-000000000000", "judgeScore": 0.22, "replyClassification": "bounce" }
+  ]
+}

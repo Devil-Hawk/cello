@@ -1,0 +1,36 @@
+-- Drops three dead tables (public.memories, public.memories_entities,
+-- public.memory_migrations) left behind by mem0ai's PGVector provider
+-- running BEFORE 20260816000006_memories.sql's `mem0` schema existed — back
+-- when there was no search_path option yet, so mem0ai's unqualified
+-- CREATE TABLE IF NOT EXISTS landed in the connection's default schema
+-- (public). Confirmed dead: 0 live rows in memories/memories_entities, no
+-- app code references public.memories (grep across lib/, confirmed
+-- 2026-08-25), and n_live_tup stayed 0 across every real memory-write
+-- attempt since — because these tables are the reason those attempts kept
+-- failing (see below), not a record of any of them succeeding.
+--
+-- WHY THESE ARE MORE THAN CLUTTER — THEY WERE ACTIVELY BREAKING WRITES
+--   mem0ai@3.1.6's PGVector.listCols() (node_modules/mem0ai/dist/oss/
+--   index.mjs) hardcodes `WHERE table_schema = 'public'` when it asks "does
+--   my collection table already exist?" on every cold Memory() construction.
+--   With a same-named `memories` table sitting in `public`, that check came
+--   back true even though the SCHEMA-SCOPED collection (the one every real
+--   query actually reads/writes, resolved via search_path=mem0) had never
+--   been created — so PGVector permanently skipped creating it, and every
+--   insert against the unqualified `memories` table then failed with
+--   "relation does not exist" (proven live against a throwaway schema,
+--   2026-08-25 probe). mem0ai's own add() swallows that failure internally
+--   for the infer:true path and reports success anyway — see
+--   lib/memory/mem0-store.ts#Mem0Store.add's verifyPersisted, the other half
+--   of this fix. Dropping the stray tables removes the false positive;
+--   verifyPersisted stays as the permanent guard against this class of bug
+--   recurring, from mem0ai or anything else that can silently no-op a write.
+--
+-- Also in `public`: exposed to PostgREST by mere presence in that schema,
+-- exactly the leak 20260816000006_memories.sql's schema-isolation doctrine
+-- exists to prevent. Safe to drop outright (not ALTER/rename) — nothing
+-- reads them, and mem0ai recreates memory_migrations/the collection table
+-- itself, inside `mem0`, the next time Mem0Store constructs a Memory.
+drop table if exists public.memories_entities;
+drop table if exists public.memories;
+drop table if exists public.memory_migrations;

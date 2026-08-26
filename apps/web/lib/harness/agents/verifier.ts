@@ -15,6 +15,7 @@
 
 import type { AgentFn, AdminClient } from '../types'
 import { VerifierInput } from '../schemas'
+import { ownedJobsQuery } from './matcher'
 
 /** Cap jobs checked per run. */
 const MAX_JOBS = 30
@@ -96,19 +97,18 @@ export const verifier: AgentFn = async (ctx) => {
     return { output: { verified: true, issues: [] }, tokensUsed: 0 }
   }
 
+  // Ownership scoped via the companies FK join (see ownedJobsQuery), not an
+  // .in('company_id', companyIds) array — that breaks past ~600 companies.
+  const SELECT_COLUMNS = 'id, company_id, title, url, external_id, companies!inner(name)'
   let jobs: JobRow[]
   if (jobIds.length > 0) {
-    const { data } = await ctx.admin
-      .from('jobs')
-      .select('id, company_id, title, url, external_id, companies(name)')
-      .in('id', jobIds.slice(0, MAX_JOBS))
-      .in('company_id', companyIds)
+    const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, SELECT_COLUMNS).in(
+      'id',
+      jobIds.slice(0, MAX_JOBS)
+    )
     jobs = (data as JobRow[] | null) ?? []
   } else {
-    const { data } = await ctx.admin
-      .from('jobs')
-      .select('id, company_id, title, url, external_id, companies(name)')
-      .in('company_id', companyIds)
+    const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, SELECT_COLUMNS)
       .eq('is_new', true)
       .order('discovered_at', { ascending: false })
       .limit(MAX_JOBS)

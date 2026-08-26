@@ -1,11 +1,14 @@
 // POST /api/outreach/send — send a drafted outreach message through the user's
 // OWN Gmail account. Every guardrail is enforced here, in order:
+//   (0) demo sessions: a demo may draft, judge and preview — never deliver
 //   (1) approve-queue: message must be 'approved' (or autoSend enabled)
 //   (2) daily cap: stay under preferences.outreach.dailyCap
 //   (4) real identity: From is always the authenticated Gmail account
 //   (5) follow-ups: never send after a reply, and only past the wait window
 // Sends are From the signed-in user only — no spoofing, no scraped strangers.
 
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { readProfileForDemoGuards } from '@/lib/harness/keys'
 import { hasGmailPermission } from '@/lib/gmail/permissions'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
@@ -13,6 +16,7 @@ import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { readOutreachConfig } from '@/lib/outreach/config'
 import { getOutreach, updateOutreach, countSentToday } from '@/lib/outreach/store'
 import { canSendNow, checkDailyCap, followUpWindowElapsed } from '@/lib/outreach/guardrails'
+import { demoSendGate, firstRefusal, type DemoProfileFacts } from '@/lib/access/guardrails'
 import { sendGmailMessage, threadHasReply } from '@/lib/outreach/gmail'
 
 export const dynamic = 'force-dynamic'
@@ -32,11 +36,40 @@ export async function POST(request: NextRequest) {
   // a preference; without this check revoking it was cosmetic and the next
   // "Approve & send" still delivered mail. A permission the product displays
   // but does not enforce is a promise it does not keep.
-  const { data: sendPerm } = await supabase
-    .from('profiles')
-    .select('preferences')
-    .eq('id', user.id)
-    .single()
+  //
+  // is_demo / demo_expires_at ride along on the read this route was already
+  // doing, so guardrail (0) below costs no extra query. They are selected
+  // through an untyped view of the same client because the access-codes
+  // migration's columns are not in @cello/shared's generated Database type yet
+  // — the same escape hatch app/api/access-codes/route.ts uses.
+  const { row: sendPerm } = await readProfileForDemoGuards(
+    supabase as unknown as SupabaseClient,
+    user.id
+  )
+
+  // Guardrail (0): a demo session never delivers mail.
+  //
+  // Everything upstream of this line is the demo — drafting, the judge, the
+  // preview, the approve queue all run for real. Delivery is the one action
+  // that leaves the workspace permanently: it puts a stranger's words in a real
+  // person's inbox, From the owner's own Gmail account, with no undo. Every
+  // other thing a demo can do writes rows RLS already fences off.
+  //
+  // Checked FIRST, before the Gmail permission and before the message is even
+  // loaded, because it is the cheapest and most fundamental refusal — and
+  // because a demo should be told "sending is off in the demo", not "turn on a
+  // permission you cannot turn on". demoSendGate also refuses an EXPIRED demo
+  // (with the expiry wording) and refuses outright when the profile could not
+  // be read, since we cannot then prove the caller is not a demo.
+  const demoFacts = (sendPerm ?? null) as DemoProfileFacts | null
+  const demoGate = demoSendGate(demoFacts)
+  if (!demoGate.allowed) {
+    return NextResponse.json(
+      { error: demoGate.reason, message: demoGate.message, demo: demoGate.code },
+      { status: 403 }
+    )
+  }
+
   if (!hasGmailPermission(sendPerm?.preferences, 'send')) {
     return NextResponse.json(
       {
@@ -78,8 +111,14 @@ export async function POST(request: NextRequest) {
 
   const config = await readOutreachConfig(supabase, user.id)
 
-  // Guardrail (1): approve-queue.
-  const sendGate = canSendNow(message, config.prefs, { humanApproved })
+  // Guardrail (1): approve-queue, composed with the demo gate a SECOND time.
+  //
+  // Deliberate redundancy, not a copy-paste slip. The refusal above is the one a
+  // demo user actually sees; re-composing here means any future edit that adds
+  // an early path around it — a new branch, a reordered read, a "fast path" for
+  // follow-ups — still cannot reach sendGmailMessage below. firstRefusal keeps
+  // it to the single `if (!sendGate.allowed)` branch this route already had.
+  const sendGate = firstRefusal(demoSendGate(demoFacts), canSendNow(message, config.prefs, { humanApproved }))
   if (!sendGate.allowed) {
     return NextResponse.json({ error: sendGate.reason, needsApproval: message.status === 'pending_review' }, { status: 403 })
   }

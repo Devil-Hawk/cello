@@ -14,6 +14,7 @@ import { ContactDialog } from '@/components/contacts/contact-dialog'
 import { ContactRow } from '@/components/contacts/contact-row'
 import { ContactsEmptyPreview } from '@/components/contacts/empty-preview'
 import { CsvImportDialog } from '@/components/contacts/csv-import'
+import { PeopleGraph } from '@/components/contacts/people-graph'
 import type {
   Contact,
   ContactCompany,
@@ -21,7 +22,7 @@ import type {
   CsvContactRow,
 } from '@/components/contacts/types'
 
-type ViewMode = 'list' | 'company'
+type ViewMode = 'graph' | 'list' | 'company'
 
 function ContactsTableHead() {
   return (
@@ -49,7 +50,7 @@ export default function ContactsPage() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [editingContact, setEditingContact] = useState<Contact | null>(null)
   const [isSaving, setIsSaving] = useState(false)
-  const [viewMode, setViewMode] = useState<ViewMode>('list')
+  const [viewMode, setViewMode] = useState<ViewMode>('graph')
   const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set())
   const [updatingContactId, setUpdatingContactId] = useState<string | null>(null)
   const [isImporting, setIsImporting] = useState(false)
@@ -401,6 +402,7 @@ export default function ContactsPage() {
           <Segmented<ViewMode>
             aria-label="Group contacts"
             options={[
+              { value: 'graph', label: 'Network' },
               { value: 'list', label: 'All contacts' },
               { value: 'company', label: 'By company' },
             ]}
@@ -434,6 +436,8 @@ export default function ContactsPage() {
           preview={<ContactsEmptyPreview />}
           className="min-h-[26rem]"
         />
+      ) : viewMode === 'graph' ? (
+        <PeopleGraph contacts={contacts} onSelectContact={openEditModal} />
       ) : viewMode === 'company' && groupedContacts ? (
         <div className="space-y-4">
           {groupedContacts.groups.map(({ company, contacts: groupContacts }) => (

@@ -11,15 +11,21 @@
 //   predicate is the only thing separating users. Never remove it. The
 //   cookie-scoped RLS client also works (reads are then filtered twice).
 //
-// SEARCH IS FULL-TEXT ONLY
+// SEARCH IS HYBRID (FTS + optional vector)
 //   searchKb() calls the search_kb_chunks() SQL function, which ranks with
-//   ts_rank_cd over the GENERATED `tsv` column. There is no embedding column and
-//   pgvector is not installed — see the EMBEDDING SEAM comments in
-//   supabase/migrations/20260724000002_phaseB.sql for how to add hybrid search
-//   later without changing this module's signatures.
+//   ts_rank_cd over the GENERATED `tsv` column and, when `opts.vector` is
+//   given, fuses that with a cosine-distance ranking over kb_chunks.embedding
+//   via Reciprocal Rank Fusion — see
+//   supabase/migrations/20260816000007_hybrid_search.sql. Omit `opts.vector`
+//   (or call via lib/kb/retrieve.ts#retrieveKb, which degrades to FTS-only on
+//   its own) for byte-compatible pure-FTS behavior.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { chunkText } from './chunk'
+import { chunkText, type TextChunk } from './chunk'
+import { createAdminClient } from '../harness/supabase-admin'
+import { loadApiKeys } from '../harness/keys'
+import { callEmbedding } from '../harness/llm'
+import { captureError } from '../observability/sentry'
 import type {
   KbDocument,
   KbSearchHit,
@@ -179,13 +185,18 @@ export async function deleteSource(
  * this row, not a mutable attribute.
  */
 export function buildDocumentPatch(
-  input: Pick<UpsertDocumentInput, 'title' | 'url' | 'metadata'> & { content?: string }
+  input: Pick<UpsertDocumentInput, 'title' | 'url' | 'metadata' | 'companyId' | 'contactId' | 'jobId'> & {
+    content?: string
+  }
 ): Record<string, unknown> {
   const patch: Record<string, unknown> = {}
   if (input.content !== undefined) patch.content = input.content
   if (input.title !== undefined) patch.title = input.title
   if (input.url !== undefined) patch.url = input.url
   if (input.metadata !== undefined) patch.metadata = input.metadata
+  if (input.companyId !== undefined) patch.company_id = input.companyId
+  if (input.contactId !== undefined) patch.contact_id = input.contactId
+  if (input.jobId !== undefined) patch.job_id = input.jobId
   return patch
 }
 
@@ -274,6 +285,9 @@ export async function upsertDocument(
         url: input.url ?? null,
         content,
         metadata: input.metadata ?? null,
+        company_id: input.companyId ?? null,
+        contact_id: input.contactId ?? null,
+        job_id: input.jobId ?? null,
       })
       .select('*')
       .single()
@@ -329,7 +343,62 @@ export async function replaceChunks(
     const { error } = await client.from(CHUNKS).insert(batch)
     if (error) throw new Error(`replaceChunks failed (insert): ${error.message}`)
   }
+
+  await embedChunksBestEffort(userId, documentId, pieces)
   return rows.length
+}
+
+/**
+ * Embed the chunks just written by replaceChunks() and persist them onto
+ * their rows, so search_kb_chunks can rank this document in its vector
+ * candidate list too (see 20260816000007_hybrid_search.sql). NEVER throws:
+ * any failure — no provider configured, budget cap hit, a transient provider
+ * error, a persist error on some subset of rows — leaves the affected
+ * chunk(s) at their default NULL embedding, which search_kb_chunks already
+ * treats as "FTS-only for this row". Ingestion (upsertDocument) must never
+ * fail because embedding did.
+ *
+ * Uses its OWN admin client for loadApiKeys regardless of which client the
+ * caller passed to replaceChunks (see this file's WHICH CLIENT TO PASS
+ * header) — loadApiKeys needs service-role access to read the user's
+ * decrypted provider keys, which a cookie-scoped RLS client cannot do.
+ *
+ * One callEmbedding call batches every chunk's text (provider embedding APIs
+ * are batch-native), so this is one provider round trip per document
+ * regardless of chunk count — only the per-row persist afterward is N calls,
+ * and kb_chunks has no unique constraint on (document_id, ord) to upsert
+ * against instead (see idx_kb_chunks_document_ord — a plain, non-unique
+ * index), so each row is written with its own scoped UPDATE.
+ */
+async function embedChunksBestEffort(
+  userId: string,
+  documentId: string,
+  pieces: TextChunk[]
+): Promise<void> {
+  if (pieces.length === 0) return
+  try {
+    const admin = createAdminClient()
+    const keys = await loadApiKeys(admin, userId)
+    const { embeddings } = await callEmbedding(keys, { texts: pieces.map((p) => p.content) })
+    for (let i = 0; i < pieces.length; i++) {
+      const { error } = await admin
+        .from(CHUNKS)
+        .update({ embedding: embeddings[i] })
+        .eq('document_id', documentId)
+        .eq('user_id', userId)
+        .eq('ord', pieces[i].ord)
+      if (error) throw new Error(`persist embedding failed (ord=${pieces[i].ord}): ${error.message}`)
+    }
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err))
+    console.error(
+      `[kb:embed-failed] document=${documentId} user=${userId} chunks=${pieces.length}: ${error.message}`
+    )
+    void captureError(error, {
+      tags: { area: 'kb', phase: 'embed' },
+      extra: { userId, documentId, chunkCount: pieces.length },
+    })
+  }
 }
 
 /** Documents for a user, newest first. Optionally filtered to one source. */
@@ -394,8 +463,15 @@ interface SearchRow {
 }
 
 /**
- * Ranked full-text search over the user's chunks, joined to their documents for
- * citation. Ordered by ts_rank_cd descending.
+ * Ranked search over the user's chunks, joined to their documents for
+ * citation. FTS-only (ts_rank_cd desc) unless `opts.vector` is given, in
+ * which case the SQL side fuses it with the FTS ranking via Reciprocal Rank
+ * Fusion — see supabase/migrations/20260816000007_hybrid_search.sql. This
+ * function itself does no fusion math; it is a pure RPC wrapper, same as
+ * before hybrid search existed. lib/kb/retrieve.ts is what supplies
+ * `opts.vector` (embedding the query, degrading to FTS-only on failure) —
+ * call THAT from feature code; call this directly only when you already
+ * have a vector or deliberately want FTS-only.
  *
  * The query goes through websearch_to_tsquery('english', ...), so it accepts
  * plain words plus the familiar web operators: `"exact phrase"`, `or`, and a
@@ -408,10 +484,11 @@ export async function searchKb(
   client: SupabaseClient,
   userId: string,
   query: string,
-  opts: { limit?: number } = {}
+  opts: { limit?: number; vector?: number[]; companyId?: string } = {}
 ): Promise<KbSearchHit[]> {
   const trimmed = (query ?? '').trim()
-  // Skip the round trip: an empty tsquery can never match a row.
+  // Skip the round trip: an empty tsquery can never match a row, and with no
+  // vector either there is nothing for the SQL side to rank at all.
   if (!trimmed || !userId) return []
 
   const limit = Math.min(
@@ -423,6 +500,8 @@ export async function searchKb(
     p_user_id: userId,
     p_query: trimmed,
     p_limit: limit,
+    p_vec: opts.vector ?? null,
+    p_company_id: opts.companyId ?? null,
   })
   if (error) throw new Error(`searchKb failed: ${error.message}`)
 

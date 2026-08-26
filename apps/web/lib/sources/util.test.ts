@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { compileKeyword, relevanceScore } from './util'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { compileKeyword, employerDomainFromUrl, relevanceScore } from './util'
 import type { JobLead } from './types'
 
 function lead(overrides: Partial<JobLead> = {}): JobLead {
@@ -78,5 +80,75 @@ describe('relevanceScore uses compileKeyword for both title and description/tags
 
   it('returns 0 for an empty keyword list', () => {
     expect(relevanceScore(lead({ title: 'Anything' }), [])).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Regression: an adapter host missing from NON_EMPLOYER_HOSTS silently poisons
+// the companies table.
+//
+// employerDomainFromUrl() decides whether a URL yields an EMPLOYER's domain.
+// When an aggregator host is absent it returns that host, and ingestLeads
+// stores it as the company's own domain. MEASURED consequence in the live
+// table: 190 of 436 companies carry an aggregator domain — "Capital One" with
+// themuse.com, "ManTech" with jobicy.com. Those companies can never have their
+// ATS detected (detection probes the aggregator), dedupe collapses across
+// unrelated employers, and email inference would synthesize addresses at the
+// aggregator's domain.
+//
+// The cause was a hand-maintained list drifting behind a growing adapter
+// registry: five adapters shipped after it was last updated. This test reads
+// the adapter sources themselves, so the next adapter cannot reintroduce it.
+// ---------------------------------------------------------------------------
+describe('every source adapter host is treated as a non-employer host', () => {
+  const ADAPTER_FILES = [
+    'themuse', 'arbeitnow', 'remoteok', 'hackernews', 'ycombinator', 'echojobs',
+    'weworkremotely', 'remotive', 'jobicy', 'himalayas', 'workingnomads',
+  ]
+
+  it('finds the adapter files (guards against a silently empty scan)', () => {
+    expect(ADAPTER_FILES.length).toBeGreaterThan(10)
+  })
+
+  it.each(ADAPTER_FILES)('%s: no host it fetches is ever returned as an employer domain', (name) => {
+    const src = readFileSync(path.resolve(process.cwd(), `lib/sources/${name}.ts`), 'utf8')
+
+    // Hosts the adapter names in its own allowlist / URLs.
+    const hosts = new Set<string>()
+    for (const m of src.matchAll(/['"`]([a-z0-9-]+(?:\.[a-z0-9-]+)+)['"`]/g)) {
+      const h = m[1].toLowerCase()
+      if (/\.(com|app|io|co|dev|net|org|gg)$/.test(h) && !h.endsWith('.ts')) hosts.add(h)
+    }
+
+    const leaked: string[] = []
+    for (const h of hosts) {
+      // Only judge hosts this adapter actually fetches from, not employer
+      // examples that might appear in a comment.
+      if (!src.includes(`//${h}`) && !src.includes(`://${h}`) && !src.includes(`'${h}'`)) continue
+      if (employerDomainFromUrl(`https://${h}/jobs/some-role`) !== null) leaked.push(h)
+    }
+
+    expect(
+      leaked,
+      `${name}.ts fetches from ${leaked.join(', ')}, but employerDomainFromUrl() returns ` +
+        `${leaked.length === 1 ? 'it' : 'them'} as an employer domain. Add to SOURCE_FETCH_HOSTS ` +
+        `in lib/sources/util.ts, or every company ingested from this source gets the ` +
+        `aggregator's domain stored as its own.`
+    ).toEqual([])
+  })
+
+  it('rejects the aggregators found poisoning the live table', () => {
+    for (const host of [
+      'themuse.com', 'jobicy.com', 'himalayas.app', 'arbeitnow.com', 'remoteok.com',
+      'weworkremotely.com', 'remotive.com', 'workingnomads.com', 'echojobs.io',
+    ]) {
+      expect(employerDomainFromUrl(`https://${host}/jobs/x`), host).toBeNull()
+      expect(employerDomainFromUrl(`https://www.${host}/jobs/x`), `www.${host}`).toBeNull()
+    }
+  })
+
+  it('still returns a real employer domain', () => {
+    expect(employerDomainFromUrl('https://careers.stripe.com/jobs/123')).toBe('careers.stripe.com')
+    expect(employerDomainFromUrl('https://www.loom.com/careers')).toBe('loom.com')
   })
 })

@@ -14,6 +14,24 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Browser-rendered fetching for career pages that ship an empty shell to plain
+# HTTP. Optional on purpose: src/render.py imports it lazily and degrades to the
+# httpx-only path when it is absent, so CI and local installs need not provision
+# a browser. Install with `pip install -e ".[render]" && scrapling install`.
+render = [
+    "scrapling>=0.2.9",
+]
+# The last escalation rung, for boards that sit behind a click rather than
+# just behind rendering (see src/browser_tier.py). Also optional and lazily
+# imported for the same reason [render] is: this tier degrades to whatever
+# the render tier produced wherever it is not provisioned. Playwright drives
+# the deterministic click-through; browser-use's own LLM agent is the last,
+# env-flag-gated rung. Install with `pip install -e ".[browser]" &&
+# playwright install chromium`.
+browser = [
+    "browser-use[core]>=0.13.0",
+    "playwright>=1.40.0",
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.23.0",

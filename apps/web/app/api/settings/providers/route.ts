@@ -25,6 +25,7 @@ import {
 } from '@/lib/harness/providers'
 import { detectAllLocalClis } from '@/lib/harness/providers/local-cli'
 import { detectLocalServer } from '@/lib/harness/providers/local-server'
+import { langfuseConfigured } from '@/lib/observability/langfuse'
 
 export const dynamic = 'force-dynamic'
 
@@ -71,6 +72,10 @@ export async function GET() {
     preferences: providerPrefs,
     reasoningEffort,
     reasoningEfforts: REASONING_EFFORTS,
+    // Operator-set env vars (LANGFUSE_SECRET_KEY + LANGFUSE_BASE_URL), never
+    // user-editable here — same "boolean only, no key material" posture as
+    // hasOpenrouterKey above. See lib/observability/langfuse.ts for the gate.
+    tracingExportEnabled: langfuseConfigured(),
     providers: {
       openrouter: {
         label: PROVIDER_LABELS.openrouter,

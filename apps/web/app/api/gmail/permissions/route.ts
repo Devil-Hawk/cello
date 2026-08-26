@@ -19,6 +19,7 @@ import {
   withGmailPermissionState,
   type GmailPermissionTier,
 } from '@/lib/gmail/permissions'
+import { hasStoredGmailRefreshToken } from '@/lib/gmail/token'
 import type { Json } from '@cello/shared'
 
 export const dynamic = 'force-dynamic'
@@ -64,6 +65,13 @@ export async function GET() {
     permissions: parsed.state,
     legacy: parsed.legacy,
     migrated: parsed.needsMigrationPersist,
+    // Honest "is background sync actually possible" signal for the dashboard
+    // card and the Connections tab — derived from the STORED refresh token,
+    // never the caller's live (and short-lived) Google session scopes. See
+    // components/dashboard/gmail-sync-card.tsx's header for the three states
+    // this produces together with `permissions.monitor.enabled`.
+    backgroundReady: hasStoredGmailRefreshToken((profile?.preferences ?? {}) as Record<string, unknown>),
+    lastSyncAt: parsed.legacy.lastSyncedAt,
   })
 }
 

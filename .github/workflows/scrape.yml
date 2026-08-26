@@ -32,7 +32,30 @@ jobs:
       - name: Install dependencies
         run: |
           cd packages/scrapers
-          pip install -e ".[dev]"
+          pip install -e ".[dev,render,browser]"
+
+      # Career pages that render their listings client-side return an empty
+      # shell to httpx, so the extractors find nothing and the company is
+      # recorded as having no openings. src/render.py escalates those to a real
+      # browser, which needs Chromium present. Non-fatal: render.py degrades to
+      # the httpx-only path if this step fails, so a browser-install hiccup
+      # must not take down the hourly run for every company.
+      - name: Install Scrapling browser
+        continue-on-error: true
+        run: |
+          cd packages/scrapers
+          scrapling install
+
+      # src/browser_tier.py's deterministic click-through rung drives
+      # Playwright directly (not through Scrapling), so it needs its own
+      # Chromium present too — same cache dir `scrapling install` just
+      # populated, so this is usually a fast no-op. Also non-fatal: the tier
+      # degrades to whatever the render tier produced if this step fails.
+      - name: Install browser tier's Chromium
+        continue-on-error: true
+        run: |
+          cd packages/scrapers
+          playwright install --with-deps chromium
 
       - name: Run intelligent scraper
         env:
@@ -41,6 +64,10 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # Opt-in, per the deterministic-first mandate in src/browser_tier.py:
+          # the LLM navigation rung only runs when this is set, and only after
+          # the deterministic click-through rung still finds a shell.
+          SCRAPER_BROWSER_USE_AGENT: ${{ vars.SCRAPER_BROWSER_USE_AGENT || '' }}
         run: |
           cd packages/scrapers
           python -m src.runner ${{ github.event.inputs.company_id || '' }}

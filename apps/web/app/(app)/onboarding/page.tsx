@@ -12,11 +12,16 @@ import {
   Sparkles,
   Upload,
 } from 'lucide-react'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Segmented } from '@/components/ui/segmented'
 import { toast } from '@/components/ui/use-toast'
 import { createClient } from '@/lib/supabase/client'
+import {
+  fetchClientSafePreferences,
+  SET_ONBOARDING_PREFERENCES_RPC,
+} from '@/lib/preferences/client-safe'
 import {
   RESUME_UPLOAD_ACCEPT,
   RESUME_UPLOAD_MAX_LABEL,
@@ -62,17 +67,20 @@ export default function OnboardingPage() {
         router.push('/login')
         return
       }
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('resume_text, preferences')
-        .eq('id', user.id)
-        .single()
+      // Split what used to be one `select('resume_text, preferences')`: the
+      // resume flag is harmless, but the raw preferences column also carries
+      // api_keys ciphertext and autopilot.atsKeys (an ATS board password,
+      // never encrypted, per the audit that found this) — read only what
+      // this step needs through the safe RPC. See lib/preferences/client-safe.ts.
+      const [{ data: profile }, safePrefs] = await Promise.all([
+        supabase.from('profiles').select('resume_text').eq('id', user.id).single(),
+        fetchClientSafePreferences(supabase as unknown as SupabaseClient),
+      ])
       if (profile?.resume_text) {
         setHasResume(true)
       }
-      const prefs = (profile?.preferences ?? {}) as Record<string, unknown>
-      if (typeof prefs.matchThreshold === 'number') setThreshold(String(prefs.matchThreshold))
-      if (typeof prefs.autoSubmit === 'boolean') setAutoSubmit(prefs.autoSubmit)
+      if (typeof safePrefs?.matchThreshold === 'number') setThreshold(String(safePrefs.matchThreshold))
+      if (typeof safePrefs?.autoSubmit === 'boolean') setAutoSubmit(safePrefs.autoSubmit)
       setChecking(false)
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -102,18 +110,16 @@ export default function OnboardingPage() {
         data: { user },
       } = await supabase.auth.getUser()
       if (!user) return false
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('preferences')
-        .eq('id', user.id)
-        .single()
-      const prefs = (profile?.preferences ?? {}) as Record<string, unknown>
-      const next = {
-        ...prefs,
-        matchThreshold: Number(threshold),
-        onboardedAt: new Date().toISOString(),
-      }
-      const { error } = await supabase.from('profiles').update({ preferences: next }).eq('id', user.id)
+      // Used to read the FULL preferences column first (api_keys ciphertext,
+      // autopilot.atsKeys included) just to spread it back unchanged around
+      // these two fields — the same over-read as the leak above, on the write
+      // side. set_onboarding_preferences() does the merge inside Postgres, so
+      // the rest of the column never has to travel to the browser in either
+      // direction. See the migration and lib/preferences/client-safe.ts.
+      const { error } = await (supabase as unknown as SupabaseClient).rpc(
+        SET_ONBOARDING_PREFERENCES_RPC,
+        { p_match_threshold: Number(threshold) }
+      )
       if (error) throw error
       return true
     } catch (e) {

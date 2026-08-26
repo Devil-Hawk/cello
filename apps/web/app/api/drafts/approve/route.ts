@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
   // Load + own the draft.
   const { data: draft, error: draftErr } = await admin
     .from('application_drafts')
-    .select('id, user_id, job_id, resume_summary, cover_letter, answers, status')
+    .select('id, user_id, job_id, resume_summary, cover_letter, answers, status, fill_state')
     .eq('id', draftId)
     .eq('user_id', user.id)
     .maybeSingle()
@@ -73,6 +73,38 @@ export async function POST(request: NextRequest) {
   }
   if (draft.status === 'rejected') {
     return NextResponse.json({ error: 'Draft was rejected' }, { status: 409 })
+  }
+
+  // ASSISTED-APPLY DRAFTS (a browser filled the hosted form — draft.fill_state
+  // was written by PATCH /api/apply/state) never go through submitApplication:
+  // there is no official-ATS credential involved, only a host-scoped board
+  // sign-in released to the browser runner. "Approve" here means exactly what
+  // ruling 8 requires it to mean — a human reviewed the filled answers and
+  // screenshots and confirmed them — recorded as reviewed_at/review_confirmed_at.
+  // A SEPARATE human click (POST /api/apply/confirm) is what actually
+  // authorizes and dispatches the submit run; see that route's header for why
+  // the two are deliberately not the same request.
+  if (draft.fill_state) {
+    // Only a completed, unreviewed fill may be approved from here — a
+    // draft sitting in 'filling' (still in flight) or 'failed' (a submit
+    // attempt already failed) must not be silently re-stamped 'approved'
+    // with a fresh review_confirmed_at: that timestamp is exactly what
+    // ruling 8 and app/api/apply/bundle gate a real submit dispatch on, and
+    // neither status reflects an actual human re-review of anything.
+    if (draft.status !== 'pending_review') {
+      return NextResponse.json(
+        { error: `Draft is ${draft.status}, not pending_review — cannot approve.` },
+        { status: 409 }
+      )
+    }
+    const nowIso = new Date().toISOString()
+    const { error: assistedErr } = await admin
+      .from('application_drafts')
+      .update({ status: 'approved', reviewed_at: nowIso, review_confirmed_at: nowIso, updated_at: nowIso })
+      .eq('id', draftId)
+      .eq('user_id', user.id)
+    if (assistedErr) return NextResponse.json({ error: assistedErr.message }, { status: 500 })
+    return NextResponse.json({ ok: true, status: 'approved', assisted: true })
   }
 
   // Load job + company + profile.
@@ -142,14 +174,21 @@ export async function POST(request: NextRequest) {
   const submissionRef = result.outcome === 'submitted' ? result.submissionRef : null
   const handoffUrl = result.outcome === 'handoff' ? result.prefilledUrl : null
 
+  const reviewedNowIso = new Date().toISOString()
   const { error: updErr } = await admin
     .from('application_drafts')
     .update({
       status,
       answers,
       submission_ref: submissionRef,
-      submitted_at: status === 'submitted' ? new Date().toISOString() : null,
-      updated_at: new Date().toISOString(),
+      submitted_at: status === 'submitted' ? reviewedNowIso : null,
+      reviewed_at: reviewedNowIso,
+      // Official-API drafts have no separate human-click submit step (the
+      // approve click here already IS the authorization submitApplication()
+      // acted on above), so this is stamped for consistency with the review
+      // surface rather than gating anything further downstream for this path.
+      review_confirmed_at: reviewedNowIso,
+      updated_at: reviewedNowIso,
     })
     .eq('id', draftId)
     .eq('user_id', user.id)

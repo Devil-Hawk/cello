@@ -7,11 +7,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { readOutreachConfig } from '@/lib/outreach/config'
-import { makeLlmRunner } from '@/lib/outreach/llm'
 import { getOutreach, findFollowUp, insertOutreach } from '@/lib/outreach/store'
 import { followUpWindowElapsed } from '@/lib/outreach/guardrails'
 import { threadHasReply } from '@/lib/outreach/gmail'
-import { generateOutreachDraft, fallbackOutreachDraft, type OutreachDraftInput } from '@/lib/harness/agents/outreach'
+import type { OutreachDraftInput } from '@/lib/harness/agents/outreach'
+import { runUnitOnce } from '@/lib/graph/oneshot'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -107,8 +107,19 @@ export async function POST(request: NextRequest) {
     kind: 'follow_up',
   }
 
-  const llm = makeLlmRunner(config.openrouterKey)
-  const draft = llm ? await generateOutreachDraft(llm, draftInput) : fallbackOutreachDraft(draftInput)
+  // runAgentUnit('outreach') — same unit the initial-draft route uses,
+  // distinguished by draftInput.kind ('follow_up' here) — builds its own
+  // metered LlmRunner from the user's stored keys (lib/harness/keys.ts#
+  // loadApiKeys); no more makeLlmRunner here. generateOutreachDraft never
+  // throws (falls back to a deterministic template on any model failure).
+  const unitResult = await runUnitOnce('outreach', {
+    admin,
+    userId: user.id,
+    goal: 'Draft outreach follow-up email',
+    input: draftInput,
+  })
+  const draft = unitResult.output as { subject: string; body: string; tokensUsed: number }
+  const usedLlm = draft.tokensUsed > 0
 
   try {
     const row = await insertOutreach(admin, {
@@ -124,7 +135,7 @@ export async function POST(request: NextRequest) {
       kind: 'follow_up',
       parent_id: parentId,
     })
-    return NextResponse.json({ ok: true, message: row, usedLlm: !!llm })
+    return NextResponse.json({ ok: true, message: row, usedLlm })
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed to save follow-up' }, { status: 500 })
   }

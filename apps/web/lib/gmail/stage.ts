@@ -6,6 +6,7 @@
 //    the decision is always recorded, never applied-and-forgotten.
 
 import type { ApplicationStatus } from './types'
+import type { ReplyClassification } from '../outreach/types'
 
 const STAGE_RANK: Record<string, number> = {
   discovered: 0,
@@ -80,4 +81,30 @@ export function decideStageTransition(currentStage: string, detectedStatus: Appl
     toStage: detectedStatus,
     reason: `detected "${detectedStatus}" would regress from "${currentStage}"; not applied`,
   }
+}
+
+// --- Outreach reply bridge (STEP 5) --------------------------------------
+// Bounce senders/subjects come from Gmail's own delivery-failure convention
+// (mailer-daemon/postmaster, "undeliverable"/"delivery status notification")
+// — never from the job-application classifier, which has no bounce concept.
+const BOUNCE_SENDER = /mailer-daemon|postmaster|mail delivery subsystem/i
+const BOUNCE_SUBJECT = /undeliverable|delivery (has )?fail|delivery status notification|returned to sender/i
+
+/**
+ * Coarse polarity for an inbound reply matched to an outreach thread —
+ * positive|neutral|negative|bounce, NOT the ApplicationStatus vocabulary the
+ * rest of this classifier speaks (a reply "sounds good, let's talk Tuesday"
+ * has no job-application stage). Reduces the SAME parsed status the sync
+ * loop already computed for the job-application pipeline down to what the
+ * reward signal (lib/strategy/questions/outreachImpact.ts) needs: did this
+ * contact engage, and how. Pure — no I/O; the write lives in
+ * lib/outreach/store.ts#recordOutreachReply.
+ */
+export function classifyReply(from: string, subject: string, status: ApplicationStatus): ReplyClassification {
+  if (BOUNCE_SENDER.test(from) || BOUNCE_SUBJECT.test(subject)) return 'bounce'
+  if (status === 'rejected') return 'negative'
+  if (status === 'unknown') return 'neutral'
+  // applied | screen | interview | offer | accepted — any forward-moving
+  // signal the classifier detected reads as engagement.
+  return 'positive'
 }

@@ -9,6 +9,7 @@ Instead of fragile CSS selectors, this scraper uses:
 
 import asyncio
 import json
+import logging
 import re
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -18,7 +19,9 @@ import httpx
 from bs4 import BeautifulSoup
 from pydantic import BaseModel
 
+from .browser_tier import fetch_with_browser_fallback
 from .fallback import FallbackExtractor
+from .render import fetch_with_render_fallback
 from .types import ScrapedJob, ScrapeResult
 
 # Default retry configuration
@@ -263,8 +266,43 @@ class IntelligentScraper:
 
                 visited_urls.add(url)
 
-                # Fetch and clean page
-                html = await self._fetch_page(url)
+                # Fetch and clean page.
+                #
+                # httpx returns only what the server sent, so a career page that
+                # renders its listings client-side arrives as an empty shell and
+                # every extractor below finds nothing — the company is then
+                # silently recorded as having no openings. That is not a rare
+                # edge: for one user, 303 of 436 watched companies have no
+                # detectable Greenhouse/Lever/Ashby board and depend entirely on
+                # this generic path, which had produced 3 stored jobs in total.
+                #
+                # So a shell is escalated to a real browser. Pages that already
+                # carry their postings skip this untouched, keeping the cheap
+                # path cheap. Scrapling's fetch is synchronous, hence to_thread:
+                # calling it directly would stall the event loop for every other
+                # company in the run. See src/render.py.
+                static_html = await self._fetch_page(url)
+                html, was_rendered = await asyncio.to_thread(
+                    fetch_with_render_fallback, url, static_html
+                )
+                if was_rendered:
+                    logging.getLogger(__name__).info(
+                        "rendered %s in a browser to reach its listings", url
+                    )
+
+                # Scrapling's single rendered fetch of THIS url still misses
+                # boards that sit behind a click (a "Careers" nav link, a
+                # "View all openings" button) rather than behind the shell
+                # itself. Tier 3 escalates further only when Tier 2's result
+                # still verdicts as a shell — see src/browser_tier.py for the
+                # deterministic-click-before-LLM ladder within this tier.
+                html, was_browser_assisted = await asyncio.to_thread(
+                    fetch_with_browser_fallback, url, html
+                )
+                if was_browser_assisted:
+                    logging.getLogger(__name__).info(
+                        "navigated %s in a real browser to reach its listings", url
+                    )
                 content = self._clean_html(html)
 
                 # Try AI extraction first, fallback to heuristics if it fails

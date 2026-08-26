@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { AnimatePresence, motion, transitionFast } from '@/components/ui/motion'
 import { navItems, type NavItem, type NavSubItem } from '@/components/layout/nav-items'
+import { NotificationBell } from '@/components/layout/notification-bell'
 
 /** Local storage key for the desktop rail's collapse state (see isCollapsed
  *  below) — namespaced so it can't collide with any other persisted UI
@@ -395,41 +396,60 @@ export function Sidebar({ user, onSignOut, isMobileOpen = false, onCloseMobile }
           {navItems.map((item) => renderPrimaryItem(item, isCollapsed))}
         </nav>
 
-        {/* Account + collapse toggle. Account sits above the toggle rather
-            than beside it — at 68px collapsed width there isn't room for
-            two icon-sized controls side by side without shrinking one below
-            the 44px touch-target floor. */}
+        {/* Account + notifications + collapse toggle. Account sits above the
+            rest rather than beside it — at 68px collapsed width there isn't
+            room for two icon-sized controls side by side without shrinking one
+            below the 44px touch-target floor.
+
+            The bell lives HERE, in the utility foot, and not in the nav above:
+            notifications stopped being a route (see nav-items.ts) and a
+            popover trigger is chrome, like the account menu and the collapse
+            toggle, not a destination. It has to be in this rail at all because
+            header.tsx — where the mobile bell hangs — is `md:hidden`, so a
+            desktop user would otherwise have no bell at any width. Same
+            reason the two never collide: exactly one of the two shells is on
+            screen at a time. It carries no tooltip when collapsed, unlike the
+            expand/collapse control beside it: a bell needs no gloss, and its
+            aria-label already names it (with the count) for assistive tech. */}
         <div className="space-y-1 border-t px-3 py-3">
           {renderAccountRow(isCollapsed)}
           {isCollapsed ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="w-full text-muted-foreground"
-                  onClick={() => setIsCollapsed(false)}
-                  aria-label="Expand sidebar"
-                  aria-expanded={!isCollapsed}
-                >
-                  <PanelLeftOpen className="h-[18px] w-[18px]" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right" className="font-medium">
-                Expand
-              </TooltipContent>
-            </Tooltip>
+            <>
+              <NotificationBell className="w-full" side="right" align="end" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="w-full text-muted-foreground"
+                    onClick={() => setIsCollapsed(false)}
+                    aria-label="Expand sidebar"
+                    aria-expanded={!isCollapsed}
+                  >
+                    <PanelLeftOpen className="h-[18px] w-[18px]" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right" className="font-medium">
+                  Expand
+                </TooltipContent>
+              </Tooltip>
+            </>
           ) : (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-muted-foreground"
-              onClick={() => setIsCollapsed(true)}
-              aria-label="Collapse sidebar"
-              aria-expanded={!isCollapsed}
-            >
-              <PanelLeftClose className="h-[18px] w-[18px]" />
-            </Button>
+            // Expanded, the rail is 240px wide, so the two icon controls fit
+            // on one row — the constraint noted above is a collapsed-width one.
+            <div className="flex items-center gap-1">
+              <NotificationBell side="right" align="end" />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground"
+                onClick={() => setIsCollapsed(true)}
+                aria-label="Collapse sidebar"
+                aria-expanded={!isCollapsed}
+              >
+                <PanelLeftClose className="h-[18px] w-[18px]" />
+              </Button>
+            </div>
           )}
         </div>
       </aside>

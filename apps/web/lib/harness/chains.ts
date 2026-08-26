@@ -1,8 +1,9 @@
 // Harness runtime — chains: reusable goal templates that compile DIRECTLY to a
-// validated Plan for the executor (./executor.ts), bypassing the LLM planner
-// entirely (see how app/api/harness/run/route.ts sets agent_runs.plan before
-// calling runAgentRun — executor.ts only invokes planGoal() when a run has no
-// plan yet). A chain is a pure function: untrusted params in, a PlanSchema-
+// validated Plan for the graph runtime (lib/graph/runs.ts), bypassing the LLM
+// planner entirely (see how app/api/harness/run/route.ts sets agent_runs.plan
+// before calling harnessRunGraph — harnessRunGraph's own plannerTask only
+// invokes planGoal() when a run has no plan yet). A chain is a pure function:
+// untrusted params in, a PlanSchema-
 // valid Plan out (or a thrown ZodError/Error on bad params) — no DB, no LLM,
 // no next/* imports, mirroring ./dynamic.ts's own "pure orchestration logic"
 // philosophy so every chain here is unit-testable and framework-free.
@@ -37,17 +38,17 @@ import type { Plan, PlanStep } from './types'
 // verify. Produces `pending_review` drafts for a human to look at; the only
 // way any of them gets submitted is a separate submit-confirmed run (below).
 //
-// FAN-OUT LIMITATION (documented, not silently papered over): the executor
+// FAN-OUT LIMITATION (documented, not silently papered over): the engine
 // only exposes a fan-out step's AGGREGATE output ({fannedOut,completed,failed,
 // childLabels}) to steps that depend on it — never each child's own output
-// (see lib/harness/executor.ts#runFanOutStep). So `apply`'s children do not
+// (see lib/graph/runs.ts#runFanOutStep). So `apply`'s children do not
 // automatically receive `tailor`'s per-job resumeSummary/coverLetter through
 // ctx.deps; applier.ts's own resolveContent() falls back to the user's raw
 // profile resume when no tailored content is found on a dep. `apply` still
 // depends on `tailor` (ordering only) so drafts are never built before their
 // CV has at least been attempted. Wiring per-child fan-out output through to
-// sibling steps would need a small engine change (lib/harness/executor.ts /
-// dynamic.ts) that is out of this chain-compiler's file scope.
+// sibling steps would need a small engine change (lib/graph/runs.ts) that is
+// out of this chain-compiler's file scope.
 
 export const ApplyToRoleParams = z.object({
   /** Free-text role/keyword query handed to the sourcer (e.g. "staff backend"). */
@@ -268,7 +269,7 @@ export function buildWarmIntroPlan(rawParams: unknown): Plan {
 // failed because sourcing only ever ran once; the plan was static).
 //
 // LOOP-CONDITION CAVEAT (documented, not hidden): the engine's loop
-// (lib/harness/dynamic.ts#runLoop) evaluates `until` against EACH ITERATION'S
+// (lib/graph/runs.ts#runLoopStep) evaluates `until` against EACH ITERATION'S
 // OWN output only — there is no cross-iteration running total built into the
 // engine. sourcer.ts also takes no pagination/offset input, so repeat calls
 // with the SAME static input tend toward near-duplicate results (dedupe drives
