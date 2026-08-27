@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Building2, ClipboardCheck, Copy, FileCheck2, Loader2, Mail, MessageSquare, Paperclip } from 'lucide-react'
+import { Building2, Clock, ClipboardCheck, Copy, FileCheck2, Loader2, Mail, MessageSquare, Paperclip } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -13,13 +13,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/use-toast'
-import { cn } from '@/lib/utils'
+import { cn, formatRelativeTime } from '@/lib/utils'
 import { formatShortDate, matchTone, STAGE_META, type PipelineStage } from '@/lib/format'
 import { CompanyLogo } from '@/components/companies/company-logo'
 import { PrepForInterviewButton } from '@/components/prep/prep-launcher'
 import { LogApplicationDialog } from '@/components/pipeline/log-application-dialog'
 import { PROVENANCE_LABELS } from '@/lib/applications/receipts'
-import type { ApplicationReceipt } from '@/lib/applications/types'
+import type { ApplicationActivity, ApplicationReceipt } from '@/lib/applications/types'
 import {
   type ApplicationWithJob,
   getDaysSinceUpdate,
@@ -37,6 +37,70 @@ interface ReceiptsResponse {
   receipts: ApplicationReceipt[]
   monitoring: { active: boolean; message: string }
   statusMessage: string
+}
+
+type ActivityTone = 'bad' | 'accent' | 'neutral'
+
+const ACTIVITY_DOT_CLASS: Record<ActivityTone, string> = {
+  bad: 'bg-red-500',
+  // Accent is otherwise reserved for "new / attention" moments (see
+  // components/ui/badge.tsx) — an interview signal earns it.
+  accent: 'bg-accent',
+  neutral: 'bg-muted-foreground/40',
+}
+
+function activityTone(type: string): ActivityTone {
+  if (type === 'rejected') return 'bad'
+  if (type.includes('interview')) return 'accent'
+  return 'neutral'
+}
+
+/** "recruiter_screen" -> "Recruiter screen". Used only as the dot's tooltip
+ *  — the row's own `title` (e.g. "Recruiter screen scheduled") already
+ *  carries the human-readable story, so this isn't repeated as visible
+ *  text. Derived rather than a static label table so an activity type
+ *  neither this file nor lib/access/fixtures/pipeline.ts's DemoActivity
+ *  anticipated still renders sensibly. */
+function humanizeActivityType(type: string): string {
+  return type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+/** The real conversation history behind an application — see
+ *  app/api/applications/activities/route.ts. Renders nothing at all when
+ *  empty; the receipts block below already carries the honest "nothing on
+ *  file" copy, so an empty timeline needs no empty-state box of its own. */
+export function ActivityTimeline({ activities }: { activities: ApplicationActivity[] }) {
+  if (activities.length === 0) return null
+
+  return (
+    <div className="border-t pt-4">
+      <div className="mb-3 flex items-center gap-2">
+        <Clock className="h-4 w-4 text-muted-foreground" />
+        <span className="text-body font-medium text-foreground">Activity</span>
+      </div>
+      <ul className="space-y-3">
+        {activities.map((activity) => (
+          <li key={activity.id} className="flex gap-2.5">
+            <span
+              className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', ACTIVITY_DOT_CLASS[activityTone(activity.type)])}
+              title={humanizeActivityType(activity.type)}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+                <span className="text-caption font-medium text-foreground">{activity.title}</span>
+                <span className="shrink-0 text-caption text-muted-foreground">
+                  {formatRelativeTime(activity.occurred_at)}
+                </span>
+              </div>
+              {activity.description && (
+                <p className="mt-0.5 text-caption text-muted-foreground">{activity.description}</p>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
@@ -60,6 +124,11 @@ function DialogBody({ application }: { application: ApplicationWithJob }) {
   const [loadingReceipts, setLoadingReceipts] = useState(true)
   const [logDialogOpen, setLogDialogOpen] = useState(false)
 
+  // The activity timeline — see app/api/applications/activities/route.ts.
+  // Independent of the receipts fetch above: a stalled or failing receipts
+  // load should never blank out activity history that already loaded fine.
+  const [activities, setActivities] = useState<ApplicationActivity[]>([])
+
   function refreshReceipts() {
     setLoadingReceipts(true)
     fetch(`/api/applications/receipts?applicationId=${encodeURIComponent(application.id)}`)
@@ -71,6 +140,10 @@ function DialogBody({ application }: { application: ApplicationWithJob }) {
 
   useEffect(() => {
     refreshReceipts()
+    fetch(`/api/applications/activities?applicationId=${encodeURIComponent(application.id)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { activities: ApplicationActivity[] } | null) => setActivities(data?.activities ?? []))
+      .catch(() => setActivities([]))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [application.id])
 
@@ -203,6 +276,8 @@ function DialogBody({ application }: { application: ApplicationWithJob }) {
             </p>
           </div>
         )}
+
+        <ActivityTimeline activities={activities} />
 
         {/* Application receipt — works with zero Gmail access. A receipt is
             what Cello (or the applicant) actually witnessed, distinct from

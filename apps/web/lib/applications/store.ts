@@ -13,6 +13,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type {
+  ApplicationActivity,
   ApplicationReceipt,
   ApplicationReceiptRow,
   NewReceiptInput,
@@ -25,6 +26,8 @@ import { recordInteraction } from '../interactions/store'
 
 const RECEIPTS_TABLE = 'application_receipts'
 const APPLICATIONS_TABLE = 'applications'
+const ACTIVITIES_TABLE = 'activities'
+const ACTIVITIES_LIMIT = 50
 
 export interface OwnedApplication {
   id: string
@@ -121,6 +124,25 @@ export async function listReceipts(
     .order('submitted_at', { ascending: false })
   if (error) throw new Error(`listReceipts failed: ${error.message}`)
   return ((data as ApplicationReceiptRow[]) ?? []).map(toApplicationReceipt)
+}
+
+/** The activity timeline for one application, newest first, capped — the
+ *  real conversation history (Gmail-detected signal today) that the
+ *  notifications page already reads, surfaced here per-application. No
+ *  user_id filter: activities has no such column, so the caller MUST have
+ *  already scoped `applicationId` to this user via getOwnedApplication. */
+export async function listActivities(
+  client: SupabaseClient,
+  applicationId: string
+): Promise<ApplicationActivity[]> {
+  const { data, error } = await client
+    .from(ACTIVITIES_TABLE)
+    .select('id, application_id, type, title, description, metadata, occurred_at')
+    .eq('application_id', applicationId)
+    .order('occurred_at', { ascending: false })
+    .limit(ACTIVITIES_LIMIT)
+  if (error) throw new Error(`listActivities failed: ${error.message}`)
+  return (data as ApplicationActivity[]) ?? []
 }
 
 /** One receipt by id, scoped to its owner. */

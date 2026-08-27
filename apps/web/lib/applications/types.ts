@@ -133,3 +133,18 @@ export interface ReceiptPatch {
   confirmationNote?: string | null
   confirmationAttachmentUrl?: string | null
 }
+
+/** Row shape of public.activities — the real conversation history behind an
+ *  application (Gmail-detected signal today; type is free text, see
+ *  lib/access/fixtures/pipeline.ts's DemoActivity for the vocabulary in
+ *  use). No user_id column — ownership is via the parent application, which
+ *  every reader here has already checked with getOwnedApplication. */
+export interface ApplicationActivity {
+  id: string
+  application_id: string
+  type: string
+  title: string
+  description: string | null
+  metadata: Record<string, unknown> | null
+  occurred_at: string
+}
