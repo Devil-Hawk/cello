@@ -674,7 +674,9 @@ describe('clientHint', () => {
 
 describe('clientHint key (strict mode)', () => {
   const HEX = 'ef'.repeat(32)
-  afterEach(() => vi.unstubAllEnvs())
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
 
   it('uses AUDIT_HMAC_KEY, so the same input hints differently under a different key', () => {
     vi.stubEnv('VERCEL', '1')

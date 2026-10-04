@@ -42,7 +42,9 @@ describe('splitCommandLine', () => {
 })
 
 describe('isStdioAvailable', () => {
-  afterEach(() => vi.unstubAllEnvs())
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
 
   it('is false by default: no flag means no stdio, even off Vercel', () => {
     vi.stubEnv('VERCEL', '')
@@ -81,7 +83,9 @@ describe('isStdioAvailable', () => {
 })
 
 describe('stdio gating enforced at connect time, not just isStdioAvailable()', () => {
-  afterEach(() => vi.unstubAllEnvs())
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
 
   const stdioServer: McpServerConfig = {
     id: 'x',

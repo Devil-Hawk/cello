@@ -21,7 +21,9 @@ vi.mock('@/lib/kb/store', () => ({
 
 import { GET, POST } from './route'
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('/api/kb/sources failures', () => {
   it('GET returns a fixed message and logs the real one', async () => {

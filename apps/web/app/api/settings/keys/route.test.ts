@@ -37,6 +37,7 @@ import { isEncrypted } from '@/lib/crypto'
 interface DbError {
   code?: string
   message?: string
+  details?: string
 }
 
 const OWNER_ID = 'owner-user-1'

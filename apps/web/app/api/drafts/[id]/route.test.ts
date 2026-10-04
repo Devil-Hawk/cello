@@ -21,7 +21,9 @@ vi.mock('@/lib/harness/supabase-admin', () => ({
 
 import { PATCH } from './route'
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('PATCH /api/drafts/[id]', () => {
   it('returns a fixed message on a database failure and logs the real one', async () => {
