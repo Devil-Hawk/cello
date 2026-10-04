@@ -95,11 +95,11 @@ function post() {
   })
 }
 
-function fallbackLines(warn: ReturnType<typeof vi.spyOn>): string[] {
+function fallbackLines(warn: { mock: { calls: unknown[][] } }): string[] {
   return warn.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith('[llm:fallback]'))
 }
 
-let fetchMock: ReturnType<typeof vi.fn>
+let fetchMock: ReturnType<typeof vi.fn<unknown[], Promise<Response>>>
 
 beforeEach(() => {
   callOpenRouterMock.mockReset()
@@ -108,7 +108,7 @@ beforeEach(() => {
   getDecryptedApiKeysMock.mockReset().mockResolvedValue({ openrouter: 'sk-or-test', userId: 'user-1' })
   insertedSpans.length = 0
   upserted.length = 0
-  fetchMock = vi.fn(async () => new Response(PAGE, { status: 200 }))
+  fetchMock = vi.fn<unknown[], Promise<Response>>(async () => new Response(PAGE, { status: 200 }))
   globalThis.fetch = fetchMock as unknown as typeof fetch
 })
 

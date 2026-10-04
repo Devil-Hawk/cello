@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { describeLlmFailure, warnLlmFallback } from './llm-fallback'
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('describeLlmFailure', () => {
   it('keeps the class and HTTP status, drops secrets, and caps the length', () => {

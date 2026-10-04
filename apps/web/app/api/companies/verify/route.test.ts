@@ -74,7 +74,7 @@ function post() {
   })
 }
 
-function fallbackLines(warn: ReturnType<typeof vi.spyOn>): string[] {
+function fallbackLines(warn: { mock: { calls: unknown[][] } }): string[] {
   return warn.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith('[llm:fallback]'))
 }
 
