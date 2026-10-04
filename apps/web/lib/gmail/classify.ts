@@ -91,19 +91,17 @@ Return ONLY the JSON object, no markdown.`
 
 /**
  * Use an LLM (through callLlm, so budget-checked, spend-recorded and traced) to
- * parse an email into structured job-application info. Pass the user's
- * DecryptedApiKeys. A bare key string still works for older call sites, but it
- * carries no userId, so callLlm cannot meter or trace that call.
+ * parse an email into structured job-application info. Takes the whole
+ * DecryptedApiKeys (with userId), never a bare key: without a userId callLlm
+ * cannot meter or trace the call.
  */
 export async function parseEmailWithAI(
   from: string,
   subject: string,
   body: string,
-  keys: DecryptedApiKeys | string,
+  apiKeys: DecryptedApiKeys,
   referenceDate: Date
 ): Promise<ParsedEmail> {
-  const apiKeys: DecryptedApiKeys = typeof keys === 'string' ? { openrouter: keys } : keys
-
   const fromDomain = extractDomain(from)
   const senderIsAts = isAtsOrJobBoardDomain(fromDomain)
 

@@ -162,14 +162,4 @@ describe('parseEmailWithAI fallbacks still degrade to the regex classifier, and 
     expect(line).not.toContain('secret subject line')
     expect(line).not.toContain('secret body text')
   })
-
-  it('a bare key string (older call sites) still classifies, unmetered because it carries no user', async () => {
-    callOpenRouterMock.mockResolvedValue(llmResult(AI_JSON))
-
-    const parsed = await parseEmailWithAI(FROM, SUBJECT, BODY, 'sk-or-test', REF)
-
-    expect(parsed.companyName).toBe('Acme')
-    expect(assertWithinBudgetMock).not.toHaveBeenCalled()
-    expect(recordSpendMock).not.toHaveBeenCalled()
-  })
 })

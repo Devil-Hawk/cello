@@ -184,7 +184,7 @@ export async function runGmailSyncCore(params: GmailSyncCoreParams): Promise<Gma
 
     let parsed: ParsedEmail
     if (apiKeys.openrouter) {
-      parsed = await parseEmailWithAI(from, subject, body, apiKeys.openrouter, receivedAt)
+      parsed = await parseEmailWithAI(from, subject, body, apiKeys, receivedAt)
     } else {
       parsed = classifyWithPatterns(from, subject, body, receivedAt)
     }
