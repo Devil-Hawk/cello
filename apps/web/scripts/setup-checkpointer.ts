@@ -36,7 +36,7 @@
  */
 import { Pool } from 'pg'
 import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres'
-import { parseDbUrl } from '../lib/graph/pg'
+import { parseDbUrl, sslFor } from '../lib/graph/pg'
 
 const CHECKPOINTER_SCHEMA = 'langgraph'
 
@@ -72,7 +72,7 @@ async function main(): Promise<void> {
     // is the same relaxation the spike used to reach this same database.
     // Does NOT disable encryption — the connection is still TLS, only
     // certificate-chain verification is skipped.
-    ssl: { rejectUnauthorized: false },
+    ssl: sslFor(connectionString),
   })
 
   const saver = new PostgresSaver(pool, undefined, { schema: CHECKPOINTER_SCHEMA })

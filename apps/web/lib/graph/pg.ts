@@ -41,6 +41,16 @@ export function parseDbUrl(raw: string): string {
   return url.toString()
 }
 
+/**
+ * pg's `ssl` option for a connection string. A local `supabase start`
+ * Postgres speaks no TLS at all, so it gets none; everything else gets the
+ * self-signed-chain relaxation described in this file's header.
+ */
+export function sslFor(connectionString: string): false | { rejectUnauthorized: false } {
+  const host = new URL(connectionString).hostname
+  return host === '127.0.0.1' || host === 'localhost' ? false : { rejectUnauthorized: false }
+}
+
 function resolvePoolerConnectionString(): string {
   const raw = process.env.SUPABASE_DB_URL
   if (!raw) {
@@ -64,7 +74,7 @@ export async function withCheckpointer<T>(fn: (saver: PostgresSaver) => Promise<
   const pool = new Pool({
     connectionString,
     max: 1,
-    ssl: { rejectUnauthorized: false },
+    ssl: sslFor(connectionString),
   })
   const saver = new PostgresSaver(pool, undefined, { schema: CHECKPOINTER_SCHEMA })
   try {
