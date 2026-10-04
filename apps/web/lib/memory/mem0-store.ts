@@ -203,9 +203,8 @@ function buildMemoryConfig(): Partial<MemoryConfig> {
       provider: 'pgvector',
       config: {
         connectionString: mem0ConnectionString,
-        // Same relaxation as lib/graph/pg.ts, against the same database —
-        // see that file's header for why this does not disable encryption,
-        // only chain verification against Supabase's self-signed chain.
+        // Verified against the pinned Supabase root CA, same as
+        // lib/graph/pg.ts (see that file's header).
         ssl: sslFor(mem0ConnectionString),
         embeddingModelDims: EMBEDDING_DIMS,
         // mem0's own Memory._autoInitialize() checks `dimension`, NOT

@@ -17,15 +17,16 @@
 //   pinned backend). withCheckpointer() opens exactly one connection for the
 //   duration of `fn` and always closes it — see the `finally`.
 //
-// TLS: same relaxation as setup-checkpointer.ts, against the same database —
-// `sslmode` is stripped from the URL (pg's own `ssl` option is what actually
-// configures TLS; leaving a conflicting `sslmode` query param means pg fights
-// itself over which one wins) and `rejectUnauthorized: false` is passed
-// explicitly because Supabase's chain is self-signed from Node's default
-// trust store. This does not disable encryption, only chain verification.
+// TLS: `sslmode` is stripped from the URL (pg's own `ssl` option is what
+// actually configures TLS; leaving a conflicting `sslmode` query param means pg
+// fights itself over which one wins). Every non-local host is then verified
+// against the pinned Supabase Root 2021 CA (see supabase-root-ca.ts), because
+// Node's default trust store does not include it. The same sslFor() serves
+// setup-checkpointer.ts and mem0-store.ts so no connection path can drift.
 
 import { Pool } from 'pg'
 import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres'
+import { SUPABASE_ROOT_CA_2021 } from './supabase-root-ca'
 
 const CHECKPOINTER_SCHEMA = 'langgraph'
 
@@ -43,12 +44,13 @@ export function parseDbUrl(raw: string): string {
 
 /**
  * pg's `ssl` option for a connection string. A local `supabase start`
- * Postgres speaks no TLS at all, so it gets none; everything else gets the
- * self-signed-chain relaxation described in this file's header.
+ * Postgres speaks no TLS at all, so it gets none; everything else must present
+ * a certificate chaining to the pinned Supabase root, or the connection fails.
  */
-export function sslFor(connectionString: string): false | { rejectUnauthorized: false } {
+export function sslFor(connectionString: string): false | { ca: string; rejectUnauthorized: true } {
   const host = new URL(connectionString).hostname
-  return host === '127.0.0.1' || host === 'localhost' ? false : { rejectUnauthorized: false }
+  if (host === '127.0.0.1' || host === 'localhost') return false
+  return { ca: SUPABASE_ROOT_CA_2021, rejectUnauthorized: true }
 }
 
 function resolvePoolerConnectionString(): string {
