@@ -53,13 +53,21 @@
 import { randomUUID } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { AdminClient } from '../harness/types'
-import { mirrorSpansToLangfuse } from '../observability/langfuse'
+import { mirrorSpansWithDeadline } from '../observability/langfuse'
 
 /** Matches the `kind` CHECK constraint on public.trace_spans. */
 export type SpanKind = 'graph' | 'node' | 'llm' | 'tool' | 'judge' | 'http'
 export type SpanStatus = 'ok' | 'error'
 
-/** One trace_spans row, shaped for a direct `.insert()`. */
+/** Prompt and completion text for the Langfuse mirror. In-memory only. */
+export interface SpanContent {
+  input?: { role: string; content: string }[]
+  output?: string
+}
+
+/** One trace_spans row, shaped for a direct `.insert()`, plus `content`,
+ *  which is NOT a column: flush() strips it before the insert so prompt and
+ *  completion text can never reach Postgres. */
 export interface SpanRecord {
   trace_id: string
   span_id: string
@@ -74,6 +82,7 @@ export interface SpanRecord {
   status: SpanStatus
   attributes: Record<string, unknown> | null
   events: unknown | null
+  content?: SpanContent
 }
 
 // --- attribute size discipline -----------------------------------------
@@ -141,22 +150,23 @@ export class SpanBuffer {
   async flush(admin: AdminClient): Promise<void> {
     if (this.pending.length === 0) return
     const rows = this.pending.splice(0, this.pending.length)
+    // Started first so it overlaps the insert. It is awaited below (Next 14
+    // has no after(), and a Vercel function can freeze once it returns), but
+    // only up to a deadline, and it never rejects. See langfuse.ts's header.
+    const mirror = mirrorSpansWithDeadline(rows).catch((err) =>
+      console.error(`[trace] Langfuse mirror threw unexpectedly: ${err instanceof Error ? err.message : String(err)}`)
+    )
     try {
-      const { error } = await admin.from('trace_spans').insert(rows)
+      // `content` (prompt/completion text) is dropped here, never persisted.
+      const persisted = rows.map(({ content: _content, ...row }) => row)
+      const { error } = await admin.from('trace_spans').insert(persisted)
       if (error) console.error(`[trace] span flush failed (${rows.length} span(s) dropped): ${error.message}`)
     } catch (err) {
       console.error(
         `[trace] span flush threw (${rows.length} span(s) dropped): ${err instanceof Error ? err.message : String(err)}`
       )
     }
-    // Fire-and-forget Langfuse mirror — never awaited, so a slow or
-    // unreachable Langfuse never adds latency to the request that produced
-    // these spans. Postgres above is the write this function's caller
-    // actually depends on; this is a bonus copy for whoever opted into it.
-    // See lib/observability/langfuse.ts's header for the full rationale.
-    void mirrorSpansToLangfuse(rows).catch((err) =>
-      console.error(`[trace] Langfuse mirror threw unexpectedly: ${err instanceof Error ? err.message : String(err)}`)
-    )
+    await mirror
   }
 }
 
@@ -231,7 +241,8 @@ export async function withSpan<T>(
   buffer: SpanBuffer,
   spec: SpanSpec,
   fn: (spanId: string) => Promise<T>,
-  attributesOf?: (result: T | undefined, err: unknown) => Record<string, unknown> | undefined
+  attributesOf?: (result: T | undefined, err: unknown) => Record<string, unknown> | undefined,
+  contentOf?: (result: T | undefined, err: unknown) => SpanContent | undefined
 ): Promise<T> {
   const spanId = randomUUID()
   const startTime = new Date().toISOString()
@@ -248,6 +259,7 @@ export async function withSpan<T>(
       status: 'ok',
       attributes: capAttributes(attributesOf?.(result, undefined)),
       events: null,
+      content: contentOf?.(result, undefined),
     })
     return result
   } catch (err) {
@@ -262,6 +274,7 @@ export async function withSpan<T>(
       status: 'error',
       attributes: capAttributes(attributesOf?.(undefined, err)),
       events: null,
+      content: contentOf?.(undefined, err),
     })
     throw err
   }

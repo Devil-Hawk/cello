@@ -14,9 +14,9 @@ import {
   withSpan,
 } from './spans'
 
-const mirrorSpansToLangfuseMock = vi.fn(async (_rows: unknown[]) => undefined)
+const mirrorSpansWithDeadlineMock = vi.fn(async (_rows: unknown[]) => undefined)
 vi.mock('../observability/langfuse', () => ({
-  mirrorSpansToLangfuse: (rows: unknown[]) => mirrorSpansToLangfuseMock(rows),
+  mirrorSpansWithDeadline: (rows: unknown[]) => mirrorSpansWithDeadlineMock(rows),
 }))
 
 function makeCapturingAdmin() {
@@ -36,8 +36,8 @@ function makeCapturingAdmin() {
 }
 
 beforeEach(() => {
-  mirrorSpansToLangfuseMock.mockReset()
-  mirrorSpansToLangfuseMock.mockResolvedValue(undefined)
+  mirrorSpansWithDeadlineMock.mockReset()
+  mirrorSpansWithDeadlineMock.mockResolvedValue(undefined)
 })
 
 describe('SpanBuffer.flush — batched single-insert', () => {
@@ -111,8 +111,8 @@ describe('SpanBuffer.flush — batched single-insert', () => {
     expect(insertCalls[0][0]).toMatchObject({ trace_id: buffer.traceId, user_id: 'user-1', thread_id: 'thread-1', run_id: 'run-1' })
   })
 
-  it('mirrors the flushed rows to Langfuse, fire-and-forget', async () => {
-    mirrorSpansToLangfuseMock.mockResolvedValue(undefined)
+  it('mirrors the flushed rows to Langfuse, awaited', async () => {
+    mirrorSpansWithDeadlineMock.mockResolvedValue(undefined)
     const buffer = new SpanBuffer('user-1', 'thread-1')
     buffer.record({
       span_id: 's1',
@@ -128,12 +128,12 @@ describe('SpanBuffer.flush — batched single-insert', () => {
     })
     const { admin } = makeCapturingAdmin()
     await buffer.flush(admin)
-    expect(mirrorSpansToLangfuseMock).toHaveBeenCalledTimes(1)
-    expect(mirrorSpansToLangfuseMock.mock.calls[0][0]).toHaveLength(1)
+    expect(mirrorSpansWithDeadlineMock).toHaveBeenCalledTimes(1)
+    expect(mirrorSpansWithDeadlineMock.mock.calls[0][0]).toHaveLength(1)
   })
 
   it('a Langfuse mirror that rejects is caught — the run completes, never fails on it', async () => {
-    mirrorSpansToLangfuseMock.mockRejectedValue(new Error('langfuse ingestion is down'))
+    mirrorSpansWithDeadlineMock.mockRejectedValue(new Error('langfuse ingestion is down'))
     const buffer = new SpanBuffer('user-1')
     buffer.record({
       span_id: 's1',
@@ -148,15 +148,59 @@ describe('SpanBuffer.flush — batched single-insert', () => {
       events: null,
     })
     const { admin, insertCalls } = makeCapturingAdmin()
-    // flush() itself resolves fine — it never awaits the mirror promise —
-    // and the Postgres insert (the write this function's caller actually
-    // depends on) still lands, regardless of the exporter throwing.
+    // flush() awaits the mirror but swallows a rejection (the mirror's own
+    // contract is to never reject; this is the belt and suspenders), and the
+    // Postgres insert still lands.
     await expect(buffer.flush(admin)).resolves.toBeUndefined()
     expect(insertCalls).toHaveLength(1)
-    // Let the fire-and-forget promise's rejection settle before the test
-    // ends, so its .catch(log) handler (not an unhandled rejection) is what
-    // actually resolves it.
-    await new Promise((resolve) => setImmediate(resolve))
+  })
+
+  it('prompt and completion text reach the mirror but NEVER the Postgres insert', async () => {
+    const buffer = new SpanBuffer('user-1')
+    buffer.record({
+      span_id: 's1',
+      parent_span_id: null,
+      run_id: null,
+      kind: 'llm',
+      name: 'llm',
+      start_time: new Date().toISOString(),
+      end_time: new Date().toISOString(),
+      status: 'ok',
+      attributes: { model: 'm' },
+      events: null,
+      content: { input: [{ role: 'user', content: 'MY-SECRET-PROMPT' }], output: 'MY-SECRET-COMPLETION' },
+    })
+    const { admin, insertCalls } = makeCapturingAdmin()
+    await buffer.flush(admin)
+
+    expect(JSON.stringify(insertCalls)).not.toContain('MY-SECRET')
+    expect(insertCalls[0][0]).not.toHaveProperty('content')
+    const mirrored = mirrorSpansWithDeadlineMock.mock.calls[0][0] as { content?: { output?: string } }[]
+    expect(mirrored[0].content?.output).toBe('MY-SECRET-COMPLETION')
+  })
+
+  it('flush waits for the mirror (Next 14 has no after(), so a floating promise can be frozen)', async () => {
+    let finished = false
+    mirrorSpansWithDeadlineMock.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      finished = true
+    })
+    const buffer = new SpanBuffer('user-1')
+    buffer.record({
+      span_id: 's1',
+      parent_span_id: null,
+      run_id: null,
+      kind: 'graph',
+      name: 'run',
+      start_time: new Date().toISOString(),
+      end_time: new Date().toISOString(),
+      status: 'ok',
+      attributes: null,
+      events: null,
+    })
+    const { admin } = makeCapturingAdmin()
+    await buffer.flush(admin)
+    expect(finished).toBe(true)
   })
 })
 

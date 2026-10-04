@@ -29,6 +29,7 @@ interface CliAvailability {
 interface ProviderStatus {
   selfHosted: boolean
   tracingExportEnabled: boolean
+  tracingCaptureContent: boolean
   active: ProviderId
   preferences: {
     active: ProviderId
@@ -165,12 +166,15 @@ export function ProviderTab({ onStatus }: ProviderTabProps) {
 
       {status.tracingExportEnabled && (
         <div className="rounded-card border bg-sunken p-4 text-caption text-muted-foreground">
-          <p className="font-medium text-foreground">This instance mirrors traces to Langfuse.</p>
+          <p className="font-medium text-foreground">This instance sends AI call traces to Langfuse.</p>
           <p className="mt-1">
-            The operator running this Cello instance has turned on optional Langfuse export. That
-            ships run traces — including prompt content and employer/job text — to a third-party
-            service for debugging and analysis. Postgres remains the complete record either way; ask
-            your operator if you have questions about what leaves this instance.
+            The operator turned on Langfuse, a third-party monitoring service. For each AI call it
+            receives the model, token counts, estimated cost, timing, any error message and a
+            pseudonymous user id.{' '}
+            {status.tracingCaptureContent
+              ? 'It also receives the prompt and the reply. Prompts can include text you gave Cello, such as your resume, job descriptions and chat messages. Email addresses, tokens and API-key-like strings are redacted first; other text is not.'
+              : 'Prompts and replies are not sent.'}{' '}
+            Your saved API keys are never sent. Ask your operator if you have questions.
           </p>
         </div>
       )}

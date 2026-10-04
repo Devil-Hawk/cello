@@ -82,6 +82,25 @@ export function deepScrub(value: unknown, keyHint = '', depth = 0): unknown {
   return value
 }
 
+/** Like deepScrub, but numbers and booleans always survive. deepScrub's key
+ *  deny-list matches `token` and `session`, so it would blank tokensUsed,
+ *  promptTokens and costUsd, which are the point of span metadata. A
+ *  sensitive key still redacts any string, object or array stored under it. */
+export function scrubMetadata(value: unknown, keyHint = '', depth = 0): unknown {
+  if (typeof value === 'number' || typeof value === 'boolean') return value
+  if (depth > 8) return '[truncated]'
+  if (value == null) return value
+  if (SENSITIVE_KEY_RE.test(keyHint)) return REDACTED
+  if (typeof value === 'string') return redactString(value)
+  if (Array.isArray(value)) return value.map((v) => scrubMetadata(v, keyHint, depth + 1))
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = scrubMetadata(v, k, depth + 1)
+    return out
+  }
+  return value
+}
+
 /**
  * Minimal structural subset of a Sentry event this module cares about.
  * Intentionally NOT `import type { Event } from '@sentry/nextjs'` — keeping

@@ -86,6 +86,81 @@ serialized output — while confirming harmless debugging fields (`runId`,
 cd apps/web && npx vitest run lib/observability/scrub.test.ts
 ```
 
+## Prompt monitoring (Langfuse): optional, three env vars
+
+Langfuse shows every AI call as a generation: the prompt, the reply, the
+model, token counts, cost and latency. It is a second copy. Postgres
+`trace_spans` stays the system of record and holds no prompt or reply text.
+
+Setup:
+
+1. Create a Langfuse Cloud account (Hobby is free: 50,000 units a month,
+   30 days of retention). Pick the region first, because accounts and data
+   are separate per region: EU `https://cloud.langfuse.com` or US
+   `https://us.cloud.langfuse.com`.
+2. Create a project and copy its public and secret keys.
+3. Set all three in the environment (Vercel project settings for production):
+
+```bash
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com   # or https://us.cloud.langfuse.com
+```
+
+If any one is missing or blank, the whole thing is off: no network call and
+the `langfuse` package is never loaded.
+
+Optional:
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `LANGFUSE_CAPTURE_CONTENT` | on | `0` stops prompts and replies from being sent. Tokens, cost and timing still go. |
+| `LANGFUSE_SAMPLE_RATE` | `1` | A number from 0 to 1. Chosen per trace by a hash of the trace id, so a trace is sent whole or not at all. |
+
+**What is sent.** One trace per run, named after the surface (copilot,
+autopilot, and so on). Each AI call is a generation with model, input and
+output tokens, estimated cost, start and end time, error level and message,
+and the prompt messages and reply unless capture is off. Graph and agent
+steps are plain spans. The user id is sent as is (a random UUID) so Langfuse
+can group cost per user. The trace carries `environment` from `VERCEL_ENV`
+(production, preview, development) and `release` from `VERCEL_GIT_COMMIT_SHA`,
+so preview traffic never mixes into production views. Filter by environment
+in the Langfuse UI.
+
+**What is never sent.** Saved API keys and OAuth tokens are not part of any
+prompt or span by design, and key-shaped strings are redacted anyway. Prompt
+and reply text are never written to Postgres: they live in memory on the span
+row and are dropped before the insert.
+
+**Redaction.** Before anything leaves the process, every string passes
+through `redactString` from `lib/observability/scrub.ts` (emails, JWTs,
+`Bearer` tokens, `sk-` and other provider keys, Cello's AES blobs) and is cut
+to 16KB. Span metadata also redacts sensitive key names but keeps numbers, so
+token counts and cost survive. Redaction is pattern based. Free text such as a
+resume still reaches Langfuse with names and phone numbers in it, which is why
+the settings page tells users when capture is on and why `LANGFUSE_CAPTURE_CONTENT=0`
+exists.
+
+**Budget.** A unit is a trace, an observation or a score. One copilot run is
+a trace plus a graph span, a span per agent step and a generation per AI call.
+If the 50,000 a month is not enough, lower `LANGFUSE_SAMPLE_RATE`. Postgres
+keeps everything either way, and the Langfuse usage page shows the burn.
+
+**Latency.** The export is awaited at the end of a request (Next 14 has no
+`after()`, and a serverless function can freeze once it returns), but only for
+2.5 seconds. A slow or unreachable Langfuse costs a request at most that, and
+never throws.
+
+**Postgres size.** The step journal (`lib/graph/journal.ts`) caps each stored
+step input and output at about 8KB. Long strings are cut with a marker, long
+lists keep their length with the overflow items set to null, and small fields
+are kept exactly. The run page only needs short fields and list lengths, and
+resume reads the LangGraph checkpoint, not these rows.
+
+**OpenRouter.** Each request also sends OpenRouter's `user` field as a hash of
+the Cello user id (`cello_` plus 32 hex characters), so the OpenRouter activity
+view can tell users apart without a raw id or email.
+
 ## Structured harness logging — independent of Sentry, always on
 
 Every `agent_steps` row already records `output.error` on failure — that's

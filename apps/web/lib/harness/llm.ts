@@ -36,7 +36,8 @@ import { callOpenRouter, DEFAULT_MODEL } from './providers/openrouter'
 import { callLocalCli } from './providers/local-cli'
 import { callLocalServer } from './providers/local-server'
 import { isTransient } from '../util/retry'
-import { acquireSpanScope, withSpan } from '../trace/spans'
+import { acquireSpanScope, withSpan, type SpanContent } from '../trace/spans'
+import { langfuseCaptureEnabled } from '../observability/langfuse'
 import {
   EMBEDDING_MODEL,
   EMBEDDING_DIMS,
@@ -63,6 +64,18 @@ export {
 } from './providers'
 export { DEFAULT_MODEL }
 export { EMBEDDING_MODEL, EMBEDDING_DIMS, testEmbedding }
+
+/** The request as the model sees it (system, then messages or the prompt),
+ *  plus the completion. Held in memory on the span row for the Langfuse mirror
+ *  only: flush() strips it before the Postgres insert, and langfuse.ts
+ *  redacts and caps it before it leaves the process. */
+function spanContent(opts: LlmRunOptions, completion: string | undefined): SpanContent {
+  const input: NonNullable<SpanContent['input']> = []
+  if (opts.system) input.push({ role: 'system', content: opts.system })
+  if (opts.messages && opts.messages.length > 0) input.push(...opts.messages.map((m) => ({ role: m.role, content: m.content })))
+  else if (opts.prompt) input.push({ role: 'user', content: opts.prompt })
+  return { input, output: completion }
+}
 
 /**
  * Call the user's configured LLM backend once and return the assistant
@@ -154,11 +167,12 @@ export async function callLlm(
                 userId: apiKeys.userId,
               }
             : {
-                model: effectiveOpts.model ?? DEFAULT_MODEL,
+                model: effectiveOpts.model || apiKeys.model || DEFAULT_MODEL,
                 metered,
                 userId: apiKeys.userId,
                 error: err instanceof Error ? err.message : String(err),
-              }
+              },
+        langfuseCaptureEnabled() ? (r) => spanContent(effectiveOpts, r?.content) : undefined
       )
     } finally {
       // Only the invocation that CREATED this buffer flushes it — a call

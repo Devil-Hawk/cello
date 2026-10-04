@@ -4,7 +4,7 @@
 // text and assert neither survives.
 
 import { describe, expect, it } from 'vitest'
-import { deepScrub, redactString, scrubBreadcrumb, scrubEvent, type ScrubbableEvent } from './scrub'
+import { deepScrub, redactString, scrubBreadcrumb, scrubEvent, scrubMetadata, type ScrubbableEvent } from './scrub'
 
 const FAKE_ANTHROPIC_KEY = 'sk-ant-api03-FAKEKEY1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 const FAKE_OPENAI_KEY = 'sk-FAKEKEY1234567890abcdefghijklmnop'
@@ -193,5 +193,25 @@ describe('deepScrub', () => {
     let deep: unknown = 'leaf'
     for (let i = 0; i < 20; i++) deep = { child: deep }
     expect(() => deepScrub(deep)).not.toThrow()
+  })
+})
+
+describe('scrubMetadata: span metadata for the Langfuse mirror', () => {
+  it('keeps numeric metrics that deepScrub would blank (key names contain "token")', () => {
+    const attrs = { promptTokens: 5, completionTokens: 7, tokensUsed: 12, costUsd: 0.01, metered: true }
+    expect(deepScrub(attrs)).toMatchObject({ tokensUsed: '[redacted]' }) // the problem
+    expect(scrubMetadata(attrs)).toEqual(attrs)
+  })
+
+  it('still redacts secrets in string values and under sensitive keys', () => {
+    const out = scrubMetadata({
+      error: `401 Bearer abc.def ${FAKE_OPENAI_KEY} for ${FAKE_EMAIL}`,
+      apiKey: 'plaintext',
+      nested: { refresh_token: FAKE_JWT, note: FAKE_ENCRYPTED_BLOB, tokensUsed: 3 },
+      label: 'sourcer',
+    }) as Record<string, any>
+    expect(JSON.stringify(out)).not.toMatch(/abc\.def|FAKEKEY|jane\.doe|plaintext|aGVsbG93/)
+    expect(out.nested.tokensUsed).toBe(3)
+    expect(out.label).toBe('sourcer')
   })
 })
