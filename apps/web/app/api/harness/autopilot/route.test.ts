@@ -16,6 +16,8 @@ interface ProfileRow {
   email: string | null
   resume_text: string | null
   preferences: Record<string, unknown> | null
+  is_demo?: boolean
+  demo_expires_at?: string | null
 }
 
 let profiles: ProfileRow[]
@@ -57,7 +59,7 @@ vi.mock('@/lib/graph/autopilot', async (importOriginal) => {
   return { ...actual, autopilotTickGraph: { __fake: 'autopilotTickGraph' } }
 })
 
-import { POST } from './route'
+import { POST, maxDuration } from './route'
 
 const SECRET = 'test-cron-secret'
 
@@ -161,5 +163,80 @@ describe('POST /api/harness/autopilot — per-user isolation', () => {
     expect(bad.message).toContain('error: thread ownership refused')
     const ok = body.results.find((r: { userId: string }) => r.userId === 'user-ok')
     expect(ok.message).toBe('ok')
+  })
+})
+
+describe('POST /api/harness/autopilot — checkpointed input carries no secrets', () => {
+  it('passes a slim profile: no api_keys, gmail_sync, email, or autopilot.atsKeys, but everything the graph reads', async () => {
+    profiles = [
+      {
+        id: 'user-secret',
+        full_name: 'Ada Lovelace',
+        email: 'ada@example.com',
+        resume_text: 'Resume text.',
+        preferences: {
+          autopilot: { enabled: true, dailyCap: 5, minScore: 80, budgetTokens: 50_000, atsKeys: { greenhouse: 'PLAINTEXT' } },
+          targeting: { remoteOnly: true },
+          searchGoals: [{ id: 'g1', statement: 'Find a staff role' }],
+          api_keys: { openrouter: 'CIPHERTEXT' },
+          gmail_sync: { refreshToken: 'CIPHERTEXT' },
+          gmail_permissions: { monitor: true },
+          digest: { latest: 'x' },
+        },
+      },
+    ]
+
+    await POST(autopilotRequest())
+
+    const input = invokeGraphForUserMock.mock.calls[0][0].input
+    const serialized = JSON.stringify(input)
+    for (const leaked of ['api_keys', 'gmail_sync', 'gmail_permissions', 'atsKeys', 'PLAINTEXT', 'CIPHERTEXT', 'ada@example.com', 'Ada Lovelace']) {
+      expect(serialized).not.toContain(leaked)
+    }
+    expect(input.profile.id).toBe('user-secret')
+    expect(input.profile.resume_text).toBe('Resume text.')
+    expect(input.profile.preferences.autopilot).toEqual({ enabled: true, dailyCap: 5, minScore: 80, budgetTokens: 50_000 })
+    expect(input.profile.preferences.targeting).toEqual({ remoteOnly: true })
+    expect(input.profile.preferences.searchGoals).toEqual([{ id: 'g1', statement: 'Find a staff role' }])
+  })
+})
+
+describe('POST /api/harness/autopilot — demo profiles', () => {
+  it('never ticks a demo profile and does not let demos take MAX_USERS_PER_TICK slots', async () => {
+    profiles = [
+      ...Array.from({ length: 12 }, (_, i) => ({ ...makeProfile(`demo-${i}`, true), is_demo: true })),
+      { ...makeProfile('dated-demo', true), is_demo: false, demo_expires_at: '2099-01-01T00:00:00Z' },
+      { ...makeProfile('owner', true), is_demo: false, demo_expires_at: null },
+    ]
+
+    const body = await (await POST(autopilotRequest())).json()
+
+    expect(body.enabledUsers).toBe(1)
+    expect(invokeGraphForUserMock.mock.calls.map((c) => c[0].userId)).toEqual(['owner'])
+  })
+})
+
+describe('POST /api/harness/autopilot — duration', () => {
+  it('declares the 300s Hobby+Fluid maximum', () => {
+    expect(maxDuration).toBe(300)
+  })
+
+  it('stops starting new users once the internal deadline has passed, and reports them skipped', async () => {
+    profiles = Array.from({ length: 4 }, (_, i) => makeProfile(`user-${i}`, true))
+    const realNow = Date.now.bind(Date)
+    let t = realNow()
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => t)
+    invokeGraphForUserMock.mockImplementation(async ({ userId }: { userId: string }) => {
+      t += 250_000 // the first users' ticks eat the whole budget
+      return { threadId: 'x', result: { userId, message: 'ok' } }
+    })
+
+    const body = await (await POST(autopilotRequest())).json()
+    spy.mockRestore()
+
+    const skipped = body.results.filter((r: { message: string }) => r.message.startsWith('skipped'))
+    expect(skipped.length).toBeGreaterThan(0)
+    expect(invokeGraphForUserMock.mock.calls.length).toBeLessThan(4)
+    expect(body.results).toHaveLength(4)
   })
 })
