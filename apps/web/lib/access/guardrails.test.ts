@@ -147,6 +147,21 @@ function fakeAdmin(rows: Record<string, Record<string, unknown>>): AdminClient {
         update: (patch: { preferences: Record<string, unknown> }) => updateBuilder(patch),
       }
     },
+    // recordSpend is one atomic rpc now (migration 20261005000005). Same
+    // arithmetic as the SQL: stale period resets, new total rounded to 6dp.
+    async rpc(_fn: string, args: { p_user_id: string; p_cost: number }) {
+      const prefs = rows[args.p_user_id] ?? {}
+      const budget = (prefs.budget ?? {}) as Record<string, unknown>
+      const now = new Date()
+      const period = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+      const spent = budget.periodStart === period && typeof budget.spentUsd === 'number' && budget.spentUsd > 0 ? budget.spentUsd : 0
+      const cap = typeof budget.monthlyUsd === 'number' && budget.monthlyUsd > 0 ? budget.monthlyUsd : 10
+      rows[args.p_user_id] = {
+        ...prefs,
+        budget: { periodStart: period, spentUsd: Number((spent + args.p_cost).toFixed(6)), monthlyUsd: cap },
+      }
+      return { data: null, error: null }
+    },
   }
   return admin as unknown as AdminClient
 }
