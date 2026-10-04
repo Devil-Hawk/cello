@@ -318,8 +318,12 @@ if __name__ == "__main__":
     # so its own logging setup defers to this one. Our own line stays at INFO.
     logging.basicConfig(level=logging.WARNING)
     logger.setLevel(logging.INFO)
-    # Warnings from browser-use can carry element text.
-    logging.getLogger("browser_use").setLevel(logging.ERROR)
+    # browser-use logs failed actions at ERROR with exception text and element
+    # reprs, which carry typed form values. Only this script's own lines may
+    # print: filter the root handlers and mute browser_use outright.
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(lambda record: record.name == logger.name)
+    logging.getLogger("browser_use").setLevel(logging.CRITICAL + 1)
     try:
         run()
     except Exception as e:  # noqa: BLE001 — a failed fill run must exit non-zero for GitHub Actions

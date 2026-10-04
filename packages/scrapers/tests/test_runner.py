@@ -172,8 +172,8 @@ class TestNoUserDataInLogs:
         printed = capsys.readouterr().out
         assert "careers.example.com" not in printed and "Acme" not in printed
 
-    def test_main_silences_third_party_info_logs_carrying_the_url(self, monkeypatch, capsys):
-        """scrapling and browser-use log the fetched URL at INFO on their own handlers."""
+    def test_main_silences_third_party_logs_carrying_the_url(self, monkeypatch, capsys):
+        """scrapling and browser-use log the fetched URL at INFO, and failures at ERROR, on their own handlers."""
         import sys
 
         from src import browser_tier
@@ -194,6 +194,7 @@ class TestNoUserDataInLogs:
             for lg in loggers:
                 lg.info("Fetched (200) <GET https://private-user-company.example/careers>")
                 lg.warning("Navigated to https://private-user-company.example/careers")
+                lg.error("Failed after 3 attempts: Page.goto: net::ERR_NAME_NOT_RESOLVED at https://private-user-company.example/careers")
         finally:
             logging.disable(logging.NOTSET)
             for lg, level in zip(loggers, saved):
@@ -230,13 +231,42 @@ class TestNoUserDataInLogs:
 
 
 @pytest.mark.parametrize("module", ["src.apply_fill", "src.apply_submit"])
-def test_apply_scripts_do_not_log_browser_actions_at_info(module, monkeypatch):
-    """browser-use logs typed values at INFO; the root level must stay at WARNING."""
-    seen = {}
-    monkeypatch.setattr(logging, "basicConfig", lambda **kw: seen.update(kw))
+def test_apply_scripts_print_only_their_own_log_lines(module, monkeypatch, capsys):
+    """browser-use logs typed values at INFO and failed actions at ERROR; only ours may print."""
+    import sys
+
     for var in ("DRAFT_ID", "APP_BASE_URL", "BROWSER_RUNNER_SECRET", "OPENROUTER_API_KEY"):
         monkeypatch.delenv(var, raising=False)
-    with pytest.raises(SystemExit):
-        runpy.run_module(module, run_name="__main__")
-    assert seen["level"] == logging.WARNING
-    assert logging.getLogger("browser_use").level == logging.ERROR
+    root = logging.getLogger()
+    saved = (root.handlers[:], root.level, logging.getLogger("browser_use").level)
+    root.handlers = [logging.StreamHandler(sys.stderr)]
+    try:
+        with pytest.raises(SystemExit):
+            runpy.run_module(module, run_name="__main__")
+        for name in ("browser_use.Agent", "browser_use.browser.watchdogs", "bubus", "cdp_use"):
+            lg = logging.getLogger(name)
+            lg.info("Typed 'Jane Roe jane@example.com' into element")
+            lg.error("Failed to input text into element: Jane Roe jane@example.com")
+    finally:
+        root.handlers, root.level = saved[0], saved[1]
+        logging.getLogger("browser_use").setLevel(saved[2])
+        logging.getLogger("__main__").setLevel(logging.NOTSET)
+    err = capsys.readouterr().err
+    assert "Jane Roe" not in err and "jane@example.com" not in err
+    assert "run failed (" in err
+
+
+def test_runner_script_crash_prints_only_the_exception_class(monkeypatch, capsys):
+    """A failure outside the per-company try must not dump a traceback into the public log."""
+    for var in ("SUPABASE_URL", "SUPABASE_SERVICE_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr("sys.argv", ["runner"])
+    try:
+        with pytest.raises(SystemExit) as exc:
+            runpy.run_module("src.runner", run_name="__main__")
+    finally:
+        logging.disable(logging.NOTSET)
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err
+    assert "Scout Agent failed (ValueError)" in captured.out

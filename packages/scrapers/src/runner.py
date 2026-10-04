@@ -186,9 +186,11 @@ async def scrape_company(
 async def main(specific_company_id: str | None = None):
     """Main entry point for the scraper runner."""
     # Scrapling logs "Fetched (200) <GET career-url>" at INFO on its own handler and
-    # browser-use installs a root one, so per-logger levels do not hold. This repo's
-    # Actions logs are public; disable() survives any handler setup.
-    logging.disable(logging.WARNING)
+    # browser-use installs a root one, so per-logger levels do not hold. Scrapling also
+    # logs "Failed after N attempts: <playwright error with the URL>" at ERROR. This
+    # repo's Actions logs are public and the runner prints with print(), so disable()
+    # everything: it survives any handler setup.
+    logging.disable(logging.CRITICAL)
 
     print("=" * 60)
     print(f"Scout Agent starting at {datetime.utcnow().isoformat()}")
@@ -233,4 +235,8 @@ async def main(specific_company_id: str | None = None):
 
 if __name__ == "__main__":
     company_id = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else None
-    asyncio.run(main(company_id))
+    try:
+        asyncio.run(main(company_id))
+    except Exception as e:  # noqa: BLE001 - a traceback can carry the career URL or row text
+        print(f"Scout Agent failed ({type(e).__name__})")
+        sys.exit(1)

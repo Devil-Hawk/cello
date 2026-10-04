@@ -85,10 +85,6 @@ jobs:
           APP_BASE_URL: ${{ vars.APP_BASE_URL || 'https://cello-two.vercel.app' }}
           BROWSER_RUNNER_SECRET: ${{ secrets.BROWSER_RUNNER_SECRET }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          # Second layer behind the WARNING root level in the script: if
-          # browser-use sets up its own logging, only its final result prints,
-          # not every action with the text it typed. The log is public.
-          BROWSER_USE_LOGGING_LEVEL: result
         run: |
           cd packages/scrapers
           python -m src.apply_fill
@@ -123,10 +119,6 @@ jobs:
           APP_BASE_URL: ${{ vars.APP_BASE_URL || 'https://cello-two.vercel.app' }}
           BROWSER_RUNNER_SECRET: ${{ secrets.BROWSER_RUNNER_SECRET }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          # Second layer behind the WARNING root level in the script: if
-          # browser-use sets up its own logging, only its final result prints,
-          # not every action with the text it typed. The log is public.
-          BROWSER_USE_LOGGING_LEVEL: result
         run: |
           cd packages/scrapers
           python -m src.apply_submit
