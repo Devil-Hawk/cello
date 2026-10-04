@@ -47,3 +47,10 @@ def test_harness_cron_has_no_schedule_and_waits_for_the_route():
 
 def test_browser_apply_keeps_browser_use_quiet():
     assert _read("browser-apply.yml").count("BROWSER_USE_LOGGING_LEVEL: result") == 2
+
+
+def test_ats_refresh_logs_ids_and_counts_only():
+    text = (WORKFLOWS.parents[1] / "scripts" / "ats-refresh.ts").read_text()
+    assert "companyName" not in text
+    assert "errors: result.errors" not in text
+    assert "error.message" not in text and "error.stack" not in text

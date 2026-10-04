@@ -185,8 +185,10 @@ async def scrape_company(
 
 async def main(specific_company_id: str | None = None):
     """Main entry point for the scraper runner."""
-    # The scrapers' own warnings carry the career URL they were fetching.
-    logging.getLogger("src").setLevel(logging.ERROR)
+    # Scrapling logs "Fetched (200) <GET career-url>" at INFO on its own handler and
+    # browser-use installs a root one, so per-logger levels do not hold. This repo's
+    # Actions logs are public; disable() survives any handler setup.
+    logging.disable(logging.WARNING)
 
     print("=" * 60)
     print(f"Scout Agent starting at {datetime.utcnow().isoformat()}")
@@ -204,7 +206,11 @@ async def main(specific_company_id: str | None = None):
 
     results = []
     for company in companies:
-        result = await scrape_company(company, llm_provider, supabase)
+        try:
+            result = await scrape_company(company, llm_provider, supabase)
+        except Exception as e:  # noqa: BLE001 - a traceback can carry the career URL or row text
+            print(f"  Company {company.get('id')} failed ({type(e).__name__})")
+            result = {"company": company.get("id"), "success": False}
         results.append(result)
         # Small delay between companies to be nice to APIs
         await asyncio.sleep(1)

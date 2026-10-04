@@ -182,8 +182,11 @@ if __name__ == "__main__":
     # so its own logging setup defers to this one. Our own line stays at INFO.
     logging.basicConfig(level=logging.WARNING)
     logger.setLevel(logging.INFO)
+    # Warnings from browser-use can carry element text.
+    logging.getLogger("browser_use").setLevel(logging.ERROR)
     try:
         run()
-    except Exception:  # noqa: BLE001 — a failed submit run must exit non-zero for GitHub Actions
-        logger.exception("assisted-apply submit run failed")
+    except Exception as e:  # noqa: BLE001 — a failed submit run must exit non-zero for GitHub Actions
+        # Type only: a traceback or message can embed form values or page text.
+        logger.error("assisted-apply submit run failed (%s)", type(e).__name__)
         sys.exit(1)

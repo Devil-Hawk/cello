@@ -172,15 +172,61 @@ class TestNoUserDataInLogs:
         printed = capsys.readouterr().out
         assert "careers.example.com" not in printed and "Acme" not in printed
 
-    def test_main_quiets_the_scrapers_url_bearing_warnings(self, monkeypatch):
+    def test_main_silences_third_party_info_logs_carrying_the_url(self, monkeypatch, capsys):
+        """scrapling and browser-use log the fetched URL at INFO on their own handlers."""
+        import sys
+
+        from src import browser_tier
+
         monkeypatch.setattr(runner, "get_supabase_client", lambda: _Client([]))
         monkeypatch.setattr(runner, "get_llm_provider", lambda: None)
-        logging.getLogger("src").setLevel(logging.NOTSET)
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setLevel(logging.INFO)
+        names = ("", "scrapling", "browser_use", "playwright", "httpx")
+        loggers = [logging.getLogger(n) for n in names]
+        saved = [lg.level for lg in loggers]
+        try:
+            for lg in loggers:
+                lg.addHandler(handler)
+                lg.setLevel(logging.INFO)
+            asyncio.run(runner.main())
+            browser_tier.browser_use_available()
+            for lg in loggers:
+                lg.info("Fetched (200) <GET https://private-user-company.example/careers>")
+                lg.warning("Navigated to https://private-user-company.example/careers")
+        finally:
+            logging.disable(logging.NOTSET)
+            for lg, level in zip(loggers, saved):
+                lg.removeHandler(handler)
+                lg.setLevel(level)
+        assert "private-user-company" not in capsys.readouterr().err
+
+    def test_one_company_blowing_up_prints_only_its_id_and_exception_class(
+        self, monkeypatch, capsys
+    ):
+        company = {"id": "cid-9", "name": "Acme Private", "career_url": "https://careers.example.com"}
+
+        async def boom(*_a, **_k):
+            raise RuntimeError("GET https://careers.example.com failed: row Acme Private")
+
+        async def one(*_a, **_k):
+            return [company]
+
+        async def no_sleep(_s):
+            return None
+
+        monkeypatch.setattr(runner, "get_supabase_client", lambda: _Client([]))
+        monkeypatch.setattr(runner, "get_llm_provider", lambda: None)
+        monkeypatch.setattr(runner, "get_companies_to_scrape", one)
+        monkeypatch.setattr(runner, "scrape_company", boom)
+        monkeypatch.setattr(runner.asyncio, "sleep", no_sleep)
         try:
             asyncio.run(runner.main())
-            assert logging.getLogger("src").getEffectiveLevel() >= logging.ERROR
         finally:
-            logging.getLogger("src").setLevel(logging.NOTSET)
+            logging.disable(logging.NOTSET)
+        out = capsys.readouterr().out
+        assert "cid-9" in out and "RuntimeError" in out
+        assert "careers.example.com" not in out and "Acme" not in out
 
 
 @pytest.mark.parametrize("module", ["src.apply_fill", "src.apply_submit"])
@@ -193,3 +239,4 @@ def test_apply_scripts_do_not_log_browser_actions_at_info(module, monkeypatch):
     with pytest.raises(SystemExit):
         runpy.run_module(module, run_name="__main__")
     assert seen["level"] == logging.WARNING
+    assert logging.getLogger("browser_use").level == logging.ERROR
