@@ -94,10 +94,21 @@ describe('the lockdown migrations', () => {
       'profile_is_demo(uuid)',
       'is_service_role_request()',
     ]) {
-      const name = fn.replace(/[()]/g, '\\$&')
-      expect(sql, `${fn} revoke`).toMatch(new RegExp(`revoke execute on function public\\.${name} from public, anon`))
-      expect(sql, `${fn} grant`).toMatch(new RegExp(`grant execute on function public\\.${name} to authenticated, service_role`))
+      expect(sql, `${fn} listed`).toContain(`'public.${fn}'`)
     }
+    expect(sql).toMatch(/revoke execute on function %s from public, anon'/)
+    expect(sql).toMatch(/grant execute on function %s to authenticated, service_role'/)
+  })
+
+  it('guards every revoke and grant so a function missing on production cannot abort the migration', () => {
+    // Production was bootstrapped from free_tier_migration.sql and may lack
+    // functions the 20240131* migrations create. No bare per-function
+    // revoke/grant may remain: each goes through to_regprocedure.
+    const sql = stripComments(read('20261005000002_revoke_function_execute_from_anon.sql'))
+    expect(sql).not.toMatch(/(?:^|;)\s*(?:revoke|grant) execute on function\s+public\.(?!set_limit)/im)
+    expect(sql.match(/to_regprocedure\(sig\) is not null/g)?.length).toBeGreaterThanOrEqual(2)
+    expect(sql).toMatch(/where to_regprocedure\(f\) is not null/)
+    expect(sql).toMatch(/to_regprocedure\('public\.set_limit\(real\)'\) is not null/)
   })
 
   it('revokes EXECUTE from every non-extension function in public, by exact signature', () => {
@@ -114,7 +125,7 @@ describe('the lockdown migrations', () => {
       stripComments(read('20261005000002_revoke_function_execute_from_anon.sql')) +
       stripComments(read('20261004194501_prune_stale_rows.sql'))
     ).toLowerCase()
-    const missing = [...created].filter((name) => !new RegExp(`function (?:if exists )?public\\.${name}\\(`).test(handled))
+    const missing = [...created].filter((name) => !new RegExp(`(?:function (?:if exists )?|')public\\.${name}\\(`).test(handled))
     expect(missing).toEqual([])
   })
 

@@ -25,66 +25,77 @@
 --
 -- REVOKE and GRANT are idempotent, so this is safe to re-run.
 
--- ---------------------------------------------------------------------------
+-- Production was bootstrapped from free_tier_migration.sql, so any function
+-- below may be absent there. Every revoke and grant is guarded by
+-- to_regprocedure, so a missing function is skipped instead of aborting the
+-- whole migration (an unresolvable argument type also yields null).
+
 -- Trigger-only functions: nobody calls these through the API
--- ---------------------------------------------------------------------------
-revoke execute on function public.handle_new_user() from public, anon, authenticated;
-revoke execute on function public.update_updated_at() from public, anon, authenticated;
-revoke execute on function public.log_stage_change() from public, anon, authenticated;
-revoke execute on function public.enforce_demo_profile_lockdown() from public, anon, authenticated;
-revoke execute on function public.forbid_demo_access_code_issue() from public, anon, authenticated;
-revoke execute on function public.forbid_demo_apply_credentials() from public, anon, authenticated;
-revoke execute on function public.forbid_demo_graph_threads() from public, anon, authenticated;
-revoke execute on function public.forbid_demo_api_tokens() from public, anon, authenticated;
-revoke execute on function public.forbid_demo_apply_phase_tokens() from public, anon, authenticated;
+do $$
+declare sig text;
+begin
+  foreach sig in array array[
+    'public.handle_new_user()',
+    'public.update_updated_at()',
+    'public.log_stage_change()',
+    'public.enforce_demo_profile_lockdown()',
+    'public.forbid_demo_access_code_issue()',
+    'public.forbid_demo_apply_credentials()',
+    'public.forbid_demo_graph_threads()',
+    'public.forbid_demo_api_tokens()',
+    'public.forbid_demo_apply_phase_tokens()'
+  ] loop
+    if to_regprocedure(sig) is not null then
+      execute format('revoke execute on function %s from public, anon, authenticated', sig);
+    end if;
+  end loop;
+end
+$$;
 
--- ---------------------------------------------------------------------------
--- Functions a signed-in session (or an RLS policy / trigger it fires) needs
--- ---------------------------------------------------------------------------
-revoke execute on function public.get_client_safe_preferences() from public, anon;
-grant execute on function public.get_client_safe_preferences() to authenticated, service_role;
+-- Functions a signed-in session (or an RLS policy / trigger it fires) needs,
+-- plus the SECURITY INVOKER search / distill / merge RPCs (RLS applies to the
+-- caller). Both groups: anon and PUBLIC lose EXECUTE, authenticated keeps it.
+do $$
+declare sig text;
+begin
+  foreach sig in array array[
+    'public.get_client_safe_preferences()',
+    'public.set_onboarding_preferences(numeric, timestamptz)',
+    'public.profile_is_demo(uuid)',
+    'public.is_service_role_request()',
+    'public.search_insights(uuid, extensions.vector, text[], integer)',
+    'public.upsert_insight(uuid, text, text, jsonb, real, text, uuid)',
+    'public.find_company_merge_candidates(uuid, real)',
+    'public.search_kb_chunks(uuid, text, integer, extensions.vector, uuid)',
+    'public.search_jobs_by_title_trgm(uuid, text, integer)',
+    'public.search_contacts_by_name_trgm(uuid, text, integer)',
+    'public.distill_match_score_by_score_band(uuid)',
+    'public.distill_match_score_by_source(uuid)',
+    'public.distill_draft_by_seniority(uuid)',
+    'public.distill_outreach_by_company(uuid)'
+  ] loop
+    if to_regprocedure(sig) is not null then
+      execute format('revoke execute on function %s from public, anon', sig);
+      execute format('grant execute on function %s to authenticated, service_role', sig);
+    end if;
+  end loop;
+end
+$$;
 
-revoke execute on function public.set_onboarding_preferences(numeric, timestamptz) from public, anon;
-grant execute on function public.set_onboarding_preferences(numeric, timestamptz) to authenticated, service_role;
-
-revoke execute on function public.profile_is_demo(uuid) from public, anon;
-grant execute on function public.profile_is_demo(uuid) to authenticated, service_role;
-
-revoke execute on function public.is_service_role_request() from public, anon;
-grant execute on function public.is_service_role_request() to authenticated, service_role;
-
--- ---------------------------------------------------------------------------
--- SECURITY INVOKER search / distill / merge RPCs (RLS applies to the caller)
--- ---------------------------------------------------------------------------
-revoke execute on function public.search_insights(uuid, extensions.vector, text[], integer) from public, anon;
-grant execute on function public.search_insights(uuid, extensions.vector, text[], integer) to authenticated, service_role;
-
-revoke execute on function public.upsert_insight(uuid, text, text, jsonb, real, text, uuid) from public, anon;
-grant execute on function public.upsert_insight(uuid, text, text, jsonb, real, text, uuid) to authenticated, service_role;
-
-revoke execute on function public.find_company_merge_candidates(uuid, real) from public, anon;
-grant execute on function public.find_company_merge_candidates(uuid, real) to authenticated, service_role;
-
-revoke execute on function public.search_kb_chunks(uuid, text, integer, extensions.vector, uuid) from public, anon;
-grant execute on function public.search_kb_chunks(uuid, text, integer, extensions.vector, uuid) to authenticated, service_role;
-
-revoke execute on function public.search_jobs_by_title_trgm(uuid, text, integer) from public, anon;
-grant execute on function public.search_jobs_by_title_trgm(uuid, text, integer) to authenticated, service_role;
-
-revoke execute on function public.search_contacts_by_name_trgm(uuid, text, integer) from public, anon;
-grant execute on function public.search_contacts_by_name_trgm(uuid, text, integer) to authenticated, service_role;
-
-revoke execute on function public.distill_match_score_by_score_band(uuid) from public, anon;
-grant execute on function public.distill_match_score_by_score_band(uuid) to authenticated, service_role;
-
-revoke execute on function public.distill_match_score_by_source(uuid) from public, anon;
-grant execute on function public.distill_match_score_by_source(uuid) to authenticated, service_role;
-
-revoke execute on function public.distill_draft_by_seniority(uuid) from public, anon;
-grant execute on function public.distill_draft_by_seniority(uuid) to authenticated, service_role;
-
-revoke execute on function public.distill_outreach_by_company(uuid) from public, anon;
-grant execute on function public.distill_outreach_by_company(uuid) to authenticated, service_role;
+-- pg_trgm's set_limit() changes a session-level threshold that the `%`
+-- operator in the trgm search RPCs reads, so anon could skew search results on
+-- a pooled connection. Revoking only works where postgres owns the extension
+-- (hosted Supabase); where another role owns it this is skipped with a notice.
+do $$
+begin
+  if to_regprocedure('public.set_limit(real)') is not null then
+    revoke execute on function public.set_limit(real) from public, anon, authenticated;
+    grant execute on function public.set_limit(real) to service_role;
+  end if;
+exception when others then
+  raise notice 'set_limit(real) left as is: %', sqlerrm;
+end
+$$;
 
 -- ---------------------------------------------------------------------------
 -- Future functions
@@ -125,7 +136,8 @@ begin
     'public.profile_is_demo(uuid)',
     'public.is_service_role_request()'
   ]) f
-  where not has_function_privilege('authenticated', f::regprocedure, 'EXECUTE');
+  where to_regprocedure(f) is not null
+    and not has_function_privilege('authenticated', to_regprocedure(f), 'EXECUTE');
   if bad is not null then
     raise exception 'authenticated lost EXECUTE on: %', bad;
   end if;
