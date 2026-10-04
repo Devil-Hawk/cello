@@ -31,6 +31,25 @@ const nextConfig = {
       },
     ],
   },
+  // Anti-clickjacking and basic hardening on every response. The app has
+  // one-click approve and send actions and embeds nothing, uses no camera,
+  // microphone or location, and its OAuth flows are top-level redirects, so none
+  // of these affect it. Deliberately no script-src CSP: Next's inline scripts
+  // would need per-request nonces, and a half-working one breaks pages.
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+        ],
+      },
+    ]
+  },
   // Typed routes disabled for now - causes issues with dynamic routes
   // experimental: {
   //   typedRoutes: true,
