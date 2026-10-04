@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { classifyJob, isLowQuality, type Classification } from '@/lib/jobs/classify'
 import { resolveTargeting, isTargetingConfigured, type Targeting } from '@/lib/targeting'
+import { callLlm } from '@/lib/harness/llm'
+import type { DecryptedApiKeys } from '@/lib/harness/types'
+import { warnLlmFallback } from '@/lib/observability/llm-fallback'
 
 // Simple job extractor that works without Python dependencies
 // Uses fetch + cheerio-like parsing via regex
@@ -139,11 +142,25 @@ function validateAiJobs(raw: unknown, careerUrl: string): ExtractedJob[] {
   return out
 }
 
-// Use AI to extract jobs (if API keys available)
+/** Cheap on purpose: a 15k-character page in, a short JSON list out. */
+const EXTRACT_MODEL = 'google/gemini-2.0-flash-001'
+const AI_TIMEOUT_MS = 30_000
+
+/** Throw on a non-2xx from a direct provider so the caller logs why, instead of reading an error body as an empty answer. */
+async function assertProviderOk(res: Response, provider: string): Promise<void> {
+  if (res.ok) return
+  const detail = await res.text().then((t) => t.slice(0, 200)).catch(() => '')
+  throw Object.assign(new Error(`${provider} HTTP ${res.status} ${detail}`.trim()), { status: res.status })
+}
+
+// Use AI to extract jobs (if API keys available). The openrouter path goes
+// through callLlm (budget-checked, spend-recorded, traced). The openai and
+// anthropic paths use the user's own provider key directly: that spend is
+// theirs, outside Cello's OpenRouter ledger, and a demo never holds those keys.
 async function extractJobsWithAI(
   careerUrl: string,
   companyName: string,
-  apiKey: string,
+  apiKeys: DecryptedApiKeys,
   provider: 'openrouter' | 'openai' | 'anthropic'
 ): Promise<ExtractedJob[]> {
   try {
@@ -253,53 +270,60 @@ If no jobs are found, return: []`
 
     let aiResponse: string = ''
 
-    if (provider === 'openrouter') {
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://cello.app',
-        },
-        body: JSON.stringify({
-          model: 'google/gemini-2.0-flash-001',
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 4096,
-        }),
-      })
-      const data = await res.json()
-      aiResponse = data.choices?.[0]?.message?.content || ''
-    } else if (provider === 'openai') {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 4096,
-        }),
-      })
-      const data = await res.json()
-      aiResponse = data.choices?.[0]?.message?.content || ''
-    } else if (provider === 'anthropic') {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'claude-3-haiku-20240307',
-          max_tokens: 4096,
-          messages: [{ role: 'user', content: prompt }],
-        }),
-      })
-      const data = await res.json()
-      aiResponse = data.content?.[0]?.text || ''
+    try {
+      if (provider === 'openrouter') {
+        const result = await callLlm(
+          apiKeys,
+          {
+            model: EXTRACT_MODEL,
+            prompt,
+            maxTokens: 4096,
+            // The account-wide default effort would add thinking tokens to a call that never used them.
+            reasoning: { effort: 'none' },
+          },
+          // callLlm retries transient errors with backoff; bound the whole call.
+          AbortSignal.timeout(AI_TIMEOUT_MS)
+        )
+        aiResponse = result.content
+      } else if (provider === 'openai') {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKeys.openai}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 4096,
+          }),
+        })
+        await assertProviderOk(res, 'openai')
+        const data = await res.json()
+        aiResponse = data.choices?.[0]?.message?.content || ''
+      } else if (provider === 'anthropic') {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'x-api-key': apiKeys.anthropic ?? '',
+            'anthropic-version': '2023-06-01',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'claude-3-haiku-20240307',
+            max_tokens: 4096,
+            messages: [{ role: 'user', content: prompt }],
+          }),
+        })
+        await assertProviderOk(res, 'anthropic')
+        const data = await res.json()
+        aiResponse = data.content?.[0]?.text || ''
+      }
+    } catch (error) {
+      // A 402, a retired model or a spent budget: say so, then let the caller
+      // run the deterministic extraction.
+      warnLlmFallback('scraper-trigger', 'deterministic-extraction', error)
+      return []
     }
 
     // Parse JSON response — never trust it verbatim, validate shape strictly.
@@ -414,11 +438,11 @@ export async function POST(request: NextRequest) {
 
   // Try AI extraction first if keys available
   if (apiKeys.openrouter) {
-    jobs = await extractJobsWithAI(company.career_url, company.name, apiKeys.openrouter, 'openrouter')
+    jobs = await extractJobsWithAI(company.career_url, company.name, apiKeys, 'openrouter')
   } else if (apiKeys.anthropic) {
-    jobs = await extractJobsWithAI(company.career_url, company.name, apiKeys.anthropic, 'anthropic')
+    jobs = await extractJobsWithAI(company.career_url, company.name, apiKeys, 'anthropic')
   } else if (apiKeys.openai) {
-    jobs = await extractJobsWithAI(company.career_url, company.name, apiKeys.openai, 'openai')
+    jobs = await extractJobsWithAI(company.career_url, company.name, apiKeys, 'openai')
   }
 
   // Fallback to basic extraction
