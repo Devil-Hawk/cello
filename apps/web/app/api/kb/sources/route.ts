@@ -36,7 +36,8 @@ export async function GET() {
     const sources = await listSources(admin, user.id)
     return NextResponse.json({ ok: true, sources })
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed to list sources' }, { status: 500 })
+    console.error('[kb/sources] list failed:', e instanceof Error ? e.message : e)
+    return NextResponse.json({ error: 'Failed to list sources' }, { status: 500 })
   }
 }
 
@@ -74,6 +75,7 @@ export async function POST(request: NextRequest) {
     const source = await createSource(admin, { userId: user.id, kind, label, config, enabled })
     return NextResponse.json({ ok: true, source })
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed to create source' }, { status: 500 })
+    console.error('[kb/sources] create failed:', e instanceof Error ? e.message : e)
+    return NextResponse.json({ error: 'Failed to create source' }, { status: 500 })
   }
 }

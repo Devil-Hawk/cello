@@ -54,7 +54,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     .eq('user_id', user.id)
     .select('id, resume_summary, cover_letter, status, updated_at')
     .single()
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    console.error('[drafts/update] update failed:', error.code, error.message)
+    return NextResponse.json({ error: 'Failed to update draft' }, { status: 500 })
+  }
 
   return NextResponse.json({ ok: true, draft: updated })
 }
