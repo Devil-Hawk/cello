@@ -16,9 +16,9 @@
 //      silently falls back to a key derived from NEXT_PUBLIC_SUPABASE_URL — a
 //      value every browser already has — so a write in that state stores a
 //      password in the clear with extra steps. This is the one that matters
-//      most, and it is tested three ways: unset, too weak, and the nastiest
-//      case, where the variable is set but the process loaded crypto.ts before
-//      it existed and is therefore still using the fallback key.
+//      most, and it is tested several ways: unset, too weak, strict mode
+//      (Vercel) refusing anything but 64 hex, and the nastiest case, a
+//      crypto.ts that is still encrypting under the fallback key.
 //   4. A demo workspace is refused on every path, and refused before it can
 //      touch the table at all.
 //   5. NO ERROR PATH — thrown message, serialised error, or log line — CONTAINS
@@ -224,11 +224,9 @@ function makeClient() {
 type Vault = typeof import('./vault')
 
 /**
- * lib/crypto.ts SNAPSHOTS its key at import time, which is the entire reason
- * property (3) is subtle. Every scenario therefore sets the environment, resets
- * the module registry, and imports fresh — `loadedAfter` exists so one test can
- * reproduce the genuinely dangerous ordering: crypto.ts imported with no key,
- * the variable appearing afterwards.
+ * Every scenario sets the environment, resets the module registry, and imports
+ * fresh. `loadedAfter` sets the key after import; lib/crypto.ts resolves its key
+ * lazily now, so that ordering is safe and a test pins it.
  */
 async function loadVault(options: { key?: string; loadedAfter?: string } = {}): Promise<Vault> {
   vi.resetModules()
@@ -425,22 +423,74 @@ describe('refusing to store when encryption is not real', () => {
     expect(rows).toHaveLength(0)
   })
 
-  it('refuses when the variable is set but the browser-derivable fallback key is the one in use', async () => {
-    // THE DANGEROUS CASE. The environment reads back perfectly — an env-var
-    // check would say "ready" — but lib/crypto.ts snapshotted the fallback key
-    // at import time, so encrypt() is using a key derived from
-    // NEXT_PUBLIC_SUPABASE_URL, which ships to every browser.
-    const vault = await loadVault({ loadedAfter: STRONG_KEY })
-    expect(process.env.API_ENCRYPTION_KEY).toBe(STRONG_KEY)
-
-    const status = vault.encryptionStatus()
-    expect(status).toMatchObject({ ready: false, reason: 'browser-derivable-key' })
-    expect(status.message).toMatch(/browser/i)
-
-    await expect(vault.saveCredential(makeClient(), OWNER, input())).rejects.toMatchObject({
-      code: 'encryption-unavailable',
+  it('refuses when encrypt() is still using the browser-derivable fallback key', async () => {
+    // THE DANGEROUS CASE. The environment reads back perfectly, so an env-var
+    // check would say "ready", but encrypt() uses a key derived from
+    // NEXT_PUBLIC_SUPABASE_URL, which ships to every browser. lib/crypto.ts no
+    // longer does this, so a stand-in encrypt() reproduces it.
+    vi.resetModules()
+    vi.doMock('@/lib/crypto', async (importOriginal) => {
+      const real = await importOriginal<typeof import('@/lib/crypto')>()
+      const { createCipheriv, createDecipheriv, randomBytes, scryptSync } = await import('crypto')
+      return {
+        ...real,
+        decrypt: (payload: string) => {
+          const [iv, tag, body] = payload.split(':')
+          const d = createDecipheriv('aes-256-gcm', scryptSync(PUBLIC_SUPABASE_URL, 'salt', 32), Buffer.from(iv, 'base64'))
+          d.setAuthTag(Buffer.from(tag, 'base64'))
+          return d.update(body, 'base64', 'utf8') + d.final('utf8')
+        },
+        encrypt: (text: string) => {
+          const iv = randomBytes(16)
+          const c = createCipheriv('aes-256-gcm', scryptSync(PUBLIC_SUPABASE_URL, 'salt', 32), iv)
+          const body = c.update(text, 'utf8', 'base64') + c.final('base64')
+          return `${iv.toString('base64')}:${c.getAuthTag().toString('base64')}:${body}`
+        },
+      }
     })
-    expect(rows).toHaveLength(0)
+    try {
+      const vault = await loadVault({ key: STRONG_KEY })
+      const status = vault.encryptionStatus()
+      expect(status).toMatchObject({ ready: false, reason: 'browser-derivable-key' })
+      expect(status.message).toMatch(/browser/i)
+
+      await expect(vault.saveCredential(makeClient(), OWNER, input())).rejects.toMatchObject({
+        code: 'encryption-unavailable',
+      })
+      expect(rows).toHaveLength(0)
+    } finally {
+      vi.doUnmock('@/lib/crypto')
+    }
+  })
+
+  it('accepts a key that appears after import, because the key is resolved lazily', async () => {
+    const vault = await loadVault({ loadedAfter: STRONG_KEY })
+    expect(vault.encryptionStatus()).toEqual({ ready: true })
+  })
+
+  describe('strict mode (VERCEL set)', () => {
+    beforeEach(() => {
+      vi.stubEnv('VERCEL', '1')
+    })
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it('refuses an unset key, a passphrase of any length, and a hex key with a newline', async () => {
+      for (const key of [undefined, 'devkey', STRONG_PASSPHRASE, `${STRONG_KEY}\n`]) {
+        const vault = await loadVault({ key })
+        expect(vault.encryptionStatus().ready).toBe(false)
+        await expect(vault.saveCredential(makeClient(), OWNER, input())).rejects.toMatchObject({
+          code: 'encryption-unavailable',
+        })
+      }
+      expect(rows).toHaveLength(0)
+    })
+
+    it('accepts exactly 64 hex characters', async () => {
+      const vault = await loadVault({ key: STRONG_KEY })
+      expect(vault.encryptionStatus()).toEqual({ ready: true })
+    })
   })
 
   it('refuses to hand out plaintext on the resolve path too', async () => {

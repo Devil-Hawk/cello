@@ -20,6 +20,7 @@ afterEach(() => {
   else process.env.API_ENCRYPTION_KEY = ORIGINAL_KEY_ENV
   if (ORIGINAL_SUPABASE_URL_ENV === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL
   else process.env.NEXT_PUBLIC_SUPABASE_URL = ORIGINAL_SUPABASE_URL_ENV
+  vi.unstubAllEnvs()
   vi.resetModules()
 })
 
@@ -217,5 +218,83 @@ describe('isEncrypted', () => {
   it('false when a segment is empty (e.g. "a::c")', async () => {
     const { isEncrypted } = await freshCrypto()
     expect(isEncrypted('a::c')).toBe(false)
+  })
+})
+
+describe('strict mode (VERCEL set or NODE_ENV=production)', () => {
+  const HEX = 'ab'.repeat(32)
+  const strictCases: Array<[string, () => void]> = [
+    ['VERCEL=1', () => vi.stubEnv('VERCEL', '1')],
+    ['NODE_ENV=production', () => vi.stubEnv('NODE_ENV', 'production')],
+  ]
+
+  for (const [label, enter] of strictCases) {
+    describe(label, () => {
+      beforeEach(() => {
+        enter()
+        process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+      })
+
+      it('importing never throws, so next build works without secrets', async () => {
+        delete process.env.API_ENCRYPTION_KEY
+        await expect(freshCrypto()).resolves.toBeDefined()
+      })
+
+      for (const [name, value] of [
+        ['unset', undefined],
+        ['empty', ''],
+        ['whitespace', '   '],
+        ['a short passphrase', 'hunter2'],
+        ['a long non-hex passphrase', 'correct-horse-battery-staple-correct-horse'],
+        ['63 hex characters', 'a'.repeat(63)],
+        ['65 hex characters', 'a'.repeat(65)],
+        ['64 hex with a trailing newline', `${HEX}\n`],
+      ] as const) {
+        it(`encrypt and decrypt throw when the key is ${name}`, async () => {
+          if (value === undefined) delete process.env.API_ENCRYPTION_KEY
+          else process.env.API_ENCRYPTION_KEY = value
+          const { encrypt, decrypt } = await freshCrypto()
+          expect(() => encrypt('x')).toThrow(/64 hex/)
+          expect(() => decrypt('AAAA:BBBB:CCCC')).toThrow(/64 hex/)
+        })
+      }
+
+      it('never falls back to a key derived from the public Supabase URL', async () => {
+        delete process.env.API_ENCRYPTION_KEY
+        const { encrypt } = await freshCrypto()
+        expect(() => encrypt('x')).toThrow()
+      })
+
+      it('works with a 64-hex key and uses it verbatim', async () => {
+        process.env.API_ENCRYPTION_KEY = HEX
+        const { encrypt, decrypt } = await freshCrypto()
+        const ct = encrypt('prod secret')
+        expect(decrypt(ct)).toBe('prod secret')
+        const [iv, tag, data] = ct.split(':')
+        const d = createDecipheriv('aes-256-gcm', Buffer.from(HEX, 'hex'), Buffer.from(iv, 'base64'))
+        d.setAuthTag(Buffer.from(tag, 'base64'))
+        expect(d.update(data, 'base64', 'utf8') + d.final('utf8')).toBe('prod secret')
+      })
+
+      it('picks up a key that appears after import and drops one that is removed', async () => {
+        delete process.env.API_ENCRYPTION_KEY
+        const { encrypt } = await freshCrypto()
+        expect(() => encrypt('x')).toThrow()
+        process.env.API_ENCRYPTION_KEY = HEX
+        expect(() => encrypt('x')).not.toThrow()
+        delete process.env.API_ENCRYPTION_KEY
+        expect(() => encrypt('x')).toThrow()
+      })
+    })
+  }
+})
+
+describe('decrypt auth tag length', () => {
+  it('rejects a truncated tag instead of accepting a forgeable one', async () => {
+    process.env.API_ENCRYPTION_KEY = 'cd'.repeat(32)
+    const { encrypt, decrypt } = await freshCrypto()
+    const [iv, tag, data] = encrypt('tag test').split(':')
+    const short = Buffer.from(tag, 'base64').subarray(0, 4).toString('base64')
+    expect(() => decrypt(`${iv}:${short}:${data}`)).toThrow()
   })
 })

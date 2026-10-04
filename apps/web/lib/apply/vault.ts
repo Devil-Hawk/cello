@@ -42,7 +42,7 @@
 
 import { createDecipheriv, scryptSync } from 'crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { decrypt, encrypt, isEncrypted } from '@/lib/crypto'
+import { decrypt, encrypt, isEncrypted, isStrictEnv } from '@/lib/crypto'
 import { isDemoProfile, type DemoProfileFacts } from '@/lib/access/guardrails'
 
 /**
@@ -147,36 +147,26 @@ export class VaultError extends Error {
 /**
  * WHY THIS EXISTS.
  *
- * lib/crypto.ts derives its key like this:
+ * lib/crypto.ts used to derive a fallback key from NEXT_PUBLIC_SUPABASE_URL when
+ * API_ENCRYPTION_KEY was unset. That value is compiled into the JavaScript bundle
+ * every visitor downloads, with a static salt and a published algorithm, so
+ * anyone could reconstruct the key in one line. Storing a password under it is
+ * storing it in the clear with extra steps, while the column name says
+ * `encrypted_secret` and the UI says "encrypted at rest".
  *
- *     const rawKey = process.env.API_ENCRYPTION_KEY
- *     const ENCRYPTION_KEY = rawKey
- *       ? (isHex64(rawKey) ? Buffer.from(rawKey,'hex') : scryptSync(rawKey,'salt',32))
- *       : scryptSync(process.env.NEXT_PUBLIC_SUPABASE_URL || 'default-key', 'salt', 32)
+ * lib/crypto.ts now refuses that fallback in strict mode (Vercel, or
+ * NODE_ENV=production): there it throws unless the key is exactly 64 hex
+ * characters. The fallback survives only for local dev and tests, and this
+ * module still refuses to write in that state, because a password is not a
+ * rotatable API key. The checks below stay as a second, independent opinion.
  *
- * That last branch derives the key from a value with NEXT_PUBLIC_ in its name —
- * it is compiled into the JavaScript bundle every visitor downloads — with a
- * static salt and a published algorithm. Anyone who has ever loaded the site
- * can reconstruct that key in one line. Storing a password under it is storing
- * it in the clear with extra steps, while the column name says `encrypted_secret`
- * and the UI says "encrypted at rest". That gap is worse than not having the
- * feature, so this module refuses to write at all when it is in that state.
- *
- * It is tolerable for a rotatable API key, which is why lib/crypto.ts keeps the
- * fallback and this file does not try to change it. It is not tolerable for a
- * password.
- *
- * HOW IT IS DETECTED — by what encrypt() ACTUALLY DID, not by reading the env
- * var. Reading `process.env.API_ENCRYPTION_KEY` here would be a different
- * question from "which key is lib/crypto.ts using", because that module
- * snapshots its key at import time: a process that imported it before the
- * variable was in scope keeps using the fallback for its whole life while
- * `process.env` reads back perfectly. So the check encrypts a known,
- * non-secret probe and then asks which key can open it:
+ * HOW IT IS DETECTED: by what encrypt() ACTUALLY DID, not by reading the env
+ * var. The check encrypts a known, non-secret probe and then asks which key can
+ * open it:
  *
  *   opens with the key derived from API_ENCRYPTION_KEY   -> real, allow
  *   opens with the browser-derivable fallback key        -> refuse
- *   opens with neither                                   -> refuse
+ *   opens with neither (or encrypt() throws)             -> refuse
  *
  * The derivations below MIRROR lib/crypto.ts. If that file ever changes how it
  * builds a key, this check stops matching and starts refusing every write.
@@ -225,7 +215,7 @@ const REFUSAL_MESSAGES: Record<EncryptionRefusal, string> = {
   'missing-key':
     `Passwords can't be saved because this deployment has no encryption key. ${SET_THE_KEY}`,
   'weak-key':
-    `Passwords can't be saved because API_ENCRYPTION_KEY is too short to be a real key. ${SET_THE_KEY}`,
+    `Passwords can't be saved because API_ENCRYPTION_KEY is not a real key (production needs exactly 64 hex characters). ${SET_THE_KEY}`,
   'browser-derivable-key':
     'Passwords can’t be saved: this deployment is falling back to a key derived from a public ' +
     `value that ships to every browser, so "encrypted" would not mean anything. ${SET_THE_KEY}`,
@@ -233,7 +223,8 @@ const REFUSAL_MESSAGES: Record<EncryptionRefusal, string> = {
     `Passwords can't be saved because the encryption key in use could not be verified. ${SET_THE_KEY}`,
 }
 
-/** Mirrors lib/crypto.ts: a 64-char hex key is decoded, anything else is scrypt-derived. */
+/** Mirrors lib/crypto.ts: a 64-char hex key is decoded, anything else is scrypt-derived
+ * (non-strict only: strict mode refuses anything but 64 hex before this runs). */
 function keyFromPassphrase(raw: string): Buffer {
   return HEX_64.test(raw) ? Buffer.from(raw, 'hex') : scryptSync(raw, 'salt', 32)
 }
@@ -258,9 +249,8 @@ function openWith(key: Buffer, payload: string): string | null {
 }
 
 /**
- * Memoised because the scrypt derivations cost ~100ms each and the answer
- * cannot change without the process restarting (lib/crypto.ts's key is fixed at
- * import time). Keyed on both inputs so a test that changes the environment
+ * Memoised because the scrypt derivations cost ~100ms each. Keyed on every
+ * input that decides the answer so a test that changes the environment
  * gets a fresh answer rather than a stale "ready".
  */
 let cachedStatus: { key: string; status: EncryptionStatus } | null = null
@@ -299,7 +289,10 @@ function refuseEncryption(reason: EncryptionRefusal): EncryptionStatus {
 function computeEncryptionStatus(raw: string | undefined): EncryptionStatus {
   const trimmed = raw?.trim() ?? ''
   if (!raw || !trimmed) return refuseEncryption('missing-key')
-  if (!HEX_64.test(trimmed) && trimmed.length < MIN_PASSPHRASE_CHARS) {
+  // Strict mode mirrors lib/crypto.ts: exactly 64 hex, untrimmed, nothing else.
+  if (isStrictEnv()) {
+    if (!HEX_64.test(raw)) return refuseEncryption('weak-key')
+  } else if (!HEX_64.test(trimmed) && trimmed.length < MIN_PASSPHRASE_CHARS) {
     return refuseEncryption('weak-key')
   }
 
