@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { assertSsrfSafe } from '@/lib/security/untrusted'
-import { createAdminClient } from '@/lib/harness/supabase-admin'
-import { assertWithinBudget, recordSpend } from '@/lib/harness/spend'
-import OpenAI from 'openai'
-import Anthropic from '@anthropic-ai/sdk'
+import { getDecryptedApiKeys } from '@/lib/apikeys'
+import { callLlm } from '@/lib/harness/llm'
+import { canRunLlm } from '@/lib/harness/llm-key-message'
+import type { DecryptedApiKeys } from '@/lib/harness/types'
+import { warnLlmFallback } from '@/lib/observability/llm-fallback'
 import { lookupKnownCompanyByDomain, faviconForDomain } from '@/lib/companies/known-companies'
 
 interface VerificationResult {
@@ -41,25 +42,13 @@ const JOB_KEYWORDS = [
   'apply', 'application', 'full-time', 'part-time', 'remote',
 ]
 
-async function analyzeWithOpenAI(apiKey: string, html: string, url: string): Promise<AIAnalysis | null> {
-  try {
-    const openai = new OpenAI({ apiKey })
+/** Cheap on purpose: one short yes/no assessment of a page. */
+const VERIFY_MODEL = 'openai/gpt-4o-mini'
 
-    // Extract text content, limiting size
-    const textContent = html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 8000)
+/** Give up on the AI and use the heuristic rather than stall the add-company dialog. */
+const AI_TIMEOUT_MS = 20_000
 
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: `You are an expert at analyzing web pages to determine if they are legitimate company career pages.
+const VERIFY_SYSTEM_PROMPT = `You are an expert at analyzing web pages to determine if they are legitimate company career pages.
 Analyze the provided page content and URL to determine:
 1. Is this an official company careers/jobs page (not a job board like Indeed or LinkedIn)?
 2. What is the exact company name?
@@ -75,34 +64,42 @@ Respond in JSON format only:
   "confidence": number,
   "reasoning": "brief explanation"
 }`
-        },
-        {
-          role: 'user',
-          content: `URL: ${url}\n\nPage content:\n${textContent}`
-        }
-      ],
-      temperature: 0.1,
-      max_tokens: 500,
-    })
 
-    const content = response.choices[0]?.message?.content
-    if (!content) return null
-
-    // Parse JSON from response
-    const jsonMatch = content.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) return null
-
-    return JSON.parse(jsonMatch[0]) as AIAnalysis
-  } catch (error) {
-    console.error('OpenAI analysis error:', error)
+/** The model's JSON, trusted only as far as its types: anything else is a miss, not a verdict. */
+function parseAnalysis(content: string): AIAnalysis | null {
+  const jsonMatch = content.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) return null
+  let raw: Record<string, unknown>
+  try {
+    raw = JSON.parse(jsonMatch[0]) as Record<string, unknown>
+  } catch {
     return null
+  }
+  if (typeof raw.isCareerPage !== 'boolean' || typeof raw.isOfficialPage !== 'boolean') return null
+  return {
+    isCareerPage: raw.isCareerPage,
+    isOfficialPage: raw.isOfficialPage,
+    companyName: typeof raw.companyName === 'string' ? raw.companyName : null,
+    estimatedJobCount:
+      typeof raw.estimatedJobCount === 'number' && Number.isFinite(raw.estimatedJobCount)
+        ? Math.max(0, Math.round(raw.estimatedJobCount))
+        : 0,
+    confidence:
+      typeof raw.confidence === 'number' && Number.isFinite(raw.confidence)
+        ? Math.min(1, Math.max(0, raw.confidence))
+        : 0,
+    reasoning: typeof raw.reasoning === 'string' ? raw.reasoning : '',
   }
 }
 
-async function analyzeWithAnthropic(apiKey: string, html: string, url: string): Promise<AIAnalysis | null> {
+/**
+ * AI verification through callLlm, so it is budget-checked, spend-recorded and
+ * traced like every other model call. Any failure (no key, a spent budget, a
+ * 402, a retired model, a timeout, unparseable output) returns null and logs
+ * why; the caller then runs the heuristic verifier.
+ */
+async function analyzeWithLlm(apiKeys: DecryptedApiKeys, html: string, url: string): Promise<AIAnalysis | null> {
   try {
-    const anthropic = new Anthropic({ apiKey })
-
     // Extract text content, limiting size
     const textContent = html
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
@@ -112,68 +109,26 @@ async function analyzeWithAnthropic(apiKey: string, html: string, url: string): 
       .trim()
       .slice(0, 8000)
 
-    const response = await anthropic.messages.create({
-      model: 'claude-3-haiku-20240307',
-      max_tokens: 500,
-      messages: [
-        {
-          role: 'user',
-          content: `You are an expert at analyzing web pages to determine if they are legitimate company career pages.
-
-Analyze this page content and URL to determine:
-1. Is this an official company careers/jobs page (not a job board like Indeed or LinkedIn)?
-2. What is the exact company name?
-3. Approximately how many job listings are visible?
-4. How confident are you (0-1)?
-
-URL: ${url}
-
-Page content:
-${textContent}
-
-Respond in JSON format only:
-{
-  "isCareerPage": boolean,
-  "isOfficialPage": boolean,
-  "companyName": string | null,
-  "estimatedJobCount": number,
-  "confidence": number,
-  "reasoning": "brief explanation"
-}`
-        }
-      ],
-    })
-
-    const content = response.content[0]
-    if (content.type !== 'text') return null
-
-    // Parse JSON from response
-    const jsonMatch = content.text.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) return null
-
-    return JSON.parse(jsonMatch[0]) as AIAnalysis
+    const result = await callLlm(
+      apiKeys,
+      {
+        model: VERIFY_MODEL,
+        system: VERIFY_SYSTEM_PROMPT,
+        prompt: `URL: ${url}\n\nPage content:\n${textContent}`,
+        temperature: 0.1,
+        maxTokens: 500,
+        // The account-wide default effort would add thinking tokens to a call that never used them.
+        reasoning: { effort: 'none' },
+      },
+      AbortSignal.timeout(AI_TIMEOUT_MS)
+    )
+    const analysis = parseAnalysis(result.content)
+    if (!analysis) warnLlmFallback('company-verify', 'heuristic', new Error('model output was not a usable verdict'))
+    return analysis
   } catch (error) {
-    console.error('Anthropic analysis error:', error)
+    warnLlmFallback('company-verify', 'heuristic', error)
     return null
   }
-}
-
-async function getApiKeys(userId: string): Promise<{ openai?: string; anthropic?: string }> {
-  try {
-    const supabase = await createClient()
-    const { data } = await supabase
-      .from('profiles')
-      .select('api_keys')
-      .eq('id', userId)
-      .single()
-
-    if (data?.api_keys) {
-      return data.api_keys as { openai?: string; anthropic?: string }
-    }
-  } catch {
-    // No keys found
-  }
-  return {}
 }
 
 function heuristicVerification(html: string, url: string, domain: string): Omit<VerificationResult, 'aiVerified'> {
@@ -443,46 +398,20 @@ export async function POST(request: NextRequest) {
       } satisfies VerificationResult)
     }
 
-    // Try to get user's API keys for AI verification
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-
+    // AI verification, only for a signed-in user whose keys load. Keys come from
+    // the guarded request-context loader (demo spend and expiry guards apply);
+    // callLlm does the budget check, spend record and trace. Every failure,
+    // including an expired demo or a spent budget, degrades to the heuristic.
     let aiAnalysis: AIAnalysis | null = null
-    let aiVerified = false
 
-    if (user) {
-      const apiKeys = await getApiKeys(user.id)
-
-      // Budget, enforced here because this route builds its own OpenAI /
-      // Anthropic client rather than going through lib/harness/llm.ts — see
-      // lib/harness/spend-chokepoints.test.ts for why every such path needs
-      // these two calls. A cap hit degrades to the deterministic verification
-      // below rather than failing the request: the user still gets a verified
-      // career URL, just without the AI analysis they cannot currently afford.
-      const budgetAdmin = createAdminClient()
-      let withinBudget = true
-      try {
-        await assertWithinBudget(budgetAdmin, user.id)
-      } catch {
-        withinBudget = false
-      }
-
-      // Try OpenAI first, then Anthropic
-      if (withinBudget && apiKeys.openai) {
-        aiAnalysis = await analyzeWithOpenAI(apiKeys.openai, html, normalizedUrl)
-        if (aiAnalysis) aiVerified = true
-      }
-
-      if (withinBudget && !aiAnalysis && apiKeys.anthropic) {
-        aiAnalysis = await analyzeWithAnthropic(apiKeys.anthropic, html, normalizedUrl)
-        if (aiAnalysis) aiVerified = true
-      }
-
-      // Estimated: these helpers return parsed analysis, not usage. Errs high,
-      // because silent under-counting is how a cap stops protecting anyone.
-      if (aiVerified) {
-        await recordSpend(budgetAdmin, user.id, 'gpt-4o-mini', 4000, 500)
-      }
+    let apiKeys: DecryptedApiKeys | null = null
+    try {
+      apiKeys = await getDecryptedApiKeys(requestingUser.id)
+    } catch (error) {
+      warnLlmFallback('company-verify', 'heuristic', error)
+    }
+    if (apiKeys && canRunLlm(apiKeys)) {
+      aiAnalysis = await analyzeWithLlm(apiKeys, html, normalizedUrl)
     }
 
     // If AI analysis succeeded, use it
