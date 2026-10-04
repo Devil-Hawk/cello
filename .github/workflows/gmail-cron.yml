@@ -14,9 +14,9 @@ name: Gmail Cron - Scheduled Sync
 
 on:
   schedule:
-    # Hourly, on the quarter hour (offset from scrape.yml/autopilot-cron.yml's
-    # :30 and harness-cron.yml's daily 13:00, so ticks don't pile up).
-    - cron: '15 * * * *'
+    # Hourly at an odd minute: GitHub drops top-of-hour and round-minute ticks
+    # under load. Doubles as the free Supabase project's keep-alive.
+    - cron: '47 * * * *'
   workflow_dispatch:
 
 # Never let two ticks overlap; a single in-flight tick keeps the per-tick cap
@@ -47,10 +47,10 @@ jobs:
             -H "Content-Type: application/json" \
             --max-time 120)
           echo "HTTP $http_code"
-          echo "--- response ---"
-          cat /tmp/gmail-cron.out || true
-          echo
           if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
             echo "::error::Gmail cron returned HTTP $http_code"
             exit 1
           fi
+          # Public repo: never print the body. Whitelisted keys, numbers and
+          # booleans only, so no user id, email or error text can reach the log.
+          jq -c '{ok,eligibleUsers,processed} | with_entries(select(.value | type | IN("number", "boolean")))' /tmp/gmail-cron.out 2>/dev/null || true

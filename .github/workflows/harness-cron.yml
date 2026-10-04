@@ -8,10 +8,11 @@ name: Harness Cron - Daily Digest
 # URL defaults to prod but can be overridden with the HARNESS_CRON_URL repo
 # variable (Settings -> Secrets and variables -> Actions -> Variables).
 
+# No schedule here: a Vercel cron calls this route daily. This workflow stays
+# as a manual trigger. curl waits up to 330s because the route's maxDuration
+# is 300s.
+
 on:
-  schedule:
-    # Daily at 13:00 UTC.
-    - cron: '0 13 * * *'
   workflow_dispatch:
 
 jobs:
@@ -34,12 +35,12 @@ jobs:
             -X POST "$CRON_URL" \
             -H "Authorization: Bearer $CRON_SECRET" \
             -H "Content-Type: application/json" \
-            --max-time 120)
+            --max-time 330)
           echo "HTTP $http_code"
-          echo "--- response ---"
-          cat /tmp/harness-cron.out || true
-          echo
           if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
             echo "::error::Harness cron returned HTTP $http_code"
             exit 1
           fi
+          # Public repo: never print the body. Whitelisted keys, numbers and
+          # booleans only, so no user id, email or error text can reach the log.
+          jq -c '{ok,activeUsers,processed,skippedForCapacity,traceSpansPruned} | with_entries(select(.value | type | IN("number", "boolean")))' /tmp/harness-cron.out 2>/dev/null || true

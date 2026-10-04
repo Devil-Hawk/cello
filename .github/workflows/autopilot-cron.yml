@@ -4,7 +4,7 @@ name: Autopilot Cron - Continuous Draft
 # them, and (for opted-in users, above their threshold) tailors them and builds
 # a pending_review application draft with a handoff link. It NEVER submits —
 # see the SAFETY note at the top of lib/harness/autopilot.ts: this path runs
-# fully unattended on an hourly schedule, so there is no human present at any
+# fully unattended on a schedule, so there is no human present at any
 # given tick to confirm a real, irreversible submission. Actual submission is
 # a separate, explicit, human-confirmed action outside this cron
 # (lib/harness/chains.ts#buildSubmitConfirmedPlan via the apply UI). "Never
@@ -19,8 +19,9 @@ name: Autopilot Cron - Continuous Draft
 
 on:
   schedule:
-    # Hourly, on the half hour (offset from scrape.yml/harness-cron.yml).
-    - cron: '30 * * * *'
+    # Every 4 hours at an odd minute. Each tick writes a fresh graph thread and
+    # checkpoints per enabled user, so hourly was the main DB growth source.
+    - cron: '23 */4 * * *'
   workflow_dispatch:
 
 # Never let two ticks overlap; guardrails are idempotent but a single in-flight
@@ -51,10 +52,10 @@ jobs:
             -H "Content-Type: application/json" \
             --max-time 120)
           echo "HTTP $http_code"
-          echo "--- response ---"
-          cat /tmp/autopilot.out || true
-          echo
           if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
             echo "::error::Autopilot cron returned HTTP $http_code"
             exit 1
           fi
+          # Public repo: never print the body. Whitelisted keys, numbers and
+          # booleans only, so no user id, email or error text can reach the log.
+          jq -c '{ok,enabledUsers,processed} | with_entries(select(.value | type | IN("number", "boolean")))' /tmp/autopilot.out 2>/dev/null || true
