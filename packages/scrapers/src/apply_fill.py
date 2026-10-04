@@ -312,7 +312,12 @@ def run() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    # WARNING, not INFO: browser-use logs each action with its arguments at INFO,
+    # which for a form includes typed name, email and phone, and this repo's
+    # Actions logs are public. Set before browser_use is imported (it is lazy),
+    # so its own logging setup defers to this one. Our own line stays at INFO.
+    logging.basicConfig(level=logging.WARNING)
+    logger.setLevel(logging.INFO)
     try:
         run()
     except Exception:  # noqa: BLE001 — a failed fill run must exit non-zero for GitHub Actions

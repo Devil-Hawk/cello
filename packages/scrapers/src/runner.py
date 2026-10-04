@@ -9,6 +9,7 @@ This script is run by GitHub Actions on a schedule. It:
 """
 
 import asyncio
+import logging
 import os
 import sys
 from datetime import datetime, timedelta
@@ -16,6 +17,11 @@ from datetime import datetime, timedelta
 from supabase import Client, create_client
 
 from .intelligent import AnthropicProvider, IntelligentScraper, OpenAIProvider, OpenRouterProvider
+
+# A tick this early is still due: scrapes finish a little after they start, so
+# last_scraped_at drifts late and a strict cutoff would skip every other tick.
+# Same value as DUE_SLACK_MINUTES in scripts/ats-refresh.ts.
+DUE_SLACK_MINUTES = 5
 
 
 def get_supabase_client() -> Client:
@@ -49,6 +55,21 @@ def get_llm_provider():
     raise ValueError("One of OPENROUTER_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY must be set")
 
 
+def is_due(company: dict, now: datetime) -> bool:
+    """Whether a company's last scrape is old enough to scrape again."""
+    last_scraped = company.get("last_scraped_at")
+    if last_scraped is None:
+        return True
+
+    # Dream companies: 1 hour, Regular: 24 hours
+    default_frequency = 60 if company.get("is_dream_company", False) else 1440
+    frequency = max(default_frequency, company.get("scrape_frequency") or 0)
+
+    last_scraped_dt = datetime.fromisoformat(last_scraped.replace("Z", "+00:00"))
+    last_scraped_dt = last_scraped_dt.replace(tzinfo=None)
+    return now - last_scraped_dt >= timedelta(minutes=frequency - DUE_SLACK_MINUTES)
+
+
 async def get_companies_to_scrape(
     supabase: Client,
     specific_company_id: str | None = None,
@@ -60,9 +81,12 @@ async def get_companies_to_scrape(
     - Dream companies: every 1 hour (60 mins)
     - Regular companies: every 24 hours (1440 mins)
 
+    A user-set scrape_frequency can stretch that but never go below it, the same
+    rule as scripts/ats-refresh.ts.
+
     A company is due if:
     - It has never been scraped, OR
-    - It was last scraped more than its frequency ago
+    - It was last scraped at least its frequency (less a 5 minute slack) ago
     """
     if specific_company_id:
         result = supabase.table("companies").select("*").eq("id", specific_company_id).execute()
@@ -73,22 +97,7 @@ async def get_companies_to_scrape(
     companies = result.data
 
     now = datetime.utcnow()
-    due_companies = []
-
-    for company in companies:
-        last_scraped = company.get("last_scraped_at")
-        is_dream = company.get("is_dream_company", False)
-
-        # Dream companies: 1 hour, Regular: 24 hours
-        default_frequency = 60 if is_dream else 1440
-        frequency = company.get("scrape_frequency") or default_frequency
-
-        if last_scraped is None:
-            due_companies.append(company)
-        else:
-            last_scraped_dt = datetime.fromisoformat(last_scraped.replace("Z", "+00:00"))
-            if now - last_scraped_dt.replace(tzinfo=None) > timedelta(minutes=frequency):
-                due_companies.append(company)
+    due_companies = [c for c in companies if is_due(c, now)]
 
     # Prioritize dream companies first
     due_companies.sort(key=lambda c: (not c.get("is_dream_company", False), c.get("name", "")))
@@ -107,10 +116,11 @@ async def scrape_company(
     Returns a summary of the scrape results.
     """
     company_id = company["id"]
-    company_name = company["name"]
     career_url = company["career_url"]
 
-    print(f"Scraping {company_name} ({career_url})...")
+    # Actions logs are public and companies are user-entered: log ids and
+    # counts, never names, URLs, job titles or error text.
+    print(f"Scraping company {company_id}...")
 
     async with IntelligentScraper(
         company_id=company_id,
@@ -121,9 +131,9 @@ async def scrape_company(
         result = await scraper.scrape()
 
     if not result.success:
-        print(f"  Failed: {result.error}")
+        print("  Failed")
         return {
-            "company": company_name,
+            "company": company_id,
             "success": False,
             "error": result.error,
         }
@@ -155,7 +165,7 @@ async def scrape_company(
             ).execute()
             new_jobs_count += 1
         except Exception as e:
-            print(f"  Failed to insert job '{job.title}': {e}")
+            print(f"  Failed to insert a job ({type(e).__name__})")
 
     # Update last_scraped_at
     supabase.table("companies").update({"last_scraped_at": datetime.utcnow().isoformat()}).eq(
@@ -165,7 +175,7 @@ async def scrape_company(
     print(f"  Found {len(result.jobs)} jobs, inserted {new_jobs_count}")
 
     return {
-        "company": company_name,
+        "company": company_id,
         "success": True,
         "jobs_found": len(result.jobs),
         "jobs_inserted": new_jobs_count,
@@ -175,6 +185,9 @@ async def scrape_company(
 
 async def main(specific_company_id: str | None = None):
     """Main entry point for the scraper runner."""
+    # The scrapers' own warnings carry the career URL they were fetching.
+    logging.getLogger("src").setLevel(logging.ERROR)
+
     print("=" * 60)
     print(f"Scout Agent starting at {datetime.utcnow().isoformat()}")
     print("=" * 60)
