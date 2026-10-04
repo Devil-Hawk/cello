@@ -672,6 +672,54 @@ describe('clientHint', () => {
   })
 })
 
+describe('clientHint key (strict mode)', () => {
+  const HEX = 'ef'.repeat(32)
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('uses AUDIT_HMAC_KEY, so the same input hints differently under a different key', () => {
+    vi.stubEnv('VERCEL', '1')
+    vi.stubEnv('AUDIT_HMAC_KEY', HEX)
+    const a = clientHint({ userAgent: 'UA-1', ip: '203.0.113.7' })
+    vi.stubEnv('AUDIT_HMAC_KEY', 'ab'.repeat(32))
+    expect(clientHint({ userAgent: 'UA-1', ip: '203.0.113.7' })).not.toBe(a)
+  })
+
+  for (const [name, value] of [
+    ['unset', undefined],
+    ['empty', ''],
+    ['short', 'hunter2'],
+    ['63 hex', 'a'.repeat(63)],
+  ] as const) {
+    it(`throws when AUDIT_HMAC_KEY is ${name}, even if other secrets are present`, () => {
+      vi.stubEnv('VERCEL', '1')
+      vi.stubEnv('API_ENCRYPTION_KEY', HEX)
+      vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'service-role-placeholder')
+      if (value === undefined) vi.stubEnv('AUDIT_HMAC_KEY', undefined as unknown as string)
+      else vi.stubEnv('AUDIT_HMAC_KEY', value)
+      expect(() => clientHint({ userAgent: 'UA-1' })).toThrow(/AUDIT_HMAC_KEY/)
+      expect(() => clientHintFromHeaders(new Headers({ 'user-agent': 'UA-1' }))).toThrow(/AUDIT_HMAC_KEY/)
+    })
+  }
+
+  it('still returns undefined with no signal, without needing a key', () => {
+    vi.stubEnv('VERCEL', '1')
+    vi.stubEnv('AUDIT_HMAC_KEY', undefined as unknown as string)
+    expect(clientHint({})).toBeUndefined()
+  })
+
+  it('recordAccessEvent swallows a missing key as a logged failure and never throws', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('AUDIT_HMAC_KEY', undefined as unknown as string)
+    const insert = vi.fn()
+    const admin = { from: () => ({ insert }) } as unknown as SupabaseClient
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    await expect(
+      recordAccessEvent(admin, { codeId: CODE_ID, kind: 'action', action: 'x', clientHint: 'UA-1' })
+    ).resolves.toBeUndefined()
+    expect(insert).not.toHaveBeenCalled()
+  })
+})
+
 describe('coerceClientHint', () => {
   it('passes a real hint through unchanged', () => {
     const hint = clientHint({ userAgent: 'UA-1' })!
