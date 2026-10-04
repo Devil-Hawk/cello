@@ -38,6 +38,7 @@ import {
 } from '@/lib/graph/autopilot'
 import { mapWithConcurrency } from '@/lib/ats'
 import { logApiError } from '@/lib/observability/log'
+import { isCronAuthorized } from '@/lib/security/shared-secret'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -48,17 +49,8 @@ export const maxDuration = 60
 // harnessRunGraph.
 const AUTOPILOT_GRAPH = autopilotTickGraph as unknown as CompiledGraphLike
 
-function isAuthorized(request: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET
-  if (!secret) return false
-  const auth = request.headers.get('authorization')
-  const bearer = auth?.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : null
-  const header = request.headers.get('x-cron-secret')
-  return bearer === secret || header === secret
-}
-
 export async function POST(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  if (!isCronAuthorized(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

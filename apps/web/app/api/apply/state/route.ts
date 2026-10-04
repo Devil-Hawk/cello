@@ -38,19 +38,12 @@ import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { verifyReportToken } from '@/lib/ats-apply/phase-tokens'
 import { createReceipt } from '@/lib/applications/store'
 import { DATA_URL_RE, MAX_ATTACHMENT_BYTES, base64ByteSize } from '@/lib/applications/receipts'
+import { isRunnerAuthorized } from '@/lib/security/shared-secret'
 
 export const dynamic = 'force-dynamic'
 
 const NO_STORE = { 'Cache-Control': 'no-store' }
 const MAX_SCREENSHOTS = 12
-
-function isAuthorized(request: NextRequest): boolean {
-  const secret = process.env.BROWSER_RUNNER_SECRET
-  if (!secret) return false
-  const auth = request.headers.get('authorization')
-  const bearer = auth?.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : null
-  return bearer === secret
-}
 
 interface ScreenshotIn {
   page: string
@@ -82,7 +75,7 @@ function validateScreenshots(raw: unknown): { ok: true; value: ScreenshotIn[] } 
 }
 
 export async function PATCH(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  if (!isRunnerAuthorized(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: NO_STORE })
   }
 

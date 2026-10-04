@@ -58,6 +58,7 @@ import { pruneOldTraceSpans } from '@/lib/trace/spans'
 import type { AdminClient } from '@/lib/harness/types'
 import { logApiError } from '@/lib/observability/log'
 import { chunkedIn } from '@/lib/supabase/chunked-in'
+import { isCronAuthorized } from '@/lib/security/shared-secret'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -132,15 +133,6 @@ const RESUME_ATTEMPT_CEILING = 5
  * tick is simply picked up again on the next one; nothing about it is lost.
  */
 const CRON_MAX_CONTINUATIONS = 2
-
-function isAuthorized(request: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET
-  if (!secret) return false
-  const auth = request.headers.get('authorization')
-  const bearer = auth?.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : null
-  const header = request.headers.get('x-cron-secret')
-  return bearer === secret || header === secret
-}
 
 interface ActiveProfile {
   id: string
@@ -365,7 +357,7 @@ async function resumeCheckpointedRuns(admin: AdminClient): Promise<ResumeBatch> 
 }
 
 export async function POST(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  if (!isCronAuthorized(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
