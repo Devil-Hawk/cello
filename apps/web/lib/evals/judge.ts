@@ -23,6 +23,11 @@
 //   headers, same user key) and handing it straight to autoevals. There is
 //   still only ONE provider and ONE key here — see meteredJudgeClient below.
 //
+//   Not going through callLlm does NOT mean going untraced: the same fetch
+//   wrapper below also emits one 'llm' span per request (same attributes as
+//   callLlm's) and warns on a non-2xx response, so judge calls appear in
+//   trace_spans and a 402 or retired model id is visible in the logs.
+//
 // WHY THE PER-CALL `client` OPTION AND NOT AUTOEVALS' GLOBAL `init()`
 //   `init()` stashes the client on `globalThis`, so two tests judging with
 //   different keys (or running in parallel) would race on which client wins.
@@ -53,8 +58,10 @@
 import OpenAI from 'openai'
 import { ClosedQA, Factuality } from 'autoevals'
 import { MissingKeyError } from '../harness/llm'
-import { assertWithinBudget, recordSpend } from '../harness/spend'
+import { assertWithinBudget, estimateCostUsd, recordSpend } from '../harness/spend'
 import { logHarnessError } from '../observability/log'
+import { warnLlmFallback } from '../observability/llm-fallback'
+import { acquireSpanScope, withSpan } from '../trace/spans'
 import type { AdminClient, DecryptedApiKeys } from '../harness/types'
 import type { EvalResult, EvalVerdict } from './harness'
 
@@ -131,35 +138,119 @@ function meteredFetch(
 ): (input: string | URL | Request, init?: RequestInit) => Promise<Response> {
   return async (input, init) => {
     await assertWithinBudget(admin, userId)
-    const response = await fetch(input, clampJudgeMaxTokens(init))
-    if (response.ok) {
-      // response.clone() so the OpenAI SDK can still read the body itself —
-      // this wrapper only ever PEEKS at it for accounting.
-      try {
-        const body = (await response.clone().json()) as {
-          model?: string
-          usage?: { prompt_tokens?: number; completion_tokens?: number }
-        }
-        const usage = body.usage
-        if (typeof usage?.prompt_tokens === 'number' && typeof usage.completion_tokens === 'number') {
-          await recordSpend(admin, userId, body.model ?? JUDGE_MODEL, usage.prompt_tokens, usage.completion_tokens)
-        } else {
-          await recordSpend(
-            admin,
-            userId,
-            JUDGE_MODEL,
-            JUDGE_FALLBACK_PROMPT_TOKENS,
-            JUDGE_FALLBACK_COMPLETION_TOKENS
-          )
-        }
-      } catch {
-        // Body wasn't JSON, or had no usable shape — same conservative
-        // fallback as a missing `usage` field, not a swallowed failure:
-        // recordSpend itself still runs and still logs loudly if IT fails.
-        await recordSpend(admin, userId, JUDGE_MODEL, JUDGE_FALLBACK_PROMPT_TOKENS, JUDGE_FALLBACK_COMPLETION_TOKENS)
+    const clamped = clampJudgeMaxTokens(init)
+    const requestedModel = requestedModelOf(clamped)
+
+    // One 'llm' span per request, same shape callLlm emits, so judge calls show
+    // up in trace_spans (and the Langfuse mirror) next to every other model call.
+    const scope = acquireSpanScope(userId)
+    let used: { model: string; promptTokens: number; completionTokens: number } | undefined
+    try {
+      return await withSpan(
+        scope.buffer,
+        { parentSpanId: scope.parentSpanId, runId: scope.runId, kind: 'llm', name: 'llm' },
+        async () => {
+          const response = await fetch(input, clamped)
+          // Thrown (not returned) so the span is marked 'error'; the catch
+          // below hands the same response back to the OpenAI SDK untouched.
+          if (!response.ok) throw await JudgeHttpError.from(response)
+          used = await readUsage(response)
+          await recordSpend(admin, userId, used.model, used.promptTokens, used.completionTokens)
+          return response
+        },
+        (response, err) =>
+          response && used
+            ? {
+                model: used.model,
+                promptTokens: used.promptTokens,
+                completionTokens: used.completionTokens,
+                tokensUsed: used.promptTokens + used.completionTokens,
+                costUsd: estimateCostUsd(used.model, used.promptTokens, used.completionTokens),
+                metered: true,
+                userId,
+                source: 'judge',
+              }
+            : {
+                model: requestedModel,
+                metered: true,
+                userId,
+                source: 'judge',
+                error: err instanceof Error ? err.message : String(err),
+              }
+      )
+    } catch (err) {
+      if (err instanceof JudgeHttpError) {
+        // A 402 or a retired model id must be visible, not just a null score.
+        warnLlmFallback('judge', 'verdict-unavailable', err)
+        return err.response
+      }
+      throw err
+    } finally {
+      // Only the call that created the buffer flushes it; inside a graph
+      // invocation the graph root does.
+      if (scope.owns) await scope.buffer.flush(admin)
+    }
+  }
+}
+
+/** A non-2xx judge response, carrying the Response so the SDK still sees it. */
+class JudgeHttpError extends Error {
+  readonly status: number
+  constructor(
+    readonly response: Response,
+    detail: string
+  ) {
+    super(`judge request failed: HTTP ${response.status}${detail ? ` ${detail}` : ''}`)
+    this.name = 'JudgeHttpError'
+    this.status = response.status
+  }
+
+  static async from(response: Response): Promise<JudgeHttpError> {
+    // Peek at a clone for the provider's own reason ("Insufficient credits").
+    const detail = await response
+      .clone()
+      .text()
+      .then((t) => t.slice(0, 200))
+      .catch(() => '')
+    return new JudgeHttpError(response, detail)
+  }
+}
+
+function requestedModelOf(init: RequestInit | undefined): string {
+  if (typeof init?.body !== 'string') return JUDGE_MODEL
+  try {
+    const model = (JSON.parse(init.body) as { model?: unknown }).model
+    return typeof model === 'string' && model ? model : JUDGE_MODEL
+  } catch {
+    return JUDGE_MODEL
+  }
+}
+
+/** Real usage off the body (response.clone() so the SDK can still read it), or
+ *  the deliberately high fallback when the body has none. */
+async function readUsage(
+  response: Response
+): Promise<{ model: string; promptTokens: number; completionTokens: number }> {
+  try {
+    const body = (await response.clone().json()) as {
+      model?: string
+      usage?: { prompt_tokens?: number; completion_tokens?: number }
+    }
+    const usage = body.usage
+    if (typeof usage?.prompt_tokens === 'number' && typeof usage.completion_tokens === 'number') {
+      return {
+        model: body.model ?? JUDGE_MODEL,
+        promptTokens: usage.prompt_tokens,
+        completionTokens: usage.completion_tokens,
       }
     }
-    return response
+  } catch {
+    // Body wasn't JSON: same conservative fallback as a missing `usage` field.
+  }
+  return {
+    model: JUDGE_MODEL,
+    promptTokens: JUDGE_FALLBACK_PROMPT_TOKENS,
+    completionTokens: JUDGE_FALLBACK_COMPLETION_TOKENS,
   }
 }
 

@@ -14,7 +14,9 @@ import type { AdminClient } from '../harness/types'
 
 const assertWithinBudgetMock = vi.fn()
 const recordSpendMock = vi.fn()
-vi.mock('../harness/spend', () => ({
+vi.mock('../harness/spend', async (importOriginal) => ({
+  // estimateCostUsd stays real: the span's costUsd is asserted below.
+  ...(await importOriginal<typeof import('../harness/spend')>()),
   assertWithinBudget: (...args: unknown[]) => assertWithinBudgetMock(...args),
   recordSpend: (...args: unknown[]) => recordSpendMock(...args),
 }))
@@ -27,7 +29,19 @@ vi.mock('../observability/log', () => ({
 import { MissingKeyError } from '../harness/llm'
 import { meteredJudgeClient, judgeGroundedness, judgeSpecificity, toEvalResult, JUDGE_MODEL } from './judge'
 
-const FAKE_ADMIN = {} as AdminClient
+/** Captures every trace_spans row a flush() inserts; every other table is unexpected. */
+const insertedSpans: Record<string, unknown>[] = []
+const FAKE_ADMIN = {
+  from: (name: string) => {
+    if (name !== 'trace_spans') throw new Error(`FAKE_ADMIN: unexpected table "${name}"`)
+    return {
+      insert: async (rows: Record<string, unknown>[]) => {
+        insertedSpans.push(...rows)
+        return { error: null }
+      },
+    }
+  },
+} as unknown as AdminClient
 const realFetch = globalThis.fetch
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -47,6 +61,7 @@ function chatCompletion(usage?: { prompt_tokens: number; completion_tokens: numb
 }
 
 beforeEach(() => {
+  insertedSpans.length = 0
   assertWithinBudgetMock.mockReset().mockResolvedValue(undefined)
   recordSpendMock.mockReset().mockResolvedValue(undefined)
   logHarnessErrorMock.mockReset()
@@ -113,6 +128,55 @@ describe('meteredJudgeClient', () => {
     await client.chat.completions.create({ model: JUDGE_MODEL, messages: [{ role: 'user', content: 'hi' }] })
 
     expect(recordSpendMock).toHaveBeenCalledWith(FAKE_ADMIN, 'user-1', JUDGE_MODEL, 2000, 300)
+  })
+
+  it('emits one llm span per request with model, tokens, cost and user, flushed to trace_spans', async () => {
+    globalThis.fetch = vi.fn(async () =>
+      chatCompletion({ prompt_tokens: 1000, completion_tokens: 200 })
+    ) as unknown as typeof fetch
+
+    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
+    await client.chat.completions.create({ model: JUDGE_MODEL, messages: [{ role: 'user', content: 'hi' }] })
+
+    expect(insertedSpans).toHaveLength(1)
+    expect(insertedSpans[0]).toMatchObject({
+      user_id: 'user-1',
+      kind: 'llm',
+      name: 'llm',
+      status: 'ok',
+      attributes: {
+        model: JUDGE_MODEL,
+        promptTokens: 1000,
+        completionTokens: 200,
+        tokensUsed: 1200,
+        // haiku-4.5: $1 in, $5 out per M tokens
+        costUsd: 0.002,
+        metered: true,
+        userId: 'user-1',
+        source: 'judge',
+      },
+    })
+  })
+
+  it('a 402 is an error span, a visible warning, and still reaches the SDK as a failure', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({ error: { message: 'Insufficient credits' } }, 402)
+    ) as unknown as typeof fetch
+
+    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
+    await expect(
+      client.chat.completions.create({ model: JUDGE_MODEL, messages: [{ role: 'user', content: 'hi' }] })
+    ).rejects.toMatchObject({ status: 402 })
+
+    expect(insertedSpans).toHaveLength(1)
+    expect(insertedSpans[0]).toMatchObject({ status: 'error', attributes: { model: JUDGE_MODEL, error: expect.stringContaining('402') } })
+    expect(recordSpendMock).not.toHaveBeenCalled()
+    const line = warn.mock.calls.map((c) => String(c[0])).find((l) => l.startsWith('[llm:fallback]'))
+    expect(line).toBeDefined()
+    expect(line).toContain('"scope":"judge"')
+    expect(line).toContain('"status":402')
+    expect(line).toContain('Insufficient credits')
   })
 
   it('does not record spend for a non-ok response', async () => {
