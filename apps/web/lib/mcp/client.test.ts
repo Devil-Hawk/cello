@@ -11,7 +11,7 @@
 // transcript. That's evidence, not a repo artifact: it spawns a subprocess
 // over npx, which would make CI flaky/slow, so it isn't checked in as a test.
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { callMcpTool, isStdioAvailable, listMcpTools, splitCommandLine, testMcpServer } from './client'
 import { McpError, type McpServerConfig } from './types'
 
@@ -42,42 +42,68 @@ describe('splitCommandLine', () => {
 })
 
 describe('isStdioAvailable', () => {
-  const original = process.env.VERCEL
+  afterEach(() => vi.unstubAllEnvs())
 
-  afterEach(() => {
-    if (original === undefined) delete process.env.VERCEL
-    else process.env.VERCEL = original
+  it('is false by default: no flag means no stdio, even off Vercel', () => {
+    vi.stubEnv('VERCEL', '')
+    vi.stubEnv('CELLO_SELF_HOSTED', '')
+    expect(isStdioAvailable()).toBe(false)
   })
 
-  it('is true when VERCEL is unset (self-hosted / this sandbox)', () => {
-    delete process.env.VERCEL
+  it('is false for anything but the exact opt-in value', () => {
+    vi.stubEnv('VERCEL', '')
+    for (const v of ['0', 'true', 'yes', ' 1', '1 ']) {
+      vi.stubEnv('CELLO_SELF_HOSTED', v)
+      expect(isStdioAvailable()).toBe(false)
+    }
+  })
+
+  it('is true when explicitly self-hosted and not on Vercel', () => {
+    vi.stubEnv('VERCEL', '')
+    vi.stubEnv('CELLO_SELF_HOSTED', '1')
     expect(isStdioAvailable()).toBe(true)
   })
 
-  it('is false on Vercel (VERCEL is always set there)', () => {
-    process.env.VERCEL = '1'
+  it('is false on Vercel even with the flag set (VERCEL is a hard veto)', () => {
+    vi.stubEnv('VERCEL', '1')
+    vi.stubEnv('CELLO_SELF_HOSTED', '1')
     expect(isStdioAvailable()).toBe(false)
+  })
+
+  it('is the same answer as the provider gate, so they cannot drift', async () => {
+    const { isSelfHosted } = await import('@/lib/harness/providers')
+    for (const [vercel, flag] of [['', ''], ['', '1'], ['1', '1'], ['1', '']]) {
+      vi.stubEnv('VERCEL', vercel)
+      vi.stubEnv('CELLO_SELF_HOSTED', flag)
+      expect(isSelfHosted()).toBe(isStdioAvailable())
+    }
   })
 })
 
 describe('stdio gating enforced at connect time, not just isStdioAvailable()', () => {
-  const original = process.env.VERCEL
-  afterEach(() => {
-    if (original === undefined) delete process.env.VERCEL
-    else process.env.VERCEL = original
-  })
+  afterEach(() => vi.unstubAllEnvs())
+
+  const stdioServer: McpServerConfig = {
+    id: 'x',
+    name: 'stdio-demo',
+    transport: 'stdio',
+    url: 'npx -y @modelcontextprotocol/server-everything',
+    headers: {},
+    enabled: true,
+  }
 
   it('refuses a stdio server with a clear, non-throwing testMcpServer() result when "on Vercel"', async () => {
-    process.env.VERCEL = '1'
-    const server: McpServerConfig = {
-      id: 'x',
-      name: 'stdio-demo',
-      transport: 'stdio',
-      url: 'npx -y @modelcontextprotocol/server-everything',
-      headers: {},
-      enabled: true,
-    }
-    const result = await testMcpServer(server)
+    vi.stubEnv('VERCEL', '1')
+    vi.stubEnv('CELLO_SELF_HOSTED', '1')
+    const result = await testMcpServer(stdioServer)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toMatch(/self-hosted/i)
+  })
+
+  it('refuses a stdio server off Vercel when CELLO_SELF_HOSTED is not set', async () => {
+    vi.stubEnv('VERCEL', '')
+    vi.stubEnv('CELLO_SELF_HOSTED', '')
+    const result = await testMcpServer(stdioServer)
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error).toMatch(/self-hosted/i)
   })
