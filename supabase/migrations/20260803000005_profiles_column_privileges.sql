@@ -82,6 +82,12 @@ $$;
 -- REVOKE is naturally idempotent (revoking a privilege the role never had is
 -- not an error), so this is safe to re-run and safe on a database where it
 -- already applied.
+--
+-- The table-level REVOKE comes first because a column-level REVOKE cannot
+-- take away a table-level grant, and Supabase's default privileges hand anon
+-- table-level ALL on every public table. Without it the postcondition below
+-- fails on any database created with those defaults.
+revoke all on public.profiles from anon;
 revoke select (preferences), update (preferences) on public.profiles from anon;
 
 -- ---------------------------------------------------------------------------
