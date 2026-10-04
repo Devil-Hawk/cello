@@ -144,11 +144,14 @@ async def scrape_company(
             "is_new": True,
         }
 
-        # Upsert - update if external_id exists, insert if not
+        # Insert new postings and leave known ones alone. Updating them on every
+        # scrape rewrote each row (and its 10KB description) hourly, which is
+        # what filled the first database's disk, and re-flagged seen jobs as new.
         try:
             supabase.table("jobs").upsert(
                 job_data,
                 on_conflict="company_id,external_id",
+                ignore_duplicates=True,
             ).execute()
             new_jobs_count += 1
         except Exception as e:
