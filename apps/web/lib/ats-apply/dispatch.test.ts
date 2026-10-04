@@ -3,7 +3,9 @@ import { DispatchError, dispatchBrowserApplyWorkflow, revokeLivePhaseToken } fro
 
 describe('dispatchBrowserApplyWorkflow', () => {
   const saved = process.env.GH_ACTIONS_TOKEN
-  beforeEach(() => vi.stubGlobal('fetch', vi.fn()))
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+  })
   afterEach(() => {
     vi.unstubAllGlobals()
     if (saved === undefined) delete process.env.GH_ACTIONS_TOKEN
