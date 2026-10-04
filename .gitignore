@@ -49,6 +49,9 @@ venv/
 
 # Supabase
 .supabase/
+# CLI link state (project ref, pooler URL) written by `supabase link`
+supabase/.temp/
+supabase/.branches/
 
 # Local agent/tooling state — machine-specific, not project config.
 #
