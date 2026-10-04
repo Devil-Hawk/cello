@@ -22,7 +22,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { isDemoProfile, type DemoProfileFacts } from '@/lib/access/guardrails'
 import { issuePhaseToken } from '@/lib/ats-apply/phase-tokens'
-import { dispatchBrowserApplyWorkflow, DispatchError } from '@/lib/ats-apply/dispatch'
+import { dispatchBrowserApplyWorkflow, revokeLivePhaseToken, DispatchError } from '@/lib/ats-apply/dispatch'
 import { AUTHORIZATION_MAX_AGE_MS } from '@/lib/ats-apply'
 
 export const dynamic = 'force-dynamic'
@@ -93,8 +93,11 @@ export async function POST(request: NextRequest) {
     await issuePhaseToken(admin, { draftId, userId: user.id, phase: 'submit' })
     await dispatchBrowserApplyWorkflow({ draftId, phase: 'submit' })
   } catch (err) {
-    const message = err instanceof DispatchError ? err.message : 'Could not start the submit run.'
+    // The draft stays 'approved' (this route never moves it), so the user can
+    // simply click again; only the orphaned submit token needs revoking.
     console.error('[apply/confirm] dispatch failed', err)
+    await revokeLivePhaseToken(admin, { draftId, phase: 'submit' })
+    const message = err instanceof DispatchError ? err.message : 'Could not start the submit run.'
     return NextResponse.json({ error: message }, { status: 502, headers: NO_STORE })
   }
 

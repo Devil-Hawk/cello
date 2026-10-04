@@ -17,7 +17,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { isDemoProfile, type DemoProfileFacts } from '@/lib/access/guardrails'
 import { issuePhaseToken } from '@/lib/ats-apply/phase-tokens'
-import { dispatchBrowserApplyWorkflow, DispatchError } from '@/lib/ats-apply/dispatch'
+import { dispatchBrowserApplyWorkflow, revokeLivePhaseToken, DispatchError } from '@/lib/ats-apply/dispatch'
 
 export const dynamic = 'force-dynamic'
 
@@ -103,14 +103,18 @@ export async function POST(request: NextRequest) {
     await dispatchBrowserApplyWorkflow({ draftId, phase: 'fill' })
   } catch (err) {
     // Roll back — a draft stuck in 'filling' with no run behind it is worse
-    // than one the user can simply retry.
-    await admin
+    // than one the user can simply retry. Only a draft still in 'filling'
+    // is touched, and a token that was already minted is revoked.
+    console.error('[apply/prepare] dispatch failed', err)
+    await revokeLivePhaseToken(admin, { draftId, phase: 'fill' })
+    const { error: rollbackErr } = await admin
       .from('application_drafts')
       .update({ status: 'pending_review', updated_at: new Date().toISOString() })
       .eq('id', draftId)
       .eq('user_id', user.id)
+      .eq('status', 'filling')
+    if (rollbackErr) console.error('[apply/prepare] rollback to pending_review failed', rollbackErr)
     const message = err instanceof DispatchError ? err.message : 'Could not start the browser run.'
-    console.error('[apply/prepare] dispatch failed', err)
     return NextResponse.json({ error: message }, { status: 502, headers: NO_STORE })
   }
 

@@ -26,6 +26,7 @@
 // AUTHORIZATION itself never becomes a value that would need to travel
 // through this call at all.
 
+import type { AdminClient } from '@/lib/harness/types'
 import type { ApplyPhase } from './phase-tokens'
 
 const GH_API = 'https://api.github.com'
@@ -55,7 +56,8 @@ export interface DispatchBrowserApplyInput {
  * that dispatches must know definitively whether the run was actually
  * queued, because app/api/apply/prepare and app/api/apply/confirm have
  * already moved the draft into a phase-in-progress state by the time this
- * is called and cannot silently leave it stuck there.
+ * is called and cannot silently leave it stuck there. Both restore the
+ * draft and call revokeLivePhaseToken below when this throws.
  */
 export async function dispatchBrowserApplyWorkflow(input: DispatchBrowserApplyInput): Promise<void> {
   const token = process.env.GH_ACTIONS_TOKEN
@@ -83,5 +85,24 @@ export async function dispatchBrowserApplyWorkflow(input: DispatchBrowserApplyIn
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     throw new DispatchError(`workflow dispatch failed: ${res.status} ${body.slice(0, 300)}`)
+  }
+}
+
+/**
+ * Called when a dispatch failed after issuePhaseToken already minted the
+ * (draft, phase) token: marks the still-live row consumed so no token sits
+ * live for 15 minutes with no run behind it. Best-effort, never throws; the
+ * caller is already returning an error.
+ */
+export async function revokeLivePhaseToken(admin: AdminClient, input: DispatchBrowserApplyInput): Promise<void> {
+  try {
+    await admin
+      .from('apply_phase_tokens')
+      .update({ consumed_at: new Date().toISOString() })
+      .eq('draft_id', input.draftId)
+      .eq('phase', input.phase)
+      .is('consumed_at', null)
+  } catch (err) {
+    console.error('[ats-apply/dispatch] could not revoke the live phase token', err)
   }
 }
