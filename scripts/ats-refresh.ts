@@ -135,6 +135,10 @@ const store: AtsStore = {
   },
 }
 
+function errorKind(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error
+}
+
 async function main(): Promise<void> {
   if (!SUPABASE_URL || !SERVICE_KEY) {
     console.error('ats-refresh: SUPABASE_URL and SUPABASE_SERVICE_KEY env vars are required')
@@ -146,7 +150,8 @@ async function main(): Promise<void> {
   try {
     companies = await fetchAllCompanies()
   } catch (error) {
-    console.error(`ats-refresh: failed to list companies: ${error instanceof Error ? error.message : String(error)}`)
+    // Error text can carry URLs or row data and this repo's Actions logs are public.
+    console.error(`ats-refresh: failed to list companies (${errorKind(error)})`)
     process.exit(1)
     return
   }
@@ -179,12 +184,11 @@ async function main(): Promise<void> {
       JSON.stringify({
         event: 'company',
         companyId: result.companyId,
-        companyName: result.companyName,
         dream: Boolean(row.is_dream_company),
         provider: result.provider,
         found: result.found,
         inserted: result.inserted,
-        errors: result.errors,
+        errorCount: result.errors.length,
       })
     )
     return result
@@ -210,6 +214,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(`ats-refresh: fatal: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`)
+  console.error(`ats-refresh: fatal (${errorKind(error)})`)
   process.exit(1)
 })
