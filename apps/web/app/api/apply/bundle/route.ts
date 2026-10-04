@@ -8,7 +8,9 @@
 //      GitHub Actions job", nothing more — it authorizes NO specific draft.
 //   2. An unconsumed, unexpired apply_phase_tokens row for exactly the
 //      (draft_id, phase) the caller names — consumed here, atomically,
-//      before anything is released (lib/ats-apply/phase-tokens.ts).
+//      after the read-only draft/approval/job checks pass (so a bad request
+//      cannot burn it) and before anything is released
+//      (lib/ats-apply/phase-tokens.ts).
 //
 // Once consumed, this route mints a REPORT TOKEN (mintReportToken()) and
 // returns its plaintext in the response body below — a channel
@@ -41,18 +43,11 @@ import { consumePhaseToken, mintReportToken, type ApplyPhase } from '@/lib/ats-a
 import { buildApplyProfile, AUTHORIZATION_MAX_AGE_MS } from '@/lib/ats-apply'
 import { normalizeHost, resolveCredentialFor } from '@/lib/apply/vault'
 import { getBaseResume, getLatestVersion } from '@/lib/resume/store'
+import { isRunnerAuthorized } from '@/lib/security/shared-secret'
 
 export const dynamic = 'force-dynamic'
 
 const NO_STORE = { 'Cache-Control': 'no-store' }
-
-function isAuthorized(request: NextRequest): boolean {
-  const secret = process.env.BROWSER_RUNNER_SECRET
-  if (!secret) return false
-  const auth = request.headers.get('authorization')
-  const bearer = auth?.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : null
-  return bearer === secret
-}
 
 interface DraftRow {
   id: string
@@ -66,7 +61,7 @@ interface DraftRow {
 }
 
 export async function POST(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  if (!isRunnerAuthorized(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: NO_STORE })
   }
 
@@ -84,17 +79,6 @@ export async function POST(request: NextRequest) {
   }
 
   const admin = createAdminClient()
-
-  // Consume FIRST: a bundle is never composed for a caller that could not
-  // present a live authorization, whatever else is true of the draft.
-  const consumed = await consumePhaseToken(admin, { draftId, phase })
-  if (!consumed) {
-    return NextResponse.json(
-      { error: 'No live authorization for this draft/phase.' },
-      { status: 403, headers: NO_STORE }
-    )
-  }
-  const reportToken = await mintReportToken(admin, { draftId, phase, consumedRowId: consumed.id })
 
   const { data: draft } = await admin
     .from('application_drafts')
@@ -126,6 +110,19 @@ export async function POST(request: NextRequest) {
   // edit could plug straight into the prompt.
   const { data: job } = await admin.from('jobs').select('url').eq('id', row.job_id).maybeSingle()
   if (!job?.url) return NextResponse.json({ error: 'Job has no URL.' }, { status: 422, headers: NO_STORE })
+
+  // Consume only AFTER every read-only validation above, so a malformed or
+  // refused request can never burn a legitimate one-use token, and still
+  // BEFORE any credential or profile read: a bundle is never composed for a
+  // caller that could not present a live authorization.
+  const consumed = await consumePhaseToken(admin, { draftId, phase })
+  if (!consumed) {
+    return NextResponse.json(
+      { error: 'No live authorization for this draft/phase.' },
+      { status: 403, headers: NO_STORE }
+    )
+  }
+  const reportToken = await mintReportToken(admin, { draftId, phase, consumedRowId: consumed.id })
 
   let credential: { username: string; secret: string } | null = null
   const host = normalizeHost(job.url)

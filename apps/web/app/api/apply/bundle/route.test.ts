@@ -4,7 +4,9 @@
 // THE THINGS THIS FILE HAS TO PROVE:
 //   1. Wrong/missing BROWSER_RUNNER_SECRET refuses before anything is read.
 //   2. No live phase token => refused, and the token is consumed BEFORE the
-//      bundle is composed (so a burned token never yields a second bundle).
+//      bundle is composed (so a burned token never yields a second bundle)
+//      but only AFTER the read-only draft/approval/job checks, so a bad
+//      request cannot burn a legitimate token.
 //   3. Host-scoped release: a credential is only ever asked for at the
 //      job's own host.
 //   4. A submit bundle additionally requires status='approved' AND a fresh
@@ -102,7 +104,7 @@ beforeEach(() => {
     job: { url: 'https://boards.greenhouse.io/acme/jobs/123', description: 'A great role' },
     profileRow: { full_name: 'Ada Lovelace', email: 'ada@example.com', resume_text: null, preferences: null },
   }
-  consumePhaseTokenMock.mockReset().mockResolvedValue(true)
+  consumePhaseTokenMock.mockReset().mockResolvedValue({ id: 'tok-1' })
   mintReportTokenMock.mockReset().mockResolvedValue('minted-report-token')
   normalizeHostMock.mockClear()
   resolveCredentialForMock.mockReset().mockResolvedValue(null)
@@ -131,9 +133,46 @@ describe('POST /api/apply/bundle', () => {
     expect(res.status).toBe(403)
   })
 
-  it('consumes the token BEFORE composing the bundle', async () => {
+  it('consumes the token BEFORE any credential or profile read', async () => {
+    const order: string[] = []
+    consumePhaseTokenMock.mockImplementation(async () => {
+      order.push('consume')
+      return { id: 'tok-1' }
+    })
+    resolveCredentialForMock.mockImplementation(async () => {
+      order.push('credential')
+      return null
+    })
+    getBaseResumeMock.mockImplementation(async () => {
+      order.push('resume')
+      return { content: 'x' }
+    })
     await POST(bundleRequest({ draftId: 'draft-1', phase: 'fill' }))
     expect(consumePhaseTokenMock).toHaveBeenCalledWith(expect.anything(), { draftId: 'draft-1', phase: 'fill' })
+    expect(order[0]).toBe('consume')
+    expect(order).toContain('credential')
+  })
+
+  it('a malformed or refused request never burns the phase token', async () => {
+    // bad body
+    await POST(bundleRequest({ draftId: '', phase: 'fill' }))
+    await POST(bundleRequest({ draftId: 'draft-1', phase: 'bogus' }))
+    // unknown draft
+    state.draft = null
+    expect((await POST(bundleRequest({ draftId: 'nope', phase: 'fill' }))).status).toBe(404)
+    // submit on a draft that is not approved
+    state.draft = { id: 'draft-1', user_id: 'user-1', job_id: 'job-1', status: 'pending_review', review_confirmed_at: new Date().toISOString() }
+    expect((await POST(bundleRequest({ draftId: 'draft-1', phase: 'submit' }))).status).toBe(403)
+    // submit with a stale review confirmation
+    state.draft = { ...state.draft, status: 'approved', review_confirmed_at: new Date(Date.now() - 25 * 3600_000).toISOString() }
+    expect((await POST(bundleRequest({ draftId: 'draft-1', phase: 'submit' }))).status).toBe(403)
+    // job without a url
+    state.draft = { ...state.draft, review_confirmed_at: new Date().toISOString() }
+    state.job = { url: null }
+    expect((await POST(bundleRequest({ draftId: 'draft-1', phase: 'submit' }))).status).toBe(422)
+    expect(consumePhaseTokenMock).not.toHaveBeenCalled()
+    expect(mintReportTokenMock).not.toHaveBeenCalled()
+    expect(resolveCredentialForMock).not.toHaveBeenCalled()
   })
 
   it('releases the fill bundle with profile + resume + job content', async () => {
@@ -150,7 +189,7 @@ describe('POST /api/apply/bundle', () => {
   it('mints a report token AFTER consuming the phase token, and returns it in the bundle', async () => {
     const res = await POST(bundleRequest({ draftId: 'draft-1', phase: 'fill' }))
     const body = await res.json()
-    expect(mintReportTokenMock).toHaveBeenCalledWith(expect.anything(), { draftId: 'draft-1', phase: 'fill' })
+    expect(mintReportTokenMock).toHaveBeenCalledWith(expect.anything(), { draftId: 'draft-1', phase: 'fill', consumedRowId: 'tok-1' })
     expect(body.reportToken).toBe('minted-report-token')
   })
 
