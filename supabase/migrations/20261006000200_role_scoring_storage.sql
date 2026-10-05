@@ -133,8 +133,10 @@ create table if not exists public.role_reactions (
   constraint role_reactions_reason_only_on_pass check (reason is null or reaction = 'not_for_me')
 );
 
+-- Not partial, so an upsert can name it. Rows whose job was pruned have a null
+-- job_id, and nulls never collide in a unique index.
 create unique index if not exists role_reactions_user_job_key
-  on public.role_reactions (user_id, job_id) where job_id is not null;
+  on public.role_reactions (user_id, job_id);
 create index if not exists idx_role_reactions_user_recent
   on public.role_reactions (user_id, updated_at desc);
 
@@ -241,7 +243,7 @@ begin
     from public.jobs j
     join public.companies c on c.id = j.company_id
     where j.id = new.job_id
-    on conflict (user_id, job_id) where job_id is not null
+    on conflict (user_id, job_id)
     do update set reaction = 'applied', reason = null, updated_at = now();
   end if;
   return new;
