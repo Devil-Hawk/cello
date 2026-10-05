@@ -50,6 +50,8 @@ export const RequirementsSchema = z.object({
       period: z.enum(['year', 'month', 'hour']).nullable(),
     })
     .nullable(),
+  /** When a model last read this posting for its skill lists, even if it found none. Not set by the parser, so a posting is not asked twice until its description changes (which rewrites this record). */
+  model_checked_at: z.string().nullable().optional(),
 })
 export type Requirements = z.infer<typeof RequirementsSchema>
 
@@ -305,7 +307,7 @@ export function groundModelAnswer(base: Requirements, description: string, answe
     const out: string[] = []
     for (const raw of items) {
       const item = raw.trim().replace(/\s+/g, ' ')
-      if (!item || item.length > 80) continue
+      if (!item || item.length > 80 || item.split(' ').length > 6) continue
       if (!hay.includes(norm(item))) continue
       if (!out.some((o) => norm(o) === norm(item))) out.push(item)
     }

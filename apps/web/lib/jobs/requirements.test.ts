@@ -11,6 +11,7 @@ import {
 } from './requirements'
 import { findSkills } from './skill-vocabulary'
 import { completeRequirements } from './requirements-model'
+import { MODEL_LIMIT } from '../ingest/model'
 
 const DATA_ENGINEER = `About the team
 We build the analytics platform that every product team at Acme relies on.
@@ -207,16 +208,35 @@ describe('completeRequirements', () => {
 
   it('keeps the deterministic result when the model fails, answers nonsense, or invents', async () => {
     expect(await completeRequirements(base, input, async () => null)).toBe(base)
-    expect(await completeRequirements(base, input, async () => 'not json')).toBe(base)
+    expect(await completeRequirements(base, input, async () => MODEL_LIMIT)).toBe(base)
     expect(await completeRequirements(base, input, async () => { throw new Error('429') })).toBe(base)
-    expect(await completeRequirements(base, input, async () => '{"must_have":["Kubernetes"]}')).toBe(base)
+    for (const answer of ['not json', '{"must_have":["Kubernetes"]}']) {
+      const out = await completeRequirements(base, input, async () => answer)
+      expect({ ...out, model_checked_at: undefined }).toEqual({ ...base, model_checked_at: undefined })
+    }
+  })
+
+  it('stamps a posting a model read, even when it found nothing, and not one it never reached', async () => {
+    const at = new Date('2026-10-06T00:00:00Z')
+    const refused = await completeRequirements(base, input, async () => '{"must_have":[],"nice_to_have":[]}', () => at)
+    expect(refused.model_checked_at).toBe(at.toISOString())
+    expect(refused.skills_resolved).toBe(false)
+    expect((await completeRequirements(base, input, async () => 'not json', () => at)).model_checked_at).toBe(at.toISOString())
+    expect((await completeRequirements(base, input, async () => null, () => at)).model_checked_at).toBeUndefined()
+    expect((await completeRequirements(base, input, async () => MODEL_LIMIT, () => at)).model_checked_at).toBeUndefined()
+  })
+
+  it('drops an item longer than six words even if the posting says it', () => {
+    const text = 'You will have experience with the full end to end lifecycle of enterprise sales cycles'
+    const out = groundModelAnswer(base, text, { must_have: ['the full end to end lifecycle of enterprise sales cycles', 'enterprise sales cycles'], nice_to_have: [], years_min: null })
+    expect(out.must_have).toEqual(['enterprise sales cycles'])
   })
 
   it('puts the posting in tags and the free-model rule on the call', async () => {
     const call = vi.fn().mockResolvedValue('{"must_have":[],"nice_to_have":[]}')
     await completeRequirements(base, input, call)
     const req = call.mock.calls[0][0]
-    expect(req.prompt).toContain('<posting>')
+    expect(req.prompt).toContain('BEGIN UNTRUSTED JOB POSTING')
     expect(req.system).toContain('Job requirements reader')
     expect(req.name).toBe('read-job-requirements')
   })
