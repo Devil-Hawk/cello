@@ -10,6 +10,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { classifyJob } from '../jobs/classify'
 import { repairMojibake } from '../jobs/mojibake'
+import { parseRequirements } from '../jobs/requirements'
+import { mapWithConcurrency } from '../ats/concurrency'
 import type { JobLead, SourceAdapter, SourceId, SourceQuery } from './types'
 import { rankAndLimit, sanitizeLeads } from './util'
 import { ownedJobsQuery } from '../harness/agents/matcher'
@@ -267,16 +269,28 @@ export async function ingestLeads(
   // 3. Existing jobs (by external_id AND url) across the user's companies.
   const companyIds = [...new Set([...resolved.values()].map((c) => c.id))]
   const existing = new Map<string, string>() // dedup-key -> job id
+  // Stored rows with no description: a later listing that carries a body fills them.
+  const bodiless = new Set<string>()
   if (companyIds.length > 0) {
     // Ownership via the companies FK join (ownedJobsQuery), not an
     // .in('company_id', companyIds) array — that breaks past ~600 companies.
-    const { data, error } = await ownedJobsQuery(admin, userId, 'id, external_id, url, companies!inner(user_id)')
+    const { data, error } = await ownedJobsQuery(
+      admin,
+      userId,
+      'id, external_id, url, description_md5, companies!inner(user_id)'
+    )
     if (error) {
       result.errors.push(`load jobs: ${error.message}`)
     }
-    for (const j of (data ?? []) as unknown as { id: string; external_id: string | null; url: string | null }[]) {
+    for (const j of (data ?? []) as unknown as {
+      id: string
+      external_id: string | null
+      url: string | null
+      description_md5?: string | null
+    }[]) {
       if (j.external_id) existing.set(j.external_id, j.id)
       if (j.url) existing.set(j.url, j.id)
+      if (!j.description_md5 || j.description_md5 === EMPTY_MD5) bodiless.add(j.id)
     }
   }
 
@@ -284,12 +298,16 @@ export async function ingestLeads(
   const now = new Date().toISOString()
   const seenKeys = new Set<string>()
   const toInsert: Record<string, unknown>[] = []
+  const stillListed = new Set<string>() // stored jobs a source listed again
+  const fills = new Map<string, JobLead>() // stored jobs with no body that this lead has one for
   for (const lead of leads) {
     const norm = normalizeCompanyName(lead.company)
     const company = resolved.get(norm)
     if (!company) continue // company creation failed
     const existingId = existing.get(lead.externalId) ?? existing.get(lead.url)
     if (existingId) {
+      stillListed.add(existingId)
+      if (bodiless.has(existingId) && lead.description.trim() && !fills.has(existingId)) fills.set(existingId, lead)
       if (!seenKeys.has(existingId)) {
         seenKeys.add(existingId)
         result.jobIds.push(existingId)
@@ -323,8 +341,50 @@ export async function ingestLeads(
       job_type: c.jobType,
       quality_score: c.qualityScore,
       source: lead.source,
+      last_seen_at: now,
+      requirements: parseRequirements({
+        title: lead.title,
+        description: lead.description,
+        location: lead.location,
+        salaryRange: lead.salary,
+      }),
+      requirements_extracted_at: now,
     })
   }
+
+  // 4b. A job that a source lists again is still listed: the prune reads
+  //     last_seen_at, so a posting an aggregator keeps listing is not deleted
+  //     out from under a user who has scored or applied to it. Aggregators never
+  //     count a miss (their list is a query's window, not the employer's board).
+  const listedIds = [...stillListed]
+  for (let i = 0; i < listedIds.length; i += SEEN_CHUNK) {
+    const { error } = await admin
+      .from('jobs')
+      .update({ last_seen_at: now })
+      .in('id', listedIds.slice(i, i + SEEN_CHUNK))
+    if (error) result.errors.push(`mark jobs seen: ${error.message}`)
+  }
+
+  // 4c. Fill a stored job that has no description from this lead's. The
+  //     description = '' guard means text an employer's board supplied is never
+  //     overwritten by an aggregator's copy.
+  await mapWithConcurrency([...fills.entries()], 4, async ([id, lead]) => {
+    const { error } = await admin
+      .from('jobs')
+      .update({
+        description: lead.description,
+        requirements: parseRequirements({
+          title: lead.title,
+          description: lead.description,
+          location: lead.location,
+          salaryRange: lead.salary,
+        }),
+        requirements_extracted_at: now,
+      })
+      .eq('id', id)
+      .eq('description', '')
+    if (error) result.errors.push(`fill description: ${error.message}`)
+  })
 
   // 5. Bulk upsert new jobs (onConflict company_id,external_id) and collect ids.
   if (toInsert.length > 0) {
@@ -343,6 +403,11 @@ export async function ingestLeads(
 
   return result
 }
+
+/** md5('') — jobs.description_md5 of a row with no description. */
+const EMPTY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e'
+/** Ids per update, so the querystring stays short. */
+const SEEN_CHUNK = 200
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
