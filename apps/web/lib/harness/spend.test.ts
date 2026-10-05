@@ -9,7 +9,9 @@ import {
   DEFAULT_MONTHLY_USD,
   assertWithinBudget,
   canMeter,
+  estimateCostDetails,
   estimateCostUsd,
+  hasListedPrice,
   getSpendState,
   recordSpend,
 } from './spend'
@@ -106,6 +108,14 @@ describe('estimateCostUsd', () => {
       const knownCost = estimateCostUsd(model, 1_000_000, 1_000_000)
       expect(unknownCost).toBeGreaterThanOrEqual(knownCost)
     }
+  })
+
+  it('a :free OpenRouter model costs nothing and is a listed price, not the fallback', () => {
+    expect(estimateCostUsd('google/gemma-4-31b-it:free', 1_000_000, 1_000_000)).toBe(0)
+    expect(estimateCostDetails('qwen/qwen3.8-27b:free', 1_000_000, 1_000_000)).toEqual({ input: 0, output: 0 })
+    expect(hasListedPrice('google/gemma-4-31b-it:free')).toBe(true)
+    // The suffix must be exact: a paid model whose id merely contains "free" stays on the fallback.
+    expect(estimateCostUsd('some/free-model', 1_000_000, 0)).toBeCloseTo(5, 6)
   })
 
   it('zero tokens costs zero even for an unknown model', () => {

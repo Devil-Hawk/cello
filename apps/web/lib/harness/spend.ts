@@ -57,9 +57,18 @@ const PRICES: Record<string, { in: number; out: number }> = {
   'openai/text-embedding-3-small': { in: 0.02, out: 0 },
 }
 const FALLBACK_PRICE = { in: 5, out: 25 }
+// OpenRouter's ':free' variants cost nothing per token. Booking them at the
+// fallback would charge the ingest pass (which only uses free models) $5/$25
+// per million and drain a user's cap on work that costs them nothing.
+const FREE_PRICE = { in: 0, out: 0 }
+
+function priceFor(model: string): { in: number; out: number } {
+  if (model.endsWith(':free')) return FREE_PRICE
+  return PRICES[model] ?? FALLBACK_PRICE
+}
 
 export function estimateCostUsd(model: string, promptTokens: number, completionTokens: number): number {
-  const p = PRICES[model] ?? FALLBACK_PRICE
+  const p = priceFor(model)
   return (promptTokens / 1e6) * p.in + (completionTokens / 1e6) * p.out
 }
 
@@ -71,13 +80,13 @@ export function estimateCostDetails(
   promptTokens: number,
   completionTokens: number
 ): { input: number; output: number } {
-  const p = PRICES[model] ?? FALLBACK_PRICE
+  const p = priceFor(model)
   return { input: (promptTokens / 1e6) * p.in, output: (completionTokens / 1e6) * p.out }
 }
 
 /** False when estimateCostUsd had to use FALLBACK_PRICE for this model. */
 export function hasListedPrice(model: string): boolean {
-  return Object.prototype.hasOwnProperty.call(PRICES, model)
+  return model.endsWith(':free') || Object.prototype.hasOwnProperty.call(PRICES, model)
 }
 
 /** Current UTC billing month, e.g. "2026-07". */
