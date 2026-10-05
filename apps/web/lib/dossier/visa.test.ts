@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sponsorshipSignalForCompanies, sponsorshipSignalForCompany, visaFromCuratedList } from './visa'
+import { sponsorshipSignalForCompanies, sponsorshipSignalForCompany, verifyVisaAnswer, visaFromCuratedList } from './visa'
 
 describe('visaFromCuratedList — zero-LLM-cost curated match', () => {
   it('matches an exact curated name', () => {
@@ -56,5 +56,31 @@ describe('sponsorshipSignalForCompany / sponsorshipSignalForCompanies', () => {
     expect(results.map((r) => r.signal)).toEqual(['likely', 'likely', 'likely', 'unknown', 'unknown'])
     // Echoes the caller's input order/names 1:1.
     expect(results.map((r) => r.name)).toEqual(names)
+  })
+})
+
+describe('verifyVisaAnswer: a stance needs a quote that is on the careers page', () => {
+  const page = 'We are remote-first.\nWe sponsor   H-1B visas for\nengineers, and welcome applicants from anywhere.'
+
+  it('keeps likely when the evidence is on the page, whatever the whitespace and quote style', () => {
+    expect(verifyVisaAnswer({ signal: 'likely', evidence: 'We sponsor H-1B visas for engineers' }, page)).toEqual({
+      signal: 'likely',
+      evidence: 'We sponsor H-1B visas for engineers',
+    })
+  })
+
+  it('turns likely into unknown when the quote is not on the page', () => {
+    expect(verifyVisaAnswer({ signal: 'likely', evidence: 'We sponsor all visas for every role' }, page).signal).toBe('unknown')
+  })
+
+  it('turns an unlikely with no quote, or a one-word quote, into unknown', () => {
+    expect(verifyVisaAnswer({ signal: 'unlikely', evidence: '' }, page).signal).toBe('unknown')
+    expect(verifyVisaAnswer({ signal: 'unlikely', evidence: 'visas' }, page).signal).toBe('unknown')
+  })
+
+  it('leaves unknown, and anything that is not a signal, as unknown', () => {
+    expect(verifyVisaAnswer({ signal: 'unknown', evidence: '' }, page).signal).toBe('unknown')
+    expect(verifyVisaAnswer({ signal: 'sponsors', evidence: 'We sponsor' }, page).signal).toBe('unknown')
+    expect(verifyVisaAnswer(null, page).signal).toBe('unknown')
   })
 })
