@@ -4,7 +4,7 @@
 import type { AtsJob, AtsProvider, DetectInput } from './types'
 import { isValidToken } from './types'
 import { HttpError, assertAllowedHost, fetchJson } from './http'
-import { htmlToPlainText } from './html'
+import { htmlToPlainText, linkHostsOf } from './html'
 
 const API_HOSTS = new Set(['boards-api.greenhouse.io', 'boards-api.eu.greenhouse.io'])
 
@@ -97,6 +97,7 @@ async function fetchBoard(host: string, token: string): Promise<AtsJob[]> {
       externalId: j.absolute_url,
       location: j.location?.name || undefined,
       description: typeof j.content === 'string' && j.content ? descriptionToText(j.content) : undefined,
+      linkHosts: typeof j.content === 'string' && j.content ? linkHostsOf(unescapeDoubleEncodedHtml(j.content)) : undefined,
       postedAt: toIso(j.first_published) ?? toIso(j.updated_at),
     })
   }

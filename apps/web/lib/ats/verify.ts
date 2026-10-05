@@ -239,7 +239,7 @@ export async function verifyBoard(input: VerifyInput): Promise<Exclude<VerifiedB
   if (
     sameEmployerName(identity.name, company.name) &&
     tokenMatchesDomainLabel(token, company.domain) &&
-    jobs.some((j) => mentionsDomain(j.description, company.domain))
+    jobs.some((j) => mentionsDomain(j.description, company.domain) || (j.linkHosts ?? []).some((h) => onCompanyDomain(h, company.domain)))
   ) {
     return 'provider_name'
   }

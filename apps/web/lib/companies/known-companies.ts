@@ -107,6 +107,7 @@ export const KNOWN_COMPANIES: Record<string, KnownCompany> = {
   'hashicorp.com': { name: 'HashiCorp' },
   'intercom.com': { name: 'Intercom', board: { provider: 'greenhouse', token: 'intercom' } },
   'posthog.com': { name: 'PostHog', board: { provider: 'ashby', token: 'posthog' } },
+  'scale.com': { name: 'Scale AI', board: { provider: 'greenhouse', token: 'scaleai' } },
   'confluent.io': { name: 'Confluent', board: { provider: 'ashby', token: 'confluent' } },
 }
 
