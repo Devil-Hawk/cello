@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckCircle, Loader2, Search, Sparkles, Star, XCircle } from 'lucide-react'
+import { CheckCircle, Loader2, Search, Star, XCircle } from 'lucide-react'
+import { LogoMark } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -307,7 +308,7 @@ export function AddCompanyDialog({ open, onOpenChange, onAdded }: AddCompanyDial
                                 {candidate.name}
                               </span>
                               <Badge tone={candidate.source === 'ai' ? 'accent' : 'neutral'}>
-                                {candidate.source === 'ai' && <Sparkles className="h-3 w-3" />}
+                                {candidate.source === 'ai' && <LogoMark className="h-3 w-3" />}
                                 {SOURCE_LABEL[candidate.source]}
                               </Badge>
                             </div>
@@ -409,7 +410,7 @@ export function AddCompanyDialog({ open, onOpenChange, onAdded }: AddCompanyDial
                       </p>
                       {verification.aiVerified && (
                         <Badge tone="accent">
-                          <Sparkles className="h-3 w-3" />
+                          <LogoMark className="h-3 w-3" />
                           AI verified
                         </Badge>
                       )}

@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { Loader2, Sparkles } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
+import { LogoMark } from '@/components/brand/logo'
 import {
   Tooltip,
   TooltipContent,
@@ -188,7 +189,7 @@ export function PulseRibbon({
                 {isCalculatingBatch ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
                 ) : (
-                  <Sparkles className="h-3 w-3" />
+                  <LogoMark className="h-3 w-3" />
                 )}
                 {isCalculatingBatch ? 'Scoring…' : 'Score now'}
               </button>

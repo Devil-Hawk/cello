@@ -39,7 +39,7 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Bell, CalendarClock, Inbox, Mail, Sparkles, type LucideIcon } from 'lucide-react'
+import { Star, AlertTriangle, Bell, CalendarClock, Inbox, Mail, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -70,7 +70,7 @@ const KIND_ICON: Record<NotificationKind, LucideIcon> = {
   outreach: Mail,
   overdue: AlertTriangle,
   interview: CalendarClock,
-  job: Sparkles,
+  job: Star,
 }
 
 /** The tone vocabulary of the /notifications page's three sections, plus the
