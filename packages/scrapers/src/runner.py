@@ -12,7 +12,7 @@ import asyncio
 import logging
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from supabase import Client, create_client
 
@@ -22,6 +22,26 @@ from .intelligent import AnthropicProvider, IntelligentScraper, OpenAIProvider, 
 # last_scraped_at drifts late and a strict cutoff would skip every other tick.
 # Same value as DUE_SLACK_MINUTES in scripts/ats-refresh.ts.
 DUE_SLACK_MINUTES = 5
+
+# A posting older than this is not an open role, whatever the page still lists.
+# Same value as ROLE_MAX_AGE_DAYS in apps/web/lib/jobs/freshness.ts.
+ROLE_MAX_AGE_DAYS = 180
+
+
+def is_stale_posting(posted_at: datetime | None, now: datetime | None = None) -> bool:
+    """True when the posting's own date is older than ROLE_MAX_AGE_DAYS. Undated is not stale."""
+    if posted_at is None:
+        return False
+    if posted_at.tzinfo is None:
+        posted_at = posted_at.replace(tzinfo=timezone.utc)
+    return (now or datetime.now(timezone.utc)) - posted_at > timedelta(days=ROLE_MAX_AGE_DAYS)
+
+
+def is_tracked_with_careers_url(company: dict) -> bool:
+    """The watchlist is what the person added: no suggested leads, nothing without a careers page."""
+    if (company.get("metadata") or {}).get("suggested") is True:
+        return False
+    return bool((company.get("career_url") or "").strip())
 
 
 def get_supabase_client() -> Client:
@@ -97,7 +117,7 @@ async def get_companies_to_scrape(
     companies = result.data
 
     now = datetime.utcnow()
-    due_companies = [c for c in companies if is_due(c, now)]
+    due_companies = [c for c in companies if is_tracked_with_careers_url(c) and is_due(c, now)]
 
     # Prioritize dream companies first
     due_companies.sort(key=lambda c: (not c.get("is_dream_company", False), c.get("name", "")))
@@ -141,6 +161,8 @@ async def scrape_company(
     # Insert new jobs (upsert by external_id)
     new_jobs_count = 0
     for job in result.jobs:
+        if is_stale_posting(job.posted_at):
+            continue
         job_data = {
             "company_id": company_id,
             "title": job.title,
