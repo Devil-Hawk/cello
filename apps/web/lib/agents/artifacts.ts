@@ -193,7 +193,7 @@ export async function createArtifact(admin: AdminClient, input: CreateArtifactIn
   const contentText = renderMarkdown(input.type, content)
 
   if (input.idempotencyKey) {
-    const existing = await findByKey(admin, input.userId, input.idempotencyKey)
+    const existing = await findArtifactByKey(admin, input.userId, input.idempotencyKey)
     if (existing) return { id: existing.id, version: existing.current_version, created: false }
   }
 
@@ -215,7 +215,7 @@ export async function createArtifact(admin: AdminClient, input: CreateArtifactIn
   if (error || !data) {
     // Two calls with one key at once: the loser reads the winner's row.
     if (input.idempotencyKey && (error as { code?: string } | null)?.code === '23505') {
-      const existing = await findByKey(admin, input.userId, input.idempotencyKey)
+      const existing = await findArtifactByKey(admin, input.userId, input.idempotencyKey)
       if (existing) return { id: existing.id, version: existing.current_version, created: false }
     }
     throw new Error(`Could not save the ${input.type.replace('_', ' ')}: ${error?.message ?? 'no row returned'}`)
@@ -239,7 +239,8 @@ export async function createArtifact(admin: AdminClient, input: CreateArtifactIn
   return { id, version: 1, created: true }
 }
 
-async function findByKey(admin: AdminClient, userId: string, key: string): Promise<ArtifactRow | null> {
+/** The artifact an earlier call with this key made, if any. */
+export async function findArtifactByKey(admin: AdminClient, userId: string, key: string): Promise<ArtifactRow | null> {
   const { data } = await admin.from('artifacts').select(ARTIFACT_COLUMNS).eq('user_id', userId).eq('idempotency_key', key).maybeSingle()
   return (data as ArtifactRow | null) ?? null
 }
