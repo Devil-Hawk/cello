@@ -1,0 +1,204 @@
+// Board ownership. A (provider, token) pair guessed from a company's name
+// answers for whoever owns that token: "amazon" on Personio is a different
+// employer's board, and it holds London marketing jobs from 2018. A guessed
+// board is therefore accepted only when something ties it to THIS company, and
+// only while it is alive. When nothing verifies, the answer is "no readable
+// source", never a guess.
+//
+// Evidence, cheapest first (any one is enough, and the board must be recent):
+//   careers_page_link  the company's own careers page or site links to this exact board
+//   board_links_home   the board's postings (or its own header) point at the company's domain
+//   provider_name      the provider names the same employer AND the token is the domain label
+// Boards read off the careers URL itself ('careers_url') and boards the person
+// set by hand ('manual') are trusted and never come through here.
+//
+// Framework-free like the rest of lib/ats: global fetch through ./http only.
+
+import type { AtsJob, AtsProviderId } from './types'
+import { assertAllowedHost, assertAllowedHostSuffix, fetchJson, fetchText } from './http'
+import { SUFFIX_WORDS } from '../companies/known-companies'
+
+export type VerifiedBy = 'careers_url' | 'manual' | 'careers_page_link' | 'board_links_home' | 'provider_name'
+
+export interface BoardRef {
+  provider: AtsProviderId
+  token: string
+}
+
+/** A board whose newest posting is older than this is dead. */
+export const BOARD_MAX_AGE_DAYS = 365
+const DAY_MS = 86_400_000
+
+/**
+ * True when at least one posting is dated within the last 12 months. Undated
+ * boards count as dead: with nothing to show it is alive, fail closed.
+ */
+export function isRecentBoard(jobs: readonly AtsJob[], now: number = Date.now()): boolean {
+  for (const job of jobs) {
+    const t = job.postedAt ? Date.parse(job.postedAt) : NaN
+    if (!Number.isNaN(t) && now - t <= BOARD_MAX_AGE_DAYS * DAY_MS) return true
+  }
+  return false
+}
+
+/** "Gusto, Inc." -> "gusto"; "Société Générale SA" -> "societegenerale". */
+export function normalizeEmployerName(name: string): string {
+  const words = name
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+  // Only TRAILING legal suffixes go, so "Wise Worksite Field Sales" stays itself.
+  while (words.length > 1 && (SUFFIX_WORDS.has(words[words.length - 1]) || words[words.length - 1] === 'se')) {
+    words.pop()
+  }
+  return words.join('')
+}
+
+/** Strict: equal after normalisation, and not empty. */
+export function sameEmployerName(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false
+  const na = normalizeEmployerName(a)
+  return na.length > 0 && na === normalizeEmployerName(b)
+}
+
+function hostOf(value: string): string | null {
+  try {
+    const raw = value.includes('://') ? value : `https://${value}`
+    return new URL(raw).hostname.toLowerCase().replace(/^www\./, '')
+  } catch {
+    return null
+  }
+}
+
+function alnum(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+/** The token is the domain's first label: "scaleai" is not "scale". */
+export function tokenMatchesDomainLabel(token: string, domain: string | null | undefined): boolean {
+  const host = domain ? hostOf(domain) : null
+  const label = host ? alnum(host.split('.')[0]) : ''
+  return label.length > 0 && alnum(token) === label
+}
+
+/** True when the URL's host is the company domain or one of its subdomains. */
+export function onCompanyDomain(url: string | null | undefined, domain: string | null | undefined): boolean {
+  const host = url ? hostOf(url) : null
+  const root = domain ? hostOf(domain) : null
+  return !!host && !!root && (host === root || host.endsWith(`.${root}`))
+}
+
+// ---------------------------------------------------------------------------
+// What each provider says about who owns a board. Plain public GETs through
+// ./http (host allow-list, timeout, breaker). Personio's feed has no employer
+// field at all, so a guessed Personio board can only pass through a page link.
+// ---------------------------------------------------------------------------
+
+export interface BoardIdentity {
+  name: string | null
+  /** URLs on the board that may point back at the company's own site. */
+  homeUrls: string[]
+}
+
+const OPTS = { retries: 1, timeoutMs: 8000 }
+const HTML = { ...OPTS, headers: { accept: 'text/html' } }
+const GH_HOSTS = new Set(['boards-api.greenhouse.io'])
+const LEVER_HOSTS = new Set(['jobs.lever.co'])
+const ASHBY_HOSTS = new Set(['jobs.ashbyhq.com'])
+const WORKABLE_HOSTS = new Set(['apply.workable.com'])
+const SR_HOSTS = new Set(['api.smartrecruiters.com'])
+const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null)
+
+export const IDENTIFY: Partial<Record<AtsProviderId, (token: string) => Promise<BoardIdentity>>> = {
+  async greenhouse(t) {
+    const url = assertAllowedHost(`https://boards-api.greenhouse.io/v1/boards/${t}`, GH_HOSTS)
+    const d = await fetchJson<{ name?: unknown }>(url, OPTS)
+    return { name: str(d?.name), homeUrls: [] }
+  },
+  async lever(t) {
+    const url = assertAllowedHost(`https://jobs.lever.co/${t}`, LEVER_HOSTS)
+    const html = await fetchText(url, HTML)
+    const title = /<title>([^<]*)<\/title>/i.exec(html)
+    const home = /class="main-header-logo"><a href="([^"]+)"/.exec(html)
+    return { name: title ? str(title[1]) : null, homeUrls: home ? [home[1]] : [] }
+  },
+  async ashby(t) {
+    const url = assertAllowedHost(`https://jobs.ashbyhq.com/${t}`, ASHBY_HOSTS)
+    const html = await fetchText(url, HTML)
+    const m = /"name":"([^"]*)","publicWebsite":"([^"]*)"/.exec(html)
+    return { name: m ? str(m[1]) : null, homeUrls: m && m[2] ? [m[2]] : [] }
+  },
+  async workable(t) {
+    const url = assertAllowedHost(`https://apply.workable.com/api/v1/widget/accounts/${t}`, WORKABLE_HOSTS)
+    const d = await fetchJson<{ name?: unknown }>(url, OPTS)
+    return { name: str(d?.name), homeUrls: [] }
+  },
+  async recruitee(t) {
+    const url = assertAllowedHostSuffix(`https://${t}.recruitee.com/api/offers/`, ['.recruitee.com'])
+    const d = await fetchJson<{ offers?: Array<{ company_name?: unknown; careers_url?: unknown }> }>(url, OPTS)
+    const first = Array.isArray(d?.offers) ? d.offers[0] : undefined
+    return { name: str(first?.company_name), homeUrls: str(first?.careers_url) ? [first!.careers_url as string] : [] }
+  },
+  async smartrecruiters(t) {
+    const url = assertAllowedHost(`https://api.smartrecruiters.com/v1/companies/${t}/postings?limit=1`, SR_HOSTS)
+    const d = await fetchJson<{ content?: Array<{ company?: { name?: unknown } }> }>(url, OPTS)
+    return { name: str(d?.content?.[0]?.company?.name), homeUrls: [] }
+  },
+}
+
+export interface VerifyInput extends BoardRef {
+  /** The postings the adapter already fetched. */
+  jobs: readonly AtsJob[]
+  company: { name: string | null; domain: string | null }
+  /** Boards the company's own site links to, or a lazy way to find them. */
+  pageBoards?: readonly BoardRef[] | (() => Promise<readonly BoardRef[]>)
+  now?: number
+}
+
+/**
+ * Why this board is the company's, or null when nothing ties it to them (or it
+ * is dead). Never throws: a failed identity call is simply no evidence.
+ */
+export async function verifyBoard(input: VerifyInput): Promise<Exclude<VerifiedBy, 'careers_url' | 'manual'> | null> {
+  const { provider, token, jobs, company } = input
+  if (!isRecentBoard(jobs, input.now)) return null
+
+  const linked = (boards: readonly BoardRef[]) =>
+    boards.some((b) => b.provider === provider && b.token.toLowerCase() === token.toLowerCase())
+  const pb = input.pageBoards
+
+  // 1. The company's own site links to this exact board (already read).
+  if (pb && typeof pb !== 'function' && linked(pb)) return 'careers_page_link'
+
+  // 2. A posting links to the company's own domain (free: already fetched).
+  if (jobs.some((j) => onCompanyDomain(j.url, company.domain))) return 'board_links_home'
+
+  // 2b. Same as 1, but the site is only read now (a stored board being re-checked).
+  if (typeof pb === 'function') {
+    try {
+      if (linked(await pb())) return 'careers_page_link'
+    } catch {
+      /* no evidence */
+    }
+  }
+
+  // 3. The provider's own record of the board.
+  const identify = IDENTIFY[provider]
+  if (!identify) return null
+  let identity: BoardIdentity
+  try {
+    identity = await identify(token)
+  } catch {
+    return null
+  }
+  if (identity.homeUrls.some((u) => onCompanyDomain(u, company.domain))) return 'board_links_home'
+  if (sameEmployerName(identity.name, company.name) && tokenMatchesDomainLabel(token, company.domain)) {
+    return 'provider_name'
+  }
+  return null
+}

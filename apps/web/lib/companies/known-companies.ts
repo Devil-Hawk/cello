@@ -125,7 +125,7 @@ const NAME_TO_DOMAIN: Map<string, string> = (() => {
   return map
 })()
 
-const SUFFIX_WORDS = new Set([
+export const SUFFIX_WORDS = new Set([
   'inc', 'incorporated', 'corp', 'corporation', 'co', 'company', 'llc', 'llp',
   'ltd', 'limited', 'gmbh', 'plc', 'sa', 'ag', 'nv', 'bv', 'srl', 'pty',
   'group', 'holdings', 'holding',
