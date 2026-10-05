@@ -18,7 +18,9 @@ const LLM: LlmRunner = vi.fn()
 const base = { admin: ADMIN, userId: 'u', llm: LLM, limit: 5 }
 const row = (over: Record<string, unknown> = {}) => ({ jobId: 'j1', blocked: [], chance: 'possible', want: 0.6, wantReason: 'Payments work like what you liked.', highlights: [], gaps: [], ...over })
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+})
 
 describe('runBulkMatch', () => {
   it('reports why a role with no description cannot have its chance checked, instead of a bare "failed"', async () => {
