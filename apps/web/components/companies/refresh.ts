@@ -18,7 +18,7 @@ export interface RefreshCompanyResult {
 export interface RefreshResponse {
   ok: boolean
   results: RefreshCompanyResult[]
-  totals: { found: number; inserted: number; companiesWithAts: number }
+  totals: { found: number; inserted: number; updated: number; closed: number; busy: number; companiesWithAts: number }
 }
 
 export interface ScraperTriggerResult {

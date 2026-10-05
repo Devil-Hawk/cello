@@ -119,6 +119,12 @@ export interface RefreshJobsInput {
 export interface RefreshJobsTotals {
   found: number
   inserted: number
+  /** Stored jobs whose text, title, location or pay changed at the source. */
+  updated: number
+  /** Jobs marked closed because the source stopped listing them. */
+  closed: number
+  /** Companies another check was already reading, so this one did nothing for them. */
+  busy: number
   companiesWithAts: number
 }
 
@@ -269,6 +275,9 @@ export const refreshJobsGraph = entrypoint(
     const totals: RefreshJobsTotals = {
       found: results.reduce((sum, r) => sum + r.found, 0),
       inserted: results.reduce((sum, r) => sum + r.inserted, 0),
+      updated: results.reduce((sum, r) => sum + r.updated, 0),
+      closed: results.reduce((sum, r) => sum + r.closed, 0),
+      busy: results.filter((r) => r.busy).length,
       companiesWithAts: results.filter((r) => r.provider !== null).length,
     }
 

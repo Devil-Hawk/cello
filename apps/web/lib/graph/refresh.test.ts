@@ -99,10 +99,10 @@ describe('refreshJobsGraph — happy path', () => {
     expect((outcome as { total: number }).total).toBe(3)
     const o = outcome as {
       results: CompanyRefreshResult[]
-      totals: { found: number; inserted: number; companiesWithAts: number }
+      totals: { found: number; inserted: number; updated: number; closed: number; busy: number; companiesWithAts: number }
     }
     expect(o.results.map((r) => r.companyId)).toEqual(['c1', 'c2', 'c3'])
-    expect(o.totals).toEqual({ found: 6, inserted: 3, companiesWithAts: 3 })
+    expect(o.totals).toEqual({ found: 6, inserted: 3, updated: 0, closed: 0, busy: 0, companiesWithAts: 3 })
 
     // RULING 9: every per-company task built its store from
     // config.configurable.dbClient, not from anywhere else — proves getConfig()
@@ -113,6 +113,17 @@ describe('refreshJobsGraph — happy path', () => {
       expect(store).not.toBe(dbClient) // makeStore() wraps it into an AtsStore
       expect(store).toHaveProperty('listJobs')
     }
+  })
+
+  it('totals what changed: updated, closed, and the companies another check was already reading', async () => {
+    refreshCompanyMock.mockImplementation(async (_store, company) => {
+      if (company.id === 'c3') return fakeResult('c3', { provider: null, found: 0, inserted: 0, busy: true })
+      return fakeResult(company.id, { inserted: 0, updated: 2, closed: company.id === 'c1' ? 3 : 0 })
+    })
+    const outcome = (await refreshJobsGraph.invoke(inputFor(['c1', 'c2', 'c3']), makeConfig('t-changed', new MemorySaver()))) as {
+      totals: { updated: number; closed: number; busy: number }
+    }
+    expect(outcome.totals).toMatchObject({ updated: 4, closed: 3, busy: 1 })
   })
 
   it('refuses up front when config.configurable.dbClient is absent', async () => {

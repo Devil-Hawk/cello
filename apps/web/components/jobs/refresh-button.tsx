@@ -36,7 +36,7 @@ interface RefreshResult {
     inserted: number
     errors: string[]
   }>
-  totals: { found: number; inserted: number; companiesWithAts: number }
+  totals: { found: number; inserted: number; updated: number; closed: number; busy: number; companiesWithAts: number }
   /** Progress so far; null when the run is complete. */
   cursor: number | null
   total: number
@@ -57,6 +57,9 @@ interface Progress {
   companiesDone: number
   total: number
   inserted: number
+  updated: number
+  closed: number
+  busy: number
   found: number
   withAts: number
 }
@@ -71,6 +74,19 @@ interface Progress {
  */
 const MAX_ROUNDS = 500
 
+/** "7 new, 2 updated, 3 closed." plus a note when another check already held a company. */
+export function refreshSummary(run: Pick<Progress, 'inserted' | 'updated' | 'closed' | 'busy' | 'companiesDone' | 'total'>, stopped = false): string {
+  const parts = [`${run.inserted} new, ${run.updated} updated, ${run.closed} closed.`]
+  if (stopped) parts.push(`Stopped after ${run.companiesDone} of ${run.total} ${run.total === 1 ? 'company' : 'companies'}.`)
+  if (run.busy > 0) {
+    parts.push(
+      `${run.busy} ${run.busy === 1 ? 'company was' : 'companies were'} already being checked; ` +
+        `${run.busy === 1 ? 'its' : 'their'} roles will appear in a few minutes.`
+    )
+  }
+  return parts.join(' ')
+}
+
 /** Prominent "Refresh jobs" action. Drives POST /api/jobs/refresh to completion. */
 export function RefreshJobsButton({
   companyId,
@@ -84,13 +100,13 @@ export function RefreshJobsButton({
 
   const refresh = useCallback(async () => {
     stopRef.current = false
-    setProgress({ companiesDone: 0, total: 0, inserted: 0, found: 0, withAts: 0 })
+    setProgress({ companiesDone: 0, total: 0, inserted: 0, updated: 0, closed: 0, busy: 0, found: 0, withAts: 0 })
 
     let threadId: string | undefined
     let done = false
     let rounds = 0
     let previousProcessed = 0
-    const run: Progress = { companiesDone: 0, total: 0, inserted: 0, found: 0, withAts: 0 }
+    const run: Progress = { companiesDone: 0, total: 0, inserted: 0, updated: 0, closed: 0, busy: 0, found: 0, withAts: 0 }
 
     try {
       while (!done && !stopRef.current) {
@@ -117,6 +133,9 @@ export function RefreshJobsButton({
         // note) — an interrupted round reports zeros, so assigning rather
         // than accumulating always lands on the true final numbers.
         run.inserted = data.totals.inserted
+        run.updated = data.totals.updated ?? 0
+        run.closed = data.totals.closed ?? 0
+        run.busy = data.totals.busy ?? 0
         run.found = data.totals.found
         run.withAts = data.totals.companiesWithAts
         run.total = data.total
@@ -138,10 +157,7 @@ export function RefreshJobsButton({
       const stopped = stopRef.current
       toast({
         title: stopped ? 'Refresh stopped' : 'Jobs refreshed',
-        description:
-          `${run.inserted} new · ${run.found} found · ` +
-          `${run.companiesDone}/${run.total} ${run.total === 1 ? 'company' : 'companies'} checked` +
-          (stopped ? ' before you stopped it' : ''),
+        description: refreshSummary(run, stopped),
       })
     } catch (error) {
       toast({
