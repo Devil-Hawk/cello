@@ -10,6 +10,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GmailMessage } from './types'
 import type { ParsedEmail } from './types'
+import { TRACKED_FILTER } from '@/lib/companies/watchlist'
 
 type Row = Record<string, any>
 
@@ -71,6 +72,12 @@ function makeFakeDb() {
         }
         return api
       },
+      // Only the watchlist filter is used by sync-core; anything else must fail loudly.
+      or(filter: string) {
+        if (filter !== TRACKED_FILTER) throw new Error(`unexpected or() filter: ${filter}`)
+        working = working.filter((r) => r.metadata?.suggested !== true)
+        return api
+      },
       not(col: string, _op: string, val: unknown) {
         working = working.filter((r) => getNested(r, col) !== val)
         return api
@@ -123,6 +130,7 @@ const FIXED_MESSAGE: GmailMessage = {
 }
 
 let fakeDb: ReturnType<typeof makeFakeDb>
+let mailbox: GmailMessage[] = [FIXED_MESSAGE]
 
 vi.mock('@/lib/harness/supabase-admin', () => ({
   createAdminClient: () => fakeDb,
@@ -138,7 +146,7 @@ vi.mock('@/lib/outreach/reply', () => ({
 }))
 vi.mock('./gmail-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./gmail-api')>()
-  return { ...actual, fetchGmailMessages: async () => [FIXED_MESSAGE] }
+  return { ...actual, fetchGmailMessages: async () => mailbox }
 })
 // classify stays REAL: only the provider call and spend's DB writes are faked, so
 // the test proves sync-core hands callLlm a userId and the call is metered.
@@ -253,5 +261,136 @@ describe('runGmailSyncCore — LLM metering', () => {
     expect(callOpenRouterMock).toHaveBeenCalled()
     expect(assertWithinBudgetMock).toHaveBeenCalledWith(expect.anything(), USER_ID)
     expect(recordSpendMock).toHaveBeenCalledWith(expect.anything(), USER_ID, 'google/gemini-2.0-flash-001', 500, 100)
+  })
+})
+
+// What production's Gmail sync wrote into the companies table (2026-10-05): a
+// sender display name, a job title, a mail relay, a non-employer. The model
+// answered with these names and confidence >= 0.6, and each became a "company".
+const JUNK_SENDERS: Array<{ label: string; from: string; employerName: string | null; employerDomain: string | null }> = [
+  { label: 'recruiter display name', from: '"Jane Doe" <jane@point.com>', employerName: 'Jane Doe', employerDomain: 'point.com' },
+  { label: 'job title as sender name', from: '"Machine Learning Engineer" <jobs@pitchbook.com>', employerName: 'Machine Learning Engineer', employerDomain: 'pitchbook.com' },
+  { label: 'greenhouse-mail.io relay', from: 'Northwind Recruiting <no-reply@us.greenhouse-mail.io>', employerName: 'Northwind Recruiting', employerDomain: 'us.greenhouse-mail.io' },
+  { label: 'rippling relay', from: 'Hiring <jobs@ats.rippling.com>', employerName: 'Rippling ATS', employerDomain: 'ats.rippling.com' },
+  { label: 'bamboohr relay', from: 'Hiring <noreply@app.bamboohr.com>', employerName: 'BambooHR', employerDomain: 'app.bamboohr.com' },
+  { label: 'icims relay', from: 'Talent <noreply@talent.icims.eu>', employerName: 'Talent', employerDomain: 'talent.icims.eu' },
+  { label: 'oracle cloud relay', from: 'Recruiting <donotreply@workflow.mail.us2.cloud.oracle.com>', employerName: 'Recruiting', employerDomain: 'workflow.mail.us2.cloud.oracle.com' },
+  { label: 'paycom relay', from: 'Careers <no-reply@msgint.paycomonline.com>', employerName: 'PAYCOM', employerDomain: 'msgint.paycomonline.com' },
+  { label: 'teamtailor relay', from: 'Careers <no-reply@teamtailor-mail.com>', employerName: 'Teamtailor', employerDomain: 'teamtailor-mail.com' },
+  { label: 'ticket draw application', from: 'FIFA <tickets@fifa.example>', employerName: 'FIFA World Cup', employerDomain: 'fifa.example' },
+  { label: 'apartment rental application', from: 'Leasing <leasing@rentals.example>', employerName: 'Maple Court Apartments', employerDomain: 'rentals.example' },
+  { label: 'job tool inbox', from: 'Tsenta <inbox@tsenta.example>', employerName: 'Tsenta', employerDomain: 'tsenta.example' },
+]
+
+function junkMessage(i: number, from: string): GmailMessage {
+  return {
+    id: `junk-${i}`,
+    threadId: `junk-thread-${i}`,
+    snippet: '',
+    payload: {
+      headers: [
+        { name: 'from', value: from },
+        { name: 'subject', value: 'Thank you for your application' },
+      ],
+      body: { data: '' },
+    },
+    internalDate: String(Date.now()),
+  }
+}
+
+describe('runGmailSyncCore: email never creates companies', () => {
+  beforeEach(() => {
+    assertWithinBudgetMock.mockReset().mockResolvedValue(undefined)
+    recordSpendMock.mockReset().mockResolvedValue(undefined)
+    fakeDb = makeFakeDb()
+    fakeDb.tables.set('companies', [
+      { id: 'company-1', user_id: USER_ID, name: 'Acme Corp', domain: 'acme.com', metadata: null },
+    ])
+    fakeDb.tables.set('profiles', [{ id: USER_ID, preferences: {} }])
+    mailbox = JUNK_SENDERS.map((j, i) => junkMessage(i, j.from))
+  })
+
+  it('creates zero companies and counts every unmatched job email (model path)', async () => {
+    callOpenRouterMock.mockReset()
+    for (const j of JUNK_SENDERS) {
+      callOpenRouterMock.mockResolvedValueOnce({
+        content: JSON.stringify({
+          isJobRelated: true,
+          employerName: j.employerName,
+          employerDomain: j.employerDomain,
+          jobTitle: 'Data Engineer',
+          status: 'applied',
+          careerPageUrl: null,
+          interviewDateTime: null,
+          confidence: 0.9,
+          reasoning: null,
+        }),
+        tokensUsed: 600,
+        promptTokens: 500,
+        completionTokens: 100,
+        model: 'google/gemini-2.0-flash-001',
+      })
+    }
+    const result = await runGmailSyncCore({
+      db: fakeDb as any,
+      userId: USER_ID,
+      accessToken: 'fake-access-token',
+      apiKeys: { openrouter: 'fake-key', userId: USER_ID },
+      preferences: preferences(),
+    })
+    expect(fakeDb.tables.get('companies')).toHaveLength(1)
+    expect(fakeDb.tables.get('jobs') ?? []).toHaveLength(0)
+    expect(fakeDb.tables.get('applications') ?? []).toHaveLength(0)
+    expect(result.unmatchedEmployers).toBe(JUNK_SENDERS.length)
+    expect('createdCompanies' in result).toBe(false)
+  })
+
+  it('creates zero companies on the pattern path too (no model key)', async () => {
+    const result = await runGmailSyncCore({
+      db: fakeDb as any,
+      userId: USER_ID,
+      accessToken: 'fake-access-token',
+      apiKeys: { userId: USER_ID },
+      preferences: preferences(),
+    })
+    expect(fakeDb.tables.get('companies')).toHaveLength(1)
+    expect(result.unmatchedEmployers).toBe(result.unmatched.length)
+  })
+
+  it('still attaches activity to a tracked company, ignoring a suggested row of the same name', async () => {
+    mailbox = [FIXED_MESSAGE]
+    fakeDb.tables.set('companies', [
+      { id: 'suggested-acme', user_id: USER_ID, name: 'Acme Corp', domain: 'acme.com', metadata: { suggested: true, source: 'gmail' } },
+      { id: 'company-1', user_id: USER_ID, name: 'Acme Corp', domain: 'acme.com', metadata: null },
+    ])
+    callOpenRouterMock.mockReset().mockResolvedValue({
+      content: JSON.stringify({
+        isJobRelated: true,
+        employerName: 'Acme Corp',
+        employerDomain: 'acme.com',
+        jobTitle: 'Backend Engineer',
+        status: 'applied',
+        careerPageUrl: null,
+        interviewDateTime: null,
+        confidence: 0.95,
+        reasoning: null,
+      }),
+      tokensUsed: 600,
+      promptTokens: 500,
+      completionTokens: 100,
+      model: 'google/gemini-2.0-flash-001',
+    })
+    const result = await runGmailSyncCore({
+      db: fakeDb as any,
+      userId: USER_ID,
+      accessToken: 'fake-access-token',
+      apiKeys: { openrouter: 'fake-key', userId: USER_ID },
+      preferences: preferences(),
+    })
+    expect(fakeDb.tables.get('companies')).toHaveLength(2)
+    expect(result.unmatchedEmployers).toBe(0)
+    expect(result.createdApplications).toEqual(['Acme Corp'])
+    expect(fakeDb.tables.get('jobs')?.[0].company_id).toBe('company-1')
+    expect(fakeDb.tables.get('activities')).toHaveLength(1)
   })
 })
