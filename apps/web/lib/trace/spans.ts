@@ -59,6 +59,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { readProfileForDemoGuards } from '../harness/keys'
 import type { AdminClient } from '../harness/types'
 import { contentCaptureFor, exportTrace, langfuseConfigured, traceSampled } from '../observability/langfuse'
 
@@ -116,6 +117,28 @@ export interface TraceMeta {
   feature?: string
   /** Ids and enums only, at most 200 chars each. */
   metadata?: Record<string, string>
+  /** Root observation input and output (the trace input/output in Langfuse).
+   *  The root span's lfOf reads these when it ends, so a graph that learns its
+   *  answer late (copilot's finalize) can set the output after invoke returns.
+   *  Used only when the buffer captures content. */
+  input?: unknown
+  output?: unknown
+}
+
+/** A judge verdict waiting to become a Langfuse score at replay time. Scores
+ *  ride the replay so a sampled-out trace emits none. */
+export interface PendingScore {
+  /** `<subject_kind>.<judge>`, e.g. `outreach_draft.factuality`. */
+  name: string
+  /** 0..1 for a numeric score, null for a refusal (sent as a categorical outcome). */
+  value: number | null
+  /** pass, fail, insufficient-data... */
+  verdict: string
+  /** span_id of the judge generation that produced it, when known. */
+  spanId?: string | null
+  rationale?: string | null
+  /** Ids, enums and numbers only. */
+  metadata?: Record<string, string | number | boolean>
 }
 
 /** A short, content-free code for a failure: `http_429`, `ETIMEDOUT`,
@@ -194,6 +217,7 @@ export class SpanBuffer {
   private flushed = false
   private exportCache: boolean | undefined
   meta: TraceMeta
+  readonly scores: PendingScore[] = []
 
   constructor(userId: string, threadId: string | null = null, traceId: string = randomUUID(), meta: TraceMeta = {}) {
     this.userId = userId
@@ -206,6 +230,17 @@ export class SpanBuffer {
   setMeta(patch: Partial<TraceMeta>): void {
     this.meta = { ...this.meta, ...patch, metadata: { ...this.meta.metadata, ...patch.metadata } }
     this.exportCache = undefined
+  }
+
+  /** Queue a judge verdict for the Langfuse replay. Nothing is kept when the
+   *  trace is not exported. */
+  addScore(score: PendingScore): void {
+    if (this.exportEnabled) this.scores.push(score)
+  }
+
+  /** Hand the queued scores to one replay (each is sent once). */
+  takeScores(): PendingScore[] {
+    return this.scores.splice(0, this.scores.length)
   }
 
   /** Fill isDemo when the buffer was created before the profile was known.
@@ -264,7 +299,24 @@ export class SpanBuffer {
     try {
       // `lf` (prompt/completion text) is dropped here, never persisted, and
       // Langfuse-only records (persist:false) never become rows at all.
-      const persisted = rows.filter((r) => r.persist !== false).map(({ lf: _lf, persist: _persist, ...row }) => row)
+      // trace_spans.parent_span_id is a foreign key, so a persisted row whose
+      // parent is Langfuse-only (an embedding or retriever record) re-parents to
+      // its nearest persisted ancestor, or becomes a root.
+      const byId = new Map(rows.map((r) => [r.span_id, r]))
+      const persistedParent = (r: SpanRecord): string | null => {
+        let p = r.parent_span_id ? byId.get(r.parent_span_id) : undefined
+        for (let hops = 0; p && hops < 64; hops += 1) {
+          if (p.persist !== false) return p.span_id
+          p = p.parent_span_id ? byId.get(p.parent_span_id) : undefined
+        }
+        return null
+      }
+      const persisted = rows
+        .filter((r) => r.persist !== false)
+        .map(({ lf: _lf, persist: _persist, ...row }) => ({
+          ...row,
+          parent_span_id: row.parent_span_id && byId.get(row.parent_span_id)?.persist === false ? persistedParent(row) : row.parent_span_id,
+        }))
       if (persisted.length > 0) {
         const { error } = await admin.from('trace_spans').insert(persisted)
         if (error) console.error(`[trace] span flush failed (${persisted.length} span(s) dropped): ${error.message}`)
@@ -414,6 +466,125 @@ export async function withSpan<T>(
       ...(spec.persist === false ? { persist: false as const } : {}),
     })
     throw err
+  }
+}
+
+export interface ObserveSpec {
+  /** Langfuse name: a lowercase code constant. */
+  name: string
+  type: LfType
+  /** trace_spans kind when the span is persisted. Default `tool`. */
+  kind?: SpanKind
+  /** False keeps it Langfuse-only (retrievers and the like). */
+  persist?: false
+  /** Small, content-free trace_spans attributes for a persisted span. */
+  attributesOf?: (result: never, err: unknown) => Record<string, unknown> | undefined
+}
+
+/**
+ * Record `fn` as one child observation of the ambient trace (a tool call, a
+ * retrieval). Outside a trace, and when the trace is not exported and the span
+ * is Langfuse-only, it just runs `fn`: lone observations would make
+ * single-observation traces that cost units and show nothing.
+ */
+export async function observe<T>(
+  spec: ObserveSpec,
+  fn: () => Promise<T>,
+  lfOf?: (result: T | undefined, err: unknown, capture: boolean) => Omit<LfPayload, 'name' | 'type'> | undefined
+): Promise<T> {
+  const ctx = currentTraceContext()
+  if (!ctx) return fn()
+  return withSpan(
+    ctx.buffer,
+    { parentSpanId: ctx.parentSpanId, runId: ctx.runId, kind: spec.kind ?? 'tool', name: spec.name, persist: spec.persist },
+    (spanId) => runInTraceContext({ ...ctx, parentSpanId: spanId }, fn),
+    spec.attributesOf as ((result: T | undefined, err: unknown) => Record<string, unknown> | undefined) | undefined,
+    (result, err, capture) => ({ name: spec.name, type: spec.type, ...lfOf?.(result, err, capture) })
+  )
+}
+
+/** Set the output of the current trace's root observation (copilot's reply,
+ *  a run's summary). A no-op outside a trace. */
+export function setTraceOutput(output: unknown): void {
+  const ctx = currentTraceContext()
+  if (ctx) ctx.buffer.meta.output = output
+}
+
+/** Set the input of the current trace's root observation, for a route that
+ *  only knows it after parsing its body. Request essentials only (ids, titles),
+ *  never resume text. A no-op outside a trace. */
+export function setTraceInput(input: unknown): void {
+  const ctx = currentTraceContext()
+  if (ctx) ctx.buffer.meta.input = input
+}
+
+export interface TraceSpec {
+  /** Trace and root observation name: a lowercase code constant. */
+  name: string
+  /** Root observation type, default `span`. */
+  type?: LfType
+  /** Request essentials (ids, titles, counts). Never resume text or base64. */
+  input?: unknown
+  /** Result summary for the root observation's output. */
+  outputOf?: (result: never) => unknown
+  isDemo?: boolean
+  sessionId?: string
+  /** Ids and enums only. */
+  metadata?: Record<string, string>
+}
+
+/**
+ * Give a standalone route (or any code with no graph around it) a named
+ * Langfuse trace: a root observation that every `callLlm`, judge and tool call
+ * inside `fn` nests under. The root is Langfuse-only (persist:false), so
+ * trace_spans gains no rows. Inside an ambient trace this is a plain child
+ * observation, and only the call that created the buffer flushes it.
+ */
+export async function withTrace<T>(admin: AdminClient, userId: string, spec: TraceSpec, fn: () => Promise<T>): Promise<T> {
+  // Demo or owner decides whether prompt text may leave and how the trace is
+  // sampled, and the root observation is decided at its start, so the answer
+  // is needed before the first span. Read only when Langfuse is on.
+  let isDemo = spec.isDemo
+  if (isDemo === undefined && !currentTraceContext() && langfuseConfigured()) {
+    try {
+      const { row } = await readProfileForDemoGuards(admin, userId)
+      isDemo = row ? (row.is_demo === true || Boolean(row.demo_expires_at) ? true : row.is_demo === false ? false : undefined) : undefined
+    } catch {
+      // Unknown stays unknown, which counts as demo (fail closed).
+    }
+  }
+  const scope = acquireSpanScope(userId, isDemo)
+  if (scope.owns) {
+    scope.buffer.setMeta({
+      name: spec.name,
+      ...(spec.sessionId ? { sessionId: spec.sessionId } : {}),
+      ...(spec.metadata ? { metadata: spec.metadata } : {}),
+    })
+  }
+  try {
+    return await withSpan(
+      scope.buffer,
+      { parentSpanId: scope.parentSpanId, runId: scope.runId, kind: 'http', name: spec.name, persist: false },
+      (spanId) => runInTraceContext({ buffer: scope.buffer, parentSpanId: spanId, runId: scope.runId }, fn),
+      undefined,
+      (result, _err, capture) => ({
+        name: spec.name,
+        type: spec.type ?? 'span',
+        ...(capture
+          ? {
+              input: (scope.owns ? scope.buffer.meta.input : undefined) ?? spec.input,
+              output:
+                (scope.owns ? scope.buffer.meta.output : undefined) ??
+                (result !== undefined && spec.outputOf ? (spec.outputOf as (r: T) => unknown)(result) : undefined),
+            }
+          : {}),
+      })
+    )
+  } finally {
+    // A root with nothing under it (a request that never reached a model) is
+    // not worth a unit: only the call that created the buffer flushes, and only
+    // when something ran inside it.
+    if (scope.owns && (scope.buffer.size > 1 || !scope.buffer.exportEnabled)) await scope.buffer.flush(admin)
   }
 }
 

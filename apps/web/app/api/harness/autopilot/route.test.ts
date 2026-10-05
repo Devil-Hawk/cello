@@ -133,6 +133,10 @@ describe('POST /api/harness/autopilot — fresh thread every tick', () => {
     expect(call.surface).toBe('autopilot')
     expect(call.threadId).toBeUndefined() // fresh thread, not a resume
     expect(call.input).toEqual({ profile: profiles[0] })
+    // The Langfuse trace never carries the profile (resume text, email): counts only.
+    expect(JSON.stringify(call.trace)).not.toContain('resume')
+    expect(JSON.stringify(call.trace)).not.toContain('@')
+    expect(call.trace.input).toEqual({ autopilot: 'tick' })
   })
 
   it('mints an independent fresh thread per user, not one shared thread for the whole tick', async () => {

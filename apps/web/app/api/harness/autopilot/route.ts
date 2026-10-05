@@ -107,6 +107,23 @@ export async function POST(request: NextRequest) {
         surface: 'autopilot',
         graph: AUTOPILOT_GRAPH,
         input: { profile: slimProfile(profile) },
+        // Counts only: the profile holds the resume and the email address.
+        trace: {
+          input: { autopilot: 'tick' },
+          outputOf: (r) => {
+            const o = r as Partial<AutopilotUserResult> | null
+            return {
+              skipped: o?.skipped,
+              discovered: o?.discovered,
+              scored: o?.scored,
+              eligible: o?.eligible,
+              submitted: o?.submitted,
+              handoff: o?.handoff,
+              failed: o?.failed,
+              message: o?.message,
+            }
+          },
+        },
       })
       return result as AutopilotUserResult
     } catch (e) {

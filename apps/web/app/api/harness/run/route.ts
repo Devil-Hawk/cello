@@ -55,6 +55,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { invokeGraphForUser, type CompiledGraphLike } from '@/lib/graph/invoke'
 import { harnessRunGraph, markRunPausedOnInterrupt, type RunOutcome } from '@/lib/graph/runs'
+import { summarizeRunOutcome } from '@/lib/graph/run-summary'
 import { CHAIN_NAMES, compileChain, describeChains, isChainName, type ChainName } from '@/lib/harness/chains'
 import type { Plan } from '@/lib/harness/types'
 import { logApiError } from '@/lib/observability/log'
@@ -152,6 +153,7 @@ export async function POST(request: NextRequest) {
       surface: 'run',
       graph: RUN_GRAPH,
       input: { runId },
+      trace: { input: { goal, chain: chainName }, outputOf: summarizeRunOutcome, metadata: { source: 'ui', run_id: runId } },
     })
 
     // A deadline interrupt: harnessRunGraph parked mid-DAG instead of

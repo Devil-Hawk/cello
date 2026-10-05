@@ -51,6 +51,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { invokeGraphForUser, type CompiledGraphLike } from '@/lib/graph/invoke'
 import { harnessRunGraph, markRunPausedOnInterrupt, type RunOutcome } from '@/lib/graph/runs'
+import { summarizeRunOutcome } from '@/lib/graph/run-summary'
 import { countThreadCheckpoints } from '@/lib/graph/pg'
 import { distillInsights } from '@/lib/graph/distill'
 import { composeAndStoreDigest, type DigestOutcome } from '@/lib/harness/agents/digest'
@@ -336,6 +337,7 @@ async function resumeCheckpointedRuns(admin: AdminClient): Promise<ResumeBatch> 
         surface: 'run',
         graph: RUN_GRAPH,
         threadId: run.thread_id,
+        trace: { input: { runId: run.id }, outputOf: summarizeRunOutcome, metadata: { source: 'cron', resumed: 'true', run_id: run.id } },
       })
 
       // Reached invokeGraphForUser's return without throwing: this attempt
@@ -439,6 +441,7 @@ export async function POST(request: NextRequest) {
           surface: 'run',
           graph: RUN_GRAPH,
           input: { runId },
+          trace: { name: 'send-digest', type: 'chain', input: { goal: DIGEST_GOAL }, outputOf: summarizeRunOutcome, metadata: { source: 'cron', run_id: runId } },
         })
         if (await markRunPausedOnInterrupt(admin, runId, result)) {
           // A digest run that hits its own deadline is not lost — it now sits

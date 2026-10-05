@@ -11,8 +11,12 @@ import {
   capAttributes,
   currentTraceContext,
   errorCode,
+  observe,
   runInTraceContext,
+  setTraceInput,
+  setTraceOutput,
   withSpan,
+  withTrace,
 } from './spans'
 
 // Real env gates (langfuseConfigured, traceSampled, contentCaptureFor); only the
@@ -442,5 +446,125 @@ describe('acquireSpanScope + runInTraceContext — span parentage (graph -> node
     expect(llmSpan.parent_span_id).toBe(nodeSpan.span_id)
     expect(llmSpan.run_id).toBe('run-domain-1')
     expect(graphSpan.run_id).toBeNull() // invoke.ts never guesses a domain run id — see spans.ts's header
+  })
+})
+
+describe('SpanBuffer.flush: Langfuse-only parents', () => {
+  it('a persisted row whose parent is Langfuse-only re-parents to its nearest persisted ancestor, so the foreign key holds', async () => {
+    configureLangfuse()
+    const buffer = new SpanBuffer('u', null, undefined, { isDemo: false })
+    const at = new Date().toISOString()
+    const base = { run_id: null, start_time: at, end_time: at, status: 'ok' as const, attributes: null, events: null }
+    buffer.record({ ...base, span_id: 'root', parent_span_id: null, kind: 'graph', name: 'run' })
+    buffer.record({ ...base, span_id: 'lf-only', parent_span_id: 'root', kind: 'http', name: 'x', persist: false })
+    buffer.record({ ...base, span_id: 'lf-only-2', parent_span_id: 'lf-only', kind: 'http', name: 'y', persist: false })
+    buffer.record({ ...base, span_id: 'child', parent_span_id: 'lf-only-2', kind: 'llm', name: 'llm' })
+    buffer.record({ ...base, span_id: 'orphan', parent_span_id: 'lf-only', kind: 'llm', name: 'llm' })
+    const { admin, insertCalls } = makeCapturingAdmin()
+    await buffer.flush(admin)
+    const rows = insertCalls[0] as { span_id: string; parent_span_id: string | null }[]
+    expect(rows.map((r) => r.span_id).sort()).toEqual(['child', 'orphan', 'root'])
+    expect(rows.find((r) => r.span_id === 'child')?.parent_span_id).toBe('root')
+    expect(rows.find((r) => r.span_id === 'orphan')?.parent_span_id).toBe('root')
+    // the Langfuse replay still sees the original tree
+    const exported = exportTraceMock.mock.calls[0][1] as { span_id: string; parent_span_id: string | null }[]
+    expect(exported.find((r) => r.span_id === 'child')?.parent_span_id).toBe('lf-only-2')
+  })
+})
+
+describe('withTrace and observe', () => {
+  const profileAdmin = (profile: Record<string, unknown> | null) => {
+    const inserts: Record<string, unknown>[][] = []
+    const admin = {
+      from: (name: string) => {
+        if (name === 'profiles') {
+          return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: profile, error: null }) }) }) }
+        }
+        return { insert: async (rows: Record<string, unknown>[]) => (inserts.push(rows), { error: null }) }
+      },
+    } as unknown as AdminClient
+    return { admin, inserts }
+  }
+  const rowsOf = () => exportTraceMock.mock.calls[0][1] as { name: string; kind: string; parent_span_id: string | null; span_id: string; persist?: false; lf?: { name?: string; type?: string; input?: unknown; output?: unknown } }[]
+
+  it('makes a Langfuse-only root that the model calls inside nest under, and flushes once', async () => {
+    configureLangfuse()
+    const { admin, inserts } = profileAdmin({ id: 'u', is_demo: false })
+    const out = await withTrace(admin, 'u', { name: 'draft-outreach' }, async () => {
+      setTraceInput({ contactId: 'c1' })
+      await withSpan(
+        currentTraceContext()!.buffer,
+        { parentSpanId: currentTraceContext()!.parentSpanId, runId: null, kind: 'llm', name: 'llm' },
+        async () => 'reply'
+      )
+      setTraceOutput({ ok: true })
+      return 'done'
+    })
+    expect(out).toBe('done')
+    expect(exportTraceMock).toHaveBeenCalledTimes(1)
+    const [root, child] = [rowsOf().find((r) => r.name === 'draft-outreach')!, rowsOf().find((r) => r.name === 'llm')!]
+    expect(root.persist).toBe(false)
+    expect(root.lf).toMatchObject({ name: 'draft-outreach', type: 'span', input: { contactId: 'c1' }, output: { ok: true } })
+    expect(child.parent_span_id).toBe(root.span_id)
+    // no trace_spans row for the root: only the llm row, re-parented to nothing
+    expect(inserts[0]).toHaveLength(1)
+    expect(inserts[0][0]).toMatchObject({ name: 'llm', parent_span_id: null })
+    expect((exportTraceMock.mock.calls[0][0] as SpanBuffer).meta).toMatchObject({ name: 'draft-outreach', isDemo: false })
+  })
+
+  it('reads the profile for the demo flag: a demo profile means no content, an owner means content', async () => {
+    configureLangfuse()
+    vi.stubEnv('LANGFUSE_DEMO_SAMPLE_RATE', '1')
+    await withTrace(profileAdmin({ id: 'u', is_demo: true }).admin, 'u', { name: 'a-trace', input: { x: 1 } }, async () => {
+      await observe({ name: 'inner', type: 'span' }, async () => 1)
+    })
+    expect(rowsOf().find((r) => r.name === 'a-trace')?.lf?.input).toBeUndefined()
+    exportTraceMock.mockClear()
+    await withTrace(profileAdmin({ id: 'u', is_demo: false }).admin, 'u', { name: 'a-trace', input: { x: 1 } }, async () => {
+      await observe({ name: 'inner', type: 'span' }, async () => 1)
+    })
+    expect(rowsOf().find((r) => r.name === 'a-trace')?.lf?.input).toEqual({ x: 1 })
+  })
+
+  it('a root with nothing under it is not exported, and an unconfigured trace still flushes its rows', async () => {
+    configureLangfuse()
+    await withTrace(profileAdmin({ id: 'u', is_demo: false }).admin, 'u', { name: 'a-trace' }, async () => 'no model call')
+    expect(exportTraceMock).not.toHaveBeenCalled()
+
+    vi.unstubAllEnvs() // Langfuse off: the llm row must still reach trace_spans
+    const { admin, inserts } = profileAdmin(null)
+    await withTrace(admin, 'u', { name: 'a-trace' }, async () => {
+      await withSpan(currentTraceContext()!.buffer, { parentSpanId: null, runId: null, kind: 'llm', name: 'llm' }, async () => 'x')
+    })
+    expect(inserts[0]).toHaveLength(1)
+  })
+
+  it('inside an ambient trace it is a plain child and never flushes the buffer it does not own', async () => {
+    configureLangfuse()
+    const { admin, inserts } = profileAdmin({ id: 'u', is_demo: false })
+    const buffer = new SpanBuffer('u', null, undefined, { isDemo: false })
+    await runInTraceContext({ buffer, parentSpanId: 'outer', runId: null }, () =>
+      withTrace(admin, 'u', { name: 'child-trace' }, async () => {
+        await observe({ name: 'inner', type: 'tool', kind: 'tool' }, async () => 1)
+      })
+    )
+    expect(inserts).toHaveLength(0)
+    expect(exportTraceMock).not.toHaveBeenCalled()
+    expect(buffer.size).toBe(2)
+  })
+
+  it('observe records a tool span as a persisted row and a retriever as Langfuse-only; outside a trace it only runs fn', async () => {
+    configureLangfuse()
+    expect(await observe({ name: 'search-kb', type: 'tool' }, async () => 'plain')).toBe('plain')
+    const buffer = new SpanBuffer('u', null, undefined, { isDemo: false })
+    await runInTraceContext({ buffer, parentSpanId: 'root', runId: null }, async () => {
+      await observe({ name: 'list_jobs', type: 'tool' }, async () => ({ jobs: [] }), (_r, _e, capture) => ({ ...(capture ? { input: { q: 1 } } : {}) }))
+      await observe({ name: 'search-memory', type: 'retriever', persist: false }, async () => [])
+    })
+    const { admin, insertCalls } = makeCapturingAdmin()
+    await buffer.flush(admin)
+    expect(insertCalls[0].map((r) => (r as { name: string; kind: string }).kind)).toEqual(['tool'])
+    expect(rowsOf().map((r) => r.lf?.type)).toEqual(['tool', 'retriever'])
+    expect(rowsOf()[0].parent_span_id).toBe('root')
   })
 })

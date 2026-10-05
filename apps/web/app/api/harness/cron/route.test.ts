@@ -394,6 +394,8 @@ describe('POST /api/harness/cron — digest pass creates a fresh thread per run'
     expect(call).toBeTruthy()
     expect(call![0].threadId).toBeUndefined() // fresh thread, not a resume
     expect(call![0].input).toEqual({ runId: call![0].input.runId })
+    // The digest is its own Langfuse trace, named for the feature.
+    expect(call![0].trace).toMatchObject({ name: 'send-digest', type: 'chain', metadata: { source: 'cron' } })
   })
 
   it('a digest run that pauses is reported paused, not invented as a finished outcome', async () => {

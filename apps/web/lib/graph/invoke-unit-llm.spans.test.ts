@@ -62,6 +62,7 @@ vi.mock('../harness/supabase-admin', () => ({
 import { invokeGraphForUser, type CompiledGraphLike } from './invoke'
 import { runAgentUnit } from './unit'
 import { isJournaledStepRow } from './journal'
+import { setTraceOutput } from '../trace/spans'
 
 // --- fake admin: graph_threads + agent_runs + a trace_spans capturer -------
 
@@ -325,8 +326,8 @@ describe('invoke.ts -> unit.ts -> llm.ts: the Langfuse trace', () => {
 
   it('owner: run -> run-job-matcher (agent) -> score-job-match (generation), the planner label only in capture-gated detail', async () => {
     const tables = await runOne({ expiresAt: null, isDemo: false, label: 'rank the open roles at Acme#3' })
-    expect(exporter.getFinishedSpans().map((s) => s.name).sort()).toEqual(['run', 'run-job-matcher', 'score-job-match'])
-    const root = named('run')
+    expect(exporter.getFinishedSpans().map((s) => s.name).sort()).toEqual(['run-agents', 'run-job-matcher', 'score-job-match'])
+    const root = named('run-agents')
     const agent = named('run-job-matcher')
     const gen = named('score-job-match')
     expect(agent.parentSpanContext?.spanId).toBe(root.spanContext().spanId)
@@ -338,8 +339,11 @@ describe('invoke.ts -> unit.ts -> llm.ts: the Langfuse trace', () => {
     expect(agent.attributes['langfuse.observation.metadata.step_label']).toBe('rank the open roles at Acme')
     expect(agent.attributes['langfuse.observation.metadata.run_id']).toBe('run-domain-1')
     for (const s of exporter.getFinishedSpans()) {
-      expect(s.attributes['langfuse.trace.name']).toBe('run')
-      expect(s.attributes['langfuse.trace.tags']).toEqual(['feature:run', 'owner'])
+      expect(s.attributes['langfuse.trace.name']).toBe('run-agents')
+      expect(s.attributes['langfuse.trace.tags']).toEqual(['feature:run-agents', 'owner'])
+      // a run's session is its graph thread
+      expect(s.attributes['session.id']).toBe('thread-1')
+      expect(s.attributes['langfuse.trace.metadata.surface']).toBe('run')
       expect(s.attributes['user.id']).toBe(OWNER)
       expect(s.name).not.toMatch(/#|Acme/)
     }
@@ -352,8 +356,53 @@ describe('invoke.ts -> unit.ts -> llm.ts: the Langfuse trace', () => {
   it('a demo thread (expires_at set) is tagged demo and sends no prompt text', async () => {
     await runOne({ expiresAt: new Date(Date.now() + 3_600_000).toISOString(), isDemo: true, label: 'matcher' })
     const gen = named('score-job-match')
-    expect(gen.attributes['langfuse.trace.tags']).toEqual(['feature:run', 'demo'])
+    expect(gen.attributes['langfuse.trace.tags']).toEqual(['feature:run-agents', 'demo'])
     expect(gen.attributes['langfuse.observation.input']).toBeUndefined()
     expect(named('run-job-matcher').attributes['langfuse.observation.metadata.step_label']).toBeUndefined()
+  })
+
+  it('the trace option names the trace, sets session, metadata, input and output; setTraceOutput beats outputOf', async () => {
+    loadApiKeysMock.mockResolvedValue({ userId: OWNER, provider: { active: 'openrouter' }, isDemo: false })
+    const { admin, tables } = makeFakeAdmin()
+    tables.graph_threads.rows.push({ thread_id: 'thread-2', user_id: OWNER, surface: 'copilot', expires_at: null, run_id: null, conversation_id: 'convo-9' })
+    const graph: CompiledGraphLike = {
+      invoke: async () => {
+        setTraceOutput({ reply: 'hello from the model' })
+        return { status: 'ignored' }
+      },
+      getState: async () => ({ config: { configurable: {} } }),
+    }
+    await invokeGraphForUser({
+      admin,
+      userId: OWNER,
+      surface: 'copilot',
+      graph,
+      threadId: 'thread-2',
+      trace: {
+        input: { message: 'find me roles' },
+        outputOf: () => ({ not: 'used' }),
+        sessionId: 'convo-9',
+        metadata: { leg: 'turn' },
+      },
+    })
+    const root = named('copilot-turn')
+    expect(root.attributes['langfuse.observation.type']).toBe('agent')
+    expect(root.attributes['langfuse.trace.tags']).toEqual(['feature:copilot-turn', 'owner'])
+    expect(root.attributes['session.id']).toBe('convo-9')
+    expect(root.attributes['langfuse.trace.metadata.leg']).toBe('turn')
+    expect(String(root.attributes['langfuse.observation.input'])).toContain('find me roles')
+    expect(String(root.attributes['langfuse.observation.output'])).toContain('hello from the model')
+    expect(String(root.attributes['langfuse.observation.output'])).not.toContain('not')
+  })
+
+  it('refresh and autopilot surfaces default to chain roots named for the feature', async () => {
+    loadApiKeysMock.mockResolvedValue({ userId: OWNER, provider: { active: 'openrouter' }, isDemo: false })
+    const { admin, tables } = makeFakeAdmin()
+    tables.graph_threads.rows.push({ thread_id: 'thread-3', user_id: OWNER, surface: 'refresh', expires_at: null, run_id: null, conversation_id: null })
+    const graph: CompiledGraphLike = { invoke: async () => ({}), getState: async () => ({ config: { configurable: {} } }) }
+    await invokeGraphForUser({ admin, userId: OWNER, surface: 'refresh', graph, threadId: 'thread-3' })
+    const root = named('refresh-jobs')
+    expect(root.attributes['langfuse.observation.type']).toBe('chain')
+    expect(root.attributes['session.id']).toBeUndefined()
   })
 })

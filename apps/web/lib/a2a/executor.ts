@@ -38,6 +38,7 @@ import type { Message } from '@a2a-js/sdk'
 import type { AdminClient } from '../harness/types'
 import { invokeGraphForUser, type CompiledGraphLike } from '../graph/invoke'
 import { harnessRunGraph, markRunPausedOnInterrupt } from '../graph/runs'
+import { summarizeRunOutcome } from '../graph/run-summary'
 import { STATE_USER_ID_KEY } from './context'
 import { buildA2aPlan, isUserMessage, parseA2aAgentRequest } from './agent'
 
@@ -175,6 +176,7 @@ export function createA2aExecutor(admin: AdminClient): AgentExecutor {
         graph: harnessRunGraph as unknown as CompiledGraphLike,
         threadId,
         input: { runId },
+        trace: { input: { runId }, outputOf: summarizeRunOutcome, metadata: { source: 'a2a', run_id: runId } },
       })
         .then(({ result }) => markRunPausedOnInterrupt(admin, runId, result))
         .catch(async (err) => {

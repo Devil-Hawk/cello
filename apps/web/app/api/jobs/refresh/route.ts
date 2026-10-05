@@ -141,6 +141,13 @@ export async function POST(request: NextRequest) {
       threadId,
       input,
       extraConfigurable: { dbClient: supabase },
+      trace: {
+        input: { companies: total ?? null, resumed: Boolean(threadId) },
+        outputOf: (r) => {
+          const o = r as Partial<RefreshJobsOutcome> | null
+          return o?.totals ? { ...o.totals, processed: o.processed, total: o.total } : { paused: true }
+        },
+      },
     })
 
     const interrupted = getRefreshDeadlineInterrupt(result)
