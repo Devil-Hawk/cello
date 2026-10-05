@@ -49,12 +49,12 @@ export const KNOWN_COMPANIES: Record<string, KnownCompany> = {
   'stripe.com': { name: 'Stripe', board: { provider: 'greenhouse', token: 'stripe' } },
   'airbnb.com': { name: 'Airbnb', board: { provider: 'greenhouse', token: 'airbnb' } },
   'uber.com': { name: 'Uber', careerUrl: 'https://www.uber.com/us/en/careers/list/' },
-  'lyft.com': { name: 'Lyft', careerUrl: 'https://www.lyft.com/careers' },
+  'lyft.com': { name: 'Lyft', careerUrl: 'https://www.lyft.com/careers', board: { provider: 'greenhouse', token: 'lyft' } },
   'salesforce.com': { name: 'Salesforce', careerUrl: 'https://careers.salesforce.com/en/jobs/' },
   'adobe.com': { name: 'Adobe', careerUrl: 'https://careers.adobe.com/us/en/search-results' },
   'nvidia.com': { name: 'NVIDIA', careerUrl: 'https://www.nvidia.com/en-us/about-nvidia/careers/' },
   'tesla.com': { name: 'Tesla', careerUrl: 'https://www.tesla.com/careers/search/' },
-  'spacex.com': { name: 'SpaceX', careerUrl: 'https://www.spacex.com/careers/' },
+  'spacex.com': { name: 'SpaceX', careerUrl: 'https://www.spacex.com/careers/', board: { provider: 'greenhouse', token: 'spacex' } },
   'twitter.com': { name: 'X (Twitter)', careerUrl: 'https://careers.x.com/en' },
   'x.com': { name: 'X', careerUrl: 'https://careers.x.com/en' },
   'linkedin.com': { name: 'LinkedIn', careerUrl: 'https://careers.linkedin.com/jobs' },
@@ -105,6 +105,8 @@ export const KNOWN_COMPANIES: Record<string, KnownCompany> = {
   'elastic.co': { name: 'Elastic', board: { provider: 'greenhouse', token: 'elastic' } },
   'mongodb.com': { name: 'MongoDB', board: { provider: 'greenhouse', token: 'mongodb' } },
   'hashicorp.com': { name: 'HashiCorp' },
+  'intercom.com': { name: 'Intercom', board: { provider: 'greenhouse', token: 'intercom' } },
+  'posthog.com': { name: 'PostHog', board: { provider: 'ashby', token: 'posthog' } },
   'confluent.io': { name: 'Confluent', board: { provider: 'ashby', token: 'confluent' } },
 }
 

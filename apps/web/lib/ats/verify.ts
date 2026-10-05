@@ -18,7 +18,7 @@
 // Framework-free like the rest of lib/ats: global fetch through ./http only.
 
 import type { AtsJob, AtsProviderId } from './types'
-import { assertAllowedHost, assertAllowedHostSuffix, fetchJson, fetchText } from './http'
+import { HttpError, assertAllowedHost, assertAllowedHostSuffix, fetchJson, fetchText } from './http'
 import { SUFFIX_WORDS } from '../companies/known-companies'
 
 export type VerifiedBy =
@@ -180,6 +180,8 @@ export interface VerifyInput extends BoardRef {
   pageBoards?: readonly BoardRef[] | (() => Promise<readonly BoardRef[]>)
   /** A big known employer: only its own site's link counts (see header). */
   knownEmployer?: boolean
+  /** Out-param: set true when the provider could not be asked (timeout, 5xx), so a null is not a verdict. */
+  evidence?: { unreachable: boolean }
   now?: number
 }
 
@@ -217,7 +219,11 @@ export async function verifyBoard(input: VerifyInput): Promise<Exclude<VerifiedB
   let identity: BoardIdentity
   try {
     identity = await identify(token)
-  } catch {
+  } catch (error) {
+    // A timeout or a 5xx says nothing about who owns the board; only a plain "not found" does.
+    if (input.evidence && !(error instanceof HttpError && (error.status === 404 || error.status === 410))) {
+      input.evidence.unreachable = true
+    }
     return null
   }
   // A home the board declares for itself decides: on the company's domain it ties
