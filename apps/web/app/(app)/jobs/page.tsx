@@ -642,6 +642,9 @@ function JobsPageInner() {
     else setIsLoading(true)
 
     let query = untyped.from('jobs').select(JOB_SELECT_COLUMNS, { count: 'exact' })
+    // A posting the employer took down (two checks in a row did not list it) leaves
+    // the list. Unknown (null) stays. An old link to one still opens, see the deep link below.
+    query = query.or('still_open.is.null,still_open.eq.true')
 
     if (selectedCompany !== 'all') {
       query = query.eq('company_id', selectedCompany)
