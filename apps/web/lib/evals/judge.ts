@@ -65,6 +65,7 @@ import {
   estimateCostUsd,
   estimatePromptTokens,
   reserveSpend,
+  rungFor,
   settleSpend,
 } from '../harness/spend'
 import { logHarnessError } from '../observability/log'
@@ -180,6 +181,8 @@ function meteredFetch(
       model: requestedModel,
       promptTokens: estimatePromptTokens(sentBody, requestMessagesOf(clamped)?.length ?? 1),
       maxTokens: JUDGE_MAX_TOKENS_CEILING,
+      rung: rungFor('openrouter', requestedModel),
+      step: 'judge',
       traceId: scope.buffer.traceId,
     })
 

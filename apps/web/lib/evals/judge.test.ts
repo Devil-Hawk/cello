@@ -114,6 +114,18 @@ describe('meteredJudgeClient', () => {
     })
   })
 
+  it('a :free judge model reserves rung R3 and a paid one R4, both under the step judge', async () => {
+    globalThis.fetch = vi.fn(async () => chatCompletion({ prompt_tokens: 1, completion_tokens: 1 })) as unknown as typeof fetch
+    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
+    const body = { messages: [{ role: 'user' as const, content: 'hi' }], max_tokens: 100 }
+
+    await client.chat.completions.create({ ...body, model: 'google/gemma-4-31b-it:free' })
+    expect(reserveSpendMock.mock.calls[0][1]).toMatchObject({ rung: 'R3', step: 'judge' })
+
+    await client.chat.completions.create({ ...body, model: JUDGE_MODEL })
+    expect(reserveSpendMock.mock.calls[1][1]).toMatchObject({ rung: 'R4', step: 'judge' })
+  })
+
   it('settles the provider-reported cost when the response carries usage.cost', async () => {
     globalThis.fetch = vi.fn(async () =>
       jsonResponse({
