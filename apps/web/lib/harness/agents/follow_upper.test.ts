@@ -28,6 +28,11 @@ describe('lineMatchesInput', () => {
     expect(lineMatchesInput('Queued 3 follow-ups, including one for Spotify.', items)).toBe(false)
   })
 
+  it('rejects a line that says nothing about the list', () => {
+    expect(lineMatchesInput('{}', items)).toBe(false)
+    expect(lineMatchesInput('All done.', items)).toBe(false)
+  })
+
   it('rejects approximations, weeks and months, a long dash, and an empty line', () => {
     expect(lineMatchesInput('Figma has been silent for roughly 16 days.', items)).toBe(false)
     expect(lineMatchesInput('Figma has been silent for over 2 weeks.', items)).toBe(false)

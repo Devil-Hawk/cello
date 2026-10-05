@@ -34,6 +34,10 @@ export interface Args {
   out: string | null
   maxRequests: number
   data: string | null
+  /** Check the plumbing with no network; the numbers mean nothing. */
+  stub: boolean
+  /** Skip the model paths (mail and replies): the pattern paths still run. */
+  noModel: boolean
 }
 
 export function parseArgs(argv: string[]): Args {
@@ -48,6 +52,8 @@ export function parseArgs(argv: string[]): Args {
     out: get('--out'),
     maxRequests: Number(get('--max-requests') ?? (quick ? 40 : 400)),
     data: get('--data'),
+    stub: argv.includes('--stub'),
+    noModel: argv.includes('--no-model'),
   }
 }
 
@@ -99,7 +105,7 @@ export function finish(report: Omit<Report, 'at' | 'requests'>, args: Args): voi
   writeFileSync(join(outDir, `${report.label}-${stamp}.md`), md)
   console.log(md)
 
-  if (report.label === 'before') return
+  if (report.label.startsWith('before') || report.label.endsWith('-stub')) return
   const file = join(process.cwd(), 'scripts', 'evals', 'outputs', 'thresholds.json')
   if (!existsSync(file)) return
   const t = (JSON.parse(readFileSync(file, 'utf8')) as Thresholds)[report.feature] ?? {}

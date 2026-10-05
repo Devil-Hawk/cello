@@ -180,7 +180,7 @@ const STATUS_PATTERNS: StatusPattern[] = [
   { pattern: /thank you for (applying|your application)/i, status: 'applied', confidence: 0.85 },
   { pattern: /thank you for your interest/i, status: 'applied', confidence: 0.8, context: ABOUT_APPLICATION },
   { pattern: /application (received|confirmed|submitted)/i, status: 'applied', confidence: 0.9 },
-  { pattern: /we('d| would) (like|love) to (schedule|invite|move forward)/i, status: 'screen', confidence: 0.85, context: ABOUT_SCHEDULING },
+  { pattern: /we('d| would) (like|love) to (schedule|set up|invite|move forward)/i, status: 'screen', confidence: 0.85, context: ABOUT_SCHEDULING },
   { pattern: /phone (screen|interview|call)/i, status: 'screen', confidence: 0.8 },
   { pattern: /technical interview/i, status: 'interview', confidence: 0.85 },
   { pattern: /on-?site interview/i, status: 'interview', confidence: 0.9 },

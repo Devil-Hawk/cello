@@ -86,6 +86,9 @@ export function lineMatchesInput(line: string, items: { company: string; days: n
   const text = line.trim()
   if (!text || /[\u2013\u2014]/.test(text)) return false
   if (NUMBER_WORDS.test(text) || APPROXIMATION.test(text)) return false
+  // A status line says something about the list: a company on it, or how many.
+  const lower = text.toLowerCase()
+  if (!items.some((c) => lower.includes(c.company.toLowerCase())) && !new RegExp(`\\b${items.length}\\b`).test(text)) return false
   const support = [`${items.length}`, ...items.map((c) => `${c.company} ${c.days}`)].join('\n')
   if (unbackedTokens(text, support).length > 0) return false
   // The first word of a sentence is capitalised by grammar, so the name check

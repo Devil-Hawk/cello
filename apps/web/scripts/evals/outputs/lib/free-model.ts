@@ -35,6 +35,12 @@ export interface ChatResult {
 
 export class EvalBudgetError extends Error {}
 
+/** `--stub`: no network, every call answers with this text. For checking a script's plumbing, never for numbers. */
+let stubContent: string | null = null
+export function setStub(content: string | null): void {
+  stubContent = content
+}
+
 let apiKey: string | null | undefined
 let requests = 0
 let maxRequests = Infinity
@@ -105,6 +111,10 @@ function cachePath(args: ChatArgs, messages: unknown): string {
 }
 
 export async function chat(args: ChatArgs): Promise<ChatResult> {
+  if (stubContent !== null) {
+    requests++
+    return { content: stubContent, finishReason: 'stop', tokensUsed: 0, cached: false }
+  }
   const messages =
     args.messages ??
     [
@@ -145,6 +155,11 @@ export async function chat(args: ChatArgs): Promise<ChatResult> {
     }
     if (res.status === 429 || res.status >= 500) {
       lastError = `HTTP ${res.status}`
+      // The free tier has a daily pool shared by everything on the account. When it is spent,
+      // waiting does not help: stop the run and say when it resets instead of retrying for an hour.
+      if (res.status === 429 && /per-day|daily/i.test(await res.text().catch(() => ''))) {
+        throw new EvalBudgetError('the free-model daily limit is used up; it resets at 00:00 UTC')
+      }
       await new Promise((r) => setTimeout(r, 8000 * (attempt + 1)))
       continue
     }
