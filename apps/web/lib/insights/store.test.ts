@@ -408,6 +408,7 @@ describe('searchInsights in Langfuse', () => {
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
     vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
     vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'u1,u,me,user-1')
     const { runInTraceContext, SpanBuffer } = await import('../trace/spans')
     callEmbeddingMock.mockResolvedValue({ embeddings: [[0.5]], model: 'x', promptTokens: 1 })
     const row0 = { id: 'i1', kind: 'preference', statement: 'Salary floor is 180k, remote only', evidence: null, confidence: 0.9, status: 'active', source: 'chat', company_id: null, supersedes_id: null, created_at: 'x', updated_at: 'x' }
@@ -426,6 +427,7 @@ describe('searchInsights in Langfuse', () => {
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
     vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
     vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'u1,u,me,user-1')
     const { runInTraceContext, SpanBuffer } = await import('../trace/spans')
     const { MissingKeyError } = await import('../harness/llm')
     callEmbeddingMock.mockRejectedValue(new MissingKeyError('No embedding provider configured'))
