@@ -15,7 +15,7 @@ import { scoringPromptRef, scoringSystem } from './prompts'
 import type { RoleFacts } from './types'
 
 /** Bump when the prompt or the grounding rules change, so stored requirements are re-read. */
-export const EXTRACTOR_VERSION = 1
+export const EXTRACTOR_VERSION = 2
 
 export const REQUIREMENT_KINDS = ['skill', 'experience', 'domain', 'education', 'credential', 'authorization', 'language', 'other'] as const
 export type RequirementKind = (typeof REQUIREMENT_KINDS)[number]
