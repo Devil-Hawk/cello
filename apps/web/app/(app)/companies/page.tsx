@@ -1,5 +1,6 @@
 'use client'
 
+import { trackedOnly } from '@/lib/companies/watchlist'
 import { useEffect, useState } from 'react'
 import { Building2, FileWarning, Plus, RefreshCw, Search, Sparkles, Star } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -80,16 +81,17 @@ export default function CompaniesPage() {
       // this pulls each company's jobs' match_score in the same query and
       // reduces client-side below — one query for every company, not one
       // query per company.
-      const { data, error } = await supabase
-        .from('companies')
-        .select(
-          `
+      const { data, error } = await trackedOnly(
+        supabase
+          .from('companies')
+          .select(
+            `
         *,
         jobs:jobs(match_score)
       `
-        )
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
+          )
+          .eq('user_id', user.id)
+      ).order('created_at', { ascending: false })
 
       if (error) {
         setLoadError("Couldn't load your companies. Check your connection and try again.")
