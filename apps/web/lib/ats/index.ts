@@ -560,7 +560,6 @@ export async function syncJobs(
   }
 }
 
-
 // Implementation moved to ./concurrency.ts so the adapters can use it without
 // importing this module back; re-exported here so every existing caller
 // (`import { mapWithConcurrency } from '@/lib/ats'`) keeps working.
