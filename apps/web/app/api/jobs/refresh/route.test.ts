@@ -207,7 +207,7 @@ describe('POST /api/jobs/refresh', () => {
       ok: true,
       threadId: 'thread-1',
       results: [],
-      totals: { found: 0, inserted: 0, companiesWithAts: 0 },
+      totals: { found: 0, inserted: 0, updated: 0, closed: 0, busy: 0, companiesWithAts: 0 },
       cursor: 1,
       total: 2,
       done: false,

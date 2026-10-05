@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { createClient } from '@/lib/supabase/server'
 import { makeSupabaseAtsStore } from '@/lib/ats/store'
 import { staticFetchPage } from '@/lib/ingest/fetch-page'
-import { makeIngestModelCall, newModelBudget } from '@/lib/ingest/model'
+import { freeModelKeys, makeIngestModelCall, newModelBudget } from '@/lib/ingest/model'
 import { ingestCompany, type DueCompany, type FailureReason } from '@/lib/ingest/run'
 
 // The in-app twin of the scheduled check, for one company: the job board when it
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
   const apiKeys = await getDecryptedApiKeys(user.id)
   const admin = createAdminClient()
   const budget = newModelBudget(MODEL_CALLS_PER_PRESS)
-  const model = apiKeys.openrouter ? makeIngestModelCall(user.id, apiKeys.openrouter, { budget }) : null
+  const model = apiKeys.openrouter ? makeIngestModelCall(freeModelKeys(apiKeys, apiKeys.openrouter), { budget }) : null
 
   const outcome = await withTrace(admin, user.id, { name: 'find-new-roles', outputOf: () => ({ companies: 1 }) }, () =>
     ingestCompany(makeSupabaseAtsStore(supabase, { lockClient: admin }), company as DueCompany, {

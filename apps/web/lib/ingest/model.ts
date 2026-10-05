@@ -51,15 +51,27 @@ export interface ModelRequest {
 /** The model's text; null when no free model produced one; MODEL_LIMIT when the allowance or the spend cap stopped the call. */
 export type ModelCall = (req: ModelRequest) => Promise<string | null | typeof MODEL_LIMIT>
 
+/**
+ * The keys an ingestion call runs on: the account's id and demo standing, and an
+ * OpenRouter key for the free models. `guarded` must come from a loader that has
+ * been through the demo guards (loadApiKeys in the scheduled check,
+ * getDecryptedApiKeys in a route), so an expired demo cannot make calls and a
+ * demo's calls are booked to the demo. Nothing else of the user's keys or
+ * backend preference is carried over: ingestion always asks OpenRouter.
+ */
+export function freeModelKeys(guarded: DecryptedApiKeys, openrouterKey: string | undefined): DecryptedApiKeys {
+  return { userId: guarded.userId, ...(guarded.isDemo !== undefined ? { isDemo: guarded.isDemo } : {}), ...(openrouterKey ? { openrouter: openrouterKey } : {}) }
+}
+
+/** Takes keys that already passed the demo guards (see freeModelKeys); it never obtains one itself. */
 export function makeIngestModelCall(
-  userId: string,
-  key: string | undefined,
+  keys: DecryptedApiKeys,
   opts: { budget?: ModelBudget; models?: readonly string[] } = {}
 ): ModelCall {
   const models = opts.models ?? INGEST_MODELS
   const budget = opts.budget
   return async (req) => {
-    if (!key) return null
+    if (!keys.openrouter || !keys.userId) return null
     if (budget) {
       if (budget.n <= 0) {
         budget.hit = true
@@ -67,7 +79,7 @@ export function makeIngestModelCall(
       }
       budget.n -= 1
     }
-    const apiKeys: DecryptedApiKeys = { openrouter: key, userId }
+    const apiKeys = freeModelKeys(keys, keys.openrouter)
     for (const model of models) {
       if (!model.endsWith(':free')) throw new Error('ingestion only uses free models')
       try {

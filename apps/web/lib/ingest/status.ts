@@ -117,13 +117,9 @@ export async function readFindNewRoles(client: Db, now: Date = new Date()): Prom
   const entries = (row.failed_companies ?? []).filter((f) => f.company_id && f.reason && KNOWN.has(f.reason))
   const names = new Map<string, string>()
   if (entries.length > 0) {
-    const { data } = await client
-      .from('companies')
-      .select('id, name')
-      .in(
-        'id',
-        entries.map((f) => f.company_id as string)
-      )
+    // At most 50 entries are ever stored on a run row, so this is bounded.
+    const ids = entries.map((f) => f.company_id as string)
+    const { data } = await client.from('companies').select('id, name').in('id', ids.slice(0, 50))
     for (const c of (data ?? []) as { id: string; name: string }[]) names.set(c.id, c.name)
   }
   const failed: FailedCompany[] = entries

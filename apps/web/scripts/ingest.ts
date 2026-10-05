@@ -24,9 +24,10 @@
 import { randomUUID } from 'node:crypto'
 import { makeSupabaseAtsStore } from '../lib/ats/store'
 import { createAdminClient } from '../lib/harness/supabase-admin'
+import { loadApiKeys } from '../lib/harness/keys'
 import { withTrace } from '../lib/trace/spans'
 import { pageFetcherFromEnv, staticFetchPage } from '../lib/ingest/fetch-page'
-import { DEFAULT_MODEL_CALLS, makeIngestModelCall, newModelBudget } from '../lib/ingest/model'
+import { DEFAULT_MODEL_CALLS, freeModelKeys, makeIngestModelCall, newModelBudget, type ModelCall } from '../lib/ingest/model'
 import { supabaseRequirementsRows } from '../lib/ingest/requirements-pass'
 import { ingestUser, isDue, makeSupabaseRunsStore, type DueCompany } from '../lib/ingest/run'
 
@@ -92,7 +93,16 @@ async function main(): Promise<void> {
 
   for (const [userId, companies] of byUser) {
     const budget = newModelBudget(calls)
-    const model = openrouterKey ? makeIngestModelCall(userId, openrouterKey, { budget }) : null
+    // The demo guards run on every account: an expired demo gets no model at all.
+    // The platform key is what pays for the (free) model; the account is the user's.
+    let model: ModelCall | null = null
+    if (openrouterKey) {
+      try {
+        model = makeIngestModelCall(freeModelKeys(await loadApiKeys(admin, userId), openrouterKey), { budget })
+      } catch {
+        model = null
+      }
+    }
     try {
       const summary = await withTrace(admin, userId, { name: 'find-new-roles', metadata: { batch: batchId } }, () =>
         ingestUser(
