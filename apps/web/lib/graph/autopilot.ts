@@ -360,12 +360,12 @@ interface ScoreTaskResult {
 /** A fresh, per-task metered LlmRunner that aborts once its own usage crosses
  *  `budgetRemaining` — see this file's header BUDGET note. Shared shape
  *  between scoreTask and judgeTask. */
-function meteredLlm(apiKeys: DecryptedApiKeys, budgetRemaining: number): { llm: LlmRunner; signal: AbortSignal; used: () => number } {
+function meteredLlm(apiKeys: DecryptedApiKeys, budgetRemaining: number, name: string): { llm: LlmRunner; signal: AbortSignal; used: () => number } {
   const controller = new AbortController()
   let used = 0
   const llm: LlmRunner = async (opts: LlmRunOptions): Promise<LlmResult> => {
     if (controller.signal.aborted) throw new BudgetExceededError()
-    const res = await callLlm(apiKeys, opts, controller.signal)
+    const res = await callLlm(apiKeys, { ...opts, name: opts.name ?? name }, controller.signal)
     used += res.tokensUsed
     if (used > budgetRemaining) {
       controller.abort()
@@ -379,7 +379,7 @@ function meteredLlm(apiKeys: DecryptedApiKeys, budgetRemaining: number): { llm: 
 const scoreTask = task('score', async (args: ScoreTaskArgs): Promise<ScoreTaskResult> => {
   const admin = createAdminClient()
   const apiKeys = await loadApiKeys(admin, args.userId)
-  const { llm, signal, used } = meteredLlm(apiKeys, args.budgetRemaining)
+  const { llm, signal, used } = meteredLlm(apiKeys, args.budgetRemaining, 'score-job-batch')
   const batch = await scoreJobBatch({
     admin,
     userId: args.userId,
@@ -420,7 +420,7 @@ interface JudgeTaskResult {
 const judgeTask = task('judge', async (args: JudgeTaskArgs): Promise<JudgeTaskResult> => {
   const admin = createAdminClient()
   const apiKeys = await loadApiKeys(admin, args.userId)
-  const { llm, signal, used } = meteredLlm(apiKeys, args.budgetRemaining)
+  const { llm, signal, used } = meteredLlm(apiKeys, args.budgetRemaining, 'judge-goal-fit')
   // Source-choice/threshold context (lib/context/assemble.ts): general,
   // non-company-scoped strategy notes learned from past ticks — zero
   // embedding calls, one query, reused for every candidate this tick judges.
@@ -491,7 +491,7 @@ export async function prepareApplicationDraft(unitConfig: UnitConfig, canTailor:
   // (ruling 2c: 'judge-failed' -> status 'failed'; 'unjudged' -> requires
   // human review) — 'verified' needs no override, applier's own
   // 'pending_review' already stands.
-  let flaggedVerdict: { verdict: 'fail' | 'unjudged'; rationale: string | null } | null = null
+  let flaggedVerdict: { verdict: 'fail' | 'unjudged'; rationale: string | null; judgeSpanId?: string } | null = null
 
   // Tailor + VERIFY (best-effort; needs an LLM key). Ruling 2a: a containment
   // failure that survives the bounded retry loop is FAIL WITHOUT PERSIST —
@@ -506,7 +506,7 @@ export async function prepareApplicationDraft(unitConfig: UnitConfig, canTailor:
       resumeSummary = outcome.resumeSummary
       coverLetter = outcome.coverLetter
       if (outcome.kind === 'judge-failed') {
-        flaggedVerdict = { verdict: 'fail', rationale: outcome.verdict.summary }
+        flaggedVerdict = { verdict: 'fail', rationale: outcome.verdict.summary, judgeSpanId: outcome.verdict.spanId }
       } else if (outcome.kind === 'unjudged') {
         flaggedVerdict = { verdict: 'unjudged', rationale: null }
       }
@@ -554,6 +554,7 @@ export async function prepareApplicationDraft(unitConfig: UnitConfig, canTailor:
         judge: 'factuality',
         verdict: flaggedVerdict.verdict,
         rationale: flaggedVerdict.rationale,
+        judgeSpanId: flaggedVerdict.judgeSpanId,
       })
       // A judge-failed draft never counts toward this tick's drafted quota —
       // it lands in the SAME 'failed' bucket a genuine apply failure does

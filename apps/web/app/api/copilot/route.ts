@@ -495,6 +495,7 @@ export async function POST(request: NextRequest) {
               threadId: threadIdForInvoke,
               signal: request.signal,
               extraConfigurable: { conversationId: conversation.id },
+              trace: { name: 'copilot-turn', sessionId: conversation.id, metadata: { leg: 'continue' } },
             })
           ).result
         } catch (e) {
@@ -588,6 +589,14 @@ export async function POST(request: NextRequest) {
           streamHandler,
           signal: request.signal,
           extraConfigurable: { conversationId: conversation.id },
+          // The conversation is the Langfuse session; the reply is set as the
+          // trace output by the graph's finalize node (setTraceOutput).
+          trace: {
+            name: 'copilot-turn',
+            sessionId: conversation.id,
+            input: isResume ? { directive: resumeDirective, confirmed_tool_call: confirmToolCall } : { message: messageIn },
+            metadata: { leg: isResume ? (confirmToolCall ? 'confirm' : 'resume') : 'turn' },
+          },
         })
       } catch (e) {
         const aborted = request.signal.aborted || (e instanceof Error && e.name === 'AbortError')

@@ -41,6 +41,7 @@ import type { AdminClient } from '../harness/types'
 import type { AgentRunRow } from '../harness/types'
 import { invokeGraphForUser, type CompiledGraphLike } from '../graph/invoke'
 import { harnessRunGraph } from '../graph/runs'
+import { summarizeRunOutcome } from '../graph/run-summary'
 import { runStatusToTaskState, isNonTerminalRunStatus, type A2aAgent } from './agent'
 import { STATE_USER_ID_KEY } from './context'
 
@@ -180,6 +181,7 @@ export function createA2aTaskStore(admin: AdminClient): TaskStore {
             surface: 'run',
             graph: harnessRunGraph as unknown as CompiledGraphLike,
             threadId: row.thread_id,
+            trace: { input: { runId: run.id }, outputOf: summarizeRunOutcome, metadata: { source: 'a2a', resumed: 'true', run_id: run.id } },
           })
           const interrupted =
             typeof result === 'object' && result !== null && Array.isArray((result as { __interrupt__?: unknown[] }).__interrupt__)

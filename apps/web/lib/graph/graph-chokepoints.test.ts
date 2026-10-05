@@ -523,3 +523,106 @@ describe('trace_spans has exactly its two known writers', () => {
     ).toEqual([])
   })
 })
+
+// ---------------------------------------------------------------------------
+// Langfuse has exactly one importer
+// ---------------------------------------------------------------------------
+//
+// The SDK is reached only through lib/observability/langfuse.ts, which owns the
+// no-op gate, the masking layers and the delivery rules. A second file that
+// imported `@langfuse/*` or called startObservation( would be a way around all
+// three, so it is a scan failure, not a quiet addition.
+
+const LANGFUSE_IMPORT = /from\s+['"]@langfuse\/|import\(\s*['"]@langfuse\/|require\(\s*['"]@langfuse\/|['"]langfuse['"]/
+const START_OBSERVATION_CALL = /\bstartObservation\(|\bstartActiveObservation\(/
+const LANGFUSE_SINGLE_IMPORTER = 'lib/observability/langfuse.ts'
+
+function bypassesLangfuseGate(src: string): boolean {
+  const code = stripComments(src)
+  return LANGFUSE_IMPORT.test(code) || START_OBSERVATION_CALL.test(code)
+}
+
+describe('@langfuse/* has exactly one importer', () => {
+  it('detects an import and a startObservation call (fixture self-test, not a repo file)', () => {
+    expect(bypassesLangfuseGate(`import { startObservation } from '@langfuse/tracing'`)).toBe(true)
+    expect(bypassesLangfuseGate(`const m = await import('@langfuse/otel')`)).toBe(true)
+    expect(bypassesLangfuseGate(`const o = startObservation('x', {}, { asType: 'span' })`)).toBe(true)
+    expect(bypassesLangfuseGate(`import { Langfuse } from 'langfuse'`)).toBe(true)
+  })
+
+  it('a comment that mentions the SDK is not accused', () => {
+    expect(bypassesLangfuseGate(`// uses @langfuse/tracing startObservation( under the hood`)).toBe(false)
+  })
+
+  it('only lib/observability/langfuse.ts imports @langfuse/* or calls startObservation(', () => {
+    const files = walk(WEB_ROOT, isSourceFile)
+    expect(files.length).toBeGreaterThan(50)
+    const offenders: string[] = []
+    for (const file of files) {
+      const filePath = rel(file)
+      if (filePath === LANGFUSE_SINGLE_IMPORTER) continue
+      if (bypassesLangfuseGate(readFileSync(file, 'utf8'))) offenders.push(filePath)
+    }
+    expect(
+      offenders,
+      `These files reach Langfuse outside lib/observability/langfuse.ts, skipping its ` +
+        `no-op gate, masking and delivery rules:\n  ${offenders.join('\n  ')}`
+    ).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Every model call names its Langfuse generation
+// ---------------------------------------------------------------------------
+//
+// A callLlm( without `name:` shows up in Langfuse as `call-llm`, which says
+// nothing about what the call was for. Every call site passes a constant name
+// (directly, or as `{ ...opts, name: opts.name ?? '<constant>' }` in a wrapper).
+// lib/harness/llm.ts itself defines callLlm, so it is the one file exempt.
+
+const CALL_LLM_SITE = /\bcallLlm\(/g
+const CALL_LLM_EXEMPT = new Set(['lib/harness/llm.ts'])
+
+/** Argument text of each callLlm( call in `code`: from the open paren to its match. */
+function callLlmArguments(code: string): string[] {
+  const out: string[] = []
+  for (const m of code.matchAll(CALL_LLM_SITE)) {
+    let depth = 1
+    let i = (m.index ?? 0) + m[0].length
+    const start = i
+    for (; i < code.length && depth > 0; i += 1) {
+      if (code[i] === '(') depth += 1
+      else if (code[i] === ')') depth -= 1
+    }
+    out.push(code.slice(start, i))
+  }
+  return out
+}
+
+describe('every callLlm( call passes a generation name', () => {
+  it('detects a call with and without a name (fixture self-test, not a repo file)', () => {
+    expect(callLlmArguments(`await callLlm(keys, { prompt: 'x' })`).every((a) => /\bname:/.test(a))).toBe(false)
+    expect(callLlmArguments(`await callLlm(keys, { prompt: 'x', name: 'tailor-cv' })`).every((a) => /\bname:/.test(a))).toBe(true)
+    expect(callLlmArguments(`callLlm(k, { ...opts, name: opts.name ?? 'x' }, signal)`).every((a) => /\bname:/.test(a))).toBe(true)
+  })
+
+  it('no callLlm( call site lacks name:', () => {
+    const files = walk(WEB_ROOT, isSourceFile)
+    expect(files.length).toBeGreaterThan(50)
+    const offenders: string[] = []
+    let sites = 0
+    for (const file of files) {
+      const filePath = rel(file)
+      if (CALL_LLM_EXEMPT.has(filePath)) continue
+      for (const args of callLlmArguments(stripComments(readFileSync(file, 'utf8')))) {
+        sites += 1
+        if (!/\bname:/.test(args)) offenders.push(filePath)
+      }
+    }
+    expect(sites).toBeGreaterThan(10) // the walk really found the call sites
+    expect(
+      offenders,
+      `These callLlm( calls name no Langfuse generation (they would show up as call-llm):\n  ${offenders.join('\n  ')}`
+    ).toEqual([])
+  })
+})

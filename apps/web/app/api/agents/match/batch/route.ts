@@ -46,6 +46,7 @@ import type { z } from 'zod'
 import { isAllowedModel } from '@/lib/models'
 import { QUALITY_REJECT_THRESHOLD } from '@/lib/jobs/classify'
 import { recordDemoEvent } from '@/lib/access/session'
+import { setTraceInput, setTraceOutput, withTrace } from '@/lib/trace/spans'
 
 /** Unit output, typed off the same zod schema runAgentUnit validated it
  *  against (agentSchemas.bulk_matcher.output) — see lib/harness/schemas.ts. */
@@ -185,154 +186,158 @@ export async function POST(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  return withTrace(createAdminClient(), user.id, { name: 'match-jobs' }, async () => {
 
-  const body = await request.json().catch(() => ({}))
-  const limit = clampLimit((body as { limit?: unknown })?.limit)
+    const body = await request.json().catch(() => ({}))
+    const limit = clampLimit((body as { limit?: unknown })?.limit)
 
-  const rawModel = (body as { model?: unknown })?.model
-  const modelProvided = typeof rawModel === 'string' && rawModel.trim().length > 0
-  const model = modelProvided && isAllowedModel(rawModel) ? rawModel : undefined
-  if (modelProvided && !model) {
-    return NextResponse.json({ error: `Unsupported model "${rawModel as string}".` }, { status: 400 })
-  }
-  const effort = parseEffort((body as { effort?: unknown })?.effort)
+    const rawModel = (body as { model?: unknown })?.model
+    const modelProvided = typeof rawModel === 'string' && rawModel.trim().length > 0
+    const model = modelProvided && isAllowedModel(rawModel) ? rawModel : undefined
+    if (modelProvided && !model) {
+      return NextResponse.json({ error: `Unsupported model "${rawModel as string}".` }, { status: 400 })
+    }
+    const effort = parseEffort((body as { effort?: unknown })?.effort)
 
-  const admin = createAdminClient()
+    const admin = createAdminClient()
 
-  // PROVIDER GATE ALIGNMENT: fail fast, before any queries, with the same
-  // actionable message the other LLM routes use — never a bare "missing key".
-  const apiKeys = await loadApiKeys(admin, user.id)
-  if (!canRunLlm(apiKeys)) {
-    // Journalled: "the visitor tried to score and the workspace had no key" is
-    // a fact about the demo the owner set up, not a non-event.
+    // PROVIDER GATE ALIGNMENT: fail fast, before any queries, with the same
+    // actionable message the other LLM routes use — never a bare "missing key".
+    const apiKeys = await loadApiKeys(admin, user.id)
+    if (!canRunLlm(apiKeys)) {
+      // Journalled: "the visitor tried to score and the workspace had no key" is
+      // a fact about the demo the owner set up, not a non-event.
+      await recordScoringOutcome(
+        supabase,
+        { outcome: 'failed', reason: 'no_key' },
+        request.headers
+      )
+      return NextResponse.json(
+        { error: missingOpenRouterMessage(apiKeys), skippedReason: 'no-llm-key' },
+        { status: 400 }
+      )
+    }
+
+    const { data: profile } = await admin
+      .from('profiles')
+      .select('resume_text, preferences')
+      .eq('id', user.id)
+      .single()
+    const resume = String((profile?.resume_text as string | null) ?? '').trim()
+    if (!resume) {
+      await recordScoringOutcome(
+        supabase,
+        { outcome: 'failed', reason: 'no_resume' },
+        request.headers
+      )
+      return NextResponse.json(
+        { error: 'No resume uploaded — add one in Settings before matching jobs.', skippedReason: 'no-resume' },
+        { status: 400 }
+      )
+    }
+    const prefs = (profile?.preferences as Record<string, unknown> | null) ?? {}
+    const targeting = resolveTargeting(prefs)
+
+    const companyIds = await userCompanyIds(admin, user.id)
+
+    if (companyIds.length === 0) {
+      // A 200 that scored nothing. Not a failure — nothing was wrong — but it is
+      // still a click the owner should see, and "Scored 0 jobs · reason: no
+      // companies" is a far better answer than an empty timeline.
+      await recordScoringOutcome(supabase, { count: 0, reason: 'no_companies' }, request.headers)
+      return NextResponse.json({
+        scored: 0,
+        failed: 0,
+        remaining: 0,
+        remainingInTargeting: 0,
+        excludedByTargeting: 0,
+        candidatesConsidered: 0,
+        skippedReasons: { 'no-companies': 1 },
+        batches: 0,
+        tokensUsed: 0,
+      })
+    }
+
+    let result: BulkMatcherResult
+    try {
+      // internals now run under runAgentUnit('bulk_matcher') — metered/demo-
+      // gated/journaled the same as every other unit — instead of calling
+      // runBulkMatch directly. No checkpoint thread: the DB's match_score IS
+      // NULL set is already the cursor (see this file's own header), so a
+      // thread would only duplicate that truth. companyIds/targetTitles are
+      // passed explicitly (already resolved above, for the no-resume/
+      // no-companies checks and the post-run stats below) so the unit's own
+      // internal resolution — see lib/harness/registry.ts's bulk_matcher
+      // wrapper, which exists precisely so a caller does NOT have to know
+      // this — is simply handed what this route already has.
+      const unitResult = await runUnitOnce('bulk_matcher', {
+        admin,
+        userId: user.id,
+        goal: 'Score unscored jobs',
+        input: {
+          companyIds,
+          limit,
+          model,
+          effort,
+          // Spend on the most on-target jobs first. Ordering only — nothing is
+          // excluded, so an unusually-titled role is still scored, just later.
+          targetTitles: resolveTargetTitles(prefs),
+        },
+      })
+      result = unitResult.output as BulkMatcherResult
+      setTraceInput({ companies: companyIds.length, limit })
+    } catch (e) {
+      // The unit issues tier-1 and tier-2 LLM calls before it can throw, so
+      // this is money already spent with nothing persisted to show for it — the
+      // single most expensive thing a successes-only trail would have hidden.
+      // Journalled and RETHROWN: what this request returns is exactly what it
+      // returned before, because an audit row is not a licence to change a
+      // handler's behaviour.
+      await recordScoringOutcome(
+        supabase,
+        { outcome: 'failed', reason: 'score_failed' },
+        request.headers
+      )
+      throw e
+    }
+
+    // Both counts reflect POST-run state (scoring above may have just cleared
+    // some of these rows), computed in parallel — two head-count queries, no
+    // LLM spend. See the SYNC WARNING above for what remainingInTargeting must
+    // stay aligned with.
+    const [remainingInTargeting, totalUnscored] = await Promise.all([
+      countRemainingInTargeting(admin, user.id, companyIds, targeting),
+      countUnscoredNoFilter(admin, user.id, companyIds),
+    ])
+    const excludedByTargeting = Math.max(0, totalUnscored - remainingInTargeting)
+
+    // THE DEMO TRAIL — see recordScoringOutcome above for what goes in a row and
+    // what awaiting it costs.
     await recordScoringOutcome(
       supabase,
-      { outcome: 'failed', reason: 'no_key' },
-      request.headers
-    )
-    return NextResponse.json(
-      { error: missingOpenRouterMessage(apiKeys), skippedReason: 'no-llm-key' },
-      { status: 400 }
-    )
-  }
-
-  const { data: profile } = await admin
-    .from('profiles')
-    .select('resume_text, preferences')
-    .eq('id', user.id)
-    .single()
-  const resume = String((profile?.resume_text as string | null) ?? '').trim()
-  if (!resume) {
-    await recordScoringOutcome(
-      supabase,
-      { outcome: 'failed', reason: 'no_resume' },
-      request.headers
-    )
-    return NextResponse.json(
-      { error: 'No resume uploaded — add one in Settings before matching jobs.', skippedReason: 'no-resume' },
-      { status: 400 }
-    )
-  }
-  const prefs = (profile?.preferences as Record<string, unknown> | null) ?? {}
-  const targeting = resolveTargeting(prefs)
-
-  const companyIds = await userCompanyIds(admin, user.id)
-
-  if (companyIds.length === 0) {
-    // A 200 that scored nothing. Not a failure — nothing was wrong — but it is
-    // still a click the owner should see, and "Scored 0 jobs · reason: no
-    // companies" is a far better answer than an empty timeline.
-    await recordScoringOutcome(supabase, { count: 0, reason: 'no_companies' }, request.headers)
-    return NextResponse.json({
-      scored: 0,
-      failed: 0,
-      remaining: 0,
-      remainingInTargeting: 0,
-      excludedByTargeting: 0,
-      candidatesConsidered: 0,
-      skippedReasons: { 'no-companies': 1 },
-      batches: 0,
-      tokensUsed: 0,
-    })
-  }
-
-  let result: BulkMatcherResult
-  try {
-    // internals now run under runAgentUnit('bulk_matcher') — metered/demo-
-    // gated/journaled the same as every other unit — instead of calling
-    // runBulkMatch directly. No checkpoint thread: the DB's match_score IS
-    // NULL set is already the cursor (see this file's own header), so a
-    // thread would only duplicate that truth. companyIds/targetTitles are
-    // passed explicitly (already resolved above, for the no-resume/
-    // no-companies checks and the post-run stats below) so the unit's own
-    // internal resolution — see lib/harness/registry.ts's bulk_matcher
-    // wrapper, which exists precisely so a caller does NOT have to know
-    // this — is simply handed what this route already has.
-    const unitResult = await runUnitOnce('bulk_matcher', {
-      admin,
-      userId: user.id,
-      goal: 'Score unscored jobs',
-      input: {
-        companyIds,
-        limit,
-        model,
-        effort,
-        // Spend on the most on-target jobs first. Ordering only — nothing is
-        // excluded, so an unusually-titled role is still scored, just later.
-        targetTitles: resolveTargetTitles(prefs),
+      {
+        count: result.scored,
+        failed: result.failed,
+        considered: result.candidatesConsidered,
+        remaining: remainingInTargeting,
       },
-    })
-    result = unitResult.output as BulkMatcherResult
-  } catch (e) {
-    // The unit issues tier-1 and tier-2 LLM calls before it can throw, so
-    // this is money already spent with nothing persisted to show for it — the
-    // single most expensive thing a successes-only trail would have hidden.
-    // Journalled and RETHROWN: what this request returns is exactly what it
-    // returned before, because an audit row is not a licence to change a
-    // handler's behaviour.
-    await recordScoringOutcome(
-      supabase,
-      { outcome: 'failed', reason: 'score_failed' },
       request.headers
     )
-    throw e
-  }
 
-  // Both counts reflect POST-run state (scoring above may have just cleared
-  // some of these rows), computed in parallel — two head-count queries, no
-  // LLM spend. See the SYNC WARNING above for what remainingInTargeting must
-  // stay aligned with.
-  const [remainingInTargeting, totalUnscored] = await Promise.all([
-    countRemainingInTargeting(admin, user.id, companyIds, targeting),
-    countUnscoredNoFilter(admin, user.id, companyIds),
-  ])
-  const excludedByTargeting = Math.max(0, totalUnscored - remainingInTargeting)
-
-  // THE DEMO TRAIL — see recordScoringOutcome above for what goes in a row and
-  // what awaiting it costs.
-  await recordScoringOutcome(
-    supabase,
-    {
-      count: result.scored,
+    setTraceOutput({ scored: result.scored, failed: result.failed, remaining: remainingInTargeting, tokensUsed: result.tokensUsed })
+    return NextResponse.json({
+      scored: result.scored,
       failed: result.failed,
-      considered: result.candidatesConsidered,
+      // Back-compat field — see the REMAINING-COUNT FIX comment at the top of
+      // this file: this now means the same thing as remainingInTargeting, not
+      // the old ungated match_score-null count.
       remaining: remainingInTargeting,
-    },
-    request.headers
-  )
-
-  return NextResponse.json({
-    scored: result.scored,
-    failed: result.failed,
-    // Back-compat field — see the REMAINING-COUNT FIX comment at the top of
-    // this file: this now means the same thing as remainingInTargeting, not
-    // the old ungated match_score-null count.
-    remaining: remainingInTargeting,
-    remainingInTargeting,
-    excludedByTargeting,
-    candidatesConsidered: result.candidatesConsidered,
-    skippedReasons: result.skippedReasons,
-    batches: result.batches,
-    tokensUsed: result.tokensUsed,
+      remainingInTargeting,
+      excludedByTargeting,
+      candidatesConsidered: result.candidatesConsidered,
+      skippedReasons: result.skippedReasons,
+      batches: result.batches,
+      tokensUsed: result.tokensUsed,
+    })
   })
 }

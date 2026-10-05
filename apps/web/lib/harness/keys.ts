@@ -71,6 +71,7 @@ import {
   assertDemoSessionActive,
   demoSafeApiKeys,
   demoSessionGate,
+  isDemoProfile,
   type DemoProfileFacts,
 } from '@/lib/access/guardrails'
 import { resolveProviderPreferences } from './providers'
@@ -232,7 +233,13 @@ export function applyDemoKeyGuards(
 
   // (1) Spend. A no-op for the owner's own profile — non-demo rows come back
   // byte-identical.
-  return demoSafeApiKeys(keys, facts)
+  const safe = demoSafeApiKeys(keys, facts)
+
+  // Whose workspace this is, for the Langfuse export only: demo traces are
+  // sampled lower and send no prompt text by default. Fail closed: only a
+  // profile that PROVES it is not a demo (is_demo === false) counts as the
+  // owner; an unreadable flag stays undefined, which the export treats as demo.
+  return { ...safe, isDemo: isDemoProfile(facts) ? true : facts.is_demo === false ? false : undefined }
 }
 
 export async function loadApiKeys(admin: AdminClient, userId: string): Promise<DecryptedApiKeys> {

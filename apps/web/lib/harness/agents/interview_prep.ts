@@ -27,7 +27,7 @@ import type {
   LlmRunOptions,
 } from '../types'
 import { callLlm, parseJsonLoose } from '../llm'
-import { composeSystemPrompt, loadModeDoc } from '../prompts'
+import { composeSystemPrompt, loadModeDoc, promptRef } from '../prompts'
 import {
   upsertKit,
   type InterviewQuestion,
@@ -186,7 +186,7 @@ export async function generateInterviewKit(
     args.llm ??
     ((opts: LlmRunOptions): Promise<LlmResult> => {
       if (!args.apiKeys) throw new Error('generateInterviewKit requires either `llm` or `apiKeys`')
-      return callLlm(args.apiKeys, opts, args.signal)
+      return callLlm(args.apiKeys, { ...opts, name: opts.name ?? 'prepare-interview' }, args.signal)
     })
 
   const companyId = args.job.company_id ?? args.company?.id ?? null
@@ -197,6 +197,7 @@ export async function generateInterviewKit(
 
   const res = await run({
     system: buildSystem(resumeText),
+    promptRef: promptRef('interview_prep'),
     prompt: buildPrompt({ ...args, resumeText }, context),
     json: true,
     // 2600 was already close to typical usage for 8-14 questions + 3-5 STAR

@@ -79,6 +79,11 @@ describe('estimateCostUsd', () => {
     expect(cost).toBeCloseTo(0.5 * 1 + 0.2 * 5, 6)
   })
 
+  it('the cheap bulk models are priced at their published rates, not the $5/$25 fallback', () => {
+    expect(estimateCostUsd('google/gemini-2.0-flash-001', 1_000_000, 1_000_000)).toBeCloseTo(0.1 + 0.4, 6)
+    expect(estimateCostUsd('openai/gpt-4o-mini', 1_000_000, 1_000_000)).toBeCloseTo(0.15 + 0.6, 6)
+  })
+
   it('an UNKNOWN model falls back to the MOST EXPENSIVE known rate, never zero', () => {
     const unknownCost = estimateCostUsd('some/unrecognized-model-xyz', 1_000_000, 1_000_000)
     // FALLBACK_PRICE = { in: 5, out: 25 } — the most expensive entry in PRICES

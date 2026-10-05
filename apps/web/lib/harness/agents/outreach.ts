@@ -15,7 +15,7 @@
 // is no spoofing anywhere in this path.
 
 import type { LlmRunner } from '../types'
-import { composeSystemPrompt, loadModeDoc } from '../prompts'
+import { composeSystemPrompt, loadModeDoc, promptRef } from '../prompts'
 
 export interface OutreachDraftInput {
   /** The sender's real name (used in the sign-off — never spoofed). */
@@ -149,6 +149,7 @@ export async function generateOutreachDraft(
   try {
     const res = await llm({
       system,
+      promptRef: promptRef('outreach'),
       prompt: promptParts.join('\n\n'),
       json: true,
       maxTokens: 1200,

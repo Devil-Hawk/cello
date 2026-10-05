@@ -18,6 +18,8 @@ import {
   journalStepFinish,
   journalStepOutput,
   journalStepStart,
+  capPayload,
+  JOURNAL_PAYLOAD_CAP_BYTES,
   markRunPaused,
   markRunRunning,
   markRunTerminal,
@@ -360,5 +362,85 @@ describe('agent_runs status writers', () => {
     await markRunTerminal(admin, 'run-1', 'completed', { result: { ok: true } })
     expect(tables.agent_runs.rows[0].status).toBe('completed')
     expect(tables.agent_runs.rows[0].result).toEqual({ ok: true })
+  })
+})
+
+describe('payload cap: the step ledger must not grow without bound', () => {
+  const size = (v: unknown) => Buffer.byteLength(JSON.stringify(v), 'utf8')
+  const CAP = JOURNAL_PAYLOAD_CAP_BYTES
+
+  it('small payloads pass through untouched (same reference)', () => {
+    const small = { jobIds: ['a', 'b'], message: 'hi', n: 3 }
+    expect(capPayload(small)).toBe(small)
+    expect(capPayload(null)).toBeNull()
+    expect(capPayload(42)).toBe(42)
+  })
+
+  it('a huge string is cut with a marker', () => {
+    const out = capPayload('x'.repeat(100_000)) as string
+    expect(size(out)).toBeLessThanOrEqual(CAP)
+    expect(out).toContain('[truncated')
+  })
+
+  it('a huge object stays bounded, keeps every key, and small keys keep their exact value', () => {
+    const big = { resume: 'r'.repeat(200_000), containment: { stripped: 2 }, accepted: true, reason: 'ok' }
+    const out = capPayload(big) as Record<string, unknown>
+    expect(size(out)).toBeLessThanOrEqual(CAP + 64)
+    expect(Object.keys(out)).toEqual(expect.arrayContaining(['resume', 'containment', 'accepted', 'reason']))
+    expect(out.containment).toEqual({ stripped: 2 })
+    expect(out.accepted).toBe(true)
+    expect(out.reason).toBe('ok')
+    expect(out._truncated).toBe(true)
+    expect(String(out.resume)).toContain('[truncated')
+  })
+
+  it('a wide object (20,000 keys) is bounded too, not just a few big values', () => {
+    const wide: Record<string, string> = {}
+    for (let i = 0; i < 20_000; i += 1) wide[`key-${i}`] = 'v'.repeat(30)
+    const out = capPayload(wide)
+    expect(size(out)).toBeLessThanOrEqual(10 * 1024)
+    expect((out as Record<string, unknown>)._truncated).toBe(true)
+  })
+
+  it('a long array keeps its LENGTH (the run-detail UI shows counts), nulling the overflow', () => {
+    const matches = Array.from({ length: 300 }, (_, i) => ({ jobId: `job-${i}`, score: i, rationale: 'because '.repeat(10) }))
+    const out = capPayload({ matches, topJobIds: matches.map((m) => m.jobId) }) as { matches: unknown[]; topJobIds: unknown[] }
+    expect(out.matches).toHaveLength(300)
+    expect(out.topJobIds).toHaveLength(300)
+    expect(out.matches[0]).toEqual(matches[0])
+    expect(out.matches[299]).toBeNull()
+    expect(size(out)).toBeLessThanOrEqual(CAP + 64)
+  })
+
+  it('journalStepStart/Finish persist capped input and output, but never touch tokensUsed', async () => {
+    const { admin, tables } = makeFakeAdmin()
+    seedRun(tables, 'run-1')
+    await journalStepStart(admin, { runId: 'run-1', agentType: 'cv_tailor', label: 'cv', input: { resumeText: 'r'.repeat(500_000) } })
+    await journalStepFinish(admin, {
+      runId: 'run-1',
+      agentType: 'cv_tailor',
+      label: 'cv',
+      status: 'completed',
+      output: { resumeSummary: 's'.repeat(500_000), containment: { stripped: 1 } },
+      tokensUsed: 1234,
+    })
+    const attrs = tables.trace_spans.rows[0]!.attributes as Record<string, any>
+    expect(size(attrs.input)).toBeLessThanOrEqual(CAP + 64)
+    expect(size(attrs.output)).toBeLessThanOrEqual(CAP + 64)
+    expect(attrs.tokensUsed).toBe(1234)
+    expect(attrs.output.containment).toEqual({ stripped: 1 })
+    // the UI mapper still works on a capped row
+    const step = stepRowToAgentStepRow({ ...(tables.trace_spans.rows[0] as any) })
+    expect(step.status).toBe('completed')
+    expect(typeof (step.output as any).resumeSummary).toBe('string')
+  })
+
+  it('resume still works: the replan row journalStepOutput reads is far below the cap, so it round-trips exactly', async () => {
+    const { admin, tables } = makeFakeAdmin()
+    seedRun(tables, 'run-1')
+    const output = { accepted: true, reason: 'need a dossier', addedLabels: ['dossier-1', 'dossier-2'] }
+    await journalStepStart(admin, { runId: 'run-1', agentType: 'planner', label: '__replan-1', input: { fromLabel: 'x', reason: 'r' } })
+    await journalStepFinish(admin, { runId: 'run-1', agentType: 'planner', label: '__replan-1', status: 'completed', output, tokensUsed: 0 })
+    expect(await journalStepOutput(admin, { runId: 'run-1', label: '__replan-1' })).toEqual(output)
   })
 })

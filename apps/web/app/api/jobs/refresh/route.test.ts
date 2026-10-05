@@ -150,6 +150,7 @@ describe('POST /api/jobs/refresh', () => {
     const call = invokeGraphForUserMock.mock.calls[0][0]
     expect(call.userId).toBe('user-1')
     expect(call.surface).toBe('refresh')
+    expect(call.trace).toMatchObject({ input: { companies: 2, resumed: false } }) // the Langfuse trace: counts only
     expect(call.threadId).toBeUndefined() // fresh thread — never passes one in
     expect(call.input).toEqual({
       companyIds: ['c1', 'c2'],

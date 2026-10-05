@@ -13,7 +13,7 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
 } from 'openai/resources/chat/completions'
 import type { DecryptedApiKeys, LlmResult, LlmRunOptions } from '../types'
-import { ProviderUnavailableError, TruncatedResponseError, estimateTokens, isSelfHosted } from './index'
+import { ProviderUnavailableError, TruncatedResponseError, estimateTokens, isSelfHosted, tokenBuckets } from './index'
 
 /** Timeout for the lightweight reachability probe used by the settings route. */
 const PROBE_TIMEOUT_MS = 2_500
@@ -147,5 +147,5 @@ export async function callLocalServer(
     throw new TruncatedResponseError(completionTokens, maxTokens)
   }
 
-  return { content, tokensUsed, promptTokens, completionTokens, model, finishReason }
+  return { content, tokensUsed, promptTokens, completionTokens, model, finishReason, ...tokenBuckets(usage) }
 }

@@ -134,10 +134,20 @@ vi.mock('./gmail-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./gmail-api')>()
   return { ...actual, fetchGmailMessages: async () => [FIXED_MESSAGE] }
 })
-vi.mock('./classify', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./classify')>()
-  return { ...actual, parseEmailWithAI: async () => FIXED_PARSED }
-})
+// classify stays REAL: only the provider call and spend's DB writes are faked, so
+// the test proves sync-core hands callLlm a userId and the call is metered.
+const callOpenRouterMock = vi.fn()
+vi.mock('@/lib/harness/providers/openrouter', () => ({
+  callOpenRouter: (...args: unknown[]) => callOpenRouterMock(...args),
+  DEFAULT_MODEL: 'anthropic/claude-sonnet-5',
+}))
+const assertWithinBudgetMock = vi.fn()
+const recordSpendMock = vi.fn()
+vi.mock('@/lib/harness/spend', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/harness/spend')>()),
+  assertWithinBudget: (...args: unknown[]) => assertWithinBudgetMock(...args),
+  recordSpend: (...args: unknown[]) => recordSpendMock(...args),
+}))
 
 import { runGmailSyncCore } from './sync-core'
 
@@ -149,6 +159,25 @@ function preferences() {
 
 describe('runGmailSyncCore — idempotency', () => {
   beforeEach(() => {
+    callOpenRouterMock.mockReset().mockResolvedValue({
+      content: JSON.stringify({
+        isJobRelated: true,
+        employerName: 'Acme Corp',
+        employerDomain: 'acme.com',
+        jobTitle: 'Backend Engineer',
+        status: 'applied',
+        careerPageUrl: null,
+        interviewDateTime: null,
+        confidence: 0.95,
+        reasoning: null,
+      }),
+      tokensUsed: 600,
+      promptTokens: 500,
+      completionTokens: 100,
+      model: 'google/gemini-2.0-flash-001',
+    })
+    assertWithinBudgetMock.mockReset().mockResolvedValue(undefined)
+    recordSpendMock.mockReset().mockResolvedValue(undefined)
     fakeDb = makeFakeDb()
     fakeDb.tables.set('companies', [
       { id: 'company-1', user_id: USER_ID, name: 'Acme Corp', domain: 'acme.com', metadata: null },
@@ -162,7 +191,7 @@ describe('runGmailSyncCore — idempotency', () => {
         db: fakeDb as any,
         userId: USER_ID,
         accessToken: 'fake-access-token',
-        apiKeys: { openrouter: 'fake-key' },
+        apiKeys: { openrouter: 'fake-key', userId: USER_ID },
         preferences: preferences(),
       })
 
@@ -180,5 +209,22 @@ describe('runGmailSyncCore — idempotency', () => {
     expect(fakeDb.tables.get('activities')).toHaveLength(1)
     expect(fakeDb.tables.get('applications')).toHaveLength(1)
     expect(fakeDb.tables.get('jobs')).toHaveLength(1)
+  })
+})
+
+describe('runGmailSyncCore — LLM metering', () => {
+  it('classifies through callLlm with the user id: budget checked and spend recorded per email', async () => {
+    fakeDb = makeFakeDb()
+    fakeDb.tables.set('profiles', [{ id: USER_ID, preferences: {} }])
+    await runGmailSyncCore({
+      db: fakeDb as any,
+      userId: USER_ID,
+      accessToken: 'fake-access-token',
+      apiKeys: { openrouter: 'fake-key', userId: USER_ID },
+      preferences: preferences(),
+    })
+    expect(callOpenRouterMock).toHaveBeenCalled()
+    expect(assertWithinBudgetMock).toHaveBeenCalledWith(expect.anything(), USER_ID)
+    expect(recordSpendMock).toHaveBeenCalledWith(expect.anything(), USER_ID, 'google/gemini-2.0-flash-001', 500, 100)
   })
 })

@@ -23,6 +23,13 @@
 // written directly by whoever is already inside the invocation and about to
 // return, has no such gap. (Spec decision, see the doc's "Tracing" row.)
 //
+// LANGFUSE REPLAY. This buffer is also the ONLY capture point for the Langfuse
+// export (lib/observability/langfuse.ts). A record may carry an in-memory `lf`
+// payload (names, usage, cost, prompt text); flush() strips it before the
+// insert and replays the records to Langfuse as observations with their real
+// timestamps, so there is no second span tree and no live OTel context. `lf` is
+// built only when the buffer's export is enabled (keys set and trace sampled).
+//
 // WHY AsyncLocalStorage, REUSING lib/memory/mem0-store.ts's PATTERN
 //   callLlm has no `config`/context parameter — its signature is
 //   (apiKeys, opts, signal), unchanged by this port on purpose (see llm.ts's
@@ -52,14 +59,108 @@
 
 import { randomUUID } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { readProfileForDemoGuards } from '../harness/keys'
 import type { AdminClient } from '../harness/types'
-import { mirrorSpansToLangfuse } from '../observability/langfuse'
+import { contentCaptureFor, exportTrace, langfuseConfigured, traceSampled } from '../observability/langfuse'
 
 /** Matches the `kind` CHECK constraint on public.trace_spans. */
 export type SpanKind = 'graph' | 'node' | 'llm' | 'tool' | 'judge' | 'http'
 export type SpanStatus = 'ok' | 'error'
 
-/** One trace_spans row, shaped for a direct `.insert()`. */
+/** Langfuse observation types a record can ask for. */
+export type LfType = 'agent' | 'chain' | 'span' | 'generation' | 'embedding' | 'tool' | 'retriever'
+
+/**
+ * What the Langfuse export needs beyond the trace_spans columns. In memory
+ * only: flush() strips it before the Postgres insert, so prompt and completion
+ * text can never reach the database, and langfuse.ts redacts and caps every
+ * string in it before it leaves the process. Built only when the buffer's
+ * export is enabled (see SpanBuffer.exportEnabled).
+ */
+export interface LfPayload {
+  /** Stable Langfuse name (a code constant, never free text). */
+  name?: string
+  /** Defaults from the span kind. Usage and cost only ride generation/embedding. */
+  type?: LfType
+  /** Observation input and output. Set only when the buffer captures content. */
+  input?: unknown
+  output?: unknown
+  model?: string
+  modelParameters?: Record<string, string | number>
+  /** usageDetails buckets (input, output, total). */
+  usage?: Record<string, number>
+  /** costDetails in USD. */
+  cost?: Record<string, number>
+  /** Ids, enums and numbers only. Sent even with content capture off. */
+  metadata?: Record<string, string | number | boolean>
+  /** Free text (a planner label, an MCP server name). Sent only with capture on. */
+  detail?: Record<string, string>
+  /** Prompt version (a content hash). */
+  version?: string
+  level?: 'WARNING' | 'ERROR'
+  /** Short machine code for a failure or warning, see errorCode(). */
+  errorCode?: string
+  /** The raw error text. Set only when the buffer captures content. */
+  errorMessage?: string
+  /** The span threw, but the caller treats that as a normal fallback (no
+   *  embedding key, budget cap). It stays at the default level with no status
+   *  message, so level filters and error counts only show real failures. */
+  expected?: boolean
+}
+
+/** Trace-level facts the Langfuse export stamps on every observation. */
+export interface TraceMeta {
+  /** Trace name constant. Defaults to the root observation's stable name. */
+  name?: string
+  /** Copilot conversation id, or a run/digest thread id. */
+  sessionId?: string
+  /** True for a demo workspace, false for the owner. Undefined is treated as
+   *  demo (fail closed): demo content capture is off by default. */
+  isDemo?: boolean
+  /** Tag `feature:<x>` and metadata.feature. Defaults to the trace name. */
+  feature?: string
+  /** Ids and enums only, at most 200 chars each. */
+  metadata?: Record<string, string>
+  /** Short code for a failure the route handled itself (a 500 it returned
+   *  instead of throwing). The root observation then carries level ERROR. */
+  error?: string
+  /** Root observation input and output (the trace input/output in Langfuse).
+   *  The root span's lfOf reads these when it ends, so a graph that learns its
+   *  answer late (copilot's finalize) can set the output after invoke returns.
+   *  Used only when the buffer captures content. */
+  input?: unknown
+  output?: unknown
+}
+
+/** A judge verdict waiting to become a Langfuse score at replay time. Scores
+ *  ride the replay so a sampled-out trace emits none. */
+export interface PendingScore {
+  /** `<subject_kind>.<judge>`, e.g. `outreach_draft.factuality`. */
+  name: string
+  /** 0..1 for a numeric score, null for a refusal (sent as a categorical outcome). */
+  value: number | null
+  /** pass, fail, insufficient-data... */
+  verdict: string
+  /** span_id of the judge generation that produced it, when known. */
+  spanId?: string | null
+  rationale?: string | null
+  /** Ids, enums and numbers only. */
+  metadata?: Record<string, string | number | boolean>
+}
+
+/** A short, content-free code for a failure: `http_429`, `ETIMEDOUT`,
+ *  `TypeError`, else `error`. Never the message text. */
+export function errorCode(err: unknown): string {
+  const e = err as { status?: unknown; code?: unknown; name?: unknown } | null | undefined
+  if (typeof e?.status === 'number') return `http_${e.status}`
+  if (typeof e?.code === 'string' && /^[A-Z0-9_]{2,32}$/.test(e.code)) return e.code
+  if (typeof e?.name === 'string' && /^[A-Za-z]{1,40}$/.test(e.name)) return e.name
+  return 'error'
+}
+
+/** One trace_spans row, shaped for a direct `.insert()`, plus `lf`, which is
+ *  NOT a column: flush() strips it before the insert so prompt and
+ *  completion text can never reach Postgres. */
 export interface SpanRecord {
   trace_id: string
   span_id: string
@@ -74,6 +175,10 @@ export interface SpanRecord {
   status: SpanStatus
   attributes: Record<string, unknown> | null
   events: unknown | null
+  lf?: LfPayload
+  /** False keeps the record out of trace_spans (Langfuse only, e.g. embeddings).
+   *  Not a column either: flush() strips it. */
+  persist?: false
 }
 
 // --- attribute size discipline -----------------------------------------
@@ -116,14 +221,64 @@ export class SpanBuffer {
   readonly userId: string
   readonly threadId: string | null
   private pending: SpanRecord[] = []
+  private flushed = false
+  private exportCache: boolean | undefined
+  meta: TraceMeta
+  readonly scores: PendingScore[] = []
 
-  constructor(userId: string, threadId: string | null = null, traceId: string = randomUUID()) {
+  constructor(userId: string, threadId: string | null = null, traceId: string = randomUUID(), meta: TraceMeta = {}) {
     this.userId = userId
     this.threadId = threadId
     this.traceId = traceId
+    this.meta = meta
+  }
+
+  /** Merge trace-level facts (name, session, isDemo...). Re-decides sampling. */
+  setMeta(patch: Partial<TraceMeta>): void {
+    this.meta = { ...this.meta, ...patch, metadata: { ...this.meta.metadata, ...patch.metadata } }
+    this.exportCache = undefined
+  }
+
+  /** Queue a judge verdict for the Langfuse replay. Nothing is kept when the
+   *  trace is not exported. */
+  addScore(score: PendingScore): void {
+    if (this.exportEnabled) this.scores.push(score)
+  }
+
+  /** Hand the queued scores to one replay (each is sent once). */
+  takeScores(): PendingScore[] {
+    return this.scores.splice(0, this.scores.length)
+  }
+
+  /** Fill isDemo when the buffer was created before the profile was known.
+   *  Fails closed: an unknown flag is filled, and a later `true` (the key
+   *  loader saw a demo profile) downgrades an earlier `false`, never the
+   *  other way round. */
+  adoptDemoFlag(isDemo: boolean | undefined): void {
+    if (isDemo === undefined) return
+    if (this.meta.isDemo === undefined || (isDemo && this.meta.isDemo === false)) this.setMeta({ isDemo })
+  }
+
+  /** Langfuse is configured and this trace is sampled in. Decided once per
+   *  trace (and again by setMeta); when false no `lf` payload is built, no
+   *  Langfuse package is imported and nothing leaves the process. */
+  get exportEnabled(): boolean {
+    this.exportCache ??= langfuseConfigured() && traceSampled(this.traceId, this.meta.isDemo)
+    return this.exportCache
+  }
+
+  /** Prompt and completion text may be sent for this trace. */
+  get captureContent(): boolean {
+    return this.exportEnabled && contentCaptureFor(this.meta.isDemo)
   }
 
   record(span: Omit<SpanRecord, 'trace_id' | 'user_id' | 'thread_id'>): void {
+    if (this.flushed) {
+      // Recorded after the owner already flushed: still exported if flush()
+      // runs again, but a span that nobody flushes is lost, so say so once.
+      this.flushed = false
+      console.warn(`[trace] span "${span.name}" recorded after flush; it is lost unless flush() runs again`)
+    }
     this.pending.push({ trace_id: this.traceId, user_id: this.userId, thread_id: this.threadId, ...span })
   }
 
@@ -141,22 +296,44 @@ export class SpanBuffer {
   async flush(admin: AdminClient): Promise<void> {
     if (this.pending.length === 0) return
     const rows = this.pending.splice(0, this.pending.length)
+    this.flushed = true
+    // Started first so it overlaps the insert. It never rejects. On Vercel it
+    // runs inside waitUntil and resolves at once; elsewhere it is awaited up to
+    // a deadline. See langfuse.ts's delivery notes.
+    const exporting = exportTrace(this, rows).catch((err) =>
+      console.error(`[trace] Langfuse export threw unexpectedly: ${err instanceof Error ? err.message : String(err)}`)
+    )
     try {
-      const { error } = await admin.from('trace_spans').insert(rows)
-      if (error) console.error(`[trace] span flush failed (${rows.length} span(s) dropped): ${error.message}`)
+      // `lf` (prompt/completion text) is dropped here, never persisted, and
+      // Langfuse-only records (persist:false) never become rows at all.
+      // trace_spans.parent_span_id is a foreign key, so a persisted row whose
+      // parent is Langfuse-only (an embedding or retriever record) re-parents to
+      // its nearest persisted ancestor, or becomes a root.
+      const byId = new Map(rows.map((r) => [r.span_id, r]))
+      const persistedParent = (r: SpanRecord): string | null => {
+        let p = r.parent_span_id ? byId.get(r.parent_span_id) : undefined
+        for (let hops = 0; p && hops < 64; hops += 1) {
+          if (p.persist !== false) return p.span_id
+          p = p.parent_span_id ? byId.get(p.parent_span_id) : undefined
+        }
+        return null
+      }
+      const persisted = rows
+        .filter((r) => r.persist !== false)
+        .map(({ lf: _lf, persist: _persist, ...row }) => ({
+          ...row,
+          parent_span_id: row.parent_span_id && byId.get(row.parent_span_id)?.persist === false ? persistedParent(row) : row.parent_span_id,
+        }))
+      if (persisted.length > 0) {
+        const { error } = await admin.from('trace_spans').insert(persisted)
+        if (error) console.error(`[trace] span flush failed (${persisted.length} span(s) dropped): ${error.message}`)
+      }
     } catch (err) {
       console.error(
         `[trace] span flush threw (${rows.length} span(s) dropped): ${err instanceof Error ? err.message : String(err)}`
       )
     }
-    // Fire-and-forget Langfuse mirror — never awaited, so a slow or
-    // unreachable Langfuse never adds latency to the request that produced
-    // these spans. Postgres above is the write this function's caller
-    // actually depends on; this is a bonus copy for whoever opted into it.
-    // See lib/observability/langfuse.ts's header for the full rationale.
-    void mirrorSpansToLangfuse(rows).catch((err) =>
-      console.error(`[trace] Langfuse mirror threw unexpectedly: ${err instanceof Error ? err.message : String(err)}`)
-    )
+    await exporting
   }
 }
 
@@ -170,6 +347,16 @@ export interface TraceContext {
    *  is known at this level (e.g. invoke.ts's own graph-root context — see
    *  that file's header for why it never guesses one). */
   runId: string | null
+  /** Set by a retriever (see observe's foldEmbeddings): embeddings made under
+   *  it add their usage here instead of becoming observations of their own. */
+  embed?: EmbedFold
+}
+
+/** Embedding usage folded into the enclosing retriever or memory write. */
+export interface EmbedFold {
+  calls: number
+  tokens: number
+  costUsd: number
 }
 
 const traceContext = new AsyncLocalStorage<TraceContext>()
@@ -203,10 +390,13 @@ export interface SpanScope {
  * know its own domain run id (runAgentUnit always does) supplies it directly
  * to `withSpan`/`runInTraceContext` rather than through this function.
  */
-export function acquireSpanScope(userId: string): SpanScope {
+export function acquireSpanScope(userId: string, isDemo?: boolean): SpanScope {
   const ctx = currentTraceContext()
-  if (ctx) return { buffer: ctx.buffer, parentSpanId: ctx.parentSpanId, runId: ctx.runId, owns: false }
-  return { buffer: new SpanBuffer(userId), parentSpanId: null, runId: null, owns: true }
+  if (ctx) {
+    ctx.buffer.adoptDemoFlag(isDemo)
+    return { buffer: ctx.buffer, parentSpanId: ctx.parentSpanId, runId: ctx.runId, owns: false }
+  }
+  return { buffer: new SpanBuffer(userId, null, undefined, { isDemo }), parentSpanId: null, runId: null, owns: true }
 }
 
 // --- span emission ---------------------------------------------------------
@@ -216,6 +406,9 @@ export interface SpanSpec {
   runId: string | null
   kind: SpanKind
   name: string
+  /** False: a Langfuse-only span. Recorded only when the trace is exported,
+   *  and never inserted into trace_spans. */
+  persist?: false
 }
 
 /**
@@ -230,11 +423,35 @@ export interface SpanSpec {
 export async function withSpan<T>(
   buffer: SpanBuffer,
   spec: SpanSpec,
-  fn: (spanId: string) => Promise<T>,
-  attributesOf?: (result: T | undefined, err: unknown) => Record<string, unknown> | undefined
+  fn: (spanId: string | null) => Promise<T>,
+  attributesOf?: (result: T | undefined, err: unknown) => Record<string, unknown> | undefined,
+  lfOf?: (result: T | undefined, err: unknown, capture: boolean) => LfPayload | undefined
 ): Promise<T> {
   const spanId = randomUUID()
   const startTime = new Date().toISOString()
+  // A Langfuse-only span has nowhere to go when the trace is not exported. It
+  // is never recorded, so children nest under its parent: a phantom id would
+  // break trace_spans.parent_span_id's foreign key and drop the whole batch.
+  if (spec.persist === false && !buffer.exportEnabled) return fn(spec.parentSpanId)
+  // The Langfuse payload is built ONLY when this trace is exported, and gets
+  // `capture` so it can skip building prompt text when content is off. A
+  // failure here must never fail the request: observability only.
+  const lfFor = (result: T | undefined, err: unknown, failed: boolean): LfPayload | undefined => {
+    if (!buffer.exportEnabled) return undefined
+    let lf: LfPayload | undefined
+    try {
+      lf = lfOf?.(result, err, buffer.captureContent)
+    } catch (e) {
+      console.warn(`[trace] lfOf threw: ${e instanceof Error ? e.name : 'error'}`)
+    }
+    if (!failed) return lf
+    const message = err instanceof Error ? err.message : String(err)
+    return {
+      ...lf,
+      errorCode: lf?.errorCode ?? errorCode(err),
+      errorMessage: lf?.errorMessage ?? (buffer.captureContent ? message : undefined),
+    }
+  }
   try {
     const result = await fn(spanId)
     buffer.record({
@@ -248,6 +465,8 @@ export async function withSpan<T>(
       status: 'ok',
       attributes: capAttributes(attributesOf?.(result, undefined)),
       events: null,
+      lf: lfFor(result, undefined, false),
+      ...(spec.persist === false ? { persist: false as const } : {}),
     })
     return result
   } catch (err) {
@@ -262,8 +481,171 @@ export async function withSpan<T>(
       status: 'error',
       attributes: capAttributes(attributesOf?.(undefined, err)),
       events: null,
+      lf: lfFor(undefined, err, true),
+      ...(spec.persist === false ? { persist: false as const } : {}),
     })
     throw err
+  }
+}
+
+export interface ObserveSpec {
+  /** Langfuse name: a lowercase code constant. */
+  name: string
+  type: LfType
+  /** trace_spans kind when the span is persisted. Default `tool`. */
+  kind?: SpanKind
+  /** False keeps it Langfuse-only (retrievers and the like). */
+  persist?: false
+  /** Embeddings made inside this span add their tokens and cost to its
+   *  metadata (embedding_tokens, embedding_cost) instead of each becoming an
+   *  EMBEDDING observation with only a count and a size. */
+  foldEmbeddings?: boolean
+  /** Small, content-free trace_spans attributes for a persisted span. */
+  attributesOf?: (result: never, err: unknown) => Record<string, unknown> | undefined
+}
+
+/**
+ * Record `fn` as one child observation of the ambient trace (a tool call, a
+ * retrieval). Outside a trace, and when the trace is not exported and the span
+ * is Langfuse-only, it just runs `fn`: lone observations would make
+ * single-observation traces that cost units and show nothing.
+ */
+export async function observe<T>(
+  spec: ObserveSpec,
+  fn: () => Promise<T>,
+  lfOf?: (result: T | undefined, err: unknown, capture: boolean) => Omit<LfPayload, 'name' | 'type'> | undefined
+): Promise<T> {
+  const ctx = currentTraceContext()
+  if (!ctx) return fn()
+  const embed: EmbedFold | undefined = spec.foldEmbeddings ? { calls: 0, tokens: 0, costUsd: 0 } : undefined
+  return withSpan(
+    ctx.buffer,
+    { parentSpanId: ctx.parentSpanId, runId: ctx.runId, kind: spec.kind ?? 'tool', name: spec.name, persist: spec.persist },
+    (spanId) => runInTraceContext({ ...ctx, parentSpanId: spanId, ...(embed ? { embed } : {}) }, fn),
+    spec.attributesOf as ((result: T | undefined, err: unknown) => Record<string, unknown> | undefined) | undefined,
+    (result, err, capture) => {
+      const lf = lfOf?.(result, err, capture)
+      return {
+        name: spec.name,
+        type: spec.type,
+        ...lf,
+        ...(embed && embed.calls > 0
+          ? { metadata: { ...lf?.metadata, embedding_calls: embed.calls, embedding_tokens: embed.tokens, embedding_cost: embed.costUsd } }
+          : {}),
+      }
+    }
+  )
+}
+
+/** Set the output of the current trace's root observation (copilot's reply,
+ *  a run's summary). A no-op outside a trace. */
+export function setTraceOutput(output: unknown): void {
+  const ctx = currentTraceContext()
+  if (ctx) ctx.buffer.meta.output = output
+}
+
+/** Set the input of the current trace's root observation, for a route that
+ *  only knows it after parsing its body. Request essentials only (ids, titles),
+ *  never resume text. A no-op outside a trace. */
+export function setTraceInput(input: unknown): void {
+  const ctx = currentTraceContext()
+  if (ctx) ctx.buffer.meta.input = input
+}
+
+/** Add ids and enums to the current trace's metadata (job_id, message_id...),
+ *  so the root's input can say what a reviewer needs and the ids stay
+ *  searchable. Values must look like ids (200 chars of [A-Za-z0-9_.:/-]) or the
+ *  export drops them. A no-op outside a trace. */
+export function setTraceMeta(metadata: Record<string, string>): void {
+  currentTraceContext()?.buffer.setMeta({ metadata })
+}
+
+/** Mark the current trace's root observation failed from a handled error (a
+ *  route that catches a model failure and returns a 500). The root then has
+ *  level ERROR, this code as its status message and {error: code} as output.
+ *  A no-op outside a trace. */
+export function setTraceError(code: string): void {
+  const ctx = currentTraceContext()
+  if (ctx) ctx.buffer.meta.error = code
+}
+
+export interface TraceSpec {
+  /** Trace and root observation name: a lowercase code constant. */
+  name: string
+  /** Root observation type, default `span`. */
+  type?: LfType
+  /** Request essentials (ids, titles, counts). Never resume text or base64. */
+  input?: unknown
+  /** Result summary for the root observation's output. */
+  outputOf?: (result: never) => unknown
+  isDemo?: boolean
+  sessionId?: string
+  /** Ids and enums only. */
+  metadata?: Record<string, string>
+}
+
+/**
+ * Give a standalone route (or any code with no graph around it) a named
+ * Langfuse trace: a root observation that every `callLlm`, judge and tool call
+ * inside `fn` nests under. The root is Langfuse-only (persist:false), so
+ * trace_spans gains no rows. Inside an ambient trace this is a plain child
+ * observation, and only the call that created the buffer flushes it.
+ */
+export async function withTrace<T>(admin: AdminClient, userId: string, spec: TraceSpec, fn: () => Promise<T>): Promise<T> {
+  // Demo or owner decides whether prompt text may leave and how the trace is
+  // sampled, and the root observation is decided at its start, so the answer
+  // is needed before the first span. Read only when Langfuse is on.
+  let isDemo = spec.isDemo
+  if (isDemo === undefined && !currentTraceContext() && langfuseConfigured()) {
+    try {
+      const { row } = await readProfileForDemoGuards(admin, userId)
+      isDemo = row ? (row.is_demo === true || Boolean(row.demo_expires_at) ? true : row.is_demo === false ? false : undefined) : undefined
+    } catch {
+      // Unknown stays unknown, which counts as demo (fail closed).
+    }
+  }
+  const scope = acquireSpanScope(userId, isDemo)
+  if (scope.owns) {
+    scope.buffer.setMeta({
+      name: spec.name,
+      ...(spec.sessionId ? { sessionId: spec.sessionId } : {}),
+      ...(spec.metadata ? { metadata: spec.metadata } : {}),
+    })
+  }
+  try {
+    return await withSpan(
+      scope.buffer,
+      { parentSpanId: scope.parentSpanId, runId: scope.runId, kind: 'http', name: spec.name, persist: false },
+      (spanId) => runInTraceContext({ buffer: scope.buffer, parentSpanId: spanId, runId: scope.runId }, fn),
+      undefined,
+      (result, _err, capture) => {
+        // A handled failure: setTraceError(code), or a returned Response with
+        // status >= 500. A thrown error is already an ERROR via withSpan.
+        const status = (result as { status?: unknown } | undefined)?.status
+        const failure = scope.owns
+          ? scope.buffer.meta.error ?? (typeof status === 'number' && status >= 500 ? `http_${status}` : undefined)
+          : undefined
+        return {
+          name: spec.name,
+          type: spec.type ?? 'span',
+          ...(failure ? { level: 'ERROR' as const, errorCode: failure } : {}),
+          ...(capture
+            ? {
+                input: (scope.owns ? scope.buffer.meta.input : undefined) ?? spec.input,
+                output: failure
+                  ? { error: failure }
+                  : (scope.owns ? scope.buffer.meta.output : undefined) ??
+                    (result !== undefined && spec.outputOf ? (spec.outputOf as (r: T) => unknown)(result) : undefined),
+              }
+            : {}),
+        }
+      }
+    )
+  } finally {
+    // A root with nothing under it (a request that never reached a model) is
+    // not worth a unit: only the call that created the buffer flushes, and only
+    // when something ran inside it.
+    if (scope.owns && (scope.buffer.size > 1 || !scope.buffer.exportEnabled)) await scope.buffer.flush(admin)
   }
 }
 

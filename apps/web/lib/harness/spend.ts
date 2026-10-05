@@ -47,6 +47,10 @@ const PRICES: Record<string, { in: number; out: number }> = {
   'moonshotai/kimi-k3': { in: 3, out: 15 },
   'moonshotai/kimi-k2-thinking': { in: 0.6, out: 2.5 },
   'google/gemini-2.5-flash': { in: 0.3, out: 2.5 },
+  // Cheap bulk models (Gmail classify, scraper extract, career-page verify). Unlisted they
+  // would book at the $5/$25 fallback, about 70x too high, and burn a demo's cap in ~70 emails.
+  'google/gemini-2.0-flash-001': { in: 0.1, out: 0.4 },
+  'openai/gpt-4o-mini': { in: 0.15, out: 0.6 },
   // Embeddings only ever consume input tokens (out: 0) — callEmbedding
   // (lib/harness/llm.ts) always passes completionTokens=0 to recordSpend.
   // Locked model (2026-08-16 langgraph port spec); OpenAI's published rate.
@@ -57,6 +61,23 @@ const FALLBACK_PRICE = { in: 5, out: 25 }
 export function estimateCostUsd(model: string, promptTokens: number, completionTokens: number): number {
   const p = PRICES[model] ?? FALLBACK_PRICE
   return (promptTokens / 1e6) * p.in + (completionTokens / 1e6) * p.out
+}
+
+/** The same numbers split into Langfuse costDetails buckets (USD). Uses OUR
+ *  price table, the one the budget ledger charges, so Langfuse and the cap
+ *  agree. */
+export function estimateCostDetails(
+  model: string,
+  promptTokens: number,
+  completionTokens: number
+): { input: number; output: number } {
+  const p = PRICES[model] ?? FALLBACK_PRICE
+  return { input: (promptTokens / 1e6) * p.in, output: (completionTokens / 1e6) * p.out }
+}
+
+/** False when estimateCostUsd had to use FALLBACK_PRICE for this model. */
+export function hasListedPrice(model: string): boolean {
+  return Object.prototype.hasOwnProperty.call(PRICES, model)
 }
 
 /** Current UTC billing month, e.g. "2026-07". */

@@ -16,7 +16,8 @@ process.env.MEM0_TELEMETRY = 'false'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { Memory, type MemoryConfig } from 'mem0ai/oss'
 import type { BaseMessage } from '@langchain/core/messages'
-import { callLlm, callEmbedding, EMBEDDING_DIMS } from '../harness/llm'
+import { callLlm, callEmbedding, EMBEDDING_DIMS, isEmbeddingFallback } from '../harness/llm'
+import { observe } from '../trace/spans'
 import { loadApiKeys } from '../harness/keys'
 import { createAdminClient } from '../harness/supabase-admin'
 import { parseDbUrl, sslFor } from '../graph/pg'
@@ -87,7 +88,13 @@ const mem0LlmDelegate = {
       role: roleOf(m),
       content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
     }))
-    const res = await callLlm(apiKeys, { messages: chatMessages, model: MEM0_INTERNAL_MODEL, maxTokens: 800, temperature: 0 })
+    const res = await callLlm(apiKeys, {
+      messages: chatMessages,
+      model: MEM0_INTERNAL_MODEL,
+      maxTokens: 800,
+      temperature: 0,
+      name: 'extract-memories',
+    })
     return { content: res.content }
   },
 }
@@ -99,14 +106,14 @@ const mem0LlmDelegate = {
 const mem0EmbedderDelegate = {
   async embedQuery(text: string): Promise<number[]> {
     const apiKeys = currentApiKeys()
-    const res = await callEmbedding(apiKeys, { texts: [text] })
+    const res = await callEmbedding(apiKeys, { texts: [text], name: 'embed-memory-lookup' })
     const vec = res.embeddings[0]
     if (!vec) throw new Error('lib/memory/mem0-store.ts: callEmbedding returned no vector for a single query embed')
     return vec
   },
   async embedDocuments(texts: string[]): Promise<number[][]> {
     const apiKeys = currentApiKeys()
-    const res = await callEmbedding(apiKeys, { texts })
+    const res = await callEmbedding(apiKeys, { texts, name: 'embed-memory' })
     return res.embeddings
   },
 }
@@ -235,6 +242,9 @@ function toMemoryItem(raw: { id: string; memory: string; score?: number; created
   return { id: raw.id, memory: raw.memory, score: raw.score, createdAt: raw.createdAt, metadata: raw.metadata }
 }
 
+/** Metadata for a memory call that did not run because no embedding was possible. */
+const skippedNoEmbedding = (err: unknown): Record<string, string> => (isEmbeddingFallback(err) ? { fallback: 'no-embedding' } : {})
+
 export class Mem0Store implements MemoryStore {
   private memory: Memory | undefined
 
@@ -258,18 +268,30 @@ export class Mem0Store implements MemoryStore {
     const admin = createAdminClient()
     const apiKeys = await loadApiKeys(admin, userId)
     const metadata = { scope: input.scope, ...(input.refs ?? {}) }
-    await apiKeysContext.run(apiKeys, async () => {
-      const result =
-        input.fact !== undefined
-          ? // Already a distilled fact — store as-is, skip mem0's own
-            // extraction LLM call (infer: false).
-            await this.instance().add(input.fact, { userId, infer: false, metadata })
-          : // A conversation turn — let mem0 run its own fact-extraction LLM
-            // call and resolve ADD/UPDATE/DELETE (with hash dedup) against
-            // what it already knows about this user.
-            await this.instance().add(input.messages ?? [], { userId, infer: true, metadata })
-      await this.verifyPersisted(result.results)
-    })
+    // One Langfuse observation for the whole write: the fact extraction call
+    // nests under it, and the lookup and storage embeddings fold into its
+    // metadata instead of hanging off the turn's root as bare observations.
+    await observe(
+      { name: 'save-memory', type: 'chain', persist: false, foldEmbeddings: true },
+      () =>
+        apiKeysContext.run(apiKeys, async () => {
+          const result =
+            input.fact !== undefined
+              ? // Already a distilled fact — store as-is, skip mem0's own
+                // extraction LLM call (infer: false).
+                await this.instance().add(input.fact, { userId, infer: false, metadata })
+              : // A conversation turn — let mem0 run its own fact-extraction LLM
+                // call and resolve ADD/UPDATE/DELETE (with hash dedup) against
+                // what it already knows about this user.
+                await this.instance().add(input.messages ?? [], { userId, infer: true, metadata })
+          await this.verifyPersisted(result.results)
+          return result.results.length
+        }),
+      (written, err) => ({
+        metadata: { scope: input.scope, ...(written !== undefined ? { memories: written } : {}), ...skippedNoEmbedding(err) },
+        ...(isEmbeddingFallback(err) ? { expected: true } : {}),
+      })
+    )
   }
 
   /**
@@ -298,10 +320,25 @@ export class Mem0Store implements MemoryStore {
   async search(userId: string, query: string, opts: { limit?: number } = {}): Promise<MemoryItem[]> {
     const admin = createAdminClient()
     const apiKeys = await loadApiKeys(admin, userId)
-    const result = await apiKeysContext.run(apiKeys, () =>
-      this.instance().search(query, { topK: opts.limit ?? 6, filters: { user_id: userId } })
+    // One Langfuse retriever observation (with its embed-query nested under
+    // it) when a trace is active. The query is user text: capture-gated.
+    const items = await observe(
+      { name: 'search-memory', type: 'retriever', persist: false, foldEmbeddings: true },
+      async () => {
+        const result = await apiKeysContext.run(apiKeys, () =>
+          this.instance().search(query, { topK: opts.limit ?? 6, filters: { user_id: userId } })
+        )
+        return result.results.map(toMemoryItem)
+      },
+      (found, err, capture) => ({
+        ...(capture ? { input: { query }, output: { count: found?.length ?? 0, hits: (found ?? []).slice(0, 10).map((m) => ({ text: m.memory.slice(0, 300), score: m.score })) } } : {}),
+        metadata: { limit: opts.limit ?? 6, ...(found ? { hits: found.length } : {}), ...skippedNoEmbedding(err) },
+        // No embedding key (or a capped month) is a normal configuration: the
+        // caller carries on without memories. Not an error.
+        ...(isEmbeddingFallback(err) ? { expected: true } : {}),
+      })
     )
-    return result.results.map(toMemoryItem)
+    return items
   }
 
   async getAll(userId: string): Promise<MemoryItem[]> {

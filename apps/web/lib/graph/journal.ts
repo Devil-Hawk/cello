@@ -53,6 +53,95 @@ export interface StepKey {
   iteration?: number | null
 }
 
+// --- payload cap -----------------------------------------------------------
+//
+// Step input/output used to land in trace_spans uncapped (resumes, job text,
+// whole match lists), which is the real size risk on the 500MB free database.
+// Nothing needs the full payloads back: a resumed run restores from the
+// LangGraph checkpointer, never from this ledger; findStepRow only reads
+// `iteration`; journalStepOutput is only ever called for the tiny
+// `__replan-N` rows ({accepted, reason, addedLabels}); and the run-detail UI
+// (graph-view.tsx#stepDetail) reads short scalars plus the LENGTH of
+// topJobIds / matches / jobIds. So big values are shrunk, not dropped: every
+// key survives, a long string is cut, and a long array keeps its length with
+// the overflow items nulled, which keeps those counts right.
+
+export const JOURNAL_PAYLOAD_CAP_BYTES = 8 * 1024
+const bytes = (v: unknown): number => Buffer.byteLength(JSON.stringify(v) ?? '', 'utf8')
+
+/** Caps `value` to about `cap` bytes. The recursive shaping below cannot
+ *  bound a wide object (every key still costs a key plus a marker), so a final
+ *  guard swaps an oversized result for a plain preview. */
+export function capPayload(value: unknown, cap: number = JOURNAL_PAYLOAD_CAP_BYTES): unknown {
+  const out = capInner(value, cap, 0)
+  let size: number
+  try {
+    size = bytes(out)
+  } catch {
+    return '[unserializable]'
+  }
+  if (size <= cap * 1.25) return out
+  let preview = ''
+  try {
+    preview = JSON.stringify(value).slice(0, Math.max(0, cap - 128))
+  } catch {
+    /* unserializable: keep the empty preview */
+  }
+  return { _truncated: true, preview }
+}
+
+function capInner(value: unknown, cap: number, depth: number): unknown {
+  if (value == null || typeof value === 'number' || typeof value === 'boolean') return value
+  let size: number
+  try {
+    size = bytes(value)
+  } catch {
+    return '[unserializable]'
+  }
+  if (size <= cap) return value
+  if (typeof value === 'string') {
+    // Same byte-slice approach as spans.ts#capValue, with headroom for the marker.
+    return `${Buffer.from(value, 'utf8').subarray(0, Math.max(0, cap - 64)).toString('utf8')}…[truncated ${size} bytes]`
+  }
+  if (depth > 6 || cap < 64) return '[truncated]'
+  if (Array.isArray(value)) {
+    // Keep whole items while they fit, always leaving room for the remaining
+    // ones as `null,` (5 bytes) so the length survives. If even the nulls
+    // cannot fit, the length is cut too.
+    const out: unknown[] = []
+    let used = 2
+    for (let i = 0; i < value.length; i += 1) {
+      const n = bytes(value[i]) + 1
+      const rest = 5 * (value.length - i - 1)
+      if (used + n + rest <= cap) {
+        out.push(value[i])
+        used += n
+      } else if (used + 5 + rest <= cap) {
+        out.push(null)
+        used += 5
+      } else {
+        out.push(...new Array(Math.max(0, Math.floor((cap - used) / 5))).fill(null))
+        break
+      }
+    }
+    return out
+  }
+  // Object: keys that fit an even share keep their value as is, the leftover
+  // budget is split across the oversized ones.
+  const entries = Object.entries(value as Record<string, unknown>)
+  const share = Math.floor(cap / Math.max(1, entries.length))
+  const sizes = entries.map(([k, v]) => bytes(k) + bytes(v) + 2)
+  const small = sizes.reduce((sum, n) => sum + (n <= share ? n : 0), 0)
+  const bigCount = sizes.filter((n) => n > share).length
+  const bigShare = bigCount ? Math.floor((cap - small) / bigCount) : 0
+  const out: Record<string, unknown> = {}
+  entries.forEach(([k, v], i) => {
+    out[k] = sizes[i] <= share ? v : capInner(v, Math.max(0, bigShare - bytes(k) - 2), depth + 1)
+  })
+  out._truncated = true
+  return out
+}
+
 /** The subset of a trace_spans row's shape this file reads/writes attributes as. */
 interface StepAttributes {
   agentType: string
@@ -224,7 +313,7 @@ export async function journalStepStart(admin: AdminClient, args: JournalStepStar
     admin,
     { runId: args.runId, label: args.label, iteration: args.iteration },
     { start_time: new Date().toISOString() },
-    { stepStatus: 'running', input: args.input },
+    { stepStatus: 'running', input: capPayload(args.input) },
     { agentType: args.agentType, parentSpanId: args.parentStepId ?? null }
   )
 }
@@ -244,7 +333,7 @@ export async function journalStepFinish(admin: AdminClient, args: JournalStepFin
     admin,
     { runId: args.runId, label: args.label, iteration: args.iteration },
     { end_time: new Date().toISOString() },
-    { stepStatus: args.status, output: args.output, tokensUsed: args.tokensUsed },
+    { stepStatus: args.status, output: capPayload(args.output), tokensUsed: args.tokensUsed },
     { agentType: args.agentType, parentSpanId: args.parentStepId ?? null }
   )
 }

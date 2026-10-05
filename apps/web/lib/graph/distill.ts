@@ -72,6 +72,7 @@ import { BudgetCapError } from '../harness/spend'
 import { JUDGE_MODEL } from '../evals/judge'
 import { MIN_SAMPLE_PER_CLASS } from '../evals/harness'
 import { writeVerdict } from '../evals/verdicts'
+import { withTrace } from '../trace/spans'
 import { ingestInsight } from '../insights/store'
 import { resolveCompanyId, trackedRoleCount } from '../entities/companies'
 import { isSmallCompany } from '../contacts/relevance'
@@ -281,7 +282,7 @@ async function distillCandidate(admin: AdminClient, userId: string, runId: strin
 
   let content: string
   try {
-    const result = await callLlm(apiKeys, { system, prompt, model: JUDGE_MODEL, maxTokens: 220 })
+    const result = await callLlm(apiKeys, { system, prompt, model: JUDGE_MODEL, maxTokens: 220, name: 'distill-insight' })
     content = result.content.trim()
   } catch (err) {
     if (err instanceof BudgetCapError) {
@@ -350,6 +351,13 @@ export interface DistillOutcome {
  * the failure is not silent.
  */
 export async function distillInsights(admin: AdminClient, userId: string): Promise<DistillOutcome> {
+  // A weekly background job: its own Langfuse trace, outcome counts as output.
+  return withTrace(admin, userId, { name: 'distill-memory', outputOf: (o: DistillOutcome) => o }, () =>
+    distillInsightsInner(admin, userId)
+  )
+}
+
+async function distillInsightsInner(admin: AdminClient, userId: string): Promise<DistillOutcome> {
   const lastRun = await lastDistillRunAt(admin, userId)
   if (lastRun && Date.now() - new Date(lastRun).getTime() < WEEKLY_GATE_MS) {
     return { ran: false, reason: `last run ${lastRun} — weekly gate not yet elapsed` }

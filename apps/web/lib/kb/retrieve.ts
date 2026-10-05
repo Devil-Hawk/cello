@@ -21,6 +21,7 @@ import { loadApiKeys } from '../harness/keys'
 import { callEmbedding, MissingKeyError } from '../harness/llm'
 import { BudgetCapError } from '../harness/spend'
 import { captureError } from '../observability/sentry'
+import { observe } from '../trace/spans'
 import { searchKb } from './store'
 import type { KbSearchHit } from './types'
 
@@ -45,6 +46,29 @@ export async function retrieveKb(
   query: string,
   opts: { limit?: number; companyId?: string } = {}
 ): Promise<KbSearchHit[]> {
+  // One Langfuse retriever observation (its embed-query nests under it) when
+  // a trace is active. The query, hit titles and a 300 char excerpt of each are capture-gated (and masked at the Langfuse choke point).
+  const state = { fts: false }
+  return observe(
+    { name: 'retrieve-knowledge', type: 'retriever', persist: false, foldEmbeddings: true },
+    () => retrieveKbInner(admin, userId, query, opts, state),
+    (hits, _err, capture) => ({
+      // Without a query vector the search is FTS-only: a normal fallback, not an error.
+      metadata: { limit: opts.limit ?? 0, ...(hits ? { hits: hits.length } : {}), ...(state.fts ? { fallback: 'fts-only' } : {}) },
+      ...(capture
+        ? { input: { query }, output: { hits: (hits ?? []).slice(0, 10).map((h) => ({ title: h.title, url: h.url, rank: h.rank, excerpt: h.content.slice(0, 300) })) } }
+        : {}),
+    })
+  )
+}
+
+async function retrieveKbInner(
+  admin: SupabaseClient,
+  userId: string,
+  query: string,
+  opts: { limit?: number; companyId?: string },
+  state: { fts: boolean }
+): Promise<KbSearchHit[]> {
   const trimmed = (query ?? '').trim()
   // Same short circuit as searchKb(): an empty query can't match anything,
   // so there's nothing worth spending an embedding call on.
@@ -55,7 +79,7 @@ export async function retrieveKb(
     const keys = await loadApiKeys(admin, userId)
     const { embeddings } = await callEmbedding(
       keys,
-      { texts: [trimmed] },
+      { texts: [trimmed], name: 'embed-query' },
       AbortSignal.timeout(EMBED_TIMEOUT_MS)
     )
     vector = embeddings[0]
@@ -66,6 +90,7 @@ export async function retrieveKb(
       void captureError(error, { tags: { area: 'kb', phase: 'retrieve-embed' }, extra: { userId } })
     }
     // vector stays undefined — searchKb() degrades to FTS-only.
+    state.fts = true
   }
 
   return searchKb(admin, userId, trimmed, { limit: opts.limit, companyId: opts.companyId, vector })

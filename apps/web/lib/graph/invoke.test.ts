@@ -10,7 +10,9 @@
 // insert/update as well as select.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { InMemorySpanExporter } from '@opentelemetry/sdk-trace-base'
 import type { AdminClient } from '../harness/types'
+import { __setLangfuseForTest } from '../observability/langfuse'
 
 vi.mock('./pg', () => ({
   // No real Pool, no real PostgresSaver — the fake graph below never
@@ -118,6 +120,7 @@ function makeFakeAdmin() {
   const tables = {
     profiles: new FakeTable('id', 'profile'),
     graph_threads: new FakeTable('thread_id', 'thread'),
+    trace_spans: new FakeTable('span_id', 'span'),
   }
   const admin = {
     from: (name: string) => {
@@ -368,5 +371,44 @@ describe('invokeGraphForUser — checkpointer lands where LangGraph reads it', (
     const config = calls.invoke[0].config
     expect(config.configurable.__pregel_checkpointer).toEqual({ fakeSaver: true })
     expect((config as unknown as Record<string, unknown>).checkpointer).toBeUndefined()
+  })
+})
+
+describe('invokeGraphForUser: the root observation when the graph throws', () => {
+  const failing = (): CompiledGraphLike => ({
+    invoke: async () => {
+      throw new Error('graph blew up sk-or-v1-abcdefghijklmnopqrstuv')
+    },
+    getState: async () => ({ config: { configurable: {} } }),
+  })
+
+  async function rootOutput(profile: Row, env: Record<string, string> = {}): Promise<string | undefined> {
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
+    vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
+    vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+    vi.stubEnv('LANGFUSE_DEMO_SAMPLE_RATE', '1')
+    for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v)
+    const exporter = new InMemorySpanExporter()
+    __setLangfuseForTest({ exporter })
+    const { admin, tables } = makeFakeAdmin()
+    seedProfile(tables, { id: OWNER, preferences: {}, ...profile })
+    await expect(invokeGraphForUser({ admin, userId: OWNER, surface: 'run', graph: failing(), input: { goal: 'x' } })).rejects.toThrow('graph blew up')
+    const root = exporter.getFinishedSpans().find((sp) => sp.name === 'run-agents')
+    expect(root).toBeDefined()
+    return root!.attributes['langfuse.observation.output'] as string | undefined
+  }
+
+  it('carries a scrubbed error as its output', async () => {
+    const out = await rootOutput({ is_demo: false, demo_expires_at: null })
+    expect(JSON.parse(out!).error).toContain('graph blew up')
+    expect(out).not.toContain('sk-or-v1-abcdefghijklmnopqrstuv')
+    vi.unstubAllEnvs()
+  })
+
+  it('carries nothing when capture is off or the workspace is a demo', async () => {
+    expect(await rootOutput({ is_demo: false, demo_expires_at: null }, { LANGFUSE_CAPTURE_CONTENT: '0' })).toBeUndefined()
+    vi.unstubAllEnvs()
+    expect(await rootOutput({ is_demo: true, demo_expires_at: new Date(Date.now() + 3600_000).toISOString() })).toBeUndefined()
+    vi.unstubAllEnvs()
   })
 })

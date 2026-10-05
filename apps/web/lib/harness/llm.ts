@@ -29,14 +29,14 @@
 
 import pRetry from 'p-retry'
 import type { DecryptedApiKeys, LlmResult, LlmRunOptions } from './types'
-import { assertWithinBudget, estimateCostUsd, recordSpend } from './spend'
+import { assertWithinBudget, BudgetCapError, estimateCostDetails, estimateCostUsd, hasListedPrice, recordSpend } from './spend'
 import { createAdminClient } from './supabase-admin'
-import { resolveProviderId, MissingKeyError } from './providers'
+import { resolveProviderId, resolveLocalCliId, MissingKeyError } from './providers'
 import { callOpenRouter, DEFAULT_MODEL } from './providers/openrouter'
 import { callLocalCli } from './providers/local-cli'
 import { callLocalServer } from './providers/local-server'
 import { isTransient } from '../util/retry'
-import { acquireSpanScope, withSpan } from '../trace/spans'
+import { acquireSpanScope, currentTraceContext, withSpan, type LfPayload } from '../trace/spans'
 import {
   EMBEDDING_MODEL,
   EMBEDDING_DIMS,
@@ -63,6 +63,100 @@ export {
 } from './providers'
 export { DEFAULT_MODEL }
 export { EMBEDDING_MODEL, EMBEDDING_DIMS, testEmbedding }
+
+/** The request as the model sees it (system, then messages or the prompt).
+ *  Held in memory on the span record for the Langfuse export only: flush()
+ *  strips it before the Postgres insert, and langfuse.ts redacts and caps it
+ *  before it leaves the process. Built only when content capture is on. */
+function requestMessages(opts: LlmRunOptions): { role: string; content: string }[] {
+  const input: { role: string; content: string }[] = []
+  if (opts.system) input.push({ role: 'system', content: opts.system })
+  if (opts.messages && opts.messages.length > 0) input.push(...opts.messages.map((m) => ({ role: m.role, content: m.content })))
+  else if (opts.prompt) input.push({ role: 'user', content: opts.prompt })
+  return input
+}
+
+/** The model a call was aimed at, for a call that failed before any result
+ *  named it (so errors can be grouped by model). DEFAULT_MODEL is only the
+ *  OpenRouter default; the local backends name their own. */
+function requestedModel(opts: LlmRunOptions, apiKeys: DecryptedApiKeys, provider: string): string {
+  if (provider === 'local-cli') return `local-cli/${resolveLocalCliId(apiKeys.provider?.localCli)}`
+  if (provider === 'local-server') return opts.model || apiKeys.provider?.localServerModel || apiKeys.model || 'local-server'
+  return opts.model || apiKeys.model || DEFAULT_MODEL
+}
+
+/** Exclusive buckets: cached prompt tokens and reasoning tokens are taken out of
+ *  input and output, so Langfuse prices and sums each token once. */
+function usageDetails(r: LlmResult): Record<string, number> {
+  const cached = Math.min(r.cachedTokens ?? 0, r.promptTokens)
+  const reasoning = Math.min(r.reasoningTokens ?? 0, r.completionTokens)
+  return {
+    input: r.promptTokens - cached,
+    output: r.completionTokens - reasoning,
+    total: r.tokensUsed,
+    ...(cached > 0 ? { input_cached_tokens: cached } : {}),
+    ...(reasoning > 0 ? { output_reasoning_tokens: reasoning } : {}),
+  }
+}
+
+/** The Langfuse generation for one callLlm: model, parameters, usage, cost
+ *  and (capture on) the prompt and the reply. Cost comes from OUR price
+ *  table. Unmetered backends (local CLI, local server) get explicit zeros so
+ *  Langfuse does not infer a price from its own model table. */
+function generationPayload(
+  opts: LlmRunOptions,
+  apiKeys: DecryptedApiKeys,
+  provider: string,
+  metered: boolean,
+  capture: boolean,
+  result: LlmResult | undefined,
+  attempt: number
+): LfPayload {
+  const modelParameters: Record<string, string | number> = {}
+  if (opts.maxTokens !== undefined) modelParameters.max_tokens = opts.maxTokens
+  if (opts.temperature !== undefined) modelParameters.temperature = opts.temperature
+  if (opts.json !== undefined) modelParameters.json = opts.json ? 'true' : 'false'
+  if (opts.reasoning) modelParameters.reasoning_effort = opts.reasoning.effort
+  const lf: LfPayload = {
+    name: opts.name ?? 'call-llm',
+    type: 'generation',
+    modelParameters,
+    ...(opts.promptRef?.hash ? { version: opts.promptRef.hash } : {}),
+    metadata: {
+      provider,
+      metered,
+      // 1 is the first try; higher means the provider call was retried.
+      attempt,
+      // Local backends report char/4 estimates, not provider token counts.
+      ...(provider !== 'openrouter' ? { usage_estimated: true } : {}),
+      ...(opts.promptRef ? { prompt_name: opts.promptRef.name } : {}),
+      ...(opts.promptRef?.hash ? { prompt_hash: opts.promptRef.hash } : {}),
+    },
+    ...(capture ? { input: requestMessages(opts) } : {}),
+  }
+  if (!result) return { ...lf, model: requestedModel(opts, apiKeys, provider) }
+  return {
+    ...lf,
+    model: result.model,
+    usage: usageDetails(result),
+    cost: metered ? estimateCostDetails(result.model, result.promptTokens, result.completionTokens) : { input: 0, output: 0 },
+    metadata: {
+      ...lf.metadata,
+      ...(result.finishReason ? { finish_reason: result.finishReason } : {}),
+      ...(metered && !hasListedPrice(result.model) ? { cost_estimated: true } : {}),
+    },
+    ...(result.finishReason === 'length' ? { level: 'WARNING' as const, errorCode: 'truncated' } : {}),
+    ...(capture
+      ? {
+          output: {
+            role: 'assistant',
+            content: result.content,
+            ...(result.reasoning ? { reasoning: result.reasoning } : {}),
+          },
+        }
+      : {}),
+  }
+}
 
 /**
  * Call the user's configured LLM backend once and return the assistant
@@ -108,14 +202,17 @@ export async function callLlm(
   // through to p-retry itself (not just the provider call) so a user
   // cancel/deadline stops retrying immediately instead of waiting out a
   // queued backoff.
+  let attempt = 0
   const runProviderCall = () =>
     pRetry(
-      () =>
-        provider === 'local-cli'
+      () => {
+        attempt += 1
+        return provider === 'local-cli'
           ? callLocalCli(apiKeys, effectiveOpts, signal)
           : provider === 'local-server'
             ? callLocalServer(apiKeys, effectiveOpts, signal)
-            : callOpenRouter(apiKeys, effectiveOpts, signal),
+            : callOpenRouter(apiKeys, effectiveOpts, signal)
+      },
       {
         retries: 3,
         factor: 2,
@@ -134,7 +231,7 @@ export async function callLlm(
   // the spend cap — see spend-chokepoints.test.ts for that half of the
   // guarantee). No userId at all means no user_id to satisfy trace_spans'
   // NOT NULL column, so there is nothing honest to record.
-  const scope = apiKeys.userId ? acquireSpanScope(apiKeys.userId) : null
+  const scope = apiKeys.userId ? acquireSpanScope(apiKeys.userId, apiKeys.isDemo) : null
   let result: LlmResult
   if (scope) {
     try {
@@ -154,11 +251,12 @@ export async function callLlm(
                 userId: apiKeys.userId,
               }
             : {
-                model: effectiveOpts.model ?? DEFAULT_MODEL,
+                model: requestedModel(effectiveOpts, apiKeys, provider),
                 metered,
                 userId: apiKeys.userId,
                 error: err instanceof Error ? err.message : String(err),
-              }
+              },
+        (r, _err, capture) => generationPayload(effectiveOpts, apiKeys, provider, metered, capture, r, attempt)
       )
     } finally {
       // Only the invocation that CREATED this buffer flushes it — a call
@@ -208,11 +306,83 @@ export interface EmbedResult {
  */
 export async function callEmbedding(
   apiKeys: DecryptedApiKeys,
-  opts: { texts: string[]; model?: string },
+  opts: { texts: string[]; model?: string; name?: string },
   signal?: AbortSignal
 ): Promise<EmbedResult> {
   if (opts.texts.length === 0) return { embeddings: [], model: opts.model || EMBEDDING_MODEL, promptTokens: 0 }
 
+  // No provider at all is a normal configuration (a self-hosted user without an
+  // embedding key), and every caller degrades. Refuse before any observation
+  // opens, so it costs no Langfuse unit and never shows up as an error.
+  if (!hasEmbeddingProvider(apiKeys)) throw new MissingKeyError(NO_EMBEDDING_PROVIDER)
+
+  // Inside a retriever or memory write that folds embeddings, the usage and
+  // cost go onto that parent's metadata and the call has no observation of its
+  // own: a query embedding has only a count and a size to show.
+  const fold = currentTraceContext()?.embed
+  if (fold) {
+    const out = await embedWithFallback(apiKeys, opts, signal)
+    fold.calls += 1
+    fold.tokens += out.result.promptTokens
+    if (out.metered) fold.costUsd += estimateCostDetails(out.result.model, out.result.promptTokens, 0).input
+    return out.result
+  }
+
+  // One Langfuse `embedding` observation per call (never a trace_spans row:
+  // persist:false). Counts and sizes only: the texts are resumes, job
+  // descriptions and notes, so they are never captured.
+  const scope = apiKeys.userId ? acquireSpanScope(apiKeys.userId, apiKeys.isDemo) : null
+  if (!scope) return (await embedWithFallback(apiKeys, opts, signal)).result
+  try {
+    const out = await withSpan(
+      scope.buffer,
+      { parentSpanId: scope.parentSpanId, runId: scope.runId, kind: 'llm', name: 'embedding', persist: false },
+      () => embedWithFallback(apiKeys, opts, signal),
+      undefined,
+      (o, err) => {
+        const model = o?.result.model ?? opts.model ?? EMBEDDING_MODEL
+        const tokens = o?.result.promptTokens ?? 0
+        // A monthly cap is an expected skip: the caller falls back, so it is
+        // not an error. Real provider failures stay ERROR.
+        const capped = err instanceof BudgetCapError
+        return {
+          name: opts.name ?? 'embed-texts',
+          type: 'embedding',
+          model,
+          input: { count: opts.texts.length, chars: opts.texts.reduce((n, t) => n + t.length, 0) },
+          ...(capped ? { expected: true } : {}),
+          metadata: { provider: o?.provider ?? 'none', metered: o?.metered ?? false, ...(capped ? { skipped: 'budget_cap' } : {}) },
+          ...(o ? { usage: { input: tokens }, cost: o.metered ? estimateCostDetails(model, tokens, 0) : { input: 0, output: 0 } } : {}),
+        }
+      }
+    )
+    return out.result
+  } finally {
+    if (scope.owns && scope.buffer.exportEnabled) await scope.buffer.flush(createAdminClient())
+  }
+}
+
+const NO_EMBEDDING_PROVIDER =
+  'No embedding provider configured — set an OpenRouter or OpenAI key, or a local-server embedding model.'
+
+function hasEmbeddingProvider(apiKeys: DecryptedApiKeys): boolean {
+  return Boolean(apiKeys.openrouter || apiKeys.openai || apiKeys.provider?.localServerEmbeddingModel)
+}
+
+/** True for the two expected reasons an embedding does not happen: no provider
+ *  configured, or this month's cap reached. Callers fall back and carry on, so
+ *  none of this is an error. */
+export function isEmbeddingFallback(err: unknown): boolean {
+  return err instanceof MissingKeyError || err instanceof BudgetCapError
+}
+
+/** The fallback chain itself, plus which backend answered and whether it was
+ *  metered (for the Langfuse observation). */
+async function embedWithFallback(
+  apiKeys: DecryptedApiKeys,
+  opts: { texts: string[]; model?: string },
+  signal?: AbortSignal
+): Promise<{ result: EmbedBatchResult; provider: string; metered: boolean }> {
   const attempts: Array<{ provider: 'openrouter' | 'openai-direct' | 'local-server'; run: () => Promise<EmbedBatchResult> }> = []
   if (apiKeys.openrouter) {
     attempts.push({
@@ -230,11 +400,7 @@ export async function callEmbedding(
     attempts.push({ provider: 'local-server', run: () => callLocalServerEmbedding(apiKeys, opts.texts, signal) })
   }
 
-  if (attempts.length === 0) {
-    throw new MissingKeyError(
-      'No embedding provider configured — set an OpenRouter or OpenAI key, or a local-server embedding model.'
-    )
-  }
+  if (attempts.length === 0) throw new MissingKeyError(NO_EMBEDDING_PROVIDER)
 
   let lastErr: unknown
   for (const attempt of attempts) {
@@ -261,7 +427,7 @@ export async function callEmbedding(
     if (admin && apiKeys.userId) {
       await recordSpend(admin, apiKeys.userId, EMBEDDING_MODEL, result.promptTokens, 0)
     }
-    return result
+    return { result, provider: attempt.provider, metered }
   }
 
   throw lastErr instanceof Error ? lastErr : new MissingKeyError('No embedding provider reachable')

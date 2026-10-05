@@ -33,7 +33,7 @@ vi.mock('../harness/llm', async (importOriginal) => {
   return { ...actual, callEmbedding: (...args: unknown[]) => callEmbeddingMock(...args) }
 })
 
-const { ingestInsight, readStandingPreferences, MAX_STANDING_PREFERENCES, InsightError } = await import('./store')
+const { ingestInsight, readStandingPreferences, searchInsights, MAX_STANDING_PREFERENCES, InsightError } = await import('./store')
 const { MissingKeyError } = await import('../harness/llm')
 
 beforeEach(() => {
@@ -400,5 +400,41 @@ describe('lib/harness/standing-preferences.ts has no production importers', () =
       .filter((f) => importPattern.test(readFileSync(f, 'utf8')))
       .map((f) => path.relative(WEB_ROOT, f))
     expect(offenders).toEqual([])
+  })
+})
+
+describe('searchInsights in Langfuse', () => {
+  it('is a retriever observation under the active trace, the query capture-gated and the embedding named', async () => {
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
+    vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
+    vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+    const { runInTraceContext, SpanBuffer } = await import('../trace/spans')
+    callEmbeddingMock.mockResolvedValue({ embeddings: [[0.5]], model: 'x', promptTokens: 1 })
+    const row0 = { id: 'i1', kind: 'preference', statement: 'Salary floor is 180k, remote only', evidence: null, confidence: 0.9, status: 'active', source: 'chat', company_id: null, supersedes_id: null, created_at: 'x', updated_at: 'x' }
+    const admin = { rpc: async () => ({ data: [row0], error: null }) } as never
+    const buffer = new SpanBuffer('u1', null, undefined, { isDemo: false })
+    await runInTraceContext({ buffer, parentSpanId: 'root', runId: null }, () => searchInsights(admin, 'u1', 'salary floor', { limit: 4 }))
+    const [row] = (buffer as unknown as { pending: { name: string; persist?: false; lf?: { type?: string; input?: unknown; metadata?: unknown } }[] }).pending
+    expect(row).toMatchObject({ name: 'search-insights', persist: false })
+    expect(row.lf).toMatchObject({ type: 'retriever', input: { query: 'salary floor' }, metadata: { limit: 4, hits: 1 } })
+    expect(JSON.stringify(row.lf)).toContain('Salary floor is 180k')
+    expect(callEmbeddingMock.mock.calls[0][1]).toMatchObject({ name: 'embed-query' })
+    vi.unstubAllEnvs()
+  })
+
+  it('no embedding provider is a recency-only fallback on the retriever, not an error', async () => {
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
+    vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
+    vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+    const { runInTraceContext, SpanBuffer } = await import('../trace/spans')
+    const { MissingKeyError } = await import('../harness/llm')
+    callEmbeddingMock.mockRejectedValue(new MissingKeyError('No embedding provider configured'))
+    const admin = { rpc: async () => ({ data: [], error: null }) } as never
+    const buffer = new SpanBuffer('u1', null, undefined, { isDemo: false })
+    await runInTraceContext({ buffer, parentSpanId: 'root', runId: null }, () => searchInsights(admin, 'u1', 'salary floor'))
+    const [row] = (buffer as unknown as { pending: { status: string; lf?: { metadata?: unknown } }[] }).pending
+    expect(row.status).toBe('ok')
+    expect(row.lf?.metadata).toMatchObject({ fallback: 'recency-only' })
+    vi.unstubAllEnvs()
   })
 })

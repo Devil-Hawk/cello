@@ -20,6 +20,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
+import { withTrace } from '@/lib/trace/spans'
 import { classifyJob } from '@/lib/jobs/classify'
 import type { PipelineStage } from '@/lib/format'
 import type { Json } from '@cello/shared'
@@ -101,6 +102,29 @@ export interface GmailSyncCoreResult {
  * callers (the route, the cron) are responsible for catching and reporting.
  */
 export async function runGmailSyncCore(params: GmailSyncCoreParams): Promise<GmailSyncCoreResult> {
+  // One Langfuse trace per sync pass, every classify-email generation under it
+  // (the 400-observation cap bounds a large scan). Counts only as output:
+  // sender names and subjects are other people's data.
+  return withTrace(
+    createAdminClient(),
+    params.userId,
+    {
+      name: 'sync-gmail',
+      outputOf: (r: GmailSyncCoreResult) => ({
+        processed: r.processed,
+        totalScanned: r.totalScanned,
+        createdCompanies: r.createdCompanies.length,
+        createdApplications: r.createdApplications.length,
+        statusUpdates: r.statusUpdates.length,
+        unmatched: r.unmatched.length,
+        isFirstSync: r.isFirstSync,
+      }),
+    },
+    () => runGmailSyncPass(params)
+  )
+}
+
+async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncCoreResult> {
   const { db, userId, accessToken, apiKeys, preferences } = params
 
   const syncState: SyncState = (preferences.gmail_sync || {}) as SyncState
@@ -184,7 +208,7 @@ export async function runGmailSyncCore(params: GmailSyncCoreParams): Promise<Gma
 
     let parsed: ParsedEmail
     if (apiKeys.openrouter) {
-      parsed = await parseEmailWithAI(from, subject, body, apiKeys.openrouter, receivedAt)
+      parsed = await parseEmailWithAI(from, subject, body, apiKeys, receivedAt)
     } else {
       parsed = classifyWithPatterns(from, subject, body, receivedAt)
     }

@@ -106,8 +106,10 @@ import { buildTurnContext } from '../context/assemble'
 import { callLlm, parseJsonLoose } from '../harness/llm'
 import type { ReasoningEffort } from '../harness/types'
 import { loadApiKeys } from '../harness/keys'
+import { templateRef } from '../harness/prompts'
 import { createAdminClient } from '../harness/supabase-admin'
 import { loadRecentMessages, type MessageRow } from '../harness/copilot-store'
+import { setTraceOutput, withTrace } from '../trace/spans'
 import { getMemoryStore } from '../memory/mem0-store'
 import { DemoMemoryWriteRefusedError, type MemoryItem } from '../memory/types'
 import {
@@ -405,6 +407,14 @@ export function submitOrSendReason(tool: string, args: Record<string, unknown>):
   return null
 }
 
+let copilotRef: { name: string; hash: string } | undefined
+/** Langfuse prompt version of the Copilot system prompt: the hash of the template
+ *  with every dynamic block empty, so it changes only when the template or the
+ *  tool list is edited. */
+function copilotPromptRef() {
+  return (copilotRef ??= templateRef('copilot', systemPrompt(undefined, '', '', '', '', '', '', '')))
+}
+
 export function systemPrompt(
   enabledAgents: ReadonlySet<StepAgentType> | undefined,
   mcpBlock: string,
@@ -671,16 +681,21 @@ export async function refreshConversationSummary(admin: AdminClient, userId: str
 
     const apiKeys = await loadApiKeys(admin, userId)
     const transcript = unsummarized.map((m) => `${m.role}: ${m.content}`).join('\n')
-    const res = await callLlm(apiKeys, {
-      system:
-        'You maintain a rolling summary of an ongoing job-search assistant conversation. Fold the new messages into the ' +
-        'existing summary, keeping concrete facts (job/company names, decisions made, numbers, preferences stated) and ' +
-        'dropping small talk. Output ONLY the updated summary text, no preamble, under 300 words.',
-      prompt: `${priorSummary ? `Existing summary:\n${priorSummary}\n\n` : ''}New messages:\n${transcript}`,
-      model: SUMMARY_REFRESH_MODEL,
-      maxTokens: 500,
-      temperature: 0.2,
-    })
+    // Its own Langfuse trace in the conversation's session (this runs from the
+    // route, before the turn's graph invoke, so there is no ambient trace).
+    const res = await withTrace(admin, userId, { name: 'summarize-conversation', sessionId: conversationId }, () =>
+      callLlm(apiKeys, {
+        system:
+          'You maintain a rolling summary of an ongoing job-search assistant conversation. Fold the new messages into the ' +
+          'existing summary, keeping concrete facts (job/company names, decisions made, numbers, preferences stated) and ' +
+          'dropping small talk. Output ONLY the updated summary text, no preamble, under 300 words.',
+        prompt: `${priorSummary ? `Existing summary:\n${priorSummary}\n\n` : ''}New messages:\n${transcript}`,
+        model: SUMMARY_REFRESH_MODEL,
+        maxTokens: 500,
+        temperature: 0.2,
+        name: 'write-summary',
+      })
+    )
     const newSummary = res.content.trim()
     if (!newSummary) return
 
@@ -958,6 +973,7 @@ async function plan(state: CopilotStateType, config: LangGraphRunnableConfig): P
             json: true,
             maxTokens: 1200,
             temperature: 0.2,
+            name: 'write-final-answer',
           },
           config.signal
         )
@@ -989,6 +1005,8 @@ async function plan(state: CopilotStateType, config: LangGraphRunnableConfig): P
         maxTokens: 4000,
         temperature: 0.2,
         reasoning: { effort: state.turnConfig.effort },
+        name: 'plan-copilot-step',
+        promptRef: copilotPromptRef(),
       },
       config.signal
     )
@@ -1381,6 +1399,10 @@ async function finalize(state: CopilotStateType, config: LangGraphRunnableConfig
   // keep growing this array across turns, so this append's lifetime is only
   // "until the next beginTurn runs".
   const messages = state.finalMessage ? [...state.messages, { role: 'assistant' as const, content: state.finalMessage }] : state.messages
+
+  // The Langfuse trace output is the reply: the invoke result is usually the
+  // next_turn interrupt, which says nothing about what the user was told.
+  if (state.finalMessage) setTraceOutput({ reply: state.finalMessage })
 
   if (state.finalMessage) await addTurnToMemory(state, config)
 

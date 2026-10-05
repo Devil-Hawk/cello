@@ -11,10 +11,13 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdminClient } from '../harness/types'
+import { runInTraceContext, SpanBuffer, type SpanRecord } from '../trace/spans'
 
 const assertWithinBudgetMock = vi.fn()
 const recordSpendMock = vi.fn()
-vi.mock('../harness/spend', () => ({
+vi.mock('../harness/spend', async (importOriginal) => ({
+  // estimateCostUsd stays real: the span's costUsd is asserted below.
+  ...(await importOriginal<typeof import('../harness/spend')>()),
   assertWithinBudget: (...args: unknown[]) => assertWithinBudgetMock(...args),
   recordSpend: (...args: unknown[]) => recordSpendMock(...args),
 }))
@@ -27,7 +30,19 @@ vi.mock('../observability/log', () => ({
 import { MissingKeyError } from '../harness/llm'
 import { meteredJudgeClient, judgeGroundedness, judgeSpecificity, toEvalResult, JUDGE_MODEL } from './judge'
 
-const FAKE_ADMIN = {} as AdminClient
+/** Captures every trace_spans row a flush() inserts; every other table is unexpected. */
+const insertedSpans: Record<string, unknown>[] = []
+const FAKE_ADMIN = {
+  from: (name: string) => {
+    if (name !== 'trace_spans') throw new Error(`FAKE_ADMIN: unexpected table "${name}"`)
+    return {
+      insert: async (rows: Record<string, unknown>[]) => {
+        insertedSpans.push(...rows)
+        return { error: null }
+      },
+    }
+  },
+} as unknown as AdminClient
 const realFetch = globalThis.fetch
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -47,6 +62,7 @@ function chatCompletion(usage?: { prompt_tokens: number; completion_tokens: numb
 }
 
 beforeEach(() => {
+  insertedSpans.length = 0
   assertWithinBudgetMock.mockReset().mockResolvedValue(undefined)
   recordSpendMock.mockReset().mockResolvedValue(undefined)
   logHarnessErrorMock.mockReset()
@@ -113,6 +129,55 @@ describe('meteredJudgeClient', () => {
     await client.chat.completions.create({ model: JUDGE_MODEL, messages: [{ role: 'user', content: 'hi' }] })
 
     expect(recordSpendMock).toHaveBeenCalledWith(FAKE_ADMIN, 'user-1', JUDGE_MODEL, 2000, 300)
+  })
+
+  it('emits one llm span per request with model, tokens, cost and user, flushed to trace_spans', async () => {
+    globalThis.fetch = vi.fn(async () =>
+      chatCompletion({ prompt_tokens: 1000, completion_tokens: 200 })
+    ) as unknown as typeof fetch
+
+    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
+    await client.chat.completions.create({ model: JUDGE_MODEL, messages: [{ role: 'user', content: 'hi' }] })
+
+    expect(insertedSpans).toHaveLength(1)
+    expect(insertedSpans[0]).toMatchObject({
+      user_id: 'user-1',
+      kind: 'llm',
+      name: 'llm',
+      status: 'ok',
+      attributes: {
+        model: JUDGE_MODEL,
+        promptTokens: 1000,
+        completionTokens: 200,
+        tokensUsed: 1200,
+        // haiku-4.5: $1 in, $5 out per M tokens
+        costUsd: 0.002,
+        metered: true,
+        userId: 'user-1',
+        source: 'judge',
+      },
+    })
+  })
+
+  it('a 402 is an error span, a visible warning, and still reaches the SDK as a failure', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({ error: { message: 'Insufficient credits' } }, 402)
+    ) as unknown as typeof fetch
+
+    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
+    await expect(
+      client.chat.completions.create({ model: JUDGE_MODEL, messages: [{ role: 'user', content: 'hi' }] })
+    ).rejects.toMatchObject({ status: 402 })
+
+    expect(insertedSpans).toHaveLength(1)
+    expect(insertedSpans[0]).toMatchObject({ status: 'error', attributes: { model: JUDGE_MODEL, error: expect.stringContaining('402') } })
+    expect(recordSpendMock).not.toHaveBeenCalled()
+    const line = warn.mock.calls.map((c) => String(c[0])).find((l) => l.startsWith('[llm:fallback]'))
+    expect(line).toBeDefined()
+    expect(line).toContain('"scope":"judge"')
+    expect(line).toContain('"status":402')
+    expect(line).toContain('Insufficient credits')
   })
 
   it('does not record spend for a non-ok response', async () => {
@@ -231,5 +296,96 @@ describe('toEvalResult — score:null', () => {
     const result = toEvalResult('outreach groundedness', { score: 0.9 }, 0.5, 'user-42')
     expect(result.verdict).toBe('pass')
     expect(logHarnessErrorMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('judge calls in Langfuse', () => {
+  const classifier = (text: string): Response => {
+    const isClosedQA = text.includes('Criterion')
+    const args = isClosedQA ? { choice: 'Y', reasons: 'specific enough' } : { choice: 'C', reasons: 'fully grounded' }
+    return jsonResponse({
+      model: JUDGE_MODEL,
+      usage: { prompt_tokens: 1000, completion_tokens: 200 },
+      choices: [{ message: { role: 'assistant', tool_calls: [{ id: 'c', type: 'function', function: { name: 'select_choice', arguments: JSON.stringify(args) } }] }, finish_reason: 'tool_calls' }],
+    })
+  }
+  const configure = () => {
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
+    vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
+    vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+  }
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  async function judgeBoth(isDemo: boolean) {
+    configure()
+    vi.stubEnv('LANGFUSE_DEMO_SAMPLE_RATE', '1')
+    globalThis.fetch = vi.fn(async (_i: unknown, init?: RequestInit) => classifier(String(init?.body))) as unknown as typeof fetch
+    const buffer = new SpanBuffer('user-1', null, undefined, { isDemo })
+    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
+    const [g, s] = await runInTraceContext({ buffer, parentSpanId: 'root', runId: null }, () =>
+      Promise.all([
+        judgeGroundedness(client, { draft: 'I led the migration.', sourceFacts: 'Led the migration.' }),
+        judgeSpecificity(client, { draft: 'About Acme.', companyAndRole: 'Acme, Engineer' }),
+      ])
+    )
+    const rows = (buffer as unknown as { pending: SpanRecord[] }).pending
+    return { g, s, rows }
+  }
+
+  it('each judge request is a generation named for its judge, with usage, our-table cost, and its span id on the verdict', async () => {
+    const { g, s, rows } = await judgeBoth(false)
+    expect(rows).toHaveLength(2)
+    const byName = (n: string) => rows.find((r) => r.lf?.name === n)!
+    const grounded = byName('judge-groundedness')
+    const specific = byName('judge-specificity')
+    expect(grounded.lf).toMatchObject({
+      type: 'generation',
+      model: JUDGE_MODEL,
+      usage: { input: 1000, output: 200, total: 1200 },
+      cost: { input: 0.001, output: 0.001 },
+    })
+    // concurrent judges on one client: each verdict carries its OWN request's span
+    expect(g.spanId).toBe(grounded.span_id)
+    expect(s.spanId).toBe(specific.span_id)
+    expect(g.spanId).not.toBe(s.spanId)
+    expect(grounded.parent_span_id).toBe('root')
+    // Postgres keeps the llm row shape COV shipped
+    expect(grounded).toMatchObject({ kind: 'llm', name: 'llm' })
+  })
+
+  it('the generation carries the sampling parameters the request actually sent (max_tokens after the clamp)', async () => {
+    configure()
+    globalThis.fetch = vi.fn(async () => classifier('Criterion')) as unknown as typeof fetch
+    const buffer = new SpanBuffer('user-1', null, undefined, { isDemo: false })
+    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
+    await runInTraceContext({ buffer, parentSpanId: 'root', runId: null }, () =>
+      client.chat.completions.create({ model: JUDGE_MODEL, messages: [{ role: 'user', content: 'hi' }], max_tokens: 64000, temperature: 0 })
+    )
+    const [row] = (buffer as unknown as { pending: SpanRecord[] }).pending
+    expect(row.lf?.modelParameters).toEqual({ temperature: 0, max_tokens: 2000 })
+  })
+
+  it('an owner trace carries the judge prompt and its answer; a demo trace carries neither', async () => {
+    const owner = await judgeBoth(false)
+    const lf = owner.rows.find((r) => r.lf?.name === 'judge-groundedness')!.lf!
+    expect(JSON.stringify(lf.input)).toContain('I led the migration')
+    expect(JSON.stringify(lf.output)).toContain('fully grounded')
+
+    const demo = await judgeBoth(true)
+    for (const r of demo.rows) {
+      expect(r.lf?.input).toBeUndefined()
+      expect(r.lf?.output).toBeUndefined()
+      expect(r.lf?.usage).toBeDefined()
+    }
+  })
+
+  it('a Langfuse-off judge call builds no payload but still returns its span id', async () => {
+    globalThis.fetch = vi.fn(async (_i: unknown, init?: RequestInit) => classifier(String(init?.body))) as unknown as typeof fetch
+    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
+    const g = await judgeGroundedness(client, { draft: 'x', sourceFacts: 'y' })
+    expect(g.spanId).toBeTruthy()
+    expect(insertedSpans[0]).not.toHaveProperty('lf')
   })
 })

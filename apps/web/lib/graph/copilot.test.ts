@@ -252,6 +252,18 @@ describe('systemPrompt — every block renders when present, none when blank', (
   })
 })
 
+describe('plan-copilot-step carries a prompt version', () => {
+  it('promptRef is name copilot with the hash of the static template, whatever the dynamic blocks hold', async () => {
+    callLlmMock.mockResolvedValueOnce(llmAction({ action: 'final', message: 'ok' }))
+    await copilotGraph.invoke({ pendingIncomingMessage: 'hello', turnConfig: baseTurnConfig() }, graphConfig('thread-promptref-1', new MemorySaver()))
+    const opts = callLlmMock.mock.calls.find((c) => (c[1] as { name?: string }).name === 'plan-copilot-step')?.[1] as { promptRef?: { name: string; hash: string } }
+    expect(opts.promptRef).toMatchObject({ name: 'copilot' })
+    expect(opts.promptRef?.hash).toMatch(/^[0-9a-f]{8}$/)
+    const { createHash } = await import('node:crypto')
+    expect(opts.promptRef?.hash).toBe(createHash('sha256').update(systemPrompt(undefined, '', '', '', '', '', '', '')).digest('hex').slice(0, 8))
+  })
+})
+
 // ---------------------------------------------------------------------------
 // (d) ask_form wire field is `detail`, not the parsed `description`
 // ---------------------------------------------------------------------------

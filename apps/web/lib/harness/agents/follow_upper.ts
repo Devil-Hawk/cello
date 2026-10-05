@@ -14,7 +14,7 @@
 import type { AgentFn, AdminClient } from '../types'
 import { FollowUpperInput } from '../schemas'
 import { MissingKeyError } from '../llm'
-import { composeSystemPrompt, loadModeDoc } from '../prompts'
+import { composeSystemPrompt, loadModeDoc, promptRef } from '../prompts'
 
 const STUCK_DAYS = 10
 const ACTIVE_STAGES = ['applied', 'screen', 'interview']
@@ -162,6 +162,7 @@ export const follow_upper: AgentFn = async (ctx) => {
       // mode document — see docs/PROMPT-GENERATOR.md) is identical for every
       // user's every run — the cheapest possible cache prefix to mark.
       system: composeSystemPrompt({ mode: loadModeDoc('follow_upper') }),
+      promptRef: promptRef('follow_upper'),
       prompt: `Follow-ups queued (all due tomorrow):\n${created
         .map((c) => `- ${c.company}: silent for ${c.days} days`)
         .join('\n')}`,

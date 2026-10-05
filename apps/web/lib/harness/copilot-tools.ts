@@ -21,6 +21,7 @@
 import { callLlm } from './llm'
 import { invokeGraphForUser, type CompiledGraphLike } from '@/lib/graph/invoke'
 import { harnessRunGraph, markRunPausedOnInterrupt } from '@/lib/graph/runs'
+import { summarizeRunOutcome } from '@/lib/graph/run-summary'
 import { ingestInsight, MAX_PREFERENCE_LENGTH } from '../insights/store'
 // Bounded-concurrency fan-out — reused, not reinvented (see
 // docs/REINVENTION-AUDIT.md's concurrency-limiter finding: lib/ats's
@@ -49,6 +50,7 @@ import type {
   LlmRunner,
   StepContext,
 } from './types'
+import { observe } from '../trace/spans'
 import { isValidTool, getToolSpec, isMcpToolName, parseMcpToolName, type StepAgentType } from './copilot-tool-catalog'
 import { getServerByName, toConfig, recordConnectionResult, buildMcpPromptContext } from '../mcp/registry'
 import { callMcpTool } from '../mcp/client'
@@ -158,8 +160,9 @@ function clampLimit(v: unknown, def: number, max: number): number {
  *  per-user model preference wins via callLlm; see harness contract C1).
  *  `signal` overrides ctx.signal when the caller wants a tighter, tool-scoped
  *  abort (see boundSignal) instead of just the whole-request one. */
-function makeRunner(ctx: CopilotToolContext, signal?: AbortSignal): LlmRunner {
-  return (opts) => callLlm(ctx.apiKeys, opts, signal ?? ctx.signal)
+function makeRunner(ctx: CopilotToolContext, signal: AbortSignal | undefined, name: string): LlmRunner {
+  // `name` is the Langfuse generation name: what the model call is for.
+  return (opts) => callLlm(ctx.apiKeys, { ...opts, name: opts.name ?? name }, signal ?? ctx.signal)
 }
 
 /** Combine the request's own abort signal (client disconnect / Stop button)
@@ -400,7 +403,100 @@ async function pickScoringCandidateIds(
  * dispatch time" exactly like the built-in agent gating.
  */
 export async function dispatchTool(ctx: CopilotToolContext, tool: string, args: Args): Promise<unknown> {
-  if (isMcpToolName(tool)) {
+  // One Langfuse observation per tool call, a sibling of the generation that
+  // asked for it. Names are the closed built-in set; MCP tools are always
+  // `call-mcp-tool` (server and tool names are user-supplied, so they ride in
+  // capture-gated detail), and anything unknown is `unknown-tool`.
+  const mcp = isMcpToolName(tool)
+  const name = mcp ? 'call-mcp-tool' : isValidTool(tool) ? tool : 'unknown-tool'
+  const thirdParty = THIRD_PARTY_TOOLS.has(tool)
+  return observe(
+    {
+      name,
+      type: RETRIEVER_TOOLS.has(tool) ? 'retriever' : 'tool',
+      attributesOf: (result: unknown) => ({ tool: name, error: toolErrorOf(result) !== undefined }),
+    },
+    () => dispatchToolInner(ctx, tool, args, mcp),
+    (result, _err, capture) => {
+      const failure = toolErrorOf(result)
+      const parsed = mcp ? parseMcpToolName(tool) : null
+      return {
+        metadata: { tool: name, ...(thirdParty ? { count: countOf(result) } : {}) },
+        detail: parsed ? { mcp_server: parsed.serverName, mcp_tool: parsed.toolName } : undefined,
+        ...(capture
+          ? {
+              input: thirdParty ? { ids: idsIn(args) } : args,
+              output: thirdParty ? { count: countOf(result), ids: idsOf(result, args) } : result,
+            }
+          : {}),
+        ...(failure ? { level: 'ERROR' as const, errorCode: failure.code, errorMessage: failure.message } : {}),
+      }
+    }
+  )
+}
+
+/** Tools whose results are other people's names, urls and contact details
+ *  (contacts, a company dossier, an application): Langfuse gets counts and ids. */
+const THIRD_PARTY_TOOLS = new Set(['list_contacts', 'get_dossier', 'get_application'])
+/** Lookups are retrievers in Langfuse (the most specific type, RAG views). */
+const RETRIEVER_TOOLS = new Set(['web_search', 'search_kb'])
+
+/** A tool reports failure by returning `{ error }`, never by throwing. The
+ *  code is a coarse kind, never message text. */
+function toolErrorOf(result: unknown): { code: string; message: string } | undefined {
+  const error = (result as { error?: unknown } | null)?.error
+  if (typeof error !== 'string') return undefined
+  const code = error.startsWith('Unknown tool')
+    ? 'unknown_tool'
+    : /is disabled for this conversation/.test(error)
+      ? 'agent_disabled'
+      : /\bis required\b/.test(error)
+        ? 'invalid_args'
+        : 'tool_error'
+  return { code, message: error }
+}
+
+/** Only the argument keys that are ids (`jobId`, `companyIds`...). */
+function idsIn(args: Args): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(args).filter(([k]) => /(^id$|Ids?$)/.test(k)))
+}
+
+/** The id of every row a read tool returned (capped), for `{ count, ids }`:
+ *  `id` on list rows, `applicationId` and `jobId` on application rows, and the
+ *  `jobId` / `companyId` the caller asked about when the result names no row. */
+function idsOf(result: unknown, args: Args = {}): string[] {
+  const out: string[] = []
+  const take = (v: unknown) => {
+    const o = v as Record<string, unknown> | null
+    if (!o || typeof o !== 'object') return
+    for (const k of ['id', 'applicationId', 'jobId']) {
+      if (typeof o[k] === 'string' && out.length < 50 && !out.includes(o[k] as string)) out.push(o[k] as string)
+    }
+  }
+  const r = result as Record<string, unknown> | null
+  if (!r || typeof r !== 'object') return out
+  take(r)
+  for (const v of Object.values(r)) {
+    if (Array.isArray(v)) v.forEach(take)
+    else take(v)
+  }
+  for (const v of Object.values(idsIn(args))) if (typeof v === 'string' && out.length < 50 && !out.includes(v)) out.push(v)
+  return out
+}
+
+/** list_contacts reports `count`, get_application `total` (or one application
+ *  and draft), get_dossier `exists`. */
+function countOf(result: unknown): number {
+  const r = result as Record<string, unknown> | null
+  if (typeof r?.count === 'number') return r.count
+  if (typeof r?.total === 'number') return r.total
+  if (typeof r?.exists === 'boolean') return r.exists ? 1 : 0
+  if (r && 'application' in r) return r.application || r.draft ? 1 : 0
+  return idsOf(result).length
+}
+
+async function dispatchToolInner(ctx: CopilotToolContext, tool: string, args: Args, mcp: boolean): Promise<unknown> {
+  if (mcp) {
     try {
       return await dispatchMcpTool(ctx, tool, args)
     } catch (e) {
@@ -860,7 +956,7 @@ async function doSourceJobs(ctx: CopilotToolContext, args: Args) {
     deps: {},
     admin: ctx.admin,
     apiKeys: ctx.apiKeys,
-    llm: makeRunner(ctx, signal),
+    llm: makeRunner(ctx, signal, 'source-jobs'),
     signal,
   }
 
@@ -971,7 +1067,7 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
       companyIds,
       resume: resumeText,
       targeting,
-      llm: makeRunner(ctx, signal),
+      llm: makeRunner(ctx, signal, 'score-job-batch'),
       limit,
       jobIds,
     })
@@ -1088,7 +1184,7 @@ async function doTailorCv(ctx: CopilotToolContext, args: Args) {
     deps: {},
     admin: ctx.admin,
     apiKeys: ctx.apiKeys,
-    llm: makeRunner(ctx),
+    llm: makeRunner(ctx, undefined, 'tailor-cv'),
     signal,
   }
   const { output } = await cv_tailor(stepCtx)
@@ -1157,7 +1253,7 @@ async function doDraftOutreach(ctx: CopilotToolContext, args: Args) {
   }
 
   const usedLlm = canRunLlm(ctx.apiKeys)
-  const draft = usedLlm ? await generateOutreachDraft(makeRunner(ctx), input) : fallbackOutreachDraft(input)
+  const draft = usedLlm ? await generateOutreachDraft(makeRunner(ctx, undefined, 'draft-outreach-message'), input) : fallbackOutreachDraft(input)
   return {
     subject: draft.subject,
     body: draft.body,
@@ -1417,7 +1513,7 @@ async function doTriggerRun(ctx: CopilotToolContext, args: Args) {
   // compiled build (vitest's ESM transform never trips it). The cast itself is
   // type-only: harnessRunGraph's `invoke` input is narrower than
   // CompiledGraphLike's `unknown`, same cast app/api/harness/run/route.ts uses.
-  void invokeGraphForUser({ admin: ctx.admin, userId: ctx.userId, surface: 'run', graph: harnessRunGraph as unknown as CompiledGraphLike, input: { runId } })
+  void invokeGraphForUser({ admin: ctx.admin, userId: ctx.userId, surface: 'run', graph: harnessRunGraph as unknown as CompiledGraphLike, input: { runId }, trace: { input: { runId }, outputOf: summarizeRunOutcome, metadata: { source: 'copilot', run_id: runId } } })
     .then(({ result }) => markRunPausedOnInterrupt(ctx.admin, runId, result))
     .catch(async (err) => {
       console.error('[copilot] background agent run failed', runId, err)

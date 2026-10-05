@@ -65,6 +65,7 @@
 // `pnpm vitest run` (cwd = apps/web there too) as the one automated check
 // available without invoking `next build`.
 
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
@@ -94,6 +95,7 @@ export const PROMPT_DOC_NAMES = [
 export type PromptDocName = (typeof PROMPT_DOC_NAMES)[number]
 
 const cache = new Map<string, string>()
+const hashes = new Map<string, string>()
 
 /**
  * Read + cache one prompt document by filename (no extension, no directory).
@@ -129,7 +131,30 @@ function readPromptDoc(name: string): string {
     throw new Error(`[prompts] prompt document "${name}" at ${path} exists but is empty.`)
   }
   cache.set(name, trimmed)
+  hashes.set(name, createHash('sha256').update(trimmed).digest('hex').slice(0, 8))
   return trimmed
+}
+
+/**
+ * The Langfuse prompt version of a prompt document: its name and the first 8
+ * hex characters of a SHA-256 of its text. The hash changes exactly when the
+ * file changes, so a quality shift in the traces can be pinned to a prompt
+ * edit. Pass it as `promptRef` on the model call that uses the document. The
+ * composed system string is never hashed (it also holds the resume).
+ */
+export function promptRef(name: string): { name: string; hash: string } {
+  readPromptDoc(name)
+  return { name, hash: hashes.get(name) as string }
+}
+
+/**
+ * promptRef for a prompt that lives in code, not in a prompts/ document (the
+ * matcher rubric, the Copilot system prompt). Pass the STATIC template only,
+ * never text with the resume or other dynamic blocks in it: the hash then
+ * changes exactly when the template is edited.
+ */
+export function templateRef(name: string, template: string): { name: string; hash: string } {
+  return { name, hash: createHash('sha256').update(template).digest('hex').slice(0, 8) }
 }
 
 /** Typed accessor for a known document (see PROMPT_DOC_NAMES). */

@@ -6,6 +6,7 @@
 // this file is a pure extraction behind the ProviderCall contract in ./index
 // so llm.ts can pick between backends without any existing caller noticing.
 
+import { createHash } from 'node:crypto'
 import OpenAI from 'openai'
 import type {
   ChatCompletionMessageParam,
@@ -13,7 +14,7 @@ import type {
 } from 'openai/resources/chat/completions'
 import type { DecryptedApiKeys, LlmResult, LlmRunOptions } from '../types'
 import { ANTHROPIC_THINKING_BUDGET } from '../types'
-import { MissingKeyError, TruncatedResponseError, estimateTokens } from './index'
+import { MissingKeyError, TruncatedResponseError, estimateTokens, tokenBuckets } from './index'
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 export const DEFAULT_MODEL = 'anthropic/claude-sonnet-5'
@@ -21,6 +22,14 @@ export const DEFAULT_MODEL = 'anthropic/claude-sonnet-5'
 const HEADERS = {
   'HTTP-Referer': 'https://cello.app',
   'X-Title': 'Cello - Job Search Assistant',
+}
+
+/** Stable, non-reversible tag for OpenRouter's `user` field, so the owner can
+ *  tell users apart in OpenRouter's activity view without a raw id or email
+ *  ever leaving Cello. Domain-separated SHA-256; a Cello user id is a random
+ *  UUID, so there is nothing to brute-force from the tag alone. */
+export function openRouterUserTag(userId: string): string {
+  return `cello_${createHash('sha256').update(`cello:openrouter-user:${userId}`).digest('hex').slice(0, 32)}`
 }
 
 /**
@@ -70,6 +79,9 @@ export async function callOpenRouter(
     messages,
     max_tokens: maxTokens,
     temperature: opts.temperature ?? 0.4,
+    // `user` is deprecated in the OpenAI SDK types but is the field OpenRouter
+    // documents for end-user attribution.
+    ...(apiKeys.userId ? { user: openRouterUserTag(apiKeys.userId) } : {}),
     ...(opts.json ? { response_format: { type: 'json_object' as const } } : {}),
   }
   // OpenRouter's `reasoning` field isn't in the OpenAI SDK's types. Attach it
@@ -107,5 +119,5 @@ export async function callOpenRouter(
     throw new TruncatedResponseError(completionTokens, maxTokens)
   }
 
-  return { content, tokensUsed, promptTokens, completionTokens, model, finishReason, reasoning: reasoningText }
+  return { content, tokensUsed, promptTokens, completionTokens, model, finishReason, reasoning: reasoningText, ...tokenBuckets(usage) }
 }

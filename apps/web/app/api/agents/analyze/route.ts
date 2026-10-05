@@ -21,6 +21,8 @@ import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { runUnitOnce } from '@/lib/graph/oneshot'
 import { AnalystError, type AnalystErrorCode } from '@/lib/harness/agents/analyst'
 import { BudgetCapError } from '@/lib/harness/spend'
+import { setTraceOutput, withTrace } from '@/lib/trace/spans'
+import { traceJobInput } from '@/lib/trace/job-input'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -65,47 +67,51 @@ export async function POST(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  return withTrace(createAdminClient(), user.id, { name: 'analyze-pipeline' }, async () => {
 
-  const body = await request.json()
-  const { jobId } = body
-  if (!jobId || typeof jobId !== 'string') {
-    return NextResponse.json({ error: 'jobId is required' }, { status: 400 })
-  }
+    const body = await request.json()
+    const { jobId } = body
+    if (!jobId || typeof jobId !== 'string') {
+      return NextResponse.json({ error: 'jobId is required' }, { status: 400 })
+    }
 
-  const admin = createAdminClient()
+    const admin = createAdminClient()
+    await traceJobInput(supabase, jobId)
 
-  try {
-    const result = await runUnitOnce('analyst', {
-      admin,
-      userId: user.id,
-      goal: `Analyze job ${jobId}`,
-      input: { jobId },
-    })
-    // AnalystOutput is exactly {summary, talkingPoints, companyInsights,
-    // interviewTips} — the response IS the unit's output, unwrapped.
-    return NextResponse.json(result.output)
-  } catch (error) {
-    // The cap is an answer, not a crash: the user is told they are out of
-    // allowance, with the same 429 the rest of the product uses.
-    if (error instanceof BudgetCapError) {
+    try {
+      const result = await runUnitOnce('analyst', {
+        admin,
+        userId: user.id,
+        goal: `Analyze job ${jobId}`,
+        input: { jobId },
+      })
+      // AnalystOutput is exactly {summary, talkingPoints, companyInsights,
+      // interviewTips} — the response IS the unit's output, unwrapped.
+      setTraceOutput({ summary: (result.output as { summary?: unknown } | null)?.summary })
+      return NextResponse.json(result.output)
+    } catch (error) {
+      // The cap is an answer, not a crash: the user is told they are out of
+      // allowance, with the same 429 the rest of the product uses.
+      if (error instanceof BudgetCapError) {
+        return NextResponse.json(
+          { error: error.message, reason: 'spend_cap', retryable: false, budgetExhausted: true },
+          { status: 429 }
+        )
+      }
+      if (error instanceof AnalystError) {
+        return failureResponse(error)
+      }
+      // Unclassified — a schema-validation failure, a journal write error, an
+      // unexpected throw. Never dressed up as a result.
+      console.error('Analyze error:', error)
       return NextResponse.json(
-        { error: error.message, reason: 'spend_cap', retryable: false, budgetExhausted: true },
-        { status: 429 }
+        {
+          error: error instanceof Error ? error.message : 'Failed to analyze job',
+          reason: 'provider_error' satisfies AnalystErrorCode,
+          retryable: true,
+        },
+        { status: 502 }
       )
     }
-    if (error instanceof AnalystError) {
-      return failureResponse(error)
-    }
-    // Unclassified — a schema-validation failure, a journal write error, an
-    // unexpected throw. Never dressed up as a result.
-    console.error('Analyze error:', error)
-    return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : 'Failed to analyze job',
-        reason: 'provider_error' satisfies AnalystErrorCode,
-        retryable: true,
-      },
-      { status: 502 }
-    )
-  }
+  })
 }

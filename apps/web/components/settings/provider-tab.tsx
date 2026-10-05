@@ -29,6 +29,8 @@ interface CliAvailability {
 interface ProviderStatus {
   selfHosted: boolean
   tracingExportEnabled: boolean
+  tracingCaptureContent: boolean
+  tracingCaptureDemoContent: boolean
   active: ProviderId
   preferences: {
     active: ProviderId
@@ -165,12 +167,19 @@ export function ProviderTab({ onStatus }: ProviderTabProps) {
 
       {status.tracingExportEnabled && (
         <div className="rounded-card border bg-sunken p-4 text-caption text-muted-foreground">
-          <p className="font-medium text-foreground">This instance mirrors traces to Langfuse.</p>
+          <p className="font-medium text-foreground">This instance sends AI call traces to Langfuse.</p>
           <p className="mt-1">
-            The operator running this Cello instance has turned on optional Langfuse export. That
-            ships run traces — including prompt content and employer/job text — to a third-party
-            service for debugging and analysis. Postgres remains the complete record either way; ask
-            your operator if you have questions about what leaves this instance.
+            The operator turned on Langfuse, a third-party monitoring service. For each AI call it
+            receives the model, token counts, estimated cost, timing, error codes, your Cello user id
+            (not your email) and, for Copilot, the conversation id.{' '}
+            {status.tracingCaptureContent
+              ? 'It also receives the prompts and replies of the operator\u2019s own workspace: resume text, job descriptions and chat messages, with email addresses, tokens and API-key-like strings masked first (other text is not masked). '
+              : 'Prompts and replies are not sent. '}
+            {status.tracingCaptureContent &&
+              (status.tracingCaptureDemoContent
+                ? 'Demo workspaces are included, so do not paste anything private into a demo. '
+                : 'Demo workspaces send no prompt or reply text. ')}
+            Your saved API keys are never sent. Ask your operator if you have questions.
           </p>
         </div>
       )}

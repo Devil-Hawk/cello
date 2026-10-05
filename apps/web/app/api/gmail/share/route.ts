@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
   try {
     const apiKeys = await getDecryptedApiKeys(user.id)
     const parsed = apiKeys.openrouter
-      ? await parseEmailWithAI(from, subject, body, apiKeys.openrouter, receivedAt)
+      ? await parseEmailWithAI(from, subject, body, apiKeys, receivedAt)
       : classifyWithPatterns(from, subject, body, receivedAt)
 
     if (!parsed.isJobRelated) {

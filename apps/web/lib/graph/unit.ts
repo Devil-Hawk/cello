@@ -68,7 +68,7 @@ import { journalStepFinish, journalStepStart } from './journal'
 import { checkToolPostcondition, recordToolPostcondition } from './postcondition'
 import { logHarnessError } from '../observability/log'
 import { BudgetCapError } from '../harness/spend'
-import { acquireSpanScope, runInTraceContext, withSpan } from '../trace/spans'
+import { acquireSpanScope, currentTraceContext, runInTraceContext, withSpan } from '../trace/spans'
 
 /**
  * Thrown when config.configurable.userId is absent. Named distinctly from a
@@ -133,6 +133,49 @@ export interface RunAgentUnitArgs {
    * other (lib/graph/journal.ts keys a row on (run_id, label, iteration)).
    */
   label?: string
+}
+
+/** Langfuse generation name per unit type: what the model call is FOR. Every
+ *  unit type must have one, so a new unit cannot ship as `call-llm`. */
+export const UNIT_GENERATION_NAME: Record<UnitType, string> = {
+  sourcer: 'source-jobs',
+  matcher: 'score-job-match',
+  bulk_matcher: 'score-job-batch',
+  enricher: 'enrich-job',
+  cv_tailor: 'tailor-cv',
+  applier: 'apply-to-job',
+  verifier: 'verify-application',
+  follow_upper: 'draft-follow-up',
+  interview_prep: 'prepare-interview',
+  company_researcher: 'research-company',
+  contact_sourcer: 'find-contacts',
+  digest: 'write-digest',
+  outreach: 'draft-outreach-message',
+  resume_optimizer: 'optimize-resume',
+  strategist: 'plan-strategy',
+  analyst: 'analyze-pipeline',
+  coach: 'coach-reply',
+}
+
+/** Langfuse agent-node name per unit type. */
+export const UNIT_AGENT_NAME: Record<UnitType, string> = {
+  sourcer: 'run-job-sourcer',
+  matcher: 'run-job-matcher',
+  bulk_matcher: 'run-bulk-matcher',
+  enricher: 'run-job-enricher',
+  cv_tailor: 'run-cv-tailor',
+  applier: 'run-applier',
+  verifier: 'run-verifier',
+  follow_upper: 'run-follow-upper',
+  interview_prep: 'run-interview-prep',
+  company_researcher: 'run-company-researcher',
+  contact_sourcer: 'run-contact-sourcer',
+  digest: 'run-digest',
+  outreach: 'run-outreach',
+  resume_optimizer: 'run-resume-optimizer',
+  strategist: 'run-strategist',
+  analyst: 'run-analyst',
+  coach: 'run-coach',
 }
 
 /** Unit types that author content a human or an employer reads, and so get a
@@ -291,6 +334,11 @@ export async function runAgentUnit<T extends UnitType>(unitType: T, ctx: RunAgen
   // never the ambient scope's — an outer graph invocation may know no
   // agent_runs row at all (see invoke.ts's header), but this unit always does.
   const scope = acquireSpanScope(userId)
+  // Langfuse names are code constants: the planner's label is free text, so it
+  // goes to capture-gated detail (and the `#n` repeat suffix runs.ts appends to
+  // loop and fan-out children to a number), never into a name.
+  const repeat = /#(\d+)$/.exec(label)
+  const stepLabel = repeat ? label.slice(0, repeat.index) : label
   try {
     return await withSpan(
       scope.buffer,
@@ -302,7 +350,14 @@ export async function runAgentUnit<T extends UnitType>(unitType: T, ctx: RunAgen
       (result, err) =>
         result
           ? { agentType: unitType, label, tokensUsed: result.tokensUsed }
-          : { agentType: unitType, label, error: err instanceof Error ? err.message : String(err) }
+          : { agentType: unitType, label, error: err instanceof Error ? err.message : String(err) },
+      (result, _err, capture) => ({
+        name: UNIT_AGENT_NAME[unitType],
+        type: 'agent',
+        metadata: { agent_type: unitType, ...(repeat ? { repeat_index: Number(repeat[1]) } : {}) },
+        detail: { step_label: stepLabel },
+        ...(capture ? { input: ctx.input, output: result?.output } : {}),
+      })
     )
   } finally {
     // Only the call that CREATED this buffer (no ambient context) flushes it
@@ -334,6 +389,9 @@ async function runUnitBody<T extends UnitType>(
   // survives a key rotation or a budget reset, and spend silently goes
   // unmetered or gets attributed to the wrong account).
   const apiKeys: DecryptedApiKeys = await loadApiKeys(ctx.admin, userId)
+  // A unit run with no graph around it started its trace before it knew whose
+  // workspace this is; the key loader just told us.
+  currentTraceContext()?.buffer.adoptDemoFlag(apiKeys?.isDemo)
   const controller = new AbortController()
   // Sums every ctx.llm call this unit makes — most agent implementations
   // return `tokensUsed: 0` from their own AgentResult on the understanding
@@ -345,7 +403,8 @@ async function runUnitBody<T extends UnitType>(
   // lib/graph/runs.ts would never trip.
   const meter = { used: 0 }
   const rawLlm: LlmRunner = async (opts) => {
-    const res = await callLlm(apiKeys, opts, controller.signal)
+    // The Langfuse generation name; a call that names itself keeps its name.
+    const res = await callLlm(apiKeys, { ...opts, name: opts.name ?? UNIT_GENERATION_NAME[unitType] }, controller.signal)
     meter.used += res.tokensUsed
     return res
   }

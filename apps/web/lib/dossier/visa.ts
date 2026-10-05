@@ -13,7 +13,7 @@
 
 import type { LlmRunner } from '@/lib/harness/types'
 import { parseJsonLoose } from '@/lib/harness/llm'
-import { composeSystemPrompt, loadModeDoc } from '@/lib/harness/prompts'
+import { composeSystemPrompt, loadModeDoc, promptRef } from '@/lib/harness/prompts'
 import sponsorData from './h1b-sponsors.json'
 import type { VisaSignal } from './store'
 
@@ -133,6 +133,7 @@ export async function parseCareersSponsorship(
       // every careers-page parse ever run — the cheapest possible cache
       // prefix to mark.
       system: composeSystemPrompt({ mode: loadModeDoc('visa'), includeVoice: false }),
+      promptRef: promptRef('visa'),
       prompt: `CAREERS PAGE TEXT:\n${text.slice(0, 6000)}`,
       json: true,
       maxTokens: 300,

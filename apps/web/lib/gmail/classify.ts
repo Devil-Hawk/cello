@@ -3,13 +3,16 @@
 // ParsedEmail shape and both are explicitly told the sending domain may be
 // an ATS, not the employer.
 
-import OpenAI from 'openai'
 import type { ParsedEmail } from './types'
+import { callLlm } from '../harness/llm'
+import type { DecryptedApiKeys } from '../harness/types'
+import { warnLlmFallback } from '../observability/llm-fallback'
 import { extractEmployerFromContent } from './employer'
 import { isAtsOrJobBoardDomain } from './skip-lists'
 import { extractInterviewDateTime, normalizeIsoDateTime } from './datetime'
 
-const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
+/** Cheap on purpose: one short classification per email, run in bulk on every sync. */
+export const CLASSIFY_MODEL = 'google/gemini-2.0-flash-001'
 
 const VALID_STATUSES = ['applied', 'screen', 'interview', 'offer', 'accepted', 'rejected']
 
@@ -86,35 +89,35 @@ IMPORTANT: When in doubt, set isJobRelated=false and status="unknown". It's bett
 Return ONLY the JSON object, no markdown.`
 }
 
-/** Use an LLM (via OpenRouter) to parse an email into structured job-application info. */
+/**
+ * Use an LLM (through callLlm, so budget-checked, spend-recorded and traced) to
+ * parse an email into structured job-application info. Takes the whole
+ * DecryptedApiKeys (with userId), never a bare key: without a userId callLlm
+ * cannot meter or trace the call.
+ */
 export async function parseEmailWithAI(
   from: string,
   subject: string,
   body: string,
-  apiKey: string,
+  apiKeys: DecryptedApiKeys,
   referenceDate: Date
 ): Promise<ParsedEmail> {
-  const client = new OpenAI({
-    apiKey,
-    baseURL: OPENROUTER_BASE_URL,
-    defaultHeaders: {
-      'HTTP-Referer': 'https://cello.app',
-      'X-Title': 'Cello - Job Search Assistant',
-    },
-  })
-
   const fromDomain = extractDomain(from)
   const senderIsAts = isAtsOrJobBoardDomain(fromDomain)
 
   try {
-    const response = await client.chat.completions.create({
-      model: 'google/gemini-2.0-flash-001',
-      max_tokens: 350,
+    const response = await callLlm(apiKeys, {
+      model: CLASSIFY_MODEL,
+      maxTokens: 350,
       temperature: 0.1,
-      messages: [{ role: 'user', content: buildPrompt(from, subject, body) }],
+      // The account-wide default effort would add thinking tokens to a call
+      // that never used them.
+      reasoning: { effort: 'none' },
+      prompt: buildPrompt(from, subject, body),
+      name: 'classify-email',
     })
 
-    const content = response.choices[0]?.message?.content || '{}'
+    const content = response.content || '{}'
     let jsonStr = content.trim()
     jsonStr = jsonStr.replace(/```json\s*/gi, '').replace(/```\s*/gi, '')
 
@@ -170,8 +173,11 @@ export async function parseEmailWithAI(
       reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : null,
       interviewDateTime: normalizeIsoDateTime(parsed.interviewDateTime, referenceDate),
     }
-  } catch {
-    // Fall through to the regex/pattern-based classifier below.
+  } catch (err) {
+    // Fall through to the regex/pattern-based classifier below, but say why: a
+    // 402, a retired model or a spent budget must not look like "the model
+    // found nothing".
+    warnLlmFallback('gmail-classify', 'regex-patterns', err)
   }
 
   return classifyWithPatterns(from, subject, body, referenceDate)

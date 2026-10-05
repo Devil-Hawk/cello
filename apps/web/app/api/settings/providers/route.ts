@@ -25,7 +25,7 @@ import {
 } from '@/lib/harness/providers'
 import { detectAllLocalClis } from '@/lib/harness/providers/local-cli'
 import { detectLocalServer } from '@/lib/harness/providers/local-server'
-import { langfuseConfigured } from '@/lib/observability/langfuse'
+import { langfuseCaptureDemoEnabled, langfuseCaptureEnabled, langfuseConfigured } from '@/lib/observability/langfuse'
 
 export const dynamic = 'force-dynamic'
 
@@ -72,10 +72,14 @@ export async function GET() {
     preferences: providerPrefs,
     reasoningEffort,
     reasoningEfforts: REASONING_EFFORTS,
-    // Operator-set env vars (LANGFUSE_SECRET_KEY + LANGFUSE_BASE_URL), never
-    // user-editable here — same "boolean only, no key material" posture as
-    // hasOpenrouterKey above. See lib/observability/langfuse.ts for the gate.
+    // Operator-set env vars (LANGFUSE_PUBLIC_KEY, _SECRET_KEY, _BASE_URL),
+    // never user-editable here: same "boolean only, no key material" posture
+    // as hasOpenrouterKey above. See lib/observability/langfuse.ts for the gate.
     tracingExportEnabled: langfuseConfigured(),
+    // Whether prompt and completion text is part of that export.
+    tracingCaptureContent: langfuseCaptureEnabled(),
+    // Whether demo workspaces' prompt and reply text is part of it (off by default).
+    tracingCaptureDemoContent: langfuseCaptureEnabled() && langfuseCaptureDemoEnabled(),
     providers: {
       openrouter: {
         label: PROVIDER_LABELS.openrouter,

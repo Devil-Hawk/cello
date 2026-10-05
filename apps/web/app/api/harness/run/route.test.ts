@@ -123,6 +123,10 @@ describe('POST /api/harness/run', () => {
     expect(call.surface).toBe('run')
     expect(call.input).toEqual({ runId: 'run-1' })
     expect(call.threadId).toBeUndefined() // fresh thread — never passes one in
+    // The Langfuse trace: the goal as input, a count-only summary as output (no step outputs).
+    expect(call.trace).toMatchObject({ input: { goal: 'find me a job', chain: null }, metadata: { source: 'ui', run_id: 'run-1' } })
+    expect(call.trace.outputOf(OUTCOME)).toEqual(expect.objectContaining({ status: OUTCOME.status }))
+    expect(JSON.stringify(call.trace.outputOf(OUTCOME))).not.toContain('outputs')
 
     expect(markRunPausedOnInterruptMock).toHaveBeenCalledWith(expect.anything(), 'run-1', OUTCOME)
     // No failure path taken — the row's status is whatever harnessRunGraph

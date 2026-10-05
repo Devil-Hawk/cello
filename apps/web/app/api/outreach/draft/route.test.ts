@@ -50,6 +50,18 @@ vi.mock('@/lib/context/assemble', () => ({
   buildOutreachContext: vi.fn().mockResolvedValue(null),
 }))
 
+// What the route tells Langfuse about this request, recorded as it is set.
+const traced = { input: [] as unknown[], output: [] as unknown[], meta: [] as unknown[] }
+vi.mock('@/lib/trace/spans', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/trace/spans')>()
+  return {
+    ...actual,
+    setTraceInput: (x: unknown) => (traced.input.push(x), actual.setTraceInput(x)),
+    setTraceOutput: (x: unknown) => (traced.output.push(x), actual.setTraceOutput(x)),
+    setTraceMeta: (x: Record<string, string>) => (traced.meta.push(x), actual.setTraceMeta(x)),
+  }
+})
+
 let user: { id: string; email: string } | null
 const supabaseTableRow: Record<string, Record<string, unknown> | null> = {
   contacts: { id: 'contact-1', name: 'Jordan', email: 'jordan@example.com', title: 'Eng Manager', company_id: 'co-1' },
@@ -84,6 +96,7 @@ function post(body: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  traced.input.length = traced.output.length = traced.meta.length = 0
   findDuplicateInitialMock.mockResolvedValue(null)
   runUnitOnceMock.mockResolvedValue({ output: { subject: 'Hi', body: 'Draft body', tokensUsed: 10 }, tokensUsed: 10 })
   writeVerdictMock.mockResolvedValue(undefined)
@@ -144,5 +157,25 @@ describe('POST — a broke judge cannot take the draft down with it', () => {
       expect.anything(),
       expect.objectContaining({ judge: 'factuality', verdict: 'pass', score: 0.9 })
     )
+  })
+})
+
+describe('POST, what the Langfuse trace says', () => {
+  it('the root input is the job title and company, not raw ids, and the ids ride the trace metadata', async () => {
+    await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
+    expect(traced.input).toEqual([{ jobTitle: 'Staff Engineer', companyName: 'Acme' }])
+    expect(traced.meta[0]).toEqual({ contact_id: 'contact-1', job_id: 'job-1' })
+    expect(traced.output[0]).toMatchObject({ subject: 'Hi', usedLlm: true })
+  })
+
+  it.each([
+    ['no judge key (the judge refused, nothing was recorded)', { verdicts: [], judgeUnavailable: false }, 'skipped'],
+    ['the judge ran', { verdicts: [{ name: 'outreach groundedness', verdict: 'pass', score: 0.9, threshold: 0.5, summary: 's' }], judgeUnavailable: false }, 'ran'],
+    ['the judge failed unexpectedly', { verdicts: [], judgeUnavailable: true }, 'failed'],
+  ])('says whether the draft was judged: %s', async (_label, fixture, expected) => {
+    verified = { subject: 'Hi', body: 'Draft body', tokensUsed: 10, failedVerdict: false, ...fixture }
+    await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
+    expect(traced.output[0]).toMatchObject({ judge: expected })
+    expect(traced.meta).toContainEqual({ message_id: 'msg-1', judge: expected })
   })
 })

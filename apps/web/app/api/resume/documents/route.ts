@@ -32,6 +32,7 @@
 // though we read/write through the service-role admin client.
 
 import { NextRequest, NextResponse } from 'next/server'
+import { setTraceInput, withTrace } from '@/lib/trace/spans'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { loadApiKeys } from '@/lib/harness/keys'
@@ -300,7 +301,9 @@ export async function POST(request: NextRequest) {
 
   switch (body.action) {
     case 'generate':
-      return handleGenerate(admin, supabase, user.id, body, request.headers)
+      return withTrace(admin, user.id, { name: 'generate-resume-document', metadata: { job_id: String(body.jobId ?? '').slice(0, 64) } }, () =>
+        handleGenerate(admin, supabase, user.id, body, request.headers)
+      )
     case 'save':
       return handleSave(admin, supabase, user.id, body, request.headers)
     case 'delete':
@@ -324,7 +327,7 @@ function trackedLlm(apiKeys: DecryptedApiKeys): { llm: LlmRunner; passIndex: () 
   let started = 0
   const llm: LlmRunner = (opts) => {
     started += 1
-    return callLlm(apiKeys, opts)
+    return callLlm(apiKeys, { ...opts, name: opts.name ?? 'generate-resume-document' })
   }
   return { llm, passIndex: () => started }
 }
@@ -368,6 +371,7 @@ async function handleGenerate(
 
   const companyRel = (job as { companies?: { name?: string } | { name?: string }[] | null }).companies
   const companyName = Array.isArray(companyRel) ? companyRel[0]?.name : companyRel?.name
+  setTraceInput({ jobTitle: job.title, companyName: companyName ?? null })
 
   const apiKeys = await loadApiKeys(admin, userId)
   if (!canRunLlm(apiKeys)) {

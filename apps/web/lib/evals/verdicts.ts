@@ -62,6 +62,9 @@ export interface WriteVerdictInput {
   rationale?: string | null
   model?: string | null
   tokensUsed?: number | null
+  /** The span of the judge call that produced a model-judged verdict
+   *  (EvalResult.spanId). The Langfuse score attaches to it. */
+  judgeSpanId?: string | null
 }
 
 /** Persist one verdict row. Service-role write — RLS on eval_verdicts is
@@ -70,7 +73,7 @@ export interface WriteVerdictInput {
 export async function writeVerdict(admin: AdminClient, input: WriteVerdictInput): Promise<void> {
   try {
     const spanId = currentTraceContext()?.parentSpanId ?? null
-    const { error } = await admin.from('eval_verdicts').insert({
+    const row = {
       user_id: input.userId,
       run_id: input.runId ?? null,
       span_id: spanId,
@@ -83,13 +86,37 @@ export async function writeVerdict(admin: AdminClient, input: WriteVerdictInput)
       rationale: input.rationale ?? null,
       model: input.model ?? null,
       tokens_used: input.tokensUsed ?? null,
-    })
+    }
+    let { error } = await admin.from('eval_verdicts').insert(row)
+    // The parent span is still in the SpanBuffer (rows reach trace_spans when
+    // the trace flushes, after this write), so the span_id foreign key cannot
+    // hold yet. The verdict matters more than the link: keep it unlinked.
+    if (error?.code === '23503' && row.span_id) ({ error } = await admin.from('eval_verdicts').insert({ ...row, span_id: null }))
     if (error) throw new Error(error.message)
   } catch (err) {
     logApiError('eval_verdicts:write', err, {
       userId: input.userId,
       subjectKind: input.subjectKind,
       judge: input.judge,
+    })
+  }
+  // The verdict also becomes a Langfuse score on the judge generation, sent
+  // with the trace's replay (nothing is kept when the trace is not exported).
+  // Deterministic verdicts stay in Postgres: they are code checks, not model
+  // judgments, and each one would cost a unit.
+  if (input.judge !== 'deterministic') {
+    const ctx = currentTraceContext()
+    ctx?.buffer.addScore({
+      name: `${input.subjectKind}.${input.judge}`,
+      value: input.score ?? null,
+      verdict: input.verdict,
+      spanId: input.judgeSpanId ?? ctx.parentSpanId,
+      rationale: input.rationale,
+      metadata: {
+        subject_id: input.subjectId,
+        ...(input.threshold != null ? { threshold: input.threshold } : {}),
+        ...(input.model ? { model: input.model } : {}),
+      },
     })
   }
 }

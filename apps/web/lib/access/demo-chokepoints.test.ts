@@ -174,21 +174,11 @@ const GUARDED_KEY_SOURCE_FILES = ['lib/harness/keys.ts', 'lib/apikeys.ts', 'lib/
 const MODEL_KEY_SLOT = /\b(openrouter|openai|anthropic)\b/
 
 /**
- * The single route that reaches a model without a guarded source, and why it is
- * not a demo hole TODAY.
- *
- * app/api/companies/verify/route.ts reads `profiles.api_keys` — a column that
- * has never existed in this schema (see app/api/settings/status/route.ts's
- * header for the same bug found elsewhere: PostgREST rejects the whole SELECT
- * with 42703). It therefore can never obtain a key and can never call a model,
- * which is why nothing here is currently at risk. The pinning test below
- * asserts exactly that, so the day someone repairs that select to
- * `preferences` — turning it into a live model path — this exception stops
- * being true and has to be dealt with rather than inherited.
- *
- * This list must not grow. A new entry means a new unguarded path to a model.
+ * Routes that reach a model without a guarded source. Empty: companies/verify
+ * used to read a non-existent `profiles.api_keys` column, and now loads keys
+ * through getDecryptedApiKeys (see the test below). This list must not grow.
  */
-const KNOWN_UNGUARDED_MODEL_ROUTES = ['app/api/companies/verify/route.ts']
+const KNOWN_UNGUARDED_MODEL_ROUTES: string[] = []
 
 /**
  * Files that reach a model but are HANDED their key rather than obtaining one.
@@ -215,7 +205,7 @@ const KEY_TAKING_MODEL_PLUMBING = [
   'lib/harness/agents/resume_optimizer.ts',
   'lib/harness/agents/matcher.ts', // Step 4 verify: builds meteredJudgeClient from ScoreBatchOptions.apiKeys — handed by its two callers (the matcher AgentFn's ctx.apiKeys, autopilot.ts's own loadApiKeys call), never obtained here
   'lib/evals/judge.ts', // defines meteredJudgeClient; takes DecryptedApiKeys (+ admin, userId — both handed, never obtained)
-  'lib/gmail/classify.ts', // takes apiKey: string
+  'lib/gmail/classify.ts', // takes DecryptedApiKeys (+ userId), handed by sync-core and gmail/share
   'lib/harness/providers/local-server.ts',
   'lib/harness/providers/openrouter.ts',
   'lib/harness/providers/embeddings.ts', // defines callEmbedding's backends; takes DecryptedApiKeys
@@ -282,12 +272,11 @@ describe('every path that reaches a model is behind the demo spend + expiry guar
     ).toEqual([])
   })
 
-  it('the companies/verify exception is still inert — it cannot obtain a key at all', () => {
+  it('companies/verify loads keys through the guarded loader and reaches the model through callLlm', () => {
     const src = read(path.join(API_ROOT, 'companies/verify/route.ts'))
-    // Reads a column that does not exist; the SELECT fails whole, so getApiKeys
-    // always returns {} and neither model branch is ever entered.
-    expect(src).toContain(".select('api_keys')")
-    expect(src).not.toContain('preferences.api_keys')
+    expect(calls(src, 'getDecryptedApiKeys')).toBe(true)
+    expect(src).toContain('callLlm')
+    expect(src).not.toContain(".select('api_keys')")
   })
 })
 
@@ -524,7 +513,18 @@ describe('applyDemoKeyGuards — what the loaders actually enforce', () => {
       model: 'anthropic/claude-sonnet-5',
     }
     const profile = { id: OWNER_ID, is_demo: false, demo_expires_at: null }
-    expect(applyDemoKeyGuards({ ...owner }, profile, OWNER_ID)).toEqual(owner)
+    // Only addition: isDemo:false, which the Langfuse export reads to send the
+    // owner's prompt text (a demo and an unknown flag send none by default).
+    expect(applyDemoKeyGuards({ ...owner }, profile, OWNER_ID)).toEqual({ ...owner, isDemo: false })
+  })
+
+  it('tells the Langfuse export who this is: owner false, demo true, unreadable flag undefined (fails closed)', () => {
+    const base = { openrouter: 'k', userId: DEMO_ID }
+    const future = new Date(Date.now() + 3_600_000).toISOString()
+    expect(applyDemoKeyGuards({ ...base }, { id: DEMO_ID, is_demo: true, demo_expires_at: future }, DEMO_ID).isDemo).toBe(true)
+    expect(applyDemoKeyGuards({ ...base }, { id: OWNER_ID, is_demo: false, demo_expires_at: null }, OWNER_ID).isDemo).toBe(false)
+    expect(applyDemoKeyGuards({ ...base }, { id: OWNER_ID, is_demo: null, demo_expires_at: null }, OWNER_ID).isDemo).toBeUndefined()
+    expect(applyDemoKeyGuards({ ...base }, { id: OWNER_ID, demoColumnsAbsent: true }, OWNER_ID).isDemo).toBe(false)
   })
 })
 

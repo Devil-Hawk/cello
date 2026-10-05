@@ -176,6 +176,34 @@ interface GraphThreadRow {
 
 const GRAPH_THREAD_COLUMNS = 'thread_id, user_id, surface, expires_at, run_id, conversation_id'
 
+/** Langfuse trace name per surface when a caller names none. Names are code
+ *  constants (see lib/observability/langfuse.ts safeName), never free text. */
+const SURFACE_TRACE: Record<GraphSurface, { name: string; type: 'agent' | 'chain' }> = {
+  run: { name: 'run-agents', type: 'agent' },
+  copilot: { name: 'copilot-turn', type: 'agent' },
+  refresh: { name: 'refresh-jobs', type: 'chain' },
+  autopilot: { name: 'autopilot-tick', type: 'chain' },
+}
+
+/** How a graph invocation shows up in Langfuse. Everything is optional: the
+ *  surface supplies a default name. `input` and `outputOf` are request and
+ *  result summaries (ids, counts, a message), never resume text. */
+export interface InvokeTrace {
+  /** Trace name constant, e.g. `send-digest`. Defaults from the surface. */
+  name?: string
+  /** Observation type of the root; defaults from the surface. */
+  type?: 'agent' | 'chain'
+  input?: unknown
+  /** Result summary for the root's output. A graph that learns its answer
+   *  late can call setTraceOutput instead (it wins over this). */
+  outputOf?: (result: unknown) => unknown
+  /** Groups the traces of one conversation. Defaults: the thread's
+   *  conversation id (copilot) or the thread id (run). */
+  sessionId?: string
+  /** Ids and enums only: leg, source, resumed. */
+  metadata?: Record<string, string>
+}
+
 export interface InvokeGraphForUserArgs {
   admin: AdminClient
   userId: string
@@ -214,6 +242,8 @@ export interface InvokeGraphForUserArgs {
    * checkpointer key) always win on collision — see the merge order below.
    */
   extraConfigurable?: Record<string, unknown>
+  /** Langfuse trace naming and input/output. See InvokeTrace. */
+  trace?: InvokeTrace
 }
 
 export interface InvokeGraphForUserResult {
@@ -337,7 +367,7 @@ export async function getGraphStateForUser(
 }
 
 export async function invokeGraphForUser(args: InvokeGraphForUserArgs): Promise<InvokeGraphForUserResult> {
-  const { admin, userId, surface, graph, threadId: incomingThreadId, input, resume, streamHandler, extraConfigurable, signal } = args
+  const { admin, userId, surface, graph, threadId: incomingThreadId, input, resume, streamHandler, extraConfigurable, signal, trace } = args
 
   if (!GRAPH_SURFACES.includes(surface)) {
     throw new Error(`invokeGraphForUser: unknown surface "${surface}" — must be one of ${GRAPH_SURFACES.join(', ')}`)
@@ -375,7 +405,17 @@ export async function invokeGraphForUser(args: InvokeGraphForUserArgs): Promise<
   // `finally` so a thrown error (thread refusal, a killed invocation) still
   // best-effort-flushes whatever was buffered before the throw — see
   // SpanBuffer.flush's own doc for why that loss is bounded and acceptable.
-  const spanBuffer = new SpanBuffer(userId, threadId)
+  // `expires_at` is set only on a demo workspace's threads (see insertThread):
+  // the Langfuse export samples demo traces lower and sends no prompt text.
+  const defaults = SURFACE_TRACE[surface]
+  const traceName = trace?.name ?? defaults.name
+  const sessionId = trace?.sessionId ?? (surface === 'copilot' ? thread.conversation_id ?? threadId : surface === 'run' ? threadId : undefined)
+  const spanBuffer = new SpanBuffer(userId, threadId, undefined, {
+    isDemo: thread.expires_at != null,
+    name: traceName,
+    ...(sessionId ? { sessionId } : {}),
+    metadata: { surface, thread_id: threadId, ...(thread.run_id ? { run_id: thread.run_id } : {}), ...trace?.metadata },
+  })
   let result: unknown
   try {
     result = await withSpan(
@@ -421,7 +461,26 @@ export async function invokeGraphForUser(args: InvokeGraphForUserArgs): Promise<
           })
         ),
       (_res, err) =>
-        err ? { surface, threadId, error: err instanceof Error ? err.message : String(err) } : { surface, threadId }
+        err ? { surface, threadId, error: err instanceof Error ? err.message : String(err) } : { surface, threadId },
+      (res, err, capture) => ({
+        name: traceName,
+        type: trace?.type ?? defaults.type,
+        metadata: { surface },
+        // Input and output only when this trace may carry content; the
+        // output a graph set late (setTraceOutput) beats the result summary.
+        ...(capture
+          ? {
+              input: trace?.input,
+              output:
+                spanBuffer.meta.output ??
+                (res !== undefined && trace?.outputOf
+                  ? trace.outputOf(res)
+                  : err
+                    ? { error: err instanceof Error ? err.message : String(err) }
+                    : undefined),
+            }
+          : {}),
+      })
     )
   } finally {
     await spanBuffer.flush(admin)
