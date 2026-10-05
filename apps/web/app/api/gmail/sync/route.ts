@@ -14,11 +14,10 @@
 //     title similarity (lib/gmail/matching.ts) above a confidence threshold,
 //     or a clearly-labelled placeholder job is created from the ACTUAL parsed
 //     title. If neither is possible, nothing is attached (see `unmatched`).
-//  2. No more inventing tracked companies from arbitrary senders. Applications
-//     are only attached to companies the user already tracks (matched by
-//     domain, then normalized name). An unrecognized-but-plausible employer is
-//     recorded as a `metadata: {suggested:true, source:'gmail'}` company for
-//     the user to confirm — never with a fabricated career_url.
+//  2. Email never creates a company. Applications are only attached to
+//     companies the user already tracks (matched by domain, then normalized
+//     name). A job email from anyone else is counted in `unmatchedEmployers`
+//     and creates nothing.
 //  3. Sender skip list now also excludes ATS/job-board/aggregator domains
 //     (lib/gmail/skip-lists.ts) from being used as the employer identity —
 //     the real employer is parsed out of the subject/body/display-name

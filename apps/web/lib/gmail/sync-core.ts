@@ -34,22 +34,12 @@ import { normalizeCompanyName, findBestJobMatch } from './matching'
 import { decideStageTransition, type StageDecision } from './stage'
 import { recordStageActivity } from './activity'
 import { syncOutreachReplies } from '@/lib/outreach/reply'
+import { trackedOnly } from '@/lib/companies/watchlist'
 
 interface CompanyRecord {
   id: string
   name: string
   domain: string | null
-  /** True when this row was auto-created as a suggestion, not user-tracked. */
-  suggested: boolean
-}
-
-function isSuggestedMetadata(metadata: unknown): boolean {
-  return (
-    !!metadata &&
-    typeof metadata === 'object' &&
-    !Array.isArray(metadata) &&
-    (metadata as Record<string, unknown>).suggested === true
-  )
 }
 
 function isHttpUrl(value: string | null | undefined): value is string {
@@ -89,11 +79,11 @@ export interface GmailSyncCoreResult {
   message: string
   processed: number
   totalScanned: number
-  /** Kept as `createdCompanies` for the existing dashboard card — these are suggested companies (metadata.suggested=true), not auto-tracked ones. */
-  createdCompanies: string[]
   createdApplications: string[]
   statusUpdates: Array<{ company: string; status: string; subject: string }>
   unmatched: UnmatchedEmail[]
+  /** Job emails whose employer is not a tracked company. Nothing is created for them. */
+  unmatchedEmployers: number
   isFirstSync: boolean
 }
 
@@ -113,10 +103,10 @@ export async function runGmailSyncCore(params: GmailSyncCoreParams): Promise<Gma
       outputOf: (r: GmailSyncCoreResult) => ({
         processed: r.processed,
         totalScanned: r.totalScanned,
-        createdCompanies: r.createdCompanies.length,
         createdApplications: r.createdApplications.length,
         statusUpdates: r.statusUpdates.length,
         unmatched: r.unmatched.length,
+        unmatchedEmployers: r.unmatchedEmployers,
         isFirstSync: r.isFirstSync,
       }),
     },
@@ -131,12 +121,10 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
   const scannedIds = new Set(syncState.scannedEmailIds || [])
   const isFirstSync = scannedIds.size === 0
 
-  // Get existing companies (including previously-suggested ones, so we don't
-  // re-suggest the same sender every sync).
-  const { data: existingCompanies } = await db
-    .from('companies')
-    .select('id, name, domain, metadata')
-    .eq('user_id', userId)
+  // Only the companies the person tracks: suggested leads are not eligible.
+  const { data: existingCompanies } = await trackedOnly(
+    db.from('companies').select('id, name, domain, metadata').eq('user_id', userId)
+  )
 
   const companiesByDomain = new Map<string, CompanyRecord>()
   const companiesByName = new Map<string, CompanyRecord>()
@@ -145,7 +133,6 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
       id: c.id,
       name: c.name,
       domain: c.domain,
-      suggested: isSuggestedMetadata(c.metadata),
     }
     if (c.domain) companiesByDomain.set(c.domain.toLowerCase(), record)
     companiesByName.set(normalizeCompanyName(c.name), record)
@@ -170,7 +157,7 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
   console.log(`Gmail sync: Processing ${newMessages.length} new emails`)
 
   const newlyScannedIds: string[] = []
-  const suggestedCompanies: string[] = []
+  let unmatchedEmployers = 0
   const createdApplications: string[] = []
   const statusUpdates: Array<{ company: string; status: string; subject: string }> = []
   const unmatched: UnmatchedEmail[] = []
@@ -204,9 +191,8 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
       continue
     }
 
-    // --- Resolve company: domain match, then normalized-name match. Only an
-    // already-TRACKED (non-suggested) company is eligible for job/
-    // application attachment. ---
+    // --- Resolve company: domain match, then normalized-name match. Only a
+    // company the person tracks is eligible for job/application attachment. ---
     let matchedCompany: CompanyRecord | null = null
     if (parsed.companyDomain) {
       matchedCompany = companiesByDomain.get(parsed.companyDomain.toLowerCase()) || null
@@ -215,61 +201,17 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
       matchedCompany = companiesByName.get(normalizeCompanyName(parsed.companyName)) || null
     }
 
-    const trackedCompany = matchedCompany && !matchedCompany.suggested ? matchedCompany : null
+    const trackedCompany = matchedCompany
 
     if (!trackedCompany) {
-      // No tracked company. Record a suggestion instead of inventing a
-      // tracked one — but only once per sender (skip if we already have a
-      // suggestion or tracked company matching this domain/name), only with
-      // a real (non-fabricated) URL, and only above a real confidence bar.
-      if (!matchedCompany && (parsed.companyName || parsed.companyDomain) && parsed.confidence >= 0.6) {
-        const suggestionName = parsed.companyName || parsed.companyDomain!
-        const careerUrl = parsed.companyDomain
-          ? `https://${parsed.companyDomain}`
-          : isHttpUrl(parsed.careerPageUrl) ? parsed.careerPageUrl : null
-
-        if (careerUrl) {
-          const { data: newCompany, error: companyError } = await db
-            .from('companies')
-            .insert({
-              user_id: userId,
-              name: suggestionName,
-              domain: parsed.companyDomain,
-              career_url: careerUrl,
-              logo_url: parsed.companyDomain
-                ? `https://www.google.com/s2/favicons?domain=${parsed.companyDomain}&sz=128`
-                : null,
-              metadata: {
-                suggested: true,
-                source: 'gmail',
-                firstSeenSubject: subject,
-                gmailMessageId: msg.id,
-              } satisfies Json,
-            })
-            .select('id')
-            .single()
-
-          if (!companyError && newCompany) {
-            const record: CompanyRecord = {
-              id: newCompany.id,
-              name: suggestionName,
-              domain: parsed.companyDomain,
-              suggested: true,
-            }
-            suggestedCompanies.push(suggestionName)
-            if (parsed.companyDomain) companiesByDomain.set(parsed.companyDomain.toLowerCase(), record)
-            companiesByName.set(normalizeCompanyName(suggestionName), record)
-          }
-        }
-      }
-
+      // Email never creates a company. Unmatched job mail is counted so the
+      // card can say so, and the person decides what to track.
+      unmatchedEmployers++
       unmatched.push({
         subject,
         from,
         receivedAt: receivedAt.toISOString(),
-        reason: matchedCompany
-          ? `"${matchedCompany.name}" is only a suggested company — track it to attach applications`
-          : 'no tracked company matched this sender; recorded as a suggestion if a real domain/name was found',
+        reason: 'no tracked company matched this sender',
       })
       continue
     }
@@ -500,10 +442,10 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
       : `Synced ${newMessages.length} new emails`,
     processed: newMessages.length,
     totalScanned: allScannedIds.length,
-    createdCompanies: suggestedCompanies,
     createdApplications,
     statusUpdates,
     unmatched,
+    unmatchedEmployers,
     isFirstSync,
   }
 }

@@ -15,7 +15,7 @@ interface GmailSyncResult {
   message?: string
   processed?: number
   totalScanned?: number
-  createdCompanies?: string[]
+  unmatchedEmployers?: number
   createdApplications?: string[]
   statusUpdates?: Array<{ company: string; status: string; subject: string }>
   updates?: unknown[]
@@ -189,24 +189,6 @@ export function GmailSyncCard({
                       {result.message}
                     </p>
 
-                    {result.createdCompanies && result.createdCompanies.length > 0 && (
-                      <div className="space-y-1">
-                        <p className="text-caption font-medium text-emerald-700 dark:text-emerald-300">
-                          New companies:
-                        </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {result.createdCompanies.slice(0, 5).map((company, i) => (
-                            <Badge key={i} tone="good">
-                              {company}
-                            </Badge>
-                          ))}
-                          {result.createdCompanies.length > 5 && (
-                            <Badge tone="good">+{result.createdCompanies.length - 5} more</Badge>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
                     {result.statusUpdates && result.statusUpdates.length > 0 && (
                       <div className="space-y-1">
                         <p className="text-caption font-medium text-emerald-700 dark:text-emerald-300">
@@ -222,7 +204,15 @@ export function GmailSyncCard({
                       </div>
                     )}
 
-                    {!result.createdCompanies?.length &&
+                    {!!result.unmatchedEmployers && (
+                      <p className="text-caption text-emerald-700 dark:text-emerald-300">
+                        {result.unmatchedEmployers} job {result.unmatchedEmployers === 1 ? 'email' : 'emails'}{' '}
+                        didn&apos;t match a company you track. Add the company to attach{' '}
+                        {result.unmatchedEmployers === 1 ? 'it' : 'them'}.
+                      </p>
+                    )}
+
+                    {!result.unmatchedEmployers &&
                       !result.createdApplications?.length &&
                       !result.statusUpdates?.length && (
                         <p className="text-caption text-pipeline-offer">
