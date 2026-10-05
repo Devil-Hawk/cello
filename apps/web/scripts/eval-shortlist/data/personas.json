@@ -44,9 +44,7 @@
    "onlyCountries": [
     "US"
    ],
-   "onsiteCities": [
-    "seattle"
-   ],
+   "onsiteCities": [],
    "needsSponsorship": false,
    "salaryFloorUsd": 190000,
    "remoteOnly": false,
@@ -108,9 +106,7 @@
    "onlyCountries": [
     "US"
    ],
-   "onsiteCities": [
-    "boston"
-   ],
+   "onsiteCities": [],
    "needsSponsorship": false,
    "salaryFloorUsd": 140000,
    "remoteOnly": false,
@@ -172,9 +168,7 @@
    "onlyCountries": [
     "US"
    ],
-   "onsiteCities": [
-    "new york"
-   ],
+   "onsiteCities": [],
    "needsSponsorship": false,
    "salaryFloorUsd": 150000,
    "remoteOnly": false,
@@ -234,11 +228,7 @@
    "onlyCountries": [
     "US"
    ],
-   "onsiteCities": [
-    "austin",
-    "san francisco",
-    "new york"
-   ],
+   "onsiteCities": [],
    "needsSponsorship": false,
    "salaryFloorUsd": 110000,
    "remoteOnly": false,

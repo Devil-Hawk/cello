@@ -14,7 +14,7 @@ import type { Embedder } from '@/lib/scoring/pipeline'
 export interface ClientOptions {
   apiKey: string
   cacheDir: string
-  /** Hard cap on live (uncached) requests this run may make. */
+  /** Hard cap on answered live requests this run may make (refused ones are retried and capped separately). */
   maxRequests: number
   /** Minimum spacing between live requests. The free tier allows 20 a minute. */
   minGapMs?: number
@@ -58,12 +58,11 @@ export class FreeModelClient {
     return { status: res.status, json: await res.json().catch(() => null) }
   }
 
-  private async live_(url: string, body: unknown, model: string, timeoutMs = 240_000): Promise<any> {
-    for (let attempt = 0; attempt < 7; attempt++) {
+  private async live_(url: string, body: unknown, model: string, timeoutMs = 240_000, attempts = 8): Promise<any> {
+    for (let attempt = 0; attempt < attempts; attempt++) {
       if (this.live >= this.opts.maxRequests) throw new Error(`request budget of ${this.opts.maxRequests} live requests reached`)
+      if (this.failures >= this.opts.maxRequests) throw new Error('too many failed requests, stopping')
       await this.slot()
-      this.live += 1
-      this.byModel.set(model, (this.byModel.get(model) ?? 0) + 1)
       let r: { status: number; json: any }
       try {
         r = await this.post(url, body, timeoutMs)
@@ -72,19 +71,21 @@ export class FreeModelClient {
         await new Promise((res) => setTimeout(res, 4000 * (attempt + 1)))
         continue
       }
+      // A rate-limited or overloaded answer is not an answer: it costs no quota and is retried after a pause.
       if (r.status === 429 || r.status >= 500 || !r.json || r.json.error) {
         this.failures += 1
-        await new Promise((res) => setTimeout(res, Math.min(60_000, 6000 * 2 ** attempt)))
+        await new Promise((res) => setTimeout(res, Math.min(45_000, 5000 * 2 ** Math.min(attempt, 3))))
         continue
       }
+      this.live += 1
+      this.byModel.set(model, (this.byModel.get(model) ?? 0) + 1)
       return r.json
     }
     throw new Error(`${model}: gave up after repeated failures`)
   }
 
-  async chat(model: string, opts: LlmRunOptions): Promise<LlmResult> {
-    if (!model.endsWith(':free')) throw new Error(`refusing non-free model ${model}`)
-    const body = {
+  private chatBody(model: string, opts: LlmRunOptions) {
+    return {
       model,
       temperature: opts.temperature ?? 0,
       max_tokens: Math.max(opts.maxTokens ?? 2000, 3000),
@@ -95,16 +96,31 @@ export class FreeModelClient {
         { role: 'user', content: opts.prompt ?? '' },
       ],
     }
-    const file = path.join(this.opts.cacheDir, `chat-${this.key(body)}.json`)
+  }
+
+  private chatFile(model: string, opts: LlmRunOptions): string {
+    return path.join(this.opts.cacheDir, `chat-${this.key(this.chatBody(model, opts))}.json`)
+  }
+
+  /** The stored answer for this exact request, if one exists. Costs nothing. */
+  cachedChat(model: string, opts: LlmRunOptions): LlmResult | null {
+    const file = this.chatFile(model, opts)
+    return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as LlmResult) : null
+  }
+
+  async chat(model: string, opts: LlmRunOptions, attempts = 8): Promise<LlmResult> {
+    if (!model.endsWith(':free')) throw new Error(`refusing non-free model ${model}`)
+    const body = this.chatBody(model, opts)
+    const file = this.chatFile(model, opts)
     if (existsSync(file)) {
       this.cached += 1
       return JSON.parse(readFileSync(file, 'utf8')) as LlmResult
     }
     // A reply the model could not finish or that came back empty is retried once at a larger budget.
-    let j = await this.live_('https://openrouter.ai/api/v1/chat/completions', body, model)
+    let j = await this.live_('https://openrouter.ai/api/v1/chat/completions', body, model, 240_000, attempts)
     let choice = j.choices?.[0]
     if (!choice?.message?.content) {
-      j = await this.live_('https://openrouter.ai/api/v1/chat/completions', { ...body, max_tokens: body.max_tokens * 2 }, model)
+      j = await this.live_('https://openrouter.ai/api/v1/chat/completions', { ...body, max_tokens: body.max_tokens * 2 }, model, 240_000, attempts)
       choice = j.choices?.[0]
     }
     const out: LlmResult = {
@@ -123,9 +139,18 @@ export class FreeModelClient {
   runner(models: string[]) {
     return async (opts: LlmRunOptions): Promise<LlmResult> => {
       let last: LlmResult | null = null
+      // An answer any listed model already gave to this exact request is reused.
+      for (const m of models) {
+        const hit = this.cachedChat(m, opts)
+        if (hit?.content) {
+          this.cached += 1
+          return hit
+        }
+      }
       for (const m of models) {
         try {
-          const out = await this.chat(m, opts)
+          // A model that keeps refusing is given up on quickly so the next one gets the work.
+          const out = await this.chat(m, opts, m === models[models.length - 1] ? 8 : 3)
           if (out.content) return out
           last = out
         } catch (err) {
