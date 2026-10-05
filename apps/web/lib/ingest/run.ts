@@ -207,19 +207,22 @@ export async function ingestCompany(store: AtsStore, company: DueCompany, deps: 
     const now = Date.now()
     const state = readerState(company.metadata, searchTerms(targets).join('|'), now)
     const checkedSet = new Set(state.checked)
+    // A stored role with no description or no place is read again once per window (marked 'h'), so rows stored before the reader learned a site's data fill in.
+    const incomplete = new Set([...stored.values()].filter((s) => !s.descriptionMd5 || !s.location).map((s) => s.externalId))
+    const mark = (id: string) => (incomplete.has(id) ? `${short(id)}h` : short(id))
     const fetcher = deps.fetcher ?? makeSiteFetcher({ mode })
     const read: SiteRead = await readSite(
       {
         company: { name: company.name, domain: company.domain, careerUrl },
         targets,
-        checked: { has: (id: string) => checkedSet.has(short(id)) } as ReadonlySet<string>,
-        storedIds: new Set(stored.keys()),
+        checked: { has: (id: string) => checkedSet.has(mark(id)) } as ReadonlySet<string>,
+        storedIds: new Set([...stored.keys()].filter((id) => !incomplete.has(id))),
       },
       { fetcher, readBoard: boardReader(company, stored), fetchPage: mode === 'scheduled' ? deps.fetchPage : undefined, model: deps.model, renderedLater: mode === 'inline' }
     )
 
     outcome.tier = read.tier
-    for (const id of read.checked) if (!checkedSet.has(short(id))) state.checked.push(short(id))
+    for (const id of read.checked) if (!checkedSet.has(mark(id))) state.checked.push(mark(id))
     state.checked = state.checked.slice(-MAX_CHECKED)
     board.meta.reader = { ...state, tier: read.tier, tried: read.tried.slice(0, 8) }
 

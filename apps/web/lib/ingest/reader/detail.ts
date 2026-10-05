@@ -8,6 +8,7 @@ import type { AtsJob } from '../../ats/types'
 import { descriptionFromPage } from '../details'
 import { readJobPostings } from '../jsonld'
 import { normalizeJobUrl } from '../snapshot'
+import { readEmbeddedPosting } from './embedded'
 
 export interface RoleDetail {
   title: string
@@ -50,6 +51,22 @@ export function pageTitle($: cheerio.CheerioAPI): string {
  * Read one role's page. `url` is where it was fetched from. Never throws.
  */
 export function readDetail(html: string, url: string): RoleDetail {
+  const d = readDetailBase(html, url)
+  // A page that carries its posting as embedded data (Apple) gives what the markup left empty.
+  const emb = d.employer ? null : readEmbeddedPosting(html)
+  const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  if (!emb || (d.title && !(norm(d.title).includes(norm(emb.title)) || norm(emb.title).includes(norm(d.title))))) return d
+  return {
+    ...d,
+    title: d.title || emb.title,
+    location: d.location ?? emb.location,
+    // Structured data beats the text of a rendered region, which may be a menu.
+    description: emb.description ?? d.description,
+    postedAt: d.postedAt ?? emb.postedAt,
+  }
+}
+
+function readDetailBase(html: string, url: string): RoleDetail {
   const hrefs: string[] = []
   let $: cheerio.CheerioAPI
   try {

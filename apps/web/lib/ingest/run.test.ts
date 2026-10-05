@@ -3,7 +3,9 @@ import type { AtsStore, ExistingJob, JobUpsertRow } from '../ats/index'
 import { MODEL_LIMIT, newModelBudget, type ModelCall } from './model'
 import { ingestCompany, ingestUser, isDue, type DueCompany, type RunPatch, type RunsStore } from './run'
 import type { FetchPage } from './fetch-page'
-import { fakeFetcher, type Route } from './reader/fake-fetcher'
+import { createHash } from 'node:crypto'
+import { fakeFetcher, fixture, type Route } from './reader/fake-fetcher'
+import { normalizeJobUrl } from './snapshot'
 import { searchTerms, NO_TARGETS } from './reader/targets'
 
 const realFetch = globalThis.fetch
@@ -180,6 +182,46 @@ describe('ingestCompany', () => {
     expect(out.reader).toBe('page_reader')
     expect(out.result.found).toBe(1)
     expect(calls.sightings[0].sources).toEqual([])
+  })
+
+  it('a stored role with no place and no text is read again, once, so rows stored before the reader knew a site fill in', async () => {
+    const detail = fixture('apple-detail-embedded.html')
+    const roleUrl = 'https://jobs.apple.com/en-us/details/200679684-0157/ios-engineer-cloud-media-and-collaboration'
+    const card = (id: string, slug: string) => `<li><a href="/en-us/details/${id}/${slug}"><h3>${slug.replace(/-/g, ' ')}</h3></a></li>`
+    const list = `<ul>${card('200679684-0157', 'ios-engineer-cloud-media-and-collaboration')}${card('200679685-0001', 'data-engineer-apple-music')}${card('200679686-0002', 'software-engineer-maps')}</ul>`
+    const SEARCH = 'https://jobs.apple.com/en-us/search?sort=newest&location=united-states-USA'
+    const apple = (over: Partial<ExistingJob> = {}) => ({ externalId: normalizeJobUrl(roleUrl), title: 'iOS Engineer: Cloud Media and Collaboration', location: null, salaryRange: null, descriptionMd5: null, source: 'listing', open: true, ...over })
+    const run = async (existing: ExistingJob[], checked: string[]) => {
+      const updates: { fields: Record<string, unknown> }[] = []
+      const { store } = memoryStore({ existing })
+      store.updateJobs = async (rows) => {
+        updates.push(...rows)
+        return rows.length
+      }
+      const f = fakeFetcher({ 'https://jobs.apple.com/robots.txt': { status: 404, body: '' }, [SEARCH]: list, [roleUrl]: detail })
+      await ingestCompany(
+        store,
+        company('c1', {
+          name: 'Apple',
+          domain: 'apple.com',
+          career_url: 'https://jobs.apple.com/en-us/search',
+          metadata: { reader: { checked, targets_key: searchTerms(NO_TARGETS).join('|'), at: new Date().toISOString() } },
+        }),
+        { fetchPage: fetcher(PLAIN_PAGE), model: null, fetcher: f }
+      )
+      return { fetched: f.calls.includes(roleUrl), updates }
+    }
+    const id = normalizeJobUrl(roleUrl)
+    const sha = (s: string) => createHash('sha1').update(s).digest('hex').slice(0, 12)
+    // Stored without a place or text, and read before: it is read again and filled in.
+    const healed = await run([apple()], [sha(id)])
+    expect(healed.fetched).toBe(true)
+    expect(healed.updates[0].fields).toMatchObject({ location: 'Austin, Texas, United States' })
+    expect(String(healed.updates[0].fields.description).length).toBeGreaterThan(500)
+    // Already read again for this: not fetched a third time.
+    expect((await run([apple()], [sha(id), `${sha(id)}h`])).fetched).toBe(false)
+    // Complete rows are never fetched again.
+    expect((await run([apple({ location: 'Austin', descriptionMd5: 'x' })], [sha(id)])).fetched).toBe(false)
   })
 
   it('inline, a script-built page is left to the scheduled pass: the company says it is being read, not that it failed', async () => {
