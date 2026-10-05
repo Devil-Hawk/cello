@@ -93,7 +93,8 @@ vi.mock('@/lib/harness/agents/matcher', async (importOriginal) => ({
 }))
 vi.mock('@/lib/harness/agents/bulk_matcher', () => ({ runBulkMatch: io.runBulkMatch }))
 vi.mock('@/lib/outreach/config', () => ({ readOutreachConfig: io.readOutreachConfig }))
-vi.mock('@/lib/outreach/store', () => ({
+vi.mock('@/lib/outreach/store', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/outreach/store')>()),
   findDuplicateInitial: io.findDuplicateInitial,
   insertOutreach: io.insertOutreach,
 }))

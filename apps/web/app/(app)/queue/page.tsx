@@ -1,7 +1,8 @@
 'use client'
 
 import { autoSubmitEnabled } from '@/lib/automation/capabilities'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Inbox, Mail, ShieldAlert, ShieldCheck } from 'lucide-react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { Badge } from '@/components/ui/badge'
@@ -13,6 +14,7 @@ import { OutreachCard, type OutreachRow } from '@/components/queue/outreach-card
 import { QueueList } from '@/components/queue/queue-list'
 import { createClient } from '@/lib/supabase/client'
 import { fetchClientSafePreferences } from '@/lib/preferences/client-safe'
+import { isFollowUpDue } from '@/lib/outreach/guardrails'
 
 type Tab = 'applications' | 'outreach'
 type ScopeFilter = 'pending' | 'all'
@@ -24,7 +26,12 @@ interface Policy {
 }
 
 export default function QueuePage() {
-  const [tab, setTab] = useState<Tab>('applications')
+  // ?tab=outreach (the draft toast, the bell) wins; otherwise the page picks the
+  // tab that has something waiting once it has loaded (see the effect below).
+  const requestedTab = useSearchParams().get('tab')
+  const [tab, setTab] = useState<Tab>(requestedTab === 'outreach' ? 'outreach' : 'applications')
+  const tabChosen = useRef(requestedTab === 'outreach' || requestedTab === 'applications')
+  const [followUpDays, setFollowUpDays] = useState(5)
   const [scope, setScope] = useState<ScopeFilter>('pending')
   const [loading, setLoading] = useState(true)
   const [drafts, setDrafts] = useState<DraftRow[]>([])
@@ -51,6 +58,14 @@ export default function QueuePage() {
 
   useEffect(() => {
     load()
+    // The follow-up wait is not part of the client-safe preferences projection,
+    // so it comes from the settings route. Best-effort: the default is 5 days.
+    fetch('/api/settings/outreach')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (typeof d?.prefs?.followUpDays === 'number') setFollowUpDays(d.prefs.followUpDays)
+      })
+      .catch(() => {})
     // Policy read for the info banner (from the user's own profile preferences).
     //
     // Reads through get_client_safe_preferences() instead of
@@ -82,14 +97,28 @@ export default function QueuePage() {
   const visibleDrafts = drafts.filter((d) =>
     scope === 'pending' ? d.status === 'pending_review' : d.status !== 'rejected'
   )
-  const visibleMessages = messages.filter((m) =>
-    scope === 'pending' ? m.status === 'pending_review' || m.status === 'approved' : m.status !== 'skipped'
-  )
+  // "Needs review" is everything that needs the user: drafts to approve, sends
+  // that failed (they used to vanish from this view), and sent emails whose one
+  // follow-up is now due.
+  const needsYou = (m: OutreachRow) =>
+    m.status === 'pending_review' ||
+    m.status === 'approved' ||
+    m.status === 'failed' ||
+    isFollowUpDue(m, messages, followUpDays)
+  const visibleMessages = messages.filter((m) => (scope === 'pending' ? needsYou(m) : m.status !== 'skipped'))
 
   const pendingDrafts = drafts.filter((d) => d.status === 'pending_review').length
-  const pendingOutreach = messages.filter(
-    (m) => m.status === 'pending_review' || m.status === 'approved'
-  ).length
+  const pendingOutreach = messages.filter(needsYou).length
+
+  // Open on Outreach when it has drafts waiting for approval (the page used to
+  // land on Applications, so "waiting in your queue" pointed at the wrong tab).
+  // Once, on first load, and never over a tab the user or the URL already chose.
+  const awaitingApproval = messages.filter((m) => m.status === 'pending_review' || m.status === 'approved').length
+  useEffect(() => {
+    if (loading || tabChosen.current) return
+    tabChosen.current = true
+    if (awaitingApproval > 0) setTab('outreach')
+  }, [loading, awaitingApproval])
 
   return (
     <div className="space-y-6">
@@ -155,7 +184,10 @@ export default function QueuePage() {
       <div className="flex items-center gap-2">
         <Segmented<Tab>
           value={tab}
-          onValueChange={setTab}
+          onValueChange={(next) => {
+            tabChosen.current = true
+            setTab(next)
+          }}
           aria-label="Queue type"
           options={[
             {
@@ -219,7 +251,12 @@ export default function QueuePage() {
       ) : (
         <div className="space-y-4">
           {visibleMessages.map((m) => (
-            <OutreachCard key={m.id} message={m} onChanged={load} />
+            <OutreachCard
+              key={m.id}
+              message={m}
+              onChanged={load}
+              followUpDue={isFollowUpDue(m, messages, followUpDays)}
+            />
           ))}
         </div>
       )}

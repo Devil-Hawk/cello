@@ -130,6 +130,12 @@ vi.mock('@/lib/harness/supabase-admin', () => ({
 vi.mock('@/lib/interactions/store', () => ({
   recordInteraction: async () => null,
 }))
+// Reply tracking has its own tests (lib/outreach/reply.test.ts); here it is only
+// observed to be called with the sync's token.
+const syncOutreachRepliesMock = vi.fn(async (..._args: unknown[]) => 0)
+vi.mock('@/lib/outreach/reply', () => ({
+  syncOutreachReplies: (...args: unknown[]) => syncOutreachRepliesMock(...args),
+}))
 vi.mock('./gmail-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./gmail-api')>()
   return { ...actual, fetchGmailMessages: async () => [FIXED_MESSAGE] }
@@ -209,6 +215,27 @@ describe('runGmailSyncCore — idempotency', () => {
     expect(fakeDb.tables.get('activities')).toHaveLength(1)
     expect(fakeDb.tables.get('applications')).toHaveLength(1)
     expect(fakeDb.tables.get('jobs')).toHaveLength(1)
+  })
+})
+
+describe('runGmailSyncCore: outreach replies', () => {
+  it('checks the tracked outreach threads on every pass, whatever the job-email search returns', async () => {
+    fakeDb = makeFakeDb()
+    fakeDb.tables.set('profiles', [{ id: USER_ID, preferences: {} }])
+    syncOutreachRepliesMock.mockClear()
+
+    await runGmailSyncCore({
+      db: fakeDb as any,
+      userId: USER_ID,
+      accessToken: 'fake-access-token',
+      apiKeys: { userId: USER_ID },
+      preferences: preferences(),
+    })
+
+    expect(syncOutreachRepliesMock).toHaveBeenCalledTimes(1)
+    expect(syncOutreachRepliesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID, accessToken: 'fake-access-token' })
+    )
   })
 })
 

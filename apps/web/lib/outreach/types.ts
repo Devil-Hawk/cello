@@ -35,6 +35,8 @@ export interface OutreachMessageRow {
   gmail_message_id: string | null
   gmail_thread_id: string | null
   error: string | null
+  /** False when the draft is the generic template (no model wrote it). NULL on rows from before this was recorded. */
+  used_llm?: boolean | null
   sent_at: string | null
   /** When an inbound reply was matched to this thread. NULL = no reply yet. */
   replied_at: string | null

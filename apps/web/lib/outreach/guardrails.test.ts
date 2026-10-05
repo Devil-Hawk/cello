@@ -16,7 +16,7 @@
 // everything here is synchronous.
 
 import { describe, expect, it } from 'vitest'
-import { canSendNow, checkDailyCap, followUpWindowElapsed } from './guardrails'
+import { canSendNow, checkDailyCap, followUpWindowElapsed, isFollowUpDue } from './guardrails'
 import { DEFAULT_OUTREACH_PREFS, type OutreachMessageRow, type OutreachPreferences, type OutreachStatus } from './types'
 
 function prefs(overrides: Partial<OutreachPreferences> = {}): OutreachPreferences {
@@ -256,5 +256,35 @@ describe('followUpWindowElapsed — guardrail (5), one polite follow-up', () => 
   it('does not treat a future-dated parent as eligible', () => {
     const gate = followUpWindowElapsed(sentAt, prefs({ followUpDays: 5 }), new Date(sentAtMs - 10 * DAY_MS))
     expect(gate.allowed).toBe(false)
+  })
+})
+
+describe('isFollowUpDue (the queue\'s Draft follow-up button)', () => {
+  const NOW = new Date('2026-10-10T00:00:00Z')
+  const sentOn = (iso: string) => ({ id: 'a', status: 'sent', kind: 'initial', sent_at: iso, replied_at: null })
+
+  it('is due once the wait has passed with no reply and no follow-up yet', () => {
+    expect(isFollowUpDue(sentOn('2026-10-04T00:00:00Z'), [], 5, NOW)).toBe(true)
+  })
+
+  it('is not due inside the window, matching what the follow-up route would refuse', () => {
+    expect(isFollowUpDue(sentOn('2026-10-08T00:00:00Z'), [], 5, NOW)).toBe(false)
+  })
+
+  it('is not due once the contact replied', () => {
+    expect(isFollowUpDue({ ...sentOn('2026-10-01T00:00:00Z'), replied_at: '2026-10-02T00:00:00Z' }, [], 5, NOW)).toBe(false)
+  })
+
+  it('is not due when a follow-up already exists for it', () => {
+    expect(isFollowUpDue(sentOn('2026-10-01T00:00:00Z'), [{ parent_id: 'a' }], 5, NOW)).toBe(false)
+  })
+
+  it.each([
+    [{ id: 'a', status: 'pending_review', kind: 'initial', sent_at: null }],
+    [{ id: 'a', status: 'failed', kind: 'initial', sent_at: null }],
+    [{ id: 'a', status: 'sent', kind: 'follow_up', sent_at: '2026-10-01T00:00:00Z' }],
+    [{ id: 'a', status: 'sent', kind: 'initial', sent_at: null }],
+  ])('is never due for %j', (m) => {
+    expect(isFollowUpDue(m, [], 5, NOW)).toBe(false)
   })
 })

@@ -32,6 +32,28 @@ export interface GmailSendResult {
   threadId: string
 }
 
+/** A non-2xx answer from Gmail's send endpoint, with the HTTP status kept so a caller can tell a bad token from a refused message. */
+export class GmailSendError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message)
+    this.name = 'GmailSendError'
+  }
+}
+
+/**
+ * True when a send failed because the credential is unusable (expired or
+ * under-scoped token), not because of the message. Nothing was delivered and
+ * nothing is wrong with the draft, so the caller keeps it sendable and asks
+ * the user to reconnect instead of burning it as failed.
+ */
+export function isGmailAuthError(err: unknown): boolean {
+  if (!(err instanceof GmailSendError)) return false
+  return err.status === 401 || (err.status === 403 && /insufficient|scope|permission/i.test(err.message))
+}
+
 /** RFC 2047 encoded-word for non-ASCII header values (subject / display name). */
 function encodeHeaderWord(value: string): string {
   if (/^[\x20-\x7E]*$/.test(value)) return value
@@ -79,7 +101,7 @@ export async function sendGmailMessage(input: GmailSendInput): Promise<GmailSend
 
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
-    throw new Error(`Gmail send failed (${res.status}): ${detail.slice(0, 300)}`)
+    throw new GmailSendError(`Gmail send failed (${res.status}): ${detail.slice(0, 300)}`, res.status)
   }
   const data = (await res.json()) as { id: string; threadId: string }
   return { id: data.id, threadId: data.threadId }

@@ -3,6 +3,8 @@
 export interface GmailMessage {
   id: string
   threadId: string
+  /** Gmail's own labels ('SENT', 'INBOX', ...). Present on every real API message. */
+  labelIds?: string[]
   snippet: string
   payload: {
     headers: Array<{ name: string; value: string }>

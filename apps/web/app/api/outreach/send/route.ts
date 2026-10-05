@@ -17,7 +17,9 @@ import { readOutreachConfig } from '@/lib/outreach/config'
 import { getOutreach, updateOutreach, countSentToday } from '@/lib/outreach/store'
 import { canSendNow, checkDailyCap, followUpWindowElapsed } from '@/lib/outreach/guardrails'
 import { demoSendGate, firstRefusal, type DemoProfileFacts } from '@/lib/access/guardrails'
-import { sendGmailMessage, threadHasReply } from '@/lib/outreach/gmail'
+import { isGmailAuthError, sendGmailMessage, threadHasReply } from '@/lib/outreach/gmail'
+import { resolveGmailAccessToken } from '@/lib/gmail/token'
+import { logApiError } from '@/lib/observability/log'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -81,13 +83,6 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  if (!session?.provider_token) {
-    return NextResponse.json(
-      { error: 'Gmail access not available. Connect Gmail in Settings to enable this.', needsReauth: true },
-      { status: 401 }
-    )
-  }
-
   let id: string
   // `approve: true` means "the human is approving this in the same breath as
   // sending it". Accepting the approval as an argument is what makes
@@ -132,7 +127,31 @@ export async function POST(request: NextRequest) {
 
   const userEmail = user.email || ''
 
+  // The Gmail credential: the stored refresh token first, so a send an hour
+  // after sign-in still works; the session's one-hour token only as a
+  // fallback. Resolved after the cheap refusals above so a message that would
+  // be refused anyway never costs a token exchange. A bad credential leaves the
+  // draft exactly where it was and tells the user to reconnect.
+  const token = await resolveGmailAccessToken(
+    supabase,
+    user.id,
+    (sendPerm?.preferences ?? {}) as Record<string, unknown>,
+    session?.provider_token
+  )
+  if (!token.ok) {
+    const hasGoogle = user.identities?.some((i) => i.provider === 'google') ?? true
+    return NextResponse.json(
+      {
+        error: hasGoogle ? token.message : 'Sending through Gmail needs a Google sign-in. Sign in with Google to use it.',
+        needsReauth: true,
+      },
+      { status: 401 }
+    )
+  }
+  const accessToken = token.accessToken
+
   // Guardrail (5): follow-ups — window + no-reply.
+  let parentThread: string | null = null
   if (message.kind === 'follow_up' && message.parent_id) {
     const parent = await getOutreach(admin, user.id, message.parent_id)
     const windowGate = followUpWindowElapsed(parent?.sent_at ?? null, config.prefs)
@@ -140,27 +159,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: windowGate.reason }, { status: 425 })
     }
     const threadId = parent?.gmail_thread_id ?? message.gmail_thread_id
-    if (threadId) {
-      const replied = await threadHasReply(session.provider_token, threadId, userEmail)
-      if (replied) {
-        await updateOutreach(admin, user.id, id, { status: 'skipped', error: 'contact already replied — follow-up suppressed' })
-        return NextResponse.json({ ok: false, skipped: true, reason: 'contact already replied' })
-      }
+    // replied_at is what the reply sync stamped; the live thread check is the
+    // fresher second opinion. Either one suppresses the follow-up.
+    if (parent?.replied_at || (threadId && (await threadHasReply(accessToken, threadId, userEmail)))) {
+      await updateOutreach(admin, user.id, id, { status: 'skipped', error: 'contact already replied — follow-up suppressed' })
+      return NextResponse.json({ ok: false, skipped: true, reason: 'contact already replied' })
     }
+    parentThread = parent?.gmail_thread_id ?? null
   }
 
   // Identity (4): From is always the signed-in user.
   const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', user.id).single()
   const fromName = profile?.full_name || userEmail.split('@')[0] || 'Me'
 
-  const parentThread =
-    message.kind === 'follow_up' && message.parent_id
-      ? (await getOutreach(admin, user.id, message.parent_id))?.gmail_thread_id ?? null
-      : null
-
+  let sent
   try {
-    const sent = await sendGmailMessage({
-      accessToken: session.provider_token,
+    sent = await sendGmailMessage({
+      accessToken,
       toEmail: message.to_email,
       toName: message.to_name,
       fromName,
@@ -169,6 +184,25 @@ export async function POST(request: NextRequest) {
       body: message.body,
       threadId: parentThread,
     })
+  } catch (e) {
+    // The credential, not the message: nothing was delivered and the draft is
+    // fine, so it stays sendable. Marking it failed here burned a good draft on
+    // every expired token.
+    if (isGmailAuthError(e)) {
+      return NextResponse.json(
+        { error: 'Gmail rejected the saved access. Reconnect Gmail in Settings, then send again.', needsReauth: true },
+        { status: 401 }
+      )
+    }
+    const errMsg = e instanceof Error ? e.message : 'Gmail send failed'
+    await updateOutreach(admin, user.id, id, { status: 'failed', error: errMsg })
+    return NextResponse.json({ error: errMsg }, { status: 502 })
+  }
+
+  // Gmail has the message. A failure to record that is NOT a failed send:
+  // marking the row failed would tell the user nothing left and invite a
+  // second send of an email already delivered.
+  try {
     const updated = await updateOutreach(admin, user.id, id, {
       status: 'sent',
       sent_at: new Date().toISOString(),
@@ -178,8 +212,11 @@ export async function POST(request: NextRequest) {
     })
     return NextResponse.json({ ok: true, message: updated })
   } catch (e) {
-    const errMsg = e instanceof Error ? e.message : 'Gmail send failed'
-    await updateOutreach(admin, user.id, id, { status: 'failed', error: errMsg })
-    return NextResponse.json({ error: errMsg }, { status: 502 })
+    logApiError('outreach/send:record', e, { userId: user.id })
+    return NextResponse.json({
+      ok: true,
+      message: null,
+      warning: 'The email was sent, but Cello could not record it. Do not send it again.',
+    })
   }
 }

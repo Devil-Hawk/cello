@@ -59,6 +59,8 @@ export default function SettingsPage() {
   const [hasOpenaiKey, setHasOpenaiKey] = useState(false)
   const [hasAnthropicKey, setHasAnthropicKey] = useState(false)
   const [hasOpenrouterKey, setHasOpenrouterKey] = useState(false)
+  const [hasHunterKey, setHasHunterKey] = useState(false)
+  const [hasApolloKey, setHasApolloKey] = useState(false)
   const [currentModel, setCurrentModel] = useState<string | null>(null)
   const [targeting, setTargeting] = useState<Targeting>(EMPTY_TARGETING)
 
@@ -135,6 +137,8 @@ export default function SettingsPage() {
           setHasOpenaiKey(Boolean(status.keys?.openai))
           setHasAnthropicKey(Boolean(status.keys?.anthropic))
           setHasOpenrouterKey(Boolean(status.keys?.openrouter))
+          setHasHunterKey(Boolean(status.keys?.hunter))
+          setHasApolloKey(Boolean(status.keys?.apollo))
           setCurrentModel(status.model ?? null)
         }
       } catch {
@@ -280,6 +284,8 @@ export default function SettingsPage() {
               initialHasOpenai={hasOpenaiKey}
               initialHasAnthropic={hasAnthropicKey}
               initialHasOpenrouter={hasOpenrouterKey}
+              initialHasHunter={hasHunterKey}
+              initialHasApollo={hasApolloKey}
               onStatus={reportStatus}
             />
           ) : activeTab === 'provider' ? (

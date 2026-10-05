@@ -64,6 +64,7 @@ export async function GET() {
     openai: present(keys.openai),
     anthropic: present(keys.anthropic),
     hunter: present(storedKeys.hunter),
+    apollo: present(storedKeys.apollo),
   }
 
   const rawModel = preferences.model

@@ -39,6 +39,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Panel } from '@/components/ui/panel'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ToastAction } from '@/components/ui/toast'
 import { toast } from '@/components/ui/use-toast'
 import type { SearchReport } from '@/lib/contacts/sources'
 import type { RoleContext } from '@/lib/contacts/relevance'
@@ -86,6 +87,9 @@ export function ContactNetworkPanel({
   const [roleBasis, setRoleBasis] = useState<string | null>(null)
   const [draftingId, setDraftingId] = useState<string | null>(null)
   const [draftedIds, setDraftedIds] = useState<Set<string>>(new Set())
+  // Names of contacts whose draft this session came back as the generic
+  // template (no model wrote it). Stays on screen, unlike the toast.
+  const [templateDrafts, setTemplateDrafts] = useState<string[]>([])
 
   // The ranking inputs — read on mount so contacts sourced on an EARLIER run
   // are ranked too, not just the ones this session happens to find. A failure
@@ -176,10 +180,27 @@ export function ContactNetworkPanel({
       const data = await res.json().catch(() => null)
       if (!res.ok || !data) throw new Error(data?.error ?? `Failed to draft outreach (HTTP ${res.status})`)
       setDraftedIds((prev) => new Set(prev).add(contact.id))
-      toast({
-        title: 'Draft ready for review',
-        description: `An intro email to ${contact.name} is waiting in your queue — nothing sends until you approve it.`,
-      })
+      // usedLlm:false means the drafter fell back to its generic template (no
+      // OpenRouter key, budget spent, or a model error). Saying "Draft ready"
+      // for that made a bland email look like the product's best effort.
+      if (data.usedLlm === false) {
+        setTemplateDrafts((prev) => [...prev, contact.name])
+        toast({
+          title: 'Draft saved, but it is a generic template',
+          description: `No model wrote the email to ${contact.name}: your OpenRouter key is missing or out of budget, or the model failed. Check Settings, then dismiss it and draft again.`,
+          variant: 'destructive',
+        })
+      } else {
+        toast({
+          title: 'Draft ready for review',
+          description: `An intro email to ${contact.name} is waiting in your queue. Nothing sends until you approve it.`,
+          action: (
+            <ToastAction altText="Open the outreach queue" asChild>
+              <Link href="/queue?tab=outreach">Open queue</Link>
+            </ToastAction>
+          ),
+        })
+      }
     } catch (e) {
       toast({
         title: 'Could not draft outreach',
@@ -282,9 +303,24 @@ export function ContactNetworkPanel({
         <p className="text-caption text-muted-foreground">{sourceNote}</p>
       )}
 
+      {templateDrafts.length > 0 && (
+        <Panel tone="sunken" divider="none" className="rounded-control" role="alert">
+          <p className="text-caption font-medium text-foreground">
+            The draft to {templateDrafts.join(', ')} is a generic template.
+          </p>
+          <p className="mt-0.5 text-caption text-muted-foreground">
+            No model wrote it. Add or top up your OpenRouter key in{' '}
+            <Link href="/settings?tab=api-keys" className="font-medium text-accent-deep hover:underline">
+              Settings
+            </Link>
+            , then dismiss the draft in the queue and draft again.
+          </p>
+        </Panel>
+      )}
+
       {draftedIds.size > 0 && (
         <p className="text-caption text-muted-foreground">
-          <Link href="/queue" className="font-medium text-accent-deep hover:underline">
+          <Link href="/queue?tab=outreach" className="font-medium text-accent-deep hover:underline">
             Review drafts in the queue
           </Link>{' '}
           — nothing sends until you approve it.

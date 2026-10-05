@@ -11,7 +11,8 @@ import { NextRequest } from 'next/server'
 
 const insertOutreachMock = vi.fn()
 const findDuplicateInitialMock = vi.fn(async (..._args: unknown[]) => null)
-vi.mock('@/lib/outreach/store', () => ({
+vi.mock('@/lib/outreach/store', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/outreach/store')>()),
   insertOutreach: (...args: unknown[]) => insertOutreachMock(...args),
   findDuplicateInitial: (...args: unknown[]) => findDuplicateInitialMock(...args),
 }))
@@ -157,6 +158,42 @@ describe('POST — a broke judge cannot take the draft down with it', () => {
       expect.anything(),
       expect.objectContaining({ judge: 'factuality', verdict: 'pass', score: 0.9 })
     )
+  })
+})
+
+describe('POST, duplicates and templates', () => {
+  it('answers 409, not a raw 500, when the unique index refuses a draft that raced past the check', async () => {
+    insertOutreachMock.mockRejectedValue(
+      Object.assign(new Error('insertOutreach failed: duplicate key value violates unique constraint "uniq_outreach_initial_contact_job"'), { code: '23505' })
+    )
+
+    const response = await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
+    const body = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(body.error).toBe('An outreach email to this contact for this role already exists.')
+    expect(body.error).not.toContain('duplicate key')
+  })
+
+  it('still answers 500 for a save failure that is not the duplicate refusal', async () => {
+    insertOutreachMock.mockRejectedValue(Object.assign(new Error('insertOutreach failed: boom'), { code: '08006' }))
+    const response = await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
+    expect(response.status).toBe(500)
+  })
+
+  it('records and reports a template draft (tokensUsed 0) as usedLlm:false', async () => {
+    verified = { subject: 'Template', body: 'Generic body', tokensUsed: 0, verdicts: [], failedVerdict: false, judgeUnavailable: false }
+
+    const response = await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
+    const body = await response.json()
+
+    expect(body.usedLlm).toBe(false)
+    expect(insertOutreachMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ used_llm: false }))
+  })
+
+  it('records a model draft as used_llm:true', async () => {
+    await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
+    expect(insertOutreachMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ used_llm: true }))
   })
 })
 

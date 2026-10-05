@@ -135,6 +135,20 @@ export async function verifyOutreachDraft(args: VerifyOutreachDraftArgs): Promis
     input: { ...args.input, correctiveContext },
   })
   const regenDraft = regenerated.output as OutreachDraftResult
+  // The drafter swallows model errors and returns its generic template with
+  // tokensUsed 0. If the retry hit one (budget, rate limit, a bad response)
+  // that template must not replace a real draft that merely failed a judge:
+  // keep the original and the verdicts that describe it.
+  if (regenDraft.tokensUsed === 0) {
+    return {
+      subject: args.draft.subject,
+      body: args.draft.body,
+      tokensUsed,
+      verdicts,
+      failedVerdict: verdicts.some((v) => v.verdict === 'fail'),
+      judgeUnavailable: false,
+    }
+  }
   tokensUsed += regenDraft.tokensUsed
 
   try {

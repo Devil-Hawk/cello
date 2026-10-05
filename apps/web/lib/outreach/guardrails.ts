@@ -86,3 +86,20 @@ export function followUpWindowElapsed(
   }
   return { allowed: true }
 }
+
+/**
+ * The queue's "Draft follow-up" predicate: a sent first email with no reply, old
+ * enough for its one follow-up, and no follow-up drafted yet. Uses the same
+ * window check the follow-up route enforces, so the button never appears for a
+ * request the server would refuse as too early.
+ */
+export function isFollowUpDue(
+  message: { id: string; status: string; kind: string; sent_at?: string | null; replied_at?: string | null },
+  all: { parent_id?: string | null }[],
+  followUpDays: number,
+  now = new Date()
+): boolean {
+  if (message.status !== 'sent' || message.kind !== 'initial' || message.replied_at) return false
+  if (all.some((m) => m.parent_id === message.id)) return false
+  return followUpWindowElapsed(message.sent_at ?? null, { autoSend: false, dailyCap: 0, followUpDays }, now).allowed
+}

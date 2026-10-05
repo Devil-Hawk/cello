@@ -6,15 +6,19 @@ import type { Database, Json } from '@cello/shared'
 import { encrypt } from '@/lib/crypto'
 import { applyGmailPermissionChange, fetchGrantedGoogleScopes, GMAIL_PERMISSION_SCOPES } from '@/lib/gmail/permissions'
 import type { SyncState } from '@/lib/gmail/types'
+import { safeNextPath } from '@/lib/auth/safe-next'
 
 const MONITOR_SCOPE = GMAIL_PERMISSION_SCOPES.monitor as string
+const SEND_SCOPE = GMAIL_PERMISSION_SCOPES.send as string
 
 /**
  * The ONLY point in the app that ever sees a Google `provider_refresh_token`
  * — Supabase hands it back exactly once, on this redirect, and never again
  * (provider_token itself is dead within about an hour and nothing refreshes
  * it in the background). If this session's grant includes gmail.readonly
- * (the "monitor mailbox" tier — see lib/gmail/permissions.ts), persist the
+ * (the "monitor mailbox" tier, see lib/gmail/permissions.ts) or gmail.send
+ * (the "send approved messages" tier, which needs the token just as much to
+ * send once the one-hour session token is gone), persist the
  * refresh token here, encrypted with the same helper api_keys uses, and
  * record the grant through applyGmailPermissionChange in the SAME write so
  * the stored permission state and the token that makes it usable never
@@ -37,7 +41,9 @@ async function persistGmailRefreshTokenIfGranted(
 ): Promise<void> {
   try {
     const scopes = providerToken ? await fetchGrantedGoogleScopes(providerToken) : []
-    if (!scopes.includes(MONITOR_SCOPE)) return
+    // Either Gmail scope makes the token worth keeping: readonly for sync,
+    // send for delivering approved outreach after the session token is gone.
+    if (!scopes.includes(MONITOR_SCOPE) && !scopes.includes(SEND_SCOPE)) return
 
     const { data: profile, error: readError } = await supabase
       .from('profiles')
@@ -50,7 +56,12 @@ async function persistGmailRefreshTokenIfGranted(
     }
 
     const now = new Date().toISOString()
-    const withGrant = applyGmailPermissionChange(profile?.preferences ?? null, 'monitor', true, now)
+    // Only the monitor tier is switched on here (it has always been recorded at
+    // the redirect that grants it). The send flag stays the user's own toggle in
+    // Settings; this only makes sure the token it relies on exists.
+    const withGrant = scopes.includes(MONITOR_SCOPE)
+      ? applyGmailPermissionChange(profile?.preferences ?? null, 'monitor', true, now)
+      : ((profile?.preferences ?? {}) as Record<string, unknown>)
     const existingSync = (withGrant.gmail_sync || {}) as SyncState
     const nextPreferences = {
       ...withGrant,
@@ -106,6 +117,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Redirect to dashboard after successful auth
-  return NextResponse.redirect(new URL('/dashboard', request.url))
+  // Back to where the sign-in started (Settings, for the incremental Gmail
+  // grant), or the dashboard. Same-origin paths only.
+  return NextResponse.redirect(new URL(safeNextPath(requestUrl.searchParams.get('next')), request.url))
 }

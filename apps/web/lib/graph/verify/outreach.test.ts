@@ -115,6 +115,26 @@ describe('verifyOutreachDraft — ONE bounded regeneration on failure', () => {
   })
 })
 
+describe('verifyOutreachDraft: a template never replaces a model draft', () => {
+  it('keeps the original draft and its verdicts when the regeneration fell back to the template (tokensUsed 0)', async () => {
+    judgeGroundednessMock.mockResolvedValue(fail('outreach groundedness'))
+    judgeSpecificityMock.mockResolvedValue(pass('outreach specificity'))
+    runUnitOnceMock.mockResolvedValue({
+      output: { subject: 'Generic template subject', body: 'Generic template body', tokensUsed: 0 },
+      tokensUsed: 0,
+    })
+
+    const result = await verifyOutreachDraft(baseArgs())
+
+    expect(result.body).toBe('Original body')
+    expect(result.subject).toBe('Hello')
+    expect(result.tokensUsed).toBe(20)
+    expect(result.failedVerdict).toBe(true)
+    expect(result.verdicts).toHaveLength(2)
+    expect(judgeGroundednessMock).toHaveBeenCalledTimes(1) // the template was never judged either
+  })
+})
+
 describe('verifyOutreachDraft — judge unavailable', () => {
   it('a budget-cap refusal returns the original draft with empty verdicts, never a crash', async () => {
     judgeGroundednessMock.mockRejectedValue(new BudgetCapError(12, 10))

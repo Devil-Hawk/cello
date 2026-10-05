@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
-import { findDuplicateInitial, insertOutreach } from '@/lib/outreach/store'
+import { findDuplicateInitial, insertOutreach, isDuplicateOutreachError } from '@/lib/outreach/store'
 import type { OutreachDraftInput } from '@/lib/harness/agents/outreach'
 import { runUnitOnce } from '@/lib/graph/oneshot'
 import { verifyOutreachDraft } from '@/lib/graph/verify/outreach'
@@ -246,8 +246,19 @@ export async function POST(request: NextRequest) {
         body: draft.body,
         status: 'pending_review',
         kind: 'initial',
+        used_llm: usedLlm,
       })
     } catch (e) {
+      // Two drafts for the same contact and role raced past the check above and
+      // the unique index caught the loser. That is the duplicate refusal, not a
+      // server fault.
+      if (isDuplicateOutreachError(e)) {
+        await recordDraftOutcome(supabase, { outcome: 'failed', reason: 'duplicate', used_llm: usedLlm }, request.headers)
+        return NextResponse.json(
+          { error: 'An outreach email to this contact for this role already exists.' },
+          { status: 409 }
+        )
+      }
       // The worst outcome to leave unrecorded: the model has already been paid
       // for and there is no outreach_messages row to show for it, so without this
       // the spend is invisible in both places the owner could look.
