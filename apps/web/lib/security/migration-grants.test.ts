@@ -22,7 +22,7 @@ function stripComments(sql: string): string {
 
 /** Returns each GRANT statement whose recipient list names anon or public. */
 export function grantsToAnonOrPublic(sql: string): string[] {
-  const text = stripComments(sql).toLowerCase()
+  const text = stripComments(sql).toLowerCase().replace(/\s+/g, ' ')
   const hits: string[] = []
   for (const m of text.matchAll(/\bgrant\b([^;]*)/g)) {
     const stmt = m[1]
@@ -47,6 +47,10 @@ describe('grantsToAnonOrPublic (the scanner itself)', () => {
     'grant execute on function public.f(uuid) to public;',
     'grant usage on sequence public.s to authenticated, anon;',
     'alter default privileges for role postgres in schema public grant all on tables to anon;',
+    'grant select on public.x\nto anon;',
+    'grant select on public.x to\nanon;',
+    'grant select on public.x\tto\tanon;',
+    'alter default privileges for role postgres in schema public\ngrant all on tables\nto anon;',
     "execute format('grant all on %I to anon', t);",
   ])('flags %s', (sql) => {
     expect(grantsToAnonOrPublic(sql)).toHaveLength(1)
