@@ -42,7 +42,7 @@ export class BudgetCapError extends Error {
   constructor(spentUsd: number, capUsd: number, scope: BudgetScope = 'user') {
     super(
       scope === 'demo-pool'
-        ? `This demo has used its AI allowance for the month: $${spentUsd.toFixed(2)} of $${capUsd.toFixed(2)}.`
+        ? 'This demo has used its AI allowance for the month. You can keep looking around.'
         : `Monthly AI spend cap reached: $${spentUsd.toFixed(2)} of $${capUsd.toFixed(2)} used. ` +
             `Raise the cap in Settings, or wait for the next billing month.`
     )
