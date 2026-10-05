@@ -47,7 +47,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
       for (let from = 0; ; from += PAGE_SIZE) {
         const { data, error } = await client
           .from('jobs')
-          .select('external_id, title, location, salary_range, description_md5, source, still_open')
+          .select('external_id, title, location, salary_range, description_md5, source, still_open, job_function, seniority, country, language, is_remote, posted_at')
           .eq('company_id', companyId)
           .order('external_id')
           .range(from, from + PAGE_SIZE - 1)
@@ -60,6 +60,12 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
           description_md5: string | null
           source: string | null
           still_open: boolean | null
+          job_function: string | null
+          seniority: string | null
+          country: string | null
+          language: string | null
+          is_remote: boolean | null
+          posted_at: string | null
         }[]) {
           if (!row.external_id) continue
           rows.push({
@@ -70,11 +76,24 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
             descriptionMd5: !row.description_md5 || row.description_md5 === EMPTY_MD5 ? null : row.description_md5,
             source: row.source,
             open: row.still_open !== false,
+            jobFunction: row.job_function,
+            seniority: row.seniority,
+            country: row.country,
+            language: row.language,
+            isRemote: row.is_remote,
+            postedAt: row.posted_at,
           })
         }
         if (!data || data.length < PAGE_SIZE) break
       }
       return rows
+    },
+
+    async evictJobs(companyId, externalIds): Promise<string[]> {
+      if (dry) return externalIds
+      const { data, error } = await client.rpc('evict_company_jobs', { p_company_id: companyId, p_external_ids: externalIds })
+      fail(error)
+      return Array.isArray(data) ? (data as string[]) : []
     },
 
     async upsertJobs(rows): Promise<void> {

@@ -12,12 +12,17 @@ const judge = { name: 'Acme', domain: 'acme.com', careerUrl: 'https://acme.com/c
 const day = 86_400_000
 const ago = (d: number) => new Date(Date.now() - d * day).toISOString()
 
-function memory(existing: ExistingJob[] = []) {
+function memory(existing: ExistingJob[] = [], keep: (id: string) => boolean = () => false) {
   const upserted: JobUpsertRow[] = []
+  const evictAsked: string[][] = []
   const sightings: { ids: string[]; sources: string[] }[] = []
   const store: AtsStore = {
     async listJobs() {
       return existing
+    },
+    async evictJobs(_c, ids) {
+      evictAsked.push(ids)
+      return ids.filter((id) => !keep(id))
     },
     async upsertJobs(rows) {
       upserted.push(...rows)
@@ -35,7 +40,7 @@ function memory(existing: ExistingJob[] = []) {
       return { deleted: 0, closed: 0 }
     },
   }
-  return { store, upserted, sightings }
+  return { store, upserted, sightings, evictAsked }
 }
 
 const role = (n: number, over: Partial<AtsJob> = {}): AtsJob => ({
@@ -48,8 +53,8 @@ const role = (n: number, over: Partial<AtsJob> = {}): AtsJob => ({
   ...over,
 })
 
-async function run(listed: AtsJob[], existing: ExistingJob[] = [], opts: Partial<Parameters<typeof syncJobs>[3]> = {}) {
-  const m = memory(existing)
+async function run(listed: AtsJob[], existing: ExistingJob[] = [], opts: Partial<Parameters<typeof syncJobs>[3]> = {}, keep?: (id: string) => boolean) {
+  const m = memory(existing, keep)
   const result = emptyResult(COMPANY)
   await syncJobs(m.store, COMPANY, listed, { source: 'sitemap', sightingSources: ['sitemap'], stored: new Map(existing.map((e) => [e.externalId, e])), judge, ...opts }, result)
   return { ...m, result }
@@ -82,6 +87,64 @@ describe('syncJobs: at most 200 open roles per company', () => {
     const listed = Array.from({ length: 30 }, (_, i) => role(i))
     const { upserted } = await run(listed, existing)
     expect(upserted).toHaveLength(10)
+  })
+
+  describe('a full company still takes a role inside the targets', () => {
+    const targeting = { ...EMPTY_TARGETING, functions: ['engineering', 'data'] }
+    const full = (n = 200, over: Partial<ExistingJob> = {}): ExistingJob[] =>
+      Array.from({ length: n }, (_, i) => ({
+        externalId: `https://acme.com/old/${i}`,
+        title: `Office Manager ${i}`,
+        location: `Elsewhere ${i}`,
+        salaryRange: null,
+        descriptionMd5: 'x',
+        source: 'sitemap',
+        open: true,
+        jobFunction: 'operations',
+        seniority: 'mid',
+        postedAt: ago(30),
+        ...over,
+      }))
+    const inTarget = (n: number) => role(n, { title: `Software Engineer II, Data Platform ${n}`, postedAt: ago(0) })
+
+    it('200 stored roles outside the targets give up one for a new role inside them', async () => {
+      const { upserted, evictAsked, result } = await run([inTarget(1)], full(), { targeting })
+      expect(upserted.map((r) => r.external_id)).toEqual(['https://acme.com/jobs/1'])
+      expect(evictAsked).toHaveLength(1)
+      expect(evictAsked[0]).toHaveLength(1)
+      expect(result.evicted).toBe(1)
+      expect(result.excluded?.capped).toBe(0)
+    })
+
+    it('gives up as many as come in, never more than 200 stay open', async () => {
+      const { upserted, evictAsked } = await run([inTarget(1), inTarget(2), inTarget(3)], full(), { targeting })
+      expect(upserted).toHaveLength(3)
+      expect(evictAsked[0]).toHaveLength(3)
+      expect(200 - evictAsked[0].length + upserted.length).toBe(200)
+    })
+
+    it('a stored role something points at is not given up, and no extra role is stored for it', async () => {
+      const { upserted, result } = await run([inTarget(1), inTarget(2)], full(), { targeting }, () => true)
+      expect(upserted).toHaveLength(0)
+      expect(result.excluded?.capped).toBe(2)
+    })
+
+    it('stored roles inside the targets are never swapped for new ones outside them or equal to them', async () => {
+      const mine = full(200, { title: 'Data Engineer', jobFunction: 'data', postedAt: ago(0) }).map((e, i) => ({ ...e, title: `Data Engineer ${i}` }))
+      const listed = [inTarget(1), role(2, { title: 'Brand Marketing Manager', postedAt: ago(0) })]
+      const { upserted, evictAsked } = await run(listed, mine, { targeting })
+      expect(upserted).toHaveLength(0)
+      expect(evictAsked).toHaveLength(0)
+    })
+
+    it('a store that cannot evict simply drops what does not fit', async () => {
+      const m = memory(full())
+      delete (m.store as { evictJobs?: unknown }).evictJobs
+      const result = emptyResult(COMPANY)
+      await syncJobs(m.store, COMPANY, [inTarget(1)], { source: 'sitemap', sightingSources: [], stored: new Map(full().map((e) => [e.externalId, e])), judge, targeting }, result)
+      expect(m.upserted).toHaveLength(0)
+      expect(result.excluded?.capped).toBe(1)
+    })
   })
 
   it('cuts a description at 20,000 characters', async () => {

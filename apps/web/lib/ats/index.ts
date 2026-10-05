@@ -31,7 +31,7 @@ import {
   type JudgeContext,
 } from '../ingest/reader/legit'
 import { searchTerms, type ReaderTargets } from '../ingest/reader/targets'
-import { targetVerdict } from '../targeting/roles'
+import { targetVerdict, type TargetVerdict } from '../targeting/roles'
 import { EMPTY_TARGETING, type Targeting } from '../targeting'
 // Relative import (not `@/...`): lib/ats/* stays framework-free, and
 // lib/jobs/classify.ts is itself a zero-dependency pure module, so this is
@@ -128,6 +128,13 @@ export interface ExistingJob {
   source?: string | null
   /** False once the row is closed (jobs.still_open). */
   open?: boolean
+  /** What the person's targets are judged on, so a full company can tell which stored role to give up (never the description). */
+  jobFunction?: string | null
+  seniority?: string | null
+  country?: string | null
+  language?: string | null
+  isRemote?: boolean | null
+  postedAt?: string | null
 }
 
 /** Column changes for one stored job. Only the fields that differ are present. */
@@ -153,6 +160,13 @@ export interface SightingResult {
 export interface AtsStore {
   /** The company's stored jobs (paged internally). */
   listJobs(companyId: string): Promise<ExistingJob[]>
+  /**
+   * Make room in a full company: delete the named stored roles that nothing
+   * points at (an application, a draft...) and return the external ids it
+   * deleted. Optional so a store that cannot keeps compiling; without it a
+   * full company simply drops the roles that do not fit.
+   */
+  evictJobs?(companyId: string, externalIds: string[]): Promise<string[]>
   /** Insert new rows (on_conflict company_id,external_id, merge). */
   upsertJobs(rows: JobUpsertRow[]): Promise<void>
   /** Apply column changes to stored rows; returns how many rows changed. Never touches match data. */
@@ -200,6 +214,8 @@ export interface CompanyRefreshResult {
   cleared?: { deleted: number; closed: number }
   /** Listed roles not stored, by why (see ingest/reader/legit.ts), and roles left out by the per-company cap. */
   excluded?: Excluded & { capped: number }
+  /** Stored roles given up to make room for better ones in a full company. */
+  evicted?: number
   errors: string[]
 }
 
@@ -603,8 +619,9 @@ export async function syncJobs(
   }
 
   // At most MAX_ROLES_PER_COMPANY open rows per company, the ones inside the person's targets first.
-  const openStored = [...stored.values()].filter((s) => s.open !== false).length
-  const room = Math.max(0, MAX_ROLES_PER_COMPANY - openStored)
+  const openStoredRows = [...stored.values()].filter((s) => s.open !== false)
+  const openStored = openStoredRows.length
+  let room = Math.max(0, MAX_ROLES_PER_COMPANY - openStored)
   const targeting = opts.targeting ?? EMPTY_TARGETING
   const fresh = candidates.filter((job) => !stored.has(job.externalId)).map(classify).filter(({ c }) => !c.rejectReason && !isLowQuality(c))
   const ranked = orderForCap(fresh, ({ job, c }) =>
@@ -615,6 +632,45 @@ export async function syncJobs(
     ),
     ({ job }) => job.postedAt
   )
+  // A full company still takes a role inside the targets: new and stored open roles are ranked together,
+  // and the stored ones that lose are given up (those nothing points at; the others stay and count).
+  if (ranked.length > room && store.evictJobs && ranked.length > 0) {
+    type Entry = { id: string; stored: boolean }
+    const pool: { entry: Entry; verdict: TargetVerdict; at?: string }[] = [
+      ...openStoredRows.map((s) => ({
+        entry: { id: s.externalId, stored: true },
+        verdict: targetVerdict(
+          { title: s.title, description: '', job_function: s.jobFunction, seniority: s.seniority, country: s.country, language: s.language, is_remote: s.isRemote },
+          targeting,
+          company.name
+        ),
+        // A stored role with no date is not older than a new one: it has been listed as recently as anything.
+        at: s.postedAt ?? now,
+      })),
+      ...ranked.map(({ job, c }) => ({
+        entry: { id: job.externalId, stored: false },
+        verdict: targetVerdict(
+          { title: job.title, description: job.description, job_function: c.jobFunction, seniority: c.seniority, country: c.country, language: c.language, is_remote: c.isRemote },
+          targeting,
+          company.name
+        ),
+        at: job.postedAt,
+      })),
+    ]
+    // Stored first, so on a tie nothing is swapped.
+    const kept = new Set(orderForCap(pool, (p) => p.verdict, (p) => p.at).slice(0, MAX_ROLES_PER_COMPANY).map((p) => p.entry.id))
+    const losers = openStoredRows.filter((s) => !kept.has(s.externalId)).map((s) => s.externalId)
+    if (losers.length > 0) {
+      try {
+        const gone = await store.evictJobs(company.id, losers)
+        room += gone.length
+        for (const id of gone) stored.delete(id)
+        result.evicted = gone.length
+      } catch (error) {
+        result.errors.push(`making room failed: ${errorMessage(error)}`)
+      }
+    }
+  }
   excluded.capped = Math.max(0, ranked.length - room)
   const newRows: JobUpsertRow[] = ranked
     .slice(0, room)
