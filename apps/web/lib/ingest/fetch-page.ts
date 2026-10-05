@@ -72,8 +72,12 @@ export const pythonFetchPage: FetchPage = async (url, opts) => {
             final_url?: string
             rendered?: boolean
             error?: string
+            /** The browser was asked for and could not run: its error class (PlaywrightMissing, TimeoutError, ...). */
+            render_error?: string
           }
           if (!out.ok || typeof out.html !== 'string') return reject(new Error(out.error ? `fetcher_${out.error}` : 'fetcher_failed'))
+          // A render that was asked for and did not happen is a failure of the browser step, not a page with nothing on it.
+          if (opts?.render && out.render_error) return reject(new Error(`fetcher_render_${out.render_error.replace(/[^\w]/g, '').slice(0, 40)}`))
           resolvePage({ html: out.html, finalUrl: out.final_url || url, rendered: out.rendered === true })
         } catch {
           reject(new Error('fetcher_unreadable'))

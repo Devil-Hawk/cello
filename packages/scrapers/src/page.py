@@ -21,6 +21,11 @@ Output is exactly one JSON line on stdout:
     {"ok": true, "html": "...", "final_url": "...", "rendered": false}
     {"ok": false, "error": "<ExceptionClass>"}
 
+When --render was asked for and the browser could not produce a page (not
+installed, crashed, timed out), the line carries "render_error": "<Class>" and
+the plain page, so the caller can say the browser failed instead of reading the
+plain page again and finding no roles.
+
 A failure carries only the exception's class name. The repo is public and so are
 its Actions logs, and an exception message can hold the page's address.
 """
@@ -40,6 +45,7 @@ import httpx
 
 from .browser_tier import fetch_with_browser_fallback
 from .polite import USER_AGENT, RobotsCache
+from . import render
 from .render import fetch_rendered, fetch_with_render_fallback
 
 _USER_AGENT = USER_AGENT
@@ -113,6 +119,7 @@ def fetch_page(url: str, force_render: bool = False) -> dict[str, object]:
     static_html: str | None = None
     final_url = url
     first_error: Exception | None = None
+    render_error: str | None = None
     try:
         static_html, final_url = _static_get(url)
     except Exception as exc:  # noqa: BLE001 - reported by class name only
@@ -121,6 +128,8 @@ def fetch_page(url: str, force_render: bool = False) -> dict[str, object]:
     try:
         if force_render:
             browser_html = fetch_rendered(final_url)
+            if not browser_html:
+                render_error = render.last_error or "RenderFailed"
             html = browser_html or static_html or ""
             rendered = bool(browser_html) and browser_html != static_html
         else:
@@ -133,7 +142,10 @@ def fetch_page(url: str, force_render: bool = False) -> dict[str, object]:
     if not html:
         error = first_error or RuntimeError("empty")
         return {"ok": False, "error": type(error).__name__}
-    return {"ok": True, "html": html, "final_url": final_url, "rendered": rendered or clicked}
+    out: dict[str, object] = {"ok": True, "html": html, "final_url": final_url, "rendered": rendered or clicked}
+    if render_error:
+        out["render_error"] = render_error
+    return out
 
 
 def main(argv: list[str]) -> int:

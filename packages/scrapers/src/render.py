@@ -136,6 +136,12 @@ def playwright_available() -> bool:
     return True
 
 
+# Why the last fetch_rendered returned None: an exception class name, never a url
+# or page text. page.py reports it so a browser that could not run is never read
+# as a site with no roles.
+last_error: str | None = None
+
+
 def fetch_rendered(url: str, timeout_ms: int = 30_000) -> str | None:
     """Fetch `url` through a browser and return its rendered HTML.
 
@@ -147,8 +153,11 @@ def fetch_rendered(url: str, timeout_ms: int = 30_000) -> str | None:
     fails. A rendering failure must degrade to "this company yielded nothing
     this run", exactly as a fetch failure already does.
     """
+    global last_error
+    last_error = None
     if not playwright_available():
         logger.info("playwright not installed; skipping rendered fetch")
+        last_error = "PlaywrightMissing"
         return None
 
     try:
@@ -172,11 +181,15 @@ def fetch_rendered(url: str, timeout_ms: int = 30_000) -> str | None:
                 for _ in range(5):
                     page.mouse.wheel(0, 3000)
                     page.wait_for_timeout(800)
-                return page.content() or None
+                content = page.content() or None
+                if content is None:
+                    last_error = "EmptyPage"
+                return content
             finally:
                 browser.close()
     except Exception as exc:  # noqa: BLE001 - any failure degrades to "no result"
         logger.warning("rendered fetch failed: %s", type(exc).__name__)
+        last_error = type(exc).__name__
         return None
 
 

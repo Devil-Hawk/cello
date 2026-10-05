@@ -193,3 +193,21 @@ def test_an_ordinary_redirect_to_a_public_page_is_followed(monkeypatch):
 def test_only_public_http_addresses_are_read():
     for url in ("http://127.0.0.1/", "http://169.254.169.254/latest/", "http://10.0.0.5/", "http://[::1]/", "file:///etc/passwd", "ftp://example.com/"):
         assert page._is_public(url) is False, url
+
+
+def test_a_forced_render_the_browser_could_not_do_says_so_with_the_class_and_keeps_the_plain_page(monkeypatch):
+    monkeypatch.setattr(page, "_static_get", lambda url: (LISTING, url))
+    monkeypatch.setattr(page, "fetch_rendered", lambda url: None)
+    monkeypatch.setattr(page.render, "last_error", "PlaywrightMissing")
+    monkeypatch.setattr(page, "fetch_with_browser_fallback", lambda url, html: (html, False))
+    out = page.fetch_page("https://acme.example/careers", force_render=True)
+    assert out["ok"] is True and out["html"] == LISTING
+    assert out["render_error"] == "PlaywrightMissing"
+
+
+def test_a_render_that_worked_carries_no_render_error(monkeypatch):
+    monkeypatch.setattr(page, "_static_get", lambda url: (LISTING, url))
+    monkeypatch.setattr(page, "fetch_rendered", lambda url: LISTING + "<a href='/jobs/99'>Role 99</a>")
+    monkeypatch.setattr(page, "fetch_with_browser_fallback", lambda url, html: (html, False))
+    assert "render_error" not in page.fetch_page("https://acme.example/careers", force_render=True)
+    assert "render_error" not in page.fetch_page("https://acme.example/careers")
