@@ -25,7 +25,7 @@ import {
 } from '@/lib/harness/providers'
 import { detectAllLocalClis } from '@/lib/harness/providers/local-cli'
 import { detectLocalServer } from '@/lib/harness/providers/local-server'
-import { langfuseCaptureEnabled, langfuseConfigured } from '@/lib/observability/langfuse'
+import { langfuseCaptureDemoEnabled, langfuseCaptureEnabled, langfuseConfigured } from '@/lib/observability/langfuse'
 
 export const dynamic = 'force-dynamic'
 
@@ -78,6 +78,8 @@ export async function GET() {
     tracingExportEnabled: langfuseConfigured(),
     // Whether prompt and completion text is part of that export.
     tracingCaptureContent: langfuseCaptureEnabled(),
+    // Whether demo workspaces' prompt and reply text is part of it (off by default).
+    tracingCaptureDemoContent: langfuseCaptureEnabled() && langfuseCaptureDemoEnabled(),
     providers: {
       openrouter: {
         label: PROVIDER_LABELS.openrouter,

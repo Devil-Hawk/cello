@@ -30,6 +30,7 @@ interface ProviderStatus {
   selfHosted: boolean
   tracingExportEnabled: boolean
   tracingCaptureContent: boolean
+  tracingCaptureDemoContent: boolean
   active: ProviderId
   preferences: {
     active: ProviderId
@@ -169,11 +170,15 @@ export function ProviderTab({ onStatus }: ProviderTabProps) {
           <p className="font-medium text-foreground">This instance sends AI call traces to Langfuse.</p>
           <p className="mt-1">
             The operator turned on Langfuse, a third-party monitoring service. For each AI call it
-            receives the model, token counts, estimated cost, timing, any error message and a
-            pseudonymous user id.{' '}
+            receives the model, token counts, estimated cost, timing, error codes, your Cello user id
+            (not your email) and, for Copilot, the conversation id.{' '}
             {status.tracingCaptureContent
-              ? 'It also receives the prompt and the reply. Prompts can include text you gave Cello, such as your resume, job descriptions and chat messages. Email addresses, tokens and API-key-like strings are redacted first; other text is not.'
-              : 'Prompts and replies are not sent.'}{' '}
+              ? 'It also receives the prompts and replies of the operator\u2019s own workspace: resume text, job descriptions and chat messages, with email addresses, tokens and API-key-like strings masked first (other text is not masked). '
+              : 'Prompts and replies are not sent. '}
+            {status.tracingCaptureContent &&
+              (status.tracingCaptureDemoContent
+                ? 'Demo workspaces are included, so do not paste anything private into a demo. '
+                : 'Demo workspaces send no prompt or reply text. ')}
             Your saved API keys are never sent. Ask your operator if you have questions.
           </p>
         </div>
