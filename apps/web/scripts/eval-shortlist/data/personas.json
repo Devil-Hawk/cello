@@ -61,7 +61,7 @@
     "manager"
    ]
   },
-  "hiddenTaste": "You care about payments, fraud and risk systems, and developer infrastructure or platform work: places where correctness and reliability of money movement or of other engineers' tooling is the product. You are not interested in ads, growth, engagement or consumer social products, and you would turn down anything that is mainly about optimising clicks or retention. You will not take a people-management role. Deep technical ownership beats breadth. You apply to roles that are payments or risk and at your level."
+  "hiddenTaste": "You want backend work where correctness and reliability are the product: payments, billing, fraud and risk, compliance, and developer platforms or infrastructure for other engineers. You are not interested in ads, growth, engagement, consumer feed or home-page products, machine learning or data-science roles, or security operations. You will not take a people-management role. Deep technical ownership beats breadth. Roles at your level in those areas are worth saving, and payments or risk roles you would apply to."
  },
  {
   "id": "r2",
@@ -120,7 +120,7 @@
     "intern"
    ]
   },
-  "hiddenTaste": "You want to do experimentation and causal inference on real outcomes in health or insurance, where your work changes care or coverage decisions. You also like applied modelling with clinicians or regulators in the loop. You are not interested in ads ranking, recommendation systems, or LLM infrastructure and tooling, and you would pass on pure analytics reporting. You want roles where a data scientist owns the question, not only the pipeline."
+  "hiddenTaste": "You want to own the question as a data scientist: experimentation, causal inference and decision science on marketplace, payments, trust and safety, pricing or product problems where the result changes a real decision. You are not interested in ads ranking, recommendation and feed relevance, LLM tooling, machine-learning platform or infrastructure engineering, or pure dashboard and BI reporting work. You pass on anything below mid level, and on roles that are really software engineering. Roles at your level in decision science or applied experimentation are worth saving."
  },
  {
   "id": "r3",
@@ -182,7 +182,7 @@
     "intern"
    ]
   },
-  "hiddenTaste": "You want to design complex B2B workflow tools: dense, expert-user products such as finance operations, admin consoles, internal tools, developer platforms and design systems. You pass on brand, marketing, growth and campaign design, on consumer social, and on roles that are mostly visual polish. You like roles with real research access and strong engineering partners."
+  "hiddenTaste": "You want to design complex B2B workflow tools: dense, expert-user products such as finance operations, admin consoles, internal tools, developer and data platforms, design systems and AI tooling for professionals. You pass on brand, marketing, growth, lifecycle and campaign design, on consumer social, on design management, and on roles that are mostly visual polish. Roles at your level on professional tools, with real research access and strong engineering partners, are worth saving."
  },
  {
   "id": "r4",
@@ -240,6 +240,6 @@
    ],
    "excludedTitleWords": []
   },
-  "hiddenTaste": "You want frontend or product engineering where you ship user-facing features and get mentorship from stronger engineers; early-career programs are ideal. You pass on SRE, infrastructure, on-call heavy and security roles, on anything senior or staff level that expects years of ownership, and on pure backend data plumbing. You like small, product-focused teams."
+  "hiddenTaste": "You want frontend or product engineering where you ship user-facing features and get mentorship from stronger engineers; early-career programs are ideal. You pass on SRE, infrastructure, on-call heavy and security roles, on anything senior or staff level that expects years of ownership, and on pure backend data plumbing. You like small, product-focused teams. Roles at your level building product are worth saving."
  }
 ]
