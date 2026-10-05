@@ -112,6 +112,8 @@ function readDetailBase(html: string, url: string): RoleDetail {
 /** A role built from what its own page says, or null when the page does not name `expectedTitle` (a redirect to somewhere generic). */
 export function jobFromDetail(url: string, detail: RoleDetail, expected?: { title?: string; location?: string; postedAt?: string }): AtsJob | null {
   const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  // A role is confirmed by its own page: a page with no title of its own (a script shell) confirms nothing, so the card's title alone never makes a role.
+  if (expected?.title && !detail.title) return null
   const title = detail.title || expected?.title || ''
   if (!title) return null
   if (expected?.title && detail.title && !norm(detail.title).includes(norm(expected.title)) && !norm(expected.title).includes(norm(detail.title))) return null

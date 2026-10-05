@@ -20,6 +20,7 @@
 //                                 scheduled: the background pass (bigger budget, then the browser tier).
 //   INGEST_PAGE_FETCHER=python    let the scheduled pass render pages with the Python fetcher.
 //   CHECK_ONLY=amazon,apple       only these (matched on lower-cased name).
+//   CHECK_EXTRA='Name|domain|https://careers/url;...'   also read these (with CHECK_ONLY set to their names, only these).
 
 import { ingestCompany, type DueCompany } from '../lib/ingest/run'
 import { pageFetcherFromEnv } from '../lib/ingest/fetch-page'
@@ -99,7 +100,11 @@ async function main(): Promise<void> {
   const mode: ReaderMode = process.env.CHECK_MODE === 'scheduled' ? 'scheduled' : 'inline'
   const only = (process.env.CHECK_ONLY ?? '').toLowerCase().split(',').map((x) => x.trim()).filter(Boolean)
   const fetchPage = pageFetcherFromEnv(process.env.INGEST_PAGE_FETCHER)
-  const list = EMPLOYERS.filter((e) => !only.length || only.some((o) => e.name.toLowerCase().includes(o)))
+  const extra: Employer[] = (process.env.CHECK_EXTRA ?? '').split(';').filter(Boolean).map((x) => {
+    const [name, domain, careers] = x.split('|')
+    return { name, domain, careers }
+  })
+  const list = [...EMPLOYERS, ...extra].filter((e) => !only.length || only.some((o) => e.name.toLowerCase().includes(o)))
 
   const failures: string[] = []
   const unread: string[] = []
@@ -165,6 +170,8 @@ async function main(): Promise<void> {
     if (excluded) console.log(`  not stored: ${Object.entries(excluded).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`)
     for (const t of samples) console.log(`  - ${t}`)
     if (outcome.message) console.log(`  ${outcome.message}`)
+    const reader = (meta.reader ?? {}) as { tried?: { tier: string; outcome: string; detail?: string }[]; listed?: number; read?: number }
+    if (reader.tried?.length) console.log(`  tried ${reader.tried.map((t) => `${t.tier}:${t.outcome}${t.detail ? `(${t.detail})` : ''}`).join(' ')}${reader.listed ? `; the site lists about ${reader.listed}, read ${reader.read ?? 0}` : ''}`)
   }
 
   console.log('\nname | tier | found | store | inside | no place/no text | newest | requests | size | time | status')

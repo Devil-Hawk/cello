@@ -253,3 +253,20 @@ describe('a board that answers with an error is "did not answer", not "reading"'
     expect(read).toMatchObject({ tier: null, reason: 'unreachable' })
   })
 })
+
+describe('a card is not a role until its own page names it', () => {
+  it('a card whose role page has no title of its own is not stored from the card alone', async () => {
+    const card = (id: number) => `<li><a href="/jobs/job/${id}"><h3>Data Engineer ${id}</h3></a></li>`
+    const r: Record<string, Route> = { 'https://shop.test/careers': `<ul>${[1, 2, 3].map((i) => card(7_000_000 + i)).join('')}</ul>` }
+    for (let i = 1; i <= 3; i++) r[`https://shop.test/jobs/job/${7_000_000 + i}`] = '<html><body><div id="root"></div></body></html>'
+    const read = await readSite(input('https://shop.test/careers'), { fetcher: fakeFetcher(r) })
+    expect(read).toMatchObject({ tier: null, jobs: [], reason: 'role_pages' })
+  })
+
+  it('styles and icons inside a card link are not part of the title', () => {
+    const card = (id: number) => `<li><a href="/jobs/job/${id}"><style>.st0{fill:none;}</style><svg><title>icon</title></svg><h3>Data Engineer ${id}</h3><p>Austin, TX</p></a></li>`
+    const links = roleLinks(`<ul>${[1, 2, 3].map((i) => card(8_100_000 + i)).join('')}</ul>`, 'https://shop.test/careers')
+    expect(links.map((l) => l.title)).toEqual(['Data Engineer', 'Data Engineer', 'Data Engineer'])
+    expect(JSON.stringify(links)).not.toContain('fill')
+  })
+})

@@ -60,6 +60,13 @@ function dateOf(text: string): string | undefined {
 
 const clean = (s: string | undefined) => (s ?? '').replace(/\s+/g, ' ').trim()
 
+/** An element's text without the styles, scripts and icons a card carries inside it. */
+const textOf = (el: cheerio.Cheerio<any>): string => {
+  const c = el.clone()
+  c.find('style,script,svg,noscript').remove()
+  return clean(c.text())
+}
+
 /** "Sunnyvale, CA, USA; Atlanta, GA, USA; +5 more" -> "Sunnyvale, CA, USA · Atlanta, GA, USA". */
 function placesOf(text: string): string | undefined {
   const place = text
@@ -96,10 +103,10 @@ function titlesOf(a: cheerio.Cheerio<any>, idInUrl: string): string[] {
   const strip = (t: string) => t.replace(new RegExp(`\\s+${idInUrl.replace(/[^\w-]/g, '')}\\s*$`), '').replace(/\s+\d{6,}$/, '').trim()
   return [
     // A card link often wraps the title and the place together; the heading inside it is the title.
-    clean(a.find('h1,h2,h3,h4,h5').first().text()),
-    clean(a.text()),
+    textOf(a.find('h1,h2,h3,h4,h5').first()),
+    textOf(a),
     clean(a.attr('aria-label')).replace(/^(?:learn more about|see full role description:?)\s*/i, ''),
-    clean(a.closest('li,article,tr,div').find('h1,h2,h3,h4').first().text()),
+    textOf(a.closest('li,article,tr,div').find('h1,h2,h3,h4').first()),
     // A card whose title is a plain span or line of its own beside a link that says only the place ("Seattle").
     clean(
       a
@@ -180,7 +187,7 @@ export function roleLinks(html: string, pageUrl: string): RoleLink[] {
       have.titles.push(...titles)
       return
     }
-    entries.set(key, { url: normalizeJobUrl(to.toString()), titles, template, g: `${to.hostname}${template}`, a, linkText: clean(a.text()), place: cardPlace(a) })
+    entries.set(key, { url: normalizeJobUrl(to.toString()), titles, template, g: `${to.hostname}${template}`, a, linkText: textOf(a), place: cardPlace(a) })
   })
   const groups = new Map<string, RoleLink[]>()
   for (const e of entries.values()) {
