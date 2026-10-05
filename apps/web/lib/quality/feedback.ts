@@ -40,6 +40,8 @@ const DAY_MS = 24 * 60 * 60 * 1000
 export const SEND_WINDOW_DAYS = 28
 export const KEEP_DAYS = 30
 export const MAX_ATTEMPTS = 5
+/** The most events one pass reads, and so the most ids one update names. */
+const MAX_BATCH = 500
 
 export interface FeedbackEvent {
   userId: string
@@ -142,7 +144,7 @@ export async function exportFeedback(admin: AdminClient, opts: { limit?: number;
     .select('id, user_id, signal, subject_table, subject_id, trace_id, observation_id, traced_at, comment, attempts')
     .eq('status', 'pending')
     .order('occurred_at', { ascending: true })
-    .limit(opts.limit ?? 200)
+    .limit(Math.min(opts.limit ?? 200, MAX_BATCH))
   if (error) throw new Error(`exportFeedback: could not read the queue: ${error.message}`)
   const events = (data ?? []) as EventRow[]
 
@@ -181,18 +183,19 @@ export async function exportFeedback(admin: AdminClient, opts: { limit?: number;
   }
 
   if (expire.length > 0) {
-    await admin.from('feedback_events').update({ status: 'expired' }).in('id', expire)
+    await admin.from('feedback_events').update({ status: 'expired' }).in('id', expire.slice(0, MAX_BATCH))
     result.skipped = expire.length
   }
 
   if (toSend.length === 0) return result
 
+  const sentIds = toSend.map((x) => x.event.id)
   const ok = await sendScores(toSend.map((x) => x.score))
   if (ok) {
     await admin
       .from('feedback_events')
       .update({ status: 'sent', sent_at: now.toISOString() })
-      .in('id', toSend.map((x) => x.event.id))
+      .in('id', sentIds.slice(0, MAX_BATCH))
     result.sent = toSend.length
     return result
   }
