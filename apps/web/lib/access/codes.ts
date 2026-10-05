@@ -6,14 +6,17 @@
 //   * It is READ ALOUD AND RETYPED, so the alphabet excludes characters people
 //     confuse (0/O, 1/I/L) and comparison is case- and separator-insensitive.
 //     A demo that fails because someone typed a lowercase l is a bug.
-//   * It is a BEARER CREDENTIAL, so it needs real entropy (60 bits here) and is
-//     stored only as a SHA-256 hash. A dump of access_codes must not hand
-//     anyone a working code.
+//   * It is a BEARER CREDENTIAL, so it needs real entropy (about 59 bits here)
+//     and is stored only as a keyed hash: HMAC-SHA256 under a key derived from
+//     the server's encryption key. A dump of access_codes must not hand anyone a
+//     working code, and without the key it cannot even be used to test guesses
+//     offline (a bare SHA-256 of a 59 bit code can be ground on a GPU).
 //   * It EXPIRES, and expiry is evaluated at use time against the stored
 //     timestamp rather than swept by a job — a code is dead the moment it
 //     lapses even if no cleanup ever runs.
 
-import { createHash, randomInt } from 'node:crypto'
+import { createHash, createHmac, randomInt } from 'node:crypto'
+import { deriveKey } from '../crypto'
 
 /** How long a freshly issued code lasts. The product promise is 72 hours. */
 export const ACCESS_CODE_TTL_HOURS = 72
@@ -62,9 +65,26 @@ export function normalizeAccessCode(input: string): string {
     .trim()
 }
 
-/** SHA-256 hex of the normalized code. The only form ever persisted. */
+/** Domain separation for the access-code pepper (see deriveKey in lib/crypto.ts). */
+const ACCESS_CODE_KEY_LABEL = 'cello/access-code/v1'
+
+/** The only form ever persisted: 'h1:' plus the HMAC-SHA256 hex of the
+ *  normalized code. The prefix versions the scheme, and lets the mint function
+ *  refuse anything that is not a keyed hash. */
 export function hashAccessCode(input: string): string {
+  return `h1:${createHmac('sha256', deriveKey(ACCESS_CODE_KEY_LABEL)).update(normalizeAccessCode(input)).digest('hex')}`
+}
+
+/** The old bare SHA-256, for LOOKUP ONLY: rows stored before the keyed hash are
+ *  at most 72 hours old, so accepting them ends by itself. Delete this and the
+ *  second entry of accessCodeLookupHashes after 2026-10-12. */
+export function legacyAccessCodeHash(input: string): string {
   return createHash('sha256').update(normalizeAccessCode(input)).digest('hex')
+}
+
+/** Every form a typed code may be stored as, current first. */
+export function accessCodeLookupHashes(input: string): string[] {
+  return [hashAccessCode(input), legacyAccessCodeHash(input)]
 }
 
 /** The clear-text fragment kept for display, derived the same way every time. */
