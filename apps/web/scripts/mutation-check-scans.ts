@@ -77,8 +77,9 @@ const BANNED_LANGCHAIN_PACKAGES = [
 ]
 const BANNED_CHAT_CONSTRUCTOR = /new Chat[A-Z]\w+\(/
 const BANNED_BIND_TOOLS = /\.bindTools\(/
+const AGENT_MODEL_DOOR = 'lib/agents/model.ts'
 
-function findLangchainBanOffenses(src: string): string[] {
+function findLangchainBanOffenses(src: string, file = ''): string[] {
   const stripped = stripComments(src)
   const offenses: string[] = []
   for (const pkg of BANNED_LANGCHAIN_PACKAGES) {
@@ -89,7 +90,8 @@ function findLangchainBanOffenses(src: string): string[] {
       stripped.includes(`require("${pkg}`)
     if (importedFrom) offenses.push(`imports ${pkg}`)
   }
-  if (BANNED_CHAT_CONSTRUCTOR.test(stripped)) offenses.push('constructs a new Chat*( client')
+  const withoutDoor = file === AGENT_MODEL_DOOR ? stripped.replace(/new ChatOpenRouter\(/g, '') : stripped
+  if (BANNED_CHAT_CONSTRUCTOR.test(withoutDoor)) offenses.push('constructs a new Chat*( client')
   if (BANNED_BIND_TOOLS.test(stripped)) offenses.push('calls .bindTools(')
   return offenses
 }
