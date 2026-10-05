@@ -28,6 +28,7 @@ import { recruitee } from './recruitee'
 import { personio } from './personio'
 import { eightfold } from './eightfold'
 import { fetchCareersHtml, findBoardLinks } from './careers-page'
+import { makeSiteFetcher } from '../ingest/reader/site-fetch'
 import { isRecentBoard, verifyBoard, type BoardRef, type VerifiedBy } from './verify'
 import { isKnownEmployer, knownBoard } from '../companies/known-companies'
 
@@ -162,7 +163,8 @@ function hostOnly(value: string | null | undefined): string | null {
 
 /**
  * The boards the company's own careers page and homepage link to or embed.
- * Two plain GETs at most; empty when a page cannot be read.
+ * Two plain GETs at most, through the site fetcher (robots.txt, user agent,
+ * delay, budget); empty when a page cannot be read or robots.txt disallows it.
  */
 export async function findPageBoards(input: {
   careerUrl: string | null
@@ -173,8 +175,10 @@ export async function findPageBoards(input: {
   const home = hostOnly(input.domain)
   if (home) urls.add(`https://${home}/`)
   const boards = new Map<string, BoardRef>()
+  // One fetcher for both pages: one budget, one robots.txt read per site.
+  const fetcher = makeSiteFetcher({ mode: 'inline' })
   for (const url of urls) {
-    const html = await fetchCareersHtml(url, input.domain)
+    const html = await fetchCareersHtml(url, input.domain, fetcher)
     if (!html) continue
     for (const b of findBoardLinks(html, (u) => detectFromUrl({ careerUrl: u, domain: null }))) {
       boards.set(`${b.provider}:${b.token.toLowerCase()}`, b)

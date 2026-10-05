@@ -76,7 +76,7 @@ export interface SiteFetcherOptions {
 export interface SiteFetcher {
   mode: ReaderMode
   /** A page or file as text. Throws ReaderError for robots, a bot check, a login wall, an unreachable site or a spent budget. */
-  get(url: string, opts?: { accept?: string }): Promise<SiteResponse>
+  get(url: string, opts?: { accept?: string; follow?: (to: string) => boolean }): Promise<SiteResponse>
   /** A JSON answer from a host in `allowedHosts`, under the same robots, delay and budget rules. */
   json<T>(url: string, opts: { allowedHosts: ReadonlySet<string>; method?: 'GET' | 'POST'; body?: string; headers?: Record<string, string> }): Promise<T>
   /** Where the first request to `url` redirects, without following it; null when it does not redirect. */
@@ -90,6 +90,30 @@ export interface SiteFetcher {
 
 const CHALLENGE = /just a moment|cf-chl|challenge-platform|captcha|attention required|access denied|verify you are (a )?human|px-captcha/i
 const LOGIN_PATH = /\/(login|log-in|signin|sign-in|sso|auth)(\/|$|\?)/i
+
+/** Up to `max` bytes as text. A heavy page is read as far as the cap, not refused: its links are nearly always in the part that was read. */
+async function readCapped(res: Response, max: number): Promise<string> {
+  const reader = res.body?.getReader()
+  if (!reader) return (await res.text()).slice(0, max)
+  const chunks: Uint8Array[] = []
+  let total = 0
+  while (total < max) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    total += value.byteLength
+  }
+  await reader.cancel().catch(() => {})
+  const bytes = new Uint8Array(Math.min(total, max))
+  let offset = 0
+  for (const chunk of chunks) {
+    const room = bytes.byteLength - offset
+    if (room <= 0) break
+    bytes.set(chunk.byteLength > room ? chunk.subarray(0, room) : chunk, offset)
+    offset += Math.min(chunk.byteLength, room)
+  }
+  return new TextDecoder('utf-8').decode(bytes)
+}
 
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -216,13 +240,16 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
         if (res.status >= 300 && res.status < 400) {
           const to = res.headers.get('location')
           if (!to) throw new ReaderError('unreachable')
-          current = new URL(to, current).toString()
+          const next = new URL(to, current).toString()
+          // The caller may keep a read on one site: a hop elsewhere is not followed.
+          if (opts.follow && !opts.follow(next)) throw new ReaderError('unreachable')
+          current = next
           if (LOGIN_PATH.test(new URL(current).pathname)) throw new ReaderError('login_required')
           continue
         }
         let text = ''
         try {
-          text = await readLimitedText(res, MAX_BYTES)
+          text = await readCapped(res, MAX_BYTES)
         } catch {
           throw new ReaderError('unreachable')
         }
