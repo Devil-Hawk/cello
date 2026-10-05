@@ -126,7 +126,7 @@ describe('fanOut', () => {
 
   it('reports every branch start and end once', async () => {
     const events: BranchEvent<string, string>[] = []
-    await fanOut({
+    await fanOut<string, string>({
       items: ['a', 'b'],
       caps,
       deadlineAt: farFuture(),
