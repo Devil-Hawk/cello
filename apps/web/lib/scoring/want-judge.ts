@@ -39,7 +39,6 @@ export const NO_STATED: StatedPreferences = {
 
 export interface WantJudgement {
   p: number
-  statedP: number
   reason: string
 }
 
@@ -121,7 +120,7 @@ export function parseJudgements(raw: unknown, idMap: ReadonlyMap<string, string>
     const jobId = idMap.get(String(r.id))
     const p = clampProb(r.p)
     if (!jobId || p == null) continue
-    out.set(jobId, { p, statedP: clampProb(r.stated_p) ?? p, reason: firstSentence(r.reason) })
+    out.set(jobId, { p, reason: firstSentence(r.reason) })
   }
   return out
 }
@@ -132,12 +131,10 @@ export interface JudgeWantInput {
   roles: readonly RoleFacts[]
 }
 
-/** Judges roles eight to a call. A batch the model fails on is simply absent from the result. */
-export async function judgeWant(llm: LlmRunner, input: JudgeWantInput): Promise<Map<string, WantJudgement>> {
+async function judgeBatches(llm: LlmRunner, context: string, roles: readonly RoleFacts[]): Promise<Map<string, WantJudgement>> {
   const out = new Map<string, WantJudgement>()
-  const context = `What they told us:\n${renderStated(input.stated)}\n\nWhat they did:\n${renderDecisions(input.reactions)}`
-  for (let i = 0; i < input.roles.length; i += BATCH_SIZE) {
-    const batch = input.roles.slice(i, i + BATCH_SIZE)
+  for (let i = 0; i < roles.length; i += BATCH_SIZE) {
+    const batch = roles.slice(i, i + BATCH_SIZE)
     const idMap = new Map(batch.map((r, k) => [`a${k + 1}`, r.id]))
     const prompt =
       frameJobTextList(
@@ -165,4 +162,20 @@ export async function judgeWant(llm: LlmRunner, input: JudgeWantInput): Promise<
     }
   }
   return out
+}
+
+/** Judges roles eight to a call from the stated preferences and the person's own decisions. A batch the model fails on is simply absent. */
+export async function judgeWant(llm: LlmRunner, input: JudgeWantInput): Promise<Map<string, WantJudgement>> {
+  const context = `What they told us:\n${renderStated(input.stated)}\n\nWhat they did:\n${renderDecisions(input.reactions)}`
+  return judgeBatches(llm, context, input.roles)
+}
+
+/**
+ * The same judgement from the stated preferences alone: the cold-start prior.
+ * It is a separate call so what the decisions showed cannot leak into it, and it
+ * does not change as reactions accumulate, so callers keep it per role.
+ */
+export async function judgeStated(llm: LlmRunner, stated: StatedPreferences, roles: readonly RoleFacts[]): Promise<Map<string, WantJudgement>> {
+  const context = `What they told us:\n${renderStated(stated)}\n\nWhat they did:\n${renderDecisions([])}`
+  return judgeBatches(llm, context, roles)
 }

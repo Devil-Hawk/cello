@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { LlmResult, LlmRunOptions } from '@/lib/harness/types'
 import { NO_CONSTRAINTS } from './constraints'
-import { buildShortlist, retrievePool, roleText, type Embedder } from './pipeline'
+import { assessRoles, buildShortlist, retrievePool, roleText, type Embedder } from './pipeline'
 import { MemoryStore } from './store'
 import { NO_STATED } from './want-judge'
 import type { ReactionRecord, RoleFacts } from './types'
@@ -40,7 +40,8 @@ interface Calls {
 /** A fake model that likes payments roles and answers requirement and chance checks consistently. */
 function fakeLlm(calls: Calls) {
   return async (opts: LlmRunOptions): Promise<LlmResult> => {
-    calls.names.push(opts.name ?? '')
+    // A judge call that is told there are no decisions is the stated-only read.
+    calls.names.push(opts.name === 'judge-role-want' && (opts.system ?? '').includes('(no decisions yet)') ? 'judge-stated' : (opts.name ?? ''))
     calls.systems.push(opts.system ?? '')
     const prompt = opts.prompt ?? ''
     let content = '{}'
@@ -49,7 +50,7 @@ function fakeLlm(calls: Calls) {
       content = JSON.stringify({
         roles: blocks.map((m) => {
           const payments = /payments/i.test(m[2])
-          return { id: m[1], p: payments ? 0.85 : 0.2, stated_p: 0.5, reason: payments ? 'Payments backend like the roles you liked.' : 'Not the kind of work you went for.' }
+          return { id: m[1], p: payments ? 0.85 : 0.2, reason: payments ? 'Payments backend like the roles you liked.' : 'Not the kind of work you went for.' }
         }),
       })
     } else if (opts.name === 'extract-role-requirements') {
@@ -79,14 +80,21 @@ function fakeLlm(calls: Calls) {
   }
 }
 
-function req(store: MemoryStore, candidates: RoleFacts[], over: Partial<Parameters<typeof buildShortlist>[1]> = {}) {
-  const calls: Calls = { names: [], systems: [] }
-  const run = () =>
-    buildShortlist(
-      { llm: fakeLlm(calls), embed: embedder, store, rng: () => 0.5 },
-      { userId: 'u', resumeText: RESUME, stated: { ...NO_STATED, titles: ['Backend Engineer'] }, constraints: NO_CONSTRAINTS, candidates, forDate: '2026-10-06', ...over }
-    )
-  return { calls, run }
+function req(store: MemoryStore, candidates: RoleFacts[], over: Partial<Parameters<typeof buildShortlist>[1]> = {}, calls: Calls = { names: [], systems: [] }) {
+  const base = { userId: 'u', resumeText: RESUME, stated: { ...NO_STATED, titles: ['Backend Engineer'] }, constraints: NO_CONSTRAINTS, candidates, forDate: '2026-10-06', ...over }
+  const deps = { llm: fakeLlm(calls), embed: embedder, store, rng: () => 0.5 }
+  return { calls, run: () => buildShortlist(deps, base), assess: () => assessRoles(deps, base) }
+}
+
+function reactionsFor(n: number): ReactionRecord[] {
+  return Array.from({ length: n }, (_, i) => {
+    const pay = i % 2 === 0
+    const r = role(`h${i}`, pay ? 'payments' : 'advertising')
+    return {
+      id: `h${i}`, jobId: `old-h${i}`, reaction: pay ? ('interested' as const) : ('not_for_me' as const), reason: pay ? null : ('domain' as const),
+      title: r.title, company: r.company, location: null, text: roleText(r), embedding: null, embeddingModel: null, predicted: null, at: `2026-09-${String(i + 10)}T00:00:00Z`,
+    }
+  })
 }
 
 describe('buildShortlist', () => {
@@ -116,7 +124,7 @@ describe('buildShortlist', () => {
     expect(out.blocked).toEqual([{ jobId: 'x', reasons: [{ kind: 'company', text: 'You ruled out Coinbase.' }] }])
     expect(out.picks.map((p) => p.jobId)).not.toContain('x')
     expect(store.assessmentRows.get('x')).toMatchObject({ blocked: true, want: null })
-    expect(calls.names.filter((n) => n === 'judge-role-want').length).toBeGreaterThan(0)
+    expect(calls.names.filter((n) => n.startsWith('judge-')).length).toBeGreaterThan(0)
   })
 
   it('says cannot assess for a posting with no description and never calls the model for its requirements', async () => {
@@ -178,6 +186,84 @@ describe('buildShortlist', () => {
     const out = await run()
     expect(out.picks).toEqual([])
     expect(out.blocked).toHaveLength(8)
+  })
+})
+
+describe('assessRoles', () => {
+  const candidates = [...['a', 'b', 'c', 'd'].map((id) => role(id, 'payments')), ...['e', 'f', 'g', 'h'].map((id) => role(id, 'advertising'))]
+  const count = (calls: Calls, name: string) => calls.names.filter((n) => n === name).length
+
+  it('with no reactions makes one judge pass: the stated read is the same call', async () => {
+    const store = new MemoryStore()
+    const { assess, calls } = req(store, candidates)
+    const out = await assess()
+    // With no decisions to show, the one call is the stated-only read.
+    expect(count(calls, 'judge-role-want') + count(calls, 'judge-stated')).toBe(1)
+    expect(out.taste.nReactions).toBe(0)
+    for (const a of out.assessed) expect(a.want!.components.stated).toBe(a.want!.components.judge)
+  })
+
+  it('with reactions makes two passes: one that sees the decisions and a stated-only one that does not', async () => {
+    const store = new MemoryStore()
+    store.reactionRows = reactionsFor(3)
+    const { assess, calls } = req(store, candidates)
+    const out = await assess()
+    expect(count(calls, 'judge-role-want')).toBe(1)
+    expect(count(calls, 'judge-stated')).toBe(1)
+    const withDecisions = calls.systems.find((s) => s.includes('[not for me, domain]'))
+    expect(withDecisions).toBeTruthy()
+    expect(withDecisions).not.toContain('(no decisions yet)')
+    expect(out.assessed[0].want!.components.stated).not.toBeNull()
+  })
+
+  it('keeps the stated read per role, so a second pass asks only about new roles', async () => {
+    const store = new MemoryStore()
+    store.reactionRows = reactionsFor(3)
+    await req(store, candidates).assess()
+    const second = req(store, [...candidates, role('z', 'payments')])
+    await second.assess()
+    expect(count(second.calls, 'judge-stated')).toBe(1)
+    const statedCall = second.calls.systems.find((s) => s.includes('(no decisions yet)'))
+    expect(statedCall).toBeTruthy()
+  })
+
+  it('keeps a settled chance for the same resume and checks it again for a different one', async () => {
+    const store = new MemoryStore()
+    const first = req(store, candidates)
+    await first.assess()
+    expect(count(first.calls, 'check-role-requirements')).toBeGreaterThan(0)
+    const same = req(store, candidates)
+    await same.assess()
+    expect(count(same.calls, 'check-role-requirements')).toBe(0)
+    const other = req(store, candidates, { resumeText: RESUME + '\nKubernetes operator work' })
+    await other.assess()
+    expect(count(other.calls, 'check-role-requirements')).toBeGreaterThan(0)
+  })
+
+  it('never stores a vector for a posting, only for reactions', async () => {
+    const store = new MemoryStore()
+    store.reactionRows = reactionsFor(2)
+    await req(store, candidates).assess()
+    expect(JSON.stringify([...store.assessmentRows.values()])).not.toMatch(/embedding":\[/)
+    expect(Object.keys(store)).not.toContain('embeddingRows')
+    expect(store.reactionRows.every((r) => Array.isArray(r.embedding) && r.embedding.length === 32)).toBe(true)
+  })
+
+  it('writes an assessment for a blocked role with its reasons and no want or chance', async () => {
+    const store = new MemoryStore()
+    const { assess } = req(store, [...candidates, role('x', 'payments', { company: 'Coinbase' })], { constraints: { ...NO_CONSTRAINTS, excludedCompanies: ['coinbase'] } })
+    const out = await assess()
+    expect(out.blocked.map((b) => b.jobId)).toEqual(['x'])
+    expect(store.assessmentRows.get('x')).toMatchObject({ blocked: true, blockedReasons: [{ kind: 'company' }], want: null, chance: null })
+  })
+
+  it('can skip the chance check', async () => {
+    const store = new MemoryStore()
+    const { assess, calls } = req(store, candidates, { chanceFor: 0 })
+    const out = await assess()
+    expect(count(calls, 'extract-role-requirements') + count(calls, 'check-role-requirements')).toBe(0)
+    expect(out.rankables).toEqual([])
+    expect(out.assessed.length).toBe(8)
   })
 })
 

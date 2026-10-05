@@ -4,7 +4,7 @@
 
 import type { BlendModel, FitEvidence } from './taste'
 import type { RequirementsOutcome } from './requirements'
-import type { Assessment, ReactionRecord, ShortlistPick } from './types'
+import type { Assessment, ChanceResult, ReactionRecord, ShortlistPick } from './types'
 
 export interface StoredTaste {
   model: BlendModel
@@ -14,19 +14,32 @@ export interface StoredTaste {
 export interface AssessmentToStore extends Assessment {
   /** The role's own text at assessment time is not stored; only what the UI and the learning need. */
   wantReason: string | null
+  /** The judge's read of the stated preferences alone, and which stated preferences it was read from. */
+  stated: { p: number | null; key: string } | null
+  /** Which resume the chance was checked against. */
+  resumeKey: string | null
+}
+
+/** What an earlier assessment of the same role already settled, so it is not paid for twice. */
+export interface PriorAssessment {
+  statedP: number | null
+  statedKey: string | null
+  chance: ChanceResult | null
+  resumeKey: string | null
 }
 
 export interface ScoringStore {
+  /** The person's reactions, newest first is not guaranteed; callers sort. */
   reactions(userId: string): Promise<ReactionRecord[]>
   setReactionEmbeddings(userId: string, items: { id: string; embedding: number[]; model: string }[]): Promise<void>
   /** Cached requirement reads that are still current. Failed reads are never cached. */
   requirements(userId: string, jobIds: string[]): Promise<Map<string, RequirementsOutcome>>
   saveRequirements(userId: string, entries: Map<string, RequirementsOutcome>): Promise<void>
-  embeddings(userId: string, jobIds: string[], model: string): Promise<Map<string, number[]>>
-  saveEmbeddings(userId: string, model: string, entries: Map<string, number[]>): Promise<void>
+  priorAssessments(userId: string, jobIds: string[]): Promise<Map<string, PriorAssessment>>
   taste(userId: string): Promise<StoredTaste | null>
   saveTaste(userId: string, taste: StoredTaste, counts: { n: number; positive: number }): Promise<void>
   saveAssessments(userId: string, rows: AssessmentToStore[]): Promise<void>
+  /** Stores the day's list, replacing any earlier list for that day, and forgets lists older than two weeks. */
   saveShortlist(userId: string, forDate: string, picks: ShortlistPick[]): Promise<void>
 }
 
@@ -34,7 +47,6 @@ export interface ScoringStore {
 export class MemoryStore implements ScoringStore {
   reactionRows: ReactionRecord[] = []
   requirementRows = new Map<string, RequirementsOutcome>()
-  embeddingRows = new Map<string, number[]>()
   tasteRow: StoredTaste | null = null
   assessmentRows = new Map<string, AssessmentToStore>()
   shortlists = new Map<string, ShortlistPick[]>()
@@ -62,16 +74,13 @@ export class MemoryStore implements ScoringStore {
   async saveRequirements(_u: string, entries: Map<string, RequirementsOutcome>): Promise<void> {
     for (const [id, v] of entries) if (v.kind !== 'failed') this.requirementRows.set(id, v)
   }
-  async embeddings(_u: string, jobIds: string[], model: string): Promise<Map<string, number[]>> {
-    const out = new Map<string, number[]>()
+  async priorAssessments(_u: string, jobIds: string[]): Promise<Map<string, PriorAssessment>> {
+    const out = new Map<string, PriorAssessment>()
     for (const id of jobIds) {
-      const v = this.embeddingRows.get(`${model}:${id}`)
-      if (v) out.set(id, v)
+      const a = this.assessmentRows.get(id)
+      if (a) out.set(id, { statedP: a.stated?.p ?? null, statedKey: a.stated?.key ?? null, chance: a.chance, resumeKey: a.resumeKey })
     }
     return out
-  }
-  async saveEmbeddings(_u: string, model: string, entries: Map<string, number[]>): Promise<void> {
-    for (const [id, v] of entries) this.embeddingRows.set(`${model}:${id}`, v)
   }
   async taste(): Promise<StoredTaste | null> {
     return this.tasteRow

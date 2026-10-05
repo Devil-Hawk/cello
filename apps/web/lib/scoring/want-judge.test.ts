@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { LlmResult, LlmRunOptions } from '@/lib/harness/types'
 import { MissingKeyError } from '@/lib/harness/llm'
-import { NO_STATED, judgeWant, parseJudgements, renderDecisions, renderStated, sampleDecisions } from './want-judge'
+import { NO_STATED, judgeStated, judgeWant, parseJudgements, renderDecisions, renderStated, sampleDecisions } from './want-judge'
 import type { ReactionRecord, RoleFacts } from './types'
 
 function rx(i: number, reaction: ReactionRecord['reaction'], reason: ReactionRecord['reason'] = null): ReactionRecord {
@@ -63,11 +63,11 @@ describe('parseJudgements', () => {
 
   it('maps ids back, clamps probabilities and keeps the first sentence of the reason', () => {
     const out = parseJudgements(
-      { roles: [{ id: 'a1', p: 1.4, stated_p: 0.3, reason: 'Same payments work as the Stripe role. It is also remote.' }, { id: 'a2', p: '0.4', reason: '' }] },
+      { roles: [{ id: 'a1', p: 1.4, reason: 'Same payments work as the Stripe role. It is also remote.' }, { id: 'a2', p: '0.4', reason: '' }] },
       idMap
     )
-    expect(out.get('uuid-a')).toEqual({ p: 0.98, statedP: 0.3, reason: 'Same payments work as the Stripe role.' })
-    expect(out.get('uuid-b')).toEqual({ p: 0.4, statedP: 0.4, reason: '' })
+    expect(out.get('uuid-a')).toEqual({ p: 0.98, reason: 'Same payments work as the Stripe role.' })
+    expect(out.get('uuid-b')).toEqual({ p: 0.4, reason: '' })
   })
 
   it('drops rows with an unknown id or no usable probability', () => {
@@ -93,7 +93,7 @@ describe('judgeWant', () => {
   }
 
   it('puts the person and their decisions in the system prompt and the roles, framed as untrusted, in the prompt', async () => {
-    const { fn, calls } = llmReturning(JSON.stringify({ roles: [{ id: 'a1', p: 0.7, stated_p: 0.5, reason: 'Backend like what you liked.' }] }))
+    const { fn, calls } = llmReturning(JSON.stringify({ roles: [{ id: 'a1', p: 0.7, reason: 'Backend like what you liked.' }] }))
     const out = await judgeWant(fn, { stated: { ...NO_STATED, titles: ['Backend Engineer'] }, reactions: [rx(1, 'interested')], roles: [roles[0]] })
     expect(out.get('uuid-a')!.p).toBe(0.7)
     expect(calls[0].system).toContain('Wants roles titled: Backend Engineer')
@@ -101,6 +101,11 @@ describe('judgeWant', () => {
     expect(calls[0].prompt).toContain('UNTRUSTED')
     expect(calls[0].prompt).not.toContain('Title 1')
     expect(calls[0].cachePrefix).toBe(true)
+  })
+
+  it('ignores a stated_p field: the stated prior comes only from judgeStated', () => {
+    const out = parseJudgements({ roles: [{ id: 'a1', p: 0.6, stated_p: 0.1, reason: 'x.' }] }, new Map([['a1', 'uuid-a']]))
+    expect(out.get('uuid-a')).toEqual({ p: 0.6, reason: 'x.' })
   })
 
   it('judges eight roles per call', async () => {
@@ -113,5 +118,20 @@ describe('judgeWant', () => {
   it('leaves a failed batch unjudged instead of throwing, but lets a missing key through', async () => {
     expect((await judgeWant(llmReturning('not json').fn, { stated: NO_STATED, reactions: [], roles })).size).toBe(0)
     await expect(judgeWant(llmReturning(new MissingKeyError('no key')).fn, { stated: NO_STATED, reactions: [], roles })).rejects.toThrow('no key')
+  })
+})
+
+describe('judgeStated', () => {
+  it('never shows the decisions: the system prompt says there are none', async () => {
+    const calls: LlmRunOptions[] = []
+    const fn = vi.fn(async (opts: LlmRunOptions): Promise<LlmResult> => {
+      calls.push(opts)
+      return { content: JSON.stringify({ roles: [{ id: 'a1', p: 0.55, reason: 'Backend, as you asked.' }] }), tokensUsed: 1, promptTokens: 1, completionTokens: 0, model: 'm' }
+    })
+    const out = await judgeStated(fn, { ...NO_STATED, titles: ['Backend Engineer'] }, [roles[0]])
+    expect(out.get('uuid-a')!.p).toBe(0.55)
+    expect(calls[0].system).toContain('Wants roles titled: Backend Engineer')
+    expect(calls[0].system).toContain('(no decisions yet)')
+    expect(calls[0].system).not.toContain('roles shown so far')
   })
 })
