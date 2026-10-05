@@ -59,7 +59,8 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/use-toast'
-import { matchTone } from '@/lib/format'
+import { ChanceChip } from '@/components/fit/chance-chip'
+import { fitFromLabel } from '@/lib/scoring/read'
 import { cn } from '@/lib/utils'
 
 // --- Wire shapes (mirrors of app/api/drafts/batch-approve/route.ts) ---------
@@ -71,7 +72,8 @@ export interface BatchReviewItem {
   jobUrl: string | null
   location: string | null
   companyName: string
-  matchScore: number | null
+  /** strong | possible | stretch | cannot_assess, or null before the role is assessed. */
+  chance: string | null
   matchWhy: string | null
   matchHighlights: string[]
   matchGaps: string[]
@@ -268,9 +270,7 @@ export function BatchReviewList({
                   {item.location && (
                     <span className="text-caption text-muted-foreground">· {item.location}</span>
                   )}
-                  {item.matchScore !== null && (
-                    <Badge tone={matchTone(item.matchScore)}>{item.matchScore} match</Badge>
-                  )}
+                  {item.chance !== null && <ChanceChip fit={fitFromLabel(item.chance)} />}
                 </div>
 
                 <div id={detailId} className="mt-1.5 space-y-1">
@@ -338,9 +338,7 @@ export function NeedsAttentionList({ items }: { items: readonly BatchReviewItem[
               <AlertTriangle className="h-3.5 w-3.5 shrink-0 translate-y-0.5 text-muted-foreground" />
               <span className="text-body font-semibold text-foreground">{item.jobTitle}</span>
               <span className="text-caption text-muted-foreground">{item.companyName}</span>
-              {item.matchScore !== null && (
-                <Badge tone={matchTone(item.matchScore)}>{item.matchScore} match</Badge>
-              )}
+              {item.chance !== null && <ChanceChip fit={fitFromLabel(item.chance)} />}
             </div>
             <ul className="mt-1.5 space-y-0.5">
               {item.blockers.map((blocker) => (

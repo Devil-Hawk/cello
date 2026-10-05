@@ -5,7 +5,9 @@ import { ArrowRightLeft, Building2, Check, ClipboardCheck, GripVertical, Mail } 
 import { useDraggable } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
 import { cn } from '@/lib/utils'
-import { formatShortDate, matchTone, STAGE_META, type PipelineStage } from '@/lib/format'
+import { formatShortDate, STAGE_META, type PipelineStage } from '@/lib/format'
+import { ChanceChip } from '@/components/fit/chance-chip'
+import { fitFromLabel } from '@/lib/scoring/read'
 import { Badge } from '@/components/ui/badge'
 import {
   DropdownMenu,
@@ -50,7 +52,6 @@ export function ApplicationCardContent({
   const daysSinceUpdate = getDaysSinceUpdate(application.updated_at)
   const alert = getPipelineAlert(application)
   const gmailUrl = getGmailUrl(application)
-  const tone = matchTone(job?.match_score ?? null)
 
   const logoSrc =
     company?.logo_url ||
@@ -123,11 +124,7 @@ export function ApplicationCardContent({
             </span>
           ) : null}
 
-          {tone !== 'none' && (
-            <Badge tone={tone} className="px-1.5 tabular-nums">
-              {job?.match_score}%
-            </Badge>
-          )}
+          {job?.chance && job.chance !== 'cannot_assess' && <ChanceChip fit={fitFromLabel(job.chance)} className="px-1.5" />}
 
           {alert && (
             <Badge tone={alert.kind === 'ghosted' ? 'bad' : 'warn'} title={alert.title}>

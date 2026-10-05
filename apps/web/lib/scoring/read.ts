@@ -91,6 +91,12 @@ export function parseFit(row: FitRow): RoleFit {
   }
 }
 
+/** A fit that carries only a chance label, for lists that show the chip and nothing else. */
+export function fitFromLabel(label: string | null | undefined): RoleFit {
+  const valid = CHANCES.includes(label as Chance) ? (label as Chance) : null
+  return { jobId: null, assessedAt: null, blocked: [], want: null, chance: valid ? { label: valid, checks: [], gaps: [], confirm: [], note: null } : null }
+}
+
 export type ChanceWord = 'Strong' | 'Possible' | 'Stretch' | 'Not assessed yet'
 
 /** The word a chip shows. A role that could not be checked, or has not been, says so. */
@@ -128,4 +134,17 @@ export function firstGapCopy(fit: RoleFit): string | null {
   const gap = fit.chance?.gaps.find((g) => !g.startsWith('Nice to have')) ?? fit.chance?.gaps[0]
   if (!gap) return null
   return `Not clearly on your resume: ${gap.replace(/^(?:Only partly shown|Nice to have):\s*/i, '').replace(/[.]+$/, '')}.`
+}
+
+/** The jobs columns a verdict fills, for a screen that has just assessed a role and wants its row to show it without a reload. */
+export function fitToColumns(fit: RoleFit): Required<Omit<FitRow, 'id'>> {
+  return {
+    fit_assessed_at: fit.assessedAt,
+    blocked_reasons: fit.blocked,
+    want_p: fit.want?.p ?? null,
+    want_reason: fit.want?.reason ?? null,
+    want_detail: fit.want ? { calibrated: fit.want.calibrated, nReactions: fit.want.nReactions } : null,
+    chance: fit.chance?.label ?? null,
+    chance_detail: fit.chance ? { checks: fit.chance.checks, gaps: fit.chance.gaps, confirm: fit.chance.confirm, note: fit.chance.note } : null,
+  }
 }

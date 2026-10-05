@@ -14,7 +14,9 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/use-toast'
 import { cn, formatRelativeTime } from '@/lib/utils'
-import { formatShortDate, matchTone, STAGE_META, type PipelineStage } from '@/lib/format'
+import { formatShortDate, STAGE_META, type PipelineStage } from '@/lib/format'
+import { ChanceChip } from '@/components/fit/chance-chip'
+import { fitFromLabel } from '@/lib/scoring/read'
 import { CompanyLogo } from '@/components/companies/company-logo'
 import { LogApplicationDialog } from '@/components/pipeline/log-application-dialog'
 import { PROVENANCE_LABELS } from '@/lib/applications/receipts'
@@ -152,7 +154,6 @@ function DialogBody({ application }: { application: ApplicationWithJob }) {
   const alert = getPipelineAlert(application)
   const gmailInfo = parseGmailInfo(application.notes)
   const stageMeta = STAGE_META[application.stage as PipelineStage]
-  const tone = matchTone(job?.match_score ?? null)
 
   const logoSrc =
     company?.logo_url ||
@@ -229,11 +230,9 @@ function DialogBody({ application }: { application: ApplicationWithJob }) {
           </span>
         </DetailRow>
 
-        {tone !== 'none' && (
-          <DetailRow label="Match score">
-            <Badge tone={tone} className="tabular-nums">
-              {job?.match_score}%
-            </Badge>
+        {job?.chance && job.chance !== 'cannot_assess' && (
+          <DetailRow label="Your chance">
+            <ChanceChip fit={fitFromLabel(job.chance)} />
           </DetailRow>
         )}
 

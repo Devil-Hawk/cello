@@ -21,7 +21,8 @@ export interface ApplicationWithJob {
     id: string
     title: string
     url: string
-    match_score: number | null
+    /** strong | possible | stretch | cannot_assess, or null before the role is assessed. */
+    chance: string | null
     companies: {
       name: string
       domain: string | null

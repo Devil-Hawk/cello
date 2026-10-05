@@ -9,9 +9,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { formatRelativeTime } from '@/lib/utils'
+import { cn, formatRelativeTime } from '@/lib/utils'
 import { knownParts, postedThisWeek } from '@/lib/format'
-import { MatchBadge, parseMatchDetails, type MatchDetails } from './match-badge'
+import Link from 'next/link'
+import { ChanceChip } from '@/components/fit/chance-chip'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { parseFit } from '@/lib/scoring/read'
 import { VisaBadge } from './visa-badge'
 import type { VisaSignal } from '@/lib/dossier/store'
 
@@ -24,8 +27,14 @@ export interface JobRowJob {
   salary_range: string | null
   posted_at: string | null
   discovered_at: string
-  match_score: number | null
-  match_details: MatchDetails | string | null
+  // The verdict on the role (lib/scoring/read.ts FIT_COLUMNS). Null columns mean it has not been assessed yet.
+  fit_assessed_at: string | null
+  blocked_reasons: unknown
+  want_p: number | null
+  want_reason: string | null
+  want_detail: unknown
+  chance: string | null
+  chance_detail: unknown
   is_new: boolean
   companies: {
     name: string
@@ -39,19 +48,19 @@ interface JobRowProps {
   inPipeline: boolean
   isAdding: boolean
   isCalculating: boolean
-  /** A batch calculation is running elsewhere on the page — disables this row's trigger too. */
+  /** A batch assessment is running elsewhere on the page, which disables this row's trigger too. */
   calculateDisabled: boolean
   /**
-   * Non-null when a single-job match can't be calculated right now (missing
+   * Non-null when a single role cannot be assessed right now (missing
    * resume/key, or the account-status check itself failed). The trigger
-   * still renders — disabled, with this reason on hover — never hidden.
+   * still renders, disabled, with this reason on hover; it is never hidden.
    */
   calculateDisabledReason: string | null
   /** Wired to retry the account-status fetch when calculateDisabledReason is the "couldn't check" case. */
   onRetryStatus?: () => void
   /** Visa-sponsorship signal from the company's dossier (if any). */
   visaSignal?: VisaSignal | null
-  /** Remaining-AI-budget line surfaced on the "calculate match" trigger — see MatchBadgeProps.budgetHint. */
+  /** Remaining-AI-budget line surfaced on the "Check chances" trigger. */
   budgetHint?: string | null
   onOpen: () => void
   onAddToPipeline: () => void
@@ -61,6 +70,75 @@ interface JobRowProps {
 // `job.is_new` only means "Cello has ever seen this row", so the marker also
 // needs the posting's own date inside the last week. A role with no posting
 // date never gets it: the date Cello found it says nothing about when it went up.
+
+/**
+ * "Check chances" on a role nobody has assessed yet: a real, keyboard-accessible
+ * button. When it cannot run it is aria-disabled, not `disabled`, so the reason
+ * stays reachable by hover and keyboard.
+ */
+function CheckChancesTrigger({
+  onCalculate,
+  isCalculating,
+  disabledReason,
+  onRetryStatus,
+  budgetHint,
+}: {
+  onCalculate: () => void
+  isCalculating: boolean
+  disabledReason: string | null
+  onRetryStatus?: () => void
+  budgetHint: string | null | undefined
+}) {
+  const isDisabled = isCalculating || !!disabledReason
+  const trigger = (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation()
+        if (!isDisabled) onCalculate()
+      }}
+      aria-disabled={isDisabled}
+      aria-label={isCalculating ? 'Checking your chances' : 'Check your chances for this role'}
+      className={cn(
+        'inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-transparent bg-sunken px-2 py-0.5 text-caption font-medium text-muted-foreground transition-colors',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        disabledReason ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:bg-accent-soft hover:text-accent-deep'
+      )}
+    >
+      {isCalculating && <Loader2 className="h-3 w-3 animate-spin" />}
+      {isCalculating ? 'Checking' : 'Not assessed yet'}
+    </button>
+  )
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-xs p-3" onClick={(e) => e.stopPropagation()}>
+          {disabledReason ? (
+            <div className="space-y-2">
+              <p className="text-caption">{disabledReason}</p>
+              {onRetryStatus && disabledReason.startsWith("Couldn't check") ? (
+                <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); onRetryStatus() }}>
+                  Retry
+                </Button>
+              ) : (
+                <Link href="/settings" className="text-caption font-medium text-accent-deep hover:underline" onClick={(e) => e.stopPropagation()}>
+                  Go to Settings
+                </Link>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <p className="text-caption">{isCalculating ? 'Checking this role against your resume' : 'Click to check your chances for this role'}</p>
+              {!isCalculating && budgetHint && <p className="text-caption text-muted-foreground">Uses a metered AI call: {budgetHint}.</p>}
+            </div>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
 /** One job as a list row: 40px logo, strong title, single caption meta line, one visible action. */
 export function JobRow({
   job,
@@ -88,6 +166,8 @@ export function JobRow({
   const showNewMarker = job.is_new && postedThisWeek(job.posted_at)
 
   const meta = knownParts(job.companies?.name, job.location, job.salary_range)
+  const fit = parseFit(job)
+  const filteredReason = fit.blocked[0]?.text ?? null
 
   return (
     // Plain container — NOT role="button". The row used to be one giant
@@ -151,48 +231,39 @@ export function JobRow({
             {job.title}
             <span className="sr-only"> at {job.companies?.name ?? 'unknown company'} — open details</span>
           </button>
-          </div>
-          {/* The match badge is a control in its own right, so it must not also
-              fire the row's open-the-job convenience click above. Its unscored
-              variant already stops the event itself; its SCORED variant — a
-              real <button> labelled "press for the full score breakdown" — did
-              not, so the click bubbled and opened the detail modal instead.
-              Verified in a browser before this wrapper existed: clicking an
-              "8 percent match" badge gave dialog=true, tooltip=false. Keyboard
-              users hit the identical bug, since Enter on a <button> dispatches
-              a bubbling click.
-              Guarded, not blanket: only swallow clicks that actually landed on
-              a control, so MatchBadge's purely decorative variant (a plain
-              <span>, rendered when there is no breakdown to show) keeps
-              counting as row whitespace and still opens the row.
-              `contents` keeps the badge a direct flex item of this line — a
-              display:contents wrapper generates no box, but events still bubble
-              through it, which is all this handler needs. */}
+          {/* The chip is a control in its own right (hover or focus for the reason), so it must not
+              also fire the row's open-the-job click. Guarded, not blanket: only clicks that landed
+              on a control are swallowed, so the plain chip still counts as row whitespace. */}
           <span
             className="contents"
             onClick={(e) => {
               if (e.target instanceof Element && e.target.closest('button, a')) e.stopPropagation()
             }}
           >
-            <MatchBadge
-              score={job.match_score}
-              details={parseMatchDetails(job.match_details)}
-              onCalculate={onCalculateMatch}
-              isCalculating={isCalculating}
-              disabledReason={
-                // A running batch blocks this row's own trigger too, but that's
-                // transient — still worth a distinct, honest reason.
-                calculateDisabled && !calculateDisabledReason ? 'A batch calculation is already running' : calculateDisabledReason
-              }
-              onRetryStatus={onRetryStatus}
-              budgetHint={budgetHint}
-            />
+            {fit.blocked.length > 0 ? (
+              <Badge tone="neutral" className="whitespace-nowrap border border-dashed border-border bg-transparent text-muted-foreground">Filtered out</Badge>
+            ) : fit.chance ? (
+              <ChanceChip fit={fit} />
+            ) : (
+              <CheckChancesTrigger
+                onCalculate={onCalculateMatch}
+                isCalculating={isCalculating}
+                disabledReason={
+                  // A running batch blocks this row's own trigger too, but that is
+                  // transient, and still worth a distinct, honest reason.
+                  calculateDisabled && !calculateDisabledReason ? 'A batch assessment is already running' : calculateDisabledReason
+                }
+                onRetryStatus={onRetryStatus}
+                budgetHint={budgetHint}
+              />
+            )}
           </span>
           <VisaBadge signal={visaSignal} className="shrink-0" />
         </div>
         <p className="mt-0.5 truncate text-caption text-muted-foreground">
           {meta.join(' · ')}
           {meta.length > 0 && ' · '}
+          {filteredReason && <span className="text-foreground">{filteredReason} · </span>}
           <span
             className={hasPostedDate ? undefined : 'italic text-muted-foreground'}
             title={
@@ -231,11 +302,6 @@ export function JobRow({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {/* "Calculate match" used to be duplicated here under the same
-                match_score === null gate as the MatchBadge trigger above, but
-                with native `disabled` instead of aria-disabled — the badge is
-                the better-placed, already keyboard-accessible control, so the
-                overflow copy was removed rather than kept in sync. */}
             <DropdownMenuItem onClick={() => window.open(job.url, '_blank')}>
               <ExternalLink className="mr-2 h-4 w-4" />
               Apply on site

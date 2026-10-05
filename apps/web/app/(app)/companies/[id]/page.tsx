@@ -26,7 +26,9 @@ import { DossierPanel } from '@/components/companies/dossier-panel'
 import { refreshCompanyJobs } from '@/components/companies/refresh'
 import { ContactNetworkPanel } from '@/components/contacts/contact-network-panel'
 import { TargetScopeSwitch, type TargetScope } from '@/components/jobs/target-scope-switch'
-import { formatShortDate, knownParts, matchTone, postedThisWeek } from '@/lib/format'
+import { formatShortDate, knownParts, postedThisWeek } from '@/lib/format'
+import { ChanceChip } from '@/components/fit/chance-chip'
+import { parseFit } from '@/lib/scoring/read'
 import { createClient } from '@/lib/supabase/client'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { lastCheckedMs, partialReadNote, rolesStatus, rolesStatusLine } from '@/lib/companies/roles-status'
@@ -59,7 +61,14 @@ interface Job {
   job_type: string | null
   posted_at: string | null
   discovered_at: string
-  match_score: number | null
+  // The verdict on the role (lib/scoring/read.ts FIT_COLUMNS).
+  fit_assessed_at: string | null
+  blocked_reasons: unknown
+  want_p: number | null
+  want_reason: string | null
+  want_detail: unknown
+  chance: string | null
+  chance_detail: unknown
   is_new: boolean
   job_function?: string | null
   seniority?: string | null
@@ -347,7 +356,7 @@ export default function CompanyDetailPage() {
         ) : (
           <Card className="divide-y">
             {shownJobs.map((job) => {
-              const tone = matchTone(job.match_score)
+              const fit = parseFit(job)
               const meta = knownParts(
                 job.location,
                 job.salary_range,
@@ -370,8 +379,10 @@ export default function CompanyDetailPage() {
                       <span className="truncate text-body font-medium text-foreground">
                         {job.title}
                       </span>
-                      {tone !== 'none' && (
-                        <Badge tone={tone}>{job.match_score}%</Badge>
+                      {fit.blocked.length > 0 ? (
+                        <Badge tone="muted">Filtered out</Badge>
+                      ) : (
+                        fit.chance && <ChanceChip fit={fit} />
                       )}
                     </div>
                     <p className="mt-0.5 truncate text-caption text-muted-foreground">

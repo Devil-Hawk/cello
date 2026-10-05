@@ -189,11 +189,11 @@ async function fetchFeed(): Promise<NotificationItem[]> {
     openRolesOnly(
       supabase
         .from('jobs')
-        .select('id, title, match_score, posted_at, discovered_at, companies(name)')
+        .select('id, title, chance, posted_at, discovered_at, companies(name)')
         .eq('is_new', true)
-        .gte('match_score', 70)
+        .in('chance', ['strong', 'possible'])
     )
-      .order('match_score', { ascending: false })
+      .order('want_p', { ascending: false, nullsFirst: false })
       .limit(LIMITS.jobs),
   ])
 
@@ -244,7 +244,7 @@ async function fetchFeed(): Promise<NotificationItem[]> {
   for (const row of (hotJobsRes.data ?? []) as unknown as {
     id: string
     title: string
-    match_score: number | null
+    chance: string | null
     posted_at: string | null
     discovered_at: string
     companies: { name: string | null } | { name: string | null }[] | null
