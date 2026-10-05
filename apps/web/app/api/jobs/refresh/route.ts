@@ -63,6 +63,7 @@ import {
   type RefreshJobsOutcome,
 } from '@/lib/graph/refresh'
 import { logApiError } from '@/lib/observability/log'
+import { trackedOnly } from '@/lib/companies/watchlist'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -109,6 +110,9 @@ export async function POST(request: NextRequest) {
       let query = supabase.from('companies').select('*').eq('user_id', user.id)
       if (companyId) {
         query = query.eq('id', companyId)
+      } else {
+        // Refresh-all covers what the person tracks, not sourcer or old Gmail leads.
+        query = trackedOnly(query)
       }
       const { data: companies, error: companiesError } = await query
 

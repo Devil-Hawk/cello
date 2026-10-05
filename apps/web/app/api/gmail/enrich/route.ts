@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { trackedOnly } from '@/lib/companies/watchlist'
 import { mineRecruiterContacts } from '@/lib/outreach/gmail'
 import { hasGmailPermission } from '@/lib/gmail/permissions'
 
@@ -64,11 +65,9 @@ export async function POST(request: NextRequest) {
     /* no body — mine all tracked companies */
   }
 
-  let companiesQuery = supabase
-    .from('companies')
-    .select('id, name, domain')
-    .eq('user_id', user.id)
-    .not('domain', 'is', null)
+  let companiesQuery = trackedOnly(
+    supabase.from('companies').select('id, name, domain').eq('user_id', user.id).not('domain', 'is', null)
+  )
   if (companyFilter && companyFilter.length > 0) {
     companiesQuery = companiesQuery.in('id', companyFilter)
   }

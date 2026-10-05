@@ -17,6 +17,8 @@ import { workable } from './workable'
 import { recruitee } from './recruitee'
 import { personio } from './personio'
 import { detectAts } from './detect'
+import { healStoredBoard, needsVerification } from './heal'
+import { isStalePosting } from '../jobs/freshness'
 // Relative import (not `@/...`): lib/ats/* stays framework-free, and
 // lib/jobs/classify.ts is itself a zero-dependency pure module, so this is
 // safe in both the Next.js route and the plain-tsx scheduled script.
@@ -150,6 +152,13 @@ export interface AtsStore {
   /** Persist the full companies.metadata object. May throw 42703/PGRST204 when the column is missing — callers swallow it. */
   saveCompanyMetadata(companyId: string, metadata: Record<string, unknown>): Promise<void>
   updateCompanyLastScraped(companyId: string): Promise<void>
+  /**
+   * Remove the roles a provider wrote for a company whose board turned out not
+   * to be theirs: delete the ones nothing points at, keep (and close) the ones
+   * an application or draft references. Throws on failure, and then nothing
+   * has changed.
+   */
+  clearBoardJobs(companyId: string, source: AtsProviderId): Promise<{ deleted: number; closed: number }>
 }
 
 /** Per-company result matching the frozen /api/jobs/refresh contract. */
@@ -167,6 +176,8 @@ export interface CompanyRefreshResult {
   reopened: number
   /** True when another refresh of this company was already running, so this one did nothing. */
   busy?: boolean
+  /** Set when a stored guessed board failed verification and its roles were cleared. */
+  cleared?: { deleted: number; closed: number }
   errors: string[]
 }
 
@@ -176,7 +187,9 @@ function errorMessage(error: unknown): string {
 }
 
 /** Read a valid cached ATS pointer out of companies.metadata, if any. */
-function readCachedAts(metadata: unknown): { provider: AtsProviderId; token: string } | null {
+function readCachedAts(
+  metadata: unknown
+): { provider: AtsProviderId; token: string; source?: string; verifiedBy?: string } | null {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null
   const ats = (metadata as Record<string, unknown>).ats
   if (!ats || typeof ats !== 'object' || Array.isArray(ats)) return null
@@ -187,7 +200,12 @@ function readCachedAts(metadata: unknown): { provider: AtsProviderId; token: str
   // adding a provider cannot silently leave stored pointers unreadable.
   if (typeof provider !== 'string' || !Object.prototype.hasOwnProperty.call(providers, provider)) return null
   if (!isValidToken(token)) return null
-  return { provider: provider as AtsProviderId, token }
+  return {
+    provider: provider as AtsProviderId,
+    token,
+    source: typeof record.source === 'string' ? record.source : undefined,
+    verifiedBy: typeof record.verified_by === 'string' ? record.verified_by : undefined,
+  }
 }
 
 /**
@@ -260,7 +278,10 @@ function sourcesFor(provider: AtsProviderId): string[] {
  * time (the store's lock). Never throws: failures are reported in result.errors.
  */
 export async function refreshCompany(store: AtsStore, company: CompanyInput): Promise<CompanyRefreshResult> {
-  return withCompanyLock(store, company, (result) => refreshLocked(store, company, result))
+  return withCompanyLock(store, company, async (result) => {
+    const board = await refreshLocked(store, company, result)
+    await saveSourceCheck(store, company, board)
+  })
 }
 
 /** A fresh result for `company`, before anything has been read. */
@@ -328,16 +349,56 @@ export async function loadStoredJobs(
   }
 }
 
-export async function refreshLocked(store: AtsStore, company: CompanyInput, result: CompanyRefreshResult): Promise<void> {
+/**
+ * What a board check learned about the company, for the metadata write that
+ * ends a refresh (see saveSourceCheck): the metadata to keep, why no roles
+ * could be read (or undefined), and whether the write must be skipped because
+ * nothing was decided.
+ */
+export interface BoardCheck {
+  meta: Record<string, unknown>
+  unreadable?: string
+  skipSave: boolean
+}
+
+/** Record what the attempt found in metadata.source_check, with any board it discovered: one metadata write per refresh. */
+export async function saveSourceCheck(
+  store: AtsStore,
+  company: CompanyInput,
+  board: BoardCheck,
+  extra?: Record<string, unknown>
+): Promise<void> {
+  if (board.skipSave) return
+  const check: Record<string, unknown> = { checked_at: new Date().toISOString(), readable: !board.unreadable, ...extra }
+  if (board.unreadable) check.reason = board.unreadable
+  board.meta.source_check = check
+  try {
+    await store.saveCompanyMetadata(company.id, board.meta)
+  } catch {
+    /* tolerated: the metadata column may not exist yet; detection simply runs again */
+  }
+}
+
+export async function refreshLocked(store: AtsStore, company: CompanyInput, result: CompanyRefreshResult): Promise<BoardCheck> {
+  const meta: Record<string, unknown> =
+    company.metadata && typeof company.metadata === 'object' && !Array.isArray(company.metadata)
+      ? { ...(company.metadata as Record<string, unknown>) }
+      : {}
+  const board: BoardCheck = { meta, skipSave: false }
+
   // 0. What is stored already. Read first so a provider that needs a second
   //    request per posting (Workday, SmartRecruiters) spends it on the postings
   //    that have no description yet.
   const stored = await loadStoredJobs(store, company.id, result)
-  if (!stored) return
+  if (!stored) {
+    board.skipSave = true
+    return board
+  }
   const ctx: FetchContext = { hasDescription: (id) => stored.get(id)?.descriptionMd5 != null }
 
   // 1. Resolve board + fetch jobs.
   let jobs: AtsJob[] | null = null
+  let cachedFailed = false
   const cached = readCachedAts(company.metadata)
   if (cached) {
     result.provider = cached.provider
@@ -348,6 +409,32 @@ export async function refreshLocked(store: AtsStore, company: CompanyInput, resu
       result.errors.push(`cached ${cached.provider} board "${cached.token}" failed: ${errorMessage(error)}`)
       result.provider = null
       jobs = null
+      cachedFailed = true
+    }
+  }
+
+  // A board stored by an old guess is verified now. A pass records how; a fail
+  // clears the mapping and its roles, then detection runs as for a new company.
+  if (cached && jobs !== null && needsVerification(cached)) {
+    try {
+      const healed = await healStoredBoard(store, company, cached, jobs)
+      if (healed.kept) {
+        const ats = meta.ats as Record<string, unknown>
+        meta.ats = { ...ats, verified_by: healed.verifiedBy, verified_at: new Date().toISOString() }
+      } else {
+        result.cleared = healed.cleared
+        delete meta.ats
+        result.provider = null
+        jobs = null
+        // The rows the board wrote are gone, so what is stored is stale.
+        stored.clear()
+      }
+    } catch (error) {
+      // Nothing was decided (the clear failed or could not run): change nothing, retry next refresh.
+      result.errors.push(`board verification failed: ${errorMessage(error)}`)
+      result.provider = null
+      board.skipSave = true
+      return board
     }
   }
 
@@ -362,36 +449,32 @@ export async function refreshLocked(store: AtsStore, company: CompanyInput, resu
     } catch (error) {
       // detectAts never throws by contract, but stay defensive.
       result.errors.push(`detection failed: ${errorMessage(error)}`)
-      return
+      board.unreadable = 'no_supported_board'
+      return board
     }
     if (!detected) {
-      // provider stays null, so callers fall back to the page reader.
-      return
+      // provider stays null, so callers fall back to reading the site.
+      board.unreadable = cachedFailed ? 'board_unreachable' : company.career_url?.trim() ? 'no_supported_board' : 'no_careers_url'
+      return board
     }
     result.provider = detected.provider
     try {
       jobs = detected.jobs ?? (await providers[detected.provider].fetch(detected.token, ctx))
     } catch (error) {
       result.errors.push(`${detected.provider} fetch failed: ${errorMessage(error)}`)
-      return
+      board.unreadable = 'board_unreachable'
+      return board
     }
-    // Persist the discovery so future runs skip probing. Best-effort: the
-    // metadata column may not exist yet (42703/PGRST204) — fall back silently.
-    const baseMetadata =
-      company.metadata && typeof company.metadata === 'object' && !Array.isArray(company.metadata)
-        ? (company.metadata as Record<string, unknown>)
-        : {}
+    // Persist the discovery (with how it was verified) so future runs skip probing.
     const ats: AtsMetadata = {
       provider: detected.provider,
       token: detected.token,
       source: detected.source,
       discovered_at: new Date().toISOString(),
+      verified_by: detected.verifiedBy,
+      verified_at: new Date().toISOString(),
     }
-    try {
-      await store.saveCompanyMetadata(company.id, { ...baseMetadata, ats })
-    } catch {
-      /* tolerated — URL/probe detection will simply run again next time */
-    }
+    meta.ats = ats
   }
 
   // Every path that reaches here set result.provider (cached or detected)
@@ -405,6 +488,7 @@ export async function refreshLocked(store: AtsStore, company: CompanyInput, resu
     cap: providers[provider].maxJobs,
     stored,
   }, result)
+  return board
 }
 
 export interface SyncOptions {
@@ -433,7 +517,8 @@ export async function syncJobs(
 ): Promise<void> {
   const { stored } = opts
   // Dedup intra-run and count.
-  const clean = sanitizeJobs(listed)
+  // A posting dated more than ROLE_MAX_AGE_DAYS ago is not an open role.
+  const clean = sanitizeJobs(listed).filter((job) => !isStalePosting(job.postedAt))
   result.found = clean.length
   if (clean.length === 0) {
     // Nothing listed is not evidence that anything closed: an empty answer looks

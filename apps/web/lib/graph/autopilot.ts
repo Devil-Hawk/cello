@@ -141,6 +141,7 @@ import { entrypoint, task } from '@langchain/langgraph'
 import type { BaseCheckpointSaver, LangGraphRunnableConfig } from '@langchain/langgraph'
 
 import { refreshCompany, makeSupabaseAtsStore, mapWithConcurrency, type CompanyInput } from '../ats'
+import { trackedOnly } from '../companies/watchlist'
 import { resolveTargeting, type Targeting } from '../targeting'
 import { loadApiKeys } from '../harness/keys'
 import { callLlm } from '../harness/llm'
@@ -863,11 +864,9 @@ interface CandidateJob {
 }
 
 async function loadCompanies(admin: AdminClient, userId: string): Promise<CompanyInput[]> {
-  const { data } = await admin
-    .from('companies')
-    .select('id, name, domain, career_url, metadata, is_dream_company')
-    .eq('user_id', userId)
-    .order('is_dream_company', { ascending: false })
+  const { data } = await trackedOnly(
+    admin.from('companies').select('id, name, domain, career_url, metadata, is_dream_company').eq('user_id', userId)
+  ).order('is_dream_company', { ascending: false })
   return ((data ?? []) as Record<string, unknown>[]).map((c) => ({
     id: c.id as string,
     name: (c.name as string) ?? '',

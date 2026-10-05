@@ -1,5 +1,6 @@
 'use client'
 
+import { trackedOnly } from '@/lib/companies/watchlist'
 import { LogoMark } from '@/components/brand/logo'
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
@@ -196,18 +197,22 @@ export default function DashboardPage() {
         gmailStatus,
         safePreferences,
       ] = await Promise.all([
-        supabase.from('companies').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
-        supabase
-          .from('companies')
-          .select('id, name, logo_url, domain, career_url, created_at')
-          .eq('user_id', user.id)
+        trackedOnly(supabase.from('companies').select('*', { count: 'exact', head: true }).eq('user_id', user.id)),
+        trackedOnly(
+          supabase
+            .from('companies')
+            .select('id, name, logo_url, domain, career_url, created_at')
+            .eq('user_id', user.id)
+        )
           .order('created_at', { ascending: false })
           .limit(5),
-        supabase
-          .from('companies')
-          .select('last_scraped_at')
-          .eq('user_id', user.id)
-          .not('last_scraped_at', 'is', null)
+        trackedOnly(
+          supabase
+            .from('companies')
+            .select('last_scraped_at')
+            .eq('user_id', user.id)
+            .not('last_scraped_at', 'is', null)
+        )
           .order('last_scraped_at', { ascending: false })
           .limit(1),
         // RLS restricts jobs to rows whose company belongs to this user — no

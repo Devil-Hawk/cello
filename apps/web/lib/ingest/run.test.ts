@@ -65,6 +65,9 @@ function memoryStore(opts: { lock?: 'ok' | 'busy'; existing?: ExistingJob[] } = 
     async releaseCompanyLock(id) {
       calls.locks.push(`release:${id}`)
     },
+    async clearBoardJobs() {
+      return { deleted: 0, closed: 0 }
+    },
     async saveCompanyMetadata() {},
     async updateCompanyLastScraped(id) {
       calls.stamped.push(id)

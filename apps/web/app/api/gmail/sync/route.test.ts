@@ -42,7 +42,7 @@ function makeSupabase() {
         }
       }
       if (table === 'companies') {
-        return { select: () => ({ eq: async () => ({ data: [] }) }) }
+        return { select: () => ({ eq: () => ({ or: async () => ({ data: [] }) }) }) }
       }
       throw new Error(`unexpected table in test: ${table}`)
     },

@@ -12,6 +12,7 @@ import { classifyJob } from '../jobs/classify'
 import { repairMojibake } from '../jobs/mojibake'
 import { parseRequirements } from '../jobs/requirements'
 import { mapWithConcurrency } from '../ats/concurrency'
+import { isStalePosting } from '../jobs/freshness'
 import type { JobLead, SourceAdapter, SourceId, SourceQuery } from './types'
 import { rankAndLimit, sanitizeLeads } from './util'
 import { ownedJobsQuery } from '../harness/agents/matcher'
@@ -316,6 +317,7 @@ export async function ingestLeads(
     }
     if (seenKeys.has(lead.externalId)) continue
     seenKeys.add(lead.externalId)
+    if (isStalePosting(lead.postedAt)) continue // a role, not a lead: too old to store
     const c = classifyJob({
       title: lead.title,
       description: lead.description,

@@ -8,6 +8,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { mapWithConcurrency } from './concurrency'
+import { clearBoardJobsRpc } from './heal'
 import type { AtsStore, ExistingJob, JobUpdate, SightingResult } from './index'
 
 // The generated Database type does not cover the columns added by the ingestion
@@ -131,6 +132,11 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
       // Throw so refreshCompany's tolerant catch handles a missing column
       // (42703 / PGRST204) the same as any other metadata write failure.
       fail(error)
+    },
+
+    async clearBoardJobs(companyId, source) {
+      if (dry) return { deleted: 0, closed: 0 }
+      return clearBoardJobsRpc(client, companyId, source)
     },
 
     async updateCompanyLastScraped(companyId: string): Promise<void> {

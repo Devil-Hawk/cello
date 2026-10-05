@@ -1,5 +1,12 @@
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('../security/untrusted', async (orig) => ({
+  ...(await orig<typeof import('../security/untrusted')>()),
+  assertSsrfSafe: async () => {},
+}))
 import {
   providers,
   refreshCompany,
@@ -30,6 +37,8 @@ function makeStore(existing: ExistingJob[] = [], opts: { sightings?: boolean; lo
   const updated: JobUpdate[] = []
   const sightings: { companyId: string; ids: string[]; sources: string[] }[] = []
   const locks: string[] = []
+  const saved: Record<string, unknown>[] = []
+  const cleared: Array<[string, string]> = []
   const store: AtsStore = {
     async listJobs() {
       return existing
@@ -60,10 +69,16 @@ function makeStore(existing: ExistingJob[] = [], opts: { sightings?: boolean; lo
           },
         }
       : {}),
-    async saveCompanyMetadata() {},
+    async saveCompanyMetadata(_id, metadata) {
+      saved.push(metadata)
+    },
     async updateCompanyLastScraped() {},
+    async clearBoardJobs(companyId, source) {
+      cleared.push([companyId, source])
+      return { deleted: 2, closed: 1 }
+    },
   }
-  return { store, upserted, updated, sightings, locks }
+  return { store, upserted, updated, sightings, locks, saved, cleared }
 }
 
 function stored(externalId: string, over: Partial<ExistingJob> = {}): ExistingJob {
@@ -309,5 +324,112 @@ describe('refreshCompany: one refresh of a company at a time', () => {
     const { store, locks } = makeStore([], { lock: true })
     await refreshCompany(store, COMPANY)
     expect(locks).toEqual(['acquire:company-1', 'release:company-1'])
+  })
+})
+const DAY = 86_400_000
+const ago = (days: number) => new Date(Date.now() - days * DAY).toISOString()
+
+describe('refreshCompany: postings older than 180 days are not stored', () => {
+  it('stores and counts only the recent posting', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      jsonResponse({
+        jobs: [
+          { ...CLEAN_JOB, absolute_url: 'https://acme.com/jobs/old', first_published: ago(200) },
+          { ...CLEAN_JOB, absolute_url: 'https://acme.com/jobs/new', first_published: ago(10) },
+        ],
+      })
+    ) as unknown as typeof fetch
+    const { store, upserted } = makeStore()
+
+    const result = await refreshCompany(store, COMPANY)
+
+    expect(result.found).toBe(1)
+    expect(upserted.map((r) => r.external_id)).toEqual(['https://acme.com/jobs/new'])
+  })
+})
+
+describe('refreshCompany: a stored guessed board is re-verified', () => {
+  const PERSONIO_AMAZON = readFileSync(path.join(__dirname, '__fixtures__/personio-amazon.xml'), 'utf8')
+  const AMAZON: CompanyInput = {
+    id: 'amazon-1',
+    name: 'Amazon',
+    domain: 'amazon.jobs',
+    career_url: 'https://www.amazon.jobs/en/search',
+    metadata: { ats: { provider: 'personio', token: 'amazon', source: 'probe' } },
+  }
+  const personioOnly = () =>
+    vi.fn(async (url: unknown) =>
+      String(url).includes('amazon.jobs.personio.de')
+        ? new Response(PERSONIO_AMAZON, { status: 200 })
+        : new Response('nf', { status: 404 })
+    ) as unknown as typeof fetch
+
+  it('clears the mapping and the roles that came from it, and stores nothing', async () => {
+    globalThis.fetch = personioOnly()
+    const { store, upserted, saved, cleared } = makeStore()
+
+    const result = await refreshCompany(store, AMAZON)
+
+    expect(cleared).toEqual([['amazon-1', 'personio']])
+    expect(result.cleared).toEqual({ deleted: 2, closed: 1 })
+    expect(upserted).toEqual([])
+    expect(result.provider).toBeNull()
+    expect(saved).toHaveLength(1)
+    expect(saved[0]).not.toHaveProperty('ats')
+    expect(saved[0].source_check).toMatchObject({ readable: false, reason: 'no_supported_board' })
+  })
+
+  it('changes nothing when the clear fails, and reports it', async () => {
+    globalThis.fetch = personioOnly()
+    const { store, saved } = makeStore()
+    store.clearBoardJobs = async () => {
+      throw new Error('function does not exist')
+    }
+
+    const result = await refreshCompany(store, AMAZON)
+
+    expect(saved).toEqual([])
+    expect(result.errors.join(' ')).toContain('function does not exist')
+  })
+
+  it('keeps a stored board that verifies and records how', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      jsonResponse({ jobs: [{ ...CLEAN_JOB, absolute_url: 'https://acme.com/jobs/9', first_published: ago(5) }] })
+    ) as unknown as typeof fetch
+    const { store, upserted, saved, cleared } = makeStore()
+
+    await refreshCompany(store, {
+      ...COMPANY,
+      metadata: { ats: { provider: 'greenhouse', token: 'acme', source: 'probe' } },
+    })
+
+    expect(cleared).toEqual([])
+    expect(upserted).toHaveLength(1)
+    expect(saved[0].ats).toMatchObject({ provider: 'greenhouse', token: 'acme', verified_by: 'board_links_home' })
+    expect(saved[0].source_check).toMatchObject({ readable: true })
+  })
+
+  it('does not verify a board read off the careers URL', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ jobs: [{ ...CLEAN_JOB, first_published: ago(5) }] })
+    )
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const { store, cleared } = makeStore()
+
+    await refreshCompany(store, { ...COMPANY, metadata: { ats: { provider: 'greenhouse', token: 'acme', source: 'url' } } })
+
+    expect(cleared).toEqual([])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('refreshCompany: what a check records', () => {
+  it('says no careers page when there is nothing to read', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('nf', { status: 404 })) as unknown as typeof fetch
+    const { store, saved } = makeStore()
+
+    await refreshCompany(store, { id: 'x', name: 'Tiny Co', domain: null, career_url: null, metadata: null })
+
+    expect(saved[0].source_check).toMatchObject({ readable: false, reason: 'no_careers_url' })
   })
 })

@@ -38,6 +38,9 @@ vi.mock('@/lib/ats/store', () => ({
       return state.lock
     },
     async releaseCompanyLock() {},
+    async clearBoardJobs() {
+      return { deleted: 0, closed: 0 }
+    },
     async saveCompanyMetadata() {},
     async updateCompanyLastScraped() {},
   }),

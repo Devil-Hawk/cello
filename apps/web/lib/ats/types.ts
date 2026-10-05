@@ -1,7 +1,9 @@
 // ATS provider contract shared by the Next.js refresh route and the
 // scheduled CI script. This module (and everything under lib/ats/) is
 // framework-free: no next/* imports, no path aliases, no Node-only APIs
-// beyond global fetch/URL.
+// beyond global fetch/URL. The one exception is careers-page.ts, which reads a
+// company's own site and so uses node:dns for its SSRF check; no client
+// component imports lib/ats.
 
 export type AtsProviderId =
   | 'greenhouse'
@@ -68,8 +70,11 @@ export interface AtsProvider {
 export interface AtsMetadata {
   provider: AtsProviderId
   token: string
-  source: 'url' | 'probe' | 'manual'
+  source: 'url' | 'probe' | 'manual' | 'known'
   discovered_at: string
+  /** How a guessed board was tied to the company (see ./verify.ts). Absent on boards stored before verification existed. */
+  verified_by?: 'careers_url' | 'manual' | 'known_board' | 'careers_page_link' | 'board_links_home' | 'provider_name'
+  verified_at?: string
 }
 
 /** Board tokens/slugs must match this before being interpolated into URLs. */

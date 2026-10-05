@@ -42,6 +42,8 @@ function makeSupabase() {
           filters.push({ col, val })
           return builder
         },
+        // trackedOnly's null-safe filter: the fixtures here have no suggested rows.
+        or: () => builder,
         then(resolve: (v: { data: unknown; error: unknown }) => unknown) {
           if (companiesError) return resolve({ data: null, error: { message: companiesError } })
           const rows = companyRows.filter((r) =>
