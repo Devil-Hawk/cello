@@ -28,7 +28,7 @@ interface VerificationResult {
   aiVerified: boolean
 }
 
-type ResolveSource = 'known' | 'greenhouse' | 'lever' | 'ashby' | 'ai'
+type ResolveSource = 'known' | 'possible' | 'ai'
 
 interface ResolveCandidate {
   name: string
@@ -37,6 +37,7 @@ interface ResolveCandidate {
   source: ResolveSource
   confidence: 'high' | 'medium' | 'low'
   logoUrl?: string
+  note?: string
 }
 
 interface ResolveResponse {
@@ -46,9 +47,7 @@ interface ResolveResponse {
 
 const SOURCE_LABEL: Record<ResolveSource, string> = {
   known: 'Known company',
-  greenhouse: 'Greenhouse board found',
-  lever: 'Lever board found',
-  ashby: 'Ashby board found',
+  possible: 'Possible match',
   ai: 'AI suggested · verified',
 }
 
@@ -316,6 +315,7 @@ export function AddCompanyDialog({ open, onOpenChange, onAdded }: AddCompanyDial
                             </div>
                             <p className="mt-0.5 truncate text-caption text-muted-foreground">
                               {candidate.careerUrl ??
+                                candidate.note ??
                                 (candidate.domain
                                   ? `${candidate.domain} · no verified career page yet`
                                   : 'No verified career page yet — you can still add it')}

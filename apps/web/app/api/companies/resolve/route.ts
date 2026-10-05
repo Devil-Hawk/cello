@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { loadApiKeys } from '@/lib/harness/keys'
 import { callLlm, parseJsonLoose, MissingKeyError } from '@/lib/harness/llm'
 import type { DecryptedApiKeys } from '@/lib/harness/types'
-import { fetchJson, assertAllowedHost } from '@/lib/ats/http'
+import { IDENTIFY } from '@/lib/ats/verify'
 import { isValidToken } from '@/lib/ats/types'
 import {
   lookupKnownCompanyByName,
@@ -18,10 +18,12 @@ import {
 //
 // Strategy, cheapest first:
 //   a. KNOWN_COMPANIES reverse lookup       — free, no network.
-//   b. Probe Greenhouse/Lever/Ashby boards  — network, ~5s timeout each, all
-//      candidate slugs × providers run in parallel. A 200 with a plausible
-//      payload is a real, verified career board.
-//   c. LLM fallback                         — ONLY when a+b found nothing AND
+//   b. Look for Greenhouse/Lever/Ashby boards under the name — network, all
+//      slugs × providers in parallel, each described by the employer name and
+//      site the provider declares. These are only POSSIBLE matches (a slug that
+//      exists says nothing about who owns it); the person picks, and the
+//      refresh verifies a board against the company's domain.
+//   c. LLM fallback                         — ONLY when a found nothing AND
 //      the user has an OpenRouter key configured. Skipped silently otherwise
 //      (never fails the request over a missing key). Its answer is validated
 //      by actually fetching the suggested careerUrl before being trusted.
@@ -36,7 +38,7 @@ import {
 export const dynamic = 'force-dynamic'
 
 type Confidence = 'high' | 'medium' | 'low'
-type Source = 'known' | 'greenhouse' | 'lever' | 'ashby' | 'ai'
+type Source = 'known' | 'possible' | 'ai'
 
 export interface ResolveCandidate {
   name: string
@@ -45,16 +47,14 @@ export interface ResolveCandidate {
   source: Source
   confidence: Confidence
   logoUrl?: string
+  /** For a 'possible' match: what the board says it is. */
+  note?: string
 }
 
 const PROBE_TIMEOUT_MS = 5000
 const MAX_CANDIDATES = 5
 const MAX_SLUGS = 4
 const MAX_NAME_LENGTH = 200
-
-const GREENHOUSE_HOSTS = new Set(['boards-api.greenhouse.io'])
-const LEVER_HOSTS = new Set(['api.lever.co'])
-const ASHBY_HOSTS = new Set(['api.ashbyhq.com'])
 
 const CONFIDENCE_RANK: Record<Confidence, number> = { high: 3, medium: 2, low: 1 }
 
@@ -82,76 +82,64 @@ function slugCandidates(name: string, domain?: string | null): string[] {
   return out.slice(0, MAX_SLUGS)
 }
 
-interface ProbeHit {
-  source: 'greenhouse' | 'lever' | 'ashby'
-  slug: string
-  careerUrl: string
-}
-
-/** Cheap existence probes — lighter payloads than the full refresh fetch in lib/ats/*. */
-async function probeGreenhouse(slug: string): Promise<boolean> {
-  try {
-    const url = `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs?content=false`
-    assertAllowedHost(url, GREENHOUSE_HOSTS)
-    const json = await fetchJson<{ jobs?: unknown }>(url, { timeoutMs: PROBE_TIMEOUT_MS })
-    return Array.isArray(json?.jobs)
-  } catch {
-    return false
-  }
-}
-
-async function probeLever(slug: string): Promise<boolean> {
-  try {
-    const url = `https://api.lever.co/v0/postings/${slug}?mode=json&limit=1`
-    assertAllowedHost(url, LEVER_HOSTS)
-    const json = await fetchJson<unknown>(url, { timeoutMs: PROBE_TIMEOUT_MS })
-    return Array.isArray(json)
-  } catch {
-    return false
-  }
-}
-
-async function probeAshby(slug: string): Promise<boolean> {
-  try {
-    const url = `https://api.ashbyhq.com/posting-api/job-board/${slug}`
-    assertAllowedHost(url, ASHBY_HOSTS)
-    const json = await fetchJson<{ jobs?: unknown }>(url, { timeoutMs: PROBE_TIMEOUT_MS })
-    return Array.isArray(json?.jobs)
-  } catch {
-    return false
-  }
-}
-
-/** Probe every provider × slug combination in parallel. Never throws. */
-async function probeAllAts(name: string, domain?: string | null): Promise<ProbeHit[]> {
-  const slugs = slugCandidates(name, domain)
-  if (slugs.length === 0) return []
-
-  const tasks: Promise<ProbeHit | null>[] = []
+/**
+ * Boards that exist under this name on Greenhouse, Lever or Ashby, described by
+ * what the PROVIDER says they are: the employer name and the site it declares.
+ * A slug that exists proves nothing about who owns it ("atlas" on Ashby is an
+ * Atlas Card board), so a hit is only ever a possible match for the person to
+ * judge, never a career page: no careerUrl is offered for it, and when the
+ * company is added the refresh verifies a board against its domain (lib/ats).
+ */
+async function findPossibleBoards(name: string): Promise<ResolveCandidate[]> {
+  const slugs = slugCandidates(name, null)
+  const providers = ['greenhouse', 'lever', 'ashby'] as const
+  const tasks: Promise<ResolveCandidate | null>[] = []
   for (const slug of slugs) {
-    tasks.push(
-      probeGreenhouse(slug).then((ok) =>
-        ok ? { source: 'greenhouse' as const, slug, careerUrl: `https://boards.greenhouse.io/${slug}` } : null
+    for (const provider of providers) {
+      tasks.push(
+        (async () => {
+          try {
+            const identity = await IDENTIFY[provider]!(slug)
+            const site = identity.homeUrls.map(siteHost).find((h): h is string => !!h)
+            if (!identity.name && !site) return null
+            const label = provider[0].toUpperCase() + provider.slice(1)
+            return {
+              name: identity.name ?? name,
+              domain: site ?? null,
+              careerUrl: null,
+              source: 'possible' as const,
+              confidence: 'low' as const,
+              note: `${label} board named \u201c${identity.name ?? slug}\u201d${site ? ` \u00b7 ${site}` : ''}`,
+              logoUrl: site ? faviconForDomain(site) : undefined,
+            }
+          } catch {
+            return null
+          }
+        })()
       )
-    )
-    tasks.push(
-      probeLever(slug).then((ok) =>
-        ok ? { source: 'lever' as const, slug, careerUrl: `https://jobs.lever.co/${slug}` } : null
-      )
-    )
-    tasks.push(
-      probeAshby(slug).then((ok) =>
-        ok ? { source: 'ashby' as const, slug, careerUrl: `https://jobs.ashbyhq.com/${slug}` } : null
-      )
-    )
+    }
   }
+  const out: ResolveCandidate[] = []
+  const seen = new Set<string>()
+  for (const r of await Promise.allSettled(tasks)) {
+    if (r.status !== 'fulfilled' || !r.value) continue
+    const key = `${r.value.name.toLowerCase()}|${r.value.domain ?? ''}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      out.push(r.value)
+    }
+  }
+  return out
+}
 
-  const settled = await Promise.allSettled(tasks)
-  const hits: ProbeHit[] = []
-  for (const r of settled) {
-    if (r.status === 'fulfilled' && r.value) hits.push(r.value)
+/** The host of a site a board declares, unless it is the provider's own. */
+function siteHost(url: string): string | null {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '').toLowerCase()
+    return /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|recruitee\.com)$/.test(host) ? null : host
+  } catch {
+    return null
   }
-  return hits
 }
 
 /** true when the URL has no meaningful path — the "epias GmbH homepage" failure mode. */
@@ -291,27 +279,20 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // b. ATS probes — network, parallel, ~5s timeout each. Never throws.
-    let atsHits: ProbeHit[] = []
-    try {
-      atsHits = await probeAllAts(name, known?.domain ?? null)
-    } catch {
-      atsHits = []
-    }
-    for (const hit of atsHits) {
-      candidates.push({
-        name: known?.name ?? name,
-        domain: known?.domain ?? null,
-        careerUrl: hit.careerUrl,
-        source: hit.source,
-        confidence: 'high',
-        logoUrl: known ? faviconForDomain(known.domain) : undefined,
-      })
+    // b. Boards that exist under this name, described by what the provider says
+    // they are. Skipped for a known company: its own board is found (and
+    // verified) by the refresh, and a namesake's must not be offered.
+    if (!known) {
+      try {
+        candidates.push(...(await findPossibleBoards(name)))
+      } catch {
+        /* none */
+      }
     }
 
     // c. LLM fallback — only when a+b found nothing, and only when the user
     // has a key. Missing key => skip silently, never fail the request.
-    if (candidates.length === 0) {
+    if (!candidates.some((c) => c.source === 'known')) {
       try {
         const apiKeys = await loadApiKeys(supabase, user.id)
         if (apiKeys.openrouter) {
