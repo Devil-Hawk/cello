@@ -58,7 +58,8 @@ export interface AddCompanyDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Called after a company was successfully inserted. */
-  onAdded: () => void
+  /** Called with the new company's id so the caller can check its roles at once. */
+  onAdded: (companyId?: string) => void
 }
 
 export function AddCompanyDialog({ open, onOpenChange, onAdded }: AddCompanyDialogProps) {
@@ -193,23 +194,27 @@ export function AddCompanyDialog({ open, onOpenChange, onAdded }: AddCompanyDial
       return
     }
 
-    const { error } = await supabase.from('companies').insert({
-      user_id: user.id,
-      name: ready.name,
-      domain: ready.domain,
-      logo_url: ready.logoUrl,
-      // companies.career_url is NOT NULL — '' is the established "no career page
-      // yet" sentinel (see getCompanyDomain/isBareHomepage). A tracked company
-      // with no board is legitimate; a bare homepage URL is not (that's what
-      // fed the garbage HTML-scraper fallback), so we never write one here.
-      career_url: ready.careerUrl ?? '',
-      is_dream_company: isDreamCompany,
-    })
+    const { data: added, error } = await supabase
+      .from('companies')
+      .insert({
+        user_id: user.id,
+        name: ready.name,
+        domain: ready.domain,
+        logo_url: ready.logoUrl,
+        // companies.career_url is NOT NULL — '' is the established "no career page
+        // yet" sentinel (see getCompanyDomain/isBareHomepage). A tracked company
+        // with no board is legitimate; a bare homepage URL is not (that's what
+        // fed the garbage HTML-scraper fallback), so we never write one here.
+        career_url: ready.careerUrl ?? '',
+        is_dream_company: isDreamCompany,
+      })
+      .select('id')
+      .single()
 
     if (!error) {
       reset()
       onOpenChange(false)
-      onAdded()
+      onAdded(added?.id)
     }
 
     setIsSaving(false)
