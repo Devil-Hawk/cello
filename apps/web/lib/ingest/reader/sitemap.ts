@@ -18,7 +18,7 @@ import { detectFromUrl } from '../../ats/detect'
 import type { BoardRef } from '../../ats/verify'
 import { jobFromDetail, readDetail } from './detail'
 import { classifyLink } from './discover'
-import { ReaderError, type SiteFetcher } from './site-fetch'
+import { allowedOnly, ReaderError, type SiteFetcher } from './site-fetch'
 import { matchesTargets, wordsOf, type ReaderTargets } from './targets'
 
 export interface SitemapEntry {
@@ -127,6 +127,10 @@ export interface SitemapRead {
   checked: string[]
   /** Posting URLs the sitemap named. */
   listed: number
+  /** Roles confirmed on their own pages this time, plus listed ones already stored: what the person can actually be shown. Zero means the roles could not be read. */
+  confirmed: number
+  /** The sitemap's addresses carry no words (only ids), so the roles' titles are known only once their pages are read. */
+  untitled: boolean
   /** An applicant system a role page links to: the caller may upgrade the read to it. */
   board?: BoardRef
 }
@@ -134,12 +138,15 @@ export interface SitemapRead {
 export async function readSitemapRoles(
   origin: string,
   f: SiteFetcher,
-  opts: { targets: ReaderTargets; skip: ReadonlySet<string>; max?: number; ownSite?: (url: string) => boolean }
+  opts: { targets: ReaderTargets; skip: ReadonlySet<string>; stored?: ReadonlySet<string>; max?: number; ownSite?: (url: string) => boolean }
 ): Promise<SitemapRead> {
   const all = await readSitemapEntries(origin, f)
   // Only the employer's own pages are fetched: a sitemap may name addresses anywhere.
-  const entries = opts.ownSite ? all.entries.filter((e) => opts.ownSite!(e.url)) : all.entries
-  const complete = all.complete
+  const own = opts.ownSite ? all.entries.filter((e) => opts.ownSite!(e.url)) : all.entries
+  // One address robots.txt disallows is dropped; the site is "robots" only when it disallows every role page it lists.
+  const entries = await allowedOnly(f, own, (e) => e.url)
+  if (own.length > 0 && entries.length === 0) throw new ReaderError('robots')
+  const complete = all.complete && entries.length === own.length
   const listedIds = entries.map((e) => normalizeJobUrl(e.url))
   const todo = orderEntries(entries, opts.targets)
     .filter((e) => !opts.skip.has(normalizeJobUrl(e.url)))
@@ -165,15 +172,19 @@ export async function readSitemapRoles(
       checked.push(id)
       // A page that names no role is remembered as read and not kept. A role outside the person's targets is kept
       // (it cost a request already, and "All roles" shows it); the cap stores the ones inside the targets first.
-      if (job) jobs.push(job)
+      // The listed address is the role's id, so a page that redirects (http to https, a locale, a canonical slug) is still the listed role.
+      if (job) jobs.push({ ...job, externalId: id })
       board ??= findBoardLinks(res.text, (u) => detectFromUrl({ careerUrl: u, domain: null }))[0]
     } catch (error) {
-      if (error instanceof ReaderError) stopped = error
+      // A role page that robots.txt disallows (through a redirect) is skipped, not a verdict on the site.
+      if (error instanceof ReaderError && error.reason !== 'robots') stopped = error
     }
   })
-  // A bot check or a robots rule on a role page ends the read; a spent budget just ends it early.
+  // A bot check on a role page ends the read; a spent budget just ends it early.
   if (stopped && (stopped as ReaderError).reason !== 'budget' && jobs.length === 0) throw stopped
-  return { jobs, listedIds, complete, checked, listed: entries.length, board }
+  const confirmed = jobs.length + (opts.stored ? listedIds.filter((id) => opts.stored!.has(id)).length : 0)
+  const untitled = entries.length > 0 && entries.every((e) => !slugWords(e.url))
+  return { jobs, listedIds, complete, checked, listed: entries.length, confirmed, untitled, board }
 }
 
 const DAY = 86_400_000

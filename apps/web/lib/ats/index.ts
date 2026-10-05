@@ -128,6 +128,9 @@ export interface ExistingJob {
   source?: string | null
   /** False once the row is closed (jobs.still_open). */
   open?: boolean
+  /** The role's address and when a read last listed it: what a re-check of a role that left a site needs. */
+  url?: string | null
+  lastSeenAt?: string | null
   /** What the person's targets are judged on, so a full company can tell which stored role to give up (never the description). */
   jobFunction?: string | null
   seniority?: string | null

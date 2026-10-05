@@ -47,7 +47,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
       for (let from = 0; ; from += PAGE_SIZE) {
         const { data, error } = await client
           .from('jobs')
-          .select('external_id, title, location, salary_range, description_md5, source, still_open, job_function, seniority, country, language, is_remote, posted_at')
+          .select('external_id, title, location, salary_range, description_md5, source, still_open, url, last_seen_at, job_function, seniority, country, language, is_remote, posted_at')
           .eq('company_id', companyId)
           .order('external_id')
           .range(from, from + PAGE_SIZE - 1)
@@ -60,6 +60,8 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
           description_md5: string | null
           source: string | null
           still_open: boolean | null
+          url: string | null
+          last_seen_at: string | null
           job_function: string | null
           seniority: string | null
           country: string | null
@@ -76,6 +78,8 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
             descriptionMd5: !row.description_md5 || row.description_md5 === EMPTY_MD5 ? null : row.description_md5,
             source: row.source,
             open: row.still_open !== false,
+            url: row.url,
+            lastSeenAt: row.last_seen_at,
             jobFunction: row.job_function,
             seniority: row.seniority,
             country: row.country,

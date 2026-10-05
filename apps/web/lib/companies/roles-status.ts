@@ -32,6 +32,9 @@ export const REASON_COPY: Record<string, string> = {
   robots: 'its robots.txt asks automated readers to stay away from its careers pages',
   no_roles: 'no open roles were found on it',
   unreachable: 'it did not answer',
+  read_failed: 'reading it failed with an error, and the next check tries again',
+  role_pages: 'it lists roles, but their pages cannot be read without a browser',
+  render_failed: "Cello's browser could not read it just now, and the next check tries again",
 }
 
 /** The check recorded while only a browser could read the site: the scheduled pass is next. */

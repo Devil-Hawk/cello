@@ -87,7 +87,8 @@ describe('readSite: each of the big employers resolves to its tier, with no mode
 
   it('Google: a server-rendered search, one page only', async () => {
     const q = 'https://www.google.com/about/careers/applications/jobs/results?q=data%20engineer&location=United%20States'
-    const f = fakeFetcher({ 'https://www.google.com/robots.txt': fixture('google-robots.txt'), [q]: fixture('google-search.html') })
+    const first = 'https://www.google.com/about/careers/applications/jobs/results/120374375760175814-senior-data-engineer-gtech-users-and-products?q=data+engineer&location=United+States'
+    const f = fakeFetcher({ 'https://www.google.com/robots.txt': fixture('google-robots.txt'), [q]: fixture('google-search.html'), [first]: fixture('google-detail.html') })
     const read = await readSite(
       { company: { name: 'Google', domain: 'google.com', careerUrl: 'https://www.google.com/about/careers/applications/jobs/results/' }, targets: { ...targets, titles: ['data engineer'] } },
       { fetcher: f }

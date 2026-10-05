@@ -17,7 +17,7 @@ import type { BoardRef } from '../../ats/verify'
 import { mapWithConcurrency } from '../../ats/concurrency'
 import { normalizeJobUrl } from '../snapshot'
 import { jobFromDetail, readDetail } from './detail'
-import { ReaderError, type SiteFetcher } from './site-fetch'
+import { allowedOnly, ReaderError, type SiteFetcher } from './site-fetch'
 import { matchesTargets, searchTerms, type ReaderTargets } from './targets'
 
 export interface RoleLink {
@@ -118,13 +118,23 @@ function titlesOf(a: cheerio.Cheerio<any>, idInUrl: string): string[] {
 const bestTitle = (titles: string[]): string => titles.find((t) => t.split(/\s+/).length >= 2) ?? titles[0] ?? ''
 
 /** The date in the card around a link: the nearest ancestor that holds a date and no other role's link. */
-function cardDate(a: cheerio.Cheerio<any>, template: string): string | undefined {
+function cardDate(a: cheerio.Cheerio<any>, template: string, base: string): string | undefined {
   let el = a.parent()
   for (let depth = 0; depth < 6 && el.length; depth++, el = el.parent()) {
     const others = new Set<string>()
     el.find('a[href]').each((_, x) => {
-      const href = (x as any).attribs?.href ?? ''
-      if (templateOf(href.split(/[?#]/)[0], href.includes('?') ? '?' + href.split('?')[1].split('#')[0] : '') === template) others.add(href.split('#')[0])
+      // A card may hold links that are not pages (javascript:, tel:, mailto:, a malformed address): they are not other roles.
+      let to: URL
+      try {
+        to = new URL((x as any).attribs?.href ?? '', base)
+      } catch {
+        return
+      }
+      if (to.protocol !== 'https:' && to.protocol !== 'http:') return
+      if (templateOf(to.pathname, to.search) === template) {
+        to.hash = ''
+        others.add(to.toString())
+      }
     })
     if (others.size > 1) return undefined
     const date = dateOf(clean(el.text()))
@@ -176,7 +186,7 @@ export function roleLinks(html: string, pageUrl: string): RoleLink[] {
   for (const e of entries.values()) {
     const title = bestTitle(e.titles)
     if (title.length < 3) continue
-    const postedAt = cardDate(e.a, e.template)
+    const postedAt = cardDate(e.a, e.template, base)
     const location = e.place ?? (e.linkText && e.linkText !== title && e.linkText.length <= 60 && !title.includes(e.linkText) ? e.linkText : undefined)
     groups.set(e.g, [...(groups.get(e.g) ?? []), { url: e.url, title, ...(postedAt ? { postedAt } : {}), ...(location ? { location } : {}) }])
   }
@@ -231,6 +241,8 @@ export interface ListingRead {
   board?: BoardRef
   /** Pages whose list could not be confirmed as roles. */
   rejected: number
+  /** Roles confirmed on their own pages this time, plus listed ones already stored. Zero means the roles could not be read. */
+  confirmed: number
   /** The role links seen (normalised), for sightings. */
   listedIds: string[]
   checked: string[]
@@ -246,7 +258,7 @@ export async function readListing(
   careerUrl: string,
   pages: { url: string; html: string }[],
   f: SiteFetcher,
-  opts: { targets: ReaderTargets; skip?: ReadonlySet<string>; max?: number; ownSite?: (url: string) => boolean }
+  opts: { targets: ReaderTargets; skip?: ReadonlySet<string>; stored?: ReadonlySet<string>; max?: number; ownSite?: (url: string) => boolean }
 ): Promise<ListingRead> {
   const all = new Map<string, RoleLink>()
   for (const p of pages) for (const l of roleLinks(p.html, p.url)) if (!all.has(l.url)) all.set(l.url, l)
@@ -272,7 +284,10 @@ export async function readListing(
   }
 
   // Only the employer's own pages are fetched: a list may link anywhere.
-  const links = [...all.values()].filter((l) => !opts.ownSite || opts.ownSite(l.url))
+  const own = [...all.values()].filter((l) => !opts.ownSite || opts.ownSite(l.url))
+  // One address robots.txt disallows is dropped; the site is "robots" only when it disallows every role link it lists.
+  const links = await allowedOnly(f, own, (l) => l.url)
+  if (own.length > 0 && links.length === 0) throw new ReaderError('robots')
   const wanted = links.filter((l) => matchesTargets(l.title, opts.targets) && !opts.skip?.has(l.url)).slice(0, opts.max ?? DETAIL_PER_READ[f.mode])
 
   const jobs: AtsJob[] = []
@@ -293,12 +308,15 @@ export async function readListing(
         rejected++
         return
       }
-      jobs.push(job)
+      jobs.push({ ...job, externalId: normalizeJobUrl(l.url) })
       board ??= findBoardLinks(res.text, (u) => detectFromUrl({ careerUrl: u, domain: null }))[0]
     } catch (error) {
-      if (error instanceof ReaderError) stopped = error
+      // A role page that robots.txt disallows (through a redirect) is skipped, not a verdict on the site.
+      if (error instanceof ReaderError && error.reason !== 'robots') stopped = error
     }
   })
   if (stopped && (stopped as ReaderError).reason !== 'budget' && jobs.length === 0) throw stopped
-  return { jobs, listed: links.length, board, rejected, listedIds: links.map((l) => l.url), checked }
+  const listedIds = links.map((l) => l.url)
+  const confirmed = jobs.length + (opts.stored ? listedIds.filter((id) => opts.stored!.has(id)).length : 0)
+  return { jobs, listed: links.length, board, rejected, confirmed, listedIds, checked }
 }

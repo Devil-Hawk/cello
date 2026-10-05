@@ -33,6 +33,8 @@ const REASON_MESSAGE: Record<FailureReason, string> = {
   robots: 'Its robots.txt asks automated readers to stay away from its careers pages, so Cello does not read them.',
   no_roles: 'No open roles were found on its careers site.',
   unreachable: 'Its careers site did not answer. Try again in a few minutes.',
+  role_pages: 'Its site lists roles, but their pages cannot be read without a browser. Cello will not report them as no roles.',
+  render_failed: "Cello's browser could not read its careers page just now. The next scheduled check tries again.",
   time: 'Not reached this time.',
 }
 

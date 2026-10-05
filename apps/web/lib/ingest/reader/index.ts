@@ -30,7 +30,7 @@ import { readJobPostings } from '../jsonld'
 import { readCareersPage } from '../page-reader'
 import { boardsInHtml, classifyLink, discoverBoards, type DiscoveredBoard, type DiscoveredVia, type PageRead } from './discover'
 import { jobFromDetail, readDetail } from './detail'
-import { mislabelledSource, onOwnSite } from './legit'
+import { confirmRoles, mislabelledSource, onOwnSite } from './legit'
 import { readListing, roleLinks } from './listing'
 import { ReaderError, type ReaderReason, type SiteFetcher } from './site-fetch'
 import { readSitemapRoles } from './sitemap'
@@ -71,6 +71,8 @@ export interface SiteDeps {
 export interface TierTry {
   tier: Tier
   outcome: 'roles' | 'none' | ReaderReason | 'skipped'
+  /** Why a step crashed, as the fetcher's error class (never an address or page text). */
+  detail?: string
 }
 
 export interface SiteRead {
@@ -80,6 +82,10 @@ export interface SiteRead {
   complete: boolean
   /** Every role the source listed (normalised addresses) when that is more than `jobs`, for sightings. */
   listedIds?: string[]
+  /** How many roles the site's own list named, when the tier saw a list (a sitemap, a listing): the person is told when Cello has read only part of it. */
+  listed?: number
+  /** The list carries no titles (only ids), so most roles are known only once their pages are read. */
+  untitled?: boolean
   board?: BoardRead
   /** Why nothing was read, or null. */
   reason: ReaderReason | null
@@ -185,18 +191,23 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
     tried.push({ tier: 'board', outcome: found.failure ? found.failure.reason : 'none' })
   }
 
-  // What the site declares for search engines.
+  // What the site declares for search engines. A tier claims success only with a role confirmed on its own page.
+  let listedNoRoles = false
   try {
     const origin = new URL(company.careerUrl).origin
-    const read = await readSitemapRoles(origin, f, { targets, skip, ownSite })
-    out.checked.push(...read.checked)
+    const read = await readSitemapRoles(origin, f, { targets, skip, stored: input.storedIds, ownSite })
     if (read.board && (await tryBoard({ ...read.board, via: 'posting' }))) return finish()
-    if (read.listed > 0) {
-      Object.assign(out, { tier: 'sitemap' as Tier, jobs: read.jobs, complete: read.complete, listedIds: read.listedIds })
+    const jobs = confirmRoles(read.jobs, company.name)
+    // Roles read now that are role pages, plus listed roles already stored: zero means none could be read.
+    if (jobs.length + (read.confirmed - read.jobs.length) > 0) {
+      out.checked.push(...read.checked)
+      Object.assign(out, { tier: 'sitemap' as Tier, jobs, complete: read.complete, listedIds: read.listedIds, listed: read.listed, untitled: read.untitled })
       tried.push({ tier: 'sitemap', outcome: 'roles' })
       return finish()
     }
-    tried.push({ tier: 'sitemap', outcome: 'none' })
+    // Roles listed, none readable: the pages are not marked as checked, so a later pass (or a browser) tries them again.
+    if (read.listed > 0) listedNoRoles = true
+    tried.push({ tier: 'sitemap', outcome: read.listed > 0 ? 'role_pages' : 'none' })
   } catch (error) {
     note(error)
     tried.push({ tier: 'sitemap', outcome: error instanceof ReaderError ? error.reason : 'none' })
@@ -205,14 +216,16 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
   // Server-rendered role lists.
   if (!firstError || (firstError as ReaderError).reason !== 'bot_check') {
     try {
-      const read = await readListing(company.careerUrl, pages, f, { targets, skip, ownSite })
-      out.checked.push(...read.checked)
+      const read = await readListing(company.careerUrl, pages, f, { targets, skip, stored: input.storedIds, ownSite })
       if (read.board && (await tryBoard({ ...read.board, via: 'posting' }))) return finish()
-      if (read.listed > 0) {
-        Object.assign(out, { tier: 'listing' as Tier, jobs: read.jobs, complete: false, listedIds: read.listedIds })
+      const jobs = confirmRoles(read.jobs, company.name)
+      if (jobs.length + (read.confirmed - read.jobs.length) > 0) {
+        out.checked.push(...read.checked)
+        Object.assign(out, { tier: 'listing' as Tier, jobs, complete: false, listedIds: read.listedIds })
         tried.push({ tier: 'listing', outcome: 'roles' })
         return finish()
       }
+      if (read.listed > 0) listedNoRoles = true
       // Postings the pages declare in their own markup (schema.org JobPosting): the employer's statement, no reading needed.
       const declared = new Map<string, AtsJob>()
       for (const p of pages) for (const j of readJobPostings(p.html, p.url)) declared.set(j.externalId, j)
@@ -221,7 +234,7 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
         tried.push({ tier: 'listing', outcome: 'roles' })
         return finish()
       }
-      tried.push({ tier: 'listing', outcome: 'none' })
+      tried.push({ tier: 'listing', outcome: read.listed > 0 ? 'role_pages' : 'none' })
     } catch (error) {
       note(error)
       tried.push({ tier: 'listing', outcome: error instanceof ReaderError ? error.reason : 'none' })
@@ -230,69 +243,104 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
 
   // The page as a browser builds it, then the model: scheduled passes only.
   const blocked = firstError && ['bot_check', 'login_required', 'robots'].includes((firstError as ReaderError).reason)
+  let renderFailed = false
   if (!blocked) {
     if (f.mode === 'scheduled' && deps.fetchPage) {
       const rendered = await readRendered(input, deps, f)
-      if (rendered) {
-        Object.assign(out, rendered.result)
-        tried.push(...rendered.tried)
-        out.checked.push(...rendered.checked)
-        if (out.tier) return finish()
+      tried.push(...rendered.tried)
+      if (rendered.tried.some((t) => t.outcome === 'role_pages')) listedNoRoles = true
+      if (rendered.failure) {
+        // The browser step crashed: that says nothing about the site, and must never read as "no roles".
+        if (rendered.failure instanceof ReaderError) note(rendered.failure)
+        else renderFailed = true
       }
-      tried.push({ tier: 'rendered', outcome: 'none' })
+      if (rendered.result) {
+        Object.assign(out, rendered.result)
+        out.checked.push(...rendered.checked)
+        return finish()
+      }
     } else if (f.mode === 'inline' && deps.fetchPage !== undefined) {
       tried.push({ tier: 'rendered', outcome: 'skipped' })
     }
   }
 
   // Nothing yet. When the scheduled pass can still try a browser, say so rather than "no roles".
-  out.reason = firstError ? (firstError as ReaderError).reason : f.mode === 'inline' && deps.renderedLater && pages.length > 0 ? 'reading' : 'no_roles'
+  const err = firstError as ReaderError | null
+  if (err && ['bot_check', 'login_required', 'robots'].includes(err.reason)) out.reason = err.reason
+  else if (renderFailed) out.reason = 'render_failed'
+  else if (f.mode === 'inline' && deps.renderedLater && (pages.length > 0 || listedNoRoles)) out.reason = 'reading'
+  else if (err) out.reason = err.reason
+  else out.reason = listedNoRoles ? 'role_pages' : 'no_roles'
   return finish()
 }
 
-async function readRendered(
-  input: SiteInput,
-  deps: SiteDeps,
-  f: SiteFetcher
-): Promise<{ result: Partial<SiteRead>; tried: TierTry[]; checked: string[] } | null> {
+interface RenderedRead {
+  result?: Partial<SiteRead>
+  tried: TierTry[]
+  checked: string[]
+  /** The browser step could not run (or the site refused it): a ReaderError for the site's own answers, else the fetcher's error. */
+  failure?: ReaderError | Error
+}
+
+/** Never throws: a crash comes back as `failure`. */
+async function readRendered(input: SiteInput, deps: SiteDeps, f: SiteFetcher): Promise<RenderedRead> {
   const { company, targets } = input
+  const tried: TierTry[] = []
   let page
   try {
     page = await deps.fetchPage!(company.careerUrl, { render: true })
-  } catch {
-    return null
+  } catch (error) {
+    const failure = error instanceof Error ? error : new Error('fetcher_failed')
+    // The fetcher's error class (fetcher_failed, fetcher_<Class>, http_<n>), never an address.
+    tried.push({ tier: 'rendered', outcome: failure instanceof ReaderError ? failure.reason : 'render_failed', detail: failure.message.slice(0, 60) })
+    return { tried, checked: [], failure }
   }
-  const tried: TierTry[] = []
-  const rendered: PageRead[] = [{ url: page.finalUrl, html: page.html }]
+  try {
+    const rendered: PageRead[] = [{ url: page.finalUrl, html: page.html }]
 
-  // Boards that only appear once the page has built itself (DigitalOcean's Greenhouse job links).
-  for (const b of boardsInHtml(page.html, page.finalUrl, company.domain)) {
-    if (deps.readBoard) {
-      const board = await deps.readBoard(b, searchTerms(targets)).catch(() => null)
-      if (board && board.jobs.length > 0) {
-        tried.push({ tier: 'rendered', outcome: 'roles' })
-        return { result: { tier: 'board', jobs: board.jobs, board, complete: false }, tried, checked: [] }
+    // Boards that only appear once the page has built itself (DigitalOcean's Greenhouse job links).
+    for (const b of boardsInHtml(page.html, page.finalUrl, company.domain)) {
+      if (deps.readBoard) {
+        const board = await deps.readBoard(b, searchTerms(targets)).catch(() => null)
+        if (board && board.jobs.length > 0) {
+          tried.push({ tier: 'rendered', outcome: 'roles' })
+          return { result: { tier: 'board', jobs: board.jobs, board, complete: false }, tried, checked: [] }
+        }
       }
     }
-  }
-  if (roleLinks(page.html, page.finalUrl).length > 0) {
-    const read = await readListing(company.careerUrl, rendered, f, { targets, skip: input.checked, ownSite: (url) => onOwnSite(url, { company }) })
-    if (read.listed > 0) {
-      tried.push({ tier: 'rendered', outcome: 'roles' })
-      return { result: { tier: 'rendered', jobs: read.jobs, complete: false, listedIds: read.listedIds }, tried, checked: read.checked }
+    if (roleLinks(page.html, page.finalUrl).length > 0) {
+      const read = await readListing(company.careerUrl, rendered, f, {
+        targets,
+        skip: input.checked,
+        stored: input.storedIds,
+        ownSite: (url) => onOwnSite(url, { company }),
+      })
+      const jobs = confirmRoles(read.jobs, company.name)
+      if (jobs.length + (read.confirmed - read.jobs.length) > 0) {
+        tried.push({ tier: 'rendered', outcome: 'roles' })
+        return { result: { tier: 'rendered', jobs, complete: false, listedIds: read.listedIds }, tried, checked: read.checked }
+      }
+      // Role links the rendered page lists, whose own pages hold nothing readable: not "no roles", and not marked as checked.
+      tried.push({ tier: 'rendered', outcome: 'role_pages' })
     }
-  }
 
-  // JobPosting data on the rendered page, else a free model over a numbered snapshot, every role checked against the page.
-  const read = await readCareersPage(
-    { name: company.name, career_url: company.careerUrl },
-    { fetchPage: async () => page, model: deps.model ?? null }
-  )
-  const jobs = read.jobs.filter((j) => matchesTargets(j.title, targets))
-  if (read.jobs.length > 0) {
-    tried.push({ tier: read.modelCalls > 0 ? 'model' : 'rendered', outcome: 'roles' })
-    return { result: { tier: read.modelCalls > 0 ? 'model' : 'rendered', jobs, complete: read.complete }, tried, checked: [] }
+    // JobPosting data on the rendered page, else a free model over a numbered snapshot, every role checked against the page.
+    const read = await readCareersPage(
+      { name: company.name, career_url: company.careerUrl },
+      { fetchPage: async () => page, model: deps.model ?? null }
+    )
+    const jobs = read.jobs.filter((j) => matchesTargets(j.title, targets))
+    if (read.jobs.length > 0) {
+      tried.push({ tier: read.modelCalls > 0 ? 'model' : 'rendered', outcome: 'roles' })
+      return { result: { tier: read.modelCalls > 0 ? 'model' : 'rendered', jobs, complete: read.complete }, tried, checked: [] }
+    }
+    tried.push({ tier: 'model', outcome: read.reason === 'model_unavailable' || read.reason === 'model_limit' ? 'skipped' : 'none' })
+    return { tried, checked: [] }
+  } catch (error) {
+    // Anything the rendered page's reading throws is the step failing, not the site having no roles.
+    if (error instanceof ReaderError && error.reason !== 'budget') return { tried, checked: [], failure: error }
+    const failure = error instanceof Error ? error : new Error('render_failed')
+    tried.push({ tier: 'rendered', outcome: 'render_failed', detail: 'read_failed' })
+    return { tried, checked: [], failure }
   }
-  tried.push({ tier: 'model', outcome: read.reason === 'model_unavailable' || read.reason === 'model_limit' ? 'skipped' : 'none' })
-  return null
 }

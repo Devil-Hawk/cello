@@ -38,6 +38,7 @@ import type { ReadReason } from './page-reader'
 import { readSite, type SiteDeps, type SiteRead, type Tier } from './reader'
 import { makeSiteFetcher, type ReaderMode, type ReaderReason, type SiteFetcher } from './reader/site-fetch'
 import { NO_TARGETS, searchTerms, type ReaderTargets } from './reader/targets'
+import { recheckStoredRoles } from './reader/recheck'
 import { runRequirementsPass, type RequirementsRows } from './requirements-pass'
 
 type Db = SupabaseClient<any, any, any>
@@ -87,7 +88,9 @@ export function isDue(
   company: Pick<DueCompany, 'last_scraped_at' | 'is_dream_company' | 'scrape_frequency'> & { metadata?: unknown },
   now: number
 ): boolean {
-  if (readSourceCheck(company.metadata)?.reason === 'reading') return true
+  // A site still to be read in a browser, or whose browser step failed, is tried again at the next scheduled pass.
+  const reason = readSourceCheck(company.metadata)?.reason
+  if (reason === 'reading' || reason === 'render_failed' || reason === 'read_failed') return true
   return now >= dueAt(company)
 }
 
@@ -114,6 +117,14 @@ interface ReaderState {
   /** The search words the list was built under: a new target starts a new list. */
   targets_key: string
   at: string
+  /** Role pages read so far under these targets (for "Read N of about M"). Not reset with the checked list. */
+  read: number
+  /** Roles the site's own list named at the last read, when the way of reading sees a list. */
+  listed?: number
+  /** The list carries no titles, so roles are known only once their pages are read. */
+  untitled?: boolean
+  /** The read saw a window onto the site (its search, a few listing pages), not all of it. */
+  window?: boolean
 }
 
 function readerState(metadata: unknown, targetsKey: string, now: number): ReaderState {
@@ -124,6 +135,11 @@ function readerState(metadata: unknown, targetsKey: string, now: number): Reader
     checked: fresh ? (r.checked as unknown[]).filter((x): x is string => typeof x === 'string') : [],
     targets_key: targetsKey,
     at: fresh ? (r.at as string) : new Date(now).toISOString(),
+    read: r.targets_key === targetsKey && typeof r.read === 'number' && r.read >= 0 ? r.read : 0,
+    // What the last read saw of the site's own list, kept while a later read cannot see it again.
+    ...(typeof r.listed === 'number' ? { listed: r.listed } : {}),
+    ...(r.untitled === true ? { untitled: true } : {}),
+    ...(r.window === true ? { window: true } : {}),
   }
 }
 
@@ -186,106 +202,129 @@ export async function ingestCompany(store: AtsStore, company: DueCompany, deps: 
       return
     }
 
-    // 2. No board. Read the site, if there is one.
-    const careerUrl = company.career_url?.trim()
-    if (!careerUrl) {
-      outcome.skipped = true
-      try {
-        await store.updateCompanyLastScraped(company.id)
-      } catch {
-        /* checked again next time */
+    // 2. No board. Read the site, if there is one. A throw here must not leave the company on a stale
+    //    status ("Cello is reading this site" for ever): it is recorded as a failed read the next pass retries.
+    try {
+      const careerUrl = company.career_url?.trim()
+      if (!careerUrl) {
+        outcome.skipped = true
+        try {
+          await store.updateCompanyLastScraped(company.id)
+        } catch {
+          /* checked again next time */
+        }
+        await saveSourceCheck(store, company, board)
+        return
       }
-      await saveSourceCheck(store, company, board)
-      return
-    }
-    const stored = await loadStoredJobs(store, company.id, result)
-    if (!stored) {
-      outcome.failure = 'board_error'
-      return
-    }
-
-    const now = Date.now()
-    const state = readerState(company.metadata, searchTerms(targets).join('|'), now)
-    const checkedSet = new Set(state.checked)
-    // A stored role with no description or no place is read again once per window (marked 'h'), so rows stored before the reader learned a site's data fill in.
-    const incomplete = new Set([...stored.values()].filter((s) => !s.descriptionMd5 || !s.location).map((s) => s.externalId))
-    const mark = (id: string) => (incomplete.has(id) ? `${short(id)}h` : short(id))
-    const fetcher = deps.fetcher ?? makeSiteFetcher({ mode })
-    const read: SiteRead = await readSite(
-      {
-        company: { name: company.name, domain: company.domain, careerUrl },
-        targets,
-        checked: { has: (id: string) => checkedSet.has(mark(id)) } as ReadonlySet<string>,
-        storedIds: new Set([...stored.keys()].filter((id) => !incomplete.has(id))),
-      },
-      { fetcher, readBoard: boardReader(company, stored), fetchPage: mode === 'scheduled' ? deps.fetchPage : undefined, model: deps.model, renderedLater: mode === 'inline' }
-    )
-
-    outcome.tier = read.tier
-    for (const id of read.checked) if (!checkedSet.has(mark(id))) state.checked.push(mark(id))
-    state.checked = state.checked.slice(-MAX_CHECKED)
-    board.meta.reader = { ...state, tier: read.tier, tried: read.tried.slice(0, 8) }
-
-    if (!read.tier) {
-      outcome.message = read.message
-      outcome.reading = read.reason === 'reading'
-      if (read.reason && read.reason !== 'reading') outcome.failure = read.reason as FailureReason
-      board.unreadable = read.reason ?? 'no_roles'
-      try {
-        await store.updateCompanyLastScraped(company.id)
-      } catch {
-        /* checked again next time */
+      const stored = await loadStoredJobs(store, company.id, result)
+      if (!stored) {
+        outcome.failure = 'board_error'
+        return
       }
-      await saveSourceCheck(store, company, board, { requests: read.requests, ...(read.message ? { message: read.message } : {}) })
-      return
-    }
 
-    board.unreadable = undefined
-    const judge = { name: company.name, domain: company.domain ?? null, careerUrl }
-    if (read.board) {
-      const b = read.board
-      const at = new Date().toISOString()
-      const ats: AtsMetadata = {
-        provider: b.provider,
-        token: b.token,
-        source: 'probe',
-        discovered_at: at,
-        verified_by: b.verifiedBy as AtsMetadata['verified_by'],
-        verified_at: at,
-      }
-      board.meta.ats = ats
-      result.provider = b.provider
-      outcome.reader = b.provider
-      await syncJobs(
-        store,
-        company,
-        read.jobs,
+      const now = Date.now()
+      const state = readerState(company.metadata, searchTerms(targets).join('|'), now)
+      const checkedSet = new Set(state.checked)
+      // A stored role with no description or no place is read again once per window (marked 'h'), so rows stored before the reader learned a site's data fill in.
+      const incomplete = new Set([...stored.values()].filter((s) => !s.descriptionMd5 || !s.location).map((s) => s.externalId))
+      const mark = (id: string) => (incomplete.has(id) ? `${short(id)}h` : short(id))
+      const fetcher = deps.fetcher ?? makeSiteFetcher({ mode })
+      const read: SiteRead = await readSite(
         {
-          source: b.provider,
-          sightingSources: sourcesFor(b.provider),
-          cap: providers[b.provider].maxJobs,
-          stored,
-          judge,
-          targeting: targets.targeting,
-          windowed: providers[b.provider].searchesByQuery === true && searchTerms(targets).length > 0,
+          company: { name: company.name, domain: company.domain, careerUrl },
+          targets,
+          checked: { has: (id: string) => checkedSet.has(mark(id)) } as ReadonlySet<string>,
+          storedIds: new Set([...stored.keys()].filter((id) => !incomplete.has(id))),
         },
-        result
+        { fetcher, readBoard: boardReader(company, stored), fetchPage: mode === 'scheduled' ? deps.fetchPage : undefined, model: deps.model, renderedLater: mode === 'inline' }
       )
-    } else {
-      const tier = read.tier as Exclude<Tier, 'board'>
-      const source = SOURCE_OF[tier]
-      outcome.reader = tier === 'rendered' || tier === 'model' ? 'page_reader' : tier
-      // A page's rows close only on a complete read of it; a sitemap lists every role even when few were read.
-      await syncJobs(
-        store,
-        company,
-        read.jobs,
-        { source, sightingSources: read.complete ? [source] : [], stored, judge, targeting: targets.targeting, listedIds: read.listedIds, windowed: !read.complete },
-        result
-      )
+
+      outcome.tier = read.tier
+      for (const id of read.checked) if (!checkedSet.has(mark(id))) state.checked.push(mark(id))
+      state.checked = state.checked.slice(-MAX_CHECKED)
+      if (read.tier) {
+        state.read += read.checked.length
+        // Whether the person has seen the whole site or part of it, and how big the part is: a partial read must say so.
+        state.listed = read.listed
+        state.untitled = read.untitled === true ? true : undefined
+        state.window = read.tier === 'site_search' || read.tier === 'listing' || read.tier === 'rendered' || read.tier === 'model' ? true : undefined
+        if (state.listed === undefined) delete state.listed
+        if (state.untitled === undefined) delete state.untitled
+        if (state.window === undefined) delete state.window
+      }
+      board.meta.reader = { ...state, tier: read.tier, tried: read.tried.slice(0, 8) }
+
+      if (!read.tier) {
+        outcome.message = read.message
+        outcome.reading = read.reason === 'reading'
+        if (read.reason && read.reason !== 'reading') outcome.failure = read.reason as FailureReason
+        board.unreadable = read.reason ?? 'no_roles'
+        try {
+          await store.updateCompanyLastScraped(company.id)
+        } catch {
+          /* checked again next time */
+        }
+        await saveSourceCheck(store, company, board, { requests: read.requests, ...(read.message ? { message: read.message } : {}) })
+        return
+      }
+
+      board.unreadable = undefined
+      const judge = { name: company.name, domain: company.domain ?? null, careerUrl }
+      if (read.board) {
+        const b = read.board
+        const at = new Date().toISOString()
+        const ats: AtsMetadata = {
+          provider: b.provider,
+          token: b.token,
+          source: 'probe',
+          discovered_at: at,
+          verified_by: b.verifiedBy as AtsMetadata['verified_by'],
+          verified_at: at,
+        }
+        board.meta.ats = ats
+        result.provider = b.provider
+        outcome.reader = b.provider
+        await syncJobs(
+          store,
+          company,
+          read.jobs,
+          {
+            source: b.provider,
+            sightingSources: sourcesFor(b.provider),
+            cap: providers[b.provider].maxJobs,
+            stored,
+            judge,
+            targeting: targets.targeting,
+            windowed: providers[b.provider].searchesByQuery === true && searchTerms(targets).length > 0,
+          },
+          result
+        )
+      } else {
+        const tier = read.tier as Exclude<Tier, 'board'>
+        const source = SOURCE_OF[tier]
+        outcome.reader = tier === 'rendered' || tier === 'model' ? 'page_reader' : tier
+        // A page's rows close only on a complete read of it; a sitemap lists every role even when few were read.
+        await syncJobs(
+          store,
+          company,
+          read.jobs,
+          { source, sightingSources: read.complete ? [source] : [], stored, judge, targeting: targets.targeting, listedIds: read.listedIds, windowed: !read.complete },
+          result
+        )
+        // A window onto the site never counts a role as missed, so the scheduled pass asks a few stored roles' own pages whether they are still there.
+        if (mode === 'scheduled' && !read.complete) {
+          const seen = new Set(read.listedIds ?? read.jobs.map((j) => j.externalId))
+          const again = await recheckStoredRoles(store, company.id, stored, fetcher, { sources: [source], seen })
+          result.closed += again.closed
+        }
+      }
+      if (boardFailed(result)) outcome.failure = 'board_error'
+      await saveSourceCheck(store, company, board, { tier: read.tier, requests: read.requests })
+    } catch {
+      outcome.failure = 'board_error'
+      board.unreadable = 'read_failed'
+      await saveSourceCheck(store, company, board)
     }
-    if (boardFailed(result)) outcome.failure = 'board_error'
-    await saveSourceCheck(store, company, board, { tier: read.tier, requests: read.requests })
   })
 
   return outcome
@@ -407,6 +446,9 @@ export async function ingestUser(
       return await ingestCompany(deps.store, company, deps)
     } catch {
       // ingestCompany isolates its own failures; this is the last guard so one company cannot end the pass.
+      // The company still gets a status, so it never stays on "Cello is reading this site".
+      const meta = company.metadata && typeof company.metadata === 'object' && !Array.isArray(company.metadata) ? { ...(company.metadata as Record<string, unknown>) } : {}
+      await saveSourceCheck(deps.store, company, { meta, unreadable: 'read_failed', skipSave: false }).catch(() => undefined)
       return { result: emptyResult(company), reader: null, tier: null, skipped: false, reading: false, failure: 'board_error' }
     }
   })

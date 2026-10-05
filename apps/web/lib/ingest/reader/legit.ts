@@ -14,6 +14,7 @@
 
 import type { AtsJob } from '../../ats/types'
 import { normalizeEmployerName, onCompanyDomain, sameEmployerName } from '../../ats/verify'
+import { classifyJob, isLowQuality } from '../../jobs/classify'
 import { isStalePosting } from '../../jobs/freshness'
 import type { TargetVerdict } from '../../targeting/roles'
 
@@ -213,4 +214,30 @@ export function orderForCap<T>(
     .map((item, i) => ({ item, i, rank: RANK[verdictOf(item)], t: Date.parse(postedAtOf(item) ?? '') || 0 }))
     .sort((a, b) => a.rank - b.rank || b.t - a.t || a.i - b.i)
     .map((x) => x.item)
+}
+
+// --- confirmed ----------------------------------------------------------------
+
+/**
+ * The roles among pages read that are role pages at all. A page that has only
+ * its site's shell (a script-built page whose title is "Atlassian Careers"
+ * on every address) is not a role: a title that is a navigation word, the
+ * company's own name, or the same few words on three or more pages with no
+ * place, date or requisition id on any of them. A tier may claim success only
+ * with one of these; without any, the site is "could not read", never "no roles".
+ */
+export function confirmRoles(jobs: readonly AtsJob[], companyName: string): AtsJob[] {
+  const key = (t: string) => slugOf(t)
+  const bare = (t: string) => normalizeEmployerName(t.replace(/\b(careers?|jobs?|career site|work with us|join us)\b/gi, ' '))
+  const company = normalizeEmployerName(companyName)
+  const bare0 = (j: AtsJob) => !j.location && !j.postedAt && !j.requisitionId
+  const shared = new Map<string, number>()
+  for (const j of jobs) if (bare0(j)) shared.set(key(j.title), (shared.get(key(j.title)) ?? 0) + 1)
+  return jobs.filter((j) => {
+    if (j.isEvent || NON_ROLE.test(j.title)) return false
+    const c = classifyJob({ title: j.title.trim(), description: j.description, location: j.location, companyName })
+    if (c.rejectReason || isLowQuality(c)) return false
+    if (company && bare(j.title) === company) return false
+    return !(bare0(j) && (shared.get(key(j.title)) ?? 0) >= 3)
+  })
 }

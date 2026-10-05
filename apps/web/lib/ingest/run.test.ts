@@ -289,6 +289,82 @@ describe('ingestCompany', () => {
     expect(saved[saved.length - 1].source_check).toMatchObject({ readable: false, reason: 'bot_check' })
   })
 
+  it('scheduled, a browser step that crashes is recorded as such, never as "no roles", and is tried again at the next pass', async () => {
+    const saved: Record<string, unknown>[] = []
+    const { store } = memoryStore()
+    store.saveCompanyMetadata = async (_id, metadata) => {
+      saved.push(metadata)
+    }
+    const out = await ingestCompany(store, company('c1'), {
+      fetchPage: fetcher(new Error('fetcher_ModuleNotFoundError')),
+      model: null,
+      mode: 'scheduled',
+      fetcher: fakeFetcher({ [CAREERS]: '<html><body><div id="root"></div></body></html>' }, 'scheduled'),
+    })
+    expect(out.failure).toBe('render_failed')
+    const meta = saved[saved.length - 1]
+    expect(meta.source_check).toMatchObject({ readable: false, reason: 'render_failed' })
+    expect((meta.reader as { tried: { detail?: string }[] }).tried.some((t) => t.detail === 'fetcher_ModuleNotFoundError')).toBe(true)
+    expect(isDue({ last_scraped_at: new Date().toISOString(), is_dream_company: false, scrape_frequency: null, metadata: meta }, Date.now())).toBe(true)
+  })
+
+  it('a company whose read throws still gets a status, so it never stays on "Cello is reading this site"', async () => {
+    const saved: Record<string, unknown>[] = []
+    const { store } = memoryStore()
+    store.saveCompanyMetadata = async (_id, metadata) => {
+      saved.push(metadata)
+    }
+    const broken = site({ [CAREERS]: PLAIN_PAGE })
+    broken.spent = () => {
+      throw new Error('boom')
+    }
+    const out = await ingestCompany(store, company('c1', { metadata: { source_check: { checked_at: '2026-10-01T00:00:00Z', readable: false, reason: 'reading' } } }), { fetchPage: fetcher(PLAIN_PAGE), model: null, fetcher: broken })
+    expect(out.failure).toBe('board_error')
+    expect(saved[saved.length - 1].source_check).toMatchObject({ readable: false, reason: 'read_failed' })
+  })
+
+  it('records how much of a big site was read, so a partial read says so', async () => {
+    const saved: Record<string, unknown>[] = []
+    const { store } = memoryStore()
+    store.saveCompanyMetadata = async (_id, metadata) => {
+      saved.push(metadata)
+    }
+    const urls = Array.from({ length: 40 }, (_, i) => `https://acme.example/jobs/job/${3_000_000 + i}`)
+    const routes: Record<string, Route> = {
+      'https://acme.example/robots.txt': 'Sitemap: https://acme.example/sitemap-jobs.xml\n',
+      'https://acme.example/sitemap-jobs.xml': `<urlset>${urls.map((u) => `<url><loc>${u}</loc></url>`).join('')}</urlset>`,
+    }
+    for (const [i, u] of urls.entries()) {
+      routes[u] = `<html><head><title>Data Engineer ${i}</title><script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', title: `Data Engineer ${i}`, datePosted: new Date().toISOString(), jobLocation: { address: { addressLocality: 'Austin' } }, hiringOrganization: { name: 'Acme' } })}</script></head></html>`
+    }
+    await ingestCompany(store, company('c1', { name: 'Acme', domain: 'acme.example' }), { fetchPage: fetcher(PLAIN_PAGE), model: null, fetcher: fakeFetcher(routes) })
+    const reader = saved[saved.length - 1].reader as { tier: string; listed: number; read: number; untitled?: boolean }
+    expect(reader).toMatchObject({ tier: 'sitemap', listed: 40, read: 10 })
+    expect(reader.untitled).toBe(true)
+  })
+
+  it('scheduled, a window onto a site checks stored roles whose pages are gone and closes them', async () => {
+    const closed: string[] = []
+    const gone = 'https://acme.example/jobs/old-role'
+    const existing: ExistingJob[] = [
+      { externalId: gone, title: 'Old Role', location: 'Austin', salaryRange: null, descriptionMd5: 'x', source: 'listing', open: true, url: gone, lastSeenAt: '2026-08-01T00:00:00Z' },
+    ]
+    const { store } = memoryStore({ existing })
+    store.updateJobs = async (rows) => {
+      for (const r of rows) if (r.fields.still_open === false) closed.push(r.externalId)
+      return rows.length
+    }
+    const out = await ingestCompany(store, company('c1', { name: 'Acme', domain: 'acme.example' }), {
+      fetchPage: fetcher(PLAIN_PAGE),
+      model: null,
+      mode: 'scheduled',
+      fetcher: fakeFetcher({ 'https://acme.example/robots.txt': { status: 404, body: '' }, [CAREERS]: ldPage(['Backend Engineer']), [gone]: { status: 404 } }, 'scheduled'),
+    })
+    expect(out.tier).toBe('listing')
+    expect(closed).toEqual([gone])
+    expect(out.result.closed).toBe(1)
+  })
+
   it('targets drive the search: a person who typed titles gets those words, one who set functions gets theirs', () => {
     expect(searchTerms({ ...NO_TARGETS, titles: ['data engineer', 'analytics engineer'] })).toEqual(['data engineer', 'analytics engineer'])
     expect(searchTerms({ targeting: { ...NO_TARGETS.targeting, functions: ['engineering', 'data'] }, titles: [] })).toEqual(['software engineer', 'data'])
@@ -405,6 +481,10 @@ describe('isDue', () => {
     expect(isDue({ last_scraped_at: ago(5), is_dream_company: false, scrape_frequency: null, metadata: reading }, now)).toBe(true)
     const checked = { source_check: { checked_at: ago(5), readable: false, reason: 'bot_check' } }
     expect(isDue({ last_scraped_at: null, is_dream_company: false, scrape_frequency: null, metadata: checked }, now)).toBe(false)
+    for (const reason of ['render_failed', 'read_failed']) {
+      const failed = { source_check: { checked_at: ago(5), readable: false, reason } }
+      expect(isDue({ last_scraped_at: ago(5), is_dream_company: false, scrape_frequency: null, metadata: failed }, now)).toBe(true)
+    }
   })
   it('lets a larger frequency stretch the interval and never shorten it', () => {
     expect(isDue({ last_scraped_at: ago(1500), is_dream_company: false, scrape_frequency: 4000 }, now)).toBe(false)

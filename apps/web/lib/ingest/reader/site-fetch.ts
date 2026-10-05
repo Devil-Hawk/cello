@@ -20,7 +20,11 @@ import robotsParser from 'robots-parser'
 import { CELLO_USER_AGENT, assertAllowedHost, fetchJson } from '../../ats/http'
 import { assertSsrfSafe, readLimitedText } from '../../security/untrusted'
 
-export type ReaderReason = 'bot_check' | 'login_required' | 'robots' | 'no_roles' | 'unreachable' | 'reading' | 'budget'
+/**
+ * Why a site could not be read. `role_pages`: it lists roles but their pages hold nothing Cello can read without a browser.
+ * `render_failed`: the browser step that was to read it crashed or timed out, which says nothing about the site.
+ */
+export type ReaderReason = 'bot_check' | 'login_required' | 'robots' | 'no_roles' | 'unreachable' | 'reading' | 'budget' | 'role_pages' | 'render_failed'
 
 /** Why Cello stopped reading a site, never carrying the address. */
 export class ReaderError extends Error {
@@ -294,4 +298,21 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
     },
   }
   return api
+}
+
+/**
+ * The items whose address robots.txt allows. The answer for a site is read once and cached, so
+ * this costs no extra request: one disallowed address among many is dropped, not a verdict on the site.
+ */
+export async function allowedOnly<T>(f: SiteFetcher, items: T[], urlOf: (item: T) => string): Promise<T[]> {
+  const keep: T[] = []
+  for (const item of items) {
+    try {
+      if (await f.allowed(urlOf(item))) keep.push(item)
+    } catch (error) {
+      if (error instanceof ReaderError && error.reason === 'budget') throw error
+      // an address that is not a url cannot be fetched either
+    }
+  }
+  return keep
 }

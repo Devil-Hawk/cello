@@ -46,6 +46,8 @@ export const FAILURE_TEXT: Record<FailureReason, string> = {
   robots: 'Its robots.txt asks automated readers to stay away from its careers pages',
   no_roles: 'No open roles were found on its careers site',
   unreachable: 'Its careers site did not answer',
+  role_pages: 'Its role pages cannot be read without a browser',
+  render_failed: "Cello's browser could not read its careers page",
   time: 'Not reached this time',
 }
 
