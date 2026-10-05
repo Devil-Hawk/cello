@@ -117,7 +117,7 @@ describe('Scout', () => {
     const { deps, admin } = setup()
     await runScout(deps, { query: 'pm' })
     const rows = admin.tables.agent_tasks
-    expect(rows.some((r) => r.agent === 'scout' && r.title.toString().startsWith('Searching'))).toBe(true)
+    expect(rows.some((r) => r.agent === 'scout' && String(r.title).startsWith('Searching'))).toBe(true)
   })
 
   it('reached through the task tool, a text brief is parsed; a bad limit is refused with the shape to use', async () => {

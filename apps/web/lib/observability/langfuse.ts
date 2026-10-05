@@ -45,7 +45,8 @@
 import { createHash, randomBytes } from 'node:crypto'
 import type { LangfuseClient } from '@langfuse/client'
 import type { LangfuseSpanProcessor } from '@langfuse/otel'
-import type { Span } from '@opentelemetry/api'
+import { context, ROOT_CONTEXT, trace, type Span } from '@opentelemetry/api'
+import type { BaseCallbackHandler } from '@langchain/core/callbacks/base'
 import type { ReadableSpan, SpanExporter } from '@opentelemetry/sdk-trace-base'
 import { capPayload } from '../graph/journal'
 import type { LfPayload, LfType, PendingScore, SpanBuffer, SpanRecord } from '../trace/spans'
@@ -702,5 +703,112 @@ export function exportTrace(buffer: SpanBuffer, rows: SpanRecord[]): Promise<voi
   } catch (err) {
     console.warn(`[langfuse] export skipped: ${redactString(String(err).slice(0, 300))}`)
     return Promise.resolve()
+  }
+}
+
+// --- agents -----------------------------------------------------------------------------
+//
+// The agent loops (lib/agents) run on LangChain, which reports through callbacks. Langfuse's
+// CallbackHandler turns those into observations: one per agent, subagent, model call and tool.
+// They go through the same isolated provider as everything above, and they are made children of
+// the request's trace (the id the SpanBuffer uses), so a request or a scheduled occurrence is ONE
+// trace with the session set to the conversation. Model calls that are not agent loops (callLlm)
+// still arrive through the replay above, under the same trace.
+
+export interface AgentCallbackInput {
+  /** The request's trace id (SpanBuffer.traceId). */
+  traceId: string
+  sessionId?: string | null
+  userId: string
+  isDemo: boolean
+  /** A short name for the trace, e.g. 'agent-turn' or 'scheduled-task'. */
+  name: string
+}
+
+/** The OTel parent every agent observation hangs under: the same synthetic root the replay uses. */
+function traceParent(traceId: string) {
+  const hex = traceId.replace(/-/g, '')
+  return { traceId: hex, spanId: hex.slice(16), traceFlags: 1, isRemote: true }
+}
+
+let contextManagerReady: Promise<void> | undefined
+
+/**
+ * Observations are parented through OpenTelemetry's active context, which needs a context manager.
+ * Sentry installs one when it is configured; otherwise this registers the standard one. Registering
+ * is a no-op when one exists.
+ */
+async function ensureContextManager(): Promise<void> {
+  contextManagerReady ??= import('@opentelemetry/context-async-hooks').then(({ AsyncLocalStorageContextManager }) => {
+    context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable())
+  })
+  await contextManagerReady
+}
+
+/**
+ * The callbacks to hand an agent invocation. Empty when Langfuse is off, the trace is sampled out,
+ * or this is a demo whose content is not captured: the handler sends prompts and results, so it
+ * must not exist when content capture is off.
+ */
+export async function agentCallbacks(input: AgentCallbackInput): Promise<BaseCallbackHandler[]> {
+  try {
+    if (!langfuseConfigured() || !traceSampled(input.traceId, input.isDemo) || !contentCaptureFor(input.isDemo)) return []
+    const lf = await getLangfuse()
+    if (!lf) return []
+    await ensureContextManager()
+    const { CallbackHandler } = await import('@langfuse/langchain')
+    return [
+      new CallbackHandler({
+        userId: input.userId,
+        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        tags: ['agent', input.isDemo ? 'demo' : 'owner'],
+        traceMetadata: { feature: 'agent', name: safeName(input.name) },
+      }),
+    ]
+  } catch (err) {
+    console.warn(`[langfuse] agent callbacks skipped: ${redactString(String(err).slice(0, 300))}`)
+    return []
+  }
+}
+
+/** Run `fn` with the request's trace as the parent of every agent observation made inside it. */
+export function withAgentSpanContext<T>(traceId: string, fn: () => Promise<T>): Promise<T> {
+  const ctx = trace.setSpanContext(ROOT_CONTEXT, traceParent(traceId))
+  return context.with(ctx, fn)
+}
+
+/** Send what the agent observations recorded. Resolves at once under a Vercel request context. */
+export function flushAgentSpans(): Promise<void> {
+  if (!langfuseConfigured()) return Promise.resolve()
+  return deliver(async () => {
+    const lf = await getLangfuse()
+    if (lf) await lf.processor.forceFlush()
+  })
+}
+
+/**
+ * A person's reaction as a score on the trace that produced the thing they reacted to:
+ * draft_approved, draft_skipped, draft_edited, job_applied, job_dismissed. The id is
+ * deterministic, so repeating a reaction updates the score instead of adding another.
+ */
+export async function scoreTrace(traceId: string, name: string, value: number, comment?: string): Promise<void> {
+  try {
+    if (!langfuseConfigured()) return
+    const lf = await getLangfuse()
+    if (!lf) return
+    const hex = traceId.replace(/-/g, '')
+    const scoreName = clean(name, 100)
+    lf.client.score.create({
+      id: createHash('sha256').update(`${hex}|${scoreName}`).digest('hex').slice(0, 32),
+      traceId: hex,
+      name: scoreName,
+      value,
+      dataType: 'NUMERIC',
+      ...(comment ? { comment: clean(comment, 300) } : {}),
+      environment: tracingEnvironment(),
+    })
+    await lf.client.flush()
+  } catch (err) {
+    console.warn(`[langfuse] score skipped: ${redactString(String(err).slice(0, 300))}`)
   }
 }
