@@ -147,6 +147,16 @@ export function promptRef(name: string): { name: string; hash: string } {
   return { name, hash: hashes.get(name) as string }
 }
 
+/**
+ * promptRef for a prompt that lives in code, not in a prompts/ document (the
+ * matcher rubric, the Copilot system prompt). Pass the STATIC template only,
+ * never text with the resume or other dynamic blocks in it: the hash then
+ * changes exactly when the template is edited.
+ */
+export function templateRef(name: string, template: string): { name: string; hash: string } {
+  return { name, hash: createHash('sha256').update(template).digest('hex').slice(0, 8) }
+}
+
 /** Typed accessor for a known document (see PROMPT_DOC_NAMES). */
 export function loadDoc(name: PromptDocName): string {
   return readPromptDoc(name)

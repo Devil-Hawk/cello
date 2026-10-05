@@ -112,6 +112,7 @@ const luhn = (digits: string): boolean => {
 const PRIVATE_KEY_RE = /-----BEGIN [A-Z ]{0,30}PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]{0,30}PRIVATE KEY-----|$)/g
 
 const REDACTED = '[redacted]'
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** Pattern-redact secret/PII-shaped substrings inside a string value,
  *  regardless of what key it was stored under. */
@@ -166,6 +167,9 @@ export function scrubMetadata(value: unknown, keyHint = '', depth = 0): unknown 
   if (typeof value === 'number' || typeof value === 'boolean') return value
   if (depth > 8) return '[truncated]'
   if (value == null) return value
+  // A uuid under an id key (contactId, session_id) is a reference, not the
+  // person's data: keep it so a trace can be joined to its row.
+  if (typeof value === 'string' && /(?:Id|_id)$/.test(keyHint) && UUID_RE.test(value)) return value
   if (SENSITIVE_KEY_RE.test(keyHint)) return REDACTED
   if (typeof value === 'string') return redactString(value)
   if (Array.isArray(value)) return value.map((v) => scrubMetadata(v, keyHint, depth + 1))

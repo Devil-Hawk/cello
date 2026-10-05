@@ -92,6 +92,16 @@ describe('scoreJobWithLlm — buildMatchContext wiring', () => {
     expect(calls[0]!.prompt).not.toBe(calls[1]!.prompt)
   })
 
+  it('carries a matcher prompt version that does not depend on the resume', async () => {
+    const calls: LlmRunOptions[] = []
+    const llm = fakeLlm(calls)
+    const job = { id: 'job-1', title: 'Backend Engineer', description: 'x', location: 'Remote', companyId: null }
+    await scoreJobWithLlm(llm, RESUME, job, FAKE_ADMIN, 'user-1')
+    await scoreJobWithLlm(llm, 'A completely different resume.', job, FAKE_ADMIN, 'user-1')
+    expect(calls[0]!.promptRef).toMatchObject({ name: 'matcher', hash: expect.stringMatching(/^[0-9a-f]{8}$/) })
+    expect(calls[0]!.promptRef).toEqual(calls[1]!.promptRef)
+  })
+
   it('adds no context block when the job has no company', async () => {
     const calls: LlmRunOptions[] = []
     const llm = fakeLlm(calls)

@@ -348,6 +348,14 @@ describe('deepScrub: short secret key names', () => {
   })
 })
 
+describe('scrubMetadata: uuid references under id keys', () => {
+  it('keeps a uuid under contactId/session_id but still blanks a non-uuid value there and other contact keys', () => {
+    const id = '5d31b5dc-1234-4abc-8def-123456789012'
+    expect(scrubMetadata({ contactId: id, session_id: id, jobId: id })).toEqual({ contactId: id, session_id: id, jobId: id })
+    expect(scrubMetadata({ contactId: 'jane@example.com', contact: id, email: id })).toEqual({ contactId: '[redacted]', contact: '[redacted]', email: '[redacted]' })
+  })
+})
+
 describe('redactString: whole passwords and phone, SSN and card numbers', () => {
   it('a bare password is redacted whole, ampersand included', () => {
     expect(redactString('password: a&b')).toBe('password: [redacted]')

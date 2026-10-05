@@ -106,6 +106,7 @@ import { buildTurnContext } from '../context/assemble'
 import { callLlm, parseJsonLoose } from '../harness/llm'
 import type { ReasoningEffort } from '../harness/types'
 import { loadApiKeys } from '../harness/keys'
+import { templateRef } from '../harness/prompts'
 import { createAdminClient } from '../harness/supabase-admin'
 import { loadRecentMessages, type MessageRow } from '../harness/copilot-store'
 import { setTraceOutput, withTrace } from '../trace/spans'
@@ -404,6 +405,14 @@ export function submitOrSendReason(tool: string, args: Record<string, unknown>):
     }
   }
   return null
+}
+
+let copilotRef: { name: string; hash: string } | undefined
+/** Langfuse prompt version of the Copilot system prompt: the hash of the template
+ *  with every dynamic block empty, so it changes only when the template or the
+ *  tool list is edited. */
+function copilotPromptRef() {
+  return (copilotRef ??= templateRef('copilot', systemPrompt(undefined, '', '', '', '', '', '', '')))
 }
 
 export function systemPrompt(
@@ -997,6 +1006,7 @@ async function plan(state: CopilotStateType, config: LangGraphRunnableConfig): P
         temperature: 0.2,
         reasoning: { effort: state.turnConfig.effort },
         name: 'plan-copilot-step',
+        promptRef: copilotPromptRef(),
       },
       config.signal
     )

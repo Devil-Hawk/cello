@@ -34,6 +34,7 @@
 
 import type { AgentFn, AdminClient, LlmRunner } from '../types'
 import { MatcherInput } from '../schemas'
+import { templateRef } from '../prompts'
 import { parseJsonLoose, MissingKeyError, TruncatedResponseError } from '../llm'
 import { resolveTargeting, type Targeting } from '@/lib/targeting'
 import { QUALITY_REJECT_THRESHOLD } from '@/lib/jobs/classify'
@@ -181,6 +182,16 @@ function collectJobIds(inputIds: string[] | undefined, deps: Record<string, unkn
   return [...set]
 }
 
+/** The static part of the matcher system prompt; the resume follows it. */
+const MATCHER_SYSTEM_HEAD =
+  'You are an expert technical recruiter producing an honest, evidence-based fit assessment ' +
+  'between a candidate resume and a job. Be specific and concrete. Never invent candidate ' +
+  'experience. Respond with a single JSON object and nothing else.\n\n' +
+  `CANDIDATE RESUME (the only source of truth about the candidate — never credit ` +
+  `experience that is not here):\n`
+/** Langfuse prompt version: the hash of the static head (the resume is not in it). */
+const MATCHER_PROMPT_REF = templateRef('matcher', MATCHER_SYSTEM_HEAD)
+
 /**
  * Score a single job with the LLM. Exported so autopilot.ts and the on-demand
  * /api/agents/match route reuse the exact same prompt + parsing instead of a
@@ -199,12 +210,7 @@ export async function scoreJobWithLlm(
   // across every job a given user scores. Sending it in the user prompt, as
   // this did, re-billed those tokens at full price every single time. As a
   // cached prefix they bill at roughly a tenth on every call after the first.
-  const system =
-    'You are an expert technical recruiter producing an honest, evidence-based fit assessment ' +
-    'between a candidate resume and a job. Be specific and concrete. Never invent candidate ' +
-    'experience. Respond with a single JSON object and nothing else.\n\n' +
-    `CANDIDATE RESUME (the only source of truth about the candidate — never credit ` +
-    `experience that is not here):\n${resume.slice(0, RESUME_LIMIT)}`
+  const system = `${MATCHER_SYSTEM_HEAD}${resume.slice(0, RESUME_LIMIT)}`
 
   // INJECTION DEFENCE (lib/security/job-text.ts): this is the highest-volume
   // model call in the product — one per job — and the description is
@@ -241,7 +247,7 @@ export async function scoreJobWithLlm(
   // skill lists: the only jobs strong enough to reach this deep pass are the
   // ones with the most to say about them, so the richest verdicts truncated
   // and were lost. Retry once wider rather than dropping a top match.
-  const base = { system, prompt, json: true, maxTokens: 1800, temperature: 0.2, cachePrefix: true } as const
+  const base = { system, prompt, json: true, maxTokens: 1800, temperature: 0.2, cachePrefix: true, promptRef: MATCHER_PROMPT_REF } as const
   let res
   try {
     res = await llm(base)
