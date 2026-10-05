@@ -87,6 +87,12 @@ describe('verifyModelJobs', () => {
     expect(dropped).toBe(3)
   })
 
+  it('keeps a posting that a company page links through Greenhouse short links', () => {
+    const s = snapshotPage('<body><p>Open roles at Wiki</p><ul><li><a href="https://grnh.se/abc123">Lead Product Manager</a></li></ul></body>', 'https://wiki.example/jobs')
+    const { kept } = verifyModelJobs(answer([{ title: 'Lead Product Manager', link: 1 }]), s)
+    expect(kept.map((j) => j.url)).toEqual(['https://grnh.se/abc123'])
+  })
+
   it('drops the page itself, an off-site host that is not an ATS, and a mailto', () => {
     const { kept, dropped } = verifyModelJobs(
       answer([

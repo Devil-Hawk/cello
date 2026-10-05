@@ -33,6 +33,7 @@ export const MAX_SNAPSHOT_LINKS = 300
 /** Hosts that hold job postings for many employers; a link to one is a plausible posting URL. */
 export const KNOWN_JOB_HOSTS = [
   'greenhouse.io',
+  'grnh.se', // Greenhouse's short links, which employers' own pages use
   'lever.co',
   'ashbyhq.com',
   'myworkdayjobs.com',
