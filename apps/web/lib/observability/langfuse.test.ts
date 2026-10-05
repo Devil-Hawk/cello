@@ -234,6 +234,11 @@ describe('replay: structure, times, types', () => {
     }
   })
 
+  it('spans carry a meaningful service name, not unknown_service', async () => {
+    await run(new SpanBuffer('u', null, undefined, { isDemo: false }), tree())
+    expect(spans()[0].resource.attributes['service.name']).toBe('cello-web')
+  })
+
   it('maps types from kind and lf.type; only generations carry model, usage and cost', async () => {
     const buffer = new SpanBuffer('user-1', null, undefined, { isDemo: false })
     const extra = [
@@ -524,9 +529,73 @@ describe('caps and the content budget', () => {
     expect(kept.has('judge')).toBe(true) // judge outranks the plain generation
   })
 
-  it('the trace content budget stops capture past 128 KB', async () => {
+  const genRow = (i: number, input: unknown, name = `step-${i}`) =>
+    row({
+      name: 'llm',
+      kind: 'llm',
+      parent_span_id: 'root',
+      span_id: `g${i}`,
+      lf: { name, type: 'generation', input: input as never, output: { role: 'assistant', content: `decision ${i}` } },
+    })
+  const inputOf = (name: string) => JSON.parse(String(byName(name).attributes['langfuse.observation.input'])) as { role: string; content: string }[]
+
+  it('a 20 KB system prompt is captured whole, tail included, and nothing is flagged cut', async () => {
+    const system = `${'rule. '.repeat(3500)}TAIL-OPERATING-RULES`
+    expect(system.length).toBeGreaterThan(20_000)
     const root = row({ name: 'copilot', kind: 'graph', span_id: 'root' })
-    const gens = Array.from({ length: 12 }, (_, i) =>
+    await run(new SpanBuffer('u', null, undefined, { isDemo: false }), [root, genRow(0, [{ role: 'system', content: system }, { role: 'user', content: 'hi' }])])
+    expect(inputOf('step-0')[0].content.endsWith('TAIL-OPERATING-RULES')).toBe(true)
+    expect(byName('step-0').attributes['langfuse.observation.metadata.input_truncated']).toBeUndefined()
+  })
+
+  it('a system prompt past 64 KB is cut and the cut is recorded on the observation', async () => {
+    const root = row({ name: 'copilot', kind: 'graph', span_id: 'root' })
+    await run(new SpanBuffer('u', null, undefined, { isDemo: false }), [root, genRow(0, [{ role: 'system', content: 'x'.repeat(70_000) }])])
+    const a = byName('step-0').attributes
+    expect(a['langfuse.observation.metadata.input_truncated']).toBe('true')
+    expect(a['langfuse.observation.metadata.input_chars']).toBe('70000')
+  })
+
+  it('a long user message is cut at 16 KB and flagged', async () => {
+    const root = row({ name: 'copilot', kind: 'graph', span_id: 'root' })
+    await run(new SpanBuffer('u', null, undefined, { isDemo: false }), [root, genRow(0, [{ role: 'user', content: 'y'.repeat(20_000) }])])
+    expect(byName('step-0').attributes['langfuse.observation.metadata.input_truncated']).toBe('true')
+  })
+
+  it('12 sequential generations sharing one 18 KB system prompt keep every input and output', async () => {
+    const system = `${'plan carefully. '.repeat(1200)}END`
+    const gens = Array.from({ length: 12 }, (_, i) => genRow(i, [{ role: 'system', content: system }, { role: 'user', content: `step ${i} ${'ctx '.repeat(500)}` }]))
+    await run(new SpanBuffer('u', null, undefined, { isDemo: false }), [row({ name: 'copilot', kind: 'graph', span_id: 'root' }), ...gens])
+    const first = inputOf('step-0')
+    expect(first[0].content).toBe(system)
+    for (let i = 1; i < 12; i++) {
+      const msgs = inputOf(`step-${i}`)
+      expect(msgs[0].content).toMatch(/^\[system prompt identical to step-0, sha256:[0-9a-f]{8}\]$/)
+      expect(msgs[1].content).toContain(`step ${i} `)
+      expect(String(byName(`step-${i}`).attributes['langfuse.observation.output'])).toContain(`decision ${i}`)
+    }
+  })
+
+  it('a different system prompt in the same trace is captured in full again', async () => {
+    const gens = [genRow(0, [{ role: 'system', content: 'A'.repeat(500) }]), genRow(1, [{ role: 'system', content: 'B'.repeat(500) }])]
+    await run(new SpanBuffer('u', null, undefined, { isDemo: false }), [row({ name: 'copilot', kind: 'graph', span_id: 'root' }), ...gens])
+    expect(inputOf('step-1')[0].content).toBe('B'.repeat(500))
+  })
+
+  it('generation output is exempt from the budget, other outputs are not', async () => {
+    const big = 'word '.repeat(3000)
+    const root = row({ name: 'copilot', kind: 'graph', span_id: 'root' })
+    const fillers = Array.from({ length: 20 }, (_, i) => genRow(i, [{ role: 'user', content: big }]))
+    const tool = row({ name: 'tool', kind: 'tool', parent_span_id: 'root', span_id: 't', lf: { name: 'late-tool', type: 'tool', output: { text: 'late' } } })
+    await run(new SpanBuffer('u', null, undefined, { isDemo: false }), [root, ...fillers, tool])
+    expect(String(byName('step-19').attributes['langfuse.observation.output'])).toContain('decision 19')
+    expect(String(byName('step-19').attributes['langfuse.observation.input'])).toBe('[trace content budget exhausted]')
+    expect(String(byName('late-tool').attributes['langfuse.observation.output'])).toBe('[trace content budget exhausted]')
+  })
+
+  it('the trace content budget stops capture past 256 KB', async () => {
+    const root = row({ name: 'copilot', kind: 'graph', span_id: 'root' })
+    const gens = Array.from({ length: 24 }, (_, i) =>
       row({
         name: 'llm',
         kind: 'llm',

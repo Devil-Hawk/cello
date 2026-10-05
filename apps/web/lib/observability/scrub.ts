@@ -88,6 +88,27 @@ const URL_USERINFO_RE = /\b([a-z][a-z0-9+.-]{1,20}:\/\/)[^\s:@/]{1,256}:[^\s@/]{
 // they only match bare or after a `_`/`-` separator.
 const KEY_VALUE_RE =
   /(?<![A-Za-z0-9])([A-Za-z0-9_-]{0,30}(?:password|passwd|passphrase|pwd|secret|secret[_-]?key|service[_-]?role[_-]?key|aws[_-]?secret[_-]?access[_-]?key|private[_-]?key|token|api[_-]?key|cookie)|(?:[A-Za-z0-9]{1,30}[_-])?(?:pass|pw))(\\?["']?\s{0,8}[:=]\s{0,8})(\\"[^"\\\n]{0,512}\\"|"(?:[^"\\\n]|\\.){0,512}"|'[^'\n]{0,512}'|[^\s"',;&]{1,512})/gi
+// A bare password value runs to the next whitespace, '&' and ',' included: a
+// password may contain them, and stopping early leaks the tail. Quoted values
+// are left to KEY_VALUE_RE. Same bounded prefix, one bounded value.
+const PASSWORD_BARE_RE =
+  /(?<![A-Za-z0-9])([A-Za-z0-9_-]{0,30}(?:password|passwd|pwd)(?:\\?["']?)\s{0,8}[:=]\s{0,8})(?![\\"'])\S{1,200}/gi
+// Phone numbers need a separator, paren or plus so a bare digit run (an epoch,
+// a count, the all-digit tail of a uuid) is never hit; the leading guard keeps
+// a match from starting inside a token, a uuid or a decimal.
+const PHONE_RE = /(?<![\w.-])(?:\+\d{1,3}[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}(?!\d)/g
+const SSN_RE = /(?<![\w.-])\d{3}-\d{2}-\d{4}(?![\w-])/g
+// 13 to 19 digits with optional space/dash groups; only a Luhn-valid run is a card.
+const CARD_RE = /(?<![\w.-])\d(?:[ -]?\d){12,18}(?!\d)/g
+const luhn = (digits: string): boolean => {
+  let sum = 0
+  for (let i = 0; i < digits.length; i++) {
+    let d = Number(digits[digits.length - 1 - i])
+    if (i % 2 === 1 && (d *= 2) > 9) d -= 9
+    sum += d
+  }
+  return sum % 10 === 0
+}
 const PRIVATE_KEY_RE = /-----BEGIN [A-Z ]{0,30}PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]{0,30}PRIVATE KEY-----|$)/g
 
 const REDACTED = '[redacted]'
@@ -106,11 +127,15 @@ export function redactString(value: string): string {
     .replace(GENERIC_SK_RE, '[redacted-key]')
     .replace(GOOGLE_TOKEN_RE, '[redacted-token]')
     .replace(GOOGLE_REFRESH_RE, '[redacted-token]')
+    .replace(PASSWORD_BARE_RE, '$1[redacted]')
     .replace(KEY_VALUE_RE, (_m, key: string, sep: string, val: string) => {
       const q = val.startsWith('\\"') ? '\\"' : val[0] === '"' || val[0] === "'" ? val[0] : ''
       return `${key}${sep}${q}${REDACTED}${q}`
     })
     .replace(EMAIL_RE, '[redacted-email]')
+    .replace(CARD_RE, (m) => (luhn(m.replace(/\D/g, '')) ? '[redacted-number]' : m))
+    .replace(SSN_RE, '[redacted-number]')
+    .replace(PHONE_RE, (m) => (/^\d+$/.test(m) ? m : '[redacted-phone]'))
 }
 
 /** Recursively scrub any JSON-ish value: sensitive key names are fully

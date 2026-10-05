@@ -55,16 +55,19 @@ import { redactString, scrubMetadata } from './scrub'
 
 /** Longest the request waits on an awaited (no request context) export. */
 export const FLUSH_DEADLINE_MS = 2000
-/** Per-string cap for captured prompt/completion text. */
+/** Per-string cap for captured prompt/completion text (non-system roles). */
 export const CONTENT_CAP_CHARS = 16 * 1024
-/** Per-generation cap on the captured prompt (all messages together). */
+/** A system prompt is the task definition, so it gets room for the whole
+ *  composed prompt (shared + voice + mode doc + dynamic context blocks). */
+export const SYSTEM_CAP_CHARS = 64 * 1024
+/** Per-generation cap on the captured non-system messages together. */
 export const GENERATION_INPUT_CAP_CHARS = 48 * 1024
 /** Cap on structured input/output (tool args, agent IO), in JSON bytes. */
 export const PAYLOAD_CAP_BYTES = 4096
 export const MAX_OBSERVATIONS_PER_TRACE = 400
 export const MAX_SCORES_PER_TRACE = 50
 /** All captured content of one trace together (bounds scrub CPU and POST size). */
-export const TRACE_CONTENT_BUDGET_CHARS = 128 * 1024
+export const TRACE_CONTENT_BUDGET_CHARS = 256 * 1024
 const BUDGET_EXHAUSTED = '[trace content budget exhausted]'
 
 const env = (name: string): string | undefined => process.env[name]?.trim() || undefined
@@ -181,19 +184,39 @@ function safeMetadata(meta: Record<string, string | number | boolean> | undefine
   return out
 }
 
-type Budget = { left: number }
+/** Per-trace capture state: the content budget plus the system prompts already
+ *  captured in full (sha256 prefix -> name of the first observation). */
+type Budget = { left: number; systems: Map<string, string> }
+/** What was cut from one observation's input or output. */
+type Cut = { chars: number; truncated: boolean }
 type Msg = { role: string; content: string; reasoning?: string }
 const isMsg = (v: unknown): v is Msg => {
   const o = v as Record<string, unknown> | null
   return typeof o === 'object' && o !== null && typeof o.role === 'string' && typeof o.content === 'string'
 }
 
-/** Chat messages keep their readable text (16 KB each, 48 KB together). */
-function scrubMessages(msgs: Msg[]): Msg[] {
+/** Chat messages keep their readable text. The first copy of a system prompt in
+ *  a trace is captured whole (64 KB); a later identical one (every Copilot step
+ *  re-sends it) becomes a one-line pointer and costs no budget. Other roles get
+ *  16 KB each and 48 KB together. */
+function scrubMessages(msgs: Msg[], budget: Budget, name: string, cut: Cut): Msg[] {
   let left = GENERATION_INPUT_CAP_CHARS
   return msgs.map((m) => {
-    const content = scrubText(m.content, Math.max(0, Math.min(CONTENT_CAP_CHARS, left)))
-    left -= content.length
+    cut.chars += m.content.length
+    let content: string
+    if (m.role === 'system') {
+      const hash = createHash('sha256').update(m.content).digest('hex').slice(0, 8)
+      const first = budget.systems.get(hash)
+      if (first !== undefined) content = `[system prompt identical to ${first}, sha256:${hash}]`
+      else {
+        budget.systems.set(hash, name)
+        content = scrubText(m.content, SYSTEM_CAP_CHARS)
+      }
+    } else {
+      content = scrubText(m.content, Math.max(0, Math.min(CONTENT_CAP_CHARS, left)))
+      left -= content.length
+    }
+    if (content.endsWith('…[truncated]')) cut.truncated = true
     return {
       role: clean(m.role, 20),
       content,
@@ -202,19 +225,28 @@ function scrubMessages(msgs: Msg[]): Msg[] {
   })
 }
 
-/** Input/output of one observation, charged against the trace budget. */
-function scrubIo(value: unknown, budget: Budget): unknown {
+/** Input/output of one observation, charged against the trace budget (a
+ *  generation's output is exempt: small, and the decision you most need). */
+function scrubIo(value: unknown, budget: Budget, name: string, cut: Cut, exempt = false): unknown {
   if (value === undefined) return undefined
-  if (budget.left <= 0) return BUDGET_EXHAUSTED
+  if (!exempt && budget.left <= 0) {
+    cut.truncated = true
+    return BUDGET_EXHAUSTED
+  }
   let out: unknown
-  if (typeof value === 'string') out = scrubText(value)
-  else if (isMsg(value)) out = scrubMessages([value])[0]
-  else if (Array.isArray(value) && value.length > 0 && value.every(isMsg)) out = scrubMessages(value)
+  if (typeof value === 'string') {
+    cut.chars += value.length
+    out = scrubText(value)
+    if (value.length > CONTENT_CAP_CHARS) cut.truncated = true
+  } else if (isMsg(value)) out = scrubMessages([value], budget, name, cut)[0]
+  else if (Array.isArray(value) && value.length > 0 && value.every(isMsg)) out = scrubMessages(value, budget, name, cut)
   else out = scrubPayload(value)
-  try {
-    budget.left -= JSON.stringify(out)?.length ?? 0
-  } catch {
-    budget.left = 0
+  if (!exempt) {
+    try {
+      budget.left -= JSON.stringify(out)?.length ?? 0
+    } catch {
+      budget.left = 0
+    }
   }
   return out
 }
@@ -244,7 +276,14 @@ const hasUsage = (t: LfType) => t === 'generation' || t === 'embedding'
 function toAttributes(r: SpanRecord, budget: Budget, capture: boolean): Attrs {
   const lf: LfPayload = r.lf ?? {}
   const type = typeOf(r)
+  const name = safeName(lf.name ?? r.name)
   const metadata: Record<string, string | number | boolean> = { kind: r.kind, ...safeMetadata(lf.metadata) }
+  const inCut: Cut = { chars: 0, truncated: false }
+  const outCut: Cut = { chars: 0, truncated: false }
+  const input = capture ? scrubIo(lf.input, budget, name, inCut) : undefined
+  const output = capture ? scrubIo(lf.output, budget, name, outCut, type === 'generation') : undefined
+  if (inCut.truncated) Object.assign(metadata, { input_chars: inCut.chars, input_truncated: true })
+  if (outCut.truncated) Object.assign(metadata, { output_chars: outCut.chars, output_truncated: true })
   if (r.run_id) metadata.run_id = r.run_id
   if (capture) {
     for (const [k, v] of Object.entries(lf.detail ?? {})) if (NAME_RE.test(k)) metadata[k] = clean(v, 200)
@@ -259,8 +298,8 @@ function toAttributes(r: SpanRecord, budget: Budget, capture: boolean): Attrs {
       ? clean(`${code ?? 'error'}: ${lf.errorMessage}`, 500)
       : code
   return {
-    ...(capture && lf.input !== undefined ? { input: scrubIo(lf.input, budget) } : {}),
-    ...(capture && lf.output !== undefined ? { output: scrubIo(lf.output, budget) } : {}),
+    ...(input !== undefined ? { input } : {}),
+    ...(output !== undefined ? { output } : {}),
     metadata,
     version: lf.version ? clean(lf.version, 64) : undefined,
     level,
@@ -375,11 +414,12 @@ async function getLangfuse(): Promise<Lf | null> {
 }
 
 async function init(): Promise<Lf> {
-  const [{ LangfuseSpanProcessor }, { BasicTracerProvider, AlwaysOnSampler }, tracing, { LangfuseClient }] = await Promise.all([
+  const [{ LangfuseSpanProcessor }, { BasicTracerProvider, AlwaysOnSampler }, tracing, { LangfuseClient }, { resourceFromAttributes }] = await Promise.all([
     import('@langfuse/otel'),
     import('@opentelemetry/sdk-trace-base'),
     import('@langfuse/tracing'),
     import('@langfuse/client'),
+    import('@opentelemetry/resources'),
   ])
   const creds = { publicKey: env('LANGFUSE_PUBLIC_KEY'), secretKey: env('LANGFUSE_SECRET_KEY'), baseUrl: env('LANGFUSE_BASE_URL') }
   const processor = new LangfuseSpanProcessor({
@@ -396,7 +436,12 @@ async function init(): Promise<Lf> {
     // exact keys langfuse.observation.input / output / metadata, as stringified JSON.
     mask: ({ data }) => (typeof data === 'string' ? redactString(data.slice(0, 256 * 1024)) : data),
   })
-  const provider = new BasicTracerProvider({ sampler: new AlwaysOnSampler(), spanProcessors: [processor] })
+  const provider = new BasicTracerProvider({
+    sampler: new AlwaysOnSampler(),
+    spanProcessors: [processor],
+    // A meaningful service name instead of unknown_service:/usr/local/bin/node.
+    resource: resourceFromAttributes({ 'service.name': 'cello-web' }),
+  })
   // Isolated: never provider.register(), Sentry owns the global one.
   tracing.setLangfuseTracerProvider(provider)
   return {
@@ -426,7 +471,7 @@ async function send(buffer: SpanBuffer, all: SpanRecord[], allScores: PendingSco
   const traceHex = buffer.traceId.replace(/-/g, '')
   const scores = allScores.slice(0, MAX_SCORES_PER_TRACE)
   const traceAttrs = buildTraceAttrs(buffer, rows, { observations: dropped, scores: allScores.length - scores.length })
-  const budget: Budget = { left: TRACE_CONTENT_BUDGET_CHARS }
+  const budget: Budget = { left: TRACE_CONTENT_BUDGET_CHARS, systems: new Map() }
   const byId = new Map<string, Obs>()
   const rowsById = new Map(rows.map((r) => [r.span_id, r]))
 

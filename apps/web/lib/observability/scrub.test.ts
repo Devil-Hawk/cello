@@ -348,6 +348,44 @@ describe('deepScrub: short secret key names', () => {
   })
 })
 
+describe('redactString: whole passwords and phone, SSN and card numbers', () => {
+  it('a bare password is redacted whole, ampersand included', () => {
+    expect(redactString('password: a&b')).toBe('password: [redacted]')
+    expect(redactString('password=a&b')).toBe('password=[redacted]')
+    expect(redactString('my password: Tr0ub4dor&3-fake')).toBe('my password: [redacted]')
+    expect(redactString('password=Tr0ub4dor&3-fake&next=1')).not.toContain('3-fake')
+    expect(redactString('DB_PASSWORD=x&yzzz')).not.toContain('yzzz')
+    expect(redactString('{"password": "a&b c"}')).toBe('{"password": "[redacted]"}')
+  })
+
+  it('masks phone numbers in the usual shapes', () => {
+    for (const p of ['+1 (555) 010-0199', '+1 415 555 0132', '(415) 555-0132', '415.555.0132', '415-555-0132']) {
+      expect(redactString(`call ${p} today`)).toBe('call [redacted-phone] today')
+    }
+  })
+
+  it('masks SSNs and Luhn-valid card numbers', () => {
+    expect(redactString('ssn 123-45-6789')).toBe('ssn [redacted-number]')
+    expect(redactString('card 4111 1111 1111 1111 ok')).toBe('card [redacted-number] ok')
+    expect(redactString('card 4111-1111-1111-1111')).toBe('card [redacted-number]')
+    expect(redactString('card 4111111111111111')).toBe('card [redacted-number]')
+  })
+
+  it('leaves ids, counts, timestamps, years and versions alone', () => {
+    for (const t of [
+      '5d31b5dc-1234-4abc-8def-123456789012',
+      'tokens 5683 of 1234567890',
+      'epoch 1700000000000',
+      '2024-2026 experience, 2026-10-04T12:00:00.123Z',
+      'v1.234.567.8901',
+      'card 4111 1111 1111 1112',
+      '10 000 000 users',
+    ]) {
+      expect(redactString(t)).toBe(t)
+    }
+  })
+})
+
 describe('redactString: linear time on hostile input', () => {
   const inputs: Record<string, string> = {
     'a/': 'a/'.repeat(32768),
@@ -385,6 +423,11 @@ describe('redactString: linear time on hostile input', () => {
     'escaped quote pw': '{\\\"password\\\":\\\"'.repeat(3000),
     'quoted pw tail': 'password=\"' + 'a\\\"'.repeat(30000),
     'long blob': `${'A'.repeat(500)}:${'B'.repeat(500)}:${'C'.repeat(60000)}`,
+    'password run': 'password='.repeat(8192),
+    'password long value': `password=${'a&'.repeat(30000)}`,
+    'digits': '1 '.repeat(32768),
+    'digit groups': '415-555-'.repeat(8192),
+    'long digits': '4'.repeat(65536),
   }
   for (const [name, text] of Object.entries(inputs)) {
     it(`${name} finishes fast`, () => {
