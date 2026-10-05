@@ -184,6 +184,7 @@ function fakeAdmin(options: AdminOptions): { admin: SupabaseClient; inserts: Ins
         in: () => builder,
         is: () => builder,
         or: () => builder,
+        not: () => builder,
         order: () => builder,
         limit: () => builder,
         maybeSingle: row,
@@ -256,6 +257,7 @@ function installRouteSession(rows: Record<string, unknown>): void {
         select: () => builder,
         eq: () => builder,
         or: () => builder,
+        not: () => builder,
         maybeSingle: row,
         single: row,
         then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
