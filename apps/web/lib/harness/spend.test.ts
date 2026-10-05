@@ -187,95 +187,68 @@ describe('assertWithinBudget', () => {
 })
 
 describe('recordSpend', () => {
-  it('accumulates cost onto existing spend for a known model', async () => {
-    const { admin, getPreferences } = fakeAdmin({
-      budget: { periodStart: currentPeriod(), spentUsd: 1, monthlyUsd: 10 },
-    })
+  /** recordSpend is ONE rpc now (migration 20261005000005), so the fake only
+   *  records calls. The SQL arithmetic is proven by
+   *  supabase/checks/access_codes_and_spend.sql. */
+  function rpcAdmin(result: { data?: unknown; error: { message: string } | null } = { error: null }) {
+    const rpc = vi.fn(async (_fn: string, _args: Record<string, unknown>) => ({ data: null, ...result }))
+    return { admin: { rpc } as unknown as AdminClient, rpc }
+  }
 
+  it('records the estimated cost through the atomic record_llm_spend rpc', async () => {
+    const { admin, rpc } = rpcAdmin()
     await recordSpend(admin, 'user-1', 'anthropic/claude-sonnet-5', 1_000_000, 1_000_000)
-
-    const prefs = getPreferences() as { budget: { spentUsd: number; monthlyUsd: number; periodStart: string } }
-    // 1 (existing) + 2 (in) + 10 (out) = 13.
-    expect(prefs.budget.spentUsd).toBe(13)
-    expect(prefs.budget.monthlyUsd).toBe(10)
-    expect(prefs.budget.periodStart).toBe(currentPeriod())
+    expect(rpc).toHaveBeenCalledTimes(1)
+    // 2 (in) + 10 (out) = 12.
+    expect(rpc).toHaveBeenCalledWith('record_llm_spend', { p_user_id: 'user-1', p_cost: 12 })
   })
 
-  it('starts a fresh accumulation in a new billing period rather than carrying stale spend', async () => {
-    const { admin, getPreferences } = fakeAdmin({
-      budget: { periodStart: '2020-01', spentUsd: 9999, monthlyUsd: 10 },
+  it('prices an unknown model at the most expensive rate, never zero', async () => {
+    const { admin, rpc } = rpcAdmin()
+    await recordSpend(admin, 'user-1', 'unknown/model', 1_000_000, 0)
+    expect(rpc).toHaveBeenCalledWith('record_llm_spend', { p_user_id: 'user-1', p_cost: 5 })
+  })
+
+  it('never reads or rewrites the preferences blob (that was the race)', async () => {
+    const from = vi.fn()
+    const rpc = vi.fn(async () => ({ data: null, error: null }))
+    await recordSpend({ from, rpc } as unknown as AdminClient, 'user-1', 'anthropic/claude-sonnet-5', 1, 1)
+    expect(from).not.toHaveBeenCalled()
+  })
+
+  it('parallel calls each reach the database; none is dropped client-side', async () => {
+    // The database serialises on the row lock; this pins that the client fires
+    // every increment instead of coalescing or read-modify-writing them.
+    let total = 0
+    const rpc = vi.fn(async (_fn: string, args: Record<string, unknown>) => {
+      await new Promise((r) => setTimeout(r, Math.random() * 5))
+      total += args.p_cost as number
+      return { data: total, error: null }
     })
-
-    await recordSpend(admin, 'user-1', 'anthropic/claude-haiku-4.5', 1_000_000, 0)
-
-    const prefs = getPreferences() as { budget: { spentUsd: number; periodStart: string } }
-    expect(prefs.budget.spentUsd).toBe(1) // haiku in-price is 1/million, no stale 9999 carried over
-    expect(prefs.budget.periodStart).toBe(currentPeriod())
+    const admin = { rpc } as unknown as AdminClient
+    await Promise.all(
+      Array.from({ length: 10 }, () => recordSpend(admin, 'user-1', 'anthropic/claude-haiku-4.5', 100_000, 0))
+    )
+    expect(rpc).toHaveBeenCalledTimes(10)
+    expect(total).toBeCloseTo(1, 6) // 10 x $0.10
   })
 
-  it('preserves other preference keys untouched (only the budget key is replaced)', async () => {
-    const { admin, getPreferences } = fakeAdmin({
-      theme: 'dark',
-      budget: { periodStart: currentPeriod(), spentUsd: 0, monthlyUsd: 10 },
-    })
-
-    await recordSpend(admin, 'user-1', 'anthropic/claude-sonnet-5', 0, 0)
-
-    const prefs = getPreferences() as { theme: string }
-    expect(prefs.theme).toBe('dark')
-  })
-
-  it('never throws on a bookkeeping failure — a DB error is swallowed, not propagated', async () => {
-    const brokenAdmin = {
-      from() {
-        return {
-          select() {
-            return {
-              eq() {
-                return this
-              },
-              async single() {
-                throw new Error('simulated DB outage')
-              },
-            }
-          },
-        }
-      },
-    } as unknown as AdminClient
-
+  it('never throws on an rpc error, and logs loudly', async () => {
+    const { admin } = rpcAdmin({ error: { message: 'function not found' } })
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    await expect(recordSpend(brokenAdmin, 'user-1', 'anthropic/claude-sonnet-5', 100, 100)).resolves.toBeUndefined()
-    expect(consoleSpy).toHaveBeenCalled() // logged loudly, per the source comment
+    await expect(recordSpend(admin, 'user-1', 'anthropic/claude-sonnet-5', 100, 100)).resolves.toBeUndefined()
+    expect(consoleSpy).toHaveBeenCalled()
     consoleSpy.mockRestore()
   })
 
-  it('never throws even when the update step itself fails', async () => {
-    const adminUpdateFails = {
-      from() {
-        return {
-          select() {
-            return {
-              eq() {
-                return this
-              },
-              async single() {
-                return { data: { preferences: { budget: { periodStart: currentPeriod(), spentUsd: 0, monthlyUsd: 10 } } }, error: null }
-              },
-            }
-          },
-          update() {
-            return {
-              eq() {
-                throw new Error('simulated write failure')
-              },
-            }
-          },
-        }
+  it('never throws when the rpc itself throws', async () => {
+    const admin = {
+      rpc() {
+        throw new Error('simulated DB outage')
       },
     } as unknown as AdminClient
-
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    await expect(recordSpend(adminUpdateFails, 'user-1', 'anthropic/claude-sonnet-5', 100, 100)).resolves.toBeUndefined()
+    await expect(recordSpend(admin, 'user-1', 'anthropic/claude-sonnet-5', 100, 100)).resolves.toBeUndefined()
     expect(consoleSpy).toHaveBeenCalled()
     consoleSpy.mockRestore()
   })

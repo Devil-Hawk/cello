@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/tooltip'
 import { toast } from '@/components/ui/use-toast'
 import { createClient } from '@/lib/supabase/client'
+import { fetchClientSafePreferences } from '@/lib/preferences/client-safe'
 import { cn } from '@/lib/utils'
 import { useAccountStatus } from '@/hooks/use-account-status'
 import {
@@ -596,11 +597,15 @@ function JobsPageInner() {
       return
     }
 
-    const [companiesRes, applicationsRes, dossiersRes, profileRes] = await Promise.all([
+    const [companiesRes, applicationsRes, dossiersRes, safePrefs] = await Promise.all([
       supabase.from('companies').select('id, name, logo_url, domain').eq('user_id', user.id).order('name'),
       supabase.from('applications').select('job_id').eq('user_id', user.id),
       untyped.from('company_dossiers').select('company_id, sponsors_visa').eq('user_id', user.id),
-      supabase.from('profiles').select('preferences').eq('id', user.id).maybeSingle(),
+      // Never supabase.from('profiles').select('preferences') here: that returns
+      // the whole column (api_keys ciphertext, tokens) into browser memory for
+      // the targeting and budget fields this page needs. See
+      // lib/preferences/client-safe.ts.
+      fetchClientSafePreferences(untyped),
     ])
 
     if (companiesRes.data) setCompanies(companiesRes.data)
@@ -617,9 +622,9 @@ function JobsPageInner() {
       setVisaByCompany(map)
     }
 
-    setTargeting(resolveTargeting(profileRes.data?.preferences))
-    setProfileTargetTitles(resolveTargetTitles(profileRes.data?.preferences))
-    setBudgetHint(computeBudgetHint(profileRes.data?.preferences))
+    setTargeting(resolveTargeting(safePrefs))
+    setProfileTargetTitles(resolveTargetTitles(safePrefs))
+    setBudgetHint(computeBudgetHint(safePrefs))
 
     setCompaniesLoaded(true)
   }

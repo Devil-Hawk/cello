@@ -113,21 +113,14 @@ export async function recordSpend(
   completionTokens: number
 ): Promise<void> {
   try {
-    const { data } = await admin.from('profiles').select('preferences').eq('id', userId).single()
-    const preferences = ((data as { preferences?: Record<string, unknown> } | null)?.preferences ?? {}) as Record<
-      string,
-      unknown
-    >
-    const state = readState(preferences)
-    const next = {
-      ...preferences,
-      budget: {
-        periodStart: state.periodStart,
-        spentUsd: Number((state.spentUsd + estimateCostUsd(model, promptTokens, completionTokens)).toFixed(6)),
-        monthlyUsd: state.capUsd,
-      },
-    }
-    await admin.from('profiles').update({ preferences: next }).eq('id', userId)
+    // One atomic UPDATE in Postgres (migration 20261005000005): parallel calls
+    // for the same user serialise on the row lock instead of overwriting each
+    // other's read-modify-write, and only preferences.budget is touched.
+    const { error } = await admin.rpc('record_llm_spend', {
+      p_user_id: userId,
+      p_cost: estimateCostUsd(model, promptTokens, completionTokens),
+    })
+    if (error) throw error
   } catch (err) {
     console.error('[spend] failed to record LLM spend — the cap may under-count', err)
   }
