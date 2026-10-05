@@ -66,8 +66,8 @@ export interface OutreachVerifyResult {
   subject: string
   body: string
   tokensUsed: number
-  /** Empty when the judge itself could not run (no key / budget cap) — still
-   *  persisted, per this file's header; REFUSE-OVER-GUESS means an empty
+  /** Empty when the judge itself could not run (no key / budget cap, see
+   *  judgeRefused), still persisted, per this file's header; REFUSE-OVER-GUESS means an empty
    *  array here, never a substituted verdict. */
   verdicts: EvalResult[]
   /** True when the FINAL draft (after the one bounded regen, if any) still
@@ -83,6 +83,10 @@ export interface OutreachVerifyResult {
    *  same shape /api/outreach/judge's own BudgetCapError branch already uses
    *  for 'insufficient-budget'. */
   judgeUnavailable: boolean
+  /** Set when the judge refused to run for a typed, expected reason: no
+   *  OpenRouter key, or the spend cap. The caller records an 'unjudged' row
+   *  naming the reason, so an unchecked draft never looks like a checked one. */
+  judgeRefused?: 'missing-key' | 'budget-cap'
 }
 
 /**
@@ -108,7 +112,15 @@ export async function verifyOutreachDraft(args: VerifyOutreachDraftArgs): Promis
     verdicts = await judgeDraft(args.admin, args.userId, apiKeys, args.draft, sourceFacts, companyAndRole)
   } catch (err) {
     if (err instanceof BudgetCapError || err instanceof MissingKeyError) {
-      return { subject: args.draft.subject, body: args.draft.body, tokensUsed, verdicts: [], failedVerdict: false, judgeUnavailable: false }
+      return {
+        subject: args.draft.subject,
+        body: args.draft.body,
+        tokensUsed,
+        verdicts: [],
+        failedVerdict: false,
+        judgeUnavailable: false,
+        judgeRefused: err instanceof BudgetCapError ? 'budget-cap' : 'missing-key',
+      }
     }
     // Any OTHER judge failure — autoevals throwing, OpenRouter erroring (the
     // E2E case this exists for: a judge call requesting more tokens than the

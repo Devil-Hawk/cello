@@ -32,6 +32,7 @@ interface VerifiedFixture {
   verdicts: unknown[]
   failedVerdict: boolean
   judgeUnavailable: boolean
+  judgeRefused?: 'missing-key' | 'budget-cap'
 }
 let verified: VerifiedFixture
 const verifyOutreachDraftMock = vi.fn(async (..._args: unknown[]) => verified)
@@ -137,6 +138,22 @@ describe('POST — a broke judge cannot take the draft down with it', () => {
     // A refusal never carries a substituted score.
     for (const call of writeVerdictMock.mock.calls) {
       expect((call[1] as { score?: number }).score).toBeUndefined()
+    }
+  })
+
+  it.each([
+    ['missing-key', /no OpenRouter key/],
+    ['budget-cap', /spend cap/],
+  ] as const)('writes an unjudged row for both judges when the judge refused (%s), with the reason', async (judgeRefused, reason) => {
+    verified = { subject: 'Hi', body: 'Draft body', tokensUsed: 10, verdicts: [], failedVerdict: false, judgeUnavailable: false, judgeRefused }
+
+    const response = await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
+
+    expect(response.status).toBe(200)
+    expect(writeVerdictMock).toHaveBeenCalledTimes(2)
+    for (const call of writeVerdictMock.mock.calls) {
+      expect(call[1]).toMatchObject({ subjectKind: 'outreach_draft', subjectId: 'msg-1', verdict: 'unjudged' })
+      expect((call[1] as { rationale: string }).rationale).toMatch(reason)
     }
   })
 

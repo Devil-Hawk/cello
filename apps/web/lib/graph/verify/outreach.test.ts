@@ -143,6 +143,7 @@ describe('verifyOutreachDraft — judge unavailable', () => {
     expect(result.body).toBe('Original body')
     expect(result.verdicts).toEqual([])
     expect(result.failedVerdict).toBe(false)
+    expect(result.judgeRefused).toBe('budget-cap')
   })
 
   it('a missing judge key returns the original draft with empty verdicts', async () => {
@@ -152,6 +153,7 @@ describe('verifyOutreachDraft — judge unavailable', () => {
 
     const result = await verifyOutreachDraft(baseArgs())
     expect(result.verdicts).toEqual([])
+    expect(result.judgeRefused).toBe('missing-key')
   })
 })
 

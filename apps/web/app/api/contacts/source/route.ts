@@ -48,9 +48,10 @@ import { resolveCompanyId } from '@/lib/entities/companies'
 export const dynamic = 'force-dynamic'
 // The free path now makes real outbound requests (the company's own public
 // pages, six in parallel at a 6s timeout each) on top of the DB reads and any
-// BYOK provider calls. 30s still comfortably covers the worst case; it is
-// stated here so the budget is a decision rather than a default.
-export const maxDuration = 30
+// BYOK provider calls, which add up to a 8s domain search, a 6s email finder
+// per target, a second 8s Apollo search and a 6s verify, one after another.
+// That can pass 30s, so the budget is 60s like the other outbound routes.
+export const maxDuration = 60
 
 const BodySchema = z.object({
   companyId: z.string().min(1),

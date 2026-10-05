@@ -17,7 +17,7 @@ import { readOutreachConfig } from '@/lib/outreach/config'
 import { getOutreach, updateOutreach, countSentToday } from '@/lib/outreach/store'
 import { canSendNow, checkDailyCap, followUpWindowElapsed } from '@/lib/outreach/guardrails'
 import { demoSendGate, firstRefusal, type DemoProfileFacts } from '@/lib/access/guardrails'
-import { isGmailAuthError, sendGmailMessage, threadHasReply } from '@/lib/outreach/gmail'
+import { REPLY_CHECK_UNKNOWN_MESSAGE, isGmailAuthError, sendGmailMessage, threadHasReply } from '@/lib/outreach/gmail'
 import { resolveGmailAccessToken } from '@/lib/gmail/token'
 import { logApiError } from '@/lib/observability/log'
 
@@ -161,9 +161,14 @@ export async function POST(request: NextRequest) {
     const threadId = parent?.gmail_thread_id ?? message.gmail_thread_id
     // replied_at is what the reply sync stamped; the live thread check is the
     // fresher second opinion. Either one suppresses the follow-up.
-    if (parent?.replied_at || (threadId && (await threadHasReply(accessToken, threadId, userEmail)))) {
-      await updateOutreach(admin, user.id, id, { status: 'skipped', error: 'contact already replied — follow-up suppressed' })
+    const replyState = parent?.replied_at ? 'replied' : threadId ? await threadHasReply(accessToken, threadId, userEmail) : 'none'
+    if (replyState === 'replied') {
+      await updateOutreach(admin, user.id, id, { status: 'skipped', error: 'contact already replied, follow-up suppressed' })
       return NextResponse.json({ ok: false, skipped: true, reason: 'contact already replied' })
+    }
+    // Unknown is not "replied": leave the draft pending and say what is missing.
+    if (replyState === 'unknown') {
+      return NextResponse.json({ error: REPLY_CHECK_UNKNOWN_MESSAGE, needsPermission: 'monitor' }, { status: 403 })
     }
     parentThread = parent?.gmail_thread_id ?? null
   }

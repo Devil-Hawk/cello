@@ -64,7 +64,7 @@ vi.mock('@/lib/outreach/gmail', async (importOriginal) => ({
 vi.mock('@/lib/observability/log', () => ({ logApiError: vi.fn() }))
 
 import { POST } from './route'
-import { GmailSendError } from '@/lib/outreach/gmail'
+import { GmailSendError, REPLY_CHECK_UNKNOWN_MESSAGE } from '@/lib/outreach/gmail'
 
 function row(over: Partial<OutreachMessageRow>): OutreachMessageRow {
   return {
@@ -109,7 +109,7 @@ beforeEach(() => {
   rows = { 'msg-1': row({}) }
   resolveTokenMock.mockResolvedValue({ ok: true, accessToken: 'stored-token' })
   sendGmailMessageMock.mockResolvedValue({ id: 'gm-1', threadId: 'th-1' })
-  threadHasReplyMock.mockResolvedValue(false)
+  threadHasReplyMock.mockResolvedValue('none')
   updateOutreachMock.mockResolvedValue(row({ status: 'sent' }))
 })
 
@@ -218,5 +218,24 @@ describe('follow-ups', () => {
     expect(res.status).toBe(200)
     expect(threadHasReplyMock).toHaveBeenCalledWith('stored-token', 'th-0', 'alex@example.com')
     expect(sendGmailMessageMock).toHaveBeenCalledWith(expect.objectContaining({ threadId: 'th-0' }))
+  })
+
+  it('does not call a Gmail 403 on the thread "already replied": the draft stays pending and the user is told what is missing', async () => {
+    const realFetch = global.fetch
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 403, text: async () => 'insufficient scopes' }) as unknown as typeof fetch
+    const actual = await vi.importActual<typeof import('@/lib/outreach/gmail')>('@/lib/outreach/gmail')
+    threadHasReplyMock.mockImplementation(actual.threadHasReply)
+    try {
+      const res = await POST(post({ id: 'msg-1', approve: true }))
+      const body = await res.json()
+
+      expect(res.status).toBe(403)
+      expect(body.error).toBe(REPLY_CHECK_UNKNOWN_MESSAGE)
+      expect(body.skipped).toBeUndefined()
+      expect(updateOutreachMock).not.toHaveBeenCalled()
+      expect(sendGmailMessageMock).not.toHaveBeenCalled()
+    } finally {
+      global.fetch = realFetch
+    }
   })
 })

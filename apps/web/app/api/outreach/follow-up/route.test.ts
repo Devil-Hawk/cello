@@ -40,12 +40,16 @@ vi.mock('@/lib/outreach/store', () => ({
 const resolveTokenMock = vi.fn()
 vi.mock('@/lib/gmail/token', () => ({ resolveGmailAccessToken: (...a: unknown[]) => resolveTokenMock(...a) }))
 const threadHasReplyMock = vi.fn()
-vi.mock('@/lib/outreach/gmail', () => ({ threadHasReply: (...a: unknown[]) => threadHasReplyMock(...a) }))
+vi.mock('@/lib/outreach/gmail', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/outreach/gmail')>()),
+  threadHasReply: (...a: unknown[]) => threadHasReplyMock(...a),
+}))
 
 const runUnitOnceMock = vi.fn(async (..._a: unknown[]) => ({ output: { subject: 'Following up', body: 'Hi again', tokensUsed: 12 } }))
 vi.mock('@/lib/graph/oneshot', () => ({ runUnitOnce: (...a: unknown[]) => runUnitOnceMock(...a) }))
 
 import { POST } from './route'
+import { REPLY_CHECK_UNKNOWN_MESSAGE } from '@/lib/outreach/gmail'
 
 const post = () =>
   POST(
@@ -74,7 +78,7 @@ beforeEach(() => {
     company_id: null,
   }
   resolveTokenMock.mockResolvedValue({ ok: true, accessToken: 'stored-token' })
-  threadHasReplyMock.mockResolvedValue(false)
+  threadHasReplyMock.mockResolvedValue('none')
 })
 
 describe('the reply gate', () => {
@@ -101,13 +105,32 @@ describe('the reply gate', () => {
   })
 
   it('checks the live thread with the resolved token and skips when the contact replied', async () => {
-    threadHasReplyMock.mockResolvedValue(true)
+    threadHasReplyMock.mockResolvedValue('replied')
 
     const body = await (await post()).json()
 
     expect(threadHasReplyMock).toHaveBeenCalledWith('stored-token', 'th-1', 'alex@example.com')
     expect(body).toMatchObject({ ok: false, skipped: true })
     expect(insertOutreachMock).not.toHaveBeenCalled()
+  })
+
+  it('does not call a Gmail 403 on the thread "already replied": it explains the missing permission and drafts nothing', async () => {
+    const realFetch = global.fetch
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 403, text: async () => 'insufficient scopes' }) as unknown as typeof fetch
+    const actual = await vi.importActual<typeof import('@/lib/outreach/gmail')>('@/lib/outreach/gmail')
+    threadHasReplyMock.mockImplementation(actual.threadHasReply)
+    try {
+      const res = await post()
+      const body = await res.json()
+
+      expect(res.status).toBe(403)
+      expect(body.error).toBe(REPLY_CHECK_UNKNOWN_MESSAGE)
+      expect(body.skipped).toBeUndefined()
+      expect(runUnitOnceMock).not.toHaveBeenCalled()
+      expect(insertOutreachMock).not.toHaveBeenCalled()
+    } finally {
+      global.fetch = realFetch
+    }
   })
 
   it('drafts the follow-up into review when there is no reply, recording whether a model wrote it', async () => {

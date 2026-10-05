@@ -1,117 +1,202 @@
-// /auth/callback: two things that were wrong:
-//   - the Google refresh token was only kept when gmail.readonly was granted, so a
-//     send-only user had nothing to send with once the one-hour token died;
-//   - ?next= was ignored, so the incremental Gmail grant started in Settings
-//     landed on the dashboard.
+// The one place a Google `provider_refresh_token` is ever seen — persisting
+// it (encrypted, same helper as api_keys) alongside the "monitor mailbox"
+// grant it belongs to. A gmail.readonly grant also records the monitor tier; a
+// gmail.send-only grant keeps the token (so an approved message can still be
+// sent after the one-hour session token dies) but switches no permission on.
+// Everything else (identity-only sign-in, a write the demo lockdown trigger
+// refuses) must be a no-op that still redirects, never blocking sign-in.
+// ?next= sends the user back where the grant started, same-site paths only.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
-import { decrypt } from '@/lib/crypto'
+import { isEncrypted, decrypt } from '@/lib/crypto'
 
-const SEND = 'https://www.googleapis.com/auth/gmail.send'
-const READ = 'https://www.googleapis.com/auth/gmail.readonly'
+const exchangeCodeForSession = vi.fn()
+let profileRow: Record<string, unknown> | null
+let writeError: { code?: string; message?: string } | null
+const writes: Record<string, unknown>[] = []
+const reads: string[] = []
 
-let scopes: string[]
-let session: { provider_token?: string; provider_refresh_token?: string } | null
-let preferences: Record<string, unknown>
-let writes: Record<string, unknown>[]
+vi.mock('next/headers', () => ({
+  cookies: async () => ({ get: () => undefined, set: () => {}, delete: () => {} }),
+}))
 
-vi.mock('next/headers', () => ({ cookies: async () => ({ get: () => undefined, set: () => {}, delete: () => {} }) }))
 vi.mock('@supabase/ssr', () => ({
   createServerClient: () => ({
-    auth: {
-      exchangeCodeForSession: async () => ({ data: { user: { id: 'user-1' }, session }, error: null }),
-    },
-    from: () => ({
-      select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { preferences }, error: null }) }) }),
+    auth: { exchangeCodeForSession: (...args: unknown[]) => exchangeCodeForSession(...args) },
+    from: (_table: string) => ({
+      select: (columns: string) => {
+        reads.push(columns)
+        return {
+          eq: () => ({
+            maybeSingle: async () => ({ data: profileRow, error: null }),
+          }),
+        }
+      },
       update: (patch: Record<string, unknown>) => ({
         eq: async () => {
+          if (writeError) return { data: null, error: writeError }
           writes.push(patch)
-          return { error: null }
+          profileRow = { ...(profileRow ?? {}), ...patch }
+          return { data: null, error: null }
         },
       }),
     }),
   }),
 }))
-vi.mock('@/lib/gmail/permissions', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/gmail/permissions')>()),
-  fetchGrantedGoogleScopes: async () => scopes,
-}))
 
 import { GET } from './route'
 
-function callback(query: string) {
-  return GET(new NextRequest(`http://localhost:3000/auth/callback${query}`))
+const ORIGINAL_FETCH = global.fetch
+const READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
+
+/** Controls what Google's tokeninfo endpoint (fetchGrantedGoogleScopes) reports. */
+function mockGrantedScopes(scopes: string[]) {
+  global.fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ scope: scopes.join(' ') }),
+  }) as unknown as typeof fetch
 }
 
-const saved = () => (writes[0]?.preferences ?? {}) as Record<string, any>
+function request() {
+  return new NextRequest('http://localhost/auth/callback?code=abc123')
+}
 
 beforeEach(() => {
-  scopes = []
-  session = { provider_token: 'google-access', provider_refresh_token: 'google-refresh' }
-  preferences = {}
-  writes = []
+  profileRow = { preferences: { model: 'gpt-5' } }
+  writeError = null
+  writes.length = 0
+  reads.length = 0
+  exchangeCodeForSession.mockReset()
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
-describe('persisting the Google refresh token', () => {
-  it('keeps it for a SEND-only grant, encrypted, without switching any permission on', async () => {
-    scopes = [SEND]
-    preferences = { api_keys: { openrouter: 'enc:x' } }
-
-    await callback('?code=abc')
-
-    expect(writes).toHaveLength(1)
-    expect(decrypt(saved().gmail_sync.refreshToken)).toBe('google-refresh')
-    expect(saved().gmail_sync.revokedAt).toBeNull()
-    expect(saved().gmail_permissions).toBeUndefined() // the send toggle stays the user's own
-    expect(saved().api_keys).toEqual({ openrouter: 'enc:x' })
-  })
-
-  it('still keeps it for the monitor grant, and records that tier as before', async () => {
-    scopes = [READ]
-
-    await callback('?code=abc')
-
-    expect(decrypt(saved().gmail_sync.refreshToken)).toBe('google-refresh')
-    expect(saved().gmail_permissions.monitor.enabled).toBe(true)
-  })
-
-  it('stores nothing for an identity-only sign-in (no Gmail scope granted)', async () => {
-    scopes = ['openid', 'email']
-    await callback('?code=abc')
-    expect(writes).toEqual([])
-  })
-
-  it('stores nothing when Google handed back no refresh token', async () => {
-    scopes = [SEND]
-    session = { provider_token: 'google-access' }
-    await callback('?code=abc')
-    expect(writes).toEqual([])
-  })
+afterEach(() => {
+  global.fetch = ORIGINAL_FETCH
+  vi.restoreAllMocks()
 })
 
-describe('where the user lands', () => {
-  it('goes to the dashboard by default', async () => {
-    const res = await callback('?code=abc')
-    expect(new URL(res.headers.get('location')!).pathname).toBe('/dashboard')
+describe('GET /auth/callback', () => {
+  it('redirects to /dashboard with no code param, touching nothing', async () => {
+    exchangeCodeForSession.mockResolvedValue({ data: {}, error: null })
+    const response = await GET(new NextRequest('http://localhost/auth/callback'))
+    expect(response.status).toBe(307)
+    expect(response.headers.get('location')).toContain('/dashboard')
+    expect(exchangeCodeForSession).not.toHaveBeenCalled()
+    expect(writes).toEqual([])
+  })
+
+  it('identity-only sign-in (no provider_refresh_token) never touches the profile', async () => {
+    exchangeCodeForSession.mockResolvedValue({
+      data: { user: { id: 'user-1' }, session: { provider_token: 'ya29.x', provider_refresh_token: null } },
+      error: null,
+    })
+    const response = await GET(request())
+    expect(response.status).toBe(307)
+    expect(reads).toEqual([])
+    expect(writes).toEqual([])
+  })
+
+  it('a refresh token present but no Gmail scope in the LIVE grant (identity only) writes nothing', async () => {
+    mockGrantedScopes(['openid', 'email'])
+    exchangeCodeForSession.mockResolvedValue({
+      data: { user: { id: 'user-1' }, session: { provider_token: 'ya29.x', provider_refresh_token: 'refresh-1' } },
+      error: null,
+    })
+    const response = await GET(request())
+    expect(response.status).toBe(307)
+    expect(writes).toEqual([])
+  })
+
+  it('a SEND-only grant keeps the refresh token encrypted and switches no permission on', async () => {
+    mockGrantedScopes(['https://www.googleapis.com/auth/gmail.send'])
+    exchangeCodeForSession.mockResolvedValue({
+      data: { user: { id: 'user-1' }, session: { provider_token: 'ya29.x', provider_refresh_token: 'send-refresh' } },
+      error: null,
+    })
+    profileRow = { preferences: { model: 'gpt-5' } }
+
+    await GET(request())
+
+    expect(writes).toHaveLength(1)
+    const preferences = writes[0].preferences as Record<string, unknown>
+    const gmailSync = preferences.gmail_sync as { refreshToken: string; revokedAt: string | null }
+    expect(decrypt(gmailSync.refreshToken)).toBe('send-refresh')
+    expect(JSON.stringify(preferences)).not.toContain('"send-refresh"')
+    expect(gmailSync.revokedAt).toBeNull()
+    expect(preferences.gmail_permissions).toBeUndefined()
+    expect(preferences.model).toBe('gpt-5')
+  })
+
+  it('THE POINT: gmail.readonly granted + a refresh token persists it encrypted and records the monitor grant in one write', async () => {
+    mockGrantedScopes([READONLY_SCOPE])
+    exchangeCodeForSession.mockResolvedValue({
+      data: { user: { id: 'user-1' }, session: { provider_token: 'ya29.x', provider_refresh_token: 'the-raw-refresh-token' } },
+      error: null,
+    })
+    profileRow = { preferences: { model: 'gpt-5', budget: { monthlyUsd: 10 } } }
+
+    const response = await GET(request())
+    expect(response.status).toBe(307)
+    expect(response.headers.get('location')).toContain('/dashboard')
+
+    expect(writes).toHaveLength(1)
+    const preferences = writes[0].preferences as Record<string, unknown>
+
+    // Never the raw token, anywhere in the write.
+    expect(JSON.stringify(preferences)).not.toContain('the-raw-refresh-token')
+
+    const gmailSync = preferences.gmail_sync as { refreshToken: string; revokedAt: string | null }
+    expect(isEncrypted(gmailSync.refreshToken)).toBe(true)
+    expect(decrypt(gmailSync.refreshToken)).toBe('the-raw-refresh-token')
+    expect(gmailSync.revokedAt).toBeNull()
+
+    const monitor = (preferences.gmail_permissions as { monitor: { enabled: boolean; grantedAt: string | null } }).monitor
+    expect(monitor.enabled).toBe(true)
+    expect(monitor.grantedAt).toEqual(expect.any(String))
+
+    // Untouched neighbours survive the read-modify-write.
+    expect(preferences.model).toBe('gpt-5')
+    expect(preferences.budget).toEqual({ monthlyUsd: 10 })
+  })
+
+  it('a write the demo lockdown trigger refuses (42501) is swallowed — sign-in still completes', async () => {
+    mockGrantedScopes([READONLY_SCOPE])
+    writeError = { code: '42501', message: 'demo profiles cannot change Gmail sync state' }
+    exchangeCodeForSession.mockResolvedValue({
+      data: { user: { id: 'demo-1' }, session: { provider_token: 'ya29.x', provider_refresh_token: 'refresh-2' } },
+      error: null,
+    })
+
+    const response = await GET(request())
+    expect(response.status).toBe(307)
+    expect(response.headers.get('location')).toContain('/dashboard')
+  })
+
+  it('an exchange error skips persistence entirely', async () => {
+    exchangeCodeForSession.mockResolvedValue({ data: {}, error: { message: 'bad code' } })
+    const response = await GET(request())
+    expect(response.status).toBe(307)
+    expect(reads).toEqual([])
+    expect(writes).toEqual([])
   })
 
   it('goes back to a same-site next path, query included', async () => {
-    const res = await callback('?code=abc&next=%2Fsettings%3Ftab%3Dconnections')
-    const to = new URL(res.headers.get('location')!)
-    expect(to.origin).toBe('http://localhost:3000')
+    exchangeCodeForSession.mockResolvedValue({ data: {}, error: null })
+    const response = await GET(new NextRequest('http://localhost/auth/callback?code=abc&next=%2Fsettings%3Ftab%3Dconnections'))
+    const to = new URL(response.headers.get('location')!)
+    expect(to.origin).toBe('http://localhost')
     expect(to.pathname + to.search).toBe('/settings?tab=connections')
   })
 
   it.each(['https://evil.example/', '//evil.example/', '/\\evil.example', '/\t/evil.example'])(
     'ignores the off-site next %s',
     async (next) => {
-      const res = await callback(`?code=abc&next=${encodeURIComponent(next)}`)
-      const to = new URL(res.headers.get('location')!)
-      expect(to.origin).toBe('http://localhost:3000')
+      exchangeCodeForSession.mockResolvedValue({ data: {}, error: null })
+      const response = await GET(new NextRequest(`http://localhost/auth/callback?code=abc&next=${encodeURIComponent(next)}`))
+      const to = new URL(response.headers.get('location')!)
+      expect(to.origin).toBe('http://localhost')
       expect(to.pathname).toBe('/dashboard')
-      expect(to.hostname).not.toBe('evil.example')
     }
   )
 })

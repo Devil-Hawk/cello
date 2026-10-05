@@ -1258,7 +1258,7 @@ async function doDraftOutreach(ctx: CopilotToolContext, args: Args) {
     subject: draft.subject,
     body: draft.body,
     usedLlm,
-    note: 'Preview only — save/send it from the Contacts page to enforce the send guardrails.',
+    note: 'Preview only. Nothing was saved or sent. To draft a real one, use Draft outreach on a contact in a job or company page; it lands in the Outreach tab of the queue, where the send guardrails apply.',
   }
 }
 

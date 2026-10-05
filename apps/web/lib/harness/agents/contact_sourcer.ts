@@ -5,19 +5,11 @@
 // Hunter/Apollo are opt-in BYOK enhancements. See lib/contacts/sources.ts for
 // the full design and the provenance/verified guarantees.
 //
-// COORDINATION NOTE (not yet wired into the DAG): 'contact_sourcer' is NOT in
-// AGENT_TYPES/STEP_AGENT_TYPES (lib/harness/schemas.ts) or registry.ts
-// (lib/harness/registry.ts) — those are owned by the engine workstream. This
-// file is shaped exactly like every other AgentFn (lib/harness/types.ts) so
-// wiring it in is a small, mechanical change once that workstream is ready:
-//   1. add 'contact_sourcer' to AGENT_TYPES + STEP_AGENT_TYPES in schemas.ts
-//   2. add ContactSourcerInput/ContactSourcerOutput (below) to schemas.ts's
-//      agentSchemas map (the zod shapes here already match 1:1)
-//   3. import { contact_sourcer } from './agents/contact_sourcer' and add it
-//      to the `registry` map in registry.ts
-// Until then this agent is fully callable directly — see
-// app/api/contacts/source/route.ts, which calls the SAME core
-// (sourceContactsForCompany) this file wraps, so both paths stay in sync.
+// Wired: 'contact_sourcer' is in AGENT_TYPES/STEP_AGENT_TYPES (schemas.ts) and
+// the registry (registry.ts), and the schemas here match the agentSchemas map
+// 1:1. It is also callable directly: app/api/contacts/source/route.ts calls the
+// SAME core (sourceContactsForCompany) this file wraps, so both paths stay in
+// sync.
 //
 // SAFETY: this agent only ever calls sourceContactsForCompany, which persists
 // contacts rows and NEVER sends an email or exposes a send path. Turning a

@@ -9,7 +9,7 @@ import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { readOutreachConfig } from '@/lib/outreach/config'
 import { getOutreach, findFollowUp, insertOutreach } from '@/lib/outreach/store'
 import { followUpWindowElapsed } from '@/lib/outreach/guardrails'
-import { threadHasReply } from '@/lib/outreach/gmail'
+import { REPLY_CHECK_UNKNOWN_MESSAGE, threadHasReply } from '@/lib/outreach/gmail'
 import { resolveGmailAccessToken } from '@/lib/gmail/token'
 import type { OutreachDraftInput } from '@/lib/harness/agents/outreach'
 import { runUnitOnce } from '@/lib/graph/oneshot'
@@ -82,8 +82,15 @@ export async function POST(request: NextRequest) {
           { status: 401 }
         )
       }
-      if (await threadHasReply(token.accessToken, parent.gmail_thread_id, user.email || '')) {
+      const replyState = await threadHasReply(token.accessToken, parent.gmail_thread_id, user.email || '')
+      if (replyState === 'replied') {
         return NextResponse.json({ ok: false, skipped: true, reason: 'contact already replied' })
+      }
+      if (replyState === 'unknown') {
+        return NextResponse.json(
+          { error: REPLY_CHECK_UNKNOWN_MESSAGE, needsPermission: 'monitor' },
+          { status: 403 }
+        )
       }
     }
 
