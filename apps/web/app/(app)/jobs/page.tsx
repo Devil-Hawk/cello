@@ -39,6 +39,7 @@ import {
 } from '@/components/jobs/facet-chips'
 import { JobRow, type JobRowJob } from '@/components/jobs/job-row'
 import { RefreshJobsButton } from '@/components/jobs/refresh-button'
+import { FindNewRoles } from '@/components/jobs/find-new-roles'
 import { JobDetailModal } from '@/components/jobs/job-detail-modal'
 import { ProvenanceSummaryBar } from '@/components/jobs/provenance-summary-bar'
 import { JOB_FUNCTIONS, QUALITY_REJECT_THRESHOLD, SENIORITY_LEVELS } from '@/lib/jobs/classify'
@@ -1151,6 +1152,7 @@ function JobsPageInner() {
               </TooltipProvider>
             )
           })()}
+          {companies.length > 0 && <FindNewRoles />}
           {companies.length > 0 && <RefreshJobsButton onRefreshed={refreshAll} />}
         </div>
       </div>

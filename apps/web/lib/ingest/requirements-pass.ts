@@ -13,7 +13,6 @@ import { completeRequirements } from '../jobs/requirements-model'
 import { RequirementsSchema, parseRequirements, type Requirements } from '../jobs/requirements'
 import type { ModelBudget, ModelCall } from './model'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = SupabaseClient<any, any, any>
 
 export interface PendingJob {

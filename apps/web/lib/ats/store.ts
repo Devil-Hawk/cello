@@ -12,7 +12,6 @@ import type { AtsStore, ExistingJob, JobUpdate, SightingResult } from './index'
 
 // The generated Database type does not cover the columns added by the ingestion
 // migrations, and callers pass clients typed both ways.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = SupabaseClient<any, any, any>
 
 const PAGE_SIZE = 1000

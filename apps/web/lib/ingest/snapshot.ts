@@ -109,7 +109,6 @@ const MAX_CARD_CHARS = 400
  * different address and is still short. A title three paragraphs away from an
  * Apply link is not that link's title.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function cardText($: cheerio.CheerioAPI, link: cheerio.Cheerio<any>, pageUrl: string): string {
   const own = hrefId(link.attr('href') ?? '', pageUrl)
   let node = link

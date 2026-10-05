@@ -28,7 +28,6 @@ import type { ModelBudget, ModelCall } from './model'
 import { readCareersPage, type ReadReason } from './page-reader'
 import { runRequirementsPass, type RequirementsRows } from './requirements-pass'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = SupabaseClient<any, any, any>
 
 export type FailureReason = 'board_error' | ReadReason | 'time'
