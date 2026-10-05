@@ -30,7 +30,7 @@
  *  under-redacting a secret is the failure that matters here, not
  *  over-redacting a harmless field name. */
 const SENSITIVE_KEY_RE =
-  /(password|passwd|passphrase|secret|token|api[_-]?key|apikey|^(?:pw|pass|pwd|key|auth|jwt|bearer)$|authoriz|cookie|session|credential|private[_-]?key|service[_-]?role|encrypted|resume|cv[_-]?text|coverletter|cover[_-]?letter|email|phone|ssn|address|firstname|first[_-]?name|lastname|last[_-]?name|fullname|full[_-]?name|contact)/i
+  /(password|passwd|passphrase|passcode|db[_-]?pass|x-auth|(?:oauth|auth)[_-]?code|secret|token|api[_-]?key|apikey|^(?:pw|pass|pwd|key|auth|jwt|bearer|cred|creds|otp)$|authoriz|cookie|session|credential|private[_-]?key|service[_-]?role|encrypted|resume|cv[_-]?text|coverletter|cover[_-]?letter|email|phone|ssn|address|firstname|first[_-]?name|lastname|last[_-]?name|fullname|full[_-]?name|contact)/i
 
 /** Header names dropped outright from event.request.headers. */
 const SENSITIVE_HEADER_RE = /(authoriz|cookie|x-supabase|x-api-key|set-cookie)/i
@@ -41,15 +41,25 @@ const SENSITIVE_HEADER_RE = /(authoriz|cookie|x-supabase|x-api-key|set-cookie)/i
 // backtracks quadratically over one long unbroken token (64K chars of 'a'
 // took seconds), which blocks the event loop. Callers that handle big text
 // (langfuse.ts) also slice BEFORE calling.
+// Leading boundary for patterns whose prefix is a common word fragment (sk-,
+// 1//, Bearer, Authorization). In JSON text a newline is the two characters
+// backslash and n, and n is a letter, so a plain \b or lookbehind on a letter
+// would let `\nsk-ant-...` through. Allow a start after a JSON escape too.
+// Distinctive prefixes (sk-ant-, ghp_, AKIA, eyJ, ya29., ...) take no boundary
+// at all: a glued prefix like `x` or `0` must not hide them.
+const LB = String.raw`(?:(?<![A-Za-z0-9])|(?<=\\(?:[nrt]|u[0-9a-fA-F]{4})))`
+const lb = (re: RegExp) => new RegExp(LB + re.source, re.flags)
+
 const EMAIL_RE = /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,24}/g
-const JWT_RE = /\beyJ[A-Za-z0-9_-]{5,2048}\.[A-Za-z0-9_-]{5,2048}\.[A-Za-z0-9_-]{5,2048}\b/g
+const JWT_RE = /eyJ[A-Za-z0-9_-]{5,2048}\.[A-Za-z0-9_-]{5,2048}\.[A-Za-z0-9_-]{5,2048}\b/g
 // lib/crypto.ts#encrypt output shape: `${ivBase64}:${authTagBase64}:${encryptedBase64}`.
 // Trailing boundary is a negative lookahead (not \b) because base64 padding
 // ('=') is a non-word char: a \b right after it only matches if the regex
 // backtracks off the padding, which would leave a stray '=' unredacted.
-const ENCRYPTED_BLOB_RE =
-  /\b[A-Za-z0-9+/]{8,64}={0,2}:[A-Za-z0-9+/]{8,64}={0,2}:[A-Za-z0-9+/]{4,4096}={0,2}(?![A-Za-z0-9+/=])/g
-const BEARER_RE = /\bBearer\s{1,8}[^\s"',;]{1,2048}/gi
+const ENCRYPTED_BLOB_RE = lb(
+  /[A-Za-z0-9+/]{8,64}={0,2}:[A-Za-z0-9+/]{8,64}={0,2}:[A-Za-z0-9+/]{4,4096}={0,2}(?![A-Za-z0-9+/=])/g
+)
+const BEARER_RE = lb(/Bearer\s{1,8}[^\s"',;]{1,2048}/gi)
 // Common LLM/cloud provider key prefixes. The `sk-` class includes `_`: the
 // Anthropic and OpenAI project key shapes (sk-ant-api03-abc_DEF, sk-proj-...)
 // contain underscores, and a class without it stops at the first one and
@@ -57,11 +67,15 @@ const BEARER_RE = /\bBearer\s{1,8}[^\s"',;]{1,2048}/gi
 // Google OAuth client secrets and API keys, and AWS key ids: caught even in a
 // message string that no key-name check would ever inspect.
 const PROVIDER_KEY_RE =
-  /\b(sk-[A-Za-z0-9_-]{10,512}|pk-lf-[A-Za-z0-9_-]{10,512}|sk_(?:live|test)_[A-Za-z0-9]{10,512}|whsec_[A-Za-z0-9]{10,512}|sb_secret_[A-Za-z0-9_-]{10,512}|github_pat_[A-Za-z0-9_]{20,512}|gh[oprsu]_[A-Za-z0-9]{10,512}|GOCSPX-[A-Za-z0-9_-]{10,512}|xox[baprs]-[A-Za-z0-9-]{10,512}|AIza[A-Za-z0-9_-]{20,512}|AKIA[A-Z0-9]{12,512})\b/g
+  /(sk-(?:ant|proj|or|svcacct|admin)-[A-Za-z0-9_-]{10,512}|pk-lf-[A-Za-z0-9_-]{10,512}|sk_(?:live|test)_[A-Za-z0-9]{10,512}|whsec_[A-Za-z0-9]{10,512}|sb_secret_[A-Za-z0-9_-]{10,512}|github_pat_[A-Za-z0-9_]{20,512}|gh[oprsu]_[A-Za-z0-9]{10,512}|GOCSPX-[A-Za-z0-9_-]{10,512}|xox[baprs]-[A-Za-z0-9-]{10,512}|AIza[A-Za-z0-9_-]{20,512}|AKIA[A-Z0-9]{12,512})\b/g
+// Any other `sk-` key (OpenAI legacy, Langfuse sk-lf-) needs the boundary,
+// or `risk-assessment-framework` would be redacted.
+const GENERIC_SK_RE = lb(/sk-[A-Za-z0-9_-]{10,512}\b/g)
 // Google OAuth access (ya29.) and refresh (1//) tokens.
-const GOOGLE_TOKEN_RE = /\b(?:ya29\.|1\/\/)[A-Za-z0-9._-]{10,512}/g
+const GOOGLE_TOKEN_RE = /ya29\.[A-Za-z0-9._-]{10,512}/g
+const GOOGLE_REFRESH_RE = lb(/1\/\/[A-Za-z0-9._-]{10,512}/g)
 // `Authorization: Basic <b64>` (Bearer has its own pattern).
-const AUTH_HEADER_RE = /\bAuthorization(["']?\s{0,8}[:=]\s{0,8}["']?)(?:Basic|Digest|Token)\s{1,8}[^\s"',;]{1,512}/gi
+const AUTH_HEADER_RE = lb(/Authorization(["']?\s{0,8}[:=]\s{0,8}["']?)(?:Basic|Digest|Token)\s{1,8}[^\s"',;]{1,512}/gi)
 // scheme://user:password@host
 const URL_USERINFO_RE = /\b([a-z][a-z0-9+.-]{1,20}:\/\/)[^\s:@/]{1,256}:[^\s@/]{1,256}@/gi
 // `password: x`, `refresh_token="x"`, `api_key=x`: a secret named in prose or
@@ -73,7 +87,7 @@ const URL_USERINFO_RE = /\b([a-z][a-z0-9+.-]{1,20}:\/\/)[^\s:@/]{1,256}:[^\s@/]{
 // userPassword). `pass` and `pw` are short enough to hit prose (bypass), so
 // they only match bare or after a `_`/`-` separator.
 const KEY_VALUE_RE =
-  /(?<![A-Za-z0-9])([A-Za-z0-9_-]{0,30}(?:password|passwd|passphrase|pwd|secret|secret[_-]?key|service[_-]?role[_-]?key|aws[_-]?secret[_-]?access[_-]?key|private[_-]?key|token|api[_-]?key|cookie)|(?:[A-Za-z0-9]{1,30}[_-])?(?:pass|pw))(["']?\s{0,8}[:=]\s{0,8})("[^"\n]{0,512}"|'[^'\n]{0,512}'|[^\s"',;&]{1,512})/gi
+  /(?<![A-Za-z0-9])([A-Za-z0-9_-]{0,30}(?:password|passwd|passphrase|pwd|secret|secret[_-]?key|service[_-]?role[_-]?key|aws[_-]?secret[_-]?access[_-]?key|private[_-]?key|token|api[_-]?key|cookie)|(?:[A-Za-z0-9]{1,30}[_-])?(?:pass|pw))(\\?["']?\s{0,8}[:=]\s{0,8})(\\"[^"\\\n]{0,512}\\"|"(?:[^"\\\n]|\\.){0,512}"|'[^'\n]{0,512}'|[^\s"',;&]{1,512})/gi
 const PRIVATE_KEY_RE = /-----BEGIN [A-Z ]{0,30}PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]{0,30}PRIVATE KEY-----|$)/g
 
 const REDACTED = '[redacted]'
@@ -89,9 +103,11 @@ export function redactString(value: string): string {
     .replace(BEARER_RE, 'Bearer [redacted-token]')
     .replace(AUTH_HEADER_RE, 'Authorization$1[redacted-token]')
     .replace(PROVIDER_KEY_RE, '[redacted-key]')
+    .replace(GENERIC_SK_RE, '[redacted-key]')
     .replace(GOOGLE_TOKEN_RE, '[redacted-token]')
+    .replace(GOOGLE_REFRESH_RE, '[redacted-token]')
     .replace(KEY_VALUE_RE, (_m, key: string, sep: string, val: string) => {
-      const q = val[0] === '"' || val[0] === "'" ? val[0] : ''
+      const q = val.startsWith('\\"') ? '\\"' : val[0] === '"' || val[0] === "'" ? val[0] : ''
       return `${key}${sep}${q}${REDACTED}${q}`
     })
     .replace(EMAIL_RE, '[redacted-email]')

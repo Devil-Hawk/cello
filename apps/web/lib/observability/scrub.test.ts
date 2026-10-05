@@ -289,6 +289,56 @@ describe('redactString: prefixed and snake_case secret names', () => {
   })
 })
 
+describe('redactString: secrets after JSON escapes or glued to other characters', () => {
+  const secrets: Record<string, string> = {
+    anthropic: 'sk-ant-api03-CANARY_abcDEF-0123456789',
+    generic: 'sk-CANARYabcdefghij0123456789',
+    ya29: 'ya29.a0AfH6SMBCANARYxxxxxxxxxxxx',
+    refresh: '1//0gCANARYxxxxxxxxxxxxxxxx',
+    jwt: 'eyJhbGciOi.eyJzdWIiOiJDQU5BUlkifQ.CANARYsignature',
+    bearer: 'Bearer CANARYtokenabcdefghijkl',
+    aws: 'AKIAIOSFODNN7CANARY',
+    sbsecret: 'sb_secret_CANARYabcdefghijklmn',
+    ghp: 'ghp_CANARYabcdefghijklmnopqr',
+  }
+  const prefixes = ['\\n', '\\t', '\\\\n', '_', 'x', '0', ' ', '\n']
+  for (const [name, secret] of Object.entries(secrets)) {
+    for (const pre of prefixes) {
+      // Bearer, generic sk- and 1// keep a word boundary on purpose: only a
+      // JSON escape, `_` or whitespace may precede them.
+      if (['bearer', 'generic', 'refresh'].includes(name) && /^[x0]$/.test(pre)) continue
+      it(`redacts ${name} after ${JSON.stringify(pre)}`, () => {
+        expect(redactString(`line one${pre}${secret} more`)).not.toContain('CANARY')
+        expect(redactString(JSON.stringify({ r: `line one${pre}${secret}` }))).not.toContain('CANARY')
+      })
+    }
+    it(`redacts ${name} inside a stringified message list`, () => {
+      const text = JSON.stringify([{ role: 'tool', content: JSON.stringify({ page: `text\n${secret}\nend` }) }])
+      expect(redactString(text)).not.toContain('CANARY')
+    })
+  }
+
+  it('does not mangle words that merely contain sk-', () => {
+    const text = 'risk-assessment-framework and task-management-system'
+    expect(redactString(text)).toBe(text)
+  })
+
+  it('redacts a password with an escaped quote in it, whole', () => {
+    expect(redactString('{"password":"hun\\"ter2 secret tail"}')).not.toMatch(/ter2|secret tail/)
+  })
+
+  it('redacts a password inside doubly stringified JSON', () => {
+    expect(redactString('{\\"password\\":\\"hunter2\\"}')).not.toContain('hunter2')
+  })
+})
+
+describe('deepScrub: more secret key names', () => {
+  it('blanks db_pass, passcode, cred, otp, x-auth and oauth code keys', () => {
+    const out = deepScrub({ db_pass: 'x1', Passcode: 'x2', cred: 'x3', otp: 'x4', 'X-Auth': 'x5', oauth_code: 'x6' }) as Record<string, string>
+    for (const v of Object.values(out)) expect(v).toBe('[redacted]')
+  })
+})
+
 describe('deepScrub: short secret key names', () => {
   it('blanks pw, pass, passphrase, key, auth, jwt and bearer keys', () => {
     const out = deepScrub({ pw: 'a', pass: 'b', passphrase: 'c', key: 'd', auth: 'e', jwt: 'f', bearer: 'g', keyword: 'ok', passed: true }) as Record<string, unknown>
@@ -327,6 +377,13 @@ describe('redactString: linear time on hostile input', () => {
     'colons': ':'.repeat(65536),
     'a@a.': 'a@a.'.repeat(16384),
     'a@aaaa': `a@${'a'.repeat(65000)}`,
+    'escaped nl': '\\n'.repeat(32768),
+    'nl sk-ant': '\\nsk-ant-'.repeat(8192),
+    'nl 1//': '\\n1//'.repeat(13107),
+    'nl Bearer': '\\nBearer '.repeat(8192),
+    'u escapes': '\\u000a'.repeat(10922),
+    'escaped quote pw': '{\\\"password\\\":\\\"'.repeat(3000),
+    'quoted pw tail': 'password=\"' + 'a\\\"'.repeat(30000),
     'long blob': `${'A'.repeat(500)}:${'B'.repeat(500)}:${'C'.repeat(60000)}`,
   }
   for (const [name, text] of Object.entries(inputs)) {

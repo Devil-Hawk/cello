@@ -175,7 +175,7 @@ describe('env gates', () => {
     expect(langfuseSampleRate()).toBe(1)
     expect(langfuseDemoSampleRate()).toBe(0.25)
     vi.stubEnv('LANGFUSE_SAMPLE_RATE', 'lots')
-    expect(langfuseSampleRate()).toBe(1)
+    expect(langfuseSampleRate()).toBe(0) // a typo never raises volume
     vi.stubEnv('LANGFUSE_SAMPLE_RATE', '7')
     expect(langfuseSampleRate()).toBe(1)
     vi.stubEnv('LANGFUSE_SAMPLE_RATE', '-3')
@@ -405,6 +405,33 @@ describe('masking canary: nothing planted survives', () => {
     vi.stubEnv('LANGFUSE_CAPTURE_DEMO_CONTENT', '1')
     await run(new SpanBuffer('u', null, undefined, { isDemo: true }), tree())
     expect(byName('score-job-match').attributes['langfuse.observation.input']).toBeDefined()
+  })
+
+  it('JSON-escaped newlines and glued prefixes do not hide a secret, and model parameters keep only safe values', async () => {
+    const shapes = [
+      `x\\n${KEY}`,
+      '\\nya29.a0AfH6SMBCANARYxxxxxxxxxxxx',
+      '\\nBearer CANARYtokenabcdefghijkl',
+      '\\nAKIAIOSFODNN7CANARY',
+      `_${KEY}`,
+    ]
+    // A tool result is JSON.stringify'd into an LLM message, as copilot.ts does.
+    const stringified = JSON.stringify({ page: `intro\n${KEY}\nya29.a0AfH6SMBCANARYxxxxxxxxxxxx\nBearer CANARYtokenabcdefghijkl` })
+    const gen = row({
+      name: 'llm',
+      kind: 'llm',
+      lf: {
+        name: 'call-llm',
+        input: [{ role: 'user', content: `TOOL RESULT ${stringified}` }, ...shapes.map((s) => ({ role: 'user', content: `line one${s} end` }))],
+        output: { role: 'assistant', content: shapes.join(' ') },
+        modelParameters: { max_tokens: 512, evil: 'ya29.a0AfH6SMBCANARYxxxxxxxxxxxx', pw: 'a password with spaces' },
+      },
+    })
+    await run(new SpanBuffer('u', null, undefined, { isDemo: false }), [gen])
+    expect(dump()).not.toMatch(/CANARY|sk-ant-api03/)
+    const params = String(byName('call-llm').attributes['langfuse.observation.model.parameters'])
+    expect(params).toContain('512')
+    expect(params).not.toContain('password')
   })
 
   it('structured payloads blank sensitive keys and drop non-safe metadata values', async () => {

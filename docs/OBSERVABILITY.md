@@ -119,7 +119,7 @@ Optional:
 | --- | --- | --- |
 | `LANGFUSE_CAPTURE_CONTENT` | on | The kill switch. Only an unset or blank value or `1`, `true`, `on`, `yes` keeps prompts and replies on. Anything else, a typo included, turns them off. Tokens, cost and timing still go. |
 | `LANGFUSE_CAPTURE_DEMO_CONTENT` | off | Demo workspaces send no prompt or reply text unless this is `1`, `true`, `on` or `yes`. A trace whose owner is unknown counts as a demo. |
-| `LANGFUSE_SAMPLE_RATE` | `1` | A number from 0 to 1. Chosen per trace by a hash of the trace id, so a trace is sent whole or not at all. The SDK itself never reads this variable, so it is not applied twice. |
+| `LANGFUSE_SAMPLE_RATE` | `1` | A number from 0 to 1. A value that is not a number means 0, so a typo never raises volume. Chosen per trace by a hash of the trace id, so a trace is sent whole or not at all. The SDK itself never reads this variable, so it is not applied twice. |
 | `LANGFUSE_DEMO_SAMPLE_RATE` | `0.25` | The same for demo traces, which use the lower of the two rates. It keeps a burst of demo visitors from eating the free unit budget. |
 
 Limits per trace: at most 400 observations (the root, errors and judge calls
@@ -153,6 +153,15 @@ numbers, so token counts and cost survive. Redaction is pattern based. Free text
 resume still reaches Langfuse with names and phone numbers in it, which is why
 the settings page tells users when capture is on and why `LANGFUSE_CAPTURE_CONTENT=0`
 exists.
+
+Known gaps, all of them free text a pattern cannot recognise: phone numbers and
+street addresses, SSNs, non-ASCII email addresses, passwords written as prose
+("my password is hunter2" with no `:` or `=`), 64-hex raw keys, `hf_` and `npm_`
+tokens, `Basic <base64>` without an `Authorization` prefix, OAuth `?code=` query
+values, and a short secret in a key named `code` or `refresh`. Keys written
+into a JSON-escaped message (a tool result is stringified into the prompt) are
+caught, including after `\n` and `\t`. The user id and session id are the raw
+Cello UUIDs, a stable identifier sent to Langfuse by design.
 
 **Budget.** A unit is a trace, an observation or a score. One copilot run is
 a trace plus a graph span, a span per agent step and a generation per AI call.

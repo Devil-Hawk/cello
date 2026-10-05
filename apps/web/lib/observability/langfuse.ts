@@ -102,10 +102,12 @@ function rate(name: string, dflt: number): number {
   const raw = env(name)
   if (!raw) return dflt
   const n = Number(raw)
-  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : dflt
+  // A typo must not raise volume: an unparseable value means 0, fail closed.
+  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0
 }
 
-/** LANGFUSE_SAMPLE_RATE clamped to 0..1; unset, blank or invalid means 1.
+/** LANGFUSE_SAMPLE_RATE clamped to 0..1; unset or blank means 1, an invalid
+ *  value means 0 (fail closed, like the kill switch).
  *  The SDK itself does not read this variable (5.11.1), so there is no double
  *  sampling. */
 export function langfuseSampleRate(): number {
@@ -264,7 +266,7 @@ function toAttributes(r: SpanRecord, budget: Budget, capture: boolean): Attrs {
     ...(hasUsage(type)
       ? {
           model: lf.model ? clean(lf.model, 100) : undefined,
-          modelParameters: lf.modelParameters,
+          modelParameters: safeMetadata(lf.modelParameters),
           usageDetails: lf.usage,
           costDetails: lf.cost,
         }
