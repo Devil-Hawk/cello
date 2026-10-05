@@ -102,6 +102,10 @@ export interface LfPayload {
   errorCode?: string
   /** The raw error text. Set only when the buffer captures content. */
   errorMessage?: string
+  /** The span threw, but the caller treats that as a normal fallback (no
+   *  embedding key, budget cap). It stays at the default level with no status
+   *  message, so level filters and error counts only show real failures. */
+  expected?: boolean
 }
 
 /** Trace-level facts the Langfuse export stamps on every observation. */
@@ -117,6 +121,9 @@ export interface TraceMeta {
   feature?: string
   /** Ids and enums only, at most 200 chars each. */
   metadata?: Record<string, string>
+  /** Short code for a failure the route handled itself (a 500 it returned
+   *  instead of throwing). The root observation then carries level ERROR. */
+  error?: string
   /** Root observation input and output (the trace input/output in Langfuse).
    *  The root span's lfOf reads these when it ends, so a graph that learns its
    *  answer late (copilot's finalize) can set the output after invoke returns.
@@ -340,6 +347,16 @@ export interface TraceContext {
    *  is known at this level (e.g. invoke.ts's own graph-root context — see
    *  that file's header for why it never guesses one). */
   runId: string | null
+  /** Set by a retriever (see observe's foldEmbeddings): embeddings made under
+   *  it add their usage here instead of becoming observations of their own. */
+  embed?: EmbedFold
+}
+
+/** Embedding usage folded into the enclosing retriever or memory write. */
+export interface EmbedFold {
+  calls: number
+  tokens: number
+  costUsd: number
 }
 
 const traceContext = new AsyncLocalStorage<TraceContext>()
@@ -479,6 +496,10 @@ export interface ObserveSpec {
   kind?: SpanKind
   /** False keeps it Langfuse-only (retrievers and the like). */
   persist?: false
+  /** Embeddings made inside this span add their tokens and cost to its
+   *  metadata (embedding_tokens, embedding_cost) instead of each becoming an
+   *  EMBEDDING observation with only a count and a size. */
+  foldEmbeddings?: boolean
   /** Small, content-free trace_spans attributes for a persisted span. */
   attributesOf?: (result: never, err: unknown) => Record<string, unknown> | undefined
 }
@@ -496,12 +517,23 @@ export async function observe<T>(
 ): Promise<T> {
   const ctx = currentTraceContext()
   if (!ctx) return fn()
+  const embed: EmbedFold | undefined = spec.foldEmbeddings ? { calls: 0, tokens: 0, costUsd: 0 } : undefined
   return withSpan(
     ctx.buffer,
     { parentSpanId: ctx.parentSpanId, runId: ctx.runId, kind: spec.kind ?? 'tool', name: spec.name, persist: spec.persist },
-    (spanId) => runInTraceContext({ ...ctx, parentSpanId: spanId }, fn),
+    (spanId) => runInTraceContext({ ...ctx, parentSpanId: spanId, ...(embed ? { embed } : {}) }, fn),
     spec.attributesOf as ((result: T | undefined, err: unknown) => Record<string, unknown> | undefined) | undefined,
-    (result, err, capture) => ({ name: spec.name, type: spec.type, ...lfOf?.(result, err, capture) })
+    (result, err, capture) => {
+      const lf = lfOf?.(result, err, capture)
+      return {
+        name: spec.name,
+        type: spec.type,
+        ...lf,
+        ...(embed && embed.calls > 0
+          ? { metadata: { ...lf?.metadata, embedding_calls: embed.calls, embedding_tokens: embed.tokens, embedding_cost: embed.costUsd } }
+          : {}),
+      }
+    }
   )
 }
 
@@ -518,6 +550,23 @@ export function setTraceOutput(output: unknown): void {
 export function setTraceInput(input: unknown): void {
   const ctx = currentTraceContext()
   if (ctx) ctx.buffer.meta.input = input
+}
+
+/** Add ids and enums to the current trace's metadata (job_id, message_id...),
+ *  so the root's input can say what a reviewer needs and the ids stay
+ *  searchable. Values must look like ids (200 chars of [A-Za-z0-9_.:/-]) or the
+ *  export drops them. A no-op outside a trace. */
+export function setTraceMeta(metadata: Record<string, string>): void {
+  currentTraceContext()?.buffer.setMeta({ metadata })
+}
+
+/** Mark the current trace's root observation failed from a handled error (a
+ *  route that catches a model failure and returns a 500). The root then has
+ *  level ERROR, this code as its status message and {error: code} as output.
+ *  A no-op outside a trace. */
+export function setTraceError(code: string): void {
+  const ctx = currentTraceContext()
+  if (ctx) ctx.buffer.meta.error = code
 }
 
 export interface TraceSpec {
@@ -569,18 +618,28 @@ export async function withTrace<T>(admin: AdminClient, userId: string, spec: Tra
       { parentSpanId: scope.parentSpanId, runId: scope.runId, kind: 'http', name: spec.name, persist: false },
       (spanId) => runInTraceContext({ buffer: scope.buffer, parentSpanId: spanId, runId: scope.runId }, fn),
       undefined,
-      (result, _err, capture) => ({
-        name: spec.name,
-        type: spec.type ?? 'span',
-        ...(capture
-          ? {
-              input: (scope.owns ? scope.buffer.meta.input : undefined) ?? spec.input,
-              output:
-                (scope.owns ? scope.buffer.meta.output : undefined) ??
-                (result !== undefined && spec.outputOf ? (spec.outputOf as (r: T) => unknown)(result) : undefined),
-            }
-          : {}),
-      })
+      (result, _err, capture) => {
+        // A handled failure: setTraceError(code), or a returned Response with
+        // status >= 500. A thrown error is already an ERROR via withSpan.
+        const status = (result as { status?: unknown } | undefined)?.status
+        const failure = scope.owns
+          ? scope.buffer.meta.error ?? (typeof status === 'number' && status >= 500 ? `http_${status}` : undefined)
+          : undefined
+        return {
+          name: spec.name,
+          type: spec.type ?? 'span',
+          ...(failure ? { level: 'ERROR' as const, errorCode: failure } : {}),
+          ...(capture
+            ? {
+                input: (scope.owns ? scope.buffer.meta.input : undefined) ?? spec.input,
+                output: failure
+                  ? { error: failure }
+                  : (scope.owns ? scope.buffer.meta.output : undefined) ??
+                    (result !== undefined && spec.outputOf ? (spec.outputOf as (r: T) => unknown)(result) : undefined),
+              }
+            : {}),
+        }
+      }
     )
   } finally {
     // A root with nothing under it (a request that never reached a model) is

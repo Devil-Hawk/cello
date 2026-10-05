@@ -28,8 +28,9 @@ vi.mock('./supabase-admin', () => ({
 
 vi.mock('./spend', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./spend')>()
-  return { ...actual, assertWithinBudget: async () => undefined, recordSpend: async () => undefined }
+  return { ...actual, assertWithinBudget: (...a: unknown[]) => assertMock(...a), recordSpend: async () => undefined }
 })
+const assertMock = vi.fn(async (..._a: unknown[]): Promise<void> => undefined)
 
 const callOpenRouterMock = vi.fn()
 vi.mock('./providers/openrouter', () => ({
@@ -295,6 +296,46 @@ describe('callEmbedding -> Langfuse embedding observation', () => {
     const emb = spans().find((s) => s.name === 'embed-query')!
     expect(emb.parentSpanContext?.spanId).toBe(root.spanContext().spanId)
     expect(insertCalls[0]).toHaveLength(1) // only the graph row
+  })
+
+  it('no embedding provider at all is a quiet refusal: MissingKeyError, and no observation, no unit, no ERROR', async () => {
+    configure()
+    const { MissingKeyError } = await import('./llm')
+    const bare = { userId: 'user-1', isDemo: false } as unknown as DecryptedApiKeys
+    await expect(callEmbedding(bare, { texts, name: 'embed-query' })).rejects.toBeInstanceOf(MissingKeyError)
+    expect(spans()).toHaveLength(0)
+    expect(embedMock).not.toHaveBeenCalled()
+  })
+
+  it('a reached monthly cap is a skipped observation at the default level, not an ERROR', async () => {
+    configure()
+    const { BudgetCapError } = await import('./spend')
+    assertMock.mockRejectedValueOnce(new BudgetCapError(10, 10))
+    await expect(callEmbedding(keys, { texts, name: 'embed-chunks' })).rejects.toBeInstanceOf(BudgetCapError)
+    expect(spans()).toHaveLength(1)
+    const e = spans()[0]
+    expect(attr(e, 'langfuse.observation.level')).toBeUndefined()
+    expect(attr(e, 'langfuse.observation.status_message')).toBeUndefined()
+    expect(attr(e, 'langfuse.observation.metadata.skipped')).toBe('budget_cap')
+  })
+
+  it('under a retriever the query embedding has no observation of its own: its usage and cost ride the retriever', async () => {
+    configure()
+    const { SpanBuffer, observe, runInTraceContext } = await import('../trace/spans')
+    const buffer = new SpanBuffer('user-1', null, undefined, { isDemo: false })
+    await runInTraceContext({ buffer, parentSpanId: null, runId: null }, () =>
+      observe({ name: 'retrieve-knowledge', type: 'retriever', persist: false, foldEmbeddings: true }, () =>
+        callEmbedding(keys, { texts: ['q'], name: 'embed-query' })
+      )
+    )
+    await buffer.flush({ from: () => ({ insert: async () => ({ error: null }) }) } as never)
+    expect(spans().map((s) => s.name)).toEqual(['retrieve-knowledge'])
+    const r = spans()[0]
+    expect(attr(r, 'langfuse.observation.metadata.embedding_tokens')).toBe('1000')
+    expect(Number(attr(r, 'langfuse.observation.metadata.embedding_cost'))).toBeCloseTo((1000 / 1e6) * 0.02, 10)
+    // a retriever is not a generation: it never carries usage or cost attributes of its own
+    expect(attr(r, 'langfuse.observation.usage_details')).toBeUndefined()
+    expect(attr(r, 'langfuse.observation.cost_details')).toBeUndefined()
   })
 
   it('unconfigured: no observation, no insert, same result', async () => {

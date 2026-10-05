@@ -421,4 +421,20 @@ describe('searchInsights in Langfuse', () => {
     expect(callEmbeddingMock.mock.calls[0][1]).toMatchObject({ name: 'embed-query' })
     vi.unstubAllEnvs()
   })
+
+  it('no embedding provider is a recency-only fallback on the retriever, not an error', async () => {
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
+    vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
+    vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+    const { runInTraceContext, SpanBuffer } = await import('../trace/spans')
+    const { MissingKeyError } = await import('../harness/llm')
+    callEmbeddingMock.mockRejectedValue(new MissingKeyError('No embedding provider configured'))
+    const admin = { rpc: async () => ({ data: [], error: null }) } as never
+    const buffer = new SpanBuffer('u1', null, undefined, { isDemo: false })
+    await runInTraceContext({ buffer, parentSpanId: 'root', runId: null }, () => searchInsights(admin, 'u1', 'salary floor'))
+    const [row] = (buffer as unknown as { pending: { status: string; lf?: { metadata?: unknown } }[] }).pending
+    expect(row.status).toBe('ok')
+    expect(row.lf?.metadata).toMatchObject({ fallback: 'recency-only' })
+    vi.unstubAllEnvs()
+  })
 })

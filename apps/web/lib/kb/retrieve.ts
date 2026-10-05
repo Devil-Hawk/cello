@@ -48,11 +48,13 @@ export async function retrieveKb(
 ): Promise<KbSearchHit[]> {
   // One Langfuse retriever observation (its embed-query nests under it) when
   // a trace is active. The query, hit titles and a 300 char excerpt of each are capture-gated (and masked at the Langfuse choke point).
+  const state = { fts: false }
   return observe(
-    { name: 'retrieve-knowledge', type: 'retriever', persist: false },
-    () => retrieveKbInner(admin, userId, query, opts),
+    { name: 'retrieve-knowledge', type: 'retriever', persist: false, foldEmbeddings: true },
+    () => retrieveKbInner(admin, userId, query, opts, state),
     (hits, _err, capture) => ({
-      metadata: { limit: opts.limit ?? 0, ...(hits ? { hits: hits.length } : {}) },
+      // Without a query vector the search is FTS-only: a normal fallback, not an error.
+      metadata: { limit: opts.limit ?? 0, ...(hits ? { hits: hits.length } : {}), ...(state.fts ? { fallback: 'fts-only' } : {}) },
       ...(capture
         ? { input: { query }, output: { hits: (hits ?? []).slice(0, 10).map((h) => ({ title: h.title, url: h.url, rank: h.rank, excerpt: h.content.slice(0, 300) })) } }
         : {}),
@@ -64,7 +66,8 @@ async function retrieveKbInner(
   admin: SupabaseClient,
   userId: string,
   query: string,
-  opts: { limit?: number; companyId?: string }
+  opts: { limit?: number; companyId?: string },
+  state: { fts: boolean }
 ): Promise<KbSearchHit[]> {
   const trimmed = (query ?? '').trim()
   // Same short circuit as searchKb(): an empty query can't match anything,
@@ -87,6 +90,7 @@ async function retrieveKbInner(
       void captureError(error, { tags: { area: 'kb', phase: 'retrieve-embed' }, extra: { userId } })
     }
     // vector stays undefined — searchKb() degrades to FTS-only.
+    state.fts = true
   }
 
   return searchKb(admin, userId, trimmed, { limit: opts.limit, companyId: opts.companyId, vector })

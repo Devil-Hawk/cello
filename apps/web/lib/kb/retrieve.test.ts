@@ -152,6 +152,17 @@ describe('retrieveKb in Langfuse', () => {
     expect(callEmbeddingMock.mock.calls[0][1]).toMatchObject({ name: 'embed-query' })
   })
 
+  it('no embedding provider is recorded as a fts-only fallback on the retriever, and a working embedding is not', async () => {
+    const row = await run(false)
+    expect(row.lf?.metadata).not.toHaveProperty('fallback')
+    callEmbeddingMock.mockRejectedValue(new MissingKeyError('No embedding provider configured'))
+    const buffer = new SpanBuffer('u1', null, undefined, { isDemo: false })
+    await runInTraceContext({ buffer, parentSpanId: 'root', runId: null }, () => retrieveKb(admin, 'u1', 'visa rules'))
+    const [fallback] = (buffer as unknown as { pending: SpanRecord[] }).pending
+    expect(fallback.status).toBe('ok')
+    expect(fallback.lf?.metadata).toMatchObject({ fallback: 'fts-only' })
+  })
+
   it('a demo trace keeps the query out', async () => {
     const row = await run(true)
     expect(row.lf?.input).toBeUndefined()

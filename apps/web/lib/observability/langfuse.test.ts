@@ -292,6 +292,45 @@ describe('replay: structure, times, types', () => {
     expect(a['langfuse.observation.status_message']).toBe('http_429: rate limited')
   })
 
+  it('a failure the caller expects (expected: true) stays at the default level with no status message', async () => {
+    const root = row({ name: 'copilot', kind: 'graph', span_id: 'root' })
+    const search = row({
+      name: 'search-memory',
+      kind: 'tool',
+      parent_span_id: 'root',
+      status: 'error',
+      lf: { name: 'search-memory', type: 'retriever', expected: true, errorCode: 'MissingKeyError', errorMessage: 'No embedding provider', metadata: { fallback: 'no-embedding' } },
+    })
+    await run(new SpanBuffer('user-1', null, undefined, { isDemo: false }), [root, search])
+    const a = byName('search-memory').attributes
+    expect(a['langfuse.observation.level']).toBeUndefined()
+    expect(a['langfuse.observation.status_message']).toBeUndefined()
+    expect(a['langfuse.observation.metadata.fallback']).toBe('no-embedding')
+  })
+
+  it('reasoning is exported as message.thinking, the shape the Langfuse viewer renders as a Thinking block, and is masked', async () => {
+    const root = row({ name: 'copilot', kind: 'graph', span_id: 'root' })
+    const gen = row({
+      name: 'llm',
+      kind: 'llm',
+      parent_span_id: 'root',
+      lf: {
+        name: 'plan-copilot-step',
+        type: 'generation',
+        input: [{ role: 'user', content: 'hi' }],
+        output: { role: 'assistant', content: 'Done.', reasoning: 'I should mail jane.doe@example.com first.' },
+      },
+    })
+    await run(new SpanBuffer('user-1', null, undefined, { isDemo: false }), [root, gen])
+    const out = JSON.parse(String(byName('plan-copilot-step').attributes['langfuse.observation.output']))
+    expect(out.role).toBe('assistant')
+    expect(out.content).toBe('Done.')
+    expect(out.thinking).toEqual([{ content: expect.stringContaining('I should mail') }])
+    expect(JSON.stringify(out)).not.toContain('jane.doe@example.com')
+    // the non-standard key is gone: a plain `reasoning` string is shown nowhere
+    expect(out.reasoning).toBeUndefined()
+  })
+
   it('trace attributes sit on every span: name, user, session, tags, metadata', async () => {
     const buffer = new SpanBuffer('11111111-2222-4333-8444-555555555555', 'th', undefined, {
       isDemo: false,

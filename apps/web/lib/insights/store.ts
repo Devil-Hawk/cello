@@ -277,11 +277,12 @@ export async function searchInsights(
 ): Promise<Insight[]> {
   // One Langfuse retriever observation (embed-query nests under it) when a
   // trace is active. The query and an excerpt of each hit are capture-gated.
+  const state = { recency: false }
   return observe(
-    { name: 'search-insights', type: 'retriever', persist: false },
-    () => searchInsightsInner(admin, userId, query, opts),
+    { name: 'search-insights', type: 'retriever', persist: false, foldEmbeddings: true },
+    () => searchInsightsInner(admin, userId, query, opts, state),
     (found, _err, capture) => ({
-      metadata: { limit: opts.limit ?? 12, ...(found ? { hits: found.length } : {}) },
+      metadata: { limit: opts.limit ?? 12, ...(found ? { hits: found.length } : {}), ...(state.recency ? { fallback: 'recency-only' } : {}) },
       ...(capture ? { input: { query }, output: { count: found?.length ?? 0, hits: (found ?? []).slice(0, 10).map((i) => ({ statement: i.statement.slice(0, 300), kind: i.kind })) } } : {}),
     })
   )
@@ -291,7 +292,8 @@ async function searchInsightsInner(
   admin: AdminClient,
   userId: string,
   query: string,
-  opts: { kinds?: InsightKind[]; limit?: number }
+  opts: { kinds?: InsightKind[]; limit?: number },
+  state: { recency: boolean }
 ): Promise<Insight[]> {
   const trimmed = (query ?? '').trim()
   if (!trimmed || !userId) return []
@@ -310,6 +312,7 @@ async function searchInsightsInner(
       })
     }
     // vector stays null — search_insights degrades to recency-only.
+    state.recency = true
   }
 
   const { data, error } = await admin.rpc('search_insights', {

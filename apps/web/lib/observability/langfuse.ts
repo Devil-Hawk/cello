@@ -189,7 +189,7 @@ function safeMetadata(meta: Record<string, string | number | boolean> | undefine
 type Budget = { left: number; systems: Map<string, string> }
 /** What was cut from one observation's input or output. */
 type Cut = { chars: number; truncated: boolean }
-type Msg = { role: string; content: string; reasoning?: string }
+type Msg = { role: string; content: string; reasoning?: string; thinking?: { content: string }[] }
 const isMsg = (v: unknown): v is Msg => {
   const o = v as Record<string, unknown> | null
   return typeof o === 'object' && o !== null && typeof o.role === 'string' && typeof o.content === 'string'
@@ -220,7 +220,9 @@ function scrubMessages(msgs: Msg[], budget: Budget, name: string, cut: Cut): Msg
     return {
       role: clean(m.role, 20),
       content,
-      ...(typeof m.reasoning === 'string' ? { reasoning: scrubText(m.reasoning) } : {}),
+      // Langfuse renders a Thinking block from message.thinking ([{ content, summary? }]); a plain
+      // `reasoning` string is shown nowhere.
+      ...(typeof m.reasoning === 'string' ? { thinking: [{ content: scrubText(m.reasoning) }] } : {}),
     }
   })
 }
@@ -288,7 +290,7 @@ function toAttributes(r: SpanRecord, budget: Budget, capture: boolean): Attrs {
   if (capture) {
     for (const [k, v] of Object.entries(lf.detail ?? {})) if (NAME_RE.test(k)) metadata[k] = clean(v, 200)
   }
-  const failed = r.status === 'error'
+  const failed = r.status === 'error' && !lf.expected
   const level = failed ? 'ERROR' : lf.level
   // With capture off no message text leaves, only the short code.
   const code = lf.errorCode ?? (failed ? 'error' : undefined)

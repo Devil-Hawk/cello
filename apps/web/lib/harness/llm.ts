@@ -29,14 +29,14 @@
 
 import pRetry from 'p-retry'
 import type { DecryptedApiKeys, LlmResult, LlmRunOptions } from './types'
-import { assertWithinBudget, estimateCostDetails, estimateCostUsd, hasListedPrice, recordSpend } from './spend'
+import { assertWithinBudget, BudgetCapError, estimateCostDetails, estimateCostUsd, hasListedPrice, recordSpend } from './spend'
 import { createAdminClient } from './supabase-admin'
 import { resolveProviderId, resolveLocalCliId, MissingKeyError } from './providers'
 import { callOpenRouter, DEFAULT_MODEL } from './providers/openrouter'
 import { callLocalCli } from './providers/local-cli'
 import { callLocalServer } from './providers/local-server'
 import { isTransient } from '../util/retry'
-import { acquireSpanScope, withSpan, type LfPayload } from '../trace/spans'
+import { acquireSpanScope, currentTraceContext, withSpan, type LfPayload } from '../trace/spans'
 import {
   EMBEDDING_MODEL,
   EMBEDDING_DIMS,
@@ -291,6 +291,23 @@ export async function callEmbedding(
 ): Promise<EmbedResult> {
   if (opts.texts.length === 0) return { embeddings: [], model: opts.model || EMBEDDING_MODEL, promptTokens: 0 }
 
+  // No provider at all is a normal configuration (a self-hosted user without an
+  // embedding key), and every caller degrades. Refuse before any observation
+  // opens, so it costs no Langfuse unit and never shows up as an error.
+  if (!hasEmbeddingProvider(apiKeys)) throw new MissingKeyError(NO_EMBEDDING_PROVIDER)
+
+  // Inside a retriever or memory write that folds embeddings, the usage and
+  // cost go onto that parent's metadata and the call has no observation of its
+  // own: a query embedding has only a count and a size to show.
+  const fold = currentTraceContext()?.embed
+  if (fold) {
+    const out = await embedWithFallback(apiKeys, opts, signal)
+    fold.calls += 1
+    fold.tokens += out.result.promptTokens
+    if (out.metered) fold.costUsd += estimateCostDetails(out.result.model, out.result.promptTokens, 0).input
+    return out.result
+  }
+
   // One Langfuse `embedding` observation per call (never a trace_spans row:
   // persist:false). Counts and sizes only: the texts are resumes, job
   // descriptions and notes, so they are never captured.
@@ -302,15 +319,19 @@ export async function callEmbedding(
       { parentSpanId: scope.parentSpanId, runId: scope.runId, kind: 'llm', name: 'embedding', persist: false },
       () => embedWithFallback(apiKeys, opts, signal),
       undefined,
-      (o) => {
+      (o, err) => {
         const model = o?.result.model ?? opts.model ?? EMBEDDING_MODEL
         const tokens = o?.result.promptTokens ?? 0
+        // A monthly cap is an expected skip: the caller falls back, so it is
+        // not an error. Real provider failures stay ERROR.
+        const capped = err instanceof BudgetCapError
         return {
           name: opts.name ?? 'embed-texts',
           type: 'embedding',
           model,
           input: { count: opts.texts.length, chars: opts.texts.reduce((n, t) => n + t.length, 0) },
-          metadata: { provider: o?.provider ?? 'none', metered: o?.metered ?? false },
+          ...(capped ? { expected: true } : {}),
+          metadata: { provider: o?.provider ?? 'none', metered: o?.metered ?? false, ...(capped ? { skipped: 'budget_cap' } : {}) },
           ...(o ? { usage: { input: tokens }, cost: o.metered ? estimateCostDetails(model, tokens, 0) : { input: 0, output: 0 } } : {}),
         }
       }
@@ -319,6 +340,20 @@ export async function callEmbedding(
   } finally {
     if (scope.owns && scope.buffer.exportEnabled) await scope.buffer.flush(createAdminClient())
   }
+}
+
+const NO_EMBEDDING_PROVIDER =
+  'No embedding provider configured — set an OpenRouter or OpenAI key, or a local-server embedding model.'
+
+function hasEmbeddingProvider(apiKeys: DecryptedApiKeys): boolean {
+  return Boolean(apiKeys.openrouter || apiKeys.openai || apiKeys.provider?.localServerEmbeddingModel)
+}
+
+/** True for the two expected reasons an embedding does not happen: no provider
+ *  configured, or this month's cap reached. Callers fall back and carry on, so
+ *  none of this is an error. */
+export function isEmbeddingFallback(err: unknown): boolean {
+  return err instanceof MissingKeyError || err instanceof BudgetCapError
 }
 
 /** The fallback chain itself, plus which backend answered and whether it was
@@ -345,11 +380,7 @@ async function embedWithFallback(
     attempts.push({ provider: 'local-server', run: () => callLocalServerEmbedding(apiKeys, opts.texts, signal) })
   }
 
-  if (attempts.length === 0) {
-    throw new MissingKeyError(
-      'No embedding provider configured — set an OpenRouter or OpenAI key, or a local-server embedding model.'
-    )
-  }
+  if (attempts.length === 0) throw new MissingKeyError(NO_EMBEDDING_PROVIDER)
 
   let lastErr: unknown
   for (const attempt of attempts) {
