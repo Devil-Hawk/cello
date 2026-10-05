@@ -208,9 +208,13 @@ export class SpanBuffer {
     this.exportCache = undefined
   }
 
-  /** Fill isDemo when the buffer was created before the profile was known. */
+  /** Fill isDemo when the buffer was created before the profile was known.
+   *  Fails closed: an unknown flag is filled, and a later `true` (the key
+   *  loader saw a demo profile) downgrades an earlier `false`, never the
+   *  other way round. */
   adoptDemoFlag(isDemo: boolean | undefined): void {
-    if (this.meta.isDemo === undefined && isDemo !== undefined) this.setMeta({ isDemo })
+    if (isDemo === undefined) return
+    if (this.meta.isDemo === undefined || (isDemo && this.meta.isDemo === false)) this.setMeta({ isDemo })
   }
 
   /** Langfuse is configured and this trace is sampled in. Decided once per

@@ -314,12 +314,14 @@ describe('SpanBuffer.flush — batched single-insert', () => {
     expect(finished).toBe(true)
   })
 
-  it('isDemo can be filled in later but never overwritten', () => {
+  it('isDemo can be filled in later and only ever tightens toward demo', () => {
     const buffer = new SpanBuffer('u')
     buffer.adoptDemoFlag(false)
     expect(buffer.meta.isDemo).toBe(false)
     buffer.adoptDemoFlag(true)
-    expect(buffer.meta.isDemo).toBe(false)
+    expect(buffer.meta.isDemo).toBe(true)
+    buffer.adoptDemoFlag(false)
+    expect(buffer.meta.isDemo).toBe(true)
   })
 })
 

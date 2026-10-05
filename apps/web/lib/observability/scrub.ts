@@ -30,7 +30,7 @@
  *  under-redacting a secret is the failure that matters here, not
  *  over-redacting a harmless field name. */
 const SENSITIVE_KEY_RE =
-  /(password|passwd|secret|token|api[_-]?key|apikey|authoriz|cookie|session|credential|private[_-]?key|service[_-]?role|encrypted|resume|cv[_-]?text|coverletter|cover[_-]?letter|email|phone|ssn|address|firstname|first[_-]?name|lastname|last[_-]?name|fullname|full[_-]?name|contact)/i
+  /(password|passwd|passphrase|secret|token|api[_-]?key|apikey|^(?:pw|pass|pwd|key|auth|jwt|bearer)$|authoriz|cookie|session|credential|private[_-]?key|service[_-]?role|encrypted|resume|cv[_-]?text|coverletter|cover[_-]?letter|email|phone|ssn|address|firstname|first[_-]?name|lastname|last[_-]?name|fullname|full[_-]?name|contact)/i
 
 /** Header names dropped outright from event.request.headers. */
 const SENSITIVE_HEADER_RE = /(authoriz|cookie|x-supabase|x-api-key|set-cookie)/i
@@ -67,8 +67,13 @@ const URL_USERINFO_RE = /\b([a-z][a-z0-9+.-]{1,20}:\/\/)[^\s:@/]{1,256}:[^\s@/]{
 // `password: x`, `refresh_token="x"`, `api_key=x`: a secret named in prose or
 // JSON text, which the key-name check on objects never sees. A quoted value
 // may hold spaces; a bare one ends at whitespace or punctuation.
+// The lead-in is a lookbehind, not \b: \b never matches between `_` and a
+// letter, so DB_PASSWORD or x-api-key would slip through. A bounded prefix
+// takes the rest of an env-style or camelCase name (SUPABASE_SERVICE_ROLE_KEY,
+// userPassword). `pass` and `pw` are short enough to hit prose (bypass), so
+// they only match bare or after a `_`/`-` separator.
 const KEY_VALUE_RE =
-  /\b(password|passwd|pwd|secret|client[_-]?secret|aws[_-]?secret[_-]?access[_-]?key|private[_-]?key|(?:access|refresh|id|auth|session)?[_-]?token|api[_-]?key|cookie)(["']?\s{0,8}[:=]\s{0,8})("[^"\n]{0,512}"|'[^'\n]{0,512}'|[^\s"',;&]{1,512})/gi
+  /(?<![A-Za-z0-9])([A-Za-z0-9_-]{0,30}(?:password|passwd|passphrase|pwd|secret|secret[_-]?key|service[_-]?role[_-]?key|aws[_-]?secret[_-]?access[_-]?key|private[_-]?key|token|api[_-]?key|cookie)|(?:[A-Za-z0-9]{1,30}[_-])?(?:pass|pw))(["']?\s{0,8}[:=]\s{0,8})("[^"\n]{0,512}"|'[^'\n]{0,512}'|[^\s"',;&]{1,512})/gi
 const PRIVATE_KEY_RE = /-----BEGIN [A-Z ]{0,30}PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]{0,30}PRIVATE KEY-----|$)/g
 
 const REDACTED = '[redacted]'

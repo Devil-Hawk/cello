@@ -257,6 +257,47 @@ describe('redactString: plaintext credentials and Google tokens', () => {
   })
 })
 
+describe('redactString: prefixed and snake_case secret names', () => {
+  const cases: Array<[string, string]> = [
+    ['DB_PASSWORD=hunter2hunter2', 'hunter2'],
+    ['MY_SECRET=abcdef123', 'abcdef123'],
+    ['OPENAI_API_KEY=abcdefghijklmnop', 'abcdefghijklmnop'],
+    ['GITHUB_TOKEN=ghx_notprefixed12345', 'notprefixed'],
+    ['SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJI.abc.def', 'eyJhbGciOiJI'],
+    ['{"user_password":"hunter2"}', 'hunter2'],
+    ['user_password: "p w d"', 'p w d'],
+    ['SECRET_KEY=abcdef', 'abcdef'],
+    ['secret_key: abcdef', 'abcdef'],
+    ['api_secret=0123456789abcdef', '0123456789abcdef'],
+    ['x-api-key: abcdef123456', 'abcdef123456'],
+    ['userPassword=hunter2', 'hunter2'],
+    ['db_pass=hunter2', 'hunter2'],
+    ['pw=hunter2', 'hunter2'],
+    ['passphrase: correcthorse', 'correcthorse'],
+    ['line one\nDB_PASSWORD=PLANTEDPW\nline three', 'PLANTEDPW'],
+  ]
+  for (const [text, secret] of cases) {
+    it(`redacts ${text.split(/[=:]/)[0].trim()}`, () => {
+      expect(redactString(text)).not.toContain(secret)
+    })
+  }
+
+  it('keeps the key name and leaves prose with similar words alone', () => {
+    expect(redactString('DB_PASSWORD=x1y2z3')).toBe('DB_PASSWORD=[redacted]')
+    const prose = 'We bypass: the queue. A compass=north. The pass rate is high.'
+    expect(redactString(prose)).toBe(prose)
+  })
+})
+
+describe('deepScrub: short secret key names', () => {
+  it('blanks pw, pass, passphrase, key, auth, jwt and bearer keys', () => {
+    const out = deepScrub({ pw: 'a', pass: 'b', passphrase: 'c', key: 'd', auth: 'e', jwt: 'f', bearer: 'g', keyword: 'ok', passed: true }) as Record<string, unknown>
+    for (const k of ['pw', 'pass', 'passphrase', 'key', 'auth', 'jwt', 'bearer']) expect(out[k]).toBe('[redacted]')
+    expect(out.keyword).toBe('ok')
+    expect(out.passed).toBe(true)
+  })
+})
+
 describe('redactString: linear time on hostile input', () => {
   const inputs: Record<string, string> = {
     'a/': 'a/'.repeat(32768),
@@ -277,6 +318,11 @@ describe('redactString: linear time on hostile input', () => {
     'ya29.': 'ya29.'.repeat(13107),
     'github_pat_': 'github_pat_'.repeat(5958),
     'begin pem': '-----BEGIN PRIVATE KEY-----'.repeat(2427),
+    _: '_'.repeat(65536),
+    'a_': 'a_'.repeat(32768),
+    '-_': '-_'.repeat(32768),
+    'secret_': 'secret_'.repeat(9362),
+    'x-api-key': 'x-api-key '.repeat(6554),
     'spaces': ' '.repeat(65536),
     'colons': ':'.repeat(65536),
     'a@a.': 'a@a.'.repeat(16384),

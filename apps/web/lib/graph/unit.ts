@@ -404,7 +404,7 @@ async function runUnitBody<T extends UnitType>(
   const meter = { used: 0 }
   const rawLlm: LlmRunner = async (opts) => {
     // The Langfuse generation name; a call that names itself keeps its name.
-    const res = await callLlm(apiKeys, { name: UNIT_GENERATION_NAME[unitType], ...opts }, controller.signal)
+    const res = await callLlm(apiKeys, { ...opts, name: opts.name ?? UNIT_GENERATION_NAME[unitType] }, controller.signal)
     meter.used += res.tokensUsed
     return res
   }

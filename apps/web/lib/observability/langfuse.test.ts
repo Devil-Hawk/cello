@@ -337,7 +337,7 @@ describe('masking canary: nothing planted survives', () => {
   const KEY = 'sk-ant-api03-CANARY_abc-DEF_1234567890'
   const MAIL = 'canary@example.com'
   const PW = 'password=CANARYPW'
-  const planted = `my key ${KEY} and mail ${MAIL} and ${PW}`
+  const planted = `my key ${KEY} and mail ${MAIL} and ${PW}\nDB_PASSWORD=CANARYENVPW`
   const canary = /CANARY|canary@example|sk-ant-api03/i
 
   const plantedRows = () => {
