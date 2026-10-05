@@ -35,6 +35,7 @@
 // the convention in lib/ats/* and the rest of lib/sources/*.
 
 import { detectApplyTarget } from '../ats-apply/detect'
+import { formatShortDate } from '../format'
 import type { ApplyProviderId } from '../ats-apply/types'
 
 // ---------------------------------------------------------------------------
@@ -520,7 +521,7 @@ function buildReasons(
   if (verification.basis === 'unknown') {
     reasons.push('No discovery date on record — cannot say when this was last confirmed open.')
   } else if (verification.basis === 'discovery-only') {
-    reasons.push(`Seen once on ${input.discoveredAt} and never re-checked since.`)
+    reasons.push(`Seen once on ${formatShortDate(input.discoveredAt) || 'an unknown date'} and never re-checked since.`)
   }
   if (verification.stillOpen === false) {
     reasons.push('Last check found this posting closed.')

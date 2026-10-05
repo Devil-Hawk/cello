@@ -25,7 +25,7 @@ import { CompanyLogo, getCompanyLogoSrc } from '@/components/companies/company-l
 import { DossierPanel } from '@/components/companies/dossier-panel'
 import { refreshCompanyJobs } from '@/components/companies/refresh'
 import { ContactNetworkPanel } from '@/components/contacts/contact-network-panel'
-import { formatShortDate, matchTone } from '@/lib/format'
+import { formatShortDate, knownParts, matchTone } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
 
 interface Company {
@@ -292,14 +292,14 @@ export default function CompanyDetailPage() {
           <Card className="divide-y">
             {jobs.map((job) => {
               const tone = matchTone(job.match_score)
-              const meta = [
+              const meta = knownParts(
                 job.location,
                 job.salary_range,
                 job.job_type,
                 job.posted_at
                   ? `Posted ${formatShortDate(job.posted_at)}`
-                  : `Found ${formatShortDate(job.discovered_at)}`,
-              ].filter(Boolean)
+                  : `Found ${formatShortDate(job.discovered_at)}`
+              )
 
               return (
                 <div key={job.id} className="flex items-center gap-4 px-5 py-3.5">
