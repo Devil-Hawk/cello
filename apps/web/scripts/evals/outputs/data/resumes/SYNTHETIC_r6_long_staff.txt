@@ -1,0 +1,65 @@
+[SYNTHETIC RESUME - fictional person, written for an evaluation set. Not a real candidate.]
+
+Elena Vasquez
+Denver, CO | elena.vasquez@example.com | github.com/example-evasquez
+
+SUMMARY
+Staff engineer with 12 years across payments, developer tooling and data platforms. Has led teams of up to 9, written design docs adopted org-wide, and owns production on-call for a high-volume ledger.
+
+EXPERIENCE
+Staff Software Engineer, Ledger - Northpoint Pay (Series E fintech), Denver, CO | 2022 - present
+- Technical lead for the double-entry ledger (Go, Postgres, gRPC); 6,500 writes/sec at p99 under 45 ms.
+- Designed the idempotency-key scheme used by all 14 money-movement services.
+- Led a team of 9 engineers across two time zones; ran weekly design review.
+- Cut month-end reconciliation from 3 days to 4 hours by moving batch jobs to streaming.
+- Wrote the on-call runbook and cut median incident time-to-mitigate from 38 to 14 minutes.
+- Mentored 5 senior engineers; 2 promoted to staff.
+- Drove a SOC 2 Type II audit for the ledger with zero findings.
+
+Senior Software Engineer, Developer Platform - Cardinal Labs, Boulder, CO | 2018 - 2022
+- Built the internal deploy platform on Kubernetes (GKE) with Helm and Argo CD; 240 services onboarded.
+- Reduced deploy time from 52 to 7 minutes by caching container layers and parallelising tests.
+- Created a service template (Go) used by 60 teams; cut new-service setup from 2 weeks to 1 day.
+- Introduced OpenTelemetry tracing across 80 services.
+- Owned the CI fleet (GitHub Actions self-hosted runners) serving 400 engineers.
+- Ran a quarterly migration of 30 Java services from Jenkins to GitHub Actions.
+- Wrote the platform's public API in gRPC with generated clients in Go, Java and Python.
+
+Software Engineer, Data - Summit Analytics, Denver, CO | 2014 - 2018
+- Built ingestion pipelines in Python and Airflow processing 2 TB per day into BigQuery.
+- Designed the event schema for the product analytics warehouse; 150 event types.
+- Reduced pipeline cost 31% by moving to partitioned tables and incremental loads.
+- Maintained the Tableau semantic layer used by 70 analysts.
+- Supported the data science team with feature tables for churn and lifetime value models.
+- Wrote a data quality framework that blocked bad loads before they reached dashboards.
+
+Software Engineer - Pinegrove Retail Systems, Fort Collins, CO | 2012 - 2014
+- Built inventory sync services in Java and MySQL for 220 stores.
+- Added a REST API consumed by the mobile team.
+- Reduced nightly sync time from 4 hours to 50 minutes.
+
+SELECTED PROJECTS AND TALKS
+- Talk: "Idempotency keys in a ledger" at a regional engineering conference, 2024, about 300 attendees.
+- Internal course: taught "Operating Kubernetes safely" to 120 engineers over four cohorts.
+- Open source: maintainer of a small Go library for retry budgets (about 1,100 GitHub stars).
+- Wrote the engineering blog series on moving a monolith's billing tables to a dedicated ledger service (five posts).
+- Interviewed 80+ candidates; ran the staff-level system design loop at Northpoint Pay.
+- Hackathon winner: built a replay UI for finance auditors in two days (Northpoint Pay, 2023).
+- Reviewer for the company's architecture decision records; authored 11 of the 40 accepted ADRs.
+- Pair-mentored two apprentices through a six-month rotation on the platform team.
+- Wrote the migration guide for Jenkins to GitHub Actions that other orgs reused.
+- Built a cost dashboard for CI minutes that saved an estimated 22% of the CI budget.
+- Led the incident review process; published 19 blameless postmortems.
+- Organised a monthly reading group on distributed systems papers (20 regular attendees).
+- Contributed a schema-registry compatibility check to the data platform used by 12 teams.
+- Created a load-testing harness for the ledger using k6 and replayed production traffic shapes.
+- Defined service-level objectives for 14 money-movement services and wired them to paging.
+
+MESSAGING AND STREAMING (late-career focus)
+- At Northpoint Pay, introduced Kafka as the event backbone for ledger changes: 28 topics, exactly-once consumers, 2 TB/day, with a replay tool the finance team uses for audits.
+
+SKILLS
+Go, Java, Python, SQL, PostgreSQL, Kafka, Kubernetes, Helm, Argo CD, Terraform, GCP, AWS, gRPC, OpenTelemetry, Airflow, BigQuery, distributed systems, payments, SOC 2
+
+EDUCATION
+B.S. Computer Science, Colorado State University, 2012

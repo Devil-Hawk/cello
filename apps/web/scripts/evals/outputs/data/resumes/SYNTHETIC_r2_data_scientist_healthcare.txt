@@ -1,0 +1,29 @@
+[SYNTHETIC RESUME - fictional person, written for an evaluation set. Not a real candidate.]
+
+Priya Raman
+Boston, MA | priya.raman@example.com | github.com/example-praman
+
+SUMMARY
+Data scientist with 4 years in healthcare analytics and machine learning. Builds risk models on claims and EHR data in Python, ships them to production with the engineering team, and explains results to clinicians.
+
+EXPERIENCE
+Data Scientist - Meridian Health Analytics, Boston, MA | 2022 - present
+- Built a 30-day readmission risk model (gradient boosting, scikit-learn, XGBoost) on 2.1M claims; AUC 0.81, adopted by 3 hospital systems.
+- Created NLP pipeline (spaCy, transformers) to extract diagnoses from clinical notes; F1 0.88.
+- Productionized models with MLflow and Airflow on AWS; wrote SQL feature pipelines in Snowflake.
+- Ran an A/B test of care-outreach messaging (n=18k patients) showing a 6% lift in appointment adherence.
+- Worked under HIPAA controls; de-identified datasets with the privacy office.
+
+Junior Data Scientist - CarePath Insurance, Hartford, CT | 2021 - 2022
+- Forecasted claim volume with Prophet and ARIMA; reduced staffing forecast error by 15%.
+- Built Tableau dashboards for the utilization-management team.
+
+Data Analyst Intern - Mass General Research Institute, Boston, MA | Summer 2020
+- Cohort selection in SQL for an oncology study; cleaned REDCap exports in pandas.
+
+SKILLS
+Python, pandas, NumPy, scikit-learn, XGBoost, PyTorch (basic), spaCy, SQL, Snowflake, Airflow, MLflow, AWS (S3, SageMaker), statistics, A/B testing, causal inference basics, Tableau, HIPAA, ICD-10 / HCC coding
+
+EDUCATION
+M.S. Biostatistics, Boston University, 2021
+B.S. Mathematics, Tufts University, 2020
