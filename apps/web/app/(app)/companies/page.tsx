@@ -19,6 +19,7 @@ import {
 } from '@/components/companies/refresh'
 import { formatShortDate } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
+import { openRolesOnly } from '@/lib/jobs/freshness'
 
 /**
  * Highest best-match-score first, unscored companies last (never coerced to
@@ -81,16 +82,20 @@ export default function CompaniesPage() {
       // this pulls each company's jobs' match_score in the same query and
       // reduces client-side below — one query for every company, not one
       // query per company.
-      const { data, error } = await trackedOnly(
-        supabase
-          .from('companies')
-          .select(
-            `
+      // jobs_count below counts open roles only: recent and not closed.
+      const { data, error } = await openRolesOnly(
+        trackedOnly(
+          supabase
+            .from('companies')
+            .select(
+              `
         *,
         jobs:jobs(match_score)
       `
-          )
-          .eq('user_id', user.id)
+            )
+            .eq('user_id', user.id)
+        ),
+        { referencedTable: 'jobs' }
       ).order('created_at', { ascending: false })
 
       if (error) {

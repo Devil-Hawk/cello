@@ -37,6 +37,7 @@ import { loadApiKeys } from '@/lib/harness/keys'
 import { canRunLlm, missingOpenRouterMessage } from '@/lib/harness/llm-key-message'
 import type { AdminClient } from '@/lib/harness/types'
 import { userCompanyIds, ownedJobsQuery } from '@/lib/harness/agents/matcher'
+import { openRolesOnly } from '@/lib/jobs/freshness'
 import { runUnitOnce } from '@/lib/graph/oneshot'
 import { resolveTargetTitles } from '@/lib/targeting/titles'
 import { resolveTargeting, type Targeting } from '@/lib/targeting'
@@ -138,10 +139,9 @@ async function countUnscoredNoFilter(admin: AdminClient, userId: string, company
   if (companyIds.length === 0) return 0
   // Ownership via the companies FK join (ownedJobsQuery), not an
   // .in('company_id', companyIds) array — that breaks past ~600 companies.
-  const { count, error } = await ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', {
-    count: 'exact',
-    head: true,
-  }).is('match_score', null)
+  const { count, error } = await openRolesOnly(
+    ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', { count: 'exact', head: true })
+  ).is('match_score', null)
   if (error) {
     console.error('[agents/match/batch] unscored-count query failed', error)
     return 0
@@ -159,10 +159,10 @@ async function countRemainingInTargeting(
   targeting: Targeting
 ): Promise<number> {
   if (companyIds.length === 0) return 0
-  let query = ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', { count: 'exact', head: true }).is(
-    'match_score',
-    null
+  let query = openRolesOnly(
+    ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', { count: 'exact', head: true })
   )
+    .is('match_score', null)
     .or(`quality_score.is.null,quality_score.gte.${QUALITY_REJECT_THRESHOLD}`)
 
   if (targeting.functions.length > 0) query = query.or(facetOrFilter('job_function', targeting.functions))
