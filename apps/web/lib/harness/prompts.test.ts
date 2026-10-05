@@ -170,3 +170,17 @@ describe('the prompt policy', () => {
     expect(c.opts.system).toBe(getPolicyDoc())
   })
 })
+
+describe('the rewritten prompt documents', () => {
+  const REWRITTEN = ['planner'] as const
+
+  it.each(REWRITTEN)('%s states its job, inputs, output, rules and examples, and no em dash', (name) => {
+    const doc = loadModeDoc(name)
+    for (const heading of ['## Job', '## Inputs', '## Output', '## Rules', '## Examples']) expect(doc, heading).toContain(`\n${heading}\n`)
+    expect(doc).not.toContain('\u2014')
+  })
+
+  it.each(REWRITTEN)('%s does not paste the policy text (it is added once, centrally)', (name) => {
+    expect(loadModeDoc(name)).not.toContain('Facts about the person come only from')
+  })
+})

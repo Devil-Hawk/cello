@@ -55,13 +55,13 @@ describe('the planner prompt actually teaches the loop contract', () => {
     expect(contractLine).toContain('fanOut')
   })
 
-  it('makes the self-check ask about counted goals', () => {
+  it('tells the model a goal that names a number needs a loop encoding it', () => {
     // The planner reliably forgot to loop even when the goal said "10". The
-    // self-check is the backstop; if it stops mentioning numbers, the backstop
-    // is gone.
-    const selfCheck = PLANNER_MD.slice(PLANNER_MD.indexOf('## Self-check'))
-    expect(selfCheck.toLowerCase()).toContain('number')
-    expect(selfCheck).toContain('loop')
+    // rule in the loop section is the backstop; if it stops saying so, the
+    // backstop is gone.
+    const section = PLANNER_MD.slice(PLANNER_MD.indexOf('## Reaching a number'), PLANNER_MD.indexOf('## One step per item'))
+    expect(section.toLowerCase()).toContain('goal names a number')
+    expect(section).toContain('loop')
   })
 })
 
