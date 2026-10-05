@@ -41,6 +41,8 @@ export interface Predicted {
 
 /** One reaction, with the snapshot of the role it was about. */
 export interface ReactionRecord {
+  /** Row id, so an embedding computed later can be written back to it. */
+  id: string
   jobId: string | null
   reaction: Reaction
   reason: PassReason | null

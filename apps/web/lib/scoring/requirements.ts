@@ -49,7 +49,7 @@ function fold(s: string): string {
     .replace(/[̀-ͯ]/g, '')
     .replace(/[‘’]/g, "'")
     .replace(/[“”]/g, '"')
-    .replace(/[–—]/g, '-')
+    .replace(/[\u2013\u2014]/g, '-')
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim()

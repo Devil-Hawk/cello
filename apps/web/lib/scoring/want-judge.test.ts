@@ -6,6 +6,7 @@ import type { ReactionRecord, RoleFacts } from './types'
 
 function rx(i: number, reaction: ReactionRecord['reaction'], reason: ReactionRecord['reason'] = null): ReactionRecord {
   return {
+    id: `r${i}`,
     jobId: `j${i}`,
     reaction,
     reason,

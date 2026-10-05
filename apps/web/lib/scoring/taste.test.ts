@@ -14,6 +14,7 @@ function mulberry(seed: number) {
 
 function rec(partial: Partial<ReactionRecord> & { reaction: Reaction }): ReactionRecord {
   return {
+    id: 'r',
     jobId: null,
     reason: null,
     title: 't',
