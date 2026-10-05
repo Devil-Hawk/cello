@@ -26,6 +26,7 @@ import { optimizeResume } from '@/lib/harness/agents/resume_optimizer'
 import { callLlm, MissingKeyError } from '@/lib/harness/llm'
 import { canRunLlm, missingOpenRouterMessage } from '@/lib/harness/llm-key-message'
 import type { DecryptedApiKeys, LlmRunner } from '@/lib/harness/types'
+import { setTraceInput, setTraceOutput, withTrace } from '@/lib/trace/spans'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -49,7 +50,7 @@ function trackedLlm(apiKeys: DecryptedApiKeys): { llm: LlmRunner; passIndex: () 
   let started = 0
   const llm: LlmRunner = (opts) => {
     started += 1
-    return callLlm(apiKeys, opts)
+    return callLlm(apiKeys, { ...opts, name: opts.name ?? 'optimize-resume' })
   }
   return { llm, passIndex: () => started }
 }
@@ -60,83 +61,87 @@ export async function POST(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  return withTrace(createAdminClient(), user.id, { name: 'optimize-resume' }, async () => {
 
-  let jobId: string
-  try {
-    const body = await request.json()
-    jobId = typeof body?.jobId === 'string' ? body.jobId : ''
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
-  }
-  if (!jobId) return NextResponse.json({ error: 'jobId is required' }, { status: 400 })
+    let jobId: string
+    try {
+      const body = await request.json()
+      jobId = typeof body?.jobId === 'string' ? body.jobId : ''
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+    }
+    if (!jobId) return NextResponse.json({ error: 'jobId is required' }, { status: 400 })
+    setTraceInput({ jobId })
 
-  const admin = createAdminClient()
+    const admin = createAdminClient()
 
-  // Resume text (source of truth — never fabricated against).
-  const { data: profile } = await admin
-    .from('profiles')
-    .select('resume_text')
-    .eq('id', user.id)
-    .single()
-  const resumeText = (profile?.resume_text as string | null) ?? ''
-  if (!resumeText.trim()) {
-    return NextResponse.json(
-      { error: 'No resume on file. Upload your resume in Settings first.', needsResume: true },
-      { status: 400 }
-    )
-  }
-
-  // Job + company (RLS-scoped read via the signed-in client).
-  const { data: job } = await supabase
-    .from('jobs')
-    .select('id, title, description, companies(name)')
-    .eq('id', jobId)
-    .single()
-  if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 })
-
-  const companyRel = (job as { companies?: { name?: string } | { name?: string }[] | null }).companies
-  const companyName = Array.isArray(companyRel) ? companyRel[0]?.name : companyRel?.name
-
-  // PROVIDER GATE ALIGNMENT: the harness only ever calls OpenRouter — gate on
-  // canRunLlm(apiKeys), and explain the gap when the account has an
-  // openai/anthropic key but no OpenRouter key, not a bare "missing key".
-  const apiKeys = await loadApiKeys(admin, user.id)
-  if (!canRunLlm(apiKeys)) {
-    return NextResponse.json(
-      { error: missingOpenRouterMessage(apiKeys), needsKey: true },
-      { status: 400 }
-    )
-  }
-
-  const { llm, passIndex } = trackedLlm(apiKeys)
-  try {
-    const result = await optimizeResume({
-      resumeText,
-      job: { title: job.title, company: companyName ?? null, description: job.description },
-      llm,
-    })
-    return NextResponse.json({ ok: true, result })
-  } catch (e) {
-    const idx = passIndex()
-    const pass = idx >= 1 && idx <= PASS_LABELS.length ? PASS_LABELS[idx - 1] : null
-    const baseMessage = e instanceof Error ? e.message : 'Resume optimization failed'
-    console.error(
-      `[resume/optimize] job=${jobId} user=${user.id} pass="${pass ?? 'unknown'}" (call #${idx}) failed:`,
-      e
-    )
-    if (e instanceof MissingKeyError) {
+    // Resume text (source of truth — never fabricated against).
+    const { data: profile } = await admin
+      .from('profiles')
+      .select('resume_text')
+      .eq('id', user.id)
+      .single()
+    const resumeText = (profile?.resume_text as string | null) ?? ''
+    if (!resumeText.trim()) {
       return NextResponse.json(
-        { error: missingOpenRouterMessage(apiKeys), needsKey: true, pass },
+        { error: 'No resume on file. Upload your resume in Settings first.', needsResume: true },
         { status: 400 }
       )
     }
-    return NextResponse.json(
-      {
-        error: pass ? `Resume optimization failed during "${pass}": ${baseMessage}` : baseMessage,
-        pass,
-        passIndex: idx || null,
-      },
-      { status: 500 }
-    )
-  }
+
+    // Job + company (RLS-scoped read via the signed-in client).
+    const { data: job } = await supabase
+      .from('jobs')
+      .select('id, title, description, companies(name)')
+      .eq('id', jobId)
+      .single()
+    if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 })
+
+    const companyRel = (job as { companies?: { name?: string } | { name?: string }[] | null }).companies
+    const companyName = Array.isArray(companyRel) ? companyRel[0]?.name : companyRel?.name
+
+    // PROVIDER GATE ALIGNMENT: the harness only ever calls OpenRouter — gate on
+    // canRunLlm(apiKeys), and explain the gap when the account has an
+    // openai/anthropic key but no OpenRouter key, not a bare "missing key".
+    const apiKeys = await loadApiKeys(admin, user.id)
+    if (!canRunLlm(apiKeys)) {
+      return NextResponse.json(
+        { error: missingOpenRouterMessage(apiKeys), needsKey: true },
+        { status: 400 }
+      )
+    }
+
+    const { llm, passIndex } = trackedLlm(apiKeys)
+    try {
+      const result = await optimizeResume({
+        resumeText,
+        job: { title: job.title, company: companyName ?? null, description: job.description },
+        llm,
+      })
+      setTraceOutput({ ok: true, passes: PASS_LABELS.length })
+      return NextResponse.json({ ok: true, result })
+    } catch (e) {
+      const idx = passIndex()
+      const pass = idx >= 1 && idx <= PASS_LABELS.length ? PASS_LABELS[idx - 1] : null
+      const baseMessage = e instanceof Error ? e.message : 'Resume optimization failed'
+      console.error(
+        `[resume/optimize] job=${jobId} user=${user.id} pass="${pass ?? 'unknown'}" (call #${idx}) failed:`,
+        e
+      )
+      if (e instanceof MissingKeyError) {
+        return NextResponse.json(
+          { error: missingOpenRouterMessage(apiKeys), needsKey: true, pass },
+          { status: 400 }
+        )
+      }
+      return NextResponse.json(
+        {
+          error: pass ? `Resume optimization failed during "${pass}": ${baseMessage}` : baseMessage,
+          pass,
+          passIndex: idx || null,
+        },
+        { status: 500 }
+      )
+    }
+  })
 }

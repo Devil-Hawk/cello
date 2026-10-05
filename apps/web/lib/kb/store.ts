@@ -26,6 +26,7 @@ import { createAdminClient } from '../harness/supabase-admin'
 import { loadApiKeys } from '../harness/keys'
 import { callEmbedding } from '../harness/llm'
 import { captureError } from '../observability/sentry'
+import { withTrace } from '../trace/spans'
 import type {
   KbDocument,
   KbSearchHit,
@@ -379,7 +380,14 @@ async function embedChunksBestEffort(
   try {
     const admin = createAdminClient()
     const keys = await loadApiKeys(admin, userId)
-    const { embeddings } = await callEmbedding(keys, { texts: pieces.map((p) => p.content) })
+    // Its own Langfuse trace when no request trace is active (ingest runs from
+    // upload routes and scripts). Counts only: chunk text is never captured.
+    const { embeddings } = await withTrace(
+      admin,
+      userId,
+      { name: 'ingest-knowledge', input: { chunks: pieces.length, document_id: documentId }, isDemo: keys.isDemo },
+      () => callEmbedding(keys, { texts: pieces.map((p) => p.content), name: 'embed-chunks' })
+    )
     for (let i = 0; i < pieces.length; i++) {
       const { error } = await admin
         .from(CHUNKS)

@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { withTrace } from '@/lib/trace/spans'
+import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { createClient } from '@/lib/supabase/server'
 import { classifyJob, isLowQuality, type Classification } from '@/lib/jobs/classify'
 import { resolveTargeting, isTargetingConfigured, type Targeting } from '@/lib/targeting'
@@ -280,6 +282,7 @@ If no jobs are found, return: []`
             maxTokens: 4096,
             // The account-wide default effort would add thinking tokens to a call that never used them.
             reasoning: { effort: 'none' },
+            name: 'extract-jobs',
           },
           // callLlm retries transient errors with backoff; bound the whole call.
           AbortSignal.timeout(AI_TIMEOUT_MS)
@@ -436,13 +439,16 @@ export async function POST(request: NextRequest) {
 
   let jobs: ExtractedJob[] = []
 
-  // Try AI extraction first if keys available
-  if (apiKeys.openrouter) {
-    jobs = await extractJobsWithAI(company.career_url, company.name, apiKeys, 'openrouter')
-  } else if (apiKeys.anthropic) {
-    jobs = await extractJobsWithAI(company.career_url, company.name, apiKeys, 'anthropic')
-  } else if (apiKeys.openai) {
-    jobs = await extractJobsWithAI(company.career_url, company.name, apiKeys, 'openai')
+  // Try AI extraction first if keys available. Its own Langfuse trace, only
+  // when a key makes a model call possible (the page HTML is never captured).
+  const aiProvider = apiKeys.openrouter ? 'openrouter' : apiKeys.anthropic ? 'anthropic' : apiKeys.openai ? 'openai' : null
+  if (aiProvider) {
+    jobs = await withTrace(
+      createAdminClient(),
+      user.id,
+      { name: 'extract-jobs', input: { careerUrl: company.career_url }, outputOf: (j: ExtractedJob[]) => ({ jobs: j.length }) },
+      () => extractJobsWithAI(company.career_url, company.name, apiKeys, aiProvider)
+    )
   }
 
   // Fallback to basic extraction

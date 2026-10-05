@@ -19,7 +19,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { DecryptedApiKeys, LlmRunner, LlmResult, LlmRunOptions } from '../types'
 import { callLlm, parseJsonLoose, TruncatedResponseError } from '../llm'
-import { composeSystemPrompt, loadModeDoc } from '../prompts'
+import { composeSystemPrompt, loadModeDoc, promptRef } from '../prompts'
 import { createVersion } from '@/lib/resume/store'
 import type { ResumeDocument, ResumeSource } from '@/lib/resume/types'
 
@@ -121,6 +121,7 @@ async function scoreResume(
 ): Promise<{ score: AtsScore; tokensUsed: number }> {
   const base: LlmRunOptions = {
     system: resumeSystem(resumeText),
+    promptRef: promptRef('resume_optimizer'),
     prompt: scorePrompt(job),
     json: true,
     maxTokens: SCORE_MAX_TOKENS,
@@ -173,6 +174,7 @@ async function rewriteResume(
 ): Promise<{ rewrite: string; tokensUsed: number }> {
   const base: LlmRunOptions = {
     system: resumeSystem(resumeText),
+    promptRef: promptRef('resume_optimizer'),
     prompt: rewritePrompt(job, missingKeywords, formatIssues),
     maxTokens: REWRITE_MAX_TOKENS,
     temperature: 0.3,
@@ -209,7 +211,7 @@ export async function optimizeResume(args: OptimizeResumeArgs): Promise<ResumeOp
     args.llm ??
     ((opts: LlmRunOptions): Promise<LlmResult> => {
       if (!args.apiKeys) throw new Error('optimizeResume requires either `llm` or `apiKeys`')
-      return callLlm(args.apiKeys, opts, args.signal)
+      return callLlm(args.apiKeys, { ...opts, name: opts.name ?? 'optimize-resume' }, args.signal)
     })
 
   let tokensUsed = 0

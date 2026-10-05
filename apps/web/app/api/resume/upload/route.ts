@@ -62,6 +62,7 @@ import {
   type ResumeImportResult,
 } from '@/lib/resume/import'
 import type { DecryptedApiKeys } from '@/lib/harness/types'
+import { setTraceInput, setTraceOutput, withTrace } from '@/lib/trace/spans'
 
 export const dynamic = 'force-dynamic'
 // A vision read of a long PDF plus a reformat pass is comfortably slower than
@@ -139,7 +140,7 @@ function buildModels(apiKeys: DecryptedApiKeys): ResumeImportModels {
     // The harness runner: honours the account's provider choice, enforces the
     // monthly spend cap and retries transient failures.
     models.reformat = async (prompt) => {
-      const result = await callLlm(apiKeys, { prompt, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0 })
+      const result = await callLlm(apiKeys, { prompt, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0, name: 'import-resume' })
       return result.content
     }
   } else if (apiKeys.openai) {
@@ -258,88 +259,93 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  return withTrace(createAdminClient(), user.id, { name: 'import-resume' }, async () => {
 
-  let parsed: ParsedRequest
-  try {
-    parsed = await parseRequest(request)
-  } catch (err) {
-    if (err instanceof ResumeImportError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: err.status })
+    let parsed: ParsedRequest
+    try {
+      parsed = await parseRequest(request)
+    } catch (err) {
+      if (err instanceof ResumeImportError) {
+        return NextResponse.json({ error: err.message, code: err.code }, { status: err.status })
+      }
+      return NextResponse.json({ error: 'Could not read the upload' }, { status: 400 })
     }
-    return NextResponse.json({ error: 'Could not read the upload' }, { status: 400 })
-  }
 
-  if (!parsed.file && !parsed.text?.trim()) {
-    return NextResponse.json(
-      { error: `No resume provided. Upload ${SUPPORTED_FORMATS_SENTENCE}, or paste your resume text.` },
-      { status: 400 }
-    )
-  }
-
-  const { getDecryptedApiKeys } = await import('@/lib/apikeys')
-  const apiKeys = await getDecryptedApiKeys(user.id)
-  // Budget, enforced at the route rather than inside buildModels, because two
-  // of that function's three model paths never touch lib/harness/llm.ts and so
-  // never inherit its guards: readPdfWithClaude calls Anthropic directly, and
-  // the completeWithOpenAI fallback calls OpenAI directly. Only the callLlm
-  // branch was capped — its own comment claims the cap for the whole function,
-  // which was true of one path in three.
-  //
-  // See lib/harness/spend-chokepoints.test.ts, which asserts this invariant
-  // across every route that builds its own client.
-  const budgetAdmin = createAdminClient()
-  try {
-    await assertWithinBudget(budgetAdmin, user.id)
-  } catch (e) {
-    if (e instanceof BudgetCapError) {
-      return NextResponse.json({ error: e.message, budgetExhausted: true }, { status: 429 })
+    if (!parsed.file && !parsed.text?.trim()) {
+      return NextResponse.json(
+        { error: `No resume provided. Upload ${SUPPORTED_FORMATS_SENTENCE}, or paste your resume text.` },
+        { status: 400 }
+      )
     }
-    throw e
-  }
+    // Kind and size only: the resume itself is not a trace input.
+    setTraceInput({ source: parsed.file ? 'file' : 'pasted_text' })
 
-  const models = buildModels(apiKeys)
-
-  let result: ResumeImportResult
-  try {
-    result = parsed.file
-      ? await importResumeFile(parsed.file, models)
-      : await importPastedResume(parsed.text ?? '', models)
-    // Estimated, and only meaningful for the direct-client paths — the callLlm
-    // branch already recorded its own real usage, so this deliberately errs
-    // small to avoid double-counting that case, while still putting the
-    // otherwise-invisible PDF read and OpenAI fallback into the ledger.
-    await recordSpend(budgetAdmin, user.id, 'resume-import', 2000, 800)
-  } catch (err) {
-    if (err instanceof ResumeImportError) {
-      // Every one of these is something the user can act on, and the message
-      // says what to do — do not flatten them into "Failed to process resume".
-      return NextResponse.json({ error: err.message, code: err.code }, { status: err.status })
+    const { getDecryptedApiKeys } = await import('@/lib/apikeys')
+    const apiKeys = await getDecryptedApiKeys(user.id)
+    // Budget, enforced at the route rather than inside buildModels, because two
+    // of that function's three model paths never touch lib/harness/llm.ts and so
+    // never inherit its guards: readPdfWithClaude calls Anthropic directly, and
+    // the completeWithOpenAI fallback calls OpenAI directly. Only the callLlm
+    // branch was capped — its own comment claims the cap for the whole function,
+    // which was true of one path in three.
+    //
+    // See lib/harness/spend-chokepoints.test.ts, which asserts this invariant
+    // across every route that builds its own client.
+    const budgetAdmin = createAdminClient()
+    try {
+      await assertWithinBudget(budgetAdmin, user.id)
+    } catch (e) {
+      if (e instanceof BudgetCapError) {
+        return NextResponse.json({ error: e.message, budgetExhausted: true }, { status: 429 })
+      }
+      throw e
     }
-    console.error('[resume/upload] import failed', { userId: user.id }, err)
-    return NextResponse.json({ error: 'Failed to process resume' }, { status: 500 })
-  }
 
-  let persisted: Awaited<ReturnType<typeof persistImport>>
-  try {
-    persisted = await persistImport(supabase, user.id, result, parsed.file?.filename ?? null)
-  } catch (err) {
-    console.error('[resume/upload] save failed', { userId: user.id }, err)
-    return NextResponse.json({ error: 'Failed to save resume' }, { status: 500 })
-  }
+    const models = buildModels(apiKeys)
 
-  const warnings = [...result.warnings, ...persisted.warnings]
+    let result: ResumeImportResult
+    try {
+      result = parsed.file
+        ? await importResumeFile(parsed.file, models)
+        : await importPastedResume(parsed.text ?? '', models)
+      // Estimated, and only meaningful for the direct-client paths — the callLlm
+      // branch already recorded its own real usage, so this deliberately errs
+      // small to avoid double-counting that case, while still putting the
+      // otherwise-invisible PDF read and OpenAI fallback into the ledger.
+      await recordSpend(budgetAdmin, user.id, 'resume-import', 2000, 800)
+    } catch (err) {
+      if (err instanceof ResumeImportError) {
+        // Every one of these is something the user can act on, and the message
+        // says what to do — do not flatten them into "Failed to process resume".
+        return NextResponse.json({ error: err.message, code: err.code }, { status: err.status })
+      }
+      console.error('[resume/upload] import failed', { userId: user.id }, err)
+      return NextResponse.json({ error: 'Failed to process resume' }, { status: 500 })
+    }
 
-  return NextResponse.json({
-    success: true,
-    message: `Resume imported from ${result.format.toUpperCase()} · ${result.method}`,
-    // `extractionMethod` and `wordCount` are the field names the settings card
-    // already renders — kept.
-    extractionMethod: result.method,
-    wordCount: result.plainText.split(/\s+/).filter(Boolean).length,
-    format: result.format,
-    structurePreserved: result.structurePreserved,
-    warnings,
-    documentId: persisted.documentId,
-    version: persisted.version,
+    let persisted: Awaited<ReturnType<typeof persistImport>>
+    try {
+      persisted = await persistImport(supabase, user.id, result, parsed.file?.filename ?? null)
+    } catch (err) {
+      console.error('[resume/upload] save failed', { userId: user.id }, err)
+      return NextResponse.json({ error: 'Failed to save resume' }, { status: 500 })
+    }
+
+    const warnings = [...result.warnings, ...persisted.warnings]
+    setTraceOutput({ format: result.format, method: result.method, warnings: warnings.length })
+
+    return NextResponse.json({
+      success: true,
+      message: `Resume imported from ${result.format.toUpperCase()} · ${result.method}`,
+      // `extractionMethod` and `wordCount` are the field names the settings card
+      // already renders — kept.
+      extractionMethod: result.method,
+      wordCount: result.plainText.split(/\s+/).filter(Boolean).length,
+      format: result.format,
+      structurePreserved: result.structurePreserved,
+      warnings,
+      documentId: persisted.documentId,
+      version: persisted.version,
+    })
   })
 }

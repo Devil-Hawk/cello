@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { withTrace } from '@/lib/trace/spans'
+import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { createClient } from '@/lib/supabase/server'
 import { assertSsrfSafe } from '@/lib/security/untrusted'
 import { getDecryptedApiKeys } from '@/lib/apikeys'
@@ -119,6 +121,7 @@ async function analyzeWithLlm(apiKeys: DecryptedApiKeys, html: string, url: stri
         maxTokens: 500,
         // The account-wide default effort would add thinking tokens to a call that never used them.
         reasoning: { effort: 'none' },
+        name: 'verify-careers-page',
       },
       AbortSignal.timeout(AI_TIMEOUT_MS)
     )
@@ -411,7 +414,13 @@ export async function POST(request: NextRequest) {
       warnLlmFallback('company-verify', 'heuristic', error)
     }
     if (apiKeys && canRunLlm(apiKeys)) {
-      aiAnalysis = await analyzeWithLlm(apiKeys, html, normalizedUrl)
+      const llmKeys = apiKeys
+      aiAnalysis = await withTrace(
+        createAdminClient(),
+        requestingUser.id,
+        { name: 'verify-careers-page', input: { url: normalizedUrl } },
+        () => analyzeWithLlm(llmKeys, html, normalizedUrl)
+      )
     }
 
     // If AI analysis succeeded, use it

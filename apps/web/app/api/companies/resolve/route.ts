@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { withTrace } from '@/lib/trace/spans'
+import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { createClient } from '@/lib/supabase/server'
 import { loadApiKeys } from '@/lib/harness/keys'
 import { callLlm, parseJsonLoose, MissingKeyError } from '@/lib/harness/llm'
@@ -170,6 +172,7 @@ async function resolveWithLlm(apiKeys: DecryptedApiKeys, name: string): Promise<
       json: true,
       maxTokens: 200,
       temperature: 0,
+      name: 'resolve-company',
     })
     raw = result.content
   } catch (error) {
@@ -312,7 +315,9 @@ export async function POST(request: NextRequest) {
       try {
         const apiKeys = await loadApiKeys(supabase, user.id)
         if (apiKeys.openrouter) {
-          const llmCandidate = await resolveWithLlm(apiKeys, name)
+          const llmCandidate = await withTrace(createAdminClient(), user.id, { name: 'resolve-company', input: { name } }, () =>
+            resolveWithLlm(apiKeys, name)
+          )
           if (llmCandidate) candidates.push(llmCandidate)
         }
       } catch {

@@ -65,6 +65,7 @@
 // open past the request that opened it.
 
 import { NextRequest, NextResponse } from 'next/server'
+import { withTrace } from '@/lib/trace/spans'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -228,7 +229,9 @@ export async function POST(request: NextRequest) {
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
   try {
     await server.connect(transport)
-    return await transport.handleRequest(request)
+    // The owner's tool calls: each dispatchTool nests under this root (a
+    // request that calls no tool makes no trace).
+    return await withTrace(admin, userId, { name: 'call-mcp-tool', isDemo: false }, () => transport.handleRequest(request))
   } catch (e) {
     console.error('[mcp] request handling failed', errMsg(e))
     return NextResponse.json({ error: 'Internal MCP server error.' }, { status: 500, headers: NO_STORE })

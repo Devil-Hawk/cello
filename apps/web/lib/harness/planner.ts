@@ -11,7 +11,7 @@ import { callLlm, parseJsonLoose, MissingKeyError } from './llm'
 import { AGENT_CATALOG, EXECUTABLE_AGENT_TYPES } from './registry'
 import { PlanSchema } from './schemas'
 import type { DecryptedApiKeys, Plan } from './types'
-import { composeSystemPrompt, loadModeDoc } from './prompts'
+import { composeSystemPrompt, loadModeDoc, promptRef } from './prompts'
 
 export interface PlanResult {
   plan: Plan
@@ -91,6 +91,8 @@ export async function planGoal(
           // The catalog + rules are a fixed string for every plan, every user,
           // forever — the cheapest possible cache prefix to mark.
           cachePrefix: true,
+          name: 'plan-run',
+          promptRef: promptRef('planner'),
         },
         signal
       )

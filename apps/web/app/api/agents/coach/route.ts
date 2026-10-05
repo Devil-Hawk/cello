@@ -21,6 +21,7 @@ import { runUnitOnce } from '@/lib/graph/oneshot'
 import { BudgetCapError } from '@/lib/harness/spend'
 import { CoachOutput } from '@/lib/harness/schemas'
 import type { z } from 'zod'
+import { setTraceInput, setTraceOutput, withTrace } from '@/lib/trace/spans'
 
 type CoachResult = z.infer<typeof CoachOutput>
 
@@ -30,51 +31,55 @@ export async function POST(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  return withTrace(createAdminClient(), user.id, { name: 'coach-job-search' }, async () => {
 
-  const body = await request.json()
-  const { applicationId } = body
-  if (!applicationId) {
-    return NextResponse.json({ error: 'applicationId is required' }, { status: 400 })
-  }
+    const body = await request.json()
+    const { applicationId } = body
+    if (!applicationId) {
+      return NextResponse.json({ error: 'applicationId is required' }, { status: 400 })
+    }
 
-  // Existence check only — the unit re-reads the row itself (and everything
-  // it needs off it) via the admin client, scoped by the SAME user_id.
-  const { data: application, error: appError } = await supabase
-    .from('applications')
-    .select('id')
-    .eq('id', applicationId)
-    .eq('user_id', user.id)
-    .single()
-  if (appError || !application) {
-    return NextResponse.json({ error: 'Application not found' }, { status: 404 })
-  }
+    // Existence check only — the unit re-reads the row itself (and everything
+    // it needs off it) via the admin client, scoped by the SAME user_id.
+    const { data: application, error: appError } = await supabase
+      .from('applications')
+      .select('id')
+      .eq('id', applicationId)
+      .eq('user_id', user.id)
+      .single()
+    if (appError || !application) {
+      return NextResponse.json({ error: 'Application not found' }, { status: 404 })
+    }
 
-  const admin = createAdminClient()
+    const admin = createAdminClient()
+    setTraceInput({ applicationId })
 
-  try {
-    const result = await runUnitOnce('coach', {
-      admin,
-      userId: user.id,
-      goal: `Coach application ${applicationId}`,
-      input: { applicationId },
-    })
-    const output = result.output as CoachResult
-    return NextResponse.json({
-      suggestion: output.suggestion,
-      draftMessage: output.draftMessage,
-      suggestedContacts: output.suggestedContacts,
-    })
-  } catch (error) {
-    if (error instanceof BudgetCapError) {
+    try {
+      const result = await runUnitOnce('coach', {
+        admin,
+        userId: user.id,
+        goal: `Coach application ${applicationId}`,
+        input: { applicationId },
+      })
+      const output = result.output as CoachResult
+      setTraceOutput({ suggestion: output.suggestion })
+      return NextResponse.json({
+        suggestion: output.suggestion,
+        draftMessage: output.draftMessage,
+        suggestedContacts: output.suggestedContacts,
+      })
+    } catch (error) {
+      if (error instanceof BudgetCapError) {
+        return NextResponse.json(
+          { error: error.message, reason: 'spend_cap', budgetExhausted: true },
+          { status: 429 }
+        )
+      }
+      console.error('Coach error:', error)
       return NextResponse.json(
-        { error: error.message, reason: 'spend_cap', budgetExhausted: true },
-        { status: 429 }
+        { error: error instanceof Error ? error.message : 'Failed to generate coaching' },
+        { status: 500 }
       )
     }
-    console.error('Coach error:', error)
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to generate coaching' },
-      { status: 500 }
-    )
-  }
+  })
 }

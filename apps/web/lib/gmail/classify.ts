@@ -114,6 +114,7 @@ export async function parseEmailWithAI(
       // that never used them.
       reasoning: { effort: 'none' },
       prompt: buildPrompt(from, subject, body),
+      name: 'classify-email',
     })
 
     const content = response.content || '{}'

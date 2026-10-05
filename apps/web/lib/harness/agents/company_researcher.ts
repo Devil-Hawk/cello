@@ -15,7 +15,7 @@
 
 import type { AgentFn, AdminClient, DecryptedApiKeys, LlmRunner, LlmRunOptions, LlmResult } from '../types'
 import { callLlm, parseJsonLoose } from '../llm'
-import { composeSystemPrompt, loadModeDoc } from '../prompts'
+import { composeSystemPrompt, loadModeDoc, promptRef } from '../prompts'
 import { truncate } from '@/lib/sources/util'
 import { collectPublicSignals, type PublicSignals } from '@/lib/dossier/sources'
 import { computeCompIntel } from '@/lib/dossier/comp'
@@ -157,7 +157,7 @@ export async function generateDossier(args: GenerateDossierArgs): Promise<Compan
   const run: LlmRunner | null =
     args.llm ??
     (args.apiKeys?.openrouter
-      ? (opts: LlmRunOptions): Promise<LlmResult> => callLlm(args.apiKeys!, opts, args.signal)
+      ? (opts: LlmRunOptions): Promise<LlmResult> => callLlm(args.apiKeys!, { ...opts, name: opts.name ?? 'research-company' }, args.signal)
       : null)
 
   // 1) Free public fetches (keyless).
@@ -201,6 +201,7 @@ export async function generateDossier(args: GenerateDossierArgs): Promise<Compan
         // identical for every company this call ever runs against — the
         // cheapest possible cache prefix to mark.
         system: composeSystemPrompt({ mode: loadModeDoc('company_researcher') }),
+        promptRef: promptRef('company_researcher'),
         prompt: buildSynthPrompt(company, pub),
         json: true,
         maxTokens: 700,
