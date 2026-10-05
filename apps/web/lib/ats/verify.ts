@@ -9,6 +9,8 @@
 //   careers_page_link  the company's own careers page or site links to this exact board
 //   board_links_home   the board's postings (or its own header) point at the company's domain
 //   provider_name      the provider names the same employer AND the token is the domain label
+// A known employer (known-companies.ts) is never matched by name or domain label: a
+// namesake's board passes those, so it needs the page link or its curated board.
 // Boards read off the careers URL itself ('careers_url') and boards the person
 // set by hand ('manual') are trusted and never come through here.
 //
@@ -18,7 +20,13 @@ import type { AtsJob, AtsProviderId } from './types'
 import { assertAllowedHost, assertAllowedHostSuffix, fetchJson, fetchText } from './http'
 import { SUFFIX_WORDS } from '../companies/known-companies'
 
-export type VerifiedBy = 'careers_url' | 'manual' | 'careers_page_link' | 'board_links_home' | 'provider_name'
+export type VerifiedBy =
+  | 'careers_url'
+  | 'manual'
+  | 'known_board'
+  | 'careers_page_link'
+  | 'board_links_home'
+  | 'provider_name'
 
 export interface BoardRef {
   provider: AtsProviderId
@@ -157,6 +165,8 @@ export interface VerifyInput extends BoardRef {
   company: { name: string | null; domain: string | null }
   /** Boards the company's own site links to, or a lazy way to find them. */
   pageBoards?: readonly BoardRef[] | (() => Promise<readonly BoardRef[]>)
+  /** A big known employer: only its own site's link counts (see header). */
+  knownEmployer?: boolean
   now?: number
 }
 
@@ -164,7 +174,7 @@ export interface VerifyInput extends BoardRef {
  * Why this board is the company's, or null when nothing ties it to them (or it
  * is dead). Never throws: a failed identity call is simply no evidence.
  */
-export async function verifyBoard(input: VerifyInput): Promise<Exclude<VerifiedBy, 'careers_url' | 'manual'> | null> {
+export async function verifyBoard(input: VerifyInput): Promise<Exclude<VerifiedBy, 'careers_url' | 'manual' | 'known_board'> | null> {
   const { provider, token, jobs, company } = input
   if (!isRecentBoard(jobs, input.now)) return null
 
@@ -176,7 +186,7 @@ export async function verifyBoard(input: VerifyInput): Promise<Exclude<VerifiedB
   if (pb && typeof pb !== 'function' && linked(pb)) return 'careers_page_link'
 
   // 2. A posting links to the company's own domain (free: already fetched).
-  if (jobs.some((j) => onCompanyDomain(j.url, company.domain))) return 'board_links_home'
+  if (!input.knownEmployer && jobs.some((j) => onCompanyDomain(j.url, company.domain))) return 'board_links_home'
 
   // 2b. Same as 1, but the site is only read now (a stored board being re-checked).
   if (typeof pb === 'function') {
@@ -188,6 +198,7 @@ export async function verifyBoard(input: VerifyInput): Promise<Exclude<VerifiedB
   }
 
   // 3. The provider's own record of the board.
+  if (input.knownEmployer) return null
   const identify = IDENTIFY[provider]
   if (!identify) return null
   let identity: BoardIdentity

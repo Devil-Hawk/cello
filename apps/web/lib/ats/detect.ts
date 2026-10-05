@@ -27,8 +27,8 @@ import { workable } from './workable'
 import { recruitee } from './recruitee'
 import { personio } from './personio'
 import { fetchCareersHtml, findBoardLinks } from './careers-page'
-import { verifyBoard, type BoardRef, type VerifiedBy } from './verify'
-import { KNOWN_COMPANIES, lookupKnownCompanyByDomain, lookupKnownCompanyByName } from '../companies/known-companies'
+import { isRecentBoard, verifyBoard, type BoardRef, type VerifiedBy } from './verify'
+import { isKnownEmployer, knownBoard } from '../companies/known-companies'
 
 /**
  * Every provider, for URL-based detection. Free (no network I/O), so order
@@ -97,7 +97,7 @@ export interface DetectAtsInput {
 export interface DetectedAts {
   provider: AtsProviderId
   token: string
-  source: 'url' | 'probe'
+  source: 'url' | 'probe' | 'known'
   /** Why this board is the company's (see ./verify.ts). */
   verifiedBy: VerifiedBy
   /** When the probe already fetched the board, its jobs are reused here. */
@@ -159,20 +159,6 @@ function hostOnly(value: string | null | undefined): string | null {
 }
 
 /**
- * Big employers with a hand-curated careers URL (Amazon, Meta, Apple, ...) run
- * their own sites: a board found by guessing their name belongs to a namesake,
- * so they are never slug-guessed. Only a link from their own site can name one.
- */
-function hasCuratedCareersSite(input: { domain: string | null; name: string | null; careerUrl?: string | null }): boolean {
-  const domain = hostOnly(input.domain)
-  if (domain && lookupKnownCompanyByDomain(domain)?.careerUrl) return true
-  if (input.name && lookupKnownCompanyByName(input.name)?.careerUrl) return true
-  const host = hostOnly(input.careerUrl)
-  if (!host) return false
-  return Object.values(KNOWN_COMPANIES).some((k) => hostOnly(k.careerUrl) === host)
-}
-
-/**
  * The boards the company's own careers page and homepage link to or embed.
  * Two plain GETs at most; empty when a page cannot be read.
  */
@@ -209,6 +195,7 @@ export async function probeAts(input: {
 }): Promise<DetectedAts | null> {
   const company = { name: input.name, domain: input.domain }
   const pageBoards = input.pageBoards ?? []
+  const known = isKnownEmployer(input)
   const tried = new Set<string>()
 
   const attempt = async (provider: AtsProvider, token: string): Promise<DetectedAts | null> => {
@@ -218,7 +205,7 @@ export async function probeAts(input: {
     try {
       const jobs = await provider.fetch(token)
       if (jobs.length < 1) return null
-      const verifiedBy = await verifyBoard({ provider: provider.id, token, jobs, company, pageBoards })
+      const verifiedBy = await verifyBoard({ provider: provider.id, token, jobs, company, pageBoards, knownEmployer: known })
       return verifiedBy ? { provider: provider.id, token, source: 'probe', verifiedBy, jobs } : null
     } catch {
       return null // Miss (404, timeout, ...) — keep going.
@@ -231,7 +218,9 @@ export async function probeAts(input: {
     if (hit) return hit
   }
 
-  if (hasCuratedCareersSite(input)) return null
+  // A known employer is never slug-guessed: its curated board or a link from
+  // its own site, nothing else.
+  if (known) return null
   const tokens = candidateTokens(input.domain, input.name)
   for (const provider of PROBE_ORDER) {
     for (const token of tokens) {
@@ -243,13 +232,26 @@ export async function probeAts(input: {
 }
 
 /**
- * Full detection: URL parsing first (free), then the company's own careers
- * page, then verified probing. Never throws; returns null when no board could
+ * Full detection: URL parsing first (free), then a known employer's curated
+ * board, then the company's own careers page, then verified probing. Never throws; returns null when no board could
  * be tied to the company.
  */
 export async function detectAts(input: DetectAtsInput): Promise<DetectedAts | null> {
   const fromUrl = detectFromUrl(input)
   if (fromUrl) return { ...fromUrl, source: 'url', verifiedBy: 'careers_url' }
+  const curated = knownBoard(input)
+  if (curated) {
+    const provider = URL_DETECT_ORDER.find((p) => p.id === curated.provider)
+    try {
+      const jobs = provider ? await provider.fetch(curated.token) : []
+      // Hand-checked, so only liveness is asked of it.
+      if (jobs.length > 0 && isRecentBoard(jobs)) {
+        return { ...curated, source: 'known', verifiedBy: 'known_board', jobs }
+      }
+    } catch {
+      /* fall through to the company's own page */
+    }
+  }
   let pageBoards: BoardRef[] = []
   try {
     pageBoards = await findPageBoards(input)

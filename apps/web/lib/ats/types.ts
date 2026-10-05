@@ -56,10 +56,10 @@ export interface AtsProvider {
 export interface AtsMetadata {
   provider: AtsProviderId
   token: string
-  source: 'url' | 'probe' | 'manual'
+  source: 'url' | 'probe' | 'manual' | 'known'
   discovered_at: string
   /** How a guessed board was tied to the company (see ./verify.ts). Absent on boards stored before verification existed. */
-  verified_by?: 'careers_url' | 'manual' | 'careers_page_link' | 'board_links_home' | 'provider_name'
+  verified_by?: 'careers_url' | 'manual' | 'known_board' | 'careers_page_link' | 'board_links_home' | 'provider_name'
   verified_at?: string
 }
 
