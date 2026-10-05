@@ -42,9 +42,20 @@ function route(handler: (url: string) => Response | undefined) {
   return urls
 }
 
-const ghBoard = (jobs: Array<{ url: string; published: string }>) => ({
-  jobs: jobs.map((j, i) => ({ absolute_url: j.url, title: `Engineer ${i}`, first_published: j.published, location: { name: 'Remote' } })),
+const ghBoard = (jobs: Array<{ url: string; published: string; content?: string }>) => ({
+  jobs: jobs.map((j, i) => ({
+    absolute_url: j.url,
+    title: `Engineer ${i}`,
+    first_published: j.published,
+    location: { name: 'Remote' },
+    ...(j.content ? { content: j.content } : {}),
+  })),
 })
+
+const ashbyBoard = (token: string) => ({
+  jobs: [{ title: 'Engineer', jobUrl: `https://jobs.ashbyhq.com/${token}/1`, publishedAt: MONTH_AGO }],
+})
+const ashbyPage = (name: string, site: string) => html(`<script>{"name":"${name}","publicWebsite":"${site}"}</script>`)
 
 describe('the Amazon / Personio false match', () => {
   const amazon = { name: 'Amazon', domain: 'amazon.jobs', careerUrl: 'https://www.amazon.jobs/en/search' }
@@ -150,6 +161,18 @@ describe('a board verified through the careers page', () => {
     await expect(detectAts(acme)).resolves.toBeNull()
   })
 
+  it('reads a heavy page as far as the cap instead of refusing it', async () => {
+    const heavy = `<a href="https://jobs.ashbyhq.com/acmehq">Roles</a>${'<!-- padding -->'.repeat(200_000)}`
+    route((u) => {
+      if (u.startsWith('https://acme.io/careers')) return html(heavy)
+      if (u.includes('/posting-api/job-board/acmehq')) {
+        return json({ jobs: [{ title: 'Engineer', jobUrl: 'https://jobs.ashbyhq.com/acmehq/1', publishedAt: MONTH_AGO }] })
+      }
+      return undefined
+    })
+    await expect(detectAts(acme)).resolves.toMatchObject({ provider: 'ashby', verifiedBy: 'careers_page_link' })
+  })
+
   it('does not follow a redirect off the company site', async () => {
     const urls = route((u) => {
       if (u.startsWith('https://acme.io/careers')) {
@@ -166,7 +189,9 @@ describe('provider name plus domain label', () => {
   it('accepts a board whose provider names the same employer and whose token is the domain label', async () => {
     route((u) => {
       if (u.includes('/v1/boards/quillbot/jobs')) {
-        return json(ghBoard([{ url: 'https://job-boards.greenhouse.io/quillbot/jobs/1', published: MONTH_AGO }]))
+        return json(
+          ghBoard([{ url: 'https://job-boards.greenhouse.io/quillbot/jobs/1', published: MONTH_AGO, content: 'Apply via quillbot.example/careers' }])
+        )
       }
       if (u.endsWith('/v1/boards/quillbot')) return json({ name: 'Quillbot, Inc.' })
       return undefined
@@ -174,6 +199,44 @@ describe('provider name plus domain label', () => {
     await expect(detectAts({ name: 'Quillbot', domain: 'quillbot.example', careerUrl: null })).resolves.toMatchObject({
       verifiedBy: 'provider_name',
     })
+  })
+
+  it('a name equal to the domain label is not enough on its own', async () => {
+    route((u) => {
+      if (u.includes('/v1/boards/quillbot/jobs')) {
+        return json(ghBoard([{ url: 'https://job-boards.greenhouse.io/quillbot/jobs/1', published: MONTH_AGO, content: 'We build things.' }]))
+      }
+      if (u.endsWith('/v1/boards/quillbot')) return json({ name: 'Quillbot' })
+      return undefined
+    })
+    await expect(detectAts({ name: 'Quillbot', domain: 'quillbot.example', careerUrl: null })).resolves.toBeNull()
+  })
+
+  it.each([
+    ['Atlas', 'atlas.co', 'atlas', 'https://atlascard.com/'],
+    ['Prism', 'prism.so', 'prism', 'https://prism-global.com/'],
+  ])("rejects %s: its board declares another employer's site (%s)", async (name, domain, token, site) => {
+    route((u) => {
+      if (u.includes(`/posting-api/job-board/${token}`)) return json(ashbyBoard(token))
+      if (u === `https://jobs.ashbyhq.com/${token}`) return ashbyPage(name, site)
+      return undefined
+    })
+    await expect(detectAts({ name, domain, careerUrl: null })).resolves.toBeNull()
+  })
+
+  it('accepts an Ashby board whose declared site is the company domain', async () => {
+    route((u) => {
+      if (u.includes('/posting-api/job-board/kiln')) return json(ashbyBoard('kiln'))
+      if (u === 'https://jobs.ashbyhq.com/kiln') return ashbyPage('Kiln', 'https://www.kiln.so/')
+      return undefined
+    })
+    await expect(detectAts({ name: 'Kiln', domain: 'kiln.so', careerUrl: null })).resolves.toMatchObject({
+      verifiedBy: 'board_links_home',
+    })
+  })
+
+  it('reads "Rover.com" as Rover', () => {
+    expect(sameEmployerName('Rover.com', 'Rover')).toBe(true)
   })
 
   it('normalises legal suffixes but not a different employer sharing the first word', () => {
@@ -201,6 +264,18 @@ describe('known employers', () => {
     expect(urls.every((u) => u.includes('greenhouse.io/v1/boards/stripe'))).toBe(true)
   })
 
+  it.each([
+    ['SpaceX', 'spacex.com', 'greenhouse', 'spacex'],
+    ['Intercom', 'intercom.com', 'greenhouse', 'intercom'],
+  ])('%s has a curated board even though its page does not link to it', async (name, domain, provider, token) => {
+    route((u) =>
+      u.includes(`/v1/boards/${token}/jobs`)
+        ? json(ghBoard([{ url: `https://job-boards.greenhouse.io/${token}/jobs/1`, published: MONTH_AGO }]))
+        : undefined
+    )
+    await expect(detectAts({ name, domain, careerUrl: null })).resolves.toMatchObject({ provider, token, verifiedBy: 'known_board' })
+  })
+
   it('a curated board that has gone dead is not used', async () => {
     route((u) =>
       u.includes('/v1/boards/stripe/jobs')
@@ -216,10 +291,10 @@ describe('known employers', () => {
     await expect(
       verifyBoard({ provider: 'recruitee', token: 'google', jobs, company: { name: 'Google', domain: 'google.com' }, knownEmployer: true })
     ).resolves.toBeNull()
-    // The same board for an employer nobody has heard of would pass on name + label.
+    // Not a known employer, but still: name + label with no mention of google.com is not enough.
     await expect(
       verifyBoard({ provider: 'recruitee', token: 'google', jobs, company: { name: 'Google', domain: 'google.com' } })
-    ).resolves.toBe('provider_name')
+    ).resolves.toBeNull()
   })
 })
 
@@ -248,6 +323,22 @@ describe('healStoredBoard', () => {
     const out = await healStoredBoard(store, stripe, { provider: 'greenhouse', token: 'stripe', source: 'probe' }, jobs)
     expect(out).toEqual({ kept: true, verifiedBy: 'known_board' })
     expect(store.clearBoardJobs).not.toHaveBeenCalled()
+  })
+
+  it('keeps a board when the provider could not be asked, and clears it when the provider says not found', async () => {
+    const ghJobs = [{ title: 'Eng', url: 'https://job-boards.greenhouse.io/acme/jobs/1', externalId: 'u', postedAt: MONTH_AGO }]
+    const acme = { id: 'a', name: 'Acme', domain: 'acme.io', career_url: null }
+    const cached = { provider: 'greenhouse' as const, token: 'acme', source: 'probe' }
+
+    route(() => new Response('refused', { status: 403, statusText: 'Forbidden' }))
+    const kept = { clearBoardJobs: vi.fn() }
+    await expect(healStoredBoard(kept, acme, cached, ghJobs)).resolves.toEqual({ kept: true })
+    expect(kept.clearBoardJobs).not.toHaveBeenCalled()
+
+    route(() => undefined) // 404 everywhere: the provider answered, and it says nothing ties the board to Acme
+    const cleared = { clearBoardJobs: vi.fn(async () => ({ deleted: 1, closed: 0 })) }
+    await expect(healStoredBoard(cleared, acme, cached, ghJobs)).resolves.toMatchObject({ kept: false })
+    expect(cleared.clearBoardJobs).toHaveBeenCalledWith('a', 'greenhouse')
   })
 
   it('lets a store error through, so the caller changes nothing', async () => {

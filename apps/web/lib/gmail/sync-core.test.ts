@@ -360,8 +360,10 @@ describe('runGmailSyncCore: email never creates companies', () => {
   it('still attaches activity to a tracked company, ignoring a suggested row of the same name', async () => {
     mailbox = [FIXED_MESSAGE]
     fakeDb.tables.set('companies', [
-      { id: 'suggested-acme', user_id: USER_ID, name: 'Acme Corp', domain: 'acme.com', metadata: { suggested: true, source: 'gmail' } },
+      // The suggested row comes LAST: the in-memory name map keeps the last row it sees, so only
+      // the trackedOnly() filter in sync-core keeps this lead out of the match.
       { id: 'company-1', user_id: USER_ID, name: 'Acme Corp', domain: 'acme.com', metadata: null },
+      { id: 'suggested-acme', user_id: USER_ID, name: 'Acme Corp', domain: 'acme.com', metadata: { suggested: true, source: 'gmail' } },
     ])
     callOpenRouterMock.mockReset().mockResolvedValue({
       content: JSON.stringify({

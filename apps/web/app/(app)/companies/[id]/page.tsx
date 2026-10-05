@@ -25,8 +25,15 @@ import { CompanyLogo, getCompanyLogoSrc } from '@/components/companies/company-l
 import { DossierPanel } from '@/components/companies/dossier-panel'
 import { refreshCompanyJobs } from '@/components/companies/refresh'
 import { ContactNetworkPanel } from '@/components/contacts/contact-network-panel'
+import { TargetScopeSwitch, type TargetScope } from '@/components/jobs/target-scope-switch'
 import { formatShortDate, knownParts, matchTone } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { lastCheckedMs, rolesStatus, rolesStatusLine } from '@/lib/companies/roles-status'
+import { openRolesOnly } from '@/lib/jobs/freshness'
+import { fetchClientSafePreferences } from '@/lib/preferences/client-safe'
+import { EMPTY_TARGETING, resolveTargeting, type Targeting } from '@/lib/targeting'
+import { hasRoleTargets, targetVerdict } from '@/lib/targeting/roles'
 
 interface Company {
   id: string
@@ -39,6 +46,7 @@ interface Company {
   created_at: string
   last_scraped_at: string | null
   scrape_frequency: number
+  metadata?: unknown
 }
 
 interface Job {
@@ -53,6 +61,11 @@ interface Job {
   discovered_at: string
   match_score: number | null
   is_new: boolean
+  job_function?: string | null
+  seniority?: string | null
+  country?: string | null
+  language?: string | null
+  is_remote?: boolean | null
 }
 
 export default function CompanyDetailPage() {
@@ -63,6 +76,8 @@ export default function CompanyDetailPage() {
 
   const [company, setCompany] = useState<Company | null>(null)
   const [jobs, setJobs] = useState<Job[]>([])
+  const [targeting, setTargeting] = useState<Targeting>(EMPTY_TARGETING)
+  const [scope, setScope] = useState<TargetScope>('matching')
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [refreshResult, setRefreshResult] = useState<{ success: boolean; message: string } | null>(
@@ -87,15 +102,18 @@ export default function CompanyDetailPage() {
     if (companyData) {
       setCompany(companyData)
 
-      const { data: jobsData } = await supabase
-        .from('jobs')
-        .select('*')
-        .eq('company_id', companyId)
-        .order('discovered_at', { ascending: false })
+      // Open roles only: posted in the last 180 days (or undated) and not closed.
+      const [{ data: jobsData }, prefs] = await Promise.all([
+        openRolesOnly(supabase.from('jobs').select('*').eq('company_id', companyId)).order('discovered_at', {
+          ascending: false,
+        }),
+        fetchClientSafePreferences(supabase as unknown as SupabaseClient),
+      ])
 
       if (jobsData) {
         setJobs(jobsData)
       }
+      setTargeting(resolveTargeting(prefs))
     }
 
     setIsLoading(false)
@@ -165,7 +183,15 @@ export default function CompanyDetailPage() {
     )
   }
 
-  const newThisWeek = jobs.filter((j) => j.is_new).length
+  // Settings -> Targeting decides what shows by default; "All roles" has the rest
+  // (including roles Cello could not classify).
+  const roleTargets = hasRoleTargets(targeting)
+  const matchingJobs = jobs.filter((j) => targetVerdict(j, targeting, company.name) === 'inside')
+  const shownJobs = roleTargets && scope === 'matching' ? matchingJobs : jobs
+  const newThisWeek = shownJobs.filter((j) => j.is_new).length
+  const status = rolesStatus(company, jobs.length, { checking: isRefreshing })
+  const statusLine = rolesStatusLine(status)
+  const lastChecked = lastCheckedMs(company)
 
   return (
     <div className="space-y-6">
@@ -232,12 +258,12 @@ export default function CompanyDetailPage() {
       {/* Stats */}
       <StatRow
         stats={[
-          { label: 'Open roles', value: jobs.length },
+          { label: 'Open roles', value: shownJobs.length },
           { label: 'New this week', value: newThisWeek },
           { label: 'Check interval', value: company.scrape_frequency, hint: 'min' },
           {
             label: 'Last checked',
-            value: company.last_scraped_at ? formatShortDate(company.last_scraped_at) : 'Never',
+            value: lastChecked ? formatShortDate(new Date(lastChecked).toISOString()) : 'Not yet',
           },
         ]}
       />
@@ -272,25 +298,54 @@ export default function CompanyDetailPage() {
 
       {/* Jobs */}
       <div className="space-y-3">
-        <h2 className="font-display text-section text-foreground">
-          Open positions ({jobs.length})
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-display text-section text-foreground">
+            Open positions ({shownJobs.length})
+          </h2>
+          {roleTargets && jobs.length > 0 && (
+            <TargetScopeSwitch
+              scope={scope}
+              matchingCount={matchingJobs.length}
+              allCount={jobs.length}
+              onScopeChange={setScope}
+            />
+          )}
+        </div>
 
         {jobs.length === 0 ? (
           <EmptyState
             icon={Briefcase}
-            title="No jobs found yet"
-            body='Click "Refresh jobs" to check this company&#39;s career page for open roles.'
+            title={statusLine.text}
+            body={
+              status.kind === 'checking'
+                ? 'This takes a few seconds.'
+                : status.kind === 'unreadable' && status.careersUrl
+                  ? 'You can still open its careers page yourself.'
+                  : 'Use Refresh jobs to check it now.'
+            }
             action={
-              <Button variant="outline" onClick={() => window.open(company.career_url, '_blank')}>
-                <ExternalLink className="h-4 w-4" />
-                Visit career page
+              company.career_url ? (
+                <Button variant="outline" onClick={() => window.open(company.career_url, '_blank')}>
+                  <ExternalLink className="h-4 w-4" />
+                  Visit career page
+                </Button>
+              ) : undefined
+            }
+          />
+        ) : shownJobs.length === 0 ? (
+          <EmptyState
+            icon={Briefcase}
+            title="No roles match your targets"
+            body={`${jobs.length} open ${jobs.length === 1 ? 'role is' : 'roles are'} outside them.`}
+            action={
+              <Button variant="outline" onClick={() => setScope('all')}>
+                Show all roles ({jobs.length})
               </Button>
             }
           />
         ) : (
           <Card className="divide-y">
-            {jobs.map((job) => {
+            {shownJobs.map((job) => {
               const tone = matchTone(job.match_score)
               const meta = knownParts(
                 job.location,

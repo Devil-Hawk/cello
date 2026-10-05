@@ -81,7 +81,9 @@ export async function healStoredBoard(
     return { kept: true, verifiedBy: 'known_board' }
   }
 
+  const evidence = { unreachable: false }
   const verifiedBy = await verifyBoard({
+    evidence,
     provider: cached.provider,
     token: cached.token,
     jobs,
@@ -91,6 +93,9 @@ export async function healStoredBoard(
     now,
   })
   if (verifiedBy) return { kept: true, verifiedBy }
+  // The provider could not be asked (timeout, 5xx): that is no verdict, so keep
+  // the board and its roles as they are and look again on the next refresh.
+  if (evidence.unreachable) return { kept: true }
 
   return { kept: false, cleared: await store.clearBoardJobs(company.id, cached.provider) }
 }

@@ -447,8 +447,10 @@ export async function refreshLocked(
     try {
       const healed = await healStoredBoard(store, company, cached, jobs)
       if (healed.kept) {
-        const ats = meta.ats as Record<string, unknown>
-        meta.ats = { ...ats, verified_by: healed.verifiedBy, verified_at: new Date().toISOString() }
+        if (healed.verifiedBy) {
+          const ats = meta.ats as Record<string, unknown>
+          meta.ats = { ...ats, verified_by: healed.verifiedBy, verified_at: new Date().toISOString() }
+        }
       } else {
         result.cleared = healed.cleared
         delete meta.ats

@@ -38,12 +38,12 @@ function makeSupabase() {
       const filters: { col: string; val: unknown }[] = []
       const builder = {
         select: () => builder,
+        // trackedOnly's null-safe filter: the fixtures here have no suggested rows.
+        or: () => builder,
         eq(col: string, val: unknown) {
           filters.push({ col, val })
           return builder
         },
-        // trackedOnly's null-safe filter: the fixtures here have no suggested rows.
-        or: () => builder,
         then(resolve: (v: { data: unknown; error: unknown }) => unknown) {
           if (companiesError) return resolve({ data: null, error: { message: companiesError } })
           const rows = companyRows.filter((r) =>

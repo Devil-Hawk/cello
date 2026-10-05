@@ -8,7 +8,8 @@
 // Evidence, cheapest first (any one is enough, and the board must be recent):
 //   careers_page_link  the company's own careers page or site links to this exact board
 //   board_links_home   the board's postings (or its own header) point at the company's domain
-//   provider_name      the provider names the same employer AND the token is the domain label
+//   provider_name      the provider names the same employer, the token is the domain label AND the board's text mentions the company's site
+//   A home the board declares for itself that is NOT the company's domain rejects it outright.
 // A known employer (known-companies.ts) is never matched by name or domain label: a
 // namesake's board passes those, so it needs the page link or its curated board.
 // Boards read off the careers URL itself ('careers_url') and boards the person
@@ -17,7 +18,7 @@
 // Framework-free like the rest of lib/ats: global fetch through ./http only.
 
 import type { AtsJob, AtsProviderId } from './types'
-import { assertAllowedHost, assertAllowedHostSuffix, fetchJson, fetchText } from './http'
+import { HttpError, assertAllowedHost, assertAllowedHostSuffix, fetchJson, fetchText } from './http'
 import { SUFFIX_WORDS } from '../companies/known-companies'
 
 export type VerifiedBy =
@@ -61,7 +62,7 @@ export function normalizeEmployerName(name: string): string {
     .split(/\s+/)
     .filter(Boolean)
   // Only TRAILING legal suffixes go, so "Wise Worksite Field Sales" stays itself.
-  while (words.length > 1 && (SUFFIX_WORDS.has(words[words.length - 1]) || words[words.length - 1] === 'se')) {
+  while (words.length > 1 && (SUFFIX_WORDS.has(words[words.length - 1]) || words[words.length - 1] === 'se' || words[words.length - 1] === 'com')) {
     words.pop()
   }
   return words.join('')
@@ -99,6 +100,18 @@ export function onCompanyDomain(url: string | null | undefined, domain: string |
   const host = url ? hostOf(url) : null
   const root = domain ? hostOf(domain) : null
   return !!host && !!root && (host === root || host.endsWith(`.${root}`))
+}
+
+const PROVIDER_DOMAINS = ['greenhouse.io', 'lever.co', 'ashbyhq.com', 'workable.com', 'smartrecruiters.com', 'recruitee.com', 'personio.de', 'personio.com']
+function onProviderHost(url: string): boolean {
+  const host = hostOf(url)
+  return !!host && PROVIDER_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`))
+}
+
+/** True when the text names the company's own site ("acme.com" or a link to it). */
+export function mentionsDomain(text: string | null | undefined, domain: string | null | undefined): boolean {
+  const host = domain ? hostOf(domain) : null
+  return !!text && !!host && text.toLowerCase().includes(host)
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +180,8 @@ export interface VerifyInput extends BoardRef {
   pageBoards?: readonly BoardRef[] | (() => Promise<readonly BoardRef[]>)
   /** A big known employer: only its own site's link counts (see header). */
   knownEmployer?: boolean
+  /** Out-param: set true when the provider could not be asked (timeout, 5xx), so a null is not a verdict. */
+  evidence?: { unreachable: boolean }
   now?: number
 }
 
@@ -204,11 +219,28 @@ export async function verifyBoard(input: VerifyInput): Promise<Exclude<VerifiedB
   let identity: BoardIdentity
   try {
     identity = await identify(token)
-  } catch {
+  } catch (error) {
+    // A timeout or a 5xx says nothing about who owns the board; only a plain "not found" does.
+    if (input.evidence && !(error instanceof HttpError && (error.status === 404 || error.status === 410))) {
+      input.evidence.unreachable = true
+    }
     return null
   }
-  if (identity.homeUrls.some((u) => onCompanyDomain(u, company.domain))) return 'board_links_home'
-  if (sameEmployerName(identity.name, company.name) && tokenMatchesDomainLabel(token, company.domain)) {
+  // A home the board declares for itself decides: on the company's domain it ties
+  // the board to them, anywhere else it is another employer who shares the name
+  // ("atlas" on Ashby declares atlascard.com), and no name match overrides that.
+  // (A link back to the provider's own host, as Recruitee gives, declares nothing.)
+  const declared = identity.homeUrls.filter((u) => !onProviderHost(u))
+  if (declared.length > 0) {
+    return declared.some((u) => onCompanyDomain(u, company.domain)) ? 'board_links_home' : null
+  }
+  // The provider declares no site: a name equal to the domain label is one word
+  // anyone can hold, so it also needs the board's own text to mention the company's site.
+  if (
+    sameEmployerName(identity.name, company.name) &&
+    tokenMatchesDomainLabel(token, company.domain) &&
+    jobs.some((j) => mentionsDomain(j.description, company.domain))
+  ) {
     return 'provider_name'
   }
   return null

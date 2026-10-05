@@ -18,6 +18,7 @@ import {
 } from '@/components/companies/refresh'
 import { formatShortDate } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
+import { openRolesOnly } from '@/lib/jobs/freshness'
 
 /**
  * Highest best-match-score first, unscored companies last (never coerced to
@@ -80,16 +81,20 @@ export default function CompaniesPage() {
       // this pulls each company's jobs' match_score in the same query and
       // reduces client-side below — one query for every company, not one
       // query per company.
-      const { data, error } = await trackedOnly(
-        supabase
-          .from('companies')
-          .select(
-            `
+      // jobs_count below counts open roles only: recent and not closed.
+      const { data, error } = await openRolesOnly(
+        trackedOnly(
+          supabase
+            .from('companies')
+            .select(
+              `
         *,
         jobs:jobs(match_score)
       `
-          )
-          .eq('user_id', user.id)
+            )
+            .eq('user_id', user.id)
+        ),
+        { referencedTable: 'jobs' }
       ).order('created_at', { ascending: false })
 
       if (error) {
@@ -188,6 +193,21 @@ export default function CompaniesPage() {
     setRefreshingIds((prev) => {
       const next = new Set(prev)
       next.delete(company.id)
+      return next
+    })
+  }
+
+  // A new company is checked at once, so its first line is "Checking now" and
+  // then its real state, not "Never checked" until the next scheduled run.
+  async function onCompanyAdded(companyId?: string) {
+    await fetchCompanies()
+    if (!companyId) return
+    setRefreshingIds((prev) => new Set(prev).add(companyId))
+    const outcome = await refreshCompanyJobs(companyId)
+    if (outcome.success) await fetchCompanies()
+    setRefreshingIds((prev) => {
+      const next = new Set(prev)
+      next.delete(companyId)
       return next
     })
   }
@@ -396,7 +416,7 @@ export default function CompaniesPage() {
       <AddCompanyDialog
         open={showAddDialog}
         onOpenChange={setShowAddDialog}
-        onAdded={fetchCompanies}
+        onAdded={onCompanyAdded}
       />
     </div>
   )

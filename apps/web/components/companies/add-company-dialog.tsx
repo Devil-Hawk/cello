@@ -28,7 +28,7 @@ interface VerificationResult {
   aiVerified: boolean
 }
 
-type ResolveSource = 'known' | 'greenhouse' | 'lever' | 'ashby' | 'ai'
+type ResolveSource = 'known' | 'possible' | 'ai'
 
 interface ResolveCandidate {
   name: string
@@ -37,6 +37,7 @@ interface ResolveCandidate {
   source: ResolveSource
   confidence: 'high' | 'medium' | 'low'
   logoUrl?: string
+  note?: string
 }
 
 interface ResolveResponse {
@@ -46,9 +47,7 @@ interface ResolveResponse {
 
 const SOURCE_LABEL: Record<ResolveSource, string> = {
   known: 'Known company',
-  greenhouse: 'Greenhouse board found',
-  lever: 'Lever board found',
-  ashby: 'Ashby board found',
+  possible: 'Possible match',
   ai: 'AI suggested · verified',
 }
 
@@ -58,7 +57,8 @@ export interface AddCompanyDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Called after a company was successfully inserted. */
-  onAdded: () => void
+  /** Called with the new company's id so the caller can check its roles at once. */
+  onAdded: (companyId?: string) => void
 }
 
 export function AddCompanyDialog({ open, onOpenChange, onAdded }: AddCompanyDialogProps) {
@@ -193,23 +193,27 @@ export function AddCompanyDialog({ open, onOpenChange, onAdded }: AddCompanyDial
       return
     }
 
-    const { error } = await supabase.from('companies').insert({
-      user_id: user.id,
-      name: ready.name,
-      domain: ready.domain,
-      logo_url: ready.logoUrl,
-      // companies.career_url is NOT NULL — '' is the established "no career page
-      // yet" sentinel (see getCompanyDomain/isBareHomepage). A tracked company
-      // with no board is legitimate; a bare homepage URL is not (that's what
-      // fed the garbage HTML-scraper fallback), so we never write one here.
-      career_url: ready.careerUrl ?? '',
-      is_dream_company: isDreamCompany,
-    })
+    const { data: added, error } = await supabase
+      .from('companies')
+      .insert({
+        user_id: user.id,
+        name: ready.name,
+        domain: ready.domain,
+        logo_url: ready.logoUrl,
+        // companies.career_url is NOT NULL — '' is the established "no career page
+        // yet" sentinel (see getCompanyDomain/isBareHomepage). A tracked company
+        // with no board is legitimate; a bare homepage URL is not (that's what
+        // fed the garbage HTML-scraper fallback), so we never write one here.
+        career_url: ready.careerUrl ?? '',
+        is_dream_company: isDreamCompany,
+      })
+      .select('id')
+      .single()
 
     if (!error) {
       reset()
       onOpenChange(false)
-      onAdded()
+      onAdded(added?.id)
     }
 
     setIsSaving(false)
@@ -311,6 +315,7 @@ export function AddCompanyDialog({ open, onOpenChange, onAdded }: AddCompanyDial
                             </div>
                             <p className="mt-0.5 truncate text-caption text-muted-foreground">
                               {candidate.careerUrl ??
+                                candidate.note ??
                                 (candidate.domain
                                   ? `${candidate.domain} · no verified career page yet`
                                   : 'No verified career page yet — you can still add it')}

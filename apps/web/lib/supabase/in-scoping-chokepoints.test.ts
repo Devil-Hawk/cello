@@ -43,8 +43,14 @@ const SCAN_ROOTS = ['apps/web/app', 'apps/web/lib']
  */
 const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
   'apps/web/lib/targeting/roles.ts': {
-    calls: [".in('job_function', t.functions)", ".in('seniority', t.seniority)", ".in('country', t.countries)", ".in('language', t.languages)"],
-    reason: "the person's own Settings targets (a few short, validated slugs), applied as a filter on one user's jobs query, never an id list.",
+    calls: [
+      ".in('job_function', t.functions)",
+      ".in('seniority', t.seniority)",
+      ".in('country', t.countries)",
+      ".in('language', t.languages)",
+    ],
+    reason:
+      "the person's own Settings -> Targeting values (a few slugs or ISO codes each), not an ownership fence or an id list.",
   },
   'apps/web/lib/access/demo-wipe.ts': {
     calls: [".in('user_id', chunk)"],

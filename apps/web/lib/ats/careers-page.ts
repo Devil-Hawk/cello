@@ -13,7 +13,7 @@
 //
 // Uses node:dns (through ../security/untrusted); no client component imports lib/ats.
 
-import { assertSsrfSafe, readLimitedText, type SsrfCheckOptions } from '../security/untrusted'
+import { assertSsrfSafe, type SsrfCheckOptions } from '../security/untrusted'
 import { CELLO_USER_AGENT } from './http'
 import { onCompanyDomain } from './verify'
 import type { BoardRef } from './verify'
@@ -44,6 +44,34 @@ export function findBoardLinks(
     if (!seen.has(key)) seen.set(key, { provider: hit.provider, token: hit.token })
   }
   return seen.size > MAX_BOARDS_PER_PAGE ? [] : [...seen.values()]
+}
+
+/**
+ * Up to MAX_BYTES of the body as text. A heavy page (a careers page with its
+ * whole app bundle inline can pass 1.5 MB) is read as far as the cap, not
+ * refused: the board link is nearly always in the part that was read.
+ */
+async function readCapped(response: Response): Promise<string> {
+  const reader = response.body?.getReader()
+  if (!reader) return ''
+  const chunks: Uint8Array[] = []
+  let total = 0
+  while (total < MAX_BYTES) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    total += value.byteLength
+  }
+  await reader.cancel().catch(() => {})
+  const bytes = new Uint8Array(Math.min(total, MAX_BYTES))
+  let offset = 0
+  for (const chunk of chunks) {
+    const room = bytes.byteLength - offset
+    if (room <= 0) break
+    bytes.set(chunk.byteLength > room ? chunk.subarray(0, room) : chunk, offset)
+    offset += Math.min(chunk.byteLength, room)
+  }
+  return new TextDecoder('utf-8').decode(bytes)
 }
 
 function bare(host: string): string {
@@ -81,7 +109,7 @@ export async function fetchCareersHtml(
         continue
       }
       if (!response.ok) return null
-      return await readLimitedText(response, MAX_BYTES)
+      return await readCapped(response)
     }
     return null
   } catch {

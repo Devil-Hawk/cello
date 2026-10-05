@@ -194,8 +194,11 @@ class FakeQueryBuilder implements PromiseLike<{ data: unknown; error: unknown; c
     this.inFilter = [col, vals]
     return this
   }
-  // trackedOnly filter: nothing in these fixtures is suggested.
+  // trackedOnly / openRolesOnly filters: nothing in these fixtures is suggested, stale or closed.
   or() {
+    return this
+  }
+  not() {
     return this
   }
   order() {

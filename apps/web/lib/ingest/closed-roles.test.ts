@@ -11,8 +11,10 @@ const source = readFileSync(path.join(process.cwd(), 'app/(app)/jobs/page.tsx'),
 
 describe('Jobs page and closed roles', () => {
   it('the list query keeps open and unknown roles only', () => {
-    const list = source.slice(source.indexOf("untyped.from('jobs').select(JOB_SELECT_COLUMNS"))
-    expect(list.slice(0, 600)).toContain(".or('still_open.is.null,still_open.eq.true')")
+    // openRolesOnly (lib/jobs/freshness.ts): posted inside 180 days or undated, and not closed (still_open is not false).
+    const withFacets = source.slice(source.indexOf('const withFacets'))
+    expect(withFacets.slice(0, 400)).toContain('openRolesOnly(start)')
+    expect(readFileSync(path.join(process.cwd(), 'lib/jobs/freshness.ts'), 'utf8')).toContain("not(`${prefix}still_open`, 'is', false)")
   })
 
   it('the deep link by id still opens a closed role', () => {

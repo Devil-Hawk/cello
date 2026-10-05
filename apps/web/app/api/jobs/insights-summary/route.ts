@@ -24,6 +24,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { SCORE_BANDS, scoreBandFor, type ScoreBand } from '@/lib/jobs/score-bands'
+import { openRolesOnly } from '@/lib/jobs/freshness'
 
 export const dynamic = 'force-dynamic'
 
@@ -74,12 +75,14 @@ export async function GET(request: NextRequest) {
       Math.max(1, Number(searchParams.get('limit')) || DEFAULT_DRILLDOWN_LIMIT)
     )
 
-    let query = supabase
-      .from('jobs')
-      .select(
-        'id, title, url, match_score, match_details, posted_at, companies(name, domain)',
-        { count: 'exact' }
-      )
+    let query = openRolesOnly(
+      supabase
+        .from('jobs')
+        .select(
+          'id, title, url, match_score, match_details, posted_at, companies(name, domain)',
+          { count: 'exact' }
+        )
+    )
       .order('match_score', { ascending: false, nullsFirst: false })
       .limit(limit)
 
@@ -125,9 +128,7 @@ export async function GET(request: NextRequest) {
 
   let from = 0
   for (; from < SUMMARY_MAX_ROWS; from += SUMMARY_PAGE) {
-    const { data, error } = await supabase
-      .from('jobs')
-      .select('source, match_score')
+    const { data, error } = await openRolesOnly(supabase.from('jobs').select('source, match_score'))
       .order('id', { ascending: true })
       .range(from, from + SUMMARY_PAGE - 1)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

@@ -12,6 +12,7 @@ import { StaggerGroup, StaggerItem } from '@/components/ui/motion'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { createClient } from '@/lib/supabase/client'
+import { openRolesOnly } from '@/lib/jobs/freshness'
 import { cn, formatRelativeTime } from '@/lib/utils'
 
 interface HotJob {
@@ -123,11 +124,13 @@ export default function NotificationsPage() {
       const [hotJobsRes, interviewsRes, followUpsRes] = await Promise.all([
         // New, unreviewed jobs that scored well. RLS already scopes jobs to
         // this user's tracked companies.
-        supabase
-          .from('jobs')
-          .select('id, title, match_score, posted_at, discovered_at, companies(name)')
-          .eq('is_new', true)
-          .gte('match_score', 70)
+        openRolesOnly(
+          supabase
+            .from('jobs')
+            .select('id, title, match_score, posted_at, discovered_at, companies(name)')
+            .eq('is_new', true)
+            .gte('match_score', 70)
+        )
           .order('match_score', { ascending: false })
           .limit(8),
         // Interview-stage signal picked up from Gmail sync (or manual notes).
