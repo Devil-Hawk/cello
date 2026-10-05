@@ -6,8 +6,9 @@ for real against seeded data. The owner can see what was done with the code.
 
 **Operator runbook (turn-on order, verification SQL, proofs, known gaps):
 [`docs/demo-access-codes.md`](../../../../docs/demo-access-codes.md).**
-Read it before applying anything: the two migrations this feature needs are not
-applied to any database yet, and applying them out of order fails by design.
+Read it before applying anything: the first two migrations this feature needs are
+not applied to any database yet, and applying them out of order fails by design.
+Section 9 covers the October 2026 hardening and its deploy order.
 
 ---
 
@@ -38,7 +39,7 @@ on a malformed date, because every comparison against `NaN` is false).
 
 | File | Role |
 | --- | --- |
-| `codes.ts` | Generating, normalizing, hashing and expiring a code. Pure, `node:crypto`. The code is stored **only** as SHA-256. |
+| `codes.ts` | Generating, normalizing, hashing and expiring a code. Pure, `node:crypto`. The code is stored **only** as a keyed hash (`h1:` + HMAC-SHA256 under a key derived from `API_ENCRYPTION_KEY`); the legacy bare SHA-256 is accepted for lookup until it lapses. |
 | `guardrails.ts` | The three policies above, as pure functions. No DB, no network — imports safely from routes, the harness, cron and client components. |
 | `session.ts` | "Is this request a demo, and which code is it?" Server-only; uses the **service-role** client for every question after "who are you". |
 | `audit.ts` | Writing `access_code_events`. Five sanitizer layers; never throws; bounded by a deadline so a slow insert cannot cost a request its result. |
@@ -134,7 +135,8 @@ lives at the two routes that can deliver — `app/api/outreach/send` and
 
 | File | What it holds in place |
 | --- | --- |
-| `guardrails.test.ts`, `guardrails.budget.test.ts` | The three policies and the spend ledger's composition with `seed-demo.ts`. |
+| `guardrails.test.ts`, `guardrails.budget.test.ts` | The three policies, and that provisioning and re-seeding write the cap only (spend lives in the `llm_spend` ledger). |
+| `access-codes.db.test.ts` | Redemption, the limiter, minting and revocation against a **real** Postgres (`CELLO_TEST_DB_URL`). |
 | `lockdown.test.ts` | Reads the migration SQL and asserts its shape: every privilege-bearing field has a guard, every guard raises (never returns), every raise carries `insufficient_privilege`, the exemption is decided by the verified token before the database role, exactly three `return new`. |
 | `demo-chokepoints.test.ts` | The three key loaders, the two send routes, and the middleware/guardrails equivalence. |
 | `audit.test.ts`, `seed-demo.test.ts`, `codes.test.ts` | The sanitizers, the seeder's safety gate and idempotency, the code alphabet and expiry. |
