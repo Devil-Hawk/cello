@@ -205,6 +205,7 @@ const KEY_TAKING_MODEL_PLUMBING = [
   'lib/harness/agents/matcher.ts', // Step 4 verify: builds meteredJudgeClient from ScoreBatchOptions.apiKeys — handed by its two callers (the matcher AgentFn's ctx.apiKeys, autopilot.ts's own loadApiKeys call), never obtained here
   'lib/evals/judge.ts', // defines meteredJudgeClient; takes DecryptedApiKeys (+ admin, userId — both handed, never obtained)
   'lib/gmail/classify.ts', // takes DecryptedApiKeys (+ userId), handed by sync-core and gmail/share
+  'lib/outreach/reply.ts', // reads a reply with the keys sync-core hands it (loaded through loadApiKeys upstream); never obtained here
   'lib/evals/claims-judge.ts', // judgeRunner binds callLlm to the keys its caller loaded (the outreach routes, via loadApiKeys); never obtained here
   'lib/harness/providers/local-server.ts',
   'lib/harness/providers/openrouter.ts',

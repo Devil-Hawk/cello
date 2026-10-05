@@ -139,3 +139,61 @@ describe('syncOutreachReplies', () => {
     ).resolves.toBe(0)
   })
 })
+
+describe('replies are read from what the person wrote', () => {
+  const QUOTE = '\n\nOn Tue, Oct 6, 2026 at 9:00 AM Alex <alex@example.com> wrote:\n> Would you be open to a chat about the role?'
+  const withBody = (body: string) =>
+    msg('m1', 'Jordan <jordan@acme.com>', 'Re: Staff Engineer at Acme - quick note', '2000', ['INBOX'], body)
+
+  it('"Happy to chat, are you free Tuesday?" above a quoted original is positive, not neutral', async () => {
+    fakeGmail({ 'th-1': [SENT, withBody(`Happy to chat, are you free Tuesday?${QUOTE}`)] })
+    await syncOutreachReplies({ admin: fakeAdmin([{ gmail_thread_id: 'th-1' }]), userId: 'user-1', accessToken: 'tok' })
+    expect(recordOutreachReplyMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ classification: 'positive' }))
+  })
+
+  it('"No thanks" above a quote containing "would you be open to a chat" is negative', async () => {
+    fakeGmail({ 'th-1': [SENT, withBody(`No thanks.${QUOTE}`)] })
+    await syncOutreachReplies({ admin: fakeAdmin([{ gmail_thread_id: 'th-1' }]), userId: 'user-1', accessToken: 'tok' })
+    expect(recordOutreachReplyMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ classification: 'negative' }))
+  })
+
+  it('"We are not hiring for this right now" is negative', async () => {
+    fakeGmail({ 'th-1': [SENT, withBody('We are not hiring for this right now.')] })
+    await syncOutreachReplies({ admin: fakeAdmin([{ gmail_thread_id: 'th-1' }]), userId: 'user-1', accessToken: 'tok' })
+    expect(recordOutreachReplyMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ classification: 'negative' }))
+  })
+
+  it('an out-of-office is skipped: nothing is recorded, so replied_at stays null and the follow-up stays open', async () => {
+    const auto = {
+      ...msg('m5', 'Jordan <jordan@acme.com>', 'Automatic reply: Staff Engineer at Acme', '2000'),
+    }
+    auto.payload.headers.push({ name: 'Auto-Submitted', value: 'auto-replied' })
+    fakeGmail({ 'th-1': [SENT, auto] })
+
+    const n = await syncOutreachReplies({ admin: fakeAdmin([{ gmail_thread_id: 'th-1' }]), userId: 'user-1', accessToken: 'tok' })
+
+    expect(n).toBe(0)
+    expect(recordOutreachReplyMock).not.toHaveBeenCalled()
+  })
+
+  it('a human reply that arrives after an out-of-office is the one recorded', async () => {
+    const auto = msg('m5', 'Jordan <jordan@acme.com>', 'Out of office', '1500')
+    const human = withBody('Back now. Happy to chat, are you free Friday?')
+    human.internalDate = '3000'
+    fakeGmail({ 'th-1': [SENT, auto, human] })
+
+    await syncOutreachReplies({ admin: fakeAdmin([{ gmail_thread_id: 'th-1' }]), userId: 'user-1', accessToken: 'tok' })
+
+    expect(recordOutreachReplyMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ gmailMessageId: 'm1', classification: 'positive' }))
+  })
+
+  it('a bounce that carries Auto-Submitted is still recorded as a bounce, not skipped as an auto-reply', async () => {
+    const bounce = msg('m9', 'Mail Delivery Subsystem <mailer-daemon@googlemail.com>', 'Delivery Status Notification (Failure)', '2000')
+    bounce.payload.headers.push({ name: 'Auto-Submitted', value: 'auto-replied' })
+    fakeGmail({ 'th-1': [SENT, bounce] })
+
+    await syncOutreachReplies({ admin: fakeAdmin([{ gmail_thread_id: 'th-1' }]), userId: 'user-1', accessToken: 'tok' })
+
+    expect(recordOutreachReplyMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ classification: 'bounce' }))
+  })
+})

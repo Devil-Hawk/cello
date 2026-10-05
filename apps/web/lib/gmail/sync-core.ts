@@ -145,7 +145,7 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
   // service-role admin client every other outreach_messages reader/writer uses
   // regardless of whether `db` is already the admin client (cron) or the
   // session client (route). Never throws; see lib/outreach/reply.ts.
-  await syncOutreachReplies({ admin: createAdminClient(), userId, accessToken })
+  await syncOutreachReplies({ admin: createAdminClient(), userId, accessToken, apiKeys })
 
   const maxEmails = isFirstSync ? 1000 : 200
 

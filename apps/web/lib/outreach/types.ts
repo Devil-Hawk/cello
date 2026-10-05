@@ -16,7 +16,7 @@ export type OutreachKind = 'initial' | 'follow_up'
  * Coarse polarity for an inbound reply, per supabase/migrations/
  * 20260818000003_outreach_reply_outcome.sql's CHECK constraint. Deliberately
  * NOT the job-application stage vocabulary (ApplicationStatus) — see
- * lib/gmail/stage.ts#classifyReply, the single writer of this column.
+ * lib/outreach/reply-classify.ts, the one place a reply is read.
  */
 export type ReplyClassification = 'positive' | 'neutral' | 'negative' | 'bounce'
 
