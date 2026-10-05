@@ -2,9 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'fix/**', 'feat/**', 'wp2/**', 'v2/**', 'chore/**']
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   # 20, not 18. undici (a transitive dep, via the Supabase client) reaches for
