@@ -15,7 +15,6 @@ import { CompanyRow, type CompanySummary } from '@/components/companies/company-
 import {
   refreshCompanyJobs,
   refreshViaAts,
-  triggerScraperFallback,
 } from '@/components/companies/refresh'
 import { formatShortDate } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
@@ -153,27 +152,14 @@ export default function CompaniesPage() {
   async function refreshAllCompanies() {
     if (companies.length === 0 || isRefreshingAll) return
     setIsRefreshingAll(true)
-    setRefreshStatus('Checking ATS boards for all companies…')
+    setRefreshStatus('Reading every careers site…')
 
     try {
       const response = await refreshViaAts()
 
-      // Fall back to the legacy scraper for companies without a detected ATS board.
-      const noAts = response.results.filter((r) => r.provider === null)
-      let fallbackFound = 0
-      for (let i = 0; i < noAts.length; i++) {
-        setRefreshStatus(
-          `Scraping ${noAts[i].companyName} (${i + 1}/${noAts.length} without an ATS board)…`
-        )
-        const result = await triggerScraperFallback(noAts[i].companyId)
-        if (result.success) fallbackFound += result.jobsFound
-      }
-
       toast({
         title: 'Refresh complete',
-        description: `${response.totals.found + fallbackFound} roles found, ${
-          response.totals.inserted
-        } new via ATS (${response.totals.companiesWithAts} companies with boards).`,
+        description: `${response.totals.found} roles found, ${response.totals.inserted} new.`,
       })
       fetchCompanies()
     } catch (err) {

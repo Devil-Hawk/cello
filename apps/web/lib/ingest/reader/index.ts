@@ -26,6 +26,7 @@ import { detectFromUrl } from '../../ats/detect'
 import { findBoardLinks } from '../../ats/careers-page'
 import type { FetchPage } from '../fetch-page'
 import type { ModelCall } from '../model'
+import { readJobPostings } from '../jsonld'
 import { readCareersPage } from '../page-reader'
 import { boardsInHtml, classifyLink, discoverBoards, ghJid, tokenBehindJid, type DiscoveredBoard, type DiscoveredVia, type PageRead } from './discover'
 import { jobFromDetail, readDetail } from './detail'
@@ -100,6 +101,8 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
   const finish = (): SiteRead => ({ ...out, requests: f.spent().requests })
   const query = searchTerms(targets)
   let firstError: ReaderError | null = null
+  // Addresses already read or rejected, and roles already stored: a later pass fetches only what is new.
+  const skip = { has: (id: string) => input.checked?.has(id) === true || input.storedIds?.has(id) === true } as ReadonlySet<string>
   const note = (error: unknown): void => {
     if (error instanceof ReaderError && error.reason !== 'budget') firstError ??= error
   }
@@ -182,7 +185,7 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
   // What the site declares for search engines.
   try {
     const origin = new URL(company.careerUrl).origin
-    const read = await readSitemapRoles(origin, f, { targets, skip: new Set([...(input.checked ?? []), ...(input.storedIds ?? [])]) })
+    const read = await readSitemapRoles(origin, f, { targets, skip })
     out.checked.push(...read.checked)
     if (read.listed > 0) {
       Object.assign(out, { tier: 'sitemap' as Tier, jobs: read.jobs, complete: read.complete, listedIds: read.listedIds })
@@ -198,11 +201,19 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
   // Server-rendered role lists.
   if (!firstError || (firstError as ReaderError).reason !== 'bot_check') {
     try {
-      const read = await readListing(company.careerUrl, pages, f, { targets, skip: new Set([...(input.checked ?? []), ...(input.storedIds ?? [])]) })
+      const read = await readListing(company.careerUrl, pages, f, { targets, skip })
       out.checked.push(...read.checked)
       if (read.board && (await tryBoard({ ...read.board, via: 'posting' }))) return finish()
       if (read.listed > 0) {
         Object.assign(out, { tier: 'listing' as Tier, jobs: read.jobs, complete: false, listedIds: read.listedIds })
+        tried.push({ tier: 'listing', outcome: 'roles' })
+        return finish()
+      }
+      // Postings the pages declare in their own markup (schema.org JobPosting): the employer's statement, no reading needed.
+      const declared = new Map<string, AtsJob>()
+      for (const p of pages) for (const j of readJobPostings(p.html, p.url)) declared.set(j.externalId, j)
+      if (declared.size > 0) {
+        Object.assign(out, { tier: 'listing' as Tier, jobs: [...declared.values()], complete: declared.size > 1 })
         tried.push({ tier: 'listing', outcome: 'roles' })
         return finish()
       }
@@ -252,7 +263,6 @@ async function readRendered(
   } catch {
     return null
   }
-  if (!page.rendered) return null
   const tried: TierTry[] = []
   const rendered: PageRead[] = [{ url: page.finalUrl, html: page.html }]
 

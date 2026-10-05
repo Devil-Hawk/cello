@@ -56,7 +56,10 @@
 import { entrypoint, task, interrupt, getConfig } from '@langchain/langgraph'
 import type { BaseCheckpointSaver, LangGraphRunnableConfig } from '@langchain/langgraph'
 import type { createClient } from '../supabase/server'
-import { makeSupabaseAtsStore, refreshCompany, type AtsStore, type CompanyInput, type CompanyRefreshResult } from '../ats'
+import { makeSupabaseAtsStore, type AtsStore, type CompanyInput, type CompanyRefreshResult } from '../ats'
+import { staticFetchPage } from '../ingest/fetch-page'
+import { loadTargets } from '../ingest/reader/targets'
+import { ingestCompany, type DueCompany } from '../ingest/run'
 import { createAdminClient } from '../harness/supabase-admin'
 
 /** Same soft wall-clock ceiling as the pre-port route's own TIME_BUDGET_MS —
@@ -177,7 +180,10 @@ function makeRefreshCompanyTask(companyId: string) {
     const config = getConfig()
     const dbClient = config.configurable?.dbClient as RefreshDbClient | undefined
     if (!dbClient) throw new MissingDbClientError()
-    return refreshCompany(makeStore(dbClient), input)
+    // The one reader: the board, else the site's own search, sitemaps and lists (plain requests; a site that needs a browser is left to the scheduled pass).
+    const targets = await loadTargets(dbClient as never)
+    const outcome = await ingestCompany(makeStore(dbClient), input as DueCompany, { fetchPage: staticFetchPage, model: null, mode: 'inline', targets })
+    return outcome.result
   })
 }
 

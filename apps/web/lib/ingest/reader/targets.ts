@@ -71,9 +71,11 @@ export function matchesTargets(titleOrSlug: string, t: ReaderTargets): boolean {
 type Db = SupabaseClient<any, any, any>
 
 /** The person's targets, from profiles.preferences. */
-export async function loadTargets(client: Db, userId: string): Promise<ReaderTargets> {
+/** `userId` may be left out with a client that is already the user's (row level security returns only their own profile). */
+export async function loadTargets(client: Db, userId?: string): Promise<ReaderTargets> {
   try {
-    const { data } = await client.from('profiles').select('preferences').eq('id', userId).maybeSingle()
+    const query = client.from('profiles').select('preferences')
+    const { data } = await (userId ? query.eq('id', userId) : query).maybeSingle()
     const preferences = (data as { preferences?: unknown } | null)?.preferences
     return { targeting: resolveTargeting(preferences), titles: resolveTargetTitles(preferences) }
   } catch {

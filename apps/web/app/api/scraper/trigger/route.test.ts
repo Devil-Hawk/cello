@@ -1,8 +1,9 @@
 // POST /api/scraper/trigger: the in-app check of one company. It runs the same
 // code as the scheduled check, so these tests pin what is specific to the route:
-// a page with structured data needs no key, a page that needs a model uses only
-// the user's OpenRouter key on a free model, no paid provider is ever called
-// directly, and nothing identifying a company reaches the server log. ZERO network.
+// a page that declares its postings is read with no key and no model, a page that
+// needs a browser is left to the schedule with an honest answer, a refusal is
+// reported with its reason, no model or paid provider is ever called, and nothing
+// identifying a company reaches the server log. ZERO network.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
@@ -13,11 +14,11 @@ vi.mock('@/lib/harness/llm', () => ({ callLlm: (...a: unknown[]) => callLlmMock(
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({}) }))
 vi.mock('@/lib/trace/spans', () => ({ withTrace: async (_a: unknown, _u: unknown, _s: unknown, fn: () => unknown) => fn() }))
 
-const getKeysMock = vi.fn()
-vi.mock('@/lib/apikeys', () => ({ getDecryptedApiKeys: (...a: unknown[]) => getKeysMock(...a) }))
-
-const fetchPageMock = vi.fn()
-vi.mock('@/lib/ingest/fetch-page', () => ({ staticFetchPage: (...a: unknown[]) => fetchPageMock(...a) }))
+// No test here touches the network: the plain fetcher resolves hosts through this, so the check is faked.
+vi.mock('@/lib/security/untrusted', async (orig) => ({
+  ...(await orig<typeof import('@/lib/security/untrusted')>()),
+  assertSsrfSafe: async () => {},
+}))
 
 const state = { lock: true, upserted: [] as JobUpsertRow[] }
 vi.mock('@/lib/ats/store', () => ({
@@ -80,64 +81,63 @@ function post() {
   })
 }
 
-const page = (html: string) => async (url: string) => ({ html, finalUrl: url, rendered: false })
+let pageHtml = LD_PAGE
 let fetchMock: ReturnType<typeof vi.fn<unknown[], Promise<Response>>>
 
 beforeEach(() => {
   callLlmMock.mockReset()
-  getKeysMock.mockReset().mockResolvedValue({ userId: 'user-1' })
-  fetchPageMock.mockReset().mockImplementation(page(LD_PAGE))
+  pageHtml = LD_PAGE
   state.lock = true
   state.upserted = []
-  // Every board probe misses, so the company has no board.
-  fetchMock = vi.fn<unknown[], Promise<Response>>(async () => new Response('not found', { status: 404 }))
+  // The careers page answers; every board probe and every other address misses, so the company has no board.
+  fetchMock = vi.fn<unknown[], Promise<Response>>(async (input) => {
+    const url = String(input)
+    return url === COMPANY.career_url ? new Response(pageHtml, { status: 200, headers: { 'content-type': 'text/html' } }) : new Response('not found', { status: 404 })
+  })
   globalThis.fetch = fetchMock as unknown as typeof fetch
 })
 
 describe('POST /api/scraper/trigger', () => {
-  it('reads a page with structured postings and needs no key at all', async () => {
+  it('reads a page that declares its postings, needs no key and no model, and says how it was read', async () => {
     const body = await (await POST(post())).json()
-    expect(body).toMatchObject({ success: true, jobsFound: 1, inserted: 1, reason: null })
-    expect(state.upserted[0]).toMatchObject({ title: 'Senior Software Engineer', source: 'scraper' })
+    expect(body).toMatchObject({ success: true, jobsFound: 1, inserted: 1, reason: null, tier: 'listing' })
+    expect(body.message).toBe('Found 1 jobs at Acme Robotics through its careers page')
+    expect(state.upserted[0]).toMatchObject({ title: 'Senior Software Engineer', source: 'listing' })
     expect(callLlmMock).not.toHaveBeenCalled()
   })
 
-  it('with no key, a page that needs a model is reported as not read, with a reason', async () => {
-    fetchPageMock.mockImplementation(page(PLAIN_PAGE))
+  it('a page that builds its list in a browser is left to the scheduled check, and the answer says so', async () => {
+    pageHtml = '<html><body><div id="root"></div><script src="/app.js"></script></body></html>'
     const body = await (await POST(post())).json()
-    expect(body).toMatchObject({ success: false, jobsFound: 0, inserted: 0, reason: 'model_unavailable' })
-    expect(body.message).toContain('OpenRouter key')
+    expect(body).toMatchObject({ success: true, jobsFound: 0, inserted: 0, reading: true })
+    expect(body.message).toMatch(/^Cello is reading this site\. Next check around \d\d:\d\d UTC\.$/)
     expect(state.upserted).toEqual([])
   })
 
-  it('never calls OpenAI or Anthropic directly, even when the user has only those keys', async () => {
-    getKeysMock.mockResolvedValue({ userId: 'user-1', openai: 'sk-openai', anthropic: 'sk-ant' })
-    fetchPageMock.mockImplementation(page(PLAIN_PAGE))
+  it('a site that asks for a bot check is not read, and the answer says why', async () => {
+    fetchMock.mockImplementation(async (input) =>
+      String(input) === COMPANY.career_url ? new Response('<title>Just a moment...</title>', { status: 403 }) : new Response('nf', { status: 404 })
+    )
     const body = await (await POST(post())).json()
-    expect(body.reason).toBe('model_unavailable')
+    expect(body).toMatchObject({ success: false, jobsFound: 0, reason: 'bot_check' })
+    expect(body.message).toContain('bot check')
+  })
+
+  it('never calls a model, and never calls OpenAI or Anthropic', async () => {
+    pageHtml = PLAIN_PAGE
+    await POST(post())
     const hosts = fetchMock.mock.calls.map((c) => String(c[0]))
-    expect(hosts.some((u) => u.includes('api.openai.com') || u.includes('api.anthropic.com'))).toBe(false)
+    expect(hosts.some((u) => u.includes('api.openai.com') || u.includes('api.anthropic.com') || u.includes('openrouter'))).toBe(false)
     expect(callLlmMock).not.toHaveBeenCalled()
   })
 
-  it("uses the user's OpenRouter key on a free model, and stores only what the page backs up", async () => {
-    getKeysMock.mockResolvedValue({ userId: 'user-1', openrouter: 'sk-or-user' })
-    fetchPageMock.mockImplementation(page(PLAIN_PAGE))
-    callLlmMock.mockResolvedValue({
-      content: JSON.stringify({
-        page_kind: 'listing',
-        jobs: [
-          { title: 'Data Analyst', link: 1 },
-          { title: 'Chief Wizard', link: 1 },
-        ],
-      }),
-    })
-    const body = await (await POST(post())).json()
-    expect(body).toMatchObject({ success: true, jobsFound: 1, inserted: 1 })
-    const [keys, opts] = callLlmMock.mock.calls[0]
-    expect(keys).toMatchObject({ openrouter: 'sk-or-user', userId: 'user-1' })
-    expect(String(opts.model).endsWith(':free')).toBe(true)
-    expect(state.upserted.map((r) => r.title)).toEqual(['Data Analyst'])
+  it('asks every site as Cello, naming the repository', async () => {
+    await POST(post())
+    const calls = fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('https://acme-robotics.example'))
+    expect(calls.length).toBeGreaterThan(0)
+    for (const [, init] of calls) {
+      expect(String((init as RequestInit).headers && ((init as RequestInit).headers as Record<string, string>)['user-agent'])).toContain('github.com/Devil-Hawk/cello')
+    }
   })
 
   it('says so when the company is already being checked', async () => {
@@ -145,14 +145,13 @@ describe('POST /api/scraper/trigger', () => {
     const body = await (await POST(post())).json()
     expect(body).toMatchObject({ success: true, jobsFound: 0, inserted: 0 })
     expect(body.message).toContain('already being checked')
-    expect(fetchPageMock).not.toHaveBeenCalled()
   })
 
   it('writes the company name and address nowhere in the server log', async () => {
     const spies = (['log', 'info', 'warn', 'error'] as const).map((k) => vi.spyOn(console, k).mockImplementation(() => {}))
-    fetchPageMock.mockImplementation(page(PLAIN_PAGE))
+    pageHtml = PLAIN_PAGE
     await POST(post())
-    fetchPageMock.mockImplementation(page(LD_PAGE))
+    pageHtml = LD_PAGE
     await POST(post())
     const logged = spies.flatMap((s) => s.mock.calls.flat().map(String)).join('\n')
     expect(logged).not.toContain('Acme')

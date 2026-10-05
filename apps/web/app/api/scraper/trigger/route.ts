@@ -4,28 +4,35 @@ import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { createClient } from '@/lib/supabase/server'
 import { makeSupabaseAtsStore } from '@/lib/ats/store'
 import { staticFetchPage } from '@/lib/ingest/fetch-page'
-import { freeModelKeys, makeIngestModelCall, newModelBudget } from '@/lib/ingest/model'
 import { ingestCompany, type DueCompany, type FailureReason } from '@/lib/ingest/run'
+import { loadTargets } from '@/lib/ingest/reader/targets'
+import { firstTickAtOrAfter } from '@/lib/companies/roles-status'
 
 // The in-app twin of the scheduled check, for one company: the job board when it
-// has one, else its careers page. It is the same code the schedule runs
-// (lib/ingest/run.ts), so a company reads the same either way. A page that
-// declares its postings in structured data is read with no model at all; any
-// other page needs the user's own OpenRouter key, and only a free model is ever
-// asked. Without a key those pages are reported as not read, never guessed.
+// has one, else the one reader (lib/ingest/reader). It is the same code the
+// schedule runs (lib/ingest/run.ts), so a company reads the same either way.
+// Nothing here calls a model: the tiers that run while a person waits need only
+// plain requests, and a page that needs a browser and a model is read by the
+// scheduled check.
 //
-// Vercel has no browser, so this uses the plain fetcher; a page that only shows
-// its list to a browser is read by the scheduled check instead.
+// Vercel has no browser, so this reads with plain requests only (the board, the
+// site's own search, its sitemaps, its server-rendered lists); a page that only
+// shows its list to a browser is read by the scheduled check, and until then the
+// answer says Cello is reading the site and when the next check is.
 
-/** A model call allowance for one button press. */
-const MODEL_CALLS_PER_PRESS = 6
+export const maxDuration = 60
 
 const REASON_MESSAGE: Record<FailureReason, string> = {
   board_error: 'Its job board did not respond. Try again in a few minutes.',
   fetch_failed: 'Its careers page did not load.',
   page_unconfirmed: 'No roles on its careers page could be confirmed. The scheduled check reads pages that need a browser.',
-  model_unavailable: 'Its careers page needs reading and no free model could be used. Add an OpenRouter key in Settings.',
+  model_unavailable: 'Its careers page needs reading and no free model could be used.',
   model_limit: "Today's reading limit was reached.",
+  bot_check: 'Its site asks visitors to pass a bot check, and Cello does not do that.',
+  login_required: 'Its careers site needs a login, so Cello cannot read it.',
+  robots: 'Its robots.txt asks automated readers to stay away from its careers pages, so Cello does not read them.',
+  no_roles: 'No open roles were found on its careers site.',
+  unreachable: 'Its careers site did not answer. Try again in a few minutes.',
   time: 'Not reached this time.',
 }
 
@@ -54,18 +61,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Company not found' }, { status: 404 })
   }
 
-  // The user's own key, for the free model that reads a page with no structured data.
-  const { getDecryptedApiKeys } = await import('@/lib/apikeys')
-  const apiKeys = await getDecryptedApiKeys(user.id)
   const admin = createAdminClient()
-  const budget = newModelBudget(MODEL_CALLS_PER_PRESS)
-  const model = apiKeys.openrouter ? makeIngestModelCall(freeModelKeys(apiKeys, apiKeys.openrouter), { budget }) : null
 
+  const targets = await loadTargets(supabase, user.id)
   const outcome = await withTrace(admin, user.id, { name: 'find-new-roles', outputOf: () => ({ companies: 1 }) }, () =>
     ingestCompany(makeSupabaseAtsStore(supabase, { lockClient: admin }), company as DueCompany, {
       fetchPage: staticFetchPage,
-      model,
-      fetchDetail: async (url) => (await staticFetchPage(url)).html,
+      model: null,
+      mode: 'inline',
+      targets,
     })
   )
 
@@ -81,13 +85,26 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  const message = failure
-    ? REASON_MESSAGE[failure]
-    : result.found > 0
-      ? `Found ${result.found} jobs at ${company.name}`
-      : outcome.skipped
-        ? 'This company has no careers page to read. Add its careers URL.'
-        : `No open roles found at ${company.name}.`
+  const TIER_WORDS: Record<string, string> = {
+    board: 'its job board',
+    site_search: "its site's own search",
+    sitemap: 'its sitemap',
+    listing: 'its careers page',
+    rendered: 'its careers page',
+    model: 'its careers page',
+  }
+  const nextTick = new Date(firstTickAtOrAfter(Date.now())).toISOString().slice(11, 16)
+  const message = outcome.message
+    ? outcome.message
+    : outcome.reading
+      ? `Cello is reading this site. Next check around ${nextTick} UTC.`
+      : failure
+        ? REASON_MESSAGE[failure]
+        : result.found > 0
+          ? `Found ${result.found} jobs at ${company.name} through ${TIER_WORDS[outcome.tier ?? 'board'] ?? 'its careers page'}`
+          : outcome.skipped
+            ? 'This company has no careers page to read. Add its careers URL.'
+            : `No open roles found at ${company.name}.`
 
   return NextResponse.json({
     success: !failure,
@@ -96,6 +113,8 @@ export async function POST(request: NextRequest) {
     inserted: result.inserted,
     updated: result.updated,
     closed: result.closed,
+    tier: outcome.tier,
+    reading: outcome.reading,
     reason: failure,
     message,
   })

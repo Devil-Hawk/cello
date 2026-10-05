@@ -283,10 +283,10 @@ function md5(text: string): string {
 }
 
 /** The sources whose rows one refresh of `provider` may count as missed. */
-function sourcesFor(provider: AtsProviderId): string[] {
-  // The page reader's rows for this company are superseded once a board exists:
+export function sourcesFor(provider: AtsProviderId): string[] {
+  // The other readers' rows for this company are superseded once a board exists:
   // the ones the board does not list close, instead of lingering until the prune.
-  return [provider, 'scraper']
+  return [provider, 'scraper', 'site_search', 'sitemap', 'listing']
 }
 
 /**

@@ -140,7 +140,10 @@
 import { entrypoint, task } from '@langchain/langgraph'
 import type { BaseCheckpointSaver, LangGraphRunnableConfig } from '@langchain/langgraph'
 
-import { refreshCompany, makeSupabaseAtsStore, mapWithConcurrency, type CompanyInput } from '../ats'
+import { makeSupabaseAtsStore, mapWithConcurrency, type CompanyInput } from '../ats'
+import { staticFetchPage } from '../ingest/fetch-page'
+import { loadTargets } from '../ingest/reader/targets'
+import { ingestCompany, type DueCompany } from '../ingest/run'
 import { trackedOnly } from '../companies/watchlist'
 import { resolveTargeting, type Targeting } from '../targeting'
 import { loadApiKeys } from '../harness/keys'
@@ -277,6 +280,7 @@ export class AutopilotOwnershipError extends Error {
 
 interface SourceTaskArgs {
   companies: CompanyInput[]
+  userId: string
 }
 interface SourceTaskResult {
   discovered: number
@@ -287,7 +291,13 @@ const sourceTask = task('source', async (args: SourceTaskArgs): Promise<SourceTa
   const admin = createAdminClient()
   const store = makeSupabaseAtsStore(admin, { lockClient: admin })
   const toRefresh = args.companies.slice(0, MAX_COMPANIES_REFRESH)
-  const refreshResults = await mapWithConcurrency(toRefresh, 5, (c) => refreshCompany(store, c).catch(() => null))
+  // The same reader as the in-app button: plain requests inline, the rendered tier left to the scheduled pass.
+  const targets = await loadTargets(admin, args.userId)
+  const refreshResults = await mapWithConcurrency(toRefresh, 5, (c) =>
+    ingestCompany(store, c as DueCompany, { fetchPage: staticFetchPage, model: null, mode: 'inline', targets })
+      .then((o) => o.result)
+      .catch(() => null)
+  )
   const discovered = refreshResults.reduce((s, r) => s + (r?.inserted ?? 0), 0)
   return { discovered, refreshed: toRefresh.length }
 })
@@ -577,7 +587,7 @@ async function sourceAndScore(
   const companies = await loadCompanies(admin, userId)
 
   await journalStepStart(admin, { runId, label: 'autopilot-source', agentType: 'sourcer', input: { companyCount: Math.min(companies.length, MAX_COMPANIES_REFRESH) } })
-  const sourced = await sourceTask({ companies })
+  const sourced = await sourceTask({ companies, userId })
   digest.discovered = sourced.discovered
   await journalStepFinish(admin, {
     runId,

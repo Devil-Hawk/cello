@@ -252,7 +252,7 @@ describe('refreshCompany: what was listed', () => {
       {
         companyId: 'company-1',
         ids: ['https://acme.com/jobs/a', 'https://acme.com/jobs/b'],
-        sources: ['greenhouse', 'scraper'],
+        sources: ['greenhouse', 'scraper', 'site_search', 'sitemap', 'listing'],
       },
     ])
     expect(result.closed).toBe(1)

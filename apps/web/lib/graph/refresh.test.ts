@@ -25,6 +25,12 @@ vi.mock('../ats', () => ({
   makeSupabaseAtsStore: (client: unknown) => ({ listJobs: async () => [], client }),
 }))
 vi.mock('../harness/supabase-admin', () => ({ createAdminClient: () => ({ fake: 'admin' }) }))
+// The refresh runs each company through the one reader (ingestCompany); this file is about the graph, so the reader is faked.
+vi.mock('../ingest/run', () => ({
+  ingestCompany: async (store: unknown, company: CompanyInput) => ({ result: await refreshCompanyMock(store, company) }),
+}))
+vi.mock('../ingest/reader/targets', () => ({ loadTargets: async () => ({ targeting: {}, titles: [] }) }))
+vi.mock('../ingest/fetch-page', () => ({ staticFetchPage: async () => ({ html: '', finalUrl: '', rendered: false }) }))
 
 // Same literal @langchain/langgraph's Pregel runtime reads a per-call
 // checkpointer override off — see lib/graph/invoke.ts's PREGEL_CHECKPOINTER_KEY

@@ -2,6 +2,7 @@
  * Client helpers around the frozen POST /api/jobs/refresh contract,
  * with a fallback to POST /api/scraper/trigger for companies where no
  * ATS board was detected (provider: null).
+ * Both now end in the one reader (lib/ingest/reader).
  */
 
 export type AtsProvider = 'greenhouse' | 'lever' | 'ashby'
@@ -24,6 +25,9 @@ export interface RefreshResponse {
 export interface ScraperTriggerResult {
   success: boolean
   jobsFound: number
+  inserted: number
+  /** Only a browser can read the site, and the scheduled check will. */
+  reading: boolean
   message: string
 }
 
@@ -40,7 +44,7 @@ export async function refreshViaAts(companyId?: string): Promise<RefreshResponse
   return res.json()
 }
 
-/** POST /api/scraper/trigger — legacy scraper path for non-ATS companies. */
+/** POST /api/scraper/trigger: one company through the one reader (board, search, sitemap, lists), with the answer in words. */
 export async function triggerScraperFallback(companyId: string): Promise<ScraperTriggerResult> {
   try {
     const res = await fetch('/api/scraper/trigger', {
@@ -52,55 +56,33 @@ export async function triggerScraperFallback(companyId: string): Promise<Scraper
     return {
       success: Boolean(data.success),
       jobsFound: data.jobsFound || 0,
+      inserted: data.inserted || 0,
+      reading: Boolean(data.reading),
       message: data.message || data.error || (data.success ? 'Scrape complete' : 'Scrape failed'),
     }
   } catch {
-    return { success: false, jobsFound: 0, message: 'Failed to connect to scraper' }
+    return { success: false, jobsFound: 0, inserted: 0, reading: false, message: 'Failed to connect to scraper' }
   }
 }
 
 export interface CompanyRefreshOutcome {
   success: boolean
-  /** Jobs found across whichever path ran. */
+  /** Jobs found, whichever way the site was read. */
   found: number
-  /** Newly inserted jobs (ATS path only; scraper path reports found). */
+  /** Newly stored jobs. */
   inserted: number
   via: 'ats' | 'scraper'
+  /** Only a browser can read the site, and the scheduled check will. */
+  reading: boolean
   message: string
 }
 
 /**
- * Refresh a single company: try the ATS route first; when no ATS board was
- * detected (provider: null), fall back to the legacy scraper trigger.
+ * Refresh a single company through the one reader: its job board, else the
+ * site's own search, sitemaps and role lists. A site that needs a browser is
+ * read by the scheduled check, and the message says so.
  */
 export async function refreshCompanyJobs(companyId: string): Promise<CompanyRefreshOutcome> {
-  let result: RefreshCompanyResult | undefined
-  try {
-    const response = await refreshViaAts(companyId)
-    result = response.results.find((r) => r.companyId === companyId) ?? response.results[0]
-  } catch {
-    // Route unavailable — fall through to the scraper.
-  }
-
-  if (result && result.provider !== null) {
-    const hadErrors = result.errors.length > 0
-    return {
-      success: !hadErrors,
-      found: result.found,
-      inserted: result.inserted,
-      via: 'ats',
-      message: hadErrors
-        ? result.errors.join('; ')
-        : `Found ${result.found} open roles (${result.inserted} new)`,
-    }
-  }
-
-  const fallback = await triggerScraperFallback(companyId)
-  return {
-    success: fallback.success,
-    found: fallback.jobsFound,
-    inserted: fallback.jobsFound,
-    via: 'scraper',
-    message: fallback.message,
-  }
+  const r = await triggerScraperFallback(companyId)
+  return { success: r.success, found: r.jobsFound, inserted: r.inserted, via: 'scraper', reading: r.reading, message: r.message }
 }

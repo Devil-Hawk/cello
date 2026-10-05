@@ -37,6 +37,13 @@ vi.mock('../ats', async (importOriginal) => {
   return { ...actual, refreshCompany: (store: unknown, company: CompanyInput) => refreshCompanyMock(store, company) }
 })
 
+// The source step reads each company through the one reader (ingestCompany); the reader has its own tests.
+vi.mock('../ingest/run', () => ({
+  ingestCompany: async (store: unknown, company: CompanyInput) => ({ result: await refreshCompanyMock(store, company) }),
+}))
+vi.mock('../ingest/reader/targets', () => ({ loadTargets: async () => ({ targeting: {}, titles: [] }) }))
+vi.mock('../ingest/fetch-page', () => ({ staticFetchPage: async () => ({ html: '', finalUrl: '', rendered: false }) }))
+
 const scoreJobBatchMock = vi.fn(async (_opts: unknown): Promise<{ scored: unknown[]; failedCount: number; candidatesConsidered: number; skippedReason?: string }> => ({
   scored: [],
   failedCount: 0,

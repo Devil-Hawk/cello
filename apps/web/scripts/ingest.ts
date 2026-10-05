@@ -1,7 +1,9 @@
 // Scheduled "Find new roles" check: one process, one pass, every user's due
 // companies. Run in GitHub Actions with `cd apps/web && npx tsx scripts/ingest.ts`.
 //
-// Per company: the job board's API when it has one, else the careers page.
+// Per company: the job board's API when it has one, else the one reader
+// (lib/ingest/reader): the site's own search, its sitemaps, its server-rendered
+// lists, then the rendered page and a free model, which only this pass can run.
 // Per user, after their companies: the requirements pass and one
 // ingestion_runs row. The per-company database lock is shared with the in-app
 // refresh button and the autopilot, so nothing reads a company twice at once.
@@ -26,7 +28,9 @@ import { makeSupabaseAtsStore } from '../lib/ats/store'
 import { createAdminClient } from '../lib/harness/supabase-admin'
 import { loadApiKeys } from '../lib/harness/keys'
 import { withTrace } from '../lib/trace/spans'
-import { pageFetcherFromEnv, staticFetchPage } from '../lib/ingest/fetch-page'
+import { pageFetcherFromEnv } from '../lib/ingest/fetch-page'
+import { loadTargets } from '../lib/ingest/reader/targets'
+import { trackedOnly } from '../lib/companies/watchlist'
 import { DEFAULT_MODEL_CALLS, freeModelKeys, makeIngestModelCall, newModelBudget, type ModelCall } from '../lib/ingest/model'
 import { supabaseRequirementsRows } from '../lib/ingest/requirements-pass'
 import { ingestUser, isDue, makeSupabaseRunsStore, type DueCompany } from '../lib/ingest/run'
@@ -68,7 +72,8 @@ async function main(): Promise<void> {
   try {
     for (let from = 0; ; from += PAGE_SIZE) {
       // select * so this works whether or not the metadata column exists yet.
-      const { data, error } = await admin.from('companies').select('*').order('created_at', { ascending: true }).range(from, from + PAGE_SIZE - 1)
+      // Tracked companies only: leads the sourcer or an old email sync wrote are not read.
+      const { data, error } = await trackedOnly(admin.from('companies').select('*')).order('created_at', { ascending: true }).range(from, from + PAGE_SIZE - 1)
       if (error) throw new Error('list')
       all.push(...((data ?? []) as unknown as DueCompany[]))
       if (!data || data.length < PAGE_SIZE) break
@@ -79,7 +84,9 @@ async function main(): Promise<void> {
   }
 
   const now = Date.now()
-  const selected = all.filter((c) => (!only || c.id === only) && (!onlyUser || c.user_id === onlyUser))
+  // A company with neither a careers page nor a stored board has nothing to read.
+  const hasSource = (c: DueCompany) => Boolean(c.career_url?.trim()) || Boolean((c.metadata as { ats?: unknown } | null)?.ats)
+  const selected = all.filter((c) => (!only || c.id === only) && (!onlyUser || c.user_id === onlyUser) && hasSource(c))
   const due = selected.filter((c) => Boolean(only) || process.env.INGEST_FORCE === '1' || isDue(c, now))
   const byUser = new Map<string, DueCompany[]>()
   for (const c of due) byUser.set(c.user_id, [...(byUser.get(c.user_id) ?? []), c])
@@ -88,11 +95,11 @@ async function main(): Promise<void> {
   log('start', { dryRun, companies: all.length, due: due.length, users: byUser.size, models: Boolean(openrouterKey) })
 
   const fetchPage = pageFetcherFromEnv(process.env.INGEST_PAGE_FETCHER)
-  const fetchDetail = async (url: string) => (await staticFetchPage(url)).html
   const runs = makeSupabaseRunsStore(admin, dryRun)
 
   for (const [userId, companies] of byUser) {
     const budget = newModelBudget(calls)
+    const targets = await loadTargets(admin, userId)
     // The demo guards run on every account: an expired demo gets no model at all.
     // The platform key is what pays for the (free) model; the account is the user's.
     let model: ModelCall | null = null
@@ -115,8 +122,9 @@ async function main(): Promise<void> {
             budget,
             deadlineAt,
             fetchPage,
-            fetchDetail,
             model,
+            mode: 'scheduled',
+            targets,
           },
           { batchId, trigger: 'schedule' }
         )
