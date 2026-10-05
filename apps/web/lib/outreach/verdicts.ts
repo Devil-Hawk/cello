@@ -45,7 +45,7 @@ export async function readStoredVerdicts(
     .select('subject_id, judge, verdict, score, rationale, created_at')
     .eq('user_id', userId)
     .eq('subject_kind', 'outreach_draft')
-    .in('judge', Object.keys(LEGACY_JUDGE))
+    .in('judge', ['groundedness', 'specificity', 'deterministic', 'factuality', 'closed_qa'])
     // Hard cap in the call itself: the list route never asks for more than 200.
     .in(
       'subject_id',

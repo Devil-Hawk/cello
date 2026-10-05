@@ -49,7 +49,7 @@ export async function loadDigestState(admin: SupabaseClient, userId: string, now
   const jobIds = [...new Set(outreach.map((m) => str(m.job_id)).filter((v): v is string => !!v))]
   const titleOf = new Map<string, string>()
   if (jobIds.length > 0) {
-    const { data: titles } = await admin.from('jobs').select('id, title').in('id', jobIds)
+    const { data: titles } = await admin.from('jobs').select('id, title').in('id', jobIds.slice(0, 500))
     for (const t of (titles as { id: string; title: string }[] | null) ?? []) titleOf.set(t.id, t.title)
   }
   const who = (m: Row) => str(m.to_name) ?? str(m.to_email)

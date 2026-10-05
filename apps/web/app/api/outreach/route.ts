@@ -48,9 +48,9 @@ export async function GET(request: NextRequest) {
     const parentIds = ids((m) => m.parent_id)
     const [{ data: profile }, { data: companies }, { data: touched }, { data: parents }] = await Promise.all([
       admin.from('profiles').select('full_name').eq('id', user.id).maybeSingle(),
-      companyIds.length ? admin.from('companies').select('id, name').eq('user_id', user.id).in('id', companyIds) : { data: [] },
-      contactIds.length ? admin.from('interactions').select('contact_id').eq('user_id', user.id).in('contact_id', contactIds) : { data: [] },
-      parentIds.length ? admin.from('outreach_messages').select('id, body').eq('user_id', user.id).in('id', parentIds) : { data: [] },
+      companyIds.length ? admin.from('companies').select('id, name').eq('user_id', user.id).in('id', companyIds.slice(0, 200)) : { data: [] },
+      contactIds.length ? admin.from('interactions').select('contact_id').eq('user_id', user.id).in('contact_id', contactIds.slice(0, 200)) : { data: [] },
+      parentIds.length ? admin.from('outreach_messages').select('id, body').eq('user_id', user.id).in('id', parentIds.slice(0, 200)) : { data: [] },
     ])
     const senderName = (profile as { full_name?: string | null } | null)?.full_name?.trim() || null
     const companyName = new Map(((companies ?? []) as { id: string; name: string }[]).map((c) => [c.id, c.name]))
