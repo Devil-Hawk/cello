@@ -1,10 +1,12 @@
-// Tests for POST /api/outreach/draft — the E2E failure this closes: a raw
-// judge error (autoevals' Factuality asking for more max_tokens than the
-// account could afford, OpenRouter returning 402) must never 500 this route.
-// insertOutreach() must run and the draft must persist 'pending_review' no
-// matter what verifyOutreachDraft's judge stage does — that's the whole
-// contract. Everything below verifyOutreachDraft is mocked (that module's own
-// judge-failure handling is lib/graph/verify/outreach.test.ts's job).
+// Tests for POST /api/outreach/draft. Two contracts matter most:
+//  - a broken judge (a raw 402, a missing key) must never take the draft down:
+//    insertOutreach() runs and the draft persists 'pending_review' whatever the
+//    review stage does;
+//  - a draft is never signed with a guessed name, and a template is recorded as
+//    one, with the reason, so the card can say so.
+// Everything below verifyOutreachDraft is mocked (the review's own control flow is
+// lib/graph/verify/outreach.test.ts's job); the verdict rows go through the real
+// writeReviewVerdicts into a mocked writeVerdict.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
@@ -18,26 +20,51 @@ vi.mock('@/lib/outreach/store', async (importOriginal) => ({
 }))
 
 const runUnitOnceMock = vi.fn(async (..._args: unknown[]) => ({
-  output: { subject: 'Hi', body: 'Draft body', tokensUsed: 10 },
+  output: { subject: 'Hi', body: 'Draft body', tokensUsed: 10, source: 'model' },
   tokensUsed: 10,
 }))
 vi.mock('@/lib/graph/oneshot', () => ({
   runUnitOnce: (...args: unknown[]) => runUnitOnceMock(...args),
 }))
 
-interface VerifiedFixture {
+const PASSING_CHECKS = { ok: true, checks: [{ id: 'one_ask', ok: true, message: 'One ask' }] }
+interface ReviewFixture {
   subject: string
   body: string
   tokensUsed: number
+  source: 'model' | 'template'
+  templateReason?: string
   verdicts: unknown[]
-  failedVerdict: boolean
+  checks: { ok: boolean; checks: { id: string; ok: boolean; message: string }[] }
+  failed: boolean
   judgeUnavailable: boolean
   judgeRefused?: 'missing-key' | 'budget-cap'
 }
-let verified: VerifiedFixture
-const verifyOutreachDraftMock = vi.fn(async (..._args: unknown[]) => verified)
+let review: ReviewFixture
+const verifyOutreachDraftMock = vi.fn(async (..._args: unknown[]) => review)
 vi.mock('@/lib/graph/verify/outreach', () => ({
   verifyOutreachDraft: (...args: unknown[]) => verifyOutreachDraftMock(...args),
+}))
+
+let senderName: string | null
+const loadOutreachSourcesMock = vi.fn(async (..._args: unknown[]) => ({
+  senderName,
+  companyId: 'co-1',
+  hasHistory: false,
+  input: {
+    userEmail: 'alex@example.com',
+    jobTitle: 'Staff Engineer',
+    companyName: 'Acme',
+    resumeText: 'Senior engineer.',
+    matchHighlights: [],
+    jobDescription: 'Build things.',
+    facts: [],
+    history: [],
+    patterns: [],
+  },
+}))
+vi.mock('@/lib/outreach/sources', () => ({
+  loadOutreachSources: (...args: unknown[]) => loadOutreachSourcesMock(...args),
 }))
 
 const writeVerdictMock = vi.fn().mockResolvedValue(undefined)
@@ -45,11 +72,9 @@ vi.mock('@/lib/evals/verdicts', () => ({
   writeVerdict: (...args: unknown[]) => writeVerdictMock(...args),
 }))
 
+const recordDemoEventMock = vi.fn().mockResolvedValue(undefined)
 vi.mock('@/lib/access/session', () => ({
-  recordDemoEvent: vi.fn().mockResolvedValue(undefined),
-}))
-vi.mock('@/lib/context/assemble', () => ({
-  buildOutreachContext: vi.fn().mockResolvedValue(null),
+  recordDemoEvent: (...args: unknown[]) => recordDemoEventMock(...args),
 }))
 
 // What the route tells Langfuse about this request, recorded as it is set.
@@ -67,9 +92,6 @@ vi.mock('@/lib/trace/spans', async (importOriginal) => {
 let user: { id: string; email: string } | null
 const supabaseTableRow: Record<string, Record<string, unknown> | null> = {
   contacts: { id: 'contact-1', name: 'Jordan', email: 'jordan@example.com', title: 'Eng Manager', company_id: 'co-1' },
-  jobs: { id: 'job-1', title: 'Staff Engineer', description: 'Build things.', company_id: 'co-1', person_roles: [{ chance_detail: null }] },
-  companies: { id: 'co-1', name: 'Acme' },
-  profiles: { full_name: 'Alex Candidate', resume_text: 'Senior engineer.' },
 }
 function tableChain(table: string) {
   const chain = {
@@ -96,20 +118,51 @@ function post(body: unknown) {
   })
 }
 
+const modelReview = (over: Partial<ReviewFixture> = {}): ReviewFixture => ({
+  subject: 'Hi',
+  body: 'Draft body',
+  tokensUsed: 10,
+  source: 'model',
+  verdicts: [],
+  checks: PASSING_CHECKS,
+  failed: false,
+  judgeUnavailable: false,
+  ...over,
+})
+
 beforeEach(() => {
   vi.clearAllMocks()
   traced.input.length = traced.output.length = traced.meta.length = 0
   findDuplicateInitialMock.mockResolvedValue(null)
-  runUnitOnceMock.mockResolvedValue({ output: { subject: 'Hi', body: 'Draft body', tokensUsed: 10 }, tokensUsed: 10 })
   writeVerdictMock.mockResolvedValue(undefined)
   user = { id: 'user-1', email: 'alex@example.com' }
-  verified = { subject: 'Hi', body: 'Draft body', tokensUsed: 10, verdicts: [], failedVerdict: false, judgeUnavailable: false }
+  senderName = 'Alex Candidate'
+  review = modelReview()
   insertOutreachMock.mockImplementation(async (_admin: unknown, row: Record<string, unknown>) => ({ id: 'msg-1', ...row }))
 })
 
-describe('POST — a broke judge cannot take the draft down with it', () => {
-  it('persists pending_review and returns 2xx when verifyOutreachDraft reports judgeUnavailable', async () => {
-    verified = { subject: 'Hi', body: 'Draft body', tokensUsed: 10, verdicts: [], failedVerdict: false, judgeUnavailable: true }
+describe('POST, no name no draft', () => {
+  it('answers 409 needsName before any model is called when the profile has no full name', async () => {
+    senderName = null
+
+    const response = await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
+    const body = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(body).toMatchObject({ needsName: true, error: 'Add your full name in Settings first. Drafts are signed with it.' })
+    expect(runUnitOnceMock).not.toHaveBeenCalled()
+    expect(insertOutreachMock).not.toHaveBeenCalled()
+  })
+
+  it('signs with the profile name, never the email local part', async () => {
+    await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
+    expect(runUnitOnceMock).toHaveBeenCalledWith('outreach', expect.objectContaining({ input: expect.objectContaining({ userName: 'Alex Candidate', kind: 'initial' }) }))
+  })
+})
+
+describe('POST, a broken judge cannot take the draft down with it', () => {
+  it('persists pending_review and returns 2xx when the review reports judgeUnavailable', async () => {
+    review = modelReview({ judgeUnavailable: true })
 
     const response = await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
     const body = await response.json()
@@ -123,58 +176,66 @@ describe('POST — a broke judge cannot take the draft down with it', () => {
     )
   })
 
-  it('writes an unjudged verdict row for both judges, keyed to the persisted draft', async () => {
-    verified = { subject: 'Hi', body: 'Draft body', tokensUsed: 10, verdicts: [], failedVerdict: false, judgeUnavailable: true }
+  it('writes an unjudged row for both judges plus the code checks, keyed to the saved draft', async () => {
+    review = modelReview({ judgeUnavailable: true })
 
     await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
 
-    expect(writeVerdictMock).toHaveBeenCalledTimes(2)
-    for (const judge of ['factuality', 'closed_qa']) {
+    for (const judge of ['groundedness', 'specificity']) {
       expect(writeVerdictMock).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ subjectKind: 'outreach_draft', subjectId: 'msg-1', judge, verdict: 'unjudged' })
       )
     }
     // A refusal never carries a substituted score.
-    for (const call of writeVerdictMock.mock.calls) {
+    for (const call of writeVerdictMock.mock.calls.filter((c) => (c[1] as { verdict: string }).verdict === 'unjudged')) {
       expect((call[1] as { score?: number }).score).toBeUndefined()
     }
   })
 
   it.each([
-    ['missing-key', /no OpenRouter key/],
-    ['budget-cap', /spend cap/],
-  ] as const)('writes an unjudged row for both judges when the judge refused (%s), with the reason', async (judgeRefused, reason) => {
-    verified = { subject: 'Hi', body: 'Draft body', tokensUsed: 10, verdicts: [], failedVerdict: false, judgeUnavailable: false, judgeRefused }
+    ['missing-key', 'Not checked: no OpenRouter key is set.'],
+    ['budget-cap', 'Not checked: the spending cap is reached.'],
+  ] as const)('says why the judges did not run (%s)', async (judgeRefused, reason) => {
+    review = modelReview({ judgeRefused })
 
     const response = await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
 
     expect(response.status).toBe(200)
-    expect(writeVerdictMock).toHaveBeenCalledTimes(2)
-    for (const call of writeVerdictMock.mock.calls) {
-      expect(call[1]).toMatchObject({ subjectKind: 'outreach_draft', subjectId: 'msg-1', verdict: 'unjudged' })
-      expect((call[1] as { rationale: string }).rationale).toMatch(reason)
-    }
+    const unjudged = writeVerdictMock.mock.calls.map((c) => c[1] as { verdict: string; rationale: string }).filter((v) => v.verdict === 'unjudged')
+    expect(unjudged).toHaveLength(2)
+    for (const v of unjudged) expect(v.rationale).toBe(reason)
+  })
+})
+
+describe('POST, the verdict rows', () => {
+  it('writes groundedness, specificity and one deterministic row on the ordinary path', async () => {
+    review = modelReview({
+      verdicts: [
+        { name: 'groundedness', verdict: 'pass', score: 1, threshold: 1, n: 3, summary: 'All 3 statements trace to your sources.' },
+        { name: 'specificity', verdict: 'fail', score: 0, threshold: 1, n: 1, summary: 'Generic: nothing ties to the post.' },
+      ],
+      checks: { ok: false, checks: [{ id: 'one_ask', ok: false, message: '2 asks. Keep one so the reply is easy.' }] },
+    })
+
+    await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
+
+    const rows = writeVerdictMock.mock.calls.map((c) => c[1] as { judge: string; verdict: string; rationale: string })
+    expect(rows.map((r) => [r.judge, r.verdict])).toEqual([
+      ['groundedness', 'pass'],
+      ['specificity', 'fail'],
+      ['deterministic', 'fail'],
+    ])
+    expect(rows[2].rationale).toBe('2 asks. Keep one so the reply is easy.')
   })
 
-  it('writes the real pass/fail verdict rows on the ordinary path (no regression)', async () => {
-    verified = {
-      subject: 'Hi',
-      body: 'Draft body',
-      tokensUsed: 10,
-      verdicts: [{ name: 'outreach groundedness', verdict: 'pass', score: 0.9, threshold: 0.5, n: 1, summary: 'grounded' }],
-      failedVerdict: false,
-      judgeUnavailable: false,
-    }
+  it('writes only the deterministic row for a template, and "All checks passed" when they pass', async () => {
+    review = modelReview({ source: 'template', templateReason: 'missing_key', tokensUsed: 0 })
 
-    const response = await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
+    await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
 
-    expect(response.status).toBe(200)
     expect(writeVerdictMock).toHaveBeenCalledTimes(1)
-    expect(writeVerdictMock).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ judge: 'factuality', verdict: 'pass', score: 0.9 })
-    )
+    expect(writeVerdictMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ judge: 'deterministic', verdict: 'pass', rationale: 'All checks passed' }))
   })
 })
 
@@ -198,19 +259,25 @@ describe('POST, duplicates and templates', () => {
     expect(response.status).toBe(500)
   })
 
-  it('records and reports a template draft (tokensUsed 0) as usedLlm:false', async () => {
-    verified = { subject: 'Template', body: 'Generic body', tokensUsed: 0, verdicts: [], failedVerdict: false, judgeUnavailable: false }
+  it('stores a template as used_llm false with its reason, and reports it', async () => {
+    review = modelReview({ source: 'template', templateReason: 'spend_cap', tokensUsed: 0 })
 
     const response = await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
     const body = await response.json()
 
-    expect(body.usedLlm).toBe(false)
-    expect(insertOutreachMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ used_llm: false }))
+    expect(body).toMatchObject({ usedLlm: false, templateReason: 'spend_cap' })
+    expect(insertOutreachMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ used_llm: false, template_reason: 'spend_cap' }))
   })
 
-  it('records a model draft as used_llm:true', async () => {
+  it('a template whose model call spent tokens is still a template (unusable output)', async () => {
+    review = modelReview({ source: 'template', templateReason: 'unusable_output', tokensUsed: 120 })
     await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
-    expect(insertOutreachMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ used_llm: true }))
+    expect(insertOutreachMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ used_llm: false, template_reason: 'unusable_output' }))
+  })
+
+  it('records a model draft as used_llm true with no reason', async () => {
+    await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
+    expect(insertOutreachMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ used_llm: true, template_reason: null }))
   })
 })
 
@@ -224,10 +291,10 @@ describe('POST, what the Langfuse trace says', () => {
 
   it.each([
     ['no judge key (the judge refused, nothing was recorded)', { verdicts: [], judgeUnavailable: false }, 'skipped'],
-    ['the judge ran', { verdicts: [{ name: 'outreach groundedness', verdict: 'pass', score: 0.9, threshold: 0.5, summary: 's' }], judgeUnavailable: false }, 'ran'],
+    ['the judge ran', { verdicts: [{ name: 'groundedness', verdict: 'pass', score: 1, threshold: 1, summary: 's' }], judgeUnavailable: false }, 'ran'],
     ['the judge failed unexpectedly', { verdicts: [], judgeUnavailable: true }, 'failed'],
   ])('says whether the draft was judged: %s', async (_label, fixture, expected) => {
-    verified = { subject: 'Hi', body: 'Draft body', tokensUsed: 10, failedVerdict: false, ...fixture }
+    review = modelReview(fixture)
     await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
     expect(traced.output[0]).toMatchObject({ judge: expected })
     expect(traced.meta).toContainEqual({ message_id: 'msg-1', judge: expected })

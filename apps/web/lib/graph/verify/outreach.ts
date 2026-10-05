@@ -1,202 +1,194 @@
-// Plan-act-verify for outreach (langgraph port design doc, Step 4, item 2):
-// groundedness (Factuality vs sourceFacts) + specificity (ClosedQA) — the two
-// judges lib/evals/judge.ts already defines, verbatim. A failing verdict gets
-// ONE bounded regeneration; either way this ALWAYS returns content for the
-// caller to persist as 'pending_review' — unlike cv_tailor (ruling 2a),
-// outreach's human-approve queue is already the send gate (nothing here ever
-// reaches a recipient without a click on /api/outreach/send), so verify's job
-// is to attach verdicts, not to block persistence.
+// Review of an outreach draft: the deterministic checks (length, banned phrases,
+// one ask, greeting, sign-off, invented history, company named), then the claims
+// judge against the numbered resume, job, research and history lines, and the
+// specificity judge against the job and research lines.
 //
-// AUTOPILOT-ORIGINATED DRAFTS: ruling 2 says a failed-verdict draft must not
-// count toward a tick's action quota. lib/graph/autopilot.ts never drafts
-// outreach at all today (grep confirms — only cv_tailor/applier run there),
-// so there is no quota to wire this into yet; `failedVerdict` on the result
-// below is what a future autopilot outreach call site would key off, the
-// same way lib/graph/verify/cv-tailor.ts's judge-failed outcome already
-// excludes a cv_tailor draft from draftedThisTick (see that file + this
-// stage's autopilot.ts wiring).
+// A failing draft gets ONE regeneration with a numbered list of exactly what to
+// fix, built here in code. Either way this returns content for the caller to
+// store as 'pending_review': the human approve queue is already the send gate,
+// so review attaches verdicts and never blocks.
+//
+// The template is a legitimate starting point but it makes no claims, so it is
+// checked by code only and never regenerated over a model draft.
+//
+// reviewOutreachDraft is pure over its two dependencies (generate, judges) so
+// the evals and tests drive it without a database; verifyOutreachDraft wires
+// them to the unit runner and the user's keys.
 
 import { runUnitOnce } from '../oneshot'
-import { meteredJudgeClient, judgeGroundedness, judgeSpecificity } from '../../evals/judge'
+import { judgeClaims, judgeRunner, judgeSpecificity, type ClaimsResult, type SpecificityResult } from '../../evals/claims-judge'
 import { loadApiKeys } from '../../harness/keys'
-import { MissingKeyError } from '../../harness/llm'
+import { MissingKeyError } from '../../harness/providers'
 import { BudgetCapError } from '../../harness/spend'
-import { frameJobText } from '../../security/job-text'
 import { logHarnessError } from '../../observability/log'
-import type { AdminClient } from '../../harness/types'
-import type { OutreachDraftInput, OutreachDraftResult } from '../../harness/agents/outreach'
+import { checkDraft, type DraftCheckResult } from '../../writing/checks'
+import { outreachSources, type OutreachDraftInput, type OutreachDraftResult } from '../../harness/agents/outreach'
+import type { AdminClient, LlmRunner } from '../../harness/types'
 import type { EvalResult } from '../../evals/harness'
 
-const JD_CHARS = 1500
-
-function buildSourceFacts(input: OutreachDraftInput): string {
-  return (
-    `CANDIDATE RESUME:\n${(input.resumeText ?? '').trim() || '(no resume on file)'}\n\n` +
-    `VERIFIED MATCH HIGHLIGHTS: ${(input.matchHighlights ?? []).join('; ') || '(none)'}\n\n` +
-    `JOB FACTS:\nTitle: ${input.jobTitle}\nCompany: ${input.companyName}\n` +
-    `Description:\n${frameJobText(input.jobDescription, { maxChars: JD_CHARS, emptyPlaceholder: '(no description provided)' })}`
-  )
+export interface ReviewDeps {
+  /** One more draft from the same writer; called at most once. */
+  generate: (input: OutreachDraftInput) => Promise<OutreachDraftResult>
+  claimsRun: LlmRunner
+  specificityRun: LlmRunner
 }
 
-async function judgeDraft(
-  admin: AdminClient,
-  userId: string,
-  apiKeys: Parameters<typeof meteredJudgeClient>[2],
+export interface OutreachReview {
+  subject: string
+  body: string
+  tokensUsed: number
+  source: 'model' | 'template'
+  templateReason?: OutreachDraftResult['templateReason']
+  /** groundedness and specificity, when the judges ran. Empty when they did not. */
+  verdicts: EvalResult[]
+  checks: DraftCheckResult
+  /** True when the final draft still fails a check or a judge. */
+  failed: boolean
+  /** A judge call threw something other than the two typed refusals. Logged. */
+  judgeUnavailable: boolean
+  /** The judges could not run for a typed, expected reason. */
+  judgeRefused?: 'missing-key' | 'budget-cap'
+}
+
+export function checksFor(input: OutreachDraftInput, draft: { subject: string; body: string }): DraftCheckResult {
+  const kind = input.kind ?? 'initial'
+  return checkDraft({
+    kind: kind === 'follow_up' ? 'follow_up' : 'outreach',
+    subject: draft.subject,
+    body: draft.body,
+    senderName: input.userName,
+    contactName: input.contactName,
+    companyName: input.companyName,
+    jobTitle: input.jobTitle,
+    hasHistory: kind === 'follow_up' ? true : (input.history?.length ?? 0) > 0,
+    previousBody: input.previousEmail?.body ?? null,
+  })
+}
+
+interface JudgeOutcome {
+  verdicts: EvalResult[]
+  refused?: 'missing-key' | 'budget-cap'
+  unavailable: boolean
+}
+
+async function judge(deps: ReviewDeps, input: OutreachDraftInput, draft: OutreachDraftResult, onError: (err: unknown) => void): Promise<JudgeOutcome> {
+  const src = outreachSources(input)
+  try {
+    const [groundedness, specificity] = await Promise.all([
+      judgeClaims(deps.claimsRun, {
+        text: draft.body,
+        sources: [...src.resume, ...src.job, ...src.facts, ...src.history],
+      }),
+      judgeSpecificity(deps.specificityRun, {
+        text: draft.body,
+        jobLines: src.job,
+        facts: src.facts,
+        role: input.jobTitle ?? 'No specific role',
+        company: input.companyName ?? 'the company',
+      }),
+    ])
+    return { verdicts: [groundedness, specificity], unavailable: false }
+  } catch (err) {
+    if (err instanceof BudgetCapError) return { verdicts: [], refused: 'budget-cap', unavailable: false }
+    if (err instanceof MissingKeyError) return { verdicts: [], refused: 'missing-key', unavailable: false }
+    onError(err)
+    return { verdicts: [], unavailable: true }
+  }
+}
+
+function problems(checks: DraftCheckResult, verdicts: EvalResult[]): number {
+  const claims = verdicts.find((v) => v.name === 'groundedness') as ClaimsResult | undefined
+  const specific = verdicts.find((v) => v.name === 'specificity')
+  return checks.checks.filter((c) => !c.ok).length + (claims?.unsupported.length ?? 0) + (specific?.verdict === 'fail' ? 1 : 0)
+}
+
+/** The numbered list of fixes the regeneration is asked for. */
+export function correctiveList(checks: DraftCheckResult, verdicts: EvalResult[]): string {
+  const items: string[] = []
+  const claims = verdicts.find((v) => v.name === 'groundedness') as ClaimsResult | undefined
+  for (const c of claims?.unsupported ?? []) {
+    items.push(`Remove or rewrite "${c.text}". No line in the resume, job post, research or history says this.`)
+  }
+  const specific = verdicts.find((v) => v.name === 'specificity') as SpecificityResult | undefined
+  if (specific?.verdict === 'fail') {
+    items.push('Use one concrete detail from the job post or company facts, and name where it ties to the resume.')
+  }
+  for (const c of checks.checks) if (!c.ok) items.push(c.message)
+  return items.map((s, i) => `${i + 1}. ${s}`).join('\n')
+}
+
+export async function reviewOutreachDraft(
+  deps: ReviewDeps,
+  input: OutreachDraftInput,
   draft: OutreachDraftResult,
-  sourceFacts: string,
-  companyAndRole: string
-): Promise<EvalResult[]> {
-  const client = meteredJudgeClient(admin, userId, apiKeys)
-  return Promise.all([
-    judgeGroundedness(client, { draft: draft.body, sourceFacts }, { userId }),
-    judgeSpecificity(client, { draft: draft.body, companyAndRole }, { userId }),
-  ])
+  onJudgeError: (err: unknown) => void = () => {}
+): Promise<OutreachReview> {
+  const source = draft.source ?? (draft.tokensUsed > 0 ? 'model' : 'template')
+  const result = (d: OutreachDraftResult, j: JudgeOutcome, tokens: number): OutreachReview => {
+    const checks = checksFor(input, d)
+    return {
+      subject: d.subject,
+      body: d.body,
+      tokensUsed: tokens,
+      source: d.source ?? source,
+      templateReason: d.templateReason,
+      verdicts: j.verdicts,
+      checks,
+      failed: !checks.ok || j.verdicts.some((v) => v.verdict === 'fail'),
+      judgeUnavailable: j.unavailable,
+      judgeRefused: j.refused,
+    }
+  }
+
+  // The template makes no claim about the sender, so there is nothing for a judge to read.
+  if (source === 'template') return result(draft, { verdicts: [], unavailable: false }, draft.tokensUsed)
+
+  const first = await judge(deps, input, draft, onJudgeError)
+  const firstChecks = checksFor(input, draft)
+  const needsFix = !firstChecks.ok || first.verdicts.some((v) => v.verdict === 'fail')
+  if (!needsFix) return result(draft, first, draft.tokensUsed)
+
+  const regen = await deps.generate({ ...input, correctiveContext: correctiveList(firstChecks, first.verdicts) })
+  const tokens = draft.tokensUsed + regen.tokensUsed
+  // A template regeneration (the model failed on the retry) never replaces a real draft.
+  if ((regen.source ?? 'model') === 'template' || regen.tokensUsed === 0) return result(draft, first, tokens)
+
+  const second = await judge(deps, input, regen, onJudgeError)
+  // Keep whichever draft has fewer problems; on a tie the corrected one wins.
+  const keepRegen = problems(checksFor(input, regen), second.verdicts) <= problems(firstChecks, first.verdicts)
+  return keepRegen ? result(regen, second, tokens) : result(draft, first, tokens)
 }
 
 export interface VerifyOutreachDraftArgs {
   admin: AdminClient
   userId: string
-  /** agent_runs.goal for the ONE bounded regeneration's own one-shot run, if it happens. */
+  /** agent_runs.goal for the one regeneration's own one-shot run. */
   goal: string
   input: OutreachDraftInput
   draft: OutreachDraftResult
 }
 
-export interface OutreachVerifyResult {
-  subject: string
-  body: string
-  tokensUsed: number
-  /** Empty when the judge itself could not run (no key / budget cap, see
-   *  judgeRefused), still persisted, per this file's header; REFUSE-OVER-GUESS means an empty
-   *  array here, never a substituted verdict. */
-  verdicts: EvalResult[]
-  /** True when the FINAL draft (after the one bounded regen, if any) still
-   *  carries a failing verdict. */
-  failedVerdict: boolean
-  /** True when a judge call threw something OTHER than the two typed
-   *  refusals (BudgetCapError/MissingKeyError) — cv-tailor.ts's SAME
-   *  discipline: an unexpected judge failure (autoevals throwing, OpenRouter
-   *  erroring — e.g. a judge requesting more tokens than the account can
-   *  afford, drawing a raw 402) is logged via logHarnessError and NEVER
-   *  allowed to take the draft down with it. The caller (the draft route)
-   *  writes 'unjudged' eval_verdicts rows for both judges when this is true,
-   *  same shape /api/outreach/judge's own BudgetCapError branch already uses
-   *  for 'insufficient-budget'. */
-  judgeUnavailable: boolean
-  /** Set when the judge refused to run for a typed, expected reason: no
-   *  OpenRouter key, or the spend cap. The caller records an 'unjudged' row
-   *  naming the reason, so an unchecked draft never looks like a checked one. */
-  judgeRefused?: 'missing-key' | 'budget-cap'
+/** The route-facing review: the writer is the outreach unit, the judges use the user's keys. */
+export async function verifyOutreachDraft(args: VerifyOutreachDraftArgs): Promise<OutreachReview> {
+  const log = (err: unknown) =>
+    logHarnessError({ runId: args.goal, stepLabel: 'outreach-verify', agentType: 'outreach', phase: 'judge', userId: args.userId }, err)
+  let claimsRun = unavailableRun
+  let specificityRun = unavailableRun
+  try {
+    const apiKeys = await loadApiKeys(args.admin, args.userId)
+    claimsRun = judgeRunner(apiKeys, 'judge-claims')
+    specificityRun = judgeRunner(apiKeys, 'judge-specificity')
+  } catch (err) {
+    log(err)
+  }
+  return reviewOutreachDraft({ generate: (i) => regenOnce(args, i), claimsRun, specificityRun }, args.input, args.draft, log)
 }
 
-/**
- * Judge `args.draft`; on any failing verdict, regenerate ONCE with the
- * failure as corrective context and re-judge; return whichever draft is
- * final either way. NEVER blocks persistence — the caller always gets
- * content back.
- */
-export async function verifyOutreachDraft(args: VerifyOutreachDraftArgs): Promise<OutreachVerifyResult> {
-  let tokensUsed = args.draft.tokensUsed
-  const sourceFacts = buildSourceFacts(args.input)
-  const companyAndRole = `${args.input.companyName}, ${args.input.jobTitle}`
-
-  let apiKeys
-  try {
-    apiKeys = await loadApiKeys(args.admin, args.userId)
-  } catch {
-    return { subject: args.draft.subject, body: args.draft.body, tokensUsed, verdicts: [], failedVerdict: false, judgeUnavailable: false }
-  }
-
-  let verdicts: EvalResult[]
-  try {
-    verdicts = await judgeDraft(args.admin, args.userId, apiKeys, args.draft, sourceFacts, companyAndRole)
-  } catch (err) {
-    if (err instanceof BudgetCapError || err instanceof MissingKeyError) {
-      return {
-        subject: args.draft.subject,
-        body: args.draft.body,
-        tokensUsed,
-        verdicts: [],
-        failedVerdict: false,
-        judgeUnavailable: false,
-        judgeRefused: err instanceof BudgetCapError ? 'budget-cap' : 'missing-key',
-      }
-    }
-    // Any OTHER judge failure — autoevals throwing, OpenRouter erroring (the
-    // E2E case this exists for: a judge call requesting more tokens than the
-    // account can afford, drawing a raw 402) — must not take the draft down
-    // with it. cv-tailor.ts's SAME discipline (see that file's judge catch):
-    // log it loudly, still return content for the caller to persist.
-    logJudgeFailure(args, err)
-    return { subject: args.draft.subject, body: args.draft.body, tokensUsed, verdicts: [], failedVerdict: false, judgeUnavailable: true }
-  }
-
-  if (verdicts.every((v) => v.verdict === 'pass')) {
-    return { subject: args.draft.subject, body: args.draft.body, tokensUsed, verdicts, failedVerdict: false, judgeUnavailable: false }
-  }
-
-  // ONE bounded regeneration, corrective context built from whichever verdict(s) failed.
-  const correctiveContext = verdicts
-    .filter((v) => v.verdict === 'fail')
-    .map((v) => v.summary)
-    .join(' ')
-  const regenerated = await runUnitOnce('outreach', {
-    admin: args.admin,
-    userId: args.userId,
-    goal: args.goal,
-    input: { ...args.input, correctiveContext },
-  })
-  const regenDraft = regenerated.output as OutreachDraftResult
-  // The drafter swallows model errors and returns its generic template with
-  // tokensUsed 0. If the retry hit one (budget, rate limit, a bad response)
-  // that template must not replace a real draft that merely failed a judge:
-  // keep the original and the verdicts that describe it.
-  if (regenDraft.tokensUsed === 0) {
-    return {
-      subject: args.draft.subject,
-      body: args.draft.body,
-      tokensUsed,
-      verdicts,
-      failedVerdict: verdicts.some((v) => v.verdict === 'fail'),
-      judgeUnavailable: false,
-    }
-  }
-  tokensUsed += regenDraft.tokensUsed
-
-  try {
-    const finalVerdicts = await judgeDraft(args.admin, args.userId, apiKeys, regenDraft, sourceFacts, companyAndRole)
-    return {
-      subject: regenDraft.subject,
-      body: regenDraft.body,
-      tokensUsed,
-      verdicts: finalVerdicts,
-      failedVerdict: finalVerdicts.some((v) => v.verdict === 'fail'),
-      judgeUnavailable: false,
-    }
-  } catch (err) {
-    if (err instanceof BudgetCapError || err instanceof MissingKeyError) {
-      // Judge went unavailable mid-flight (e.g. the regen call itself pushed
-      // spend over the cap) — keep the regenerated content, carry the
-      // FIRST-pass verdicts forward rather than fabricate a second verdict.
-      return {
-        subject: regenDraft.subject,
-        body: regenDraft.body,
-        tokensUsed,
-        verdicts,
-        failedVerdict: verdicts.some((v) => v.verdict === 'fail'),
-        judgeUnavailable: false,
-      }
-    }
-    // Same unexpected-failure discipline as the first-pass catch above — the
-    // regenerated content still persists, this run just could not be judged.
-    logJudgeFailure(args, err)
-    return { subject: regenDraft.subject, body: regenDraft.body, tokensUsed, verdicts: [], failedVerdict: false, judgeUnavailable: true }
-  }
+const unavailableRun: LlmRunner = async () => {
+  throw new Error('judge unavailable')
 }
 
-/** Shared logging chokepoint for both judge call sites above — an unexpected
- *  judge failure is ALWAYS logged, never silent (invariant 7's "refuse, don't
- *  guess" applies to the log line too, not just the persisted verdict). */
-function logJudgeFailure(args: VerifyOutreachDraftArgs, err: unknown): void {
-  logHarnessError({ runId: args.goal, stepLabel: 'outreach-verify', agentType: 'outreach', phase: 'judge', userId: args.userId }, err)
+async function regenOnce(args: VerifyOutreachDraftArgs, input: OutreachDraftInput): Promise<OutreachDraftResult> {
+  const regenerated = await runUnitOnce('outreach', { admin: args.admin, userId: args.userId, goal: args.goal, input })
+  return regenerated.output as OutreachDraftResult
 }

@@ -7,7 +7,7 @@ import type { AdminClient } from '@/lib/harness/types'
 import type { OutreachMessageRow } from './types'
 
 export interface StoredOutreachVerdict {
-  judge: 'factuality' | 'closed_qa'
+  judge: 'groundedness' | 'specificity' | 'deterministic'
   verdict: string
   score: number | null
   rationale: string | null
@@ -16,7 +16,16 @@ export interface StoredOutreachVerdict {
 /** The most messages one lookup covers (the list route's own maximum page). */
 const MAX_MESSAGES = 200
 
-type VerdictRow = StoredOutreachVerdict & { subject_id: string; created_at: string }
+type VerdictRow = Omit<StoredOutreachVerdict, 'judge'> & { judge: string; subject_id: string; created_at: string }
+
+/** Drafts checked before the claim-level judges were stored under the two older names. */
+const LEGACY_JUDGE: Record<string, StoredOutreachVerdict['judge']> = {
+  factuality: 'groundedness',
+  closed_qa: 'specificity',
+  groundedness: 'groundedness',
+  specificity: 'specificity',
+  deterministic: 'deterministic',
+}
 
 /**
  * The latest verdict per judge for each message, in one query. A verdict older
@@ -36,7 +45,7 @@ export async function readStoredVerdicts(
     .select('subject_id, judge, verdict, score, rationale, created_at')
     .eq('user_id', userId)
     .eq('subject_kind', 'outreach_draft')
-    .in('judge', ['factuality', 'closed_qa'])
+    .in('judge', Object.keys(LEGACY_JUDGE))
     // Hard cap in the call itself: the list route never asks for more than 200.
     .in(
       'subject_id',
@@ -49,9 +58,11 @@ export async function readStoredVerdicts(
   for (const v of (data ?? []) as VerdictRow[]) {
     const edited = updatedAt.get(v.subject_id)
     if (edited && Date.parse(v.created_at) < Date.parse(edited)) continue
+    const judge = LEGACY_JUDGE[v.judge]
+    if (!judge) continue
     const list = out.get(v.subject_id) ?? []
-    if (list.some((x) => x.judge === v.judge)) continue // rows arrive newest first
-    list.push({ judge: v.judge, verdict: v.verdict, score: v.score, rationale: v.rationale })
+    if (list.some((x) => x.judge === judge)) continue // rows arrive newest first
+    list.push({ judge, verdict: v.verdict, score: v.score, rationale: v.rationale })
     out.set(v.subject_id, list)
   }
   return out

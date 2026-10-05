@@ -112,8 +112,12 @@ vi.mock('@/lib/graph/verify/outreach', () => ({
     subject: draft.subject,
     body: draft.body,
     tokensUsed: draft.tokensUsed,
+    source: draft.tokensUsed > 0 ? 'model' : 'template',
+    templateReason: draft.tokensUsed > 0 ? undefined : 'missing_key',
     verdicts: [],
-    failedVerdict: false,
+    checks: { ok: true, checks: [] },
+    failed: false,
+    judgeUnavailable: false,
   }),
 }))
 vi.mock('@/lib/harness/agents/resume_optimizer', () => ({ optimizeResumeAndSave: io.optimizeResumeAndSave }))

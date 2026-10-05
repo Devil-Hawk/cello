@@ -341,13 +341,12 @@ describe('every path to a model is behind the spend cap', () => {
 
   it('the judge route specifically is guarded — it is why this test exists', () => {
     const src = readFileSync(path.join(API_ROOT, 'outreach/judge/route.ts'), 'utf8')
-    // A read-only early refusal before any request is built, PLUS the metered
-    // client every request actually goes through. Reserving and settling live
-    // only inside meteredJudgeClient's fetch wrapper (see that CALL_LLM_
-    // WRAPPERS entry above), so this route carries no reserve text of its own;
-    // duplicating it here would double-bill the same call.
-    expect(src).toContain('assertWithinBudget')
-    expect(src).toContain('meteredJudgeClient(')
+    // The two judges reach the model through lib/evals/claims-judge.ts#judgeRunner,
+    // which is callLlm: the cap is checked before the request and the real spend
+    // recorded after it, so this route carries no budget code of its own (a
+    // second recordSpend here would double-bill the same two calls).
+    expect(src).toContain('judgeRunner(')
+    expect(readFileSync(path.join(API_ROOT, '../../lib/evals/claims-judge.ts'), 'utf8')).toContain('callLlm(')
     // A cap hit is an answer, not a crash: the user is told they are out of
     // allowance rather than shown a generic failure.
     expect(src).toContain('BudgetCapError')

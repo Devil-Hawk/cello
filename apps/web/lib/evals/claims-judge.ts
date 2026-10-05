@@ -24,7 +24,7 @@ export function judgeModelFor(writerModel: string): string {
 }
 
 /** callLlm bound to the judge model, with the writer's family kept out. */
-export function judgeRunner(apiKeys: DecryptedApiKeys, name: string): LlmRunner {
+export function judgeRunner(apiKeys: DecryptedApiKeys, generationName: string): LlmRunner {
   return (opts) =>
     callLlm(apiKeys, {
       ...opts,
@@ -33,7 +33,7 @@ export function judgeRunner(apiKeys: DecryptedApiKeys, name: string): LlmRunner 
       temperature: 0,
       maxTokens: 900,
       reasoning: { effort: 'none' },
-      name,
+      name: generationName,
     })
 }
 

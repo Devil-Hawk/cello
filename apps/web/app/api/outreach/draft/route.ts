@@ -2,18 +2,22 @@
 // contact tied to a job/company, and store it as an outreach_message with status
 // 'pending_review' (approve-queue by default). Enforces the hard dedupe guardrail
 // (one initial email per contact per role). Does NOT send — see /api/outreach/send.
+//
+// A draft is signed with the user's full name from their profile, never a guess:
+// with no name on file the route answers 409 {needsName: true} before any model
+// is called. The stored row records whether a model wrote the text and, when it
+// is the standard template, why, so the card can say so.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { findDuplicateInitial, insertOutreach, isDuplicateOutreachError } from '@/lib/outreach/store'
-import type { OutreachDraftInput } from '@/lib/harness/agents/outreach'
+import type { OutreachDraftInput, OutreachDraftResult } from '@/lib/harness/agents/outreach'
 import { runUnitOnce } from '@/lib/graph/oneshot'
 import { verifyOutreachDraft } from '@/lib/graph/verify/outreach'
-import { writeVerdict } from '@/lib/evals/verdicts'
+import { loadOutreachSources } from '@/lib/outreach/sources'
+import { writeReviewVerdicts } from '@/lib/outreach/persist-review'
 import { recordDemoEvent } from '@/lib/access/session'
-import { buildOutreachContext } from '@/lib/context/assemble'
-import { fitHighlights, fitRowOf } from '@/lib/scoring/read'
 import { setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
 
 export const dynamic = 'force-dynamic'
@@ -105,76 +109,44 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Job + company context.
-    let jobTitle = 'a role'
-    let jobDescription: string | null = null
-    let companyId: string | null = contact.company_id ?? null
-    let matchHighlights: string[] = []
-    if (jobId) {
-      const { data: job } = await supabase
-        .from('jobs')
-        .select('id, title, description, company_id, person_roles(chance_detail)')
-        .eq('id', jobId)
-        .single()
-      if (job) {
-        jobTitle = job.title || jobTitle
-        jobDescription = job.description ?? null
-        companyId = job.company_id ?? companyId
-        // Only what the resume really shows, each with the line that shows it: nothing the model could invent.
-        matchHighlights = fitHighlights(fitRowOf(job).chance_detail)
-      }
+    // The job post, company research, earlier contact and the sender's identity
+    // and resume: the sources the draft is written from and checked against.
+    const sources = await loadOutreachSources({
+      supabase,
+      admin,
+      userId: user.id,
+      userEmail: user.email || '',
+      contactId,
+      jobId,
+      companyId: contact.company_id ?? null,
+    })
+    // No name, no draft: signing with the email's local part would be a guess
+    // made under the user's identity.
+    if (!sources.senderName) {
+      await recordDraftOutcome(supabase, { outcome: 'failed', reason: 'needs_name' }, request.headers)
+      return NextResponse.json(
+        { error: 'Add your full name in Settings first. Drafts are signed with it.', needsName: true },
+        { status: 409 }
+      )
     }
-
-    let companyName = 'your company'
-    if (companyId) {
-      const { data: company } = await supabase
-        .from('companies')
-        .select('id, name')
-        .eq('id', companyId)
-        .eq('user_id', user.id)
-        .single()
-      if (company) companyName = company.name
-    }
-
-    // Identity + resume (source of truth for fit claims — never fabricated).
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('full_name, resume_text')
-      .eq('id', user.id)
-      .single()
-    const userName = profile?.full_name || user.email?.split('@')[0] || 'Me'
-    const userEmail = user.email || ''
+    const companyId = sources.companyId
 
     // What a reviewer needs at a glance in Langfuse (the ids are in the trace metadata).
-    setTraceInput({ jobTitle, companyName })
-
-    const relationshipContext = await buildOutreachContext(admin, user.id, contactId, companyId)
+    setTraceInput({ jobTitle: sources.input.jobTitle, companyName: sources.input.companyName })
 
     const draftInput: OutreachDraftInput = {
-      userName,
-      userEmail,
-      jobTitle,
-      companyName,
+      ...sources.input,
+      userName: sources.senderName,
       contactName: contact.name,
       contactTitle: contact.title,
-      resumeText: profile?.resume_text ?? null,
-      matchHighlights,
-      jobDescription,
-      relationshipContext,
       kind: 'initial',
     }
 
-    // runAgentUnit('outreach') builds its own metered LlmRunner from the
-    // user's stored keys (lib/harness/keys.ts#loadApiKeys) — no more
-    // makeLlmRunner/readOutreachConfig here. generateOutreachDraft (the unit's
-    // own implementation, lib/harness/agents/outreach.ts) never throws — it
-    // falls back to a deterministic template on any model failure — so this
-    // try only exists for the infra around it (schema validation, journaling,
-    // the containment check runAgentUnit always runs for this unit type).
-    let draft: { subject: string; body: string; tokensUsed: number }
-    let verdicts: Awaited<ReturnType<typeof verifyOutreachDraft>>['verdicts'] = []
-    let judgeUnavailable = false
-    let judgeRefused: 'missing-key' | 'budget-cap' | undefined
+    // runUnitOnce builds its own metered LlmRunner from the user's stored keys.
+    // generateOutreachDraft never throws: it returns the standard template with
+    // a reason on any model failure, so this try only guards the infra around it
+    // (schema validation, journaling, the containment check the unit always runs).
+    let review: Awaited<ReturnType<typeof verifyOutreachDraft>>
     try {
       const unitResult = await runUnitOnce('outreach', {
         admin,
@@ -182,21 +154,16 @@ export async function POST(request: NextRequest) {
         goal: 'Draft outreach email',
         input: draftInput,
       })
-      // VERIFY (Step 4, item 2): groundedness + specificity, one bounded
-      // regeneration on failure. Never blocks persistence — the human-approve
-      // queue below is already the send gate — but the final verdicts ride
-      // along with whichever draft this settles on.
-      const verified = await verifyOutreachDraft({
+      // Review: deterministic checks, the claims judge and the specificity judge,
+      // one regeneration on failure. Never blocks persistence: the approve queue
+      // is the send gate, and the verdicts ride along with the draft it settles on.
+      review = await verifyOutreachDraft({
         admin,
         userId: user.id,
-        goal: 'Draft outreach email (verify regeneration)',
+        goal: 'Draft outreach email (review regeneration)',
         input: draftInput,
-        draft: unitResult.output as { subject: string; body: string; tokensUsed: number },
+        draft: unitResult.output as OutreachDraftResult,
       })
-      draft = { subject: verified.subject, body: verified.body, tokensUsed: verified.tokensUsed }
-      verdicts = verified.verdicts
-      judgeUnavailable = verified.judgeUnavailable
-      judgeRefused = verified.judgeRefused
     } catch (e) {
       // Whether or not OpenRouter billed for the attempt, the visitor reached
       // the paid path — which is the thing the owner is watching for.
@@ -206,20 +173,12 @@ export async function POST(request: NextRequest) {
       await recordDraftOutcome(supabase, { outcome: 'failed', reason: 'llm_failed' }, request.headers)
       throw e
     }
-    const usedLlm = draft.tokensUsed > 0
+    const usedLlm = review.source === 'model'
+    const templateReason = usedLlm ? null : (review.templateReason ?? null)
 
-    // Only the fallible work is in the try. Precisely what that buys:
-    //
-    // withAuditDeadline (lib/access/audit.ts) is what stops a trail write from
-    // failing this request — it converts a rejection into a message rather than
-    // propagating it. THAT is the guarantee; this move is not, and an earlier
-    // version of this comment wrongly claimed otherwise.
-    //
-    // The move buys something narrower and still worth having: a failed audit
-    // cannot be caught by this handler's error path and turn a SAVED draft into a
-    // 500 the user reads as "your draft was lost". See /api/contacts/source for
-    // the same bug left in place — success write inside the try, catch recording
-    // {outcome:'failed'}.
+    // Only the fallible work is in the try. withAuditDeadline (lib/access/audit.ts)
+    // is what stops a trail write from failing this request; keeping the save in
+    // its own try means a failed audit cannot turn a SAVED draft into a 500.
     let row
     try {
       row = await insertOutreach(admin, {
@@ -229,11 +188,12 @@ export async function POST(request: NextRequest) {
         company_id: companyId,
         to_email: contact.email,
         to_name: contact.name,
-        subject: draft.subject,
-        body: draft.body,
+        subject: review.subject,
+        body: review.body,
         status: 'pending_review',
         kind: 'initial',
         used_llm: usedLlm,
+        template_reason: templateReason,
       })
     } catch (e) {
       // Two drafts for the same contact and role raced past the check above and
@@ -247,8 +207,7 @@ export async function POST(request: NextRequest) {
         )
       }
       // The worst outcome to leave unrecorded: the model has already been paid
-      // for and there is no outreach_messages row to show for it, so without this
-      // the spend is invisible in both places the owner could look.
+      // for and there is no outreach_messages row to show for it.
       await recordDraftOutcome(
         supabase,
         { outcome: 'failed', reason: 'save_failed', used_llm: usedLlm },
@@ -261,47 +220,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Verdicts ride along with the row they judged (eval_verdicts: the single
-    // verdict store) — written AFTER the row exists so subject_id is real, and
-    // best-effort (writeVerdict never throws) so a bookkeeping hiccup can never
-    // turn an already-saved draft into a 500.
-    for (const verdict of verdicts) {
-      await writeVerdict(admin, {
-        userId: user.id,
-        subjectKind: 'outreach_draft',
-        subjectId: row.id,
-        judge: verdict.name.includes('specificity') ? 'closed_qa' : 'factuality',
-        verdict: verdict.verdict,
-        score: verdict.score,
-        threshold: verdict.threshold,
-        rationale: verdict.summary,
-        judgeSpanId: verdict.spanId,
-      })
-    }
-    // verifyOutreachDraft ran into an unexpected judge failure (not the two
-    // typed refusals, which stay silent — see that file's header) — REFUSE-
-    // OVER-GUESS still needs a typed row here, not silence. Both judges are
-    // recorded 'unjudged' because they run via Promise.all, same as
-    // /api/outreach/judge's own BudgetCapError branch: there's no way to tell
-    // from here which of the two calls actually threw.
-    // The two typed refusals (no key, spend cap) get a row too, with their own
-    // wording, so the card can say the draft was not checked and why.
-    if (judgeUnavailable || judgeRefused) {
-      const rationale = judgeRefused === 'missing-key'
-        ? 'Not checked: no OpenRouter key is set, so the quality check could not run. Draft still pending review.'
-        : judgeRefused === 'budget-cap'
-          ? 'Not checked: the spend cap was reached, so the quality check could not run. Draft still pending review.'
-          : 'Quality check failed to run unexpectedly. Draft still pending review.'
-      for (const judge of ['factuality', 'closed_qa'] as const) {
-        await writeVerdict(admin, {
-          userId: user.id,
-          subjectKind: 'outreach_draft',
-          subjectId: row.id,
-          judge,
-          verdict: 'unjudged',
-          rationale,
-        })
-      }
-    }
+    // verdict store), written AFTER the row exists so subject_id is real, and
+    // best-effort so a bookkeeping hiccup never turns a saved draft into a 500.
+    await writeReviewVerdicts(admin, user.id, row.id, review)
 
     // `detail.count` renders as "Drafted 1 outreach message"
     // (app/api/access-codes/contract.ts). See the header block above for what may
@@ -313,9 +234,16 @@ export async function POST(request: NextRequest) {
     )
 
     // A draft sent without a judge key looks like a judged one unless it says so.
-    const judge = judgeUnavailable ? 'failed' : verdicts.length > 0 ? 'ran' : 'skipped'
+    const judge = review.judgeUnavailable ? 'failed' : review.verdicts.length > 0 ? 'ran' : 'skipped'
     setTraceMeta({ message_id: row.id, judge })
-    setTraceOutput({ subject: draft.subject, usedLlm, judge, verdicts: verdicts.map((v) => ({ name: v.name, verdict: v.verdict, score: v.score })) })
-    return NextResponse.json({ ok: true, message: row, usedLlm })
+    setTraceOutput({
+      subject: review.subject,
+      usedLlm,
+      templateReason,
+      judge,
+      verdicts: review.verdicts.map((v) => ({ name: v.name, verdict: v.verdict, score: v.score })),
+      checksFailed: review.checks.checks.filter((c) => !c.ok).map((c) => c.id),
+    })
+    return NextResponse.json({ ok: true, message: row, usedLlm, templateReason, checks: review.checks })
   })
 }
