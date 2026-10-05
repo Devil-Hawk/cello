@@ -244,7 +244,9 @@ Known gaps, all of them free text a pattern cannot recognise: phone numbers and
 street addresses, SSNs, non-ASCII email addresses, passwords written as prose
 ("my password is hunter2" with no `:` or `=`), 64-hex raw keys, `hf_` and `npm_`
 tokens, `Basic <base64>` without an `Authorization` prefix, OAuth `?code=` query
-values, and a short secret in a key named `code` or `refresh`. Keys written
+values, a short secret in a key named `code` or `refresh`, a bare password value
+that stops at `&` (`password: a&b` leaks `b`), `Password - x`, a second cookie
+pair after a masked `Cookie:` header, and Fernet-style blobs. Keys written
 into a JSON-escaped message (a tool result is stringified into the prompt) are
 caught, including after `\n` and `\t`.
 

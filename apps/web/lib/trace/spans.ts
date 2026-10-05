@@ -406,14 +406,16 @@ export interface SpanSpec {
 export async function withSpan<T>(
   buffer: SpanBuffer,
   spec: SpanSpec,
-  fn: (spanId: string) => Promise<T>,
+  fn: (spanId: string | null) => Promise<T>,
   attributesOf?: (result: T | undefined, err: unknown) => Record<string, unknown> | undefined,
   lfOf?: (result: T | undefined, err: unknown, capture: boolean) => LfPayload | undefined
 ): Promise<T> {
   const spanId = randomUUID()
   const startTime = new Date().toISOString()
-  // A Langfuse-only span has nowhere to go when the trace is not exported.
-  if (spec.persist === false && !buffer.exportEnabled) return fn(spanId)
+  // A Langfuse-only span has nowhere to go when the trace is not exported. It
+  // is never recorded, so children nest under its parent: a phantom id would
+  // break trace_spans.parent_span_id's foreign key and drop the whole batch.
+  if (spec.persist === false && !buffer.exportEnabled) return fn(spec.parentSpanId)
   // The Langfuse payload is built ONLY when this trace is exported, and gets
   // `capture` so it can skip building prompt text when content is off. A
   // failure here must never fail the request: observability only.

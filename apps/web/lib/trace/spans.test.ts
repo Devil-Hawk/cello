@@ -567,4 +567,38 @@ describe('withTrace and observe', () => {
     expect(rowsOf().map((r) => r.lf?.type)).toEqual(['tool', 'retriever'])
     expect(rowsOf()[0].parent_span_id).toBe('root')
   })
+  describe.each([
+    ['Langfuse unconfigured', () => undefined],
+    ['sampled out (rate 0)', () => { configureLangfuse(); vi.stubEnv('LANGFUSE_SAMPLE_RATE', '0') }],
+  ])('a Langfuse-only root that is not exported (%s)', (_label, setup) => {
+    const childOf = async () => {
+      const ctx = currentTraceContext()!
+      await withSpan(ctx.buffer, { parentSpanId: ctx.parentSpanId, runId: null, kind: 'llm', name: 'llm' }, async () => 1)
+    }
+    const expectNoDanglingParents = (rows: Record<string, unknown>[]) => {
+      const ids = new Set(rows.map((r) => r.span_id))
+      expect(rows.length).toBeGreaterThan(0)
+      for (const r of rows) expect(r.parent_span_id === null || ids.has(r.parent_span_id)).toBe(true)
+    }
+
+    it('withTrace children never point at the unrecorded root, so the foreign key holds', async () => {
+      setup()
+      const { admin, insertCalls } = makeCapturingAdmin()
+      await withTrace(admin, 'u', { name: 'outreach', isDemo: false }, childOf)
+      expect(insertCalls).toHaveLength(1)
+      expectNoDanglingParents(insertCalls[0])
+    })
+
+    it('observe(persist:false) children nest under the ambient parent instead', async () => {
+      setup()
+      const buffer = new SpanBuffer('u', null, undefined, { isDemo: false })
+      const { admin, insertCalls } = makeCapturingAdmin()
+      await runInTraceContext({ buffer, parentSpanId: null, runId: null }, () =>
+        observe({ name: 'search-memory', type: 'retriever', persist: false }, childOf)
+      )
+      await buffer.flush(admin)
+      expectNoDanglingParents(insertCalls[0])
+      expect(insertCalls[0][0].parent_span_id).toBeNull()
+    })
+  })
 })

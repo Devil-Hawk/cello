@@ -171,7 +171,7 @@ function meteredFetch(
         scope.buffer,
         { parentSpanId: scope.parentSpanId, runId: scope.runId, kind: 'llm', name: 'llm' },
         async (spanId) => {
-          if (slot) slot.spanId = spanId
+          if (slot && spanId) slot.spanId = spanId
           const response = await fetch(input, clamped)
           // Thrown (not returned) so the span is marked 'error'; the catch
           // below hands the same response back to the OpenAI SDK untouched.

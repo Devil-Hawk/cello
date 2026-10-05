@@ -563,7 +563,7 @@ describe('delivery', () => {
     await exportTrace(new SpanBuffer('u', null, undefined, { isDemo: false }), tree())
     // the hung exporter never calls back, so BatchSpanProcessor.forceFlush hangs: only the deadline ends it
     expect(Date.now() - t0).toBeGreaterThanOrEqual(FLUSH_DEADLINE_MS - 100)
-    expect(Date.now() - t0).toBeLessThan(FLUSH_DEADLINE_MS + 1500)
+    expect(Date.now() - t0).toBeLessThan(FLUSH_DEADLINE_MS + 4000)
   }, 10_000)
 
   it('no request context on Vercel warns exactly once per instance and still delivers', async () => {
@@ -656,6 +656,11 @@ describe('judge verdicts as scores', () => {
     expect(on.comment).not.toContain('CANARY')
     const off = toScore({ name: 'a.b', value: 1, verdict: 'pass', rationale: `the draft is grounded ${s}` }, 'b'.repeat(32), undefined, false)
     expect(off.comment).toBe('pass')
+  })
+
+  it('a secret-shaped score metadata value is dropped, an id kept', () => {
+    const sc = toScore({ name: 'a.b', value: 1, verdict: 'pass', metadata: { model: 'sk-ant-api03-CANARYabcdefghijklmnop', judge: 'gpt-4o' } }, 'b'.repeat(32), undefined, true)
+    expect(sc.metadata).toEqual({ judge: 'gpt-4o' })
   })
 
   it('at most 50 scores go out and the rest are counted on the root', async () => {

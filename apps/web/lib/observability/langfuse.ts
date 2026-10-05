@@ -176,7 +176,7 @@ function safeMetadata(meta: Record<string, string | number | boolean> | undefine
   const out: Record<string, string | number | boolean> = {}
   for (const [k, v] of Object.entries(meta ?? {})) {
     if (!NAME_RE.test(k.toLowerCase())) continue
-    if (typeof v === 'number' ? Number.isFinite(v) : typeof v === 'boolean' || (typeof v === 'string' && SAFE_META_RE.test(v))) out[k] = v
+    if (typeof v === 'number' ? Number.isFinite(v) : typeof v === 'boolean' || (typeof v === 'string' && SAFE_META_RE.test(v) && clean(v, 200) === v)) out[k] = v
   }
   return out
 }
