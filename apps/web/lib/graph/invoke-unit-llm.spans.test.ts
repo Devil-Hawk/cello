@@ -286,6 +286,7 @@ describe('invoke.ts -> unit.ts -> llm.ts: the Langfuse trace', () => {
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
     vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
     vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'user-owner')
     vi.stubEnv('LANGFUSE_DEMO_SAMPLE_RATE', '1')
     exporter = new InMemorySpanExporter()
     __setLangfuseForTest({ exporter })
