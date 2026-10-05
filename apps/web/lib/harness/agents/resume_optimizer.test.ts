@@ -54,7 +54,8 @@ describe('optimizeResume', () => {
   it('drops a keyword the resume never had and reports it', async () => {
     const { llm } = stub()
     const r = await optimizeResume({ resumeText: LEGACY_TAILORED_TEXT, job, llm })
-    expect(r.resume.skills[0].keywords).toEqual(['Python', 'Go'])
+    expect(r.resume.skills[0].keywords).toEqual(['Python', 'Go', 'TypeScript', 'SQL'])
+    expect(r.resume.skills.flatMap((g) => g.keywords)).not.toContain('terraform')
     expect(r.warnings.join(' ')).toMatch(/terraform/)
   })
 

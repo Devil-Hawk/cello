@@ -167,7 +167,9 @@ concrete alternative ("built", "ran") that names the same thing.
 Return only the fields you change: the summary, the skills, and the
 highlights of an entry by its index (the ENTRIES list in the prompt gives the
 indexes). Use `""` or `[]` for anything you leave alone, and a changed entry
-carries ALL of its highlights, not just the new ones. Never return names,
+carries ALL of its highlights, not just the new ones, and a changed skills
+list carries EVERY group and keyword of the original, reordered if you like.
+Never return names,
 titles, employers, dates or education: the patch has no slot for them and the
 system keeps them from the original. No commentary, no markdown, no preamble
 or sign-off. Any suggestion that is not in the original resume is dropped by

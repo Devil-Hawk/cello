@@ -67,22 +67,44 @@ export function applyTailorPatch(base: Resume, patch: TailorPatch): { resume: Re
   const baseGroupNames = new Set(base.skills.map((s) => s.name.trim().toLowerCase()))
   const keywordOk = (k: string): boolean => baseSkillWords.has(k.trim().toLowerCase()) || hasToken(basePlain, k)
 
-  const groups: Resume['skills'] = []
+  // The patch merges into the base groups, it never replaces them: a group or a
+  // keyword the model leaves out stays, so no real skill disappears from the
+  // resume. The patch's keywords come first, which is how it reorders.
+  const merged: Resume['skills'] = out.skills.map((g) => ({ ...g, keywords: [...g.keywords] }))
   patch.skills.forEach((g, i) => {
-    const keywords = g.keywords.map((k) => k.trim()).filter(Boolean).filter((k) => {
-      if (keywordOk(k)) return true
-      dropped.push(k)
-      return false
-    })
+    const keywords = [
+      ...new Map(
+        g.keywords
+          .map((k) => k.trim())
+          .filter(Boolean)
+          .filter((k) => {
+            if (keywordOk(k)) return true
+            dropped.push(k)
+            return false
+          })
+          .map((k) => [k.toLowerCase(), k] as const)
+      ).values(),
+    ]
     if (keywords.length === 0) return
     let name = g.name.trim()
     if (name && !baseGroupNames.has(name.toLowerCase()) && !hasToken(basePlain, name)) {
       dropped.push(name)
       name = ''
     }
-    groups.push({ name: name || base.skills[i]?.name || 'Skills', keywords })
+    // An unnamed or invented group lands on the base group at its position.
+    const at = name
+      ? merged.findIndex((m) => m.name.trim().toLowerCase() === name.toLowerCase())
+      : i < merged.length
+        ? i
+        : -1
+    if (at < 0) {
+      merged.push({ name: name || 'Skills', keywords })
+      return
+    }
+    const mine = new Set(keywords.map((k) => k.toLowerCase()))
+    merged[at].keywords = [...keywords, ...merged[at].keywords.filter((k) => !mine.has(k.toLowerCase()))]
   })
-  if (groups.length > 0) out.skills = groups
+  out.skills = merged
 
   const warnings: string[] = []
   if (dropped.length) {

@@ -71,7 +71,8 @@ describe('applyTailorPatch', () => {
         base,
         patch({ skills: [{ name: 'Languages', keywords: ['Go', 'kubernetes'] }] })
       )
-      expect(resume.skills).toEqual([{ name: 'Languages', keywords: ['Go'] }])
+      expect(resume.skills[0]).toEqual({ name: 'Languages', keywords: ['Go', 'TypeScript', 'C++'] })
+      expect(resume.skills.flatMap((g) => g.keywords)).not.toContain('kubernetes')
       expect(warnings[0]).toMatch(/kubernetes/)
     })
 
@@ -82,16 +83,17 @@ describe('applyTailorPatch', () => {
       })
       const { resume } = applyTailorPatch(googleOnly, patch({ skills: [{ name: 'Cloud', keywords: ['Go', 'Google Cloud'] }] }))
       expect(resume.skills[0].keywords).toEqual(['Google Cloud'])
+      expect(resume.skills[0].keywords).not.toContain('Go')
     })
 
     it('keeps "C++" when the base has it', () => {
       const { resume } = applyTailorPatch(base, patch({ skills: [{ name: 'Languages', keywords: ['C++', 'Go'] }] }))
-      expect(resume.skills[0].keywords).toEqual(['C++', 'Go'])
+      expect(resume.skills[0].keywords).toEqual(['C++', 'Go', 'TypeScript'])
     })
 
     it('keeps a keyword that appears in the base as a whole token outside the skills list', () => {
       const { resume } = applyTailorPatch(base, patch({ skills: [{ name: 'Languages', keywords: ['engineers'] }] }))
-      expect(resume.skills[0].keywords).toEqual(['engineers'])
+      expect(resume.skills[0].keywords).toEqual(['engineers', 'Go', 'TypeScript', 'C++'])
     })
 
     it('renames an invented group to the base group at that position', () => {
@@ -99,12 +101,26 @@ describe('applyTailorPatch', () => {
       expect(resume.skills[0].name).toBe('Languages')
     })
 
-    it('drops a group left with no keywords', () => {
+    it('adds no group for a patch group left with no valid keywords', () => {
       const { resume } = applyTailorPatch(
         base,
         patch({ skills: [{ name: 'Languages', keywords: ['Go'] }, { name: 'Ops', keywords: ['terraform'] }] })
       )
-      expect(resume.skills).toHaveLength(1)
+      expect(resume.skills.map((g) => g.name)).toEqual(['Languages', 'Platforms'])
+    })
+
+    it('a partial skills patch keeps every base group and keyword it does not mention', () => {
+      const { resume, warnings } = applyTailorPatch(base, patch({ skills: [{ name: 'Languages', keywords: ['Go'] }] }))
+      expect(resume.skills).toEqual([
+        { name: 'Languages', keywords: ['Go', 'TypeScript', 'C++'] },
+        base.skills[1],
+      ])
+      expect(warnings).toEqual([])
+    })
+
+    it('reorders within a group: the patch order comes first', () => {
+      const { resume } = applyTailorPatch(base, patch({ skills: [{ name: 'platforms', keywords: ['Kafka'] }] }))
+      expect(resume.skills[1].keywords).toEqual(['Kafka', 'Google Cloud'])
     })
 
     it('keeps the base skills when the patch has none', () => {
