@@ -8,7 +8,7 @@
 // instead of only confirming what it already believes.
 
 import { entropy } from './math'
-import type { Chance, PickKind, ShortlistPick } from './types'
+import type { Chance, PickKind, ShortlistPick, WantTier } from './types'
 
 export const SHORTLIST_SIZE = 6
 export const EXPLORE_COUNT = 1
@@ -17,7 +17,7 @@ export const EXPLORE_COUNT = 1
 export const WANT_HIGH = 0.66
 export const WANT_MEDIUM = 0.33
 
-export type WantTier = 'high' | 'medium' | 'low'
+export type { WantTier }
 
 export function wantTier(p: number): WantTier {
   return p >= WANT_HIGH ? 'high' : p >= WANT_MEDIUM ? 'medium' : 'low'

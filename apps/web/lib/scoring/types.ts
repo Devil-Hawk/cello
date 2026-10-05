@@ -13,6 +13,9 @@ export type PickKind = 'top' | 'explore'
 
 export type Chance = 'strong' | 'possible' | 'stretch' | 'cannot_assess'
 
+/** How strongly a role is wanted, as a named band. Bands label; they do not weigh anything. */
+export type WantTier = 'high' | 'medium' | 'low'
+
 /** What Cello knows about a posting. Built from the jobs row plus its company. */
 export interface RoleFacts {
   id: string
@@ -103,4 +106,14 @@ export interface ShortlistPick {
   position: number
   kind: PickKind
   explanation: string
+}
+
+/** What a screen reads about one role: the verdict on the job row, parsed. Never a percentage. */
+export interface RoleFit {
+  jobId: string | null
+  assessedAt: string | null
+  /** Stated facts this role breaks, each as a sentence. Empty when none. */
+  blocked: BlockReason[]
+  want: { p: number; reason: string | null; tier: WantTier; calibrated: boolean; nReactions: number } | null
+  chance: { label: Chance; checks: RequirementCheck[]; gaps: string[]; confirm: string[]; note: string | null } | null
 }
