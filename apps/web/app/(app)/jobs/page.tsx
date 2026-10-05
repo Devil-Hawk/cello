@@ -54,6 +54,9 @@ import { rankJobsByTargetTitles, type TitleMatch } from '@/lib/matching/title-ra
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { VisaSignal } from '@/lib/dossier/store'
 import { isTrackedCompany } from '@/lib/companies/watchlist'
+import { openRolesOnly } from '@/lib/jobs/freshness'
+import { applyRoleTargets, excludedCompanyIds, hasRoleTargets } from '@/lib/targeting/roles'
+import { TargetScopeSwitch, type TargetScope } from '@/components/jobs/target-scope-switch'
 
 const VISA_VALUES = ['all', 'likely', 'unknown', 'unlikely'] as const
 type VisaFilter = (typeof VISA_VALUES)[number]
@@ -325,6 +328,8 @@ export default function JobsPage() {
   )
 }
 
+type JobsQuery = ReturnType<ReturnType<SupabaseClient['from']>['select']>
+
 function JobsPageInner() {
   const supabase = createClient()
   // jobs.job_function/seniority/language/country/is_remote/quality_score and
@@ -339,6 +344,9 @@ function JobsPageInner() {
 
   const [jobs, setJobs] = useState<Job[]>([])
   const [totalCount, setTotalCount] = useState(0)
+  // Roles inside the person's targets / all open roles, under the current facets (the switch's two counts).
+  const [matchingCount, setMatchingCount] = useState(0)
+  const [allCount, setAllCount] = useState(0)
   const [page, setPage] = useState(0)
   const [companies, setCompanies] = useState<Company[]>([])
   const [companiesLoaded, setCompaniesLoaded] = useState(false)
@@ -461,40 +469,29 @@ function JobsPageInner() {
   }, [deepLinkJobId])
 
 
-  // Classification facets default to the user's configured targeting
-  // (functions/seniority/countries/languages/remoteOnly) when the URL param is
-  // entirely absent; once the user touches the control in the UI, the param is
-  // always written (even back to "all"/false) so an explicit override sticks
-  // instead of snapping back to the targeting default.
+  // Classification facets start at "all". What the person targeted (Settings ->
+  // Targeting) is carried by the "Matching your targets" switch below, which
+  // takes every target at once; these facets only narrow further. (They used to
+  // default to the FIRST target of each kind, so data + engineering showed
+  // engineering only.) Once the user touches a control the param is always
+  // written, so an explicit "all" sticks.
   const fnParam = searchParams.get('fn')
-  const jobFunction: FunctionFacet =
-    fnParam !== null
-      ? isJobFunctionFacet(fnParam)
-        ? fnParam
-        : 'all'
-      : (targeting?.functions[0] as FunctionFacet | undefined) ?? 'all'
+  const jobFunction: FunctionFacet = fnParam !== null && isJobFunctionFacet(fnParam) ? fnParam : 'all'
 
   const srParam = searchParams.get('sr')
-  const seniority: SeniorityFacet =
-    srParam !== null
-      ? isSeniorityFacet(srParam)
-        ? srParam
-        : 'all'
-      : (targeting?.seniority[0] as SeniorityFacet | undefined) ?? 'all'
+  const seniority: SeniorityFacet = srParam !== null && isSeniorityFacet(srParam) ? srParam : 'all'
 
-  const remoteParam = searchParams.get('remote')
-  const remoteOnly = remoteParam !== null ? remoteParam === '1' : targeting?.remoteOnly ?? false
+  const remoteOnly = searchParams.get('remote') === '1'
 
-  const countryParam = searchParams.get('country')
-  const country = countryParam !== null ? countryParam : targeting?.countries[0] ?? ''
+  const country = searchParams.get('country') ?? ''
 
   const langParam = searchParams.get('lang')
-  const language: LanguageFacet =
-    langParam !== null
-      ? isLanguageFacet(langParam)
-        ? langParam
-        : 'all'
-      : (targeting?.languages[0] as LanguageFacet | undefined) ?? 'all'
+  const language: LanguageFacet = langParam !== null && isLanguageFacet(langParam) ? langParam : 'all'
+
+  // The switch: with role targets set, roles inside them show by default and
+  // ?scope=all shows everything. No targets, no switch, everything shows.
+  const roleTargets = targeting !== null && hasRoleTargets(targeting)
+  const scope: TargetScope = roleTargets && searchParams.get('scope') !== 'all' ? 'matching' : 'all'
 
   // Target titles follow the same override convention as the facets above: the
   // URL wins when the param is present (deep-linkable, and an empty string is a
@@ -555,7 +552,10 @@ function JobsPageInner() {
   }, [countryInput, country])
 
   /** Delete-on-default param setter, for the pre-existing shareable filters. */
-  function setParam(key: 'fresh' | 'company' | 'sort' | 'visa' | 'undated' | 'showLowQuality', value: string) {
+  function setParam(
+    key: 'fresh' | 'company' | 'sort' | 'visa' | 'undated' | 'showLowQuality' | 'scope',
+    value: string
+  ) {
     const params = new URLSearchParams(searchParams.toString())
     if (!value || value === 'all' || (key === 'sort' && value === 'newest')) {
       params.delete(key)
@@ -645,40 +645,50 @@ function JobsPageInner() {
     if (append) setIsLoadingMore(true)
     else setIsLoading(true)
 
-    let query = untyped.from('jobs').select(JOB_SELECT_COLUMNS, { count: 'exact' })
+    // Every facet the person set. Applied to the page query and to the count of
+    // the other side of the switch, so both counts follow the same facets.
+    // Open roles only: posted in the last 180 days (or undated) and not closed.
+    const excludedIds = targeting ? excludedCompanyIds(companies, targeting) : []
+    const withFacets = (start: JobsQuery, side: TargetScope): JobsQuery => {
+      let q = openRolesOnly(start)
 
-    if (selectedCompany !== 'all') {
-      query = query.eq('company_id', selectedCompany)
-    }
-    // No 'all companies' filter: jobs RLS already scopes every row to the
-    // user's own companies (EXISTS companies.id = jobs.company_id AND
-    // companies.user_id = auth.uid()). The old .in('company_id', companyIds)
-    // here re-sent every company id in the querystring, which passed the
-    // gateway's URL limit until the account grew past ~600 companies and then
-    // failed every load with a bare 400. The empty-companies early return
-    // above keeps the zero-companies UX identical.
+      if (selectedCompany !== 'all') {
+        q = q.eq('company_id', selectedCompany)
+      }
+      // No 'all companies' filter: jobs RLS already scopes every row to the
+      // user's own companies (EXISTS companies.id = jobs.company_id AND
+      // companies.user_id = auth.uid()). The old .in('company_id', companyIds)
+      // here re-sent every company id in the querystring, which passed the
+      // gateway's URL limit until the account grew past ~600 companies and then
+      // failed every load with a bare 400. The empty-companies early return
+      // above keeps the zero-companies UX identical.
 
-    if (freshness !== 'all') {
-      const cutoffIso = new Date(Date.now() - FRESHNESS_HOURS[freshness] * 60 * 60 * 1000).toISOString()
-      query = includeUndated
-        ? query.or(`posted_at.gte.${cutoffIso},posted_at.is.null`)
-        : query.gte('posted_at', cutoffIso)
+      if (freshness !== 'all') {
+        const cutoffIso = new Date(Date.now() - FRESHNESS_HOURS[freshness] * 60 * 60 * 1000).toISOString()
+        q = includeUndated
+          ? q.or(`posted_at.gte.${cutoffIso},posted_at.is.null`)
+          : q.gte('posted_at', cutoffIso)
+      }
+
+      if (jobFunction !== 'all') q = q.eq('job_function', jobFunction)
+      if (seniority !== 'all') q = q.eq('seniority', seniority)
+      if (remoteOnly) q = q.eq('is_remote', true)
+      if (country.trim().length === 2) q = q.eq('country', country.trim().toUpperCase())
+      if (language !== 'all') q = q.eq('language', language)
+      if (hideLowQuality) {
+        // NULL quality_score means "not classified yet" — never hide those,
+        // only rows the classifier has actually scored below the threshold.
+        q = q.or(`quality_score.gte.${QUALITY_REJECT_THRESHOLD},quality_score.is.null`)
+      }
+      if (debouncedLocationQuery.trim()) {
+        q = q.ilike('location', `%${debouncedLocationQuery.trim()}%`)
+      }
+      if (unscoredOnly) q = q.is('match_score', null)
+      if (side === 'matching' && targeting) q = applyRoleTargets(q, targeting, excludedIds)
+      return q
     }
 
-    if (jobFunction !== 'all') query = query.eq('job_function', jobFunction)
-    if (seniority !== 'all') query = query.eq('seniority', seniority)
-    if (remoteOnly) query = query.eq('is_remote', true)
-    if (country.trim().length === 2) query = query.eq('country', country.trim().toUpperCase())
-    if (language !== 'all') query = query.eq('language', language)
-    if (hideLowQuality) {
-      // NULL quality_score means "not classified yet" — never hide those,
-      // only rows the classifier has actually scored below the threshold.
-      query = query.or(`quality_score.gte.${QUALITY_REJECT_THRESHOLD},quality_score.is.null`)
-    }
-    if (debouncedLocationQuery.trim()) {
-      query = query.ilike('location', `%${debouncedLocationQuery.trim()}%`)
-    }
-    if (unscoredOnly) query = query.is('match_score', null)
+    let query = withFacets(untyped.from('jobs').select(JOB_SELECT_COLUMNS, { count: 'exact' }), scope)
 
     // Sort on posted_at (never discovered_at, a single per-batch timestamp).
     // best_match puts scored jobs above unscored via nullsFirst:false instead
@@ -695,7 +705,15 @@ function JobsPageInner() {
 
     const from = pageIndex * PAGE_SIZE
     const to = from + PAGE_SIZE - 1
-    const { data, count, error } = await query.range(from, to)
+    // The other side of the switch, counted under the same facets. Without
+    // role targets there is no switch and both counts are the one count.
+    const otherSide: TargetScope = scope === 'matching' ? 'all' : 'matching'
+    const [{ data, count, error }, other] = await Promise.all([
+      query.range(from, to),
+      roleTargets
+        ? withFacets(untyped.from('jobs').select('id', { count: 'exact', head: true }), otherSide)
+        : Promise.resolve(null),
+    ])
 
     if (error) {
       console.error('[jobs] fetchJobsPage failed:', error)
@@ -711,6 +729,10 @@ function JobsPageInner() {
       const rows = data as unknown as Job[]
       setJobs((prev) => (append ? [...prev, ...rows] : rows))
       setTotalCount(count ?? 0)
+      const here = count ?? 0
+      const there = other && !other.error ? (other.count ?? 0) : here
+      setMatchingCount(scope === 'matching' ? here : there)
+      setAllCount(scope === 'matching' ? there : here)
       setPage(pageIndex)
     }
 
@@ -738,6 +760,7 @@ function JobsPageInner() {
     debouncedLocationQuery,
     sortBy,
     unscoredOnly,
+    scope,
   ])
 
   function loadMore() {
@@ -1172,17 +1195,26 @@ function JobsPageInner() {
             </Button>
           }
         />
-      ) : totalCount === 0 ? (
+      ) : allCount === 0 && !hasActiveFilters ? (
         <EmptyState
           icon={Briefcase}
           title="No jobs discovered yet"
           body={`Cello checks your ${trackedCompanies.length} ${
             trackedCompanies.length === 1 ? 'company' : 'companies'
-          } hourly — or refresh now to fetch open roles.`}
+          } on a schedule, or refresh now to fetch open roles.`}
           action={<RefreshJobsButton onRefreshed={refreshAll} />}
         />
       ) : (
         <>
+          {roleTargets && (
+            <TargetScopeSwitch
+              scope={scope}
+              matchingCount={matchingCount}
+              allCount={allCount}
+              onScopeChange={(next) => setParam('scope', next === 'all' ? 'all' : '')}
+            />
+          )}
+
           <FacetChips
             freshness={freshness}
             onFreshnessChange={(v) => setParam('fresh', v)}
@@ -1217,7 +1249,18 @@ function JobsPageInner() {
             rankedCount={rankedJobs.length}
           />
 
-          {filteredJobs.length === 0 ? (
+          {filteredJobs.length === 0 && scope === 'matching' && allCount > 0 ? (
+            <EmptyState
+              icon={SearchX}
+              title="No roles match your targets yet"
+              body={`${allCount} open ${allCount === 1 ? 'role is' : 'roles are'} outside them, or could not be placed in a function or level.`}
+              action={
+                <Button variant="outline" onClick={() => setParam('scope', 'all')}>
+                  Show all roles ({allCount})
+                </Button>
+              }
+            />
+          ) : filteredJobs.length === 0 ? (
             <EmptyState
               icon={SearchX}
               title="No jobs match these filters"
