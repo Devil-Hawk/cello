@@ -108,11 +108,11 @@ describe('judgeWant', () => {
     expect(out.get('uuid-a')).toEqual({ p: 0.6, reason: 'x.' })
   })
 
-  it('judges eight roles per call', async () => {
+  it('judges ten roles per call', async () => {
     const many: RoleFacts[] = Array.from({ length: 17 }, (_, i) => ({ ...roles[0], id: `u${i}` }))
     const { fn, calls } = llmReturning(JSON.stringify({ roles: [] }))
     await judgeWant(fn, { stated: NO_STATED, reactions: [], roles: many })
-    expect(calls).toHaveLength(3)
+    expect(calls).toHaveLength(2)
   })
 
   it('leaves a failed batch unjudged instead of throwing, but lets a missing key through', async () => {

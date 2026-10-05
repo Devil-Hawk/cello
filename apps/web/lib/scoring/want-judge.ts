@@ -52,7 +52,7 @@ const REASON_WORDS: Record<string, string> = {
   other: 'other',
 }
 
-const BATCH_SIZE = 8
+const BATCH_SIZE = 10
 const EXAMPLES_PER_SIDE = 8
 const EXCERPT_CHARS = 700
 const EXAMPLE_CHARS = 160
@@ -164,7 +164,7 @@ async function judgeBatches(llm: LlmRunner, context: string, roles: readonly Rol
   return out
 }
 
-/** Judges roles eight to a call from the stated preferences and the person's own decisions. A batch the model fails on is simply absent. */
+/** Judges roles ten to a call from the stated preferences and the person's own decisions. A batch the model fails on is simply absent. */
 export async function judgeWant(llm: LlmRunner, input: JudgeWantInput): Promise<Map<string, WantJudgement>> {
   const context = `What they told us:\n${renderStated(input.stated)}\n\nWhat they did:\n${renderDecisions(input.reactions)}`
   return judgeBatches(llm, context, input.roles)
