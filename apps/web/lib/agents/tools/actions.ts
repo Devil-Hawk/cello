@@ -154,6 +154,8 @@ export const scheduleTask = defineTool({
   untrusted: false,
   mcp: true,
   async handler(ctx, a) {
+    // A demo has a small budget and an end date; a repeating task would spend it after they leave.
+    if (ctx.isDemo) return toolFix('Demo accounts cannot schedule tasks.', 'Tell the person this needs a full account.')
     // A task that is running cannot create or change tasks: text it read must not be able to set up its own repeat.
     if (ctx.scheduledTaskId) return toolFix('A scheduled task cannot create or change scheduled tasks.', 'Tell the person in your result what they could schedule.')
     // The person alone can turn on acting. A request for it saves "draft" and says what is left to do.

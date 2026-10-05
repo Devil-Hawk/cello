@@ -555,6 +555,13 @@ describe('schedule_task', () => {
     expect(admin.tables.scheduled_tasks ?? []).toHaveLength(0)
   })
 
+  it('a demo cannot schedule anything, so nothing repeats after the demo ends', async () => {
+    const admin = world()
+    const out = await call('schedule_task', base, ctxFor(admin, { isDemo: true }))
+    expect(out).toMatchObject({ error: 'Demo accounts cannot schedule tasks.' })
+    expect(admin.tables.scheduled_tasks ?? []).toHaveLength(0)
+  })
+
   it('a bad time zone or a missing field is an error the model can act on', async () => {
     expect(await call('schedule_task', { ...base, timezone: 'Mars/Olympus' }, ctxFor(world()))).toMatchObject({ error: expect.stringContaining('not a time zone'), fix: expect.stringContaining('IANA') })
     expect(await call('schedule_task', { name: 'x' }, ctxFor(world()))).toMatchObject({ fix: expect.stringContaining('time zone') })
