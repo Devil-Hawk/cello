@@ -43,7 +43,7 @@
 //   request already goes through). Wrapping THAT is the one seam that sees
 //   every request this client ever makes, so reserveSpend/settleSpend
 //   live there instead of at judgeGroundedness/judgeSpecificity's call sites
-//   — see lib/evals/judge.test.ts for the ordering proof (reserve before the
+//  , see lib/evals/judge.test.ts for the ordering proof (reserve before the
 //   real fetch, settle after the response).
 //
 // COST
@@ -155,7 +155,7 @@ function clampJudgeMaxTokens(init: RequestInit | undefined): RequestInit | undef
  * meteredJudgeClient below, which is the only thing that constructs this.
  *
  * MUTATION CHECK (executed, not left to trust): commented out the
- * `settleSpend(admin, reservation, {...})` call below —
+ * `settleSpend(admin, reservation, {...})` call below ,
  * lib/evals/judge.test.ts's "reserves before the request and settles real
  * usage..." and "meters both calls (2 reservations, 2 settles)..." tests
  * both went red (`expected [...] to deeply equal [...]`, `expected "spy" to

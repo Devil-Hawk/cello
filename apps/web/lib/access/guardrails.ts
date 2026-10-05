@@ -457,7 +457,7 @@ export function demoProfilePreferences(
  * entirely by user id: reserveSpend(admin, {userId, ...}) holds the cost against
  * that user's own cap and ledger rows (a demo's reservation also draws on its
  * owner's shared demo allowance, but never on the owner's own cap), so "whose
- * allowance" is decided by one value — `apiKeys.userId`. This function guarantees that for a demo profile
+ * allowance" is decided by one value, `apiKeys.userId`. This function guarantees that for a demo profile
  * that value is the demo's own id, whatever the loader did. Two concrete ways
  * it could otherwise go wrong:
  *

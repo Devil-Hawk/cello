@@ -13,7 +13,7 @@ export interface BudgetSummary {
   monthlyUsd: number
   /** Worst-case cost held for calls still in flight, when any. */
   heldUsd?: number
-  /** "YYYY-MM" — the current billing period, from the spend ledger. */
+  /** "YYYY-MM", the current billing period, from the spend ledger. */
   periodStart: string
 }
 
