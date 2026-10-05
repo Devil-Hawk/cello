@@ -181,6 +181,7 @@ describe('runGmailSyncCore — idempotency', () => {
         employerDomain: 'acme.com',
         jobTitle: 'Backend Engineer',
         status: 'applied',
+        evidence: 'Thank you for applying to Acme Corp',
         careerPageUrl: null,
         interviewDateTime: null,
         confidence: 0.95,
