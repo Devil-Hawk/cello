@@ -145,11 +145,25 @@ export const CvTailorInput = z.object({
    *  attempt. */
   correctiveContext: z.string().optional(),
 })
+/** Why the cover letter is the length it is, and what code checked (see cv_tailor.ts). */
+export const CoverLetterMeta = z.object({
+  tier: z.enum(['full', 'focused', 'brief']),
+  words: z.number().int().nonnegative(),
+  /** The job lines the resume backs, each with the resume line that backs it. */
+  evidence: z.array(z.object({ job: z.string(), resume: z.string() })),
+  /** The one company fact the letter mentions, with the page it came from. */
+  companyFact: z.object({ text: z.string(), url: z.string() }).nullable(),
+  /** Whether the job had a post to read, and whether company research was on file. */
+  hasJobPost: z.boolean().optional(),
+  hasCompanyFacts: z.boolean().optional(),
+  checks: z.array(z.object({ id: z.string(), ok: z.boolean(), message: z.string() })),
+})
 export const CvTailorOutput = z.object({
   jobId: z.string(),
   resumeSummary: z.string(),
   coverLetter: z.string(),
   keywords: z.array(z.string()).default([]),
+  coverLetterMeta: CoverLetterMeta.optional(),
 })
 
 // applier — build an application_draft + handoff (never auto-POST past policy).
@@ -157,6 +171,8 @@ export const ApplierInput = z.object({
   jobId: z.string(),
   resumeSummary: z.string().optional(),
   coverLetter: z.string().optional(),
+  /** From cv_tailor: why the letter is the length it is. Stored with the draft. */
+  coverLetterMeta: CoverLetterMeta.optional(),
   answers: z.record(z.string(), z.unknown()).optional(),
   autoSubmit: z.boolean().optional(),
 })

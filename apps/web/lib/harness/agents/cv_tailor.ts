@@ -40,6 +40,9 @@ import { CvTailorInput } from '../schemas'
 import { parseJsonLoose, TruncatedResponseError } from '../llm'
 import { composeSystemPrompt, loadModeDoc, promptRef } from '../prompts'
 import { frameJobText, checkTailoringContainment } from '@/lib/security/job-text'
+import { formatLines, jobLines, resumeLines, type NumberedLine } from '@/lib/resume/lines'
+import { companyFacts, type CompanyFact } from '@/lib/dossier/facts'
+import { checkDraft, type LetterTier } from '@/lib/writing/checks'
 
 const MAX_RESUME_CHARS = 12_000
 const MAX_JD_CHARS = 8_000
@@ -47,16 +50,31 @@ const MAX_TOKENS = 2048
 
 /**
  * System prompt = _shared.md + _voice.md + prompts/cv_tailor.md (the house-style
- * mode document — see docs/PROMPT-GENERATOR.md) + the candidate's resume. The
- * resume is the large, stable part reused across every job this user tailors
- * for — that's the cacheable prefix. The job block (below, in the user prompt)
- * is what actually changes call to call.
+ * mode document — see docs/PROMPT-GENERATOR.md) + the candidate's resume as
+ * numbered R lines. The resume is the large, stable part reused across every
+ * job this user tailors for — that's the cacheable prefix. The job block (below,
+ * in the user prompt) is what actually changes call to call.
  */
-function systemWithResume(resumeText: string): string {
+function systemWithResume(resume: NumberedLine[]): string {
   return composeSystemPrompt({
     mode: loadModeDoc('cv_tailor'),
-    stableContext: `CANDIDATE RESUME (the ONLY source of truth for claims):\n${resumeText.slice(0, MAX_RESUME_CHARS)}`,
+    stableContext: `<resume>\n${formatLines(resume)}\n</resume>`,
   })
+}
+
+/** Words that carry meaning, for checking a cited fact is really what the letter used. */
+function contentWords(text: string): Set<string> {
+  return new Set((text.toLowerCase().match(/[a-z][a-z0-9+#.-]{4,}/g) ?? []))
+}
+
+/**
+ * The letter's length follows the evidence, decided here and not by the model:
+ * 3 or more job lines the resume backs is a full letter, 1 or 2 a focused one,
+ * none (or no job post) a brief one.
+ */
+export function letterTier(pairCount: number, hasJobPost: boolean): LetterTier {
+  if (!hasJobPost || pairCount === 0) return 'brief'
+  return pairCount >= 3 ? 'full' : 'focused'
 }
 
 interface JobRow {
@@ -103,37 +121,32 @@ export const cv_tailor: AgentFn = async (ctx) => {
     throw new Error('cv_tailor: no resume on file — upload a resume before tailoring')
   }
 
-  // rawDescription (unframed) only decides whether to show the "no
-  // description" hint below; `description` (the framed block actually sent to
-  // the model) is what replaces it in the prompt.
-  const rawDescription = (job.description ?? '').trim()
-  const description = frameJobText(job.description, {
-    maxChars: MAX_JD_CHARS,
-    emptyPlaceholder: '(no description provided)',
-  })
+  // The same numbered lines go to the writer and to the review's judge: the
+  // resume as R, the job post as J, the company research as D.
+  const resume = resumeLines(resumeText, MAX_RESUME_CHARS)
+  const jobLinesList = jobLines(job.description, MAX_JD_CHARS)
+  const facts: CompanyFact[] = await companyFacts(ctx.admin, ctx.userId, job.company_id)
+  const company = companyName(job)
   const userPrompt = [
     `JOB TITLE: ${job.title ?? '(untitled)'}`,
-    `COMPANY: ${companyName(job)}`,
+    `COMPANY: ${company}`,
     job.location ? `LOCATION: ${job.location}` : '',
     '',
-    'JOB DESCRIPTION:',
-    description,
-    !rawDescription
-      ? 'The job has no description — mirror only the title/company; do not guess at requirements ' +
-        'the description never stated.'
-      : '',
+    jobLinesList.length
+      ? `<job_post>\n${frameJobText(formatLines(jobLinesList), { label: 'JOB POST', maxChars: MAX_JD_CHARS })}\n</job_post>`
+      : 'No job post on file. Write to the title and company only; do not guess at requirements the post never stated.',
+    facts.length
+      ? `<company_facts>\n${frameJobText(facts.map((f) => `${f.id}: ${f.text} (${f.url})`).join('\n'), { label: 'COMPANY FACTS', maxChars: 4000 })}\n</company_facts>`
+      : 'No company research on file.',
     '',
-    'Using the resume given in the system prompt as your only source of truth, produce the tailored',
-    'resume summary + cover letter as JSON per the system rules.',
-    input.correctiveContext
-      ? `\nCORRECTIVE INSTRUCTION (a prior attempt was rejected — fix this before returning): ${input.correctiveContext}`
-      : '',
+    'Write the resume summary and cover letter as JSON per the system rules.',
+    input.correctiveContext ? `\nFix this before you answer: ${input.correctiveContext}` : '',
   ]
-    .filter(Boolean)
+    .filter((line) => line !== '')
     .join('\n')
 
   const base = {
-    system: systemWithResume(resumeText),
+    system: systemWithResume(resume),
     promptRef: promptRef('cv_tailor'),
     prompt: userPrompt,
     json: true,
@@ -157,7 +170,7 @@ export const cv_tailor: AgentFn = async (ctx) => {
     res = await ctx.llm({ ...base, maxTokens: MAX_TOKENS * 2 })
   }
 
-  let parsed: { resumeSummary?: unknown; coverLetter?: unknown; keywords?: unknown }
+  let parsed: { resumeSummary?: unknown; coverLetter?: unknown; keywords?: unknown; evidence?: unknown; companyFact?: unknown }
   try {
     parsed = parseJsonLoose(res.content)
   } catch {
@@ -198,8 +211,42 @@ export const cv_tailor: AgentFn = async (ctx) => {
     throw new Error(`cv_tailor: refused to return tailored content — ${containment.reason}`)
   }
 
+  // Evidence pairs the model cites: both ids must exist, a pair counts once.
+  const resumeById = new Map(resume.map((l) => [l.id, l]))
+  const jobById = new Map(jobLinesList.map((l) => [l.id, l]))
+  const seen = new Set<string>()
+  const pairs: { job: NumberedLine; resume: NumberedLine }[] = []
+  for (const item of Array.isArray(parsed.evidence) ? parsed.evidence : []) {
+    const r = (item ?? {}) as { jobLine?: unknown; resumeLine?: unknown }
+    const j = typeof r.jobLine === 'string' ? jobById.get(r.jobLine.trim().toUpperCase()) : undefined
+    const rl = typeof r.resumeLine === 'string' ? resumeById.get(r.resumeLine.trim().toUpperCase()) : undefined
+    if (!j || !rl || seen.has(`${j.id}|${rl.id}`)) continue
+    seen.add(`${j.id}|${rl.id}`)
+    pairs.push({ job: j, resume: rl })
+  }
+  // The company fact must be one on file and must really be in the letter.
+  const factId = typeof parsed.companyFact === 'string' ? parsed.companyFact.trim().toUpperCase() : null
+  const fact = factId ? facts.find((f) => f.id === factId) : undefined
+  const letterWords = contentWords(coverLetter)
+  const companyFact = fact && [...contentWords(fact.text)].some((w) => letterWords.has(w)) ? { text: fact.text, url: fact.url } : null
+
+  let coverLetterMeta
+  if (coverLetter) {
+    const tier = letterTier(pairs.length, jobLinesList.length > 0)
+    const { checks } = checkDraft({ kind: 'cover_letter', body: coverLetter, companyName: company === 'the company' ? null : company, tier })
+    coverLetterMeta = {
+      tier,
+      words: coverLetter.trim().split(/\s+/).filter(Boolean).length,
+      evidence: pairs.map((p) => ({ job: p.job.text, resume: p.resume.text })),
+      companyFact,
+      hasJobPost: jobLinesList.length > 0,
+      hasCompanyFacts: facts.length > 0,
+      checks,
+    }
+  }
+
   return {
-    output: { jobId: input.jobId, resumeSummary, coverLetter, keywords },
+    output: { jobId: input.jobId, resumeSummary, coverLetter, keywords, ...(coverLetterMeta ? { coverLetterMeta } : {}) },
     // ctx.llm already metered the tokens.
     tokensUsed: 0,
   }
