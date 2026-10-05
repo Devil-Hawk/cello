@@ -25,20 +25,3 @@ export function isTrackedCompany(row: { metadata?: unknown }): boolean {
   if (!m || typeof m !== 'object' || Array.isArray(m)) return true
   return (m as Record<string, unknown>).suggested !== true
 }
-
-/**
- * True when Cello has nothing to show for a tracked company and says so instead
- * of "0 open roles": no valid board mapping, no open roles, but a detection or
- * scrape attempt already happened. Never-checked rows stay "Never checked".
- */
-export function careersSiteUnreadable(
-  company: { metadata?: unknown; last_scraped_at?: string | null },
-  openRoles: number
-): boolean {
-  if (openRoles > 0) return false
-  const m = company.metadata
-  const meta = m && typeof m === 'object' && !Array.isArray(m) ? (m as Record<string, unknown>) : {}
-  const ats = meta.ats
-  if (ats && typeof ats === 'object' && !Array.isArray(ats)) return false
-  return Boolean(meta.ats_checked_at || company.last_scraped_at)
-}
