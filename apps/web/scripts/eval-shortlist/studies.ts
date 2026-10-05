@@ -51,6 +51,8 @@ export interface RequirementsStudy {
   realItems: number
   /** Share of surviving items the second model agrees are really stated requirements. */
   precision: number
+  /** A few statements the second model did not agree with, with the posting's own quote, so the failures can be read. */
+  rejected: { text: string; kind: string; quote: string }[]
   thin: { tested: number; detected: number; kinds: string[] }
 }
 
@@ -70,6 +72,7 @@ export async function requirementsStudy(gen: LlmRunner, judge: LlmRunner, jobs: 
 
   let judged = 0
   let real = 0
+  const rejected: RequirementsStudy['rejected'] = []
   await Promise.all(
     picked.map(async (j) => {
       const o = outcomes.get(j.id)
@@ -82,6 +85,10 @@ export async function requirementsStudy(gen: LlmRunner, judge: LlmRunner, jobs: 
           if (typeof it.n !== 'number' || it.n < 1 || it.n > o.requirements.length || typeof it.stated !== 'boolean') continue
           judged += 1
           if (it.stated) real += 1
+          else if (rejected.length < 20) {
+            const r = o.requirements[it.n - 1]
+            rejected.push({ text: r.text, kind: r.kind, quote: r.quote })
+          }
         }
       } catch {
         // an unanswered posting is left out of the precision figure
@@ -115,6 +122,7 @@ export async function requirementsStudy(gen: LlmRunner, judge: LlmRunner, jobs: 
     judged,
     realItems: real,
     precision: judged === 0 ? NaN : round3(real / judged),
+    rejected,
     thin: { tested: thinPostings.length, detected, kinds: thinKinds },
   }
 }
