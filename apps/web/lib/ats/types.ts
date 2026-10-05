@@ -41,6 +41,11 @@ export interface AtsJob {
   requisitionId?: string
   /** The page describes an event (a career fair, a webinar), not a role. */
   isEvent?: boolean
+  /**
+   * Hosts the posting body links to (the plain-text description drops hrefs).
+   * Used only as board-ownership evidence (./verify.ts); never stored.
+   */
+  linkHosts?: string[]
 }
 
 export interface DetectInput {
