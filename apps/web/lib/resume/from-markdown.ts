@@ -378,10 +378,10 @@ export function markdownToResume(markdown: string, ctx: MarkdownToResumeContext 
     if (kind === 'education') (entry as Resume['education'][number]).courses.push(t)
     else if (kind === 'projects') {
       const p = entry as Resume['projects'][number]
-      p.description = [p.description, t].filter(Boolean).join('\n')
+      p.description = [p.description, t].filter(Boolean).join(' ')
     } else {
       const w = entry as Resume['work'][number]
-      w.summary = [w.summary, t].filter(Boolean).join('\n')
+      w.summary = [w.summary, t].filter(Boolean).join(' ')
     }
   }
 
@@ -494,7 +494,7 @@ export function markdownToResume(markdown: string, ctx: MarkdownToResumeContext 
     }
     if (kind === 'summary') {
       // Soft-broken lines are one paragraph, not separate items.
-      d.summary.push(b.lines.map(text).join('\n'))
+      d.summary.push(b.lines.map(text).join(' '))
       continue
     }
     // The title of an entry may be a plain line followed by a bold or italic

@@ -34,6 +34,8 @@ export function formatDates(e: DatedEntry): string {
 }
 
 const esc = escapeInlineMarkdown
+/** Free text is paragraphs: a lone newline is a soft wrap (it would print as a hard break in the PDF), a blank line is a paragraph break. */
+const prose = (s: string): string => esc(s.trim().replace(/[ \t]*\n(?:[ \t]*\n)+[ \t]*/g, '\n\n').replace(/(?<!\n)[ \t]*\n[ \t]*(?!\n)/g, ' '))
 const join = (parts: Array<string | undefined>, sep: string): string =>
   parts.map((p) => p?.trim()).filter(Boolean).join(sep)
 
@@ -68,19 +70,19 @@ function sectionBlocks(resume: Resume): Record<string, Block[]> {
   const out: Record<string, Block[]> = {}
   const { basics } = resume
 
-  if (basics.summary?.trim()) out.summary = [[esc(basics.summary.trim())]]
+  if (basics.summary?.trim()) out.summary = [[prose(basics.summary)]]
 
   out.work = resume.work.map((w) => [
     `### ${esc(join([w.position, w.name], ', '))}`,
     ...entryMeta([w.location, formatDates(w)]),
-    ...(w.summary?.trim() ? ['', esc(w.summary.trim())] : []),
+    ...(w.summary?.trim() ? ['', prose(w.summary)] : []),
     ...(w.highlights.length ? ['', ...bullets(w.highlights)] : []),
   ])
 
   out.projects = resume.projects.map((p) => [
     `### ${esc(p.name)}`,
     ...entryMeta([p.url, formatDates(p)]),
-    ...(p.description?.trim() ? ['', esc(p.description.trim())] : []),
+    ...(p.description?.trim() ? ['', prose(p.description)] : []),
     ...(p.highlights.length ? ['', ...bullets(p.highlights)] : []),
   ])
 

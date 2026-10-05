@@ -69,11 +69,11 @@ describe('resumeToMarkdown', () => {
     }
   )
 
-  it('keeps a setext-looking second summary line as text', () => {
-    const r = ResumeSchema.parse({ basics: { name: 'Ada', summary: 'First line\n===\n---' } })
+  it('keeps a setext-looking paragraph in the summary as text', () => {
+    const r = ResumeSchema.parse({ basics: { name: 'Ada', summary: 'First line\n\n===\n\n---' } })
     const blocks = parseResumeMarkdown(resumeToMarkdown(r))
     expect(blocks.filter((b) => b.type === 'heading')).toHaveLength(2) // name + Summary only
-    expect(markdownToPlainText(resumeToMarkdown(r))).toContain('First line\n===\n---')
+    expect(markdownToPlainText(resumeToMarkdown(r))).toContain('First line\n\n===\n\n---')
   })
 })
 

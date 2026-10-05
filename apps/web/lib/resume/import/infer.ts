@@ -342,7 +342,11 @@ export function inferResumeMarkdown(raw: string | null | undefined): string {
     }
 
     // --- role line (carries a date range) vs ordinary prose ---
-    const escaped = escapeInlineMarkdown(text)
+    // A right-aligned column ("Role, Company      San Francisco, CA") reaches us
+    // as a run of spaces. Make it a pipe so the structurer reads the tail as
+    // the location, not as part of the company.
+    const isRole = text.length <= 120 && (DATE_RANGE.test(text) || isDateOnlyLine((lines[i + 1] ?? '').trim()))
+    const escaped = escapeInlineMarkdown(isRole ? text.replace(/\s{2,}|\s+(?=(?:Remote|Hybrid)$)/g, ' | ') : text)
     const line = DATE_RANGE.test(text) && text.length <= 120 ? bold(escaped) : escaped
 
     if (!precededByBlank && tail && tail.kind === 'para') {

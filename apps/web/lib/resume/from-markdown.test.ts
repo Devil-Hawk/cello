@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { inferResumeMarkdown } from './import/infer'
 import { markdownToPlainText } from './markdown'
-import { markdownToResume } from './from-markdown'
+import { markdownToResume, textToResume } from './from-markdown'
 import { resumeFactText, resumeToMarkdown } from './render'
 import { ResumeSchema } from './schema'
 import { CANONICAL_RESUME, DOCX_STYLE_MD, PASTE_TEXT, PDF_INFER_MD } from './test-fixtures'
@@ -143,5 +143,59 @@ describe('markdownToResume', () => {
   it('takes the name from a Name | contact line', () => {
     const r = markdownToResume('Ada Lovelace | ada@example.com | (555) 010-2030\n\n## Summary\n\nHi there.')
     expect(r.basics).toMatchObject({ name: 'Ada Lovelace', email: 'ada@example.com' })
+  })
+
+  describe('a hard-wrapped paste (PDF or text editor)', () => {
+    const WRAPPED = [
+      'Priya Nair',
+      'priya.nair@example.com | 415-555-0199 | San Francisco, CA',
+      '',
+      'SUMMARY',
+      'Data engineer with six years of experience building batch and streaming',
+      'pipelines for fintech and health companies. Comfortable owning a system',
+      'from design through on-call.',
+      '',
+      'EXPERIENCE',
+      'Staff Data Engineer, Lumen Payments            San Francisco, CA',
+      'Jan 2022 - Present',
+      '* Led the migration of 140 Airflow DAGs to a managed scheduler with zero',
+      '  missed settlement windows.',
+      '',
+      'Data Engineer, Harbor Health\tRemote',
+      'Jun 2018 - Dec 2021',
+      '* Wrote the data quality framework used by 12 teams.',
+    ].join('\n')
+
+    it('joins the soft-wrapped summary into one line', () => {
+      const r = textToResume(WRAPPED)
+      expect(r.basics.summary).toBe(
+        'Data engineer with six years of experience building batch and streaming pipelines for fintech and health companies. Comfortable owning a system from design through on-call.'
+      )
+      expect(r.basics.summary).not.toContain('\n')
+    })
+
+    it('reads a right-aligned location as the location, not part of the company', () => {
+      const r = textToResume(WRAPPED)
+      expect(r.work[0]).toMatchObject({
+        position: 'Staff Data Engineer',
+        name: 'Lumen Payments',
+        location: 'San Francisco, CA',
+        startDate: '2022-01',
+        current: true,
+      })
+      expect(r.work[1]).toMatchObject({ name: 'Harbor Health', location: 'Remote' })
+      expect(resumeToMarkdown(r)).toContain('*San Francisco, CA | Jan 2022 - Present*')
+    })
+  })
+
+  it('splits a trailing Remote off a single-spaced role line (PDF extraction)', () => {
+    const r = textToResume('Ada Lovelace\n\nEXPERIENCE\nData Engineer, Harbor Health Remote\nJun 2018 - Dec 2021\n* Built things.')
+    expect(r.work[0]).toMatchObject({ position: 'Data Engineer', name: 'Harbor Health', location: 'Remote' })
+  })
+
+  it('renders a legacy summary with newlines as one paragraph', () => {
+    const r = markdownToResume('# Ada\n\n## Summary\n\nOne.\n\nTwo.')
+    r.basics.summary = 'Line one\nline two\n\nSecond paragraph'
+    expect(resumeToMarkdown(r)).toContain('Line one line two\n\nSecond paragraph')
   })
 })
