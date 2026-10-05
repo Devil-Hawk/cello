@@ -745,7 +745,6 @@ export const AnalystOutput = z.object({
   summary: z.string(),
   talkingPoints: z.array(z.string()),
   companyInsights: z.array(z.string()),
-  interviewTips: z.array(z.string()),
 })
 
 // application_follow_up: a follow-up suggestion (+ drafted message, when one is

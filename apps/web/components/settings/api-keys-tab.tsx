@@ -371,7 +371,7 @@ export function ApiKeysTab({
             <li>AI verification — confirm career pages are legitimate</li>
             <li>Job matching — score jobs against your resume</li>
             <li>Smart scraping — extract job details from any page format</li>
-            <li>Insights — talking points and interview prep</li>
+            <li>Insights — fit summary, talking points and company notes</li>
           </ul>
         </div>
       </div>

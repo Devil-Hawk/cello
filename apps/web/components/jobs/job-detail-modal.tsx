@@ -5,14 +5,12 @@ import Link from 'next/link'
 import {
   Building2,
   FileEdit,
-  Lightbulb,
   Loader2,
   MessageSquare,
   RefreshCw,
   Sparkles,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { PrepForInterviewButton } from '@/components/prep/prep-launcher'
 import {
   Dialog,
   DialogClose,
@@ -52,7 +50,6 @@ interface Insights {
   summary: string
   talkingPoints: string[]
   companyInsights: string[]
-  interviewTips: string[]
 }
 
 /**
@@ -84,7 +81,7 @@ const strings = (value: unknown): string[] =>
  * visible to a user as "AI insights loaded." above nothing — or, as it used
  * to be, above canned advice. If it isn't real, it isn't rendered.
  */
-function toRenderableInsights(payload: unknown): Insights | null {
+export function toRenderableInsights(payload: unknown): Insights | null {
   if (!payload || typeof payload !== 'object') return null
   const raw = payload as Record<string, unknown>
   const summary = typeof raw.summary === 'string' ? raw.summary.trim() : ''
@@ -92,12 +89,8 @@ function toRenderableInsights(payload: unknown): Insights | null {
     summary,
     talkingPoints: strings(raw.talkingPoints),
     companyInsights: strings(raw.companyInsights),
-    interviewTips: strings(raw.interviewTips),
   }
-  const hasSection =
-    insights.talkingPoints.length > 0 ||
-    insights.companyInsights.length > 0 ||
-    insights.interviewTips.length > 0
+  const hasSection = insights.talkingPoints.length > 0 || insights.companyInsights.length > 0
   return summary && hasSection ? insights : null
 }
 
@@ -492,24 +485,6 @@ export function JobDetailModal({
                     </ul>
                   </div>
                 )}
-
-                {/* Interview Tips */}
-                {insights.interviewTips?.length > 0 && (
-                  <div>
-                    <h4 className="mb-2 flex items-center gap-2 text-body font-medium">
-                      <Lightbulb className="h-4 w-4" />
-                      Interview prep
-                    </h4>
-                    <ul className="space-y-1 text-caption">
-                      {insights.interviewTips.map((tip, i) => (
-                        <li key={i} className="flex items-start gap-2">
-                          <span className="text-muted-foreground">•</span>
-                          <span>{tip}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -536,7 +511,6 @@ export function JobDetailModal({
               Resume studio
             </Link>
           </Button>
-          <PrepForInterviewButton jobId={job.id} />
           {job.company_id && (
             <Button variant="outline" asChild>
               <Link href={`/companies/${job.company_id}`}>
