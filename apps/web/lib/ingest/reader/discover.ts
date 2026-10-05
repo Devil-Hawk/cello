@@ -57,7 +57,7 @@ export function classifyLink(url: string): 'posting' | 'board' | 'search' | 'car
 /** Eightfold's page config, HTML-escaped or not: `"domain": "netflix.com"`. */
 const EIGHTFOLD_DOMAIN = /domain(?:&#34;|&quot;|")\s*:\s*(?:&#34;|&quot;|")([a-z0-9][a-z0-9.-]*\.[a-z]{2,})(?:&#34;|&quot;|")/gi
 
-function eightfoldBoards(html: string, pageUrl: string, companyDomain: string | null): DiscoveredBoard[] {
+export function eightfoldBoards(html: string, pageUrl: string, companyDomain: string | null): DiscoveredBoard[] {
   if (!/eightfold/i.test(html) || !companyDomain) return []
   const host = new URL(pageUrl).hostname.toLowerCase()
   const root = companyDomain.toLowerCase().replace(/^www\./, '')
@@ -92,14 +92,19 @@ function sameSiteLinks(html: string, pageUrl: string, companyDomain: string | nu
   return out
 }
 
-function ghJid(html: string): string | null {
+export function ghJid(html: string): string | null {
   return /[?&]gh_jid=(\d{4,})/.exec(html.replace(/&amp;/g, '&'))?.[1] ?? null
 }
 
-async function tokenBehindJid(jid: string, f: SiteFetcher): Promise<string | null> {
+export async function tokenBehindJid(jid: string, f: SiteFetcher): Promise<string | null> {
   const to = await f.redirectOf(`https://boards.greenhouse.io/embed/job_app?token=${jid}`)
   const token = to ? new URL(to).searchParams.get('for') : null
   return token && /^[A-Za-z0-9._-]+$/.test(token) ? token : null
+}
+
+/** The boards one page links to or embeds: its links and an Eightfold config naming the company's domain. */
+export function boardsInHtml(html: string, pageUrl: string, companyDomain: string | null): DiscoveredBoard[] {
+  return [...findBoardLinks(html, detect).map((b): DiscoveredBoard => ({ ...b, via: 'link' })), ...eightfoldBoards(html, pageUrl, companyDomain)]
 }
 
 /**

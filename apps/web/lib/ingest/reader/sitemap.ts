@@ -84,7 +84,9 @@ export async function readSitemapEntries(origin: string, f: SiteFetcher): Promis
   const named = (await f.sitemapsOf(origin)).filter((u) => !/\.gz($|\?)/i.test(u))
   // ponytail: .gz sitemaps are skipped (no gunzip here); the plain job sitemap is listed beside them on every site seen.
   const jobby = named.filter((u) => SITEMAP_WORDS.test(u))
-  const queue = (jobby.length ? jobby : named).slice(0, MAX_SITEMAPS)
+  // On a careers host (careers.walmart.com) every sitemap is about jobs; on a company's main site only the job ones are.
+  const careersHost = /career|(^|\.)jobs?\./i.test(new URL(origin).hostname)
+  const queue = (careersHost && !jobby.length ? named : jobby).slice(0, MAX_SITEMAPS)
   const entries: SitemapEntry[] = []
   let complete = queue.length > 0
   for (let i = 0; i < queue.length && i < MAX_SITEMAPS + 3; i++) {
