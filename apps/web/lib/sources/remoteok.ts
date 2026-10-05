@@ -3,14 +3,8 @@
 // array element is a legal/notice object and is skipped. All roles are remote.
 
 import type { JobLead, SourceAdapter, SourceQuery } from './types'
-import {
-  employerDomainFromUrl,
-  getJson,
-  rankAndLimit,
-  sanitizeLeads,
-  stripHtml,
-  truncate,
-} from './util'
+import { employerDomainFromUrl, getJson, rankAndLimit, sanitizeLeads } from './util'
+import { htmlToPlainText } from '../ats/html'
 
 const HOSTS = new Set(['remoteok.com'])
 
@@ -49,7 +43,7 @@ function toLead(job: RemoteOkJob): JobLead | null {
     url,
     location: job.location?.trim() || 'Remote',
     salary: formatSalary(job.salary_min, job.salary_max),
-    description: truncate(stripHtml(job.description)),
+    description: htmlToPlainText(job.description) ?? '',
     source: 'remoteok',
     externalId: url,
     // apply_url often points at the employer's own ATS/site → good favicon source.

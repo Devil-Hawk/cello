@@ -12,8 +12,8 @@ import {
   rankAndLimit,
   sanitizeLeads,
   stripHtml,
-  truncate,
 } from './util'
+import { htmlToPlainText } from '../ats/html'
 
 const HOSTS = new Set(['hn.algolia.com'])
 const COMMENT_PAGES = 2
@@ -85,7 +85,7 @@ function parsePosting(comment: AlgoliaCommentHit): JobLead | null {
     url: applyUrl,
     location,
     salary: null,
-    description: truncate(text, 2000),
+    description: htmlToPlainText(comment.comment_text) ?? text,
     source: 'hackernews',
     externalId: permalink, // one stable id per HN comment
     companyDomain: employerDomainFromUrl(applyUrl),

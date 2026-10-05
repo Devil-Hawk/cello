@@ -16,7 +16,8 @@
 import Parser from 'rss-parser'
 import { assertAllowedHost } from '../ats/http'
 import type { JobLead, SourceAdapter, SourceQuery } from './types'
-import { rankAndLimit, sanitizeLeads, stripHtml, truncate } from './util'
+import { rankAndLimit, sanitizeLeads } from './util'
+import { htmlToPlainText } from '../ats/html'
 
 const HOSTS = new Set(['weworkremotely.com'])
 const FEED_URL = 'https://weworkremotely.com/remote-jobs.rss'
@@ -107,7 +108,7 @@ export async function parseWwrFeed(xml: string): Promise<JobLead[]> {
       url,
       location,
       salary: null,
-      description: truncate(stripHtml(item.content ?? '')),
+      description: htmlToPlainText(item.content ?? '') ?? '',
       source: 'weworkremotely',
       externalId: url,
       companyDomain: null, // feed link stays on weworkremotely.com — no outbound employer URL

@@ -8,7 +8,8 @@
 // remotive.ts.
 
 import type { JobLead, SourceAdapter, SourceQuery } from './types'
-import { getJson, rankAndLimit, sanitizeLeads, stripHtml, truncate } from './util'
+import { getJson, rankAndLimit, sanitizeLeads } from './util'
+import { htmlToPlainText } from '../ats/html'
 
 const HOSTS = new Set(['jobicy.com'])
 const COUNT = 100
@@ -54,7 +55,7 @@ function toLead(job: JobicyJob): JobLead | null {
     url,
     location: job.jobGeo?.trim() || null,
     salary: null,
-    description: truncate(stripHtml(job.jobDescription || job.jobExcerpt)),
+    description: htmlToPlainText(job.jobDescription || job.jobExcerpt) ?? '',
     source: 'jobicy',
     externalId: url,
     companyDomain: null, // url is jobicy's own posting page, not the employer's site

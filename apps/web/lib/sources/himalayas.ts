@@ -17,7 +17,8 @@
 // than ingesting the placeholder as if it were a genuine employer name.
 
 import type { JobLead, SourceAdapter, SourceQuery } from './types'
-import { getJson, rankAndLimit, sanitizeLeads, stripHtml, truncate } from './util'
+import { getJson, rankAndLimit, sanitizeLeads } from './util'
+import { htmlToPlainText } from '../ats/html'
 
 const HOSTS = new Set(['himalayas.app'])
 const PAGE_SIZE = 20
@@ -93,7 +94,7 @@ function toLead(job: HimalayasJob): JobLead | null {
     url,
     location: (job.locationRestrictions ?? []).filter(Boolean).join(', ') || null,
     salary: null,
-    description: truncate(stripHtml(job.description || job.excerpt)),
+    description: htmlToPlainText(job.description || job.excerpt) ?? '',
     source: 'himalayas',
     externalId: url,
     companyDomain: null, // link stays on himalayas.app — no outbound employer URL in this feed

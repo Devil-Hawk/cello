@@ -11,7 +11,8 @@
 // aggregator-mislabeled-as-employer bug this port is required to avoid.
 
 import type { JobLead, SourceAdapter, SourceQuery } from './types'
-import { getJson, rankAndLimit, sanitizeLeads, stripHtml, truncate } from './util'
+import { getJson, rankAndLimit, sanitizeLeads } from './util'
+import { htmlToPlainText } from '../ats/html'
 
 const HOSTS = new Set(['remotive.com'])
 
@@ -43,7 +44,7 @@ function toLead(job: RemotiveJob): JobLead | null {
     url: rawUrl,
     location: job.candidate_required_location?.trim() || null,
     salary: job.salary?.trim() || null,
-    description: truncate(stripHtml(job.description)),
+    description: htmlToPlainText(job.description) ?? '',
     source: 'remotive',
     externalId: rawUrl,
     companyDomain: null, // job.url stays on remotive.com — no real employer domain in this feed
