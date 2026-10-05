@@ -143,12 +143,12 @@ describe('retrieveKb in Langfuse', () => {
     vi.unstubAllEnvs()
   })
 
-  it('is a Langfuse-only retriever with the query and the hit titles (never the chunk text), and names its embedding call', async () => {
+  it('is a Langfuse-only retriever with the query, the hit titles and an excerpt of each chunk, and names its embedding call', async () => {
     const row = await run(false)
     expect(row).toMatchObject({ name: 'retrieve-knowledge', persist: false, parent_span_id: 'root' })
     expect(row.lf).toMatchObject({ name: 'retrieve-knowledge', type: 'retriever', input: { query: 'visa rules' }, metadata: { limit: 5, hits: 1 } })
     expect(JSON.stringify(row.lf)).toContain('My notes')
-    expect(JSON.stringify(row.lf)).not.toContain('PRIVATE CHUNK TEXT')
+    expect(row.lf?.output).toMatchObject({ hits: [{ excerpt: 'PRIVATE CHUNK TEXT' }] })
     expect(callEmbeddingMock.mock.calls[0][1]).toMatchObject({ name: 'embed-query' })
   })
 
@@ -156,6 +156,7 @@ describe('retrieveKb in Langfuse', () => {
     const row = await run(true)
     expect(row.lf?.input).toBeUndefined()
     expect(row.lf?.output).toBeUndefined()
+    expect(JSON.stringify(row.lf)).not.toContain('PRIVATE CHUNK TEXT')
     expect(row.lf?.metadata).toMatchObject({ hits: 1 })
   })
 })

@@ -410,12 +410,14 @@ describe('searchInsights in Langfuse', () => {
     vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
     const { runInTraceContext, SpanBuffer } = await import('../trace/spans')
     callEmbeddingMock.mockResolvedValue({ embeddings: [[0.5]], model: 'x', promptTokens: 1 })
-    const admin = { rpc: async () => ({ data: [], error: null }) } as never
+    const row0 = { id: 'i1', kind: 'preference', statement: 'Salary floor is 180k, remote only', evidence: null, confidence: 0.9, status: 'active', source: 'chat', company_id: null, supersedes_id: null, created_at: 'x', updated_at: 'x' }
+    const admin = { rpc: async () => ({ data: [row0], error: null }) } as never
     const buffer = new SpanBuffer('u1', null, undefined, { isDemo: false })
     await runInTraceContext({ buffer, parentSpanId: 'root', runId: null }, () => searchInsights(admin, 'u1', 'salary floor', { limit: 4 }))
     const [row] = (buffer as unknown as { pending: { name: string; persist?: false; lf?: { type?: string; input?: unknown; metadata?: unknown } }[] }).pending
     expect(row).toMatchObject({ name: 'search-insights', persist: false })
-    expect(row.lf).toMatchObject({ type: 'retriever', input: { query: 'salary floor' }, metadata: { limit: 4, hits: 0 } })
+    expect(row.lf).toMatchObject({ type: 'retriever', input: { query: 'salary floor' }, metadata: { limit: 4, hits: 1 } })
+    expect(JSON.stringify(row.lf)).toContain('Salary floor is 180k')
     expect(callEmbeddingMock.mock.calls[0][1]).toMatchObject({ name: 'embed-query' })
     vi.unstubAllEnvs()
   })

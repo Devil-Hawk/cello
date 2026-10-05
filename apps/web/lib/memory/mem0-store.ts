@@ -316,7 +316,7 @@ export class Mem0Store implements MemoryStore {
         return result.results.map(toMemoryItem)
       },
       (found, _err, capture) => ({
-        ...(capture ? { input: { query }, output: { count: found?.length ?? 0 } } : {}),
+        ...(capture ? { input: { query }, output: { count: found?.length ?? 0, hits: (found ?? []).slice(0, 10).map((m) => ({ text: m.memory.slice(0, 300), score: m.score })) } } : {}),
         metadata: { limit: opts.limit ?? 6, ...(found ? { hits: found.length } : {}) },
       })
     )

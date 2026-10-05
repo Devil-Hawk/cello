@@ -276,13 +276,13 @@ export async function searchInsights(
   opts: { kinds?: InsightKind[]; limit?: number } = {}
 ): Promise<Insight[]> {
   // One Langfuse retriever observation (embed-query nests under it) when a
-  // trace is active. The query text is capture-gated; the hits are counted.
+  // trace is active. The query and an excerpt of each hit are capture-gated.
   return observe(
     { name: 'search-insights', type: 'retriever', persist: false },
     () => searchInsightsInner(admin, userId, query, opts),
     (found, _err, capture) => ({
       metadata: { limit: opts.limit ?? 12, ...(found ? { hits: found.length } : {}) },
-      ...(capture ? { input: { query }, output: { count: found?.length ?? 0 } } : {}),
+      ...(capture ? { input: { query }, output: { count: found?.length ?? 0, hits: (found ?? []).slice(0, 10).map((i) => ({ statement: i.statement.slice(0, 300), kind: i.kind })) } } : {}),
     })
   )
 }

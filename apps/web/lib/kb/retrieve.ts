@@ -47,14 +47,14 @@ export async function retrieveKb(
   opts: { limit?: number; companyId?: string } = {}
 ): Promise<KbSearchHit[]> {
   // One Langfuse retriever observation (its embed-query nests under it) when
-  // a trace is active. The query and hit titles are capture-gated.
+  // a trace is active. The query, hit titles and a 300 char excerpt of each are capture-gated (and masked at the Langfuse choke point).
   return observe(
     { name: 'retrieve-knowledge', type: 'retriever', persist: false },
     () => retrieveKbInner(admin, userId, query, opts),
     (hits, _err, capture) => ({
       metadata: { limit: opts.limit ?? 0, ...(hits ? { hits: hits.length } : {}) },
       ...(capture
-        ? { input: { query }, output: { hits: (hits ?? []).slice(0, 10).map((h) => ({ title: h.title, url: h.url, rank: h.rank })) } }
+        ? { input: { query }, output: { hits: (hits ?? []).slice(0, 10).map((h) => ({ title: h.title, url: h.url, rank: h.rank, excerpt: h.content.slice(0, 300) })) } }
         : {}),
     })
   )
