@@ -5,7 +5,7 @@
 // client for writes) with the row shape declared in ./types.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { OutreachMessageRow, OutreachStatus, ReplyClassification } from './types'
+import type { OutreachMessageRow, OutreachStatus, ReplyClassification, TemplateReason } from './types'
 import { recordInteraction } from '../interactions/store'
 
 const TABLE = 'outreach_messages'
@@ -25,6 +25,8 @@ export interface NewOutreach {
   parent_id?: string | null
   /** False when the text is the deterministic template, not a model draft. */
   used_llm?: boolean
+  /** Why the text is the template. Set only when used_llm is false. */
+  template_reason?: TemplateReason | null
 }
 
 export async function insertOutreach(

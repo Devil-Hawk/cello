@@ -1,5 +1,8 @@
 // Cold-outreach domain types (framework-free — safe in request + cron contexts).
 
+/** Why a draft is the standard template and not a written draft. */
+export type TemplateReason = 'missing_key' | 'spend_cap' | 'provider_error' | 'unusable_output'
+
 export type OutreachStatus =
   | 'pending_review'
   | 'approved'
@@ -37,6 +40,8 @@ export interface OutreachMessageRow {
   error: string | null
   /** False when the draft is the generic template (no model wrote it). NULL on rows from before this was recorded. */
   used_llm?: boolean | null
+  /** Why the text is the standard template: set only when used_llm is false. */
+  template_reason?: TemplateReason | null
   sent_at: string | null
   /** When an inbound reply was matched to this thread. NULL = no reply yet. */
   replied_at: string | null
