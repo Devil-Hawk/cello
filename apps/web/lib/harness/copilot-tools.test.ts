@@ -167,7 +167,7 @@ function baseCtx(admin: AdminClient, overrides: Partial<CopilotToolContext> = {}
 describe('dispatchTool — agent gating (server-side, not merely prompt-hidden)', () => {
   it('rejects a tool whose spec names an agent NOT in enabledAgents', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', match_score: 91, match_details: { ok: true } }],
+      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', chance: 'possible', want_p: 0.7, want_reason: 'Payments work.', fit_assessed_at: '2026-10-06T08:00:00Z', blocked_reasons: [], chance_detail: { checks: [], gaps: [], confirm: [], note: null } }],
       companies: [{ id: 'co-1', name: 'Acme', user_id: 'me' }],
     })
     // explain_match's catalog spec has agent: 'matcher' — exclude it.
@@ -181,7 +181,7 @@ describe('dispatchTool — agent gating (server-side, not merely prompt-hidden)'
 
   it('the SAME tool succeeds once its backing agent IS enabled', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', match_score: 91, match_details: { ok: true } }],
+      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', chance: 'possible', want_p: 0.7, want_reason: 'Payments work.', fit_assessed_at: '2026-10-06T08:00:00Z', blocked_reasons: [], chance_detail: { checks: [], gaps: [], confirm: [], note: null } }],
       companies: [{ id: 'co-1', name: 'Acme', user_id: 'me' }],
     })
     const ctx = baseCtx(admin, { enabledAgents: new Set(['matcher']) })
@@ -189,12 +189,13 @@ describe('dispatchTool — agent gating (server-side, not merely prompt-hidden)'
     const result = await dispatchTool(ctx, 'explain_match', { jobId: 'job-1' })
 
     expect(result).not.toHaveProperty('error')
-    expect(result).toMatchObject({ matched: true, score: 91 })
+    expect(result).toMatchObject({ matched: true, fit: { want: { reason: 'Payments work.' }, chance: { label: 'possible' } } })
+    expect(JSON.stringify(result)).not.toMatch(/"score"/)
   })
 
   it('undefined enabledAgents means "all enabled" (default, unchanged behavior)', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', match_score: 91, match_details: { ok: true } }],
+      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', chance: 'possible', want_p: 0.7, want_reason: 'Payments work.', fit_assessed_at: '2026-10-06T08:00:00Z', blocked_reasons: [], chance_detail: { checks: [], gaps: [], confirm: [], note: null } }],
       companies: [{ id: 'co-1', name: 'Acme', user_id: 'me' }],
     })
     const ctx = baseCtx(admin) // no enabledAgents field at all
@@ -282,7 +283,7 @@ describe('dispatchTool — always resolves to {error}, never throws', () => {
 describe('dispatchTool — job ownership enforced transitively via companies.user_id', () => {
   it('a job owned by a DIFFERENT user is not reachable via explain_match, even with the correct jobId', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'Secret Role', company_id: 'co-1', match_score: 99, match_details: { top: 'secret' } }],
+      jobs: [{ id: 'job-1', title: 'Secret Role', company_id: 'co-1', chance: 'strong', want_p: 0.99, want_reason: 'secret reason', fit_assessed_at: '2026-10-06T08:00:00Z' }],
       // co-1 belongs to someone else, NOT 'me'.
       companies: [{ id: 'co-1', name: 'Other Person Co', user_id: 'someone-else' }],
     })
@@ -295,20 +296,20 @@ describe('dispatchTool — job ownership enforced transitively via companies.use
     // Precise-id-error requirement: names the tool that returns real ids, so
     // a model that guessed wrong can self-correct in one step.
     expect(result).toMatchObject({ error: expect.stringContaining('list_jobs') })
-    // Nothing about the job's match score/details leaks into the response.
-    expect(JSON.stringify(result)).not.toContain('99')
-    expect(JSON.stringify(result)).not.toContain('secret')
+    // Nothing about the role's assessment leaks into the response.
+    expect(JSON.stringify(result)).not.toContain('0.99')
+    expect(JSON.stringify(result)).not.toContain('secret reason')
   })
 
   it('the identical job IS reachable once it belongs to the caller', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'My Role', company_id: 'co-1', match_score: 77, match_details: { fit: 'good' } }],
+      jobs: [{ id: 'job-1', title: 'My Role', company_id: 'co-1', chance: 'strong', want_p: 0.77, want_reason: 'Good fit.', fit_assessed_at: '2026-10-06T08:00:00Z', blocked_reasons: [], chance_detail: { checks: [], gaps: [], confirm: [], note: null } }],
       companies: [{ id: 'co-1', name: 'My Co', user_id: 'me' }],
     })
     const ctx = baseCtx(admin)
 
     const result = await dispatchTool(ctx, 'explain_match', { jobId: 'job-1' })
-    expect(result).toMatchObject({ matched: true, score: 77 })
+    expect(result).toMatchObject({ matched: true, fit: { want: { reason: 'Good fit.' }, chance: { label: 'strong' } } })
   })
 
   it('get_application enforces the same ownership check before returning anything about the job', async () => {
@@ -326,7 +327,7 @@ describe('dispatchTool — job ownership enforced transitively via companies.use
 
   it('a job with no company_id at all is rejected rather than treated as ownerless/public', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-3', title: 'Orphan Role', company_id: null, match_score: 50 }],
+      jobs: [{ id: 'job-3', title: 'Orphan Role', company_id: null, chance: 'stretch' }],
       companies: [],
     })
     const ctx = baseCtx(admin)
@@ -625,8 +626,8 @@ describe('dispatchTool — research_companies (batch: caps, partial failure, bou
 describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
   const co = { id: 'co-1', name: 'Acme', user_id: 'me', is_dream_company: false }
   const jobs = [
-    { id: 'job-1', title: 'Staff Backend Engineer', company_id: 'co-1', match_score: 80, is_new: false, location: null, posted_at: null },
-    { id: 'job-2', title: 'Product Designer', company_id: 'co-1', match_score: 60, is_new: false, location: null, posted_at: null },
+    { id: 'job-1', title: 'Staff Backend Engineer', company_id: 'co-1', chance: 'strong', want_p: 0.8, is_new: false, location: null, posted_at: null },
+    { id: 'job-2', title: 'Product Designer', company_id: 'co-1', chance: 'possible', want_p: 0.6, is_new: false, location: null, posted_at: null },
   ]
 
   it('a real word query (>=4 chars) matches via FTS (textSearch), no rpc needed', async () => {
@@ -708,13 +709,13 @@ describe('dispatchTool in Langfuse', () => {
 
   it('a built-in tool is a tool observation named for the tool, under the active span, with its args and result', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', match_score: 91, match_details: { ok: true } }],
+      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', chance: 'possible', want_p: 0.7, want_reason: 'Payments work.', fit_assessed_at: '2026-10-06T08:00:00Z', blocked_reasons: [], chance_detail: { checks: [], gaps: [], confirm: [], note: null } }],
       companies: [{ id: 'co-1', name: 'Acme', user_id: 'me' }],
     })
     const { rows } = await traced(configure(false), baseCtx(admin), 'explain_match', { jobId: 'job-1' })
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ kind: 'tool', name: 'explain_match', parent_span_id: 'root', status: 'ok', attributes: { tool: 'explain_match', error: false } })
-    expect(rows[0].lf).toMatchObject({ name: 'explain_match', type: 'tool', input: { jobId: 'job-1' }, output: { matched: true, score: 91 } })
+    expect(rows[0].lf).toMatchObject({ name: 'explain_match', type: 'tool', input: { jobId: 'job-1' }, output: { matched: true, fit: expect.objectContaining({ chance: expect.objectContaining({ label: 'possible' }) }) } })
   })
 
   it('web_search is a retriever', async () => {
