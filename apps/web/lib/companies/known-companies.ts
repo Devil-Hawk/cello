@@ -101,6 +101,7 @@ export const KNOWN_COMPANIES: Record<string, KnownCompany> = {
   'supabase.com': { name: 'Supabase', board: { provider: 'ashby', token: 'supabase' } },
   'cloudflare.com': { name: 'Cloudflare', board: { provider: 'greenhouse', token: 'cloudflare' } },
   'datadog.com': { name: 'Datadog', board: { provider: 'greenhouse', token: 'datadog' } },
+  'datadoghq.com': { name: 'Datadog', board: { provider: 'greenhouse', token: 'datadog' } },
   'elastic.co': { name: 'Elastic', board: { provider: 'greenhouse', token: 'elastic' } },
   'mongodb.com': { name: 'MongoDB', board: { provider: 'greenhouse', token: 'mongodb' } },
   'hashicorp.com': { name: 'HashiCorp' },
