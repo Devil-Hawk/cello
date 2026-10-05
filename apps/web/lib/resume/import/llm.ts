@@ -57,7 +57,20 @@ export interface FaithfulnessReport {
  * reformat scores ~1.0; the slack is for hyphen/ligature repairs and dropped
  * page furniture.
  */
-const MIN_RETENTION = 0.85
+export const MIN_RETENTION = 0.85
+/**
+ * Share of the source's distinct words found in `output`, or null when the
+ * source is too short to judge. The dropped-content check for structured output.
+ */
+export function wordRetention(source: string, output: string): number | null {
+  const sourceWords = tokenize(source)
+  if (sourceWords.size < MIN_TOKENS_TO_JUDGE) return null
+  const outputWords = tokenize(output)
+  let kept = 0
+  for (const word of sourceWords) if (outputWords.has(word)) kept++
+  return kept / sourceWords.size
+}
+
 /**
  * At most this share of the output's distinct words may be new. Rejoining
  * "expe rience" legitimately creates a token, so this cannot be zero — but a

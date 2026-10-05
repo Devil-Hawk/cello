@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { inferResumeMarkdown } from './infer'
 import { HEURISTIC_WARNING, structureResume, type StructureRunner } from './structure'
+import { markdownToResume } from '../from-markdown'
+import { resumeToPlainText } from '../render'
 import { ResumeSchema } from '../schema'
+import { MIN_RETENTION, wordRetention } from './llm'
 import { PASTE_TEXT } from '../test-fixtures'
 
 const SOURCE = `Jane Okafor
@@ -139,5 +142,41 @@ describe('structureResume', () => {
     expect(viaLlm.resume.basics.name).toBe('Grace Hopper')
     expect(viaLlm.resume.meta.cello.structuredBy).toBe('llm')
     expect(viaLlm.warnings.join(' ')).toMatch(/could not find your name/)
+  })
+
+  describe('dropped content', () => {
+    const md = inferResumeMarkdown(PASTE_TEXT)
+    const partial = {
+      basics: { name: 'Jordan Rivera', label: '', email: 'jordan.rivera@example.com', phone: '', url: '', location: '', summary: '' },
+      work: [
+        {
+          name: 'Northwind Analytics',
+          position: 'Senior Software Engineer',
+          location: 'Seattle, WA',
+          dates: 'Mar 2021 - Present',
+          summary: '',
+          highlights: ['Mentored 4 junior engineers; two were promoted within 18 months.'],
+        },
+      ],
+      education: [],
+      skills: [],
+      projects: [],
+      certificates: [],
+      customSections: [],
+    }
+
+    it('falls back to the deterministic parse when the answer omits most of the resume', async () => {
+      const { run } = runner(partial)
+      const { resume, warnings } = await structureResume(md, PASTE_TEXT, { run })
+      expect(resume.meta.cello.structuredBy).toBe('heuristic')
+      expect(resume.work).toHaveLength(3)
+      expect(resume.education).toHaveLength(1)
+      expect(warnings).toContain(HEURISTIC_WARNING)
+    })
+
+    it('the deterministic parse itself clears the retention bar', () => {
+      const r = markdownToResume(md)
+      expect(wordRetention(PASTE_TEXT, resumeToPlainText(r))).toBeGreaterThanOrEqual(MIN_RETENTION)
+    })
   })
 })

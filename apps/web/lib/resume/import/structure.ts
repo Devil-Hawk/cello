@@ -7,12 +7,13 @@
 //
 // The faithfulness gate reads resumeFactText(), the user-authored strings
 // only, so renderer vocabulary ("Mar", "Present", section titles) is never
-// mistaken for an invented fact. A date's year must also appear in the source.
+// mistaken for an invented fact. A date's year must also appear in the source,
+// and the answer must keep 85% of the source's distinct words (no dropped sections).
 
 import { parseJsonLoose } from '@/lib/harness/llm'
 import type { LlmRunOptions } from '@/lib/harness/types'
 import { markdownToResume } from '../from-markdown'
-import { resumeFactText } from '../render'
+import { resumeFactText, resumeToPlainText } from '../render'
 import {
   NAME_WARNING,
   ResumeLlmSchema,
@@ -22,7 +23,7 @@ import {
   type ParsedFrom,
   type Resume,
 } from '../schema'
-import { findInventedFacts } from './llm'
+import { MIN_RETENTION, findInventedFacts, wordRetention } from './llm'
 
 export type StructureRunner = (opts: LlmRunOptions) => Promise<{ content: string }>
 
@@ -149,6 +150,12 @@ async function viaLlm(
     .map((d) => d.slice(0, 4))
     .find((y) => !sourceYears.has(y))
   if (missingYear) return { reason: `it used a year that is not in your text (${missingYear})` }
+  // Dropped content. An answer that omits sections (or was cut by the prompt or
+  // token limit) is faithful to what it kept, so the gates above pass it.
+  const retention = wordRetention(sourceText, resumeToPlainText(resume))
+  if (retention !== null && retention < MIN_RETENTION) {
+    return { reason: `it left out too much of your text (kept ${Math.round(retention * 100)}%)` }
+  }
   return { resume }
 }
 
