@@ -201,9 +201,7 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
       matchedCompany = companiesByName.get(normalizeCompanyName(parsed.companyName)) || null
     }
 
-    const trackedCompany = matchedCompany
-
-    if (!trackedCompany) {
+    if (!matchedCompany) {
       // Email never creates a company. Unmatched job mail is counted so the
       // card can say so, and the person decides what to track.
       unmatchedEmployers++
@@ -216,13 +214,13 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
       continue
     }
 
-    // --- From here on `trackedCompany` is a company the user actually
+    // --- From here on `matchedCompany` is a company the user actually
     // tracks. Match the email to a specific job by title similarity — never
     // fall back to "whatever job comes back first". ---
     const { data: companyJobs } = await db
       .from('jobs')
       .select('id, title')
-      .eq('company_id', trackedCompany.id)
+      .eq('company_id', matchedCompany.id)
       .limit(500)
 
     const jobMatch = findBestJobMatch(parsed.jobTitle, companyJobs || [])
@@ -237,17 +235,17 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
       const classification = classifyJob({
         title: parsed.jobTitle,
         description: `Detected from Gmail: ${subject}`,
-        companyName: trackedCompany.name,
+        companyName: matchedCompany.name,
       })
 
       const { data: newJob, error: jobError } = await db
         .from('jobs')
         .insert({
-          company_id: trackedCompany.id,
+          company_id: matchedCompany.id,
           title: parsed.jobTitle,
           description: `[Unverified — detected from a Gmail message, not scraped from the careers page] ${subject}`,
-          url: trackedCompany.domain
-            ? `https://${trackedCompany.domain}`
+          url: matchedCompany.domain
+            ? `https://${matchedCompany.domain}`
             : isHttpUrl(parsed.careerPageUrl)
               ? parsed.careerPageUrl
               : `https://mail.google.com/mail/u/0/#inbox/${msg.threadId}`,
@@ -270,8 +268,8 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
         from,
         receivedAt: receivedAt.toISOString(),
         reason: parsed.jobTitle
-          ? `no confident job-title match at "${trackedCompany.name}" (checked ${companyJobs?.length || 0} jobs) and placeholder creation failed`
-          : `no job title could be extracted from this email to match or attach at "${trackedCompany.name}"`,
+          ? `no confident job-title match at "${matchedCompany.name}" (checked ${companyJobs?.length || 0} jobs) and placeholder creation failed`
+          : `no job title could be extracted from this email to match or attach at "${matchedCompany.name}"`,
       })
       continue
     }
@@ -299,7 +297,7 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
           .update({ stage: nextStage, updated_at: new Date().toISOString() })
           .eq('id', applicationId)
 
-        statusUpdates.push({ company: trackedCompany.name, status: nextStage, subject })
+        statusUpdates.push({ company: matchedCompany.name, status: nextStage, subject })
       }
     } else {
       if (parsed.status === 'unknown') {
@@ -307,7 +305,7 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
           subject,
           from,
           receivedAt: receivedAt.toISOString(),
-          reason: `matched a job at "${trackedCompany.name}" but no application stage was detected to create a new application`,
+          reason: `matched a job at "${matchedCompany.name}" but no application stage was detected to create a new application`,
         })
         continue
       }
@@ -336,13 +334,13 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
           subject,
           from,
           receivedAt: receivedAt.toISOString(),
-          reason: `matched a job at "${trackedCompany.name}" but failed to create the application record`,
+          reason: `matched a job at "${matchedCompany.name}" but failed to create the application record`,
         })
         continue
       }
 
       applicationId = newApp.id
-      createdApplications.push(trackedCompany.name)
+      createdApplications.push(matchedCompany.name)
       decision = { action: 'advanced', fromStage: 'discovered', toStage: parsed.status, reason: 'new application created from Gmail' }
     }
 
@@ -360,11 +358,11 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
     await recordStageActivity(db, {
       userId,
       applicationId,
-      companyId: trackedCompany.id,
+      companyId: matchedCompany.id,
       jobId,
       status: parsed.status,
       decision,
-      companyName: trackedCompany.name,
+      companyName: matchedCompany.name,
       jobTitle: jobMatch?.title || parsed.jobTitle || 'this role',
       subject,
       reasoning: parsed.reasoning,
@@ -392,8 +390,8 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
       const kind = parsed.status === 'screen' ? 'phone screen' : 'interview'
       const note =
         interviewAt && !isNaN(interviewAt.getTime())
-          ? `Prep for your ${kind} with ${trackedCompany.name} on ${interviewAt.toLocaleString()} (detected from Gmail: "${subject}")`
-          : `${kind[0].toUpperCase()}${kind.slice(1)} detected with ${trackedCompany.name} — check the email for the exact time ("${subject}")`
+          ? `Prep for your ${kind} with ${matchedCompany.name} on ${interviewAt.toLocaleString()} (detected from Gmail: "${subject}")`
+          : `${kind[0].toUpperCase()}${kind.slice(1)} detected with ${matchedCompany.name} — check the email for the exact time ("${subject}")`
 
       await db.from('follow_ups').insert({
         application_id: applicationId,
