@@ -11,7 +11,7 @@
 --   3. drops record_llm_spend, so a charge without a reservation cannot be written.
 -- Idempotent: a second run finds nothing to top up and no counters to strip.
 
-insert into public.llm_spend (user_id, funder_id, period, model, estimate_usd, actual_usd, status, settled_at)
+insert into public.llm_spend (user_id, funder_id, period, model, estimate_usd, actual_usd, status, settled_at, rung, step)
 select p.id,
        case when coalesce(p.is_demo, false) or p.demo_expires_at is not null
             then (select c.owner_user_id from public.access_codes c
@@ -27,7 +27,9 @@ select p.id,
                      where s.user_id = p.id and s.model = 'carried-over'
                        and s.period = date_trunc('month', now() at time zone 'utc')::date), 0),
        'settled',
-       now()
+       now(),
+       'R4',
+       'carried-over'
 from public.profiles p
 where p.preferences #>> '{budget,periodStart}' = to_char(now() at time zone 'utc', 'YYYY-MM')
   and jsonb_typeof(p.preferences #> '{budget,spentUsd}') = 'number'

@@ -12,13 +12,21 @@ begin;
 -- Fixed ids: client roles cannot read a postgres-owned temp table.
 --   user   bbbbbbbb-0000-0000-0000-000000000001  signed-in, not a demo, $10 cap
 --   other  bbbbbbbb-0000-0000-0000-000000000002
+--   demo   bbbbbbbb-0000-0000-0000-000000000003  a demo with a $1 cap
 insert into auth.users (id, email) values
   ('bbbbbbbb-0000-0000-0000-000000000001', 'sp-user@example.invalid'),
-  ('bbbbbbbb-0000-0000-0000-000000000002', 'sp-other@example.invalid');
+  ('bbbbbbbb-0000-0000-0000-000000000002', 'sp-other@example.invalid'),
+  ('bbbbbbbb-0000-0000-0000-000000000003', 'sp-demo@example.invalid');
 insert into public.profiles (id, email) values
   ('bbbbbbbb-0000-0000-0000-000000000001', 'sp-user@example.invalid'),
-  ('bbbbbbbb-0000-0000-0000-000000000002', 'sp-other@example.invalid')
+  ('bbbbbbbb-0000-0000-0000-000000000002', 'sp-other@example.invalid'),
+  ('bbbbbbbb-0000-0000-0000-000000000003', 'sp-demo@example.invalid')
 on conflict (id) do nothing;
+update public.profiles
+set is_demo = true,
+    demo_expires_at = now() + interval '72 hours',
+    preferences = jsonb_build_object('budget', jsonb_build_object('monthlyUsd', 1))
+where id = 'bbbbbbbb-0000-0000-0000-000000000003';
 
 -- The user has spent $9.50 of a $10 cap this month, in the OLD counter.
 update public.profiles
@@ -113,8 +121,8 @@ begin
   assert (select count(*) from public.llm_spend where user_id <> 'bbbbbbbb-0000-0000-0000-000000000001') = 0,
     'another user''s ledger rows must be invisible';
   begin
-    insert into public.llm_spend (user_id, period, model, estimate_usd)
-    values ('bbbbbbbb-0000-0000-0000-000000000001', now(), 'm', 0);
+    insert into public.llm_spend (user_id, period, model, estimate_usd, rung, step)
+    values ('bbbbbbbb-0000-0000-0000-000000000001', now(), 'm', 0, 'R3', 'x');
     raise exception 'an authenticated insert into llm_spend must be denied';
   exception when insufficient_privilege then null;
   end;
@@ -130,8 +138,13 @@ begin
   end;
   -- The functions are not callable from the Data API.
   begin
-    perform public.reserve_llm_spend('bbbbbbbb-0000-0000-0000-000000000001', 'm', 0.01);
+    perform public.reserve_llm_spend('bbbbbbbb-0000-0000-0000-000000000001', 'm', 0.01, 'R4', 'x', null, null);
     raise exception 'reserve_llm_spend must not be executable by authenticated';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.settle_llm_spend(gen_random_uuid(), 0, null);
+    raise exception 'settle_llm_spend must not be executable by authenticated';
   exception when insufficient_privilege then null;
   end;
   -- Access codes: no direct writes, no function calls.
@@ -150,16 +163,46 @@ end $$;
 
 reset role;
 
+-- A demo cannot raise its own cap over the Data API.
+set local role authenticated;
+select set_config('request.jwt.claims',
+  '{"sub":"bbbbbbbb-0000-0000-0000-000000000003","role":"authenticated"}', true);
+do $$
+begin
+  begin
+    update public.profiles
+    set preferences = jsonb_set(preferences, '{budget,monthlyUsd}', '50')
+    where id = 'bbbbbbbb-0000-0000-0000-000000000003';
+    raise exception 'a demo must not be able to raise preferences.budget.monthlyUsd';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+reset role;
+
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 do $$
 declare r jsonb;
 begin
-  r := public.reserve_llm_spend('bbbbbbbb-0000-0000-0000-000000000001', 'anthropic/claude-sonnet-5', 1);
+  r := public.reserve_llm_spend('bbbbbbbb-0000-0000-0000-000000000001', 'anthropic/claude-sonnet-5', 1, 'R4', 'check');
   assert (r ->> 'ok')::boolean is false, 'a reset of the old counter must not free the cap';
   assert r ->> 'scope' = 'user', 'a user cap refusal carries scope user';
-  r := public.reserve_llm_spend('bbbbbbbb-0000-0000-0000-000000000001', 'anthropic/claude-sonnet-5', 0.5);
+  r := public.reserve_llm_spend('bbbbbbbb-0000-0000-0000-000000000001', 'anthropic/claude-sonnet-5', 0.5, 'R4', 'check');
   assert (r ->> 'ok')::boolean is true, 'headroom under the cap is still admitted';
+  -- A free call is admitted even though the paid headroom is nearly used, and
+  -- writes a $0 row with its rung and step; a free rung cannot carry money.
+  r := public.reserve_llm_spend('bbbbbbbb-0000-0000-0000-000000000001', 'google/gemma-4-31b-it:free', 0, 'R3', 'check');
+  assert (r ->> 'ok')::boolean is true, 'a $0 reservation is never refused';
+  assert (select rung = 'R3' and step = 'check' and estimate_usd = 0 and door is null
+          from public.llm_spend where id = (r ->> 'id')::uuid), 'the free row carries rung and step and no door';
+  begin
+    perform public.reserve_llm_spend('bbbbbbbb-0000-0000-0000-000000000001', 'm', 0.01, 'R3', 'check');
+    raise exception 'a free rung must not reserve money';
+  exception when sqlstate '22023' then null;
+  end;
+  -- A demo nobody funds may still run free work.
+  r := public.reserve_llm_spend('bbbbbbbb-0000-0000-0000-000000000003', 'llama3.1', 0, 'R2', 'check');
+  assert (r ->> 'ok')::boolean is true, 'an unfunded demo may run a free call';
 end $$;
 reset role;
 

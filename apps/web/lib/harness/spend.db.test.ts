@@ -23,14 +23,15 @@ describe.skipIf(!TEST_DB_URL)('spend ledger (real database)', () => {
     users.push(u.id)
     return u.id
   }
-  const reserve = (userId: string, estimate: number) =>
+  const reserve = (userId: string, estimate: number, rung = estimate > 0 ? 'R4' : 'R3', door: string | null = null) =>
     asRole<{ r: { ok: boolean; id?: string; scope?: string } }>(
       pool,
       'service_role',
       { role: 'service_role' },
-      'select public.reserve_llm_spend($1, $2, $3) as r',
-      [userId, 'anthropic/claude-sonnet-5', estimate]
+      'select public.reserve_llm_spend($1, $2, $3, $4, $5, null, $6) as r',
+      [userId, 'anthropic/claude-sonnet-5', estimate, rung, 'test-step', door]
     ).then((rows) => rows[0].r)
+  const row = async (id: string) => (await pool.query(`select * from public.llm_spend where id = $1`, [id])).rows[0]
   const sum = async (userId: string) =>
     Number((await pool.query(`select coalesce(sum(coalesce(actual_usd, estimate_usd)), 0) as s from public.llm_spend where user_id = $1`, [userId])).rows[0].s)
 
@@ -62,7 +63,7 @@ describe.skipIf(!TEST_DB_URL)('spend ledger (real database)', () => {
   it('reserveSpend and settleSpend drive the same functions: BudgetCapError carries the figures', async () => {
     const u = await user({ capUsd: 0.05 })
     // 1000 prompt + 2048 max tokens on sonnet-5 is about $0.0225.
-    const input = { userId: u, model: 'anthropic/claude-sonnet-5', promptTokens: 1000, maxTokens: 2048 }
+    const input = { userId: u, model: 'anthropic/claude-sonnet-5', promptTokens: 1000, maxTokens: 2048, rung: 'R4' as const, step: 'test-step' }
     const a = await reserveSpend(admin(), input)
     const b = await reserveSpend(admin(), input)
     expect(a.id).toBeTruthy()
@@ -110,8 +111,8 @@ describe.skipIf(!TEST_DB_URL)('spend ledger (real database)', () => {
   it('month rollover: last month is not charged against this month', async () => {
     const u = await user({ capUsd: 1 })
     await pool.query(
-      `insert into public.llm_spend (user_id, period, model, estimate_usd, actual_usd, status)
-       values ($1, (date_trunc('month', now() at time zone 'utc') - interval '1 month')::date, 'm', 0.99, 0.99, 'settled')`,
+      `insert into public.llm_spend (user_id, period, model, estimate_usd, actual_usd, status, rung, step)
+       values ($1, (date_trunc('month', now() at time zone 'utc') - interval '1 month')::date, 'm', 0.99, 0.99, 'settled', 'R4', 's')`,
       [u]
     )
     expect((await reserve(u, 0.5)).ok).toBe(true)
@@ -155,13 +156,103 @@ describe.skipIf(!TEST_DB_URL)('spend ledger (real database)', () => {
     await expect(reserve(u, -1)).rejects.toThrow(/at least zero/)
   })
 
-  it('a free model reserves nothing and never touches the database', async () => {
+  it('a free model writes one $0 R3 row, whatever size the prompt claims to be', async () => {
     const u = await user({ capUsd: 1 })
-    const before = (await pool.query(`select count(*)::int as n from public.llm_spend where user_id = $1`, [u])).rows[0].n
-    const res = await reserveSpend(admin(), { userId: u, model: 'google/gemma-4-31b-it:free', promptTokens: 9_000_000, maxTokens: 9_000_000 })
-    expect(res.id).toBeNull()
-    const after = (await pool.query(`select count(*)::int as n from public.llm_spend where user_id = $1`, [u])).rows[0].n
-    expect(after).toBe(before)
+    const res = await reserveSpend(admin(), {
+      userId: u,
+      model: 'google/gemma-4-31b-it:free',
+      promptTokens: 9_000_000,
+      maxTokens: 9_000_000,
+      rung: 'R3',
+      step: 'test-step',
+    })
+    expect(res.id).toBeTruthy()
+    expect(await row(res.id!)).toMatchObject({ rung: 'R3', step: 'test-step', door: null, status: 'reserved' })
+    expect(Number((await row(res.id!)).estimate_usd)).toBe(0)
+  })
+
+  it('a $0 reserve at the cap is admitted and the row carries rung, step and a null door', async () => {
+    const u = await user({ capUsd: 1 })
+    expect((await reserve(u, 1)).ok).toBe(true)
+    expect((await reserve(u, 0.01)).ok).toBe(false)
+    const free = await reserve(u, 0, 'R2')
+    expect(free.ok).toBe(true)
+    expect(await row(free.id!)).toMatchObject({ rung: 'R2', step: 'test-step', door: null })
+    const withDoor = await reserve(u, 0, 'R3', 'chat')
+    expect((await row(withDoor.id!)).door).toBe('chat')
+  })
+
+  it('25 paid $0.10 and 20 free reservations in parallel against a $1 cap: exactly 10 paid admitted, all 20 free rows written', async () => {
+    const u = await user({ capUsd: 1 })
+    const results = await Promise.all([
+      ...Array.from({ length: 25 }, () => reserve(u, 0.1)),
+      ...Array.from({ length: 20 }, () => reserve(u, 0, 'R3')),
+    ])
+    expect(results.slice(0, 25).filter((r) => r.ok)).toHaveLength(10)
+    expect(results.slice(25).every((r) => r.ok)).toBe(true)
+    const free = Number((await pool.query(`select count(*)::int as n from public.llm_spend where user_id = $1 and rung = 'R3'`, [u])).rows[0].n)
+    expect(free).toBe(20)
+    expect(await sum(u)).toBeCloseTo(1.0, 6)
+  })
+
+  it('a demo with a $1 cap and a funder admits 6 of 20 parallel $0.15 reserves, and settling high overruns by at most one reservation', async () => {
+    const owner = await user({ capUsd: 100 })
+    const demo = await user({ capUsd: 1, demo: true })
+    await pool.query(
+      `insert into public.access_codes (owner_user_id, code_hash, code_prefix, expires_at, demo_user_id)
+       values ($1, $2, 'TEST', now() + interval '1 hour', $3)`,
+      [owner, `h1:${randomUUID().replace(/-/g, '')}${randomUUID().replace(/-/g, '')}`, demo]
+    )
+    const results = await Promise.all(Array.from({ length: 20 }, () => reserve(demo, 0.15)))
+    const admitted = results.filter((r) => r.ok)
+    expect(admitted).toHaveLength(6)
+    for (const r of admitted) {
+      await asRole(pool, 'service_role', { role: 'service_role' }, 'select public.settle_llm_spend($1, $2)', [r.id, 0.16])
+    }
+    // The blueprint's bound: the cap plus at most one reservation (1.00 + 0.15).
+    expect(await sum(demo)).toBeLessThanOrEqual(1.15)
+  })
+
+  it('the database refuses money on a free rung, an unknown rung and an unknown door', async () => {
+    const u = await user({ capUsd: 1 })
+    const insert = (rung: string, estimate: number, door: string | null = null) =>
+      pool.query(
+        `insert into public.llm_spend (user_id, period, model, estimate_usd, rung, step, door)
+         values ($1, date_trunc('month', now())::date, 'm', $2, $3, 's', $4)`,
+        [u, estimate, rung, door]
+      )
+    await expect(insert('R3', 0.01)).rejects.toThrow(/llm_spend_free_is_zero/)
+    await expect(insert('R2', 0.01)).rejects.toThrow(/llm_spend_free_is_zero/)
+    await expect(insert('R9', 0)).rejects.toThrow(/llm_spend_rung_check/)
+    await expect(insert('R3', 0, 'web')).rejects.toThrow(/llm_spend_door_check/)
+    await expect(insert('R4', 0.01)).resolves.toBeDefined()
+    await expect(reserve(u, 0.01, 'R2')).rejects.toThrow(/only a paid hosted call/)
+  })
+
+  it('settle stores the HTTP status of a refused attempt, and ignores an amount on a free row', async () => {
+    const u = await user({ capUsd: 1 })
+    const free = await reserve(u, 0, 'R3')
+    await asRole(pool, 'service_role', { role: 'service_role' }, 'select public.settle_llm_spend($1, 0, 429::smallint)', [free.id])
+    expect(await row(free.id!)).toMatchObject({ status: 'settled', failed_status: 429 })
+    const other = await reserve(u, 0, 'R3')
+    await asRole(pool, 'service_role', { role: 'service_role' }, 'select public.settle_llm_spend($1, 0.5)', [other.id])
+    expect(Number((await row(other.id!)).actual_usd)).toBe(0)
+  })
+
+  it('the sweeper deletes a row older than 95 days and keeps one from 94 days ago', async () => {
+    const u = await user({ capUsd: 1 })
+    const old = await reserve(u, 0, 'R3')
+    const recent = await reserve(u, 0, 'R3')
+    await pool.query(`update public.llm_spend set created_at = now() - interval '96 days' where id = $1`, [old.id])
+    await pool.query(`update public.llm_spend set created_at = now() - interval '94 days' where id = $1`, [recent.id])
+    await asRole(pool, 'service_role', { role: 'service_role' }, 'select public.sweep_llm_spend()')
+    expect(await row(old.id!)).toBeUndefined()
+    expect(await row(recent.id!)).toBeDefined()
+  })
+
+  it('the daily-count index exists', async () => {
+    const r = await pool.query(`select 1 from pg_indexes where schemaname = 'public' and indexname = 'llm_spend_user_rung_day'`)
+    expect(r.rowCount).toBe(1)
   })
 
   it('signed-in users can read their own ledger but write nothing, and cannot call the functions; anon sees nothing', async () => {
@@ -180,8 +271,8 @@ describe.skipIf(!TEST_DB_URL)('spend ledger (real database)', () => {
     await expect(asRole(pool, 'authenticated', claims(a), `update public.llm_spend set actual_usd = 0`)).rejects.toThrow(/permission denied/)
     await expect(asRole(pool, 'authenticated', claims(a), `delete from public.llm_spend`)).rejects.toThrow(/permission denied/)
     for (const call of [
-      `select public.reserve_llm_spend($1, 'm', 0.1)`,
-      `select public.settle_llm_spend(gen_random_uuid(), 0)`,
+      `select public.reserve_llm_spend($1, 'm', 0.1, 'R4', 'x')`,
+      `select public.settle_llm_spend(gen_random_uuid(), 0, null)`,
       `select public.llm_spend_state($1)`,
       `select public.sweep_llm_spend()`,
     ]) {

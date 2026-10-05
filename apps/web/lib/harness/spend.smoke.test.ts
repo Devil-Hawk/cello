@@ -7,8 +7,8 @@
 //     pnpm vitest run lib/harness/spend.smoke.test.ts
 //
 // Pass bar (both must hold):
-//   1. a callLlm on a ':free' model returns text and leaves NO ledger row (the
-//      reservation has id null and made no database call);
+//   1. a callLlm on a ':free' model returns text and writes one $0 R3 ledger row
+//      per attempt (the reservation has a row id and an estimate of 0);
 //   2. a recorded-shape paid response (fixtures/openrouter-usage.json, usage.cost
 //      0.00042) settles a real reservation at exactly that cost.
 // The key is read from OPENROUTER_API_KEY and is never printed.
@@ -45,7 +45,7 @@ describe.skipIf(!run)('spend smoke (one free-model call)', () => {
     return free.find((id) => /gemma|llama|qwen/i.test(id)) ?? free[0]
   }
 
-  it('a free-model call returns text and writes no ledger row', async () => {
+  it('a free-model call returns text and writes one $0 R3 row', async () => {
     const u = await createUser(pool, { capUsd: 1 })
     users.push(u.id)
     const model = await freeModel()
@@ -60,15 +60,32 @@ describe.skipIf(!run)('spend smoke (one free-model call)', () => {
     } catch (err) {
       // OpenRouter's free tier has a daily cap shared by everything on the key.
       // A 429 still proves the point below (a free call, answered or refused,
-      // touches no ledger row), but it is not a pass of the "returns text" half.
+      // writes a $0 row), but it is not a pass of the "returns text" half.
       if ((err as { status?: number }).status !== 429) throw err
       console.warn('[spend smoke] free-model daily quota exhausted (429); text half not exercised')
     }
-    expect(await ledgerRows(u.id)).toBe(0)
+    // One row per attempt: a refused attempt that was retried writes more than one.
+    expect(await ledgerRows(u.id)).toBeGreaterThanOrEqual(1)
+    const rows = (await pool.query(`select rung, estimate_usd, actual_usd, step from public.llm_spend where user_id = $1`, [u.id])).rows
+    for (const row of rows) {
+      expect(row.rung).toBe('R3')
+      expect(Number(row.estimate_usd)).toBe(0)
+      expect(Number(row.actual_usd ?? 0)).toBe(0)
+      expect(row.step).toBe('call-llm')
+    }
 
-    const reservation = await reserveSpend(serviceRpc(pool), { userId: u.id, model, promptTokens: 9_999_999, maxTokens: 9_999_999 })
-    expect(reservation.id).toBeNull()
-    expect(await ledgerRows(u.id)).toBe(0)
+    const before = await ledgerRows(u.id)
+    const reservation = await reserveSpend(serviceRpc(pool), {
+      userId: u.id,
+      model,
+      promptTokens: 9_999_999,
+      maxTokens: 9_999_999,
+      rung: 'R3',
+      step: 'smoke',
+    })
+    expect(reservation.id).toBeTruthy()
+    expect(reservation.estimateUsd).toBe(0)
+    expect(await ledgerRows(u.id)).toBe(before + 1)
   }, 60_000)
 
   it('a paid-shape response settles a real reservation at the provider-reported cost', async () => {
@@ -82,7 +99,7 @@ describe.skipIf(!run)('spend smoke (one free-model call)', () => {
     expect(cost).toBe(0.00042)
 
     const admin = serviceRpc(pool)
-    const reservation = await reserveSpend(admin, { userId: u.id, model: fixture.model, promptTokens: 400, maxTokens: 2048 })
+    const reservation = await reserveSpend(admin, { userId: u.id, model: fixture.model, promptTokens: 400, maxTokens: 2048, rung: 'R4', step: 'smoke' })
     expect(reservation.id).toBeTruthy()
     await settleSpend(admin, reservation, {
       model: fixture.model,

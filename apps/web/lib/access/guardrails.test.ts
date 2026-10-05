@@ -582,7 +582,7 @@ describe('demoSafeApiKeys — a demo can never draw on the OWNER’s allowance',
 
     // End to end through the real spend.ts: the reservation names the demo.
     const admin = fakeAdmin({})
-    await reserveSpend(admin, { userId: safe.userId!, model: 'anthropic/claude-haiku-4.5', promptTokens: 1000, maxTokens: 100 })
+    await reserveSpend(admin, { userId: safe.userId!, model: 'anthropic/claude-haiku-4.5', promptTokens: 1000, maxTokens: 100, rung: 'R4', step: 'test' })
     expect(reservedFor).toEqual([DEMO_ID])
   })
 
