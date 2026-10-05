@@ -66,9 +66,8 @@ const slugWords = (url: string): string => {
  * before the rest, and with targets set an entry whose slug names a different
  * role is dropped (an entry with no slug words cannot be judged and stays).
  */
-export function orderEntries(entries: SitemapEntry[], targets: ReaderTargets): SitemapEntry[] {
-  const mods = new Set(entries.map((e) => e.lastmod ?? ''))
-  const uniform = mods.size <= 1
+export function orderEntries(entries: SitemapEntry[], targets: ReaderTargets, now = Date.now()): SitemapEntry[] {
+  const uniform = !lastmodsMeanSomething(entries, now)
   const time = (e: SitemapEntry) => (e.lastmod ? Date.parse(e.lastmod) || 0 : 0)
   const rank = (e: SitemapEntry) => {
     const words = slugWords(e.url)
@@ -146,6 +145,7 @@ export async function readSitemapRoles(
     .filter((e) => !opts.skip.has(normalizeJobUrl(e.url)))
     .slice(0, opts.max ?? DETAIL_PER_READ[f.mode])
 
+  const stampsMean = lastmodsMeanSomething(entries)
   const checked: string[] = []
   const jobs: AtsJob[] = []
   let board: BoardRef | undefined
@@ -161,7 +161,7 @@ export async function readSitemapRoles(
         return
       }
       if (!res.ok) return
-      const job = jobFromDetail(res.finalUrl, readDetail(res.text, res.finalUrl), { postedAt: e.lastmod && !uniformStamp(entries) ? e.lastmod : undefined })
+      const job = jobFromDetail(res.finalUrl, readDetail(res.text, res.finalUrl), { postedAt: e.lastmod && stampsMean ? e.lastmod : undefined })
       checked.push(id)
       // A page that names no role is remembered as read and not kept. A role outside the person's targets is kept
       // (it cost a request already, and "All roles" shows it); the cap stores the ones inside the targets first.
@@ -176,7 +176,19 @@ export async function readSitemapRoles(
   return { jobs, listedIds, complete, checked, listed: entries.length, board }
 }
 
-/** True when the sitemap stamps every URL with one time: that is the fetch time, not a posting date. */
-function uniformStamp(entries: SitemapEntry[]): boolean {
-  return new Set(entries.map((e) => e.lastmod ?? '')).size <= 1
+const DAY = 86_400_000
+
+/**
+ * Do the sitemap's lastmod stamps say anything about the roles? Not when they are
+ * one time (or milliseconds apart), spread over less than a day, or mostly within
+ * ten minutes of now: that is the moment the sitemap was generated (Zalando stamps
+ * 179 roles within 1 ms of the fetch). Then a stamp is not a posting date, and
+ * order falls to the numeric id.
+ */
+export function lastmodsMeanSomething(entries: SitemapEntry[], now = Date.now()): boolean {
+  const times = entries.map((e) => (e.lastmod ? Date.parse(e.lastmod) : NaN)).filter((t) => !Number.isNaN(t))
+  if (times.length < 2) return false
+  if (Math.max(...times) - Math.min(...times) < DAY) return false
+  const recent = times.filter((t) => Math.abs(now - t) < 10 * 60_000).length
+  return recent / times.length < 0.9
 }

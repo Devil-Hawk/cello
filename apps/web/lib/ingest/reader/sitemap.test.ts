@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { fakeFetcher, fixture } from './fake-fetcher'
-import { isPostingUrl, orderEntries, readSitemapEntries, readSitemapRoles } from './sitemap'
+import { isPostingUrl, lastmodsMeanSomething, orderEntries, readSitemapEntries, readSitemapRoles } from './sitemap'
 import { NO_TARGETS, type ReaderTargets } from './targets'
 
 const targets: ReaderTargets = {
@@ -83,6 +83,46 @@ describe('sitemap tier: Walmart', () => {
     const read = await readSitemapRoles('https://careers.walmart.com', fakeFetcher(routes), { targets: NO_TARGETS, skip: new Set(), max: 5 })
     expect(read.jobs).toHaveLength(5)
     expect(read.jobs[0]).toMatchObject({ title: '(USA) Merchandising Lead', postedAt: '2026-10-02T23:55:26.015Z' })
+  })
+})
+
+describe('sitemap tier: a lastmod that is only the time the sitemap was made', () => {
+  const origin = 'https://jobs.zalando.com'
+  const routes = (): Record<string, string> => ({
+    [`${origin}/robots.txt`]: `User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n`,
+    [`${origin}/sitemap.xml`]: fixture('zalando-sitemap.xml'),
+  })
+
+  it('Zalando stamps every role within a millisecond of the fetch: that is not a posting date', async () => {
+    const { entries } = await readSitemapEntries(origin, fakeFetcher(routes()))
+    expect(entries.length).toBeGreaterThan(30)
+    expect(new Set(entries.map((e) => e.lastmod)).size).toBe(2)
+    expect(lastmodsMeanSomething(entries)).toBe(false)
+    // Read two weeks later it is still one moment, not a spread of dates.
+    expect(lastmodsMeanSomething(entries, Date.parse('2026-10-19T00:00:00Z'))).toBe(false)
+    // So order is by the numeric id, newest first.
+    const ids = orderEntries(entries, NO_TARGETS).map((e) => Number(/jobs\/(\d+)/.exec(e.url)![1]))
+    expect(ids).toEqual([...ids].sort((a, b) => b - a))
+  })
+
+  it('a role from such a sitemap is stored undated, never as posted today', async () => {
+    const r = routes()
+    const { entries } = await readSitemapEntries(origin, fakeFetcher(r))
+    for (const e of entries) r[e.url] = '<html><head><title>Data Engineer - Jobs at Zalando</title></head><body><h1>Data Engineer</h1></body></html>'
+    const read = await readSitemapRoles(origin, fakeFetcher(r), { targets: NO_TARGETS, skip: new Set(), max: 3 })
+    expect(read.jobs).toHaveLength(3)
+    expect(read.jobs.every((j) => j.postedAt === undefined)).toBe(true)
+  })
+
+  it('stamps spread over weeks are posting dates, unless they cluster at the fetch time', () => {
+    const now = Date.parse('2026-10-05T12:00:00Z')
+    const day = (n: number) => new Date(now - n * 86_400_000).toISOString()
+    const spread = [1, 4, 9, 20].map((n) => ({ url: `https://x.test/jobs/${4000000 + n}`, lastmod: day(n) }))
+    expect(lastmodsMeanSomething(spread, now)).toBe(true)
+    const clustered = [...Array.from({ length: 20 }, (_, i) => ({ url: `https://x.test/jobs/${5000000 + i}`, lastmod: new Date(now - i * 1000).toISOString() })), { url: 'https://x.test/jobs/4000001', lastmod: day(40) }]
+    expect(lastmodsMeanSomething(clustered, now)).toBe(false)
+    expect(lastmodsMeanSomething([{ url: 'https://x.test/jobs/4000001', lastmod: day(3) }], now)).toBe(false)
+    expect(lastmodsMeanSomething([{ url: 'https://x.test/jobs/4000001' }, { url: 'https://x.test/jobs/4000002' }], now)).toBe(false)
   })
 })
 
