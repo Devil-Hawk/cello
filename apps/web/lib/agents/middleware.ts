@@ -32,7 +32,7 @@ import {
   type AgentMiddleware,
 } from 'langchain'
 import { ToolMessage, type BaseMessage } from '@langchain/core/messages'
-import { interrupt } from '@langchain/langgraph'
+import { Command, interrupt, isCommand } from '@langchain/langgraph'
 import { scrubStructuralEscapes } from '@/lib/security/job-text'
 import { isTransient } from '@/lib/util/retry'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
@@ -195,18 +195,22 @@ function contentText(content: ToolMessage['content']): string {
  * cannot close it, show an image, or carry a data URL out.
  */
 export function celloUntrusted() {
+  const quote = (name: string, m: ToolMessage) =>
+    new ToolMessage({ content: quoteUntrusted(name, contentText(m.content)), tool_call_id: m.tool_call_id, name: m.name, status: m.status, artifact: m.artifact })
   return createMiddleware({
     name: 'CelloUntrusted',
     wrapToolCall: async (request, handler) => {
       const result = await handler(request)
-      if (!ToolMessage.isInstance(result) || !isUntrustedTool(request.toolCall.name)) return result
-      return new ToolMessage({
-        content: quoteUntrusted(request.toolCall.name, contentText(result.content)),
-        tool_call_id: result.tool_call_id,
-        name: result.name,
-        status: result.status,
-        artifact: result.artifact,
-      })
+      const name = request.toolCall.name
+      if (!isUntrustedTool(name)) return result
+      if (ToolMessage.isInstance(result)) return quote(name, result)
+      // The task tool returns a Command carrying the specialist's answer as a message in its state update.
+      const update = isCommand(result) ? (result.update as { messages?: unknown[] } | [string, unknown][] | undefined) : undefined
+      if (update && !Array.isArray(update) && Array.isArray(update.messages)) {
+        const messages = update.messages.map((m) => (ToolMessage.isInstance(m) ? quote(name, m) : m))
+        return new Command({ ...(result as Command), update: { ...update, messages } })
+      }
+      return result
     },
   })
 }

@@ -20,14 +20,25 @@ export interface AgentPersistence {
   saver: PostgresSaver
 }
 
-/** Open the checkpointer for one request and always close it. */
-export async function withAgentPersistence<T>(fn: (p: AgentPersistence) => Promise<T>): Promise<T> {
+export interface AgentPersistenceHandle extends AgentPersistence {
+  /** Close the pool. Always call it, success or failure. */
+  close: () => Promise<void>
+}
+
+/** Open the checkpointer for one request. The caller closes the handle; a streaming request needs this form because its work spans many yields. */
+export function openAgentPersistence(): AgentPersistenceHandle {
   const connectionString = resolvePoolerConnectionString()
   const pool = new Pool({ connectionString, max: 2, ssl: sslFor(connectionString) })
   const saver = new PostgresSaver(pool, undefined, { schema: AGENT_SCHEMA })
+  return { saver, close: async () => void (await pool.end().catch(() => undefined)) }
+}
+
+/** The same, for work that fits in one function: opened, used, always closed. */
+export async function withAgentPersistence<T>(fn: (p: AgentPersistence) => Promise<T>): Promise<T> {
+  const handle = openAgentPersistence()
   try {
-    return await fn({ saver })
+    return await fn(handle)
   } finally {
-    await pool.end()
+    await handle.close()
   }
 }

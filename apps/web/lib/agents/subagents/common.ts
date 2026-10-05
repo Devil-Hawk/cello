@@ -10,7 +10,7 @@
 
 import type { z } from 'zod'
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages'
-import type { RunnableConfig } from '@langchain/core/runnables'
+import { RunnableLambda, type RunnableConfig } from '@langchain/core/runnables'
 
 export interface BriefParse<T> {
   ok: boolean
@@ -70,6 +70,18 @@ export async function invokeSpecialist<TIn, TOut>(
   config?: RunnableConfig
 ): Promise<TOut> {
   return graph.invoke(input, { recursionLimit: 40, ...config })
+}
+
+/**
+ * A specialist graph as the runnable the task tool calls. Deep Agents merges every state key a
+ * subagent returns into its parent's state, and a specialist's working state (the brief, the
+ * draft, the review) is not the parent's, so only the last message goes back: the JSON summary.
+ */
+export function asSubAgentRunnable(graph: { invoke: (input: { messages: BaseMessage[] }, config?: RunnableConfig) => Promise<{ messages: BaseMessage[] }> }) {
+  return RunnableLambda.from(async (input: { messages: BaseMessage[] }, config?: RunnableConfig) => {
+    const out = await invokeSpecialist(graph, { messages: input.messages }, config)
+    return { messages: out.messages.slice(-1) }
+  })
 }
 
 /**

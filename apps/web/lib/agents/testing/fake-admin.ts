@@ -200,6 +200,27 @@ export function makeFakeAdmin(seed: Record<string, Row[]> = {}, config: Record<s
         filters.push((r) => r[col] != null && (r[col] as string | number) >= v)
         return api
       },
+      /** A PostgREST filter string such as "lease_until.is.null,lease_until.lt.2026-10-05T00:00:00Z". */
+      or(expr: string) {
+        const parts = expr.split(',').map((p) => {
+          const [col, op, ...rest] = p.split('.')
+          return { col, op, value: rest.join('.') }
+        })
+        filters.push((r) =>
+          parts.some(({ col, op, value }) => {
+            const v = cell(r, col)
+            if (op === 'is') return value === 'null' ? v == null : String(v) === value
+            if (op === 'eq') return String(v) === value
+            if (v == null) return false
+            if (op === 'lt') return String(v) < value
+            if (op === 'lte') return String(v) <= value
+            if (op === 'gt') return String(v) > value
+            if (op === 'gte') return String(v) >= value
+            return false
+          })
+        )
+        return api
+      },
       order(col: string, opts?: { ascending?: boolean }) {
         order = { col, asc: opts?.ascending ?? true }
         return api

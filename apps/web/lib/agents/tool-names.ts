@@ -34,6 +34,8 @@ export const UNTRUSTED_TOOL_NAMES: ReadonlySet<string> = new Set([
   'search_knowledge',
   'web_search',
   'read_page',
+  // What a specialist hands back about text it read. The orchestrator treats it as data too.
+  'task',
 ])
 
 /** User MCP tools are named mcp__<server>__<tool> (prefixed by the adapter). */

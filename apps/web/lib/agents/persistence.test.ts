@@ -22,7 +22,7 @@ vi.mock('@langchain/langgraph-checkpoint-postgres', () => ({
   },
 }))
 
-import { AGENT_SCHEMA, withAgentPersistence } from './persistence'
+import { AGENT_SCHEMA, openAgentPersistence, withAgentPersistence } from './persistence'
 
 beforeEach(() => {
   h.poolEnd.mockClear()
@@ -56,6 +56,14 @@ describe('withAgentPersistence', () => {
     expect(h.poolConfigs[0]).toMatchObject({ max: 2 })
     expect(h.saverConfigs[0]).toMatchObject({ schema: AGENT_SCHEMA })
     expect(Object.keys(seen)).toEqual(['saver'])
+  })
+
+  it('a streaming request opens the handle and closes it itself', async () => {
+    const handle = openAgentPersistence()
+    expect(Object.keys(handle).sort()).toEqual(['close', 'saver'])
+    expect(h.poolEnd).not.toHaveBeenCalled()
+    await handle.close()
+    expect(h.poolEnd).toHaveBeenCalledTimes(1)
   })
 
   it('refuses to run without a pooled database url', async () => {

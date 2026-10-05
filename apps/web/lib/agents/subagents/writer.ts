@@ -25,7 +25,7 @@ import type { LlmRunner, StepContext } from '@/lib/harness/types'
 import type { AgentContext } from '../context'
 import { addVersion, createArtifact, findArtifactByKey, getArtifact, type ArtifactType } from '../artifacts'
 import { ARTIFACT_WRITE_TYPES } from '../backends'
-import { activity, invokeSpecialist, lastHumanText, parseBrief, summaryMessage, type Fix } from './common'
+import { activity, asSubAgentRunnable, invokeSpecialist, lastHumanText, parseBrief, summaryMessage, type Fix } from './common'
 import { reviewDraft, type DraftKind, type JudgeDeps, type ReviewResult } from './review'
 
 export const WriterBriefSchema = z.object({
@@ -151,7 +151,8 @@ export function buildWriterGraph(deps: WriterDeps) {
       if (!got) return { result: fail({ error: `No artifact with id ${brief.artifact_id}.`, fix: 'Use an id returned by create_artifact or listed under /artifacts.' }) }
       if (!ARTIFACT_WRITE_TYPES.writer.includes(got.artifact.type)) return { result: fail({ error: `The writer does not revise a ${got.artifact.type.replace('_', ' ')}.`, fix: 'Revise only resumes, cover letters and outreach emails.' }) }
       previous = { text: got.version.content_text, version: got.version.version }
-      type = got.artifact.type === 'outreach_email' && brief.type === 'follow_up' ? 'follow_up' : (got.artifact.type as WriterBrief['type'])
+      const wasFollowUp = (got.version.content as { kind?: string } | null)?.kind === 'follow_up'
+      type = got.artifact.type === 'outreach_email' && (brief.type === 'follow_up' || wasFollowUp) ? 'follow_up' : (got.artifact.type as WriterBrief['type'])
       jobId = jobId ?? got.artifact.job_id ?? undefined
       contactId = contactId ?? got.artifact.contact_id ?? undefined
     }
@@ -414,5 +415,5 @@ export const WRITER_DESCRIPTION =
   'Returns a short JSON summary with the artifact id, a preview and the review result.'
 
 export function writerSubAgent(deps: WriterDeps): CompiledSubAgent {
-  return { name: 'writer', description: WRITER_DESCRIPTION, runnable: buildWriterGraph(deps) }
+  return { name: 'writer', description: WRITER_DESCRIPTION, runnable: asSubAgentRunnable(buildWriterGraph(deps) as never) }
 }

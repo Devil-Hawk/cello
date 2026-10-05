@@ -22,6 +22,8 @@ export interface AgentContext {
   threadId: string
   conversationId: string | null
   scheduledTaskId?: string | null
+  /** A read-only loop (the Researcher): tools that could save something ignore the request to. */
+  readOnly?: boolean
   /** The root task row for this request, parent of every branch row. */
   rootTaskId?: string | null
   autonomy: Autonomy

@@ -23,7 +23,7 @@ import { summarizeCounts } from '../fanout'
 import { shortlistFor, type RolePick } from '../scoring-port'
 import { sourceRoles, type SourceRolesResult } from '../sources'
 import { branchRecorder, finishTask, retitleTask, startTask, type TaskScope } from '../tasks'
-import { activity, invokeSpecialist, lastHumanText, parseBrief, summaryMessage, type Fix } from './common'
+import { activity, asSubAgentRunnable, invokeSpecialist, lastHumanText, parseBrief, summaryMessage, type Fix } from './common'
 
 export const ScoutBriefSchema = z.object({
   query: z.string().max(200).optional(),
@@ -235,5 +235,5 @@ export const SCOUT_DESCRIPTION =
   'Returns a short JSON summary with the picks and a saved shortlist artifact. It never contacts anyone.'
 
 export function scoutSubAgent(deps: ScoutDeps): CompiledSubAgent {
-  return { name: 'scout', description: SCOUT_DESCRIPTION, runnable: buildScoutGraph(deps) }
+  return { name: 'scout', description: SCOUT_DESCRIPTION, runnable: asSubAgentRunnable(buildScoutGraph(deps) as never) }
 }

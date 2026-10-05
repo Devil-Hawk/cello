@@ -282,6 +282,10 @@ export class ReadOnlySkills implements BackendProtocolV2 {
   glob(pattern: string, dir?: string) {
     return this.fs.glob(pattern, dir)
   }
+  // The skills middleware loads every SKILL.md through downloadFiles.
+  async downloadFiles(paths: string[]) {
+    return this.fs.downloadFiles ? this.fs.downloadFiles(paths) : paths.map((p) => ({ path: p, content: null, error: 'file_not_found' as const }))
+  }
   async write() {
     return { error: READ_ONLY_SKILLS }
   }

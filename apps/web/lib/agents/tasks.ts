@@ -39,6 +39,8 @@ function log(what: string, error: unknown) {
 
 /** Add a task row in the working state. Returns its id, or null when the row could not be written. */
 export async function startTask(scope: TaskScope, input: StartTaskInput): Promise<string | null> {
+  // A call over MCP has no thread, so there is no tree to show.
+  if (!scope.threadId) return null
   try {
     const { data, error } = await scope.admin
       .from('agent_tasks')
