@@ -52,6 +52,10 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     reason:
       "the person's own Settings -> Targeting values (a few slugs or ISO codes each), not an ownership fence or an id list.",
   },
+  'apps/web/lib/agents/approvals.ts': {
+    calls: [".in('status', from)"],
+    reason: 'from is a list of approval statuses, at most the five values of the status enum: a fixed set, and the row is already fenced by id and user_id.',
+  },
   'apps/web/lib/access/demo-wipe.ts': {
     calls: [".in('user_id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",

@@ -3,7 +3,9 @@ import { FetchStreamTransport } from '@langchain/langgraph-sdk/ui'
 import { AGENT_COPY } from './copy'
 import { agentFetch, errorMessage } from './client'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 // HTTP/2: the status line carries no text, so statusText is empty.
 const http2 = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, statusText: '', headers: { 'content-type': 'application/json' } })
