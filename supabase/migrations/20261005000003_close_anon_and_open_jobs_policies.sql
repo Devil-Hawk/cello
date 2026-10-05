@@ -17,6 +17,11 @@
 --    uses the service key. profiles already had anon revoked (20260803000005)
 --    and the app works, which is the same proof for the rest.
 --
+-- Known leftover: Supabase also installs default privileges for the
+-- supabase_admin role that grant anon access to objects supabase_admin
+-- creates. The migration role cannot alter those and the app never creates
+-- objects as supabase_admin, so they are left alone on purpose.
+--
 -- All statements are idempotent and delete no data.
 
 -- The own-company policies must exist before the open ones go, or signed-in
@@ -77,7 +82,9 @@ begin
     where polrelid = 'public.jobs'::regclass
       and polpermissive
       and polroles = '{0}'::oid[]
-      and (pg_get_expr(polqual, polrelid) = 'true' or pg_get_expr(polwithcheck, polrelid) = 'true')
+      -- true, (true), 1 = 1 and the like; a real predicate never matches
+      and (coalesce(pg_get_expr(polqual, polrelid), '') ~ '^\(*\s*(true|(\d+) = \2)\s*\)*$'
+           or coalesce(pg_get_expr(polwithcheck, polrelid), '') ~ '^\(*\s*(true|(\d+) = \2)\s*\)*$')
   ) then
     raise exception 'a permissive jobs policy for PUBLIC with a true predicate remains';
   end if;

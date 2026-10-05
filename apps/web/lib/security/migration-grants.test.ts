@@ -16,8 +16,11 @@ import path from 'node:path'
 const MIGRATIONS_DIR = path.resolve(__dirname, '../../../../supabase/migrations')
 const LOCKDOWN_LAST = '20261005000003'
 
+// One left-to-right pass, so a `--` or `/*` inside a '...' literal is kept as
+// text and cannot swallow the rest of the line, and a quote inside a comment
+// cannot open a literal.
 function stripComments(sql: string): string {
-  return sql.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ')
+  return sql.replace(/'(?:[^']|'')*'|--[^\n]*|\/\*[\s\S]*?\*\//g, (m) => (m[0] === "'" ? m : ' '))
 }
 
 /** Returns each GRANT statement whose recipient list names anon or public. */
@@ -26,11 +29,12 @@ export function grantsToAnonOrPublic(sql: string): string[] {
   const hits: string[] = []
   for (const m of text.matchAll(/\bgrant\b([^;]*)/g)) {
     const stmt = m[1]
-    // Everything after the LAST ` to ` is the recipient list; the object part
-    // before it can legitimately say `schema public`.
-    const idx = stmt.lastIndexOf(' to ')
-    if (idx === -1) continue
-    const recipients = stmt.slice(idx + 4).split(/\bwith\b/)[0]
+    // Everything after the LAST word `to` is the recipient list (no space is
+    // needed after it: to"anon" is valid); the object part before it can
+    // legitimately say `schema public`.
+    const parts = stmt.split(/\bto\b/)
+    if (parts.length < 2) continue
+    const recipients = parts.pop()!.split(/\bwith\b/)[0]
     if (/\b(anon|public)\b/.test(recipients)) hits.push(`grant${stmt}`.replace(/\s+/g, ' ').trim())
   }
   return hits
@@ -52,6 +56,12 @@ describe('grantsToAnonOrPublic (the scanner itself)', () => {
     'grant select on public.x\tto\tanon;',
     'alter default privileges for role postgres in schema public\ngrant all on tables\nto anon;',
     "execute format('grant all on %I to anon', t);",
+    'grant select on public.x to"anon";',
+    'grant select on public.x to"public";',
+    'grant select on public.x to/**/anon;',
+    "comment on table t is 'a--b'; grant select on public.x to anon;",
+    "select '--'; grant select on public.x to anon;",
+    "select '/*'; grant select on public.x to anon; select '*/';",
   ])('flags %s', (sql) => {
     expect(grantsToAnonOrPublic(sql)).toHaveLength(1)
   })
@@ -63,6 +73,7 @@ describe('grantsToAnonOrPublic (the scanner itself)', () => {
     'revoke execute on function public.f() from public, anon;',
     '-- grant all on public.x to anon',
     '/* grant all on public.x to public; */ select 1;',
+    "-- don't grant all on public.x to anon\nselect 1;",
   ])('ignores %s', (sql) => {
     expect(grantsToAnonOrPublic(sql)).toEqual([])
   })
