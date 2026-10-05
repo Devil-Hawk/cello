@@ -46,7 +46,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { DemoAccessError, demoSessionGate, type DemoProfileFacts } from './guardrails'
 import { applyDemoKeyGuards } from '@/lib/harness/keys'
-import { demoWindowGate } from '@/middleware'
+import { demoWindowGate, isCacheableRead } from '@/middleware'
 import type { DecryptedApiKeys, ProviderPreferences } from '@/lib/harness/types'
 
 const WEB_ROOT = process.cwd()
@@ -569,6 +569,23 @@ const WINDOW_CASES: Array<[string, DemoProfileFacts | null]> = [
   ['a demo whose flag was lost but is still in window', { is_demo: false, demo_expires_at: AT(HOUR_MS) }],
   ['a demo whose flag was lost and is out of window', { is_demo: false, demo_expires_at: AT(-HOUR_MS) }],
 ]
+
+describe('the session boundary never caches a demo, so revoking ends a session on its next request', () => {
+  it.each([
+    ['a live demo', { kind: 'facts', facts: { is_demo: true, demo_expires_at: AT(HOUR_MS) } }, false],
+    ['a demo whose flag was lost but kept a deadline', { kind: 'facts', facts: { is_demo: false, demo_expires_at: AT(HOUR_MS) } }, false],
+    ['a demo with the deadline already pulled to now', { kind: 'facts', facts: { is_demo: true, demo_expires_at: AT(-1) } }, false],
+    ['an unreadable profile', { kind: 'unreadable' }, false],
+    ['an ordinary account', { kind: 'facts', facts: { is_demo: false, demo_expires_at: null } }, true],
+    ['a schema with no demo columns', { kind: 'none' }, true],
+  ] as const)('%s', (_label, read, cacheable) => {
+    expect(isCacheableRead(read as never)).toBe(cacheable)
+  })
+
+  it('cacheSet goes through that decision', () => {
+    expect(read(MIDDLEWARE)).toMatch(/function cacheSet[\s\S]{0,400}isCacheableRead\(read\)/)
+  })
+})
 
 describe('the session boundary enforces the SAME deadline as the guardrails', () => {
   it.each(WINDOW_CASES)('middleware and demoSessionGate agree about %s', (_label, facts) => {
