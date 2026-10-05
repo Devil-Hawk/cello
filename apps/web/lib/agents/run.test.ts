@@ -80,7 +80,7 @@ describe('a normal turn', () => {
     const w = world()
     const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('Here are two roles.')] })
     const { events, result } = await run(w, model)
-    expect(events[0]).toEqual({ event: 'metadata', data: { run_id: 'trace-1', thread_id: 't1' } })
+    expect(events[0]).toEqual({ event: 'metadata', data: { run_id: 'trace-1', thread_id: 't1', conversation_id: 'c1' } })
     const names = new Set(events.map((e) => e.event.split('|')[0]))
     for (const n of ['values', 'updates', 'messages']) expect(names.has(n)).toBe(true)
     expect(result).toMatchObject({ outcome: 'done', finalText: 'Here are two roles.' })

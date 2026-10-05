@@ -43,6 +43,8 @@ export interface TurnRequest {
   emit?: (event: WireEvent) => void
   sessionId?: string | null
   traceName?: string
+  /** What the person sees for the task: the schedule's name for an occurrence. Defaults to the first words of the message. */
+  title?: string
   /** Test seams. */
   deps?: {
     persistence?: AgentPersistenceHandle
@@ -68,6 +70,8 @@ export interface RunnableAgent {
     next: readonly string[]
     tasks: ReadonlyArray<{ interrupts?: ReadonlyArray<{ value?: unknown }> }>
   }>
+  /** Add to the saved conversation without a model call: how a scheduled task leaves its result. */
+  updateState: (config: Record<string, unknown>, values: unknown, asNode?: string) => Promise<unknown>
 }
 
 /** langchain's own text when the model call limit ends a loop early. */
@@ -105,12 +109,12 @@ export async function executeTurn(req: TurnRequest): Promise<TurnResult> {
   let rootTaskId: string | null = null
   let result: TurnResult = { outcome: 'failed', finalText: '' }
 
-  emit({ event: 'metadata', data: { run_id: ctx.traceId, thread_id: ctx.threadId } })
+  emit({ event: 'metadata', data: { run_id: ctx.traceId, thread_id: ctx.threadId, ...(ctx.conversationId ? { conversation_id: ctx.conversationId } : {}) } })
 
   try {
     // The root task row: reuse the one this thread already has when resuming, so the tree stays one tree.
     const existing = req.mode.kind === 'input' ? null : await openRootTask(ctx)
-    rootTaskId = existing ?? (await startTask(scope, { agent: 'cello', title: req.mode.kind === 'input' ? taskTitle(req.mode.text) : 'Working on your request' }))
+    rootTaskId = existing ?? (await startTask(scope, { agent: 'cello', title: req.title ?? (req.mode.kind === 'input' ? taskTitle(req.mode.text) : 'Working on your request') }))
     ctx.rootTaskId = rootTaskId
     if (existing) await finishWorking(ctx, existing)
     stopHeartbeat = startHeartbeat(ctx.admin, rootTaskId, () => renewLease(ctx.admin, lease))
