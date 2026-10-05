@@ -31,7 +31,7 @@ import pRetry from 'p-retry'
 import type { DecryptedApiKeys, LlmResult, LlmRunOptions } from './types'
 import { assertWithinBudget, estimateCostDetails, estimateCostUsd, hasListedPrice, recordSpend } from './spend'
 import { createAdminClient } from './supabase-admin'
-import { resolveProviderId, MissingKeyError } from './providers'
+import { resolveProviderId, resolveLocalCliId, MissingKeyError } from './providers'
 import { callOpenRouter, DEFAULT_MODEL } from './providers/openrouter'
 import { callLocalCli } from './providers/local-cli'
 import { callLocalServer } from './providers/local-server'
@@ -76,12 +76,22 @@ function requestMessages(opts: LlmRunOptions): { role: string; content: string }
   return input
 }
 
+/** The model a call was aimed at, for a call that failed before any result
+ *  named it (so errors can be grouped by model). DEFAULT_MODEL is only the
+ *  OpenRouter default; the local backends name their own. */
+function requestedModel(opts: LlmRunOptions, apiKeys: DecryptedApiKeys, provider: string): string {
+  if (provider === 'local-cli') return `local-cli/${resolveLocalCliId(apiKeys.provider?.localCli)}`
+  if (provider === 'local-server') return opts.model || apiKeys.provider?.localServerModel || apiKeys.model || 'local-server'
+  return opts.model || apiKeys.model || DEFAULT_MODEL
+}
+
 /** The Langfuse generation for one callLlm: model, parameters, usage, cost
  *  and (capture on) the prompt and the reply. Cost comes from OUR price
  *  table. Unmetered backends (local CLI, local server) get explicit zeros so
  *  Langfuse does not infer a price from its own model table. */
 function generationPayload(
   opts: LlmRunOptions,
+  apiKeys: DecryptedApiKeys,
   provider: string,
   metered: boolean,
   capture: boolean,
@@ -100,12 +110,14 @@ function generationPayload(
     metadata: {
       provider,
       metered,
+      // Local backends report char/4 estimates, not provider token counts.
+      ...(provider !== 'openrouter' ? { usage_estimated: true } : {}),
       ...(opts.promptRef ? { prompt_name: opts.promptRef.name } : {}),
       ...(opts.promptRef?.hash ? { prompt_hash: opts.promptRef.hash } : {}),
     },
     ...(capture ? { input: requestMessages(opts) } : {}),
   }
-  if (!result) return lf
+  if (!result) return { ...lf, model: requestedModel(opts, apiKeys, provider) }
   return {
     ...lf,
     model: result.model,
@@ -219,12 +231,12 @@ export async function callLlm(
                 userId: apiKeys.userId,
               }
             : {
-                model: effectiveOpts.model || apiKeys.model || DEFAULT_MODEL,
+                model: requestedModel(effectiveOpts, apiKeys, provider),
                 metered,
                 userId: apiKeys.userId,
                 error: err instanceof Error ? err.message : String(err),
               },
-        (r, _err, capture) => generationPayload(effectiveOpts, provider, metered, capture, r)
+        (r, _err, capture) => generationPayload(effectiveOpts, apiKeys, provider, metered, capture, r)
       )
     } finally {
       // Only the invocation that CREATED this buffer flushes it — a call

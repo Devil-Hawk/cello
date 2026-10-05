@@ -40,6 +40,10 @@ const callLocalServerMock = vi.fn()
 vi.mock('./providers/local-server', () => ({
   callLocalServer: (...args: unknown[]) => callLocalServerMock(...args),
 }))
+const callLocalCliMock = vi.fn()
+vi.mock('./providers/local-cli', () => ({
+  callLocalCli: (...args: unknown[]) => callLocalCliMock(...args),
+}))
 const embedMock = vi.fn()
 vi.mock('./providers/embeddings', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./providers/embeddings')>()
@@ -218,6 +222,32 @@ describe('callLlm -> trace_spans + Langfuse generation', () => {
     expect(JSON.parse(String(attr(g, 'langfuse.observation.input')))[0].content).toContain('Tailor my CV')
     expect(attr(g, 'langfuse.observation.output')).toBeUndefined()
     expect(insertCalls[0][0]).toMatchObject({ status: 'error' })
+  })
+
+  it('a failed call still names the model it asked for, per backend, so errors group by model', async () => {
+    configure()
+    callOpenRouterMock.mockRejectedValue(Object.assign(new Error('nope'), { status: 404 }))
+    await expect(callLlm(keys, { prompt: 'x', model: 'invalid/model-xyz' })).rejects.toThrow()
+    expect(attr(gen(), 'langfuse.observation.model.name')).toBe('invalid/model-xyz')
+    expect(insertCalls[0][0]).toMatchObject({ attributes: { model: 'invalid/model-xyz' } })
+
+    exporter.reset()
+    callOpenRouterMock.mockRejectedValue(Object.assign(new Error('nope'), { status: 404 }))
+    await expect(callLlm(keys, { prompt: 'x' })).rejects.toThrow()
+    expect(attr(gen(), 'langfuse.observation.model.name')).toBe('anthropic/claude-sonnet-5')
+
+    exporter.reset()
+    callLocalCliMock.mockRejectedValue(Object.assign(new Error('refused'), { status: 400 }))
+    const cli = { userId: 'user-1', isDemo: false, provider: { active: 'local-cli', localCli: 'codex' } } as unknown as DecryptedApiKeys
+    await expect(callLlm(cli, { prompt: 'x', model: 'ignored/by-cli' })).rejects.toThrow()
+    expect(attr(gen(), 'langfuse.observation.model.name')).toBe('local-cli/codex')
+    expect(attr(gen(), 'langfuse.observation.metadata.usage_estimated')).toBe('true')
+  })
+
+  it('openrouter usage is real: no usage_estimated flag', async () => {
+    configure()
+    await callLlm(keys, { prompt: 'x' })
+    expect(attr(gen(), 'langfuse.observation.metadata.usage_estimated')).toBeUndefined()
   })
 
   it('unconfigured: nothing exported, Postgres row unchanged', async () => {
