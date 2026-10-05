@@ -50,6 +50,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { createClient } from '@/lib/supabase/client'
+import { openRolesOnly } from '@/lib/jobs/freshness'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import type { ReviewQueueItem } from '@/lib/notifications/queue'
 
@@ -185,11 +186,13 @@ async function fetchFeed(): Promise<NotificationItem[]> {
       .ilike('type', '%interview%')
       .order('occurred_at', { ascending: false })
       .limit(LIMITS.interview),
-    supabase
-      .from('jobs')
-      .select('id, title, match_score, posted_at, discovered_at, companies(name)')
-      .eq('is_new', true)
-      .gte('match_score', 70)
+    openRolesOnly(
+      supabase
+        .from('jobs')
+        .select('id, title, match_score, posted_at, discovered_at, companies(name)')
+        .eq('is_new', true)
+        .gte('match_score', 70)
+    )
       .order('match_score', { ascending: false })
       .limit(LIMITS.jobs),
   ])
