@@ -152,6 +152,34 @@ describe('callEmbedding — chokepoint shape', () => {
     expect(callLocalServerEmbeddingMock).toHaveBeenCalledTimes(1)
   })
 
+  it('the local-server leg writes an R2 $0 row; openai-direct makes no ledger call', async () => {
+    callOpenAiDirectEmbeddingMock.mockResolvedValue(FAKE_RESULT)
+    await callEmbedding({ openai: 'sk', userId: 'user-1' }, { texts: ['hello'] })
+    expect(reserveSpendMock).not.toHaveBeenCalled()
+
+    callLocalServerEmbeddingMock.mockResolvedValue(FAKE_RESULT)
+    const local: DecryptedApiKeys = {
+      userId: 'user-1',
+      provider: {
+        active: 'openrouter',
+        localCli: 'claude',
+        localServerBaseUrl: 'http://localhost:11434/v1',
+        localServerModel: '',
+        localServerEmbeddingModel: 'nomic-embed-text',
+      },
+    }
+    await callEmbedding(local, { texts: ['hello'], name: 'embed-resume' })
+    expect(reserveSpendMock).toHaveBeenCalledTimes(1)
+    expect(reserveSpendMock.mock.calls[0][1]).toMatchObject({ rung: 'R2', model: 'nomic-embed-text', step: 'embed-resume' })
+    expect(settleSpendMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('the openrouter leg reserves R4 under the default step embed-texts', async () => {
+    callOpenRouterEmbeddingMock.mockResolvedValue(FAKE_RESULT)
+    await callEmbedding(meteredKeys, { texts: ['hello'] })
+    expect(reserveSpendMock.mock.calls[0][1]).toMatchObject({ rung: 'R4', step: 'embed-texts' })
+  })
+
   it('throws MissingKeyError when nothing is configured at all', async () => {
     await expect(callEmbedding({}, { texts: ['hello'] })).rejects.toBeInstanceOf(MissingKeyError)
     expect(callOpenRouterEmbeddingMock).not.toHaveBeenCalled()

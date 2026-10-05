@@ -28,7 +28,7 @@
 // what it does and doesn't honor.
 
 import pRetry from 'p-retry'
-import type { DecryptedApiKeys, LlmResult, LlmRunOptions } from './types'
+import type { AdminClient, DecryptedApiKeys, LlmResult, LlmRunOptions } from './types'
 import {
   BudgetCapError,
   DEFAULT_MAX_TOKENS,
@@ -39,6 +39,7 @@ import {
   reserveSpend,
   settleSpend,
   type SpendReservation,
+  rungFor,
 } from './spend'
 import { createAdminClient } from './supabase-admin'
 import { resolveProviderId, resolveLocalCliId, MissingKeyError } from './providers'
@@ -89,6 +90,17 @@ function requestMessages(opts: LlmRunOptions): { role: string; content: string }
 /** The model a call was aimed at, for a call that failed before any result
  *  named it (so errors can be grouped by model). DEFAULT_MODEL is only the
  *  OpenRouter default; the local backends name their own. */
+/** A ledger client for a call that costs nothing. Without a service key (a
+ *  self-hosted setup that never configured one) it is null and the call carries on
+ *  unrecorded: bookkeeping never fails a free call. */
+function tryAdminClient(): AdminClient | null {
+  try {
+    return createAdminClient()
+  } catch {
+    return null
+  }
+}
+
 function requestedModel(opts: LlmRunOptions, apiKeys: DecryptedApiKeys, provider: string): string {
   if (provider === 'local-cli') return `local-cli/${resolveLocalCliId(apiKeys.provider?.localCli)}`
   if (provider === 'local-server') return opts.model || apiKeys.provider?.localServerModel || apiKeys.model || 'local-server'
@@ -186,12 +198,13 @@ export async function callLlm(
 ): Promise<LlmResult> {
   const provider = resolveProviderId(apiKeys.provider?.active)
 
-  // Only the metered path is capped. A local server costs nothing per token,
-  // and a signed-in CLI bills a flat subscription, so charging them against a
-  // dollar budget would be wrong, and would push users off the free options
-  // exactly when they are trying to conserve credit.
+  // Only the metered path is capped in dollars. A local server costs nothing per
+  // token, and a signed-in CLI bills a flat subscription, so charging them against
+  // a dollar budget would be wrong, and would push users off the free options
+  // exactly when they are trying to conserve credit. They still write a $0 ledger
+  // row per attempt (see spend.ts), so the daily free count has something to read.
   const metered = provider === 'openrouter' && Boolean(apiKeys.userId)
-  const admin = metered ? createAdminClient() : null
+  const admin = metered ? createAdminClient() : apiKeys.userId ? tryAdminClient() : null
 
   // Apply the user's default reasoning effort only when the call didn't
   // already ask for one: an explicit opts.reasoning (including {effort:
@@ -212,27 +225,36 @@ export async function callLlm(
   // nothing honest to record.
   const scope = apiKeys.userId ? acquireSpanScope(apiKeys.userId, apiKeys.isDemo) : null
 
-  // One provider attempt. A metered attempt reserves its worst case BEFORE the
-  // request (a BudgetCapError means the provider is never called) and settles the
-  // provider-reported cost AFTER it. Each retry is its own reservation, so a
+  // One provider attempt. Every attempt with a user reserves BEFORE the request and
+  // settles AFTER it. A paid attempt reserves its worst case (a BudgetCapError means
+  // the provider is never called) and settles the provider-reported cost; a free or
+  // local attempt reserves and settles $0. Each retry is its own reservation, so a
   // retried-away attempt that failed with an HTTP status settles at zero.
   let attempt = 0
   const runAttempt = async (): Promise<LlmResult> => {
     attempt += 1
-    if (provider === 'local-cli') return callLocalCli(apiKeys, effectiveOpts, signal)
-    if (provider === 'local-server') return callLocalServer(apiKeys, effectiveOpts, signal)
-    if (!admin || !apiKeys.userId) return callOpenRouter(apiKeys, effectiveOpts, signal)
+    const call = () =>
+      provider === 'local-cli'
+        ? callLocalCli(apiKeys, effectiveOpts, signal)
+        : provider === 'local-server'
+          ? callLocalServer(apiKeys, effectiveOpts, signal)
+          : callOpenRouter(apiKeys, effectiveOpts, signal)
+    if (!admin || !apiKeys.userId) return call()
 
     const messages = requestMessages(effectiveOpts)
+    const model = requestedModel(effectiveOpts, apiKeys, provider)
     const reservation = await reserveSpend(admin, {
       userId: apiKeys.userId,
-      model: requestedModel(effectiveOpts, apiKeys, provider),
+      model,
       promptTokens: estimatePromptTokens(messages.map((m) => m.content).join('\n'), messages.length),
       maxTokens: effectiveOpts.maxTokens ?? DEFAULT_MAX_TOKENS,
+      rung: rungFor(provider, model),
+      step: effectiveOpts.name ?? 'call-llm',
+      door: effectiveOpts.door,
       traceId: scope?.buffer.traceId,
     })
     try {
-      const out = await callOpenRouter(apiKeys, effectiveOpts, signal)
+      const out = await call()
       await settleSpend(admin, reservation, {
         model: out.model,
         promptTokens: out.promptTokens,
@@ -295,7 +317,10 @@ export async function callLlm(
       // Only the invocation that CREATED this buffer flushes it — a call
       // nested inside an ambient graph/unit context leaves flushing to
       // whichever of those created the buffer (see acquireSpanScope's doc).
-      if (scope.owns) await scope.buffer.flush(admin ?? createAdminClient())
+      // Without a service key (nothing to write spans with either) the call still
+      // returns; only the trace is dropped.
+      const flushClient = admin ?? tryAdminClient()
+      if (scope.owns && flushClient) await scope.buffer.flush(flushClient)
     }
   } else {
     result = await runProviderCall()
@@ -409,7 +434,7 @@ export function isEmbeddingFallback(err: unknown): boolean {
  *  metered (for the Langfuse observation). */
 async function embedWithFallback(
   apiKeys: DecryptedApiKeys,
-  opts: { texts: string[]; model?: string },
+  opts: { texts: string[]; model?: string; name?: string },
   signal?: AbortSignal
 ): Promise<{ result: EmbedBatchResult; provider: string; metered: boolean }> {
   const attempts: Array<{ provider: 'openrouter' | 'openai-direct' | 'local-server'; run: () => Promise<EmbedBatchResult> }> = []
@@ -434,12 +459,15 @@ async function embedWithFallback(
   let lastErr: unknown
   for (const attempt of attempts) {
     const metered = attempt.provider === 'openrouter' && Boolean(apiKeys.userId)
-    const admin = metered ? createAdminClient() : null
+    // The OpenRouter leg is paid (R4) and the local-server leg is local (R2, $0).
+    // OpenAI-direct is the person's own key and stays outside the ledger.
+    const rung = attempt.provider === 'openrouter' ? 'R4' : attempt.provider === 'local-server' ? 'R2' : null
+    const admin = !rung || !apiKeys.userId ? null : metered ? createAdminClient() : tryAdminClient()
 
     let result: EmbedBatchResult
     let reservation: SpendReservation | undefined
     try {
-      if (admin && apiKeys.userId) {
+      if (admin && apiKeys.userId && rung) {
         // Reserve BEFORE spending, same reason as callLlm: a request already
         // made cannot be refunded. Inside the try (unlike callLlm, which has
         // only one backend to fail over to): a BudgetCapError on this leg is
@@ -448,9 +476,11 @@ async function embedWithFallback(
         // OpenRouter cap must not block them. Embeddings have no output tokens.
         reservation = await reserveSpend(admin, {
           userId: apiKeys.userId,
-          model: opts.model || EMBEDDING_MODEL,
+          model: attempt.provider === 'local-server' ? apiKeys.provider?.localServerEmbeddingModel || 'local-server' : opts.model || EMBEDDING_MODEL,
           promptTokens: estimatePromptTokens(opts.texts.join('\n'), opts.texts.length),
           maxTokens: 0,
+          rung,
+          step: opts.name ?? 'embed-texts',
         })
       }
       result = await attempt.run()

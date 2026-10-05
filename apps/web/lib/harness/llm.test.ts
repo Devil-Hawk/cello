@@ -233,10 +233,9 @@ describe('callLlm emits an lib/trace/spans.ts "llm" span (Step 2)', () => {
     }
     await callLlm(localKeys, { prompt: 'hi' })
 
-    // Local providers are never budget-checked (spend.ts's own doc: a local
-    // server costs nothing per token) — the span still fires regardless.
-    expect(reserveSpendMock).not.toHaveBeenCalled()
-    expect(settleSpendMock).not.toHaveBeenCalled()
+    // A local server is never charged, but its attempt still writes a $0 R2 row.
+    expect(reserveSpendMock).toHaveBeenCalledTimes(1)
+    expect(reserveSpendMock.mock.calls[0][1]).toMatchObject({ rung: 'R2' })
     expect(inserted).toHaveLength(1)
     expect(inserted[0]).toMatchObject({ kind: 'llm', status: 'ok', attributes: expect.objectContaining({ metered: false }) })
   })
@@ -266,5 +265,75 @@ describe('callLlm emits an lib/trace/spans.ts "llm" span (Step 2)', () => {
 
     expect(createAdminClientMock).not.toHaveBeenCalled()
     expect(inserted).toHaveLength(0)
+  })
+})
+
+describe('callLlm ledger rows for free and local calls', () => {
+  const localKeys: DecryptedApiKeys = {
+    userId: 'user-1',
+    provider: { active: 'local-server', localCli: 'claude', localServerBaseUrl: 'http://localhost:1234', localServerModel: 'llama3.1' },
+  }
+  const freeKeys: DecryptedApiKeys = { openrouter: 'fake-key', userId: 'user-1' }
+
+  beforeEach(() => {
+    callOpenRouterMock.mockReset()
+    callLocalServerMock.mockReset()
+    reserveSpendMock.mockReset().mockResolvedValue(RESERVATION)
+    settleSpendMock.mockReset().mockResolvedValue(undefined)
+    createAdminClientMock.mockReset().mockReturnValue({ __fake: 'admin-client' })
+  })
+
+  it('a local-server call with a user makes one R2 reserve named for the step, and one settle', async () => {
+    callLocalServerMock.mockResolvedValueOnce(FAKE_RESULT)
+    await callLlm(localKeys, { prompt: 'hi', name: 'classify-email' })
+    expect(reserveSpendMock).toHaveBeenCalledTimes(1)
+    expect(reserveSpendMock.mock.calls[0][1]).toMatchObject({ userId: 'user-1', model: 'llama3.1', rung: 'R2', step: 'classify-email' })
+    expect(settleSpendMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a free OpenRouter model reserves R3, and an unnamed call uses the step call-llm', async () => {
+    callOpenRouterMock.mockResolvedValueOnce(FAKE_RESULT)
+    await callLlm(freeKeys, { prompt: 'hi', model: 'google/gemma-4-31b-it:free' })
+    expect(reserveSpendMock.mock.calls[0][1]).toMatchObject({ rung: 'R3', step: 'call-llm', model: 'google/gemma-4-31b-it:free' })
+  })
+
+  it('a paid model reserves R4', async () => {
+    callOpenRouterMock.mockResolvedValueOnce(FAKE_RESULT)
+    await callLlm(freeKeys, { prompt: 'hi', model: 'anthropic/claude-haiku-4.5' })
+    expect(reserveSpendMock.mock.calls[0][1]).toMatchObject({ rung: 'R4' })
+  })
+
+  it('opts.door reaches the reservation', async () => {
+    callLocalServerMock.mockResolvedValueOnce(FAKE_RESULT)
+    await callLlm(localKeys, { prompt: 'hi', door: 'chat' })
+    expect(reserveSpendMock.mock.calls[0][1]).toMatchObject({ door: 'chat' })
+  })
+
+  it('two attempts write two rows', async () => {
+    callOpenRouterMock.mockRejectedValueOnce(fakeProviderError(429)).mockResolvedValueOnce(FAKE_RESULT)
+    await callLlm(freeKeys, { prompt: 'hi', model: 'x/y:free' })
+    expect(reserveSpendMock).toHaveBeenCalledTimes(2)
+    expect(settleSpendMock.mock.calls[0][2]).toMatchObject({ failed: { status: 429 } })
+  })
+
+  it('a ledger outage on a free call still returns the model text', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const actual = await vi.importActual<typeof import('./spend')>('./spend')
+    reserveSpendMock.mockImplementation((admin: never, input: never) => actual.reserveSpend(admin, input))
+    createAdminClientMock.mockReturnValue({ rpc: async () => ({ error: { message: 'connection refused' } }) })
+    callLocalServerMock.mockResolvedValueOnce(FAKE_RESULT)
+    const out = await callLlm(localKeys, { prompt: 'hi' })
+    expect(out.content).toBe('hello')
+    spy.mockRestore()
+  })
+
+  it('a missing service key on a local call carries on without a ledger', async () => {
+    createAdminClientMock.mockImplementation(() => {
+      throw new Error('no service key')
+    })
+    callLocalServerMock.mockResolvedValueOnce(FAKE_RESULT)
+    const out = await callLlm(localKeys, { prompt: 'hi' })
+    expect(out.content).toBe('hello')
+    expect(reserveSpendMock).not.toHaveBeenCalled()
   })
 })
