@@ -24,6 +24,7 @@ may read:
 | Question | Answered by |
 | --- | --- |
 | How much money may this session spend? | `demoSafeApiKeys`, `demoProfilePreferences`, `demoSettingsGate` + `lib/harness/spend.ts` |
+| How many free or local calls did it make? | `llm_spend`: free (R3) and local (R2) calls write a $0 row with their rung and step |
 | May it deliver an email? | `demoSendGate` |
 | Is it still inside its 72 hours? | `demoSessionGate` (mirrored in `middleware.ts`) |
 
