@@ -1,45 +1,32 @@
 # Cello Scrapers
 
-AI-powered job board scraping for Cello.
+Python helpers for the parts of job ingestion that need a browser.
 
-## Features
+Job ingestion itself is `apps/web/scripts/ingest.ts`: it reads each company's
+job board API first and falls back to the careers page. The only thing this
+package does for it is fetch a page the way a browser shows it:
 
-- **Intelligent Scraping**: Uses LLM to understand career page structure
-- **No Brittle Selectors**: Works with any career page format
-- **Self-Healing**: Adapts when site structure changes
-- **Pagination Support**: Automatically follows "next" links
-
-## Usage
-
-```python
-from src import IntelligentScraper, AnthropicProvider
-
-provider = AnthropicProvider(api_key="your-key")
-
-async with IntelligentScraper(
-    company_id="uuid",
-    career_url="https://company.com/careers",
-    llm_provider=provider,
-) as scraper:
-    result = await scraper.scrape()
-
-    for job in result.jobs:
-        print(f"{job.title} - {job.location}")
+```bash
+python -m src.page https://company.com/careers
 ```
+
+That prints one JSON line, `{"ok": true, "html": "...", "final_url": "...", "rendered": false}`,
+or `{"ok": false, "error": "<ExceptionClass>"}`. It tries a plain request, then a
+Scrapling render when the page is an empty shell, then a Playwright click-through
+to a "see open roles" page. Reading the HTML (job markup, the model, checking
+what the model named) is TypeScript, so the scheduled check and the in-app
+button read a page the same way.
+
+The package also holds the posting verifier (`verification.py`) and the
+browser application filler (`apply_*.py`).
 
 ## Development
 
 ```bash
-# Create virtual environment
 python -m venv .venv
 source .venv/bin/activate
-
-# Install with dev dependencies
 pip install -e ".[dev]"
 
-# Run linter
 ruff check src
-
-# Run tests
 pytest
 ```
