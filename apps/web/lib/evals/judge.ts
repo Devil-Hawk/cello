@@ -8,7 +8,7 @@
 //   user's name, and "is this actually about THIS company, or would it read
 //   fine pasted into any cover letter" is a judgement call, not a computation.
 //   That is exactly the gap an LLM judge fills, and exactly why it must not
-//   run unattended — see judged.eval.test.ts for the opt-in gate.
+//   run unattended — the model-judged evals are opt-in and live in scripts/evals/outputs/.
 //
 // WHY THIS CALLS OPENROUTER DIRECTLY AND NOT `callLlm`
 //   `callLlm` (lib/harness/llm.ts) is the metered, budget-checked, retried
@@ -41,7 +41,7 @@
 //   around, only the OpenAI SDK's own `fetch` constructor option (which every
 //   request already goes through). Wrapping THAT is the one seam that sees
 //   every request this client ever makes, so reserveSpend/settleSpend
-//   live there instead of at judgeGroundedness/judgeSpecificity's call sites
+//   live there instead of at each judge's call site
 //   (see lib/evals/judge.test.ts for the ordering proof: reserve before the
 //   real fetch, settle after the response).
 //
@@ -52,11 +52,10 @@
 //   for high-volume work. A judge call is one short classification prompt
 //   (a few hundred tokens), so this is cents even run often — but it is still
 //   real spend against the user's OpenRouter key, which is why
-//   judged.eval.test.ts gates every call behind RUN_JUDGE_EVALS.
+//   the output evals in scripts/evals/outputs/ run on free models only.
 
 import { AsyncLocalStorage } from 'node:async_hooks'
 import OpenAI from 'openai'
-import { ClosedQA, Factuality } from 'autoevals'
 import { MissingKeyError } from '../harness/llm'
 import {
   actualCostUsd,
@@ -450,19 +449,8 @@ export function toEvalResult(name: string, judged: JudgeScore, threshold: number
   }
 }
 
-export interface GroundednessInput {
-  /** The outreach draft under judgement. */
-  draft: string
-  /**
-   * The resume facts + job facts the draft is ALLOWED to draw on — the
-   * "expert answer" Factuality diffs the draft against. Anything the draft
-   * asserts beyond this is what groundedness is checking for.
-   */
-  sourceFacts: string
-}
-
 /**
- * `userId` is optional — judged.eval.test.ts's direct calls have no signed-in
+ * `userId` is optional — direct calls from an eval have no signed-in
  * user behind them — but a caller with one (the outreach route) should pass
  * it so a score:null failure attributes to someone in the log line.
  */
@@ -470,74 +458,4 @@ export interface JudgeCallOpts {
   model?: string
   threshold?: number
   userId?: string
-}
-
-/**
- * Does the draft assert anything not supported by the candidate's resume and
- * the job's stated facts? Built on autoevals' Factuality, which classifies a
- * submission against an "expert answer" as a subset / superset / exact match
- * / outright disagreement (see templates/factuality.yaml) and scores each
- * bucket 0-1.
- *
- * CAVEAT: Factuality's "superset, but still consistent" bucket (an assertion
- * the source doesn't confirm but doesn't contradict either) scores 0.6, not
- * 0 — it was built for QA correctness, not hallucination detection, so an
- * invented detail that doesn't happen to conflict with anything in
- * `sourceFacts` can still score respectably. It reliably catches an
- * assertion that CONTRADICTS the source (scored 0) — see
- * judged.eval.test.ts's ordering assertion, which relies on relative score,
- * not just the pass/fail line, for exactly this reason.
- */
-export async function judgeGroundedness(
-  client: OpenAI,
-  input: GroundednessInput,
-  opts: JudgeCallOpts = {}
-): Promise<EvalResult> {
-  const { value: result, spanId } = await runJudge('judge-groundedness', () =>
-    Factuality({
-      input:
-        "Does the submitted outreach draft rely only on facts present in the candidate's resume " +
-        "and the job's stated facts, without asserting anything beyond them?",
-      output: input.draft,
-      expected: input.sourceFacts,
-      client,
-      model: opts.model ?? JUDGE_MODEL,
-    })
-  )
-  return toEvalResult('outreach groundedness', result, opts.threshold ?? 0.5, opts.userId, spanId)
-}
-
-export interface SpecificityInput {
-  /** The outreach draft under judgement. */
-  draft: string
-  /** What "specific to this" means here, e.g. "Acme Corp, Senior Backend Engineer". */
-  companyAndRole: string
-}
-
-/**
- * Is this outreach message about THIS company and role, or interchangeable
- * boilerplate that could be pasted into any cover letter? Built on autoevals'
- * ClosedQA, which is a yes/no criterion check rather than Factuality's
- * five-way comparison — specificity isn't "does this match a reference
- * answer", it's "does this message satisfy one written rule", which is what
- * ClosedQA is for.
- */
-export async function judgeSpecificity(
-  client: OpenAI,
-  input: SpecificityInput,
-  opts: JudgeCallOpts = {}
-): Promise<EvalResult> {
-  const { value: result, spanId } = await runJudge('judge-specificity', () =>
-    ClosedQA({
-      input: 'Is this outreach message specific to the named company and role, rather than generic boilerplate?',
-      output: input.draft,
-      criteria:
-        `The message references a concrete, verifiable detail about ${input.companyAndRole} — a named ` +
-        'product, team, technology, or fact drawn from the job post — rather than only generic ' +
-        'enthusiasm that would read the same pasted into an outreach message for a different company.',
-      client,
-      model: opts.model ?? JUDGE_MODEL,
-    })
-  )
-  return toEvalResult('outreach specificity', result, opts.threshold ?? 0.6, opts.userId, spanId)
 }
