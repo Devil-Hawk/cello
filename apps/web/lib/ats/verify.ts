@@ -152,6 +152,8 @@ export interface BoardIdentity {
   name: string | null
   /** URLs on the board that may point back at the company's own site. */
   homeUrls: string[]
+  /** An optional page could not be read (a timeout, a refusal): the lack of a home it would give says nothing. */
+  incomplete?: boolean
 }
 
 const OPTS = { retries: 1, timeoutMs: 8000 }
@@ -170,15 +172,16 @@ export const IDENTIFY: Partial<Record<AtsProviderId, (token: string) => Promise<
     const d = await fetchJson<{ name?: unknown }>(url, OPTS)
     // The board's own page links its logo to the company (Calendly, Dialpad); many boards set none.
     const page = assertAllowedHost(`https://job-boards.greenhouse.io/${t}`, GH_PAGE_HOSTS)
-    // Only "no such page" is an answer; a timeout or a 429 must not read as "no logo" (see evidence.unreachable).
-    const logo = await fetchText(page, HTML).then(
-      (h) => /"logo":\{"href":"([^"]+)"/.exec(h)?.[1],
-      (e) => {
-        if (e instanceof HttpError && (e.status === 404 || e.status === 410)) return undefined
-        throw e
-      }
-    )
-    return { name: str(d?.name), homeUrls: logo ? [logo] : [] }
+    // job-boards.greenhouse.io drops connections under load, so its page is best effort: only
+    // "no such page" is an answer, a failure leaves the identity incomplete (see verifyBoard).
+    let logo: string | undefined
+    let incomplete = false
+    try {
+      logo = /"logo":\{"href":"([^"]+)"/.exec(await fetchText(page, HTML))?.[1]
+    } catch (e) {
+      incomplete = !(e instanceof HttpError && (e.status === 404 || e.status === 410))
+    }
+    return { name: str(d?.name), homeUrls: logo ? [logo] : [], incomplete }
   },
   async lever(t) {
     const url = assertAllowedHost(`https://jobs.lever.co/${t}`, LEVER_HOSTS)
@@ -265,6 +268,19 @@ export async function verifyBoard(input: VerifyInput): Promise<Exclude<VerifiedB
     }
     return null
   }
+  const verdict = verifyByIdentity(identity, token, jobs, company)
+  // Part of what the provider says could not be read and the rest did not verify the board:
+  // that is no verdict either, so a stored board is kept and looked at again.
+  if (!verdict && identity.incomplete && input.evidence) input.evidence.unreachable = true
+  return verdict
+}
+
+function verifyByIdentity(
+  identity: BoardIdentity,
+  token: string,
+  jobs: readonly AtsJob[],
+  company: { name: string | null; domain: string | null }
+): 'board_links_home' | 'provider_name' | null {
   // A home the board declares for itself decides: on the company's domain it ties
   // the board to them, anywhere else it is another employer who shares the name
   // ("atlas" on Ashby declares atlascard.com), and no name match overrides that.

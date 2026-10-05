@@ -263,6 +263,20 @@ describe('provider name plus domain label', () => {
     await expect(detectAts({ name: 'Quillbot', domain: 'quillbot.example', careerUrl: null })).resolves.toBeNull()
   })
 
+  it('a logo page that refuses us does not take the name evidence with it', async () => {
+    route((u) => {
+      if (u.includes('/v1/boards/quillbot/jobs')) {
+        return json(ghBoard([{ url: 'https://job-boards.greenhouse.io/quillbot/jobs/1', published: MONTH_AGO, content: 'Read more at quillbot.example/about.' }]))
+      }
+      if (u.endsWith('/v1/boards/quillbot')) return json({ name: 'Quillbot' })
+      if (u === 'https://job-boards.greenhouse.io/quillbot') return new Response('', { status: 503, statusText: 'Service Unavailable' })
+      return undefined
+    })
+    await expect(detectAts({ name: 'Quillbot', domain: 'quillbot.example', careerUrl: null })).resolves.toMatchObject({
+      verifiedBy: 'provider_name',
+    })
+  })
+
   it('accepts the same name, the domain label and one posting that names the company site', async () => {
     route((u) => {
       if (u.includes('/v1/boards/quillbot/jobs')) {
