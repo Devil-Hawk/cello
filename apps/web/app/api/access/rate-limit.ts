@@ -1,118 +1,59 @@
-// Throttle on demo access-code redemption attempts.
+// Throttle on demo access-code redemption attempts, shared by every serverless
+// instance.
 //
 // WHY NOT lib/search/rate-limit.ts
-//   That limiter is keyed by user id, budgets 12 attempts a MINUTE, and exists
-//   to stop a runaway loop from burning a metered search API. This endpoint is
-//   a different shape in every way that matters:
+//   That limiter is keyed by user id and exists to stop a runaway loop from
+//   burning a metered search API. This endpoint runs BEFORE anyone is
+//   authenticated, so the key has to be something anonymous and
+//   attacker-influenced, and it guards a bearer credential, not a bill.
 //
-//     * It runs BEFORE anyone is authenticated, so the key has to be something
-//       anonymous and attacker-influenced rather than a user id.
-//     * A user-id-keyed Map is bounded by the number of users. A key derived
-//       from request headers is bounded by nothing, so this one has to defend
-//       its own memory.
-//     * It guards a bearer credential, not a bill.
-//
-//   Same in-memory sliding-window shape as the search limiter, deliberately —
-//   it is the pattern this codebase already uses, and the same caveat applies:
-//   state is per serverless instance and resets on a cold start. A governor,
-//   not a hard security boundary.
+// WHY IT LIVES IN POSTGRES
+//   The first version was an in-memory Map per serverless instance: the limit
+//   was per instance and reset on every cold start, so an attacker spread across
+//   instances (or just waiting for one to recycle) was never really limited.
+//   The counters now live in public.access_redeem_attempts, bumped by ONE atomic
+//   upsert per attempt (note_redeem_attempt, migration 20261006002001), and
+//   pruned by pg_cron.
 //
 // WHAT IT IS ACTUALLY FOR
-//   An access code carries ~59 bits, so online brute force was never going to
-//   work: at the global cap below it is ~10^13 years to cover half the space.
-//   The limiter earns its place for the other reasons — it stops the endpoint
-//   being a free oracle to bang on, it caps the cost of a flood (every attempt
-//   that gets past the shape check costs a database round trip), and it slows
-//   down spraying a code that leaked into a group chat.
+//   An access code carries about 59 bits, so online brute force was never going
+//   to work: at the global cap below it is ~10^13 years to cover half the space.
+//   The limiter earns its place because it stops the endpoint being a free
+//   oracle to bang on, caps the cost of a flood (every attempt that gets past
+//   the shape check costs a database round trip), and slows down spraying a code
+//   that leaked into a group chat.
 //
-// THE GLOBAL CAP
-//   The per-client key comes from proxy headers. Behind Vercel those are set by
-//   the platform, but this code should not assume its deployment target: anyone
-//   who can forge the header gets a fresh bucket per request and the per-client
-//   limit evaporates. The global cap does not depend on the key at all, so it
-//   is the part that still holds in that case. It is set high enough that real
-//   demo traffic — a handful of people typing a code — never reaches it.
+// NO RAW ADDRESS IS STORED. The client key is an HMAC of the address under a key
+// derived from the server's encryption key (lib/crypto.ts deriveKey), so the
+// table holds an opaque token that cannot be reversed to an IP, or even
+// correlated across deployments.
+//
+// THE GLOBAL CAP does not depend on the client key at all, so it is the part that
+// still holds if the proxy headers behind the key can be forged. It is set high
+// enough that real demo traffic (a handful of people typing a code) never
+// reaches it. The numbers (12 per client, 240 overall, per 10 minute window) live
+// in the SQL function.
+//
+// FAILS CLOSED: if the database cannot answer, the attempt is refused.
 
-/** One window. Long, because a human typing a 12-character code is slow. */
-const WINDOW_MS = 10 * 60_000
-
-/** Per client. Generous enough to survive typos, tight enough to be useless
- *  for guessing. */
-const MAX_PER_CLIENT = 12
-
-/** Per instance, regardless of client key. See "THE GLOBAL CAP" above. */
-const MAX_GLOBAL = 240
-
-/** Ceiling on distinct keys held in memory, so a flood cannot grow the Map
- *  without bound. */
-const MAX_TRACKED_CLIENTS = 5_000
-
-const clientHits = new Map<string, number[]>()
-let globalHits: number[] = []
+import { createHmac } from 'node:crypto'
+import { deriveKey } from '@/lib/crypto'
+import type { AdminClient } from '@/lib/harness/types'
 
 export type RedeemGate =
   | { allowed: true }
-  /** `scope` is for server-side logging only — the caller must not tell the
-   *  person at the keyboard which cap they hit. */
-  | { allowed: false; scope: 'client' | 'global' }
+  /** `scope` is for server-side logging only: the caller must not tell the
+   *  person at the keyboard which of these they hit. */
+  | { allowed: false; scope: 'limit' | 'unavailable' }
+
+const RATE_LIMIT_KEY_LABEL = 'cello/redeem-limit/v1'
 
 /**
- * Whether this redemption attempt may proceed.
- *
- * Records the attempt whether or not it is allowed, so the window keeps sliding
- * while a client is over the limit — someone hammering the endpoint does not
- * get to reset their own clock by hammering it harder.
- */
-export function allowRedeemAttempt(clientKey: string, now: number = Date.now()): RedeemGate {
-  const windowStart = now - WINDOW_MS
-
-  globalHits = globalHits.filter((t) => t > windowStart)
-  const recent = (clientHits.get(clientKey) ?? []).filter((t) => t > windowStart)
-
-  // Record first, decide second: both counters must move even on a refusal.
-  globalHits.push(now)
-  recent.push(now)
-  clientHits.set(clientKey, recent)
-  pruneClients(windowStart)
-
-  // Compare against `> MAX` because the current attempt is already counted.
-  if (globalHits.length > MAX_GLOBAL) return { allowed: false, scope: 'global' }
-  if (recent.length > MAX_PER_CLIENT) return { allowed: false, scope: 'client' }
-  return { allowed: true }
-}
-
-/**
- * Drop keys whose attempts have all aged out.
- *
- * If that is not enough — which means someone is minting fresh keys faster than
- * the window retires them — the whole table goes. Clearing loses the counters
- * of legitimate clients, but the global cap is still standing and does not
- * depend on this table at all, so the endpoint stays protected. Unbounded
- * growth is the worse failure: it takes down the process for everyone.
- */
-function pruneClients(windowStart: number): void {
-  if (clientHits.size <= MAX_TRACKED_CLIENTS) return
-
-  for (const [key, times] of clientHits) {
-    if (times.length === 0 || times[times.length - 1] <= windowStart) clientHits.delete(key)
-  }
-
-  if (clientHits.size > MAX_TRACKED_CLIENTS) clientHits.clear()
-}
-
-/**
- * The bucket key for a request. In memory only — this is the one place in the
- * feature that handles a raw address, and it never reaches a database. The
- * audit trail's attribution is a different thing entirely and is derived
- * separately, non-reversibly, in lib/access/audit.ts.
- *
- * `x-real-ip` is preferred over `x-forwarded-for` because a proxy sets it to a
- * single value it determined itself, whereas x-forwarded-for is a client-
- * supplied chain a proxy appends to. (audit.ts reads x-forwarded-for first, and
- * is right to: a hint a human reads is allowed to trust a header that a
- * security decision must not.) Vercel overwrites both, but nothing here should
- * depend on the deployment target — the global cap above is what holds when
- * this key can be forged.
+ * The raw address behind a request, for hashing only. `x-real-ip` is preferred
+ * over `x-forwarded-for` because a proxy sets it to a single value it
+ * determined itself, whereas x-forwarded-for is a client-supplied chain a proxy
+ * appends to. (audit.ts reads x-forwarded-for first, and is right to: a hint a
+ * human reads is allowed to trust a header that a security decision must not.)
  *
  * Falls back to a SHARED bucket, not a unique one. An unidentifiable caller
  * sharing one bucket with every other unidentifiable caller is the restrictive
@@ -130,16 +71,20 @@ export function clientKey(headers: Headers): string {
   return 'unattributed'
 }
 
-/** Test-only: clear all recorded state between test runs. */
-export function _resetRedeemRateLimitState(): void {
-  clientHits.clear()
-  globalHits = []
+/** The bucket key stored in Postgres: 32 hex characters of an HMAC of the
+ *  address. Never contains the address. */
+export function rateLimitKey(headers: Headers): string {
+  return createHmac('sha256', deriveKey(RATE_LIMIT_KEY_LABEL)).update(clientKey(headers)).digest('hex').slice(0, 32)
 }
 
-/** Test-only: the caps, so tests assert against the real numbers. */
-export const _REDEEM_LIMITS = {
-  WINDOW_MS,
-  MAX_PER_CLIENT,
-  MAX_GLOBAL,
-  MAX_TRACKED_CLIENTS,
-} as const
+/** Whether this redemption attempt may proceed. Counts the attempt either way,
+ *  so someone hammering the endpoint does not get to reset their own clock. */
+export async function allowRedeemAttempt(admin: AdminClient, headers: Headers): Promise<RedeemGate> {
+  try {
+    const { data, error } = await admin.rpc('note_redeem_attempt', { p_client: rateLimitKey(headers) })
+    if (error || typeof data !== 'boolean') return { allowed: false, scope: 'unavailable' }
+    return data ? { allowed: true } : { allowed: false, scope: 'limit' }
+  } catch {
+    return { allowed: false, scope: 'unavailable' }
+  }
+}
