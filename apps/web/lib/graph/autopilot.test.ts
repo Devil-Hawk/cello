@@ -62,6 +62,10 @@ vi.mock('../harness/agents/matcher', async (importOriginal) => {
   }
 })
 
+// The day's shortlist is picked once a day by lib/scoring; this file only checks that autopilot asks for it.
+const runDailyShortlistMock = vi.fn(async (_args: unknown) => ({ status: 'ok', picks: [] as unknown[] }))
+vi.mock('../scoring', () => ({ runDailyShortlist: (args: unknown) => runDailyShortlistMock(args) }))
+
 const loadApiKeysMock = vi.fn(async (_admin: unknown, _userId: string): Promise<Record<string, unknown>> => ({
   openrouter: 'fake-key',
   userId: 'user-1',
@@ -160,7 +164,7 @@ class FakeTable {
 }
 
 class FakeQueryBuilder implements PromiseLike<{ data: unknown; error: unknown; count?: number }> {
-  private filters: { col: string; op: 'eq' | 'is' | 'gte'; val: unknown }[] = []
+  private filters: { col: string; op: 'eq' | 'is' | 'gte' | 'notnull'; val: unknown }[] = []
   private inFilter: [string, unknown[]] | null = null
   private opMode: 'select' | 'update' | 'insert' = 'select'
   private patch: Record<string, unknown> | null = null
@@ -188,6 +192,10 @@ class FakeQueryBuilder implements PromiseLike<{ data: unknown; error: unknown; c
   }
   gte(col: string, val: unknown) {
     this.filters.push({ col, op: 'gte', val })
+    return this
+  }
+  not(col: string, _op: string, _val: unknown) {
+    this.filters.push({ col, op: 'notnull', val: null })
     return this
   }
   in(col: string, vals: unknown[]) {
@@ -231,6 +239,7 @@ class FakeQueryBuilder implements PromiseLike<{ data: unknown; error: unknown; c
       }
       const rowVal = row[col]
       if (op === 'eq') return rowVal === val
+      if (op === 'notnull') return rowVal !== null && rowVal !== undefined
       if (op === 'gte') return typeof rowVal === 'string' && typeof val === 'string' && rowVal >= val
       return val === null ? rowVal === null || rowVal === undefined : rowVal === val
     })
@@ -322,15 +331,14 @@ function seedCompanies(admin: FakeAdmin, userId: string, count: number): void {
 }
 
 // userId defaults to makeProfile()'s own default ('user-1') — every existing
-// call site relies on this. Seeds a matching eval_verdicts 'pass' row per
-// job alongside match_score: loadCandidateJobs' allowlist (Step 4 item 3)
-// requires a RECORDED non-failing verdict for an already-scored job, not
-// merely the absence of a failing one — see loadVerifiedJobIds's own header.
+// call site relies on this. Seeds each job as assessed (a chance, a want, nothing
+// blocked) and as wanted (the person tapped Interested on it): the two things
+// autopilot's gate requires before it drafts anything.
 function seedJobs(
   admin: FakeAdmin,
   companyIds: string[],
   perCompany: number,
-  matchScore: number,
+  chance: 'strong' | 'possible' | 'stretch',
   userId = 'user-1'
 ): string[] {
   const ids: string[] = []
@@ -347,17 +355,12 @@ function seedJobs(
         location: 'Remote',
         url: `https://example.com/${id}`,
         company_id: companyId,
-        match_score: matchScore,
+        chance,
+        want_p: 0.8,
+        blocked_reasons: [],
         discovered_at: new Date(2026, 0, 1, 0, 0, n).toISOString(),
       })
-      admin.seed('eval_verdicts', {
-        id: `${id}-verdict`,
-        user_id: userId,
-        subject_kind: 'match_score',
-        subject_id: id,
-        judge: 'deterministic',
-        verdict: 'pass',
-      })
+      admin.seed('role_reactions', { id: `${id}-reaction`, user_id: userId, job_id: id, reaction: 'interested' })
     }
   }
   return ids
@@ -381,7 +384,7 @@ function makeProfile(overrides: Partial<{ id: string; resume_text: string | null
     full_name: 'Test User',
     email: 'test@example.com',
     resume_text: 'Forward deployed engineer, 6 years.',
-    preferences: { autopilot: { enabled: true, minScore: 90, dailyCap: 15, budgetTokens: 150_000 } },
+    preferences: { autopilot: { enabled: true, dailyCap: 15, budgetTokens: 150_000 } },
     ...overrides,
   }
 }
@@ -392,6 +395,7 @@ beforeEach(async () => {
   vi.resetModules()
   refreshCompanyMock.mockClear()
   scoreJobBatchMock.mockClear()
+  runDailyShortlistMock.mockClear()
   loadApiKeysMock.mockClear()
   callLlmMock.mockClear()
   runAgentUnitMock.mockClear()
@@ -438,13 +442,13 @@ describe('autopilotTickGraph — disabled / no-resume skips', () => {
 })
 
 describe('autopilotTickGraph — untargeted sweep, happy path', () => {
-  it('sources, scores, drafts eligible jobs, journals one agent_runs row, and never sets autoSubmit true', async () => {
+  it('sources, assesses, drafts eligible jobs, journals one agent_runs row, and never sets autoSubmit true', async () => {
     const admin = new FakeAdmin()
     setAdmin(admin)
     const profile = makeProfile()
     seedCompanies(admin, profile.id, 3)
     const companyIds = admin.allRows('companies').map((c) => c.id as string)
-    seedJobs(admin, companyIds, 1, 95) // 3 jobs, all above minScore
+    seedJobs(admin, companyIds, 1, 'strong') // 3 roles the person wants, each with a Strong chance
 
     scoreJobBatchMock.mockResolvedValueOnce({ scored: [{ jobId: 'x' }], failedCount: 0, candidatesConsidered: 3 })
 
@@ -474,60 +478,69 @@ describe('autopilotTickGraph — untargeted sweep, happy path', () => {
       expect((c.input as { autoSubmit: unknown }).autoSubmit).toBe(false)
     }
     expect(scoreJobBatchMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 60 }))
+    // It also makes sure today's shortlist exists, without paying for it twice.
+    expect(runDailyShortlistMock).toHaveBeenCalledWith(expect.objectContaining({ userId: 'user-1', skipIfBuilt: true }))
   })
 
-  it('action-selection allowlists a scored job only with a recorded non-failing verdict (Step 4 item 3)', async () => {
+  it('drafts only for roles the person wants, that nothing they stated blocks, and whose chance is not a stretch', async () => {
     const admin = new FakeAdmin()
     setAdmin(admin)
     const profile = makeProfile()
     seedCompanies(admin, profile.id, 1)
     const companyId = admin.allRows('companies')[0].id as string
 
-    // Three already-scored jobs, same match_score, three different verdict
-    // states — only the 'pass' one should reach `eligible`.
     const jobBase = {
       title: 'Role',
       description: 'Do the work.',
       location: 'Remote',
       company_id: companyId,
-      match_score: 95,
+      want_p: 0.8,
+      blocked_reasons: [] as unknown[],
       discovered_at: '2026-01-01T00:00:00.000Z',
     }
-    admin.seed('jobs', { id: 'job-verified', url: 'https://example.com/verified', ...jobBase })
-    admin.seed('eval_verdicts', {
-      id: 'verdict-verified',
-      user_id: profile.id,
-      subject_kind: 'match_score',
-      subject_id: 'job-verified',
-      judge: 'deterministic',
-      verdict: 'pass',
-    })
-    admin.seed('jobs', { id: 'job-failed', url: 'https://example.com/failed', ...jobBase })
-    admin.seed('eval_verdicts', {
-      id: 'verdict-failed',
-      user_id: profile.id,
-      subject_kind: 'match_score',
-      subject_id: 'job-failed',
-      judge: 'deterministic',
-      verdict: 'fail',
-    })
-    admin.seed('jobs', { id: 'job-unrecorded', url: 'https://example.com/unrecorded', ...jobBase })
-    // No eval_verdicts row for job-unrecorded at all — a scored job that
-    // predates the verify stage (or a seed that bypassed it) with nothing
-    // to certify it, and the exact gap the allowlist (not a blocklist)
-    // closes.
+    const wanted = (id: string) => admin.seed('role_reactions', { id: `${id}-r`, user_id: profile.id, job_id: id, reaction: 'interested' })
+    // Wanted, Possible, nothing blocking: the only one that should reach `eligible`.
+    admin.seed('jobs', { id: 'job-ok', url: 'https://example.com/ok', chance: 'possible', ...jobBase })
+    wanted('job-ok')
+    // Wanted, but a stretch.
+    admin.seed('jobs', { id: 'job-stretch', url: 'https://example.com/stretch', chance: 'stretch', ...jobBase })
+    wanted('job-stretch')
+    // Wanted and strong, but it breaks something the person stated.
+    admin.seed('jobs', { id: 'job-blocked', url: 'https://example.com/blocked', chance: 'strong', ...jobBase, blocked_reasons: [{ kind: 'location', text: 'x' }] })
+    wanted('job-blocked')
+    // Strong, but the person has not shown they want it: not on today's list and not Interested.
+    admin.seed('jobs', { id: 'job-unwanted', url: 'https://example.com/unwanted', chance: 'strong', ...jobBase })
+    // Strong and on today's shortlist: wanted.
+    admin.seed('jobs', { id: 'job-listed', url: 'https://example.com/listed', chance: 'strong', ...jobBase, want_p: 0.9 })
+    admin.seed('shortlist_items', { id: 'item-1', user_id: profile.id, for_date: new Date().toISOString().slice(0, 10), job_id: 'job-listed' })
 
-    scoreJobBatchMock.mockResolvedValueOnce({ scored: [], failedCount: 0, candidatesConsidered: 3 })
+    scoreJobBatchMock.mockResolvedValueOnce({ scored: [], failedCount: 0, candidatesConsidered: 5 })
 
     const saver = new MemorySaver()
-    const result = (await autopilotTickGraph.invoke({ profile }, makeConfig('t-allowlist', profile.id, saver))) as {
-      eligible?: number
-    }
+    const result = (await autopilotTickGraph.invoke({ profile }, makeConfig('t-gate', profile.id, saver))) as { eligible?: number }
+
+    expect(result.eligible).toBe(2)
+    const applierCalls = runAgentUnitCalls.filter((c) => c.unitType === 'applier')
+    // Most wanted first.
+    expect(applierCalls.map((c) => (c.input as { jobId: string }).jobId)).toEqual(['job-listed', 'job-ok'])
+  })
+
+  it('does not skip a role just because tapping Interested saved it to Pipeline, but skips one the person is working', async () => {
+    const admin = new FakeAdmin()
+    setAdmin(admin)
+    const profile = makeProfile()
+    seedCompanies(admin, profile.id, 1)
+    const companyIds = admin.allRows('companies').map((c) => c.id as string)
+    const [saved, working] = (seedJobs(admin, companyIds, 2, 'strong'))
+    admin.seed('applications', { id: 'app-1', user_id: profile.id, job_id: saved, stage: 'discovered', source: 'triage' })
+    admin.seed('applications', { id: 'app-2', user_id: profile.id, job_id: working, stage: 'applied', source: 'triage' })
+
+    scoreJobBatchMock.mockResolvedValueOnce({ scored: [], failedCount: 0, candidatesConsidered: 2 })
+    const saver = new MemorySaver()
+    const result = (await autopilotTickGraph.invoke({ profile }, makeConfig('t-triage', profile.id, saver))) as { eligible?: number }
 
     expect(result.eligible).toBe(1)
-    const applierCalls = runAgentUnitCalls.filter((c) => c.unitType === 'applier')
-    expect(applierCalls).toHaveLength(1)
-    expect((applierCalls[0].input as { jobId: string }).jobId).toBe('job-verified')
+    expect((runAgentUnitCalls.find((c) => c.unitType === 'applier')!.input as { jobId: string }).jobId).toBe(saved)
   })
 
   it('an unexpected verifyCvTailorDraft failure (not budget, not containment) is journaled via logHarnessError, then falls through to a handoff draft', async () => {
@@ -536,7 +549,7 @@ describe('autopilotTickGraph — untargeted sweep, happy path', () => {
     const profile = makeProfile()
     seedCompanies(admin, profile.id, 1)
     const companyIds = admin.allRows('companies').map((c) => c.id as string)
-    seedJobs(admin, companyIds, 1, 95)
+    seedJobs(admin, companyIds, 1, 'strong')
 
     scoreJobBatchMock.mockResolvedValueOnce({ scored: [], failedCount: 0, candidatesConsidered: 1 })
     // Neither BudgetExceededError/BudgetCapError nor CvTailorContainmentError
@@ -577,7 +590,7 @@ describe('autopilotTickGraph — untargeted sweep, happy path', () => {
     const profile = makeProfile()
     seedCompanies(admin, profile.id, 1)
     const companyIds = admin.allRows('companies').map((c) => c.id as string)
-    seedJobs(admin, companyIds, 20, 95) // 20 eligible candidates, cap is 8
+    seedJobs(admin, companyIds, 20, 'strong') // 20 eligible candidates, cap is 8
 
     const saver = new MemorySaver()
     const result = (await autopilotTickGraph.invoke({ profile }, makeConfig('t-cap', profile.id, saver))) as { eligible?: number }
@@ -600,11 +613,11 @@ describe('autopilotTickGraph — untargeted sweep, happy path', () => {
     const admin = new FakeAdmin()
     setAdmin(admin)
     const profile = makeProfile({
-      preferences: { autopilot: { enabled: true, minScore: 90, dailyCap: 15, budgetTokens: 10_000 } },
+      preferences: { autopilot: { enabled: true, dailyCap: 15, budgetTokens: 10_000 } },
     })
     seedCompanies(admin, profile.id, 1)
     const companyIds = admin.allRows('companies').map((c) => c.id as string)
-    seedJobs(admin, companyIds, 5, 95) // 5 eligible; each draft costs 6_000 tokens (tailor only, in this mock)
+    seedJobs(admin, companyIds, 5, 'strong') // 5 eligible; each draft costs 6_000 tokens (tailor only, in this mock)
 
     const saver = new MemorySaver()
     const result = (await autopilotTickGraph.invoke({ profile }, makeConfig('t-budget', profile.id, saver))) as {
@@ -630,7 +643,7 @@ describe('autopilotTickGraph — untargeted sweep, happy path', () => {
     const saver = new MemorySaver()
     const result = (await autopilotTickGraph.invoke({ profile }, makeConfig('t-empty', profile.id, saver))) as { message: string }
 
-    expect(result.message).toContain('No new eligible matches')
+    expect(result.message).toContain('No new roles worth drafting for')
     expect(runAgentUnitMock).not.toHaveBeenCalled()
   })
 })
@@ -642,7 +655,7 @@ describe('autopilotTickGraph — fresh thread, replay safety', () => {
     const profile = makeProfile()
     seedCompanies(admin, profile.id, 1)
     const companyIds = admin.allRows('companies').map((c) => c.id as string)
-    seedJobs(admin, companyIds, 1, 95)
+    seedJobs(admin, companyIds, 1, 'strong')
 
     const saver = new MemorySaver()
     const config = makeConfig('t-replay', profile.id, saver)
@@ -678,7 +691,7 @@ describe('autopilotTickGraph — goal-directed tick', () => {
 
     seedCompanies(admin, profile.id, 1)
     const companyIds = admin.allRows('companies').map((c) => c.id as string)
-    seedJobs(admin, companyIds, 1, 80)
+    seedJobs(admin, companyIds, 1, 'possible')
 
     callLlmMock.mockResolvedValueOnce({
       content: '{"decision":"keep","rationale":"Strong fit for the stated goal.","confidence":0.9}',
@@ -721,7 +734,7 @@ describe('autopilotTickGraph — goal-directed tick', () => {
 
     seedCompanies(admin, profile.id, 1)
     const companyIds = admin.allRows('companies').map((c) => c.id as string)
-    seedJobs(admin, companyIds, 1, 80)
+    seedJobs(admin, companyIds, 1, 'possible')
 
     callLlmMock.mockResolvedValueOnce({
       content: '{"decision":"keep","rationale":"Strong fit for the stated goal.","confidence":0.9}',

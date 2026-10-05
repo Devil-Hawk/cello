@@ -64,6 +64,8 @@
 import { MissingKeyError, ProviderUnavailableError, parseJsonLoose } from './llm'
 import { BudgetCapError } from './spend'
 import { BudgetExceededError, type AdminClient, type LlmRunner } from './types'
+import { chanceLabel } from '@/lib/scoring/read'
+import type { Chance } from '@/lib/scoring/types'
 
 // --- tunables ----------------------------------------------------------------
 // Each of these is a spend bound before it is anything else.
@@ -239,7 +241,10 @@ export interface GoalCandidate {
   description: string | null
   location: string | null
   companyName?: string | null
-  matchScore?: number | null
+  /** Cello's own read of the person's chance: strong | possible | stretch | cannot_assess. Never a number. */
+  chance?: string | null
+  /** Probability the person is interested, used only to order candidates. */
+  want?: number | null
 }
 
 // --- reading / writing the persisted blob ------------------------------------
@@ -827,7 +832,7 @@ export function orderCandidates(goal: SearchGoal, candidates: GoalCandidate[]): 
   return [...candidates].sort((a, b) => {
     const h = hits(b) - hits(a)
     if (h !== 0) return h
-    return (b.matchScore ?? -1) - (a.matchScore ?? -1)
+    return (b.want ?? -1) - (a.want ?? -1)
   })
 }
 
@@ -974,8 +979,8 @@ export async function judgeCandidate(opts: JudgeCandidateOptions): Promise<Judge
     `Title: ${frame(candidate.title ?? 'Untitled')}\n` +
     `Company: ${frame(candidate.companyName ?? 'Unknown')}\n` +
     `Location: ${frame(candidate.location ?? 'Unspecified')}\n` +
-    (typeof candidate.matchScore === 'number'
-      ? `Cello's own resume-fit score for this job: ${candidate.matchScore}/100 (one input, not the decision)\n`
+    (candidate.chance && candidate.chance !== 'cannot_assess'
+      ? `Cello's own read of the person's chance at this role: ${chanceLabel(candidate.chance as Chance)} (one input, not the decision)\n`
       : '') +
     `Description:\n${frame(candidate.description ?? '')}`
 
