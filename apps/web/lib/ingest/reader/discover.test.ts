@@ -11,13 +11,15 @@ describe('discoverBoards: only through the company own site', () => {
     expect(f.calls).toEqual(['redirect:https://www.zynga.com/jobs/job-openings/'])
   })
 
-  it('DigitalOcean: a gh_jid link on the page names the board behind it', async () => {
+  it('does not chase a Greenhouse job-id link to its board: that redirect lives under /embed/, which robots.txt disallows', async () => {
     const f = fakeFetcher({
-      'https://www.digitalocean.com/careers': '<html><body><a href="/careers/open?gh_jid=8212263">Role</a></body></html>',
+      'https://www.digitalocean.com/careers': '<html><body><a href="/careers/position/apply?gh_jid=8212263">Role</a></body></html>',
+      'https://boards.greenhouse.io/robots.txt': 'User-agent: *\nDisallow: /embed/\n',
       'https://boards.greenhouse.io/embed/job_app?token=8212263': { location: 'https://job-boards.greenhouse.io/embed/job_app?for=digitalocean98&token=8212263' },
     })
     const d = await discoverBoards({ domain: 'digitalocean.com', careerUrl: 'https://www.digitalocean.com/careers' }, f)
-    expect(d.boards).toEqual([{ provider: 'greenhouse', token: 'digitalocean98', via: 'gh_jid' }])
+    expect(d.boards).toEqual([])
+    expect(f.calls.some((c) => c.includes('boards.greenhouse.io'))).toBe(false)
   })
 
   it('Netflix and Microsoft: the page config names an Eightfold board for the company domain', async () => {

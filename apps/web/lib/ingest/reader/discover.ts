@@ -1,8 +1,10 @@
 // Find the applicant system behind a company's careers site, through the
 // company's own site and nowhere else. Cello never guesses a board by name here:
 // a board is a candidate only when the company's own pages point at it, by a
-// redirect, a link, an embed, a Greenhouse job-id link or an Eightfold config
-// naming the company's own domain. Every candidate is then verified by
+// redirect, a link, an embed or an Eightfold config naming the company's own
+// domain. (A Greenhouse job-id link on the company's page is not followed to its
+// board: boards.greenhouse.io's robots.txt disallows /embed/, which is the only
+// place that id turns into a board name. Such a page is read as a role list.) Every candidate is then verified by
 // lib/ats/verify.ts before anything is stored (see run.ts).
 
 import * as cheerio from 'cheerio'
@@ -14,7 +16,7 @@ import { onCompanyDomain } from '../../ats/verify'
 import { roleLinks } from './listing'
 import { ReaderError, type SiteFetcher } from './site-fetch'
 
-export type DiscoveredVia = 'redirect' | 'link' | 'gh_jid' | 'eightfold' | 'posting'
+export type DiscoveredVia = 'redirect' | 'link' | 'eightfold' | 'posting'
 
 export interface DiscoveredBoard extends BoardRef {
   via: DiscoveredVia
@@ -95,16 +97,6 @@ function sameSiteLinks(html: string, pageUrl: string, companyDomain: string | nu
   return out.map((u, i) => ({ u, i })).sort((a, b) => strong(a.u) - strong(b.u) || a.i - b.i).map((x) => x.u)
 }
 
-export function ghJid(html: string): string | null {
-  return /[?&]gh_jid=(\d{4,})/.exec(html.replace(/&amp;/g, '&'))?.[1] ?? null
-}
-
-export async function tokenBehindJid(jid: string, f: SiteFetcher): Promise<string | null> {
-  const to = await f.redirectOf(`https://boards.greenhouse.io/embed/job_app?token=${jid}`)
-  const token = to ? new URL(to).searchParams.get('for') : null
-  return token && /^[A-Za-z0-9._-]+$/.test(token) ? token : null
-}
-
 /** The boards one page links to or embeds: its links and an Eightfold config naming the company's domain. */
 export function boardsInHtml(html: string, pageUrl: string, companyDomain: string | null): DiscoveredBoard[] {
   return [...findBoardLinks(html, detect).map((b): DiscoveredBoard => ({ ...b, via: 'link' })), ...eightfoldBoards(html, pageUrl, companyDomain)]
@@ -139,7 +131,6 @@ export async function discoverBoards(company: { domain: string | null; careerUrl
   // 2. The careers page itself, then a couple of its job-looking neighbours.
   const queue = [company.careerUrl]
   const seen = new Set<string>()
-  let jid: string | null = null
   for (let i = 0; i < queue.length && pages.length < 1 + MAX_SIDE_PAGES; i++) {
     const url = queue[i]
     if (seen.has(url)) continue
@@ -165,7 +156,6 @@ export async function discoverBoards(company: { domain: string | null; careerUrl
     if (landed && finalUrl !== url) add({ ...landed, via: 'redirect' })
     for (const b of findBoardLinks(html, detect)) add({ ...b, via: 'link' })
     for (const b of eightfoldBoards(html, finalUrl, company.domain)) add(b)
-    jid ??= ghJid(html)
     // A page that already lists roles is the list: its neighbours are not worth a request.
     if (i === 0 && roleLinks(html, finalUrl).length < 3) {
       for (const next of sameSiteLinks(html, finalUrl, company.domain)) if (queue.length < 1 + MAX_SIDE_PAGES * 3) queue.push(next)
@@ -173,14 +163,5 @@ export async function discoverBoards(company: { domain: string | null; careerUrl
     if (found.size > 0) break
   }
 
-  // 3. A Greenhouse job-id link on the company's own page names the board behind it.
-  if (found.size === 0 && jid) {
-    try {
-      const token = await tokenBehindJid(jid, f)
-      if (token) add({ provider: 'greenhouse', token, via: 'gh_jid' })
-    } catch {
-      /* no evidence */
-    }
-  }
   return result()
 }

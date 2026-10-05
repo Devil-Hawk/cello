@@ -149,7 +149,8 @@ export function mislabelledSource(job: AtsJob, companyName: string): string | nu
 
 const slugOf = (s: string | null | undefined) => (s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 
-export const titleKey = (title: string, location: string | null | undefined) => `${slugOf(title)}|${slugOf(location)}`
+/** One role's identity when its place is known. Without a place two roles with one title are not the same role (the same title in two cities). */
+export const titleKey = (title: string, location: string | null | undefined) => (slugOf(location) ? `${slugOf(title)}|${slugOf(location)}` : '')
 
 export interface StoredRole {
   title: string
@@ -177,13 +178,13 @@ export function dedupeRoles(jobs: AtsJob[], stored: readonly StoredRole[], sourc
     const key = titleKey(job.title, job.location)
     const req = job.requisitionId?.trim().toLowerCase()
     const isStored = storedIds.has(job.externalId)
-    const dup = (req && reqs.has(req)) || titles.has(key) || (!isStored && otherSources.has(key))
+    const dup = (req && reqs.has(req)) || (key !== '' && (titles.has(key) || (!isStored && otherSources.has(key))))
     if (dup) {
       duplicates++
       continue
     }
     if (req) reqs.add(req)
-    titles.add(key)
+    if (key) titles.add(key)
     kept.push(job)
   }
   return { kept, duplicates }

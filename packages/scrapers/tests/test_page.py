@@ -92,6 +92,24 @@ def test_prints_exactly_one_json_line_even_when_a_library_prints(monkeypatch, ca
     assert len(out) == 1 and json.loads(out[0])["ok"] is True
 
 
+def test_a_forced_render_uses_the_browser_view_even_when_the_static_page_has_text_and_links(monkeypatch):
+    monkeypatch.setattr(page, "_static_get", lambda url: (LISTING, url))
+    monkeypatch.setattr(page, "fetch_rendered", lambda url: LISTING + "<a href='/jobs/99'>Role 99</a>")
+    monkeypatch.setattr(page, "fetch_with_browser_fallback", lambda url, html: (html, False))
+    forced = page.fetch_page("https://acme.example/careers", force_render=True)
+    assert forced["rendered"] is True and "Role 99" in forced["html"]
+    # Without the flag the same page is not a shell, so it is not rendered.
+    monkeypatch.setattr(page, "fetch_with_render_fallback", lambda url, html: (html or "", False))
+    assert page.fetch_page("https://acme.example/careers")["rendered"] is False
+
+
+def test_the_render_flag_is_accepted_on_the_command_line(monkeypatch, capsys):
+    seen = {}
+    monkeypatch.setattr(page, "fetch_page", lambda url, force_render=False: seen.setdefault("force", force_render) and {"ok": True})
+    page.main(["page", "https://acme.example/careers", "--render"])
+    assert seen["force"] is True
+
+
 def test_rejects_anything_that_is_not_an_http_url(capsys):
     page.main(["page", "file:///etc/passwd"])
     assert json.loads(capsys.readouterr().out) == {"ok": False, "error": "BadArguments"}

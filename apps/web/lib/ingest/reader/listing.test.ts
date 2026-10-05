@@ -51,6 +51,30 @@ describe('roleLinks', () => {
   })
 })
 
+describe('roleLinks: a role id in the query', () => {
+  it('DigitalOcean: when the link says only the place, the card own first line is the title', () => {
+    const card = (id: number, title: string, place: string) =>
+      `<li><div><span>${title}</span></div><div><span>Local from:</span><span><a href="/careers/position/apply?gh_jid=${id}">${place}</a></span></div></li>`
+    const html = `<ul>${card(7536702, 'Cloud Operations Administrator - II', 'Seattle')}${card(7975203, 'Director of Engineering, Managed Database Service', 'Bengaluru')}${card(8193121, 'Senior Data Engineer', 'Seattle')}</ul>`
+    expect(roleLinks(html, 'https://www.digitalocean.com/careers').map((l) => l.title)).toEqual([
+      'Cloud Operations Administrator - II',
+      'Director of Engineering, Managed Database Service',
+      'Senior Data Engineer',
+    ])
+  })
+
+  it('DigitalOcean: Greenhouse job-id links on the company own site are a role list, titled by their cards', () => {
+    const cards = [7536702, 7586091, 7586093]
+      .map((id, i) => `<li><a href="/careers/position/apply?gh_jid=${id}"><h3>Cloud Engineer ${i + 1}</h3><span>Remote</span></a></li>`)
+      .join('')
+    const links = roleLinks(`<html><body><ul>${cards}</ul></body></html>`, 'https://www.digitalocean.com/careers')
+    expect(links.map((l) => l.title)).toEqual(['Cloud Engineer 1', 'Cloud Engineer 2', 'Cloud Engineer 3'])
+    expect(links[0].url).toBe('https://www.digitalocean.com/careers/position/apply?gh_jid=7536702')
+    expect(templateOf('/careers/position/apply', '?gh_jid=7536702')).toBe('/careers/position/apply?gh_jid=:id')
+    expect(templateOf('/careers', '?page=2')).toBeNull()
+  })
+})
+
 describe('readListing: every role is confirmed on its own page', () => {
   const appleDetail = fixture('apple-detail.html')
   const first = 'https://jobs.apple.com/en-us/details/200684990-3956/front-end-web-accessibility-engineer-retail-engineering?team=SFTWR'

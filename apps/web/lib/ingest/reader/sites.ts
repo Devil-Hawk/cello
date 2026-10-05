@@ -139,7 +139,56 @@ const tiktok: SiteRecipe = {
   },
 }
 
-export const RECIPES: readonly SiteRecipe[] = [amazon, tiktok]
+// --- Bending Spoons ---------------------------------------------------------
+
+interface BsJob {
+  id?: string
+  jobTitle?: string
+  isEvent?: boolean
+  status?: string
+  highLevelDescription?: string
+  responsibilities?: { title?: string; description?: string }[]
+  requirements?: { title?: string; description?: string }[]
+  officeLocations?: { title?: string }[]
+}
+
+/** The roles a Next.js page carries in its own data (`__NEXT_DATA__`), the way jobs.bendingspoons.com does: none of them is a link in the HTML. */
+export function bendingSpoonsJobs(html: string): AtsJob[] {
+  const raw = /<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/.exec(html)?.[1]
+  if (!raw) return []
+  let list: BsJob[] = []
+  try {
+    list = (JSON.parse(raw) as { props?: { pageProps?: { list?: BsJob[] } } }).props?.pageProps?.list ?? []
+  } catch {
+    return []
+  }
+  const out: AtsJob[] = []
+  for (const j of Array.isArray(list) ? list : []) {
+    const title = (j.jobTitle ?? '').trim()
+    // An event is not a role; a role that is not active is not open.
+    if (!title || !j.id || j.isEvent || (j.status && j.status !== 'active')) continue
+    const url = `https://jobs.bendingspoons.com/positions/${j.id}`
+    const lines = (items?: { title?: string; description?: string }[]) => (items ?? []).map((x) => `${x.title ?? ''}: ${x.description ?? ''}`.trim()).filter(Boolean).join('\n')
+    const body = [j.highLevelDescription, j.responsibilities?.length ? `Responsibilities\n${lines(j.responsibilities)}` : '', j.requirements?.length ? `Requirements\n${lines(j.requirements)}` : '']
+      .filter(Boolean)
+      .join('\n\n')
+    const description = htmlToPlainText(body, MAX_DESCRIPTION_CHARS)
+    const location = (j.officeLocations ?? []).map((l) => l.title).filter(Boolean).join(' · ')
+    out.push({ title, url, externalId: url, ...(location ? { location } : {}), ...(description ? { description } : {}) })
+  }
+  return out
+}
+
+const bendingSpoons: SiteRecipe = {
+  id: 'bendingspoons',
+  hosts: ['jobs.bendingspoons.com'],
+  async read(f) {
+    const res = await f.get('https://jobs.bendingspoons.com/')
+    return res.ok ? bendingSpoonsJobs(res.text) : []
+  },
+}
+
+export const RECIPES: readonly SiteRecipe[] = [amazon, tiktok, bendingSpoons]
 
 /** The recipe for a careers address, or null. */
 export function siteFor(url: string): SiteRecipe | null {

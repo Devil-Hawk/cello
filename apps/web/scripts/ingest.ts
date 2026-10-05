@@ -33,7 +33,7 @@ import { loadTargets } from '../lib/ingest/reader/targets'
 import { trackedOnly } from '../lib/companies/watchlist'
 import { DEFAULT_MODEL_CALLS, freeModelKeys, makeIngestModelCall, newModelBudget, type ModelCall } from '../lib/ingest/model'
 import { supabaseRequirementsRows } from '../lib/ingest/requirements-pass'
-import { ingestUser, isDue, makeSupabaseRunsStore, type DueCompany } from '../lib/ingest/run'
+import { hasSource, ingestUser, isDue, makeSupabaseRunsStore, type DueCompany } from '../lib/ingest/run'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const PAGE_SIZE = 1000
@@ -85,7 +85,6 @@ async function main(): Promise<void> {
 
   const now = Date.now()
   // A company with neither a careers page nor a stored board has nothing to read.
-  const hasSource = (c: DueCompany) => Boolean(c.career_url?.trim()) || Boolean((c.metadata as { ats?: unknown } | null)?.ats)
   const selected = all.filter((c) => (!only || c.id === only) && (!onlyUser || c.user_id === onlyUser) && hasSource(c))
   const due = selected.filter((c) => Boolean(only) || process.env.INGEST_FORCE === '1' || isDue(c, now))
   const byUser = new Map<string, DueCompany[]>()

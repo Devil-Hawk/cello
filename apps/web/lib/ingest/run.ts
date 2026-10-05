@@ -91,6 +91,11 @@ export function isDue(
   return now >= dueAt(company)
 }
 
+/** A company has something to read: a careers page, or a board already stored. */
+export function hasSource(company: Pick<DueCompany, 'career_url'> & { metadata?: unknown }): boolean {
+  return Boolean(company.career_url?.trim()) || Boolean((company.metadata as { ats?: unknown } | null)?.ats)
+}
+
 /** A read that listed nothing and reported errors, or listed postings it could not store. */
 function boardFailed(result: CompanyRefreshResult): boolean {
   if (result.errors.length === 0) return false

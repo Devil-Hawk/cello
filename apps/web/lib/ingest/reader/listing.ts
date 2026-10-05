@@ -24,6 +24,8 @@ export interface RoleLink {
   url: string
   title: string
   postedAt?: string
+  /** The place, when the card's link says only that ("Seattle"). */
+  location?: string
 }
 
 const ID_SEGMENT = /^(?:\d{5,}(?:-[\w-]*)?|[0-9a-f]{8,}(?:-[\w-]*)?|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
@@ -31,11 +33,22 @@ const MONTHS = 'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec'
 const CARD_DATE = new RegExp(`((?:${MONTHS})[a-z]*\\.? \\d{1,2}, \\d{4}|\\d{4}-\\d{2}-\\d{2})`)
 const MIN_GROUP = 3
 
-/** "/en-us/details/200684990-3956/front-end-engineer" -> "/en-us/details/:id"; a path with no id segment has no template. */
-export function templateOf(pathname: string): string | null {
+/** Query parameters that carry a role's id when its path does not (Greenhouse job-id links on a company's own site: ?gh_jid=123). */
+const ID_PARAM = /^(?:gh_jid|jid|job_?id|job_?req_?id|req_?id|requisition_?id|posting_?id|id)$/i
+
+/** The id a link carries in its query, as "name=value", or null. */
+export function queryIdOf(url: URL): string | null {
+  for (const [k, v] of url.searchParams) if (ID_PARAM.test(k) && /^[\w-]{4,}$/.test(v) && /\d/.test(v)) return `${k.toLowerCase()}=${v}`
+  return null
+}
+
+/** "/en-us/details/200684990-3956/front-end-engineer" -> "/en-us/details/:id"; "/careers/position/apply?gh_jid=7" -> "/careers/position/apply?gh_jid=:id"; no id, no template. */
+export function templateOf(pathname: string, search = ''): string | null {
   const parts = pathname.split('/').filter(Boolean)
   const at = parts.findIndex((p) => ID_SEGMENT.test(p))
-  return at < 0 ? null : '/' + [...parts.slice(0, at), ':id'].join('/')
+  if (at >= 0) return '/' + [...parts.slice(0, at), ':id'].join('/')
+  const q = queryIdOf(new URL(`https://x.test${pathname}${search}`))
+  return q ? `${pathname}?${q.split('=')[0]}=:id` : null
 }
 
 function dateOf(text: string): string | undefined {
@@ -47,18 +60,31 @@ function dateOf(text: string): string | undefined {
 
 const clean = (s: string | undefined) => (s ?? '').replace(/\s+/g, ' ').trim()
 
-function titleOf(a: cheerio.Cheerio<any>, idInUrl: string): string {
-  // A card link often wraps the title and the place together; the heading inside it is the title.
-  let title = clean(a.find('h1,h2,h3,h4,h5').first().text()) || clean(a.text())
-  if (!title) {
-    title = clean(a.attr('aria-label')).replace(/^(?:learn more about|see full role description:?)\s*/i, '')
-  }
-  if (!title) {
-    title = clean(a.closest('li,article,div').find('h1,h2,h3,h4').first().text())
-  }
-  // "Front End Engineer 200684990": a trailing requisition id is not part of the title.
-  return title.replace(new RegExp(`\\s+${idInUrl.replace(/[^\w-]/g, '')}\\s*$`), '').replace(/\s+\d{6,}$/, '').trim()
+/** The texts a link and its card offer as the role's title, best guess first. */
+function titlesOf(a: cheerio.Cheerio<any>, idInUrl: string): string[] {
+  const strip = (t: string) => t.replace(new RegExp(`\\s+${idInUrl.replace(/[^\w-]/g, '')}\\s*$`), '').replace(/\s+\d{6,}$/, '').trim()
+  return [
+    // A card link often wraps the title and the place together; the heading inside it is the title.
+    clean(a.find('h1,h2,h3,h4,h5').first().text()),
+    clean(a.text()),
+    clean(a.attr('aria-label')).replace(/^(?:learn more about|see full role description:?)\s*/i, ''),
+    clean(a.closest('li,article,tr,div').find('h1,h2,h3,h4').first().text()),
+    // A card whose title is a plain span or line of its own beside a link that says only the place ("Seattle").
+    clean(
+      a
+        .closest('li,article,tr')
+        .find('span,div,p,strong,b')
+        .filter((_, el) => el.children.every((c) => c.type === 'text'))
+        .first()
+        .text()
+    ),
+  ]
+    .map(strip)
+    .filter((t) => t.length >= 3)
 }
+
+/** A title is a phrase; a single word is more likely a place ("Seattle") or a button. */
+const bestTitle = (titles: string[]): string => titles.find((t) => t.split(/\s+/).length >= 2) ?? titles[0] ?? ''
 
 /** The date in the card around a link: the nearest ancestor that holds a date and no other role's link. */
 function cardDate(a: cheerio.Cheerio<any>, template: string): string | undefined {
@@ -67,7 +93,7 @@ function cardDate(a: cheerio.Cheerio<any>, template: string): string | undefined
     const others = new Set<string>()
     el.find('a[href]').each((_, x) => {
       const href = (x as any).attribs?.href ?? ''
-      if (templateOf(href.split(/[?#]/)[0]) === template) others.add(href.split(/[?#]/)[0])
+      if (templateOf(href.split(/[?#]/)[0], href.includes('?') ? '?' + href.split('?')[1].split('#')[0] : '') === template) others.add(href.split('#')[0])
     })
     if (others.size > 1) return undefined
     const date = dateOf(clean(el.text()))
@@ -91,8 +117,8 @@ export function roleLinks(html: string, pageUrl: string): RoleLink[] {
   } catch {
     /* keep the page's own address */
   }
-  const groups = new Map<string, RoleLink[]>()
-  const seen = new Set<string>()
+  // One entry per role; the same role is linked more than once on many cards (its place, its title, a "learn more" button).
+  const entries = new Map<string, { url: string; titles: string[]; template: string; g: string; a: cheerio.Cheerio<any>; linkText: string }>()
   $('a[href]').each((_, el) => {
     const a = $(el)
     let to: URL
@@ -102,23 +128,27 @@ export function roleLinks(html: string, pageUrl: string): RoleLink[] {
       return
     }
     if (to.protocol !== 'https:' && to.protocol !== 'http:') return
-    const template = templateOf(to.pathname)
+    const template = templateOf(to.pathname, to.search)
     if (!template) return
     to.hash = ''
-    const url = normalizeJobUrl(to.toString())
-    // The same role is linked twice on many cards (title and a "learn more" button).
-    const key = `${to.hostname}${to.pathname}`
-    if (seen.has(key)) {
+    const key = `${to.hostname}${to.pathname}${templateOf(to.pathname) ? '' : (queryIdOf(to) ?? '')}`
+    const idInUrl = to.pathname.split('/').find((p) => ID_SEGMENT.test(p)) ?? queryIdOf(to)?.split('=')[1] ?? ''
+    const titles = titlesOf(a, idInUrl)
+    const have = entries.get(key)
+    if (have) {
+      have.titles.push(...titles)
       return
     }
-    const idInUrl = to.pathname.split('/').find((p) => ID_SEGMENT.test(p)) ?? ''
-    const title = titleOf(a, idInUrl)
-    if (title.length < 3) return
-    seen.add(key)
-    const postedAt = cardDate(a, template)
-    const g = `${to.hostname}${template}`
-    groups.set(g, [...(groups.get(g) ?? []), { url, title, ...(postedAt ? { postedAt } : {}) }])
+    entries.set(key, { url: normalizeJobUrl(to.toString()), titles, template, g: `${to.hostname}${template}`, a, linkText: clean(a.text()) })
   })
+  const groups = new Map<string, RoleLink[]>()
+  for (const e of entries.values()) {
+    const title = bestTitle(e.titles)
+    if (title.length < 3) continue
+    const postedAt = cardDate(e.a, e.template)
+    const location = e.linkText && e.linkText !== title && e.linkText.length <= 60 && !title.includes(e.linkText) ? e.linkText : undefined
+    groups.set(e.g, [...(groups.get(e.g) ?? []), { url: e.url, title, ...(postedAt ? { postedAt } : {}), ...(location ? { location } : {}) }])
+  }
   const lists = [...groups.entries()].filter(([, links]) => links.length >= MIN_GROUP)
   if (lists.length === 0) return []
   // A list of roles lives under a path that says so; a list of press releases or blog posts with ids does not.
@@ -224,7 +254,7 @@ export async function readListing(
       const res = await f.get(l.url)
       if (!res.ok) return
       const detail = readDetail(res.text, res.finalUrl)
-      const job = jobFromDetail(res.finalUrl, detail, { title: l.title, postedAt: l.postedAt })
+      const job = jobFromDetail(res.finalUrl, detail, { title: l.title, postedAt: l.postedAt, location: l.location })
       checked.push(l.url)
       if (!job) {
         rejected++

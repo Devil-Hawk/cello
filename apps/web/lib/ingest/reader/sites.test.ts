@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { fakeFetcher, fixture } from './fake-fetcher'
-import { amazonJobs, siteFor, tiktokJobs } from './sites'
+import { amazonJobs, bendingSpoonsJobs, siteFor, tiktokJobs } from './sites'
 import { NO_TARGETS, type ReaderTargets } from './targets'
 import { judgeRole } from './legit'
 
@@ -55,6 +55,24 @@ describe('site search recipes', () => {
     const f = fakeFetcher({ 'https://api.lifeattiktok.com/api/v1/public/supplier/search/job/posts': fixture('tiktok-search.json') })
     await siteFor('https://lifeattiktok.com/')!.read(f, targets)
     expect(JSON.parse(f.jsonCalls[0].body ?? '{}')).toMatchObject({ keyword: 'software engineer', limit: 50, offset: 0 })
+  })
+
+  it('Bending Spoons: roles from the page own data, none of them a link; events and inactive roles left out', async () => {
+    const jobs = bendingSpoonsJobs(fixture('bendingspoons-home.html'))
+    expect(jobs.map((j) => j.title)).toEqual(['Product manager', 'Bookkeeper', 'Experiences manager', 'UX/UI designer', 'Graduate software engineer'])
+    expect(jobs[0].url).toMatch(/^https:\/\/jobs\.bendingspoons\.com\/positions\/[0-9a-f]{24}$/)
+    expect(jobs[0].description?.length).toBeGreaterThan(100)
+
+    const html = fixture('bendingspoons-home.html')
+    const data = JSON.parse(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/.exec(html)![1])
+    data.props.pageProps.list[1].isEvent = true
+    data.props.pageProps.list[2].status = 'closed'
+    const edited = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(data)}</script>`
+    expect(bendingSpoonsJobs(edited).map((j) => j.title)).toEqual(['Product manager', 'UX/UI designer', 'Graduate software engineer'])
+    expect(bendingSpoonsJobs('<html>no data</html>')).toEqual([])
+
+    const f = fakeFetcher({ 'https://jobs.bendingspoons.com/': html })
+    expect(await siteFor('https://jobs.bendingspoons.com/')!.read(f, targets)).toHaveLength(5)
   })
 
   it('a site that refuses the request is an error for the tier, not a crash', async () => {

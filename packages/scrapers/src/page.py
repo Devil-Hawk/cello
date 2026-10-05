@@ -1,6 +1,6 @@
 """Fetch one careers page as a browser builds it, and print its HTML.
 
-    python -m src.page <url>
+    python -m src.page <url> [--render]
 
 This is all Python does for job ingestion now. Reading the page (structured
 data, the model, verification) is TypeScript, so the scheduled check and the
@@ -38,7 +38,7 @@ import httpx
 
 from .browser_tier import fetch_with_browser_fallback
 from .polite import USER_AGENT, RobotsCache
-from .render import fetch_with_render_fallback
+from .render import fetch_rendered, fetch_with_render_fallback
 
 _USER_AGENT = USER_AGENT
 _MAX_BYTES = 5_000_000
@@ -63,8 +63,14 @@ def _allowed(url: str, robots: RobotsCache | None = None) -> bool:
     return (robots or RobotsCache()).for_url(url).allows(path)
 
 
-def fetch_page(url: str) -> dict[str, object]:
-    """Fetch `url`; always returns the output dict, never raises."""
+def fetch_page(url: str, force_render: bool = False) -> dict[str, object]:
+    """Fetch `url`; always returns the output dict, never raises.
+
+    `force_render` is for a page the plain tiers already read without finding a
+    role: the browser view is used whenever it differs, whatever the shell
+    heuristic says (a page can have plenty of text and still build its list in
+    the browser).
+    """
     if not _allowed(url):
         return {"ok": False, "error": "RobotsDisallowed"}
     static_html: str | None = None
@@ -76,7 +82,12 @@ def fetch_page(url: str) -> dict[str, object]:
         first_error = exc
 
     try:
-        html, rendered = fetch_with_render_fallback(final_url, static_html)
+        if force_render:
+            browser_html = fetch_rendered(final_url)
+            html = browser_html or static_html or ""
+            rendered = bool(browser_html) and browser_html != static_html
+        else:
+            html, rendered = fetch_with_render_fallback(final_url, static_html)
         html, clicked = fetch_with_browser_fallback(final_url, html)
     except Exception as exc:  # noqa: BLE001
         html, rendered, clicked = static_html or "", False, False
@@ -92,12 +103,13 @@ def main(argv: list[str]) -> int:
     # Libraries log the address they fetched on their own handlers; this output is
     # public. disable() survives any handler setup.
     logging.disable(logging.CRITICAL)
-    if len(argv) != 2 or not argv[1].startswith(("http://", "https://")):
+    force_render = "--render" in argv[2:]
+    if len(argv) not in (2, 3) or not argv[1].startswith(("http://", "https://")) or (len(argv) == 3 and not force_render):
         print(json.dumps({"ok": False, "error": "BadArguments"}))
         return 0
     # Libraries that print would corrupt the one JSON line, so they print to stderr.
     with contextlib.redirect_stdout(sys.stderr):
-        result = fetch_page(argv[1])
+        result = fetch_page(argv[1], force_render)
     print(json.dumps(result))
     return 0
 

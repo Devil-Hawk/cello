@@ -87,6 +87,11 @@ describe('dedupeRoles', () => {
     expect(duplicates).toBe(2)
   })
 
+  it('two roles with one title and no known place are not the same role (the same title in two cities)', () => {
+    const jobs = [job({ externalId: 'a', title: 'Software Engineer II', location: undefined }), job({ externalId: 'b', title: 'Software Engineer II', location: undefined })]
+    expect(dedupeRoles(jobs, [], 'listing').kept).toHaveLength(2)
+  })
+
   it('skips a role another source already stored open, but not a re-read of its own', () => {
     const stored = [{ title: 'Data Engineer', location: 'Remote', source: 'scraper', open: true, externalId: 'old' }]
     expect(dedupeRoles([job({ externalId: 'new' })], stored, 'greenhouse').kept).toHaveLength(0)

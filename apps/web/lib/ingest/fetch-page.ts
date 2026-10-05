@@ -23,7 +23,8 @@ export interface FetchedPage {
   rendered: boolean
 }
 
-export type FetchPage = (url: string) => Promise<FetchedPage>
+/** `render` asks for the browser view even when the plain page looks complete (the plain tiers already found no role in it). */
+export type FetchPage = (url: string, opts?: { render?: boolean }) => Promise<FetchedPage>
 
 /**
  * A plain GET through the site fetcher (lib/ingest/reader/site-fetch.ts):
@@ -45,12 +46,12 @@ const scrapersDir = () => process.env.INGEST_SCRAPERS_DIR ?? resolve(process.cwd
  * Python and a browser, none of our secrets, and its failures arrive as a class
  * name so nothing it prints (a url, a page) reaches the log.
  */
-export const pythonFetchPage: FetchPage = async (url) => {
+export const pythonFetchPage: FetchPage = async (url, opts) => {
   await assertSsrfSafe(url)
   return new Promise((resolvePage, reject) => {
     execFile(
       process.env.INGEST_PYTHON ?? 'python',
-      ['-m', 'src.page', url],
+      ['-m', 'src.page', url, ...(opts?.render ? ['--render'] : [])],
       {
         cwd: scrapersDir(),
         env: {

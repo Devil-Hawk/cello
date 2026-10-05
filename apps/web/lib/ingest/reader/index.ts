@@ -28,7 +28,7 @@ import type { FetchPage } from '../fetch-page'
 import type { ModelCall } from '../model'
 import { readJobPostings } from '../jsonld'
 import { readCareersPage } from '../page-reader'
-import { boardsInHtml, classifyLink, discoverBoards, ghJid, tokenBehindJid, type DiscoveredBoard, type DiscoveredVia, type PageRead } from './discover'
+import { boardsInHtml, classifyLink, discoverBoards, type DiscoveredBoard, type DiscoveredVia, type PageRead } from './discover'
 import { jobFromDetail, readDetail } from './detail'
 import { mislabelledSource } from './legit'
 import { readListing, roleLinks } from './listing'
@@ -257,7 +257,7 @@ async function readRendered(
   const { company, targets } = input
   let page
   try {
-    page = await deps.fetchPage!(company.careerUrl)
+    page = await deps.fetchPage!(company.careerUrl, { render: true })
   } catch {
     return null
   }
@@ -274,16 +274,6 @@ async function readRendered(
       }
     }
   }
-  const jid = ghJid(page.html)
-  if (jid && deps.readBoard) {
-    const token = await tokenBehindJid(jid, f).catch(() => null)
-    const board = token ? await deps.readBoard({ provider: 'greenhouse', token, via: 'gh_jid' }, searchTerms(targets)).catch(() => null) : null
-    if (board && board.jobs.length > 0) {
-      tried.push({ tier: 'rendered', outcome: 'roles' })
-      return { result: { tier: 'board', jobs: board.jobs, board, complete: false }, tried, checked: [] }
-    }
-  }
-
   if (roleLinks(page.html, page.finalUrl).length > 0) {
     const read = await readListing(company.careerUrl, rendered, f, { targets, skip: input.checked })
     if (read.listed > 0) {
