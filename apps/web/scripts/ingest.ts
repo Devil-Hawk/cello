@@ -125,6 +125,7 @@ async function main(): Promise<void> {
         closed: p.jobs_closed,
         failures: p.failures_by_provider,
         modelCalls: p.model_calls,
+        modelFailures: budget.failed,
         ms: p.duration_ms,
       })
     } catch (error) {

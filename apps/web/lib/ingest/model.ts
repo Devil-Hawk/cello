@@ -13,7 +13,6 @@
 import { callLlm } from '../harness/llm'
 import { BudgetCapError } from '../harness/spend'
 import type { DecryptedApiKeys } from '../harness/types'
-import { warnLlmFallback } from '../observability/llm-fallback'
 
 /** Tried in order; the next one is used when the first errors or is rate limited. */
 export const INGEST_MODELS = ['google/gemma-4-31b-it:free', 'qwen/qwen3.8-27b:free'] as const
@@ -29,10 +28,12 @@ export const DEFAULT_MODEL_CALLS = 40
 export interface ModelBudget {
   n: number
   hit: boolean
+  /** Calls that no free model answered (a rate limit, a model that is down). Counted, never logged: the Actions log is public. */
+  failed: number
 }
 
 export function newModelBudget(n: number = DEFAULT_MODEL_CALLS): ModelBudget {
-  return { n, hit: false }
+  return { n, hit: false, failed: 0 }
 }
 
 /** The answer when the allowance is spent or the user's own spend cap is reached: not "the model said nothing". */
@@ -94,9 +95,10 @@ export function makeIngestModelCall(
           }
           return MODEL_LIMIT
         }
-        warnLlmFallback(req.name, 'next-free-model', error)
+        // Next free model. The error text is not logged: this runs where the log is public.
       }
     }
+    if (budget) budget.failed += 1
     return null
   }
 }

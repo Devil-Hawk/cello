@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const callLlm = vi.fn()
 vi.mock('../harness/llm', () => ({ callLlm: (...a: unknown[]) => callLlm(...a) }))
-vi.mock('../observability/llm-fallback', () => ({ warnLlmFallback: vi.fn() }))
 
 import { BudgetCapError } from '../harness/spend'
 import { MODEL_LIMIT, makeIngestModelCall, newModelBudget } from './model'
@@ -33,7 +32,17 @@ describe('makeIngestModelCall', () => {
 
   it('returns null when every free model fails', async () => {
     callLlm.mockRejectedValueOnce(new Error('down')).mockRejectedValueOnce(new Error('down'))
-    expect(await makeIngestModelCall('u', 'key')(req)).toBeNull()
+    const budget = newModelBudget(5)
+    expect(await makeIngestModelCall('u', 'key', { budget })(req)).toBeNull()
+    expect(budget.failed).toBe(1)
+  })
+
+  it('writes nothing to the log when a model fails: the log is public', async () => {
+    const spies = (['log', 'warn', 'error', 'info'] as const).map((k) => vi.spyOn(console, k).mockImplementation(() => {}))
+    callLlm.mockRejectedValueOnce(new Error('429 for https://secret.example/careers')).mockRejectedValueOnce(new Error('down'))
+    await makeIngestModelCall('u', 'key')(req)
+    expect(spies.every((s) => s.mock.calls.length === 0)).toBe(true)
+    spies.forEach((s) => s.mockRestore())
   })
 
   it('refuses with the limit once the allowance is spent, and remembers it', async () => {
@@ -51,7 +60,7 @@ describe('makeIngestModelCall', () => {
     const budget = newModelBudget(10)
     const call = makeIngestModelCall('u', 'key', { budget })
     expect(await call(req)).toBe(MODEL_LIMIT)
-    expect(budget).toEqual({ n: 0, hit: true })
+    expect(budget).toEqual({ n: 0, hit: true, failed: 0 })
     expect(await call(req)).toBe(MODEL_LIMIT)
     expect(callLlm).toHaveBeenCalledTimes(1)
   })
