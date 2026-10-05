@@ -19,7 +19,7 @@ import type { BaseMessage } from '@langchain/core/messages'
 import { callLlm, callEmbedding, EMBEDDING_DIMS } from '../harness/llm'
 import { loadApiKeys } from '../harness/keys'
 import { createAdminClient } from '../harness/supabase-admin'
-import { parseDbUrl } from '../graph/pg'
+import { parseDbUrl, sslFor } from '../graph/pg'
 import type { DecryptedApiKeys } from '../harness/types'
 import { DemoMemoryWriteRefusedError, MemoryPersistError, type MemoryAddInput, type MemoryItem, type MemoryStore } from './types'
 
@@ -195,17 +195,18 @@ function scopeMem0SchemaSearchPath(memory: Memory): void {
 }
 
 function buildMemoryConfig(): Partial<MemoryConfig> {
+  const mem0ConnectionString = resolveMem0ConnectionString()
   return {
     embedder: { provider: 'langchain', config: { model: mem0EmbedderDelegate } },
     llm: { provider: 'langchain', config: { model: mem0LlmDelegate } },
     vectorStore: {
       provider: 'pgvector',
       config: {
-        connectionString: resolveMem0ConnectionString(),
+        connectionString: mem0ConnectionString,
         // Same relaxation as lib/graph/pg.ts, against the same database —
         // see that file's header for why this does not disable encryption,
         // only chain verification against Supabase's self-signed chain.
-        ssl: { rejectUnauthorized: false },
+        ssl: sslFor(mem0ConnectionString),
         embeddingModelDims: EMBEDDING_DIMS,
         // mem0's own Memory._autoInitialize() checks `dimension`, NOT
         // `embeddingModelDims` (PGVectorConfig's field for the vector
