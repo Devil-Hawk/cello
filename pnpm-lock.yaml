@@ -179,6 +179,9 @@ importers:
       remark-parse:
         specifier: ^11.0.0
         version: 11.0.0
+      robots-parser:
+        specifier: ^3.0.1
+        version: 3.0.1
       rss-parser:
         specifier: ^3.13.0
         version: 3.13.0
@@ -8957,6 +8960,11 @@ packages:
     dependencies:
       glob: 7.2.3
     dev: true
+
+  /robots-parser@3.0.1:
+    resolution: {integrity: sha512-s+pyvQeIKIZ0dx5iJiQk1tPLJAWln39+MI5jtM8wnyws+G5azk+dMnMX0qfbqNetKKNgcWWOdi0sfm+FbQbgdQ==}
+    engines: {node: '>=10.0.0'}
+    dev: false
 
   /rollup@4.57.1:
     resolution: {integrity: sha512-oQL6lgK3e2QZeQ7gcgIkS2YZPg5slw37hYufJ3edKlfQSGGm8ICoxswK15ntSzF/a8+h7ekRy7k7oWc3BQ7y8A==}

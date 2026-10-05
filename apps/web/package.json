@@ -67,6 +67,7 @@
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
+    "robots-parser": "3.0.1",
     "rss-parser": "^3.13.0",
     "tailwind-merge": "^2.2.0",
     "tailwindcss-animate": "^1.0.7",
