@@ -187,6 +187,14 @@ describe('Mem0Store construction', () => {
     expect(typeof (config.embedder.config.model as { embedDocuments?: unknown }).embedDocuments).toBe('function')
   })
 
+  it('tells mem0 to keep only what the person said, so Cello\'s own replies are never facts about them', async () => {
+    const store = new Mem0Store()
+    await store.getAll(USER_ID)
+    const config = memoryConstructions[0] as { customInstructions?: string }
+    expect(config.customInstructions).toContain('Only what the person said about themselves is kept')
+    expect(config.customInstructions).toContain('nothing Cello said is a memory')
+  })
+
   it('has no graphStore field — graph memory is off by construction, not by a flag', async () => {
     const store = new Mem0Store()
     await store.getAll(USER_ID)
