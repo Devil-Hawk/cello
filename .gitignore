@@ -79,3 +79,7 @@ supabase/.branches/
 .agents/
 .claude/
 skills-lock.json
+
+# Eval answers are cached here
+scripts/eval-ingest/.cache/
+apps/web/scripts/eval-ingest/.cache/
