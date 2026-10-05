@@ -165,7 +165,7 @@ export function checkDraft(input: DraftCheckInput): DraftCheckResult {
       })
     }
 
-    const greet = firstLine(body).match(/^(Hi|Hello) ([A-Z][\w'-]+|there),$/)
+    const greet = firstLine(body).match(/^(Hi|Hello) (\p{Lu}[\p{L}'’.-]*|there),$/u)
     let greetingOk = !!greet
     let greetingMessage = 'Greets by first name'
     if (!greet) {

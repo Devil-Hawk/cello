@@ -21,7 +21,7 @@ vi.mock('../harness/copilot-tools', () => ({ mcpToolsPromptBlock: (...args: unkn
 
 const {
   buildMatchContext,
-  buildOutreachContext,
+  outreachHistory,
   buildGoalStrategyContext,
   buildTurnContext,
 } = await import('./assemble')
@@ -181,7 +181,7 @@ describe('reward_loop insights', () => {
     for (const block of [
       await buildMatchContext(admin, USER, COMPANY),
       await buildGoalStrategyContext(admin, USER),
-      await buildOutreachContext(admin, USER, null, COMPANY),
+      JSON.stringify(await outreachHistory(admin, USER, null, COMPANY)),
     ]) {
       expect(block).not.toContain('Model-written pattern.')
       expect(block).toContain('Person-stated strategy.')
@@ -191,35 +191,29 @@ describe('reward_loop insights', () => {
 
 // --- buildOutreachContext -------------------------------------------------------
 
-describe('buildOutreachContext', () => {
-  it('is empty with neither a contact nor a company to build context for', async () => {
-    expect(await buildOutreachContext(fakeAdmin(), USER, null, null)).toBe('')
+describe('outreachHistory', () => {
+  it('is empty with neither a contact nor a company', async () => {
+    expect(await outreachHistory(fakeAdmin(), USER, null, null)).toEqual({ lines: [], patterns: [] })
   })
 
-  it('states plainly that this is a first contact when there is no recorded history', async () => {
-    const block = await buildOutreachContext(fakeAdmin(), USER, 'contact-1', COMPANY)
-    expect(block).toContain('none recorded')
-    expect(block).toContain('first contact')
+  it('has no lines when there is no recorded history, so a draft is a first contact', async () => {
+    expect((await outreachHistory(fakeAdmin(), USER, 'contact-1', COMPANY)).lines).toEqual([])
   })
 
-  it('surfaces real recorded history as fact, framed as a provenance rule rather than free license', async () => {
+  it('returns recorded history as plain data lines, with no rules text mixed in', async () => {
     const admin = fakeAdmin({
       interactions: [
         { user_id: USER, contact_id: 'contact-1', company_id: COMPANY, occurred_at: '2026-02-01T00:00:00Z', kind: 'outreach_sent', title: 'Initial note' },
       ],
     })
-    const block = await buildOutreachContext(admin, USER, 'contact-1', COMPANY)
-    expect(block).toContain('RELATIONSHIP HISTORY')
-    expect(block).toContain('outreach_sent')
-    expect(block).not.toContain('first contact')
+    expect((await outreachHistory(admin, USER, 'contact-1', COMPANY)).lines).toEqual(['2026-02-01 outreach_sent: Initial note'])
   })
 
   it('includes reply-pattern insights when on file', async () => {
     const admin = fakeAdmin({
       insights: [{ user_id: USER, status: 'active', kind: 'pattern', company_id: COMPANY, statement: 'Short subject lines get more replies.', updated_at: '2026-01-01' }],
     })
-    const block = await buildOutreachContext(admin, USER, null, COMPANY)
-    expect(block).toContain('Short subject lines get more replies.')
+    expect((await outreachHistory(admin, USER, null, COMPANY)).patterns).toEqual(['Short subject lines get more replies.'])
   })
 })
 

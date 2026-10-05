@@ -504,26 +504,39 @@ export const DigestOutput = z.object({
 })
 
 // outreach — draft a cold-outreach / follow-up email (lib/harness/agents/outreach.ts#generateOutreachDraft).
+const OutreachSourceLine = z.object({ id: z.string(), text: z.string(), url: z.string().optional() })
 export const OutreachInput = z.object({
   userName: z.string(),
   userEmail: z.string(),
-  jobTitle: z.string(),
-  companyName: z.string(),
+  jobTitle: z.string().nullable(),
+  companyName: z.string().nullable(),
   contactName: z.string().nullable().optional(),
   contactTitle: z.string().nullable().optional(),
   resumeText: z.string().nullable().optional(),
   matchHighlights: z.array(z.string()).optional(),
   jobDescription: z.string().nullable().optional(),
+  /** Researched company facts (D1..) and recorded earlier contact (H1..). */
+  facts: z.array(OutreachSourceLine).optional(),
+  history: z.array(OutreachSourceLine).optional(),
+  patterns: z.array(z.string()).optional(),
   kind: z.enum(['initial', 'follow_up']).optional(),
-  /** Set by lib/graph/verify/outreach.ts's ONE bounded regeneration when the
-   *  groundedness/specificity judge failed the first draft — fed into the
-   *  prompt as corrective instruction. Absent on a first attempt. */
+  /** For a follow-up: the email that got no answer, and how long ago it went out. */
+  previousEmail: z
+    .object({ subject: z.string(), body: z.string(), sentAt: z.string().nullable().optional() })
+    .nullable()
+    .optional(),
+  daysSinceSent: z.number().nullable().optional(),
+  /** Set by lib/graph/verify/outreach.ts's ONE bounded regeneration: a numbered
+   *  list of what the checks and judges flagged. Absent on a first attempt. */
   correctiveContext: z.string().optional(),
 })
 export const OutreachOutput = z.object({
   subject: z.string(),
   body: z.string(),
   tokensUsed: z.number().int().nonnegative(),
+  /** Written by the model, or the standard template. Absent only on older callers. */
+  source: z.enum(['model', 'template']).optional(),
+  templateReason: z.enum(['missing_key', 'spend_cap', 'provider_error', 'unusable_output']).optional(),
 })
 
 // resume_optimizer — score/rewrite/rescore a resume against one job

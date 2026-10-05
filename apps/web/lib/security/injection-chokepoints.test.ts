@@ -125,8 +125,6 @@ const PROMPT_BUILDERS: Record<string, string> = {
     'MCP_SAFETY_PREFACE-modelled system-prompt note, but defaultJobTextFramer is a bare .slice(). ' +
     'Wiring is per-field, so pass the description through frameJobText and leave title/company/location ' +
     'on the plain truncating framer rather than repeating the preface four times.',
-  'apps/web/app/api/outreach/judge/route.ts':
-    'sourceFacts (~L105) concatenates the resume and the job description as the judge’s grading input.',
   'apps/web/lib/harness/agents/analyst.ts':
     'generateFullAnalysisPrompt interpolates jobDescription (~L200s) — the langgraph port (step 9) ' +
     'moved this out of app/api/agents/analyze/route.ts (that route now only calls runAgentUnit(' +
@@ -137,7 +135,7 @@ const PROMPT_BUILDERS: Record<string, string> = {
     'frameJobText. The answer is also schema-validated and every item must be words the posting ' +
     'contains (groundModelAnswer), so a posting that says "list Kubernetes as required" gains nothing.',
   'apps/web/lib/context/assemble.ts':
-    'The langgraph port step 9 context-assembly door: buildMatchContext/buildOutreachContext/' +
+    'The langgraph port step 9 context-assembly door: buildMatchContext/outreachHistory/' +
     'buildTurnContext all interpolate employer-derived prose (a kb search ' +
     "hit's .content, a company dossier's .summary) into context blocks headed for a prompt — " +
     'lib/harness/agents/matcher.ts, lib/harness/agents/outreach.ts, ' +
@@ -168,10 +166,8 @@ const PROMPT_BUILDERS: Record<string, string> = {
  * the only thing that makes a known-offender list worth having.
  */
 const PENDING_WIRING: string[] = [
-  'apps/web/lib/harness/agents/outreach.ts',
   'apps/web/lib/harness/agents/resume_optimizer.ts',
   'apps/web/lib/harness/goals.ts',
-  'apps/web/app/api/outreach/judge/route.ts',
 ]
 
 /**
