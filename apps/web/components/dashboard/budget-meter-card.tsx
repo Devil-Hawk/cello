@@ -11,7 +11,9 @@ import { toast } from '@/components/ui/use-toast'
 export interface BudgetSummary {
   spentUsd: number
   monthlyUsd: number
-  /** "YYYY-MM" — the current billing period, from profiles.preferences.budget. */
+  /** Worst-case cost held for calls still in flight, when any. */
+  heldUsd?: number
+  /** "YYYY-MM" — the current billing period, from the spend ledger. */
   periodStart: string
 }
 
@@ -40,9 +42,12 @@ function formatPeriod(periodStart: string): string {
  */
 export function BudgetMeterCard({
   budget,
+  loadFailed = false,
   onBudgetChange,
 }: {
   budget: BudgetSummary | null
+  /** The budget could not be loaded (not the same as having none configured). */
+  loadFailed?: boolean
   /** Called with the new cap after a successful save, so the dashboard can
    *  update without a full refetch. */
   onBudgetChange?: (monthlyUsd: number) => void
@@ -103,7 +108,9 @@ export function BudgetMeterCard({
           <CardTitle className="text-body">AI budget</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-caption text-muted-foreground">No monthly budget configured yet.</p>
+          <p className="text-caption text-muted-foreground">
+            {loadFailed ? "Couldn't load your AI budget. Reload to try again." : 'No monthly budget configured yet.'}
+          </p>
         </CardContent>
       </Card>
     )
@@ -192,6 +199,9 @@ export function BudgetMeterCard({
             ? 'Monthly budget reached — new AI calls may be blocked until next period. Raise the cap above to keep going.'
             : `${formatUsd(remaining)} left this month.`}
         </p>
+        {(budget.heldUsd ?? 0) > 0 && (
+          <p className="text-caption text-muted-foreground">{formatUsd(budget.heldUsd ?? 0)} held for work in progress</p>
+        )}
       </CardContent>
     </Card>
   )

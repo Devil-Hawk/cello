@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { readProfileForDemoGuards } from '@/lib/harness/keys'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
-import { DEFAULT_MONTHLY_USD } from '@/lib/harness/spend'
+import { getSpendState } from '@/lib/harness/spend'
+import { createAdminClient } from '@/lib/harness/supabase-admin'
 import {
   demoLockdownGate,
   demoSettingsGate,
@@ -27,10 +28,11 @@ import {
 // so a naive `.update({ preferences: { budget } })` would silently wipe the
 // user's saved API keys. Always read the row first and spread it.
 //
-// `spentUsd` and `periodStart` are deliberately NOT writable here. They are
-// metering facts owned by lib/harness/spend.ts, which increments them when a
-// real LLM call is billed. Letting the client set "how much I have spent" would
-// make the budget unenforceable, which is the opposite of the point.
+// What has been SPENT is not stored on the profile at all. It is the sum of the
+// user's rows in the llm_spend ledger (migration 20261006002000), which only the
+// service role writes, so GET reads it through getSpendState and nothing here
+// can set it. Letting the client set "how much I have spent" would make the
+// budget unenforceable, which is the opposite of the point.
 //
 // A DEMO SESSION MAY NOT WRITE HERE AT ALL. Its $1 cap (DEMO_MONTHLY_USD) is
 // the guardrail that makes handing a stranger a real, working account
@@ -48,8 +50,12 @@ const MAX_MONTHLY_USD = 1000
 
 interface BudgetPayload {
   monthlyUsd: number
+  /** Settled spend this month. */
   spentUsd: number
-  periodStart: string | null
+  /** Worst-case cost held for calls still in flight. */
+  heldUsd: number
+  /** "YYYY-MM", the current billing month. */
+  periodStart: string
 }
 
 /**
@@ -65,18 +71,6 @@ function demoRefusalResponse(gate: DemoGate): NextResponse {
   )
 }
 
-function readBudget(preferences: unknown): BudgetPayload {
-  const prefs = (preferences ?? {}) as Record<string, unknown>
-  const raw = (prefs.budget ?? {}) as Record<string, unknown>
-  const monthlyUsd =
-    typeof raw.monthlyUsd === 'number' && raw.monthlyUsd > 0 ? raw.monthlyUsd : DEFAULT_MONTHLY_USD
-  return {
-    monthlyUsd,
-    spentUsd: typeof raw.spentUsd === 'number' && raw.spentUsd > 0 ? raw.spentUsd : 0,
-    periodStart: typeof raw.periodStart === 'string' ? raw.periodStart : null,
-  }
-}
-
 export async function GET() {
   const supabase = await createClient()
   const {
@@ -87,18 +81,19 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { data: profile, error } = await supabase
-    .from('profiles')
-    .select('preferences')
-    .eq('id', user.id)
-    .maybeSingle()
-
-  if (error) {
-    console.error('[settings/budget] read failed:', error.message)
+  try {
+    const state = await getSpendState(createAdminClient(), user.id)
+    const budget: BudgetPayload = {
+      monthlyUsd: state.capUsd,
+      spentUsd: state.spentUsd,
+      heldUsd: state.heldUsd,
+      periodStart: state.periodStart,
+    }
+    return NextResponse.json({ budget })
+  } catch (err) {
+    console.error('[settings/budget] read failed:', err instanceof Error ? err.message : err)
     return NextResponse.json({ error: 'Failed to load your budget' }, { status: 500 })
   }
-
-  return NextResponse.json({ budget: readBudget(profile?.preferences ?? null) })
 }
 
 export async function PUT(request: NextRequest) {
@@ -176,8 +171,8 @@ export async function PUT(request: NextRequest) {
     .update({
       preferences: {
         ...prefs,
-        // Spread the existing budget first so spentUsd and periodStart survive
-        // untouched — raising the cap must never look like resetting the meter.
+        // Spread the existing budget so any other key on it survives; raising
+        // the cap changes the cap and nothing else.
         budget: { ...existingBudget, monthlyUsd: capUsd },
       },
     })
@@ -195,7 +190,5 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to save your budget' }, { status: 500 })
   }
 
-  return NextResponse.json({
-    budget: readBudget({ ...prefs, budget: { ...existingBudget, monthlyUsd: capUsd } }),
-  })
+  return NextResponse.json({ budget: { monthlyUsd: capUsd } })
 }

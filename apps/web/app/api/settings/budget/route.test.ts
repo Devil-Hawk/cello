@@ -114,6 +114,14 @@ const supabase = {
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => supabase }))
 
+/** What llm_spend_state returns: spend is read from the ledger, not from preferences. */
+let ledgerState: Record<string, unknown> | null = null
+vi.mock('@/lib/harness/supabase-admin', () => ({
+  createAdminClient: () => ({
+    rpc: async () => (ledgerState ? { data: ledgerState, error: null } : { data: null, error: { message: 'down' } }),
+  }),
+}))
+
 import { GET, PUT } from './route'
 
 /** 48 hours out, so the demo is LIVE — an expired one is refused for a different reason. */
@@ -168,6 +176,7 @@ beforeEach(() => {
   writeFailure = null
   selects = []
   writes = []
+  ledgerState = { period: '2026-08-01', spent_usd: 0, held_usd: 0, cap_usd: DEFAULT_MONTHLY_USD }
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -219,31 +228,35 @@ describe('PUT /api/settings/budget — a demo cannot raise its own ceiling', () 
     expect(writes).toEqual([])
   })
 
-  it('lets a demo READ its budget — the "$0.12 of $1.00 used" banner is part of the demo', async () => {
+  it('lets a demo READ its budget, the "$0.12 of $1.00 used" banner is part of the demo', async () => {
     user = { id: DEMO_ID }
-    row = demoRow({ budget: { periodStart: '2026-08', spentUsd: 0.12, monthlyUsd: DEMO_MONTHLY_USD } })
+    row = demoRow({ budget: { monthlyUsd: DEMO_MONTHLY_USD } })
+    ledgerState = { period: '2026-08-01', spent_usd: 0.12, held_usd: 0.03, cap_usd: DEMO_MONTHLY_USD }
 
     const response = await GET()
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
-      budget: { monthlyUsd: DEMO_MONTHLY_USD, spentUsd: 0.12, periodStart: '2026-08' },
+      budget: { monthlyUsd: DEMO_MONTHLY_USD, spentUsd: 0.12, heldUsd: 0.03, periodStart: '2026-08' },
     })
+  })
+
+  it('answers 500, not a made-up zero, when the ledger cannot be read', async () => {
+    ledgerState = null
+    expect((await GET()).status).toBe(500)
   })
 })
 
 describe('PUT /api/settings/budget — the OWNER is unaffected', () => {
   it('saves the new cap and returns it', async () => {
-    row = ownerRow({ budget: { periodStart: '2026-08', spentUsd: 3.5, monthlyUsd: DEFAULT_MONTHLY_USD } })
+    row = ownerRow({ budget: { monthlyUsd: DEFAULT_MONTHLY_USD } })
 
     const response = await PUT(putRequest({ monthlyUsd: 42 }))
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({
-      budget: { monthlyUsd: 42, spentUsd: 3.5, periodStart: '2026-08' },
-    })
+    expect(await response.json()).toEqual({ budget: { monthlyUsd: 42 } })
 
     expect(writes).toHaveLength(1)
     const saved = (writes[0].preferences as { budget: Record<string, unknown> }).budget
-    expect(saved).toEqual({ periodStart: '2026-08', spentUsd: 3.5, monthlyUsd: 42 })
+    expect(saved).toEqual({ monthlyUsd: 42 })
   })
 
   it('does not wipe the rest of preferences — api_keys ride in the same column', async () => {
