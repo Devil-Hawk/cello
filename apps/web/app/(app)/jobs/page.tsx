@@ -557,7 +557,8 @@ function JobsPageInner() {
     value: string
   ) {
     const params = new URLSearchParams(searchParams.toString())
-    if (!value || value === 'all' || (key === 'sort' && value === 'newest')) {
+    // scope=all is the explicit value (absent means matching targets), so it is kept.
+    if (!value || (value === 'all' && key !== 'scope') || (key === 'sort' && value === 'newest')) {
       params.delete(key)
     } else {
       params.set(key, value)
