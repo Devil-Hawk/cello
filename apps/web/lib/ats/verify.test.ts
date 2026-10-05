@@ -150,6 +150,18 @@ describe('a board verified through the careers page', () => {
     await expect(detectAts(acme)).resolves.toBeNull()
   })
 
+  it('reads a heavy page as far as the cap instead of refusing it', async () => {
+    const heavy = `<a href="https://jobs.ashbyhq.com/acmehq">Roles</a>${'<!-- padding -->'.repeat(200_000)}`
+    route((u) => {
+      if (u.startsWith('https://acme.io/careers')) return html(heavy)
+      if (u.includes('/posting-api/job-board/acmehq')) {
+        return json({ jobs: [{ title: 'Engineer', jobUrl: 'https://jobs.ashbyhq.com/acmehq/1', publishedAt: MONTH_AGO }] })
+      }
+      return undefined
+    })
+    await expect(detectAts(acme)).resolves.toMatchObject({ provider: 'ashby', verifiedBy: 'careers_page_link' })
+  })
+
   it('does not follow a redirect off the company site', async () => {
     const urls = route((u) => {
       if (u.startsWith('https://acme.io/careers')) {
