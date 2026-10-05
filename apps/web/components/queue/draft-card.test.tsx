@@ -114,3 +114,35 @@ describe('DraftCard — official-API handoff (approved, no fill_state)', () => {
     expect(html).not.toContain('Submit application')
   })
 })
+
+describe('DraftCard — why the letter is the length it is', () => {
+  const letter = ['Dear Acme team,', 'word '.repeat(300).trim()].join(' ')
+  const meta = {
+    tier: 'focused' as const,
+    words: 301,
+    evidence: [{ job: 'Build services.', resume: 'Senior engineer with 8 years of Go.' }],
+    companyFact: { text: 'Acme ships weekly', url: 'https://acme.test/about' },
+    hasJobPost: true,
+    hasCompanyFacts: true,
+    checks: [],
+  }
+
+  it('shows the tier line, the company fact with its source link and the failing length check', () => {
+    const html = render({ cover_letter: letter, cover_letter_meta: meta })
+    expect(html).toContain("Short letter. Your resume backs 1 of this role&#x27;s requirements, so the letter stays on that.")
+    expect(html).toContain('Mentions: Acme ships weekly')
+    expect(html).toContain('href="https://acme.test/about"')
+    expect(html).toContain('A focused letter runs 150 to 250.')
+  })
+
+  it('says nothing about the company when there is no research on file', () => {
+    const html = render({ cover_letter: 'Dear Acme team, hello.', cover_letter_meta: { ...meta, tier: 'brief', evidence: [], companyFact: null, hasCompanyFacts: false } })
+    expect(html).toContain('No company research on file, so the letter says nothing about the company.')
+  })
+
+  it('adds nothing to a letter written before the notes existed', () => {
+    const html = render({ cover_letter: 'Dear Acme team, hello.', cover_letter_meta: null })
+    expect(html).not.toContain('Mentions:')
+    expect(html).not.toContain('checks passed')
+  })
+})

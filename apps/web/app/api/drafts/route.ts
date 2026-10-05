@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
   let query = admin
     .from('application_drafts')
     .select(
-      'id, job_id, run_id, resume_summary, cover_letter, answers, status, submission_ref, submitted_at, created_at, updated_at, fill_state, screenshots, review_confirmed_at, jobs(id, title, url, location, company_id, companies(name, logo_url, domain))'
+      'id, job_id, run_id, resume_summary, cover_letter, cover_letter_meta, answers, status, submission_ref, submitted_at, created_at, updated_at, fill_state, screenshots, review_confirmed_at, jobs(id, title, url, location, company_id, companies(name, logo_url, domain))'
     )
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
