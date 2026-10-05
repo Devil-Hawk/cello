@@ -2,7 +2,7 @@
 //
 // THE THING THIS ROUTE HAS TO GET RIGHT: a code is a bearer credential that
 // creates a real workspace and burns real model spend. Signed-in users cannot
-// write access_codes at all any more (migration 20261006002001), so minting is the
+// write access_codes at all any more (migration 20261008030001), so minting is the
 // service-role function mint_access_code, called here only after the caller is
 // same-origin, authenticated and a real owner. A demo profile satisfies
 // `owner_user_id = auth.uid()` for its own row, so without a refusal a visitor

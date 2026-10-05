@@ -3,7 +3,7 @@
 //   CELLO_TEST_DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres \
 //     pnpm vitest run lib/access/access-codes.db.test.ts
 //
-// Needs migrations 20261006002000 and 20261006002001 applied. Skipped when the
+// Needs migrations 20261008030000 and 20261008030001 applied. Skipped when the
 // variable is unset.
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'

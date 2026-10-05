@@ -7,7 +7,7 @@
 // deleting the answer along with the access would defeat the feature.
 //
 // HOW IT ENDS A SESSION THAT ALREADY EXISTS
-//   Signed-in users cannot write access_codes (migration 20261006002001), so this
+//   Signed-in users cannot write access_codes (migration 20261008030001), so this
 //   calls revoke_access_code with the service role, after the caller is
 //   authenticated, same-origin and a real owner. That one transaction sets
 //   revoked_at AND pulls the demo profile's deadline to now(), which the

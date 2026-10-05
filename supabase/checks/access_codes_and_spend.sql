@@ -1,5 +1,5 @@
 -- Proves migrations 20261005000004 (access_codes hardening) and 20261005000005
--- (atomic LLM spend). Run it against a database BEFORE 20261006002001: after that
+-- (atomic LLM spend). Run it against a database BEFORE 20261008030001: after that
 -- migration signed-in users cannot write access_codes at all, so the direct-insert
 -- assertions below are refused outright. supabase/checks/llm_spend_and_access.sql
 -- is the proof for the current state. It applies both migrations TWICE inside the transaction

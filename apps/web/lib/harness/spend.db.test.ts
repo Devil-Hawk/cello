@@ -4,7 +4,7 @@
 //   CELLO_TEST_DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres \
 //     pnpm vitest run lib/harness/spend.db.test.ts
 //
-// Needs migration 20261006002000 applied (psql -f is idempotent). Skipped when the
+// Needs migration 20261008030000 applied (psql -f is idempotent). Skipped when the
 // variable is unset, so the default test run never needs a database.
 
 import { randomUUID } from 'node:crypto'

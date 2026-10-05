@@ -295,7 +295,7 @@ export interface DemoBudget {
 /**
  * The `preferences.budget` block a demo profile is provisioned with: the cap
  * only. What a demo has SPENT is not stored here at all. It lives in the
- * llm_spend ledger (migration 20261006002000), which only the service role
+ * llm_spend ledger (migration 20261008030000), which only the service role
  * writes, so re-provisioning or re-seeding a workspace can never refill its
  * allowance, and nothing in this block can be edited to reset it.
  *

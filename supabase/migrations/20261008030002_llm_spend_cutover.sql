@@ -1,6 +1,6 @@
 -- Retire the old spend counters. APPLY THIS AFTER THE APP DEPLOY.
 --
--- 20261006002000 created the ledger and carried this month's profiles.preferences
+-- 20261008030000 created the ledger and carried this month's profiles.preferences
 -- .budget.spentUsd into it. Until the new app is live, the old code keeps
 -- calling record_llm_spend and growing those counters, so this migration:
 --   1. tops the ledger up with whatever the old code charged since the carry-over

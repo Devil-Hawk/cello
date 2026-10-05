@@ -12,7 +12,7 @@
 //   was per instance and reset on every cold start, so an attacker spread across
 //   instances (or just waiting for one to recycle) was never really limited.
 //   The counters now live in public.access_redeem_attempts, bumped by ONE atomic
-//   upsert per attempt (note_redeem_attempt, migration 20261006002001), and
+//   upsert per attempt (note_redeem_attempt, migration 20261008030001), and
 //   pruned by pg_cron.
 //
 // WHAT IT IS ACTUALLY FOR

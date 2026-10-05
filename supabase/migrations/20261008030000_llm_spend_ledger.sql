@@ -24,7 +24,7 @@
 --   user-editable by design (a demo cannot raise it; the lockdown trigger).
 --
 -- Additive: old code that still calls record_llm_spend keeps working until
--- 20261006002002 retires it.
+-- 20261008030002 retires it.
 --
 -- Lock order is always user, then pool, and an owner never takes a pool lock, so
 -- there is no cycle. SECURITY INVOKER with an empty search_path throughout, for

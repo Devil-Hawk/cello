@@ -1,5 +1,5 @@
--- Proves migrations 20261006002000 (spend ledger), 20261006002001 (access code
--- functions) and 20261006002002 (cutover). It asserts the hole BEFORE applying
+-- Proves migrations 20261008030000 (spend ledger), 20261008030001 (access code
+-- functions) and 20261008030002 (cutover). It asserts the hole BEFORE applying
 -- them, applies all three TWICE inside the transaction (so idempotency is
 -- exercised and an unmigrated database can be checked), runs the assertions as the
 -- real client roles, and rolls everything back.
@@ -63,12 +63,12 @@ where id = 'bbbbbbbb-0000-0000-0000-000000000001';
 -- ===========================================================================
 -- Apply the three migrations, twice.
 -- ===========================================================================
-\ir ../migrations/20261006002000_llm_spend_ledger.sql
-\ir ../migrations/20261006002000_llm_spend_ledger.sql
-\ir ../migrations/20261006002001_access_code_redemption.sql
-\ir ../migrations/20261006002001_access_code_redemption.sql
-\ir ../migrations/20261006002002_llm_spend_cutover.sql
-\ir ../migrations/20261006002002_llm_spend_cutover.sql
+\ir ../migrations/20261008030000_llm_spend_ledger.sql
+\ir ../migrations/20261008030000_llm_spend_ledger.sql
+\ir ../migrations/20261008030001_access_code_redemption.sql
+\ir ../migrations/20261008030001_access_code_redemption.sql
+\ir ../migrations/20261008030002_llm_spend_cutover.sql
+\ir ../migrations/20261008030002_llm_spend_cutover.sql
 
 -- ===========================================================================
 -- Part 2: the carried-over spend is in the ledger exactly once, and the counters

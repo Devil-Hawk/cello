@@ -7,7 +7,7 @@
 // mid-seed. What a demo has SPENT used to ride along in preferences.budget and
 // had to be carried forward by hand by both lib/access/guardrails.ts and
 // lib/access/seed-demo.ts. It now lives in the llm_spend ledger (migration
-// 20261006002000), which only the service role writes, so the rule holds by
+// 20261008030000), which only the service role writes, so the rule holds by
 // construction: provisioning and re-seeding write the CAP and nothing else, and
 // there is no spend field on the profile to zero. The ledger itself is proven
 // against a real database in lib/harness/spend.db.test.ts.

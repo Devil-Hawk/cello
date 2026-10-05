@@ -62,7 +62,7 @@
 //
 // WHAT HAPPENS IN POSTGRES, AND WHY
 //   Everything that decides whether a code may be used runs inside ONE database
-//   function, redeem_access_code (migration 20261006002001), which locks the code
+//   function, redeem_access_code (migration 20261008030001), which locks the code
 //   row. Concurrent redemptions therefore cannot both pass the checks: exactly one
 //   caller is told to provision the workspace (under a 2 minute lease), the others
 //   are told to retry, and no two demo users are ever created for one code. The
@@ -276,7 +276,7 @@ export async function POST(request: NextRequest) {
   })
 }
 
-/** What redeem_access_code returns (see migration 20261006002001). */
+/** What redeem_access_code returns (see migration 20261008030001). */
 interface RedeemOutcome {
   status: 'refused' | 'busy' | 'provision' | 'existing'
   code_id?: string

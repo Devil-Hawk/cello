@@ -155,7 +155,7 @@ const UNDEFINED_COLUMN = '42703'
  *
  * ONLY NON-DEMO READS ARE CACHED. A demo's facts are read again on every
  * request, because revoking a code pulls the demo profile's deadline to now()
- * (revoke_access_code, migration 20261006002001) and that must end the session on
+ * (revoke_access_code, migration 20261008030001) and that must end the session on
  * its very next request, not up to a minute later. Demos are rare and short
  * lived, so the extra read costs nothing that matters; ordinary accounts are the
  * traffic this cache exists for.

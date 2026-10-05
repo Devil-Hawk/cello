@@ -4,7 +4,7 @@
 // AUTHORISATION. READS use the owner's OWN cookie-scoped session: every row is
 //   reachable through the RLS policy `auth.uid() = owner_user_id`, so a bug in
 //   this file cannot list another owner's codes. WRITES do not: signed-in users
-//   have no INSERT or UPDATE on access_codes at all (migration 20261006002001),
+//   have no INSERT or UPDATE on access_codes at all (migration 20261008030001),
 //   so minting goes through the service-role function mint_access_code, called
 //   here only AFTER the caller is authenticated, same-origin and a real owner.
 //   That is what lets the database itself refuse a demo, enforce the live-code

@@ -29,7 +29,7 @@ import {
 // user's saved API keys. Always read the row first and spread it.
 //
 // What has been SPENT is not stored on the profile at all. It is the sum of the
-// user's rows in the llm_spend ledger (migration 20261006002000), which only the
+// user's rows in the llm_spend ledger (migration 20261008030000), which only the
 // service role writes, so GET reads it through getSpendState and nothing here
 // can set it. Letting the client set "how much I have spent" would make the
 // budget unenforceable, which is the opposite of the point.
