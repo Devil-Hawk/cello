@@ -315,6 +315,11 @@ export interface LlmRunOptions {
    * `score-job-match`, never free text. Falls back to `call-llm`.
    */
   name?: string
+  /**
+   * The prompt document this call uses (lib/harness/prompts.ts promptRef):
+   * Langfuse shows its name and content hash as the generation's version.
+   */
+  promptRef?: { name: string; hash?: string }
 }
 
 /**

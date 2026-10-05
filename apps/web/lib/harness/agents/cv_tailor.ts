@@ -38,7 +38,7 @@
 import type { AgentFn } from '../types'
 import { CvTailorInput } from '../schemas'
 import { parseJsonLoose, TruncatedResponseError } from '../llm'
-import { composeSystemPrompt, loadModeDoc } from '../prompts'
+import { composeSystemPrompt, loadModeDoc, promptRef } from '../prompts'
 import { frameJobText, checkTailoringContainment } from '@/lib/security/job-text'
 
 const MAX_RESUME_CHARS = 12_000
@@ -134,6 +134,7 @@ export const cv_tailor: AgentFn = async (ctx) => {
 
   const base = {
     system: systemWithResume(resumeText),
+    promptRef: promptRef('cv_tailor'),
     prompt: userPrompt,
     json: true,
     maxTokens: MAX_TOKENS,

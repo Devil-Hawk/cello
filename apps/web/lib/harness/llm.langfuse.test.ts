@@ -87,6 +87,25 @@ afterEach(() => {
 })
 
 describe('callLlm -> trace_spans + Langfuse generation', () => {
+  it('a prompt document is the generation version (its content hash) plus prompt_name and prompt_hash metadata', async () => {
+    configure()
+    await callLlm(keys, { name: 'tailor-cv', prompt: 'x', promptRef: { name: 'cv_tailor', hash: 'a1b2c3d4' } })
+    const g = gen()
+    expect(attr(g, 'langfuse.version')).toBe('a1b2c3d4')
+    expect(attr(g, 'langfuse.observation.metadata.prompt_name')).toBe('cv_tailor')
+    expect(attr(g, 'langfuse.observation.metadata.prompt_hash')).toBe('a1b2c3d4')
+    // metadata only: nothing about the prompt text rides along, and Postgres never sees it
+    expect(JSON.stringify(insertCalls)).not.toContain('a1b2c3d4')
+  })
+
+  it('an inline prompt has no version (the release stands in) and no prompt metadata', async () => {
+    configure()
+    await callLlm(keys, { name: 'plan-copilot-step', prompt: 'x' })
+    const g = gen()
+    expect(attr(g, 'langfuse.version')).toBeUndefined()
+    expect(attr(g, 'langfuse.observation.metadata.prompt_name')).toBeUndefined()
+  })
+
   it('one generation with name, model, usage and OUR price table cost; the prompt never reaches Postgres', async () => {
     configure()
     await callLlm(keys, { name: 'tailor-cv', system: 'You are a CV editor.', prompt: PROMPT, maxTokens: 800, temperature: 0.2, json: true })

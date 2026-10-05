@@ -96,7 +96,13 @@ function generationPayload(
     name: opts.name ?? 'call-llm',
     type: 'generation',
     modelParameters,
-    metadata: { provider, metered },
+    ...(opts.promptRef?.hash ? { version: opts.promptRef.hash } : {}),
+    metadata: {
+      provider,
+      metered,
+      ...(opts.promptRef ? { prompt_name: opts.promptRef.name } : {}),
+      ...(opts.promptRef?.hash ? { prompt_hash: opts.promptRef.hash } : {}),
+    },
     ...(capture ? { input: requestMessages(opts) } : {}),
   }
   if (!result) return lf

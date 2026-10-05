@@ -14,7 +14,11 @@ import {
   getVoiceDoc,
   loadDoc,
   loadModeDoc,
+  promptRef,
 } from './prompts'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 describe('assertPromptDocsResolve', () => {
   it('resolves every known document without throwing', () => {
@@ -95,5 +99,24 @@ describe('composeSystemPrompt', () => {
   it('drops an empty/whitespace-only stableContext instead of appending a blank section', () => {
     const composed = composeSystemPrompt({ mode: 'MODE MARKER', stableContext: '   \n  ' })
     expect(composed.trimEnd().endsWith('MODE MARKER')).toBe(true)
+  })
+})
+
+describe('promptRef (the Langfuse prompt version)', () => {
+  it('is the document name and the first 8 hex chars of the SHA-256 of its trimmed text', () => {
+    const text = readFileSync(join(process.cwd(), 'prompts', 'cv_tailor.md'), 'utf8').trim()
+    const expected = createHash('sha256').update(text).digest('hex').slice(0, 8)
+    expect(promptRef('cv_tailor')).toEqual({ name: 'cv_tailor', hash: expected })
+    expect(promptRef('cv_tailor')).toEqual(promptRef('cv_tailor')) // stable across calls
+  })
+
+  it('differs between documents, so an edit to one never moves another', () => {
+    const hashes = new Set(PROMPT_DOC_NAMES.map((n) => promptRef(n).hash))
+    expect(hashes.size).toBe(PROMPT_DOC_NAMES.length)
+    expect(promptRef('outreach').hash).toMatch(/^[0-9a-f]{8}$/)
+  })
+
+  it('fails loudly for a document that does not exist, like every other loader here', () => {
+    expect(() => promptRef('no_such_doc')).toThrow(/could not read prompt document/)
   })
 })
