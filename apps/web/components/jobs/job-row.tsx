@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { formatRelativeTime } from '@/lib/utils'
+import { knownParts } from '@/lib/format'
 import { MatchBadge, parseMatchDetails, type MatchDetails } from './match-badge'
 import { VisaBadge } from './visa-badge'
 import type { VisaSignal } from '@/lib/dossier/store'
@@ -97,7 +98,7 @@ export function JobRow({
   const isRecent = Date.now() - new Date(referenceTimestamp).getTime() < NEW_JOB_WINDOW_MS
   const showNewMarker = job.is_new && isRecent
 
-  const meta = [job.companies?.name, job.location, job.salary_range].filter(Boolean) as string[]
+  const meta = knownParts(job.companies?.name, job.location, job.salary_range)
 
   return (
     // Plain container — NOT role="button". The row used to be one giant
@@ -109,7 +110,10 @@ export function JobRow({
     // is purely a mouse convenience for clicking row whitespace.
     <div
       onClick={onOpen}
-      className="group relative flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-sunken/60"
+      // Wraps below sm: logo + text take the first line and the actions drop
+      // under the text (pl-[3.25rem] = 40px logo + 12px gap). A 390px row
+      // can't fit a title, its badges and "Add to pipeline" side by side.
+      className="group relative flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 transition-colors hover:bg-sunken/60 sm:flex-nowrap"
     >
       {showNewMarker && (
         <span
@@ -132,8 +136,12 @@ export function JobRow({
         </div>
       )}
 
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+      <div className="min-w-0 flex-1 basis-[calc(100%-3.25rem)] sm:basis-0">
+        {/* Badges wrap onto their own line instead of squeezing the title to
+            zero width; the title (with the NEW chip) keeps a line of its own
+            on narrow screens. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <div className="flex min-w-0 max-w-full basis-full items-center gap-2 sm:basis-auto">
           {showNewMarker && (
             <span
               className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 font-readout text-[0.5625rem] font-bold uppercase tracking-[0.1em] text-accent-deep"
@@ -149,11 +157,12 @@ export function JobRow({
               e.stopPropagation()
               onOpen()
             }}
-            className="truncate rounded-sm text-body font-semibold text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="min-w-0 truncate rounded-sm text-left text-body font-semibold text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {job.title}
             <span className="sr-only"> at {job.companies?.name ?? 'unknown company'} — open details</span>
           </button>
+          </div>
           {/* The match badge is a control in its own right, so it must not also
               fire the row's open-the-job convenience click above. Its unscored
               variant already stops the event itself; its SCORED variant — a
@@ -209,7 +218,7 @@ export function JobRow({
       </div>
 
       <div
-        className="flex shrink-0 items-center gap-1.5"
+        className="flex shrink-0 basis-full items-center gap-1.5 pl-[3.25rem] sm:basis-auto sm:pl-0"
         onClick={(e) => e.stopPropagation()}
       >
         {inPipeline ? (

@@ -57,7 +57,7 @@ export function CompanyRow({
     // this row the containing block for that overlay, and scopes the z-indices
     // used to lift the real controls back above it so they can't interact with
     // any other row's.
-    <div className="group relative isolate flex items-center gap-4 px-5 py-3.5 transition-colors hover:bg-sunken/60">
+    <div className="group relative isolate flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3.5 transition-colors hover:bg-sunken/60 sm:flex-nowrap sm:px-5">
       <Link
         href={`/companies/${company.id}`}
         // Stretched link. The <a> box only ever wraps the logo + text column,
@@ -76,14 +76,14 @@ export function CompanyRow({
         //
         // Deliberately NOT `relative`: the overlay has to resolve `inset-0`
         // against the ROW, so the anchor must stay unpositioned.
-        className="flex min-w-0 flex-1 items-center gap-4 rounded-control after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex min-w-0 flex-1 basis-full items-center gap-4 rounded-control after:absolute sm:basis-0 after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <CompanyLogo
           src={getCompanyLogoSrc(company.logo_url, company.domain, company.career_url)}
           name={company.name}
         />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
             {/* title: this is the one place the full name survives — junk
                 like a pasted "Can you change this to..." prefix pushes the
                 real name past the truncate cutoff, so hover is the only way
@@ -95,7 +95,7 @@ export function CompanyRow({
                 silently stop appearing. Lifting the span costs nothing —
                 it's inside the anchor, so clicking it still navigates. */}
             <span
-              className="relative z-10 truncate text-body font-medium text-foreground"
+              className="relative z-10 min-w-0 max-w-full truncate text-body font-medium text-foreground"
               title={company.name}
             >
               {company.name}
@@ -116,7 +116,7 @@ export function CompanyRow({
           keeps them from navigating to the company instead of firing. Their
           aria-labels and titles keep working for the same reason the name span
           above does: nothing is painted on top of them. */}
-      <div className="relative z-20 flex shrink-0 items-center gap-1">
+      <div className="relative z-20 flex shrink-0 items-center gap-1 pl-[3.5rem] sm:pl-0">
         <Button
           variant="ghost"
           size="icon"
