@@ -82,7 +82,10 @@ export function MobileNav() {
             )}
           >
             <Icon className="h-5 w-5" aria-hidden="true" />
-            <span>{item.label}</span>
+            {/* text-label carries +0.08em tracking (built for uppercase eyebrows);
+                at 11px that pushed "Opportunities" and "Applications" into each
+                other on a 390px phone. Tabs need natural spacing. */}
+            <span className="tracking-normal">{item.label}</span>
           </Link>
         )
       })}
