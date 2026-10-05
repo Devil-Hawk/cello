@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { withTrace } from '@/lib/trace/spans'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { createClient } from '@/lib/supabase/server'
-import { assertSsrfSafe } from '@/lib/security/untrusted'
+import { makeSiteFetcher, ReaderError, type ReaderReason } from '@/lib/ingest/reader/site-fetch'
+import { employerNameFromPage, isGenericName, nameFromDomain } from '@/lib/companies/page-name'
 import { getDecryptedApiKeys } from '@/lib/apikeys'
 import { callLlm } from '@/lib/harness/llm'
 import { canRunLlm } from '@/lib/harness/llm-key-message'
@@ -154,49 +155,8 @@ function heuristicVerification(html: string, url: string, domain: string): Omit<
     if (matches) jobCount = Math.max(jobCount, matches.length)
   }
 
-  // Extract company name - check known companies first
-  let companyName: string | null = null
-
-  // Check known companies directory
-  const knownCompany = lookupKnownCompanyByDomain(domain)
-  if (knownCompany) {
-    companyName = knownCompany.name
-  }
-
-  // Try og:site_name
-  if (!companyName) {
-    const ogMatch = html.match(/<meta[^>]+property="og:site_name"[^>]+content="([^"]+)"/i)
-    if (ogMatch && ogMatch[1].length < 40) {
-      companyName = ogMatch[1].trim()
-        .replace(/\s*careers?$/i, '')
-        .replace(/\s*jobs?$/i, '')
-        .trim()
-    }
-  }
-
-  // Try page title
-  if (!companyName) {
-    const titleMatch = html.match(/<title>([^<]+)<\/title>/i)
-    if (titleMatch) {
-      let title = titleMatch[1]
-        .replace(/\s*[-|–—:]\s*careers?$/i, '')
-        .replace(/\s*[-|–—:]\s*jobs?$/i, '')
-        .replace(/^careers?\s*(at|[-|])?\s*/i, '')
-        .replace(/^jobs?\s*(at|[-|])?\s*/i, '')
-        .trim()
-      const atMatch = title.match(/^(?:careers?|jobs?)\s+at\s+(.+)$/i)
-      if (atMatch) title = atMatch[1]
-      if (title.length > 0 && title.length < 50) {
-        companyName = title.split(/\s*[-|–—]\s*/)[0].trim()
-      }
-    }
-  }
-
-  // Fallback to cleaned domain
-  if (!companyName) {
-    const baseDomain = domain.replace(/^(jobs|careers|www)\./, '').split('.')[0]
-    companyName = baseDomain.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-  }
+  // The employer's name: what the employer declares, else its domain; never a marketing page title.
+  const companyName = employerNameFromPage(html, url, domain)
 
   // Calculate confidence
   let confidence = 0.3
@@ -220,8 +180,12 @@ function heuristicVerification(html: string, url: string, domain: string): Omit<
   }
 }
 
-/** Redirect hops allowed while verifying a career page. http -> https -> www. */
-const MAX_VERIFY_REDIRECTS = 3
+/** Why a page could not be read, in words for the add-company dialog. */
+const UNREADABLE: Partial<Record<ReaderReason, string>> = {
+  robots: "The site's robots.txt asks automated readers to stay away, so Cello will not read it.",
+  bot_check: 'The site answers automated requests with a bot check, so Cello cannot read it.',
+  login_required: 'The page needs a login, so Cello cannot read it.',
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -293,11 +257,6 @@ export async function POST(request: NextRequest) {
     let html = ''
     let fetchSuccess = false
 
-    const userAgents = [
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15',
-    ]
-
     // ONLY http(s). Without this, `file:`, `gopher:` and friends are reachable
     // through the same primitive, and some of them read local disk.
     if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
@@ -313,74 +272,30 @@ export async function POST(request: NextRequest) {
       } satisfies VerificationResult)
     }
 
-    for (const ua of userAgents) {
-      try {
-        const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 12000)
-
-        // Follow redirects BY HAND so every hop is checked.
-        //
-        // `redirect: 'follow'` validated nothing: the caller's URL could be a
-        // perfectly ordinary public host that 302s straight to
-        // http://169.254.169.254/latest/meta-data/, and the fetch would take
-        // that hop without anything looking at it. assertSsrfSafe resolves the
-        // name and refuses loopback, link-local, RFC1918 and cloud-metadata
-        // addresses — which is also what stops a public hostname whose DNS
-        // record simply POINTS at a private address, the case a hostname
-        // allowlist can never catch.
-        //
-        // Its limits are documented in lib/security/untrusted.ts: the check
-        // resolves DNS itself and the fetch resolves again, so a resolver that
-        // answers differently between the two can still slip through. Closing
-        // that needs a connection pinned to the verified address.
-        let target = normalizedUrl
-        let res: Response | null = null
-
-        for (let hop = 0; hop <= MAX_VERIFY_REDIRECTS; hop++) {
-          await assertSsrfSafe(target)
-          const hopRes = await fetch(target, {
-            signal: controller.signal,
-            headers: {
-              'User-Agent': ua,
-              'Accept': 'text/html,application/xhtml+xml',
-              'Accept-Language': 'en-US,en;q=0.9',
-            },
-            redirect: 'manual',
-          })
-          if (hopRes.status >= 300 && hopRes.status < 400) {
-            const location = hopRes.headers.get('location')
-            if (!location) break
-            target = new URL(location, target).toString()
-            continue
-          }
-          res = hopRes
-          break
-        }
-
-        clearTimeout(timeout)
-
-        if (res?.ok) {
-          html = await res.text()
-          fetchSuccess = true
-          break
-        }
-      } catch {
-        // Includes an SSRF refusal. Falls through to the same "could not fetch"
-        // path as a timeout, so the response body does not become an oracle
-        // distinguishing "blocked" from "unreachable".
-        continue
+    // One plain request as Cello (the user agent names it and its repository), through the same door as every
+    // other read of a company's site: public addresses only, every redirect hop checked, robots.txt obeyed.
+    // A site that refuses (a bot check, a login, robots.txt) is not asked again under another identity.
+    let unreadable: ReaderReason | null = null
+    try {
+      const res = await makeSiteFetcher({ mode: 'inline' }).get(normalizedUrl)
+      if (res.ok) {
+        html = res.text
+        fetchSuccess = true
       }
+    } catch (error) {
+      // An SSRF refusal or a timeout is just "unreachable", so the response is no oracle for which it was.
+      unreadable = error instanceof ReaderError ? error.reason : 'unreachable'
     }
 
     if (!fetchSuccess) {
       // Check if URL looks like a career page even without fetching
       const urlHasJobPattern = JOB_URL_PATTERNS.some(p => normalizedUrl.toLowerCase().includes(p))
       if (urlHasJobPattern) {
-        const guessedName = domain.split('.')[0].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+        const guessedName = lookupKnownCompanyByDomain(domain)?.name ?? nameFromDomain(domain)
         return NextResponse.json({
           isValid: true,
           status: 'unverified',
-          message: 'Could not fetch page, but URL looks like a career page. Will monitor.',
+          message: (unreadable && UNREADABLE[unreadable]) || 'Could not fetch page, but URL looks like a career page. Will monitor.',
           companyName: guessedName,
           logoUrl,
           jobCount: 0,
@@ -392,7 +307,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         isValid: false,
         status: 'unreachable',
-        message: 'Could not connect to the URL. Please check and try again.',
+        message: (unreadable && UNREADABLE[unreadable]) || 'Could not connect to the URL. Please check and try again.',
         companyName: null,
         logoUrl: null,
         jobCount: 0,
@@ -443,7 +358,8 @@ export async function POST(request: NextRequest) {
         isValid,
         status: isValid ? 'ai_verified' : 'ai_rejected',
         message,
-        companyName: aiAnalysis.companyName,
+        // A model reading a marketing page can answer with its slogan; the employer's own name wins.
+        companyName: aiAnalysis.companyName && !isGenericName(aiAnalysis.companyName) ? aiAnalysis.companyName : employerNameFromPage(html, normalizedUrl, domain),
         logoUrl: isValid ? logoUrl : null,
         jobCount: aiAnalysis.estimatedJobCount,
         confidence: aiAnalysis.confidence,
