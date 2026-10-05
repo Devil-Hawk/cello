@@ -222,10 +222,51 @@ describe('provider name plus domain label', () => {
     })
   })
 
-  it('accepts the same name and the domain label when the board gives nothing against it (Calendly, Typeform, Smartsheet)', async () => {
+  it('a name equal to the domain label is not enough on its own (Gong on Recruitee is a Polish bus company)', async () => {
     route((u) => {
       if (u.includes('/v1/boards/quillbot/jobs')) {
         return json(ghBoard([{ url: 'https://job-boards.greenhouse.io/quillbot/jobs/1', published: MONTH_AGO, content: 'We build things.' }]))
+      }
+      if (u.endsWith('/v1/boards/quillbot')) return json({ name: 'Quillbot' })
+      return undefined
+    })
+    await expect(detectAts({ name: 'Quillbot', domain: 'quillbot.example', careerUrl: null })).resolves.toBeNull()
+  })
+
+  it("accepts a Greenhouse board whose logo links to the company's site (Calendly, Dialpad)", async () => {
+    route((u) => {
+      if (u.includes('/v1/boards/quillbot/jobs')) {
+        return json(ghBoard([{ url: 'https://job-boards.greenhouse.io/quillbot/jobs/1', published: MONTH_AGO }]))
+      }
+      if (u.endsWith('/v1/boards/quillbot')) return json({ name: 'Quillbot' })
+      if (u === 'https://job-boards.greenhouse.io/quillbot') {
+        return html('<script>{"boardConfiguration":{"job_board_id":1,"logo":{"href":"https://www.quillbot.example/careers","url":"x"}}}</script>')
+      }
+      return undefined
+    })
+    await expect(detectAts({ name: 'Quillbot', domain: 'quillbot.example', careerUrl: null })).resolves.toMatchObject({
+      verifiedBy: 'board_links_home',
+    })
+  })
+
+  it("rejects a Greenhouse board whose logo links to another employer's site", async () => {
+    route((u) => {
+      if (u.includes('/v1/boards/quillbot/jobs')) {
+        return json(ghBoard([{ url: 'https://job-boards.greenhouse.io/quillbot/jobs/1', published: MONTH_AGO, content: 'See quillbot.example' }]))
+      }
+      if (u.endsWith('/v1/boards/quillbot')) return json({ name: 'Quillbot' })
+      if (u === 'https://job-boards.greenhouse.io/quillbot') {
+        return html('<script>{"boardConfiguration":{"logo":{"href":"https://quillbot-buses.example/","url":"x"}}}</script>')
+      }
+      return undefined
+    })
+    await expect(detectAts({ name: 'Quillbot', domain: 'quillbot.example', careerUrl: null })).resolves.toBeNull()
+  })
+
+  it('accepts the same name, the domain label and one posting that names the company site', async () => {
+    route((u) => {
+      if (u.includes('/v1/boards/quillbot/jobs')) {
+        return json(ghBoard([{ url: 'https://job-boards.greenhouse.io/quillbot/jobs/1', published: MONTH_AGO, content: 'Read more at quillbot.example/about.' }]))
       }
       if (u.endsWith('/v1/boards/quillbot')) return json({ name: 'Quillbot' })
       return undefined
@@ -355,6 +396,8 @@ describe('known employers', () => {
   it.each([
     ['SpaceX', 'spacex.com', 'greenhouse', 'spacex'],
     ['Intercom', 'intercom.com', 'greenhouse', 'intercom'],
+    ['Typeform', 'typeform.com', 'greenhouse', 'typeform'],
+    ['Smartsheet', 'smartsheet.com', 'greenhouse', 'smartsheet'],
   ])('%s has a curated board even though its page does not link to it', async (name, domain, provider, token) => {
     route((u) =>
       u.includes(`/v1/boards/${token}/jobs`)
