@@ -9,9 +9,9 @@ import {
   FileText,
   Loader2,
   Rocket,
-  Sparkles,
-  Upload,
+  Upload
 } from 'lucide-react'
+import { LogoMark } from '@/components/brand/logo'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -169,7 +169,7 @@ export default function OnboardingPage() {
     <div className="mx-auto max-w-xl space-y-6">
       <div className="text-center">
         <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft">
-          <Sparkles className="h-5 w-5 text-accent-deep" />
+          <LogoMark className="h-5 w-5 text-accent-deep" />
         </div>
         <h1 className="font-display text-title text-foreground">Welcome to Cello</h1>
         <p className="mt-1 text-caption text-muted-foreground">
@@ -311,7 +311,7 @@ export default function OnboardingPage() {
               </p>
             </div>
             <Button onClick={launch} disabled={launching} className="w-full">
-              {launching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {launching ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogoMark className="h-4 w-4" />}
               {launching ? 'Launching…' : 'Launch Cello'}
             </Button>
             <Button variant="ghost" onClick={() => router.push('/dashboard')} className="w-full">

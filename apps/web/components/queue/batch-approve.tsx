@@ -42,9 +42,9 @@ import {
   Mail,
   Send,
   SlashIcon,
-  Sparkles,
-  X,
+  X
 } from 'lucide-react'
+import { LogoMark } from '@/components/brand/logo'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -291,7 +291,7 @@ export function BatchReviewList({
                   {item.tailoredSummary && (
                     <p className="text-caption text-muted-foreground">
                       <span className="inline-flex items-center gap-1 text-label uppercase">
-                        <Sparkles className="h-3 w-3" /> Résumé tailored toward
+                        <LogoMark className="h-3 w-3" /> Résumé tailored toward
                       </span>{' '}
                       {item.tailoredSummary}
                     </p>

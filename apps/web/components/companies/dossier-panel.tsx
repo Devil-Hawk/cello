@@ -7,9 +7,9 @@ import {
   Loader2,
   Newspaper,
   RefreshCw,
-  Search,
-  Sparkles,
+  Search
 } from 'lucide-react'
+import { LogoMark } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -147,7 +147,7 @@ export function DossierPanel({ companyId }: DossierPanelProps) {
           ) : dossier ? (
             <RefreshCw className="h-4 w-4" />
           ) : (
-            <Sparkles className="h-4 w-4" />
+            <LogoMark className="h-4 w-4" />
           )}
           {isGenerating ? 'Researching…' : dossier ? 'Refresh' : 'Research company'}
         </Button>
