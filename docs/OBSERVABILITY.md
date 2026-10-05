@@ -384,3 +384,78 @@ replacement for the structured log line.
 at the small set of catch blocks where it's wired in today (the harness
 run/cron routes, Gmail sync, and the ATS submit-approval route) — `extra`
 is IDs/enums only, by the same rule.
+
+## Outcome scores, the free fallback and the daily health check
+
+### Outcome scores (Langfuse)
+
+What people do with Cello's output is sent to Langfuse as scores on the trace and
+generation that produced it, named after the behaviour:
+
+| Score | Type | Meaning |
+|---|---|---|
+| `draft_approved` | boolean | A draft (outreach or application) was approved or sent |
+| `draft_edited` | numeric 0..1 | Word-level edit distance from what the model wrote to what was approved |
+| `draft_skipped` | boolean | The person skipped or rejected a draft |
+| `job_applied` | boolean | The person applied to a job Cello assessed |
+| `job_dismissed` | boolean | The person passed on a role (comment is the reason) |
+| `outreach_replied` | boolean | A contact replied (comment is positive, neutral, negative or bounce) |
+| `interview_scheduled` | boolean | The application reached a screen or interview |
+
+Database triggers queue each event in `feedback_events`; the mail check and the daily
+check send them (`lib/quality/feedback.ts`). Rows that hold model output keep the
+trace and observation id (`trace_id`, `observation_id`) so an outcome that arrives
+days later, such as a reply, still lands on the call that caused it. Events older
+than 28 days are dropped, because Langfuse keeps traces for 30.
+
+### Free-model fallback
+
+When a paid call hits the person's monthly cap or OpenRouter answers 402, `callLlm`
+retries once on `LLM_FREE_FALLBACK_MODEL` (default `google/gemma-4-31b-it:free`). The
+call is priced at 0. The generation carries `free_fallback: true`, `fallback_reason`
+and `requested_model`. Demos never fall back. A value that does not end in `:free`
+turns the fallback off.
+
+### Health check and alerts
+
+The daily harness cron records heartbeats (daily check, mail check, autopilot), reads
+the database size, the pg_cron history and the last role checks, and keeps one open
+alert row per problem in `ops_alerts`:
+
+- the database is over 350 MB (the free plan stops at 500 MB)
+- a schedule has not succeeded inside its window (daily check 26 h, mail check 3 h,
+  autopilot 9 h, role check 15 h, cleanup 26 h)
+- a source failed its last three role checks in a row
+
+Alerts resolve themselves when a later check no longer sees the problem. The account
+named in `OPS_OWNER_EMAIL` sees them in Needs you and can mark one handled; for anyone
+else nothing renders. Unset, they are still recorded and returned in the cron response.
+
+### Two alerts to create in Langfuse
+
+Create these in Langfuse under Alerts (the Hobby plan allows two). Settings:
+https://langfuse.com/docs/observability/features/alerts
+
+1. **Errors**
+   - Data source: Observations
+   - Metric: count
+   - Filters: level is ERROR, environment is production
+   - Window: 1 day
+   - Operator: greater than. Warning threshold 5, alert threshold 15
+   - No data: notify after 3 days. Renotify: off
+   - Action: a Slack channel or a webhook
+2. **Drafts need more editing**
+   - Data source: Scores (numeric)
+   - Metric: average of `draft_edited`
+   - Filters: environment is production
+   - Window: 7 days
+   - Operator: greater than. Warning threshold 0.30, alert threshold 0.45
+   - No data: keep previous severity. Renotify: off
+   - Action: the same channel
+
+### Settings
+
+| Variable | What it does |
+|---|---|
+| `OPS_OWNER_EMAIL` | The one account that sees system alerts in Needs you |
+| `LLM_FREE_FALLBACK_MODEL` | The `:free` model a capped or out-of-credit call retries on |
