@@ -127,6 +127,14 @@ export interface Database {
           match_details: Json | null
           is_new: boolean
           external_id: string | null
+          fit_assessed_at: string | null
+          blocked_reasons: Json
+          want_p: number | null
+          want_reason: string | null
+          want_detail: Json | null
+          chance: string | null
+          chance_detail: Json | null
+          requirement_items: Json | null
         }
         Insert: {
           id?: string
@@ -143,6 +151,14 @@ export interface Database {
           match_details?: Json | null
           is_new?: boolean
           external_id?: string | null
+          fit_assessed_at?: string | null
+          blocked_reasons?: Json
+          want_p?: number | null
+          want_reason?: string | null
+          want_detail?: Json | null
+          chance?: string | null
+          chance_detail?: Json | null
+          requirement_items?: Json | null
         }
         Update: {
           id?: string
@@ -159,6 +175,14 @@ export interface Database {
           match_details?: Json | null
           is_new?: boolean
           external_id?: string | null
+          fit_assessed_at?: string | null
+          blocked_reasons?: Json
+          want_p?: number | null
+          want_reason?: string | null
+          want_detail?: Json | null
+          chance?: string | null
+          chance_detail?: Json | null
+          requirement_items?: Json | null
         }
         Relationships: [
           {
@@ -361,6 +385,147 @@ export interface Database {
             foreignKeyName: "follow_ups_application_id_fkey"
             columns: ["application_id"]
             referencedRelation: "applications"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      role_reactions: {
+        Row: {
+          id: string
+          user_id: string
+          job_id: string | null
+          reaction: string
+          reason: string | null
+          note: string | null
+          surface: string
+          pick_kind: string | null
+          job_title: string
+          company_name: string | null
+          job_location: string | null
+          job_text: string
+          embedding: number[] | null
+          embedding_model: string | null
+          predicted: Json | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          job_id?: string | null
+          reaction: string
+          reason?: string | null
+          note?: string | null
+          surface?: string
+          pick_kind?: string | null
+          job_title: string
+          company_name?: string | null
+          job_location?: string | null
+          job_text?: string
+          embedding?: number[] | null
+          embedding_model?: string | null
+          predicted?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          job_id?: string | null
+          reaction?: string
+          reason?: string | null
+          note?: string | null
+          surface?: string
+          pick_kind?: string | null
+          job_title?: string
+          company_name?: string | null
+          job_location?: string | null
+          job_text?: string
+          embedding?: number[] | null
+          embedding_model?: string | null
+          predicted?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "role_reactions_user_id_fkey"
+            columns: ["user_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      shortlist_items: {
+        Row: {
+          user_id: string
+          for_date: string
+          job_id: string
+          position: number
+          pick_kind: string
+          explanation: string
+          created_at: string
+        }
+        Insert: {
+          user_id: string
+          for_date: string
+          job_id: string
+          position: number
+          pick_kind: string
+          explanation: string
+          created_at?: string
+        }
+        Update: {
+          user_id?: string
+          for_date?: string
+          job_id?: string
+          position?: number
+          pick_kind?: string
+          explanation?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shortlist_items_user_id_fkey"
+            columns: ["user_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      taste_models: {
+        Row: {
+          user_id: string
+          blend: Json
+          n_reactions: number
+          n_positive: number
+          fitted: boolean
+          evidence: Json | null
+          updated_at: string
+        }
+        Insert: {
+          user_id: string
+          blend: Json
+          n_reactions?: number
+          n_positive?: number
+          fitted?: boolean
+          evidence?: Json | null
+          updated_at?: string
+        }
+        Update: {
+          user_id?: string
+          blend?: Json
+          n_reactions?: number
+          n_positive?: number
+          fitted?: boolean
+          evidence?: Json | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "taste_models_user_id_fkey"
+            columns: ["user_id"]
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           }
         ]
