@@ -14,7 +14,7 @@
 //
 // Tools reuse EXISTING product code (imports only — this file adds no new
 // harness surface): the standalone modules optimizeResume / generateOutreachDraft
-// / generateDossier / generateInterviewKit, the cv_tailor agent (driven via a
+// / generateDossier, the cv_tailor agent (driven via a
 // lightweight in-file StepContext), and harnessRunGraph (via invokeGraphForUser)
 // for whole-DAG goals.
 
@@ -33,7 +33,6 @@ import { mapWithConcurrency } from '@/lib/ats'
 import { optimizeResume } from './agents/resume_optimizer'
 import { generateOutreachDraft, fallbackOutreachDraft, type OutreachDraftInput } from './agents/outreach'
 import { generateDossier, type CompanyResearcherResult } from './agents/company_researcher'
-import { generateInterviewKit } from './agents/interview_prep'
 import { cv_tailor } from './agents/cv_tailor'
 import { sourcer } from './agents/sourcer'
 import { runBulkMatch, type BulkMatchResult } from './agents/bulk_matcher'
@@ -538,8 +537,6 @@ async function dispatchToolInner(ctx: CopilotToolContext, tool: string, args: Ar
         return await doResearchCompany(ctx, args)
       case 'research_companies':
         return await doResearchCompanies(ctx, args)
-      case 'prep_interview':
-        return await doPrepInterview(ctx, args)
       case 'trigger_run':
         return await doTriggerRun(ctx, args)
       case 'search_kb':
@@ -1259,46 +1256,6 @@ async function doDraftOutreach(ctx: CopilotToolContext, args: Args) {
     body: draft.body,
     usedLlm,
     note: 'Preview only. Nothing was saved or sent. To draft a real one, use Draft outreach on a contact in a job or company page; it lands in the Outreach tab of the queue, where the send guardrails apply.',
-  }
-}
-
-async function doPrepInterview(ctx: CopilotToolContext, args: Args) {
-  const jobId = str(args.jobId)
-  if (!jobId) return { error: 'jobId is required' }
-  const resumeText = await loadResume(ctx)
-  if (!resumeText) return { error: 'No resume on file — upload one in Settings first.', needsResume: true }
-  if (!canRunLlm(ctx.apiKeys)) return { error: missingOpenRouterMessage(ctx.apiKeys), needsKey: true }
-
-  const res = await loadOwnedJob(ctx, jobId, 'id, title, description, location, company_id')
-  if ('error' in res) return res
-
-  // Company/dossier/history/claims context comes from generateInterviewKit's
-  // own buildInterviewContext(admin, userId, companyId) call — no ad-hoc
-  // company_dossiers query here.
-  const result = await generateInterviewKit({
-    job: {
-      id: res.job.id,
-      title: res.job.title ?? null,
-      description: res.job.description ?? null,
-      location: res.job.location ?? null,
-      company_id: res.job.company_id ?? null,
-    },
-    company: { id: res.job.company_id ?? null, name: res.companyName },
-    resumeText,
-    admin: ctx.admin,
-    userId: ctx.userId,
-    apiKeys: ctx.apiKeys,
-    signal: ctx.signal,
-  })
-  if (result.needsResume) return { error: 'No resume on file.', needsResume: true }
-  if (result.needsKey || !result.kitId) return { error: 'No OpenRouter key configured.', needsKey: true }
-  return {
-    job: { jobId, title: res.job.title, company: res.companyName },
-    kitId: result.kitId,
-    questionCount: result.questionCount,
-    starCount: result.starCount,
-    status: result.status,
-    note: 'Kit saved. The user can review it on the Prep page.',
   }
 }
 

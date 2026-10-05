@@ -1,4 +1,4 @@
-// Zod input shapes for Cello's own 19 first-party copilot tools, keyed by the
+// Zod input shapes for Cello's own 18 first-party copilot tools, keyed by the
 // exact names lib/harness/copilot-tool-catalog.ts's COPILOT_TOOLS registry
 // uses — the SAME registry dispatchTool (lib/harness/copilot-tools.ts)
 // switches on and app/api/mcp/route.ts enumerates for MCP's tools/list.
@@ -71,7 +71,6 @@ export const TOOL_SCHEMAS: Record<string, ZodRawShape> = {
     companyIds: z.array(z.string()).describe('Company ids to research, up to the tool\'s batch cap.'),
     limit,
   },
-  prep_interview: { jobId },
   trigger_run: { goal: z.string().describe('The whole-DAG goal to plan and execute in the background.') },
   search_kb: { query: requiredQuery, limit },
   remember_preference: { text: z.string().describe('One short sentence, in the user\'s own words.') },

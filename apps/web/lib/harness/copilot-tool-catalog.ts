@@ -205,13 +205,6 @@ export const COPILOT_TOOLS: ToolSpec[] = [
     agent: 'company_researcher',
   },
   {
-    name: 'prep_interview',
-    kind: 'act',
-    signature: 'prep_interview {"jobId":string}',
-    desc: 'Build + store an interview prep kit for one job: tailored questions + STAR stories mined from the user\'s real resume.',
-    agent: 'interview_prep',
-  },
-  {
     name: 'trigger_run',
     kind: 'run',
     signature: 'trigger_run {"goal":string}',
@@ -220,7 +213,7 @@ export const COPILOT_TOOLS: ToolSpec[] = [
       'bigger than a few direct tool calls — an explicit unattended or repeating campaign the user asked for ' +
       '(e.g. "keep sourcing and drafting applications for anything above 90 while I\'m away"). NOT the default ' +
       'for ordinary "find/score/tailor/draft" requests: those have their own direct tools (source_jobs, ' +
-      'score_jobs, tailor_cv, draft_outreach, prep_interview, research_company) — call those yourself, one at a ' +
+      'score_jobs, tailor_cv, draft_outreach, research_company) — call those yourself, one at a ' +
       'time, and only reach for this when the ask cannot reasonably be narrated as a handful of tool calls in ' +
       'this conversation.',
   },
@@ -347,6 +340,5 @@ export const AGENT_CATALOG_UI: AgentCatalogEntry[] = [
   { id: 'applier', label: 'Applier', description: 'Build an application draft + handoff/submit via official ATS APIs (human-approve by default).' },
   { id: 'verifier', label: 'Verifier', description: 'Check a draft for completeness and knock-out questions before submission.' },
   { id: 'follow_upper', label: 'Follow-upper', description: 'Draft a follow-up or cold-outreach message for an application or contact.' },
-  { id: 'interview_prep', label: 'Interview Prep', description: 'Generate tailored interview questions + STAR stories from the real resume.' },
   { id: 'company_researcher', label: 'Company Researcher', description: 'Research a company from public sources: funding/news/culture, comp, visa signal.' },
 ]
