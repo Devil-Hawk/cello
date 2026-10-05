@@ -86,7 +86,7 @@ describe('labelChance', () => {
     expect(label(['met', 'met', 'not_met', 'not_met']).chance).toBe('stretch')
   })
 
-  it('is a Stretch when the one missing item is years, a licence or work authorization', () => {
+  it('is a Stretch when the one missing item is years of experience or a licence', () => {
     const rs = [req('r1', 'a', true, 'experience'), req('r2', 'b'), req('r3', 'c')]
     expect(labelChance(rs, [chk('not_met', true, 'a'), chk('met', true, 'b'), chk('met', true, 'c')]).chance).toBe('stretch')
   })
@@ -105,6 +105,22 @@ describe('labelChance', () => {
   it('cannot assess when a third or more of the checks went unanswered', () => {
     expect(label(['met', 'unclear', 'unclear', 'met']).chance).toBe('cannot_assess')
     expect(labelChance([], []).chance).toBe('cannot_assess')
+  })
+
+  it('keeps Strong when the resume is silent on work authorization and lists it to confirm', () => {
+    const rs = [req('r1', 'a'), req('r2', 'b'), req('r3', 'Authorized to work in the US', true, 'authorization')]
+    const r = labelChance(rs, [chk('met', true, 'a'), chk('met', true, 'b'), chk('not_met', true, 'Authorized to work in the US')])
+    expect(r.chance).toBe('strong')
+    expect(r.confirm).toEqual(['Authorized to work in the US'])
+    expect(r.gaps).toEqual([])
+    expect(r.note).toBe('2 of 2 required items are shown on your resume.')
+  })
+
+  it('cannot assess a posting whose only requirement is a condition to confirm', () => {
+    const rs = [req('r1', 'Must be located in the US', true, 'authorization')]
+    const r = labelChance(rs, [chk('not_met', true, 'Must be located in the US')])
+    expect(r.chance).toBe('cannot_assess')
+    expect(r.confirm).toEqual(['Must be located in the US'])
   })
 
   it('says how many required items are shown', () => {

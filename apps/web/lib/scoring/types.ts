@@ -37,6 +37,8 @@ export interface Predicted {
   /** The judge's read of the stated preferences alone. */
   stated: number | null
   blended: number
+  /** The chance label Cello showed with the role, so it can be checked against replies later. */
+  chance?: Chance | null
 }
 
 /** One reaction, with the snapshot of the role it was about. */
@@ -75,6 +77,8 @@ export interface ChanceResult {
   chance: Chance
   checks: RequirementCheck[]
   gaps: string[]
+  /** Conditions only the person can confirm (work authorization, where they must be). They do not move the label. */
+  confirm: string[]
   note: string | null
 }
 

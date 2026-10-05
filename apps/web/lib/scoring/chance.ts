@@ -65,24 +65,33 @@ export function verifyChecks(raw: unknown, requirements: readonly Requirement[],
   })
 }
 
-/** Gaps that cannot be closed by wording on a resume: years, licences and work authorization. */
-const HARD_KINDS: ReadonlySet<Requirement['kind']> = new Set(['experience', 'credential', 'authorization'])
+/** Gaps that cannot be closed by wording on a resume: years of experience and licences. */
+const HARD_KINDS: ReadonlySet<Requirement['kind']> = new Set(['experience', 'credential'])
 
 /**
  * The label, as a rule anyone can read:
  *   Strong    every required item is shown on the resume (one partly shown at most per four).
  *   Stretch   two or more required items are not shown, or the one that is missing
- *             is years of experience, a licence or work authorization.
+ *             is years of experience or a licence.
  *   Possible  everything else: a gap or two that could be explained or closed.
  * A third or more of the requirements left unanswered is "cannot assess".
+ *
+ * Work authorization and where the person must be are facts only the person can
+ * state, and a resume is usually silent on them. They never move the label: they
+ * come back as `confirm` items for the person to check themselves, and the
+ * constraints the person stated already filter on them.
  */
 export function labelChance(reqs: readonly Requirement[], checks: readonly RequirementCheck[]): ChanceResult {
   const kindOf = new Map(reqs.map((r) => [r.text, r.kind]))
-  const unclear = checks.filter((c) => c.status === 'unclear').length
-  if (checks.length === 0 || unclear * 3 >= checks.length) {
-    return { chance: 'cannot_assess', checks: [...checks], gaps: [], note: 'Some requirements could not be checked just now.' }
+  const isPlace = (c: RequirementCheck) => kindOf.get(c.requirement) === 'authorization'
+  const confirm = checks.filter(isPlace).map((c) => c.requirement)
+  const scored = checks.filter((c) => !isPlace(c))
+  const unclear = scored.filter((c) => c.status === 'unclear').length
+  if (scored.length === 0 || unclear * 3 >= scored.length) {
+    const note = checks.length > 0 && scored.length === 0 ? 'The posting only lists conditions you confirm yourself.' : 'Some requirements could not be checked just now.'
+    return { chance: 'cannot_assess', checks: [...checks], gaps: [], confirm, note }
   }
-  const must = checks.some((c) => c.mustHave) ? checks.filter((c) => c.mustHave) : [...checks]
+  const must = scored.some((c) => c.mustHave) ? scored.filter((c) => c.mustHave) : [...scored]
   const unmet = must.filter((c) => c.status === 'not_met' || c.status === 'unclear')
   const partial = must.filter((c) => c.status === 'partial')
 
@@ -94,9 +103,9 @@ export function labelChance(reqs: readonly Requirement[], checks: readonly Requi
   const gaps: string[] = []
   for (const c of unmet) gaps.push(c.requirement)
   for (const c of partial) gaps.push(`Only partly shown: ${c.requirement}`)
-  for (const c of checks) if (!c.mustHave && c.status === 'not_met') gaps.push(`Nice to have: ${c.requirement}`)
+  for (const c of scored) if (!c.mustHave && c.status === 'not_met') gaps.push(`Nice to have: ${c.requirement}`)
   const shown = must.filter((c) => c.status === 'met').length
-  return { chance, checks: [...checks], gaps: gaps.slice(0, 6), note: `${shown} of ${must.length} required items are shown on your resume.` }
+  return { chance, checks: [...checks], gaps: gaps.slice(0, 6), confirm, note: `${shown} of ${must.length} required items are shown on your resume.` }
 }
 
 export interface ChanceInput {
@@ -105,7 +114,7 @@ export interface ChanceInput {
 }
 
 function cannot(note: string): ChanceResult {
-  return { chance: 'cannot_assess', checks: [], gaps: [], note }
+  return { chance: 'cannot_assess', checks: [], gaps: [], confirm: [], note }
 }
 
 /**
