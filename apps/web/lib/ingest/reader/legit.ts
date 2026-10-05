@@ -201,9 +201,13 @@ const RANK: Record<TargetVerdict, number> = { inside: 0, unclassified: 1, outsid
  * roles whose fit cannot be read, then the rest; newest first within each.
  * `verdictOf` is truth's targetVerdict over the job's classification.
  */
-export function orderForCap<T extends AtsJob>(jobs: readonly T[], verdictOf: (job: T) => TargetVerdict): T[] {
-  return jobs
-    .map((job, i) => ({ job, i, rank: RANK[verdictOf(job)], t: job.postedAt ? Date.parse(job.postedAt) || 0 : 0 }))
+export function orderForCap<T>(
+  items: readonly T[],
+  verdictOf: (item: T) => TargetVerdict,
+  postedAtOf: (item: T) => string | undefined = (item) => (item as AtsJob).postedAt
+): T[] {
+  return items
+    .map((item, i) => ({ item, i, rank: RANK[verdictOf(item)], t: Date.parse(postedAtOf(item) ?? '') || 0 }))
     .sort((a, b) => a.rank - b.rank || b.t - a.t || a.i - b.i)
-    .map((x) => x.job)
+    .map((x) => x.item)
 }

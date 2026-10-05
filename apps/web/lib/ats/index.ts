@@ -20,6 +20,19 @@ import { eightfold } from './eightfold'
 import { detectAts } from './detect'
 import { healStoredBoard, needsVerification } from './heal'
 import { isStalePosting } from '../jobs/freshness'
+import {
+  dedupeRoles,
+  emptyExcluded,
+  judgeRole,
+  orderForCap,
+  MAX_DESCRIPTION_CHARS,
+  MAX_ROLES_PER_COMPANY,
+  type Excluded,
+  type JudgeContext,
+} from '../ingest/reader/legit'
+import { searchTerms, type ReaderTargets } from '../ingest/reader/targets'
+import { targetVerdict } from '../targeting/roles'
+import { EMPTY_TARGETING, type Targeting } from '../targeting'
 // Relative import (not `@/...`): lib/ats/* stays framework-free, and
 // lib/jobs/classify.ts is itself a zero-dependency pure module, so this is
 // safe in both the Next.js route and the plain-tsx scheduled script.
@@ -111,6 +124,10 @@ export interface ExistingJob {
   salaryRange: string | null
   /** md5 of the stored description (jobs.description_md5); null when it is empty. */
   descriptionMd5: string | null
+  /** jobs.source of the stored row. */
+  source?: string | null
+  /** False once the row is closed (jobs.still_open). */
+  open?: boolean
 }
 
 /** Column changes for one stored job. Only the fields that differ are present. */
@@ -181,6 +198,8 @@ export interface CompanyRefreshResult {
   busy?: boolean
   /** Set when a stored guessed board failed verification and its roles were cleared. */
   cleared?: { deleted: number; closed: number }
+  /** Listed roles not stored, by why (see ingest/reader/legit.ts), and roles left out by the per-company cap. */
+  excluded?: Excluded & { capped: number }
   errors: string[]
 }
 
@@ -280,9 +299,9 @@ function sourcesFor(provider: AtsProviderId): string[] {
  * columns that differ are written. Only one refresh of a company runs at a
  * time (the store's lock). Never throws: failures are reported in result.errors.
  */
-export async function refreshCompany(store: AtsStore, company: CompanyInput): Promise<CompanyRefreshResult> {
+export async function refreshCompany(store: AtsStore, company: CompanyInput, targets?: ReaderTargets): Promise<CompanyRefreshResult> {
   return withCompanyLock(store, company, async (result) => {
-    const board = await refreshLocked(store, company, result)
+    const board = await refreshLocked(store, company, result, targets)
     await saveSourceCheck(store, company, board)
   })
 }
@@ -382,7 +401,12 @@ export async function saveSourceCheck(
   }
 }
 
-export async function refreshLocked(store: AtsStore, company: CompanyInput, result: CompanyRefreshResult): Promise<BoardCheck> {
+export async function refreshLocked(
+  store: AtsStore,
+  company: CompanyInput,
+  result: CompanyRefreshResult,
+  targets?: ReaderTargets
+): Promise<BoardCheck> {
   const meta: Record<string, unknown> =
     company.metadata && typeof company.metadata === 'object' && !Array.isArray(company.metadata)
       ? { ...(company.metadata as Record<string, unknown>) }
@@ -397,7 +421,8 @@ export async function refreshLocked(store: AtsStore, company: CompanyInput, resu
     board.skipSave = true
     return board
   }
-  const ctx: FetchContext = { hasDescription: (id) => stored.get(id)?.descriptionMd5 != null }
+  const query = targets ? searchTerms(targets) : []
+  const ctx: FetchContext = { hasDescription: (id) => stored.get(id)?.descriptionMd5 != null, ...(query.length ? { query } : {}) }
 
   // 1. Resolve board + fetch jobs.
   let jobs: AtsJob[] | null = null
@@ -490,6 +515,9 @@ export async function refreshLocked(store: AtsStore, company: CompanyInput, resu
     sightingSources: sourcesFor(provider),
     cap: providers[provider].maxJobs,
     stored,
+    judge: { name: company.name, domain: company.domain ?? null, careerUrl: company.career_url },
+    targeting: targets?.targeting,
+    windowed: providers[provider].searchesByQuery === true && query.length > 0,
   }, result)
   return board
 }
@@ -502,6 +530,14 @@ export interface SyncOptions {
   /** A channel that returns at most this many postings (see AtsProvider.maxJobs). */
   cap?: number
   stored: Map<string, ExistingJob>
+  /** The company, so every role is judged the employer's own, open, unique and real before it is stored. */
+  judge?: JudgeContext['company']
+  /** The person's targets: roles inside them are stored first when the cap leaves some out. */
+  targeting?: Targeting
+  /** Every role the source listed, when that is more than `listed` (a sitemap lists what only a few pages were read for). Sightings use it. */
+  listedIds?: string[]
+  /** The list is a window onto the board (a search, a few pages): a role missing from it is not thereby gone. */
+  windowed?: boolean
 }
 
 /**
@@ -523,6 +559,8 @@ export async function syncJobs(
   // A posting dated more than ROLE_MAX_AGE_DAYS ago is not an open role.
   const clean = sanitizeJobs(listed).filter((job) => !isStalePosting(job.postedAt))
   result.found = clean.length
+  const excluded = { ...emptyExcluded(), capped: 0 }
+  if (opts.judge) result.excluded = excluded
   if (clean.length === 0) {
     // Nothing listed is not evidence that anything closed: an empty answer looks
     // the same as a board that failed to load, so no sighting is recorded.
@@ -547,14 +585,41 @@ export async function syncJobs(
 
   // 3. Insert only unseen rows, so re-runs create 0 duplicates and existing
   //    rows keep their discovered_at / is_new / match data.
-  const newRows: JobUpsertRow[] = clean
-    .filter((job) => !stored.has(job.externalId))
-    .map(classify)
-    .filter(({ c }) => !c.rejectReason && !isLowQuality(c))
+  // Judged the employer's own, open, unique and real (once, here, whatever tier read it).
+  let candidates = clean
+  if (opts.judge) {
+    const ctx: JudgeContext = { company: opts.judge }
+    candidates = candidates.filter((job) => {
+      const verdict = judgeRole(job, ctx)
+      if (!verdict.keep) excluded[verdict.why]++
+      return verdict.keep
+    })
+    const storedRoles = [...stored.values()].map((s) => ({ title: s.title, location: s.location, source: s.source, open: s.open, externalId: s.externalId }))
+    const deduped = dedupeRoles(candidates, storedRoles, opts.source)
+    excluded.duplicate += deduped.duplicates
+    candidates = deduped.kept
+  }
+
+  // At most MAX_ROLES_PER_COMPANY open rows per company, the ones inside the person's targets first.
+  const openStored = [...stored.values()].filter((s) => s.open !== false).length
+  const room = Math.max(0, MAX_ROLES_PER_COMPANY - openStored)
+  const targeting = opts.targeting ?? EMPTY_TARGETING
+  const fresh = candidates.filter((job) => !stored.has(job.externalId)).map(classify).filter(({ c }) => !c.rejectReason && !isLowQuality(c))
+  const ranked = orderForCap(fresh, ({ job, c }) =>
+    targetVerdict(
+      { title: job.title, description: job.description, job_function: c.jobFunction, seniority: c.seniority, country: c.country, language: c.language, is_remote: c.isRemote },
+      targeting,
+      company.name
+    ),
+    ({ job }) => job.postedAt
+  )
+  excluded.capped = Math.max(0, ranked.length - room)
+  const newRows: JobUpsertRow[] = ranked
+    .slice(0, room)
     .map(({ job, title, c }) => ({
       company_id: company.id,
       title,
-      description: job.description ?? '',
+      description: (job.description ?? '').slice(0, MAX_DESCRIPTION_CHARS),
       url: job.url,
       location: job.location ?? null,
       salary_range: job.salary ?? null,
@@ -603,7 +668,7 @@ export async function syncJobs(
     if (title && title !== have.title) fields.title = title
     if (job.location && job.location !== have.location) fields.location = job.location
     if (job.salary && job.salary !== have.salaryRange) fields.salary_range = job.salary
-    const description = (job.description ?? '').trim()
+    const description = (job.description ?? '').trim().slice(0, MAX_DESCRIPTION_CHARS)
     if (description && md5(description) !== have.descriptionMd5) {
       fields.description = description
       fields.requirements = parseRequirements({
@@ -628,11 +693,11 @@ export async function syncJobs(
   //    SmartRecruiters) cannot say a posting past the cap is gone, so a list that
   //    reached the cap stamps what it saw and counts no misses.
   if (store.recordSightings) {
-    const windowed = typeof opts.cap === 'number' && clean.length >= opts.cap
+    const windowed = opts.windowed === true || (typeof opts.cap === 'number' && clean.length >= opts.cap)
     try {
       const sighted = await store.recordSightings(
         company.id,
-        clean.map((j) => j.externalId),
+        opts.listedIds ?? clean.map((j) => j.externalId),
         windowed ? [] : opts.sightingSources
       )
       result.closed = sighted.closed

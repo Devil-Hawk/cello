@@ -47,7 +47,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
       for (let from = 0; ; from += PAGE_SIZE) {
         const { data, error } = await client
           .from('jobs')
-          .select('external_id, title, location, salary_range, description_md5')
+          .select('external_id, title, location, salary_range, description_md5, source, still_open')
           .eq('company_id', companyId)
           .order('external_id')
           .range(from, from + PAGE_SIZE - 1)
@@ -58,6 +58,8 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
           location: string | null
           salary_range: string | null
           description_md5: string | null
+          source: string | null
+          still_open: boolean | null
         }[]) {
           if (!row.external_id) continue
           rows.push({
@@ -66,6 +68,8 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
             location: row.location,
             salaryRange: row.salary_range,
             descriptionMd5: !row.description_md5 || row.description_md5 === EMPTY_MD5 ? null : row.description_md5,
+            source: row.source,
+            open: row.still_open !== false,
           })
         }
         if (!data || data.length < PAGE_SIZE) break
