@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { LlmResult, LlmRunOptions } from '@/lib/harness/types'
 import { MissingKeyError } from '@/lib/harness/llm'
-import { descriptionIsThin, extractRequirements, groundRequirements, quoteIsIn } from './requirements'
+import { descriptionIsThin, extractRequirements, groundRequirements, quoteIsIn, type GroundingStats } from './requirements'
 import type { RoleFacts } from './types'
 
 const DESC =
@@ -38,6 +38,12 @@ describe('groundRequirements', () => {
     expect(out.requirements.map((r) => r.text)).toEqual(['Strong Go or Java', 'Kubernetes'])
     expect(out.requirements.map((r) => r.id)).toEqual(['r1', 'r2'])
     expect(out.requirements[1].mustHave).toBe(false)
+  })
+
+  it('counts what the model proposed and what held up, for the evaluation', () => {
+    const stats: GroundingStats = { proposed: 0, grounded: 0 }
+    groundRequirements({ enough_detail: true, requirements: [good('Strong Go or Java', 'Strong Go or Java'), good('Rust', 'Deep Rust experience')] }, DESC, stats)
+    expect(stats).toEqual({ proposed: 2, grounded: 1 })
   })
 
   it('merges duplicates and falls back to kind other', () => {

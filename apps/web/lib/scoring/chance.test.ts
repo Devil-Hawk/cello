@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { LlmResult, LlmRunOptions } from '@/lib/harness/types'
 import { MissingKeyError } from '@/lib/harness/llm'
-import { assessChances, labelChance, resumeLines, verifyChecks } from './chance'
+import { assessChances, labelChance, resumeLines, verifyChecks, type CitationStats } from './chance'
 import type { Requirement, RequirementsOutcome } from './requirements'
 import type { RequirementCheck, RoleFacts } from './types'
 
@@ -35,6 +35,12 @@ describe('verifyChecks', () => {
   const reqs = [req('r1', '4+ years backend', true, 'experience'), req('r2', 'Strong Go'), req('r3', 'Kubernetes', false)]
   const id = (r: Requirement) => r.id
 
+  it('counts the citations claimed and the ones that held up, for the evaluation', () => {
+    const stats: CitationStats = { claimed: 0, kept: 0 }
+    const reqs = [req('r1', 'Strong Go or Java'), req('r2', 'Rust')]
+    verifyChecks([{ id: 'r1', status: 'met', line: 2, quote: 'built payment services in Go' }, { id: 'r2', status: 'met', line: 2, quote: 'wrote a Rust compiler' }], reqs, lines, (r) => r.id, stats)
+    expect(stats).toEqual({ claimed: 2, kept: 1 })
+  })
   it('keeps a citation whose quote is on the cited line', () => {
     const out = verifyChecks([{ id: 'r2', status: 'met', line: 2, quote: 'built payment services in Go' }], reqs, lines, id)
     expect(out[1]).toMatchObject({ status: 'met', evidence: { line: 2, quote: 'built payment services in Go' } })
