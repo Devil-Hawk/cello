@@ -5,13 +5,15 @@
 //
 // Each employer is read the way the app reads it: through ingestCompany with the
 // reader, an in-memory store (no database) and no model, with the targets
-// functions = engineering and data, seniority = junior and mid. It prints, per
+// functions = engineering and data, seniority = junior and mid, country = US
+// (a role with no place can never match a country, so it counts as a failure
+// here). It prints, per
 // employer, the tier that worked, the roles found, how many are inside the
 // targets, the newest posting date, three sample titles, the requests made and
 // what would be stored (rows and bytes).
 //
-// Exit codes: 0 all good; 1 a stored role is on another employer's site or older
-// than 180 days; 3 an employer could not be read (the reason is printed).
+// Exit codes: 0 all good; 1 a stored role is on another employer's site, older
+// than 180 days, or has no place or no description; 3 an employer could not be read (the reason is printed).
 //
 // Options (env):
 //   CHECK_MODE=inline|scheduled   inline (default): what a person gets within seconds.
@@ -59,7 +61,7 @@ const EMPLOYERS: Employer[] = [
 ]
 
 const TARGETS: ReaderTargets = {
-  targeting: { ...EMPTY_TARGETING, functions: ['engineering', 'data'], seniority: ['junior', 'mid'] },
+  targeting: { ...EMPTY_TARGETING, functions: ['engineering', 'data'], seniority: ['junior', 'mid'], countries: ['US'] },
   titles: [],
 }
 
@@ -141,6 +143,11 @@ async function main(): Promise<void> {
     // The two guarantees: every stored role is on the employer's own site (or its verified board), and none is older than 180 days.
     const ctx = { company: { name: e.name, domain: e.domain, careerUrl: e.careers } }
     const onBoard = Boolean(ats?.verified_by)
+    // A role with no place cannot match a country target, and one with no text cannot be read: both are failures.
+    const noPlace = rows.filter((r) => !r.location?.trim())
+    const noText = rows.filter((r) => !r.description?.trim())
+    for (const r of noPlace.slice(0, 3)) failures.push(`${e.name}: ${r.url} has no location`)
+    for (const r of noText.slice(0, 3)) failures.push(`${e.name}: ${r.url} has no description`)
     for (const r of rows) {
       if (!onBoard && !onOwnSite(r.url, ctx)) failures.push(`${e.name}: ${r.url} is not on the employer's own site`)
       if (r.posted_at && Date.now() - Date.parse(r.posted_at) > ROLE_MAX_AGE_DAYS * day) failures.push(`${e.name}: ${r.url} is older than ${ROLE_MAX_AGE_DAYS} days`)
@@ -150,16 +157,16 @@ async function main(): Promise<void> {
     // "Read" means a tier answered with roles (or, for a sitemap, listed them and has read the newest few so far).
     const status = outcome.tier ? 'read' : outcome.reading ? 'reading: only the scheduled pass can read this site' : `COULD NOT READ (${check.reason ?? outcome.failure ?? 'no_roles'})`
     if (!outcome.tier) unread.push(`${e.name}: ${outcome.reading ? 'reading' : (check.reason ?? outcome.failure ?? 'no_roles')}`)
-    table.push([e.name, tier, String(outcome.result.found), String(rows.length), String(inside), newest, String(fetcher.spent().requests), `${(bytes / 1024).toFixed(0)} KB`, seconds + 's', status])
+    table.push([e.name, tier, String(outcome.result.found), String(rows.length), String(inside), `${noPlace.length}/${noText.length}`, newest, String(fetcher.spent().requests), `${(bytes / 1024).toFixed(0)} KB`, seconds + 's', status])
     console.log(`${e.name}`)
     console.log(`  tier ${tier}${ats ? ` (verified by ${ats.verified_by})` : ''}, ${status}, ${seconds}s`)
-    console.log(`  roles found ${outcome.result.found}, to store ${rows.length}, inside targets ${inside}, newest ${newest}, requests ${fetcher.spent().requests}, ${(bytes / 1024).toFixed(0)} KB`)
+    console.log(`  roles found ${outcome.result.found}, to store ${rows.length}, inside targets ${inside}, no place ${noPlace.length}, no description ${noText.length}, newest ${newest}, requests ${fetcher.spent().requests}, ${(bytes / 1024).toFixed(0)} KB`)
     if (excluded) console.log(`  not stored: ${Object.entries(excluded).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`)
     for (const t of samples) console.log(`  - ${t}`)
     if (outcome.message) console.log(`  ${outcome.message}`)
   }
 
-  console.log('\nname | tier | found | store | inside | newest | requests | size | time | status')
+  console.log('\nname | tier | found | store | inside | no place/no text | newest | requests | size | time | status')
   for (const row of table) console.log(row.join(' | '))
   const worst = table.reduce((m, r) => Math.max(m, Number(r[3])), 0)
   console.log(`\nmost rows for one employer: ${worst} (cap 200)`)

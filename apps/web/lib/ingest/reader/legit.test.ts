@@ -87,6 +87,18 @@ describe('dedupeRoles', () => {
     expect(duplicates).toBe(2)
   })
 
+  it('two requisitions with one title and place are two openings (Amazon lists a role once per requisition)', () => {
+    const jobs = [
+      job({ externalId: 'a', requisitionId: 'REQ-1', title: 'Software Dev Engineer', location: 'Seattle, WA' }),
+      job({ externalId: 'b', requisitionId: 'REQ-2', title: 'Software Dev Engineer', location: 'Seattle, WA' }),
+      job({ externalId: 'c', title: 'Software Dev Engineer', location: 'Seattle, WA' }),
+      job({ externalId: 'd', requisitionId: 'req-1', title: 'Something Else', location: 'Austin' }),
+    ]
+    const { kept, duplicates } = dedupeRoles(jobs, [], 'site_search')
+    expect(kept.map((j) => j.externalId)).toEqual(['a', 'b'])
+    expect(duplicates).toBe(2)
+  })
+
   it('two roles with one title and no known place are not the same role (the same title in two cities)', () => {
     const jobs = [job({ externalId: 'a', title: 'Software Engineer II', location: undefined }), job({ externalId: 'b', title: 'Software Engineer II', location: undefined })]
     expect(dedupeRoles(jobs, [], 'listing').kept).toHaveLength(2)

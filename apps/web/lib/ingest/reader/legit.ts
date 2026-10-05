@@ -178,7 +178,9 @@ export function dedupeRoles(jobs: AtsJob[], stored: readonly StoredRole[], sourc
     const key = titleKey(job.title, job.location)
     const req = job.requisitionId?.trim().toLowerCase()
     const isStored = storedIds.has(job.externalId)
-    const dup = (req && reqs.has(req)) || (key !== '' && (titles.has(key) || (!isStored && otherSources.has(key))))
+    // Two requisitions are two openings even when they share a title and a place (Amazon lists the same role many times):
+    // the title and place decide only for a role that carries no requisition id.
+    const dup = req ? reqs.has(req) : key !== '' && (titles.has(key) || (!isStored && otherSources.has(key)))
     if (dup) {
       duplicates++
       continue
