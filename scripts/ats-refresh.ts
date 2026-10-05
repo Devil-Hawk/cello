@@ -1,6 +1,6 @@
 // Scheduled ATS refresh — runs in GitHub Actions via `npx tsx scripts/ats-refresh.ts`.
 //
-// Iterates ALL companies across users (service role), refreshing each one
+// Iterates every TRACKED company across users (service role; suggested leads are skipped), refreshing each one
 // that is due: dream companies hourly, others daily (a larger
 // companies.scrape_frequency, in minutes, stretches the interval further).
 // Talks to Supabase through plain PostgREST fetch — no npm dependencies.
@@ -21,6 +21,8 @@ import {
   type CompanyRefreshResult,
   type JobUpsertRow,
 } from '../apps/web/lib/ats/index'
+import { TRACKED_FILTER } from '../apps/web/lib/companies/watchlist'
+import { dueAt } from '../apps/web/lib/companies/roles-status'
 
 const SUPABASE_URL = (process.env.SUPABASE_URL ?? '').replace(/\/+$/, '')
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
@@ -28,10 +30,6 @@ const DRY_RUN = process.env.ATS_DRY_RUN === '1'
 
 const PAGE_SIZE = 1000
 const COMPANY_CONCURRENCY = 5
-// Slack so an hourly cron that drifts a few minutes still counts as "due".
-const DUE_SLACK_MINUTES = 5
-const DREAM_INTERVAL_MINUTES = 60
-const DEFAULT_INTERVAL_MINUTES = 1440
 
 interface CompanyRow {
   id: string
@@ -66,7 +64,9 @@ async function fetchAllCompanies(): Promise<CompanyRow[]> {
   const companies: CompanyRow[] = []
   for (let offset = 0; ; offset += PAGE_SIZE) {
     // select=* so this works whether or not the metadata column exists yet.
-    const res = await rest(`companies?select=*&order=created_at.asc&limit=${PAGE_SIZE}&offset=${offset}`)
+    const res = await rest(
+      `companies?select=*&or=(${TRACKED_FILTER})&order=created_at.asc&limit=${PAGE_SIZE}&offset=${offset}`
+    )
     const page = (await res.json()) as CompanyRow[]
     companies.push(...page)
     if (page.length < PAGE_SIZE) break
@@ -74,19 +74,11 @@ async function fetchAllCompanies(): Promise<CompanyRow[]> {
   return companies
 }
 
+// The scheduler and the row on screen share one rule (lib/companies/roles-status.ts):
+// the later of the last scrape and the last recorded check, so a company Cello
+// cannot read is re-probed on its tier's interval, not at every tick.
 function isDue(company: CompanyRow, now: number): boolean {
-  if (!company.last_scraped_at) return true
-  const last = Date.parse(company.last_scraped_at)
-  if (Number.isNaN(last)) return true
-  const base = company.is_dream_company ? DREAM_INTERVAL_MINUTES : DEFAULT_INTERVAL_MINUTES
-  const freq =
-    typeof company.scrape_frequency === 'number' && Number.isFinite(company.scrape_frequency)
-      ? company.scrape_frequency
-      : 0
-  // Dream companies refresh hourly, others daily; a user-set frequency can
-  // stretch the interval further but never below the tier's base.
-  const intervalMinutes = Math.max(base, freq)
-  return now - last >= (intervalMinutes - DUE_SLACK_MINUTES) * 60_000
+  return dueAt(company) <= now
 }
 
 const store: AtsStore = {
@@ -132,6 +124,16 @@ const store: AtsStore = {
       headers: { prefer: 'return=minimal' },
       body: JSON.stringify({ last_scraped_at: new Date().toISOString() }),
     })
+  },
+
+  async clearBoardJobs(companyId: string, source: string): Promise<{ deleted: number; closed: number }> {
+    if (DRY_RUN) return { deleted: 0, closed: 0 }
+    const res = await rest('rpc/clear_unverified_board_jobs', {
+      method: 'POST',
+      body: JSON.stringify({ p_company_id: companyId, p_source: source }),
+    })
+    const rows = (await res.json()) as Array<{ deleted?: number; closed?: number }>
+    return { deleted: rows[0]?.deleted ?? 0, closed: rows[0]?.closed ?? 0 }
   },
 }
 
