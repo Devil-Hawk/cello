@@ -89,7 +89,7 @@ const GENERIC_LABEL =
  * its Apply link stay on neighbouring lines instead of fusing into one.
  */
 function blockText($: cheerio.CheerioAPI): string {
-  const body = $('body').length ? $('body') : $.root()
+  const body = $('body')
   body.find('br').replaceWith('\n')
   body.find('p,div,li,tr,h1,h2,h3,h4,h5,h6,section,article,header,footer,ul,ol,table,dd,dt').each((_, el) => {
     $(el).append('\n')
@@ -109,9 +109,10 @@ const MAX_CARD_CHARS = 400
  * different address and is still short. A title three paragraphs away from an
  * Apply link is not that link's title.
  */
-function cardText($: cheerio.CheerioAPI, el: cheerio.Element, pageUrl: string): string {
-  const own = hrefId(($(el).attr('href') ?? ''), pageUrl)
-  let node = $(el)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function cardText($: cheerio.CheerioAPI, link: cheerio.Cheerio<any>, pageUrl: string): string {
+  const own = hrefId(link.attr('href') ?? '', pageUrl)
+  let node = link
   for (;;) {
     const parent = node.parent()
     if (!parent.length || /^(?:body|html)$/i.test(parent.prop('tagName') ?? '') || parent.is('main')) break
@@ -163,7 +164,7 @@ export function snapshotPage(html: string, url: string): PageSnapshot {
       truncated = true
       return
     }
-    links.push({ label: label.slice(0, 160), href: abs, context: cardText($, el, url) })
+    links.push({ label: label.slice(0, 160), href: abs, context: cardText($, $(el), url) })
   })
 
   let text = blockText($)
