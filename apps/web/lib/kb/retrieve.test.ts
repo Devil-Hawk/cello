@@ -8,7 +8,8 @@
 // behavior is covered in store.test.ts. This file is purely about
 // retrieveKb()'s own decision: did it get a vector, and if not, why not.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { runInTraceContext, SpanBuffer, type SpanRecord } from '../trace/spans'
 
 const loadApiKeysMock = vi.fn()
 vi.mock('../harness/keys', () => ({ loadApiKeys: (...args: unknown[]) => loadApiKeysMock(...args) }))
@@ -122,6 +123,40 @@ describe('retrieveKb', () => {
     expect(hits).toEqual([])
     expect(loadApiKeysMock).not.toHaveBeenCalled()
     expect(searchKbMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('retrieveKb in Langfuse', () => {
+  const run = async (isDemo: boolean) => {
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
+    vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
+    vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+    vi.stubEnv('LANGFUSE_DEMO_SAMPLE_RATE', '1')
+    loadApiKeysMock.mockResolvedValue({ userId: 'u1' })
+    callEmbeddingMock.mockResolvedValue({ embeddings: [[0.1]], model: 'x', promptTokens: 1 })
+    searchKbMock.mockResolvedValue([{ ...FTS_HIT[0], title: 'My notes', url: 'https://x.test/n', content: 'PRIVATE CHUNK TEXT' }])
+    const buffer = new SpanBuffer('u1', null, undefined, { isDemo })
+    await runInTraceContext({ buffer, parentSpanId: 'root', runId: null }, () => retrieveKb(admin, 'u1', 'visa rules', { limit: 5 }))
+    return (buffer as unknown as { pending: SpanRecord[] }).pending[0]
+  }
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('is a Langfuse-only retriever with the query and the hit titles (never the chunk text), and names its embedding call', async () => {
+    const row = await run(false)
+    expect(row).toMatchObject({ name: 'retrieve-knowledge', persist: false, parent_span_id: 'root' })
+    expect(row.lf).toMatchObject({ name: 'retrieve-knowledge', type: 'retriever', input: { query: 'visa rules' }, metadata: { limit: 5, hits: 1 } })
+    expect(JSON.stringify(row.lf)).toContain('My notes')
+    expect(JSON.stringify(row.lf)).not.toContain('PRIVATE CHUNK TEXT')
+    expect(callEmbeddingMock.mock.calls[0][1]).toMatchObject({ name: 'embed-query' })
+  })
+
+  it('a demo trace keeps the query out', async () => {
+    const row = await run(true)
+    expect(row.lf?.input).toBeUndefined()
+    expect(row.lf?.output).toBeUndefined()
+    expect(row.lf?.metadata).toMatchObject({ hits: 1 })
   })
 })
 

@@ -21,6 +21,7 @@ import { loadApiKeys } from '../harness/keys'
 import { callEmbedding, MissingKeyError } from '../harness/llm'
 import { BudgetCapError } from '../harness/spend'
 import { captureError } from '../observability/sentry'
+import { observe } from '../trace/spans'
 import { searchKb } from './store'
 import type { KbSearchHit } from './types'
 
@@ -45,6 +46,26 @@ export async function retrieveKb(
   query: string,
   opts: { limit?: number; companyId?: string } = {}
 ): Promise<KbSearchHit[]> {
+  // One Langfuse retriever observation (its embed-query nests under it) when
+  // a trace is active. The query and hit titles are capture-gated.
+  return observe(
+    { name: 'retrieve-knowledge', type: 'retriever', persist: false },
+    () => retrieveKbInner(admin, userId, query, opts),
+    (hits, _err, capture) => ({
+      metadata: { limit: opts.limit ?? 0, ...(hits ? { hits: hits.length } : {}) },
+      ...(capture
+        ? { input: { query }, output: { hits: (hits ?? []).slice(0, 10).map((h) => ({ title: h.title, url: h.url, rank: h.rank })) } }
+        : {}),
+    })
+  )
+}
+
+async function retrieveKbInner(
+  admin: SupabaseClient,
+  userId: string,
+  query: string,
+  opts: { limit?: number; companyId?: string }
+): Promise<KbSearchHit[]> {
   const trimmed = (query ?? '').trim()
   // Same short circuit as searchKb(): an empty query can't match anything,
   // so there's nothing worth spending an embedding call on.
@@ -55,7 +76,7 @@ export async function retrieveKb(
     const keys = await loadApiKeys(admin, userId)
     const { embeddings } = await callEmbedding(
       keys,
-      { texts: [trimmed] },
+      { texts: [trimmed], name: 'embed-query' },
       AbortSignal.timeout(EMBED_TIMEOUT_MS)
     )
     vector = embeddings[0]

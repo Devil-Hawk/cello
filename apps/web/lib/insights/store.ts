@@ -50,6 +50,7 @@
 import type { AdminClient } from '../harness/types'
 import { loadApiKeys } from '../harness/keys'
 import { callEmbedding, MissingKeyError } from '../harness/llm'
+import { observe } from '../trace/spans'
 import { BudgetCapError } from '../harness/spend'
 import { captureError } from '../observability/sentry'
 
@@ -170,7 +171,7 @@ function isTimeout(err: unknown): boolean {
 async function embedInsightBestEffort(admin: AdminClient, userId: string, insightId: string, statement: string): Promise<void> {
   try {
     const keys = await loadApiKeys(admin, userId)
-    const { embeddings } = await callEmbedding(keys, { texts: [statement] })
+    const { embeddings } = await callEmbedding(keys, { texts: [statement], name: 'embed-insight' })
     const { error } = await admin.from('insights').update({ embedding: embeddings[0] }).eq('id', insightId).eq('user_id', userId)
     if (error) throw new Error(`persist embedding failed: ${error.message}`)
   } catch (err) {
@@ -274,13 +275,31 @@ export async function searchInsights(
   query: string,
   opts: { kinds?: InsightKind[]; limit?: number } = {}
 ): Promise<Insight[]> {
+  // One Langfuse retriever observation (embed-query nests under it) when a
+  // trace is active. The query text is capture-gated; the hits are counted.
+  return observe(
+    { name: 'search-insights', type: 'retriever', persist: false },
+    () => searchInsightsInner(admin, userId, query, opts),
+    (found, _err, capture) => ({
+      metadata: { limit: opts.limit ?? 12, ...(found ? { hits: found.length } : {}) },
+      ...(capture ? { input: { query }, output: { count: found?.length ?? 0 } } : {}),
+    })
+  )
+}
+
+async function searchInsightsInner(
+  admin: AdminClient,
+  userId: string,
+  query: string,
+  opts: { kinds?: InsightKind[]; limit?: number }
+): Promise<Insight[]> {
   const trimmed = (query ?? '').trim()
   if (!trimmed || !userId) return []
 
   let vector: number[] | null = null
   try {
     const keys = await loadApiKeys(admin, userId)
-    const { embeddings } = await callEmbedding(keys, { texts: [trimmed] }, AbortSignal.timeout(EMBED_TIMEOUT_MS))
+    const { embeddings } = await callEmbedding(keys, { texts: [trimmed], name: 'embed-query' }, AbortSignal.timeout(EMBED_TIMEOUT_MS))
     vector = embeddings[0] ?? null
   } catch (err) {
     if (!(err instanceof MissingKeyError) && !(err instanceof BudgetCapError) && !isTimeout(err)) {

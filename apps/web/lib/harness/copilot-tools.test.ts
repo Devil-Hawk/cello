@@ -45,6 +45,7 @@ import {
   type CopilotToolContext,
 } from './copilot-tools'
 import type { AdminClient, DecryptedApiKeys } from './types'
+import { runInTraceContext, SpanBuffer, type SpanRecord } from '../trace/spans'
 
 // --- minimal in-memory fake of the PostgREST query-builder chain shapes ------
 // dispatchTool's read tools actually use: select().eq().eq().maybeSingle(),
@@ -677,5 +678,88 @@ describe('list_contacts — trgm search (ILIKE retired)', () => {
 
     expect(result.count).toBe(0)
     expect(result.contacts).toEqual([])
+  })
+})
+
+// Every tool call is one Langfuse observation under the active trace.
+describe('dispatchTool in Langfuse', () => {
+  const configure = (isDemo: boolean) => {
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
+    vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
+    vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+    vi.stubEnv('LANGFUSE_DEMO_SAMPLE_RATE', '1')
+    return new SpanBuffer('me', null, undefined, { isDemo })
+  }
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+  const traced = async (buffer: SpanBuffer, ctx: CopilotToolContext, tool: string, args: Record<string, unknown>) => {
+    const result = await runInTraceContext({ buffer, parentSpanId: 'root', runId: null }, () => dispatchTool(ctx, tool, args))
+    return { result, rows: (buffer as unknown as { pending: SpanRecord[] }).pending }
+  }
+
+  it('a built-in tool is a tool observation named for the tool, under the active span, with its args and result', async () => {
+    const admin = fakeAdmin({
+      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', match_score: 91, match_details: { ok: true } }],
+      companies: [{ id: 'co-1', name: 'Acme', user_id: 'me' }],
+    })
+    const { rows } = await traced(configure(false), baseCtx(admin), 'explain_match', { jobId: 'job-1' })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ kind: 'tool', name: 'explain_match', parent_span_id: 'root', status: 'ok', attributes: { tool: 'explain_match', error: false } })
+    expect(rows[0].lf).toMatchObject({ name: 'explain_match', type: 'tool', input: { jobId: 'job-1' }, output: { matched: true, score: 91 } })
+  })
+
+  it('web_search is a retriever', async () => {
+    webSearchMock.mockResolvedValue({ results: [] })
+    const { rows } = await traced(configure(false), baseCtx(fakeAdmin({})), 'web_search', { query: 'acme' })
+    expect(rows[0].lf?.type).toBe('retriever')
+  })
+
+  it('a returned { error } marks the observation ERROR with a coarse code, and the raw message only with capture on', async () => {
+    const owner = await traced(configure(false), baseCtx(fakeAdmin({}), { enabledAgents: new Set(['sourcer']) }), 'explain_match', { jobId: 'job-1' })
+    expect(owner.rows[0].lf).toMatchObject({ level: 'ERROR', errorCode: 'agent_disabled' })
+    expect(owner.rows[0].lf?.errorMessage).toContain('disabled')
+    expect(owner.rows[0].attributes).toMatchObject({ error: true })
+    const unknown = await traced(configure(false), baseCtx(fakeAdmin({})), 'not_a_tool_sk-abc', {})
+    expect(unknown.rows[0]).toMatchObject({ name: 'unknown-tool' })
+    expect(unknown.rows[0].lf).toMatchObject({ level: 'ERROR', errorCode: 'unknown_tool' })
+  })
+
+  it('list_contacts, get_dossier and get_application send ids and counts, never other people\'s details', async () => {
+    const admin = fakeAdmin({
+      contacts: [
+        { id: 'c-1', user_id: 'me', name: 'Jane Recruiter', email: 'jane@acme.com', title: 'Recruiter', company_id: 'co-1' },
+        { id: 'c-2', user_id: 'me', name: 'Joe Manager', email: 'joe@acme.com', title: 'Manager', company_id: 'co-1' },
+      ],
+    })
+    const { rows } = await traced(configure(false), baseCtx(admin), 'list_contacts', { query: 'jane', companyId: 'co-1' })
+    const lf = rows[0].lf!
+    expect(lf.input).toEqual({ ids: { companyId: 'co-1' } })
+    expect(lf.output).toMatchObject({ count: expect.any(Number), ids: expect.any(Array) })
+    const dump = JSON.stringify(lf)
+    for (const secret of ['Jane', 'jane@acme.com', 'Recruiter', 'Joe']) expect(dump).not.toContain(secret)
+  })
+
+  it('an MCP tool is always call-mcp-tool; the server and tool names only travel as capture-gated detail', async () => {
+    const admin = { from: () => { throw new Error('mcp server lookup failed') } } as unknown as AdminClient
+    const { rows } = await traced(configure(false), baseCtx(admin), 'mcp:evil sk-ant-api03-CANARY_x:sometool', {})
+    expect(rows[0].name).toBe('call-mcp-tool')
+    expect(rows[0].lf).toMatchObject({ name: 'call-mcp-tool', detail: { mcp_server: expect.any(String), mcp_tool: 'sometool' } })
+  })
+
+  it('a demo trace builds no input or output for a tool call', async () => {
+    const admin = fakeAdmin({ contacts: [] })
+    const { rows } = await traced(configure(true), baseCtx(admin), 'list_contacts', {})
+    expect(rows[0].lf?.input).toBeUndefined()
+    expect(rows[0].lf?.output).toBeUndefined()
+  })
+
+  it('outside a trace, and with Langfuse off, dispatching is unchanged and records nothing', async () => {
+    const admin = fakeAdmin({ contacts: [] })
+    const plain = await dispatchTool(baseCtx(admin), 'list_contacts', {})
+    expect(plain).not.toHaveProperty('error')
+    const buffer = new SpanBuffer('me', null, undefined, { isDemo: false }) // Langfuse unconfigured
+    const { rows } = await traced(buffer, baseCtx(admin), 'list_contacts', {})
+    expect(rows[0].lf).toBeUndefined()
   })
 })
