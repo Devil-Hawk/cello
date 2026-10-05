@@ -1,0 +1,3 @@
+comment = 'stub of pg_net for local checks: records calls, never sends them'
+default_version = '1.0'
+relocatable = false
