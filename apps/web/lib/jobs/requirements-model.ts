@@ -12,7 +12,7 @@
 
 import { composeSystemPrompt, loadModeDoc, promptRef } from '../harness/prompts'
 import { parseJsonLoose } from '../harness/llm'
-import { frameJobText } from '../security/job-text'
+import { frameJobText } from '@/lib/security/job-text'
 import { MODEL_LIMIT, type ModelCall } from '../ingest/model'
 import { ModelAnswerSchema, groundModelAnswer, needsModel, type Requirements } from './requirements'
 

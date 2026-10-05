@@ -1,91 +1,73 @@
-// POST /api/scraper/trigger. The OpenRouter extraction now goes through the
-// REAL callLlm with only its edges faked (provider call, admin client, spend's
-// DB functions), so the budget check, spend record and trace span are proven to
-// happen. Every failure still lands on the deterministic JSON-LD / HTML
-// extractor, and now logs why. ZERO network.
+// POST /api/scraper/trigger: the in-app check of one company. It runs the same
+// code as the scheduled check, so these tests pin what is specific to the route:
+// a page with structured data needs no key, a page that needs a model uses only
+// the user's OpenRouter key on a free model, no paid provider is ever called
+// directly, and nothing identifying a company reaches the server log. ZERO network.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
+import type { AtsStore, JobUpsertRow } from '@/lib/ats'
 
-const callOpenRouterMock = vi.fn()
-vi.mock('@/lib/harness/providers/openrouter', () => ({
-  callOpenRouter: (...args: unknown[]) => callOpenRouterMock(...args),
-  DEFAULT_MODEL: 'anthropic/claude-sonnet-5',
-}))
+const callLlmMock = vi.fn()
+vi.mock('@/lib/harness/llm', () => ({ callLlm: (...a: unknown[]) => callLlmMock(...a), parseJsonLoose: (s: string) => JSON.parse(s) }))
+vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({}) }))
+vi.mock('@/lib/trace/spans', () => ({ withTrace: async (_a: unknown, _u: unknown, _s: unknown, fn: () => unknown) => fn() }))
 
-const assertWithinBudgetMock = vi.fn()
-const recordSpendMock = vi.fn()
-vi.mock('@/lib/harness/spend', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/harness/spend')>()),
-  assertWithinBudget: (...args: unknown[]) => assertWithinBudgetMock(...args),
-  recordSpend: (...args: unknown[]) => recordSpendMock(...args),
-}))
+const getKeysMock = vi.fn()
+vi.mock('@/lib/apikeys', () => ({ getDecryptedApiKeys: (...a: unknown[]) => getKeysMock(...a) }))
 
-const insertedSpans: Record<string, unknown>[] = []
-const fakeAdmin = {
-  from: (name: string) => {
-    if (name !== 'trace_spans') throw new Error(`unexpected table "${name}"`)
-    return {
-      insert: async (rows: Record<string, unknown>[]) => {
-        insertedSpans.push(...rows)
-        return { error: null }
-      },
-    }
-  },
-}
-vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => fakeAdmin }))
+const fetchPageMock = vi.fn()
+vi.mock('@/lib/ingest/fetch-page', () => ({ staticFetchPage: (...a: unknown[]) => fetchPageMock(...a) }))
 
-const getDecryptedApiKeysMock = vi.fn()
-vi.mock('@/lib/apikeys', () => ({
-  getDecryptedApiKeys: (...args: unknown[]) => getDecryptedApiKeysMock(...args),
-}))
-
-const upserted: Record<string, unknown>[][] = []
-function tableChain(table: string) {
-  const rows: Record<string, unknown> =
-    table === 'companies'
-      ? { id: 'co-1', name: 'Acme', career_url: 'https://acme.com/careers', user_id: 'user-1' }
-      : { preferences: {} }
-  const chain: Record<string, unknown> = {
-    select: () => chain,
-    eq: () => chain,
-    single: async () => ({ data: rows, error: null }),
-    update: () => chain,
-    upsert: async (r: Record<string, unknown>[]) => {
-      upserted.push(r)
-      return { error: null }
+const state = { lock: true, upserted: [] as JobUpsertRow[] }
+vi.mock('@/lib/ats/store', () => ({
+  makeSupabaseAtsStore: (): AtsStore => ({
+    async listJobs() {
+      return []
     },
-    // `await supabase.from('jobs').select().eq()` (existing external ids)
-    then: (resolve: (v: unknown) => void) => resolve({ data: [], error: null }),
-  }
-  return chain
-}
+    async upsertJobs(rows) {
+      state.upserted.push(...rows)
+    },
+    async updateJobs(rows) {
+      return rows.length
+    },
+    async recordSightings(_c, ids) {
+      return { seen: ids.length, reopened: 0, missed: 0, closed: 0 }
+    },
+    async acquireCompanyLock() {
+      return state.lock
+    },
+    async releaseCompanyLock() {},
+    async saveCompanyMetadata() {},
+    async updateCompanyLastScraped() {},
+  }),
+}))
+
+const COMPANY = { id: 'co-1', name: 'Acme Robotics', career_url: 'https://acme-robotics.example/careers', user_id: 'user-1', domain: null, metadata: {} }
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
     auth: { getUser: async () => ({ data: { user: { id: 'user-1' } }, error: null }) },
-    from: (table: string) => tableChain(table),
+    from: () => {
+      const chain: Record<string, unknown> = {
+        select: () => chain,
+        eq: () => chain,
+        single: async () => ({ data: COMPANY, error: null }),
+      }
+      return chain
+    },
   }),
 }))
 
 import { POST } from './route'
-import { BudgetCapError } from '@/lib/harness/spend'
 
-// The deterministic extractor reads JSON-LD, so a page with one real posting
-// proves the fallback ran (the AI answers below return a different job).
-const PAGE = `<html><head><script type="application/ld+json">${JSON.stringify({
+const FILLER = 'We are a small team that cares about customers and about each other. '.repeat(4)
+const LD_PAGE = `<html><head><script type="application/ld+json">${JSON.stringify({
   '@type': 'JobPosting',
   title: 'Senior Software Engineer',
-  url: 'https://acme.com/jobs/deterministic',
-  jobLocation: { name: 'Remote' },
-})}</script></head><body><a href="/jobs/x">x</a></body></html>`
-
-const AI_JOBS = JSON.stringify([
-  { title: 'Staff Software Engineer', url: 'https://acme.com/jobs/from-ai', location: 'Remote' },
-])
-
-function llmResult(content: string) {
-  return { content, tokensUsed: 5000, promptTokens: 4500, completionTokens: 500, model: 'google/gemini-2.0-flash-001' }
-}
+  url: 'https://acme-robotics.example/jobs/1',
+  description: `<p>${'You will build and run things for customers. '.repeat(10)}</p>`,
+})}</script></head><body>${FILLER}</body></html>`
+const PLAIN_PAGE = `<html><body><p>${FILLER}</p><div><h3>Data Analyst</h3><a href="/jobs/3">Apply</a></div></body></html>`
 
 function post() {
   return new NextRequest('http://localhost/api/scraper/trigger', {
@@ -95,102 +77,83 @@ function post() {
   })
 }
 
-function fallbackLines(warn: { mock: { calls: unknown[][] } }): string[] {
-  return warn.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith('[llm:fallback]'))
-}
-
+const page = (html: string) => async (url: string) => ({ html, finalUrl: url, rendered: false })
 let fetchMock: ReturnType<typeof vi.fn<unknown[], Promise<Response>>>
 
 beforeEach(() => {
-  callOpenRouterMock.mockReset()
-  assertWithinBudgetMock.mockReset().mockResolvedValue(undefined)
-  recordSpendMock.mockReset().mockResolvedValue(undefined)
-  getDecryptedApiKeysMock.mockReset().mockResolvedValue({ openrouter: 'sk-or-test', userId: 'user-1' })
-  insertedSpans.length = 0
-  upserted.length = 0
-  fetchMock = vi.fn<unknown[], Promise<Response>>(async () => new Response(PAGE, { status: 200 }))
+  callLlmMock.mockReset()
+  getKeysMock.mockReset().mockResolvedValue({ userId: 'user-1' })
+  fetchPageMock.mockReset().mockImplementation(page(LD_PAGE))
+  state.lock = true
+  state.upserted = []
+  // Every board probe misses, so the company has no board.
+  fetchMock = vi.fn<unknown[], Promise<Response>>(async () => new Response('not found', { status: 404 }))
   globalThis.fetch = fetchMock as unknown as typeof fetch
 })
 
-describe('OpenRouter extraction is budget-checked, metered and traced', () => {
-  it('goes through callLlm on the cheap model and uses the AI jobs', async () => {
-    callOpenRouterMock.mockResolvedValue(llmResult(AI_JOBS))
+describe('POST /api/scraper/trigger', () => {
+  it('reads a page with structured postings and needs no key at all', async () => {
+    const body = await (await POST(post())).json()
+    expect(body).toMatchObject({ success: true, jobsFound: 1, inserted: 1, reason: null })
+    expect(state.upserted[0]).toMatchObject({ title: 'Senior Software Engineer', source: 'scraper' })
+    expect(callLlmMock).not.toHaveBeenCalled()
+  })
 
-    const res = await POST(post())
-    const body = await res.json()
+  it('with no key, a page that needs a model is reported as not read, with a reason', async () => {
+    fetchPageMock.mockImplementation(page(PLAIN_PAGE))
+    const body = await (await POST(post())).json()
+    expect(body).toMatchObject({ success: false, jobsFound: 0, inserted: 0, reason: 'model_unavailable' })
+    expect(body.message).toContain('OpenRouter key')
+    expect(state.upserted).toEqual([])
+  })
 
-    expect(res.status).toBe(200)
-    expect(body.jobsInserted).toBe(1)
-    expect((upserted[0][0] as { url: string }).url).toBe('https://acme.com/jobs/from-ai')
-    expect(callOpenRouterMock.mock.calls[0][1]).toMatchObject({
-      model: 'google/gemini-2.0-flash-001',
-      maxTokens: 4096,
-      reasoning: { effort: 'none' },
+  it('never calls OpenAI or Anthropic directly, even when the user has only those keys', async () => {
+    getKeysMock.mockResolvedValue({ userId: 'user-1', openai: 'sk-openai', anthropic: 'sk-ant' })
+    fetchPageMock.mockImplementation(page(PLAIN_PAGE))
+    const body = await (await POST(post())).json()
+    expect(body.reason).toBe('model_unavailable')
+    const hosts = fetchMock.mock.calls.map((c) => String(c[0]))
+    expect(hosts.some((u) => u.includes('api.openai.com') || u.includes('api.anthropic.com'))).toBe(false)
+    expect(callLlmMock).not.toHaveBeenCalled()
+  })
+
+  it("uses the user's OpenRouter key on a free model, and stores only what the page backs up", async () => {
+    getKeysMock.mockResolvedValue({ userId: 'user-1', openrouter: 'sk-or-user' })
+    fetchPageMock.mockImplementation(page(PLAIN_PAGE))
+    callLlmMock.mockResolvedValue({
+      content: JSON.stringify({
+        page_kind: 'listing',
+        jobs: [
+          { title: 'Data Analyst', link: 1 },
+          { title: 'Chief Wizard', link: 1 },
+        ],
+      }),
     })
-    expect(assertWithinBudgetMock).toHaveBeenCalledWith(fakeAdmin, 'user-1')
-    expect(recordSpendMock).toHaveBeenCalledWith(fakeAdmin, 'user-1', 'google/gemini-2.0-flash-001', 4500, 500)
-    expect(insertedSpans).toHaveLength(1)
-    expect(insertedSpans[0]).toMatchObject({
-      user_id: 'user-1',
-      kind: 'llm',
-      status: 'ok',
-      attributes: { model: 'google/gemini-2.0-flash-001', promptTokens: 4500, completionTokens: 500, metered: true },
-    })
-    // The raw OpenRouter endpoint is never hit directly any more.
-    expect(fetchMock.mock.calls.some(([u]) => String(u).includes('openrouter.ai'))).toBe(false)
-  })
-})
-
-describe('every failure still falls back to deterministic extraction', () => {
-  async function expectDeterministic() {
-    const res = await POST(post())
-    const body = await res.json()
-    expect(res.status).toBe(200)
-    expect(body.success).toBe(true)
-    expect(body.jobsInserted).toBe(1)
-    expect((upserted[0][0] as { url: string }).url).toBe('https://acme.com/jobs/deterministic')
-  }
-
-  it('no key at all: no model call, no metering', async () => {
-    getDecryptedApiKeysMock.mockResolvedValue({ userId: 'user-1' })
-    await expectDeterministic()
-    expect(callOpenRouterMock).not.toHaveBeenCalled()
-    expect(assertWithinBudgetMock).not.toHaveBeenCalled()
-    expect(recordSpendMock).not.toHaveBeenCalled()
+    const body = await (await POST(post())).json()
+    expect(body).toMatchObject({ success: true, jobsFound: 1, inserted: 1 })
+    const [keys, opts] = callLlmMock.mock.calls[0]
+    expect(keys).toMatchObject({ openrouter: 'sk-or-user', userId: 'user-1' })
+    expect(String(opts.model).endsWith(':free')).toBe(true)
+    expect(state.upserted.map((r) => r.title)).toEqual(['Data Analyst'])
   })
 
-  it('a spent budget refuses before the provider call, and warns', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    assertWithinBudgetMock.mockRejectedValue(new BudgetCapError(1, 1))
-    await expectDeterministic()
-    expect(callOpenRouterMock).not.toHaveBeenCalled()
-    expect(recordSpendMock).not.toHaveBeenCalled()
-    expect(fallbackLines(warn)[0]).toContain('BudgetCapError')
+  it('says so when the company is already being checked', async () => {
+    state.lock = false
+    const body = await (await POST(post())).json()
+    expect(body).toMatchObject({ success: true, jobsFound: 0, inserted: 0 })
+    expect(body.message).toContain('already being checked')
+    expect(fetchPageMock).not.toHaveBeenCalled()
   })
 
-  it('a provider 402 records no spend and warns with the status', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    callOpenRouterMock.mockRejectedValue(Object.assign(new Error('402 Insufficient credits'), { status: 402 }))
-    await expectDeterministic()
-    expect(recordSpendMock).not.toHaveBeenCalled()
-    const lines = fallbackLines(warn)
-    expect(lines).toHaveLength(1)
-    expect(lines[0]).toContain('"scope":"scraper-trigger"')
-    expect(lines[0]).toContain('"status":402')
-  })
-
-  it('an anthropic-only account whose direct call fails (non-2xx) now warns instead of failing silently', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    getDecryptedApiKeysMock.mockResolvedValue({ anthropic: 'sk-ant-test', userId: 'user-1' })
-    fetchMock.mockImplementation(async (url: unknown) =>
-      String(url).includes('api.anthropic.com')
-        ? new Response(JSON.stringify({ error: { message: 'model retired' } }), { status: 404 })
-        : new Response(PAGE, { status: 200 })
-    )
-    await expectDeterministic()
-    expect(callOpenRouterMock).not.toHaveBeenCalled()
-    const lines = fallbackLines(warn)
-    expect(lines).toHaveLength(1)
-    expect(lines[0]).toContain('"status":404')
+  it('writes the company name and address nowhere in the server log', async () => {
+    const spies = (['log', 'info', 'warn', 'error'] as const).map((k) => vi.spyOn(console, k).mockImplementation(() => {}))
+    fetchPageMock.mockImplementation(page(PLAIN_PAGE))
+    await POST(post())
+    fetchPageMock.mockImplementation(page(LD_PAGE))
+    await POST(post())
+    const logged = spies.flatMap((s) => s.mock.calls.flat().map(String)).join('\n')
+    expect(logged).not.toContain('Acme')
+    expect(logged).not.toContain('acme-robotics')
+    spies.forEach((s) => s.mockRestore())
   })
 })
