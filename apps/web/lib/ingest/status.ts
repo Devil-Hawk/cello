@@ -41,6 +41,11 @@ export const FAILURE_TEXT: Record<FailureReason, string> = {
   page_unconfirmed: 'No roles on its careers page could be confirmed',
   model_unavailable: 'Its careers page needs reading and no model was free',
   model_limit: "Today's reading limit was reached",
+  bot_check: 'Its site asks visitors to pass a bot check, which Cello does not do',
+  login_required: 'Its careers site needs a login',
+  robots: 'Its robots.txt asks automated readers to stay away from its careers pages',
+  no_roles: 'No open roles were found on its careers site',
+  unreachable: 'Its careers site did not answer',
   time: 'Not reached this time',
 }
 

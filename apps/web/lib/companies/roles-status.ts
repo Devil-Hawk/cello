@@ -26,7 +26,16 @@ export const REASON_COPY: Record<string, string> = {
   no_careers_url: 'no careers page was added',
   no_supported_board: 'its careers page is not on a job board Cello can read yet',
   board_unreachable: 'its job board did not answer',
+  // Written by the reader (lib/ingest/reader).
+  bot_check: 'its site asks visitors to pass a bot check, which Cello does not do',
+  login_required: 'its careers site needs a login',
+  robots: 'its robots.txt asks automated readers to stay away from its careers pages',
+  no_roles: 'no open roles were found on it',
+  unreachable: 'it did not answer',
 }
+
+/** The check recorded while only a browser could read the site: the scheduled pass is next. */
+export const READING_REASON = 'reading'
 
 // The scheduler (scripts/ats-refresh.ts) and the runner use these: dream companies hourly, others daily.
 const DREAM_INTERVAL_MINUTES = 60
@@ -70,7 +79,7 @@ export function dueAt(company: StatusCompany): number {
 }
 
 /** The first scheduler tick (minute 41 of 00/06/12/18 UTC) at or after `ms`. */
-function firstTickAtOrAfter(ms: number): number {
+export function firstTickAtOrAfter(ms: number): number {
   const d = new Date(ms)
   const hourStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours())
   for (let h = 0; h <= TICK_EVERY_HOURS + 1; h++) {
@@ -90,6 +99,7 @@ export function nextCheckAt(company: StatusCompany, now: number = Date.now()): n
 export type RolesStatus =
   | { kind: 'roles'; count: number }
   | { kind: 'checking' }
+  | { kind: 'reading'; nextCheckAt: number }
   | { kind: 'not_checked'; nextCheckAt: number; now: number }
   | { kind: 'empty'; nextCheckAt: number; now: number }
   | { kind: 'unreadable'; reason: string; careersUrl: string | null }
@@ -103,6 +113,9 @@ export function rolesStatus(
   if (openRoles > 0) return { kind: 'roles', count: openRoles }
   if (opts.checking) return { kind: 'checking' }
   const check = readSourceCheck(company.metadata)
+  if (check && !check.readable && check.reason === READING_REASON) {
+    return { kind: 'reading', nextCheckAt: firstTickAtOrAfter(now) }
+  }
   if (check && !check.readable) {
     const reason = (check.reason && REASON_COPY[check.reason]) || 'it could not be read'
     return { kind: 'unreadable', reason, careersUrl: company.career_url?.trim() || null }
@@ -124,6 +137,10 @@ export function rolesStatusLine(s: RolesStatus): { text: string; href?: string }
       return { text: `${s.count} open ${s.count === 1 ? 'role' : 'roles'}` }
     case 'checking':
       return { text: 'Checking now' }
+    case 'reading': {
+      const t = new Date(s.nextCheckAt).toISOString().slice(11, 16)
+      return { text: `Cello is reading this site. Next check around ${t} UTC` }
+    }
     case 'not_checked':
       return { text: `Not checked yet, next check ${inAbout(s.nextCheckAt - s.now)}` }
     case 'empty':

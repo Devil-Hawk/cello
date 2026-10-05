@@ -45,6 +45,21 @@ describe('rolesStatus', () => {
     expect(line.href).toBeUndefined()
   })
 
+  it('says Cello is reading the site, and when the next check is, while only a browser can read it', () => {
+    const company = { metadata: { source_check: { checked_at: '2026-10-05T10:00:00Z', readable: false, reason: 'reading' } }, career_url: 'https://jobs.example/' }
+    expect(rolesStatusLine(rolesStatus(company, 0, { now }))).toEqual({ text: 'Cello is reading this site. Next check around 12:41 UTC' })
+  })
+
+  it('names why a site was not read: a bot check, a login, robots.txt, no roles, no answer', () => {
+    const line = (reason: string) =>
+      rolesStatusLine(rolesStatus({ metadata: { source_check: { checked_at: '2026-10-05T10:00:00Z', readable: false, reason } }, career_url: 'https://x.test/' }, 0, { now })).text
+    expect(line('bot_check')).toContain('bot check')
+    expect(line('login_required')).toContain('needs a login')
+    expect(line('robots')).toContain('robots.txt')
+    expect(line('no_roles')).toContain('no open roles were found')
+    expect(line('unreachable')).toContain('did not answer')
+  })
+
   it('ignores a malformed source_check', () => {
     expect(rolesStatus({ metadata: { source_check: 'x' } }, 0, { now }).kind).toBe('not_checked')
   })
