@@ -111,7 +111,7 @@ import { createAdminClient } from '../harness/supabase-admin'
 import { loadRecentMessages, type MessageRow } from '../harness/copilot-store'
 import { setTraceOutput, withTrace } from '../trace/spans'
 import { getMemoryStore } from '../memory/mem0-store'
-import { DemoMemoryWriteRefusedError, type MemoryItem } from '../memory/types'
+import type { MemoryItem } from '../memory/types'
 import {
   dispatchTool,
   toolsPromptBlock,
@@ -169,7 +169,7 @@ export interface CopilotTurnConfig {
   /**
    * The route's own already-computed demo-session verdict (isDemoProfile on
    * the profile it already reads at request time) — threaded through so
-   * finalize's post-turn MemoryStore.add can refuse a demo write without
+   * a memory write can refuse a demo write without
    * lib/memory/mem0-store.ts doing a second, independent profile read (see
    * that file's header). Defaults false so a caller that predates this field
    * (any test fixture using DEFAULT_TURN_CONFIG) never accidentally refuses
@@ -765,12 +765,6 @@ const RECENT_MESSAGE_WINDOW = 12
 /** How many past-session memories MemoryStore.search returns into a turn's
  *  system prompt. */
 const MEMORY_SEARCH_LIMIT = 6
-/** Post-turn MemoryStore.add's own "capped input" — mem0 runs an LLM fact-
- *  extraction pass over whatever this caps to, so an unbounded final answer
- *  (a long research writeup) never turns one turn into an oversized,
- *  wasteful extraction call. */
-const MEMORY_ADD_CHAR_CAP = 4000
-
 function formatSummaryBlock(summary: string | null | undefined): string {
   if (!summary || !summary.trim()) return ''
   return `[Summary of earlier messages in this conversation, not shown verbatim below]\n${summary.trim()}`
@@ -1383,7 +1377,7 @@ function routeAfterDispatch(state: CopilotStateType): 'plan' | 'finalize' | 'dis
   return 'plan'
 }
 
-async function finalize(state: CopilotStateType, config: LangGraphRunnableConfig): Promise<Partial<CopilotStateType>> {
+async function finalize(state: CopilotStateType): Promise<Partial<CopilotStateType>> {
   // Persistence (copilot_messages, copilot_conversations.updated_at) is the
   // ADAPTER's job (app/api/copilot/route.ts), reading `finalMessage`/`trace`
   // off this node's own chunk in real time — see spec item 3. `trace` is
@@ -1404,33 +1398,7 @@ async function finalize(state: CopilotStateType, config: LangGraphRunnableConfig
   // next_turn interrupt, which says nothing about what the user was told.
   if (state.finalMessage) setTraceOutput({ reply: state.finalMessage })
 
-  if (state.finalMessage) await addTurnToMemory(state, config)
-
   return { finalMessage: state.finalMessage, trace: state.trace, awaitingTurn: true, messages, wireEvents: [] }
-}
-
-/**
- * Post-turn MemoryStore.add on the user+assistant pair (Step 7 of the
- * memory build) — cheap model, capped input (MEMORY_ADD_CHAR_CAP), metered
- * through loadApiKeys same as every other MemoryStore call. Best-effort:
- * mem0/DB trouble here must not turn a successfully answered turn into a
- * failed one — the user already has their answer by the time this runs.
- */
-async function addTurnToMemory(state: CopilotStateType, config: LangGraphRunnableConfig): Promise<void> {
-  const cfg = configurableOf(config)
-  try {
-    await getMemoryStore().add(cfg.userId, {
-      messages: [
-        { role: 'user', content: state.objective.slice(0, MEMORY_ADD_CHAR_CAP) },
-        { role: 'assistant', content: (state.finalMessage ?? '').slice(0, MEMORY_ADD_CHAR_CAP) },
-      ],
-      scope: 'copilot',
-      isDemo: state.turnConfig.isDemo,
-    })
-  } catch (e) {
-    if (e instanceof DemoMemoryWriteRefusedError) return
-    console.error(`[graph] copilot: memory add failed for thread ${cfg.threadId}, continuing without it: ${(e as Error).message}`)
-  }
 }
 
 // --- Graph -----------------------------------------------------------------
