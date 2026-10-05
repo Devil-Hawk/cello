@@ -20,7 +20,7 @@ import { toast } from '@/components/ui/use-toast'
 import { createClient } from '@/lib/supabase/client'
 import {
   fetchClientSafePreferences,
-  SET_ONBOARDING_PREFERENCES_RPC,
+  markOnboarded,
 } from '@/lib/preferences/client-safe'
 import {
   RESUME_UPLOAD_ACCEPT,
@@ -116,10 +116,7 @@ export default function OnboardingPage() {
       // side. set_onboarding_preferences() does the merge inside Postgres, so
       // the rest of the column never has to travel to the browser in either
       // direction. See the migration and lib/preferences/client-safe.ts.
-      const { error } = await (supabase as unknown as SupabaseClient).rpc(
-        SET_ONBOARDING_PREFERENCES_RPC,
-        { p_match_threshold: Number(threshold) }
-      )
+      const error = await markOnboarded(supabase as unknown as SupabaseClient, Number(threshold))
       if (error) throw error
       return true
     } catch (e) {
@@ -128,6 +125,15 @@ export default function OnboardingPage() {
     } finally {
       setSavingPrefs(false)
     }
+  }
+
+  // Skipping must be remembered: the app layout re-opens this wizard on every
+  // full reload until onboardedAt is stamped (or a company exists). If the save
+  // fails savePreferences() has already toasted, and we stay so they can retry.
+  async function skip() {
+    const ok = await savePreferences()
+    if (!ok) return
+    router.push('/dashboard')
   }
 
   async function launch() {
@@ -234,7 +240,7 @@ export default function OnboardingPage() {
               </Button>
             )}
             <div className="flex justify-between pt-2">
-              <Button variant="ghost" onClick={() => router.push('/dashboard')}>
+              <Button variant="ghost" onClick={skip} disabled={savingPrefs}>
                 Skip for now
               </Button>
               <Button onClick={() => setStep('preferences')} disabled={!hasResume}>
