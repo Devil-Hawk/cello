@@ -86,6 +86,21 @@ describe('sitemap tier: Walmart', () => {
   })
 })
 
+describe('sitemap tier: only the employer own pages are fetched', () => {
+  it('an entry on another site is never requested', async () => {
+    const f = fakeFetcher({
+      'https://acme.test/robots.txt': 'User-agent: *\nAllow: /\nSitemap: https://acme.test/jobs-sitemap.xml\n',
+      'https://acme.test/jobs-sitemap.xml':
+        '<urlset><url><loc>https://acme.test/jobs/4000001-data-engineer</loc></url><url><loc>https://evil.test/jobs/4000002-data-engineer</loc></url></urlset>',
+      'https://acme.test/jobs/4000001-data-engineer': '<html><head><title>Data Engineer</title></head><body><h1>Data Engineer</h1></body></html>',
+    })
+    const own = (u: string) => new URL(u).hostname === 'acme.test'
+    const read = await readSitemapRoles('https://acme.test', f, { targets: NO_TARGETS, skip: new Set(), ownSite: own })
+    expect(read.jobs.map((j) => j.url)).toEqual(['https://acme.test/jobs/4000001-data-engineer'])
+    expect(f.calls.some((c) => c.includes('evil.test'))).toBe(false)
+  })
+})
+
 describe('sitemap helpers', () => {
   it('tells a role URL from a policy, department or landing page', () => {
     expect(isPostingUrl('https://www.metacareers.com/profile/job_details/1616812923224613/')).toBe(true)

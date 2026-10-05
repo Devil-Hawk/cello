@@ -30,7 +30,7 @@ import { readJobPostings } from '../jsonld'
 import { readCareersPage } from '../page-reader'
 import { boardsInHtml, classifyLink, discoverBoards, type DiscoveredBoard, type DiscoveredVia, type PageRead } from './discover'
 import { jobFromDetail, readDetail } from './detail'
-import { mislabelledSource } from './legit'
+import { mislabelledSource, onOwnSite } from './legit'
 import { readListing, roleLinks } from './listing'
 import { ReaderError, type ReaderReason, type SiteFetcher } from './site-fetch'
 import { readSitemapRoles } from './sitemap'
@@ -105,6 +105,7 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
   let firstError: ReaderError | null = null
   // Addresses already read or rejected, and roles already stored: a later pass fetches only what is new.
   const skip = { has: (id: string) => input.checked?.has(id) === true || input.storedIds?.has(id) === true } as ReadonlySet<string>
+  const ownSite = (url: string) => onOwnSite(url, { company })
   const note = (error: unknown): void => {
     if (error instanceof ReaderError && error.reason !== 'budget') firstError ??= error
   }
@@ -187,7 +188,7 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
   // What the site declares for search engines.
   try {
     const origin = new URL(company.careerUrl).origin
-    const read = await readSitemapRoles(origin, f, { targets, skip })
+    const read = await readSitemapRoles(origin, f, { targets, skip, ownSite })
     out.checked.push(...read.checked)
     if (read.board && (await tryBoard({ ...read.board, via: 'posting' }))) return finish()
     if (read.listed > 0) {
@@ -204,7 +205,7 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
   // Server-rendered role lists.
   if (!firstError || (firstError as ReaderError).reason !== 'bot_check') {
     try {
-      const read = await readListing(company.careerUrl, pages, f, { targets, skip })
+      const read = await readListing(company.careerUrl, pages, f, { targets, skip, ownSite })
       out.checked.push(...read.checked)
       if (read.board && (await tryBoard({ ...read.board, via: 'posting' }))) return finish()
       if (read.listed > 0) {
@@ -275,7 +276,7 @@ async function readRendered(
     }
   }
   if (roleLinks(page.html, page.finalUrl).length > 0) {
-    const read = await readListing(company.careerUrl, rendered, f, { targets, skip: input.checked })
+    const read = await readListing(company.careerUrl, rendered, f, { targets, skip: input.checked, ownSite: (url) => onOwnSite(url, { company }) })
     if (read.listed > 0) {
       tried.push({ tier: 'rendered', outcome: 'roles' })
       return { result: { tier: 'rendered', jobs: read.jobs, complete: false, listedIds: read.listedIds }, tried, checked: read.checked }

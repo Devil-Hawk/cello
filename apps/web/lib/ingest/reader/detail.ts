@@ -43,7 +43,7 @@ export function pageTitle($: cheerio.CheerioAPI): string {
   // A generic h1 ("job details") is not the role.
   const candidate = og || (h1.split(/\s+/).length >= 2 && !/^job details$/i.test(h1) ? h1 : '') || title
   // "Role - Jobs - Careers at Apple", "Role | Datadog Careers": the site's own name after the role is not part of it.
-  return candidate.replace(/(?:\s+[-|—–]\s+[^-|—–]*\b(?:careers?|jobs)\b[^-|—–]*)+$/i, '').trim()
+  return candidate.replace(/(?:\s+[-|\u2014\u2013]\s+[^-|\u2014\u2013]*\b(?:careers?|jobs)\b[^-|\u2014\u2013]*)+$/i, '').trim()
 }
 
 /**

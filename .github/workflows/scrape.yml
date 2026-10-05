@@ -55,19 +55,12 @@ jobs:
           cd packages/scrapers
           pip install -e ".[render,browser]"
 
-      # Pages that build their job list with script return an empty shell to a
-      # plain request; src/render.py escalates those to a real browser. Non-fatal:
-      # the fetcher degrades to the plain request if a browser is missing, so an
-      # install hiccup must not stop the check for every company.
-      - name: Install Scrapling browser
-        continue-on-error: true
-        run: |
-          cd packages/scrapers
-          scrapling install
-
-      # The click-through rung (src/browser_tier.py) drives Playwright directly,
-      # so it needs its own Chromium. Usually a fast no-op after the step above.
-      - name: Install click-through browser
+      # Pages that build their job list with script need a browser (src/render.py,
+      # src/browser_tier.py). It says who it is (Cello and the repository) and does
+      # nothing to look like a person. Non-fatal: the fetcher degrades to the plain
+      # request if a browser is missing, so an install hiccup must not stop the
+      # check for every company.
+      - name: Install browser
         continue-on-error: true
         run: |
           cd packages/scrapers

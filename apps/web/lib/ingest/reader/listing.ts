@@ -215,7 +215,7 @@ export async function readListing(
   careerUrl: string,
   pages: { url: string; html: string }[],
   f: SiteFetcher,
-  opts: { targets: ReaderTargets; skip?: ReadonlySet<string>; max?: number }
+  opts: { targets: ReaderTargets; skip?: ReadonlySet<string>; max?: number; ownSite?: (url: string) => boolean }
 ): Promise<ListingRead> {
   const all = new Map<string, RoleLink>()
   for (const p of pages) for (const l of roleLinks(p.html, p.url)) if (!all.has(l.url)) all.set(l.url, l)
@@ -240,7 +240,8 @@ export async function readListing(
     }
   }
 
-  const links = [...all.values()]
+  // Only the employer's own pages are fetched: a list may link anywhere.
+  const links = [...all.values()].filter((l) => !opts.ownSite || opts.ownSite(l.url))
   const wanted = links.filter((l) => matchesTargets(l.title, opts.targets) && !opts.skip?.has(l.url)).slice(0, opts.max ?? DETAIL_PER_READ[f.mode])
 
   const jobs: AtsJob[] = []

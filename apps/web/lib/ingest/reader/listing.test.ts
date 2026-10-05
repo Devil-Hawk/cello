@@ -107,7 +107,7 @@ describe('readListing: every role is confirmed on its own page', () => {
     })
     const links = roleLinks(fixture('google-search.html'), GOOGLE)
     const detailRoutes: Record<string, string> = {}
-    for (const l of links) detailRoutes[l.url] = `<html><head><title>${l.title} — Google Careers</title></head><body><main>${l.title}</main></body></html>`
+    for (const l of links) detailRoutes[l.url] = `<html><head><title>${l.title} \u2014 Google Careers</title></head><body><main>${l.title}</main></body></html>`
     const g = fakeFetcher({ 'https://www.google.com/robots.txt': fixture('google-robots.txt'), [GOOGLE]: fixture('google-search.html'), ...detailRoutes })
     const read = await readListing(GOOGLE, [], g, { targets: { ...engData, titles: ['data engineer'] }, max: 20 })
     expect(read.jobs.length).toBeGreaterThan(5)
@@ -127,6 +127,15 @@ describe('readListing: every role is confirmed on its own page', () => {
     const read = await readListing('https://www.nytco.com/careers/', [{ url: 'https://www.nytco.com/careers/job-listings/', html: list }], f, { targets: NO_TARGETS, max: 5 })
     expect(read.jobs).toHaveLength(5)
     expect(read.board).toEqual({ provider: 'greenhouse', token: 'thenewyorktimes' })
+  })
+
+  it('never fetches a role link that leaves the employer own site', async () => {
+    const card = (host: string, id: number) => `<li><a href="https://${host}/careers/job/${id}"><h3>Data Engineer ${id}</h3></a></li>`
+    const html = `<ul>${card('acme.test', 1000001)}${card('acme.test', 1000002)}${card('acme.test', 1000003)}${card('evil.test', 1000004)}</ul>`
+    const f = fakeFetcher({ 'https://acme.test/careers': html })
+    const read = await readListing('https://acme.test/careers', [{ url: 'https://acme.test/careers', html }], f, { targets: NO_TARGETS, ownSite: (u) => new URL(u).hostname === 'acme.test' })
+    expect(read.listed).toBe(3)
+    expect(f.calls.some((c) => c.includes('evil.test'))).toBe(false)
   })
 
   it('knows the search sites it has parameters for, and no others', () => {

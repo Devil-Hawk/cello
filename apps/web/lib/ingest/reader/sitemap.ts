@@ -135,9 +135,12 @@ export interface SitemapRead {
 export async function readSitemapRoles(
   origin: string,
   f: SiteFetcher,
-  opts: { targets: ReaderTargets; skip: ReadonlySet<string>; max?: number }
+  opts: { targets: ReaderTargets; skip: ReadonlySet<string>; max?: number; ownSite?: (url: string) => boolean }
 ): Promise<SitemapRead> {
-  const { entries, complete } = await readSitemapEntries(origin, f)
+  const all = await readSitemapEntries(origin, f)
+  // Only the employer's own pages are fetched: a sitemap may name addresses anywhere.
+  const entries = opts.ownSite ? all.entries.filter((e) => opts.ownSite!(e.url)) : all.entries
+  const complete = all.complete
   const listedIds = entries.map((e) => normalizeJobUrl(e.url))
   const todo = orderEntries(entries, opts.targets)
     .filter((e) => !opts.skip.has(normalizeJobUrl(e.url)))

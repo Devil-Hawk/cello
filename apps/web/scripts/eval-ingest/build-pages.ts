@@ -16,10 +16,11 @@
 import * as cheerio from 'cheerio'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { CELLO_USER_AGENT } from '../../lib/ats/http'
 
 const DIR = path.join(__dirname, 'pages')
 mkdirSync(DIR, { recursive: true })
-const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36'
+const UA = CELLO_USER_AGENT
 
 type Kind = 'hosted' | 'bespoke' | 'shell' | 'negative' | 'injection' | 'single'
 interface Entry {
