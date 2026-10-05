@@ -266,7 +266,13 @@ export function buildWriterGraph(deps: WriterDeps) {
         draft: {
           text: out.body,
           subject: out.subject,
-          content: { subject: out.subject, body: out.body, to_name: facts.contact?.name ?? null, to_email: facts.contact?.email ?? null },
+          content: {
+            subject: out.subject,
+            body: out.body,
+            to_name: facts.contact?.name ?? null,
+            to_email: facts.contact?.email ?? null,
+            kind: brief.type === 'follow_up' ? 'follow_up' : 'initial',
+          },
           title: `${brief.type === 'follow_up' ? 'Follow-up' : 'Email'} to ${facts.contact?.name ?? company}`,
           artifactType: 'outreach_email' as const,
         },
