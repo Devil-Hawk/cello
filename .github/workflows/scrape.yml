@@ -2,14 +2,20 @@ name: Scout Agent - Job Scraping
 
 on:
   schedule:
-    # Run every hour at minute 0
-    - cron: '0 * * * *'
+    # Every 6 hours at an odd minute (GitHub drops top-of-hour ticks; the
+    # effective rate was already ~5 a day).
+    - cron: '41 */6 * * *'
   workflow_dispatch:
     inputs:
       company_id:
         description: 'Specific company ID to scrape (optional)'
         required: false
         type: string
+
+# Two overlapping scrapes would fetch the same due companies twice.
+concurrency:
+  group: scrape
+  cancel-in-progress: false
 
 env:
   PYTHON_VERSION: '3.11'
@@ -39,7 +45,7 @@ jobs:
       # recorded as having no openings. src/render.py escalates those to a real
       # browser, which needs Chromium present. Non-fatal: render.py degrades to
       # the httpx-only path if this step fails, so a browser-install hiccup
-      # must not take down the hourly run for every company.
+      # must not take down the scheduled run for every company.
       - name: Install Scrapling browser
         continue-on-error: true
         run: |
@@ -68,9 +74,16 @@ jobs:
           # the LLM navigation rung only runs when this is set, and only after
           # the deterministic click-through rung still finds a shell.
           SCRAPER_BROWSER_USE_AGENT: ${{ vars.SCRAPER_BROWSER_USE_AGENT || '' }}
+          # Via env, never interpolated into the script: a dispatch input is
+          # attacker-shaped text. Must be a UUID or empty.
+          COMPANY_ID: ${{ github.event.inputs.company_id || '' }}
         run: |
+          if [ -n "$COMPANY_ID" ] && ! [[ "$COMPANY_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+            echo "::error::company_id must be a UUID"
+            exit 1
+          fi
           cd packages/scrapers
-          python -m src.runner ${{ github.event.inputs.company_id || '' }}
+          python -m src.runner "$COMPANY_ID"
 
       - name: Report results
         if: always()

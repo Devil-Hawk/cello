@@ -312,9 +312,21 @@ def run() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    # WARNING, not INFO: browser-use logs each action with its arguments at INFO,
+    # which for a form includes typed name, email and phone, and this repo's
+    # Actions logs are public. Set before browser_use is imported (it is lazy),
+    # so its own logging setup defers to this one. Our own line stays at INFO.
+    logging.basicConfig(level=logging.WARNING)
+    logger.setLevel(logging.INFO)
+    # browser-use logs failed actions at ERROR with exception text and element
+    # reprs, which carry typed form values. Only this script's own lines may
+    # print: filter the root handlers and mute browser_use outright.
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(lambda record: record.name == logger.name)
+    logging.getLogger("browser_use").setLevel(logging.CRITICAL + 1)
     try:
         run()
-    except Exception:  # noqa: BLE001 — a failed fill run must exit non-zero for GitHub Actions
-        logger.exception("assisted-apply fill run failed")
+    except Exception as e:  # noqa: BLE001 — a failed fill run must exit non-zero for GitHub Actions
+        # Type only: a traceback or message can embed form values or page text.
+        logger.error("assisted-apply fill run failed (%s)", type(e).__name__)
         sys.exit(1)
