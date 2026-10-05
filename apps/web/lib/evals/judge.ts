@@ -8,7 +8,7 @@
 //   user's name, and "is this actually about THIS company, or would it read
 //   fine pasted into any cover letter" is a judgement call, not a computation.
 //   That is exactly the gap an LLM judge fills, and exactly why it must not
-//   run unattended — the model-judged evals are opt-in and live in scripts/evals/outputs/.
+//   run unattended; the model-judged evals are opt-in and live in scripts/evals/outputs/.
 //
 // WHY THIS CALLS OPENROUTER DIRECTLY AND NOT `callLlm`
 //   `callLlm` (lib/harness/llm.ts) is the metered, budget-checked, retried
@@ -450,7 +450,7 @@ export function toEvalResult(name: string, judged: JudgeScore, threshold: number
 }
 
 /**
- * `userId` is optional — direct calls from an eval have no signed-in
+ * `userId` is optional: direct calls from an eval have no signed-in
  * user behind them — but a caller with one (the outreach route) should pass
  * it so a score:null failure attributes to someone in the log line.
  */

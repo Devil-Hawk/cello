@@ -50,9 +50,9 @@ const MAX_TOKENS = 2048
 
 /**
  * System prompt = _shared.md + _voice.md + prompts/cv_tailor.md (the house-style
- * mode document — see docs/PROMPT-GENERATOR.md) + the candidate's resume as
+ * mode document, see docs/PROMPT-GENERATOR.md) + the candidate's resume as
  * numbered R lines. The resume is the large, stable part reused across every
- * job this user tailors for — that's the cacheable prefix. The job block (below,
+ * job this user tailors for: that's the cacheable prefix. The job block (below,
  * in the user prompt) is what actually changes call to call.
  */
 function systemWithResume(resume: NumberedLine[]): string {

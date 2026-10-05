@@ -225,7 +225,7 @@ describe('verifyCvTailorDraft — the factual-grounding judge (ruling 2c)', () =
   })
 })
 
-describe('verifyCvTailorDraft — the letter checks share the retry budget', () => {
+describe('verifyCvTailorDraft: the letter checks share the retry budget', () => {
   const meta = (ok: boolean) => ({
     tier: 'focused' as const,
     words: ok ? 200 : 380,

@@ -1,4 +1,4 @@
-// POST /api/outreach/judge — quality check for ONE outreach draft: does every
+// POST /api/outreach/judge: quality check for ONE outreach draft: does every
 // statement about the sender, the company or the role trace to a numbered line
 // of the resume, job post, company research or history (groundedness), and does
 // the draft carry a detail from the job post or research (specificity)? See
@@ -9,7 +9,7 @@
 // approves and sends (or doesn't) via /api/outreach/[id] and /api/outreach/send;
 // this route only reports what the check found in the current text.
 //
-// USER-TRIGGERED ONLY — this is two real, billed model calls on the user's own
+// USER-TRIGGERED ONLY: this is two real, billed model calls on the user's own
 // key. It must only ever run because a signed-in human clicked "Check again" in
 // components/queue/outreach-card.tsx; nothing calls this route on a schedule,
 // on render, or from a webhook.

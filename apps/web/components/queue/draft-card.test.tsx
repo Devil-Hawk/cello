@@ -115,7 +115,7 @@ describe('DraftCard — official-API handoff (approved, no fill_state)', () => {
   })
 })
 
-describe('DraftCard — why the letter is the length it is', () => {
+describe('DraftCard: why the letter is the length it is', () => {
   const letter = ['Dear Acme team,', 'word '.repeat(300).trim()].join(' ')
   const meta = {
     tier: 'focused' as const,

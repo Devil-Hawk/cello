@@ -169,7 +169,7 @@ export async function verifyCvTailorDraft(args: CvTailorVerifyArgs): Promise<CvT
             .join('; ')}.`
         : ''
 
-    // (c) CLAIMS JUDGE — ruling 2c. Every statement in the summary and letter
+    // (c) CLAIMS JUDGE, ruling 2c. Every statement in the summary and letter
     // must trace to a numbered resume line, job line or company fact; a judge
     // from a different model family than the writer reads the same lines.
     const [job, resumeText] = await Promise.all([loadJobFacts(args.admin, args.jobId), loadResumeText(args.admin, userId)])
