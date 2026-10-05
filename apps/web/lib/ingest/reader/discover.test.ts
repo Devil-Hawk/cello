@@ -35,6 +35,14 @@ describe('discoverBoards: only through the company own site', () => {
     expect(ms.boards).toEqual([{ provider: 'eightfold', token: 'apply.careers.microsoft.com_microsoft.com', via: 'eightfold' }])
   })
 
+  it('a company added by its careers address (domain explore.jobs.netflix.net) still finds the board its page names', async () => {
+    const d = await discoverBoards(
+      { domain: 'explore.jobs.netflix.net', careerUrl: 'https://explore.jobs.netflix.net/careers' },
+      fakeFetcher({ 'https://explore.jobs.netflix.net/careers': fixture('netflix-careers.html') })
+    )
+    expect(d.boards).toEqual([{ provider: 'eightfold', token: 'explore.jobs.netflix.net_netflix.com', via: 'eightfold' }])
+  })
+
   it('an Eightfold page whose domain is not the company domain gives nothing', async () => {
     const d = await discoverBoards(
       { domain: 'someoneelse.com', careerUrl: 'https://explore.jobs.netflix.net/careers' },

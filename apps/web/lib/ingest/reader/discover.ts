@@ -66,7 +66,13 @@ export function eightfoldBoards(html: string, pageUrl: string, companyDomain: st
   const root = companyDomain.toLowerCase().replace(/^www\./, '')
   const domains = [...html.matchAll(EIGHTFOLD_DOMAIN)].map((m) => m[1].toLowerCase())
   // The config must name the company's own domain: a vendor page for a customer is not this company's.
-  const own = domains.find((d) => d === root) ?? domains.find((d) => d.endsWith(`.${root}`))
+  // A company added by its careers address (its domain is that host) counts when the host carries the name
+  // the config names (explore.jobs.netflix.net names netflix.com).
+  const labels = new Set(host.split('.'))
+  const own =
+    domains.find((d) => d === root) ??
+    domains.find((d) => d.endsWith(`.${root}`)) ??
+    (host === root || host.endsWith(`.${root}`) ? domains.find((d) => d.split('.')[0].length >= 4 && labels.has(d.split('.')[0])) : undefined)
   const token = own ? eightfoldToken(host, own) : null
   return token ? [{ provider: 'eightfold', token, via: 'eightfold' }] : []
 }
