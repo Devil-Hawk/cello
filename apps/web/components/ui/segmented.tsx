@@ -32,7 +32,11 @@ export function Segmented<T extends string = string>({
       role="group"
       aria-label={ariaLabel}
       className={cn(
-        'inline-flex items-center gap-0.5 rounded-control border bg-sunken p-0.5',
+        // max-w-full + overflow-x-auto: a long option list (the 10 freshness
+        // ranges) scrolls inside its own track on a phone instead of being
+        // clipped by the page. The scrollbar stays visible on purpose; it is
+        // the cue that there is more to the right.
+        'inline-flex max-w-full items-center gap-0.5 overflow-x-auto rounded-control border bg-sunken p-0.5',
         className
       )}
     >
@@ -45,7 +49,7 @@ export function Segmented<T extends string = string>({
             aria-pressed={isActive}
             onClick={() => onValueChange(option.value)}
             className={cn(
-              'rounded-[6px] px-2.5 py-1 text-caption font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              'shrink-0 rounded-[6px] px-2 py-1 text-caption sm:px-2.5 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               isActive
                 ? 'bg-card text-foreground shadow-card'
                 : 'text-muted-foreground hover:text-foreground'
