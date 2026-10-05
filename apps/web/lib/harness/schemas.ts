@@ -614,11 +614,11 @@ const SourceFunnelDataSchema = z.object({
   buckets: z.array(OutcomeBucketSchema),
 })
 
-const ScoreBandBucketSchema = OutcomeBucketSchema.extend({ min: z.number(), max: z.number() })
-const MatchScoreAccuracyDataSchema = z.object({
+const ChanceBucketSchema = OutcomeBucketSchema.extend({ chance: z.enum(['strong', 'possible', 'stretch']) })
+const ChanceAccuracyDataSchema = z.object({
   totalApplications: z.number().int().nonnegative(),
-  totalScored: z.number().int().nonnegative(),
-  bands: z.array(ScoreBandBucketSchema),
+  totalAssessed: z.number().int().nonnegative(),
+  buckets: z.array(ChanceBucketSchema),
   verdict: z.enum(['validates', 'refutes', 'inconclusive']),
 })
 
@@ -657,7 +657,7 @@ const ApplicationTimingDataSchema = z.object({
 })
 
 const FilterDimensionImpactSchema = z.object({
-  dimension: z.enum(['functions', 'seniority', 'countries', 'remoteOnly', 'languages', 'excludedCompanies', 'excludedKeywords', 'minScore (not enforced)']),
+  dimension: z.enum(['functions', 'seniority', 'countries', 'remoteOnly', 'languages', 'excludedCompanies', 'excludedKeywords']),
   configured: z.boolean(),
   jobsExcludedByThisAlone: z.number().int().nonnegative(),
 })
@@ -697,7 +697,7 @@ export const StrategistOutput = z.object({
   userId: z.string(),
   totalApplications: z.number().int().nonnegative(),
   sourceFunnel: questionResultSchema(SourceFunnelDataSchema),
-  matchScoreAccuracy: questionResultSchema(MatchScoreAccuracyDataSchema),
+  chanceAccuracy: questionResultSchema(ChanceAccuracyDataSchema),
   resumeVariants: questionResultSchema(ResumeVariantDataSchema),
   outreachImpact: questionResultSchema(OutreachImpactDataSchema),
   rejectionPatterns: questionResultSchema(RejectionPatternsDataSchema),

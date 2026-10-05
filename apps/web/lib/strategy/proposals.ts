@@ -20,10 +20,10 @@ function proposalId(question: string): string {
   return `${question}-${counter}`
 }
 
-export function buildProposals(report: Pick<StrategyReport, 'sourceFunnel' | 'matchScoreAccuracy' | 'resumeVariants' | 'outreachImpact' | 'rejectionPatterns' | 'applicationTiming' | 'recurringEvidence'>): StrategyProposal[] {
+export function buildProposals(report: Pick<StrategyReport, 'sourceFunnel' | 'chanceAccuracy' | 'resumeVariants' | 'outreachImpact' | 'rejectionPatterns' | 'applicationTiming' | 'recurringEvidence'>): StrategyProposal[] {
   const proposals: StrategyProposal[] = []
 
-  const { sourceFunnel, matchScoreAccuracy, resumeVariants, outreachImpact, rejectionPatterns, applicationTiming, recurringEvidence } = report
+  const { sourceFunnel, chanceAccuracy, resumeVariants, outreachImpact, rejectionPatterns, applicationTiming, recurringEvidence } = report
 
   if (sourceFunnel.status === 'answered') {
     const comparable = sourceFunnel.data.buckets.filter((b) => !b.thinBucket)
@@ -42,28 +42,28 @@ export function buildProposals(report: Pick<StrategyReport, 'sourceFunnel' | 'ma
     }
   }
 
-  if (matchScoreAccuracy.status === 'answered' && matchScoreAccuracy.data.verdict === 'refutes') {
+  if (chanceAccuracy.status === 'answered' && chanceAccuracy.data.verdict === 'refutes') {
     proposals.push({
-      id: proposalId('matchScoreAccuracy'),
-      title: 'Review the match-scoring rubric.',
-      change: 'Re-examine what the matcher rewards — the current scores are not separating repliers from non-repliers.',
-      why: matchScoreAccuracy.summary,
-      evidence: [{ question: matchScoreAccuracy.question, sampleSize: matchScoreAccuracy.sampleSize, summary: matchScoreAccuracy.summary }],
-      expectedEffect: 'A rubric that actually predicts replies would let a minimum-score filter cut low-value applications without losing real opportunities. No effect estimate — this only says the current rubric is not doing that yet.',
+      id: proposalId('chanceAccuracy'),
+      title: 'Review how Cello checks your chances.',
+      change: 'Re-examine what the chance check counts as a requirement met: the Strong, Possible and Stretch calls are not separating roles that get replies from roles that do not.',
+      why: chanceAccuracy.summary,
+      evidence: [{ question: chanceAccuracy.question, sampleSize: chanceAccuracy.sampleSize, summary: chanceAccuracy.summary }],
+      expectedEffect: 'A chance call that predicts replies would let the shortlist skip low-value roles without losing real opportunities. No effect estimate: this only says the current call is not doing that yet.',
       status: 'proposed',
     })
   }
 
-  if (matchScoreAccuracy.status === 'answered' && matchScoreAccuracy.data.verdict === 'validates') {
-    const bands = matchScoreAccuracy.data.bands.filter((b) => !b.thinBucket).sort((a, b) => a.min - b.min)
-    const cutoff = bands.length > 1 ? bands[1].min : undefined
-    if (cutoff !== undefined) {
+  if (chanceAccuracy.status === 'answered' && chanceAccuracy.data.verdict === 'validates') {
+    const stretch = chanceAccuracy.data.buckets.find((b) => b.chance === 'stretch')
+    const possible = chanceAccuracy.data.buckets.find((b) => b.chance === 'possible')
+    if (stretch && possible && !stretch.thinBucket && !possible.thinBucket && (stretch.replyRate ?? 0) < (possible.replyRate ?? 0)) {
       proposals.push({
-        id: proposalId('matchScoreAccuracy'),
-        title: `Consider a minimum match score around ${cutoff}.`,
-        change: `Set targeting to only surface jobs scored ${cutoff} or higher.`,
-        why: matchScoreAccuracy.summary,
-        evidence: [{ question: matchScoreAccuracy.question, sampleSize: matchScoreAccuracy.sampleSize, summary: matchScoreAccuracy.summary }],
+        id: proposalId('chanceAccuracy'),
+        title: 'Consider skipping Stretch roles.',
+        change: 'Keep Stretch roles out of the daily shortlist unless you ask for them.',
+        why: chanceAccuracy.summary,
+        evidence: [{ question: chanceAccuracy.question, sampleSize: chanceAccuracy.sampleSize, summary: chanceAccuracy.summary }],
         expectedEffect: 'May raise the average reply rate per application sent, at the cost of surfacing fewer opportunities overall.',
         status: 'proposed',
       })

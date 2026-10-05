@@ -1,11 +1,12 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import type { ScoreBand } from '@/lib/jobs/score-bands'
+import type { ChanceBand } from '@/lib/jobs/chance-bands'
 
 export interface InsightsSummary {
   totalJobs: number
-  scoreHistogram: Record<ScoreBand, number>
+  chanceHistogram: Record<ChanceBand, number>
+  /** `scored` is how many of the source's roles have been assessed. */
   bySource: Record<string, { total: number; scored: number }>
 }
 

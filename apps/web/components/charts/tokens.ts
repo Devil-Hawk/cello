@@ -4,7 +4,7 @@
 // are fixed hex (reusing the `pipeline` instrument-tone family) rather than a
 // second, theme-varying palette.
 
-import { type ScoreBand } from '@/lib/jobs/score-bands'
+import { type ChanceBand } from '@/lib/jobs/chance-bands'
 
 /** var(--x) — NOT hsl(var(--x)): the chart tokens are plain hex, unlike the
  *  HSL-triple UI tokens (--accent, --border, etc.), because they're fixed
@@ -13,11 +13,11 @@ function cssVar(name: string): string {
   return `var(${name})`
 }
 
-export const SCORE_BAND_COLOR: Record<ScoreBand, string> = {
-  unscored: cssVar('--chart-score-unscored'),
-  weak: cssVar('--chart-score-bad'),
-  fair: cssVar('--chart-score-fair'),
-  good: cssVar('--chart-score-good'),
+export const CHANCE_BAND_COLOR: Record<ChanceBand, string> = {
+  unassessed: cssVar('--chart-score-unscored'),
+  filtered: cssVar('--chart-series-total'),
+  stretch: cssVar('--chart-score-fair'),
+  possible: cssVar('--chart-score-good'),
   strong: cssVar('--chart-score-strong'),
 }
 

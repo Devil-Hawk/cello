@@ -16,8 +16,8 @@ export interface SourcePerformanceChartProps {
 }
 
 /**
- * Jobs per source, with scored count as a second series — color encodes the
- * SERIES (total intake vs. scored), not the source identity, so this scales
+ * Jobs per source, with assessed count as a second series — color encodes the
+ * SERIES (total intake vs. assessed), not the source identity, so this scales
  * to any number of source rows without needing a wide categorical palette.
  * Source identity is the row label (the y-axis), never a color.
  */
@@ -70,7 +70,7 @@ export function SourcePerformanceChart({ data, onRowClick }: SourcePerformanceCh
         />
         <Bar
           dataKey="scored"
-          name="Scored"
+          name="Assessed"
           fill={SERIES_COLOR.scored}
           radius={[0, 3, 3, 0]}
           onClick={onRowClick ? (entry) => onRowClick((entry as unknown as SourcePerformanceDatum).source) : undefined}

@@ -6,7 +6,7 @@
 // page.
 
 import type { PipelineStage } from '@/lib/format'
-import { scoreBandFor, scoreBandLabel, type ScoreBand } from '@/lib/jobs/score-bands'
+import { chanceBandFor, chanceBandLabel, type ChanceBand } from '@/lib/jobs/chance-bands'
 
 // --- Input row shapes (mirror the RLS-scoped selects in the page) ------------
 
@@ -18,8 +18,10 @@ export interface AppInput {
   source: string | null
   created_at: string
   updated_at: string
-  /** From the joined job. */
-  match_score: number | null
+  /** From the joined job: strong | possible | stretch, or null when it has none yet. */
+  chance: string | null
+  /** From the joined job: the facts the person stated that it breaks. */
+  blocked_reasons?: unknown
 }
 
 export interface ActivityInput {
@@ -42,7 +44,7 @@ export interface FollowUpInput {
 
 // --- Output shape ------------------------------------------------------------
 
-export type { ScoreBand }
+export type { ChanceBand }
 
 export interface Breakdown {
   key: string
@@ -73,7 +75,7 @@ export interface Insights {
   outreachReplyRate: number | null
   followUpsDue: number
   followUpsOverdue: number
-  byScoreBand: Breakdown[]
+  byChance: Breakdown[]
   bySource: Breakdown[]
   byOutreach: Breakdown[]
 }
@@ -235,11 +237,11 @@ export function computeInsights(
   }
 
   // "What's working" cuts.
-  const byScoreBand = buildBreakdown(
+  const byChance = buildBreakdown(
     apps,
-    (a) => scoreBandFor(a.match_score),
-    (k) => scoreBandLabel(k as ScoreBand),
-    ['strong', 'good', 'fair', 'weak', 'unscored']
+    (a) => chanceBandFor(a.chance, a.blocked_reasons),
+    (k) => chanceBandLabel(k as ChanceBand),
+    ['strong', 'possible', 'stretch', 'filtered', 'unassessed']
   )
   const bySource = buildBreakdown(
     apps,
@@ -271,7 +273,7 @@ export function computeInsights(
     outreachReplyRate,
     followUpsDue,
     followUpsOverdue,
-    byScoreBand,
+    byChance,
     bySource,
     byOutreach,
   }

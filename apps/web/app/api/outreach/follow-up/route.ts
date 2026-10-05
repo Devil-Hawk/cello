@@ -13,6 +13,7 @@ import { REPLY_CHECK_UNKNOWN_MESSAGE, threadHasReply } from '@/lib/outreach/gmai
 import { resolveGmailAccessToken } from '@/lib/gmail/token'
 import type { OutreachDraftInput } from '@/lib/harness/agents/outreach'
 import { runUnitOnce } from '@/lib/graph/oneshot'
+import { fitHighlights } from '@/lib/scoring/read'
 import { setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
 
 export const dynamic = 'force-dynamic'
@@ -101,13 +102,12 @@ export async function POST(request: NextRequest) {
     if (parent.job_id) {
       const { data: job } = await supabase
         .from('jobs')
-        .select('title, match_details')
+        .select('title, chance_detail')
         .eq('id', parent.job_id)
         .single()
       if (job) {
         jobTitle = job.title || jobTitle
-        const md = (job.match_details ?? {}) as { highlights?: unknown }
-        if (Array.isArray(md.highlights)) matchHighlights = md.highlights.filter((h): h is string => typeof h === 'string').slice(0, 4)
+        matchHighlights = fitHighlights(job.chance_detail)
       }
     }
     if (parent.company_id) {

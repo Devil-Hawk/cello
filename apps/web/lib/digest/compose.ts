@@ -37,7 +37,8 @@ interface JobRow {
   id: string
   title: string
   url: string | null
-  match_score: number | null
+  chance: string | null
+  want_p: number | null
   is_new: boolean | null
   company_id: string
   discovered_at: string | null
@@ -97,10 +98,10 @@ export async function composeDigest(
       ownedJobsQuery(
         admin,
         userId,
-        'id, title, url, match_score, is_new, company_id, discovered_at, companies!inner(user_id)'
+        'id, title, url, chance, want_p, is_new, company_id, discovered_at, companies!inner(user_id)'
       )
     )
-      .order('match_score', { ascending: false, nullsFirst: false })
+      .order('want_p', { ascending: false, nullsFirst: false })
       .order('discovered_at', { ascending: false })
       .limit(TOP_JOBS_LIMIT)
     const jobs = (jobData as JobRow[] | null) ?? []
@@ -108,7 +109,7 @@ export async function composeDigest(
       jobId: j.id,
       title: j.title,
       companyName: companyName.get(j.company_id) ?? null,
-      matchScore: j.match_score,
+      chance: j.chance,
       url: j.url,
     }))
   }
@@ -191,16 +192,21 @@ interface RenderParts {
   empty: boolean
 }
 
+/** What the digest says about a role's chance: only the two that are worth a mention, in words. */
+function chanceNote(chance: string | null): string {
+  return chance === 'strong' ? ' (strong chance)' : chance === 'possible' ? ' (possible chance)' : ''
+}
+
 function renderText(p: RenderParts): string {
   if (p.empty) {
     return 'Nothing needs your attention today. Enjoy the calm — Cello is still watching your tracked companies.'
   }
   const lines: string[] = ['Your Cello daily digest', '']
   if (p.topJobs.length) {
-    lines.push('Top matches:')
+    lines.push('Roles worth a look:')
     for (const j of p.topJobs) {
-      const score = j.matchScore != null ? ` (${j.matchScore}% match)` : ''
-      lines.push(`  • ${j.title}${j.companyName ? ` @ ${j.companyName}` : ''}${score}`)
+      const chance = chanceNote(j.chance)
+      lines.push(`  • ${j.title}${j.companyName ? ` @ ${j.companyName}` : ''}${chance}`)
     }
     lines.push('')
   }
@@ -240,12 +246,12 @@ function renderHtml(p: RenderParts): string {
   if (p.topJobs.length) {
     const items = p.topJobs
       .map((j) => {
-        const score = j.matchScore != null ? ` <span style="color:#059669">(${j.matchScore}% match)</span>` : ''
-        const label = `${esc(j.title)}${j.companyName ? ` @ ${esc(j.companyName)}` : ''}${score}`
+        const chance = chanceNote(j.chance) ? ` <span style="color:#059669">${chanceNote(j.chance)}</span>` : ''
+        const label = `${esc(j.title)}${j.companyName ? ` @ ${esc(j.companyName)}` : ''}${chance}`
         return `<li>${j.url ? `<a href="${esc(j.url)}">${label}</a>` : label}</li>`
       })
       .join('')
-    sections.push(`<h3>Top matches</h3><ul>${items}</ul>`)
+    sections.push(`<h3>Roles worth a look</h3><ul>${items}</ul>`)
   }
   if (p.followUpsDue.length) {
     const items = p.followUpsDue

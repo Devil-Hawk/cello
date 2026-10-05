@@ -5,7 +5,7 @@
 //   Weekly, per user: join eval_verdicts (Step 3's single verdict store) to
 //   the ground truth Step 3 wired up — draft approve/reject, outreach reply
 //   classification, application stage progression — grouped by a feature
-//   dimension (score band, source, seniority band, company-size proxy).
+//   dimension (chance, source, seniority band, company-size proxy).
 //   Every group that crosses MIN_SAMPLE_PER_CLASS on BOTH sides becomes one
 //   cheap-model callLlm call turning the numbers into a sentence, written as
 //   a `pattern` insight via ingestInsight (source 'reward_loop') — the SAME
@@ -94,7 +94,7 @@ const WEEKLY_GATE_MS = 7 * 24 * 60 * 60 * 1000
 
 /** How many sampled verdict rationales ride along in the distillation prompt
  *  — bounded for the same cost-discipline reason lib/context/assemble.ts
- *  caps every context block it builds; a score band can carry hundreds of
+ *  caps every context block it builds; a chance group can carry hundreds of
  *  verdict ids and the prompt only needs enough texture to ground one sentence. */
 const RATIONALE_SAMPLE_SIZE = 6
 
@@ -187,8 +187,8 @@ async function fetchCompanySizeCandidates(admin: AdminClient, userId: string): P
  *  why company-size is a fifth query's worth of work folded into one RPC. */
 async function collectCandidates(admin: AdminClient, userId: string): Promise<Candidate[]> {
   const [scoreBand, source, seniority, companySize] = await Promise.all([
-    fetchBandCandidates(admin, userId, 'distill_match_score_by_score_band', 'match_score_stage_progression', 'score_band'),
-    fetchBandCandidates(admin, userId, 'distill_match_score_by_source', 'match_score_stage_progression', 'source'),
+    fetchBandCandidates(admin, userId, 'distill_chance_by_label', 'chance_stage_progression', 'chance'),
+    fetchBandCandidates(admin, userId, 'distill_chance_by_source', 'chance_stage_progression', 'source'),
     fetchBandCandidates(admin, userId, 'distill_draft_by_seniority', 'cv_tailor_draft_decision', 'seniority_band'),
     fetchCompanySizeCandidates(admin, userId),
   ])

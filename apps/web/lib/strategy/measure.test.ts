@@ -22,7 +22,6 @@ function counts(overrides: Partial<JobScopeCounts> = {}): JobScopeCounts {
     jobsWithNoDescription: 0,
     excludedByDimension: {},
     excludedByKeywords: null,
-    excludedByMinScoreHypothetical: null,
     ...overrides,
   }
 }

@@ -37,7 +37,8 @@ export interface ApplicationRow {
   /** jobs.source — the ingest channel (greenhouse, lever, arbeitnow, ...). This IS the job board / ATS. */
   jobSource: string | null
   jobPostedAt: string | null
-  matchScore: number | null
+  /** jobs.chance: strong | possible | stretch | cannot_assess, or null before the role was assessed. */
+  chance: string | null
   jobFunction: string | null
   seniority: string | null
 }
@@ -76,8 +77,6 @@ export interface JobScopeCounts {
   excludedByDimension: Record<string, number>
   /** How many jobs a configured excludedKeywords list WOULD additionally exclude (title+description ILIKE). Null when excludedKeywords is empty (never evaluated, never a fabricated zero). */
   excludedByKeywords: number | null
-  /** How many jobs a configured targeting.minScore WOULD exclude, computed for transparency even though nothing in the product enforces targeting.minScore today (see lib/targeting.ts / lib/harness/agents/matcher.ts — only preferences.autopilot.minScore is enforced, a different field). Null when minScore is unset. */
-  excludedByMinScoreHypothetical: number | null
 }
 
 export interface StrategyDataSource {
@@ -104,7 +103,7 @@ interface RawJob {
   company_id: string
   source: string | null
   posted_at: string | null
-  match_score: number | null
+  chance: string | null
   job_function: string | null
   seniority: string | null
   companies?: { name: string | null } | { name: string | null }[] | null
@@ -146,7 +145,7 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
       const jobs = await chunkedIn(jobIds, async (chunk) => {
         const { data, error } = await admin
           .from('jobs')
-          .select('id, company_id, source, posted_at, match_score, job_function, seniority, companies(name)')
+          .select('id, company_id, source, posted_at, chance, job_function, seniority, companies(name)')
           .in('id', chunk)
         if (error) console.error('[strategy] getApplications: jobs query failed', error)
         return (data as RawJob[] | null) ?? []
@@ -168,7 +167,7 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
             companyName: rawJobCompanyName(job),
             jobSource: job.source,
             jobPostedAt: job.posted_at,
-            matchScore: job.match_score,
+            chance: job.chance,
             jobFunction: job.job_function,
             seniority: job.seniority,
           }
@@ -379,23 +378,12 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
         }
       }
 
-      // targeting.minScore is validated/stored but NOT enforced by any
-      // filtering code path today (see the field comment in datasource.ts /
-      // lib/targeting.ts) — computed here purely as a "what if it were"
-      // transparency number, never folded into totalPassingAllConfiguredFilters.
-      let excludedByMinScoreHypothetical: number | null = null
-      if (targeting.minScore !== null) {
-        const passingScore = await count((q) => q.gte('match_score', targeting.minScore as number))
-        excludedByMinScoreHypothetical = totalJobs - passingScore
-      }
-
       return {
         totalJobs,
         totalPassingAllConfiguredFilters: combinedCount ?? passingAll,
         jobsWithNoDescription,
         excludedByDimension,
         excludedByKeywords,
-        excludedByMinScoreHypothetical,
       }
     },
   }
