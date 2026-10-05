@@ -66,10 +66,15 @@ const ASK_PATTERN =
 
 const HISTORY_PATTERN = /as we discussed|great (meeting|chatting|speaking)|following up on (our|your)|per our conversation|it was (great|nice) to/i
 
+/**
+ * Sentences, split after . ! or ?. No lookbehind: this file runs in the browser,
+ * and `(?<=...)` is a parse-time SyntaxError on Safari before 16.4, which would
+ * take the whole card down with it.
+ */
 function sentences(text: string): string[] {
   return text
     .split(/\n+/)
-    .flatMap((line) => line.split(/(?<=[.!?])\s+/))
+    .flatMap((line) => line.match(/[^.!?]+[.!?]*/g) ?? [])
     .map((s) => s.trim())
     .filter(Boolean)
 }

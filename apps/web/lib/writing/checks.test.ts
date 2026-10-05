@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { checkDraft, countAsks, countWords, type DraftCheckInput } from './checks'
 
@@ -104,5 +106,14 @@ describe('checkDraft', () => {
   it('counts each asking sentence once', () => {
     expect(countAsks('Would you be open to a chat? Could you point me to someone?')).toBe(2)
     expect(countAsks('Could you tell me who is the right person?')).toBe(1)
+  })
+})
+
+describe('browser safety', () => {
+  it('uses no regex lookbehind, a parse-time SyntaxError on Safari before 16.4 that would take the card down', () => {
+    for (const file of ['checks.ts', 'banned.ts']) {
+      const src = readFileSync(join(process.cwd(), 'lib', 'writing', file), 'utf8')
+      expect(src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, ''), file).not.toMatch(/\(\?<[=!]/)
+    }
   })
 })
