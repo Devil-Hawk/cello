@@ -27,7 +27,7 @@ def test_scrape_dispatch_input_is_not_interpolated_into_the_shell():
     for line in text.splitlines():
         if "github.event.inputs.company_id" in line or "inputs.company_id" in line:
             assert line.strip().startswith("COMPANY_ID:"), line
-    assert 'python -m src.runner "$COMPANY_ID"' in text
+    assert "npx tsx scripts/ingest.ts" in text
     assert '[[ "$COMPANY_ID" =~ ^[0-9a-fA-F]{8}-' in text
 
 
@@ -49,8 +49,25 @@ def test_browser_apply_does_not_lean_on_the_inert_browser_use_env_var():
     assert "BROWSER_USE_LOGGING_LEVEL" not in _read("browser-apply.yml")
 
 
-def test_ats_refresh_logs_ids_and_counts_only():
-    text = (WORKFLOWS.parents[1] / "scripts" / "ats-refresh.ts").read_text()
-    assert "companyName" not in text
+def test_ingest_logs_ids_and_counts_only():
+    text = (WORKFLOWS.parents[1] / "apps" / "web" / "scripts" / "ingest.ts").read_text()
+    assert "companyName" not in text and "career_url" not in text
     assert "errors: result.errors" not in text
     assert "error.message" not in text and "error.stack" not in text
+    assert "console.error(error" not in text
+
+
+def test_the_page_fetcher_cannot_print_a_url():
+    text = (WORKFLOWS.parents[1] / "packages" / "scrapers" / "src" / "page.py").read_text()
+    assert "logging.disable(logging.CRITICAL)" in text
+    assert '"error": type(' in text
+
+
+def test_scrape_is_one_job_on_free_models():
+    text = _read("scrape.yml")
+    assert text.count("\n  find-new-roles:") == 1
+    assert "\n  scrape:" not in text and "\n  ats-refresh:" not in text
+    assert "OPENROUTER_API_KEY" in text
+    for paid in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "SCRAPER_BROWSER_USE_AGENT"):
+        assert paid not in text
+    assert "timeout-minutes: 50" in text
