@@ -14,7 +14,6 @@ vi.mock('@/lib/supabase/server', () => ({
       auth: { getUser: async () => ({ data: { user: state.user } }) },
       from: (table: string) => ({
         select: (cols: string) =>
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           state.failure ? { order: () => ({ limit: async () => ({ data: null, error: { message: 'down' } }) }) } : (db.from(table) as any).eq('user_id', state.user?.id ?? '').select(cols),
       }),
     }

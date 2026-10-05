@@ -19,7 +19,6 @@ import { people, research, searchKnowledge } from './research'
 import { findRoles, getRole, triageRole } from './roles'
 
 // The type of each tool keeps its own argument shape; the list holds them all.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const CELLO_TOOLS: readonly CelloTool<any>[] = [
   findRoles,
   getRole,
