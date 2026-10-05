@@ -89,8 +89,8 @@ export interface JobUpsertRow {
   is_remote: boolean
   job_type: string
   quality_score: number
-  /** Ingest provenance: the ATS provider that produced this row. */
-  source: AtsProviderId
+  /** Ingest provenance: the ATS provider (or 'scraper', the page reader) that produced this row. */
+  source: string
   /** The refresh that listed this posting; the prune and the closed check read it. */
   last_seen_at: string
   /** What the posting asks for (lib/jobs/requirements.ts), read from the description now. */
@@ -259,7 +259,12 @@ function sourcesFor(provider: AtsProviderId): string[] {
  * time (the store's lock). Never throws: failures are reported in result.errors.
  */
 export async function refreshCompany(store: AtsStore, company: CompanyInput): Promise<CompanyRefreshResult> {
-  const result: CompanyRefreshResult = {
+  return withCompanyLock(store, company, (result) => refreshLocked(store, company, result))
+}
+
+/** A fresh result for `company`, before anything has been read. */
+export function emptyResult(company: CompanyInput): CompanyRefreshResult {
+  return {
     companyId: company.id,
     companyName: company.name,
     provider: null,
@@ -270,7 +275,19 @@ export async function refreshCompany(store: AtsStore, company: CompanyInput): Pr
     reopened: 0,
     errors: [],
   }
+}
 
+/**
+ * Run `fn` while holding the company's lock, so the scheduled run, the in-app
+ * button and the autopilot never read the same company at once. When someone
+ * else holds it, `fn` does not run and the result says `busy`.
+ */
+export async function withCompanyLock(
+  store: AtsStore,
+  company: CompanyInput,
+  fn: (result: CompanyRefreshResult) => Promise<void>
+): Promise<CompanyRefreshResult> {
+  const result = emptyResult(company)
   if (store.acquireCompanyLock) {
     let got = false
     try {
@@ -285,7 +302,7 @@ export async function refreshCompany(store: AtsStore, company: CompanyInput): Pr
     }
   }
   try {
-    await refreshLocked(store, company, result)
+    await fn(result)
   } finally {
     try {
       await store.releaseCompanyLock?.(company.id)
@@ -296,17 +313,26 @@ export async function refreshCompany(store: AtsStore, company: CompanyInput): Pr
   return result
 }
 
+/** The company's stored jobs by external id; null (and an error on the result) when they cannot be listed. */
+export async function loadStoredJobs(
+  store: AtsStore,
+  companyId: string,
+  result: CompanyRefreshResult
+): Promise<Map<string, ExistingJob> | null> {
+  try {
+    return new Map((await store.listJobs(companyId)).map((job) => [job.externalId, job]))
+  } catch (error) {
+    result.errors.push(`listing existing jobs failed: ${errorMessage(error)}`)
+    return null
+  }
+}
+
 async function refreshLocked(store: AtsStore, company: CompanyInput, result: CompanyRefreshResult): Promise<void> {
   // 0. What is stored already. Read first so a provider that needs a second
   //    request per posting (Workday, SmartRecruiters) spends it on the postings
   //    that have no description yet.
-  const stored = new Map<string, ExistingJob>()
-  try {
-    for (const job of await store.listJobs(company.id)) stored.set(job.externalId, job)
-  } catch (error) {
-    result.errors.push(`listing existing jobs failed: ${errorMessage(error)}`)
-    return
-  }
+  const stored = await loadStoredJobs(store, company.id, result)
+  if (!stored) return
   const ctx: FetchContext = { hasDescription: (id) => stored.get(id)?.descriptionMd5 != null }
 
   // 1. Resolve board + fetch jobs.
@@ -372,8 +398,41 @@ async function refreshLocked(store: AtsStore, company: CompanyInput, result: Com
   // returned early above.
   const provider: AtsProviderId = result.provider as AtsProviderId
 
-  // 2. Dedup intra-run and count.
-  const clean = sanitizeJobs(jobs)
+  await syncJobs(store, company, jobs, {
+    source: provider,
+    sightingSources: sourcesFor(provider),
+    cap: providers[provider].maxJobs,
+    stored,
+  }, result)
+}
+
+export interface SyncOptions {
+  /** jobs.source of rows this sync inserts. */
+  source: string
+  /** The sources whose stored rows a miss may be counted against. */
+  sightingSources: string[]
+  /** A channel that returns at most this many postings (see AtsProvider.maxJobs). */
+  cap?: number
+  stored: Map<string, ExistingJob>
+}
+
+/**
+ * Everything after a source has listed a company's postings: dedupe, insert the
+ * new ones with their requirements read, update stored ones that changed, and
+ * record what was listed so a posting that stops being listed closes. The ATS
+ * refresh and the page reader both end here, so a job means the same thing
+ * whichever way it was found.
+ */
+export async function syncJobs(
+  store: AtsStore,
+  company: CompanyInput,
+  listed: AtsJob[],
+  opts: SyncOptions,
+  result: CompanyRefreshResult
+): Promise<void> {
+  const { stored } = opts
+  // Dedup intra-run and count.
+  const clean = sanitizeJobs(listed)
   result.found = clean.length
   if (clean.length === 0) {
     // Nothing listed is not evidence that anything closed: an empty answer looks
@@ -421,7 +480,7 @@ async function refreshLocked(store: AtsStore, company: CompanyInput, result: Com
       is_remote: c.isRemote,
       job_type: c.jobType,
       quality_score: c.qualityScore,
-      source: provider,
+      source: opts.source,
       last_seen_at: now,
       requirements: parseRequirements({
         title,
@@ -480,13 +539,12 @@ async function refreshLocked(store: AtsStore, company: CompanyInput, result: Com
   //    SmartRecruiters) cannot say a posting past the cap is gone, so a list that
   //    reached the cap stamps what it saw and counts no misses.
   if (store.recordSightings) {
-    const cap = providers[provider].maxJobs
-    const windowed = typeof cap === 'number' && clean.length >= cap
+    const windowed = typeof opts.cap === 'number' && clean.length >= opts.cap
     try {
       const sighted = await store.recordSightings(
         company.id,
         clean.map((j) => j.externalId),
-        windowed ? [] : sourcesFor(provider)
+        windowed ? [] : opts.sightingSources
       )
       result.closed = sighted.closed
       result.reopened = sighted.reopened
@@ -501,6 +559,7 @@ async function refreshLocked(store: AtsStore, company: CompanyInput, result: Com
     result.errors.push(`last_scraped_at update failed: ${errorMessage(error)}`)
   }
 }
+
 
 // Implementation moved to ./concurrency.ts so the adapters can use it without
 // importing this module back; re-exported here so every existing caller
