@@ -365,7 +365,7 @@ export async function refreshLocked(store: AtsStore, company: CompanyInput, resu
       return
     }
     if (!detected) {
-      // provider stays null — callers fall back to the page reader.
+      // provider stays null, so callers fall back to the page reader.
       return
     }
     result.provider = detected.provider

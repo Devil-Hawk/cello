@@ -404,7 +404,7 @@ export async function ingestLeads(
   return result
 }
 
-/** md5('') — jobs.description_md5 of a row with no description. */
+/** md5('') is jobs.description_md5 of a row with no description. */
 const EMPTY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e'
 /** Ids per update, so the querystring stays short. */
 const SEEN_CHUNK = 200

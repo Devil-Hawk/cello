@@ -159,7 +159,7 @@ function listJobs(...jobs: object[]) {
   globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({ jobs })) as unknown as typeof fetch
 }
 
-describe('refreshCompany — new rows carry the full description and what it asks for', () => {
+describe('refreshCompany: new rows carry the full description and what it asks for', () => {
   it('stores the description, the requirements read from it and a last-seen stamp', async () => {
     listJobs(JOB_A)
     const { store, upserted } = makeStore()
@@ -174,7 +174,7 @@ describe('refreshCompany — new rows carry the full description and what it ask
   })
 })
 
-describe('refreshCompany — stored jobs', () => {
+describe('refreshCompany: stored jobs', () => {
   it('writes only what changed and leaves match data and discovery date alone', async () => {
     listJobs(JOB_A, JOB_B)
     const { store, upserted, updated } = makeStore([
@@ -228,7 +228,7 @@ describe('refreshCompany — stored jobs', () => {
   })
 })
 
-describe('refreshCompany — what was listed', () => {
+describe('refreshCompany: what was listed', () => {
   it('records every listed id against the provider and the page reader, and reports what closed', async () => {
     listJobs(JOB_A, JOB_B)
     const { store, sightings } = makeStore([], { sightings: true })
@@ -284,7 +284,7 @@ describe('refreshCompany — what was listed', () => {
   })
 })
 
-describe('refreshCompany — one refresh of a company at a time', () => {
+describe('refreshCompany: one refresh of a company at a time', () => {
   it('holds the lock for the whole refresh and releases it', async () => {
     listJobs(JOB_A)
     const { store, locks, upserted } = makeStore([], { lock: true })
