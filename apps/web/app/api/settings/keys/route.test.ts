@@ -37,6 +37,7 @@ import { isEncrypted } from '@/lib/crypto'
 interface DbError {
   code?: string
   message?: string
+  details?: string
 }
 
 const OWNER_ID = 'owner-user-1'
@@ -354,6 +355,23 @@ describe('a refusal only the DATABASE saw', () => {
     const body = await read(response)
     expect(body).toEqual({ error: 'Failed to save API keys' })
     expect(body.demo).toBeUndefined()
+  })
+
+  it('logs only the error code and message, never the whole error (its details can quote the row)', async () => {
+    const quotedRow = 'Failing row contains ({"api_keys":{"openrouter":"enc:SECRET-ROW"}})'
+    row = ownerRow({ api_keys: { openrouter: 'enc:owner-openrouter' } })
+    writeFailure = { code: '23502', message: 'null value in column', details: quotedRow }
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await POST(postRequest({ openrouter: OWNER_OPENROUTER }))
+    await DELETE(deleteRequest('openrouter'))
+
+    const logged = JSON.stringify(spy.mock.calls)
+    expect(logged).toContain('Failed to save API keys')
+    expect(logged).toContain('Failed to delete API key')
+    expect(logged).toContain('23502')
+    expect(logged).not.toContain('SECRET-ROW')
+    expect(logged).not.toContain('Failing row')
   })
 
   it('reports an ordinary write failure as a 500', async () => {

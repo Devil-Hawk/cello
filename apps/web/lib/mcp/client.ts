@@ -10,7 +10,7 @@
 // dispatch time). Nothing in this file throws anything but McpError, so
 // callers can pattern-match on a single type.
 //
-// STDIO IS SELF-HOSTED ONLY. It spawns a child process, which a Vercel
+// STDIO IS SELF-HOSTED ONLY (CELLO_SELF_HOSTED=1). It spawns a child process, which a Vercel
 // serverless function cannot do reliably (no persistent process control, and
 // most serverless runtimes forbid child_process outright). isStdioAvailable()
 // is the single source of truth for the gate — lib/mcp/registry.ts and
@@ -24,6 +24,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { McpError, type McpServerConfig, type McpToolDescriptor } from './types'
 import { assertSsrfSafe } from '@/lib/security/untrusted'
+import { isSelfHosted } from '@/lib/self-hosted'
 
 const CLIENT_NAME = 'cello-copilot'
 const CLIENT_VERSION = '1.0.0'
@@ -37,12 +38,11 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-/** True when running on Vercel (or anywhere `VERCEL` is set, which Vercel's
- *  build/runtime always sets) — the one place stdio's child_process.spawn
- *  cannot be relied on. Self-hosted deployments (bare Node, Docker, etc.)
- *  don't set this and stdio works normally there. */
+/** stdio spawns a child process, so it is available only on an explicitly
+ *  self-hosted deployment (CELLO_SELF_HOSTED=1, never on Vercel). Same rule as
+ *  the local providers: see lib/self-hosted.ts. */
 export function isStdioAvailable(): boolean {
-  return !process.env.VERCEL
+  return isSelfHosted()
 }
 
 /**

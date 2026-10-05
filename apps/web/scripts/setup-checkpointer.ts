@@ -21,14 +21,11 @@
  *   support the session-level features CREATE TABLE / migrations rely on.
  *   See apps/web/.env.example for the pooler-vs-direct split.
  *
- * TLS: Supabase's Postgres presents a certificate chain that is self-signed
- * from Node's default trust store, so a plain `ssl: true` fails with
- * SELF_SIGNED_CERT_IN_CHAIN. `sslmode` is stripped out of the connection
- * string (pg's ssl object is what actually configures TLS; leaving a
- * conflicting `sslmode` query param in the URL causes pg to fight itself over
- * which one wins) and `ssl: { rejectUnauthorized: false }` is passed
- * explicitly instead — the same handling the langgraph-port spike used
- * against this same database.
+ * TLS: Supabase's root CA is not in Node's default trust store, so sslFor()
+ * (lib/graph/pg.ts) pins it and verifies the server. `sslmode` is stripped out
+ * of the connection string (pg's ssl object is what actually configures TLS;
+ * leaving a conflicting `sslmode` query param in the URL causes pg to fight
+ * itself over which one wins).
  *
  * Usage:
  *   set -a && source /path/to/prod.env && set +a
@@ -68,10 +65,8 @@ async function main(): Promise<void> {
 
   const pool = new Pool({
     connectionString,
-    // Supabase's chain is self-signed from Node's default trust store; this
-    // is the same relaxation the spike used to reach this same database.
-    // Does NOT disable encryption — the connection is still TLS, only
-    // certificate-chain verification is skipped.
+    // Verified against the pinned Supabase root CA, same as the runtime
+    // pooler path in lib/graph/pg.ts.
     ssl: sslFor(connectionString),
   })
 

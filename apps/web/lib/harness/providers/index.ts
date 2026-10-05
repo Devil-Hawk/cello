@@ -189,21 +189,10 @@ export function resolveProviderPreferences(raw: unknown): ProviderPreferences {
   }
 }
 
-/**
- * True when Cello itself is not running on Vercel serverless — the only
- * environment where spawning a local CLI binary or reaching a localhost
- * server makes sense. Vercel sets VERCEL=1 in every build and runtime
- * environment (both preview and production); its absence is the honest
- * signal this repo has for "self-hosted."
- *
- * process.env access here is fine at RUNTIME (this file has no 'use client'
- * boundary of its own) but this function must never be called from code that
- * ships into a client bundle — see the module comment at the top of this
- * file. Every current caller is a route handler or lib/harness/llm.ts.
- */
-export function isSelfHosted(): boolean {
-  return !process.env.VERCEL
-}
+// Re-exported so every provider keeps importing it from here. The rule (an
+// explicit CELLO_SELF_HOSTED=1 opt-in, vetoed on Vercel) lives in one place,
+// lib/self-hosted.ts, shared with the stdio MCP gate.
+export { isSelfHosted } from '@/lib/self-hosted'
 
 /** Rough token estimate (~4 chars/token), shared by every backend that
  *  doesn't get real usage numbers back from its API/CLI. */

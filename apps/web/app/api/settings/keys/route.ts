@@ -176,7 +176,9 @@ export async function POST(request: NextRequest) {
     const lockdown = demoLockdownGate(error)
     if (lockdown) return demoRefusalResponse(lockdown)
 
-    console.error('Failed to save API keys:', error)
+    // message and code only: a PostgREST error object also carries `details`,
+    // which can quote the row being written.
+    console.error('Failed to save API keys:', error.code, error.message)
     return NextResponse.json({ error: 'Failed to save API keys' }, { status: 500 })
   }
 
@@ -225,7 +227,7 @@ export async function DELETE(request: NextRequest) {
     const lockdown = demoLockdownGate(error)
     if (lockdown) return demoRefusalResponse(lockdown)
 
-    console.error('Failed to delete API key:', error)
+    console.error('Failed to delete API key:', error.code, error.message)
     return NextResponse.json({ error: 'Failed to delete API key' }, { status: 500 })
   }
 

@@ -95,6 +95,7 @@
 
 import { createHmac } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { isStrictEnv } from '@/lib/crypto'
 import { deepScrub } from '@/lib/observability/scrub'
 import {
   boundForScrub,
@@ -362,16 +363,29 @@ export function sanitizeDetail(raw: unknown): AccessEventDetail {
  * removes that offline attack entirely.
  *
  * Read per call rather than at import so a process that loads its secrets late
- * (and the tests) see the value that is actually configured.
+ * (and the tests) see the value that is actually configured. It is its own key
+ * (AUDIT_HMAC_KEY), not API_ENCRYPTION_KEY or a service key: one secret, one use.
  */
 function hintKey(): string {
+  const dedicated = process.env.AUDIT_HMAC_KEY
+  if (isStrictEnv()) {
+    // Fail closed: a guessable key makes the hint brute-forceable back to an IP.
+    // Callers are all request paths, so a missing key surfaces as a loud error
+    // on the first request, never as weak hints in the table.
+    if (!dedicated || !/^[0-9a-f]{64}$/i.test(dedicated)) {
+      throw new Error(
+        'AUDIT_HMAC_KEY must be exactly 64 hex characters in production. Generate one with: openssl rand -hex 32'
+      )
+    }
+    return dedicated
+  }
+  // Local dev and tests only. Hints stay stable and usable but are not
+  // brute-force resistant.
   return (
+    dedicated ||
     process.env.API_ENCRYPTION_KEY ||
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
     process.env.SUPABASE_SERVICE_KEY ||
-    // Last resort. Hints stay stable and usable; they are simply no longer
-    // brute-force resistant, which is why every real deployment sets one of
-    // the above.
     'cello-access-hint'
   )
 }
