@@ -1310,7 +1310,12 @@ export async function sourceContactsForCompany(params: SourceContactsParams): Pr
     }
 
     const { data: row, error } = await client.from('contacts').insert(insertRow).select('id, name, email').single()
-    if (error || !row) continue
+    if (error || !row) {
+      // Not silent: a missing grant or constraint here makes every sourced
+      // contact vanish, and the report would only say nothing was saved.
+      console.warn('[contacts] insert failed, contact not saved', { companyId, code: error?.code, message: error?.message })
+      continue
+    }
     const inserted_row = row as { id: string; name: string; email: string | null }
     inserted.push({ id: inserted_row.id, name: inserted_row.name, email: inserted_row.email, source: c.source })
     if (c.email) existingEmails.add(c.email.toLowerCase())

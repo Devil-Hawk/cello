@@ -35,6 +35,7 @@ let state: {
   profile: Record<string, unknown> | null
   drafts: DraftFixture[]
   evalVerdicts: VerdictFixture[]
+  outreach: Record<string, unknown>[]
 }
 
 const GREENHOUSE_URL = 'https://boards.greenhouse.io/acme/jobs/4001'
@@ -95,6 +96,8 @@ function chain(table: string, opts?: { count?: string; head?: boolean }) {
       let rows: Record<string, unknown>[] =
         table === 'application_drafts'
           ? (state.drafts as unknown as Record<string, unknown>[]).filter(matchesEq)
+          : table === 'outreach_messages'
+            ? (state.outreach as Record<string, unknown>[]).filter(matchesEq)
           : table === 'eval_verdicts'
             ? (state.evalVerdicts as unknown as Record<string, unknown>[]).filter((v) => matchesEq(v) && matchesIn(v))
             : []
@@ -111,7 +114,12 @@ function chain(table: string, opts?: { count?: string; head?: boolean }) {
       // filtered set, exactly like Postgres does: a head request never trims.
       const result = opts?.head
         ? { data: null, error: null, count: rows.length }
-        : { data: limitTo !== null ? rows.slice(0, limitTo) : rows, error: null }
+        : {
+            data: limitTo !== null ? rows.slice(0, limitTo) : rows,
+            error: null,
+            // `{ count: 'exact' }` without head: the page is capped, the count is not.
+            ...(opts?.count ? { count: rows.length } : {}),
+          }
       return Promise.resolve(result).then(resolve, reject)
     },
   }
@@ -152,6 +160,7 @@ beforeEach(() => {
     },
     drafts: [],
     evalVerdicts: [],
+    outreach: [],
   }
 })
 
@@ -166,7 +175,44 @@ describe('GET /api/notifications/queue', () => {
     const response = await GET(get())
     const body = await response.json()
     expect(response.status).toBe(200)
-    expect(body).toEqual({ items: [], count: 0 })
+    expect(body).toEqual({ items: [], count: 0, outreach: { count: 0, items: [] } })
+  })
+
+  it('lists pending cold-outreach drafts in their own bucket, scoped to this user and to pending_review', async () => {
+    const msg = (over: Record<string, unknown>) => ({
+      id: 'm', user_id: 'user-1', status: 'pending_review', to_name: 'Jordan', to_email: 'jordan@acme.com',
+      subject: 'Staff Engineer at Acme', created_at: '2026-10-01T00:00:00.000Z', ...over,
+    })
+    state.outreach = [
+      msg({ id: 'm1' }),
+      msg({ id: 'm2', to_name: null, to_email: 'sam@acme.com', created_at: '2026-10-02T00:00:00.000Z' }),
+      msg({ id: 'sent', status: 'sent' }),
+      msg({ id: 'theirs', user_id: 'user-2' }),
+    ]
+
+    const response = await GET(get())
+    const body = await response.json()
+
+    expect(body.outreach.count).toBe(2)
+    expect(body.outreach.items.map((i: { messageId: string }) => i.messageId).sort()).toEqual(['m1', 'm2'])
+    expect(body.outreach.items.find((i: { messageId: string }) => i.messageId === 'm2')).toMatchObject({
+      toName: null,
+      toEmail: 'sam@acme.com',
+    })
+    // The application-draft bucket is untouched by it.
+    expect(body.items).toEqual([])
+    expect(body.count).toBe(0)
+  })
+
+  it('reports the true outreach total when limit caps the rendered rows', async () => {
+    state.outreach = ['a', 'b', 'c'].map((id) => ({
+      id, user_id: 'user-1', status: 'pending_review', to_name: id, to_email: `${id}@x.com`, subject: 's',
+      created_at: '2026-10-01T00:00:00.000Z',
+    }))
+    const response = await GET(get('?limit=1'))
+    const body = await response.json()
+    expect(body.outreach.items).toHaveLength(1)
+    expect(body.outreach.count).toBe(3)
   })
 
   it('reports each pending item with a WHY sentence, not just a status', async () => {

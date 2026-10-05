@@ -31,9 +31,9 @@ import { JOB_EMAIL_QUERY, fetchGmailMessages, extractBody, getHeader, extractDom
 import { isPersonalEmailDomain } from './skip-lists'
 import { parseEmailWithAI, classifyWithPatterns } from './classify'
 import { normalizeCompanyName, findBestJobMatch } from './matching'
-import { decideStageTransition, classifyReply, type StageDecision } from './stage'
+import { decideStageTransition, type StageDecision } from './stage'
 import { recordStageActivity } from './activity'
-import { recordOutreachReply } from '@/lib/outreach/store'
+import { syncOutreachReplies } from '@/lib/outreach/reply'
 
 interface CompanyRecord {
   id: string
@@ -151,25 +151,14 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
     companiesByName.set(normalizeCompanyName(c.name), record)
   })
 
-  // STEP 5 Gmail reply bridge: preload the set of Gmail thread ids this user
-  // still has an un-replied outreach message on, so the per-message loop
-  // below can check thread membership in memory instead of running a wasted
-  // outreach_messages lookup for every one of up to 1000 emails.
-  // outreach_messages isn't in @cello/shared's generated Database type (see
-  // lib/outreach/store.ts's header), so this goes through the same untyped
-  // service-role admin client every other outreach_messages reader/writer
-  // uses — regardless of whether `db` above is already the admin client
-  // (cron) or the session client (route).
-  const admin = createAdminClient()
-  const { data: unrepliedOutreach } = await admin
-    .from('outreach_messages')
-    .select('gmail_thread_id')
-    .eq('user_id', userId)
-    .not('gmail_thread_id', 'is', null)
-    .is('replied_at', null)
-  const trackedThreadIds = new Set(
-    ((unrepliedOutreach as { gmail_thread_id: string }[] | null) || []).map((r) => r.gmail_thread_id)
-  )
+  // STEP 5 Gmail reply bridge: look at the outreach threads themselves (by the
+  // thread id stored at send time), independent of the job-application search
+  // below. outreach_messages isn't in @cello/shared's generated Database type
+  // (see lib/outreach/store.ts's header), so this goes through the untyped
+  // service-role admin client every other outreach_messages reader/writer uses
+  // regardless of whether `db` is already the admin client (cron) or the
+  // session client (route). Never throws; see lib/outreach/reply.ts.
+  await syncOutreachReplies({ admin: createAdminClient(), userId, accessToken })
 
   const maxEmails = isFirstSync ? 1000 : 200
 
@@ -200,33 +189,13 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
     // and job-board senders (greenhouse.io, linkedin.com, ...) are NOT
     // skipped here: they're processed normally, but parseEmailWithAI /
     // classifyWithPatterns never trust their domain as the employer.
-    // Exception: a message on a thread we're tracking for an outreach reply
-    // must still reach the bridge below even from a personal domain — a
-    // contact replying from a personal address is still a real reply.
-    const isTrackedReplyThread = trackedThreadIds.has(msg.threadId)
-    if (isPersonalEmailDomain(fromDomain) && !isTrackedReplyThread) continue
+    if (isPersonalEmailDomain(fromDomain)) continue
 
     let parsed: ParsedEmail
     if (apiKeys.openrouter) {
       parsed = await parseEmailWithAI(from, subject, body, apiKeys, receivedAt)
     } else {
       parsed = classifyWithPatterns(from, subject, body, receivedAt)
-    }
-
-    // STEP 5 Gmail reply bridge: independent of the job-application pipeline
-    // below — an outreach reply ("sounds good, let's talk Tuesday") often
-    // isn't job-application-related by that classifier's own standard, but
-    // it still answers a tracked outreach thread. Reuses the SAME
-    // parsed.status the job pipeline already computed rather than
-    // classifying twice.
-    if (isTrackedReplyThread) {
-      await recordOutreachReply(admin, {
-        userId,
-        gmailThreadId: msg.threadId,
-        gmailMessageId: msg.id,
-        classification: classifyReply(from, subject, parsed.status),
-        occurredAt: receivedAt.toISOString(),
-      })
     }
 
     if (!parsed.isJobRelated) continue

@@ -35,7 +35,15 @@ interface ApiKeys {
   openai?: string
   anthropic?: string
   openrouter?: string
+  /** Contact-sourcing providers (lib/contacts/keys.ts reads these two). */
+  hunter?: string
+  apollo?: string
   [key: string]: string | undefined
+}
+
+/** Hunter and Apollo keys have no fixed prefix: accept one opaque token, no spaces. */
+function validContactKey(v: unknown): v is string {
+  return typeof v === 'string' && /^\S{8,200}$/.test(v)
 }
 
 /**
@@ -114,6 +122,8 @@ export async function GET() {
     hasOpenai: !!keys.openai,
     hasAnthropic: !!keys.anthropic,
     hasOpenrouter: !!keys.openrouter,
+    hasHunter: !!keys.hunter,
+    hasApollo: !!keys.apollo,
   })
 }
 
@@ -132,7 +142,7 @@ export async function POST(request: NextRequest) {
   if ('refusal' in loaded) return loaded.refusal
 
   const body = await request.json()
-  const { openai, anthropic, openrouter } = body as ApiKeys
+  const { openai, anthropic, openrouter, hunter, apollo } = body as ApiKeys
 
   // Validate key formats
   if (openai && !openai.startsWith('sk-')) {
@@ -143,6 +153,13 @@ export async function POST(request: NextRequest) {
   }
   if (openrouter && !openrouter.startsWith('sk-or-')) {
     return NextResponse.json({ error: 'OpenRouter key should start with sk-or-' }, { status: 400 })
+  }
+
+  if (hunter && !validContactKey(hunter)) {
+    return NextResponse.json({ error: 'Hunter key looks wrong: it should be one token with no spaces' }, { status: 400 })
+  }
+  if (apollo && !validContactKey(apollo)) {
+    return NextResponse.json({ error: 'Apollo key looks wrong: it should be one token with no spaces' }, { status: 400 })
   }
 
   const preferences = loaded.preferences
@@ -159,6 +176,13 @@ export async function POST(request: NextRequest) {
   }
   if (openrouter) {
     newKeys.openrouter = encrypt(openrouter)
+  }
+  // Encrypted like the model keys; lib/contacts/keys.ts decrypts them.
+  if (hunter) {
+    newKeys.hunter = encrypt(hunter)
+  }
+  if (apollo) {
+    newKeys.apollo = encrypt(apollo)
   }
 
   const { error } = await supabase
@@ -187,6 +211,8 @@ export async function POST(request: NextRequest) {
     hasOpenai: !!newKeys.openai,
     hasAnthropic: !!newKeys.anthropic,
     hasOpenrouter: !!newKeys.openrouter,
+    hasHunter: !!newKeys.hunter,
+    hasApollo: !!newKeys.apollo,
   })
 }
 
@@ -205,9 +231,9 @@ export async function DELETE(request: NextRequest) {
   if ('refusal' in loaded) return loaded.refusal
 
   const { searchParams } = new URL(request.url)
-  const provider = searchParams.get('provider') as 'openai' | 'anthropic' | 'openrouter'
+  const provider = searchParams.get('provider') as 'openai' | 'anthropic' | 'openrouter' | 'hunter' | 'apollo'
 
-  if (!provider || !['openai', 'anthropic', 'openrouter'].includes(provider)) {
+  if (!provider || !['openai', 'anthropic', 'openrouter', 'hunter', 'apollo'].includes(provider)) {
     return NextResponse.json({ error: 'Invalid provider' }, { status: 400 })
   }
 

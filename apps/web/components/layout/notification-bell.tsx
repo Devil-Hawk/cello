@@ -39,7 +39,7 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Bell, CalendarClock, Inbox, Sparkles, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Bell, CalendarClock, Inbox, Mail, Sparkles, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -53,7 +53,7 @@ import { createClient } from '@/lib/supabase/client'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import type { ReviewQueueItem } from '@/lib/notifications/queue'
 
-type NotificationKind = 'queue' | 'overdue' | 'interview' | 'job'
+type NotificationKind = 'queue' | 'outreach' | 'overdue' | 'interview' | 'job'
 
 interface NotificationItem {
   id: string
@@ -66,6 +66,7 @@ interface NotificationItem {
 
 const KIND_ICON: Record<NotificationKind, LucideIcon> = {
   queue: Inbox,
+  outreach: Mail,
   overdue: AlertTriangle,
   interview: CalendarClock,
   job: Sparkles,
@@ -80,6 +81,7 @@ const KIND_ICON: Record<NotificationKind, LucideIcon> = {
  *  it is what failing closed looks like when nobody has looked yet. */
 const KIND_ICON_CLASS: Record<NotificationKind, string> = {
   queue: 'text-accent-deep',
+  outreach: 'text-accent-deep',
   overdue: 'text-red-600 dark:text-red-400',
   interview: 'text-teal-600 dark:text-teal-400',
   job: 'text-accent-deep',
@@ -126,14 +128,26 @@ async function fetchQueueBucket(): Promise<NotificationItem[]> {
   try {
     const res = await fetch(`/api/notifications/queue?limit=${LIMITS.queue}`)
     if (!res.ok) return []
-    const data = (await res.json().catch(() => null)) as { items?: ReviewQueueItem[] } | null
-    return (data?.items ?? []).map((item) => ({
+    const data = (await res.json().catch(() => null)) as {
+      items?: ReviewQueueItem[]
+      outreach?: { items?: { messageId: string; toName: string | null; toEmail: string; subject: string }[] }
+    } | null
+    const drafts = (data?.items ?? []).map((item) => ({
       id: `queue:${item.draftId}`,
       kind: 'queue' as const,
       title: `${item.title} · ${item.companyName}`,
       subtitle: item.reason,
       href: '/queue',
     }))
+    // Outreach emails waiting for the user's click, straight to the Outreach tab.
+    const outreach = (data?.outreach?.items ?? []).map((m) => ({
+      id: `outreach:${m.messageId}`,
+      kind: 'outreach' as const,
+      title: `Email to ${m.toName ?? m.toEmail}`,
+      subtitle: `Needs your approval · ${m.subject}`,
+      href: '/queue?tab=outreach',
+    }))
+    return [...drafts, ...outreach]
   } catch (err) {
     console.error('[notification-bell] queue bucket failed', err)
     return []

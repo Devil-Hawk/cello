@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Check, Loader2, Mail, Pencil, Send, ShieldAlert, Sparkles, User, X } from 'lucide-react'
+import Link from 'next/link'
+import { AlertTriangle, Check, CornerDownRight, Loader2, Mail, Pencil, RotateCcw, Send, ShieldAlert, Sparkles, User, X } from 'lucide-react'
 import { Badge, type BadgeTone } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -12,6 +13,7 @@ import { toast } from '@/components/ui/use-toast'
 import { cn } from '@/lib/utils'
 import { formatShortDate } from '@/lib/format'
 import type { EvalResult } from '@/lib/evals/harness'
+import type { StoredOutreachVerdict } from '@/lib/outreach/verdicts'
 
 export interface OutreachRow {
   id: string
@@ -21,7 +23,34 @@ export interface OutreachRow {
   body: string
   status: 'pending_review' | 'approved' | 'sent' | 'failed' | 'skipped'
   kind: 'initial' | 'follow_up'
+  parent_id?: string | null
   created_at: string
+  /** Why a send failed (status 'failed'), in Gmail's own words. */
+  error?: string | null
+  sent_at?: string | null
+  /** Set by the Gmail reply sync once the contact has answered. */
+  replied_at?: string | null
+  reply_classification?: 'positive' | 'neutral' | 'negative' | 'bounce' | null
+  /** False when no model wrote this draft (the generic template). */
+  used_llm?: boolean | null
+  /** Quality-check verdicts already stored for this draft. */
+  verdicts?: StoredOutreachVerdict[]
+}
+
+const REPLY_LABEL: Record<NonNullable<OutreachRow['reply_classification']>, { text: string; tone: BadgeTone }> = {
+  positive: { text: 'Replied (positive)', tone: 'good' },
+  neutral: { text: 'Replied', tone: 'good' },
+  negative: { text: 'Replied (declined)', tone: 'neutral' },
+  bounce: { text: 'Bounced, the address did not accept it', tone: 'bad' },
+}
+
+/** A stored verdict as the same row shape a live check renders. */
+function storedAsResult(v: StoredOutreachVerdict | undefined): Pick<EvalResult, 'verdict' | 'summary'> | null {
+  if (!v) return null
+  return {
+    verdict: v.verdict as EvalResult['verdict'],
+    summary: v.rationale ?? (v.verdict === 'pass' ? 'Passed.' : 'No detail was recorded.'),
+  }
 }
 
 const STATUS_TONE: Record<OutreachRow['status'], 'good' | 'warn' | 'bad' | 'neutral' | 'accent'> = {
@@ -40,11 +69,23 @@ const STATUS_LABEL: Record<OutreachRow['status'], string> = {
   skipped: 'Skipped',
 }
 
-export function OutreachCard({ message, onChanged }: { message: OutreachRow; onChanged: () => void }) {
+export function OutreachCard({
+  message,
+  onChanged,
+  followUpDue = false,
+}: {
+  message: OutreachRow
+  onChanged: () => void
+  /** The page's call: sent, unanswered, past the wait window, and no follow-up drafted yet. */
+  followUpDue?: boolean
+}) {
   const [editing, setEditing] = useState(false)
   const [subject, setSubject] = useState(message.subject)
   const [body, setBody] = useState(message.body)
-  const [busy, setBusy] = useState<null | 'save' | 'send' | 'reject'>(null)
+  const [busy, setBusy] = useState<null | 'save' | 'send' | 'reject' | 'retry' | 'followup'>(null)
+  // A send that did not go out and is worth reading twice, kept on the card
+  // (the toast is gone in seconds). `reauth` adds the link that fixes it.
+  const [sendError, setSendError] = useState<{ message: string; reauth: boolean } | null>(null)
   // The send confirmation step. Deleting a *contact* in this app prompts first;
   // emailing a stranger under the user's own name did not. There is no undo,
   // no delay window and no recall once Gmail has it, so the second look has to
@@ -57,9 +98,17 @@ export function OutreachCard({ message, onChanged }: { message: OutreachRow; onC
   const [judging, setJudging] = useState(false)
   const [judgeResult, setJudgeResult] = useState<{ groundedness: EvalResult; specificity: EvalResult } | null>(null)
   const [judgeError, setJudgeError] = useState<string | null>(null)
+  const [edited, setEdited] = useState(false)
 
   const pending = message.status === 'pending_review'
   const approved = message.status === 'approved'
+  const failed = message.status === 'failed'
+  const sent = message.status === 'sent'
+  // Stored verdicts describe the text as drafted. Once this card's text has been
+  // edited they no longer do (the server stops sending them on the next load).
+  const stored = edited ? [] : message.verdicts ?? []
+  const storedGround = storedAsResult(stored.find((v) => v.judge === 'factuality'))
+  const storedSpecific = storedAsResult(stored.find((v) => v.judge === 'closed_qa'))
 
   async function save() {
     setBusy('save')
@@ -72,6 +121,7 @@ export function OutreachCard({ message, onChanged }: { message: OutreachRow; onC
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Save failed')
       setEditing(false)
+      setEdited(true)
       // The text just changed — a prior check described a draft that no
       // longer exists.
       setJudgeResult(null)
@@ -129,19 +179,75 @@ export function OutreachCard({ message, onChanged }: { message: OutreachRow; onC
       })
       const data = await res.json()
       if (!res.ok) {
-        if (data.needsReauth) {
-          throw new Error('Gmail access expired — reconnect Gmail in Settings.')
-        }
-        throw new Error(data.error ?? 'Send failed')
+        const text = data.error ?? 'Send failed'
+        // The draft is untouched when the credential was the problem: say what
+        // to do, and keep saying it until the user acts.
+        setSendError({ message: text, reauth: data.needsReauth === true })
+        throw new Error(text)
       }
+      setSendError(null)
       if (data.skipped) {
         toast({ title: 'Skipped', description: data.reason ?? 'Contact already replied.' })
+      } else if (data.warning) {
+        toast({ title: 'Email sent', description: data.warning })
       } else {
         toast({ title: 'Email sent', description: `to ${message.to_name ?? message.to_email}` })
       }
       onChanged()
     } catch (e) {
       toast({ title: 'Could not send', description: e instanceof Error ? e.message : 'Failed', variant: 'destructive' })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // A failed send goes back to the review state with its error cleared; it
+  // still needs the human's Approve & send to go out again.
+  async function retry() {
+    setBusy('retry')
+    try {
+      const res = await fetch(`/api/outreach/${message.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'retry' }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Retry failed')
+      setSendError(null)
+      toast({ title: 'Back in review', description: 'Review it and send when you are ready.' })
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Error', description: e instanceof Error ? e.message : 'Failed', variant: 'destructive' })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // One polite follow-up, drafted into the same review queue.
+  async function draftFollowUp() {
+    setBusy('followup')
+    try {
+      const res = await fetch('/api/outreach/follow-up', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentId: message.id }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error ?? 'Could not draft a follow-up')
+      if (data.skipped) {
+        toast({ title: 'No follow-up needed', description: `${message.to_name ?? message.to_email} already replied.` })
+      } else if (data.usedLlm === false) {
+        toast({
+          title: 'Follow-up drafted from a template',
+          description: 'No model wrote it: check your OpenRouter key and budget in Settings.',
+          variant: 'destructive',
+        })
+      } else {
+        toast({ title: 'Follow-up drafted', description: 'It is waiting for your review.' })
+      }
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Could not draft a follow-up', description: e instanceof Error ? e.message : 'Failed', variant: 'destructive' })
     } finally {
       setBusy(null)
     }
@@ -188,6 +294,20 @@ export function OutreachCard({ message, onChanged }: { message: OutreachRow; onC
               {message.kind === 'follow_up' ? 'Follow-up' : 'Initial'}
             </Badge>
             <span>{formatShortDate(message.created_at)}</span>
+            {message.used_llm === false && (
+              <Badge tone="warn" className="text-[11px]" title="No model wrote this draft: it is the generic template.">
+                Generic template
+              </Badge>
+            )}
+            {sent && message.sent_at && <span>Sent {formatShortDate(message.sent_at)}</span>}
+            {sent &&
+              (message.replied_at ? (
+                <Badge tone={REPLY_LABEL[message.reply_classification ?? 'neutral'].tone} className="text-[11px]">
+                  {REPLY_LABEL[message.reply_classification ?? 'neutral'].text}
+                </Badge>
+              ) : (
+                <span>No reply yet</span>
+              ))}
           </div>
         </div>
         <Badge tone={STATUS_TONE[message.status]} className="shrink-0">
@@ -241,20 +361,61 @@ export function OutreachCard({ message, onChanged }: { message: OutreachRow; onC
         )}
       </div>
 
+      {failed && (
+        <div className="mt-3 rounded-control border border-pipeline-rejected/50 bg-pipeline-rejected/10 p-3" role="alert">
+          <p className="flex items-center gap-1.5 text-caption font-semibold text-pipeline-rejected">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> This email did not go out
+          </p>
+          <p className="mt-1 break-words text-caption text-foreground">{message.error ?? 'Gmail did not accept it.'}</p>
+          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={retry} disabled={busy !== null}>
+              {busy === 'retry' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+              Retry
+            </Button>
+            <Button size="sm" variant="ghost" onClick={reject} disabled={busy !== null}>
+              {busy === 'reject' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {sent && followUpDue && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" onClick={draftFollowUp} disabled={busy !== null}>
+            {busy === 'followup' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CornerDownRight className="h-3.5 w-3.5" />}
+            Draft follow-up
+          </Button>
+          <span className="text-caption text-muted-foreground">No reply yet. One polite nudge is allowed.</span>
+        </div>
+      )}
+
       {/* Quality check — advisory, user-triggered, never a gate on send.
           Stays visible through the confirm step below: a failed groundedness
           check is most useful exactly when the human is one click from
           sending. */}
       {(pending || approved) && !editing && (
         <div className="mt-3">
-          {judgeResult ? (
+          {judgeResult || storedGround || storedSpecific ? (
             <div className="space-y-2">
-              <JudgeVerdictRow
-                label="Groundedness"
-                result={judgeResult.groundedness}
-                failureWarning="This draft may be lying about the company — it asserts something your resume and the job post don't support."
-              />
-              <JudgeVerdictRow label="Specificity" result={judgeResult.specificity} />
+              {/* A fresh check wins; otherwise what was stored when the draft
+                  was written. Nothing re-runs, so showing them costs nothing. */}
+              {(judgeResult?.groundedness ?? storedGround) && (
+                <JudgeVerdictRow
+                  label="Groundedness"
+                  result={(judgeResult?.groundedness ?? storedGround)!}
+                  failureWarning="This draft may be lying about the company — it asserts something your resume and the job post don't support."
+                />
+              )}
+              {(judgeResult?.specificity ?? storedSpecific) && (
+                <JudgeVerdictRow label="Specificity" result={(judgeResult?.specificity ?? storedSpecific)!} />
+              )}
+              {!judgeResult && (
+                <Button size="sm" variant="ghost" onClick={checkDraft} disabled={judging || busy !== null}>
+                  {judging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  {judging ? 'Checking…' : 'Check again (two paid AI calls)'}
+                </Button>
+              )}
             </div>
           ) : (
             <TooltipProvider delayDuration={200}>
@@ -336,6 +497,16 @@ export function OutreachCard({ message, onChanged }: { message: OutreachRow; onC
           </div>
         )
       )}
+      {sendError && (
+        <p className="mt-3 text-caption text-pipeline-rejected" role="alert">
+          {sendError.message}{' '}
+          {sendError.reauth && (
+            <Link href="/settings?tab=connections" className="font-medium underline">
+              Open Gmail settings
+            </Link>
+          )}
+        </p>
+      )}
     </Card>
   )
 }
@@ -354,7 +525,7 @@ function JudgeVerdictRow({
   failureWarning,
 }: {
   label: string
-  result: EvalResult
+  result: Pick<EvalResult, 'verdict' | 'summary'>
   failureWarning?: string
 }) {
   const tone: BadgeTone = result.verdict === 'pass' ? 'good' : result.verdict === 'fail' ? 'bad' : 'muted'

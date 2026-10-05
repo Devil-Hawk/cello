@@ -8,7 +8,9 @@
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { updateOutreach, recordOutreachReply } from './store'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { ACTIVE_INITIAL_STATUSES, findDuplicateInitial, insertOutreach, isDuplicateOutreachError, updateOutreach, recordOutreachReply } from './store'
 
 const recordInteraction = vi.fn()
 vi.mock('../interactions/store', () => ({
@@ -202,5 +204,55 @@ describe('recordOutreachReply', () => {
     const { db, tablesTouched } = makeReplyFakeDb(rows)
     await recordOutreachReply(db, match)
     expect(tablesTouched).not.toContain('activities')
+  })
+})
+
+// --- dedupe: the app check and the unique index must be the same rule --------
+describe('findDuplicateInitial / the unique index', () => {
+  it('counts the statuses that still hold the slot, and not a dismissed draft', () => {
+    expect([...ACTIVE_INITIAL_STATUSES].sort()).toEqual(['approved', 'failed', 'pending_review', 'sent'])
+    expect(ACTIVE_INITIAL_STATUSES).not.toContain('skipped')
+  })
+
+  it('asks the database for exactly those statuses', async () => {
+    const seen: { column?: string; values?: readonly string[] } = {}
+    const builder: Record<string, unknown> = {}
+    for (const m of ['select', 'eq', 'is']) builder[m] = () => builder
+    builder.in = (column: string, values: string[]) => {
+      Object.assign(seen, { column, values })
+      return builder
+    }
+    builder.limit = async () => ({ data: [] })
+    const db = { from: () => builder } as unknown as SupabaseClient
+
+    expect(await findDuplicateInitial(db, 'user-1', 'ct-1', 'job-1')).toBeNull()
+    expect(seen).toEqual({ column: 'status', values: [...ACTIVE_INITIAL_STATUSES] })
+  })
+
+  it('the newest migration\'s unique-index predicate lists the same statuses as the app', () => {
+    const dir = join(__dirname, '../../../../supabase/migrations')
+    const sql = readFileSync(join(dir, '20261005100001_outreach_dedupe_matches_app.sql'), 'utf8')
+    const index = sql.slice(sql.indexOf('create unique index'))
+    const listed = [...index.matchAll(/status in \(([^)]*)\)/g)][0]?.[1]
+    const statuses = (listed ?? '').split(',').map((x) => x.trim().replace(/'/g, '')).filter(Boolean)
+    expect(statuses.sort()).toEqual([...ACTIVE_INITIAL_STATUSES].sort())
+  })
+})
+
+describe('insertOutreach errors', () => {
+  const failingDb = (error: { code: string; message: string }) =>
+    ({ from: () => ({ insert: () => ({ select: () => ({ single: async () => ({ data: null, error }) }) }) }) }) as unknown as SupabaseClient
+  const row = { user_id: 'u', to_email: 'a@b.com', subject: 's', body: 'b' }
+
+  it('carries the Postgres code so the unique-index refusal is recognisable', async () => {
+    const err = await insertOutreach(failingDb({ code: '23505', message: 'duplicate key value' }), row).catch((e) => e)
+    expect(isDuplicateOutreachError(err)).toBe(true)
+  })
+
+  it('does not mistake another failure for a duplicate', async () => {
+    const err = await insertOutreach(failingDb({ code: '42703', message: 'column does not exist' }), row).catch((e) => e)
+    expect(isDuplicateOutreachError(err)).toBe(false)
+    expect(isDuplicateOutreachError(new Error('plain'))).toBe(false)
+    expect(isDuplicateOutreachError(null)).toBe(false)
   })
 })

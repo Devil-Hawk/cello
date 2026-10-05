@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
-import { findDuplicateInitial, insertOutreach } from '@/lib/outreach/store'
+import { findDuplicateInitial, insertOutreach, isDuplicateOutreachError } from '@/lib/outreach/store'
 import type { OutreachDraftInput } from '@/lib/harness/agents/outreach'
 import { runUnitOnce } from '@/lib/graph/oneshot'
 import { verifyOutreachDraft } from '@/lib/graph/verify/outreach'
@@ -189,6 +189,7 @@ export async function POST(request: NextRequest) {
     let draft: { subject: string; body: string; tokensUsed: number }
     let verdicts: Awaited<ReturnType<typeof verifyOutreachDraft>>['verdicts'] = []
     let judgeUnavailable = false
+    let judgeRefused: 'missing-key' | 'budget-cap' | undefined
     try {
       const unitResult = await runUnitOnce('outreach', {
         admin,
@@ -210,6 +211,7 @@ export async function POST(request: NextRequest) {
       draft = { subject: verified.subject, body: verified.body, tokensUsed: verified.tokensUsed }
       verdicts = verified.verdicts
       judgeUnavailable = verified.judgeUnavailable
+      judgeRefused = verified.judgeRefused
     } catch (e) {
       // Whether or not OpenRouter billed for the attempt, the visitor reached
       // the paid path — which is the thing the owner is watching for.
@@ -246,8 +248,19 @@ export async function POST(request: NextRequest) {
         body: draft.body,
         status: 'pending_review',
         kind: 'initial',
+        used_llm: usedLlm,
       })
     } catch (e) {
+      // Two drafts for the same contact and role raced past the check above and
+      // the unique index caught the loser. That is the duplicate refusal, not a
+      // server fault.
+      if (isDuplicateOutreachError(e)) {
+        await recordDraftOutcome(supabase, { outcome: 'failed', reason: 'duplicate', used_llm: usedLlm }, request.headers)
+        return NextResponse.json(
+          { error: 'An outreach email to this contact for this role already exists.' },
+          { status: 409 }
+        )
+      }
       // The worst outcome to leave unrecorded: the model has already been paid
       // for and there is no outreach_messages row to show for it, so without this
       // the spend is invisible in both places the owner could look.
@@ -285,7 +298,14 @@ export async function POST(request: NextRequest) {
     // recorded 'unjudged' because they run via Promise.all, same as
     // /api/outreach/judge's own BudgetCapError branch: there's no way to tell
     // from here which of the two calls actually threw.
-    if (judgeUnavailable) {
+    // The two typed refusals (no key, spend cap) get a row too, with their own
+    // wording, so the card can say the draft was not checked and why.
+    if (judgeUnavailable || judgeRefused) {
+      const rationale = judgeRefused === 'missing-key'
+        ? 'Not checked: no OpenRouter key is set, so the quality check could not run. Draft still pending review.'
+        : judgeRefused === 'budget-cap'
+          ? 'Not checked: the spend cap was reached, so the quality check could not run. Draft still pending review.'
+          : 'Quality check failed to run unexpectedly. Draft still pending review.'
       for (const judge of ['factuality', 'closed_qa'] as const) {
         await writeVerdict(admin, {
           userId: user.id,
@@ -293,7 +313,7 @@ export async function POST(request: NextRequest) {
           subjectId: row.id,
           judge,
           verdict: 'unjudged',
-          rationale: 'Quality check failed to run unexpectedly — draft still pending review.',
+          rationale,
         })
       }
     }

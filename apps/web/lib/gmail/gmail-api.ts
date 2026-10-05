@@ -104,3 +104,21 @@ export async function fetchGmailMessages(
 
   return messages
 }
+
+/** Every message in one Gmail thread (full format), oldest first, or null when the thread cannot be read. */
+export async function fetchGmailThread(accessToken: string, threadId: string): Promise<GmailMessage[] | null> {
+  const res = await fetch(`${GMAIL_API}/users/me/threads/${encodeURIComponent(threadId)}?format=full`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!res.ok) return null
+  const data = (await res.json()) as { messages?: GmailMessage[] }
+  return data.messages ?? []
+}
+
+/** The mailbox's own address (needs gmail.readonly, which the sync already holds), or null. */
+export async function fetchGmailAddress(accessToken: string): Promise<string | null> {
+  const res = await fetch(`${GMAIL_API}/users/me/profile`, { headers: { Authorization: `Bearer ${accessToken}` } })
+  if (!res.ok) return null
+  const data = (await res.json()) as { emailAddress?: string }
+  return data.emailAddress ? data.emailAddress.toLowerCase() : null
+}

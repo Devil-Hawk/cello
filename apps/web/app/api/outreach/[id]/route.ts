@@ -1,9 +1,11 @@
 // GET/PATCH/DELETE /api/outreach/[id] — review, edit, approve, or reject a draft.
 //
-// PATCH accepts { subject?, body?, action? } where action ∈ 'approve' | 'reject'.
+// PATCH accepts { subject?, body?, action? } where action ∈ 'approve' | 'reject' | 'retry'.
 // Approving is the explicit human ok in the approve-queue; it only moves a
-// 'pending_review' draft to 'approved' (never a sent/failed one). Editing subject
-// or body is allowed while the message is still pending_review/approved.
+// 'pending_review' draft to 'approved' (never a sent/failed one). 'retry' puts a
+// 'failed' message back in the queue as pending_review (error cleared) so it can
+// be reviewed and sent again; it still needs the human's approval to go out.
+// Editing subject or body is allowed on anything that has not been sent.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
@@ -59,6 +61,12 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     fields.status = 'approved'
   } else if (action === 'reject') {
     fields.status = 'skipped'
+  } else if (action === 'retry') {
+    if (existing.status !== 'failed') {
+      return NextResponse.json({ error: `Only a failed message can be retried, this one is ${existing.status}` }, { status: 409 })
+    }
+    fields.status = 'pending_review'
+    fields.error = null
   }
 
   try {

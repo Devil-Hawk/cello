@@ -140,7 +140,7 @@ export const GMAIL_PERMISSION_TIER_META: Record<GmailPermissionTier | 'prepare',
       "Nothing is walled off within the grant itself: gmail.readonly covers your entire mailbox. Cello only processes messages that match its application-email search, but Google's permission screen does not limit access to those messages.",
     ],
     selfHostWarning:
-      "Gmail read scopes are Google-restricted: any OAuth app requesting them must pass Google's CASA security assessment annually. Cello's hosted app has done this. If you self-host Cello, this permission will not work until you register your own Google Cloud OAuth client and complete CASA yourself — a real, recurring cost specific to this tier, not the others.",
+      "Gmail read scopes are Google-restricted: any OAuth app requesting them must pass Google's CASA security assessment annually, and until an app has, Google shows an unverified-app warning and limits how many people can grant it. If you self-host Cello, this permission will not work until you register your own Google Cloud OAuth client and complete CASA yourself, a real, recurring cost specific to this tier, not the others.",
   },
 }
 

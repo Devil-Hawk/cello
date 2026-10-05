@@ -23,6 +23,8 @@ export interface NewOutreach {
   status?: OutreachStatus
   kind?: 'initial' | 'follow_up'
   parent_id?: string | null
+  /** False when the text is the deterministic template, not a model draft. */
+  used_llm?: boolean
 }
 
 export async function insertOutreach(
@@ -30,7 +32,9 @@ export async function insertOutreach(
   row: NewOutreach
 ): Promise<OutreachMessageRow> {
   const { data, error } = await client.from(TABLE).insert(row).select('*').single()
-  if (error) throw new Error(`insertOutreach failed: ${error.message}`)
+  // The Postgres code rides along so a caller can tell the unique-index race
+  // (23505) from a real fault without parsing the message.
+  if (error) throw Object.assign(new Error(`insertOutreach failed: ${error.message}`), { code: error.code })
   return data as OutreachMessageRow
 }
 
@@ -183,9 +187,20 @@ export async function countSentToday(client: SupabaseClient, userId: string): Pr
   return count ?? 0
 }
 
+/** The statuses that still hold the (user, contact, job) slot. MUST match the
+ *  partial unique index uniq_outreach_initial_contact_job (migration
+ *  20261005100001): a dismissed ('skipped') draft frees the slot, a failed one
+ *  does not because it can be retried. */
+export const ACTIVE_INITIAL_STATUSES = ['pending_review', 'approved', 'sent', 'failed'] as const
+
+/** True when an insertOutreach error is the unique-index refusal. */
+export function isDuplicateOutreachError(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === '23505'
+}
+
 /**
- * Existing non-skipped INITIAL outreach for (user, contact, job) — the hard
- * dedupe check ("one email per contact per role, no repeat pestering").
+ * Existing INITIAL outreach still holding the slot for (user, contact, job):
+ * the hard dedupe check ("one email per contact per role, no repeat pestering").
  */
 export async function findDuplicateInitial(
   client: SupabaseClient,
@@ -199,7 +214,7 @@ export async function findDuplicateInitial(
     .eq('user_id', userId)
     .eq('contact_id', contactId)
     .eq('kind', 'initial')
-    .in('status', ['pending_review', 'approved', 'sent'])
+    .in('status', [...ACTIVE_INITIAL_STATUSES])
   q = jobId ? q.eq('job_id', jobId) : q.is('job_id', null)
   const { data } = await q.limit(1)
   const rows = (data as OutreachMessageRow[]) ?? []

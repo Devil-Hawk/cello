@@ -1,5 +1,8 @@
 // GET /api/notifications/queue — the review-queue notification bucket.
 //
+// `outreach` carries the cold-outreach drafts waiting for approval (count plus
+// the newest few), so the bell can surface them next to the application drafts.
+//
 // Every application_drafts row still sitting at status='pending_review' for
 // this user, each with the ONE sentence explaining why a human has to look at
 // it (lib/notifications/queue.ts#buildQueueItem, which reuses the same
@@ -93,7 +96,7 @@ export async function GET(request: NextRequest) {
   // the profile is only needed to explain rows that come back from the second
   // query, and the count is the same predicate as the second query without the
   // `limit`, so none of the three can shortcut another.
-  const [profileRes, draftsRes, countRes] = await Promise.all([
+  const [profileRes, draftsRes, countRes, outreachRes] = await Promise.all([
     admin.from('profiles').select('full_name, email, resume_text, preferences').eq('id', user.id).single(),
     admin
       .from('application_drafts')
@@ -109,6 +112,17 @@ export async function GET(request: NextRequest) {
       .select('id', { count: 'exact', head: true })
       .eq('user_id', user.id)
       .eq('status', 'pending_review'),
+    // Cold-outreach drafts waiting on a click are "needs you" too: nothing in
+    // the app told the user they existed. Same cap and same scoping as the
+    // drafts read; the count comes from the same query. A failure here only
+    // hides this bucket, never the application drafts above.
+    admin
+      .from('outreach_messages')
+      .select('id, to_name, to_email, subject, created_at', { count: 'exact' })
+      .eq('user_id', user.id)
+      .eq('status', 'pending_review')
+      .order('created_at', { ascending: false })
+      .limit(limit),
   ])
 
   if (draftsRes.error) return NextResponse.json({ error: draftsRes.error.message }, { status: 500 })
@@ -151,5 +165,19 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ items, count: countRes.count ?? items.length })
+  const outreachRows = outreachRes.error
+    ? []
+    : ((outreachRes.data ?? []) as { id: string; to_name: string | null; to_email: string; subject: string; created_at: string }[])
+  const outreach = {
+    count: outreachRes.error ? 0 : outreachRes.count ?? outreachRows.length,
+    items: outreachRows.map((m) => ({
+      messageId: m.id,
+      toName: m.to_name,
+      toEmail: m.to_email,
+      subject: m.subject,
+      createdAt: m.created_at,
+    })),
+  }
+
+  return NextResponse.json({ items, count: countRes.count ?? items.length, outreach })
 }

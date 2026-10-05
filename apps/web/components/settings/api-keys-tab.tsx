@@ -9,14 +9,26 @@ interface ApiKeys {
   openai?: string
   anthropic?: string
   openrouter?: string
+  hunter?: string
+  apollo?: string
 }
 
-type Provider = 'openai' | 'anthropic' | 'openrouter'
+type Provider = 'openai' | 'anthropic' | 'openrouter' | 'hunter' | 'apollo'
+
+const PROVIDER_NAME: Record<Provider, string> = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  openrouter: 'OpenRouter',
+  hunter: 'Hunter',
+  apollo: 'Apollo',
+}
 
 export interface ApiKeysTabProps {
   initialHasOpenai: boolean
   initialHasAnthropic: boolean
   initialHasOpenrouter: boolean
+  initialHasHunter?: boolean
+  initialHasApollo?: boolean
   onStatus: (status: 'success' | 'error', message: string) => void
 }
 
@@ -101,6 +113,8 @@ export function ApiKeysTab({
   initialHasOpenai,
   initialHasAnthropic,
   initialHasOpenrouter,
+  initialHasHunter = false,
+  initialHasApollo = false,
   onStatus,
 }: ApiKeysTabProps) {
   const [openaiKey, setOpenaiKey] = useState('')
@@ -109,6 +123,10 @@ export function ApiKeysTab({
   const [hasOpenaiKey, setHasOpenaiKey] = useState(initialHasOpenai)
   const [hasAnthropicKey, setHasAnthropicKey] = useState(initialHasAnthropic)
   const [hasOpenrouterKey, setHasOpenrouterKey] = useState(initialHasOpenrouter)
+  const [hunterKey, setHunterKey] = useState('')
+  const [apolloKey, setApolloKey] = useState('')
+  const [hasHunterKey, setHasHunterKey] = useState(initialHasHunter)
+  const [hasApolloKey, setHasApolloKey] = useState(initialHasApollo)
   const [isSaving, setIsSaving] = useState(false)
 
   async function saveApiKeys() {
@@ -144,6 +162,10 @@ export function ApiKeysTab({
       payload.openrouter = openrouterKey
     }
 
+    // Contact-search keys: no fixed prefix, so the server checks the shape.
+    if (hunterKey && !hunterKey.includes('•')) payload.hunter = hunterKey.trim()
+    if (apolloKey && !apolloKey.includes('•')) payload.apollo = apolloKey.trim()
+
     try {
       const response = await fetch('/api/settings/keys', {
         method: 'POST',
@@ -160,9 +182,13 @@ export function ApiKeysTab({
         setHasOpenaiKey(result.hasOpenai)
         setHasAnthropicKey(result.hasAnthropic)
         setHasOpenrouterKey(result.hasOpenrouter)
+        setHasHunterKey(Boolean(result.hasHunter))
+        setHasApolloKey(Boolean(result.hasApollo))
         setOpenaiKey('')
         setAnthropicKey('')
         setOpenrouterKey('')
+        setHunterKey('')
+        setApolloKey('')
       }
     } catch {
       onStatus('error', 'Failed to save API keys')
@@ -183,9 +209,9 @@ export function ApiKeysTab({
         if (provider === 'openai') setHasOpenaiKey(false)
         if (provider === 'anthropic') setHasAnthropicKey(false)
         if (provider === 'openrouter') setHasOpenrouterKey(false)
-        const providerName =
-          provider === 'openai' ? 'OpenAI' : provider === 'anthropic' ? 'Anthropic' : 'OpenRouter'
-        onStatus('success', `${providerName} key removed`)
+        if (provider === 'hunter') setHasHunterKey(false)
+        if (provider === 'apollo') setHasApolloKey(false)
+        onStatus('success', `${PROVIDER_NAME[provider]} key removed`)
       }
     } catch {
       onStatus('error', 'Failed to remove API key')
@@ -275,10 +301,64 @@ export function ApiKeysTab({
           }
         />
 
+        <div className="pt-2">
+          <h3 className="text-body font-medium text-foreground">Contact search (optional)</h3>
+          <p className="mt-1 text-caption text-muted-foreground">
+            Used when Cello looks for people to contact at a company. Without them it only uses
+            public pages, which often turn up few email addresses.
+          </p>
+        </div>
+
+        <KeyField
+          label="Hunter API key"
+          configured={hasHunterKey}
+          value={hunterKey}
+          onChange={setHunterKey}
+          placeholder="Your Hunter key"
+          onRemove={() => deleteApiKey('hunter')}
+          isSaving={isSaving}
+          helpText={
+            <>
+              Finds and verifies work emails by company domain. Get your key from{' '}
+              <a
+                href="https://hunter.io/api-keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent-deep hover:underline"
+              >
+                hunter.io
+              </a>
+            </>
+          }
+        />
+
+        <KeyField
+          label="Apollo API key"
+          configured={hasApolloKey}
+          value={apolloKey}
+          onChange={setApolloKey}
+          placeholder="Your Apollo key"
+          onRemove={() => deleteApiKey('apollo')}
+          isSaving={isSaving}
+          helpText={
+            <>
+              Looks up people by company and role. Get your key from{' '}
+              <a
+                href="https://app.apollo.io/#/settings/integrations/api"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent-deep hover:underline"
+              >
+                apollo.io
+              </a>
+            </>
+          }
+        />
+
         <div className="pt-1">
           <Button
             onClick={saveApiKeys}
-            disabled={isSaving || (!openaiKey && !anthropicKey && !openrouterKey)}
+            disabled={isSaving || (!openaiKey && !anthropicKey && !openrouterKey && !hunterKey && !apolloKey)}
           >
             {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
             Save API keys

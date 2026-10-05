@@ -159,3 +159,32 @@ export async function getGmailAccessToken(
 
   return result
 }
+
+export type SendTokenResult = { ok: true; accessToken: string } | { ok: false; message: string }
+
+/**
+ * The token a Gmail call made on the user's behalf should use: the stored
+ * refresh token first (it outlives the browser session), then the session's
+ * one-hour provider_token. A revoked grant is NOT papered over with the
+ * session token (getGmailAccessToken has already recorded the revocation), but
+ * a missing exchange (no refresh token yet, GOOGLE_CLIENT_* unset, Google
+ * unreachable) still falls back, because that is exactly the case where the
+ * session token is the only thing that can work.
+ */
+export async function resolveGmailAccessToken(
+  db: { from: (table: string) => any },
+  userId: string,
+  preferences: Record<string, unknown>,
+  sessionProviderToken: string | null | undefined
+): Promise<SendTokenResult> {
+  const stored = await getGmailAccessToken(db, userId, preferences)
+  if (stored.ok) return { ok: true, accessToken: stored.accessToken }
+  if (stored.reason !== 'invalid_grant' && sessionProviderToken) return { ok: true, accessToken: sessionProviderToken }
+  return {
+    ok: false,
+    message:
+      stored.reason === 'invalid_grant'
+        ? 'Google no longer accepts the saved Gmail connection. Reconnect Gmail in Settings.'
+        : 'Gmail access not available. Connect Gmail in Settings to enable this.',
+  }
+}

@@ -240,7 +240,13 @@ describe('POST /api/settings/keys — a demo cannot swap in key material of its 
 
     const response = await GET()
     expect(response.status).toBe(200)
-    expect(await read(response)).toEqual({ hasOpenai: false, hasAnthropic: false, hasOpenrouter: true })
+    expect(await read(response)).toEqual({
+      hasOpenai: false,
+      hasAnthropic: false,
+      hasOpenrouter: true,
+      hasHunter: false,
+      hasApollo: false,
+    })
   })
 })
 
@@ -274,6 +280,8 @@ describe('the OWNER is unaffected', () => {
       hasOpenai: false,
       hasAnthropic: false,
       hasOpenrouter: true,
+      hasHunter: false,
+      hasApollo: false,
     })
 
     expect(writes).toHaveLength(1)
@@ -281,6 +289,39 @@ describe('the OWNER is unaffected', () => {
     expect(saved).not.toBe(OWNER_OPENROUTER)
     expect(saved).not.toContain(OWNER_OPENROUTER)
     expect(isEncrypted(saved)).toBe(true)
+  })
+
+  it('saves Hunter and Apollo keys encrypted, where lib/contacts/keys.ts reads them, and reports them', async () => {
+    const HUNTER = 'hunter-PLACEHOLDER-0123456789abcdef'
+    const APOLLO = 'apollo-PLACEHOLDER-key-77'
+    const response = await POST(postRequest({ hunter: HUNTER, apollo: APOLLO }))
+    expect(response.status).toBe(200)
+    expect(await read(response)).toMatchObject({ success: true, hasHunter: true, hasApollo: true, hasOpenrouter: false })
+
+    const keys = storedKeys()
+    for (const [stored, plain] of [[keys.hunter, HUNTER], [keys.apollo, APOLLO]]) {
+      expect(isEncrypted(stored)).toBe(true)
+      expect(stored).not.toContain(plain)
+    }
+    // And the contact-sourcing reader can use them.
+    const { decrypt } = await import('@/lib/crypto')
+    expect(decrypt(keys.hunter)).toBe(HUNTER)
+    expect(decrypt(keys.apollo)).toBe(APOLLO)
+  })
+
+  it('rejects a Hunter or Apollo key with spaces or that is too short, writing nothing', async () => {
+    for (const body of [{ hunter: 'has a space in it' }, { apollo: 'short' }]) {
+      const res = await POST(postRequest(body))
+      expect(res.status).toBe(400)
+      await read(res)
+    }
+    expect(writes).toEqual([])
+  })
+
+  it('removes a Hunter key without touching Apollo', async () => {
+    row = ownerRow({ api_keys: { hunter: 'enc:h', apollo: 'enc:a' } })
+    expect((await DELETE(deleteRequest('hunter'))).status).toBe(200)
+    expect(storedKeys()).toEqual({ apollo: 'enc:a' })
   })
 
   it('does not wipe the rest of preferences, or the other providers', async () => {

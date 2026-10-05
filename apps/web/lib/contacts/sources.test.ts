@@ -161,7 +161,7 @@ interface FakeTables {
   contacts?: Record<string, unknown>[]
 }
 
-function fakeClient(rows: FakeTables, inserted: Record<string, unknown>[] = []) {
+function fakeClient(rows: FakeTables, inserted: Record<string, unknown>[] = [], insertError: { code: string; message: string } | null = null) {
   const build = (table: keyof FakeTables) => {
     const filters: Record<string, unknown> = {}
     const api: Record<string, unknown> = {
@@ -182,6 +182,7 @@ function fakeClient(rows: FakeTables, inserted: Record<string, unknown>[] = []) 
       insert: (row: Record<string, unknown>) => ({
         select: () => ({
           single: () => {
+            if (insertError) return Promise.resolve({ data: null, error: insertError })
             inserted.push(row)
             return Promise.resolve({ data: { id: `id-${inserted.length}`, name: row.name, email: row.email }, error: null })
           },
@@ -194,9 +195,9 @@ function fakeClient(rows: FakeTables, inserted: Record<string, unknown>[] = []) 
   return { from: (t: string) => build(t as keyof FakeTables) } as never
 }
 
-const call = (rows: FakeTables, inserted: Record<string, unknown>[] = []) =>
+const call = (rows: FakeTables, inserted: Record<string, unknown>[] = [], insertError: { code: string; message: string } | null = null) =>
   sourceContactsForCompany({
-    client: fakeClient(rows, inserted),
+    client: fakeClient(rows, inserted, insertError),
     userId: 'u1',
     companyId: 'c1',
     jobId: 'j1',
@@ -291,6 +292,29 @@ describe('sourceContactsForCompany — the report is never a bare "nothing usabl
     expect(guessed?.verified).toBe(false)
     expect(guessed?.basis).toMatch(/INFERRED, NOT VERIFIED/)
     expect(inserted[0].name).toBe('Jane Roberts')
+  })
+
+  it('logs a failed contact insert instead of swallowing it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const res = await call(
+        {
+          companies: [{ id: 'c1', name: 'Doist', domain: 'doist.com', user_id: 'u1' }],
+          jobs: [{ id: 'j1', description: 'Questions? Write to careers@doist.com.', url: null, company_id: 'c1' }],
+          company_dossiers: [],
+          contacts: [],
+        },
+        [],
+        { code: '42501', message: 'permission denied for table contacts' }
+      )
+      expect(res.inserted).toEqual([])
+      expect(warn).toHaveBeenCalledWith(
+        '[contacts] insert failed, contact not saved',
+        expect.objectContaining({ code: '42501', message: 'permission denied for table contacts' })
+      )
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('names a role inbox with the whole address so it cannot read as a person', async () => {

@@ -32,6 +32,28 @@ export interface GmailSendResult {
   threadId: string
 }
 
+/** A non-2xx answer from Gmail's send endpoint, with the HTTP status kept so a caller can tell a bad token from a refused message. */
+export class GmailSendError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message)
+    this.name = 'GmailSendError'
+  }
+}
+
+/**
+ * True when a send failed because the credential is unusable (expired or
+ * under-scoped token), not because of the message. Nothing was delivered and
+ * nothing is wrong with the draft, so the caller keeps it sendable and asks
+ * the user to reconnect instead of burning it as failed.
+ */
+export function isGmailAuthError(err: unknown): boolean {
+  if (!(err instanceof GmailSendError)) return false
+  return err.status === 401 || (err.status === 403 && /insufficient|scope|permission/i.test(err.message))
+}
+
 /** RFC 2047 encoded-word for non-ASCII header values (subject / display name). */
 function encodeHeaderWord(value: string): string {
   if (/^[\x20-\x7E]*$/.test(value)) return value
@@ -79,7 +101,7 @@ export async function sendGmailMessage(input: GmailSendInput): Promise<GmailSend
 
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
-    throw new Error(`Gmail send failed (${res.status}): ${detail.slice(0, 300)}`)
+    throw new GmailSendError(`Gmail send failed (${res.status}): ${detail.slice(0, 300)}`, res.status)
   }
   const data = (await res.json()) as { id: string; threadId: string }
   return { id: data.id, threadId: data.threadId }
@@ -209,38 +231,45 @@ export async function mineRecruiterContacts(opts: MineOptions): Promise<MinedCon
   return Array.from(best.values())
 }
 
+/** What a thread check found: someone else wrote, nobody did, or Gmail would not say. */
+export type ReplyState = 'replied' | 'none' | 'unknown'
+
 /**
- * True if the given Gmail thread has an inbound reply — i.e. a message From
- * someone other than the user, so we never send a follow-up after a reply.
+ * Whether the given Gmail thread has an inbound reply, i.e. a message From
+ * someone other than the user, so we never follow up after a reply.
+ *
+ * Tri-state on purpose. A non-OK answer means the reply state is UNKNOWN, not
+ * "no reply" and not "replied": a send-only token 403s here (threads.get needs
+ * gmail.readonly), an expired token 401s, and the API can 5xx. Callers must
+ * fail closed on 'unknown' (do not draft or send) but must not tell the user the
+ * contact replied, because that is false and hides the real fix.
  */
 export async function threadHasReply(
   accessToken: string,
   threadId: string,
   userEmail: string
-): Promise<boolean> {
+): Promise<ReplyState> {
   const res = await fetch(
     `${GMAIL_API}/users/me/threads/${threadId}?format=metadata&metadataHeaders=From`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   )
   if (!res.ok) {
-    // FAIL CLOSED. Any non-OK response means the reply state is UNKNOWN, not
-    // "no reply": a send-only token 403s here, an expired token 401s, and the
-    // API can 5xx. Reporting "no reply" in those cases makes the guardrail
-    // "never follow up after they answered" fail open, and the failure lands on
-    // a real person who already replied. Suppressing a follow-up costs a delay;
-    // sending a duplicate costs the user's credibility with that contact.
-    console.warn('[outreach] reply check failed, suppressing follow-up', {
+    console.warn('[outreach] reply check failed, reply state unknown', {
       status: res.status,
       threadId,
     })
-    return true
+    return 'unknown'
   }
   const data = (await res.json()) as { messages?: { payload?: { headers?: GmailHeader[] } }[] }
   const me = userEmail.toLowerCase()
   for (const m of data.messages || []) {
     const from = getHeader(m.payload?.headers || [], 'from')
     const { email } = parseFromHeader(from)
-    if (email && email !== me) return true
+    if (email && email !== me) return 'replied'
   }
-  return false
+  return 'none'
 }
+
+/** What to tell the user when the reply state could not be read. */
+export const REPLY_CHECK_UNKNOWN_MESSAGE =
+  'Cello cannot see replies without the Monitor mailbox permission, so it will not draft or send a follow-up it cannot vet. Turn on "Monitor mailbox" in Settings > Connections.'

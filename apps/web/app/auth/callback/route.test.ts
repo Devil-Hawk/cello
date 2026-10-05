@@ -1,9 +1,11 @@
 // The one place a Google `provider_refresh_token` is ever seen — persisting
 // it (encrypted, same helper as api_keys) alongside the "monitor mailbox"
-// grant it belongs to, and only when Google's session actually carries the
-// gmail.readonly scope. Everything else (identity-only sign-in, a "send"-only
-// grant, a write the demo lockdown trigger refuses) must be a no-op that
-// still redirects — this is best-effort, never allowed to block sign-in.
+// grant it belongs to. A gmail.readonly grant also records the monitor tier; a
+// gmail.send-only grant keeps the token (so an approved message can still be
+// sent after the one-hour session token dies) but switches no permission on.
+// Everything else (identity-only sign-in, a write the demo lockdown trigger
+// refuses) must be a no-op that still redirects, never blocking sign-in.
+// ?next= sends the user back where the grant started, same-site paths only.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
@@ -95,8 +97,8 @@ describe('GET /auth/callback', () => {
     expect(writes).toEqual([])
   })
 
-  it('a refresh token present but the LIVE scope does not include gmail.readonly (e.g. "send" grant) writes nothing', async () => {
-    mockGrantedScopes(['https://www.googleapis.com/auth/gmail.send'])
+  it('a refresh token present but no Gmail scope in the LIVE grant (identity only) writes nothing', async () => {
+    mockGrantedScopes(['openid', 'email'])
     exchangeCodeForSession.mockResolvedValue({
       data: { user: { id: 'user-1' }, session: { provider_token: 'ya29.x', provider_refresh_token: 'refresh-1' } },
       error: null,
@@ -104,6 +106,26 @@ describe('GET /auth/callback', () => {
     const response = await GET(request())
     expect(response.status).toBe(307)
     expect(writes).toEqual([])
+  })
+
+  it('a SEND-only grant keeps the refresh token encrypted and switches no permission on', async () => {
+    mockGrantedScopes(['https://www.googleapis.com/auth/gmail.send'])
+    exchangeCodeForSession.mockResolvedValue({
+      data: { user: { id: 'user-1' }, session: { provider_token: 'ya29.x', provider_refresh_token: 'send-refresh' } },
+      error: null,
+    })
+    profileRow = { preferences: { model: 'gpt-5' } }
+
+    await GET(request())
+
+    expect(writes).toHaveLength(1)
+    const preferences = writes[0].preferences as Record<string, unknown>
+    const gmailSync = preferences.gmail_sync as { refreshToken: string; revokedAt: string | null }
+    expect(decrypt(gmailSync.refreshToken)).toBe('send-refresh')
+    expect(JSON.stringify(preferences)).not.toContain('"send-refresh"')
+    expect(gmailSync.revokedAt).toBeNull()
+    expect(preferences.gmail_permissions).toBeUndefined()
+    expect(preferences.model).toBe('gpt-5')
   })
 
   it('THE POINT: gmail.readonly granted + a refresh token persists it encrypted and records the monitor grant in one write', async () => {
@@ -158,4 +180,23 @@ describe('GET /auth/callback', () => {
     expect(reads).toEqual([])
     expect(writes).toEqual([])
   })
+
+  it('goes back to a same-site next path, query included', async () => {
+    exchangeCodeForSession.mockResolvedValue({ data: {}, error: null })
+    const response = await GET(new NextRequest('http://localhost/auth/callback?code=abc&next=%2Fsettings%3Ftab%3Dconnections'))
+    const to = new URL(response.headers.get('location')!)
+    expect(to.origin).toBe('http://localhost')
+    expect(to.pathname + to.search).toBe('/settings?tab=connections')
+  })
+
+  it.each(['https://evil.example/', '//evil.example/', '/\\evil.example', '/\t/evil.example'])(
+    'ignores the off-site next %s',
+    async (next) => {
+      exchangeCodeForSession.mockResolvedValue({ data: {}, error: null })
+      const response = await GET(new NextRequest(`http://localhost/auth/callback?code=abc&next=${encodeURIComponent(next)}`))
+      const to = new URL(response.headers.get('location')!)
+      expect(to.origin).toBe('http://localhost')
+      expect(to.pathname).toBe('/dashboard')
+    }
+  )
 })

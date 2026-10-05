@@ -9,7 +9,8 @@ import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { readOutreachConfig } from '@/lib/outreach/config'
 import { getOutreach, findFollowUp, insertOutreach } from '@/lib/outreach/store'
 import { followUpWindowElapsed } from '@/lib/outreach/guardrails'
-import { threadHasReply } from '@/lib/outreach/gmail'
+import { REPLY_CHECK_UNKNOWN_MESSAGE, threadHasReply } from '@/lib/outreach/gmail'
+import { resolveGmailAccessToken } from '@/lib/gmail/token'
 import type { OutreachDraftInput } from '@/lib/harness/agents/outreach'
 import { runUnitOnce } from '@/lib/graph/oneshot'
 import { setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
@@ -56,14 +57,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: windowGate.reason }, { status: 425 })
     }
 
-    // No-reply gate (best-effort; needs the Gmail token).
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (session?.provider_token && parent.gmail_thread_id) {
-      const replied = await threadHasReply(session.provider_token, parent.gmail_thread_id, user.email || '')
-      if (replied) {
+    // No-reply gate. replied_at is what the reply sync already stamped, so a
+    // known reply stops the follow-up with no Gmail call at all.
+    if (parent.replied_at) {
+      return NextResponse.json({ ok: false, skipped: true, reason: 'contact already replied' })
+    }
+    // Otherwise ask Gmail, and FAIL CLOSED: with no usable token the reply state
+    // is unknown, and a follow-up chasing someone who already answered costs the
+    // user more than a refusal costs them.
+    if (parent.gmail_thread_id) {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      const { data: prefsRow } = await supabase.from('profiles').select('preferences').eq('id', user.id).single()
+      const token = await resolveGmailAccessToken(
+        supabase,
+        user.id,
+        (prefsRow?.preferences ?? {}) as Record<string, unknown>,
+        session?.provider_token
+      )
+      if (!token.ok) {
+        return NextResponse.json(
+          { error: `Cannot check whether they replied. ${token.message}`, needsReauth: true },
+          { status: 401 }
+        )
+      }
+      const replyState = await threadHasReply(token.accessToken, parent.gmail_thread_id, user.email || '')
+      if (replyState === 'replied') {
         return NextResponse.json({ ok: false, skipped: true, reason: 'contact already replied' })
+      }
+      if (replyState === 'unknown') {
+        return NextResponse.json(
+          { error: REPLY_CHECK_UNKNOWN_MESSAGE, needsPermission: 'monitor' },
+          { status: 403 }
+        )
       }
     }
 
@@ -139,6 +166,7 @@ export async function POST(request: NextRequest) {
         status: 'pending_review',
         kind: 'follow_up',
         parent_id: parentId,
+        used_llm: usedLlm,
       })
       setTraceMeta({ message_id: row.id })
       setTraceOutput({ subject: draft.subject, usedLlm })

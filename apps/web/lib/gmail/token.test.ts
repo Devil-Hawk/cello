@@ -3,7 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { encrypt } from '@/lib/crypto'
-import { getGmailAccessToken, hasStoredGmailRefreshToken, refreshGoogleAccessToken } from './token'
+import { getGmailAccessToken, hasStoredGmailRefreshToken, refreshGoogleAccessToken, resolveGmailAccessToken } from './token'
 
 const ORIGINAL_CLIENT_ID = process.env.GOOGLE_CLIENT_ID
 const ORIGINAL_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET
@@ -175,5 +175,49 @@ describe('getGmailAccessToken', () => {
 
     await getGmailAccessToken(db, 'user-1', preferences)
     expect(writes).toEqual([])
+  })
+})
+
+// A send an hour after sign-in used the dead session token. The resolver prefers
+// the stored refresh token and only falls back to the session token when there
+// is nothing better to try.
+describe('resolveGmailAccessToken', () => {
+  it('uses the stored refresh token even when a session token exists', async () => {
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse(true, { access_token: 'ya29.stored' })) as unknown as typeof fetch
+    const { db } = fakeDb({ preferences: {} })
+    const preferences = { gmail_sync: { refreshToken: encrypt('rt') } }
+
+    expect(await resolveGmailAccessToken(db, 'user-1', preferences, 'session-token')).toEqual({ ok: true, accessToken: 'ya29.stored' })
+  })
+
+  it('falls back to the session token when no refresh token was ever stored', async () => {
+    const { db } = fakeDb({ preferences: {} })
+    expect(await resolveGmailAccessToken(db, 'user-1', {}, 'session-token')).toEqual({ ok: true, accessToken: 'session-token' })
+  })
+
+  it('falls back to the session token when the exchange cannot run (client id/secret unset)', async () => {
+    delete process.env.GOOGLE_CLIENT_ID
+    delete process.env.GOOGLE_CLIENT_SECRET
+    const { db } = fakeDb({ preferences: {} })
+    const preferences = { gmail_sync: { refreshToken: encrypt('rt') } }
+
+    expect(await resolveGmailAccessToken(db, 'user-1', preferences, 'session-token')).toEqual({ ok: true, accessToken: 'session-token' })
+  })
+
+  it('does NOT paper over a revoked grant with the session token', async () => {
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse(false, { error: 'invalid_grant' })) as unknown as typeof fetch
+    const { db } = fakeDb({ preferences: {} })
+    const preferences = { gmail_sync: { refreshToken: encrypt('rt') } }
+
+    const result = await resolveGmailAccessToken(db, 'user-1', preferences, 'session-token')
+
+    expect(result.ok).toBe(false)
+    expect(!result.ok && result.message).toMatch(/Reconnect Gmail/)
+  })
+
+  it('refuses when there is neither a stored token nor a session token', async () => {
+    const { db } = fakeDb({ preferences: {} })
+    const result = await resolveGmailAccessToken(db, 'user-1', {}, null)
+    expect(result.ok).toBe(false)
   })
 })
