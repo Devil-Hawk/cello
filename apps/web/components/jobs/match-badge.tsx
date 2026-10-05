@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { Loader2 } from 'lucide-react'
 import { Badge, badgeToneClass } from '@/components/ui/badge'
@@ -84,6 +85,10 @@ export function MatchBadge({
   onRetryStatus,
   budgetHint = null,
 }: MatchBadgeProps) {
+  // Only the scored variant's tooltip uses this; declared up here because
+  // hooks can't sit after the early returns below.
+  const [open, setOpen] = useState(false)
+
   if (score === null || score === undefined) {
     if (!showUnscored) return null
 
@@ -189,13 +194,22 @@ export function MatchBadge({
 
   return (
     <TooltipProvider delayDuration={200}>
-      <Tooltip>
+      {/* Controlled so a tap works: Radix opens a tooltip on hover/focus only,
+          and a touch tap does neither, so on a phone the badge did nothing.
+          The click below opens it explicitly (hover still opens it on desktop). */}
+      <Tooltip open={open} onOpenChange={setOpen}>
         {/* A real <button>, not the bare Badge <span> — a <span> can't
             receive keyboard focus, so a keyboard user could never reveal
             this tooltip's WHY-behind-the-score breakdown. */}
         <TooltipTrigger asChild>
           <button
             type="button"
+            onClick={(e) => {
+              // preventDefault skips Radix's own trigger click, which closes
+              // the tooltip — undoing the open we just asked for.
+              e.preventDefault()
+              setOpen(true)
+            }}
             aria-label={`${score} percent match — press for the full score breakdown`}
             className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >

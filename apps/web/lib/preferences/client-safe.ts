@@ -118,3 +118,23 @@ export async function fetchClientSafePreferences(
   }
   return (data ?? null) as ClientSafePreferences | null
 }
+
+/**
+ * Persist the onboarding choice and stamp `onboardedAt` through the narrow
+ * write RPC. "Skip for now" uses this too: the app layout only sends a user to
+ * the wizard while `onboardedAt` is unset and they have no companies, so a skip
+ * that doesn't stamp it brings the wizard back on the next full reload.
+ *
+ * @param matchThreshold the account's current threshold (the RPC always writes
+ *   one, so pass the loaded value, not a guess: a skip must not change it).
+ * @returns the RPC error, or null on success.
+ */
+export async function markOnboarded(
+  client: SupabaseClient,
+  matchThreshold: number
+): Promise<{ message: string } | null> {
+  const { error } = await client.rpc(SET_ONBOARDING_PREFERENCES_RPC, {
+    p_match_threshold: matchThreshold,
+  })
+  return error ?? null
+}

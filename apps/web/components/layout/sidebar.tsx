@@ -260,7 +260,7 @@ export function Sidebar({ user, onSignOut, isMobileOpen = false, onCloseMobile }
    * wrap to two rows or shrink tap targets below 44px. Keeping it as a menu
    * item is also the smaller diff on a control that already worked.
    */
-  function renderAccountRow(collapsed: boolean) {
+  function renderAccountRow(collapsed: boolean, inDrawer = false) {
     const trigger = (
       <button
         type="button"
@@ -300,8 +300,17 @@ export function Sidebar({ user, onSignOut, isMobileOpen = false, onCloseMobile }
     // pinned to the trigger's bottom edge, so the menu grows upward from a
     // trigger that sits at the very foot of the screen instead of trying to
     // render below it and off the bottom of the viewport.
+    //
+    // In the mobile drawer the rail is ~288px wide, so "right" sends the
+    // 224px menu past the viewport edge (x=284..498 on a 390px phone). There
+    // it opens upward over the row, left-aligned, inside the drawer instead.
     const content = (
-      <DropdownMenuContent className="w-56" side="right" align="end" forceMount>
+      <DropdownMenuContent
+        className="w-56"
+        side={inDrawer ? 'top' : 'right'}
+        align={inDrawer ? 'start' : 'end'}
+        forceMount
+      >
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col space-y-1">
             <p className="text-body font-medium leading-none text-foreground">
@@ -527,7 +536,7 @@ export function Sidebar({ user, onSignOut, isMobileOpen = false, onCloseMobile }
                 there now), so without this a phone user would have no way
                 to sign out at all. Always the expanded (collapsed=false)
                 variant — same reasoning as the nav items just above. */}
-            <div className="border-t px-3 py-3">{renderAccountRow(false)}</div>
+            <div className="border-t px-3 py-3">{renderAccountRow(false, true)}</div>
           </motion.aside>
         )}
       </AnimatePresence>

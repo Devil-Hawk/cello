@@ -21,7 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { matchTone, type MatchTone } from '@/lib/format'
+import { knownParts, matchTone, type MatchTone } from '@/lib/format'
 import { parseMatchDetails, type MatchDetails } from './match-badge'
 import { MatchScoreBreakdown } from './match-score-breakdown'
 import { ResumeOptimizerPanel } from '@/components/resume/resume-optimizer-panel'
@@ -261,7 +261,7 @@ export function JobDetailModal({
 
   const matchDetails = parseMatchDetails(job.match_details)
   const tone = matchTone(job.match_score)
-  const meta = [job.location, job.salary_range, job.job_type].filter(Boolean) as string[]
+  const meta = knownParts(job.location, job.salary_range, job.job_type)
 
   return (
     <Dialog

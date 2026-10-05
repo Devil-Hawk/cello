@@ -108,3 +108,21 @@ export function formatShortDate(iso: string | null | undefined): string {
     ...(sameYear ? {} : { year: 'numeric' }),
   })
 }
+
+/**
+ * Placeholder strings that mean "we have no value" — the job classifier writes
+ * 'unknown' into job_type, and some sources emit 'n/a' for location. Shown
+ * verbatim they read as data ("Bengaluru · unknown").
+ */
+const NO_VALUE = new Set(['unknown', 'n/a', 'na', 'none', 'null', 'undefined', 'unspecified', 'not specified', '-', '—'])
+
+/** True for null/blank text and for the placeholder strings above. */
+export function isUnknownText(value: string | null | undefined): boolean {
+  const v = value?.trim().toLowerCase()
+  return !v || NO_VALUE.has(v)
+}
+
+/** The real values from a list of meta fragments, trimmed, with blanks and placeholders dropped. */
+export function knownParts(...values: Array<string | null | undefined>): string[] {
+  return values.filter((v): v is string => !isUnknownText(v)).map((v) => v.trim())
+}
