@@ -12,7 +12,7 @@ import asyncio
 import logging
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from supabase import Client, create_client
 
@@ -33,12 +33,12 @@ def is_stale_posting(posted_at: datetime | None, now: datetime | None = None) ->
     if posted_at is None:
         return False
     if posted_at.tzinfo is None:
-        posted_at = posted_at.replace(tzinfo=timezone.utc)
-    return (now or datetime.now(timezone.utc)) - posted_at > timedelta(days=ROLE_MAX_AGE_DAYS)
+        posted_at = posted_at.replace(tzinfo=UTC)
+    return (now or datetime.now(UTC)) - posted_at > timedelta(days=ROLE_MAX_AGE_DAYS)
 
 
 def is_tracked_with_careers_url(company: dict) -> bool:
-    """The watchlist is what the person added: no suggested leads, nothing without a careers page."""
+    """The watchlist is what the person added: no suggested leads, no empty careers URL."""
     if (company.get("metadata") or {}).get("suggested") is True:
         return False
     return bool((company.get("career_url") or "").strip())

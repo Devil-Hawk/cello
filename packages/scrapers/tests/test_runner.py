@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import runpy
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -130,7 +130,7 @@ class TestOnlyTrackedCompaniesWithACareersPage:
 
 class TestOldPostingsAreNotStored:
     def test_a_200_day_old_posting_is_dropped_and_a_10_day_old_one_kept(self, monkeypatch):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         def job(i, age_days):
             return type(
@@ -177,7 +177,7 @@ class TestOldPostingsAreNotStored:
         assert stored == ["2", "3"]
 
     def test_the_cutoff_is_180_days(self):
-        now = datetime(2026, 10, 4, tzinfo=timezone.utc)
+        now = datetime(2026, 10, 4, tzinfo=UTC)
         assert not runner.is_stale_posting(now - timedelta(days=180), now)
         assert runner.is_stale_posting(now - timedelta(days=181), now)
         assert runner.is_stale_posting(datetime(2026, 1, 1), now)  # naive reads as UTC
