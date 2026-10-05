@@ -42,9 +42,20 @@ function route(handler: (url: string) => Response | undefined) {
   return urls
 }
 
-const ghBoard = (jobs: Array<{ url: string; published: string }>) => ({
-  jobs: jobs.map((j, i) => ({ absolute_url: j.url, title: `Engineer ${i}`, first_published: j.published, location: { name: 'Remote' } })),
+const ghBoard = (jobs: Array<{ url: string; published: string; content?: string }>) => ({
+  jobs: jobs.map((j, i) => ({
+    absolute_url: j.url,
+    title: `Engineer ${i}`,
+    first_published: j.published,
+    location: { name: 'Remote' },
+    ...(j.content ? { content: j.content } : {}),
+  })),
 })
+
+const ashbyBoard = (token: string) => ({
+  jobs: [{ title: 'Engineer', jobUrl: `https://jobs.ashbyhq.com/${token}/1`, publishedAt: MONTH_AGO }],
+})
+const ashbyPage = (name: string, site: string) => html(`<script>{"name":"${name}","publicWebsite":"${site}"}</script>`)
 
 describe('the Amazon / Personio false match', () => {
   const amazon = { name: 'Amazon', domain: 'amazon.jobs', careerUrl: 'https://www.amazon.jobs/en/search' }
@@ -178,7 +189,9 @@ describe('provider name plus domain label', () => {
   it('accepts a board whose provider names the same employer and whose token is the domain label', async () => {
     route((u) => {
       if (u.includes('/v1/boards/quillbot/jobs')) {
-        return json(ghBoard([{ url: 'https://job-boards.greenhouse.io/quillbot/jobs/1', published: MONTH_AGO }]))
+        return json(
+          ghBoard([{ url: 'https://job-boards.greenhouse.io/quillbot/jobs/1', published: MONTH_AGO, content: 'Apply via quillbot.example/careers' }])
+        )
       }
       if (u.endsWith('/v1/boards/quillbot')) return json({ name: 'Quillbot, Inc.' })
       return undefined
@@ -186,6 +199,44 @@ describe('provider name plus domain label', () => {
     await expect(detectAts({ name: 'Quillbot', domain: 'quillbot.example', careerUrl: null })).resolves.toMatchObject({
       verifiedBy: 'provider_name',
     })
+  })
+
+  it('a name equal to the domain label is not enough on its own', async () => {
+    route((u) => {
+      if (u.includes('/v1/boards/quillbot/jobs')) {
+        return json(ghBoard([{ url: 'https://job-boards.greenhouse.io/quillbot/jobs/1', published: MONTH_AGO, content: 'We build things.' }]))
+      }
+      if (u.endsWith('/v1/boards/quillbot')) return json({ name: 'Quillbot' })
+      return undefined
+    })
+    await expect(detectAts({ name: 'Quillbot', domain: 'quillbot.example', careerUrl: null })).resolves.toBeNull()
+  })
+
+  it.each([
+    ['Atlas', 'atlas.co', 'atlas', 'https://atlascard.com/'],
+    ['Prism', 'prism.so', 'prism', 'https://prism-global.com/'],
+  ])("rejects %s: its board declares another employer's site (%s)", async (name, domain, token, site) => {
+    route((u) => {
+      if (u.includes(`/posting-api/job-board/${token}`)) return json(ashbyBoard(token))
+      if (u === `https://jobs.ashbyhq.com/${token}`) return ashbyPage(name, site)
+      return undefined
+    })
+    await expect(detectAts({ name, domain, careerUrl: null })).resolves.toBeNull()
+  })
+
+  it('accepts an Ashby board whose declared site is the company domain', async () => {
+    route((u) => {
+      if (u.includes('/posting-api/job-board/kiln')) return json(ashbyBoard('kiln'))
+      if (u === 'https://jobs.ashbyhq.com/kiln') return ashbyPage('Kiln', 'https://www.kiln.so/')
+      return undefined
+    })
+    await expect(detectAts({ name: 'Kiln', domain: 'kiln.so', careerUrl: null })).resolves.toMatchObject({
+      verifiedBy: 'board_links_home',
+    })
+  })
+
+  it('reads "Rover.com" as Rover', () => {
+    expect(sameEmployerName('Rover.com', 'Rover')).toBe(true)
   })
 
   it('normalises legal suffixes but not a different employer sharing the first word', () => {
@@ -228,10 +279,10 @@ describe('known employers', () => {
     await expect(
       verifyBoard({ provider: 'recruitee', token: 'google', jobs, company: { name: 'Google', domain: 'google.com' }, knownEmployer: true })
     ).resolves.toBeNull()
-    // The same board for an employer nobody has heard of would pass on name + label.
+    // Not a known employer, but still: name + label with no mention of google.com is not enough.
     await expect(
       verifyBoard({ provider: 'recruitee', token: 'google', jobs, company: { name: 'Google', domain: 'google.com' } })
-    ).resolves.toBe('provider_name')
+    ).resolves.toBeNull()
   })
 })
 
