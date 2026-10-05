@@ -29,7 +29,17 @@
 
 import pRetry from 'p-retry'
 import type { DecryptedApiKeys, LlmResult, LlmRunOptions } from './types'
-import { assertWithinBudget, BudgetCapError, estimateCostDetails, estimateCostUsd, hasListedPrice, recordSpend } from './spend'
+import {
+  BudgetCapError,
+  DEFAULT_MAX_TOKENS,
+  estimateCostDetails,
+  estimateCostUsd,
+  estimatePromptTokens,
+  hasListedPrice,
+  reserveSpend,
+  settleSpend,
+  type SpendReservation,
+} from './spend'
 import { createAdminClient } from './supabase-admin'
 import { resolveProviderId, resolveLocalCliId, MissingKeyError } from './providers'
 import { callOpenRouter, DEFAULT_MODEL } from './providers/openrouter'
@@ -139,7 +149,11 @@ function generationPayload(
     ...lf,
     model: result.model,
     usage: usageDetails(result),
-    cost: metered ? estimateCostDetails(result.model, result.promptTokens, result.completionTokens) : { input: 0, output: 0 },
+    cost: !metered
+      ? { input: 0, output: 0 }
+      : result.costUsd !== undefined
+        ? { total: result.costUsd }
+        : estimateCostDetails(result.model, result.promptTokens, result.completionTokens),
     metadata: {
       ...lf.metadata,
       ...(result.finishReason ? { finish_reason: result.finishReason } : {}),
@@ -170,68 +184,87 @@ export async function callLlm(
   opts: LlmRunOptions,
   signal?: AbortSignal
 ): Promise<LlmResult> {
-  // Apply the user's default reasoning effort only when the call didn't
-  // already ask for one — an explicit opts.reasoning (including {effort:
-  // 'none'}) always wins over the account-wide default.
-  const effectiveOpts: LlmRunOptions =
-    opts.reasoning || !apiKeys.reasoningEffort || apiKeys.reasoningEffort === 'none'
-      ? opts
-      : { ...opts, reasoning: { effort: apiKeys.reasoningEffort } }
-
   const provider = resolveProviderId(apiKeys.provider?.active)
 
   // Only the metered path is capped. A local server costs nothing per token,
   // and a signed-in CLI bills a flat subscription, so charging them against a
-  // dollar budget would be wrong — and would push users off the free options
+  // dollar budget would be wrong, and would push users off the free options
   // exactly when they are trying to conserve credit.
   const metered = provider === 'openrouter' && Boolean(apiKeys.userId)
   const admin = metered ? createAdminClient() : null
-  if (admin && apiKeys.userId) {
-    // Refuse BEFORE spending: a request already made cannot be refunded.
-    await assertWithinBudget(admin, apiKeys.userId)
+
+  // Apply the user's default reasoning effort only when the call didn't
+  // already ask for one: an explicit opts.reasoning (including {effort:
+  // 'none'}) always wins over the account-wide default. A metered call always
+  // carries a max_tokens, because its reservation is priced from it.
+  const withReasoning: LlmRunOptions =
+    opts.reasoning || !apiKeys.reasoningEffort || apiKeys.reasoningEffort === 'none'
+      ? opts
+      : { ...opts, reasoning: { effort: apiKeys.reasoningEffort } }
+  const effectiveOpts: LlmRunOptions =
+    metered && withReasoning.maxTokens === undefined ? { ...withReasoning, maxTokens: DEFAULT_MAX_TOKENS } : withReasoning
+
+  // Span emission (lib/trace/spans.ts's header explains the AsyncLocalStorage
+  // reuse) is acquired up front so a reservation can carry the trace id. Every
+  // call that carries a userId gets an 'llm' span, metered or not (this doubles
+  // as chokepoint-coverage insurance: see spend-chokepoints.test.ts). No userId
+  // at all means no user_id to satisfy trace_spans' NOT NULL column, so there is
+  // nothing honest to record.
+  const scope = apiKeys.userId ? acquireSpanScope(apiKeys.userId, apiKeys.isDemo) : null
+
+  // One provider attempt. A metered attempt reserves its worst case BEFORE the
+  // request (a BudgetCapError means the provider is never called) and settles the
+  // provider-reported cost AFTER it. Each retry is its own reservation, so a
+  // retried-away attempt that failed with an HTTP status settles at zero.
+  let attempt = 0
+  const runAttempt = async (): Promise<LlmResult> => {
+    attempt += 1
+    if (provider === 'local-cli') return callLocalCli(apiKeys, effectiveOpts, signal)
+    if (provider === 'local-server') return callLocalServer(apiKeys, effectiveOpts, signal)
+    if (!admin || !apiKeys.userId) return callOpenRouter(apiKeys, effectiveOpts, signal)
+
+    const messages = requestMessages(effectiveOpts)
+    const reservation = await reserveSpend(admin, {
+      userId: apiKeys.userId,
+      model: requestedModel(effectiveOpts, apiKeys, provider),
+      promptTokens: estimatePromptTokens(messages.map((m) => m.content).join('\n'), messages.length),
+      maxTokens: effectiveOpts.maxTokens ?? DEFAULT_MAX_TOKENS,
+      traceId: scope?.buffer.traceId,
+    })
+    try {
+      const out = await callOpenRouter(apiKeys, effectiveOpts, signal)
+      await settleSpend(admin, reservation, {
+        model: out.model,
+        promptTokens: out.promptTokens,
+        completionTokens: out.completionTokens,
+        costUsd: out.costUsd,
+      })
+      return out
+    } catch (err) {
+      await settleSpend(admin, reservation, { failed: err })
+      throw err
+    }
   }
 
   // A transient failure (429/500/502/503/504/529, a dropped connection, a
   // timeout) gets retried with backoff before it's allowed to fail the call.
-  // A permanent failure (MissingKeyError, TruncatedResponseError, a 400/401/
-  // 402/403/404 from the provider) throws on the very first attempt — see
-  // lib/util/retry's classifyError, plugged in below as p-retry's
-  // `shouldRetry`. Each retry re-runs the full provider call, so spend is
-  // only ever metered below on whichever attempt actually completes — a
-  // retried-away attempt never reaches recordSpend. `signal` is passed
-  // through to p-retry itself (not just the provider call) so a user
-  // cancel/deadline stops retrying immediately instead of waiting out a
-  // queued backoff.
-  let attempt = 0
+  // A permanent failure (MissingKeyError, TruncatedResponseError, BudgetCapError,
+  // a 400/401/402/403/404 from the provider) throws on the very first attempt;
+  // see lib/util/retry's classifyError, plugged in below as p-retry's
+  // `shouldRetry`. `signal` is passed through to p-retry itself (not just the
+  // provider call) so a user cancel/deadline stops retrying immediately instead
+  // of waiting out a queued backoff.
   const runProviderCall = () =>
-    pRetry(
-      () => {
-        attempt += 1
-        return provider === 'local-cli'
-          ? callLocalCli(apiKeys, effectiveOpts, signal)
-          : provider === 'local-server'
-            ? callLocalServer(apiKeys, effectiveOpts, signal)
-            : callOpenRouter(apiKeys, effectiveOpts, signal)
-      },
-      {
-        retries: 3,
-        factor: 2,
-        minTimeout: 400,
-        maxTimeout: 8_000,
-        randomize: true,
-        signal,
-        shouldRetry: ({ error }) => isTransient(error),
-      }
-    )
+    pRetry(runAttempt, {
+      retries: 3,
+      factor: 2,
+      minTimeout: 400,
+      maxTimeout: 8_000,
+      randomize: true,
+      signal,
+      shouldRetry: ({ error }) => isTransient(error),
+    })
 
-  // Span emission — lib/trace/spans.ts's header explains the AsyncLocalStorage
-  // reuse. Every call that carries a userId gets an 'llm' span, metered or
-  // not (this doubles as chokepoint-coverage insurance: a model call with no
-  // userId at all is invisible to trace_spans the same way it's invisible to
-  // the spend cap — see spend-chokepoints.test.ts for that half of the
-  // guarantee). No userId at all means no user_id to satisfy trace_spans'
-  // NOT NULL column, so there is nothing honest to record.
-  const scope = apiKeys.userId ? acquireSpanScope(apiKeys.userId, apiKeys.isDemo) : null
   let result: LlmResult
   if (scope) {
     try {
@@ -246,7 +279,7 @@ export async function callLlm(
                 promptTokens: r.promptTokens,
                 completionTokens: r.completionTokens,
                 tokensUsed: r.tokensUsed,
-                costUsd: estimateCostUsd(r.model, r.promptTokens, r.completionTokens),
+                costUsd: r.costUsd ?? estimateCostUsd(r.model, r.promptTokens, r.completionTokens),
                 metered,
                 userId: apiKeys.userId,
               }
@@ -266,10 +299,6 @@ export async function callLlm(
     }
   } else {
     result = await runProviderCall()
-  }
-
-  if (admin && apiKeys.userId) {
-    await recordSpend(admin, apiKeys.userId, result.model, result.promptTokens, result.completionTokens)
   }
 
   return result
@@ -408,24 +437,36 @@ async function embedWithFallback(
     const admin = metered ? createAdminClient() : null
 
     let result: EmbedBatchResult
+    let reservation: SpendReservation | undefined
     try {
       if (admin && apiKeys.userId) {
-        // Refuse BEFORE spending, same reason as callLlm: a request already
+        // Reserve BEFORE spending, same reason as callLlm: a request already
         // made cannot be refunded. Inside the try (unlike callLlm, which has
         // only one backend to fail over to): a BudgetCapError on this leg is
-        // still worth falling through on — a self-supplied OpenAI key or a
+        // still worth falling through on, since a self-supplied OpenAI key or a
         // local server costs Cello's own ledger nothing, so an unrelated
-        // OpenRouter cap must not block them.
-        await assertWithinBudget(admin, apiKeys.userId)
+        // OpenRouter cap must not block them. Embeddings have no output tokens.
+        reservation = await reserveSpend(admin, {
+          userId: apiKeys.userId,
+          model: opts.model || EMBEDDING_MODEL,
+          promptTokens: estimatePromptTokens(opts.texts.join('\n'), opts.texts.length),
+          maxTokens: 0,
+        })
       }
       result = await attempt.run()
     } catch (err) {
+      if (admin && reservation) await settleSpend(admin, reservation, { failed: err })
       lastErr = err
       continue
     }
 
-    if (admin && apiKeys.userId) {
-      await recordSpend(admin, apiKeys.userId, EMBEDDING_MODEL, result.promptTokens, 0)
+    if (admin && reservation) {
+      await settleSpend(admin, reservation, {
+        model: EMBEDDING_MODEL,
+        promptTokens: result.promptTokens,
+        completionTokens: 0,
+        costUsd: result.costUsd,
+      })
     }
     return { result, provider: attempt.provider, metered }
   }

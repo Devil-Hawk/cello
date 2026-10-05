@@ -48,7 +48,7 @@ vi.mock('../harness/providers/openrouter', () => ({
 
 vi.mock('../harness/spend', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../harness/spend')>()
-  return { ...actual, assertWithinBudget: async () => undefined, recordSpend: async () => undefined }
+  return { ...actual, reserveSpend: async () => ({ id: 'res-1', userId: 'user-1', model: 'm', estimateUsd: 0.01 }), settleSpend: async () => undefined }
 })
 
 // callLlm's metered path builds its own admin client for the budget guards

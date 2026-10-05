@@ -13,12 +13,13 @@ vi.mock('@/lib/harness/providers/openrouter', () => ({
   DEFAULT_MODEL: 'anthropic/claude-sonnet-5',
 }))
 
-const assertWithinBudgetMock = vi.fn()
-const recordSpendMock = vi.fn()
+const reserveSpendMock = vi.fn()
+const settleSpendMock = vi.fn()
+const RESERVATION = { id: 'res-1', userId: 'user-1', model: 'm', estimateUsd: 0.01 }
 vi.mock('@/lib/harness/spend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/harness/spend')>()),
-  assertWithinBudget: (...args: unknown[]) => assertWithinBudgetMock(...args),
-  recordSpend: (...args: unknown[]) => recordSpendMock(...args),
+  reserveSpend: (...args: unknown[]) => reserveSpendMock(...args),
+  settleSpend: (...args: unknown[]) => settleSpendMock(...args),
 }))
 
 const insertedSpans: Record<string, unknown>[] = []
@@ -80,8 +81,8 @@ function fallbackLines(warn: { mock: { calls: unknown[][] } }): string[] {
 
 beforeEach(() => {
   callOpenRouterMock.mockReset()
-  assertWithinBudgetMock.mockReset().mockResolvedValue(undefined)
-  recordSpendMock.mockReset().mockResolvedValue(undefined)
+  reserveSpendMock.mockReset().mockResolvedValue(RESERVATION)
+  settleSpendMock.mockReset().mockResolvedValue(undefined)
   getDecryptedApiKeysMock.mockReset().mockResolvedValue({ openrouter: 'sk-or-test', userId: 'user-1' })
   insertedSpans.length = 0
   user = { id: 'user-1' }
@@ -104,8 +105,8 @@ describe('AI verification (the path that never ran)', () => {
       temperature: 0.1,
       reasoning: { effort: 'none' },
     })
-    expect(assertWithinBudgetMock).toHaveBeenCalledWith(fakeAdmin, 'user-1')
-    expect(recordSpendMock).toHaveBeenCalledWith(fakeAdmin, 'user-1', 'openai/gpt-4o-mini', 4000, 500)
+    expect(reserveSpendMock).toHaveBeenCalledWith(fakeAdmin, expect.objectContaining({ userId: 'user-1', model: 'openai/gpt-4o-mini', maxTokens: 500 }))
+    expect(settleSpendMock).toHaveBeenCalledWith(fakeAdmin, RESERVATION, { model: 'openai/gpt-4o-mini', promptTokens: 4000, completionTokens: 500, costUsd: undefined })
     expect(insertedSpans).toHaveLength(1)
     expect(insertedSpans[0]).toMatchObject({
       user_id: 'user-1',
@@ -130,24 +131,24 @@ describe('every fallback is still the heuristic verifier, never a 500', () => {
     getDecryptedApiKeysMock.mockResolvedValue({ userId: 'user-1' })
     await expectHeuristic()
     expect(callOpenRouterMock).not.toHaveBeenCalled()
-    expect(assertWithinBudgetMock).not.toHaveBeenCalled()
-    expect(recordSpendMock).not.toHaveBeenCalled()
+    expect(reserveSpendMock).not.toHaveBeenCalled()
+    expect(settleSpendMock).not.toHaveBeenCalled()
   })
 
   it('a spent budget refuses before the provider call and warns', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    assertWithinBudgetMock.mockRejectedValue(new BudgetCapError(1, 1))
+    reserveSpendMock.mockRejectedValue(new BudgetCapError(1, 1))
     await expectHeuristic()
     expect(callOpenRouterMock).not.toHaveBeenCalled()
-    expect(recordSpendMock).not.toHaveBeenCalled()
+    expect(settleSpendMock).not.toHaveBeenCalled()
     expect(fallbackLines(warn)[0]).toContain('BudgetCapError')
   })
 
-  it('a provider 402 falls back with no spend recorded and a warning carrying the status', async () => {
+  it('a provider 402 falls back with its reservation settled as failed and a warning carrying the status', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     callOpenRouterMock.mockRejectedValue(Object.assign(new Error('402 Insufficient credits'), { status: 402 }))
     await expectHeuristic()
-    expect(recordSpendMock).not.toHaveBeenCalled()
+    expect(settleSpendMock).toHaveBeenCalledWith(fakeAdmin, RESERVATION, { failed: expect.objectContaining({ status: 402 }) })
     const lines = fallbackLines(warn)
     expect(lines).toHaveLength(1)
     expect(lines[0]).toContain('"scope":"company-verify"')

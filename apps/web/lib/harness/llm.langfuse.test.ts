@@ -28,9 +28,9 @@ vi.mock('./supabase-admin', () => ({
 
 vi.mock('./spend', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./spend')>()
-  return { ...actual, assertWithinBudget: (...a: unknown[]) => assertMock(...a), recordSpend: async () => undefined }
+  return { ...actual, reserveSpend: (...a: unknown[]) => assertMock(...a), settleSpend: async () => undefined }
 })
-const assertMock = vi.fn(async (..._a: unknown[]): Promise<void> => undefined)
+const assertMock = vi.fn(async (..._a: unknown[]) => ({ id: 'res-1', userId: 'user-1', model: 'm', estimateUsd: 0.01 }))
 
 const callOpenRouterMock = vi.fn()
 vi.mock('./providers/openrouter', () => ({
@@ -151,6 +151,22 @@ describe('callLlm -> trace_spans + Langfuse generation', () => {
     const sent = JSON.stringify(spans().map((s) => s.attributes))
     expect(sent).not.toContain('jane.doe@example.com')
     expect(sent).not.toContain('sk-or-v1-abcdefghijklmnopqrstuv')
+  })
+
+  it('a provider-reported cost is the generation cost and the span costUsd, over our price table', async () => {
+    configure()
+    callOpenRouterMock.mockResolvedValue({
+      content: COMPLETION,
+      tokensUsed: 150,
+      promptTokens: 100,
+      completionTokens: 50,
+      model: 'anthropic/claude-sonnet-5',
+      finishReason: 'stop',
+      costUsd: 0.00042,
+    })
+    await callLlm(keys, { name: 'tailor-cv', prompt: 'x' })
+    expect(JSON.parse(String(attr(gen(), 'langfuse.observation.cost_details')))).toEqual({ total: 0.00042 })
+    expect(insertCalls[0][0]).toMatchObject({ attributes: { costUsd: 0.00042 } })
   })
 
   it('with no name the generation is call-llm; messages[] replaces prompt like the provider does', async () => {

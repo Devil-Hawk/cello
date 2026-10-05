@@ -11,12 +11,13 @@ vi.mock('../harness/providers/openrouter', () => ({
   DEFAULT_MODEL: 'anthropic/claude-sonnet-5',
 }))
 
-const assertWithinBudgetMock = vi.fn()
-const recordSpendMock = vi.fn()
+const reserveSpendMock = vi.fn()
+const settleSpendMock = vi.fn()
+const RESERVATION = { id: 'res-1', userId: 'user-1', model: 'm', estimateUsd: 0.01 }
 vi.mock('../harness/spend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../harness/spend')>()),
-  assertWithinBudget: (...args: unknown[]) => assertWithinBudgetMock(...args),
-  recordSpend: (...args: unknown[]) => recordSpendMock(...args),
+  reserveSpend: (...args: unknown[]) => reserveSpendMock(...args),
+  settleSpend: (...args: unknown[]) => settleSpendMock(...args),
 }))
 
 const insertedSpans: Record<string, unknown>[] = []
@@ -67,8 +68,8 @@ function fallbackLines(warn: { mock: { calls: unknown[][] } }): string[] {
 
 beforeEach(() => {
   callOpenRouterMock.mockReset()
-  assertWithinBudgetMock.mockReset().mockResolvedValue(undefined)
-  recordSpendMock.mockReset().mockResolvedValue(undefined)
+  reserveSpendMock.mockReset().mockResolvedValue(RESERVATION)
+  settleSpendMock.mockReset().mockResolvedValue(undefined)
   insertedSpans.length = 0
 })
 
@@ -87,8 +88,8 @@ describe('parseEmailWithAI is metered and traced through callLlm', () => {
       temperature: 0.1,
       reasoning: { effort: 'none' },
     })
-    expect(assertWithinBudgetMock).toHaveBeenCalledWith(fakeAdmin, 'user-1')
-    expect(recordSpendMock).toHaveBeenCalledWith(fakeAdmin, 'user-1', CLASSIFY_MODEL, 500, 100)
+    expect(reserveSpendMock).toHaveBeenCalledWith(fakeAdmin, expect.objectContaining({ userId: 'user-1', model: CLASSIFY_MODEL }))
+    expect(settleSpendMock).toHaveBeenCalledWith(fakeAdmin, RESERVATION, { model: CLASSIFY_MODEL, promptTokens: 500, completionTokens: 100, costUsd: undefined })
     expect(insertedSpans).toHaveLength(1)
     expect(insertedSpans[0]).toMatchObject({
       user_id: 'user-1',
@@ -100,12 +101,12 @@ describe('parseEmailWithAI is metered and traced through callLlm', () => {
 
   it('a spent budget refuses BEFORE the provider is called and falls back to patterns', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    assertWithinBudgetMock.mockRejectedValue(new BudgetCapError(10, 10))
+    reserveSpendMock.mockRejectedValue(new BudgetCapError(10, 10))
 
     const parsed = await parseEmailWithAI(FROM, SUBJECT, BODY, KEYS, REF)
 
     expect(callOpenRouterMock).not.toHaveBeenCalled()
-    expect(recordSpendMock).not.toHaveBeenCalled()
+    expect(settleSpendMock).not.toHaveBeenCalled()
     expect(parsed).toEqual(classifyWithPatterns(FROM, SUBJECT, BODY, REF))
     const lines = fallbackLines(warn)
     expect(lines).toHaveLength(1)
@@ -117,15 +118,15 @@ describe('parseEmailWithAI is metered and traced through callLlm', () => {
 describe('parseEmailWithAI fallbacks still degrade to the regex classifier, and say why', () => {
   const expected = () => classifyWithPatterns(FROM, SUBJECT, BODY, REF)
 
-  it('a provider 402 (out of credits) falls back, records no spend, does not retry, and warns with the status', async () => {
+  it('a provider 402 (out of credits) falls back, settles at zero, does not retry, and warns with the status', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     callOpenRouterMock.mockRejectedValue(Object.assign(new Error('402 Insufficient credits'), { status: 402 }))
 
     const parsed = await parseEmailWithAI(FROM, SUBJECT, BODY, KEYS, REF)
 
-    expect(parsed).toEqual(expected())
     expect(callOpenRouterMock).toHaveBeenCalledTimes(1)
-    expect(recordSpendMock).not.toHaveBeenCalled()
+    expect(settleSpendMock).toHaveBeenCalledWith(fakeAdmin, RESERVATION, { failed: expect.objectContaining({ status: 402 }) })
+    expect(parsed).toEqual(expected())
     const lines = fallbackLines(warn)
     expect(lines).toHaveLength(1)
     expect(lines[0]).toContain('"status":402')
