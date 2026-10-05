@@ -178,8 +178,12 @@ async function evalRequirements() {
           try {
             const verdict = j.content ? (parseJsonLoose(j.content) as { must_have?: unknown[]; nice_to_have?: unknown[] }) : null
             if (verdict) {
-              const flags = [...(verdict.must_have ?? []), ...(verdict.nice_to_have ?? [])]
-              run.judge = { yes: flags.filter((f) => f === true).length, total: kept.must.length + kept.nice.length }
+              // One verdict per item, in order; any extra the judge adds is ignored.
+              const yes = (flags: unknown[] | undefined, n: number) => (flags ?? []).slice(0, n).filter((f) => f === true).length
+              run.judge = {
+                yes: yes(verdict.must_have, kept.must.length) + yes(verdict.nice_to_have, kept.nice.length),
+                total: kept.must.length + kept.nice.length,
+              }
             }
           } catch {
             /* an unreadable verdict is not counted */
@@ -199,7 +203,7 @@ async function main() {
   if (what === 'requirements' || what === 'all') out.requirements = await evalRequirements()
   if (quotaHit) out.stopped = 'the free-model daily request limit was reached; rerun after the reset, answers so far are cached'
   console.log(JSON.stringify(out, null, 2))
-  const file = path.join(DIR, 'results.json')
+  const file = process.env.EVAL_RESULTS ?? path.join(DIR, 'results.json')
   const previous = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>) : {}
   writeFileSync(file, JSON.stringify({ ...previous, ...out }, null, 2) + '\n')
 }

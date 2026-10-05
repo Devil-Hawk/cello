@@ -9,7 +9,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
-const CACHE = path.join(__dirname, '.cache')
+const CACHE = process.env.EVAL_CACHE_DIR ?? path.join(__dirname, '.cache')
+/** Overridable so the harness can be exercised against a local stub without spending a request. */
+const BASE_URL = process.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1'
 
 export class QuotaError extends Error {
   constructor() {
@@ -57,7 +59,7 @@ export async function chat(args: ChatArgs): Promise<ChatResult> {
   for (let attempt = 0; attempt < 4; attempt++) {
     let res: Response
     try {
-      res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      res = await fetch(`${BASE_URL}/chat/completions`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key()}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://cello.app', 'X-Title': 'Cello ingestion eval' },
         body: JSON.stringify({
