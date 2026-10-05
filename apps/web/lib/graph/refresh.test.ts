@@ -21,7 +21,10 @@ const refreshCompanyMock = vi.fn(async (_store: unknown, _company: CompanyInput)
 })
 vi.mock('../ats', () => ({
   refreshCompany: (store: unknown, company: CompanyInput) => refreshCompanyMock(store, company),
+  // The real store wraps the client in an AtsStore; here it only has to look like one.
+  makeSupabaseAtsStore: (client: unknown) => ({ listJobs: async () => [], client }),
 }))
+vi.mock('../harness/supabase-admin', () => ({ createAdminClient: () => ({ fake: 'admin' }) }))
 
 // Same literal @langchain/langgraph's Pregel runtime reads a per-call
 // checkpointer override off — see lib/graph/invoke.ts's PREGEL_CHECKPOINTER_KEY
@@ -47,6 +50,9 @@ function fakeResult(companyId: string, overrides: Partial<CompanyRefreshResult> 
     provider: 'greenhouse',
     found: 1,
     inserted: 1,
+    updated: 0,
+    closed: 0,
+    reopened: 0,
     errors: [],
     ...overrides,
   }
@@ -105,7 +111,7 @@ describe('refreshJobsGraph — happy path', () => {
     expect(seenStores).toHaveLength(3)
     for (const store of seenStores) {
       expect(store).not.toBe(dbClient) // makeStore() wraps it into an AtsStore
-      expect(store).toHaveProperty('listJobExternalIds')
+      expect(store).toHaveProperty('listJobs')
     }
   })
 

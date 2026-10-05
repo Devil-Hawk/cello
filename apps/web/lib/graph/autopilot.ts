@@ -140,7 +140,7 @@
 import { entrypoint, task } from '@langchain/langgraph'
 import type { BaseCheckpointSaver, LangGraphRunnableConfig } from '@langchain/langgraph'
 
-import { refreshCompany, mapWithConcurrency, type AtsStore, type CompanyInput, type JobUpsertRow } from '../ats'
+import { refreshCompany, makeSupabaseAtsStore, mapWithConcurrency, type CompanyInput } from '../ats'
 import { resolveTargeting, type Targeting } from '../targeting'
 import { loadApiKeys } from '../harness/keys'
 import { callLlm } from '../harness/llm'
@@ -282,52 +282,9 @@ interface SourceTaskResult {
   refreshed: number
 }
 
-/** Admin (service-role) AtsStore — same contract as /api/jobs/refresh's own. */
-function makeAdminStore(admin: AdminClient): AtsStore {
-  const PAGE = 1000
-  return {
-    async listJobExternalIds(companyId: string): Promise<Set<string>> {
-      const ids = new Set<string>()
-      for (let from = 0; ; from += PAGE) {
-        const { data, error } = await admin
-          .from('jobs')
-          .select('external_id')
-          .eq('company_id', companyId)
-          .range(from, from + PAGE - 1)
-        if (error) throw new Error(error.message)
-        for (const row of (data ?? []) as { external_id: string | null }[]) {
-          if (row.external_id) ids.add(row.external_id)
-        }
-        if (!data || data.length < PAGE) break
-      }
-      return ids
-    },
-    async upsertJobs(rows: JobUpsertRow[]): Promise<void> {
-      const { error } = await admin
-        .from('jobs')
-        .upsert(rows as never, { onConflict: 'company_id,external_id', ignoreDuplicates: false })
-      if (error) throw new Error(error.message)
-    },
-    async saveCompanyMetadata(companyId: string, metadata: Record<string, unknown>): Promise<void> {
-      const { error } = await admin
-        .from('companies')
-        .update({ metadata: metadata as never })
-        .eq('id', companyId)
-      if (error) throw new Error(error.message)
-    },
-    async updateCompanyLastScraped(companyId: string): Promise<void> {
-      const { error } = await admin
-        .from('companies')
-        .update({ last_scraped_at: new Date().toISOString() })
-        .eq('id', companyId)
-      if (error) throw new Error(error.message)
-    },
-  }
-}
-
 const sourceTask = task('source', async (args: SourceTaskArgs): Promise<SourceTaskResult> => {
   const admin = createAdminClient()
-  const store = makeAdminStore(admin)
+  const store = makeSupabaseAtsStore(admin, { lockClient: admin })
   const toRefresh = args.companies.slice(0, MAX_COMPANIES_REFRESH)
   const refreshResults = await mapWithConcurrency(toRefresh, 5, (c) => refreshCompany(store, c).catch(() => null))
   const discovered = refreshResults.reduce((s, r) => s + (r?.inserted ?? 0), 0)

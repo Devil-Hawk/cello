@@ -25,6 +25,9 @@ const refreshCompanyMock = vi.fn(async (_store: unknown, company: CompanyInput):
   provider: 'greenhouse',
   found: 0,
   inserted: 0,
+  updated: 0,
+  closed: 0,
+  reopened: 0,
   errors: [],
 }))
 vi.mock('../ats', async (importOriginal) => {

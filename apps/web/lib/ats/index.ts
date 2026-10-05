@@ -5,7 +5,8 @@
 // the Next.js route (user-scoped supabase-js client, RLS enforced) and in the
 // scheduled CI script (service-role PostgREST via plain fetch).
 
-import type { AtsJob, AtsMetadata, AtsProvider, AtsProviderId } from './types'
+import { createHash } from 'node:crypto'
+import type { AtsJob, AtsMetadata, AtsProvider, AtsProviderId, FetchContext } from './types'
 import { isValidToken } from './types'
 import { greenhouse } from './greenhouse'
 import { lever } from './lever'
@@ -23,6 +24,9 @@ import { classifyJob, isLowQuality } from '../jobs/classify'
 // Same reasoning as classify above: lib/jobs/mojibake.ts is pure and
 // dependency-free, so importing it here keeps lib/ats framework-free.
 import { repairMojibake } from '../jobs/mojibake'
+// Pure and import-light too (zod + the classifier): the requirements read at
+// ingest, so a row is stored with what it asks for.
+import { parseRequirements, type Requirements } from '../jobs/requirements'
 
 export type {
   AtsJob,
@@ -42,6 +46,7 @@ export { smartrecruiters } from './smartrecruiters'
 export { workable } from './workable'
 export { recruitee } from './recruitee'
 export { personio } from './personio'
+export { makeSupabaseAtsStore } from './store'
 
 export const providers: Record<AtsProviderId, AtsProvider> = {
   greenhouse,
@@ -86,6 +91,35 @@ export interface JobUpsertRow {
   quality_score: number
   /** Ingest provenance: the ATS provider that produced this row. */
   source: AtsProviderId
+  /** The refresh that listed this posting; the prune and the closed check read it. */
+  last_seen_at: string
+  /** What the posting asks for (lib/jobs/requirements.ts), read from the description now. */
+  requirements: Requirements
+  requirements_extracted_at: string
+}
+
+/** A stored job, as much of it as a refresh needs to decide whether anything changed. */
+export interface ExistingJob {
+  externalId: string
+  title: string
+  location: string | null
+  salaryRange: string | null
+  /** md5 of the stored description (jobs.description_md5); null when it is empty. */
+  descriptionMd5: string | null
+}
+
+/** Column changes for one stored job. Only the fields that differ are present. */
+export interface JobUpdate {
+  companyId: string
+  externalId: string
+  fields: Record<string, unknown>
+}
+
+export interface SightingResult {
+  seen: number
+  reopened: number
+  missed: number
+  closed: number
 }
 
 /**
@@ -94,18 +128,24 @@ export interface JobUpsertRow {
  * isolates failures per company.
  */
 export interface AtsStore {
-  /** All existing jobs.external_id values for a company (paged internally). */
-  listJobExternalIds(companyId: string): Promise<Set<string>>
-  /** Upsert rows with on_conflict company_id,external_id (merge duplicates). */
+  /** The company's stored jobs (paged internally). */
+  listJobs(companyId: string): Promise<ExistingJob[]>
+  /** Insert new rows (on_conflict company_id,external_id, merge). */
   upsertJobs(rows: JobUpsertRow[]): Promise<void>
+  /** Apply column changes to stored rows; returns how many rows changed. Never touches match data. */
+  updateJobs(updates: JobUpdate[]): Promise<number>
   /**
-   * Fill an EMPTY description on an already-stored job. Optional so existing
-   * store implementations keep compiling; returns how many rows it changed.
-   * Must never overwrite a description that already has content.
+   * Stamp what this refresh listed as seen, count a miss for the rest of the
+   * given sources, close after two. Optional so a store that cannot (a test
+   * double) keeps compiling.
    */
-  backfillJobDescriptions?(
-    rows: { company_id: string; external_id: string; description: string }[]
-  ): Promise<number>
+  recordSightings?(companyId: string, externalIds: string[], sources: string[]): Promise<SightingResult>
+  /**
+   * One refresh of a company at a time, across the scheduled run, the in-app
+   * button and the autopilot. Returns false when someone else holds it.
+   */
+  acquireCompanyLock?(companyId: string): Promise<boolean>
+  releaseCompanyLock?(companyId: string): Promise<void>
   /** Persist the full companies.metadata object. May throw 42703/PGRST204 when the column is missing — callers swallow it. */
   saveCompanyMetadata(companyId: string, metadata: Record<string, unknown>): Promise<void>
   updateCompanyLastScraped(companyId: string): Promise<void>
@@ -118,8 +158,14 @@ export interface CompanyRefreshResult {
   provider: AtsProviderId | null
   found: number
   inserted: number
-  /** Already-known jobs whose empty description was filled in this pass. */
-  backfilled?: number
+  /** Stored jobs whose description, title, location or pay changed at the source. */
+  updated: number
+  /** Jobs marked closed this refresh (two consecutive refreshes did not list them). */
+  closed: number
+  /** Closed jobs the source listed again. */
+  reopened: number
+  /** True when another refresh of this company was already running, so this one did nothing. */
+  busy?: boolean
   errors: string[]
 }
 
@@ -191,11 +237,26 @@ function sanitizeJobs(jobs: AtsJob[]): AtsJob[] {
   return clean
 }
 
+function md5(text: string): string {
+  return createHash('md5').update(text).digest('hex')
+}
+
+/** The sources whose rows one refresh of `provider` may count as missed. */
+function sourcesFor(provider: AtsProviderId): string[] {
+  // The page reader's rows for this company are superseded once a board exists:
+  // the ones the board does not list close, instead of lingering until the prune.
+  return [provider, 'scraper']
+}
+
 /**
  * Refresh one company: resolve its ATS board (cached metadata -> careers URL
- * -> probe), fetch open roles, and insert the ones we haven't seen. Existing
- * rows are left untouched (preserves discovered_at/is_new/match_score).
- * Never throws — failures are reported in result.errors.
+ * -> probe), fetch open roles, insert the ones we haven't seen, update the
+ * stored ones whose description, title, location or pay changed at the source,
+ * and record what was listed so a posting that stops being listed closes.
+ *
+ * Existing rows keep discovered_at, is_new and their match data; only the
+ * columns that differ are written. Only one refresh of a company runs at a
+ * time (the store's lock). Never throws: failures are reported in result.errors.
  */
 export async function refreshCompany(store: AtsStore, company: CompanyInput): Promise<CompanyRefreshResult> {
   const result: CompanyRefreshResult = {
@@ -204,8 +265,49 @@ export async function refreshCompany(store: AtsStore, company: CompanyInput): Pr
     provider: null,
     found: 0,
     inserted: 0,
+    updated: 0,
+    closed: 0,
+    reopened: 0,
     errors: [],
   }
+
+  if (store.acquireCompanyLock) {
+    let got = false
+    try {
+      got = await store.acquireCompanyLock(company.id)
+    } catch (error) {
+      result.errors.push(`lock failed: ${errorMessage(error)}`)
+      return result
+    }
+    if (!got) {
+      result.busy = true
+      return result
+    }
+  }
+  try {
+    await refreshLocked(store, company, result)
+  } finally {
+    try {
+      await store.releaseCompanyLock?.(company.id)
+    } catch {
+      /* the lease expires on its own */
+    }
+  }
+  return result
+}
+
+async function refreshLocked(store: AtsStore, company: CompanyInput, result: CompanyRefreshResult): Promise<void> {
+  // 0. What is stored already. Read first so a provider that needs a second
+  //    request per posting (Workday, SmartRecruiters) spends it on the postings
+  //    that have no description yet.
+  const stored = new Map<string, ExistingJob>()
+  try {
+    for (const job of await store.listJobs(company.id)) stored.set(job.externalId, job)
+  } catch (error) {
+    result.errors.push(`listing existing jobs failed: ${errorMessage(error)}`)
+    return
+  }
+  const ctx: FetchContext = { hasDescription: (id) => stored.get(id)?.descriptionMd5 != null }
 
   // 1. Resolve board + fetch jobs.
   let jobs: AtsJob[] | null = null
@@ -213,7 +315,7 @@ export async function refreshCompany(store: AtsStore, company: CompanyInput): Pr
   if (cached) {
     result.provider = cached.provider
     try {
-      jobs = await providers[cached.provider].fetch(cached.token)
+      jobs = await providers[cached.provider].fetch(cached.token, ctx)
     } catch (error) {
       // Cached board may have moved — fall through to fresh detection.
       result.errors.push(`cached ${cached.provider} board "${cached.token}" failed: ${errorMessage(error)}`)
@@ -233,18 +335,18 @@ export async function refreshCompany(store: AtsStore, company: CompanyInput): Pr
     } catch (error) {
       // detectAts never throws by contract, but stay defensive.
       result.errors.push(`detection failed: ${errorMessage(error)}`)
-      return result
+      return
     }
     if (!detected) {
-      // provider stays null — callers may fall back to the HTML scraper.
-      return result
+      // provider stays null — callers fall back to the page reader.
+      return
     }
     result.provider = detected.provider
     try {
-      jobs = detected.jobs ?? (await providers[detected.provider].fetch(detected.token))
+      jobs = detected.jobs ?? (await providers[detected.provider].fetch(detected.token, ctx))
     } catch (error) {
       result.errors.push(`${detected.provider} fetch failed: ${errorMessage(error)}`)
-      return result
+      return
     }
     // Persist the discovery so future runs skip probing. Best-effort: the
     // metadata column may not exist yet (42703/PGRST204) — fall back silently.
@@ -274,22 +376,14 @@ export async function refreshCompany(store: AtsStore, company: CompanyInput): Pr
   const clean = sanitizeJobs(jobs)
   result.found = clean.length
   if (clean.length === 0) {
+    // Nothing listed is not evidence that anything closed: an empty answer looks
+    // the same as a board that failed to load, so no sighting is recorded.
     try {
       await store.updateCompanyLastScraped(company.id)
     } catch (error) {
       result.errors.push(`last_scraped_at update failed: ${errorMessage(error)}`)
     }
-    return result
-  }
-
-  // 3. Insert only unseen rows so re-runs create 0 duplicates and existing
-  //    rows keep their discovered_at / is_new / match data.
-  let existing: Set<string>
-  try {
-    existing = await store.listJobExternalIds(company.id)
-  } catch (error) {
-    result.errors.push(`listing existing jobs failed: ${errorMessage(error)}`)
-    return result
+    return
   }
 
   const now = new Date().toISOString()
@@ -297,18 +391,17 @@ export async function refreshCompany(store: AtsStore, company: CompanyInput): Pr
   // a badly-configured board (a "location" page listed as a posting, etc.)
   // can still slip through, so every row runs through the same classifier
   // gate as the scraper/aggregator paths rather than trusting the source.
+  const classify = (job: AtsJob) => {
+    const title = job.title.trim()
+    const c = classifyJob({ title, description: job.description, location: job.location, companyName: company.name })
+    return { job, title, c }
+  }
+
+  // 3. Insert only unseen rows, so re-runs create 0 duplicates and existing
+  //    rows keep their discovered_at / is_new / match data.
   const newRows: JobUpsertRow[] = clean
-    .filter((job) => !existing.has(job.externalId))
-    .map((job) => {
-      const title = job.title.trim()
-      const c = classifyJob({
-        title,
-        description: job.description,
-        location: job.location,
-        companyName: company.name,
-      })
-      return { job, title, c }
-    })
+    .filter((job) => !stored.has(job.externalId))
+    .map(classify)
     .filter(({ c }) => !c.rejectReason && !isLowQuality(c))
     .map(({ job, title, c }) => ({
       company_id: company.id,
@@ -329,6 +422,14 @@ export async function refreshCompany(store: AtsStore, company: CompanyInput): Pr
       job_type: c.jobType,
       quality_score: c.qualityScore,
       source: provider,
+      last_seen_at: now,
+      requirements: parseRequirements({
+        title,
+        description: job.description ?? '',
+        location: job.location,
+        salaryRange: job.salary,
+      }),
+      requirements_extracted_at: now,
     }))
 
   if (newRows.length > 0) {
@@ -337,35 +438,60 @@ export async function refreshCompany(store: AtsStore, company: CompanyInput): Pr
       result.inserted = newRows.length
     } catch (error) {
       result.errors.push(`upsert failed: ${errorMessage(error)}`)
-      return result
+      return
     }
   }
 
-  // BACKFILL ALREADY-KNOWN JOBS.
-  //
-  // Refresh used to insert new postings and nothing else, so a row stored once
-  // could never improve. That mattered the moment the Greenhouse adapter began
-  // requesting posting bodies: 13,043 already-stored jobs had an empty
-  // description and, without this, would have stayed empty forever while the
-  // refresh reported success and inserted nothing.
-  //
-  // Deliberately conservative: fill ONLY fields that are currently empty, and
-  // never overwrite something already stored. Refresh should improve a row, not
-  // rewrite it.
-  const backfill = clean
-    .filter((job) => existing.has(job.externalId))
-    .filter((job) => (job.description ?? '').trim().length > 0)
-    .map((job) => ({
-      company_id: company.id,
-      external_id: job.externalId,
-      description: job.description as string,
-    }))
-
-  if (backfill.length > 0 && typeof store.backfillJobDescriptions === 'function') {
+  // 4. Update stored rows that changed at the source. The source is the
+  //    employer's own posting, so its text wins over what an aggregator or an
+  //    older version of this code stored; a field the source did not supply is
+  //    left alone rather than blanked.
+  const updates: JobUpdate[] = []
+  for (const job of clean) {
+    const have = stored.get(job.externalId)
+    if (!have) continue
+    const fields: Record<string, unknown> = {}
+    const title = job.title.trim()
+    if (title && title !== have.title) fields.title = title
+    if (job.location && job.location !== have.location) fields.location = job.location
+    if (job.salary && job.salary !== have.salaryRange) fields.salary_range = job.salary
+    const description = (job.description ?? '').trim()
+    if (description && md5(description) !== have.descriptionMd5) {
+      fields.description = description
+      fields.requirements = parseRequirements({
+        title: title || have.title,
+        description,
+        location: job.location ?? have.location,
+        salaryRange: job.salary ?? have.salaryRange,
+      })
+      fields.requirements_extracted_at = now
+    }
+    if (Object.keys(fields).length > 0) updates.push({ companyId: company.id, externalId: job.externalId, fields })
+  }
+  if (updates.length > 0) {
     try {
-      result.backfilled = await store.backfillJobDescriptions(backfill)
+      result.updated = await store.updateJobs(updates)
     } catch (error) {
-      result.errors.push(`backfill failed: ${errorMessage(error)}`)
+      result.errors.push(`update failed: ${errorMessage(error)}`)
+    }
+  }
+
+  // 5. Record what was listed. A provider that returns a capped window (Workday,
+  //    SmartRecruiters) cannot say a posting past the cap is gone, so a list that
+  //    reached the cap stamps what it saw and counts no misses.
+  if (store.recordSightings) {
+    const cap = providers[provider].maxJobs
+    const windowed = typeof cap === 'number' && clean.length >= cap
+    try {
+      const sighted = await store.recordSightings(
+        company.id,
+        clean.map((j) => j.externalId),
+        windowed ? [] : sourcesFor(provider)
+      )
+      result.closed = sighted.closed
+      result.reopened = sighted.reopened
+    } catch (error) {
+      result.errors.push(`recording sightings failed: ${errorMessage(error)}`)
     }
   }
 
@@ -374,8 +500,6 @@ export async function refreshCompany(store: AtsStore, company: CompanyInput): Pr
   } catch (error) {
     result.errors.push(`last_scraped_at update failed: ${errorMessage(error)}`)
   }
-
-  return result
 }
 
 // Implementation moved to ./concurrency.ts so the adapters can use it without

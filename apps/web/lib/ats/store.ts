@@ -1,0 +1,146 @@
+// The one supabase-js implementation of AtsStore.
+//
+// The in-app refresh (user session, row level security), the autopilot and the
+// scheduled ingestion (service role) used to carry three near-identical copies
+// of this, which is how one of them came to lack the description backfill and
+// none of them could record a sighting. The client decides who is acting; the
+// code is the same.
+
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { mapWithConcurrency } from './concurrency'
+import type { AtsStore, ExistingJob, JobUpdate, SightingResult } from './index'
+
+// The generated Database type does not cover the columns added by the ingestion
+// migrations, and callers pass clients typed both ways.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Db = SupabaseClient<any, any, any>
+
+const PAGE_SIZE = 1000
+const UPDATE_CONCURRENCY = 4
+/** md5('') : jobs.description_md5 of a row with no description. */
+const EMPTY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e'
+/** Longer than any refresh of one company takes; a crashed holder frees itself. */
+const LOCK_LEASE_MINUTES = 15
+
+export interface AtsStoreOptions {
+  /** Service-role client used only for the per-company lock (the lock functions are not callable by a signed-in user). */
+  lockClient?: Db
+  /** Who holds the lock; unique per process so a second process cannot release the first one's lock. */
+  holder?: string
+  /** Read, detect and count, but write nothing. */
+  dryRun?: boolean
+}
+
+function fail(error: { message: string } | null): void {
+  if (error) throw new Error(error.message)
+}
+
+export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): AtsStore {
+  const holder = opts.holder ?? `ingest-${Math.random().toString(36).slice(2)}`
+  const dry = opts.dryRun === true
+  const lock = opts.lockClient
+
+  return {
+    async listJobs(companyId: string): Promise<ExistingJob[]> {
+      const rows: ExistingJob[] = []
+      // Pagination within a company is always sequential.
+      for (let from = 0; ; from += PAGE_SIZE) {
+        const { data, error } = await client
+          .from('jobs')
+          .select('external_id, title, location, salary_range, description_md5')
+          .eq('company_id', companyId)
+          .order('external_id')
+          .range(from, from + PAGE_SIZE - 1)
+        fail(error)
+        for (const row of (data ?? []) as {
+          external_id: string | null
+          title: string
+          location: string | null
+          salary_range: string | null
+          description_md5: string | null
+        }[]) {
+          if (!row.external_id) continue
+          rows.push({
+            externalId: row.external_id,
+            title: row.title,
+            location: row.location,
+            salaryRange: row.salary_range,
+            descriptionMd5: !row.description_md5 || row.description_md5 === EMPTY_MD5 ? null : row.description_md5,
+          })
+        }
+        if (!data || data.length < PAGE_SIZE) break
+      }
+      return rows
+    },
+
+    async upsertJobs(rows): Promise<void> {
+      if (dry) return
+      const { error } = await client
+        .from('jobs')
+        .upsert(rows as never, { onConflict: 'company_id,external_id', ignoreDuplicates: false })
+      fail(error)
+    },
+
+    async updateJobs(updates: JobUpdate[]): Promise<number> {
+      if (dry) return updates.length
+      const changed = await mapWithConcurrency(updates, UPDATE_CONCURRENCY, async (u) => {
+        const { data, error } = await client
+          .from('jobs')
+          .update(u.fields as never)
+          .eq('company_id', u.companyId)
+          .eq('external_id', u.externalId)
+          .select('id')
+        fail(error)
+        return (data as unknown[] | null)?.length ?? 0
+      })
+      return changed.reduce((sum, n) => sum + n, 0)
+    },
+
+    async recordSightings(companyId, externalIds, sources): Promise<SightingResult> {
+      if (dry) return { seen: 0, reopened: 0, missed: 0, closed: 0 }
+      const { data, error } = await client.rpc('record_job_sightings', {
+        p_company_id: companyId,
+        p_external_ids: externalIds,
+        p_sources: sources,
+        p_close_after: 2,
+      })
+      fail(error)
+      const r = (data ?? {}) as Partial<SightingResult>
+      return { seen: r.seen ?? 0, reopened: r.reopened ?? 0, missed: r.missed ?? 0, closed: r.closed ?? 0 }
+    },
+
+    ...(lock
+      ? {
+          async acquireCompanyLock(companyId: string): Promise<boolean> {
+            const { data, error } = await lock.rpc('acquire_ingestion_lock', {
+              p_name: `company:${companyId}`,
+              p_holder: holder,
+              p_lease_minutes: LOCK_LEASE_MINUTES,
+            })
+            fail(error)
+            return data === true
+          },
+          async releaseCompanyLock(companyId: string): Promise<void> {
+            await lock.rpc('release_ingestion_lock', { p_name: `company:${companyId}`, p_holder: holder })
+          },
+        }
+      : {}),
+
+    async saveCompanyMetadata(companyId: string, metadata: Record<string, unknown>): Promise<void> {
+      if (dry) return
+      const { error } = await client.from('companies').update({ metadata: metadata as never }).eq('id', companyId)
+      // Throw so refreshCompany's tolerant catch handles a missing column
+      // (42703 / PGRST204) the same as any other metadata write failure.
+      fail(error)
+    },
+
+    async updateCompanyLastScraped(companyId: string): Promise<void> {
+      if (dry) return
+      const { error } = await client
+        .from('companies')
+        .update({ last_scraped_at: new Date().toISOString() })
+        .eq('id', companyId)
+      fail(error)
+    },
+  }
+}

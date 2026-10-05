@@ -61,6 +61,11 @@ begin
   assert (r->>'missed')::int = 0, 'empty list is no evidence: ' || r;
   select * into s from pg_temp.st('a'); assert s.missed = 0, 'a untouched by an empty list';
 
+  -- An empty source list stamps sightings and counts no miss at all (a windowed list).
+  r := public.record_job_sightings(f.company_id, array['b'], array[]::text[], 2, now() + interval '7 minutes');
+  assert (r->>'missed')::int = 0 and (r->>'seen')::int = 1, 'empty source list counts no miss: ' || r;
+  select * into s from pg_temp.st('a'); assert s.missed = 0, 'a untouched by a sources-empty call';
+
   -- A sighting newer than the refresh's own clock is not undone by it.
   update public.jobs set last_seen_at = now() + interval '30 minutes' where external_id = 'a' and company_id = f.company_id;
   r := public.record_job_sightings(f.company_id, array['b'], array['greenhouse'], 2, now() + interval '10 minutes');

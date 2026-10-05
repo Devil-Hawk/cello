@@ -37,7 +37,7 @@ create index if not exists idx_jobs_requirements_todo on public.jobs (company_id
 --
 -- p_external_ids  every external_id the source listed this time.
 -- p_sources       the jobs.source values that belong to the channel that was
---                 just read (['greenhouse'] for the Greenhouse board,
+--                 just read; empty means "stamp what was seen, count no miss" (['greenhouse'] for the Greenhouse board,
 --                 ['scraper'] for the page reader). Only those rows can be
 --                 "missed". Aggregator rows are never closed by a miss: an
 --                 aggregator returns a window of listings chosen by a query,
@@ -100,6 +100,7 @@ begin
                          then p_seen_at else j.closed_at end
     where j.company_id = p_company_id
       and (j.external_id is null or j.external_id <> all(p_external_ids))
+      and cardinality(p_sources) > 0
       and (j.source is null or j.source = any(p_sources))
       and j.still_open is not false
       and j.last_seen_at < p_seen_at
