@@ -38,6 +38,7 @@ import { templateRef } from '../prompts'
 import { parseJsonLoose, MissingKeyError, TruncatedResponseError } from '../llm'
 import { resolveTargeting, type Targeting } from '@/lib/targeting'
 import { QUALITY_REJECT_THRESHOLD } from '@/lib/jobs/classify'
+import { openRolesOnly } from '@/lib/jobs/freshness'
 import { prioritiseByTargetTitles } from '@/lib/jobs/target-relevance'
 import { frameJobText } from '@/lib/security/job-text'
 import { buildMatchContext } from '@/lib/context/assemble'
@@ -550,7 +551,7 @@ async function fetchDefaultCandidatePool(
   poolSize: number,
   targeting: Targeting
 ): Promise<JobRow[]> {
-  let query = ownedJobsQuery(admin, userId, SELECT_COLUMNS)
+  let query = openRolesOnly(ownedJobsQuery(admin, userId, SELECT_COLUMNS))
     .is('match_score', null)
     // Never spend an LLM call on confirmed junk. Was JS-only; pushed into SQL
     // so it no longer eats into LIMIT before targeting gets a say.
@@ -584,10 +585,9 @@ async function fetchDefaultCandidatePool(
  * one broken diagnostic query can't take down the caller's real result.
  */
 async function countUnscoredJobs(admin: AdminClient, userId: string): Promise<number | null> {
-  const { count, error } = await ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', {
-    count: 'exact',
-    head: true,
-  }).is('match_score', null)
+  const { count, error } = await openRolesOnly(
+    ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', { count: 'exact', head: true })
+  ).is('match_score', null)
   if (error) {
     console.error('[harness] matcher: unscored-count query failed', error)
     return null
