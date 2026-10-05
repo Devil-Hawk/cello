@@ -15,7 +15,9 @@ const buttonVariants = cva(
         outline: 'border border-input bg-card text-foreground hover:bg-muted',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-border/60',
         ghost: 'text-foreground hover:bg-muted',
-        link: 'text-accent-deep underline-offset-4 hover:underline',
+        // Quiet text link. Not accent: orange here read as an error message
+        // (the "Enter a career page URL instead" link in Add company).
+        link: 'text-muted-foreground underline underline-offset-4 hover:text-foreground',
         // Legacy alias kept for backward compatibility; maps to the single accent.
         // Uses the accent ramp's hover/active steps (not a flat opacity dim)
         // so a filled accent button gives real press feedback in both themes.
