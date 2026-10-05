@@ -11,6 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdminClient } from '../harness/types'
+import { runInTraceContext, SpanBuffer, type SpanRecord } from '../trace/spans'
 
 const assertWithinBudgetMock = vi.fn()
 const recordSpendMock = vi.fn()
@@ -295,5 +296,84 @@ describe('toEvalResult — score:null', () => {
     const result = toEvalResult('outreach groundedness', { score: 0.9 }, 0.5, 'user-42')
     expect(result.verdict).toBe('pass')
     expect(logHarnessErrorMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('judge calls in Langfuse', () => {
+  const classifier = (text: string): Response => {
+    const isClosedQA = text.includes('Criterion')
+    const args = isClosedQA ? { choice: 'Y', reasons: 'specific enough' } : { choice: 'C', reasons: 'fully grounded' }
+    return jsonResponse({
+      model: JUDGE_MODEL,
+      usage: { prompt_tokens: 1000, completion_tokens: 200 },
+      choices: [{ message: { role: 'assistant', tool_calls: [{ id: 'c', type: 'function', function: { name: 'select_choice', arguments: JSON.stringify(args) } }] }, finish_reason: 'tool_calls' }],
+    })
+  }
+  const configure = () => {
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
+    vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
+    vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+  }
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  async function judgeBoth(isDemo: boolean) {
+    configure()
+    vi.stubEnv('LANGFUSE_DEMO_SAMPLE_RATE', '1')
+    globalThis.fetch = vi.fn(async (_i: unknown, init?: RequestInit) => classifier(String(init?.body))) as unknown as typeof fetch
+    const buffer = new SpanBuffer('user-1', null, undefined, { isDemo })
+    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
+    const [g, s] = await runInTraceContext({ buffer, parentSpanId: 'root', runId: null }, () =>
+      Promise.all([
+        judgeGroundedness(client, { draft: 'I led the migration.', sourceFacts: 'Led the migration.' }),
+        judgeSpecificity(client, { draft: 'About Acme.', companyAndRole: 'Acme, Engineer' }),
+      ])
+    )
+    const rows = (buffer as unknown as { pending: SpanRecord[] }).pending
+    return { g, s, rows }
+  }
+
+  it('each judge request is a generation named for its judge, with usage, our-table cost, and its span id on the verdict', async () => {
+    const { g, s, rows } = await judgeBoth(false)
+    expect(rows).toHaveLength(2)
+    const byName = (n: string) => rows.find((r) => r.lf?.name === n)!
+    const grounded = byName('judge-groundedness')
+    const specific = byName('judge-specificity')
+    expect(grounded.lf).toMatchObject({
+      type: 'generation',
+      model: JUDGE_MODEL,
+      usage: { input: 1000, output: 200, total: 1200 },
+      cost: { input: 0.001, output: 0.001 },
+    })
+    // concurrent judges on one client: each verdict carries its OWN request's span
+    expect(g.spanId).toBe(grounded.span_id)
+    expect(s.spanId).toBe(specific.span_id)
+    expect(g.spanId).not.toBe(s.spanId)
+    expect(grounded.parent_span_id).toBe('root')
+    // Postgres keeps the llm row shape COV shipped
+    expect(grounded).toMatchObject({ kind: 'llm', name: 'llm' })
+  })
+
+  it('an owner trace carries the judge prompt and its answer; a demo trace carries neither', async () => {
+    const owner = await judgeBoth(false)
+    const lf = owner.rows.find((r) => r.lf?.name === 'judge-groundedness')!.lf!
+    expect(JSON.stringify(lf.input)).toContain('I led the migration')
+    expect(JSON.stringify(lf.output)).toContain('fully grounded')
+
+    const demo = await judgeBoth(true)
+    for (const r of demo.rows) {
+      expect(r.lf?.input).toBeUndefined()
+      expect(r.lf?.output).toBeUndefined()
+      expect(r.lf?.usage).toBeDefined()
+    }
+  })
+
+  it('a Langfuse-off judge call builds no payload but still returns its span id', async () => {
+    globalThis.fetch = vi.fn(async (_i: unknown, init?: RequestInit) => classifier(String(init?.body))) as unknown as typeof fetch
+    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
+    const g = await judgeGroundedness(client, { draft: 'x', sourceFacts: 'y' })
+    expect(g.spanId).toBeTruthy()
+    expect(insertedSpans[0]).not.toHaveProperty('lf')
   })
 })

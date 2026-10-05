@@ -784,6 +784,7 @@ export async function verifyMatchVerdict(opts: ScoreBatchOptions, jobId: string,
       score: judged.score,
       threshold: judged.threshold,
       rationale: judged.summary,
+      judgeSpanId: judged.spanId,
     })
   } catch (err) {
     if (err instanceof MissingKeyError || err instanceof BudgetCapError) {

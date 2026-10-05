@@ -8,7 +8,7 @@
 // a trace context is active, and readVerdicts throws on a query failure
 // (the opposite contract, on purpose — see the file's own header comment).
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdminClient } from '../harness/types'
 import { runInTraceContext, SpanBuffer } from '../trace/spans'
 
@@ -168,5 +168,85 @@ describe('readVerdicts', () => {
       subjectId: 'msg-1',
     })
     expect(result).toEqual([])
+  })
+})
+
+describe('writeVerdict: Langfuse scores', () => {
+  const configure = () => {
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
+    vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
+    vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+  }
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  const inTrace = async (isDemo: boolean | undefined, fn: () => Promise<void>) => {
+    const buffer = new SpanBuffer('user-1', null, undefined, { isDemo })
+    await runInTraceContext({ buffer, parentSpanId: 'parent-span', runId: null }, fn)
+    return buffer
+  }
+
+  it('a numeric verdict queues a score on the judge span the caller names', async () => {
+    configure()
+    const { admin } = makeAdmin()
+    const buffer = await inTrace(false, () =>
+      writeVerdict(admin, { ...baseInput, score: 0.8, threshold: 0.5, rationale: 'grounded', model: 'm/x', judgeSpanId: 'judge-span' })
+    )
+    expect(buffer.scores).toEqual([
+      {
+        name: 'outreach_draft.factuality',
+        value: 0.8,
+        verdict: 'pass',
+        spanId: 'judge-span',
+        rationale: 'grounded',
+        metadata: { subject_id: 'msg-1', threshold: 0.5, model: 'm/x' },
+      },
+    ])
+  })
+
+  it('without a judge span id the score rides the ambient parent span; Postgres span_id is unchanged', async () => {
+    configure()
+    const { admin, insertCalls } = makeAdmin()
+    const buffer = await inTrace(false, () => writeVerdict(admin, { ...baseInput, score: 1, judgeSpanId: 'judge-span' }))
+    expect(insertCalls[0].span_id).toBe('parent-span')
+    expect(buffer.scores[0].spanId).toBe('judge-span')
+    const second = await inTrace(false, () => writeVerdict(admin, { ...baseInput, score: 1 }))
+    expect(second.scores[0].spanId).toBe('parent-span')
+  })
+
+  it('a refusal queues a score with no value (sent as a categorical outcome)', async () => {
+    configure()
+    const { admin } = makeAdmin()
+    const buffer = await inTrace(false, () => writeVerdict(admin, { ...baseInput, verdict: 'insufficient-budget', score: null }))
+    expect(buffer.scores[0]).toMatchObject({ name: 'outreach_draft.factuality', value: null, verdict: 'insufficient-budget' })
+  })
+
+  it('a deterministic verdict stays in Postgres: no score', async () => {
+    configure()
+    const { admin, insertCalls } = makeAdmin()
+    const buffer = await inTrace(false, () => writeVerdict(admin, { ...baseInput, judge: 'deterministic', score: 1 }))
+    expect(insertCalls).toHaveLength(1)
+    expect(buffer.scores).toHaveLength(0)
+  })
+
+  it('no score when the trace is sampled out, Langfuse is unconfigured, or there is no trace at all', async () => {
+    const { admin, insertCalls } = makeAdmin()
+    // unconfigured
+    expect((await inTrace(false, () => writeVerdict(admin, { ...baseInput, score: 1 }))).scores).toHaveLength(0)
+    // sampled out
+    configure()
+    vi.stubEnv('LANGFUSE_SAMPLE_RATE', '0')
+    expect((await inTrace(false, () => writeVerdict(admin, { ...baseInput, score: 1 }))).scores).toHaveLength(0)
+    // no trace context: the verdict is still written
+    await writeVerdict(admin, { ...baseInput, score: 1 })
+    expect(insertCalls.length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('a failed Postgres insert still queues the score: the judgment happened', async () => {
+    configure()
+    const { admin } = makeAdmin({ error: { message: 'db down' } })
+    const buffer = await inTrace(false, () => writeVerdict(admin, { ...baseInput, score: 0.2, verdict: 'fail' }))
+    expect(buffer.scores).toHaveLength(1)
   })
 })

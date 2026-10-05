@@ -55,10 +55,11 @@
 //   real spend against the user's OpenRouter key, which is why
 //   judged.eval.test.ts gates every call behind RUN_JUDGE_EVALS.
 
+import { AsyncLocalStorage } from 'node:async_hooks'
 import OpenAI from 'openai'
 import { ClosedQA, Factuality } from 'autoevals'
 import { MissingKeyError } from '../harness/llm'
-import { assertWithinBudget, estimateCostUsd, recordSpend } from '../harness/spend'
+import { assertWithinBudget, estimateCostDetails, estimateCostUsd, recordSpend } from '../harness/spend'
 import { logHarnessError } from '../observability/log'
 import { warnLlmFallback } from '../observability/llm-fallback'
 import { acquireSpanScope, withSpan } from '../trace/spans'
@@ -71,6 +72,25 @@ const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 const HEADERS = {
   'HTTP-Referer': 'https://cello.app',
   'X-Title': 'Cello - Job Search Assistant',
+}
+
+/** Which judge call is running, and (written back by meteredFetch) the span
+ *  its request became. Per call, not per client: the outreach route runs two
+ *  judges concurrently on one client, and an AsyncLocalStorage slot follows
+ *  each call's own async chain. */
+interface JudgeSlot {
+  /** Langfuse generation name, e.g. `judge-groundedness`. */
+  name: string
+  spanId?: string
+}
+const judgeSlot = new AsyncLocalStorage<JudgeSlot>()
+
+/** Run one autoevals scorer under its Langfuse name and report the span id of
+ *  its request. */
+async function runJudge<T>(name: string, fn: () => T | Promise<T>): Promise<{ value: T; spanId?: string }> {
+  const slot: JudgeSlot = { name }
+  const value = await judgeSlot.run(slot, async () => fn())
+  return { value, spanId: slot.spanId }
 }
 
 /** See the COST comment above for why this model and not the product default. */
@@ -144,12 +164,14 @@ function meteredFetch(
     // One 'llm' span per request, same shape callLlm emits, so judge calls show
     // up in trace_spans (and the Langfuse mirror) next to every other model call.
     const scope = acquireSpanScope(userId)
-    let used: { model: string; promptTokens: number; completionTokens: number } | undefined
+    const slot = judgeSlot.getStore()
+    let used: { model: string; promptTokens: number; completionTokens: number; text?: string } | undefined
     try {
       return await withSpan(
         scope.buffer,
         { parentSpanId: scope.parentSpanId, runId: scope.runId, kind: 'llm', name: 'llm' },
-        async () => {
+        async (spanId) => {
+          if (slot) slot.spanId = spanId
           const response = await fetch(input, clamped)
           // Thrown (not returned) so the span is marked 'error'; the catch
           // below hands the same response back to the OpenAI SDK untouched.
@@ -176,7 +198,27 @@ function meteredFetch(
                 userId,
                 source: 'judge',
                 error: err instanceof Error ? err.message : String(err),
+              },
+        // A judge request is a Langfuse generation (usage and cost live only
+        // on generations), named after the judge. Verdict scores attach to it.
+        (response, _err, capture) => ({
+          name: slot?.name ?? 'judge-call',
+          type: 'generation',
+          model: used?.model ?? requestedModel,
+          metadata: { source: 'judge', metered: true },
+          ...(used
+            ? {
+                usage: { input: used.promptTokens, output: used.completionTokens, total: used.promptTokens + used.completionTokens },
+                cost: estimateCostDetails(used.model, used.promptTokens, used.completionTokens),
               }
+            : {}),
+          ...(capture
+            ? {
+                input: requestMessagesOf(clamped),
+                ...(response && used?.text !== undefined ? { output: { role: 'assistant', content: used.text } } : {}),
+              }
+            : {}),
+        })
       )
     } catch (err) {
       if (err instanceof JudgeHttpError) {
@@ -216,6 +258,21 @@ class JudgeHttpError extends Error {
   }
 }
 
+/** The chat messages of an outgoing judge request, for the Langfuse input
+ *  (capture on only; langfuse.ts redacts and caps them). */
+function requestMessagesOf(init: RequestInit | undefined): { role: string; content: string }[] | undefined {
+  if (typeof init?.body !== 'string') return undefined
+  try {
+    const messages = (JSON.parse(init.body) as { messages?: unknown }).messages
+    if (!Array.isArray(messages)) return undefined
+    return messages
+      .filter((m): m is { role: string; content: unknown } => typeof (m as { role?: unknown })?.role === 'string')
+      .map((m) => ({ role: m.role, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }))
+  } catch {
+    return undefined
+  }
+}
+
 function requestedModelOf(init: RequestInit | undefined): string {
   if (typeof init?.body !== 'string') return JUDGE_MODEL
   try {
@@ -230,18 +287,25 @@ function requestedModelOf(init: RequestInit | undefined): string {
  *  the deliberately high fallback when the body has none. */
 async function readUsage(
   response: Response
-): Promise<{ model: string; promptTokens: number; completionTokens: number }> {
+): Promise<{ model: string; promptTokens: number; completionTokens: number; text?: string }> {
   try {
     const body = (await response.clone().json()) as {
       model?: string
       usage?: { prompt_tokens?: number; completion_tokens?: number }
+      choices?: { message?: { content?: unknown; tool_calls?: { function?: { arguments?: unknown } }[] } }[]
     }
     const usage = body.usage
+    // autoevals asks for a forced tool call, so the judge's answer and reasons
+    // are the call's arguments, not message content.
+    const message = body.choices?.[0]?.message
+    const toolArgs = message?.tool_calls?.[0]?.function?.arguments
+    const text = typeof message?.content === 'string' ? message.content : typeof toolArgs === 'string' ? toolArgs : undefined
     if (typeof usage?.prompt_tokens === 'number' && typeof usage.completion_tokens === 'number') {
       return {
         model: body.model ?? JUDGE_MODEL,
         promptTokens: usage.prompt_tokens,
         completionTokens: usage.completion_tokens,
+        text,
       }
     }
   } catch {
@@ -293,7 +357,7 @@ interface JudgeScore {
  * formatEvalResult()) as a free, deterministic one — a reader of eval output
  * should not need to know which kind produced a given line.
  */
-export function toEvalResult(name: string, judged: JudgeScore, threshold: number, userId?: string): EvalResult {
+export function toEvalResult(name: string, judged: JudgeScore, threshold: number, userId?: string, spanId?: string): EvalResult {
   // autoevals returns score: null when the judge call itself failed to parse
   // a usable answer (see OpenAIClassifier's parseResponse) — that is a judge
   // failure, not a verdict on the draft, so it gets the harness's existing
@@ -315,6 +379,7 @@ export function toEvalResult(name: string, judged: JudgeScore, threshold: number
       threshold,
       n: 1,
       summary: `Judge produced no usable score — treat as inconclusive, not as a pass.`,
+      ...(spanId ? { spanId } : {}),
     }
   }
 
@@ -331,6 +396,7 @@ export function toEvalResult(name: string, judged: JudgeScore, threshold: number
       verdict === 'pass'
         ? `${scored}.${rationale ? ` ${rationale}` : ''}`
         : `${scored} — below threshold.${rationale ? ` ${rationale}` : ''}`,
+    ...(spanId ? { spanId } : {}),
   }
 }
 
@@ -377,16 +443,18 @@ export async function judgeGroundedness(
   input: GroundednessInput,
   opts: JudgeCallOpts = {}
 ): Promise<EvalResult> {
-  const result = await Factuality({
-    input:
-      "Does the submitted outreach draft rely only on facts present in the candidate's resume " +
-      "and the job's stated facts, without asserting anything beyond them?",
-    output: input.draft,
-    expected: input.sourceFacts,
-    client,
-    model: opts.model ?? JUDGE_MODEL,
-  })
-  return toEvalResult('outreach groundedness', result, opts.threshold ?? 0.5, opts.userId)
+  const { value: result, spanId } = await runJudge('judge-groundedness', () =>
+    Factuality({
+      input:
+        "Does the submitted outreach draft rely only on facts present in the candidate's resume " +
+        "and the job's stated facts, without asserting anything beyond them?",
+      output: input.draft,
+      expected: input.sourceFacts,
+      client,
+      model: opts.model ?? JUDGE_MODEL,
+    })
+  )
+  return toEvalResult('outreach groundedness', result, opts.threshold ?? 0.5, opts.userId, spanId)
 }
 
 export interface SpecificityInput {
@@ -424,16 +492,18 @@ export async function judgeMatchQuality(
   input: MatchQualityInput,
   opts: JudgeCallOpts = {}
 ): Promise<EvalResult> {
-  const result = await ClosedQA({
-    input: 'Is this match assessment consistent with the job and resume it claims to be scored against?',
-    output: input.verdictSummary,
-    criteria:
-      'Every strength, gap and the overall score is plausibly supported by the job and resume facts given, ' +
-      'with nothing that contradicts them or reads as invented.',
-    client,
-    model: opts.model ?? JUDGE_MODEL,
-  })
-  return toEvalResult('match quality', result, opts.threshold ?? 0.6, opts.userId)
+  const { value: result, spanId } = await runJudge('judge-match-quality', () =>
+    ClosedQA({
+      input: 'Is this match assessment consistent with the job and resume it claims to be scored against?',
+      output: input.verdictSummary,
+      criteria:
+        'Every strength, gap and the overall score is plausibly supported by the job and resume facts given, ' +
+        'with nothing that contradicts them or reads as invented.',
+      client,
+      model: opts.model ?? JUDGE_MODEL,
+    })
+  )
+  return toEvalResult('match quality', result, opts.threshold ?? 0.6, opts.userId, spanId)
 }
 
 export async function judgeSpecificity(
@@ -441,15 +511,17 @@ export async function judgeSpecificity(
   input: SpecificityInput,
   opts: JudgeCallOpts = {}
 ): Promise<EvalResult> {
-  const result = await ClosedQA({
-    input: 'Is this outreach message specific to the named company and role, rather than generic boilerplate?',
-    output: input.draft,
-    criteria:
-      `The message references a concrete, verifiable detail about ${input.companyAndRole} — a named ` +
-      'product, team, technology, or fact drawn from the job post — rather than only generic ' +
-      'enthusiasm that would read the same pasted into an outreach message for a different company.',
-    client,
-    model: opts.model ?? JUDGE_MODEL,
-  })
-  return toEvalResult('outreach specificity', result, opts.threshold ?? 0.6, opts.userId)
+  const { value: result, spanId } = await runJudge('judge-specificity', () =>
+    ClosedQA({
+      input: 'Is this outreach message specific to the named company and role, rather than generic boilerplate?',
+      output: input.draft,
+      criteria:
+        `The message references a concrete, verifiable detail about ${input.companyAndRole} — a named ` +
+        'product, team, technology, or fact drawn from the job post — rather than only generic ' +
+        'enthusiasm that would read the same pasted into an outreach message for a different company.',
+      client,
+      model: opts.model ?? JUDGE_MODEL,
+    })
+  )
+  return toEvalResult('outreach specificity', result, opts.threshold ?? 0.6, opts.userId, spanId)
 }

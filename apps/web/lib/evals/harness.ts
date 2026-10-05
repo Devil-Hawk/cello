@@ -50,6 +50,9 @@ export interface EvalResult {
   n: number
   /** One sentence a human can act on. Always populated, including on refusal. */
   summary: string
+  /** The trace span of the judge call that produced this verdict, so the
+   *  verdict can be attached to it as a Langfuse score. Judged evals only. */
+  spanId?: string
 }
 
 /**

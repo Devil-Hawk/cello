@@ -11,6 +11,7 @@ import { SpanBuffer, type SpanRecord } from '../trace/spans'
 import {
   FLUSH_DEADLINE_MS,
   MAX_OBSERVATIONS_PER_TRACE,
+  MAX_SCORES_PER_TRACE,
   __setLangfuseForTest,
   contentCaptureFor,
   exportTrace,
@@ -23,6 +24,7 @@ import {
   safeName,
   scrubText,
   selectRows,
+  toScore,
   traceSampled,
 } from './langfuse'
 
@@ -586,5 +588,104 @@ describe('delivery', () => {
     Object.defineProperty(bad, 'lf', { get: () => { throw new Error('boom') } })
     await expect(exportTrace(new SpanBuffer('u', null, undefined, { isDemo: false }), [bad])).resolves.toBeUndefined()
     expect(warn.mock.calls.some((c) => String(c[0]).includes('[langfuse] export failed'))).toBe(true)
+  })
+})
+
+describe('judge verdicts as scores', () => {
+  const sink = () => {
+    const created: Record<string, unknown>[] = []
+    return {
+      created,
+      scores: { score: { create: (b: Record<string, unknown>) => void created.push(b) }, flush: vi.fn(async () => undefined) } as never,
+    }
+  }
+  const traceHex = (b: SpanBuffer) => b.traceId.replace(/-/g, '')
+
+  it('a numeric verdict is a NUMERIC score on the judge generation, with trace and observation ids', async () => {
+    const { created, scores } = sink()
+    __setLangfuseForTest({ exporter, scores })
+    const buffer = new SpanBuffer('user-1', null, undefined, { isDemo: false })
+    buffer.addScore({ name: 'outreach_draft.factuality', value: 0.6, verdict: 'pass', spanId: 'judge', rationale: 'ok, grounded', metadata: { subject_id: 'abc-123', threshold: 0.5, model: 'anthropic/claude-haiku-4.5' } })
+    await run(buffer, tree())
+    expect(created).toHaveLength(1)
+    const judge = byName('judge-groundedness')
+    expect(created[0]).toMatchObject({
+      name: 'outreach_draft.factuality',
+      value: 0.6,
+      dataType: 'NUMERIC',
+      traceId: traceHex(buffer),
+      observationId: judge.spanContext().spanId,
+      environment: 'development',
+      comment: 'pass - ok, grounded',
+      metadata: { subject_id: 'abc-123', threshold: 0.5, model: 'anthropic/claude-haiku-4.5' },
+    })
+    expect(String(created[0].id)).toMatch(/^[0-9a-f]{32}$/)
+  })
+
+  it('a refusal (no score) is a CATEGORICAL outcome under its own name, never a made-up number', async () => {
+    const { created, scores } = sink()
+    __setLangfuseForTest({ exporter, scores })
+    const buffer = new SpanBuffer('user-1', null, undefined, { isDemo: false })
+    buffer.addScore({ name: 'match_score.closed_qa', value: null, verdict: 'insufficient-budget', spanId: 'judge' })
+    await run(buffer, tree())
+    expect(created[0]).toMatchObject({ name: 'match_score.closed_qa.outcome', value: 'insufficient-budget', dataType: 'CATEGORICAL' })
+  })
+
+  it('the score id is deterministic, so a replay updates instead of duplicating', () => {
+    const a = toScore({ name: 'x.y', value: 1, verdict: 'pass', spanId: 's1' }, 'a'.repeat(32), 'o1', true)
+    const b = toScore({ name: 'x.y', value: 0, verdict: 'fail', spanId: 's1' }, 'a'.repeat(32), 'o1', true)
+    const c = toScore({ name: 'x.y', value: 1, verdict: 'pass', spanId: 's2' }, 'a'.repeat(32), 'o2', true)
+    expect(a.id).toBe(b.id)
+    expect(a.id).not.toBe(c.id)
+  })
+
+  it('a span that was dropped or is unknown leaves the score on the trace only', async () => {
+    const { created, scores } = sink()
+    __setLangfuseForTest({ exporter, scores })
+    const buffer = new SpanBuffer('user-1', null, undefined, { isDemo: false })
+    buffer.addScore({ name: 'a.b', value: 1, verdict: 'pass', spanId: 'gone' })
+    await run(buffer, tree())
+    expect(created[0]).not.toHaveProperty('observationId')
+    expect(created[0]).toMatchObject({ traceId: traceHex(buffer) })
+  })
+
+  it('rationale text only leaves with content capture on; the secret in it is masked either way', async () => {
+    const s = 'sk-ant-api03-CANARY_abcdefghijklmnop'
+    const on = toScore({ name: 'a.b', value: 1, verdict: 'pass', rationale: `the draft is grounded ${s}` }, 'b'.repeat(32), undefined, true)
+    expect(on.comment).toContain("the draft is grounded")
+    expect(on.comment).not.toContain('CANARY')
+    const off = toScore({ name: 'a.b', value: 1, verdict: 'pass', rationale: `the draft is grounded ${s}` }, 'b'.repeat(32), undefined, false)
+    expect(off.comment).toBe('pass')
+  })
+
+  it('at most 50 scores go out and the rest are counted on the root', async () => {
+    const { created, scores } = sink()
+    __setLangfuseForTest({ exporter, scores })
+    const buffer = new SpanBuffer('user-1', null, undefined, { isDemo: false })
+    for (let i = 0; i < 60; i += 1) buffer.addScore({ name: `s.k${i}`, value: 1, verdict: 'pass', spanId: 'judge' })
+    await run(buffer, tree())
+    expect(created).toHaveLength(MAX_SCORES_PER_TRACE)
+    expect(byName('copilot').attributes['langfuse.trace.metadata.dropped_scores']).toBe('10')
+  })
+
+  it('a sampled-out or unconfigured trace keeps no score at all', () => {
+    vi.stubEnv('LANGFUSE_SAMPLE_RATE', '0')
+    const out = new SpanBuffer('user-1', null, undefined, { isDemo: false })
+    out.addScore({ name: 'a.b', value: 1, verdict: 'pass' })
+    expect(out.scores).toHaveLength(0)
+    vi.unstubAllEnvs()
+    const off = new SpanBuffer('user-1', null, undefined, { isDemo: false })
+    off.addScore({ name: 'a.b', value: 1, verdict: 'pass' })
+    expect(off.scores).toHaveLength(0)
+  })
+
+  it('each score is sent once even when the buffer flushes twice', async () => {
+    const { created, scores } = sink()
+    __setLangfuseForTest({ exporter, scores })
+    const buffer = new SpanBuffer('user-1', null, undefined, { isDemo: false })
+    buffer.addScore({ name: 'a.b', value: 1, verdict: 'pass', spanId: 'judge' })
+    await run(buffer, tree())
+    await run(buffer, [row({ name: 'again', kind: 'graph', span_id: 'again-root' })])
+    expect(created).toHaveLength(1)
   })
 })

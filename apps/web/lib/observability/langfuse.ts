@@ -43,11 +43,12 @@
 //   per-trace caps and the demo defaults below keep Langfuse inside the cap.
 
 import { createHash } from 'node:crypto'
+import type { LangfuseClient } from '@langfuse/client'
 import type { LangfuseSpanProcessor } from '@langfuse/otel'
 import type { Span } from '@opentelemetry/api'
 import type { ReadableSpan, SpanExporter } from '@opentelemetry/sdk-trace-base'
 import { capPayload } from '../graph/journal'
-import type { LfPayload, LfType, SpanBuffer, SpanRecord } from '../trace/spans'
+import type { LfPayload, LfType, PendingScore, SpanBuffer, SpanRecord } from '../trace/spans'
 import { redactString, scrubMetadata } from './scrub'
 
 // --- knobs ---------------------------------------------------------------------
@@ -61,6 +62,7 @@ export const GENERATION_INPUT_CAP_CHARS = 48 * 1024
 /** Cap on structured input/output (tool args, agent IO), in JSON bytes. */
 export const PAYLOAD_CAP_BYTES = 4096
 export const MAX_OBSERVATIONS_PER_TRACE = 400
+export const MAX_SCORES_PER_TRACE = 50
 /** All captured content of one trace together (bounds scrub CPU and POST size). */
 export const TRACE_CONTENT_BUDGET_CHARS = 128 * 1024
 const BUDGET_EXHAUSTED = '[trace content budget exhausted]'
@@ -277,7 +279,7 @@ function toAttributes(r: SpanRecord, budget: Budget, capture: boolean): Attrs {
 function buildTraceAttrs(
   buffer: SpanBuffer,
   rows: SpanRecord[],
-  dropped: number
+  dropped: { observations: number; scores: number }
 ): Record<string, string | string[]> {
   const root = rows.find((r) => !r.parent_span_id) ?? rows[0]
   const name = safeName(buffer.meta.name ?? root.lf?.name ?? root.name)
@@ -290,7 +292,8 @@ function buildTraceAttrs(
   }
   if (buffer.meta.sessionId) attrs['session.id'] = clean(buffer.meta.sessionId, 200)
   const meta: Record<string, string> = { ...buffer.meta.metadata }
-  if (dropped > 0) meta.dropped_observations = String(dropped)
+  if (dropped.observations > 0) meta.dropped_observations = String(dropped.observations)
+  if (dropped.scores > 0) meta.dropped_scores = String(dropped.scores)
   for (const [k, v] of Object.entries(meta)) {
     if (NAME_RE.test(k) && SAFE_META_RE.test(v)) attrs[`langfuse.trace.metadata.${k}`] = v
   }
@@ -330,7 +333,7 @@ export function selectRows(rows: SpanRecord[], cap: number = MAX_OBSERVATIONS_PE
   }
   const important = [
     ...rows.filter((r) => !r.parent_span_id),
-    ...rows.filter((r) => r.kind === 'judge'),
+    ...rows.filter((r) => r.kind === 'judge' || r.lf?.name?.startsWith('judge-')),
     ...rows.filter((r) => r.status === 'error'),
   ]
   for (const r of important) admit(r)
@@ -344,13 +347,18 @@ export function selectRows(rows: SpanRecord[], cap: number = MAX_OBSERVATIONS_PE
 
 // --- init (lazy, Node only, one per instance) ----------------------------------------
 
+/** What a score needs of the client (a test replaces it with a recorder). */
+type ScoreSink = Pick<LangfuseClient, 'flush'> & { score: Pick<LangfuseClient['score'], 'create'> }
+
 interface Lf {
   processor: LangfuseSpanProcessor
   startObservation: StartFn
+  client: ScoreSink
 }
 
 const KEY = Symbol.for('cello.langfuse')
 let testExporter: SpanExporter | undefined
+let testScoreSink: ScoreSink | undefined
 
 type Holder = { [KEY]?: Promise<Lf | null> }
 
@@ -367,15 +375,15 @@ async function getLangfuse(): Promise<Lf | null> {
 }
 
 async function init(): Promise<Lf> {
-  const [{ LangfuseSpanProcessor }, { BasicTracerProvider, AlwaysOnSampler }, tracing] = await Promise.all([
+  const [{ LangfuseSpanProcessor }, { BasicTracerProvider, AlwaysOnSampler }, tracing, { LangfuseClient }] = await Promise.all([
     import('@langfuse/otel'),
     import('@opentelemetry/sdk-trace-base'),
     import('@langfuse/tracing'),
+    import('@langfuse/client'),
   ])
+  const creds = { publicKey: env('LANGFUSE_PUBLIC_KEY'), secretKey: env('LANGFUSE_SECRET_KEY'), baseUrl: env('LANGFUSE_BASE_URL') }
   const processor = new LangfuseSpanProcessor({
-    publicKey: env('LANGFUSE_PUBLIC_KEY'),
-    secretKey: env('LANGFUSE_SECRET_KEY'),
-    baseUrl: env('LANGFUSE_BASE_URL'),
+    ...creds,
     ...(testExporter ? { exporter: testExporter } : {}),
     environment: tracingEnvironment(),
     // The SDK has no Vercel auto-detect (5.11.1 source).
@@ -391,13 +399,18 @@ async function init(): Promise<Lf> {
   const provider = new BasicTracerProvider({ sampler: new AlwaysOnSampler(), spanProcessors: [processor] })
   // Isolated: never provider.register(), Sentry owns the global one.
   tracing.setLangfuseTracerProvider(provider)
-  return { processor, startObservation: tracing.startObservation as unknown as StartFn }
+  return {
+    processor,
+    startObservation: tracing.startObservation as unknown as StartFn,
+    client: testScoreSink ?? new LangfuseClient(creds),
+  }
 }
 
 /** Test seam: drop the singleton and route the next init to `exporter`
  *  (an in-memory exporter), or to the real OTLP exporter when omitted. */
-export function __setLangfuseForTest(opts?: { exporter?: SpanExporter }): void {
+export function __setLangfuseForTest(opts?: { exporter?: SpanExporter; scores?: ScoreSink }): void {
   testExporter = opts?.exporter
+  testScoreSink = opts?.scores
   delete (globalThis as Holder)[KEY]
   tail = Promise.resolve()
   warnedNoContext = false
@@ -405,13 +418,14 @@ export function __setLangfuseForTest(opts?: { exporter?: SpanExporter }): void {
 
 // --- replay ---------------------------------------------------------------------------
 
-async function send(buffer: SpanBuffer, all: SpanRecord[]): Promise<void> {
+async function send(buffer: SpanBuffer, all: SpanRecord[], allScores: PendingScore[]): Promise<void> {
   const lf = await getLangfuse()
   if (!lf) return
   const capture = buffer.captureContent
   const { rows, dropped } = selectRows(all)
   const traceHex = buffer.traceId.replace(/-/g, '')
-  const traceAttrs = buildTraceAttrs(buffer, rows, dropped)
+  const scores = allScores.slice(0, MAX_SCORES_PER_TRACE)
+  const traceAttrs = buildTraceAttrs(buffer, rows, { observations: dropped, scores: allScores.length - scores.length })
   const budget: Budget = { left: TRACE_CONTENT_BUDGET_CHARS }
   const byId = new Map<string, Obs>()
   const rowsById = new Map(rows.map((r) => [r.span_id, r]))
@@ -444,7 +458,31 @@ async function send(buffer: SpanBuffer, all: SpanRecord[]): Promise<void> {
     finalize(o.otelSpan)
     o.end(new Date(r.end_time))
   }
-  await lf.processor.forceFlush()
+  // 3) Scores, attached to the judge generation that produced them (a dropped
+  //    or unknown span leaves the score on the trace).
+  for (const s of scores) lf.client.score.create(toScore(s, traceHex, byId.get(s.spanId ?? '')?.id, capture))
+  // One failing sink never hides the other.
+  await Promise.allSettled([lf.processor.forceFlush(), lf.client.flush()])
+}
+
+/** A judge verdict as a Langfuse score. A numeric verdict is `NUMERIC` 0..1; a
+ *  refusal (no score) is a `CATEGORICAL` outcome under its own name, so one
+ *  score name never holds two data types. Ids are deterministic, so a replay
+ *  of the same verdict updates instead of duplicating. */
+export function toScore(s: PendingScore, traceHex: string, observationId: string | undefined, capture: boolean) {
+  const numeric = typeof s.value === 'number' && Number.isFinite(s.value)
+  const name = numeric ? clean(s.name, 100) : `${clean(s.name, 90)}.outcome`
+  const comment = capture && s.rationale ? clean(`${s.verdict} - ${s.rationale}`, 500) : clean(s.verdict, 100)
+  return {
+    id: createHash('sha256').update(`${traceHex}|${s.spanId ?? ''}|${name}`).digest('hex').slice(0, 32),
+    traceId: traceHex,
+    ...(observationId ? { observationId } : {}),
+    name,
+    ...(numeric ? { value: s.value as number, dataType: 'NUMERIC' as const } : { value: clean(s.verdict, 100), dataType: 'CATEGORICAL' as const }),
+    comment,
+    environment: tracingEnvironment(),
+    metadata: safeMetadata(s.metadata),
+  }
 }
 
 // --- delivery -----------------------------------------------------------------------------
@@ -505,7 +543,10 @@ function deliver(unbounded: () => Promise<void>): Promise<void> {
 export function exportTrace(buffer: SpanBuffer, rows: SpanRecord[]): Promise<void> {
   try {
     if (rows.length === 0 || !buffer.exportEnabled) return Promise.resolve()
-    return deliver(() => send(buffer, rows))
+    // Taken now, not inside the deferred replay, so a later flush of the same
+    // buffer never sends them twice.
+    const scores = buffer.takeScores()
+    return deliver(() => send(buffer, rows, scores))
   } catch (err) {
     console.warn(`[langfuse] export skipped: ${redactString(String(err).slice(0, 300))}`)
     return Promise.resolve()

@@ -62,6 +62,9 @@ export interface WriteVerdictInput {
   rationale?: string | null
   model?: string | null
   tokensUsed?: number | null
+  /** The span of the judge call that produced a model-judged verdict
+   *  (EvalResult.spanId). The Langfuse score attaches to it. */
+  judgeSpanId?: string | null
 }
 
 /** Persist one verdict row. Service-role write — RLS on eval_verdicts is
@@ -90,6 +93,25 @@ export async function writeVerdict(admin: AdminClient, input: WriteVerdictInput)
       userId: input.userId,
       subjectKind: input.subjectKind,
       judge: input.judge,
+    })
+  }
+  // The verdict also becomes a Langfuse score on the judge generation, sent
+  // with the trace's replay (nothing is kept when the trace is not exported).
+  // Deterministic verdicts stay in Postgres: they are code checks, not model
+  // judgments, and each one would cost a unit.
+  if (input.judge !== 'deterministic') {
+    const ctx = currentTraceContext()
+    ctx?.buffer.addScore({
+      name: `${input.subjectKind}.${input.judge}`,
+      value: input.score ?? null,
+      verdict: input.verdict,
+      spanId: input.judgeSpanId ?? ctx.parentSpanId,
+      rationale: input.rationale,
+      metadata: {
+        subject_id: input.subjectId,
+        ...(input.threshold != null ? { threshold: input.threshold } : {}),
+        ...(input.model ? { model: input.model } : {}),
+      },
     })
   }
 }
