@@ -205,6 +205,7 @@ function meteredFetch(
           name: slot?.name ?? 'judge-call',
           type: 'generation',
           model: used?.model ?? requestedModel,
+          modelParameters: requestParamsOf(clamped),
           metadata: { source: 'judge', metered: true },
           ...(used
             ? {
@@ -280,6 +281,21 @@ function requestedModelOf(init: RequestInit | undefined): string {
     return typeof model === 'string' && model ? model : JUDGE_MODEL
   } catch {
     return JUDGE_MODEL
+  }
+}
+
+/** The sampling parameters the judge request actually carried (after the
+ *  max_tokens clamp), for the Langfuse generation. */
+function requestParamsOf(init: RequestInit | undefined): Record<string, number> {
+  if (typeof init?.body !== 'string') return {}
+  try {
+    const body = JSON.parse(init.body) as { temperature?: unknown; max_tokens?: unknown }
+    return {
+      ...(typeof body.temperature === 'number' ? { temperature: body.temperature } : {}),
+      ...(typeof body.max_tokens === 'number' ? { max_tokens: body.max_tokens } : {}),
+    }
+  } catch {
+    return {}
   }
 }
 

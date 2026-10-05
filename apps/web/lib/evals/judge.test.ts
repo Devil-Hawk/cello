@@ -355,6 +355,18 @@ describe('judge calls in Langfuse', () => {
     expect(grounded).toMatchObject({ kind: 'llm', name: 'llm' })
   })
 
+  it('the generation carries the sampling parameters the request actually sent (max_tokens after the clamp)', async () => {
+    configure()
+    globalThis.fetch = vi.fn(async () => classifier('Criterion')) as unknown as typeof fetch
+    const buffer = new SpanBuffer('user-1', null, undefined, { isDemo: false })
+    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
+    await runInTraceContext({ buffer, parentSpanId: 'root', runId: null }, () =>
+      client.chat.completions.create({ model: JUDGE_MODEL, messages: [{ role: 'user', content: 'hi' }], max_tokens: 64000, temperature: 0 })
+    )
+    const [row] = (buffer as unknown as { pending: SpanRecord[] }).pending
+    expect(row.lf?.modelParameters).toEqual({ temperature: 0, max_tokens: 2000 })
+  })
+
   it('an owner trace carries the judge prompt and its answer; a demo trace carries neither', async () => {
     const owner = await judgeBoth(false)
     const lf = owner.rows.find((r) => r.lf?.name === 'judge-groundedness')!.lf!

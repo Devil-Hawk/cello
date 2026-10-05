@@ -170,9 +170,28 @@ Inside a trace the observations nest the way the work did:
   `invalid_args`, `tool_error`).
 - Knowledge search, insight search and memory search are `retriever`
   observations (`retrieve-knowledge`, `search-insights`, `search-memory`) with
-  the query and the hit titles, and the `embedding` observation of the query
-  (`embed-query`) nested under them. Embeddings record counts and sizes only,
-  never the text.
+  the query and the hit titles. The query embedding has no observation of its
+  own (it would show only a count and a size): its tokens and cost are the
+  metadata `embedding_calls`, `embedding_tokens` and `embedding_cost` on the
+  retriever. A separate `embedding` observation exists only for batch work
+  outside a retriever (`embed-chunks` when a document is ingested), and records
+  counts and sizes, never the text.
+- A Copilot memory write is one `save-memory` observation (a `chain`): the
+  `extract-memories` generation nests under it and its embeddings fold into its
+  metadata the same way.
+- A fallback that every caller handles is not an error. No embedding provider
+  (a self-hosted user without an embedding key) or a reached monthly cap leaves
+  the retriever or memory write at the default level, with the metadata
+  `fallback` (`fts-only`, `recency-only`, `no-embedding`), so a level filter on
+  `ERROR` only finds real provider failures.
+- A route that catches a model failure and answers 500 still marks its root:
+  the root observation is `ERROR`, its status message is a short code
+  (`http_500`, or `scoring-failed` where the route names one) and its output is
+  `{ error: code }`.
+- Reasoning text, where a provider returns it (OpenRouter reasoning models), is
+  sent as `thinking: [{ content }]` on the assistant output, the shape Langfuse
+  renders as a Thinking block, masked like any other text. Local CLI backends
+  return no reasoning, so there is none to show.
 - A prompt that lives in `apps/web/prompts/*.md` is the generation's
   `version`: the first 8 hex characters of a SHA-256 of the file, plus the
   metadata `prompt_name` and `prompt_hash`. It changes exactly when the file does,
@@ -188,8 +207,13 @@ match quality, the CV tailor check, distillation) becomes a Langfuse score on
 the judge generation that produced it. A numeric verdict is a `NUMERIC` score
 0 to 1 named `<subject>.<judge>`, for example `outreach_draft.factuality`. A
 refusal (no key, no budget, unjudged) is a `CATEGORICAL` score named
-`<subject>.<judge>.outcome`, so one name never holds two data types. The score
-id is deterministic, so a replay updates instead of duplicating. Deterministic
+`<subject>.<judge>.outcome`, so one name never holds two data types. That
+categorical score is written only when a verdict row is written with no number
+(the outreach judge route on a reached cap, or a draft whose judge failed
+unexpectedly). A draft saved with no judge key at all writes no verdict and so
+no score: its root output and the trace metadata say `judge: skipped` (`ran` and
+`failed` are the other two values), so it is not mistaken for a judged one. The
+score id is deterministic, so a replay updates instead of duplicating. Deterministic
 checks stay in Postgres only. At most 50 scores go out per trace.
 
 Limits per trace: at most 400 observations (the root, errors and judge calls
@@ -210,8 +234,12 @@ visitors alike, so Langfuse can group cost per user. The session id is a
 Copilot conversation id or a graph thread id. Prompt and reply text are sent
 only when capture is on for that trace (see the table above). Saved API keys and
 OAuth tokens are not part of any prompt or span by design, and key-shaped
-strings are redacted anyway. Prompt and reply text are never written to
+strings are redacted anyway. Prompt and reply text from model calls are never written to
 Postgres: they live in memory on the span row and are dropped before the insert.
+The step journal is separate: it keeps capped agent inputs and outputs in
+`trace_spans.attributes` for the run page (about 8KB each), unmasked, and those
+include resume text, the account email, contact names and job descriptions.
+Langfuse never receives them.
 
 With the kill switch off the export still carries names, types, timings, model,
 usage, cost, numeric and id metadata, the error level and a short error code,
@@ -264,14 +292,14 @@ working daily plus about 50 demo sessions at the default demo rate:
 
 | Feature | Units per trace | Per month | Units |
 | --- | --- | --- | --- |
-| `copilot-turn` (root, two retrievers, two embeddings, three plan calls, two tools, one memory write) | 12 | 900 | 10,800 |
+| `copilot-turn` (root, two retrievers, three plan calls, two tools, one memory write and its extraction call) | 11 | 900 | 9,900 |
 | `run-agents` (root, planner, six agents, their calls, two judge calls, two scores) | 23 | 90 | 2,070 |
 | `refresh-jobs`, `autopilot-tick`, `sync-gmail`, `send-digest` | 3 to 42 | 150 | 3,000 |
 | Outreach draft and judge | 8 | 60 | 480 |
 | Other standalone traces | 3 | 400 | 1,200 |
 | Demo sessions at rate 0.25 | 150 | 12 | 1,875 |
 
-That is about 20,000 units, 40% of the cap. Check the real number weekly with
+That is about 19,000 units, 38% of the cap. Check the real number weekly with
 `npx langfuse-cli api metrics get` (observations by `traceName`), and if the
 projection passes 40,000, halve `LANGFUSE_DEMO_SAMPLE_RATE` first, then
 `LANGFUSE_SAMPLE_RATE`. The behaviour at the cap is not documented by Langfuse,
