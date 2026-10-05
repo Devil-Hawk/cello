@@ -469,6 +469,21 @@ describe('healStoredBoard', () => {
     expect(cleared.clearBoardJobs).toHaveBeenCalledWith('a', 'greenhouse')
   })
 
+  it('keeps a board when only its logo page could not be read (a 429 is not "no logo")', async () => {
+    const ghJobs = [{ title: 'Eng', url: 'https://job-boards.greenhouse.io/acme/jobs/1', externalId: 'u', postedAt: MONTH_AGO }]
+    const acme = { id: 'a', name: 'Acme', domain: 'acme.io', career_url: null }
+    route((u) =>
+      u.endsWith('/v1/boards/acme')
+        ? json({ name: 'Acme' })
+        : u === 'https://job-boards.greenhouse.io/acme'
+          ? new Response('slow down', { status: 503, statusText: 'Service Unavailable' })
+          : undefined
+    )
+    const store = { clearBoardJobs: vi.fn() }
+    await expect(healStoredBoard(store, acme, { provider: 'greenhouse', token: 'acme', source: 'probe' }, ghJobs)).resolves.toEqual({ kept: true })
+    expect(store.clearBoardJobs).not.toHaveBeenCalled()
+  })
+
   it('lets a store error through, so the caller changes nothing', async () => {
     route(() => undefined)
     const store = { clearBoardJobs: vi.fn(async () => { throw new Error('rpc missing') }) }
