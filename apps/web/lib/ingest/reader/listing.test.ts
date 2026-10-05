@@ -125,7 +125,9 @@ describe('readListing: every role is confirmed on its own page', () => {
     for (const l of links) routes[l.url] = detail.replace('Art Director', l.title)
     const f = fakeFetcher(routes)
     const read = await readListing('https://www.nytco.com/careers/', [{ url: 'https://www.nytco.com/careers/job-listings/', html: list }], f, { targets: NO_TARGETS, max: 5 })
-    expect(read.jobs).toHaveLength(5)
+    // The first role page names the applicant system, which ends the read: the board is the better source.
+    expect(read.jobs.length).toBeGreaterThan(0)
+    expect(read.jobs.length).toBeLessThanOrEqual(2)
     expect(read.board).toEqual({ provider: 'greenhouse', token: 'thenewyorktimes' })
   })
 

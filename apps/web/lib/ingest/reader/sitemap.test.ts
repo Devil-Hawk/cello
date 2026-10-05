@@ -101,6 +101,21 @@ describe('sitemap tier: only the employer own pages are fetched', () => {
   })
 })
 
+describe('sitemap tier: a role page that names the applicant system ends the read', () => {
+  it('returns the board and stops fetching pages', async () => {
+    const urls = Array.from({ length: 8 }, (_, i) => `https://acme.test/jobs/400000${i}-data-engineer`)
+    const routes: Record<string, string> = {
+      'https://acme.test/robots.txt': 'User-agent: *\nAllow: /\nSitemap: https://acme.test/jobs-sitemap.xml\n',
+      'https://acme.test/jobs-sitemap.xml': `<urlset>${urls.map((u) => `<url><loc>${u}</loc></url>`).join('')}</urlset>`,
+    }
+    for (const u of urls) routes[u] = '<html><head><title>Data Engineer</title></head><body><h1>Data Engineer</h1><a href="https://boards.greenhouse.io/acmeco/jobs/1">Apply</a></body></html>'
+    const f = fakeFetcher(routes)
+    const read = await readSitemapRoles('https://acme.test', f, { targets: NO_TARGETS, skip: new Set(), max: 8 })
+    expect(read.board).toEqual({ provider: 'greenhouse', token: 'acmeco' })
+    expect(f.calls.filter((c) => c.includes('/jobs/4')).length).toBeLessThanOrEqual(2)
+  })
+})
+
 describe('sitemap helpers', () => {
   it('tells a role URL from a policy, department or landing page', () => {
     expect(isPostingUrl('https://www.metacareers.com/profile/job_details/1616812923224613/')).toBe(true)

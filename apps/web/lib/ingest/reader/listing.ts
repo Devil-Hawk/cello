@@ -250,7 +250,8 @@ export async function readListing(
   let board: BoardRef | undefined
   let stopped: ReaderError | null = null
   await mapWithConcurrency(wanted, 2, async (l) => {
-    if (stopped) return
+    // A page that names the applicant system behind the site ends the read: the board is the better source.
+    if (stopped || board) return
     try {
       const res = await f.get(l.url)
       if (!res.ok) return

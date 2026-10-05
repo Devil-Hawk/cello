@@ -151,7 +151,8 @@ export async function readSitemapRoles(
   let board: BoardRef | undefined
   let stopped: ReaderError | null = null
   await mapWithConcurrency(todo, 2, async (e) => {
-    if (stopped) return
+    // A page that names the applicant system behind the site ends the read: the board is the better source.
+    if (stopped || board) return
     const id = normalizeJobUrl(e.url)
     try {
       const res = await f.get(e.url)
