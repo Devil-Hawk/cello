@@ -92,7 +92,7 @@ const redeemCalls = () => fake.rpcCalls.filter((c) => c.fn === 'redeem_access_co
 describe('POST /api/access/redeem: same-origin', () => {
   it('refuses a cross-site POST with the refusal body, before counting or reading anything', async () => {
     fake.state.redeem = PROVISION
-    for (const headers of [
+    for (const headers of <Record<string, string>[]>[
       { 'sec-fetch-site': 'cross-site' },
       { origin: 'https://evil.example', host: 'localhost' },
       {}, // no origin signal at all
