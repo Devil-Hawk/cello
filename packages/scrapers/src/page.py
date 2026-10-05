@@ -28,8 +28,10 @@ its Actions logs, and an exception message can hold the page's address.
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import json
 import logging
+import socket
 import sys
 
 from urllib.parse import urlsplit
@@ -44,14 +46,49 @@ _USER_AGENT = USER_AGENT
 _MAX_BYTES = 5_000_000
 
 
+_MAX_HOPS = 4
+
+
+class UnsafeRedirect(Exception):
+    """A redirect hop that is not a public http(s) address, or that robots.txt closes."""
+
+
+def _is_public(url: str) -> bool:
+    """Is `url` an http(s) address whose host resolves only to public addresses?
+
+    The same rule as lib/security/untrusted.ts on the TypeScript side: loopback,
+    link-local (the cloud metadata address), private and reserved ranges are not
+    read, however a hostname got there.
+    """
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return False
+    try:
+        infos = socket.getaddrinfo(parts.hostname, parts.port or 443, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return False
+    return bool(infos) and all(ipaddress.ip_address(info[4][0]).is_global for info in infos)
+
+
 def _static_get(url: str) -> tuple[str, str]:
-    """A plain request: (html, final_url). Raises on a transport or HTTP error."""
-    with httpx.Client(
-        timeout=20.0, follow_redirects=True, headers={"User-Agent": _USER_AGENT}
-    ) as client:
-        response = client.get(url)
-        response.raise_for_status()
-        return response.text[:_MAX_BYTES], str(response.url)
+    """A plain request: (html, final_url). Raises on a transport or HTTP error.
+
+    Redirects are followed by hand, at most _MAX_HOPS, and every hop is held to
+    the same rules as the first address: a public http(s) host, and a robots.txt
+    that allows the path.
+    """
+    with httpx.Client(timeout=20.0, follow_redirects=False, headers={"User-Agent": _USER_AGENT}) as client:
+        current = url
+        for _ in range(_MAX_HOPS + 1):
+            response = client.get(current)
+            if response.is_redirect and response.headers.get("location"):
+                current = str(httpx.URL(current).join(response.headers["location"]))
+                if not _is_public(current) or not _allowed(current):
+                    raise UnsafeRedirect("redirect refused")
+                continue
+            response.raise_for_status()
+            return response.text[:_MAX_BYTES], str(response.url)
+    raise UnsafeRedirect("too many redirects")
 
 
 def _allowed(url: str, robots: RobotsCache | None = None) -> bool:

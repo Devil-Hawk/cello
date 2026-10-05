@@ -137,3 +137,59 @@ def test_the_robots_check_reads_the_rules_for_the_path_and_query():
     robots = RobotsCache(fetcher=lambda url: (200, "User-agent: *\nDisallow: /results\n"))
     assert _real_allowed("https://acme.example/careers", robots) is True
     assert _real_allowed("https://acme.example/results?q=data", robots) is False
+
+
+def _client_over(handler, monkeypatch):
+    """Make page._static_get talk to `handler` (a MockTransport) instead of the network."""
+    real = httpx.Client
+    monkeypatch.setattr(page.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+
+
+def test_a_redirect_to_an_internal_address_is_refused_and_never_requested(monkeypatch):
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        if request.url.host == "acme.example":
+            return httpx.Response(302, headers={"location": "http://169.254.169.254/latest/meta-data/"})
+        return httpx.Response(200, text="secret")
+
+    _client_over(handler, monkeypatch)
+    monkeypatch.setattr(page, "_allowed", lambda url, robots=None: True)
+    # acme.example is not resolvable offline: treat it as public, leave the metadata address to the real check.
+    real_public = page._is_public
+    monkeypatch.setattr(page, "_is_public", lambda url: True if "acme.example" in url else real_public(url))
+    with pytest.raises(page.UnsafeRedirect):
+        page._static_get("https://acme.example/careers")
+    assert seen == ["https://acme.example/careers"]
+
+
+def test_a_redirect_the_new_hosts_robots_txt_closes_is_refused(monkeypatch):
+    def handler(request):
+        if request.url.host == "acme.example":
+            return httpx.Response(301, headers={"location": "https://boards.example/private"})
+        return httpx.Response(200, text="private")
+
+    _client_over(handler, monkeypatch)
+    monkeypatch.setattr(page, "_is_public", lambda url: True)
+    monkeypatch.setattr(page, "_allowed", lambda url, robots=None: "boards.example" not in url)
+    with pytest.raises(page.UnsafeRedirect):
+        page._static_get("https://acme.example/careers")
+
+
+def test_an_ordinary_redirect_to_a_public_page_is_followed(monkeypatch):
+    def handler(request):
+        if request.url.path == "/careers":
+            return httpx.Response(301, headers={"location": "/en/careers/"})
+        return httpx.Response(200, text="<html>roles</html>")
+
+    _client_over(handler, monkeypatch)
+    monkeypatch.setattr(page, "_is_public", lambda url: True)
+    monkeypatch.setattr(page, "_allowed", lambda url, robots=None: True)
+    html, final = page._static_get("https://acme.example/careers")
+    assert html == "<html>roles</html>" and final == "https://acme.example/en/careers/"
+
+
+def test_only_public_http_addresses_are_read():
+    for url in ("http://127.0.0.1/", "http://169.254.169.254/latest/", "http://10.0.0.5/", "http://[::1]/", "file:///etc/passwd", "ftp://example.com/"):
+        assert page._is_public(url) is False, url
