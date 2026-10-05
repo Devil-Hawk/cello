@@ -53,6 +53,7 @@ import {
 import { rankJobsByTargetTitles, type TitleMatch } from '@/lib/matching/title-rank'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { VisaSignal } from '@/lib/dossier/store'
+import { isTrackedCompany } from '@/lib/companies/watchlist'
 
 const VISA_VALUES = ['all', 'likely', 'unknown', 'unlikely'] as const
 type VisaFilter = (typeof VISA_VALUES)[number]
@@ -75,6 +76,7 @@ interface Company {
   name: string
   logo_url: string | null
   domain: string | null
+  metadata?: unknown
 }
 
 interface Job extends JobRowJob {
@@ -578,6 +580,8 @@ function JobsPageInner() {
   }
 
   const companyIds = useMemo(() => companies.map((c) => c.id), [companies])
+  // The watchlist is what the person added: sourcer leads stay out of the counts and the company filter.
+  const trackedCompanies = useMemo(() => companies.filter(isTrackedCompany), [companies])
   const companyIdsKey = companyIds.join(',')
 
   // One-time load: companies, applications (for "in pipeline"), visa dossiers,
@@ -598,7 +602,7 @@ function JobsPageInner() {
     }
 
     const [companiesRes, applicationsRes, dossiersRes, safePrefs] = await Promise.all([
-      supabase.from('companies').select('id, name, logo_url, domain').eq('user_id', user.id).order('name'),
+      supabase.from('companies').select('id, name, logo_url, domain, metadata').eq('user_id', user.id).order('name'),
       supabase.from('applications').select('job_id').eq('user_id', user.id),
       untyped.from('company_dossiers').select('company_id, sponsors_visa').eq('user_id', user.id),
       // Never supabase.from('profiles').select('preferences') here: that returns
@@ -1172,8 +1176,8 @@ function JobsPageInner() {
         <EmptyState
           icon={Briefcase}
           title="No jobs discovered yet"
-          body={`Cello checks your ${companies.length} ${
-            companies.length === 1 ? 'company' : 'companies'
+          body={`Cello checks your ${trackedCompanies.length} ${
+            trackedCompanies.length === 1 ? 'company' : 'companies'
           } hourly — or refresh now to fetch open roles.`}
           action={<RefreshJobsButton onRefreshed={refreshAll} />}
         />
@@ -1184,7 +1188,7 @@ function JobsPageInner() {
             onFreshnessChange={(v) => setParam('fresh', v)}
             includeUndated={includeUndated}
             onIncludeUndatedChange={(v) => setParam('undated', v ? '1' : '')}
-            companies={companies}
+            companies={trackedCompanies}
             selectedCompany={selectedCompany}
             onCompanyChange={(id) => setParam('company', id)}
             locationQuery={locationQuery}

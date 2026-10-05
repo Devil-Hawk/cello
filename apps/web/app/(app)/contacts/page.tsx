@@ -1,5 +1,6 @@
 'use client'
 
+import { trackedOnly } from '@/lib/companies/watchlist'
 import { useEffect, useMemo, useState } from 'react'
 import { Building2, ChevronDown, ChevronRight, FileWarning, Plus, Upload, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -84,11 +85,9 @@ export default function ContactsPage() {
       setContacts((contactsData ?? []) as Contact[])
 
       // Fetch companies for dropdown
-      const { data: companiesData, error: companiesError } = await supabase
-        .from('companies')
-        .select('id, name, logo_url')
-        .eq('user_id', user.id)
-        .order('name')
+      const { data: companiesData, error: companiesError } = await trackedOnly(
+        supabase.from('companies').select('id, name, logo_url').eq('user_id', user.id)
+      ).order('name')
 
       if (companiesError) {
         setLoadError("Couldn't load your companies. Check your connection and try again.")
