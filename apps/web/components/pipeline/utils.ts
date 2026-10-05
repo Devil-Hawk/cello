@@ -1,10 +1,11 @@
 /*
  * Shared pipeline types + status logic.
- * The three legacy warning systems (ghost icon, follow-up bubble, coach chip)
+ * The three legacy warning systems (ghost icon, follow-up bubble, follow-up chip)
  * collapse into ONE alert: amber "Follow up" / red "Ghosted?".
  */
 
 import { GHOST_THRESHOLDS } from '@cello/shared'
+import { FOLLOW_UP_TIMING } from '@/lib/pipeline/follow-up'
 
 export interface ApplicationWithJob {
   id: string
@@ -29,14 +30,6 @@ export interface ApplicationWithJob {
   }
 }
 
-/** Coach follow-up timing thresholds by stage (days since last update). */
-export const FOLLOW_UP_TIMING: Record<string, { min: number; max: number }> = {
-  applied: { min: 5, max: 7 }, // 5-7 days after applying
-  screen: { min: 3, max: 5 }, // 3-5 days after screen
-  interview: { min: 1, max: 2 }, // 1-2 days after interview (thank you)
-  offer: { min: 2, max: 3 }, // 2-3 days to respond
-}
-
 export function getDaysSinceUpdate(updatedAt: string): number {
   const diff = Math.abs(Date.now() - new Date(updatedAt).getTime())
   return Math.floor(diff / (1000 * 60 * 60 * 24))
@@ -51,7 +44,7 @@ export interface PipelineAlert {
 
 /**
  * Single alert per application: red "Ghosted?" past GHOST_THRESHOLDS.GHOSTED,
- * amber "Follow up" when the coach timing or ghost warning thresholds hit.
+ * amber "Follow up" when the follow-up timing or ghost warning thresholds hit.
  */
 export function getPipelineAlert(app: ApplicationWithJob): PipelineAlert | null {
   const days = getDaysSinceUpdate(app.updated_at)

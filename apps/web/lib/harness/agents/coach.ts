@@ -20,6 +20,7 @@
 
 import type { AgentFn, LlmRunner } from '../types'
 import { CoachInput } from '../schemas'
+import { followUpStep } from '@/lib/pipeline/follow-up'
 import type { PipelineStage } from '@cello/shared'
 
 interface ApplicationRow {
@@ -35,100 +36,6 @@ interface JobRow {
   id: string
   title: string | null
   company_id: string | null
-}
-
-// --- timing (packages/agents/src/coach/timing.ts) ---------------------------
-
-type FollowUpStage = 'applied' | 'screen' | 'interview' | 'offer'
-
-function isFollowUpStage(stage: PipelineStage): stage is FollowUpStage {
-  return ['applied', 'screen', 'interview', 'offer'].includes(stage)
-}
-
-interface FollowUpTiming {
-  minDays: number
-  maxDays: number
-  suggestion: string
-}
-
-/** Follow-up timing configuration by stage — best-practice windows for job
- *  application follow-ups. Verbatim from packages/agents/src/coach/timing.ts. */
-const FOLLOW_UP_TIMINGS: Record<FollowUpStage, FollowUpTiming> = {
-  applied: {
-    minDays: 5,
-    maxDays: 7,
-    suggestion: 'Check on application status with a brief, professional inquiry',
-  },
-  screen: {
-    minDays: 3,
-    maxDays: 5,
-    suggestion: 'Send thank you note and reiterate your interest in the role',
-  },
-  interview: {
-    minDays: 1,
-    maxDays: 2,
-    suggestion: 'Send thank you note and ask about next steps in the process',
-  },
-  offer: {
-    minDays: 2,
-    maxDays: 3,
-    suggestion: 'Follow up with questions about the offer or negotiation points',
-  },
-}
-
-/** Returns null for stages that don't support a follow-up. */
-function getFollowUpTiming(stage: PipelineStage): FollowUpTiming | null {
-  if (!isFollowUpStage(stage)) return null
-  return FOLLOW_UP_TIMINGS[stage]
-}
-
-function daysSince(date: Date | null): number {
-  if (!date) return 0
-  const diffTime = Math.abs(Date.now() - date.getTime())
-  return Math.floor(diffTime / (1000 * 60 * 60 * 24))
-}
-
-function shouldSuggestFollowUp(stage: PipelineStage, lastActivityDate: Date | null): boolean {
-  if (!lastActivityDate) return false
-  const timing = getFollowUpTiming(stage)
-  if (!timing) return false
-  return daysSince(lastActivityDate) >= timing.minDays
-}
-
-/** Human-readable suggestion based on stage and elapsed time. */
-function getTimingSuggestion(stage: PipelineStage, daysSinceActivity: number): string {
-  const timing = getFollowUpTiming(stage)
-  if (!timing) return 'No follow-up needed for this stage.'
-
-  const urgency =
-    daysSinceActivity < timing.minDays ? 'none' : daysSinceActivity <= timing.maxDays ? 'suggested' : 'urgent'
-
-  switch (stage) {
-    case 'applied':
-      return urgency === 'none'
-        ? `It's only been ${daysSinceActivity} days since you applied. Wait until day ${timing.minDays} to follow up.`
-        : `It's been ${daysSinceActivity} days since you applied. Consider sending a brief follow up to check on your application status.`
-    case 'screen':
-      return urgency === 'none'
-        ? `It's been ${daysSinceActivity} days since your screen. Wait a bit longer before following up.`
-        : `It's been ${daysSinceActivity} days since your screen. Send a thank you note and reiterate your interest.`
-    case 'interview':
-      return urgency === 'none'
-        ? `It's been ${daysSinceActivity} days since your interview. Consider sending a thank you note soon.`
-        : `It's been ${daysSinceActivity} days since your interview. Send a thank you note and ask about next steps.`
-    case 'offer':
-      return urgency === 'none'
-        ? `It's been ${daysSinceActivity} days since receiving the offer. Take time to review it carefully.`
-        : `It's been ${daysSinceActivity} days since receiving the offer. Follow up with any questions about the offer or negotiation.`
-    default:
-      return timing.suggestion
-  }
-}
-
-/** Uses appliedAt as the baseline activity date (proxy for last activity —
- *  a more complete implementation would track actual email/interview dates). */
-function getLastActivityDate(application: { appliedAt: Date | null; updatedAt: Date }): Date | null {
-  return application.appliedAt
 }
 
 // --- message generation (packages/agents/src/coach/{templates,message-
@@ -548,19 +455,13 @@ export const coach: AgentFn = async (ctx) => {
   // exist, same as packages/agents/src/coach/index.ts did.
   const suggestedContacts = contactRows.map((c) => c.name)
 
-  const lastActivity = getLastActivityDate({
-    appliedAt: application.applied_at ? new Date(application.applied_at) : null,
-    updatedAt: new Date(application.updated_at),
-  })
-  const days = daysSince(lastActivity)
   const stage = application.stage as PipelineStage
-  const timing = getFollowUpTiming(stage)
-  const willFollowUp = shouldSuggestFollowUp(stage, lastActivity)
+  const { due, days, suggestion } = followUpStep(
+    stage,
+    application.applied_at ? new Date(application.applied_at) : null
+  )
 
-  if (!willFollowUp) {
-    const suggestion = timing
-      ? `It's too soon to follow up. Wait until day ${timing.minDays} since applying (currently day ${days}).`
-      : 'No follow-up action needed at this stage.'
+  if (!due) {
     return {
       output: {
         applicationId: application.id,
@@ -572,7 +473,6 @@ export const coach: AgentFn = async (ctx) => {
     }
   }
 
-  const suggestion = getTimingSuggestion(stage, days)
   const messageType = suggestedMessageType(application.stage, days)
   const messageContext: MessageContext = {
     userName,
