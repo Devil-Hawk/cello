@@ -21,7 +21,8 @@ import { runUnitOnce } from '@/lib/graph/oneshot'
 import { BudgetCapError } from '@/lib/harness/spend'
 import { CoachOutput } from '@/lib/harness/schemas'
 import type { z } from 'zod'
-import { setTraceInput, setTraceOutput, withTrace } from '@/lib/trace/spans'
+import { setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
+import { traceJobInput } from '@/lib/trace/job-input'
 
 type CoachResult = z.infer<typeof CoachOutput>
 
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
     // it needs off it) via the admin client, scoped by the SAME user_id.
     const { data: application, error: appError } = await supabase
       .from('applications')
-      .select('id')
+      .select('id, job_id')
       .eq('id', applicationId)
       .eq('user_id', user.id)
       .single()
@@ -52,7 +53,8 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = createAdminClient()
-    setTraceInput({ applicationId })
+    setTraceMeta({ application_id: applicationId })
+    if (application.job_id) await traceJobInput(supabase, application.job_id)
 
     try {
       const result = await runUnitOnce('coach', {

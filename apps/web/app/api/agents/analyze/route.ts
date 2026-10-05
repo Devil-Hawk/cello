@@ -21,7 +21,8 @@ import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { runUnitOnce } from '@/lib/graph/oneshot'
 import { AnalystError, type AnalystErrorCode } from '@/lib/harness/agents/analyst'
 import { BudgetCapError } from '@/lib/harness/spend'
-import { setTraceInput, setTraceOutput, withTrace } from '@/lib/trace/spans'
+import { setTraceOutput, withTrace } from '@/lib/trace/spans'
+import { traceJobInput } from '@/lib/trace/job-input'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -75,7 +76,7 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = createAdminClient()
-    setTraceInput({ jobId })
+    await traceJobInput(supabase, jobId)
 
     try {
       const result = await runUnitOnce('analyst', {

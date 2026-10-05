@@ -26,7 +26,7 @@ import { optimizeResume } from '@/lib/harness/agents/resume_optimizer'
 import { callLlm, MissingKeyError } from '@/lib/harness/llm'
 import { canRunLlm, missingOpenRouterMessage } from '@/lib/harness/llm-key-message'
 import type { DecryptedApiKeys, LlmRunner } from '@/lib/harness/types'
-import { setTraceInput, setTraceOutput, withTrace } from '@/lib/trace/spans'
+import { setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
     }
     if (!jobId) return NextResponse.json({ error: 'jobId is required' }, { status: 400 })
-    setTraceInput({ jobId })
+    setTraceMeta({ job_id: jobId })
 
     const admin = createAdminClient()
 
@@ -99,6 +99,7 @@ export async function POST(request: NextRequest) {
 
     const companyRel = (job as { companies?: { name?: string } | { name?: string }[] | null }).companies
     const companyName = Array.isArray(companyRel) ? companyRel[0]?.name : companyRel?.name
+    setTraceInput({ jobTitle: job.title, companyName: companyName ?? null })
 
     // PROVIDER GATE ALIGNMENT: the harness only ever calls OpenRouter — gate on
     // canRunLlm(apiKeys), and explain the gap when the account has an

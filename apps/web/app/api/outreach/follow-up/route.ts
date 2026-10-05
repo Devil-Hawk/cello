@@ -12,7 +12,7 @@ import { followUpWindowElapsed } from '@/lib/outreach/guardrails'
 import { threadHasReply } from '@/lib/outreach/gmail'
 import type { OutreachDraftInput } from '@/lib/harness/agents/outreach'
 import { runUnitOnce } from '@/lib/graph/oneshot'
-import { setTraceInput, setTraceOutput, withTrace } from '@/lib/trace/spans'
+import { setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
     }
     if (!parentId) return NextResponse.json({ error: 'parentId is required' }, { status: 400 })
-    setTraceInput({ parentId })
+    setTraceMeta({ parent_id: parentId })
 
     const admin = createAdminClient()
     const parent = await getOutreach(admin, user.id, parentId)
@@ -93,6 +93,8 @@ export async function POST(request: NextRequest) {
       if (company) companyName = company.name
     }
 
+    setTraceInput({ jobTitle, companyName })
+
     const { data: profile } = await supabase
       .from('profiles')
       .select('full_name, resume_text')
@@ -138,7 +140,8 @@ export async function POST(request: NextRequest) {
         kind: 'follow_up',
         parent_id: parentId,
       })
-      setTraceOutput({ messageId: row.id, usedLlm })
+      setTraceMeta({ message_id: row.id })
+      setTraceOutput({ subject: draft.subject, usedLlm })
       return NextResponse.json({ ok: true, message: row, usedLlm })
     } catch (e) {
       return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed to save follow-up' }, { status: 500 })

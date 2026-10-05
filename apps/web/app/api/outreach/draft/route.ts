@@ -13,7 +13,7 @@ import { verifyOutreachDraft } from '@/lib/graph/verify/outreach'
 import { writeVerdict } from '@/lib/evals/verdicts'
 import { recordDemoEvent } from '@/lib/access/session'
 import { buildOutreachContext } from '@/lib/context/assemble'
-import { setTraceInput, setTraceOutput, withTrace } from '@/lib/trace/spans'
+import { setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
     }
     if (!contactId) return NextResponse.json({ error: 'contactId is required' }, { status: 400 })
-    setTraceInput({ contactId, jobId })
+    setTraceMeta({ contact_id: contactId, ...(jobId ? { job_id: jobId } : {}) })
 
     // Contact (must be the user's own, and reachable by email).
     const { data: contact } = await supabase
@@ -159,6 +159,9 @@ export async function POST(request: NextRequest) {
       .single()
     const userName = profile?.full_name || user.email?.split('@')[0] || 'Me'
     const userEmail = user.email || ''
+
+    // What a reviewer needs at a glance in Langfuse (the ids are in the trace metadata).
+    setTraceInput({ jobTitle, companyName })
 
     const relationshipContext = await buildOutreachContext(admin, user.id, contactId, companyId)
 
@@ -304,7 +307,10 @@ export async function POST(request: NextRequest) {
       request.headers
     )
 
-    setTraceOutput({ messageId: row.id, usedLlm, verdicts: verdicts.map((v) => ({ name: v.name, verdict: v.verdict, score: v.score })) })
+    // A draft sent without a judge key looks like a judged one unless it says so.
+    const judge = judgeUnavailable ? 'failed' : verdicts.length > 0 ? 'ran' : 'skipped'
+    setTraceMeta({ message_id: row.id, judge })
+    setTraceOutput({ subject: draft.subject, usedLlm, judge, verdicts: verdicts.map((v) => ({ name: v.name, verdict: v.verdict, score: v.score })) })
     return NextResponse.json({ ok: true, message: row, usedLlm })
   })
 }

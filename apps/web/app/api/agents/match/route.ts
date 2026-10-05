@@ -7,7 +7,7 @@ import { scoreJobWithLlm, buildMatchDetails } from '@/lib/harness/agents/matcher
 import { canRunLlm, missingOpenRouterMessage } from '@/lib/harness/llm-key-message'
 import type { LlmRunner } from '@/lib/harness/types'
 import type { Database, Json } from '@cello/shared'
-import { setTraceInput, setTraceOutput, withTrace } from '@/lib/trace/spans'
+import { setTraceError, setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
 
 type ProfileRow = Database['public']['Tables']['profiles']['Row']
 type JobRow = Database['public']['Tables']['jobs']['Row']
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
     if (!jobId) {
       return NextResponse.json({ error: 'jobId is required' }, { status: 400 })
     }
-    setTraceInput({ jobId })
+    setTraceMeta({ job_id: jobId })
 
     const { data: profile } = await supabase
       .from('profiles')
@@ -97,6 +97,8 @@ export async function POST(request: NextRequest) {
 
     const companies = typedJob.companies
     const companyName = Array.isArray(companies) ? companies[0]?.name : companies?.name
+    // What a reviewer needs at a glance in Langfuse, not a bare uuid.
+    setTraceInput({ jobTitle: typedJob.title, companyName: companyName ?? null })
 
     try {
       const llm: LlmRunner = (opts) => callLlm(apiKeys, { ...opts, name: opts.name ?? 'score-job-match' })
@@ -121,7 +123,7 @@ export async function POST(request: NextRequest) {
         .update({ match_score: verdict.score, match_details: matchDetails as unknown as Json })
         .eq('id', jobId)
 
-      setTraceOutput({ score: verdict.score })
+      setTraceOutput({ score: verdict.score, seniorityFit: verdict.seniorityFit })
       return NextResponse.json(matchDetails)
     } catch (error) {
       if (error instanceof MissingKeyError) {
@@ -131,6 +133,7 @@ export async function POST(request: NextRequest) {
         )
       }
       console.error('Match error:', error)
+      setTraceError('scoring-failed')
       return NextResponse.json(
         {
           error: error instanceof Error ? error.message : 'Failed to match job',

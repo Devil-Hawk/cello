@@ -21,7 +21,7 @@ import { getOutreach } from '@/lib/outreach/store'
 import { meteredJudgeClient, judgeGroundedness, judgeSpecificity, JUDGE_MODEL } from '@/lib/evals/judge'
 import { writeVerdict } from '@/lib/evals/verdicts'
 import { assertWithinBudget, BudgetCapError } from '@/lib/harness/spend'
-import { setTraceInput, setTraceOutput, withTrace } from '@/lib/trace/spans'
+import { setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
 
 export const dynamic = 'force-dynamic'
 // Two short classification calls (a few hundred tokens each) — seconds, not
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
     }
     if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
-    setTraceInput({ outreachId: id })
+    setTraceMeta({ outreach_id: id })
 
     const admin = createAdminClient()
     // getOutreach scopes by user_id — an id from the client is not proof of
@@ -97,6 +97,7 @@ export async function POST(request: NextRequest) {
         .single()
       if (company) companyName = company.name
     }
+    setTraceInput({ jobTitle, companyName, subject: message.subject })
 
     const { data: profile } = await supabase
       .from('profiles')

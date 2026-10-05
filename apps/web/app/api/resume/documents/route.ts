@@ -32,7 +32,7 @@
 // though we read/write through the service-role admin client.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { withTrace } from '@/lib/trace/spans'
+import { setTraceInput, withTrace } from '@/lib/trace/spans'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { loadApiKeys } from '@/lib/harness/keys'
@@ -301,7 +301,7 @@ export async function POST(request: NextRequest) {
 
   switch (body.action) {
     case 'generate':
-      return withTrace(admin, user.id, { name: 'generate-resume-document', input: { jobId: body.jobId } }, () =>
+      return withTrace(admin, user.id, { name: 'generate-resume-document', metadata: { job_id: String(body.jobId ?? '').slice(0, 64) } }, () =>
         handleGenerate(admin, supabase, user.id, body, request.headers)
       )
     case 'save':
@@ -371,6 +371,7 @@ async function handleGenerate(
 
   const companyRel = (job as { companies?: { name?: string } | { name?: string }[] | null }).companies
   const companyName = Array.isArray(companyRel) ? companyRel[0]?.name : companyRel?.name
+  setTraceInput({ jobTitle: job.title, companyName: companyName ?? null })
 
   const apiKeys = await loadApiKeys(admin, userId)
   if (!canRunLlm(apiKeys)) {
