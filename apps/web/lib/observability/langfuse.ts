@@ -42,7 +42,7 @@
 //   has no such cap and is written regardless. The sampling knobs, the
 //   per-trace caps and the demo defaults below keep Langfuse inside the cap.
 
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import type { LangfuseClient } from '@langfuse/client'
 import type { LangfuseSpanProcessor } from '@langfuse/otel'
 import type { Span } from '@opentelemetry/api'
@@ -407,6 +407,33 @@ export function selectRows(rows: SpanRecord[], cap: number = MAX_OBSERVATIONS_PE
   return { rows: kept, dropped: rows.length - kept.length }
 }
 
+// --- observation ids -----------------------------------------------------------------
+
+/**
+ * The Langfuse observation id for a trace_spans span: the first 16 hex digits
+ * of the span's UUID. The replay hands this id to the tracer (see
+ * `pendingObservationId`), so any row written in the same request can name the
+ * generation that produced it, and a score sent days later still lands on it.
+ */
+export function observationIdFor(spanId: string): string {
+  const hex = spanId.replace(/-/g, '').toLowerCase()
+  if (/^[0-9a-f]{16,}$/.test(hex) && /[1-9a-f]/.test(hex.slice(0, 16))) return hex.slice(0, 16)
+  return createHash('sha256').update(spanId).digest('hex').slice(0, 16)
+}
+
+/** Set just before each startObservation (a synchronous call) and consumed by
+ *  the provider's id generator. Unset means a random id, as before. */
+let pendingObservationId: string | undefined
+
+const idGenerator = {
+  generateTraceId: () => randomBytes(16).toString('hex'),
+  generateSpanId: () => {
+    const id = pendingObservationId
+    pendingObservationId = undefined
+    return id ?? randomBytes(8).toString('hex')
+  },
+}
+
 // --- init (lazy, Node only, one per instance) ----------------------------------------
 
 /** What a score needs of the client (a test replaces it with a recorder). */
@@ -461,6 +488,7 @@ async function init(): Promise<Lf> {
   })
   const provider = new BasicTracerProvider({
     sampler: new AlwaysOnSampler(),
+    idGenerator,
     spanProcessors: [processor],
     // A meaningful service name instead of unknown_service:/usr/local/bin/node.
     resource: resourceFromAttributes({ 'service.name': 'cello-web' }),
@@ -509,11 +537,13 @@ async function send(buffer: SpanBuffer, all: SpanRecord[], allScores: PendingSco
       : { traceId: traceHex, spanId: traceHex.slice(16), traceFlags: 1 }
     // Top-level startObservation, NOT parent.startObservation(): the child
     // method drops startTime (5.11.1).
+    pendingObservationId = observationIdFor(r.span_id)
     const obs = lf.startObservation(safeName(r.lf?.name ?? r.name), toAttributes(r, budget, capture), {
       asType: typeOf(r),
       startTime: new Date(r.start_time),
       parentSpanContext,
     })
+    pendingObservationId = undefined
     obs.otelSpan.setAttributes(traceAttrs)
     byId.set(r.span_id, obs)
     return obs
@@ -550,6 +580,60 @@ export function toScore(s: PendingScore, traceHex: string, observationId: string
     comment,
     environment: tracingEnvironment(),
     metadata: safeMetadata(s.metadata),
+  }
+}
+
+// --- outcome scores ------------------------------------------------------------------
+
+/** What a person did with something Cello produced (lib/quality/feedback.ts),
+ *  sent as a score on the trace and generation that produced it. */
+export interface OutcomeScore {
+  /** Deterministic, so a resend updates the same score. */
+  id: string
+  /** 32 hex. */
+  traceId: string
+  /** 16 hex, when known. */
+  observationId?: string
+  /** Named after the behaviour: draft_approved, draft_edited, ... */
+  name: string
+  value: number
+  dataType: 'BOOLEAN' | 'NUMERIC'
+  comment?: string
+}
+
+/**
+ * Send outcome scores. True when Langfuse accepted the batch for sending,
+ * false when it is not configured or the send failed (the caller keeps its rows
+ * pending and tries again later). Waits for the flush, up to FLUSH_DEADLINE_MS
+ * longer than a replay would, because a cron has nothing else to do.
+ */
+export async function sendScores(scores: OutcomeScore[]): Promise<boolean> {
+  if (scores.length === 0) return true
+  if (!langfuseConfigured()) return false
+  try {
+    const lf = await getLangfuse()
+    if (!lf) return false
+    const env = tracingEnvironment()
+    for (const sc of scores) {
+      lf.client.score.create({
+        id: sc.id,
+        traceId: sc.traceId,
+        ...(sc.observationId ? { observationId: sc.observationId } : {}),
+        name: clean(sc.name, 100),
+        value: sc.value,
+        dataType: sc.dataType,
+        ...(sc.comment ? { comment: clean(sc.comment, 200) } : {}),
+        environment: env,
+      })
+    }
+    await Promise.race([
+      lf.client.flush(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('score flush timed out')), 10_000).unref()),
+    ])
+    return true
+  } catch (err) {
+    console.warn(`[langfuse] score send failed: ${redactString(String(err).slice(0, 300))}`)
+    return false
   }
 }
 
