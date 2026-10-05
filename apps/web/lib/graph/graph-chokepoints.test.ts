@@ -523,3 +523,50 @@ describe('trace_spans has exactly its two known writers', () => {
     ).toEqual([])
   })
 })
+
+// ---------------------------------------------------------------------------
+// Langfuse has exactly one importer
+// ---------------------------------------------------------------------------
+//
+// The SDK is reached only through lib/observability/langfuse.ts, which owns the
+// no-op gate, the masking layers and the delivery rules. A second file that
+// imported `@langfuse/*` or called startObservation( would be a way around all
+// three, so it is a scan failure, not a quiet addition.
+
+const LANGFUSE_IMPORT = /from\s+['"]@langfuse\/|import\(\s*['"]@langfuse\/|require\(\s*['"]@langfuse\/|['"]langfuse['"]/
+const START_OBSERVATION_CALL = /\bstartObservation\(|\bstartActiveObservation\(/
+const LANGFUSE_SINGLE_IMPORTER = 'lib/observability/langfuse.ts'
+
+function bypassesLangfuseGate(src: string): boolean {
+  const code = stripComments(src)
+  return LANGFUSE_IMPORT.test(code) || START_OBSERVATION_CALL.test(code)
+}
+
+describe('@langfuse/* has exactly one importer', () => {
+  it('detects an import and a startObservation call (fixture self-test, not a repo file)', () => {
+    expect(bypassesLangfuseGate(`import { startObservation } from '@langfuse/tracing'`)).toBe(true)
+    expect(bypassesLangfuseGate(`const m = await import('@langfuse/otel')`)).toBe(true)
+    expect(bypassesLangfuseGate(`const o = startObservation('x', {}, { asType: 'span' })`)).toBe(true)
+    expect(bypassesLangfuseGate(`import { Langfuse } from 'langfuse'`)).toBe(true)
+  })
+
+  it('a comment that mentions the SDK is not accused', () => {
+    expect(bypassesLangfuseGate(`// uses @langfuse/tracing startObservation( under the hood`)).toBe(false)
+  })
+
+  it('only lib/observability/langfuse.ts imports @langfuse/* or calls startObservation(', () => {
+    const files = walk(WEB_ROOT, isSourceFile)
+    expect(files.length).toBeGreaterThan(50)
+    const offenders: string[] = []
+    for (const file of files) {
+      const filePath = rel(file)
+      if (filePath === LANGFUSE_SINGLE_IMPORTER) continue
+      if (bypassesLangfuseGate(readFileSync(file, 'utf8'))) offenders.push(filePath)
+    }
+    expect(
+      offenders,
+      `These files reach Langfuse outside lib/observability/langfuse.ts, skipping its ` +
+        `no-op gate, masking and delivery rules:\n  ${offenders.join('\n  ')}`
+    ).toEqual([])
+  })
+})

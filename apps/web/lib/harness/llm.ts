@@ -29,15 +29,14 @@
 
 import pRetry from 'p-retry'
 import type { DecryptedApiKeys, LlmResult, LlmRunOptions } from './types'
-import { assertWithinBudget, estimateCostUsd, recordSpend } from './spend'
+import { assertWithinBudget, estimateCostDetails, estimateCostUsd, hasListedPrice, recordSpend } from './spend'
 import { createAdminClient } from './supabase-admin'
 import { resolveProviderId, MissingKeyError } from './providers'
 import { callOpenRouter, DEFAULT_MODEL } from './providers/openrouter'
 import { callLocalCli } from './providers/local-cli'
 import { callLocalServer } from './providers/local-server'
 import { isTransient } from '../util/retry'
-import { acquireSpanScope, withSpan, type SpanContent } from '../trace/spans'
-import { langfuseCaptureEnabled } from '../observability/langfuse'
+import { acquireSpanScope, withSpan, type LfPayload } from '../trace/spans'
 import {
   EMBEDDING_MODEL,
   EMBEDDING_DIMS,
@@ -65,16 +64,63 @@ export {
 export { DEFAULT_MODEL }
 export { EMBEDDING_MODEL, EMBEDDING_DIMS, testEmbedding }
 
-/** The request as the model sees it (system, then messages or the prompt),
- *  plus the completion. Held in memory on the span row for the Langfuse mirror
- *  only: flush() strips it before the Postgres insert, and langfuse.ts
- *  redacts and caps it before it leaves the process. */
-function spanContent(opts: LlmRunOptions, completion: string | undefined): SpanContent {
-  const input: NonNullable<SpanContent['input']> = []
+/** The request as the model sees it (system, then messages or the prompt).
+ *  Held in memory on the span record for the Langfuse export only: flush()
+ *  strips it before the Postgres insert, and langfuse.ts redacts and caps it
+ *  before it leaves the process. Built only when content capture is on. */
+function requestMessages(opts: LlmRunOptions): { role: string; content: string }[] {
+  const input: { role: string; content: string }[] = []
   if (opts.system) input.push({ role: 'system', content: opts.system })
   if (opts.messages && opts.messages.length > 0) input.push(...opts.messages.map((m) => ({ role: m.role, content: m.content })))
   else if (opts.prompt) input.push({ role: 'user', content: opts.prompt })
-  return { input, output: completion }
+  return input
+}
+
+/** The Langfuse generation for one callLlm: model, parameters, usage, cost
+ *  and (capture on) the prompt and the reply. Cost comes from OUR price
+ *  table. Unmetered backends (local CLI, local server) get explicit zeros so
+ *  Langfuse does not infer a price from its own model table. */
+function generationPayload(
+  opts: LlmRunOptions,
+  provider: string,
+  metered: boolean,
+  capture: boolean,
+  result: LlmResult | undefined
+): LfPayload {
+  const modelParameters: Record<string, string | number> = {}
+  if (opts.maxTokens !== undefined) modelParameters.max_tokens = opts.maxTokens
+  if (opts.temperature !== undefined) modelParameters.temperature = opts.temperature
+  if (opts.json !== undefined) modelParameters.json = opts.json ? 'true' : 'false'
+  if (opts.reasoning) modelParameters.reasoning_effort = opts.reasoning.effort
+  const lf: LfPayload = {
+    name: opts.name ?? 'call-llm',
+    type: 'generation',
+    modelParameters,
+    metadata: { provider, metered },
+    ...(capture ? { input: requestMessages(opts) } : {}),
+  }
+  if (!result) return lf
+  return {
+    ...lf,
+    model: result.model,
+    usage: { input: result.promptTokens, output: result.completionTokens, total: result.tokensUsed },
+    cost: metered ? estimateCostDetails(result.model, result.promptTokens, result.completionTokens) : { input: 0, output: 0 },
+    metadata: {
+      ...lf.metadata,
+      ...(result.finishReason ? { finish_reason: result.finishReason } : {}),
+      ...(metered && !hasListedPrice(result.model) ? { cost_estimated: true } : {}),
+    },
+    ...(result.finishReason === 'length' ? { level: 'WARNING' as const, errorCode: 'truncated' } : {}),
+    ...(capture
+      ? {
+          output: {
+            role: 'assistant',
+            content: result.content,
+            ...(result.reasoning ? { reasoning: result.reasoning } : {}),
+          },
+        }
+      : {}),
+  }
 }
 
 /**
@@ -147,7 +193,7 @@ export async function callLlm(
   // the spend cap — see spend-chokepoints.test.ts for that half of the
   // guarantee). No userId at all means no user_id to satisfy trace_spans'
   // NOT NULL column, so there is nothing honest to record.
-  const scope = apiKeys.userId ? acquireSpanScope(apiKeys.userId) : null
+  const scope = apiKeys.userId ? acquireSpanScope(apiKeys.userId, apiKeys.isDemo) : null
   let result: LlmResult
   if (scope) {
     try {
@@ -172,7 +218,7 @@ export async function callLlm(
                 userId: apiKeys.userId,
                 error: err instanceof Error ? err.message : String(err),
               },
-        langfuseCaptureEnabled() ? (r) => spanContent(effectiveOpts, r?.content) : undefined
+        (r, _err, capture) => generationPayload(effectiveOpts, provider, metered, capture, r)
       )
     } finally {
       // Only the invocation that CREATED this buffer flushes it — a call
@@ -222,11 +268,48 @@ export interface EmbedResult {
  */
 export async function callEmbedding(
   apiKeys: DecryptedApiKeys,
-  opts: { texts: string[]; model?: string },
+  opts: { texts: string[]; model?: string; name?: string },
   signal?: AbortSignal
 ): Promise<EmbedResult> {
   if (opts.texts.length === 0) return { embeddings: [], model: opts.model || EMBEDDING_MODEL, promptTokens: 0 }
 
+  // One Langfuse `embedding` observation per call (never a trace_spans row:
+  // persist:false). Counts and sizes only: the texts are resumes, job
+  // descriptions and notes, so they are never captured.
+  const scope = apiKeys.userId ? acquireSpanScope(apiKeys.userId, apiKeys.isDemo) : null
+  if (!scope) return (await embedWithFallback(apiKeys, opts, signal)).result
+  try {
+    const out = await withSpan(
+      scope.buffer,
+      { parentSpanId: scope.parentSpanId, runId: scope.runId, kind: 'llm', name: 'embedding', persist: false },
+      () => embedWithFallback(apiKeys, opts, signal),
+      undefined,
+      (o) => {
+        const model = o?.result.model ?? opts.model ?? EMBEDDING_MODEL
+        const tokens = o?.result.promptTokens ?? 0
+        return {
+          name: opts.name ?? 'embed-texts',
+          type: 'embedding',
+          model,
+          input: { count: opts.texts.length, chars: opts.texts.reduce((n, t) => n + t.length, 0) },
+          metadata: { provider: o?.provider ?? 'none', metered: o?.metered ?? false },
+          ...(o ? { usage: { input: tokens }, cost: o.metered ? estimateCostDetails(model, tokens, 0) : { input: 0, output: 0 } } : {}),
+        }
+      }
+    )
+    return out.result
+  } finally {
+    if (scope.owns && scope.buffer.exportEnabled) await scope.buffer.flush(createAdminClient())
+  }
+}
+
+/** The fallback chain itself, plus which backend answered and whether it was
+ *  metered (for the Langfuse observation). */
+async function embedWithFallback(
+  apiKeys: DecryptedApiKeys,
+  opts: { texts: string[]; model?: string },
+  signal?: AbortSignal
+): Promise<{ result: EmbedBatchResult; provider: string; metered: boolean }> {
   const attempts: Array<{ provider: 'openrouter' | 'openai-direct' | 'local-server'; run: () => Promise<EmbedBatchResult> }> = []
   if (apiKeys.openrouter) {
     attempts.push({
@@ -275,7 +358,7 @@ export async function callEmbedding(
     if (admin && apiKeys.userId) {
       await recordSpend(admin, apiKeys.userId, EMBEDDING_MODEL, result.promptTokens, 0)
     }
-    return result
+    return { result, provider: attempt.provider, metered }
   }
 
   throw lastErr instanceof Error ? lastErr : new MissingKeyError('No embedding provider reachable')

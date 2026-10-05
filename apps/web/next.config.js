@@ -54,7 +54,21 @@ const nextConfig = {
     // node-only modules and is server-only by nature, so leave it external
     // rather than discover at runtime that a resume upload 500s the way the
     // copilot route did.
-    serverComponentsExternalPackages: ['cheerio', 'undici', 'mammoth', 'mem0ai'],
+    // The Langfuse SDK and its OpenTelemetry peers are server-only and loaded
+    // by dynamic import (lib/observability/langfuse.ts); keeping them external
+    // stops webpack from bundling them and their node-only dependencies.
+    serverComponentsExternalPackages: [
+      'cheerio',
+      'undici',
+      'mammoth',
+      'mem0ai',
+      '@langfuse/tracing',
+      '@langfuse/otel',
+      '@langfuse/client',
+      '@langfuse/core',
+      '@opentelemetry/sdk-trace-base',
+      '@opentelemetry/exporter-trace-otlp-http',
+    ],
     // lib/harness/prompts.ts reads apps/web/prompts/*.md at RUNTIME via
     // fs.readFileSync(path.join(process.cwd(), 'prompts', ...)). That call is
     // invisible to Next's build-time file tracer (@vercel/nft walks static

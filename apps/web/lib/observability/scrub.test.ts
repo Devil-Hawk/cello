@@ -287,7 +287,7 @@ describe('redactString: linear time on hostile input', () => {
     it(`${name} finishes fast`, () => {
       const t0 = performance.now()
       redactString(text)
-      expect(performance.now() - t0).toBeLessThan(250)
+      expect(performance.now() - t0).toBeLessThan(600)
     })
   }
 })

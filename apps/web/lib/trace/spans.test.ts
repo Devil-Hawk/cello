@@ -2,7 +2,7 @@
 // of the langgraph port). ZERO network: `admin` is a tiny hand-rolled fake
 // capturing whatever a flush() inserts, same style as lib/graph/invoke.test.ts.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdminClient } from '../harness/types'
 import {
   SPAN_ATTRIBUTE_VALUE_CAP_BYTES,
@@ -10,14 +10,24 @@ import {
   acquireSpanScope,
   capAttributes,
   currentTraceContext,
+  errorCode,
   runInTraceContext,
   withSpan,
 } from './spans'
 
-const mirrorSpansWithDeadlineMock = vi.fn(async (_rows: unknown[]) => undefined)
-vi.mock('../observability/langfuse', () => ({
-  mirrorSpansWithDeadline: (rows: unknown[]) => mirrorSpansWithDeadlineMock(rows),
-}))
+// Real env gates (langfuseConfigured, traceSampled, contentCaptureFor); only the
+// replay itself is a spy.
+const exportTraceMock = vi.fn(async (_buffer: unknown, _rows: unknown[]) => undefined)
+vi.mock('../observability/langfuse', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../observability/langfuse')>()
+  return { ...actual, exportTrace: (buffer: unknown, rows: unknown[]) => exportTraceMock(buffer, rows) }
+})
+
+function configureLangfuse() {
+  vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
+  vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
+  vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+}
 
 function makeCapturingAdmin() {
   const insertCalls: Record<string, unknown>[][] = []
@@ -36,8 +46,11 @@ function makeCapturingAdmin() {
 }
 
 beforeEach(() => {
-  mirrorSpansWithDeadlineMock.mockReset()
-  mirrorSpansWithDeadlineMock.mockResolvedValue(undefined)
+  exportTraceMock.mockReset()
+  exportTraceMock.mockResolvedValue(undefined)
+})
+afterEach(() => {
+  vi.unstubAllEnvs()
 })
 
 describe('SpanBuffer.flush — batched single-insert', () => {
@@ -111,51 +124,28 @@ describe('SpanBuffer.flush — batched single-insert', () => {
     expect(insertCalls[0][0]).toMatchObject({ trace_id: buffer.traceId, user_id: 'user-1', thread_id: 'thread-1', run_id: 'run-1' })
   })
 
-  it('mirrors the flushed rows to Langfuse, awaited', async () => {
-    mirrorSpansWithDeadlineMock.mockResolvedValue(undefined)
+  it('hands every flushed record to the Langfuse export, awaited', async () => {
     const buffer = new SpanBuffer('user-1', 'thread-1')
     buffer.record({
       span_id: 's1',
       parent_span_id: null,
       run_id: null,
-      kind: 'graph',
-      name: 'run',
+      kind: 'llm',
+      name: 'llm',
       start_time: new Date().toISOString(),
       end_time: new Date().toISOString(),
       status: 'ok',
-      attributes: null,
+      attributes: { model: 'm' },
       events: null,
     })
     const { admin } = makeCapturingAdmin()
     await buffer.flush(admin)
-    expect(mirrorSpansWithDeadlineMock).toHaveBeenCalledTimes(1)
-    expect(mirrorSpansWithDeadlineMock.mock.calls[0][0]).toHaveLength(1)
+    expect(exportTraceMock).toHaveBeenCalledTimes(1)
+    expect(exportTraceMock.mock.calls[0][0]).toBe(buffer)
+    expect(exportTraceMock.mock.calls[0][1]).toHaveLength(1)
   })
 
-  it('a Langfuse mirror that rejects is caught — the run completes, never fails on it', async () => {
-    mirrorSpansWithDeadlineMock.mockRejectedValue(new Error('langfuse ingestion is down'))
-    const buffer = new SpanBuffer('user-1')
-    buffer.record({
-      span_id: 's1',
-      parent_span_id: null,
-      run_id: null,
-      kind: 'graph',
-      name: 'run',
-      start_time: new Date().toISOString(),
-      end_time: new Date().toISOString(),
-      status: 'ok',
-      attributes: null,
-      events: null,
-    })
-    const { admin, insertCalls } = makeCapturingAdmin()
-    // flush() awaits the mirror but swallows a rejection (the mirror's own
-    // contract is to never reject; this is the belt and suspenders), and the
-    // Postgres insert still lands.
-    await expect(buffer.flush(admin)).resolves.toBeUndefined()
-    expect(insertCalls).toHaveLength(1)
-  })
-
-  it('prompt and completion text reach the mirror but NEVER the Postgres insert', async () => {
+  it('prompt and completion text reach the export but NEVER the Postgres insert', async () => {
     const buffer = new SpanBuffer('user-1')
     buffer.record({
       span_id: 's1',
@@ -168,20 +158,141 @@ describe('SpanBuffer.flush — batched single-insert', () => {
       status: 'ok',
       attributes: { model: 'm' },
       events: null,
-      content: { input: [{ role: 'user', content: 'MY-SECRET-PROMPT' }], output: 'MY-SECRET-COMPLETION' },
+      lf: { input: [{ role: 'user', content: 'MY-SECRET-PROMPT' }], output: { role: 'assistant', content: 'MY-SECRET-COMPLETION' } },
     })
     const { admin, insertCalls } = makeCapturingAdmin()
     await buffer.flush(admin)
 
     expect(JSON.stringify(insertCalls)).not.toContain('MY-SECRET')
-    expect(insertCalls[0][0]).not.toHaveProperty('content')
-    const mirrored = mirrorSpansWithDeadlineMock.mock.calls[0][0] as { content?: { output?: string } }[]
-    expect(mirrored[0].content?.output).toBe('MY-SECRET-COMPLETION')
+    expect(insertCalls[0][0]).not.toHaveProperty('lf')
+    expect(insertCalls[0][0]).not.toHaveProperty('persist')
+    const exported = exportTraceMock.mock.calls[0][1] as { lf?: { output?: { content?: string } } }[]
+    expect(exported[0].lf?.output?.content).toBe('MY-SECRET-COMPLETION')
   })
 
-  it('flush waits for the mirror (Next 14 has no after(), so a floating promise can be frozen)', async () => {
+  it('a withSpan lfOf payload is built only when exporting, and its text never lands in the insert', async () => {
+    configureLangfuse()
+    const buffer = new SpanBuffer('user-1', null, undefined, { isDemo: false })
+    await withSpan(
+      buffer,
+      { parentSpanId: null, runId: null, kind: 'llm', name: 'llm' },
+      async () => 'reply',
+      () => ({ model: 'm' }),
+      (_r, _e, capture) => ({ name: 'call-llm', ...(capture ? { input: 'PLANTED-PROMPT' } : {}) })
+    )
+    const { admin, insertCalls } = makeCapturingAdmin()
+    await buffer.flush(admin)
+    expect(JSON.stringify(insertCalls)).not.toContain('PLANTED')
+    expect((exportTraceMock.mock.calls[0][1] as { lf?: { input?: string } }[])[0].lf?.input).toBe('PLANTED-PROMPT')
+  })
+
+  it('an error span always carries a content-free errorCode; the raw message only with capture on', async () => {
+    configureLangfuse()
+    const run = async (buffer: SpanBuffer) => {
+      await expect(
+        withSpan(buffer, { parentSpanId: null, runId: null, kind: 'llm', name: 'llm' }, async () => {
+          throw Object.assign(new Error('secret message'), { status: 429 })
+        })
+      ).rejects.toThrow('secret message')
+      return (buffer as unknown as { pending: { lf?: { errorCode?: string; errorMessage?: string } }[] }).pending[0].lf
+    }
+    expect(await run(new SpanBuffer('u', null, undefined, { isDemo: false }))).toEqual({ errorCode: 'http_429', errorMessage: 'secret message' })
+    vi.stubEnv('LANGFUSE_DEMO_SAMPLE_RATE', '1')
+    expect(await run(new SpanBuffer('u', null, undefined, { isDemo: true }))).toEqual({ errorCode: 'http_429', errorMessage: undefined })
+  })
+
+  it('errorCode never returns message text', () => {
+    expect(errorCode(Object.assign(new Error('x'), { status: 503 }))).toBe('http_503')
+    expect(errorCode(Object.assign(new Error('x'), { code: 'ETIMEDOUT' }))).toBe('ETIMEDOUT')
+    expect(errorCode(new TypeError('with secret sk-abc'))).toBe('TypeError')
+    expect(errorCode(Object.assign(new Error('x'), { name: 'weird name with spaces' }))).toBe('error')
+    expect(errorCode('a string')).toBe('error')
+    expect(errorCode(null)).toBe('error')
+  })
+
+  it('a throwing lfOf never fails the request or loses the span', async () => {
+    configureLangfuse()
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const buffer = new SpanBuffer('u', null, undefined, { isDemo: false })
+    const out = await withSpan(buffer, { parentSpanId: null, runId: null, kind: 'llm', name: 'llm' }, async () => 'ok', undefined, () => {
+      throw new Error('bad payload')
+    })
+    expect(out).toBe('ok')
+    expect(buffer.size).toBe(1)
+  })
+
+  it('Langfuse-only records (persist:false) are exported but never inserted', async () => {
+    configureLangfuse()
+    const buffer = new SpanBuffer('u', null, undefined, { isDemo: false })
+    await withSpan(buffer, { parentSpanId: null, runId: null, kind: 'llm', name: 'embedding', persist: false }, async () => 'ok', undefined, () => ({ type: 'embedding' }))
+    await withSpan(buffer, { parentSpanId: null, runId: null, kind: 'llm', name: 'llm' }, async () => 'ok')
+    const { admin, insertCalls } = makeCapturingAdmin()
+    await buffer.flush(admin)
+    expect(exportTraceMock.mock.calls[0][1]).toHaveLength(2)
+    expect(insertCalls).toHaveLength(1)
+    expect(insertCalls[0]).toHaveLength(1)
+    expect(insertCalls[0][0]).toMatchObject({ name: 'llm' })
+  })
+
+  it('a buffer holding only Langfuse-only records makes no insert call at all', async () => {
+    configureLangfuse()
+    const buffer = new SpanBuffer('u', null, undefined, { isDemo: false })
+    await withSpan(buffer, { parentSpanId: null, runId: null, kind: 'llm', name: 'embedding', persist: false }, async () => 'ok')
+    const { admin, insertCalls } = makeCapturingAdmin()
+    await buffer.flush(admin)
+    expect(insertCalls).toHaveLength(0)
+    expect(exportTraceMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a record that arrives after flush is reported once, and still exported by the next flush', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const buffer = new SpanBuffer('u')
+    const r: Parameters<SpanBuffer['record']>[0] = {
+      span_id: 's1',
+      parent_span_id: null,
+      run_id: null,
+      kind: 'llm',
+      name: 'llm',
+      start_time: new Date().toISOString(),
+      end_time: new Date().toISOString(),
+      status: 'ok',
+      attributes: { model: 'm' },
+      events: null,
+    }
+    buffer.record(r)
+    const { admin, insertCalls } = makeCapturingAdmin()
+    await buffer.flush(admin)
+    buffer.record({ ...r, span_id: 's2' })
+    buffer.record({ ...r, span_id: 's3' })
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('recorded after flush'))).toHaveLength(1)
+    await buffer.flush(admin)
+    expect(insertCalls).toHaveLength(2)
+    expect(insertCalls[1]).toHaveLength(2)
+  })
+
+  it('a rejecting export cannot fail the flush: the insert still lands', async () => {
+    exportTraceMock.mockRejectedValue(new Error('langfuse ingestion is down'))
+    const buffer = new SpanBuffer('user-1')
+    buffer.record({
+      span_id: 's1',
+      parent_span_id: null,
+      run_id: null,
+      kind: 'llm',
+      name: 'llm',
+      start_time: new Date().toISOString(),
+      end_time: new Date().toISOString(),
+      status: 'ok',
+      attributes: { model: 'm' },
+      events: null,
+    })
+    const { admin, insertCalls } = makeCapturingAdmin()
+    await expect(buffer.flush(admin)).resolves.toBeUndefined()
+    expect(insertCalls).toHaveLength(1)
+  })
+
+  it('flush waits for the export (so an awaited delivery path is not cut short)', async () => {
     let finished = false
-    mirrorSpansWithDeadlineMock.mockImplementation(async () => {
+    exportTraceMock.mockImplementation(async () => {
       await new Promise((resolve) => setTimeout(resolve, 30))
       finished = true
     })
@@ -190,17 +301,25 @@ describe('SpanBuffer.flush — batched single-insert', () => {
       span_id: 's1',
       parent_span_id: null,
       run_id: null,
-      kind: 'graph',
-      name: 'run',
+      kind: 'llm',
+      name: 'llm',
       start_time: new Date().toISOString(),
       end_time: new Date().toISOString(),
       status: 'ok',
-      attributes: null,
+      attributes: { model: 'm' },
       events: null,
     })
     const { admin } = makeCapturingAdmin()
     await buffer.flush(admin)
     expect(finished).toBe(true)
+  })
+
+  it('isDemo can be filled in later but never overwritten', () => {
+    const buffer = new SpanBuffer('u')
+    buffer.adoptDemoFlag(false)
+    expect(buffer.meta.isDemo).toBe(false)
+    buffer.adoptDemoFlag(true)
+    expect(buffer.meta.isDemo).toBe(false)
   })
 })
 

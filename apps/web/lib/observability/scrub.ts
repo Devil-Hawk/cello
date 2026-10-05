@@ -48,7 +48,7 @@ const JWT_RE = /\beyJ[A-Za-z0-9_-]{5,2048}\.[A-Za-z0-9_-]{5,2048}\.[A-Za-z0-9_-]
 // ('=') is a non-word char: a \b right after it only matches if the regex
 // backtracks off the padding, which would leave a stray '=' unredacted.
 const ENCRYPTED_BLOB_RE =
-  /\b[A-Za-z0-9+/]{8,512}={0,2}:[A-Za-z0-9+/]{8,512}={0,2}:[A-Za-z0-9+/]{4,4096}={0,2}(?![A-Za-z0-9+/=])/g
+  /\b[A-Za-z0-9+/]{8,64}={0,2}:[A-Za-z0-9+/]{8,64}={0,2}:[A-Za-z0-9+/]{4,4096}={0,2}(?![A-Za-z0-9+/=])/g
 const BEARER_RE = /\bBearer\s{1,8}[^\s"',;]{1,2048}/gi
 // Common LLM/cloud provider key prefixes. The `sk-` class includes `_`: the
 // Anthropic and OpenAI project key shapes (sk-ant-api03-abc_DEF, sk-proj-...)

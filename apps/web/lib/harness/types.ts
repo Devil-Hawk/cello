@@ -74,6 +74,12 @@ export interface DecryptedApiKeys {
    * where only the calls that explicitly opt in ever think.
    */
   reasoningEffort?: ReasoningEffort
+  /**
+   * True for a demo workspace, false for the owner, absent when the loader
+   * did not say. Only the Langfuse export reads it (demo prompt text is not
+   * sent by default, and demo traces are sampled lower); absent counts as demo.
+   */
+  isDemo?: boolean
 }
 
 // --- DB row shapes (hand-declared; mirror the harness migration) -------------
@@ -304,6 +310,11 @@ export interface LlmRunOptions {
    * safe to set unconditionally.
    */
   cachePrefix?: boolean
+  /**
+   * Langfuse generation name: a lowercase code constant such as
+   * `score-job-match`, never free text. Falls back to `call-llm`.
+   */
+  name?: string
 }
 
 /**

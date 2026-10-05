@@ -23,6 +23,13 @@
 // written directly by whoever is already inside the invocation and about to
 // return, has no such gap. (Spec decision, see the doc's "Tracing" row.)
 //
+// LANGFUSE REPLAY. This buffer is also the ONLY capture point for the Langfuse
+// export (lib/observability/langfuse.ts). A record may carry an in-memory `lf`
+// payload (names, usage, cost, prompt text); flush() strips it before the
+// insert and replays the records to Langfuse as observations with their real
+// timestamps, so there is no second span tree and no live OTel context. `lf` is
+// built only when the buffer's export is enabled (keys set and trace sampled).
+//
 // WHY AsyncLocalStorage, REUSING lib/memory/mem0-store.ts's PATTERN
 //   callLlm has no `config`/context parameter — its signature is
 //   (apiKeys, opts, signal), unchanged by this port on purpose (see llm.ts's
@@ -53,20 +60,76 @@
 import { randomUUID } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { AdminClient } from '../harness/types'
-import { mirrorSpansWithDeadline } from '../observability/langfuse'
+import { contentCaptureFor, exportTrace, langfuseConfigured, traceSampled } from '../observability/langfuse'
 
 /** Matches the `kind` CHECK constraint on public.trace_spans. */
 export type SpanKind = 'graph' | 'node' | 'llm' | 'tool' | 'judge' | 'http'
 export type SpanStatus = 'ok' | 'error'
 
-/** Prompt and completion text for the Langfuse mirror. In-memory only. */
-export interface SpanContent {
-  input?: { role: string; content: string }[]
-  output?: string
+/** Langfuse observation types a record can ask for. */
+export type LfType = 'agent' | 'chain' | 'span' | 'generation' | 'embedding' | 'tool' | 'retriever'
+
+/**
+ * What the Langfuse export needs beyond the trace_spans columns. In memory
+ * only: flush() strips it before the Postgres insert, so prompt and completion
+ * text can never reach the database, and langfuse.ts redacts and caps every
+ * string in it before it leaves the process. Built only when the buffer's
+ * export is enabled (see SpanBuffer.exportEnabled).
+ */
+export interface LfPayload {
+  /** Stable Langfuse name (a code constant, never free text). */
+  name?: string
+  /** Defaults from the span kind. Usage and cost only ride generation/embedding. */
+  type?: LfType
+  /** Observation input and output. Set only when the buffer captures content. */
+  input?: unknown
+  output?: unknown
+  model?: string
+  modelParameters?: Record<string, string | number>
+  /** usageDetails buckets (input, output, total). */
+  usage?: Record<string, number>
+  /** costDetails in USD. */
+  cost?: Record<string, number>
+  /** Ids, enums and numbers only. Sent even with content capture off. */
+  metadata?: Record<string, string | number | boolean>
+  /** Free text (a planner label, an MCP server name). Sent only with capture on. */
+  detail?: Record<string, string>
+  /** Prompt version (a content hash). */
+  version?: string
+  level?: 'WARNING' | 'ERROR'
+  /** Short machine code for a failure or warning, see errorCode(). */
+  errorCode?: string
+  /** The raw error text. Set only when the buffer captures content. */
+  errorMessage?: string
 }
 
-/** One trace_spans row, shaped for a direct `.insert()`, plus `content`,
- *  which is NOT a column: flush() strips it before the insert so prompt and
+/** Trace-level facts the Langfuse export stamps on every observation. */
+export interface TraceMeta {
+  /** Trace name constant. Defaults to the root observation's stable name. */
+  name?: string
+  /** Copilot conversation id, or a run/digest thread id. */
+  sessionId?: string
+  /** True for a demo workspace, false for the owner. Undefined is treated as
+   *  demo (fail closed): demo content capture is off by default. */
+  isDemo?: boolean
+  /** Tag `feature:<x>` and metadata.feature. Defaults to the trace name. */
+  feature?: string
+  /** Ids and enums only, at most 200 chars each. */
+  metadata?: Record<string, string>
+}
+
+/** A short, content-free code for a failure: `http_429`, `ETIMEDOUT`,
+ *  `TypeError`, else `error`. Never the message text. */
+export function errorCode(err: unknown): string {
+  const e = err as { status?: unknown; code?: unknown; name?: unknown } | null | undefined
+  if (typeof e?.status === 'number') return `http_${e.status}`
+  if (typeof e?.code === 'string' && /^[A-Z0-9_]{2,32}$/.test(e.code)) return e.code
+  if (typeof e?.name === 'string' && /^[A-Za-z]{1,40}$/.test(e.name)) return e.name
+  return 'error'
+}
+
+/** One trace_spans row, shaped for a direct `.insert()`, plus `lf`, which is
+ *  NOT a column: flush() strips it before the insert so prompt and
  *  completion text can never reach Postgres. */
 export interface SpanRecord {
   trace_id: string
@@ -82,7 +145,10 @@ export interface SpanRecord {
   status: SpanStatus
   attributes: Record<string, unknown> | null
   events: unknown | null
-  content?: SpanContent
+  lf?: LfPayload
+  /** False keeps the record out of trace_spans (Langfuse only, e.g. embeddings).
+   *  Not a column either: flush() strips it. */
+  persist?: false
 }
 
 // --- attribute size discipline -----------------------------------------
@@ -125,14 +191,48 @@ export class SpanBuffer {
   readonly userId: string
   readonly threadId: string | null
   private pending: SpanRecord[] = []
+  private flushed = false
+  private exportCache: boolean | undefined
+  meta: TraceMeta
 
-  constructor(userId: string, threadId: string | null = null, traceId: string = randomUUID()) {
+  constructor(userId: string, threadId: string | null = null, traceId: string = randomUUID(), meta: TraceMeta = {}) {
     this.userId = userId
     this.threadId = threadId
     this.traceId = traceId
+    this.meta = meta
+  }
+
+  /** Merge trace-level facts (name, session, isDemo...). Re-decides sampling. */
+  setMeta(patch: Partial<TraceMeta>): void {
+    this.meta = { ...this.meta, ...patch, metadata: { ...this.meta.metadata, ...patch.metadata } }
+    this.exportCache = undefined
+  }
+
+  /** Fill isDemo when the buffer was created before the profile was known. */
+  adoptDemoFlag(isDemo: boolean | undefined): void {
+    if (this.meta.isDemo === undefined && isDemo !== undefined) this.setMeta({ isDemo })
+  }
+
+  /** Langfuse is configured and this trace is sampled in. Decided once per
+   *  trace (and again by setMeta); when false no `lf` payload is built, no
+   *  Langfuse package is imported and nothing leaves the process. */
+  get exportEnabled(): boolean {
+    this.exportCache ??= langfuseConfigured() && traceSampled(this.traceId, this.meta.isDemo)
+    return this.exportCache
+  }
+
+  /** Prompt and completion text may be sent for this trace. */
+  get captureContent(): boolean {
+    return this.exportEnabled && contentCaptureFor(this.meta.isDemo)
   }
 
   record(span: Omit<SpanRecord, 'trace_id' | 'user_id' | 'thread_id'>): void {
+    if (this.flushed) {
+      // Recorded after the owner already flushed: still exported if flush()
+      // runs again, but a span that nobody flushes is lost, so say so once.
+      this.flushed = false
+      console.warn(`[trace] span "${span.name}" recorded after flush; it is lost unless flush() runs again`)
+    }
     this.pending.push({ trace_id: this.traceId, user_id: this.userId, thread_id: this.threadId, ...span })
   }
 
@@ -150,23 +250,27 @@ export class SpanBuffer {
   async flush(admin: AdminClient): Promise<void> {
     if (this.pending.length === 0) return
     const rows = this.pending.splice(0, this.pending.length)
-    // Started first so it overlaps the insert. It is awaited below (Next 14
-    // has no after(), and a Vercel function can freeze once it returns), but
-    // only up to a deadline, and it never rejects. See langfuse.ts's header.
-    const mirror = mirrorSpansWithDeadline(rows).catch((err) =>
-      console.error(`[trace] Langfuse mirror threw unexpectedly: ${err instanceof Error ? err.message : String(err)}`)
+    this.flushed = true
+    // Started first so it overlaps the insert. It never rejects. On Vercel it
+    // runs inside waitUntil and resolves at once; elsewhere it is awaited up to
+    // a deadline. See langfuse.ts's delivery notes.
+    const exporting = exportTrace(this, rows).catch((err) =>
+      console.error(`[trace] Langfuse export threw unexpectedly: ${err instanceof Error ? err.message : String(err)}`)
     )
     try {
-      // `content` (prompt/completion text) is dropped here, never persisted.
-      const persisted = rows.map(({ content: _content, ...row }) => row)
-      const { error } = await admin.from('trace_spans').insert(persisted)
-      if (error) console.error(`[trace] span flush failed (${rows.length} span(s) dropped): ${error.message}`)
+      // `lf` (prompt/completion text) is dropped here, never persisted, and
+      // Langfuse-only records (persist:false) never become rows at all.
+      const persisted = rows.filter((r) => r.persist !== false).map(({ lf: _lf, persist: _persist, ...row }) => row)
+      if (persisted.length > 0) {
+        const { error } = await admin.from('trace_spans').insert(persisted)
+        if (error) console.error(`[trace] span flush failed (${persisted.length} span(s) dropped): ${error.message}`)
+      }
     } catch (err) {
       console.error(
         `[trace] span flush threw (${rows.length} span(s) dropped): ${err instanceof Error ? err.message : String(err)}`
       )
     }
-    await mirror
+    await exporting
   }
 }
 
@@ -213,10 +317,13 @@ export interface SpanScope {
  * know its own domain run id (runAgentUnit always does) supplies it directly
  * to `withSpan`/`runInTraceContext` rather than through this function.
  */
-export function acquireSpanScope(userId: string): SpanScope {
+export function acquireSpanScope(userId: string, isDemo?: boolean): SpanScope {
   const ctx = currentTraceContext()
-  if (ctx) return { buffer: ctx.buffer, parentSpanId: ctx.parentSpanId, runId: ctx.runId, owns: false }
-  return { buffer: new SpanBuffer(userId), parentSpanId: null, runId: null, owns: true }
+  if (ctx) {
+    ctx.buffer.adoptDemoFlag(isDemo)
+    return { buffer: ctx.buffer, parentSpanId: ctx.parentSpanId, runId: ctx.runId, owns: false }
+  }
+  return { buffer: new SpanBuffer(userId, null, undefined, { isDemo }), parentSpanId: null, runId: null, owns: true }
 }
 
 // --- span emission ---------------------------------------------------------
@@ -226,6 +333,9 @@ export interface SpanSpec {
   runId: string | null
   kind: SpanKind
   name: string
+  /** False: a Langfuse-only span. Recorded only when the trace is exported,
+   *  and never inserted into trace_spans. */
+  persist?: false
 }
 
 /**
@@ -242,10 +352,31 @@ export async function withSpan<T>(
   spec: SpanSpec,
   fn: (spanId: string) => Promise<T>,
   attributesOf?: (result: T | undefined, err: unknown) => Record<string, unknown> | undefined,
-  contentOf?: (result: T | undefined, err: unknown) => SpanContent | undefined
+  lfOf?: (result: T | undefined, err: unknown, capture: boolean) => LfPayload | undefined
 ): Promise<T> {
   const spanId = randomUUID()
   const startTime = new Date().toISOString()
+  // A Langfuse-only span has nowhere to go when the trace is not exported.
+  if (spec.persist === false && !buffer.exportEnabled) return fn(spanId)
+  // The Langfuse payload is built ONLY when this trace is exported, and gets
+  // `capture` so it can skip building prompt text when content is off. A
+  // failure here must never fail the request: observability only.
+  const lfFor = (result: T | undefined, err: unknown, failed: boolean): LfPayload | undefined => {
+    if (!buffer.exportEnabled) return undefined
+    let lf: LfPayload | undefined
+    try {
+      lf = lfOf?.(result, err, buffer.captureContent)
+    } catch (e) {
+      console.warn(`[trace] lfOf threw: ${e instanceof Error ? e.name : 'error'}`)
+    }
+    if (!failed) return lf
+    const message = err instanceof Error ? err.message : String(err)
+    return {
+      ...lf,
+      errorCode: lf?.errorCode ?? errorCode(err),
+      errorMessage: lf?.errorMessage ?? (buffer.captureContent ? message : undefined),
+    }
+  }
   try {
     const result = await fn(spanId)
     buffer.record({
@@ -259,7 +390,8 @@ export async function withSpan<T>(
       status: 'ok',
       attributes: capAttributes(attributesOf?.(result, undefined)),
       events: null,
-      content: contentOf?.(result, undefined),
+      lf: lfFor(result, undefined, false),
+      ...(spec.persist === false ? { persist: false as const } : {}),
     })
     return result
   } catch (err) {
@@ -274,7 +406,8 @@ export async function withSpan<T>(
       status: 'error',
       attributes: capAttributes(attributesOf?.(undefined, err)),
       events: null,
-      content: contentOf?.(undefined, err),
+      lf: lfFor(undefined, err, true),
+      ...(spec.persist === false ? { persist: false as const } : {}),
     })
     throw err
   }

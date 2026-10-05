@@ -513,7 +513,18 @@ describe('applyDemoKeyGuards — what the loaders actually enforce', () => {
       model: 'anthropic/claude-sonnet-5',
     }
     const profile = { id: OWNER_ID, is_demo: false, demo_expires_at: null }
-    expect(applyDemoKeyGuards({ ...owner }, profile, OWNER_ID)).toEqual(owner)
+    // Only addition: isDemo:false, which the Langfuse export reads to send the
+    // owner's prompt text (a demo and an unknown flag send none by default).
+    expect(applyDemoKeyGuards({ ...owner }, profile, OWNER_ID)).toEqual({ ...owner, isDemo: false })
+  })
+
+  it('tells the Langfuse export who this is: owner false, demo true, unreadable flag undefined (fails closed)', () => {
+    const base = { openrouter: 'k', userId: DEMO_ID }
+    const future = new Date(Date.now() + 3_600_000).toISOString()
+    expect(applyDemoKeyGuards({ ...base }, { id: DEMO_ID, is_demo: true, demo_expires_at: future }, DEMO_ID).isDemo).toBe(true)
+    expect(applyDemoKeyGuards({ ...base }, { id: OWNER_ID, is_demo: false, demo_expires_at: null }, OWNER_ID).isDemo).toBe(false)
+    expect(applyDemoKeyGuards({ ...base }, { id: OWNER_ID, is_demo: null, demo_expires_at: null }, OWNER_ID).isDemo).toBeUndefined()
+    expect(applyDemoKeyGuards({ ...base }, { id: OWNER_ID, demoColumnsAbsent: true }, OWNER_ID).isDemo).toBe(false)
   })
 })
 

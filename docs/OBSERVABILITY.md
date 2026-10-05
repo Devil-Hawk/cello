@@ -108,14 +108,23 @@ LANGFUSE_BASE_URL=https://cloud.langfuse.com   # or https://us.cloud.langfuse.co
 ```
 
 If any one is missing or blank, the whole thing is off: no network call and
-the `langfuse` package is never loaded.
+none of the `@langfuse/*` packages is loaded. The export uses the current
+OpenTelemetry based SDK (`@langfuse/tracing`, `@langfuse/otel`, version 5.11.1),
+on its own tracer provider that is never registered globally, so Sentry keeps
+the global one.
 
 Optional:
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `LANGFUSE_CAPTURE_CONTENT` | on | `0` stops prompts and replies from being sent. Tokens, cost and timing still go. |
-| `LANGFUSE_SAMPLE_RATE` | `1` | A number from 0 to 1. Chosen per trace by a hash of the trace id, so a trace is sent whole or not at all. |
+| `LANGFUSE_CAPTURE_CONTENT` | on | The kill switch. Only an unset or blank value or `1`, `true`, `on`, `yes` keeps prompts and replies on. Anything else, a typo included, turns them off. Tokens, cost and timing still go. |
+| `LANGFUSE_CAPTURE_DEMO_CONTENT` | off | Demo workspaces send no prompt or reply text unless this is `1`, `true`, `on` or `yes`. A trace whose owner is unknown counts as a demo. |
+| `LANGFUSE_SAMPLE_RATE` | `1` | A number from 0 to 1. Chosen per trace by a hash of the trace id, so a trace is sent whole or not at all. The SDK itself never reads this variable, so it is not applied twice. |
+| `LANGFUSE_DEMO_SAMPLE_RATE` | `0.25` | The same for demo traces, which use the lower of the two rates. It keeps a burst of demo visitors from eating the free unit budget. |
+
+Limits per trace: at most 400 observations (the root, errors and judge calls
+are always kept, and the root records how many were dropped) and 128KB of
+captured text.
 
 **What is sent.** One trace per run, named after the surface (copilot,
 autopilot, and so on). Each AI call is a generation with model, input and
@@ -134,9 +143,13 @@ row and are dropped before the insert.
 
 **Redaction.** Before anything leaves the process, every string passes
 through `redactString` from `lib/observability/scrub.ts` (emails, JWTs,
-`Bearer` tokens, `sk-` and other provider keys, Cello's AES blobs) and is cut
-to 16KB. Span metadata also redacts sensitive key names but keeps numbers, so
-token counts and cost survive. Redaction is pattern based. Free text such as a
+`Bearer` and `Basic` credentials, `sk-`, GitHub, Google and other provider
+keys, OAuth tokens, passwords in `key=value` text, URL credentials, private
+keys, Cello's AES blobs) and is cut to 16KB. Every pattern is bounded, so a
+long unbroken token cannot stall a request. Names, tags and ids are code
+constants or UUIDs, and a second pass re-scrubs every string on a span just
+before it ends. Structured payloads also redact sensitive key names but keep
+numbers, so token counts and cost survive. Redaction is pattern based. Free text such as a
 resume still reaches Langfuse with names and phone numbers in it, which is why
 the settings page tells users when capture is on and why `LANGFUSE_CAPTURE_CONTENT=0`
 exists.
@@ -146,10 +159,12 @@ a trace plus a graph span, a span per agent step and a generation per AI call.
 If the 50,000 a month is not enough, lower `LANGFUSE_SAMPLE_RATE`. Postgres
 keeps everything either way, and the Langfuse usage page shows the burn.
 
-**Latency.** The export is awaited at the end of a request (Next 14 has no
-`after()`, and a serverless function can freeze once it returns), but only for
-2.5 seconds. A slow or unreachable Langfuse costs a request at most that, and
-never throws.
+**Latency.** When Vercel exposes its request context, the export runs inside
+its `waitUntil` and adds about nothing to the response. When it does not (local
+development, scripts, or a Vercel function with no context), the export is
+awaited for at most 2 seconds, and Vercel logs one line,
+`[langfuse] no Vercel request context`, per instance. A slow or unreachable
+Langfuse never throws and never costs a request more than that.
 
 **Postgres size.** The step journal (`lib/graph/journal.ts`) caps each stored
 step input and output at about 8KB. Long strings are cut with a marker, long

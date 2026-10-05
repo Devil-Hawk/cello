@@ -375,7 +375,9 @@ export async function invokeGraphForUser(args: InvokeGraphForUserArgs): Promise<
   // `finally` so a thrown error (thread refusal, a killed invocation) still
   // best-effort-flushes whatever was buffered before the throw — see
   // SpanBuffer.flush's own doc for why that loss is bounded and acceptable.
-  const spanBuffer = new SpanBuffer(userId, threadId)
+  // `expires_at` is set only on a demo workspace's threads (see insertThread):
+  // the Langfuse export samples demo traces lower and sends no prompt text.
+  const spanBuffer = new SpanBuffer(userId, threadId, undefined, { isDemo: thread.expires_at != null })
   let result: unknown
   try {
     result = await withSpan(

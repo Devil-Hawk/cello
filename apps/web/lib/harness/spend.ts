@@ -63,6 +63,23 @@ export function estimateCostUsd(model: string, promptTokens: number, completionT
   return (promptTokens / 1e6) * p.in + (completionTokens / 1e6) * p.out
 }
 
+/** The same numbers split into Langfuse costDetails buckets (USD). Uses OUR
+ *  price table, the one the budget ledger charges, so Langfuse and the cap
+ *  agree. */
+export function estimateCostDetails(
+  model: string,
+  promptTokens: number,
+  completionTokens: number
+): { input: number; output: number } {
+  const p = PRICES[model] ?? FALLBACK_PRICE
+  return { input: (promptTokens / 1e6) * p.in, output: (completionTokens / 1e6) * p.out }
+}
+
+/** False when estimateCostUsd had to use FALLBACK_PRICE for this model. */
+export function hasListedPrice(model: string): boolean {
+  return Object.prototype.hasOwnProperty.call(PRICES, model)
+}
+
 /** Current UTC billing month, e.g. "2026-07". */
 function currentPeriod(): string {
   const now = new Date()

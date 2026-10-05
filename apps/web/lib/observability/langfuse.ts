@@ -1,218 +1,511 @@
-// Optional trace mirror to Langfuse. trace_spans (lib/trace/spans.ts) stays
-// the system of record; this module only ever ADDS a second, best-effort
-// copy so Langfuse's UI can show prompts, completions, tokens and cost.
+// Langfuse export for prompt monitoring. trace_spans (lib/trace/spans.ts)
+// stays the system of record and the ONLY capture point: SpanBuffer.flush()
+// hands the buffered records to exportTrace() below, which replays them as
+// Langfuse observations with their real start and end times. There is no
+// second span tree, no live OpenTelemetry context and no LangGraph callback.
 //
-// GATING MIRRORS lib/observability/sentry.ts: unless LANGFUSE_PUBLIC_KEY,
-// LANGFUSE_SECRET_KEY and LANGFUSE_BASE_URL are ALL set (a half-configured
-// state is the same as unset: a key with nowhere to send it, or a host with
-// nothing to authenticate), this module is a complete no-op. No network
-// call, and `langfuse` is never even imported (it is a dynamic import behind
-// the synchronous `langfuseConfigured()` check, so cold start stays clean).
+// SDK: @langfuse/tracing + @langfuse/otel (v5, the OpenTelemetry based SDK).
+// Docs: https://langfuse.com/docs/observability/sdk/instrumentation and
+// https://langfuse.com/docs/observability/features/masking. This file is the
+// only place that imports `@langfuse/*` or calls startObservation (a guard
+// test in lib/graph/graph-chokepoints.test.ts holds that).
 //
-// WHAT IS SENT
-//   - one trace per trace_id, named after the surface (the root 'graph'
-//     span's name), with environment (VERCEL_ENV) and release
-//     (VERCEL_GIT_COMMIT_SHA) so production and preview never mix
-//   - 'llm' rows as GENERATIONS: model, token usage, cost, timing, error
-//     level, and (unless LANGFUSE_CAPTURE_CONTENT=0) the prompt messages and
-//     completion text
-//   - 'node' / 'graph' rows as plain spans
-//   Prompt and completion text exist only in memory (SpanRecord's
-//   non-persisted `content` field, stripped before the Postgres insert) and
-//   every string passes through redactString and a 16KB cap right here, the
-//   single gate. Metadata goes through scrubMetadata, which redacts strings
-//   and sensitive keys but keeps the numeric metrics.
+// COMPLETE NO-OP WHEN UNCONFIGURED. Unless LANGFUSE_PUBLIC_KEY,
+// LANGFUSE_SECRET_KEY and LANGFUSE_BASE_URL are ALL set, SpanBuffer never
+// builds an `lf` payload, exportTrace returns at once, and no `@langfuse/*`
+// module is imported (the imports are dynamic, behind the synchronous gate).
+//
+// PROVIDER ISOLATION. The processor sits on its own BasicTracerProvider that
+// is NEVER registered globally. Sentry (lib/observability/sentry.ts) owns the
+// global provider and context manager and keeps them. Every observation gets
+// an explicit parentSpanContext and our AlwaysOnSampler ignores parents, so an
+// unsampled Sentry request span can neither drop nor adopt our spans.
+//
+// DELIVERY ON SERVERLESS. When Vercel exposes a request context, the replay
+// and the OTLP POST run inside its waitUntil and add about 0 ms to the
+// response. Without one (local dev, scripts, or Vercel with no context) the
+// export is awaited with a 2000 ms deadline, so there is never a silent loss
+// path and never an unbounded wait. Replays run one at a time per instance so
+// the batch queue holds at most one trace (400 observations).
+//
+// MASKING. Layer 1: every string written here goes through redactString
+// (linear time, see scrub.ts), via scrubText/scrubPayload for input and
+// output and via clean() for everything else. Layer 2: finalize() re-scrubs
+// every string attribute on a span just before it ends, because the
+// processor's `mask` only sees the exact keys langfuse.observation.input /
+// output / metadata (our flat metadata keys never match them). `mask` stays on
+// as a second layer for input and output.
 //
 // WHY POSTGRES STAYS THE SYSTEM OF RECORD, NOT LANGFUSE
-//   Langfuse Cloud's free (Hobby) tier is 50,000 units a month, where a
-//   unit is a trace, an observation or a score, with 30 days of retention.
-//   Past the cap it stops accepting data. trace_spans has no such cap and is
-//   written regardless. LANGFUSE_SAMPLE_RATE keeps whole traces together
-//   (hash of trace_id) when the budget needs stretching.
-//
-// WHY AWAITED WITH A DEADLINE, NOT FIRE-AND-FORGET
-//   Next 14 has no after()/waitUntil, and a Vercel function can freeze the
-//   moment the response is sent, so a floating promise silently loses the
-//   export. SpanBuffer.flush awaits mirrorSpansWithDeadline, which races the
-//   export against MIRROR_DEADLINE_MS: a slow or down Langfuse costs a
-//   request at most that long, and nothing here ever throws.
+//   Langfuse Cloud's free (Hobby) tier is 50,000 units a month (a unit is a
+//   trace, an observation or a score) with 30 days of retention. trace_spans
+//   has no such cap and is written regardless. The sampling knobs, the
+//   per-trace caps and the demo defaults below keep Langfuse inside the cap.
 
 import { createHash } from 'node:crypto'
-import type { Langfuse } from 'langfuse'
-import type { SpanRecord } from '../trace/spans'
+import type { LangfuseSpanProcessor } from '@langfuse/otel'
+import type { Span } from '@opentelemetry/api'
+import type { ReadableSpan, SpanExporter } from '@opentelemetry/sdk-trace-base'
+import { capPayload } from '../graph/journal'
+import type { LfPayload, LfType, SpanBuffer, SpanRecord } from '../trace/spans'
 import { redactString, scrubMetadata } from './scrub'
 
-/** Longest a request may wait on the Langfuse export. */
-export const MIRROR_DEADLINE_MS = 2500
+// --- knobs ---------------------------------------------------------------------
+
+/** Longest the request waits on an awaited (no request context) export. */
+export const FLUSH_DEADLINE_MS = 2000
 /** Per-string cap for captured prompt/completion text. */
 export const CONTENT_CAP_CHARS = 16 * 1024
+/** Per-generation cap on the captured prompt (all messages together). */
+export const GENERATION_INPUT_CAP_CHARS = 48 * 1024
+/** Cap on structured input/output (tool args, agent IO), in JSON bytes. */
+export const PAYLOAD_CAP_BYTES = 4096
+export const MAX_OBSERVATIONS_PER_TRACE = 400
+/** All captured content of one trace together (bounds scrub CPU and POST size). */
+export const TRACE_CONTENT_BUDGET_CHARS = 128 * 1024
+const BUDGET_EXHAUSTED = '[trace content budget exhausted]'
 
-let cachedClient: Langfuse | null = null
+const env = (name: string): string | undefined => process.env[name]?.trim() || undefined
 
 /** The single on/off switch for this module. All three must be non-blank. */
 export function langfuseConfigured(): boolean {
-  return Boolean(
-    process.env.LANGFUSE_PUBLIC_KEY?.trim() &&
-      process.env.LANGFUSE_SECRET_KEY?.trim() &&
-      process.env.LANGFUSE_BASE_URL?.trim()
-  )
+  return Boolean(env('LANGFUSE_PUBLIC_KEY') && env('LANGFUSE_SECRET_KEY') && env('LANGFUSE_BASE_URL'))
 }
 
-/** Prompt/completion capture is on by default once Langfuse is configured;
- *  LANGFUSE_CAPTURE_CONTENT=0 (or false/off) turns it off. */
+/** Fail-closed flag parse: unset or blank gives `dflt`, 1/true/on/yes is on,
+ *  anything else (a typo such as "disabled" included) is off. */
+function flag(name: string, dflt: boolean): boolean {
+  const raw = env(name)
+  if (raw === undefined) return dflt
+  return /^(1|true|on|yes)$/i.test(raw)
+}
+
+/** Prompt/completion capture, the kill switch. On by default once Langfuse is
+ *  configured; LANGFUSE_CAPTURE_CONTENT=0 (or any typo) turns it off. */
 export function langfuseCaptureEnabled(): boolean {
-  if (!langfuseConfigured()) return false
-  return !/^(0|false|off|no)$/i.test(process.env.LANGFUSE_CAPTURE_CONTENT?.trim() ?? '')
+  return langfuseConfigured() && flag('LANGFUSE_CAPTURE_CONTENT', true)
 }
 
-/** LANGFUSE_SAMPLE_RATE clamped to 0..1; unset, blank or invalid means 1. */
-export function langfuseSampleRate(): number {
-  const raw = process.env.LANGFUSE_SAMPLE_RATE?.trim()
-  if (!raw) return 1
+/** Demo workspaces (public, strangers' text) send no content unless
+ *  LANGFUSE_CAPTURE_DEMO_CONTENT is explicitly on. */
+export function langfuseCaptureDemoEnabled(): boolean {
+  return flag('LANGFUSE_CAPTURE_DEMO_CONTENT', false)
+}
+
+/** May prompt text of this trace leave the process? isDemo undefined counts as
+ *  demo: the fail-closed side. */
+export function contentCaptureFor(isDemo: boolean | undefined): boolean {
+  return langfuseCaptureEnabled() && (isDemo === false || langfuseCaptureDemoEnabled())
+}
+
+function rate(name: string, dflt: number): number {
+  const raw = env(name)
+  if (!raw) return dflt
   const n = Number(raw)
-  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1
+  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : dflt
 }
 
-/** Deterministic per-trace sampling: the same trace_id always lands on the
- *  same side, so a trace is exported whole or not at all. */
-export function traceSampled(traceId: string, rate: number = langfuseSampleRate()): boolean {
-  if (rate >= 1) return true
-  if (rate <= 0) return false
-  return createHash('sha256').update(traceId).digest().readUInt32BE(0) / 2 ** 32 < rate
+/** LANGFUSE_SAMPLE_RATE clamped to 0..1; unset, blank or invalid means 1.
+ *  The SDK itself does not read this variable (5.11.1), so there is no double
+ *  sampling. */
+export function langfuseSampleRate(): number {
+  return rate('LANGFUSE_SAMPLE_RATE', 1)
+}
+
+/** LANGFUSE_DEMO_SAMPLE_RATE, default 0.25: protects the unit budget from a
+ *  public-demo burst. */
+export function langfuseDemoSampleRate(): number {
+  return rate('LANGFUSE_DEMO_SAMPLE_RATE', 0.25)
+}
+
+/** Deterministic per-trace sampling: the same trace id always lands on the
+ *  same side, so a trace is exported whole or not at all. Demo (and unknown)
+ *  traces use the lower of the two rates. */
+export function traceSampled(traceId: string, isDemo?: boolean): boolean {
+  const r = isDemo === false ? langfuseSampleRate() : Math.min(langfuseSampleRate(), langfuseDemoSampleRate())
+  if (r >= 1) return true
+  if (r <= 0) return false
+  return createHash('sha256').update(traceId).digest().readUInt32BE(0) / 2 ** 32 < r
 }
 
 /** Langfuse only accepts lowercase [a-z0-9_-] and nothing starting with
  *  'langfuse'. VERCEL_ENV is production, preview or development. */
 function tracingEnvironment(): string {
-  const env = (process.env.VERCEL_ENV?.trim() || 'development').toLowerCase().replace(/[^a-z0-9_-]/g, '-')
-  return env.startsWith('langfuse') ? 'development' : env
+  const e = (env('VERCEL_ENV') || 'development').toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 40)
+  return e.startsWith('langfuse') ? 'development' : e
 }
 
-async function getClient(): Promise<Langfuse | null> {
-  if (!langfuseConfigured()) return null
-  if (cachedClient) return cachedClient
-  const { Langfuse: LangfuseCtor } = await import('langfuse')
-  cachedClient = new LangfuseCtor({
-    secretKey: process.env.LANGFUSE_SECRET_KEY?.trim(),
-    publicKey: process.env.LANGFUSE_PUBLIC_KEY?.trim(),
-    baseUrl: process.env.LANGFUSE_BASE_URL?.trim(),
-    environment: tracingEnvironment(),
-    release: process.env.VERCEL_GIT_COMMIT_SHA?.trim() || undefined,
-    // Sampling is done per trace in mirrorSpansToLangfuse. Passing 1 stops
-    // the SDK from also reading LANGFUSE_SAMPLE_RATE and sampling twice.
-    sampleRate: 1,
-    // Fail fast: the caller only waits MIRROR_DEADLINE_MS anyway.
-    requestTimeout: 2000,
-    fetchRetryCount: 1,
-    fetchRetryDelay: 300,
+// --- masking choke points ---------------------------------------------------------
+
+/** Redact secret/PII-shaped substrings, then cap. The slice BEFORE redaction
+ *  bounds regex work; the 512 chars of headroom mean a secret that straddles
+ *  the cap is still replaced whole before the final cut. */
+export function scrubText(text: string, cap: number = CONTENT_CAP_CHARS): string {
+  const redacted = redactString(text.slice(0, cap + 512))
+  return text.length > cap || redacted.length > cap ? `${redacted.slice(0, cap)}…[truncated]` : redacted
+}
+
+/** Structured payloads: bounded first (capPayload also bounds wide objects),
+ *  then key deny-list plus patterns (resume, email, token... keys are blanked). */
+export function scrubPayload(value: unknown): unknown {
+  return scrubMetadata(capPayload(value, PAYLOAD_CAP_BYTES))
+}
+
+/** The one choke function for every non-input/output string: slice, redact, cut. */
+function clean(value: unknown, max: number): string {
+  return redactString(String(value).slice(0, max + 512)).slice(0, max)
+}
+
+const NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/
+/** Names come from code constants. A name that is not one (a bug, or a planner
+ *  label that slipped through) becomes `unnamed` rather than carrying free
+ *  text to Langfuse. */
+export function safeName(name: string | undefined): string {
+  return name !== undefined && NAME_RE.test(name) ? name : 'unnamed'
+}
+
+const SAFE_META_RE = /^[A-Za-z0-9_.:/-]{1,200}$/
+
+/** Metadata is ids, enums and numbers. Anything else is dropped, never cleaned
+ *  into something that looks fine. */
+function safeMetadata(meta: Record<string, string | number | boolean> | undefined): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {}
+  for (const [k, v] of Object.entries(meta ?? {})) {
+    if (!NAME_RE.test(k.toLowerCase())) continue
+    if (typeof v === 'number' ? Number.isFinite(v) : typeof v === 'boolean' || (typeof v === 'string' && SAFE_META_RE.test(v))) out[k] = v
+  }
+  return out
+}
+
+type Budget = { left: number }
+type Msg = { role: string; content: string; reasoning?: string }
+const isMsg = (v: unknown): v is Msg => {
+  const o = v as Record<string, unknown> | null
+  return typeof o === 'object' && o !== null && typeof o.role === 'string' && typeof o.content === 'string'
+}
+
+/** Chat messages keep their readable text (16 KB each, 48 KB together). */
+function scrubMessages(msgs: Msg[]): Msg[] {
+  let left = GENERATION_INPUT_CAP_CHARS
+  return msgs.map((m) => {
+    const content = scrubText(m.content, Math.max(0, Math.min(CONTENT_CAP_CHARS, left)))
+    left -= content.length
+    return {
+      role: clean(m.role, 20),
+      content,
+      ...(typeof m.reasoning === 'string' ? { reasoning: scrubText(m.reasoning) } : {}),
+    }
   })
-  return cachedClient
 }
 
-/** Redact secret/PII-shaped substrings, then cap. Slicing BEFORE redaction
- *  only bounds regex work; it is 4x the final cap, so a secret cut in half
- *  by it can never reach the final output. */
-function scrubText(text: string): string {
-  const redacted = redactString(text.slice(0, CONTENT_CAP_CHARS * 4))
-  return redacted.length > CONTENT_CAP_CHARS ? `${redacted.slice(0, CONTENT_CAP_CHARS)}…[truncated]` : redacted
+/** Input/output of one observation, charged against the trace budget. */
+function scrubIo(value: unknown, budget: Budget): unknown {
+  if (value === undefined) return undefined
+  if (budget.left <= 0) return BUDGET_EXHAUSTED
+  let out: unknown
+  if (typeof value === 'string') out = scrubText(value)
+  else if (isMsg(value)) out = scrubMessages([value])[0]
+  else if (Array.isArray(value) && value.length > 0 && value.every(isMsg)) out = scrubMessages(value)
+  else out = scrubPayload(value)
+  try {
+    budget.left -= JSON.stringify(out)?.length ?? 0
+  } catch {
+    budget.left = 0
+  }
+  return out
 }
 
-function scrubContent(content: SpanRecord['content']) {
-  if (!content) return {}
+// --- observation building ------------------------------------------------------------
+
+type Attrs = Record<string, unknown>
+/** What exportTrace needs of an observation. */
+interface Obs {
+  id: string
+  otelSpan: Span
+  end(endTime?: Date): void
+}
+type StartFn = (name: string, attributes: Attrs, options: Attrs) => Obs
+
+const DEFAULT_TYPE: Record<SpanRecord['kind'], LfType> = {
+  graph: 'chain',
+  node: 'agent',
+  llm: 'generation',
+  tool: 'tool',
+  judge: 'generation',
+  http: 'span',
+}
+const typeOf = (r: SpanRecord): LfType => r.lf?.type ?? DEFAULT_TYPE[r.kind]
+const hasUsage = (t: LfType) => t === 'generation' || t === 'embedding'
+
+function toAttributes(r: SpanRecord, budget: Budget, capture: boolean): Attrs {
+  const lf: LfPayload = r.lf ?? {}
+  const type = typeOf(r)
+  const metadata: Record<string, string | number | boolean> = { kind: r.kind, ...safeMetadata(lf.metadata) }
+  if (r.run_id) metadata.run_id = r.run_id
+  if (capture) {
+    for (const [k, v] of Object.entries(lf.detail ?? {})) if (NAME_RE.test(k)) metadata[k] = clean(v, 200)
+  }
+  const failed = r.status === 'error'
+  const level = failed ? 'ERROR' : lf.level
+  // With capture off no message text leaves, only the short code.
+  const code = lf.errorCode ?? (failed ? 'error' : undefined)
+  const statusMessage = !level
+    ? undefined
+    : capture && lf.errorMessage
+      ? clean(`${code ?? 'error'}: ${lf.errorMessage}`, 500)
+      : code
   return {
-    input: content.input?.map((m) => ({ role: String(m.role).slice(0, 20), content: scrubText(String(m.content)) })),
-    output: content.output === undefined ? undefined : scrubText(String(content.output)),
+    ...(capture && lf.input !== undefined ? { input: scrubIo(lf.input, budget) } : {}),
+    ...(capture && lf.output !== undefined ? { output: scrubIo(lf.output, budget) } : {}),
+    metadata,
+    version: lf.version ? clean(lf.version, 64) : undefined,
+    level,
+    statusMessage,
+    ...(hasUsage(type)
+      ? {
+          model: lf.model ? clean(lf.model, 100) : undefined,
+          modelParameters: lf.modelParameters,
+          usageDetails: lf.usage,
+          costDetails: lf.cost,
+        }
+      : {}),
   }
 }
 
-const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+function buildTraceAttrs(
+  buffer: SpanBuffer,
+  rows: SpanRecord[],
+  dropped: number
+): Record<string, string | string[]> {
+  const root = rows.find((r) => !r.parent_span_id) ?? rows[0]
+  const name = safeName(buffer.meta.name ?? root.lf?.name ?? root.name)
+  const feature = safeName(buffer.meta.feature ?? name)
+  const attrs: Record<string, string | string[]> = {
+    'langfuse.trace.name': name,
+    'user.id': clean(buffer.userId, 200),
+    'langfuse.trace.tags': [`feature:${feature}`, buffer.meta.isDemo === false ? 'owner' : 'demo'],
+    'langfuse.trace.metadata.feature': feature,
+  }
+  if (buffer.meta.sessionId) attrs['session.id'] = clean(buffer.meta.sessionId, 200)
+  const meta: Record<string, string> = { ...buffer.meta.metadata }
+  if (dropped > 0) meta.dropped_observations = String(dropped)
+  for (const [k, v] of Object.entries(meta)) {
+    if (NAME_RE.test(k) && SAFE_META_RE.test(v)) attrs[`langfuse.trace.metadata.${k}`] = v
+  }
+  return attrs
+}
+
+const IO_KEYS = new Set(['langfuse.observation.input', 'langfuse.observation.output'])
+
+/** Layer 2: re-scrub every string (and string[]) attribute except input and
+ *  output (those are scrubbed and masked already). Throws when the SDK stops
+ *  exposing `attributes`: the whole trace is then dropped (fail closed). */
+export function finalize(span: Span): void {
+  const attrs = (span as unknown as ReadableSpan).attributes
+  if (!attrs || typeof attrs !== 'object') throw new Error('finalize: span attributes not readable')
+  for (const [k, v] of Object.entries(attrs)) {
+    if (IO_KEYS.has(k)) continue
+    if (typeof v === 'string') span.setAttribute(k, clean(v, 1000))
+    else if (Array.isArray(v)) span.setAttribute(k, v.map((x) => (typeof x === 'string' ? clean(x, 200) : x)) as string[])
+  }
+}
+
+/** Which records fit the per-trace cap. The root, error spans and judge spans
+ *  (with all their ancestors) are always kept, then the rest in start order, so
+ *  every kept record's parent is kept too. */
+export function selectRows(rows: SpanRecord[], cap: number = MAX_OBSERVATIONS_PER_TRACE): { rows: SpanRecord[]; dropped: number } {
+  if (rows.length <= cap) return { rows, dropped: 0 }
+  const byId = new Map(rows.map((r) => [r.span_id, r]))
+  const keep = new Set<string>()
+  const chain = (r: SpanRecord): SpanRecord[] => {
+    const out: SpanRecord[] = []
+    for (let c: SpanRecord | undefined = r; c && !keep.has(c.span_id); c = c.parent_span_id ? byId.get(c.parent_span_id) : undefined) out.push(c)
+    return out
+  }
+  const admit = (r: SpanRecord) => {
+    const c = chain(r)
+    if (keep.size + c.length <= cap) for (const x of c) keep.add(x.span_id)
+  }
+  const important = [
+    ...rows.filter((r) => !r.parent_span_id),
+    ...rows.filter((r) => r.kind === 'judge'),
+    ...rows.filter((r) => r.status === 'error'),
+  ]
+  for (const r of important) admit(r)
+  for (const r of [...rows].sort((a, b) => (a.start_time < b.start_time ? -1 : a.start_time > b.start_time ? 1 : 0))) {
+    if (keep.size >= cap) break
+    admit(r)
+  }
+  const kept = rows.filter((r) => keep.has(r.span_id))
+  return { rows: kept, dropped: rows.length - kept.length }
+}
+
+// --- init (lazy, Node only, one per instance) ----------------------------------------
+
+interface Lf {
+  processor: LangfuseSpanProcessor
+  startObservation: StartFn
+}
+
+const KEY = Symbol.for('cello.langfuse')
+let testExporter: SpanExporter | undefined
+
+type Holder = { [KEY]?: Promise<Lf | null> }
+
+async function getLangfuse(): Promise<Lf | null> {
+  const g = globalThis as Holder
+  g[KEY] ??= init().catch((err) => {
+    console.warn(`[langfuse] init failed, export disabled for 60s: ${redactString(String(err).slice(0, 300))}`)
+    setTimeout(() => {
+      delete g[KEY]
+    }, 60_000).unref()
+    return null
+  })
+  return g[KEY] as Promise<Lf | null>
+}
+
+async function init(): Promise<Lf> {
+  const [{ LangfuseSpanProcessor }, { BasicTracerProvider, AlwaysOnSampler }, tracing] = await Promise.all([
+    import('@langfuse/otel'),
+    import('@opentelemetry/sdk-trace-base'),
+    import('@langfuse/tracing'),
+  ])
+  const processor = new LangfuseSpanProcessor({
+    publicKey: env('LANGFUSE_PUBLIC_KEY'),
+    secretKey: env('LANGFUSE_SECRET_KEY'),
+    baseUrl: env('LANGFUSE_BASE_URL'),
+    ...(testExporter ? { exporter: testExporter } : {}),
+    environment: tracingEnvironment(),
+    // The SDK has no Vercel auto-detect (5.11.1 source).
+    release: env('VERCEL_GIT_COMMIT_SHA'),
+    mediaUploadEnabled: false,
+    // maxExportBatchSize, above MAX_OBSERVATIONS_PER_TRACE: one trace is about one POST.
+    flushAt: 512,
+    additionalHeaders: { 'x-langfuse-ingestion-version': '4' },
+    // Second layer for input/output only: the processor applies it to the
+    // exact keys langfuse.observation.input / output / metadata, as stringified JSON.
+    mask: ({ data }) => (typeof data === 'string' ? redactString(data.slice(0, 256 * 1024)) : data),
+  })
+  const provider = new BasicTracerProvider({ sampler: new AlwaysOnSampler(), spanProcessors: [processor] })
+  // Isolated: never provider.register(), Sentry owns the global one.
+  tracing.setLangfuseTracerProvider(provider)
+  return { processor, startObservation: tracing.startObservation as unknown as StartFn }
+}
+
+/** Test seam: drop the singleton and route the next init to `exporter`
+ *  (an in-memory exporter), or to the real OTLP exporter when omitted. */
+export function __setLangfuseForTest(opts?: { exporter?: SpanExporter }): void {
+  testExporter = opts?.exporter
+  delete (globalThis as Holder)[KEY]
+  tail = Promise.resolve()
+  warnedNoContext = false
+}
+
+// --- replay ---------------------------------------------------------------------------
+
+async function send(buffer: SpanBuffer, all: SpanRecord[]): Promise<void> {
+  const lf = await getLangfuse()
+  if (!lf) return
+  const capture = buffer.captureContent
+  const { rows, dropped } = selectRows(all)
+  const traceHex = buffer.traceId.replace(/-/g, '')
+  const traceAttrs = buildTraceAttrs(buffer, rows, dropped)
+  const budget: Budget = { left: TRACE_CONTENT_BUDGET_CHARS }
+  const byId = new Map<string, Obs>()
+  const rowsById = new Map(rows.map((r) => [r.span_id, r]))
+
+  // 1) START every observation, parents first, and end nothing until all are
+  //    started (the processor's app-root logic keys on currently open spans).
+  const start = (r: SpanRecord): Obs => {
+    const seen = byId.get(r.span_id)
+    if (seen) return seen
+    const parentRow = r.parent_span_id ? rowsById.get(r.parent_span_id) : undefined
+    const parentSpanContext = parentRow
+      ? start(parentRow).otelSpan.spanContext()
+      : { traceId: traceHex, spanId: traceHex.slice(16), traceFlags: 1 }
+    // Top-level startObservation, NOT parent.startObservation(): the child
+    // method drops startTime (5.11.1).
+    const obs = lf.startObservation(safeName(r.lf?.name ?? r.name), toAttributes(r, budget, capture), {
+      asType: typeOf(r),
+      startTime: new Date(r.start_time),
+      parentSpanContext,
+    })
+    obs.otelSpan.setAttributes(traceAttrs)
+    byId.set(r.span_id, obs)
+    return obs
+  }
+  for (const r of rows) start(r)
+
+  // 2) FINALIZE then END. finalize() is the only guarantee for non-IO strings.
+  for (const r of rows) {
+    const o = byId.get(r.span_id) as Obs
+    finalize(o.otelSpan)
+    o.end(new Date(r.end_time))
+  }
+  await lf.processor.forceFlush()
+}
+
+// --- delivery -----------------------------------------------------------------------------
+
+/** The symbol @vercel/functions' get-context reads (3.9.11). Read directly:
+ *  the package does not export getContext and its waitUntil is a silent no-op
+ *  without a context, so detecting registration here is the only honest way. */
+const REQ_CTX = Symbol.for('@vercel/request-context')
+let tail: Promise<unknown> = Promise.resolve() // one replay at a time per instance
+let warnedNoContext = false
+
+/** A replay that has not finished by now is abandoned, so one hung export
+ *  cannot stall every later trace queued behind it (the OTLP exporter has its
+ *  own 5 s timeout; this is the backstop). */
+const JOB_TIMEOUT_MS = 15_000
+
+function bounded(job: () => Promise<void>): () => Promise<void> {
+  return () =>
+    new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`export still running after ${JOB_TIMEOUT_MS} ms`)), JOB_TIMEOUT_MS)
+      timer.unref()
+      job().then(resolve, reject).finally(() => clearTimeout(timer))
+    })
+}
+
+function deliver(unbounded: () => Promise<void>): Promise<void> {
+  const job = bounded(unbounded)
+  const run = tail.then(job, job)
+  tail = run.catch(() => undefined)
+  const safe = run.catch((err) => {
+    console.warn(`[langfuse] export failed: ${redactString(String(err).slice(0, 300))}`)
+  })
+  const ctx = (globalThis as unknown as Record<symbol, { get?: () => { waitUntil?: (p: Promise<unknown>) => void } | undefined } | undefined>)[REQ_CTX]?.get?.()
+  if (typeof ctx?.waitUntil === 'function') {
+    ctx.waitUntil(safe)
+    return Promise.resolve()
+  }
+  if (process.env.VERCEL && !warnedNoContext) {
+    warnedNoContext = true
+    console.warn(`[langfuse] no Vercel request context; export awaited with a ${FLUSH_DEADLINE_MS} ms deadline`)
+  }
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, FLUSH_DEADLINE_MS)
+    timer.unref()
+    void safe.then(() => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
+}
 
 /**
- * Mirror already-flushed trace_spans rows to Langfuse. Complete no-op with no
- * `langfuse` import when unconfigured. NEVER throws and NEVER rejects: a
- * down endpoint, a bad key or a timeout all land here as one logged line.
+ * Export one flushed buffer to Langfuse. Never rejects, and a complete no-op
+ * (no import, no work) when Langfuse is unconfigured or the trace is sampled
+ * out. Resolves at once under a Vercel request context, else within
+ * FLUSH_DEADLINE_MS.
  */
-export async function mirrorSpansToLangfuse(rows: SpanRecord[]): Promise<void> {
-  if (rows.length === 0 || !langfuseConfigured()) return
+export function exportTrace(buffer: SpanBuffer, rows: SpanRecord[]): Promise<void> {
   try {
-    const rate = langfuseSampleRate()
-    const kept = rows.filter((r) => traceSampled(r.trace_id, rate))
-    if (kept.length === 0) return
-    const client = await getClient()
-    if (!client) return
-    const capture = langfuseCaptureEnabled()
-
-    const tracedIds = new Set<string>()
-    for (const row of kept) {
-      if (!tracedIds.has(row.trace_id)) {
-        tracedIds.add(row.trace_id)
-        // Trace name = the surface = the root graph span's name, else the first row's.
-        const mine = kept.filter((r) => r.trace_id === row.trace_id)
-        const name = (mine.find((r) => r.kind === 'graph' && !r.parent_span_id) ?? mine[0]).name
-        const start = mine.reduce((min, r) => (r.start_time < min ? r.start_time : min), mine[0].start_time)
-        client.trace({
-          id: row.trace_id,
-          name,
-          timestamp: new Date(start),
-          userId: row.user_id,
-          sessionId: row.thread_id ?? undefined,
-        })
-      }
-      const attrs = row.attributes ?? {}
-      const failed = row.status === 'error'
-      const error = typeof attrs.error === 'string' ? attrs.error : undefined
-      const common = {
-        id: row.span_id,
-        traceId: row.trace_id,
-        parentObservationId: row.parent_span_id ?? undefined,
-        name: row.name,
-        startTime: new Date(row.start_time),
-        endTime: new Date(row.end_time),
-        metadata: row.attributes ? scrubMetadata(row.attributes) : undefined,
-        level: failed ? ('ERROR' as const) : ('DEFAULT' as const),
-        statusMessage: failed && error ? scrubText(error) : undefined,
-      }
-      if (row.kind === 'llm') {
-        const usage = { input: num(attrs.promptTokens), output: num(attrs.completionTokens), total: num(attrs.tokensUsed) }
-        const cost = num(attrs.costUsd)
-        client.generation({
-          ...common,
-          model: typeof attrs.model === 'string' ? attrs.model : undefined,
-          usageDetails: Object.fromEntries(Object.entries(usage).filter(([, v]) => v !== undefined)) as Record<string, number>,
-          // Local CLI and local-server calls cost nothing per token; the
-          // price table's estimate would be a made-up number there.
-          costDetails: cost !== undefined && attrs.metered !== false ? { total: cost } : undefined,
-          ...(capture ? scrubContent(row.content) : {}),
-        })
-      } else {
-        client.span(common)
-      }
-    }
-    await client.flushAsync()
+    if (rows.length === 0 || !buffer.exportEnabled) return Promise.resolve()
+    return deliver(() => send(buffer, rows))
   } catch (err) {
-    console.error(
-      `[observability] Langfuse export failed (${rows.length} span(s) not mirrored): ${err instanceof Error ? err.message : String(err)}`
-    )
-  }
-}
-
-/** mirrorSpansToLangfuse raced against a deadline, timer always cleared.
- *  Resolves (never rejects) within `ms` even if Langfuse hangs; the abandoned
- *  export may finish in the background. */
-export async function mirrorSpansWithDeadline(rows: SpanRecord[], ms: number = MIRROR_DEADLINE_MS): Promise<void> {
-  if (rows.length === 0 || !langfuseConfigured()) return
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const deadline = new Promise<void>((resolve) => {
-    timer = setTimeout(() => {
-      console.error(`[observability] Langfuse export still pending after ${ms}ms (${rows.length} span(s)); not waiting`)
-      resolve()
-    }, ms)
-  })
-  try {
-    await Promise.race([mirrorSpansToLangfuse(rows), deadline])
-  } catch (err) {
-    console.error(`[observability] Langfuse mirror threw unexpectedly: ${err instanceof Error ? err.message : String(err)}`)
-  } finally {
-    clearTimeout(timer)
+    console.warn(`[langfuse] export skipped: ${redactString(String(err).slice(0, 300))}`)
+    return Promise.resolve()
   }
 }
