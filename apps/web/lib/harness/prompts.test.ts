@@ -47,6 +47,8 @@ describe('assertPromptDocsResolve', () => {
       'memory_extract',
       'company_verify',
       'goal_judge',
+      'orchestrator',
+      'researcher',
     ]))
   })
 })
