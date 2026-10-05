@@ -536,8 +536,9 @@ export async function collectPublicSignals(company: {
   }
 
   if (wiki) addSource('Wikipedia', wiki.url, 'wikipedia')
-  if (host) addSource(`${company.name} — official site`, `https://${host}`, 'official-site')
-  if (pages.careersText) addSource(`${company.name} — careers`, `https://${host}/careers`, 'careers')
+  if (host) addSource(`${company.name} site`, `https://${host}`, 'official-site')
+  if (pages.aboutText) addSource(`${company.name} about page`, `https://${host}/about`, 'official-site')
+  if (pages.careersText) addSource(`${company.name} careers`, `https://${host}/careers`, 'careers')
   if (github?.login) addSource('GitHub', `https://github.com/${github.login}`, 'github')
   for (const n of news) addSource(n.title, n.url, n.matchedBy)
 
