@@ -39,12 +39,18 @@ export function resumeLines(resumeText: string | null | undefined): ResumeLine[]
 
 const STATUSES = ['met', 'partial', 'not_met'] as const
 
+/** How many requirements the model claimed the resume shows, and how many of those citations held up. */
+export interface CitationStats {
+  claimed: number
+  kept: number
+}
+
 /**
  * Confirms each citation. `met` and `partial` need a real line whose text holds
  * the quoted words; otherwise the requirement counts as not shown. A requirement
  * the model never answered stays `unclear`.
  */
-export function verifyChecks(raw: unknown, requirements: readonly Requirement[], lines: readonly ResumeLine[], idOf: (r: Requirement) => string): RequirementCheck[] {
+export function verifyChecks(raw: unknown, requirements: readonly Requirement[], lines: readonly ResumeLine[], idOf: (r: Requirement) => string, stats?: CitationStats): RequirementCheck[] {
   const list = Array.isArray(raw) ? raw : []
   const byId = new Map<string, Record<string, unknown>>()
   for (const item of list) {
@@ -60,7 +66,9 @@ export function verifyChecks(raw: unknown, requirements: readonly Requirement[],
     if (status === 'not_met') return { ...base, status, evidence: null }
     const line = typeof c.line === 'number' ? lines.find((l) => l.n === c.line) : undefined
     const quote = typeof c.quote === 'string' ? c.quote.trim() : ''
+    if (stats) stats.claimed += 1
     if (!line || !quote || !quoteIsIn(quote, line.text)) return { ...base, status: 'not_met', evidence: null }
+    if (stats) stats.kept += 1
     return { ...base, status, evidence: { line: line.n, quote: quote.slice(0, 200) } }
   })
 }
@@ -121,7 +129,7 @@ function cannot(note: string): ChanceResult {
  * Checks several roles against one resume, three to a model call. Roles whose
  * posting could not be read come back as "cannot assess" without a call.
  */
-export async function assessChances(llm: LlmRunner, resumeText: string, inputs: readonly ChanceInput[]): Promise<Map<string, ChanceResult>> {
+export async function assessChances(llm: LlmRunner, resumeText: string, inputs: readonly ChanceInput[], stats?: CitationStats): Promise<Map<string, ChanceResult>> {
   const out = new Map<string, ChanceResult>()
   const lines = resumeLines(resumeText)
   const ready: { role: RoleFacts; reqs: Requirement[] }[] = []
@@ -157,7 +165,7 @@ export async function assessChances(llm: LlmRunner, resumeText: string, inputs: 
       })
       const parsed = parseJsonLoose<{ checks?: unknown }>(res.content)
       batch.forEach(({ role, reqs }, k) => {
-        out.set(role.id, labelChance(reqs, verifyChecks(parsed.checks, reqs, lines, idOf(k))))
+        out.set(role.id, labelChance(reqs, verifyChecks(parsed.checks, reqs, lines, idOf(k), stats)))
       })
     } catch (err) {
       if (err instanceof MissingKeyError || err instanceof BudgetCapError) throw err

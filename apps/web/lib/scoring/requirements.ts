@@ -65,11 +65,17 @@ function asKind(v: unknown): RequirementKind {
   return (REQUIREMENT_KINDS as readonly string[]).includes(v as string) ? (v as RequirementKind) : 'other'
 }
 
+/** How many items the model proposed and how many survived the check that their quote is really in the posting. */
+export interface GroundingStats {
+  proposed: number
+  grounded: number
+}
+
 /**
  * Turns the model's answer for one posting into grounded requirements. Items
  * with no verbatim quote in the posting are dropped; duplicates are merged.
  */
-export function groundRequirements(raw: unknown, description: string): RequirementsOutcome {
+export function groundRequirements(raw: unknown, description: string, stats?: GroundingStats): RequirementsOutcome {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   if (o.enough_detail === false) return { kind: 'thin', reason: 'The posting does not list what the role needs.' }
   const list = Array.isArray(o.requirements) ? o.requirements : []
@@ -80,8 +86,10 @@ export function groundRequirements(raw: unknown, description: string): Requireme
     const r = item as Record<string, unknown>
     const text = typeof r.text === 'string' ? r.text.trim() : ''
     const quote = typeof r.quote === 'string' ? r.quote.trim() : ''
+    if (stats) stats.proposed += 1
     if (!text || !quote) continue
     if (!quoteIsIn(quote, description)) continue
+    if (stats) stats.grounded += 1
     const key = fold(text)
     if (seen.has(key)) continue
     seen.add(key)
@@ -102,7 +110,7 @@ export function descriptionIsThin(description: string | null | undefined): boole
  * that are thin are answered without a call. Never throws on a model failure:
  * the affected postings come back as `failed`.
  */
-export async function extractRequirements(llm: LlmRunner, roles: readonly RoleFacts[]): Promise<Map<string, RequirementsOutcome>> {
+export async function extractRequirements(llm: LlmRunner, roles: readonly RoleFacts[], stats?: GroundingStats): Promise<Map<string, RequirementsOutcome>> {
   const out = new Map<string, RequirementsOutcome>()
   const toRead: RoleFacts[] = []
   for (const r of roles) {
@@ -132,7 +140,7 @@ export async function extractRequirements(llm: LlmRunner, roles: readonly RoleFa
       const byId = new Map((parsed.postings ?? []).map((p) => [String(p.id), p]))
       batch.forEach((r, k) => {
         const p = byId.get(ids[k])
-        out.set(r.id, p ? groundRequirements(p, r.description ?? '') : { kind: 'failed', reason: 'The model skipped this posting.' })
+        out.set(r.id, p ? groundRequirements(p, r.description ?? '', stats) : { kind: 'failed', reason: 'The model skipped this posting.' })
       })
     } catch (err) {
       // No key or no budget is not a bad answer for these postings; the caller has to hear it.

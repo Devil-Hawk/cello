@@ -22,7 +22,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { parseJsonLoose } from '@/lib/harness/llm'
 import type { LlmRunner } from '@/lib/harness/types'
-import { assessChances } from '@/lib/scoring/chance'
+import { assessChances, type CitationStats } from '@/lib/scoring/chance'
 import { checkConstraints, type StatedConstraints } from '@/lib/scoring/constraints'
 import { classifyJob } from '@/lib/jobs/classify'
 import { extractRequirements } from '@/lib/scoring/requirements'
@@ -34,6 +34,7 @@ import { naivePoints, oldBand, oldScore, resumeSkillTokens } from './eval-shortl
 import { agreement, auc, brier, cohenKappa, mean, mulberry32, precisionAtK, round, shuffled, stratifiedSplit } from './eval-shortlist/metrics'
 import { isPositive, labelPostings, type OracleLabel, type SyntheticPersona } from './eval-shortlist/oracle'
 import { FreeModelClient } from './eval-shortlist/openrouter'
+import { requirementsStudy } from './eval-shortlist/studies'
 import thresholds from './eval-shortlist/thresholds.json'
 
 // ---------------------------------------------------------------------------
@@ -64,6 +65,8 @@ interface Args {
   skipChance: boolean
   /** Only ask the simulated people to react to every posting and print what they said. */
   labelsOnly: boolean
+  /** Skip the learning rounds and run only the checks on the two reading prompts. */
+  studiesOnly: boolean
 }
 
 function parseArgs(argv: string[]): Args {
@@ -83,8 +86,9 @@ function parseArgs(argv: string[]): Args {
     label: get('label') ?? 'run',
     outDir: get('out') ?? null,
     skipOld: argv.includes('--skip-old'),
-    skipChance: argv.includes('--skip-chance') || quick,
+    skipChance: argv.includes('--skip-chance') || (quick && !argv.includes('--studies-only')),
     labelsOnly: argv.includes('--labels-only'),
+    studiesOnly: argv.includes('--studies-only'),
   }
 }
 
@@ -213,6 +217,30 @@ function measure(read: Map<string, WantRead>, labels: Map<string, OracleLabel>, 
   return { p5: precisionAtK(ranked, pos, 5), auc: auc(p, y), brier: brier(p, y) }
 }
 
+interface Prepared {
+  constraints: StatedConstraints
+  eligible: Posting[]
+  labels: Map<string, OracleLabel>
+  missing: string[]
+  stream: Posting[]
+  heldOut: Posting[]
+}
+
+/** The postings that pass the person's stated constraints, what they said about each, and the stream / held-out split. */
+async function prepare(args: Args, oracle: LlmRunner, persona: SyntheticPersona, jobs: Posting[], seedOffset: number): Promise<Prepared> {
+  const constraints = persona.constraints as StatedConstraints
+  const eligible = jobs.filter((j) => checkConstraints(toFacts(j), constraints).length === 0)
+  log(`${persona.id}: ${eligible.length} of ${jobs.length} postings pass the stated constraints`)
+  const { labels, missing } = await labelPostings(oracle, persona, eligible)
+  const labelled = eligible.filter((j) => labels.has(j.id))
+  const group = (j: Posting) => classifyJob({ title: j.title, description: j.description, location: j.location, companyName: j.company }).jobFunction ?? 'other'
+  const { stream, heldOut } = stratifiedSplit(labelled, group, args.heldOutShare, mulberry32(args.seed + seedOffset))
+  const positives = labelled.filter((j) => isPositive(labels.get(j.id)!))
+  log(`${persona.id}: ${stream.length} stream, ${heldOut.length} held out, ${positives.length}/${labelled.length} wanted by the person`)
+  heldOutByPersona.set(persona.id, { heldOut })
+  return { constraints, eligible, labels, missing, stream, heldOut }
+}
+
 async function runPersona(
   args: Args,
   client: FreeModelClient,
@@ -223,16 +251,7 @@ async function runPersona(
   jobs: Posting[],
   seedOffset: number
 ): Promise<PersonaReport> {
-  const constraints = persona.constraints as StatedConstraints
-  const eligible = jobs.filter((j) => checkConstraints(toFacts(j), constraints).length === 0)
-  log(`${persona.id}: ${eligible.length} of ${jobs.length} postings pass the stated constraints`)
-  const { labels, missing } = await labelPostings(oracle, persona, eligible)
-  const labelled = eligible.filter((j) => labels.has(j.id))
-  const group = (j: Posting) => classifyJob({ title: j.title, description: j.description, location: j.location, companyName: j.company }).jobFunction ?? 'other'
-  const { stream, heldOut } = stratifiedSplit(labelled, group, args.heldOutShare, mulberry32(args.seed + seedOffset))
-  const positives = labelled.filter((j) => isPositive(labels.get(j.id)!))
-  log(`${persona.id}: ${stream.length} stream, ${heldOut.length} held out, ${positives.length}/${labelled.length} wanted by the person`)
-
+  const { constraints, eligible, labels, missing, stream, heldOut } = await prepare(args, oracle, persona, jobs, seedOffset)
   const heldFacts = heldOut.map(toFacts)
   const heldLabelPos = new Set(heldOut.filter((j) => isPositive(labels.get(j.id)!)).map((j) => j.id))
   const store = new MemoryStore()
@@ -349,12 +368,11 @@ async function runPersona(
     reasons,
     heldOutRead: heldOut.filter((j) => lastRead.has(j.id)).map((j) => ({ id: j.id, want: lastRead.get(j.id)!.p, label: heldLabelPos.has(j.id) ? 1 : 0 })),
   }
-  heldOutByPersona.set(persona.id, { heldOut, lastRead })
   return report
 }
 
 const oldScores = new Map<string, Map<string, number>>()
-const heldOutByPersona = new Map<string, { heldOut: Posting[]; lastRead: Map<string, WantRead> }>()
+const heldOutByPersona = new Map<string, { heldOut: Posting[] }>()
 
 // ---------------------------------------------------------------------------
 // Strong / Possible / Stretch against two other judges
@@ -405,15 +423,28 @@ async function judgeChance(llm: LlmRunner, resume: string, postings: Posting[]):
 async function chanceStudy(args: Args, gen: LlmRunner, judgeA: LlmRunner, judgeB: LlmRunner, personas: SyntheticPersona[], jobs: Posting[]) {
   const pairs: ChancePair[] = []
   const store = new MemoryStore()
+  const citations: CitationStats = { claimed: 0, kept: 0 }
   await Promise.all(personas.map(async (persona) => {
     const held = heldOutByPersona.get(persona.id)
     if (!held) return
-    // Twelve held-out roles per person: the six Cello likes best and six at random, so every label gets a look.
-    const byWant = [...held.heldOut].filter((j) => held.lastRead.has(j.id)).sort((a, b) => held.lastRead.get(b.id)!.p - held.lastRead.get(a.id)!.p)
-    const sample = [...new Map([...byWant.slice(0, 6), ...shuffled(byWant.slice(6), mulberry32(args.seed + 99)).slice(0, 6)].map((j) => [j.id, j])).values()]
+    // Twelve held-out roles per person, drawn at random so the sample does not depend on what Cello thinks of them.
+    const sample = shuffled(held.heldOut, mulberry32(args.seed + 99)).slice(0, 12)
     const outcomes = await extractRequirements(gen, sample.map(toFacts))
     await store.saveRequirements(persona.id, outcomes)
-    const ours = await assessChances(gen, persona.resume, sample.map((j) => ({ role: toFacts(j), outcome: outcomes.get(j.id)! })))
+    const ours = await assessChances(gen, persona.resume, sample.map((j) => ({ role: toFacts(j), outcome: outcomes.get(j.id)! })), citations)
+    // The Release 1 score for the same roles, so its bands can be compared on the same pairs.
+    if (!args.skipOld) {
+      const known = oldScores.get(persona.id) ?? new Map<string, number>()
+      await Promise.all(
+        sample
+          .filter((j) => !known.has(j.id))
+          .map(async (j) => {
+            const sc = await oldScore(gen, persona.resume, j)
+            if (sc != null) known.set(j.id, sc)
+          })
+      )
+      oldScores.set(persona.id, known)
+    }
     for (const j of sample) {
       const c = ours.get(j.id)
       if (!c || c.chance === 'cannot_assess') continue
@@ -445,6 +476,7 @@ async function chanceStudy(args: Args, gen: LlmRunner, judgeA: LlmRunner, judgeB
   const labelCounts = (xs: ChancePair[]) => ({ strong: xs.filter((p) => p.ours === 'strong').length, possible: xs.filter((p) => p.ours === 'possible').length, stretch: xs.filter((p) => p.ours === 'stretch').length })
   const oldComparable = consensus.filter((p) => p.old)
   return {
+    citations: { claimed: citations.claimed, kept: citations.kept, survival: citations.claimed === 0 ? NaN : round(citations.kept / citations.claimed) },
     pairsLabelled: picked.length,
     ourLabelCounts: labelCounts(picked),
     judgesAgreeOn: consensus.length,
@@ -507,7 +539,31 @@ async function main(): Promise<void> {
 
   // The people run side by side: each waits on its own model calls, and the client keeps the
   // whole run under the free tier's request rate.
+  if (args.studiesOnly) {
+    await Promise.all(personas.map((persona, i) => prepare(args, oracle, persona, jobs, i)))
+    const requirements = await requirementsStudy(gen, oracle, jobs, args.seed)
+    const chance = await chanceStudy(args, gen, oracle, judge2, personas, jobs)
+    const out = {
+      label: args.label,
+      at: new Date().toISOString(),
+      mode: 'studies-only',
+      models: { generator: GENERATOR, simulatedPerson: ORACLE, secondChanceJudge: JUDGE2, answeredBy: Object.fromEntries(client.byModel) },
+      prompts: { role_want: scoringPromptRef('role_want').hash, role_requirements: scoringPromptRef('role_requirements').hash, role_chance: scoringPromptRef('role_chance').hash },
+      requests: { live: client.live, cached: client.cached, refusedAndRetried: client.failures, budget: args.maxRequests },
+      requirements,
+      chance,
+    }
+    const dir = args.outDir ?? process.env.EVAL_REPORT_DIR
+    if (dir) {
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(path.join(dir, `studies-${args.label}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`), JSON.stringify(out, null, 2))
+    }
+    process.stdout.write(JSON.stringify(out, null, 2) + '\n')
+    process.exit(0)
+  }
+
   const reports: PersonaReport[] = await Promise.all(personas.map((persona, i) => runPersona(args, client, gen, oracle, embed, persona, jobs, i)))
+  const requirements = args.skipChance ? null : await requirementsStudy(gen, oracle, jobs, args.seed)
   const chance = args.skipChance ? null : await chanceStudy(args, gen, oracle, judge2, personas, jobs)
 
   const nRounds = Math.max(...reports.map((r) => r.rounds.length))
@@ -533,6 +589,13 @@ async function main(): Promise<void> {
     ...(bars.finalAtLeastOldScorer && !args.skipOld ? [{ bar: 'last round p@5 >= Release 1 scorer', pass: final >= summaryRows.oldScorerP5, value: [final, summaryRows.oldScorerP5] }] : []),
     ...(bars.finalAtLeastNaivePoints ? [{ bar: 'last round p@5 >= naive points', pass: final >= summaryRows.naivePointsP5, value: [final, summaryRows.naivePointsP5] }] : []),
     { bar: `sentences pass the code checks >= ${bars.reasonChecksMin}`, pass: reasonOk >= bars.reasonChecksMin, value: round(reasonOk) },
+    ...(requirements
+      ? [
+          { bar: `requirement quotes found in the posting >= ${bars.requirementsQuoteRateMin}`, pass: requirements.quoteRate >= bars.requirementsQuoteRateMin, value: requirements.quoteRate },
+          { bar: `requirements a second model agrees are stated >= ${bars.requirementsPrecisionMin}`, pass: requirements.precision >= bars.requirementsPrecisionMin, value: requirements.precision },
+          { bar: 'postings that say too little are called thin', pass: requirements.thin.tested > 0 && requirements.thin.detected / requirements.thin.tested >= bars.thinDetectionMin, value: `${requirements.thin.detected}/${requirements.thin.tested}` },
+        ]
+      : []),
     ...(chance
       ? [
           { bar: `chance agreement with the judges >= ${bars.chanceAgreementMin}`, pass: chance.ours.agreement >= bars.chanceAgreementMin, value: chance.ours.agreement },
@@ -552,6 +615,7 @@ async function main(): Promise<void> {
     synthetic: 'All people in this evaluation are SYNTHETIC. The postings are real public postings.',
     summary: { ...summaryRows, reasonSentencesChecked: allReasons.length, reasonChecksPassed: round(reasonOk) },
     personas: reports.map((r) => ({ ...r, reasons: undefined })),
+    requirements,
     chance: chance ? { ...chance, pairs: chance.pairs.map((p) => ({ ...p })) } : null,
     checks,
     pass: checks.every((c) => c.pass),

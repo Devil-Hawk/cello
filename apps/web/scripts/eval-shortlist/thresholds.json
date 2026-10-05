@@ -6,7 +6,10 @@
     "reasonChecksMin": 0.95,
     "chanceAgreementMin": 0.6,
     "chanceKappaMin": 0.4,
-    "chanceAtLeastOldScorer": true
+    "chanceAtLeastOldScorer": true,
+    "requirementsQuoteRateMin": 0.9,
+    "requirementsPrecisionMin": 0.9,
+    "thinDetectionMin": 1.0
   },
   "quick": {
     "p5GainMin": 0.0,
@@ -15,6 +18,9 @@
     "reasonChecksMin": 0.9,
     "chanceAgreementMin": 0.5,
     "chanceKappaMin": 0.2,
-    "chanceAtLeastOldScorer": false
+    "chanceAtLeastOldScorer": false,
+    "requirementsQuoteRateMin": 0.8,
+    "requirementsPrecisionMin": 0.8,
+    "thinDetectionMin": 0.6
   }
 }
