@@ -86,7 +86,7 @@ describe('eightfold adapter', () => {
     expect(jobs.some((j) => (j.description ?? '').length > 100)).toBe(true)
   })
 
-  it('stops paging at the cap: 7 pages per search word', async () => {
+  it('stops paging at the cap: 5 pages per search word', async () => {
     const page = JSON.parse(fixture('netflix-v2.json')) as { count: number; positions: Record<string, unknown>[] }
     let calls = 0
     globalThis.fetch = vi.fn(async (input: unknown) => {
@@ -102,9 +102,25 @@ describe('eightfold adapter', () => {
       return json(JSON.stringify({ count: 900, positions }))
     }) as unknown as typeof fetch
 
-    const jobs = await eightfold.fetch('explore.jobs.netflix.net_netflix.com', { query: ['data'] })
-    expect(calls).toBe(7)
-    expect(jobs).toHaveLength(70)
+    const jobs = await eightfold.fetch('explore.jobs.netflix.net_netflix.com', { query: ['data'], sleep: async () => {} })
+    expect(calls).toBe(5)
+    expect(jobs).toHaveLength(50)
+  })
+
+  it('stops with what it has when the host says slow down mid-read', async () => {
+    const page = JSON.parse(fixture('netflix-v2.json')) as { count: number; positions: Record<string, unknown>[] }
+    let calls = 0
+    globalThis.fetch = vi.fn(async (input: unknown) => {
+      const url = String(input)
+      if (url.includes('/api/apply/v2/jobs/')) return json('{}')
+      calls++
+      if (calls > 2) return new Response('slow down', { status: 403 })
+      const start = Number(new URL(url).searchParams.get('start'))
+      const positions = Array.from({ length: 10 }, (_, i) => ({ ...page.positions[0], id: String(start + i + 1), canonicalPositionUrl: `https://explore.jobs.netflix.net/careers/job/${start + i + 1}` }))
+      return json(JSON.stringify({ count: 900, positions }))
+    }) as unknown as typeof fetch
+    const jobs = await eightfold.fetch('explore.jobs.netflix.net_netflix.com', { query: ['data'], sleep: async () => {} })
+    expect(jobs).toHaveLength(20)
   })
 
   it('refuses a token that is not a host and a domain', async () => {

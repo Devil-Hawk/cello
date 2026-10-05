@@ -64,6 +64,8 @@ export interface SiteDeps {
   /** The rendered page (a browser): scheduled passes only. */
   fetchPage?: FetchPage
   model?: ModelCall | null
+  /** A browser pass will run later (the scheduled check): a site with nothing to read yet is "being read", not "no roles". */
+  renderedLater?: boolean
 }
 
 export interface TierTry {
@@ -187,6 +189,7 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
     const origin = new URL(company.careerUrl).origin
     const read = await readSitemapRoles(origin, f, { targets, skip })
     out.checked.push(...read.checked)
+    if (read.board && (await tryBoard({ ...read.board, via: 'posting' }))) return finish()
     if (read.listed > 0) {
       Object.assign(out, { tier: 'sitemap' as Tier, jobs: read.jobs, complete: read.complete, listedIds: read.listedIds })
       tried.push({ tier: 'sitemap', outcome: 'roles' })
@@ -241,14 +244,9 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
     }
   }
 
-  out.reason = firstError ? (firstError as ReaderError).reason : f.mode === 'inline' && pages.length > 0 && looksLikeShell(pages) ? 'reading' : 'no_roles'
+  // Nothing yet. When the scheduled pass can still try a browser, say so rather than "no roles".
+  out.reason = firstError ? (firstError as ReaderError).reason : f.mode === 'inline' && deps.renderedLater && pages.length > 0 ? 'reading' : 'no_roles'
   return finish()
-}
-
-/** A page with almost no text and a script bundle builds its list in the browser. */
-function looksLikeShell(pages: PageRead[]): boolean {
-  const text = pages[0].html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-  return text.length < 800 || /<div id="(root|app|__next)"/i.test(pages[0].html)
 }
 
 async function readRendered(

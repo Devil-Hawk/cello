@@ -210,7 +210,7 @@ export async function ingestCompany(store: AtsStore, company: DueCompany, deps: 
         checked: { has: (id: string) => checkedSet.has(short(id)) } as ReadonlySet<string>,
         storedIds: new Set(stored.keys()),
       },
-      { fetcher, readBoard: boardReader(company, stored), fetchPage: mode === 'scheduled' ? deps.fetchPage : undefined, model: deps.model }
+      { fetcher, readBoard: boardReader(company, stored), fetchPage: mode === 'scheduled' ? deps.fetchPage : undefined, model: deps.model, renderedLater: mode === 'inline' }
     )
 
     outcome.tier = read.tier

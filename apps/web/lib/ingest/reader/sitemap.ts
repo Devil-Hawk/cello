@@ -13,6 +13,9 @@
 import type { AtsJob } from '../../ats/types'
 import { mapWithConcurrency } from '../../ats/concurrency'
 import { normalizeJobUrl } from '../snapshot'
+import { findBoardLinks } from '../../ats/careers-page'
+import { detectFromUrl } from '../../ats/detect'
+import type { BoardRef } from '../../ats/verify'
 import { jobFromDetail, readDetail } from './detail'
 import { classifyLink } from './discover'
 import { ReaderError, type SiteFetcher } from './site-fetch'
@@ -125,6 +128,8 @@ export interface SitemapRead {
   checked: string[]
   /** Posting URLs the sitemap named. */
   listed: number
+  /** An applicant system a role page links to: the caller may upgrade the read to it. */
+  board?: BoardRef
 }
 
 export async function readSitemapRoles(
@@ -140,6 +145,7 @@ export async function readSitemapRoles(
 
   const checked: string[] = []
   const jobs: AtsJob[] = []
+  let board: BoardRef | undefined
   let stopped: ReaderError | null = null
   await mapWithConcurrency(todo, 2, async (e) => {
     if (stopped) return
@@ -153,15 +159,17 @@ export async function readSitemapRoles(
       if (!res.ok) return
       const job = jobFromDetail(res.finalUrl, readDetail(res.text, res.finalUrl), { postedAt: e.lastmod && !uniformStamp(entries) ? e.lastmod : undefined })
       checked.push(id)
-      // A page that names no role, or one the person is not looking for, is remembered as read and not kept.
-      if (job && matchesTargets(job.title, opts.targets)) jobs.push(job)
+      // A page that names no role is remembered as read and not kept. A role outside the person's targets is kept
+      // (it cost a request already, and "All roles" shows it); the cap stores the ones inside the targets first.
+      if (job) jobs.push(job)
+      board ??= findBoardLinks(res.text, (u) => detectFromUrl({ careerUrl: u, domain: null }))[0]
     } catch (error) {
       if (error instanceof ReaderError) stopped = error
     }
   })
   // A bot check or a robots rule on a role page ends the read; a spent budget just ends it early.
   if (stopped && (stopped as ReaderError).reason !== 'budget' && jobs.length === 0) throw stopped
-  return { jobs, listedIds, complete, checked, listed: entries.length }
+  return { jobs, listedIds, complete, checked, listed: entries.length, board }
 }
 
 /** True when the sitemap stamps every URL with one time: that is the fetch time, not a posting date. */

@@ -26,7 +26,7 @@ export interface RoleLink {
   postedAt?: string
 }
 
-const ID_SEGMENT = /^(?:\d{4,}(?:-[\w-]*)?|[0-9a-f]{8,}(?:-[\w-]*)?|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
+const ID_SEGMENT = /^(?:\d{5,}(?:-[\w-]*)?|[0-9a-f]{8,}(?:-[\w-]*)?|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
 const MONTHS = 'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec'
 const CARD_DATE = new RegExp(`((?:${MONTHS})[a-z]*\\.? \\d{1,2}, \\d{4}|\\d{4}-\\d{2}-\\d{2})`)
 const MIN_GROUP = 3
@@ -121,9 +121,10 @@ export function roleLinks(html: string, pageUrl: string): RoleLink[] {
   })
   const lists = [...groups.entries()].filter(([, links]) => links.length >= MIN_GROUP)
   if (lists.length === 0) return []
+  // A list of roles lives under a path that says so; a list of press releases or blog posts with ids does not.
   const jobby = lists.filter(([g]) => /job|career|position|opening|role|detail|vacanc|requisition|result/i.test(g))
-  const [, best] = (jobby.length ? jobby : lists).sort((x, y) => y[1].length - x[1].length)[0]
-  return best
+  if (jobby.length === 0) return []
+  return jobby.sort((x, y) => y[1].length - x[1].length)[0][1]
 }
 
 // --- search pages -----------------------------------------------------------

@@ -54,6 +54,15 @@ describe('site fetcher: robots.txt', () => {
     await expect(down.fetcher.get('https://acme.test/jobs')).rejects.toMatchObject({ reason: 'robots' })
   })
 
+  it('a site that sends /robots.txt to a web page has no robots file, however big that page is', async () => {
+    const { fetcher } = harness({
+      'https://acme.test/robots.txt': new Response(null, { status: 301, headers: { location: 'https://apply.acme.test/' } }),
+      'https://apply.acme.test/': html('<p>home</p>'.repeat(60_000)),
+      'https://acme.test/jobs': html('<p>hi</p>'),
+    })
+    expect((await fetcher.get('https://acme.test/jobs')).text).toContain('hi')
+  })
+
   it('reads robots.txt once per origin and lists its sitemaps', async () => {
     const { fetcher, calls } = harness({
       'https://acme.test/robots.txt': robots('User-agent: *\nAllow: /\nSitemap: https://acme.test/jobs-sitemap.xml\n'),

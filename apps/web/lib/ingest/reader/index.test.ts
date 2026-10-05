@@ -169,7 +169,7 @@ describe('readSite: any link a person pastes', () => {
 
 describe('readSite: could not read, with the reason', () => {
   const careers = 'https://jobs.uber.com/'
-  const read = (routes: Record<string, Route>) => readSite(company('Uber', 'uber.com', careers), { fetcher: fakeFetcher(routes) })
+  const read = (routes: Record<string, Route>) => readSite(company('Uber', 'uber.com', careers), { fetcher: fakeFetcher(routes), renderedLater: true })
 
   it('a Cloudflare challenge is a bot check', async () => {
     const r = await read({ [careers]: { error: 'bot_check' } })
@@ -185,9 +185,10 @@ describe('readSite: could not read, with the reason', () => {
     expect(r).toMatchObject({ jobs: [], reason: 'robots' })
   })
 
-  it('a page with text and no roles is no roles, and a script shell is "reading" until the rendered pass', async () => {
+  it('a page with nothing to read is "reading" while a browser pass is still to come, and no roles once it is not', async () => {
     const prose = `<html><body><p>${'We are a company that cares about people. '.repeat(40)}</p></body></html>`
-    expect((await read({ [careers]: prose })).reason).toBe('no_roles')
+    expect((await read({ [careers]: prose })).reason).toBe('reading')
+    expect((await readSite(company('Uber', 'uber.com', careers), { fetcher: fakeFetcher({ [careers]: prose }) })).reason).toBe('no_roles')
     const shell = '<html><body><div id="root"></div><script src="/app.js"></script></body></html>'
     expect((await read({ [careers]: shell })).reason).toBe('reading')
   })
@@ -206,7 +207,7 @@ describe('readSite: could not read, with the reason', () => {
     expect(sched.jobs.map((j) => j.title)).toEqual(['Data Engineer'])
 
     fetchPage.mockClear()
-    const inline = await readSite(company('Uber', 'uber.com', careers), { fetcher: fakeFetcher({ [careers]: shell }, 'inline'), fetchPage, model: null })
+    const inline = await readSite(company('Uber', 'uber.com', careers), { fetcher: fakeFetcher({ [careers]: shell }, 'inline'), fetchPage, model: null, renderedLater: true })
     expect(fetchPage).not.toHaveBeenCalled()
     expect(inline.reason).toBe('reading')
   })

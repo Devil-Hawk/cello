@@ -11,6 +11,7 @@ import { detectFromUrl } from '../../ats/detect'
 import { findBoardLinks } from '../../ats/careers-page'
 import type { BoardRef } from '../../ats/verify'
 import { onCompanyDomain } from '../../ats/verify'
+import { roleLinks } from './listing'
 import { ReaderError, type SiteFetcher } from './site-fetch'
 
 export type DiscoveredVia = 'redirect' | 'link' | 'gh_jid' | 'eightfold' | 'posting'
@@ -89,7 +90,9 @@ function sameSiteLinks(html: string, pageUrl: string, companyDomain: string | nu
     if (url === pageUrl || out.includes(url)) return
     if (JOB_WORDS.test(to.pathname) || JOB_WORDS.test(label)) out.push(url)
   })
-  return out
+  // A link that says "jobs", "openings" or "listings" is more likely the list than one that only says "careers".
+  const strong = (u: string) => /job|opening|position|vacanc|listing|roles/i.test(new URL(u).pathname) ? 0 : 1
+  return out.map((u, i) => ({ u, i })).sort((a, b) => strong(a.u) - strong(b.u) || a.i - b.i).map((x) => x.u)
 }
 
 export function ghJid(html: string): string | null {
@@ -163,7 +166,10 @@ export async function discoverBoards(company: { domain: string | null; careerUrl
     for (const b of findBoardLinks(html, detect)) add({ ...b, via: 'link' })
     for (const b of eightfoldBoards(html, finalUrl, company.domain)) add(b)
     jid ??= ghJid(html)
-    if (i === 0) for (const next of sameSiteLinks(html, finalUrl, company.domain)) if (queue.length < 1 + MAX_SIDE_PAGES * 3) queue.push(next)
+    // A page that already lists roles is the list: its neighbours are not worth a request.
+    if (i === 0 && roleLinks(html, finalUrl).length < 3) {
+      for (const next of sameSiteLinks(html, finalUrl, company.domain)) if (queue.length < 1 + MAX_SIDE_PAGES * 3) queue.push(next)
+    }
     if (found.size > 0) break
   }
 

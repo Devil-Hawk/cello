@@ -227,7 +227,14 @@ describe('ingestCompany', () => {
     expect((await run('a', { [CAREERS]: { error: 'bot_check' } })).failure).toBe('bot_check')
     expect((await run('b', { [CAREERS]: { error: 'login_required' } })).failure).toBe('login_required')
     expect((await run('c', { 'https://acme.example/robots.txt': 'User-agent: *\nDisallow: /\n', [CAREERS]: PLAIN_PAGE })).failure).toBe('robots')
-    expect((await run('d', { [CAREERS]: `<html><body><p>${'We are a company that cares about people. '.repeat(40)}</p></body></html>` })).failure).toBe('no_roles')
+    // Scheduled, the browser has had its turn: no roles it is.
+    const done = await ingestCompany(store, company('d'), {
+      fetchPage: vi.fn(async (url: string) => ({ html: PLAIN_PAGE, finalUrl: url, rendered: true })),
+      model: null,
+      mode: 'scheduled',
+      fetcher: fakeFetcher({ [CAREERS]: PLAIN_PAGE }, 'scheduled'),
+    })
+    expect(done.failure).toBe('no_roles')
   })
 
   it('writes the reason into the company so the screen can say it instead of "0 open roles"', async () => {

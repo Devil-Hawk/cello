@@ -153,6 +153,8 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
       }
       if (res.status >= 500) return 'deny'
       if (res.status >= 400 || res.status >= 300) return 'allow'
+      // A redirect that lands on a web page (a site that sends /robots.txt to its home page) means there is no robots file.
+      if (/html/i.test(res.headers.get('content-type') ?? '')) return 'allow'
       const text = await readLimitedText(res, 500_000)
       used.bytes += text.length
       return robotsParser(url, text)

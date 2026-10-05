@@ -20,12 +20,16 @@ import { isStalePosting } from '../jobs/freshness'
 import { assertSsrfSafe } from '../security/untrusted'
 
 const PAGE_SIZE = 10
-/** 7 pages x 10 = 70 roles per search word; at most 3 words, and 20 pages (200 roles) with none. */
-const MAX_PAGES_PER_QUERY = 7
+/** 5 pages x 10 = 50 roles per search word; at most 3 words, and 20 pages (200 roles) with none. */
+const MAX_PAGES_PER_QUERY = 5
 const MAX_PAGES_UNQUERIED = 20
 const MAX_QUERIES = 3
-const DESCRIPTION_BUDGET = 10
+const DESCRIPTION_BUDGET = 8
+/** Pause between the pages of one search: Microsoft answers 429 to a quick run of them. */
+const PAGE_PAUSE_MS = 400
 const MAX_DESCRIPTION_CHARS = 20_000
+
+const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 const DOMAIN_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i
 
@@ -112,8 +116,15 @@ function searchUrl(flavor: Flavor, host: string, domain: string, query: string, 
     : `https://${host}/api/pcsx/search?domain=${domain}&query=${q}&location=&start=${start}&sort_by=timestamp`
 }
 
-async function page(flavor: Flavor, host: string, domain: string, query: string, start: number): Promise<{ jobs: AtsJob[]; count: number }> {
-  const json = await fetchJson<Record<string, unknown>>(searchUrl(flavor, host, domain, query, start), { redirect: 'manual', retries: 2 })
+async function page(
+  flavor: Flavor,
+  host: string,
+  domain: string,
+  query: string,
+  start: number,
+  sleep?: (ms: number) => Promise<void>
+): Promise<{ jobs: AtsJob[]; count: number }> {
+  const json = await fetchJson<Record<string, unknown>>(searchUrl(flavor, host, domain, query, start), { redirect: 'manual', retries: 2, sleep })
   if (flavor === 'v2') {
     const positions = Array.isArray(json.positions) ? (json.positions as V2Position[]) : []
     return { jobs: positions.map((p) => fromV2(host, p)).filter((j): j is AtsJob => !!j), count: Number(json.count) || 0 }
@@ -170,13 +181,17 @@ async function fetchJobs(token: string, ctx?: FetchContext): Promise<AtsJob[]> {
   for (const query of terms) {
     for (let p = 0; p < maxPages; p++) {
       let got: { jobs: AtsJob[]; count: number }
+      // Pages come one after another with a pause; a host that says slow down ends the read with what it gave.
+      if (p > 0) await (ctx?.sleep ?? pause)(PAGE_PAUSE_MS)
       try {
-        got = await page(flavor, host, domain, query, p * PAGE_SIZE)
+        got = await page(flavor, host, domain, query, p * PAGE_SIZE, ctx?.sleep)
       } catch (error) {
         // The tenant answers the other flavor of the same search.
         if (error instanceof HttpError && (error.status === 403 || error.status === 404) && flavor === 'v2' && byId.size === 0 && p === 0) {
           flavor = 'pcsx'
-          got = await page(flavor, host, domain, query, 0)
+          got = await page(flavor, host, domain, query, 0, ctx?.sleep)
+        } else if (byId.size > 0 || p > 0) {
+          break
         } else {
           throw error
         }
