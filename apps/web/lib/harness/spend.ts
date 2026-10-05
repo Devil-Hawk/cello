@@ -24,8 +24,15 @@
 // A call that dies without settling is charged at its estimate by a pg_cron
 // sweeper after 15 minutes, so a crash can only over-count. The ledger rows
 // (public.llm_spend) are the counter; only the service role writes them.
+//
+// EVERY attempt with a user writes a row, paid or not. Free hosted (R3) and local
+// (R2) calls write a $0 row carrying the rung that ran and the step that asked, so
+// the daily free-request count is read from the ledger. A $0 reservation takes no
+// lock and is never refused.
 
-import type { AdminClient, DecryptedApiKeys } from './types'
+import type { AdminClient, DecryptedApiKeys, Door } from './types'
+
+export type { Door }
 
 /** Conservative default. Deliberately low: a user who never configures this
  *  should not be able to lose real money to a background cron. */
@@ -127,12 +134,24 @@ export function worstCaseUsd(model: string, promptTokens: number, maxTokens: num
   return Math.ceil(estimateCostUsd(model, promptTokens, maxTokens) * 1e6) / 1e6
 }
 
-/** A held slice of a user's allowance. `id` is null for a free model: it costs
- *  nothing, so it writes no ledger row and takes no lock. */
+/** Which backend ran a call: R0s in-browser, R1 the person's own key or tool on the
+ *  extension, R2 a local model or command-line tool, R3 a free hosted model, R4 a
+ *  paid hosted model. Only R4 ever costs money. */
+export type Rung = 'R0s' | 'R1' | 'R2' | 'R3' | 'R4'
+
+/** The rung is code, read from the backend that ran. R0s and R1 have no backend yet. */
+export function rungFor(provider: 'openrouter' | 'local-cli' | 'local-server', model: string): Rung {
+  if (provider !== 'openrouter') return 'R2'
+  return model.endsWith(':free') ? 'R3' : 'R4'
+}
+
+/** A held slice of a user's allowance. `id` is null only when a $0 reservation could
+ *  not be recorded (the ledger was unreachable): bookkeeping never fails a free call. */
 export interface SpendReservation {
   id: string | null
   userId: string
   model: string
+  rung: Rung
   estimateUsd: number
 }
 
@@ -141,6 +160,11 @@ export interface ReserveInput {
   model: string
   promptTokens: number
   maxTokens: number
+  rung: Rung
+  /** The declared step that asked: the code constant the caller gives Langfuse. */
+  step: string
+  /** Null until commands say which door a call came through. */
+  door?: Door
   traceId?: string
 }
 
@@ -148,24 +172,42 @@ export interface ReserveInput {
  * Hold the worst-case cost of a call before making it. Throws BudgetCapError when
  * the user's cap (or, for a demo, its owner's shared allowance) cannot cover it,
  * and a plain Error when the ledger is unreachable: an unreadable ledger means no
- * metered call, never a free one.
+ * paid call. A $0 reservation (R0s to R3) is the other way round: an unreadable
+ * ledger is logged and the call goes ahead without a row.
  */
 export async function reserveSpend(admin: AdminClient, input: ReserveInput): Promise<SpendReservation> {
-  if (input.model.endsWith(':free')) return { id: null, userId: input.userId, model: input.model, estimateUsd: 0 }
-  const estimateUsd = worstCaseUsd(input.model, input.promptTokens, input.maxTokens)
+  const paid = input.rung === 'R4'
+  const estimateUsd = paid ? worstCaseUsd(input.model, input.promptTokens, input.maxTokens) : 0
+  const held = (id: string | null): SpendReservation => ({
+    id,
+    userId: input.userId,
+    model: input.model,
+    rung: input.rung,
+    estimateUsd,
+  })
 
   const { data, error } = await admin.rpc('reserve_llm_spend', {
     p_user_id: input.userId,
     p_model: input.model,
     p_estimate: estimateUsd,
+    p_rung: input.rung,
+    p_step: input.step,
     p_trace_id: input.traceId ?? null,
+    p_door: input.door ?? null,
   })
   const row = data as { ok?: boolean; id?: string; scope?: BudgetScope; spent_usd?: number; cap_usd?: number } | null
+  if (!paid) {
+    if (error || !row?.ok || !row.id) {
+      console.error('[spend] could not record a zero-cost call; carrying on without a row', error ?? row)
+      return held(null)
+    }
+    return held(row.id)
+  }
   if (error || !row) throw new Error('spend ledger unavailable')
   if (!row.ok || !row.id) {
     throw new BudgetCapError(Number(row.spent_usd ?? 0), Number(row.cap_usd ?? 0), row.scope === 'demo-pool' ? 'demo-pool' : 'user')
   }
-  return { id: row.id, userId: input.userId, model: input.model, estimateUsd }
+  return held(row.id)
 }
 
 export type SpendOutcome =
@@ -181,23 +223,29 @@ function errorStatus(err: unknown): number | undefined {
 /**
  * Charge what the call really cost, once. Never throws: a bookkeeping failure
  * must not fail the user's request, and the sweeper still charges the estimate.
- *   - a result charges the provider-reported cost, else our price estimate
+ *   - a result charges the provider-reported cost, else our price estimate; only
+ *     a paid (R4) reservation can cost anything, every other rung settles at 0
  *   - an error with an HTTP status (the provider answered, nothing was generated)
- *     charges 0
+ *     charges 0 and stores the status, so a day that hit the limit can be counted
  *   - any other failure (abort, timeout, dropped connection) is left reserved, so
  *     the sweeper charges the estimate
  */
 export async function settleSpend(admin: AdminClient, res: SpendReservation, outcome: SpendOutcome): Promise<void> {
   if (!res.id) return
   let actual: number
+  let status: number | null = null
   if ('failed' in outcome) {
-    if (errorStatus(outcome.failed) === undefined) return
+    status = errorStatus(outcome.failed) ?? null
+    if (status === null) return
     actual = 0
   } else {
-    actual = outcome.costUsd ?? estimateCostUsd(outcome.model, outcome.promptTokens, outcome.completionTokens)
+    actual =
+      res.rung === 'R4'
+        ? (outcome.costUsd ?? estimateCostUsd(outcome.model, outcome.promptTokens, outcome.completionTokens))
+        : 0
   }
   try {
-    const { error } = await admin.rpc('settle_llm_spend', { p_id: res.id, p_actual: actual })
+    const { error } = await admin.rpc('settle_llm_spend', { p_id: res.id, p_actual: actual, p_status: status })
     if (error) throw error
   } catch (err) {
     console.error('[spend] failed to settle LLM spend; the sweeper will charge the estimate', err)

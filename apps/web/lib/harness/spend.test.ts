@@ -18,6 +18,7 @@ import {
   getSpendState,
   hasListedPrice,
   reserveSpend,
+  rungFor,
   settleSpend,
   worstCaseUsd,
 } from './spend'
@@ -109,8 +110,25 @@ describe('estimatePromptTokens and worstCaseUsd', () => {
   })
 })
 
+describe('rungFor', () => {
+  it('reads the rung from the backend that ran', () => {
+    expect(rungFor('local-server', 'llama3.1')).toBe('R2')
+    expect(rungFor('local-cli', 'local-cli/claude')).toBe('R2')
+    expect(rungFor('openrouter', 'google/gemma-4-31b-it:free')).toBe('R3')
+    expect(rungFor('openrouter', 'anthropic/claude-haiku-4.5')).toBe('R4')
+  })
+})
+
 describe('reserveSpend', () => {
-  const input = { userId: 'user-1', model: SONNET, promptTokens: 1000, maxTokens: 2048, traceId: 'trace-1' }
+  const input = {
+    userId: 'user-1',
+    model: SONNET,
+    promptTokens: 1000,
+    maxTokens: 2048,
+    rung: 'R4' as const,
+    step: 'score-job-match',
+    traceId: 'trace-1',
+  }
 
   it('reserves the worst case in ONE rpc and returns the reservation id', async () => {
     const { admin, rpc } = rpcAdmin(() => ({ data: { ok: true, id: 'res-9' } }))
@@ -120,17 +138,45 @@ describe('reserveSpend', () => {
       p_user_id: 'user-1',
       p_model: SONNET,
       p_estimate: 0.02248,
+      p_rung: 'R4',
+      p_step: 'score-job-match',
       p_trace_id: 'trace-1',
+      p_door: null,
     })
-    expect(res).toEqual({ id: 'res-9', userId: 'user-1', model: SONNET, estimateUsd: 0.02248 })
+    expect(res).toEqual({ id: 'res-9', userId: 'user-1', model: SONNET, rung: 'R4', estimateUsd: 0.02248 })
   })
 
-  it('a free model makes no database call at all', async () => {
-    const { admin, rpc } = rpcAdmin(() => ({ data: { ok: true, id: 'never' } }))
-    const res = await reserveSpend(admin, { ...input, model: 'google/gemma-4-31b-it:free' })
-    expect(res.id).toBeNull()
+  it('a free model reserves a $0 row: one rpc, rung R3, the step, and the row id back', async () => {
+    const { admin, rpc } = rpcAdmin(() => ({ data: { ok: true, id: 'free-1' } }))
+    const res = await reserveSpend(admin, { ...input, model: 'google/gemma-4-31b-it:free', rung: 'R3', door: 'chat' })
+    expect(rpc).toHaveBeenCalledTimes(1)
+    expect(rpc).toHaveBeenCalledWith('reserve_llm_spend', {
+      p_user_id: 'user-1',
+      p_model: 'google/gemma-4-31b-it:free',
+      p_estimate: 0,
+      p_rung: 'R3',
+      p_step: 'score-job-match',
+      p_trace_id: 'trace-1',
+      p_door: 'chat',
+    })
+    expect(res).toMatchObject({ id: 'free-1', rung: 'R3', estimateUsd: 0 })
+  })
+
+  it('a local model reserves 0 even when its id would hit the fallback price', async () => {
+    const { admin, rpc } = rpcAdmin(() => ({ data: { ok: true, id: 'local-1' } }))
+    const res = await reserveSpend(admin, { ...input, model: 'llama3.1', rung: 'R2' })
+    expect(rpc.mock.calls[0][1]).toMatchObject({ p_estimate: 0, p_rung: 'R2' })
     expect(res.estimateUsd).toBe(0)
-    expect(rpc).not.toHaveBeenCalled()
+  })
+
+  it('a zero-cost reservation whose ledger errors carries on without a row; a paid one refuses', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { admin } = rpcAdmin(() => ({ error: { message: 'connection refused' } }))
+    const free = await reserveSpend(admin, { ...input, model: 'x:free', rung: 'R3' })
+    expect(free.id).toBeNull()
+    expect(spy).toHaveBeenCalled()
+    await expect(reserveSpend(admin, input)).rejects.toThrow('spend ledger unavailable')
+    spy.mockRestore()
   })
 
   it('a refusal becomes a BudgetCapError carrying the figures and the scope', async () => {
@@ -154,24 +200,30 @@ describe('reserveSpend', () => {
 })
 
 describe('settleSpend', () => {
-  const res = { id: 'res-1', userId: 'user-1', model: SONNET, estimateUsd: 0.02 }
+  const res = { id: 'res-1', userId: 'user-1', model: SONNET, rung: 'R4' as const, estimateUsd: 0.02 }
 
   it('settles the provider-reported cost over our own estimate', async () => {
     const { admin, rpc } = rpcAdmin(() => ({ data: true }))
     await settleSpend(admin, res, { model: SONNET, promptTokens: 1_000_000, completionTokens: 1_000_000, costUsd: 0.00042 })
-    expect(rpc).toHaveBeenCalledWith('settle_llm_spend', { p_id: 'res-1', p_actual: 0.00042 })
+    expect(rpc).toHaveBeenCalledWith('settle_llm_spend', { p_id: 'res-1', p_actual: 0.00042, p_status: null })
   })
 
   it('falls back to the price table when the provider reported no cost', async () => {
     const { admin, rpc } = rpcAdmin(() => ({ data: true }))
     await settleSpend(admin, res, { model: SONNET, promptTokens: 1_000_000, completionTokens: 1_000_000 })
-    expect(rpc).toHaveBeenCalledWith('settle_llm_spend', { p_id: 'res-1', p_actual: 12 })
+    expect(rpc).toHaveBeenCalledWith('settle_llm_spend', { p_id: 'res-1', p_actual: 12, p_status: null })
   })
 
-  it('a provider error with an HTTP status settles at zero', async () => {
+  it('a provider error with an HTTP status settles at zero and stores the status', async () => {
     const { admin, rpc } = rpcAdmin(() => ({ data: true }))
     await settleSpend(admin, res, { failed: Object.assign(new Error('rate limited'), { status: 429 }) })
-    expect(rpc).toHaveBeenCalledWith('settle_llm_spend', { p_id: 'res-1', p_actual: 0 })
+    expect(rpc).toHaveBeenCalledWith('settle_llm_spend', { p_id: 'res-1', p_actual: 0, p_status: 429 })
+  })
+
+  it('a non-R4 reservation settles at 0 even when a cost is given', async () => {
+    const { admin, rpc } = rpcAdmin(() => ({ data: true }))
+    await settleSpend(admin, { ...res, rung: 'R2', model: 'llama3.1' }, { model: 'llama3.1', promptTokens: 1000, completionTokens: 1000, costUsd: 0.5 })
+    expect(rpc).toHaveBeenCalledWith('settle_llm_spend', { p_id: 'res-1', p_actual: 0, p_status: null })
   })
 
   it('an abort or network failure is left reserved for the sweeper', async () => {

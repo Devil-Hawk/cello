@@ -282,6 +282,9 @@ export const DEFAULT_PROVIDER_PREFERENCES: ProviderPreferences = {
   localServerEmbeddingModel: '',
 }
 
+/** The way a request reached Cello. Null on a ledger row until commands set one. */
+export type Door = 'session' | 'routine' | 'rule' | 'chat' | 'assistant' | 'agent' | 'extension'
+
 export interface LlmRunOptions {
   /** Optional system prompt. */
   system?: string
@@ -327,6 +330,8 @@ export interface LlmRunOptions {
    * Langfuse shows its name and content hash as the generation's version.
    */
   promptRef?: { name: string; hash?: string }
+  /** The door this call came through, written to the spend ledger. */
+  door?: Door
 }
 
 /**
