@@ -62,6 +62,8 @@ interface Args {
   outDir: string | null
   skipOld: boolean
   skipChance: boolean
+  /** Only ask the simulated people to react to every posting and print what they said. */
+  labelsOnly: boolean
 }
 
 function parseArgs(argv: string[]): Args {
@@ -82,6 +84,7 @@ function parseArgs(argv: string[]): Args {
     outDir: get('out') ?? null,
     skipOld: argv.includes('--skip-old'),
     skipChance: argv.includes('--skip-chance') || quick,
+    labelsOnly: argv.includes('--labels-only'),
   }
 }
 
@@ -313,10 +316,13 @@ async function runPersona(
   let old: PersonaReport['baselines']['oldScorer'] = null
   if (!args.skipOld) {
     const scores = new Map<string, number>()
-    for (const j of heldOut) {
-      const s = await oldScore(gen, persona.resume, j)
-      if (s != null) scores.set(j.id, s)
-    }
+    // The client spaces the requests out; the calls themselves overlap.
+    await Promise.all(
+      heldOut.map(async (j) => {
+        const s = await oldScore(gen, persona.resume, j)
+        if (s != null) scores.set(j.id, s)
+      })
+    )
     const ids = [...scores.keys()]
     const ranked = ids.sort((a, b) => scores.get(b)! - scores.get(a)! || a.localeCompare(b))
     old = {
@@ -399,9 +405,9 @@ async function judgeChance(llm: LlmRunner, resume: string, postings: Posting[]):
 async function chanceStudy(args: Args, gen: LlmRunner, judgeA: LlmRunner, judgeB: LlmRunner, personas: SyntheticPersona[], jobs: Posting[]) {
   const pairs: ChancePair[] = []
   const store = new MemoryStore()
-  for (const persona of personas) {
+  await Promise.all(personas.map(async (persona) => {
     const held = heldOutByPersona.get(persona.id)
-    if (!held) continue
+    if (!held) return
     // Twelve held-out roles per person: the six Cello likes best and six at random, so every label gets a look.
     const byWant = [...held.heldOut].filter((j) => held.lastRead.has(j.id)).sort((a, b) => held.lastRead.get(b.id)!.p - held.lastRead.get(a.id)!.p)
     const sample = [...new Map([...byWant.slice(0, 6), ...shuffled(byWant.slice(6), mulberry32(args.seed + 99)).slice(0, 6)].map((j) => [j.id, j])).values()]
@@ -414,7 +420,9 @@ async function chanceStudy(args: Args, gen: LlmRunner, judgeA: LlmRunner, judgeB
       const old = oldScores.get(persona.id)?.get(j.id)
       pairs.push({ persona: persona.id, jobId: j.id, ours: c.chance, old: old == null ? null : oldBand(old), judgeA: null, judgeB: null })
     }
-  }
+  }))
+  // The people finished in any order; the picks below must not depend on it.
+  pairs.sort((a, b) => a.persona.localeCompare(b.persona) || a.jobId.localeCompare(b.jobId))
   // About 40 pairs, spread over our three labels.
   const byLabel = new Map<Chance, ChancePair[]>()
   for (const p of pairs) byLabel.set(p.ours, [...(byLabel.get(p.ours) ?? []), p])
@@ -423,16 +431,15 @@ async function chanceStudy(args: Args, gen: LlmRunner, judgeA: LlmRunner, judgeB
   const picked: ChancePair[] = []
   const lists = [...byLabel.values()].map((l) => shuffled(l, rng))
   for (let i = 0; picked.length < target && lists.some((l) => i < l.length); i++) for (const l of lists) if (i < l.length && picked.length < target) picked.push(l[i])
-  for (const persona of personas) {
+  await Promise.all(personas.map(async (persona) => {
     const mine = picked.filter((p) => p.persona === persona.id)
     const postings = mine.map((p) => jobs.find((j) => j.id === p.jobId)!)
-    const a = await judgeChance(judgeA, persona.resume, postings)
-    const b = await judgeChance(judgeB, persona.resume, postings)
+    const [a, b] = await Promise.all([judgeChance(judgeA, persona.resume, postings), judgeChance(judgeB, persona.resume, postings)])
     for (const p of mine) {
       p.judgeA = a.get(p.jobId) ?? null
       p.judgeB = b.get(p.jobId) ?? null
     }
-  }
+  }))
   const both = picked.filter((p) => p.judgeA && p.judgeB)
   const consensus = both.filter((p) => p.judgeA === p.judgeB)
   const labelCounts = (xs: ChancePair[]) => ({ strong: xs.filter((p) => p.ours === 'strong').length, possible: xs.filter((p) => p.ours === 'possible').length, stretch: xs.filter((p) => p.ours === 'stretch').length })
@@ -486,9 +493,21 @@ async function main(): Promise<void> {
   const embed = memoEmbedder(client, EMBEDDER)
   await embed.embed(jobs.map((j) => roleText(toFacts(j))))
 
-  const reports: PersonaReport[] = []
-  let i = 0
-  for (const persona of personas) reports.push(await runPersona(args, client, gen, oracle, embed, persona, jobs, i++))
+  if (args.labelsOnly) {
+    for (const persona of personas) {
+      const eligible = jobs.filter((j) => checkConstraints(toFacts(j), persona.constraints as StatedConstraints).length === 0)
+      const { labels } = await labelPostings(oracle, persona, eligible)
+      const lines = eligible.filter((j) => labels.has(j.id)).map((j) => ({ j, l: labels.get(j.id)! })).sort((a, b) => Number(isPositive(b.l)) - Number(isPositive(a.l)))
+      const positives = lines.filter((x) => isPositive(x.l)).length
+      process.stderr.write(`\n${persona.id}: ${positives} of ${lines.length} wanted\n`)
+      for (const { j, l } of lines) process.stderr.write(`  ${l.reaction === 'not_for_me' ? `no  (${l.reason})` : l.reaction.padEnd(10)} ${j.title} | ${j.company}\n`)
+    }
+    process.exit(0)
+  }
+
+  // The people run side by side: each waits on its own model calls, and the client keeps the
+  // whole run under the free tier's request rate.
+  const reports: PersonaReport[] = await Promise.all(personas.map((persona, i) => runPersona(args, client, gen, oracle, embed, persona, jobs, i)))
   const chance = args.skipChance ? null : await chanceStudy(args, gen, oracle, judge2, personas, jobs)
 
   const nRounds = Math.max(...reports.map((r) => r.rounds.length))
