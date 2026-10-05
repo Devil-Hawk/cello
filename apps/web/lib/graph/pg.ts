@@ -53,7 +53,7 @@ export function sslFor(connectionString: string): false | { ca: string; rejectUn
   return { ca: SUPABASE_ROOT_CA_2021, rejectUnauthorized: true }
 }
 
-function resolvePoolerConnectionString(): string {
+export function resolvePoolerConnectionString(): string {
   const raw = process.env.SUPABASE_DB_URL
   if (!raw) {
     throw new Error(
