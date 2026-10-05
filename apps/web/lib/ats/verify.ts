@@ -7,9 +7,13 @@
 //
 // Evidence, cheapest first (any one is enough, and the board must be recent):
 //   careers_page_link  the company's own careers page or site links to this exact board
-//   board_links_home   the board's postings (or its own header) point at the company's domain
-//   provider_name      the provider names the same employer, the token is the domain label AND the board's text mentions the company's site
-//   A home the board declares for itself that is NOT the company's domain rejects it outright.
+//   board_links_home   a posting lives on the company's domain, or two or more postings link to or
+//                      name it (on a host boundary: mercury.co is not mercury.com), or the board
+//                      declares the company's domain as its own site
+//   provider_name      the provider names the same employer (TLD ignored: "Honeycomb.io") AND the
+//                      token is the domain's first label, with nothing against it
+//   Against a board: it declares a home that is NOT the company's domain, or its postings link to a
+//   rival domain (same name, other TLD) and never to the company's. Either rejects the name match.
 // A known employer (known-companies.ts) is never matched by name or domain label: a
 // namesake's board passes those, so it needs the page link or its curated board.
 // Boards read off the careers URL itself ('careers_url') and boards the person
@@ -53,6 +57,7 @@ export function isRecentBoard(jobs: readonly AtsJob[], now: number = Date.now())
 /** "Gusto, Inc." -> "gusto"; "Société Générale SA" -> "societegenerale". */
 export function normalizeEmployerName(name: string): string {
   const words = name
+    .replace(/\.(com|io|ai|co|dev|app|net|org|so|xyz|tech)\s*$/i, '')
     .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
@@ -108,10 +113,52 @@ function onProviderHost(url: string): boolean {
   return !!host && PROVIDER_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`))
 }
 
-/** True when the text names the company's own site ("acme.com" or a link to it). */
+/**
+ * True when the text names the company's own site ("acme.com" or a link to it).
+ * On a host boundary: "mercury.co" is not in "mercury.com" or "mercury.co.uk",
+ * and "notmercury.co" is not "mercury.co" (www.mercury.co and a.mercury.co are).
+ */
 export function mentionsDomain(text: string | null | undefined, domain: string | null | undefined): boolean {
   const host = domain ? hostOf(domain) : null
-  return !!text && !!host && text.toLowerCase().includes(host)
+  if (!text || !host) return false
+  const re = new RegExp(`(?<![a-z0-9-])${host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9-]|\\.[a-z0-9])`, 'i')
+  return re.test(text)
+}
+
+/** Postings needed to name the company's site before that alone ties a board to it. */
+const HOME_MENTIONS = 2
+
+/** A posting links to, or names, the company's own site. */
+function pointsHome(job: AtsJob, domain: string | null | undefined): boolean {
+  return (job.linkHosts ?? []).some((h) => onCompanyDomain(h, domain)) || mentionsDomain(job.description, domain)
+}
+
+/** A posting that lives on the company's domain, or enough postings that link to or name it. */
+export function boardPointsHome(jobs: readonly AtsJob[], domain: string | null | undefined): boolean {
+  if (jobs.some((j) => onCompanyDomain(j.url, domain))) return true
+  let n = 0
+  for (const j of jobs) if (pointsHome(j, domain) && ++n >= HOME_MENTIONS) return true
+  return false
+}
+
+const RIVAL_TLDS = 'com|net|org|io|co|ai|app|dev|so|us|uk|de|eu|tech|xyz|me|tv|ly|fm|gg|sh|cc'
+
+/**
+ * A posting links to another site that carries the company's name ("demo.mercury.com"
+ * while the company is mercury.co): the board belongs to a namesake.
+ */
+export function pointsToRival(jobs: readonly AtsJob[], domain: string | null | undefined): boolean {
+  const root = domain ? hostOf(domain) : null
+  const label = root ? alnum(root.split('.')[0]) : ''
+  if (!root || label.length < 2) return false
+  const rivalHost = (host: string) =>
+    !onCompanyDomain(host, root) && host.split('.').slice(0, -1).some((part) => alnum(part) === label)
+  const textRe = new RegExp(`(?<![a-z0-9-])((?:[a-z0-9-]+\\.)*${label}\\.(?:${RIVAL_TLDS})(?:\\.[a-z]{2})?)(?![a-z0-9-])`, 'gi')
+  return jobs.some(
+    (j) =>
+      (j.linkHosts ?? []).some(rivalHost) ||
+      [...(j.description ?? '').matchAll(textRe)].some((m) => rivalHost(m[1].toLowerCase()))
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -200,8 +247,8 @@ export async function verifyBoard(input: VerifyInput): Promise<Exclude<VerifiedB
   // 1. The company's own site links to this exact board (already read).
   if (pb && typeof pb !== 'function' && linked(pb)) return 'careers_page_link'
 
-  // 2. A posting links to the company's own domain (free: already fetched).
-  if (!input.knownEmployer && jobs.some((j) => onCompanyDomain(j.url, company.domain))) return 'board_links_home'
+  // 2. The board's own postings point at the company's domain (free: already fetched).
+  if (!input.knownEmployer && boardPointsHome(jobs, company.domain)) return 'board_links_home'
 
   // 2b. Same as 1, but the site is only read now (a stored board being re-checked).
   if (typeof pb === 'function') {
@@ -234,12 +281,13 @@ export async function verifyBoard(input: VerifyInput): Promise<Exclude<VerifiedB
   if (declared.length > 0) {
     return declared.some((u) => onCompanyDomain(u, company.domain)) ? 'board_links_home' : null
   }
-  // The provider declares no site: a name equal to the domain label is one word
-  // anyone can hold, so it also needs the board's own text to mention the company's site.
+  // The provider declares no site. The same name and a token that is the domain's first
+  // label tie the board to the company, unless the board's own postings point at a rival
+  // domain (a namesake: mercury.com's board is not mercury.co's).
   if (
     sameEmployerName(identity.name, company.name) &&
     tokenMatchesDomainLabel(token, company.domain) &&
-    jobs.some((j) => mentionsDomain(j.description, company.domain) || (j.linkHosts ?? []).some((h) => onCompanyDomain(h, company.domain)))
+    !pointsToRival(jobs, company.domain)
   ) {
     return 'provider_name'
   }
