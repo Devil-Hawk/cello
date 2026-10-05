@@ -147,11 +147,11 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-function str(v: unknown): string {
+export function str(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
 }
 
-function clampLimit(v: unknown, def: number, max: number): number {
+export function clampLimit(v: unknown, def: number, max: number): number {
   const n = typeof v === 'number' ? v : parseInt(String(v ?? ''), 10)
   if (!Number.isFinite(n) || n <= 0) return def
   return Math.min(Math.floor(n), max)
@@ -161,7 +161,7 @@ function clampLimit(v: unknown, def: number, max: number): number {
  *  per-user model preference wins via callLlm; see harness contract C1).
  *  `signal` overrides ctx.signal when the caller wants a tighter, tool-scoped
  *  abort (see boundSignal) instead of just the whole-request one. */
-function makeRunner(ctx: CopilotToolContext, signal: AbortSignal | undefined, name: string): LlmRunner {
+export function makeRunner(ctx: CopilotToolContext, signal: AbortSignal | undefined, name: string): LlmRunner {
   // `name` is the Langfuse generation name: what the model call is for.
   return (opts) => callLlm(ctx.apiKeys, { ...opts, name: opts.name ?? name }, signal ?? ctx.signal)
 }
@@ -170,12 +170,12 @@ function makeRunner(ctx: CopilotToolContext, signal: AbortSignal | undefined, na
  *  with a hard per-call timeout, so a single tool call can't sit past `ms`
  *  even while the surrounding HTTP request is still within budget. Falls back
  *  to a bare timeout when there is no base signal (e.g. a synthetic context). */
-function boundSignal(base: AbortSignal | undefined, ms: number): AbortSignal {
+export function boundSignal(base: AbortSignal | undefined, ms: number): AbortSignal {
   const timeout = AbortSignal.timeout(ms)
   return base ? AbortSignal.any([base, timeout]) : timeout
 }
 
-interface OwnedJob {
+export interface OwnedJob {
   id: string
   title: string | null
   description?: string | null
@@ -211,7 +211,7 @@ function companyNotFoundError(companyId: string): string {
 }
 
 /** Load a job and verify the user owns it (via companies.user_id). With `fit`, the person's own verdict on it (their person_roles row) is merged into the job. */
-async function loadOwnedJob(
+export async function loadOwnedJob(
   ctx: CopilotToolContext,
   jobId: string,
   columns: string,
@@ -240,7 +240,7 @@ async function loadOwnedJob(
   return { job, companyName: (company as { name: string }).name }
 }
 
-async function loadOwnedCompany(
+export async function loadOwnedCompany(
   ctx: CopilotToolContext,
   companyId: string
 ): Promise<{ company: { id: string; name: string; domain: string | null } } | { error: string }> {
@@ -254,7 +254,7 @@ async function loadOwnedCompany(
   return { company: data as { id: string; name: string; domain: string | null } }
 }
 
-async function loadResume(ctx: CopilotToolContext): Promise<string> {
+export async function loadResume(ctx: CopilotToolContext): Promise<string> {
   const { data } = await ctx.admin.from('profiles').select('resume_text').eq('id', ctx.userId).single()
   return String((data?.resume_text as string | null) ?? '').trim()
 }
@@ -269,7 +269,7 @@ async function loadResume(ctx: CopilotToolContext): Promise<string> {
  *  before this field existed there was no legal way for the model to obtain
  *  one for a company it only knew from a jobs list, which meant "research
  *  this company" silently dead-ended into a companyId it had to invent. */
-interface JobBriefRow {
+export interface JobBriefRow {
   jobId: string
   title: string | null
   company: string | null
@@ -287,7 +287,7 @@ interface JobBriefRow {
  *  here — every caller already sourced these ids from an owned/company-scoped
  *  query (ingestLeads only ever creates rows under this user's companies;
  *  bulk_matcher's candidate selection filters by this user's companyIds). */
-async function loadJobBriefs(ctx: CopilotToolContext, jobIds: string[]): Promise<JobBriefRow[]> {
+export async function loadJobBriefs(ctx: CopilotToolContext, jobIds: string[]): Promise<JobBriefRow[]> {
   if (jobIds.length === 0) return []
   const { data: jobs } = await ctx.admin
     .from('jobs')
@@ -611,7 +611,7 @@ async function searchJobIdsByTitleTrgm(ctx: CopilotToolContext, query: string, l
   return ((data as { job_id: string }[] | null) ?? []).map((r) => r.job_id)
 }
 
-async function listJobs(ctx: CopilotToolContext, args: Args) {
+export async function listJobs(ctx: CopilotToolContext, args: Args) {
   const query = str(args.query).trim()
   const dreamOnly = args.dreamOnly === true
   const fresh = args.fresh === true
@@ -732,7 +732,7 @@ async function explainMatch(ctx: CopilotToolContext, args: Args) {
   }
 }
 
-async function getApplication(ctx: CopilotToolContext, args: Args) {
+export async function getApplication(ctx: CopilotToolContext, args: Args) {
   const jobId = str(args.jobId)
   if (jobId) {
     const owned = await loadOwnedJob(ctx, jobId, 'id, title, company_id')
@@ -783,7 +783,7 @@ async function getApplication(ctx: CopilotToolContext, args: Args) {
 
 const CONTACT_LIST_COLUMNS = 'id, name, email, title, relationship, company_id, last_contact_at'
 
-async function listContacts(ctx: CopilotToolContext, args: Args) {
+export async function listContacts(ctx: CopilotToolContext, args: Args) {
   const query = str(args.query).trim()
   if (!query) {
     const { data } = await ctx.admin
@@ -808,7 +808,7 @@ async function listContacts(ctx: CopilotToolContext, args: Args) {
   return { count: rows.length, contacts: rows, note: rows.length === 0 ? 'No contacts saved yet.' : undefined }
 }
 
-async function getDossier(ctx: CopilotToolContext, args: Args) {
+export async function getDossier(ctx: CopilotToolContext, args: Args) {
   const companyId = str(args.companyId)
   if (!companyId) return { error: 'companyId is required' }
   const owned = await loadOwnedCompany(ctx, companyId)
@@ -903,7 +903,7 @@ async function doRememberPreference(ctx: CopilotToolContext, args: Args) {
   }
 }
 
-async function doSearchKb(ctx: CopilotToolContext, args: Args) {
+export async function doSearchKb(ctx: CopilotToolContext, args: Args) {
   const query = str(args.query)
   if (!query) return { error: 'query is required' }
   const limit = clampLimit(args.limit, 8, 20)
@@ -941,7 +941,7 @@ async function doSearchKb(ctx: CopilotToolContext, args: Args) {
  * third-party search results, never take an action — see the catalog entry's
  * "cannot browse further, take any action, or change anything".
  */
-async function doWebSearch(ctx: CopilotToolContext, args: Args) {
+export async function doWebSearch(ctx: CopilotToolContext, args: Args) {
   const query = str(args.query)
   if (!query) return { error: 'query is required' }
   const limit = clampLimit(args.limit, WEB_SEARCH_DEFAULT_LIMIT, WEB_SEARCH_MAX_LIMIT)
@@ -1296,7 +1296,7 @@ async function doDraftOutreach(ctx: CopilotToolContext, args: Args) {
  *  propagates as a thrown exception. This is what lets research_companies
  *  (the batch tool below) give every requested id its own row instead of one
  *  bad company failing the whole call. */
-type ResearchCompanyOutcome =
+export type ResearchCompanyOutcome =
   | ({ status: 'researched'; company: string; reason: string } & CompanyResearcherResult)
   | { status: 'error'; companyId: string; company: string | null; reason: string }
 
@@ -1309,7 +1309,7 @@ type ResearchCompanyOutcome =
  * research_companies report one bad company without losing the rest of the
  * batch (see doResearchCompanies).
  */
-async function researchOneCompany(
+export async function researchOneCompany(
   ctx: CopilotToolContext,
   companyId: string,
   signal?: AbortSignal

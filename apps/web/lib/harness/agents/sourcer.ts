@@ -68,7 +68,7 @@ const STOPWORDS = new Set([
 ])
 
 /** Resume skills (curated list) + query terms → deduped, capped keyword list. */
-function buildKeywords(query: string | undefined, resume: string | null): string[] {
+export function buildKeywords(query: string | undefined, resume: string | null): string[] {
   const out = new Set<string>()
   if (resume) {
     for (const skill of extractSkillsFromText(resume)) {
@@ -86,7 +86,7 @@ function buildKeywords(query: string | undefined, resume: string | null): string
 }
 
 /** Merge two keyword lists, deduped case-insensitively, order preserved (primary first). */
-function mergeKeywords(primary: string[], secondary: string[]): string[] {
+export function mergeKeywords(primary: string[], secondary: string[]): string[] {
   const out: string[] = []
   const seen = new Set<string>()
   for (const k of [...primary, ...secondary]) {
@@ -105,7 +105,7 @@ function mergeKeywords(primary: string[], secondary: string[]): string[] {
  * wants free text, not a country code, and this signal is additive to —
  * never a substitute for — the resolved Targeting passed alongside it.
  */
-function readLocationPrefs(preferences: unknown): { locations: string[]; remote: boolean } {
+export function readLocationPrefs(preferences: unknown): { locations: string[]; remote: boolean } {
   const p = (preferences && typeof preferences === 'object' ? preferences : {}) as Record<string, unknown>
   const rawLocs = Array.isArray(p.preferredLocations) ? (p.preferredLocations as unknown[]) : []
   const locations = rawLocs
@@ -218,7 +218,7 @@ export function planBroadenStep(
  * because relevanceScore() gave it a non-zero score. No-op when no intent was
  * resolved from the query.
  */
-function filterForIntent(leads: JobLead[], intent: RoleIntentDef | null, allowAdjacent: boolean): JobLead[] {
+export function filterForIntent(leads: JobLead[], intent: RoleIntentDef | null, allowAdjacent: boolean): JobLead[] {
   if (!intent) return leads
   return leads.filter((lead) => {
     const m = classifyTitleForIntent(lead.title, intent)
@@ -233,7 +233,7 @@ function filterForIntent(leads: JobLead[], intent: RoleIntentDef | null, allowAd
  * the `sourcer` loop below — so these two fields can never be relaxed away by
  * broaden-on-empty, no matter how many rounds run.
  */
-function violatesHardExclusions(lead: JobLead, targeting: Targeting): boolean {
+export function violatesHardExclusions(lead: JobLead, targeting: Targeting): boolean {
   if (targeting.excludedCompanies.length > 0) {
     const company = lead.company.toLowerCase()
     if (targeting.excludedCompanies.some((c) => company.includes(c))) return true
