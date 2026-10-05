@@ -35,19 +35,41 @@ const SENSITIVE_KEY_RE =
 /** Header names dropped outright from event.request.headers. */
 const SENSITIVE_HEADER_RE = /(authoriz|cookie|x-supabase|x-api-key|set-cookie)/i
 
-const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
-const JWT_RE = /\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b/g
+// LINEAR-TIME CONTRACT. redactString runs on prompts and completions inside a
+// request, so every quantifier below is bounded (nothing above 4096) and none
+// is nested. An unbounded `[A-Za-z0-9._%+-]+@` or `[A-Za-z0-9+/]{8,}:`
+// backtracks quadratically over one long unbroken token (64K chars of 'a'
+// took seconds), which blocks the event loop. Callers that handle big text
+// (langfuse.ts) also slice BEFORE calling.
+const EMAIL_RE = /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,24}/g
+const JWT_RE = /\beyJ[A-Za-z0-9_-]{5,2048}\.[A-Za-z0-9_-]{5,2048}\.[A-Za-z0-9_-]{5,2048}\b/g
 // lib/crypto.ts#encrypt output shape: `${ivBase64}:${authTagBase64}:${encryptedBase64}`.
 // Trailing boundary is a negative lookahead (not \b) because base64 padding
 // ('=') is a non-word char: a \b right after it only matches if the regex
 // backtracks off the padding, which would leave a stray '=' unredacted.
 const ENCRYPTED_BLOB_RE =
-  /\b[A-Za-z0-9+/]{8,}={0,2}:[A-Za-z0-9+/]{8,}={0,2}:[A-Za-z0-9+/]{4,}={0,2}(?![A-Za-z0-9+/=])/g
-const BEARER_RE = /\bBearer\s+\S+/gi
-// Common LLM/cloud provider key prefixes (OpenAI/Anthropic/OpenRouter sk-...,
-// GitHub tokens, Slack, Google, AWS) — catches a raw key even in a message
-// string that no key-name check would ever inspect.
-const PROVIDER_KEY_RE = /\b(sk-[a-zA-Z0-9-]{10,}|sk-ant-[a-zA-Z0-9-]{10,}|gh[oprsu]_[A-Za-z0-9]{10,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{12,})\b/g
+  /\b[A-Za-z0-9+/]{8,512}={0,2}:[A-Za-z0-9+/]{8,512}={0,2}:[A-Za-z0-9+/]{4,4096}={0,2}(?![A-Za-z0-9+/=])/g
+const BEARER_RE = /\bBearer\s{1,8}[^\s"',;]{1,2048}/gi
+// Common LLM/cloud provider key prefixes. The `sk-` class includes `_`: the
+// Anthropic and OpenAI project key shapes (sk-ant-api03-abc_DEF, sk-proj-...)
+// contain underscores, and a class without it stops at the first one and
+// leaks the tail. Also Langfuse pk-lf-, Stripe, Supabase, GitHub, Slack,
+// Google OAuth client secrets and API keys, and AWS key ids: caught even in a
+// message string that no key-name check would ever inspect.
+const PROVIDER_KEY_RE =
+  /\b(sk-[A-Za-z0-9_-]{10,512}|pk-lf-[A-Za-z0-9_-]{10,512}|sk_(?:live|test)_[A-Za-z0-9]{10,512}|whsec_[A-Za-z0-9]{10,512}|sb_secret_[A-Za-z0-9_-]{10,512}|github_pat_[A-Za-z0-9_]{20,512}|gh[oprsu]_[A-Za-z0-9]{10,512}|GOCSPX-[A-Za-z0-9_-]{10,512}|xox[baprs]-[A-Za-z0-9-]{10,512}|AIza[A-Za-z0-9_-]{20,512}|AKIA[A-Z0-9]{12,512})\b/g
+// Google OAuth access (ya29.) and refresh (1//) tokens.
+const GOOGLE_TOKEN_RE = /\b(?:ya29\.|1\/\/)[A-Za-z0-9._-]{10,512}/g
+// `Authorization: Basic <b64>` (Bearer has its own pattern).
+const AUTH_HEADER_RE = /\bAuthorization(["']?\s{0,8}[:=]\s{0,8}["']?)(?:Basic|Digest|Token)\s{1,8}[^\s"',;]{1,512}/gi
+// scheme://user:password@host
+const URL_USERINFO_RE = /\b([a-z][a-z0-9+.-]{1,20}:\/\/)[^\s:@/]{1,256}:[^\s@/]{1,256}@/gi
+// `password: x`, `refresh_token="x"`, `api_key=x`: a secret named in prose or
+// JSON text, which the key-name check on objects never sees. A quoted value
+// may hold spaces; a bare one ends at whitespace or punctuation.
+const KEY_VALUE_RE =
+  /\b(password|passwd|pwd|secret|client[_-]?secret|aws[_-]?secret[_-]?access[_-]?key|private[_-]?key|(?:access|refresh|id|auth|session)?[_-]?token|api[_-]?key|cookie)(["']?\s{0,8}[:=]\s{0,8})("[^"\n]{0,512}"|'[^'\n]{0,512}'|[^\s"',;&]{1,512})/gi
+const PRIVATE_KEY_RE = /-----BEGIN [A-Z ]{0,30}PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]{0,30}PRIVATE KEY-----|$)/g
 
 const REDACTED = '[redacted]'
 
@@ -56,9 +78,17 @@ const REDACTED = '[redacted]'
 export function redactString(value: string): string {
   return value
     .replace(ENCRYPTED_BLOB_RE, '[redacted-secret]')
+    .replace(PRIVATE_KEY_RE, '[redacted-key]')
+    .replace(URL_USERINFO_RE, '$1[redacted]@')
     .replace(JWT_RE, '[redacted-token]')
     .replace(BEARER_RE, 'Bearer [redacted-token]')
+    .replace(AUTH_HEADER_RE, 'Authorization$1[redacted-token]')
     .replace(PROVIDER_KEY_RE, '[redacted-key]')
+    .replace(GOOGLE_TOKEN_RE, '[redacted-token]')
+    .replace(KEY_VALUE_RE, (_m, key: string, sep: string, val: string) => {
+      const q = val[0] === '"' || val[0] === "'" ? val[0] : ''
+      return `${key}${sep}${q}${REDACTED}${q}`
+    })
     .replace(EMAIL_RE, '[redacted-email]')
 }
 

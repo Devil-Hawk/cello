@@ -69,7 +69,28 @@ export interface StepKey {
 export const JOURNAL_PAYLOAD_CAP_BYTES = 8 * 1024
 const bytes = (v: unknown): number => Buffer.byteLength(JSON.stringify(v) ?? '', 'utf8')
 
-export function capPayload(value: unknown, cap: number = JOURNAL_PAYLOAD_CAP_BYTES, depth = 0): unknown {
+/** Caps `value` to about `cap` bytes. The recursive shaping below cannot
+ *  bound a wide object (every key still costs a key plus a marker), so a final
+ *  guard swaps an oversized result for a plain preview. */
+export function capPayload(value: unknown, cap: number = JOURNAL_PAYLOAD_CAP_BYTES): unknown {
+  const out = capInner(value, cap, 0)
+  let size: number
+  try {
+    size = bytes(out)
+  } catch {
+    return '[unserializable]'
+  }
+  if (size <= cap * 1.25) return out
+  let preview = ''
+  try {
+    preview = JSON.stringify(value).slice(0, Math.max(0, cap - 128))
+  } catch {
+    /* unserializable: keep the empty preview */
+  }
+  return { _truncated: true, preview }
+}
+
+function capInner(value: unknown, cap: number, depth: number): unknown {
   if (value == null || typeof value === 'number' || typeof value === 'boolean') return value
   let size: number
   try {
@@ -115,7 +136,7 @@ export function capPayload(value: unknown, cap: number = JOURNAL_PAYLOAD_CAP_BYT
   const bigShare = bigCount ? Math.floor((cap - small) / bigCount) : 0
   const out: Record<string, unknown> = {}
   entries.forEach(([k, v], i) => {
-    out[k] = sizes[i] <= share ? v : capPayload(v, Math.max(0, bigShare - bytes(k) - 2), depth + 1)
+    out[k] = sizes[i] <= share ? v : capInner(v, Math.max(0, bigShare - bytes(k) - 2), depth + 1)
   })
   out._truncated = true
   return out

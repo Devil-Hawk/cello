@@ -215,3 +215,79 @@ describe('scrubMetadata: span metadata for the Langfuse mirror', () => {
     expect(out.label).toBe('sourcer')
   })
 })
+
+describe('redactString: plaintext credentials and Google tokens', () => {
+  const cases: Array<[string, string]> = [
+    ['password: hunter2', 'hunter2'],
+    ['password=hunter2', 'hunter2'],
+    ['"password": "hunter2"', 'hunter2'],
+    ['refresh_token=1//0gXXXXXXXXXXXXXXXXXXXXXXXX', '0gXXXXXXXX'],
+    ['{"refresh_token": "1//0gAbCdEfGhIjKlMnOp"}', '0gAbCdEf'],
+    ['ya29.a0AfH6SMBxxxxxxxxxxxxxxxxxxxxxxx', 'a0AfH6SMB'],
+    ['api_key=abcd1234efgh5678', 'abcd1234efgh5678'],
+    ['Authorization: Basic dXNlcjpwYXNzd29yZA==', 'dXNlcjpw'],
+    ['sk_live_abcdefghijklmnop1234', 'abcdefghijklmnop1234'],
+    ['whsec_abcdefghijklmnop1234', 'abcdefghijklmnop1234'],
+    ['sb_secret_abcdefghijklmnop1234', 'abcdefghijklmnop1234'],
+    ['-----BEGIN RSA PRIVATE KEY-----\nMIIEvQIBADANBgkq\n-----END RSA PRIVATE KEY-----', 'MIIEvQIB'],
+    // The tail after the first underscore used to leak.
+    ['sk-ant-api03-abc_DEFghi_JKLmno-pqrSTU_vwx', 'JKLmno'],
+    ['sk-proj-AbCdEfGhIj_KlMnOpQrStUv_WxYz0123', 'WxYz0123'],
+    ['github_pat_11ABCDEFG0abcdefghijkl_MNOPQRSTUVWXYZ0123456789', 'MNOPQRSTUV'],
+    ['GOCSPX-abcdEFGH1234_ijklMNOP5678', 'ijklMNOP'],
+    ['postgres://postgres:s3cretPassw0rd@db.example.com:5432/app', 's3cretPassw0rd'],
+    ["{'password': 'two words here'}", 'two words'],
+    ['client_secret=abcdEFGH1234ijkl', 'abcdEFGH1234ijkl'],
+    ['cookie: sb-access=abcdef123456', 'abcdef123456'],
+  ]
+  for (const [input, leak] of cases) {
+    it(`redacts ${input.slice(0, 30).replace(/\n/g, ' ')}`, () => {
+      expect(redactString(`before ${input} after`)).not.toContain(leak)
+    })
+  }
+
+  it('leaves ordinary prose and metric-like text alone', () => {
+    const text = 'Basic requirements: tokensUsed 5, the token limit is high, a secretive plan'
+    expect(redactString(text)).toBe(text)
+  })
+
+  it('still redacts the original shapes', () => {
+    const out = redactString(`${FAKE_EMAIL} ${FAKE_JWT} Bearer abc ${FAKE_OPENAI_KEY} ${FAKE_ENCRYPTED_BLOB}`)
+    expect(out).not.toMatch(/jane\.doe|eyJ|abc|FAKEKEY/)
+  })
+})
+
+describe('redactString: linear time on hostile input', () => {
+  const inputs: Record<string, string> = {
+    'a/': 'a/'.repeat(32768),
+    a: 'a'.repeat(65536),
+    'a+': 'a+'.repeat(32768),
+    'a-': 'a-'.repeat(32768),
+    base64: 'QUJDREVGR0hJSktM'.repeat(4096),
+    'eyJ-': 'eyJ-'.repeat(16384),
+    'sk--': 'sk-'.repeat(21845),
+    'a@': 'a@'.repeat(32768),
+    'a:': 'abcdefgh:'.repeat(7000),
+    'sk-_': 'sk-a_'.repeat(13107),
+    'a.a.a': 'eyJaaaaa.'.repeat(7282),
+    'Bearer ': 'Bearer '.repeat(9362),
+    'password=': 'password='.repeat(7282),
+    'password:"': 'password: "'.repeat(7282),
+    'a://b:c': 'ab://c:'.repeat(9362),
+    'ya29.': 'ya29.'.repeat(13107),
+    'github_pat_': 'github_pat_'.repeat(5958),
+    'begin pem': '-----BEGIN PRIVATE KEY-----'.repeat(2427),
+    'spaces': ' '.repeat(65536),
+    'colons': ':'.repeat(65536),
+    'a@a.': 'a@a.'.repeat(16384),
+    'a@aaaa': `a@${'a'.repeat(65000)}`,
+    'long blob': `${'A'.repeat(500)}:${'B'.repeat(500)}:${'C'.repeat(60000)}`,
+  }
+  for (const [name, text] of Object.entries(inputs)) {
+    it(`${name} finishes fast`, () => {
+      const t0 = performance.now()
+      redactString(text)
+      expect(performance.now() - t0).toBeLessThan(250)
+    })
+  }
+})

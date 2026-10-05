@@ -394,6 +394,14 @@ describe('payload cap: the step ledger must not grow without bound', () => {
     expect(String(out.resume)).toContain('[truncated')
   })
 
+  it('a wide object (20,000 keys) is bounded too, not just a few big values', () => {
+    const wide: Record<string, string> = {}
+    for (let i = 0; i < 20_000; i += 1) wide[`key-${i}`] = 'v'.repeat(30)
+    const out = capPayload(wide)
+    expect(size(out)).toBeLessThanOrEqual(10 * 1024)
+    expect((out as Record<string, unknown>)._truncated).toBe(true)
+  })
+
   it('a long array keeps its LENGTH (the run-detail UI shows counts), nulling the overflow', () => {
     const matches = Array.from({ length: 300 }, (_, i) => ({ jobId: `job-${i}`, score: i, rationale: 'because '.repeat(10) }))
     const out = capPayload({ matches, topJobIds: matches.map((m) => m.jobId) }) as { matches: unknown[]; topJobIds: unknown[] }
