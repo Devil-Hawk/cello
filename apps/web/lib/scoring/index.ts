@@ -14,13 +14,15 @@ import type { AdminClient, DecryptedApiKeys, LlmRunner } from '@/lib/harness/typ
 import { ownedJobsQuery } from '@/lib/jobs/owned-query'
 import { candidateRoles, loadScoringInputs, makeEmbedder, type ScoringInputs } from './inputs'
 import { assessRoles, buildShortlist, roleText, type PipelineDeps } from './pipeline'
+import { wantTier } from './shortlist'
 import { FIT_COLUMNS, parseFit, type FitRow } from './read'
 import type { ScoringStore } from './store'
 import { SupabaseScoringStore } from './supabase-store'
 import { PASS_REASONS, type Chance, type PassReason, type PickKind, type Predicted, type Reaction, type RoleFit, type ShortlistPick, type Surface } from './types'
 
 export { FIT_COLUMNS, parseFit, chanceLabel, fitHighlights, firstGapCopy, WANT_TIER_COPY } from './read'
-export type { RoleFit } from './types'
+export { PASS_REASONS } from './types'
+export type { RoleFit, PassReason, Reaction, Surface, PickKind } from './types'
 
 /** Something the caller got wrong, with a message that is safe to show. Routes turn it into a 400. */
 export class ScoringInputError extends Error {
@@ -36,13 +38,13 @@ type Db = AdminClient
 export interface ScoringContext {
   admin: AdminClient
   userId: string
-  apiKeys: DecryptedApiKeys
+  /** Without keys there is no embedding provider, so the taste similarity is skipped and the rest still works. */
+  apiKeys?: DecryptedApiKeys
   llm: LlmRunner
-  signal?: AbortSignal
 }
 
 function deps(ctx: ScoringContext, store: ScoringStore): PipelineDeps {
-  return { llm: ctx.llm, embed: makeEmbedder(ctx.apiKeys), store }
+  return { llm: ctx.llm, embed: ctx.apiKeys ? makeEmbedder(ctx.apiKeys) : null, store }
 }
 
 export function todayUtc(now = new Date()): string {
@@ -78,10 +80,26 @@ export interface DailyShortlistArgs extends ScoringContext {
   forDate?: string
   size?: number
   exploreCount?: number
+  /** Return the day's list as it is when one was already picked, instead of picking again. */
+  skipIfBuilt?: boolean
 }
 
 export async function runDailyShortlist(args: DailyShortlistArgs): Promise<ShortlistRun> {
   const forDate = args.forDate ?? todayUtc()
+  if (args.skipIfBuilt) {
+    const built = await readShortlist(args.admin, args.userId, forDate)
+    if (built.status === 'ready') {
+      return {
+        status: 'ok',
+        forDate,
+        picks: built.picks.map((p) => ({ jobId: p.job?.id ?? '', position: p.position, kind: p.kind, explanation: p.explanation })).filter((p) => p.jobId),
+        unfinished: 0,
+        counts: { newRoles: built.counts.newRoles, filtered: built.counts.filtered },
+        learning: built.learning,
+        notes: [],
+      }
+    }
+  }
   const inputs = await loadScoringInputs(args.admin, args.userId)
   const base = { forDate, picks: [], unfinished: 0, counts: { newRoles: 0, filtered: 0 }, learning: { nReactions: inputs.nReactions, mode: learningMode(inputs.nReactions, false) }, notes: [] as string[] }
   if (!inputs.resumeText) return { ...base, status: 'no_resume' }
@@ -235,7 +253,7 @@ export async function assessJobs(args: AssessJobsArgs): Promise<AssessJobsResult
         jobId: a.jobId,
         assessedAt: new Date().toISOString(),
         blocked: [],
-        want: a.want ? { p: a.want.p, reason: a.want.reason || null, tier: a.want.p >= 0.66 ? 'high' : a.want.p >= 0.33 ? 'medium' : 'low', calibrated: a.want.calibrated, nReactions: a.want.nReactions } : null,
+        want: a.want ? { p: a.want.p, reason: a.want.reason || null, tier: wantTier(a.want.p), calibrated: a.want.calibrated, nReactions: a.want.nReactions } : null,
         chance: a.chance ? { label: a.chance.chance, checks: a.chance.checks, gaps: a.chance.gaps, confirm: a.chance.confirm, note: a.chance.note } : null,
       })
     }

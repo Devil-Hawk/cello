@@ -9,7 +9,7 @@ import type { AgentFn, StepAgentType, UnitType } from './types'
 import { STEP_AGENT_TYPES, UNIT_TYPES, BulkMatcherInput, DigestInput, OutreachInput, ResumeOptimizerInput } from './schemas'
 
 import { sourcer } from './agents/sourcer'
-import { matcher, userCompanyIds } from './agents/matcher'
+import { matcher } from './agents/matcher'
 import { enricher } from './agents/enricher'
 import { cv_tailor } from './agents/cv_tailor'
 import { applier } from './agents/applier'
@@ -25,8 +25,6 @@ import { optimizeResume } from './agents/resume_optimizer'
 import { strategist } from './agents/strategist'
 import { analyst } from './agents/analyst'
 import { application_follow_up } from './agents/application_follow_up'
-import { resolveTargeting } from '@/lib/targeting'
-import { resolveTargetTitles } from '@/lib/targeting/titles'
 
 // Property GETTERS, not value shorthand: this module sits inside import
 // cycles (agents import helpers that import back through here), and a plain
@@ -56,34 +54,19 @@ export const registry: Record<StepAgentType, AgentFn> = {
 // lib/harness/schemas.ts's "The five graph-port stragglers" section for where
 // each input/output shape was derived from.
 
-/** bulk_matcher — mirrors the `matcher` AgentFn's own profile/targeting/
- *  companyIds resolution (lib/harness/agents/matcher.ts's `matcher` below)
- *  rather than requiring a caller to already know the user's companyIds. */
+/** bulk_matcher: assesses a batch of the person's roles. The resume, stated
+ *  preferences and constraints are read inside lib/scoring, so a caller only
+ *  names how many roles, or which ones. */
 const bulk_matcher: AgentFn = async (ctx) => {
   const input = BulkMatcherInput.parse(ctx.input ?? {})
-  const { data: profile } = await ctx.admin
-    .from('profiles')
-    .select('resume_text, preferences')
-    .eq('id', ctx.userId)
-    .single()
-  const resume = ((profile?.resume_text as string | null) ?? '').trim()
-  const prefs = (profile?.preferences as Record<string, unknown> | null) ?? {}
-  const targeting = resolveTargeting(prefs)
-  const companyIds =
-    input.companyIds && input.companyIds.length > 0 ? input.companyIds : await userCompanyIds(ctx.admin, ctx.userId)
-
   const result = await runBulkMatch({
     admin: ctx.admin,
     userId: ctx.userId,
-    companyIds,
-    resume,
-    targeting,
     llm: ctx.llm,
     limit: input.limit ?? 25,
     model: input.model,
-    effort: input.effort,
     jobIds: input.jobIds,
-    targetTitles: input.targetTitles ?? resolveTargetTitles(prefs),
+    apiKeys: ctx.apiKeys,
   })
   return { output: result, tokensUsed: result.tokensUsed }
 }
@@ -172,7 +155,7 @@ export function getAgent(type: StepAgentType): AgentFn {
 /** Human-readable capability catalog handed to the planner LLM. */
 export const AGENT_CATALOG: Record<StepAgentType, string> = {
   sourcer: 'Discover/refresh open jobs from the user\'s tracked companies (official ATS APIs).',
-  matcher: 'Score jobs against the user\'s resume and produce match explanations (skills matched, gaps, seniority fit).',
+  matcher: 'Decide which roles to show: filter on the facts the user stated, rank by what they want, and check their chance against their resume with cited evidence.',
   enricher: 'Add signal to jobs: compensation, seniority, and insider connections from the user\'s own contacts/Gmail graph.',
   cv_tailor: 'Tailor a resume summary + cover letter for a specific job (rephrase true content only, never fabricate).',
   applier: 'Build an application draft for a job and produce a handoff/submit action via official ATS APIs (human-approve by default).',

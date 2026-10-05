@@ -1,51 +1,30 @@
-// POST /api/agents/match/batch  { limit?: number, model?: string, effort?: string }
+// POST /api/agents/match/batch  { limit?: number, model?: string }
 //
-// BULK scoring: drains the unscored-jobs backlog using bulk_matcher's
-// two-tier design (lib/harness/agents/bulk_matcher.ts) instead of one LLM
-// call per job — see that file's header for the tier-1/tier-2 rationale. One
-// call here triages up to `limit` (default 200, hard cap 500) of the user's
-// unscored jobs and is safe to call again immediately: it always selects the
-// next unscored page (match_score is null), so a client can poll this in a
-// loop until `remainingInTargeting` hits 0.
+// Assesses the person's roles that have not been assessed yet, a bounded page at
+// a time (default 200, hard cap 500), through lib/scoring: roles that break a fact
+// they stated are filtered with the reason, the rest are judged on what they want
+// and on their chance against the resume. Safe to call again immediately: it
+// always takes the next unassessed page, so a client can poll this in a loop until
+// `remainingInTargeting` reaches 0.
 //
-// Reuses the SAME candidate selection as the harness cron digest, autopilot,
-// and the on-demand single-job route (matcher.ts's selectCandidateJobs /
-// userCompanyIds / toScorable) so ownership + quality + targeting filtering,
-// and the persisted match_details shape, are consistent regardless of which
-// path scored a given job.
-//
-// REMAINING-COUNT FIX: `remaining` (kept in the response for back-compat with
-// existing callers — see dashboard/page.tsx) and the new `remainingInTargeting`
-// are now the SAME number: match_score-null rows that ALSO pass the quality +
-// targeting predicate the scorer itself applies (countRemainingInTargeting
-// below). Before this fix `remaining` counted every match_score-null row with
-// NO targeting/quality filter at all, while the scorer can only ever select
-// rows that pass targeting — so on an account where targeting/quality reject
-// almost everything (observed: 11,370 unscored, 189 actually in-targeting)
-// the counter reported ~11,275 while the true reachable backlog was 189.
-// Every click past that point returned `scored: 0` while the toast still said
-// "N left to score", and `allScored`/"All jobs scored" (jobs/page.tsx) was
-// permanently unreachable. The match_score-null rows that targeting/quality
-// exclude are now reported separately as `excludedByTargeting` — they are not
-// "left to score", they will never be scored under the account's current
-// filters.
+// `scored` keeps its old name in the response for existing callers; it now means
+// "roles with a recorded verdict". `remaining` and `remainingInTargeting` are the
+// roles still waiting among those worth assessing (inside the function and level
+// the person asked for); the rest, which stay unassessed on purpose, are reported
+// as `excludedByTargeting`.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { loadApiKeys } from '@/lib/harness/keys'
 import { canRunLlm, missingOpenRouterMessage } from '@/lib/harness/llm-key-message'
-import type { AdminClient } from '@/lib/harness/types'
-import { userCompanyIds, ownedJobsQuery } from '@/lib/harness/agents/matcher'
-import { openRolesOnly } from '@/lib/jobs/freshness'
+import { userCompanyIds } from '@/lib/jobs/owned-query'
+import { countUnassessed } from '@/lib/scoring/inputs'
 import { runUnitOnce } from '@/lib/graph/oneshot'
-import { resolveTargetTitles } from '@/lib/targeting/titles'
-import { resolveTargeting, type Targeting } from '@/lib/targeting'
-import { REASONING_EFFORTS, type ReasoningEffort } from '@/lib/harness/types'
+import { resolveTargeting } from '@/lib/targeting'
 import { BulkMatcherOutput } from '@/lib/harness/schemas'
 import type { z } from 'zod'
 import { isAllowedModel } from '@/lib/models'
-import { QUALITY_REJECT_THRESHOLD } from '@/lib/jobs/classify'
 import { recordDemoEvent } from '@/lib/access/session'
 import { setTraceInput, setTraceOutput, withTrace } from '@/lib/trace/spans'
 
@@ -60,8 +39,8 @@ const DEFAULT_LIMIT = 200
 const HARD_CAP = 500
 
 /**
- * One trail row for a bulk-scoring attempt — what it scored, or why it scored
- * nothing.
+ * One trail row for a bulk assessment attempt: what it assessed, or why it
+ * assessed nothing.
  *
  * "We should be able to see what someone did with a particular access code",
  * and bulk scoring is the single most expensive thing a demo visitor can do, so
@@ -101,85 +80,6 @@ function clampLimit(v: unknown): number {
   return Math.min(Math.floor(n), HARD_CAP)
 }
 
-function parseEffort(v: unknown): ReasoningEffort | undefined {
-  return typeof v === 'string' && (REASONING_EFFORTS as readonly string[]).includes(v) ? (v as ReasoningEffort) : undefined
-}
-
-// ---------------------------------------------------------------------------
-// SYNC WARNING: quoteFilterValue / facetOrFilter below are a DELIBERATE
-// duplicate of lib/harness/agents/matcher.ts's quoteFilterValue (:425-437)
-// and facetOrFilter (:439-448), and the query they build mirrors that file's
-// fetchDefaultCandidatePool (:494-525) — the exact SQL predicate
-// selectCandidateJobs uses to pick the default candidate pool that
-// runBulkMatch actually scores. matcher.ts does not export these (nor
-// passesQualityAndTargeting, :281-305), and this route does not own that
-// file, so they cannot be imported. If matcher.ts's predicate changes, THIS
-// must change too or the "remaining to score" count will drift from what the
-// scorer can actually reach again — the exact bug this file was rewritten to
-// fix. Like fetchDefaultCandidatePool, this is SQL-only: it deliberately
-// omits targeting.excludedCompanies/excludedKeywords (matcher.ts keeps those
-// JS-only — they need the joined company name / description text — and
-// they're rare/optional prefs, not the always-on case that caused the
-// starvation this fix addresses), so remainingInTargeting can be a hair
-// higher than what a full JS passesQualityAndTargeting pass would report for
-// an account that has set those two prefs.
-function quoteFilterValue(v: string): string {
-  return /[,()"]/.test(v) ? `"${v.replace(/"/g, '\\"')}"` : v
-}
-function facetOrFilter(column: string, values: string[]): string {
-  const list = values.map(quoteFilterValue).join(',')
-  return `${column}.is.null,${column}.eq.unknown,${column}.in.(${list})`
-}
-
-/** Raw match_score-null count, no targeting/quality filter — this is what
- *  `remaining` used to mean (the bug). Kept only to derive `excludedByTargeting`
- *  (= this minus countRemainingInTargeting) — never returned to the client on
- *  its own, so a caller can no longer mistake it for "left to score". */
-async function countUnscoredNoFilter(admin: AdminClient, userId: string, companyIds: string[]): Promise<number> {
-  if (companyIds.length === 0) return 0
-  // Ownership via the companies FK join (ownedJobsQuery), not an
-  // .in('company_id', companyIds) array — that breaks past ~600 companies.
-  const { count, error } = await openRolesOnly(
-    ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', { count: 'exact', head: true })
-  ).is('match_score', null)
-  if (error) {
-    console.error('[agents/match/batch] unscored-count query failed', error)
-    return 0
-  }
-  return count ?? 0
-}
-
-/** match_score-null rows that ALSO pass the quality + targeting predicate —
- *  see the SYNC WARNING above. This is the number the "Score unscored jobs"
- *  button can actually drive to zero. */
-async function countRemainingInTargeting(
-  admin: AdminClient,
-  userId: string,
-  companyIds: string[],
-  targeting: Targeting
-): Promise<number> {
-  if (companyIds.length === 0) return 0
-  let query = openRolesOnly(
-    ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', { count: 'exact', head: true })
-  )
-    .is('match_score', null)
-    .or(`quality_score.is.null,quality_score.gte.${QUALITY_REJECT_THRESHOLD}`)
-
-  if (targeting.functions.length > 0) query = query.or(facetOrFilter('job_function', targeting.functions))
-  if (targeting.seniority.length > 0) query = query.or(facetOrFilter('seniority', targeting.seniority))
-  if (targeting.languages.length > 0) query = query.or(facetOrFilter('language', targeting.languages))
-  if (targeting.countries.length > 0) query = query.or(facetOrFilter('country', targeting.countries))
-  if (targeting.remoteOnly) query = query.or('is_remote.is.null,is_remote.eq.true')
-
-  const { count, error } = await query
-  if (error) {
-    console.error('[agents/match/batch] remaining-in-targeting count query failed', error)
-    return 0
-  }
-  return count ?? 0
-}
-// ---------------------------------------------------------------------------
-
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
   const {
@@ -197,7 +97,6 @@ export async function POST(request: NextRequest) {
     if (modelProvided && !model) {
       return NextResponse.json({ error: `Unsupported model "${rawModel as string}".` }, { status: 400 })
     }
-    const effort = parseEffort((body as { effort?: unknown })?.effort)
 
     const admin = createAdminClient()
 
@@ -260,39 +159,21 @@ export async function POST(request: NextRequest) {
 
     let result: BulkMatcherResult
     try {
-      // internals now run under runAgentUnit('bulk_matcher') — metered/demo-
-      // gated/journaled the same as every other unit — instead of calling
-      // runBulkMatch directly. No checkpoint thread: the DB's match_score IS
-      // NULL set is already the cursor (see this file's own header), so a
-      // thread would only duplicate that truth. companyIds/targetTitles are
-      // passed explicitly (already resolved above, for the no-resume/
-      // no-companies checks and the post-run stats below) so the unit's own
-      // internal resolution — see lib/harness/registry.ts's bulk_matcher
-      // wrapper, which exists precisely so a caller does NOT have to know
-      // this — is simply handed what this route already has.
+      // Runs under runAgentUnit('bulk_matcher'), so it is metered, demo-gated and
+      // journaled like every other unit. No checkpoint thread: the roles that have
+      // no assessment yet are the cursor, so a thread would only duplicate that.
       const unitResult = await runUnitOnce('bulk_matcher', {
         admin,
         userId: user.id,
-        goal: 'Score unscored jobs',
-        input: {
-          companyIds,
-          limit,
-          model,
-          effort,
-          // Spend on the most on-target jobs first. Ordering only — nothing is
-          // excluded, so an unusually-titled role is still scored, just later.
-          targetTitles: resolveTargetTitles(prefs),
-        },
+        goal: 'Assess unassessed roles',
+        input: { companyIds, limit, model },
       })
       result = unitResult.output as BulkMatcherResult
       setTraceInput({ companies: companyIds.length, limit })
     } catch (e) {
-      // The unit issues tier-1 and tier-2 LLM calls before it can throw, so
-      // this is money already spent with nothing persisted to show for it — the
-      // single most expensive thing a successes-only trail would have hidden.
-      // Journalled and RETHROWN: what this request returns is exactly what it
-      // returned before, because an audit row is not a licence to change a
-      // handler's behaviour.
+      // The unit may have made model calls before it throws, so this is spend with
+      // nothing to show for it, which a trail of successes alone would hide.
+      // Journalled and rethrown: an audit row does not change what the request returns.
       await recordScoringOutcome(
         supabase,
         { outcome: 'failed', reason: 'score_failed' },
@@ -301,15 +182,9 @@ export async function POST(request: NextRequest) {
       throw e
     }
 
-    // Both counts reflect POST-run state (scoring above may have just cleared
-    // some of these rows), computed in parallel — two head-count queries, no
-    // LLM spend. See the SYNC WARNING above for what remainingInTargeting must
-    // stay aligned with.
-    const [remainingInTargeting, totalUnscored] = await Promise.all([
-      countRemainingInTargeting(admin, user.id, companyIds, targeting),
-      countUnscoredNoFilter(admin, user.id, companyIds),
-    ])
-    const excludedByTargeting = Math.max(0, totalUnscored - remainingInTargeting)
+    // The counts reflect the state after this run: two head-count queries, no model spend.
+    const { inRecall: remainingInTargeting, total: totalUnassessed } = await countUnassessed(admin, user.id, targeting)
+    const excludedByTargeting = Math.max(0, totalUnassessed - remainingInTargeting)
 
     // THE DEMO TRAIL — see recordScoringOutcome above for what goes in a row and
     // what awaiting it costs.
@@ -328,9 +203,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       scored: result.scored,
       failed: result.failed,
-      // Back-compat field — see the REMAINING-COUNT FIX comment at the top of
-      // this file: this now means the same thing as remainingInTargeting, not
-      // the old ungated match_score-null count.
+      // Same number as remainingInTargeting; kept under its old name for existing callers.
       remaining: remainingInTargeting,
       remainingInTargeting,
       excludedByTargeting,

@@ -169,6 +169,26 @@ export async function candidateRoles(admin: AdminClient, userId: string, targeti
   return prioritiseByTargetTitles(rows, titles).slice(0, opts.limit)
 }
 
+/**
+ * How many of the person's roles still wait for an assessment: the ones the
+ * candidate query would pick up (`inRecall`), and all of them (`total`). The
+ * difference is roles outside the function or level they asked for, which stay
+ * unassessed on purpose.
+ */
+export async function countUnassessed(admin: AdminClient, userId: string, targeting: Targeting): Promise<{ inRecall: number; total: number }> {
+  const head = { count: 'exact' as const, head: true }
+  const total = await ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', head).is('fit_assessed_at', null)
+  let q = ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', head)
+    .is('fit_assessed_at', null)
+    .or('still_open.is.null,still_open.eq.true')
+    .or(`quality_score.is.null,quality_score.gte.${QUALITY_REJECT_THRESHOLD}`)
+  if (targeting.functions.length > 0) q = q.or(facet('job_function', targeting.functions))
+  if (targeting.seniority.length > 0) q = q.or(facet('seniority', targeting.seniority))
+  if (targeting.languages.length > 0) q = q.or(facet('language', targeting.languages))
+  const inRecall = await q
+  return { inRecall: inRecall.count ?? 0, total: total.count ?? 0 }
+}
+
 // ---------------------------------------------------------------------------
 // Embeddings
 // ---------------------------------------------------------------------------
