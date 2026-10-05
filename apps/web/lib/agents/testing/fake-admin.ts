@@ -32,6 +32,12 @@ type Filter = (r: Row) => boolean
 
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve))
 
+/** A column value; "companies.user_id" reads through an embedded relation. */
+function cell(r: Row, col: string): unknown {
+  if (!col.includes('.')) return r[col]
+  return col.split('.').reduce<unknown>((o, k) => (Array.isArray(o) ? (o[0] as Row | undefined)?.[k] : (o as Row | undefined)?.[k]), r)
+}
+
 export function makeFakeAdmin(seed: Record<string, Row[]> = {}, config: Record<string, TableConfig> = {}): FakeAdmin {
   const tables: Record<string, Row[]> = {}
   for (const [name, rows] of Object.entries(seed)) tables[name] = rows.map((r) => ({ ...r }))
@@ -159,19 +165,19 @@ export function makeFakeAdmin(seed: Record<string, Row[]> = {}, config: Record<s
         return api
       },
       eq(col: string, v: unknown) {
-        filters.push((r) => r[col] === v)
+        filters.push((r) => cell(r, col) === v)
         return api
       },
       neq(col: string, v: unknown) {
-        filters.push((r) => r[col] !== v)
+        filters.push((r) => cell(r, col) !== v)
         return api
       },
       in(col: string, vs: unknown[]) {
-        filters.push((r) => vs.includes(r[col]))
+        filters.push((r) => vs.includes(cell(r, col)))
         return api
       },
       is(col: string, v: null | boolean) {
-        filters.push((r) => (v === null ? r[col] == null : r[col] === v))
+        filters.push((r) => (v === null ? cell(r, col) == null : cell(r, col) === v))
         return api
       },
       not(col: string, operator: string, v: unknown) {
