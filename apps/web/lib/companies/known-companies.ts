@@ -109,6 +109,18 @@ export const KNOWN_COMPANIES: Record<string, KnownCompany> = {
   'posthog.com': { name: 'PostHog', board: { provider: 'ashby', token: 'posthog' } },
   'scale.com': { name: 'Scale AI', board: { provider: 'greenhouse', token: 'scaleai' } },
   'confluent.io': { name: 'Confluent', board: { provider: 'ashby', token: 'confluent' } },
+  // Real boards that give nothing to verify them by (no declared site, no posting names the
+  // company's, careers page renders them by script), checked by hand on 2026-10-05.
+  'notion.com': { name: 'Notion', board: { provider: 'ashby', token: 'notion' } },
+  'typeform.com': { name: 'Typeform', board: { provider: 'greenhouse', token: 'typeform' } },
+  'lucidsoftware.com': { name: 'Lucid Software', board: { provider: 'greenhouse', token: 'lucidsoftware' } },
+  'lucid.co': { name: 'Lucid Software', board: { provider: 'greenhouse', token: 'lucidsoftware' } },
+  'smartsheet.com': { name: 'Smartsheet', board: { provider: 'greenhouse', token: 'smartsheet' } },
+  'gemini.com': { name: 'Gemini', board: { provider: 'greenhouse', token: 'gemini' } },
+  'canva.com': { name: 'Canva', board: { provider: 'smartrecruiters', token: 'canva' } },
+  'wise.com': { name: 'Wise', board: { provider: 'smartrecruiters', token: 'wise' } },
+  'planetscale.com': { name: 'PlanetScale', board: { provider: 'greenhouse', token: 'planetscale' } },
+  'loopreturns.com': { name: 'Loop Returns', board: { provider: 'lever', token: 'loopreturns' } },
 }
 
 /** Domain → known company, tolerating a jobs./careers. subdomain prefix. */

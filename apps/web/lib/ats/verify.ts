@@ -10,10 +10,11 @@
 //   board_links_home   a posting lives on the company's domain, or two or more postings link to or
 //                      name it (on a host boundary: mercury.co is not mercury.com), or the board
 //                      declares the company's domain as its own site
-//   provider_name      the provider names the same employer (TLD ignored: "Honeycomb.io") AND the
-//                      token is the domain's first label, with nothing against it
-//   Against a board: it declares a home that is NOT the company's domain, or its postings link to a
-//   rival domain (same name, other TLD) and never to the company's. Either rejects the name match.
+//   provider_name      the provider names the same employer (TLD ignored: "Honeycomb.io"), the token is
+//                      the domain's first label AND one posting names the company's site. A name and a
+//                      label alone are not enough: "gong" on Recruitee is a Polish bus company, not gong.io.
+//   A home the board declares for itself that is NOT the company's domain rejects it outright.
+//   A real board that offers none of this is not guessed: curate it in known-companies.ts.
 // A known employer (known-companies.ts) is never matched by name or domain label: a
 // namesake's board passes those, so it needs the page link or its curated board.
 // Boards read off the careers URL itself ('careers_url') and boards the person
@@ -141,26 +142,6 @@ export function boardPointsHome(jobs: readonly AtsJob[], domain: string | null |
   return false
 }
 
-const RIVAL_TLDS = 'com|net|org|io|co|ai|app|dev|so|us|uk|de|eu|tech|xyz|me|tv|ly|fm|gg|sh|cc'
-
-/**
- * A posting links to another site that carries the company's name ("demo.mercury.com"
- * while the company is mercury.co): the board belongs to a namesake.
- */
-export function pointsToRival(jobs: readonly AtsJob[], domain: string | null | undefined): boolean {
-  const root = domain ? hostOf(domain) : null
-  const label = root ? alnum(root.split('.')[0]) : ''
-  if (!root || label.length < 2) return false
-  const rivalHost = (host: string) =>
-    !onCompanyDomain(host, root) && host.split('.').slice(0, -1).some((part) => alnum(part) === label)
-  const textRe = new RegExp(`(?<![a-z0-9-])((?:[a-z0-9-]+\\.)*${label}\\.(?:${RIVAL_TLDS})(?:\\.[a-z]{2})?)(?![a-z0-9-])`, 'gi')
-  return jobs.some(
-    (j) =>
-      (j.linkHosts ?? []).some(rivalHost) ||
-      [...(j.description ?? '').matchAll(textRe)].some((m) => rivalHost(m[1].toLowerCase()))
-  )
-}
-
 // ---------------------------------------------------------------------------
 // What each provider says about who owns a board. Plain public GETs through
 // ./http (host allow-list, timeout, breaker). Personio's feed has no employer
@@ -176,6 +157,7 @@ export interface BoardIdentity {
 const OPTS = { retries: 1, timeoutMs: 8000 }
 const HTML = { ...OPTS, headers: { accept: 'text/html' } }
 const GH_HOSTS = new Set(['boards-api.greenhouse.io'])
+const GH_PAGE_HOSTS = new Set(['job-boards.greenhouse.io'])
 const LEVER_HOSTS = new Set(['jobs.lever.co'])
 const ASHBY_HOSTS = new Set(['jobs.ashbyhq.com'])
 const WORKABLE_HOSTS = new Set(['apply.workable.com'])
@@ -186,7 +168,10 @@ export const IDENTIFY: Partial<Record<AtsProviderId, (token: string) => Promise<
   async greenhouse(t) {
     const url = assertAllowedHost(`https://boards-api.greenhouse.io/v1/boards/${t}`, GH_HOSTS)
     const d = await fetchJson<{ name?: unknown }>(url, OPTS)
-    return { name: str(d?.name), homeUrls: [] }
+    // The board's own page links its logo to the company (Calendly, Dialpad); many boards set none.
+    const page = assertAllowedHost(`https://job-boards.greenhouse.io/${t}`, GH_PAGE_HOSTS)
+    const logo = await fetchText(page, HTML).then((h) => /"logo":\{"href":"([^"]+)"/.exec(h)?.[1], () => undefined)
+    return { name: str(d?.name), homeUrls: logo ? [logo] : [] }
   },
   async lever(t) {
     const url = assertAllowedHost(`https://jobs.lever.co/${t}`, LEVER_HOSTS)
@@ -281,13 +266,12 @@ export async function verifyBoard(input: VerifyInput): Promise<Exclude<VerifiedB
   if (declared.length > 0) {
     return declared.some((u) => onCompanyDomain(u, company.domain)) ? 'board_links_home' : null
   }
-  // The provider declares no site. The same name and a token that is the domain's first
-  // label tie the board to the company, unless the board's own postings point at a rival
-  // domain (a namesake: mercury.com's board is not mercury.co's).
+  // The provider declares no site: a name equal to the domain label is one word anyone
+  // can hold (Gong, Rise, Kite, Juno), so it also needs a posting that names the company's site.
   if (
     sameEmployerName(identity.name, company.name) &&
     tokenMatchesDomainLabel(token, company.domain) &&
-    !pointsToRival(jobs, company.domain)
+    jobs.some((j) => pointsHome(j, company.domain))
   ) {
     return 'provider_name'
   }
