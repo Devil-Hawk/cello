@@ -3,7 +3,7 @@
 // refreshCompany() contains all provider/dedup/insert-count logic and talks to
 // the database through the small AtsStore interface, so the same code runs in
 // the Next.js route (user-scoped supabase-js client, RLS enforced) and in the
-// scheduled CI script (service-role PostgREST via plain fetch).
+// scheduled script (scripts/ingest.ts, service-role client).
 
 import { createHash } from 'node:crypto'
 import type { AtsJob, AtsMetadata, AtsProvider, AtsProviderId, FetchContext } from './types'
@@ -123,8 +123,9 @@ export interface SightingResult {
 }
 
 /**
- * Storage adapter. Implementations: supabase-js client (route) and raw
- * PostgREST fetch (scripts/ats-refresh.ts). All methods may throw; refresh
+ * Storage adapter. The one implementation is lib/ats/store.ts (supabase-js):
+ * with the user's session in the route (row level security applies) and with
+ * the service role in scripts/ingest.ts. All methods may throw; refresh
  * isolates failures per company.
  */
 export interface AtsStore {
@@ -327,7 +328,7 @@ export async function loadStoredJobs(
   }
 }
 
-async function refreshLocked(store: AtsStore, company: CompanyInput, result: CompanyRefreshResult): Promise<void> {
+export async function refreshLocked(store: AtsStore, company: CompanyInput, result: CompanyRefreshResult): Promise<void> {
   // 0. What is stored already. Read first so a provider that needs a second
   //    request per posting (Workday, SmartRecruiters) spends it on the postings
   //    that have no description yet.

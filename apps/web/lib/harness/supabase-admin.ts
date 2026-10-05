@@ -2,7 +2,7 @@
 //
 // The harness journals steps into agent_steps, which has an RLS SELECT policy
 // but NO insert/update policy — so writes MUST use the service role (bypasses
-// RLS), exactly like scripts/ats-refresh.ts. This client is intentionally
+// RLS), exactly like scripts/ingest.ts. This client is intentionally
 // UNtyped (no Database generic) because agent_runs/agent_steps/application_drafts
 // are not in @cello/shared's generated Database type; row shapes live in ./types.
 //
