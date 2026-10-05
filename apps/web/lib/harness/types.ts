@@ -199,6 +199,9 @@ export interface LlmResult {
    * agent happens to put in its own JSON output.
    */
   reasoning?: string
+  /** What the provider says the call cost, USD (OpenRouter usage.cost). Absent when
+   *  the provider does not report one; the ledger then uses the price table. */
+  costUsd?: number
 }
 
 /**
