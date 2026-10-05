@@ -193,8 +193,15 @@ id is deterministic, so a replay updates instead of duplicating. Deterministic
 checks stay in Postgres only. At most 50 scores go out per trace.
 
 Limits per trace: at most 400 observations (the root, errors and judge calls
-are always kept, and the root records how many were dropped) and 128KB of
-captured text.
+are always kept, and the root records how many were dropped) and 256KB of
+captured input text (a generation's output is not counted against it).
+
+A system prompt is captured whole (up to 64KB) the first time it appears in a
+trace. A later generation that sends the identical prompt (every Copilot step
+does) gets a one line pointer, `[system prompt identical to <first observation>,
+sha256:<8 hex>]`. Other messages are cut at 16KB each and 48KB together. Whenever
+text is cut, the observation's metadata says so (`input_truncated`,
+`input_chars`).
 
 ### What is sent, and what is not
 
@@ -219,8 +226,9 @@ capture on.
 Before anything leaves the process, every string passes through `redactString`
 from `lib/observability/scrub.ts` (emails, JWTs, `Bearer` and `Basic`
 credentials, `sk-`, GitHub, Google and other provider keys, OAuth tokens,
-passwords in `key=value` text, URL credentials, private keys, Cello's AES
-blobs) and is cut to 16KB. Every pattern is bounded, so a long unbroken token
+passwords in `key=value` text (a bare password is masked to the next space, `&`
+included), phone numbers, SSNs, Luhn-valid card numbers, URL credentials,
+private keys, Cello's AES blobs) and is cut to 16KB. Every pattern is bounded, so a long unbroken token
 cannot stall a request. There are two layers:
 
 1. The replay scrubs prompt and reply text (`scrubText`), structured payloads
@@ -235,17 +243,16 @@ Names are code constants and must match `^[a-z][a-z0-9_-]{0,63}$`, otherwise the
 become `unnamed`, so free text can never become a name.
 
 Redaction is pattern based. Free text such as a resume still reaches Langfuse
-with names and phone numbers in it, which is why the settings page tells users
+with names and street addresses in it, which is why the settings page tells users
 when capture is on and why `LANGFUSE_CAPTURE_CONTENT=0` exists. Gmail
 classification prompts hold email bodies, so they are visible too while capture
 is on.
 
-Known gaps, all of them free text a pattern cannot recognise: phone numbers and
-street addresses, SSNs, non-ASCII email addresses, passwords written as prose
+Known gaps, all of them free text a pattern cannot recognise: street addresses,
+phone numbers written as a bare digit run, non-ASCII email addresses, passwords written as prose
 ("my password is hunter2" with no `:` or `=`), 64-hex raw keys, `hf_` and `npm_`
 tokens, `Basic <base64>` without an `Authorization` prefix, OAuth `?code=` query
-values, a short secret in a key named `code` or `refresh`, a bare password value
-that stops at `&` (`password: a&b` leaks `b`), `Password - x`, a second cookie
+values, a short secret in a key named `code` or `refresh`, `Password - x`, a second cookie
 pair after a masked `Cookie:` header, and Fernet-style blobs. Keys written
 into a JSON-escaped message (a tool result is stringified into the prompt) are
 caught, including after `\n` and `\t`.
