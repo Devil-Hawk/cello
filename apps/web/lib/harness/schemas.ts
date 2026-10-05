@@ -756,6 +756,8 @@ export const AnalystOutput = z.object({
   summary: z.string(),
   talkingPoints: z.array(z.string()),
   companyInsights: z.array(z.string()),
+  /** The posting was too short to say much; the panel can say so. */
+  thin: z.boolean().optional(),
 })
 
 // application_follow_up: a follow-up suggestion (+ drafted message, when one is

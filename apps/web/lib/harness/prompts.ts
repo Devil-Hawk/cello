@@ -96,6 +96,7 @@ export const PROMPT_DOC_NAMES = [
   'judge_specificity',
   'gmail_classify',
   'reply_classify',
+  'analyst',
 ] as const
 export type PromptDocName = (typeof PROMPT_DOC_NAMES)[number]
 
