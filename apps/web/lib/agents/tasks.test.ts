@@ -100,7 +100,7 @@ describe('labels', () => {
     expect(statusLabel('done')).toBe('Done')
     expect(statusLabel('partial', 'budget')).toBe('Partial: ran out of budget')
     expect(statusLabel('partial', 'time')).toBe('Partial: ran out of time')
-    expect(statusLabel('partial', 'steps')).toBe('Partial: hit the step limit')
+    expect(statusLabel('partial', 'steps')).toBe('Partial: stopped at its limit')
     expect(statusLabel('failed', null, 'site did not load')).toBe('Failed: site did not load')
     expect(statusLabel('waiting')).toBe('Waiting for your approval')
   })

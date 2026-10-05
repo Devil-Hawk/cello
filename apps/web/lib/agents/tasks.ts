@@ -183,7 +183,7 @@ export function statusLabel(status: TaskStatus, reason?: PartialReason | null, f
     case 'waiting':
       return 'Waiting for your approval'
     case 'partial':
-      return reason === 'budget' ? 'Partial: ran out of budget' : reason === 'time' ? 'Partial: ran out of time' : 'Partial: hit the step limit'
+      return reason === 'budget' ? 'Partial: ran out of budget' : reason === 'time' ? 'Partial: ran out of time' : 'Partial: stopped at its limit'
     case 'failed':
       return `Failed: ${failure ?? 'something went wrong'}`
   }

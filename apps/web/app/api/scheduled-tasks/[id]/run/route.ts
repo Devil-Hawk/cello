@@ -25,7 +25,7 @@ export async function POST(_request: NextRequest, { params }: { params: { id: st
   const task = await getScheduledTask(admin, user.id, params.id)
   if (!task) return NextResponse.json({ error: 'Not found', fix: 'Open Scheduled tasks and choose one from the list.' }, { status: 404 })
   if (await isDemoUser(admin, user.id)) {
-    return NextResponse.json({ error: 'Demo accounts cannot run scheduled tasks.', fix: 'This needs a full account.' }, { status: 403 })
+    return NextResponse.json({ error: 'Demo accounts cannot start scheduled tasks.', fix: 'This needs a full account.' }, { status: 403 })
   }
 
   await fireContinue({ reason: 'due', scheduled_task_id: task.id, force: true })
