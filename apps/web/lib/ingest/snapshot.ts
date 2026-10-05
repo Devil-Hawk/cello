@@ -86,16 +86,19 @@ const GENERIC_LABEL =
   /^(?:apply(?: now| here| today)?|view(?: this)?(?: job| role| position| posting| details)?|learn more|read more|see (?:role|job|position|details)|details|more info|more details|open role|open position|job details)$/i
 
 /**
- * Cheerio text with block boundaries kept as line breaks, so a card's title and
- * its Apply link stay on neighbouring lines instead of fusing into one.
+ * Mark where one piece of text ends and the next begins, before any text is
+ * read: a block ends a line, an inline element ends a word. Without it a card's
+ * title, its location and its Apply link read as one run ("EngineerSan JoseApply").
  */
+function separateText($: cheerio.CheerioAPI): void {
+  $('br').replaceWith('\n')
+  $('p,div,li,tr,h1,h2,h3,h4,h5,h6,section,article,header,footer,ul,ol,table,dd,dt').append('\n')
+  $('span,a,b,strong,em,small,label,time,i,u,button,td,th').append(' ')
+}
+
+/** The page's text, one block per line. */
 function blockText($: cheerio.CheerioAPI): string {
-  const body = $('body')
-  body.find('br').replaceWith('\n')
-  body.find('p,div,li,tr,h1,h2,h3,h4,h5,h6,section,article,header,footer,ul,ol,table,dd,dt').each((_, el) => {
-    $(el).append('\n')
-  })
-  return body
+  return $('body')
     .text()
     .split('\n')
     .map(squash)
@@ -143,6 +146,7 @@ export function snapshotPage(html: string, url: string): PageSnapshot {
     return { text: '', links: [], truncated: false, url }
   }
   $('script,style,noscript,svg,iframe,template').remove()
+  separateText($)
 
   const links: PageLink[] = []
   const seen = new Set<string>()

@@ -104,6 +104,38 @@ function nextPageUrl(snap: PageSnapshot, seen: Set<string>): string | null {
   return null
 }
 
+export type PageAnswer = z.infer<typeof AnswerSchema>
+
+/** The model's text as a validated answer, or null when it is not one. */
+export function parsePageAnswer(raw: string): PageAnswer | null {
+  let parsed: unknown = null
+  try {
+    parsed = parseJsonLoose(raw)
+  } catch {
+    return null
+  }
+  const answer = AnswerSchema.safeParse(parsed)
+  return answer.success ? answer.data : null
+}
+
+/**
+ * What a validated answer is worth against its page: the postings the page
+ * backs up, how many items were thrown away, and how many the model named.
+ * A single posting page has no link to point at, so its one title must be on
+ * the page and its address is the page's own.
+ */
+export function answerToJobs(answer: PageAnswer, snap: PageSnapshot): { jobs: AtsJob[]; dropped: number; kind: PageAnswer['page_kind']; named: number } {
+  const { page_kind: kind, jobs: named } = answer
+  if (kind === 'single_posting') {
+    const title = named[0]?.title.trim()
+    const onPage = title ? snap.text.toLowerCase().includes(title.toLowerCase()) : false
+    if (!title || !onPage) return { jobs: [], dropped: named.length, kind, named: named.length }
+    return { jobs: [{ title, url: snap.url, externalId: normalizeJobUrl(snap.url) }], dropped: named.length - 1, kind, named: named.length }
+  }
+  const { kept, dropped } = verifyModelJobs({ page_kind: kind, jobs: named }, snap)
+  return { jobs: kept, dropped, kind, named: named.length }
+}
+
 interface PageOutcome {
   jobs: AtsJob[]
   /** The page proved it lists postings (so asking for its next page is worth it). */
@@ -156,41 +188,18 @@ async function readOnePage(
   }
   if (!raw) return { snap, outcome: { jobs: [], listed: false, complete: false, reason: 'model_unavailable', dropped: 0 } }
 
-  let parsed: unknown = null
-  try {
-    parsed = parseJsonLoose(raw)
-  } catch {
-    /* handled below */
-  }
-  const answer = AnswerSchema.safeParse(parsed)
-  if (!answer.success) return { snap, outcome: { jobs: [], listed: false, complete: false, reason: 'page_unconfirmed', dropped: 0 } }
-  const { page_kind: kind, jobs: named } = answer.data
+  const answer = parsePageAnswer(raw)
+  if (!answer) return { snap, outcome: { jobs: [], listed: false, complete: false, reason: 'page_unconfirmed', dropped: 0 } }
+  const { jobs, dropped, kind, named } = answerToJobs(answer, snap)
 
-  if (kind === 'single_posting') {
-    const title = named[0]?.title.trim()
-    const onPage = title ? snap.text.toLowerCase().includes(title.toLowerCase()) : false
-    if (!title || !onPage) return { snap, outcome: { jobs: [], listed: false, complete: false, reason: 'page_unconfirmed', dropped: named.length } }
-    return {
-      snap,
-      outcome: {
-        jobs: [{ title, url: snap.url, externalId: normalizeJobUrl(snap.url), description: undefined }],
-        listed: false,
-        complete: false,
-        reason: null,
-        dropped: named.length - 1,
-      },
-    }
-  }
-
-  const { kept, dropped } = verifyModelJobs({ page_kind: kind, jobs: named }, snap)
-  if (kept.length === 0) {
+  if (jobs.length === 0) {
     // The page honestly shows no role, or the model named roles the page did not back up.
-    const reason: ReadReason | null = named.length > 0 ? 'page_unconfirmed' : null
+    const reason: ReadReason | null = named > 0 ? 'page_unconfirmed' : null
     return { snap, outcome: { jobs: [], listed: false, complete: false, reason, dropped } }
   }
   return {
     snap,
-    outcome: { jobs: kept, listed: kind === 'listing', complete: kind === 'listing' && !snap.truncated, reason: null, dropped },
+    outcome: { jobs, listed: kind === 'listing', complete: kind === 'listing' && !snap.truncated, reason: null, dropped },
   }
 }
 

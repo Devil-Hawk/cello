@@ -44,6 +44,12 @@ describe('snapshotPage', () => {
     expect(snap.truncated).toBe(false)
   })
 
+  it('keeps a card\'s title, place and link apart instead of running them together', () => {
+    const s = snapshotPage('<body><div><a href="/jobs/9"><span>General Software Engineer</span><span>San Jose, CA</span></a></div></body>', PAGE)
+    expect(s.links[0].label).toBe('General Software Engineer San Jose, CA')
+    expect(s.links[0].context).toBe('General Software Engineer San Jose, CA')
+  })
+
   it('reports a truncated page', () => {
     const big = snapshotPage(`<body>${'<p>word </p>'.repeat(10_000)}</body>`, PAGE)
     expect(big.truncated).toBe(true)
