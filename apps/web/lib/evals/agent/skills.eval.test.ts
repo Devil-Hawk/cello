@@ -13,7 +13,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { runChecks, skillsRead, SkillEvalsSchema, type SkillEvals } from '../agent-checks'
-import { freeComplete, GENERATORS, mapLimit, pct, RUN_LIVE, stats, writeReport } from './free'
+import { freeComplete, GENERATORS, mapLimit, pct, RUN_LIVE, stats, writeReport } from './free.eval'
 import { firstAction } from './run'
 import { majority } from './score'
 

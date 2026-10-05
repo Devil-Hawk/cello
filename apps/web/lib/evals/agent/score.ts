@@ -1,7 +1,7 @@
 // Scoring for the agent evals: plain code over what a model did, so a number means the same
 // thing every run. Used by the live eval files and by score.test.ts.
 
-import { parseJson } from './free'
+import { parseJson } from './free.eval'
 
 export interface ParsedCall {
   name: string
@@ -58,14 +58,21 @@ export interface Tally {
   cases: number
 }
 
+/** Votes are those of the models that were measured. A model that errored has no vote, and a case no model measured counts as missed. */
 export function tally(rows: readonly { category: string; byModel: Record<string, boolean> }[]): Tally {
-  const share = (rs: typeof rows) => (rs.length === 0 ? 0 : rs.filter((r) => majority(Object.values(r.byModel))).length / rs.length)
-  const models = Object.keys(rows[0]?.byModel ?? {})
+  const wins = (r: { byModel: Record<string, boolean> }) => Object.keys(r.byModel).length > 0 && majority(Object.values(r.byModel))
+  const share = (rs: typeof rows) => (rs.length === 0 ? 0 : rs.filter(wins).length / rs.length)
+  const models = [...new Set(rows.flatMap((r) => Object.keys(r.byModel)))]
   return {
     overall: share(rows),
     delegation: share(rows.filter((r) => r.category === 'delegation')),
     single: share(rows.filter((r) => r.category === 'single')),
-    perModel: Object.fromEntries(models.map((m) => [m, rows.length === 0 ? 0 : rows.filter((r) => r.byModel[m]).length / rows.length])),
+    perModel: Object.fromEntries(
+      models.map((m) => {
+        const measured = rows.filter((r) => m in r.byModel)
+        return [m, measured.length === 0 ? 0 : measured.filter((r) => r.byModel[m]).length / measured.length]
+      })
+    ),
     cases: rows.length,
   }
 }

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { CELLO_TOOL_NAMES } from '@/lib/agents/tool-names'
-import { assertFree, GENERATORS, JUDGE, parseJson } from './free'
+import { assertFree, GENERATORS, JUDGE, parseJson } from './free.eval'
 import { majority, oldAction, passesNew, passesOld, tally, tokenOf, type CaseSpec } from './score'
 
 const cases = JSON.parse(readFileSync(path.join(__dirname, 'tool-selection.cases.json'), 'utf8')).cases as CaseSpec[]

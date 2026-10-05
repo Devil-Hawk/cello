@@ -1,6 +1,6 @@
 // Tool selection: what the agent does first with 30 messages, on three free models, majority per case.
 //
-// OPT-IN, LIVE. It calls free OpenRouter models (never a paid one: lib/evals/agent/free.ts refuses any id
+// OPT-IN, LIVE. It calls free OpenRouter models (never a paid one: lib/evals/agent/free.eval.ts refuses any id
 // that does not end in ":free"). Without RUN_AGENT_EVALS=1 it reports skipped, which is the default.
 //
 //   cd apps/web
@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { GENERATORS, mapLimit, pct, RUN_LIVE, stats, writeReport } from './free'
+import { GENERATORS, mapByModel, pct, RUN_LIVE, stats, writeReport } from './free.eval'
 import { firstAction, oldFirstAction } from './run'
 import { passesNew, passesOld, tally, type CaseSpec } from './score'
 
@@ -32,7 +32,7 @@ describe.skipIf(!RUN_LIVE)(`tool selection (${MODE}, ${LABEL})`, () => {
     `scores ${cases.length} cases on ${models.length} free model(s)`,
     async () => {
       const jobs = cases.flatMap((spec) => models.map((model) => ({ spec, model })))
-      const results = await mapLimit(jobs, 3, async ({ spec, model }) => {
+      const results = await mapByModel(jobs, (j) => j.model, async ({ spec, model }) => {
         try {
           if (MODE === 'old') {
             const out = await oldFirstAction(model, spec.message)
@@ -41,7 +41,7 @@ describe.skipIf(!RUN_LIVE)(`tool selection (${MODE}, ${LABEL})`, () => {
           const out = await firstAction(model, spec.message)
           return { id: spec.id, model, pass: passesNew(spec, out.calls), saw: out.calls.length ? out.calls.map((c) => c.name + (c.name === 'read_file' ? `:${String(c.args.file_path ?? '')}` : '')).join(', ') : 'answer' }
         } catch (e) {
-          // A provider failure is a missing measurement, not a wrong answer: it is reported, and counts as not passed.
+          // A provider failure is a missing measurement, not a wrong answer: it is reported and the model has no vote on that case.
           return { id: spec.id, model, pass: false, saw: `error: ${e instanceof Error ? e.message.slice(0, 120) : String(e)}` }
         }
       })
@@ -51,7 +51,7 @@ describe.skipIf(!RUN_LIVE)(`tool selection (${MODE}, ${LABEL})`, () => {
         category: spec.category,
         message: spec.message,
         allowed: MODE === 'old' ? spec.allowed_old : spec.allowed_new,
-        byModel: Object.fromEntries(results.filter((r) => r.id === spec.id).map((r) => [r.model, r.pass])),
+        byModel: Object.fromEntries(results.filter((r) => r.id === spec.id && !r.saw.startsWith('error:')).map((r) => [r.model, r.pass])),
         saw: Object.fromEntries(results.filter((r) => r.id === spec.id).map((r) => [r.model, r.saw])),
       }))
       const t = tally(rows)
@@ -59,7 +59,7 @@ describe.skipIf(!RUN_LIVE)(`tool selection (${MODE}, ${LABEL})`, () => {
       const md = [
         `# Tool selection: ${MODE} (${LABEL})`,
         '',
-        `Cases: ${t.cases}. Models: ${models.join(', ')}. Provider errors counted as misses: ${errors}.`,
+        `Cases: ${t.cases}. Models: ${models.join(', ')}. Provider errors (no vote on that case): ${errors}.`,
         '',
         `| | overall | delegation | single |`,
         `|---|---|---|---|`,

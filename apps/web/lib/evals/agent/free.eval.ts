@@ -19,14 +19,16 @@ import type { ChatResult } from '@langchain/core/outputs'
 import { z } from 'zod'
 import { celloChatModel } from '@/lib/agents/model'
 
-export const GENERATORS = ['qwen/qwen3.8-27b:free', 'google/gemma-4-31b-it:free', 'nvidia/nemotron-3-super-120b-a12b:free'] as const
-/** A different family from the generators it judges (qwen and gemma). */
+// gemma-4-31b was rate limited upstream on almost every call while these were written, so poolside's laguna takes its place.
+export const GENERATORS = ['qwen/qwen3.8-27b:free', 'poolside/laguna-s-2.1:free', 'nvidia/nemotron-3-super-120b-a12b:free'] as const
+/** A different family from the generators it judges (qwen and laguna). */
 export const JUDGE = 'nvidia/nemotron-3-super-120b-a12b:free'
 
 export const OUT_DIR = process.env.AGENT_EVAL_OUT ?? path.join(os.homedir(), 'cello-scratch', 'evals', 'agent')
 const CACHE_DIR = process.env.AGENT_EVAL_CACHE ?? path.join(OUT_DIR, '.cache')
 const MAX_REQUESTS = Number(process.env.AGENT_EVAL_MAX_REQUESTS ?? 450)
-const BACKOFF_MS = [2000, 4000, 8000, 16_000]
+// Free models are rate limited upstream and share their limits, so a 429 is waited out for a long time before it is given up on.
+const BACKOFF_MS = [4000, 8000, 16_000, 32_000, 60_000, 60_000, 60_000]
 
 export const stats = { requests: 0, cacheHits: 0, retries: 0 }
 
@@ -78,13 +80,19 @@ export async function withBackoff<T>(call: () => Promise<T>): Promise<T> {
   for (let attempt = 0; attempt <= BACKOFF_MS.length; attempt++) {
     if (stats.requests >= MAX_REQUESTS) throw new Error(`Eval request cap reached (${MAX_REQUESTS}). Raise AGENT_EVAL_MAX_REQUESTS to go on.`)
     stats.requests += 1
+    const started = Date.now()
     try {
-      return await call()
+      const out = await call()
+      if (process.env.AGENT_EVAL_LOG) console.error(`[eval] ok ${Date.now() - started}ms`)
+      return out
     } catch (e) {
       lastError = e
       const text = `${(e as { status?: number })?.status ?? ''} ${e instanceof Error ? e.message : String(e)}`
       const retryable = /\b(429|500|502|503|504|529)\b|rate.?limit|timed? ?out|ECONNRESET|ETIMEDOUT|fetch failed|overloaded|provider returned error/i.test(text)
+      if (process.env.AGENT_EVAL_LOG) console.error(`[eval] ${retryable ? 'retry' : 'fail'} ${Date.now() - started}ms attempt ${attempt} ${text.slice(0, 80)}`)
       if (!retryable || attempt === BACKOFF_MS.length) break
+      // A request the provider refused for rate limiting did not run, so it does not use up the cap.
+      if (/\b429\b|rate.?limit/i.test(text)) stats.requests -= 1
       stats.retries += 1
       await sleep(jitter(BACKOFF_MS[attempt]))
     }
@@ -239,6 +247,22 @@ export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (it
         const i = next++
         out[i] = await fn(items[i], i)
       }
+    })
+  )
+  return out
+}
+
+/**
+ * Run jobs with one worker per model, each model's jobs one after another. A model that is rate
+ * limited then slows only itself: the others carry on instead of every worker waiting on it.
+ */
+export async function mapByModel<T, R>(items: readonly T[], modelOf: (item: T) => string, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length)
+  const queues = new Map<string, number[]>()
+  items.forEach((item, i) => queues.set(modelOf(item), [...(queues.get(modelOf(item)) ?? []), i]))
+  await Promise.all(
+    [...queues.values()].map(async (indexes) => {
+      for (const i of indexes) out[i] = await fn(items[i], i)
     })
   )
   return out

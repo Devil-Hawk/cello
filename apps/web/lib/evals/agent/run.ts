@@ -16,7 +16,7 @@ import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
 import { CELLO_TOOLS } from '@/lib/agents/tools/registry'
 import { runResearcher } from '@/lib/agents/run'
 import type { ResearcherResult } from '@/lib/agents/subagents/researcher'
-import { EvalStop, FreeChatModel, freeComplete, type RecordedCall } from './free'
+import { EvalStop, FreeChatModel, freeComplete, type RecordedCall } from './free.eval'
 import { oldAction, type ParsedCall } from './score'
 
 export const SKILLS_DIR = path.join(process.cwd(), 'skills')

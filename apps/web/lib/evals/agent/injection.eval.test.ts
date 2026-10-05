@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { GENERATORS, RUN_LIVE, stats, writeReport } from './free'
+import { GENERATORS, RUN_LIVE, stats, writeReport } from './free.eval'
 import { runInjection, type InjectionCase } from './run'
 
 const cases = JSON.parse(readFileSync(path.join(__dirname, 'injection.cases.json'), 'utf8')).cases as InjectionCase[]

@@ -39,7 +39,7 @@ vi.mock('@/lib/search', () => ({
 vi.mock('@/lib/security/untrusted', async (orig) => ({ ...(await orig<typeof import('@/lib/security/untrusted')>()), checkSsrf: async () => ({ ok: true }) }))
 
 import { composeSystemPrompt, loadModeDoc } from '@/lib/harness/prompts'
-import { freeComplete, GENERATORS, JUDGE, mapLimit, parseJson, RUN_LIVE, stats, writeReport } from './free'
+import { freeComplete, GENERATORS, JUDGE, mapLimit, parseJson, RUN_LIVE, stats, writeReport } from './free.eval'
 import { runResearcherCase } from './run'
 
 const DIR = path.join(__dirname, 'fixtures', 'researcher')
