@@ -28,10 +28,10 @@ import { accessCodeUsability, describeTimeRemaining } from '@/lib/access/codes'
 /**
  * The columns the owner's routes read from access_codes.
  *
- * `code_hash` is deliberately absent and must stay that way. It is a plain
- * SHA-256 of a 12-character code over a 30-symbol alphabet; handing it to a
- * browser turns a bearer credential into an offline brute-force target for
- * anything that can read the response. Nothing in the owner's UI needs it —
+ * `code_hash` is deliberately absent and must stay that way. It is a hash of
+ * a 12-character code over a 30-symbol alphabet; handing it to a browser turns
+ * a bearer credential into an offline brute-force target for anything that can
+ * read the response (the keyed form is safe at rest, not safe to publish). Nothing in the owner's UI needs it —
  * `code_prefix` is what tells two codes apart in a list.
  */
 export const ACCESS_CODE_COLUMNS =

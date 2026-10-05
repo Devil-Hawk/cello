@@ -1,21 +1,23 @@
 // GET  /api/access-codes  — the owner's codes, with status and usage.
 // POST /api/access-codes  — issue a new code. Returns the plaintext ONCE.
 //
-// AUTHORISATION: the owner's OWN cookie-scoped session, never the service key.
-//   Every row here is reachable through RLS policies that already say
-//   `auth.uid() = owner_user_id` (see 20260803000002_access_codes.sql), so the
-//   session is both sufficient and safer: a bug in this file cannot reach
-//   another owner's codes, because the database refuses. The service key is
-//   reserved for writing access_code_events, which has no insert policy on
-//   purpose so a demo session cannot forge or suppress its own trail.
+// AUTHORISATION. READS use the owner's OWN cookie-scoped session: every row is
+//   reachable through the RLS policy `auth.uid() = owner_user_id`, so a bug in
+//   this file cannot list another owner's codes. WRITES do not: signed-in users
+//   have no INSERT or UPDATE on access_codes at all (migration 20261006002001),
+//   so minting goes through the service-role function mint_access_code, called
+//   here only AFTER the caller is authenticated, same-origin and a real owner.
+//   That is what lets the database itself refuse a demo, enforce the live-code
+//   and daily caps atomically, and store only a keyed hash.
 //
-// The explicit `.eq('owner_user_id', user.id)` on every query is belt to that
-// braces — the same doubling lib/resume/store.ts uses. If RLS were ever
-// mis-applied to this table, these routes would still be scoped.
+// The explicit `.eq('owner_user_id', user.id)` on every read is belt to that
+// braces, the same doubling lib/resume/store.ts uses.
 
 import { NextRequest, NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/harness/supabase-admin'
+import { isSameOriginRequest } from '@/lib/security/same-origin'
 import {
   ACCESS_CODE_TTL_HOURS,
   accessCodeExpiry,
@@ -51,21 +53,24 @@ const MAX_LIVE_CODES = 25
 const INSERT_ATTEMPTS = 3
 
 /**
- * What the demo-chaining trigger raises, as PostgREST reports it.
- *
- * 20260803000003_demo_profile_lockdown.sql's forbid_demo_access_code_issue()
- * raises `insufficient_privilege` (SQLSTATE 42501) on insert. PostgREST passes
- * the SQLSTATE through as `error.code`, and supabase-js hands it to us
- * unchanged. Recognising it turns the database's refusal into the same 403 the
- * application check above already returns, instead of a 500 that reads as "our
- * bug" and invites a retry. The two checks are deliberately independent: this
- * is the backstop for the window between reading the profile and inserting the
- * row, and for any future caller that forgets the check entirely.
+ * What mint_access_code raises for a demo owner (or one it cannot read), as
+ * PostgREST reports it: `insufficient_privilege` (SQLSTATE 42501), passed through
+ * as `error.code`. Recognising it turns the database's refusal into the same 403
+ * the application check above already returns, instead of a 500 that reads as
+ * "our bug" and invites a retry. The two checks are deliberately independent:
+ * this is the backstop for the window between reading the profile and minting,
+ * and for any future caller that forgets the check entirely.
  */
 const INSUFFICIENT_PRIVILEGE = '42501'
 
+/** mint_access_code's cap refusals (live codes, or codes in the last 24 hours). */
+const CHECK_VIOLATION = '23514'
+
+const CROSS_SITE = "This request didn't come from Cello. Reload the page and try again."
+
 /** The refusal both the application check and the database trigger produce. */
 const DEMO_CANNOT_ISSUE = 'Demo workspaces cannot issue access codes.'
+const DAILY_LIMIT = 'You have created a lot of codes in the last day. Try again tomorrow.'
 
 export async function GET() {
   const supabase = await createClient()
@@ -100,13 +105,35 @@ export async function GET() {
   const now = new Date()
   const codes = ((data ?? []) as AccessCodeRow[]).map((row) => summarizeAccessCode(row, now))
 
+  // What this owner's demos have spent this month, against the monthly pool they
+  // all share. Omitted (not zero) when it cannot be read: the card then says
+  // nothing rather than something false.
+  let demoAllowance: { usedUsd: number; capUsd: number } | null = null
+  try {
+    const { data: state, error: stateError } = await createAdminClient().rpc('demo_allowance_state', {
+      p_owner_id: user.id,
+    })
+    const row = state as { used_usd?: number; cap_usd?: number } | null
+    if (!stateError && row && typeof row.used_usd === 'number' && typeof row.cap_usd === 'number') {
+      demoAllowance = { usedUsd: row.used_usd, capUsd: row.cap_usd }
+    }
+  } catch (err) {
+    console.error('[access-codes] demo allowance read failed', err)
+  }
+
   return NextResponse.json(
-    { codes, liveLimit: MAX_LIVE_CODES, ttlHours: ACCESS_CODE_TTL_HOURS },
+    { codes, liveLimit: MAX_LIVE_CODES, ttlHours: ACCESS_CODE_TTL_HOURS, demoAllowance },
     { headers: NO_STORE }
   )
 }
 
 export async function POST(request: NextRequest) {
+  // A cookie-authenticated state change: refuse a request a hostile page made on
+  // the owner's behalf.
+  if (!isSameOriginRequest(request.headers)) {
+    return NextResponse.json({ error: CROSS_SITE }, { status: 403, headers: NO_STORE })
+  }
+
   const supabase = await createClient()
   const {
     data: { user },
@@ -156,72 +183,50 @@ export async function POST(request: NextRequest) {
   const label =
     typeof rawLabel === 'string' && rawLabel.trim() ? rawLabel.trim().slice(0, MAX_LABEL_CHARS) : null
 
-  // Count what is currently live. `head: true` so this costs a count, not rows.
-  const { count, error: countError } = await db
-    .from('access_codes')
-    .select('id', { count: 'exact', head: true })
-    .eq('owner_user_id', user.id)
-    .is('revoked_at', null)
-    .gt('expires_at', new Date().toISOString())
-
-  if (countError) {
-    console.error('[access-codes] live count failed', countError)
-    return NextResponse.json(
-      { error: "Couldn't issue a code right now. Try again." },
-      { status: 500, headers: NO_STORE }
-    )
-  }
-  // Fail closed on an unreadable count: without a number we cannot say the cap
-  // is respected, and issuing anyway is the wrong way to be wrong.
-  if (typeof count !== 'number') {
-    console.error('[access-codes] live count returned no number')
-    return NextResponse.json(
-      { error: "Couldn't issue a code right now. Try again." },
-      { status: 500, headers: NO_STORE }
-    )
-  }
-  if (count >= MAX_LIVE_CODES) {
-    return NextResponse.json(
-      {
-        error: `You already have ${MAX_LIVE_CODES} live codes. Revoke one you are finished with, or wait for it to expire.`,
-      },
-      { status: 409, headers: NO_STORE }
-    )
-  }
-
   const expiresAt = accessCodeExpiry()
+  const admin = createAdminClient()
 
   for (let attempt = 0; attempt < INSERT_ATTEMPTS; attempt++) {
     const code = generateAccessCode()
 
-    const { data, error } = await db
-      .from('access_codes')
-      .insert({
-        owner_user_id: user.id,
-        // Only the hash is ever persisted. `code` below leaves this process in
-        // the response body and is never written down.
-        code_hash: hashAccessCode(code),
-        code_prefix: accessCodePrefix(code),
-        label,
-        expires_at: expiresAt.toISOString(),
-      })
-      .select(ACCESS_CODE_COLUMNS)
-      .single()
+    // The caps (live and daily) and the demo refusal are enforced inside the
+    // function, atomically, under the owner's lock.
+    const { data, error } = await admin.rpc('mint_access_code', {
+      p_owner_id: user.id,
+      // Only the keyed hash is ever persisted. `code` below leaves this process
+      // in the response body and is never written down.
+      p_code_hash: hashAccessCode(code),
+      p_code_prefix: accessCodePrefix(code),
+      p_label: label,
+      p_expires_at: expiresAt.toISOString(),
+    })
 
     // 23505 = unique_violation on code_hash. At ~59 bits of entropy this is
     // effectively unreachable, but retrying is cheaper than a mystery 500.
     if (error?.code === '23505' && attempt < INSERT_ATTEMPTS - 1) continue
 
-    // The database refused because the caller is a demo — the same answer the
-    // check above gives, reached the other way. Never retried: a trigger's
-    // refusal is a decision, not a collision, and retrying it would just be
-    // three round trips to the same 403.
+    // The database refused because the caller is a demo: the same answer the
+    // check above gives, reached the other way. Never retried: a refusal is a
+    // decision, not a collision.
     if (error?.code === INSUFFICIENT_PRIVILEGE) {
       console.warn('[access-codes] database refused a demo-issued code', error.message)
       return NextResponse.json({ error: DEMO_CANNOT_ISSUE }, { status: 403, headers: NO_STORE })
     }
 
-    if (error || !data) {
+    if (error?.code === CHECK_VIOLATION) {
+      const daily = /24 hours/.test(error.message ?? '')
+      return NextResponse.json(
+        {
+          error: daily
+            ? DAILY_LIMIT
+            : `You already have ${MAX_LIVE_CODES} live codes. Revoke one you are finished with, or wait for it to expire.`,
+        },
+        { status: 409, headers: NO_STORE }
+      )
+    }
+
+    const row = (Array.isArray(data) ? data[0] : data) as AccessCodeRow | null | undefined
+    if (error || !row) {
       console.error('[access-codes] create failed', error)
       return NextResponse.json(
         { error: "Couldn't issue a code right now. Try again." },
@@ -235,7 +240,7 @@ export async function POST(request: NextRequest) {
         // stored, not logged, and not recoverable from any later response.
         code,
         ttlHours: ACCESS_CODE_TTL_HOURS,
-        summary: summarizeAccessCode(data as AccessCodeRow),
+        summary: summarizeAccessCode(row),
       },
       { status: 201, headers: NO_STORE }
     )
