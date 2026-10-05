@@ -73,7 +73,7 @@ export interface WriteVerdictInput {
 export async function writeVerdict(admin: AdminClient, input: WriteVerdictInput): Promise<void> {
   try {
     const spanId = currentTraceContext()?.parentSpanId ?? null
-    const { error } = await admin.from('eval_verdicts').insert({
+    const row = {
       user_id: input.userId,
       run_id: input.runId ?? null,
       span_id: spanId,
@@ -86,7 +86,12 @@ export async function writeVerdict(admin: AdminClient, input: WriteVerdictInput)
       rationale: input.rationale ?? null,
       model: input.model ?? null,
       tokens_used: input.tokensUsed ?? null,
-    })
+    }
+    let { error } = await admin.from('eval_verdicts').insert(row)
+    // The parent span is still in the SpanBuffer (rows reach trace_spans when
+    // the trace flushes, after this write), so the span_id foreign key cannot
+    // hold yet. The verdict matters more than the link: keep it unlinked.
+    if (error?.code === '23503' && row.span_id) ({ error } = await admin.from('eval_verdicts').insert({ ...row, span_id: null }))
     if (error) throw new Error(error.message)
   } catch (err) {
     logApiError('eval_verdicts:write', err, {

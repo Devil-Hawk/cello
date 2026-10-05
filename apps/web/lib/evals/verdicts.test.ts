@@ -99,6 +99,36 @@ describe('writeVerdict', () => {
     expect(insertCalls[0]).toMatchObject({ span_id: 'span-77' })
   })
 
+  it('a span_id foreign key failure (parent not flushed yet) retries unlinked instead of losing the verdict', async () => {
+    const insertCalls: Record<string, unknown>[] = []
+    const admin = {
+      from: () => ({
+        insert: async (row: Record<string, unknown>) => {
+          insertCalls.push(row)
+          return { error: row.span_id ? { code: '23503', message: 'violates foreign key constraint "eval_verdicts_span_id_fkey"' } : null }
+        },
+      }),
+    } as unknown as AdminClient
+    await runInTraceContext({ buffer: new SpanBuffer('user-1'), parentSpanId: 'span-77', runId: 'run-1' }, () => writeVerdict(admin, baseInput))
+    expect(insertCalls.map((r) => r.span_id)).toEqual(['span-77', null])
+    expect(logApiErrorMock).not.toHaveBeenCalled()
+  })
+
+  it('other insert errors are not retried', async () => {
+    const insertCalls: Record<string, unknown>[] = []
+    const admin = {
+      from: () => ({
+        insert: async (row: Record<string, unknown>) => {
+          insertCalls.push(row)
+          return { error: { code: '23514', message: 'check violation' } }
+        },
+      }),
+    } as unknown as AdminClient
+    await runInTraceContext({ buffer: new SpanBuffer('user-1'), parentSpanId: 'span-77', runId: 'run-1' }, () => writeVerdict(admin, baseInput))
+    expect(insertCalls).toHaveLength(1)
+    expect(logApiErrorMock).toHaveBeenCalledTimes(1)
+  })
+
   it('a refusal verdict carries no substituted score', async () => {
     const { admin, insertCalls } = makeAdmin()
     await writeVerdict(admin, {

@@ -715,6 +715,13 @@ describe('dispatchTool in Langfuse', () => {
     expect(rows[0].lf?.type).toBe('retriever')
   })
 
+  it('search_kb is a retriever too, and a non-lookup tool stays a tool', async () => {
+    const kb = await traced(configure(false), baseCtx(fakeAdmin({})), 'search_kb', {})
+    expect(kb.rows[0].lf?.type).toBe('retriever')
+    const other = await traced(configure(false), baseCtx(fakeAdmin({})), 'explain_match', { jobId: 'x' })
+    expect(other.rows[0].lf?.type).toBe('tool')
+  })
+
   it('a returned { error } marks the observation ERROR with a coarse code, and the raw message only with capture on', async () => {
     const owner = await traced(configure(false), baseCtx(fakeAdmin({}), { enabledAgents: new Set(['sourcer']) }), 'explain_match', { jobId: 'job-1' })
     expect(owner.rows[0].lf).toMatchObject({ level: 'ERROR', errorCode: 'agent_disabled' })

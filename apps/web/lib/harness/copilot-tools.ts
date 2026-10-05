@@ -413,7 +413,7 @@ export async function dispatchTool(ctx: CopilotToolContext, tool: string, args: 
   return observe(
     {
       name,
-      type: tool === 'web_search' ? 'retriever' : 'tool',
+      type: RETRIEVER_TOOLS.has(tool) ? 'retriever' : 'tool',
       attributesOf: (result: unknown) => ({ tool: name, error: toolErrorOf(result) !== undefined }),
     },
     () => dispatchToolInner(ctx, tool, args, mcp),
@@ -438,6 +438,8 @@ export async function dispatchTool(ctx: CopilotToolContext, tool: string, args: 
 /** Tools whose results are other people's names, urls and contact details
  *  (contacts, a company dossier, an application): Langfuse gets counts and ids. */
 const THIRD_PARTY_TOOLS = new Set(['list_contacts', 'get_dossier', 'get_application'])
+/** Lookups are retrievers in Langfuse (the most specific type, RAG views). */
+const RETRIEVER_TOOLS = new Set(['web_search', 'search_kb'])
 
 /** A tool reports failure by returning `{ error }`, never by throwing. The
  *  code is a coarse kind, never message text. */
