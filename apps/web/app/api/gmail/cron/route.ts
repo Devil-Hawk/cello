@@ -37,6 +37,7 @@ import { mapWithConcurrency } from '@/lib/ats/concurrency'
 import { withTimeout } from '@/lib/security/untrusted'
 import { logApiError } from '@/lib/observability/log'
 import type { SyncState } from '@/lib/gmail/types'
+import { isCronAuthorized } from '@/lib/security/shared-secret'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -56,15 +57,6 @@ const USER_CONCURRENCY = 2
 // add a real queue) if mailboxes routinely need longer than one tick.
 const PER_USER_BUDGET_MS = 20_000
 
-function isAuthorized(request: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET
-  if (!secret) return false
-  const auth = request.headers.get('authorization')
-  const bearer = auth?.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : null
-  const header = request.headers.get('x-cron-secret')
-  return bearer === secret || header === secret
-}
-
 interface ProfileRow {
   id: string
   preferences: Record<string, unknown> | null
@@ -80,7 +72,7 @@ interface CronUserResult {
 }
 
 export async function POST(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  if (!isCronAuthorized(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

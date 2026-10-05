@@ -1,4 +1,4 @@
-// POST /api/harness/cron — the harness's one scheduled tick: resume every
+// POST|GET /api/harness/cron — the harness's one scheduled tick: resume every
 // checkpointed run that stalled, wipe ruling-5 user-data rows past their
 // demo's expiry, create + run a daily-digest agent_run for each active user,
 // then run lib/graph/distill.ts#distillInsights per active user (its own
@@ -6,8 +6,9 @@
 // (docs/superpowers/specs/2026-08-16-langgraph-port-design.md).
 //
 // Guarded by the CRON_SECRET env var: the caller must present it as either
-// `Authorization: Bearer <secret>` or `X-Cron-Secret: <secret>`. Invoked by
-// .github/workflows/harness-cron.yml on a daily schedule.
+// `Authorization: Bearer <secret>` or `X-Cron-Secret: <secret>`. Invoked daily
+// by Vercel Cron (GET, see apps/web/vercel.json) and by
+// .github/workflows/harness-cron.yml (POST).
 //
 // maxDuration = 300 mirrors app/api/harness/run/route.ts — lib/graph/runs.ts's
 // own MAX_RUN_MS is 240s per run, so CRON_MAX_USERS/CRON_CONCURRENCY batches of
@@ -58,6 +59,8 @@ import { pruneOldTraceSpans } from '@/lib/trace/spans'
 import type { AdminClient } from '@/lib/harness/types'
 import { logApiError } from '@/lib/observability/log'
 import { chunkedIn } from '@/lib/supabase/chunked-in'
+import { isDemoProfile } from '@/lib/access/guardrails'
+import { isCronAuthorized } from '@/lib/security/shared-secret'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -133,19 +136,12 @@ const RESUME_ATTEMPT_CEILING = 5
  */
 const CRON_MAX_CONTINUATIONS = 2
 
-function isAuthorized(request: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET
-  if (!secret) return false
-  const auth = request.headers.get('authorization')
-  const bearer = auth?.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : null
-  const header = request.headers.get('x-cron-secret')
-  return bearer === secret || header === secret
-}
-
 interface ActiveProfile {
   id: string
   resume_text: string | null
   preferences: Record<string, unknown> | null
+  is_demo?: boolean | null
+  demo_expires_at?: string | null
 }
 
 function hasOpenrouter(profile: ActiveProfile): boolean {
@@ -365,7 +361,7 @@ async function resumeCheckpointedRuns(admin: AdminClient): Promise<ResumeBatch> 
 }
 
 export async function POST(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  if (!isCronAuthorized(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -399,11 +395,16 @@ export async function POST(request: NextRequest) {
 
   const { data: profiles, error } = await admin
     .from('profiles')
-    .select('id, resume_text, preferences')
+    .select('id, resume_text, preferences, is_demo, demo_expires_at')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+  // Demo profiles are never part of the per-user digest/distill batch: they
+  // would crowd the owner out of CRON_MAX_USERS and burn LLM spend. The demo
+  // wipe above has already run for them.
   const active = ((profiles ?? []) as ActiveProfile[]).filter(
-    (p) => (p.resume_text && p.resume_text.trim().length > 0) || hasOpenrouter(p)
+    (p) =>
+      !isDemoProfile({ is_demo: p.is_demo ?? null, demo_expires_at: p.demo_expires_at ?? null }) &&
+      ((p.resume_text && p.resume_text.trim().length > 0) || hasOpenrouter(p))
   )
   const batch = active.slice(0, CRON_MAX_USERS)
 
@@ -531,4 +532,12 @@ export async function POST(request: NextRequest) {
       runs: resume.resumed,
     },
   })
+}
+
+// Vercel Cron invokes scheduled paths with GET and sends
+// `Authorization: Bearer $CRON_SECRET` itself (see vercel.json). Same handler,
+// same auth. `dynamic = 'force-dynamic'` above keeps this out of the build-time
+// static optimisation Next 14 applies to GET route handlers.
+export async function GET(request: NextRequest) {
+  return POST(request)
 }

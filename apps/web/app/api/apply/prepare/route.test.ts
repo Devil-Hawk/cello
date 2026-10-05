@@ -92,11 +92,13 @@ vi.mock('@/lib/ats-apply/phase-tokens', () => ({
 }))
 
 const dispatchMock = vi.fn()
+const revokeMock = vi.fn()
 const { FakeDispatchError } = vi.hoisted(() => ({
   FakeDispatchError: class FakeDispatchError extends Error {},
 }))
 vi.mock('@/lib/ats-apply/dispatch', () => ({
   dispatchBrowserApplyWorkflow: (...args: unknown[]) => dispatchMock(...args),
+  revokeLivePhaseToken: (...args: unknown[]) => revokeMock(...args),
   DispatchError: FakeDispatchError,
 }))
 
@@ -122,6 +124,7 @@ beforeEach(() => {
   }
   issuePhaseTokenMock.mockReset().mockResolvedValue({ id: 'tok-1', expiresAt: '2099-01-01T00:00:00.000Z' })
   dispatchMock.mockReset().mockResolvedValue(undefined)
+  revokeMock.mockReset().mockResolvedValue(undefined)
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -194,5 +197,22 @@ describe('POST /api/apply/prepare', () => {
     expect(res.status).toBe(502)
     // Last update recorded must be the rollback.
     expect(state.updates[state.updates.length - 1].status).toBe('pending_review')
+  })
+
+  it('restores the draft and revokes the token when dispatch throws for any reason (GH_ACTIONS_TOKEN unset)', async () => {
+    dispatchMock.mockRejectedValue(new FakeDispatchError('GH_ACTIONS_TOKEN is not configured'))
+    const res = await POST(post({ draftId: 'draft-1' }))
+    expect(res.status).toBe(502)
+    expect((await res.json()).error).toContain('GH_ACTIONS_TOKEN')
+    expect(state.draft?.status).toBe('pending_review')
+    expect(revokeMock).toHaveBeenCalledWith(expect.anything(), { draftId: 'draft-1', phase: 'fill' })
+  })
+
+  it('also restores the draft when minting the token throws', async () => {
+    issuePhaseTokenMock.mockRejectedValue(new Error('db down'))
+    const res = await POST(post({ draftId: 'draft-1' }))
+    expect(res.status).toBe(502)
+    expect(state.draft?.status).toBe('pending_review')
+    expect(dispatchMock).not.toHaveBeenCalled()
   })
 })

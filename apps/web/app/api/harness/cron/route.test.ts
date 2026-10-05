@@ -33,6 +33,8 @@ interface ProfileRow {
   id: string
   resume_text: string | null
   preferences: Record<string, unknown> | null
+  is_demo?: boolean
+  demo_expires_at?: string | null
 }
 
 let agentRuns: Map<string, AgentRunRow>
@@ -45,6 +47,7 @@ const markRunPausedOnInterruptMock = vi.fn()
 const countThreadCheckpointsMock = vi.fn()
 const composeAndStoreDigestMock = vi.fn()
 const distillInsightsMock = vi.fn()
+const wipeExpiredDemoDataMock = vi.fn()
 
 /** A chainable, thenable PostgREST-shaped stub over the three tables this
  *  route touches (agent_runs, graph_threads, profiles), backed by the maps
@@ -167,11 +170,14 @@ vi.mock('@/lib/graph/pg', () => ({
 vi.mock('@/lib/harness/agents/digest', () => ({
   composeAndStoreDigest: (...args: unknown[]) => composeAndStoreDigestMock(...args),
 }))
+vi.mock('@/lib/access/demo-wipe', () => ({
+  wipeExpiredDemoData: (...args: unknown[]) => wipeExpiredDemoDataMock(...args),
+}))
 vi.mock('@/lib/graph/distill', () => ({
   distillInsights: (...args: unknown[]) => distillInsightsMock(...args),
 }))
 
-import { POST } from './route'
+import { GET, POST, dynamic } from './route'
 
 const SECRET = 'test-cron-secret'
 
@@ -201,6 +207,7 @@ beforeEach(() => {
   countThreadCheckpointsMock.mockReset()
   composeAndStoreDigestMock.mockReset()
   distillInsightsMock.mockReset().mockResolvedValue({ ran: false, reason: 'weekly gate not yet elapsed' })
+  wipeExpiredDemoDataMock.mockReset().mockResolvedValue([])
   countThreadCheckpointsMock.mockResolvedValue(1) // well under the ceiling unless a test overrides it
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
@@ -399,5 +406,70 @@ describe('POST /api/harness/cron — digest pass creates a fresh thread per run'
     const body = await response.json()
 
     expect(body.results).toEqual([{ userId: 'user-active', runId: expect.any(String), status: 'paused' }])
+  })
+})
+
+describe('POST /api/harness/cron — demo profiles', () => {
+  it('never selects a demo profile for the digest, distill or run passes, but still runs the demo wipe', async () => {
+    profiles = [
+      { id: 'demo-flag', resume_text: 'Resume.', preferences: null, is_demo: true, demo_expires_at: null },
+      { id: 'demo-dated', resume_text: 'Resume.', preferences: null, is_demo: false, demo_expires_at: '2099-01-01T00:00:00Z' },
+      { id: 'owner', resume_text: 'Resume.', preferences: null, is_demo: false, demo_expires_at: null },
+    ]
+    invokeGraphForUserMock.mockResolvedValue({ threadId: 't', result: terminalOutcome('completed') })
+    markRunPausedOnInterruptMock.mockResolvedValue(false)
+    composeAndStoreDigestMock.mockImplementation(async (_a: unknown, userId: string) => ({ userId, outcome: 'skipped_disabled' }))
+
+    const body = await (await POST(cronRequest())).json()
+
+    expect(wipeExpiredDemoDataMock).toHaveBeenCalledTimes(1)
+    expect(body.activeUsers).toBe(1)
+    expect(invokeGraphForUserMock.mock.calls.map((c) => c[0].userId)).toEqual(['owner'])
+    expect(composeAndStoreDigestMock.mock.calls.map((c) => c[1])).toEqual(['owner'])
+    expect(distillInsightsMock.mock.calls.map((c) => c[1])).toEqual(['owner'])
+  })
+
+  it('demo profiles do not use up CRON_MAX_USERS slots', async () => {
+    profiles = [
+      ...Array.from({ length: 12 }, (_, i) => ({ id: `demo-${i}`, resume_text: 'R', preferences: null, is_demo: true })),
+      { id: 'owner', resume_text: 'R', preferences: null, is_demo: false },
+    ]
+    invokeGraphForUserMock.mockResolvedValue({ threadId: 't', result: terminalOutcome('completed') })
+    markRunPausedOnInterruptMock.mockResolvedValue(false)
+    composeAndStoreDigestMock.mockResolvedValue({ userId: 'owner', outcome: 'skipped_disabled' })
+    const body = await (await POST(cronRequest())).json()
+    expect(body.processed).toBe(1)
+    expect(body.skippedForCapacity).toBe(0)
+  })
+})
+
+describe('GET /api/harness/cron — Vercel Cron entry point', () => {
+  function getRequest(headers: Record<string, string> = {}) {
+    return new NextRequest('http://localhost/api/harness/cron', { method: 'GET', headers })
+  }
+
+  it('is force-dynamic so it is never statically rendered or cached', () => {
+    expect(dynamic).toBe('force-dynamic')
+  })
+
+  it('refuses without the secret, with a wrong one, and with the secret in the query string', async () => {
+    expect((await GET(getRequest())).status).toBe(401)
+    expect((await GET(getRequest({ authorization: 'Bearer nope' }))).status).toBe(401)
+    const viaQuery = new NextRequest(`http://localhost/api/harness/cron?secret=${SECRET}`, { method: 'GET' })
+    expect((await GET(viaQuery)).status).toBe(401)
+    expect(wipeExpiredDemoDataMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses when CRON_SECRET is unset', async () => {
+    delete process.env.CRON_SECRET
+    expect((await GET(getRequest({ authorization: 'Bearer ' }))).status).toBe(401)
+    expect((await GET(getRequest({ 'x-cron-secret': '' }))).status).toBe(401)
+  })
+
+  it('runs the same tick as POST when Vercel presents Authorization: Bearer', async () => {
+    const response = await GET(getRequest({ authorization: `Bearer ${SECRET}` }))
+    expect(response.status).toBe(200)
+    expect((await response.json()).ok).toBe(true)
+    expect(wipeExpiredDemoDataMock).toHaveBeenCalledTimes(1)
   })
 })

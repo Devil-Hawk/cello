@@ -44,11 +44,13 @@ vi.mock('@/lib/ats-apply/phase-tokens', () => ({
 }))
 
 const dispatchMock = vi.fn()
+const revokeMock = vi.fn()
 const { FakeDispatchError } = vi.hoisted(() => ({
   FakeDispatchError: class FakeDispatchError extends Error {},
 }))
 vi.mock('@/lib/ats-apply/dispatch', () => ({
   dispatchBrowserApplyWorkflow: (...args: unknown[]) => dispatchMock(...args),
+  revokeLivePhaseToken: (...args: unknown[]) => revokeMock(...args),
   DispatchError: FakeDispatchError,
 }))
 
@@ -76,6 +78,7 @@ beforeEach(() => {
   }
   issuePhaseTokenMock.mockReset().mockResolvedValue({ id: 'tok-1', expiresAt: '2099-01-01T00:00:00.000Z' })
   dispatchMock.mockReset().mockResolvedValue(undefined)
+  revokeMock.mockReset().mockResolvedValue(undefined)
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -141,5 +144,13 @@ describe('POST /api/apply/confirm', () => {
     dispatchMock.mockRejectedValue(new FakeDispatchError('github is down'))
     const res = await POST(post({ draftId: 'draft-1' }))
     expect(res.status).toBe(502)
+  })
+
+  it('revokes the minted submit token and leaves the draft approved when dispatch throws', async () => {
+    dispatchMock.mockRejectedValue(new Error('network down'))
+    const res = await POST(post({ draftId: 'draft-1' }))
+    expect(res.status).toBe(502)
+    expect(revokeMock).toHaveBeenCalledWith(expect.anything(), { draftId: 'draft-1', phase: 'submit' })
+    expect(state.draft?.status).toBe('approved')
   })
 })

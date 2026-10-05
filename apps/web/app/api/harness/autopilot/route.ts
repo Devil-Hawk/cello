@@ -38,9 +38,14 @@ import {
 } from '@/lib/graph/autopilot'
 import { mapWithConcurrency } from '@/lib/ats'
 import { logApiError } from '@/lib/observability/log'
+import { isDemoProfile } from '@/lib/access/guardrails'
+import { isCronAuthorized } from '@/lib/security/shared-secret'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+// Hobby with Fluid compute allows up to 300s. A tick stops STARTING new users
+// at DEADLINE_MS so the response is written before the platform kills it.
+export const maxDuration = 300
+const DEADLINE_MS = 240_000
 
 // autopilotTickGraph (a real compiled LangGraph Pregel graph) has a NARROWER
 // `invoke` input type than CompiledGraphLike's own `unknown` — same
@@ -48,37 +53,60 @@ export const maxDuration = 60
 // harnessRunGraph.
 const AUTOPILOT_GRAPH = autopilotTickGraph as unknown as CompiledGraphLike
 
-function isAuthorized(request: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET
-  if (!secret) return false
-  const auth = request.headers.get('authorization')
-  const bearer = auth?.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : null
-  const header = request.headers.get('x-cron-secret')
-  return bearer === secret || header === secret
+type AutopilotCandidate = ProfileRow & { is_demo?: boolean | null; demo_expires_at?: string | null }
+
+/**
+ * The graph input is persisted to langgraph.checkpoints on a fresh thread
+ * every tick, so it carries only what lib/graph/autopilot.ts reads: id,
+ * resume_text, and preferences.{autopilot, targeting, searchGoals}. No api_keys,
+ * gmail_sync, email, or autopilot.atsKeys ever reach a checkpoint.
+ */
+function slimProfile(profile: ProfileRow): ProfileRow {
+  const prefs = (profile.preferences ?? {}) as Record<string, unknown>
+  const { atsKeys: _atsKeys, ...autopilot } = (prefs.autopilot ?? {}) as Record<string, unknown>
+  return {
+    id: profile.id,
+    full_name: null,
+    email: null,
+    resume_text: profile.resume_text,
+    preferences: { autopilot, targeting: prefs.targeting, searchGoals: prefs.searchGoals },
+  }
 }
 
 export async function POST(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  if (!isCronAuthorized(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const startedAt = Date.now()
   const admin = createAdminClient()
-  const { data: profiles, error } = await admin.from('profiles').select('id, full_name, email, resume_text, preferences')
+  const { data: profiles, error } = await admin
+    .from('profiles')
+    .select('id, resume_text, preferences, is_demo, demo_expires_at')
   if (error) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
   }
 
-  const enabled = ((profiles ?? []) as ProfileRow[]).filter((p) => parseAutopilotConfig(p.preferences).enabled)
+  // Demo profiles are never ticked: they would crowd the owner out of
+  // MAX_USERS_PER_TICK and burn spend.
+  const enabled = ((profiles ?? []) as AutopilotCandidate[]).filter(
+    (p) =>
+      !isDemoProfile({ is_demo: p.is_demo ?? null, demo_expires_at: p.demo_expires_at ?? null }) &&
+      parseAutopilotConfig(p.preferences).enabled
+  )
   const batch = enabled.slice(0, MAX_USERS_PER_TICK)
 
   const results = await mapWithConcurrency(batch, USER_CONCURRENCY, async (profile): Promise<AutopilotUserResult> => {
+    if (Date.now() - startedAt > DEADLINE_MS) {
+      return { userId: profile.id, message: 'skipped: tick deadline reached, picked up next tick' }
+    }
     try {
       const { result } = await invokeGraphForUser({
         admin,
         userId: profile.id,
         surface: 'autopilot',
         graph: AUTOPILOT_GRAPH,
-        input: { profile },
+        input: { profile: slimProfile(profile) },
       })
       return result as AutopilotUserResult
     } catch (e) {
