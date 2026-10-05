@@ -1,18 +1,20 @@
-// Prompt documents for the shortlist. Each one is a self-contained mode
-// document under apps/web/prompts (role_requirements, role_chance, role_want).
+// Prompt documents for the shortlist. Each one is a self-contained mode document
+// under apps/web/prompts (role_requirements, role_chance, role_want), composed
+// with the shared grounding rules (_shared.md) the same way every other agent's
+// prompt is, so the central prompt policy reaches them.
 //
-// They are deliberately NOT composed with _shared.md: that file carries the
-// 0-100 fit-score bands of the retired match score, which would contradict
-// these prompts. The central prompt policy is added in this one function, so
-// when the policy package lands it is a one-line change here.
+// The voice document (_voice.md) is left out on purpose: it is written for cover
+// letters and emails, and its "every claim needs a number or a name" rule would
+// contradict the one-sentence reasons these prompts ask for. role_want carries
+// its own few style rules.
 
-import { loadModeDoc, promptRef } from '@/lib/harness/prompts'
+import { composeSystemPrompt, loadModeDoc, promptRef } from '@/lib/harness/prompts'
 
 export type ScoringPromptName = 'role_requirements' | 'role_chance' | 'role_want'
 
+/** The system prompt for one of the scoring documents, with per-person stable context (stated preferences and decisions, or the resume) after it. */
 export function scoringSystem(name: ScoringPromptName, stableContext?: string): string {
-  const doc = loadModeDoc(name)
-  return stableContext && stableContext.trim() ? `${doc}\n\n---\n\n${stableContext.trim()}` : doc
+  return composeSystemPrompt({ mode: loadModeDoc(name), includeVoice: false, stableContext })
 }
 
 export function scoringPromptRef(name: ScoringPromptName): { name: string; hash: string } {
