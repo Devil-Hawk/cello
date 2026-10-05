@@ -57,6 +57,7 @@ import { entrypoint, task, interrupt, getConfig } from '@langchain/langgraph'
 import type { BaseCheckpointSaver, LangGraphRunnableConfig } from '@langchain/langgraph'
 import type { createClient } from '../supabase/server'
 import { refreshCompany, type AtsStore, type CompanyInput, type CompanyRefreshResult, type JobUpsertRow } from '../ats'
+import { clearBoardJobsRpc } from '../ats/heal'
 
 /** Same soft wall-clock ceiling as the pre-port route's own TIME_BUDGET_MS —
  *  see the (now-deleted) app/api/jobs/refresh/route.ts header for the
@@ -159,6 +160,8 @@ function makeStore(client: RefreshDbClient): AtsStore {
         .eq('id', companyId)
       if (error) throw new Error(error.message)
     },
+
+    clearBoardJobs: (companyId, source) => clearBoardJobsRpc(client, companyId, source),
   }
 }
 
