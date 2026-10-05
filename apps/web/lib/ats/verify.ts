@@ -170,7 +170,14 @@ export const IDENTIFY: Partial<Record<AtsProviderId, (token: string) => Promise<
     const d = await fetchJson<{ name?: unknown }>(url, OPTS)
     // The board's own page links its logo to the company (Calendly, Dialpad); many boards set none.
     const page = assertAllowedHost(`https://job-boards.greenhouse.io/${t}`, GH_PAGE_HOSTS)
-    const logo = await fetchText(page, HTML).then((h) => /"logo":\{"href":"([^"]+)"/.exec(h)?.[1], () => undefined)
+    // Only "no such page" is an answer; a timeout or a 429 must not read as "no logo" (see evidence.unreachable).
+    const logo = await fetchText(page, HTML).then(
+      (h) => /"logo":\{"href":"([^"]+)"/.exec(h)?.[1],
+      (e) => {
+        if (e instanceof HttpError && (e.status === 404 || e.status === 410)) return undefined
+        throw e
+      }
+    )
     return { name: str(d?.name), homeUrls: logo ? [logo] : [] }
   },
   async lever(t) {
