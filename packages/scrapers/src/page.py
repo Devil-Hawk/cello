@@ -38,14 +38,13 @@ import json
 import logging
 import socket
 import sys
-
 from urllib.parse import urlsplit
 
 import httpx
 
+from . import render
 from .browser_tier import fetch_with_browser_fallback
 from .polite import USER_AGENT, RobotsCache
-from . import render
 from .render import fetch_rendered, fetch_with_render_fallback
 
 _USER_AGENT = USER_AGENT
@@ -55,7 +54,7 @@ _MAX_BYTES = 5_000_000
 _MAX_HOPS = 4
 
 
-class UnsafeRedirect(Exception):
+class UnsafeRedirect(Exception):  # noqa: N818 - named for what happened, tests and the runner import it
     """A redirect hop that is not a public http(s) address, or that robots.txt closes."""
 
 
@@ -83,7 +82,8 @@ def _static_get(url: str) -> tuple[str, str]:
     the same rules as the first address: a public http(s) host, and a robots.txt
     that allows the path.
     """
-    with httpx.Client(timeout=20.0, follow_redirects=False, headers={"User-Agent": _USER_AGENT}) as client:
+    headers = {"User-Agent": _USER_AGENT}
+    with httpx.Client(timeout=20.0, follow_redirects=False, headers=headers) as client:
         current = url
         for _ in range(_MAX_HOPS + 1):
             response = client.get(current)
@@ -142,7 +142,12 @@ def fetch_page(url: str, force_render: bool = False) -> dict[str, object]:
     if not html:
         error = first_error or RuntimeError("empty")
         return {"ok": False, "error": type(error).__name__}
-    out: dict[str, object] = {"ok": True, "html": html, "final_url": final_url, "rendered": rendered or clicked}
+    out: dict[str, object] = {
+        "ok": True,
+        "html": html,
+        "final_url": final_url,
+        "rendered": rendered or clicked,
+    }
     if render_error:
         out["render_error"] = render_error
     return out
@@ -153,7 +158,8 @@ def main(argv: list[str]) -> int:
     # public. disable() survives any handler setup.
     logging.disable(logging.CRITICAL)
     force_render = "--render" in argv[2:]
-    if len(argv) not in (2, 3) or not argv[1].startswith(("http://", "https://")) or (len(argv) == 3 and not force_render):
+    bad_shape = len(argv) not in (2, 3) or (len(argv) == 3 and not force_render)
+    if bad_shape or not argv[1].startswith(("http://", "https://")):
         print(json.dumps({"ok": False, "error": "BadArguments"}))
         return 0
     # Libraries that print would corrupt the one JSON line, so they print to stderr.

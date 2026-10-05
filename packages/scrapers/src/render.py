@@ -34,6 +34,7 @@ SCOPE
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 from dataclasses import dataclass
@@ -173,11 +174,10 @@ def fetch_rendered(url: str, timeout_ms: int = 30_000) -> str | None:
                 # settles, so waiting for network idle rather than DOMContentLoaded
                 # is what distinguishes a rendered board from the shell we started with.
                 page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
-                try:
+                # A page that never goes quiet is still read as it stands.
+                with contextlib.suppress(Exception):
                     page.wait_for_load_state("networkidle", timeout=15_000)
-                except Exception:  # noqa: BLE001 - a page that never goes quiet is still read as it stands
-                    pass
-                # Lists below the fold are often loaded as the page scrolls, as they are for a visitor.
+                # Lists below the fold often load as the page scrolls, as for a visitor.
                 for _ in range(5):
                     page.mouse.wheel(0, 3000)
                     page.wait_for_timeout(800)
