@@ -13,7 +13,7 @@
  *
  * WHY PER-USER, NOT ONE GLOBAL CALL: callEmbedding needs one user's decrypted
  * provider keys and spends against that user's own budget cap
- * (assertWithinBudget / recordSpend) — there is no "embed for everyone" key.
+ * (reserveSpend / settleSpend) — there is no "embed for everyone" key.
  * Rows are grouped by user_id so each user's chunks go through their own
  * loadApiKeys() + callEmbedding() calls and their own spend ledger.
  *

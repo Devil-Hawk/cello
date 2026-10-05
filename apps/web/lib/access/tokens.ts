@@ -23,7 +23,7 @@
 // which a bare PostgREST insert can do, and revoking/touching are server-side
 // for the same reason a demo profile must never reach them directly. Every
 // function below takes its AdminClient as the first argument (matching
-// lib/harness/spend.ts's assertWithinBudget/recordSpend) rather than building
+// lib/harness/spend.ts's reserveSpend/settleSpend) rather than building
 // one internally, so a caller cannot forget which authority it is writing
 // with and a test can inject a fake.
 
