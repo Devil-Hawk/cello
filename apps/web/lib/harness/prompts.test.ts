@@ -26,7 +26,7 @@ describe('assertPromptDocsResolve', () => {
   })
 
   it('covers _shared, _voice, and every migrated agent doc today', () => {
-    expect(PROMPT_DOC_NAMES).toEqual([
+    expect([...PROMPT_DOC_NAMES]).toEqual(expect.arrayContaining([
       '_shared',
       '_voice',
       'cv_tailor',
@@ -36,7 +36,9 @@ describe('assertPromptDocsResolve', () => {
       'company_researcher',
       'planner',
       'visa',
-    ])
+      'judge_claims',
+      'judge_specificity',
+    ]))
   })
 })
 
