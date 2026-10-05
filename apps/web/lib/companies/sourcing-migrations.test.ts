@@ -34,3 +34,35 @@ describe('20261005200001 delete_unreferenced_gmail_suggestions', () => {
     expect(sql).not.toMatch(/\bgrant\b/i)
   })
 })
+
+describe('20261005200002 clear_unverified_board_jobs', () => {
+  const sql = code(read('20261005200002_clear_unverified_board_jobs.sql'))
+
+  it('runs as the owner, because jobs have no delete policy and RLS hides referencing rows', () => {
+    expect(sql).toMatch(/security definer set search_path = ''/)
+  })
+
+  it('lets a signed-in user clear only their own company', () => {
+    expect(sql).toMatch(/auth\.uid\(\)/)
+    expect(sql).toMatch(/errcode = '42501'/)
+  })
+
+  it('keeps every role anything references: foreign keys come from the catalog, referenced rows are only closed', () => {
+    expect(sql).toMatch(/pg_catalog\.pg_constraint/)
+    expect(sql).toMatch(/confrelid = 'public\.jobs'::regclass/)
+    expect(sql).toMatch(/set still_open = false/)
+    expect(sql).toMatch(/and not \(' \|\| referenced/)
+    expect(sql).toMatch(/raise exception 'multi-column foreign key/)
+  })
+
+  it('touches one company and one provider only', () => {
+    expect(sql).toMatch(/j\.company_id = \$1 and j\.source = \$2/)
+  })
+
+  it('is not granted to anon or public', () => {
+    expect(sql).toMatch(/revoke execute on function public\.clear_unverified_board_jobs\(uuid, text\) from public, anon/)
+    expect(sql).toMatch(
+      /grant execute on function public\.clear_unverified_board_jobs\(uuid, text\) to authenticated, service_role/
+    )
+  })
+})
