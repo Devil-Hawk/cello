@@ -32,6 +32,11 @@ export interface AtsJob {
   postedAt?: string
   /** Human-readable salary string (annualized when the source uses intervals). */
   salary?: string
+  /**
+   * Hosts the posting body links to (the plain-text description drops hrefs).
+   * Used only as board-ownership evidence (./verify.ts); never stored.
+   */
+  linkHosts?: string[]
 }
 
 export interface DetectInput {

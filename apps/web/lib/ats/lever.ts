@@ -4,6 +4,7 @@
 
 import type { AtsJob, AtsProvider, DetectInput } from './types'
 import { isValidToken } from './types'
+import { linkHostsOf } from './html'
 import { HttpError, assertAllowedHost, fetchJson } from './http'
 
 const API_HOSTS = new Set(['api.lever.co', 'api.eu.lever.co'])
@@ -16,6 +17,8 @@ interface LeverPosting {
   text?: string
   hostedUrl?: string
   descriptionPlain?: string
+  /** The same body as HTML; kept only for the hosts it links to. */
+  description?: string
   createdAt?: number
   country?: string
   workplaceType?: string
@@ -97,6 +100,7 @@ async function fetchBoard(host: string, token: string): Promise<AtsJob[]> {
         typeof j.descriptionPlain === 'string' && j.descriptionPlain
           ? j.descriptionPlain.slice(0, MAX_DESCRIPTION_CHARS)
           : undefined,
+      linkHosts: typeof j.description === 'string' && j.description ? linkHostsOf(j.description) : undefined,
       postedAt: toIsoFromEpochMs(j.createdAt),
       salary: formatSalary(j),
     })

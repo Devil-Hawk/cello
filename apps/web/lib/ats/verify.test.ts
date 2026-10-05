@@ -201,6 +201,27 @@ describe('provider name plus domain label', () => {
     })
   })
 
+  it('counts a link to the company site inside the posting body, which the plain text drops', async () => {
+    route((u) => {
+      if (u.includes('/v1/boards/quillbot/jobs')) {
+        return json(
+          ghBoard([
+            {
+              url: 'https://job-boards.greenhouse.io/quillbot/jobs/1',
+              published: MONTH_AGO,
+              content: '&lt;p&gt;See our &lt;a href=&quot;https://www.quillbot.example/privacy&quot;&gt;privacy notice&lt;/a&gt;&lt;/p&gt;',
+            },
+          ])
+        )
+      }
+      if (u.endsWith('/v1/boards/quillbot')) return json({ name: 'Quillbot' })
+      return undefined
+    })
+    await expect(detectAts({ name: 'Quillbot', domain: 'quillbot.example', careerUrl: null })).resolves.toMatchObject({
+      verifiedBy: 'provider_name',
+    })
+  })
+
   it('a name equal to the domain label is not enough on its own', async () => {
     route((u) => {
       if (u.includes('/v1/boards/quillbot/jobs')) {
