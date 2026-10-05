@@ -122,6 +122,11 @@ describe('site fetcher: when a site cannot be read', () => {
     await expect(fetcher.get('https://acme.test/jobs')).rejects.toMatchObject({ reason: 'bot_check' })
   })
 
+  it('a plain 403 with no challenge page is still a refusal to automation, reported as a bot check', async () => {
+    const { fetcher } = harness({ ...open, 'https://acme.test/jobs': html('Forbidden', 403) })
+    await expect(fetcher.get('https://acme.test/jobs')).rejects.toMatchObject({ reason: 'bot_check' })
+  })
+
   it('a 401 and a redirect to a login page both need a login', async () => {
     const a = harness({ ...open, 'https://acme.test/jobs': html('no', 401) })
     await expect(a.fetcher.get('https://acme.test/jobs')).rejects.toMatchObject({ reason: 'login_required' })
@@ -150,5 +155,38 @@ describe('site fetcher: when a site cannot be read', () => {
     expect(res.finalUrl).toBe('https://boards.test/acme')
     expect(await fetcher.redirectOf('https://acme.test/jobs')).toBe('https://boards.test/acme')
     expect(await fetcher.allowed('https://boards.test/private')).toBe(false)
+  })
+})
+
+describe('site fetcher: internal addresses', () => {
+  // The default check refuses private addresses; here a stub stands in for it.
+  const refuse = async (url: string) => {
+    if (/(^|\/\/)(10\.|169\.254\.|localhost)/.test(url)) throw new Error('blocked address')
+  }
+  const open = { 'https://acme.test/robots.txt': robots('', 404), 'http://169.254.169.254/*': html('secret'), 'http://localhost/*': html('secret') }
+
+  it('never requests an internal address a person typed in', async () => {
+    const { fetcher, calls } = harness(open, { assertSafe: refuse })
+    await expect(fetcher.get('http://169.254.169.254/latest/meta-data')).rejects.toBeInstanceOf(ReaderError)
+    expect(calls).toEqual([])
+  })
+
+  it('checks every redirect hop: a public page that redirects inward is not followed', async () => {
+    const { fetcher, calls } = harness(
+      { ...open, 'https://acme.test/jobs': new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data' } }) },
+      { assertSafe: refuse }
+    )
+    await expect(fetcher.get('https://acme.test/jobs')).rejects.toBeInstanceOf(ReaderError)
+    expect(calls.some((c) => c.url === 'https://acme.test/jobs')).toBe(true)
+    expect(calls.some((c) => c.url.includes('169.254'))).toBe(false)
+  })
+
+  it('a robots.txt that redirects inward is not followed either', async () => {
+    const { fetcher, calls } = harness(
+      { 'https://acme.test/robots.txt': new Response(null, { status: 302, headers: { location: 'http://localhost/robots.txt' } }), 'https://acme.test/jobs': html('hi') },
+      { assertSafe: refuse }
+    )
+    await expect(fetcher.get('https://acme.test/jobs')).rejects.toBeInstanceOf(ReaderError)
+    expect(calls.some((c) => c.url.includes('localhost'))).toBe(false)
   })
 })

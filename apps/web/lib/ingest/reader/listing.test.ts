@@ -140,6 +140,23 @@ describe('readListing: every role is confirmed on its own page', () => {
     expect(f.calls.some((c) => c.includes('evil.test'))).toBe(false)
   })
 
+  it('a list whose roles all sit on another site is never requested, even though it is the biggest list on the page', async () => {
+    const card = (host: string, id: number) => `<li><a href="https://${host}/careers/job/${id}"><h3>Data Engineer ${id}</h3></a></li>`
+    const own = `<ul>${card('acme.test', 1000001)}${card('acme.test', 1000002)}${card('acme.test', 1000003)}</ul>`
+    const foreign = `<ul>${[1, 2, 3, 4, 5].map((i) => card('evil.test', 2000000 + i)).join('')}</ul>`
+    const routes: Record<string, string> = {}
+    for (const i of [1, 2, 3, 4, 5]) routes[`https://evil.test/careers/job/${2000000 + i}`] = '<html><head><title>Data Engineer</title></head></html>'
+    const f = fakeFetcher(routes)
+    const pages = [
+      { url: 'https://acme.test/careers', html: own },
+      { url: 'https://acme.test/careers/more', html: foreign },
+    ]
+    const read = await readListing('https://acme.test/careers', pages, f, { targets: NO_TARGETS, ownSite: (u) => new URL(u).hostname === 'acme.test' })
+    expect(read.listed).toBe(3)
+    expect(read.listedIds.every((u) => u.startsWith('https://acme.test/'))).toBe(true)
+    expect(f.calls.filter((c) => c.includes('evil.test'))).toEqual([])
+  })
+
   it('knows the search sites it has parameters for, and no others', () => {
     expect(listingSiteFor('https://jobs.apple.com/en-us/search')).not.toBeNull()
     expect(listingSiteFor('https://www.google.com/about/careers/applications/jobs/results/')).not.toBeNull()
