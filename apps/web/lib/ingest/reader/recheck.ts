@@ -5,11 +5,14 @@
 // window may simply not reach them. So the scheduled pass asks the role's own
 // page, a few at a time, oldest sighting first, through the same site fetcher
 // (robots.txt, budget, delay): a page that is gone (404 or 410), or that says
-// it is closed (validThrough in the past), closes the role. Anything else, an
-// error, a robots rule, a spent budget, leaves it as it was.
+// it is closed (validThrough in the past), closes the role. So does a page that
+// answers but no longer names the role, for sources whose roles were confirmed by
+// their own page in the first place (Apple answers 200 "Page not found" for a
+// role that is gone). Anything else, an error, a robots rule, a spent budget,
+// leaves it as it was.
 
 import type { AtsStore, ExistingJob } from '../../ats/index'
-import { readDetail } from './detail'
+import { jobFromDetail, readDetail } from './detail'
 import { ReaderError, type SiteFetcher } from './site-fetch'
 
 /** Role pages asked per company per scheduled pass: the budget decides how fast a big list is covered. */
@@ -25,7 +28,7 @@ export async function recheckStoredRoles(
   companyId: string,
   stored: Map<string, ExistingJob>,
   f: SiteFetcher,
-  opts: { sources: string[]; seen: ReadonlySet<string>; limit?: number; now?: number }
+  opts: { sources: string[]; seen: ReadonlySet<string>; limit?: number; now?: number; /** The role was confirmed by its page naming it, so a page that no longer does closes it. */ byTitle?: boolean }
 ): Promise<Recheck> {
   const now = opts.now ?? Date.now()
   const due = [...stored.values()]
@@ -40,8 +43,10 @@ export async function recheckStoredRoles(
       const res = await f.get(job.url!)
       if (res.status === 404 || res.status === 410) gone.push(job.externalId)
       else if (res.ok) {
-        const until = Date.parse(readDetail(res.text, res.finalUrl).validThrough ?? '')
+        const detail = readDetail(res.text, res.finalUrl)
+        const until = Date.parse(detail.validThrough ?? '')
         if (!Number.isNaN(until) && until < now) gone.push(job.externalId)
+        else if (opts.byTitle && !jobFromDetail(res.finalUrl, detail, { title: job.title })) gone.push(job.externalId)
       }
     } catch (error) {
       // A spent budget or a bot check ends the re-check; a robots rule or a failed request leaves that role as it was.

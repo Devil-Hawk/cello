@@ -315,7 +315,7 @@ export async function ingestCompany(store: AtsStore, company: DueCompany, deps: 
         // A window onto the site never counts a role as missed, so the scheduled pass asks a few stored roles' own pages whether they are still there.
         if (mode === 'scheduled' && !read.complete) {
           const seen = new Set(read.listedIds ?? read.jobs.map((j) => j.externalId))
-          const again = await recheckStoredRoles(store, company.id, stored, fetcher, { sources: [source], seen })
+          const again = await recheckStoredRoles(store, company.id, stored, fetcher, { sources: [source], seen, byTitle: source === 'listing' || source === 'sitemap' })
           result.closed += again.closed
         }
       }

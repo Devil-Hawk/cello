@@ -193,7 +193,7 @@ describe('a role that has left a site is closed by its own page', () => {
     lastSeenAt: `2026-09-${id.padStart(2, '0')}T00:00:00Z`,
     ...over,
   })
-  const run = async (jobs: ExistingJob[], routes: Record<string, Route>, opts: { limit?: number; seen?: string[] } = {}) => {
+  const run = async (jobs: ExistingJob[], routes: Record<string, Route>, opts: { limit?: number; seen?: string[]; byTitle?: boolean } = {}) => {
     const closed: string[] = []
     const store = {
       updateJobs: async (u: { externalId: string; fields: Record<string, unknown> }[]) => {
@@ -205,7 +205,7 @@ describe('a role that has left a site is closed by its own page', () => {
       },
     }
     const f = fakeFetcher({ 'https://shop.test/robots.txt': 'User-agent: *\nDisallow: /jobs/blocked\n', ...routes }, 'scheduled')
-    const out = await recheckStoredRoles(store, 'c1', new Map(jobs.map((j) => [j.externalId, j])), f, { sources: ['listing'], seen: new Set(opts.seen ?? []), limit: opts.limit })
+    const out = await recheckStoredRoles(store, 'c1', new Map(jobs.map((j) => [j.externalId, j])), f, { sources: ['listing'], seen: new Set(opts.seen ?? []), limit: opts.limit, byTitle: opts.byTitle })
     return { out, closed, f }
   }
 
@@ -224,6 +224,16 @@ describe('a role that has left a site is closed by its own page', () => {
     const past = `<html><head><title>Role 4</title><script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', title: 'Role 4', validThrough: '2026-01-01' })}</script></head></html>`
     const { closed } = await run([stored('4')], { 'https://shop.test/jobs/4': past })
     expect(closed).toEqual(['https://shop.test/jobs/4'])
+  })
+
+  it('closes a role whose page answers 200 but no longer names it, only for roles a page confirmed', async () => {
+    const notFound = '<html><head><title>Careers</title></head><body><h1>Page not found.</h1></body></html>'
+    const routes = { 'https://shop.test/jobs/5': notFound, 'https://shop.test/jobs/6': posting('Role 6', 6) }
+    const jobs = [stored('5'), stored('6')]
+    const withTitle = await run(jobs, routes, { byTitle: true })
+    expect(withTitle.closed).toEqual(['https://shop.test/jobs/5'])
+    // A role found through a JSON search was never confirmed by its page, so a page that answers is left alone.
+    expect((await run(jobs, routes)).closed).toEqual([])
   })
 
   it('asks the oldest sighting first, only a few at a time, and never one this read just listed', async () => {
