@@ -125,7 +125,7 @@ export interface SitemapRead {
   complete: boolean
   /** Addresses read or rejected this time, to remember so the next pass skips them. */
   checked: string[]
-  /** Posting URLs the sitemap named. */
+  /** Posting URLs the sitemap named that could be the person's roles (their words in the address, or no words to judge by): the part of the site that is theirs to read. */
   listed: number
   /** Roles confirmed on their own pages this time, plus listed ones already stored: what the person can actually be shown. Zero means the roles could not be read. */
   confirmed: number
@@ -148,7 +148,8 @@ export async function readSitemapRoles(
   if (own.length > 0 && entries.length === 0) throw new ReaderError('robots')
   const complete = all.complete && entries.length === own.length
   const listedIds = entries.map((e) => normalizeJobUrl(e.url))
-  const todo = orderEntries(entries, opts.targets)
+  const ordered = orderEntries(entries, opts.targets)
+  const todo = ordered
     .filter((e) => !opts.skip.has(normalizeJobUrl(e.url)))
     .slice(0, opts.max ?? DETAIL_PER_READ[f.mode])
 
@@ -184,7 +185,7 @@ export async function readSitemapRoles(
   if (stopped && (stopped as ReaderError).reason !== 'budget' && jobs.length === 0) throw stopped
   const confirmed = jobs.length + (opts.stored ? listedIds.filter((id) => opts.stored!.has(id)).length : 0)
   const untitled = entries.length > 0 && entries.every((e) => !slugWords(e.url))
-  return { jobs, listedIds, complete, checked, listed: entries.length, confirmed, untitled, board }
+  return { jobs, listedIds, complete, checked, listed: ordered.length, confirmed, untitled, board }
 }
 
 const DAY = 86_400_000

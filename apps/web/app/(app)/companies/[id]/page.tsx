@@ -29,7 +29,7 @@ import { TargetScopeSwitch, type TargetScope } from '@/components/jobs/target-sc
 import { formatShortDate, knownParts, matchTone } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { lastCheckedMs, rolesStatus, rolesStatusLine } from '@/lib/companies/roles-status'
+import { lastCheckedMs, partialReadNote, rolesStatus, rolesStatusLine } from '@/lib/companies/roles-status'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { fetchClientSafePreferences } from '@/lib/preferences/client-safe'
 import { EMPTY_TARGETING, resolveTargeting, type Targeting } from '@/lib/targeting'
@@ -191,6 +191,7 @@ export default function CompanyDetailPage() {
   const newThisWeek = shownJobs.filter((j) => j.is_new).length
   const status = rolesStatus(company, jobs.length, { checking: isRefreshing })
   const statusLine = rolesStatusLine(status)
+  const partial = partialReadNote(company.metadata, jobs.length)
   const lastChecked = lastCheckedMs(company)
 
   return (
@@ -311,6 +312,7 @@ export default function CompanyDetailPage() {
             />
           )}
         </div>
+        {partial && <p className="text-caption text-muted-foreground">{partial}</p>}
 
         {jobs.length === 0 ? (
           <EmptyState

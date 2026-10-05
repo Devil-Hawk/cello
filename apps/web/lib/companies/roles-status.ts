@@ -127,6 +127,28 @@ export function rolesStatus(
   return { kind: lastCheckedMs(company) === null ? 'not_checked' : 'empty', nextCheckAt: next, now }
 }
 
+/**
+ * Said beside a company's roles when Cello has read only part of its site: a
+ * partial read must not look like the whole. Null when the read was the whole
+ * list, or when nothing is known about its size. Reads metadata.reader
+ * (written by lib/ingest/run.ts).
+ */
+export function partialReadNote(metadata: unknown, openRoles: number): string | null {
+  if (openRoles <= 0 || !metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null
+  const r = (metadata as Record<string, unknown>).reader
+  if (!r || typeof r !== 'object' || Array.isArray(r)) return null
+  const { listed, read, untitled, window } = r as { listed?: unknown; read?: unknown; untitled?: unknown; window?: unknown }
+  const n = (v: number) => v.toLocaleString('en-US')
+  if (typeof listed === 'number' && listed > 0) {
+    const done = typeof read === 'number' && read >= 0 ? Math.min(read, listed) : 0
+    if (done >= listed) return null
+    const more = untitled === true ? 'Its list names no titles, so Cello reads the roles in turn, more each check.' : 'More each check.'
+    return `Read ${n(done)} of about ${n(listed)} roles so far. ${more}`
+  }
+  if (window === true) return 'Showing the newest roles Cello matched on this site, not every role it lists.'
+  return null
+}
+
 function inAbout(ms: number): string {
   if (ms < HOUR_MS) return 'in under an hour'
   const h = Math.round(ms / HOUR_MS)

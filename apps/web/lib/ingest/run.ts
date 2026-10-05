@@ -247,7 +247,7 @@ export async function ingestCompany(store: AtsStore, company: DueCompany, deps: 
         // Whether the person has seen the whole site or part of it, and how big the part is: a partial read must say so.
         state.listed = read.listed
         state.untitled = read.untitled === true ? true : undefined
-        state.window = read.tier === 'site_search' || read.tier === 'listing' || read.tier === 'rendered' || read.tier === 'model' ? true : undefined
+        state.window = read.tier === 'site_search' || read.tier === 'listing' ? true : undefined
         if (state.listed === undefined) delete state.listed
         if (state.untitled === undefined) delete state.untitled
         if (state.window === undefined) delete state.window
