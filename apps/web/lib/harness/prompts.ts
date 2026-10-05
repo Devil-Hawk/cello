@@ -100,6 +100,7 @@ export const PROMPT_DOC_NAMES = [
   'distill',
   'memory_extract',
   'company_verify',
+  'goal_judge',
 ] as const
 export type PromptDocName = (typeof PROMPT_DOC_NAMES)[number]
 

@@ -167,7 +167,6 @@ const PROMPT_BUILDERS: Record<string, string> = {
  */
 const PENDING_WIRING: string[] = [
   'apps/web/lib/harness/agents/resume_optimizer.ts',
-  'apps/web/lib/harness/goals.ts',
 ]
 
 /**

@@ -699,7 +699,7 @@ describe('autopilotTickGraph — goal-directed tick', () => {
     seedJobs(admin, companyIds, 1, 'possible')
 
     callLlmMock.mockResolvedValueOnce({
-      content: '{"decision":"keep","rationale":"Strong fit for the stated goal.","confidence":0.9}',
+      content: '{"decision":"keep","rationale":"An FDE role, as the goal states.","cites":["G1","J1"],"confidence":0.9}',
       tokensUsed: 120,
       promptTokens: 100,
       completionTokens: 20,
@@ -742,7 +742,7 @@ describe('autopilotTickGraph — goal-directed tick', () => {
     seedJobs(admin, companyIds, 1, 'possible')
 
     callLlmMock.mockResolvedValueOnce({
-      content: '{"decision":"keep","rationale":"Strong fit for the stated goal.","confidence":0.9}',
+      content: '{"decision":"keep","rationale":"An FDE role, as the goal states.","cites":["G1","J1"],"confidence":0.9}',
       tokensUsed: 120,
       promptTokens: 100,
       completionTokens: 20,
