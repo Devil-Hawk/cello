@@ -56,7 +56,19 @@
 //   The plaintext code is read from the request body, normalized, hashed, and
 //   dropped. It is never logged, never put in a URL or query string, never
 //   written to a database column, and never echoed in a response. The database
-//   only ever sees its SHA-256.
+//   only ever sees its keyed hash (HMAC-SHA256 under a key derived from the
+//   server's encryption key, plus the legacy bare SHA-256 for rows older than
+//   the keyed form, which lapse within 72 hours).
+//
+// WHAT HAPPENS IN POSTGRES, AND WHY
+//   Everything that decides whether a code may be used runs inside ONE database
+//   function, redeem_access_code (migration 20261006002001), which locks the code
+//   row. Concurrent redemptions therefore cannot both pass the checks: exactly one
+//   caller is told to provision the workspace (under a 2 minute lease), the others
+//   are told to retry, and no two demo users are ever created for one code. The
+//   attempt limiter (note_redeem_attempt) is in Postgres too, so it holds across
+//   serverless instances. A request must also be same-origin: a hostile page could
+//   otherwise burn someone's attempts or sign their browser into a demo.
 
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
@@ -64,7 +76,8 @@ import { cookies } from 'next/headers'
 import type { Database } from '@cello/shared'
 
 import { createAdminClient } from '@/lib/harness/supabase-admin'
-import { accessCodeUsability, hashAccessCode, looksLikeAccessCode } from '@/lib/access/codes'
+import { accessCodeLookupHashes, looksLikeAccessCode } from '@/lib/access/codes'
+import { isSameOriginRequest } from '@/lib/security/same-origin'
 import { clientHintFromHeaders, recordAccessEvent } from '@/lib/access/audit'
 import { demoProfilePreferences } from '@/lib/access/guardrails'
 import { seedDemoWorkspace } from '@/lib/access/seed-demo'
@@ -126,11 +139,25 @@ const NIL_UUID = '00000000-0000-0000-0000-000000000000'
 export async function POST(request: NextRequest) {
   const startedAt = Date.now()
 
-  // Before anything else, including reading the body: this is the throttle on
-  // an unauthenticated endpoint that reaches the service key.
-  const gate = allowRedeemAttempt(clientKey(request.headers))
+  // A cross-site POST is refused with the same answer as a bad code, before
+  // anything is counted or read.
+  if (!isSameOriginRequest(request.headers)) {
+    await padToFloor(startedAt)
+    return NextResponse.json({ ok: false, error: REFUSAL }, { status: 403 })
+  }
+
+  const admin = createAdminClient()
+
+  // The throttle on an unauthenticated endpoint that reaches the service key,
+  // before the body is read. It fails closed: a database that cannot count
+  // attempts cannot be allowed to hand out sessions.
+  const gate = await allowRedeemAttempt(admin, request.headers)
   if (!gate.allowed) {
-    console.warn(`[access/redeem] rate limited (${gate.scope})`)
+    if (gate.scope === 'unavailable') {
+      console.error('[access/redeem] attempt limiter unavailable; refusing')
+      return serverError(startedAt, 503)
+    }
+    console.warn('[access/redeem] rate limited')
     return NextResponse.json(
       { ok: false, error: 'Too many attempts. Wait a few minutes and try again.' },
       { status: 429 }
@@ -149,88 +176,83 @@ export async function POST(request: NextRequest) {
     typed = ''
   }
 
-  // Cheap shape check first, so nonsense never costs a database round trip.
+  // Cheap shape check first, so nonsense never reaches the redemption function.
   if (!looksLikeAccessCode(typed)) return refuse(startedAt)
 
-  const admin = createAdminClient()
-
-  // BY HASH, never by plaintext. The column holds a SHA-256 and nothing else.
-  //
-  // owner_user_id is read for exactly one purpose — copying the allowlisted
-  // slice of the owner's preferences onto the fresh demo profile (see
-  // provisionDemoPreferences). It is never returned, never logged, and never
-  // reaches the demo session.
-  const codeHash = hashAccessCode(typed)
-  const { data: code, error: lookupError } = await admin
-    .from('access_codes')
-    .select('id, owner_user_id, demo_user_id, expires_at, revoked_at, first_redeemed_at, redemption_count')
-    .eq('code_hash', codeHash)
-    .maybeSingle()
-
-  if (lookupError) {
-    console.error('[access/redeem] code lookup failed:', lookupError.message)
+  // BY KEYED HASH, never by plaintext. `typed` goes no further than this call:
+  // nothing below this line has the code, so nothing below it can log it.
+  const { data, error: redeemError } = await admin.rpc('redeem_access_code', {
+    p_hashes: accessCodeLookupHashes(typed),
+  })
+  const outcome = data as RedeemOutcome | null
+  if (redeemError || !outcome || typeof outcome.status !== 'string') {
+    console.error('[access/redeem] redemption function failed:', redeemError?.message ?? 'no result')
     return serverError(startedAt)
   }
 
-  if (!code) return refuseUnknownCode(admin, startedAt)
-
-  const usability = accessCodeUsability({
-    expires_at: code.expires_at,
-    revoked_at: code.revoked_at,
-  })
-
-  if (!usability.usable) {
-    // The owner asked to see what was done with a code, and "someone tried to
-    // use it after it lapsed" is part of that answer. We can only record this
-    // for codes that exist — an unknown hash has no row to attach an event to,
-    // which is the same reason it cannot be counted against anything.
-    //
-    // This insert is the SECOND round trip that refuseUnknownCode() spends a
-    // decoy read to match. Awaiting it is deliberate: the trail is a promise to
-    // the owner, and Next 14 has no after()/waitUntil here, so backgrounding it
-    // would mean quietly losing events whenever the process is torn down after
-    // the response.
-    await recordAccessEvent(admin, {
-      codeId: code.id,
-      kind: 'denied',
-      action: 'code.denied',
-      detail: { reason: usability.reason },
-      clientHint: clientHintFromHeaders(request.headers),
-    })
-    return refuse(startedAt)
+  if (outcome.status === 'refused') {
+    // Unknown, expired, revoked and used codes all answer identically. The owner
+    // asked to see what was done with a code, and "someone tried to use it after
+    // it lapsed" is part of that answer, so a denial is recorded for codes that
+    // exist (an unknown hash has no row to attach an event to). The reason goes
+    // into the owner's audit trail only, never into the response.
+    if (outcome.code_id) {
+      // Awaited on purpose: the trail is a promise to the owner, and Next 14 has
+      // no after()/waitUntil, so backgrounding it would lose events whenever the
+      // process is torn down after the response.
+      await recordAccessEvent(admin, {
+        codeId: outcome.code_id,
+        kind: 'denied',
+        action: 'code.denied',
+        detail: { reason: outcome.reason },
+        clientHint: clientHintFromHeaders(request.headers),
+      })
+      return refuse(startedAt)
+    }
+    return refuseUnknownCode(admin, startedAt)
   }
+
+  // Another request holds the provisioning lease. Not a refusal of the code.
+  if (outcome.status === 'busy') return serverError(startedAt, 503)
 
   // ---------------------------------------------------------------------
   // Past this line the code is valid. Only now may anything be created.
   // ---------------------------------------------------------------------
+  if (
+    (outcome.status !== 'provision' && outcome.status !== 'existing') ||
+    !outcome.code_id ||
+    !outcome.owner_user_id ||
+    !outcome.expires_at
+  ) {
+    console.error('[access/redeem] unexpected redemption result:', outcome.status)
+    return serverError(startedAt)
+  }
 
   let workspace: { demoUserId: string; email: string; seeded: boolean }
   try {
-    workspace = await ensureDemoWorkspace(admin, {
-      codeId: code.id,
-      ownerUserId: code.owner_user_id,
-      storedDemoUserId: code.demo_user_id,
-      expiresAt: code.expires_at,
-    })
+    workspace =
+      outcome.status === 'provision'
+        ? await provisionDemoWorkspace(admin, {
+            codeId: outcome.code_id,
+            ownerUserId: outcome.owner_user_id,
+            expiresAt: outcome.expires_at,
+          })
+        : await reuseDemoWorkspace(admin, {
+            codeId: outcome.code_id,
+            demoUserId: outcome.demo_user_id ?? '',
+            expiresAt: outcome.expires_at,
+          })
   } catch (error) {
     console.error('[access/redeem] could not prepare demo workspace:', describeError(error))
     return serverError(startedAt)
   }
 
-  // Bookkeeping BEFORE the session is handed out. If sign-in then fails we have
-  // over-recorded a redemption, which is the harmless direction for an audit
-  // trail; recording afterwards would silently lose sessions that did happen.
-  await recordRedemptionCount(admin, {
-    codeId: code.id,
-    observedCount: code.redemption_count ?? 0,
-    firstRedeemedAt: code.first_redeemed_at,
-  })
-
   // The one write that must survive: lib/access/audit.ts sanitizes it, writes
   // it with the service key (the table has no insert policy, so a demo session
-  // can never forge or suppress this), and never throws.
+  // can never forge or suppress this), and never throws. The redemption itself
+  // was counted inside the redemption function.
   await recordAccessEvent(admin, {
-    codeId: code.id,
+    codeId: outcome.code_id,
     kind: 'redeemed',
     action: 'code.redeem',
     target: '/dashboard',
@@ -248,137 +270,108 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     ok: true,
     redirect: '/dashboard',
-    // The code's own expiry. Safe to return — the holder is entitled to know
+    // The code's own expiry. Safe to return: the holder is entitled to know
     // how long they have, and it says nothing about the code itself.
-    expiresAt: code.expires_at,
+    expiresAt: outcome.expires_at,
   })
 }
 
+/** What redeem_access_code returns (see migration 20261006002001). */
+interface RedeemOutcome {
+  status: 'refused' | 'busy' | 'provision' | 'existing'
+  code_id?: string
+  reason?: string
+  owner_user_id?: string
+  demo_user_id?: string
+  expires_at?: string
+}
+
 /**
- * The demo auth user for this code, creating and seeding it on first use.
- *
- * The email is derived from the code's ROW ID, never from the code, so it is
- * both stable across redemptions and useless to anyone who sees it.
+ * A repeat redemption: the workspace already exists, so nothing is created or
+ * seeded. The email is derived from the code's ROW ID, never from the code, so
+ * it is stable across redemptions and useless to anyone who sees it.
  */
-async function ensureDemoWorkspace(
+async function reuseDemoWorkspace(
   admin: AdminClient,
-  code: { codeId: string; ownerUserId: string; storedDemoUserId: string | null; expiresAt: string }
+  code: { codeId: string; demoUserId: string; expiresAt: string }
 ): Promise<{ demoUserId: string; email: string; seeded: boolean }> {
+  if (!code.demoUserId) throw new Error(`code ${code.codeId} has no recorded demo user`)
   const email = demoEmailForCode(code.codeId)
 
-  if (code.storedDemoUserId) {
-    // THE MAILBOX AND THE RECORDED USER MUST BE THE SAME ACCOUNT.
-    //
-    // Everything downstream signs in by EMAIL (generateLink takes an address,
-    // not an id) while this branch reports the id the code recorded. Those are
-    // two different derivations of "who is this", and if they ever disagree the
-    // visitor is signed into one workspace while the code — and therefore the
-    // whole audit trail, which resolveDemoContext keys on demo_user_id — points
-    // at another. See DEMO_EMAIL_DOMAIN above for how they come apart.
-    //
-    // Refusing is the restrictive choice and the honest one: the alternative is
-    // a session that looks fine and records nothing.
-    await assertMailboxBelongsTo(admin, email, code.storedDemoUserId, code.codeId)
-
-    // Re-apply the demo marking rather than trusting it: self-heals a first
-    // redemption that died between creating the user and marking the profile,
-    // which would otherwise leave a demo workspace that no guardrail recognises
-    // as one.
-    await markProfileAsDemo(admin, code.storedDemoUserId, code.expiresAt)
-    return { demoUserId: code.storedDemoUserId, email, seeded: false }
-  }
-
-  const demoUserId = await createOrRecoverDemoUser(admin, email, code.codeId)
-  await markProfileAsDemo(admin, demoUserId, code.expiresAt)
-
-  // Claim the code for this user, but only if nobody else has. The `is null`
-  // guard makes the transition happen exactly once even if two people redeem
-  // the same code at the same instant, and its result is what decides who
-  // seeds — so the workspace is never seeded twice.
-  const { data: claimed, error: claimError } = await admin
-    .from('access_codes')
-    .update({ demo_user_id: demoUserId })
-    .eq('id', code.codeId)
-    .is('demo_user_id', null)
-    .select('id')
-
-  if (claimError) throw new Error(`claiming demo user for code: ${claimError.message}`)
-
-  const wonTheRace = (claimed?.length ?? 0) > 0
-  if (!wonTheRace) {
-    // Someone else got there first. Because the email is derived from the code
-    // id, they created the same auth user we did, so there is nothing to clean
-    // up — just don't seed on top of them.
-    const { data: current } = await admin
-      .from('access_codes')
-      .select('demo_user_id')
-      .eq('id', code.codeId)
-      .maybeSingle()
-
-    const winner = typeof current?.demo_user_id === 'string' ? current.demo_user_id : null
-
-    // "They created the same auth user we did" is an ASSUMPTION about the
-    // mailbox, and it is exactly the assumption DEMO_EMAIL_DOMAIN can break. If
-    // the winner recorded a different id than the address we just resolved,
-    // signing in by that address would hand out a session the code cannot be
-    // attributed to — so refuse rather than guess which one is real.
-    if (winner && winner !== demoUserId) {
-      throw new Error(
-        `code ${code.codeId} was claimed for a different demo user than the one its demo ` +
-          `mailbox resolves to; refusing to issue a session that cannot be attributed. ` +
-          `Has DEMO_EMAIL_DOMAIN changed since this code was first redeemed?`
-      )
-    }
-
-    return { demoUserId: winner ?? demoUserId, email, seeded: false }
-  }
-
-  // RELEASE THE CLAIM IF PROVISIONING OR SEEDING FAILS.
+  // THE MAILBOX AND THE RECORDED USER MUST BE THE SAME ACCOUNT.
   //
-  // The claim above commits on its own. Without this compensation a single
-  // transient failure here — a network blip mid-seed, a Supabase hiccup —
-  // BRICKS THE CODE PERMANENTLY AND SILENTLY: the row now carries a
-  // demo_user_id, so every later redemption takes the already-claimed branch,
-  // reports success, and signs the visitor into a workspace that was never
-  // seeded and never fenced. The owner hands out a code that quietly lands
-  // people on an empty dashboard, with no error anywhere to explain it.
+  // Everything downstream signs in by EMAIL (generateLink takes an address,
+  // not an id) while this reports the id the code recorded. Those are two
+  // different derivations of "who is this", and if they ever disagree the
+  // visitor is signed into one workspace while the code, and therefore the
+  // whole audit trail, which resolveDemoContext keys on demo_user_id, points
+  // at another. See DEMO_EMAIL_DOMAIN above for how they come apart.
   //
-  // Postgres cannot help here: the claim, the auth user and the seed are three
-  // separate round trips through PostgREST, so there is no transaction to roll
-  // back. Undoing the claim by hand is the compensation, and it restores the
-  // exact precondition the next attempt needs — demo_user_id null, so it can
-  // win the race and seed properly.
+  // Refusing is the restrictive choice and the honest one: the alternative is
+  // a session that looks fine and records nothing.
+  await assertMailboxBelongsTo(admin, email, code.demoUserId, code.codeId)
+
+  // Re-apply the demo marking rather than trusting it: self-heals a first
+  // redemption that died between creating the user and marking the profile,
+  // which would otherwise leave a demo workspace that no guardrail recognises
+  // as one.
+  await markProfileAsDemo(admin, code.demoUserId, code.expiresAt)
+  return { demoUserId: code.demoUserId, email, seeded: false }
+}
+
+/**
+ * First redemption: the ONE caller redeem_access_code told to provision. Creates
+ * (or recovers) the auth user, marks and fences the profile, seeds the workspace
+ * and records it on the code through finish_access_code_provisioning.
+ *
+ * If anything fails the lease is released, so the next attempt can provision;
+ * nothing was recorded on the code, so there is no half-claimed state to undo.
+ */
+async function provisionDemoWorkspace(
+  admin: AdminClient,
+  code: { codeId: string; ownerUserId: string; expiresAt: string }
+): Promise<{ demoUserId: string; email: string; seeded: boolean }> {
+  const email = demoEmailForCode(code.codeId)
   try {
-    // Provision preferences ONCE, on the redemption that won the claim — never
-    // on a repeat one, which would wipe whatever the demo user has since
-    // changed in Settings. Before seeding, so the seeder is free to layer
-    // persona preferences on top of a workspace that is already fenced.
+    const demoUserId = await createOrRecoverDemoUser(admin, email, code.codeId)
+    await markProfileAsDemo(admin, demoUserId, code.expiresAt)
+
+    // Provision preferences ONCE, here, never on a repeat redemption (which
+    // would wipe whatever the demo user has since changed in Settings). Before
+    // seeding, so the seeder is free to layer persona preferences on top of a
+    // workspace that is already fenced.
     await provisionDemoPreferences(admin, demoUserId, code.ownerUserId)
 
-    // "Every feature works for real against seeded demo data" — an empty
+    // "Every feature works for real against seeded demo data": an empty
     // workspace is a broken demo, so a seeding failure fails the redemption
     // rather than landing someone on an empty dashboard.
     await seedDemoWorkspace(admin, demoUserId)
+
+    const { data: finished, error } = await admin.rpc('finish_access_code_provisioning', {
+      p_code_id: code.codeId,
+      p_demo_user_id: demoUserId,
+    })
+    if (error) throw new Error(`recording the demo workspace on the code: ${error.message}`)
+    // False: the code was revoked or expired while the workspace was being built.
+    if (finished !== true) throw new Error(`code ${code.codeId} stopped being redeemable during provisioning`)
+
+    return { demoUserId, email, seeded: true }
   } catch (error) {
+    // Release the lease so the code is redeemable again rather than waiting out
+    // the two minutes. Best effort: the lease expires by itself either way.
     const { error: releaseError } = await admin
       .from('access_codes')
-      .update({ demo_user_id: null })
+      .update({ provisioning_until: null })
       .eq('id', code.codeId)
-      .eq('demo_user_id', demoUserId)
-
+      .is('demo_user_id', null)
     if (releaseError) {
-      // The code IS now stranded, and that is worth shouting about — it is the
-      // one state an owner cannot diagnose from the outside.
       console.error(
-        `[access/redeem] CODE STRANDED: seeding failed for code ${code.codeId} and the ` +
-          `claim could not be released (${releaseError.message}). Clear demo_user_id on ` +
-          `that row to make the code usable again.`
+        `[access/redeem] could not release the provisioning lease on code ${code.codeId} ` +
+          `(${releaseError.message}); it lapses on its own within two minutes.`
       )
     }
     throw error
   }
-
-  return { demoUserId, email, seeded: true }
 }
 
 /**
@@ -734,28 +727,24 @@ async function createDemoSession(): Promise<DemoSession> {
  *
  * WHY THE OWNER'S PREFERENCES ARE READ AT ALL
  *   "Every feature works perfectly" is not true of a workspace with no model
- *   key — scoring, tailoring and drafting would all refuse. demoProfilePreferences
+ *   key: scoring, tailoring and drafting would all refuse. demoProfilePreferences
  *   is an ALLOWLIST that carries across exactly one thing, the encrypted
- *   api_keys blob, and forces everything else (a $1 budget on the demo's own
- *   ledger, the metered provider, every Gmail grant off, nothing auto-sending).
- *   The owner's targeting, contacts, digest and autopilot settings stay behind.
+ *   api_keys blob, and forces everything else (a $1 cap, the metered provider,
+ *   every Gmail grant off, nothing auto-sending). The owner's targeting,
+ *   contacts, digest and autopilot settings stay behind.
  *
  * WHY THIS IS NOT THE OWNER'S ALLOWANCE
  *   Spend is keyed by user id, not by key. lib/access/guardrails.ts's
  *   demoSafeApiKeys re-stamps apiKeys.userId to the demo's own id at call time,
- *   so every token the demo spends is checked and billed against the demo's own
- *   $1 ledger. The key material itself is never readable from the client.
+ *   so every call is reserved against the demo's own $1 cap, and against the
+ *   owner's shared monthly demo allowance, never the owner's own cap. The key
+ *   material itself is never readable from the client.
  *
  * WHY THE DEMO'S OWN PREFERENCES ARE READ TOO
- *   Only for its spend ledger. Provisioning is NOT guaranteed to run exactly
- *   once per workspace: when a first redemption fails mid-seed the compensation
- *   above releases the claim, and the next redemption runs this again on a
- *   profile that may already have spent money. Rebuilding the budget block from
- *   scratch would zero `spentUsd` every time, which would make re-entering a
- *   code a one-keystroke allowance refill and the $1 cap a decoration.
- *   demoProfilePreferences carries the ledger forward; everything else about
- *   the existing row is deliberately discarded, because a half-provisioned
- *   previous attempt is not evidence about anything.
+ *   Only so a cap already lowered on the row is kept (the cap only ever goes
+ *   down). What a demo has spent lives in the llm_spend ledger, not here, so
+ *   re-provisioning cannot refill an allowance. A half-provisioned previous
+ *   attempt is not evidence about anything else, so the rest is discarded.
  *
  * This is the ONLY place it can happen: seedDemoWorkspace() is handed the demo
  * user id and nothing else, so it has no way to reach the owner's row — which
@@ -786,11 +775,11 @@ async function provisionDemoPreferences(
     .maybeSingle()
 
   // FATAL, unlike the owner read above, and for the opposite reason: not
-  // knowing the owner's key costs the demo a feature, but not knowing what this
-  // workspace has already spent means the write below would reset it. Failing
-  // here releases the claim and the retry gets another chance to read it; the
+  // knowing the owner's key costs the demo a feature, but not knowing the cap
+  // already on this workspace means the write below could raise it. Failing
+  // here releases the lease and the retry gets another chance to read it; the
   // only thing lost is a redemption attempt.
-  if (existingError) throw new Error(`reading the demo's spend ledger: ${existingError.message}`)
+  if (existingError) throw new Error(`reading the demo's existing preferences: ${existingError.message}`)
 
   const { error } = await admin
     .from('profiles')
@@ -804,93 +793,6 @@ async function provisionDemoPreferences(
     .eq('id', demoUserId)
 
   if (error) throw new Error(`provisioning demo preferences: ${error.message}`)
-}
-
-/**
- * Bump redemption_count with a COMPARE-AND-SWAP rather than a blind write.
- *
- * `update({ redemption_count: read + 1 })` is a read-modify-write across two
- * round trips: two people opening the same link at once both read 4 and both
- * write 5, so the counter — the number the owner reads to answer "how much has
- * this code been used?" — silently loses redemptions. Guarding the update with
- * `.eq('redemption_count', <what we read>)` makes the write conditional on
- * nothing having moved, which Postgres evaluates atomically inside the UPDATE,
- * so the loser matches no rows, re-reads and retries instead of overwriting.
- *
- * No SQL function and no migration needed, which matters because the counter is
- * the SUMMARY, not the record — access_code_events is the record, and it is
- * append-only and immune to this class of bug by construction. That is also why
- * a failure here is logged rather than fatal: an inaccurate summary must never
- * cost someone their demo.
- */
-const REDEMPTION_COUNT_ATTEMPTS = 3
-
-async function recordRedemptionCount(
-  admin: AdminClient,
-  input: { codeId: string; observedCount: number; firstRedeemedAt: string | null }
-): Promise<void> {
-  let expected = input.observedCount
-  let firstRedeemedAt = input.firstRedeemedAt
-
-  for (let attempt = 0; attempt < REDEMPTION_COUNT_ATTEMPTS; attempt++) {
-    const nowIso = new Date().toISOString()
-
-    const { data, error } = await admin
-      .from('access_codes')
-      .update({
-        last_used_at: nowIso,
-        // The FIRST one, so never overwritten once set.
-        first_redeemed_at: firstRedeemedAt ?? nowIso,
-        redemption_count: expected + 1,
-      })
-      .eq('id', input.codeId)
-      .eq('redemption_count', expected)
-      .select('id')
-
-    if (error) {
-      // Not fatal to the demo, but the owner is owed an accurate trail, so it is
-      // loud in the logs.
-      console.error('[access/redeem] redemption bookkeeping failed:', error.message)
-      return
-    }
-
-    if ((data?.length ?? 0) > 0) return
-
-    // Matched nothing: someone else redeemed between our read and our write.
-    // Re-read and try again from the value they left behind.
-    const { data: current, error: reReadError } = await admin
-      .from('access_codes')
-      .select('redemption_count, first_redeemed_at')
-      .eq('id', input.codeId)
-      .maybeSingle()
-
-    if (reReadError || !current) {
-      console.error(
-        '[access/redeem] redemption bookkeeping could not re-read the code row:',
-        reReadError?.message ?? 'row not found'
-      )
-      return
-    }
-
-    const observed = typeof current.redemption_count === 'number' ? current.redemption_count : null
-    // Unchanged means the row did not lose a race — it is gone, filtered, or
-    // the column is not what we think it is. Retrying would spin, so stop.
-    if (observed === null || observed === expected) {
-      console.error(
-        `[access/redeem] redemption bookkeeping made no progress on code ${input.codeId}; ` +
-          `the count may under-report. access_code_events remains the record of use.`
-      )
-      return
-    }
-
-    expected = observed
-    firstRedeemedAt = (current.first_redeemed_at as string | null) ?? firstRedeemedAt
-  }
-
-  console.error(
-    `[access/redeem] redemption bookkeeping lost ${REDEMPTION_COUNT_ATTEMPTS} races on code ` +
-      `${input.codeId}; the count may under-report. access_code_events remains the record of use.`
-  )
 }
 
 /** Stable per code, derived from the row id — never from the code itself. */
@@ -908,7 +810,7 @@ async function refuse(startedAt: number): Promise<NextResponse> {
  * a code that exists-but-is-dead spends.
  *
  * THE LEAK THIS CLOSES. Both refusals return the identical body after the same
- * REFUSAL_FLOOR_MS, so on paper they are indistinguishable — but the dead-code
+ * REFUSAL_FLOOR_MS, so on paper they are indistinguishable, but the dead-code
  * branch awaits an audit insert the unknown-code branch has nothing to write.
  * The floor hides that only while both fit inside it: against a database a
  * couple of hundred milliseconds away, "exists" costs two round trips and
@@ -942,11 +844,11 @@ async function refuseUnknownCode(admin: AdminClient, startedAt: number): Promise
 
 /** A distinct shape from refuse(): it is our fault, not the code's, and it says
  *  nothing about whether any code exists. */
-async function serverError(startedAt: number): Promise<NextResponse> {
+async function serverError(startedAt: number, status: 500 | 503 = 500): Promise<NextResponse> {
   await padToFloor(startedAt)
   return NextResponse.json(
     { ok: false, error: 'Something went wrong on our end. Try again in a moment.' },
-    { status: 500 }
+    { status }
   )
 }
 
