@@ -44,48 +44,36 @@ export function utcDateKey(now = new Date()): string {
 
 // --- Composed digest payload (stored at preferences.digest.latest) -----------
 
-export interface DigestTopJob {
-  jobId: string
+export type DigestSectionId =
+  | 'replies'
+  | 'approvals'
+  | 'follow_ups'
+  | 'new_roles'
+  | 'gone_quiet'
+  | 'working'
+
+/** One line of the digest: a plain sentence with the exact numbers, and where to act on it. */
+export interface DigestItem {
+  text: string
+  /** A path in the app (starts with "/") or an absolute link to a posting. Null when there is nothing to open. */
+  href: string | null
+}
+
+export interface DigestSection {
+  id: DigestSectionId
   title: string
-  companyName: string | null
-  /** strong | possible | stretch | cannot_assess, or null before the role is assessed. */
-  chance: string | null
-  url: string | null
+  items: DigestItem[]
 }
 
-export interface DigestStaleApp {
-  applicationId: string
-  jobTitle: string
-  companyName: string | null
-  stage: string
-  daysStale: number
-}
-
-export interface DigestPrepReady {
-  jobId: string
-  jobTitle: string
-  companyName: string | null
-  stage: string
-}
-
-export interface DigestFollowUpDue {
-  id: string
-  note: string
-  dueDate: string
-  overdue: boolean
-}
-
-/** The fully composed digest — safe to store as JSON and render in-app. */
+/** The fully composed digest, safe to store as JSON and render in-app. */
 export interface ComposedDigest {
   /** YYYY-MM-DD (UTC) this digest was composed for. */
   date: string
   subject: string
   text: string
   html: string
-  topJobs: DigestTopJob[]
-  prepReady: DigestPrepReady[]
-  staleApps: DigestStaleApp[]
-  followUpsDue: DigestFollowUpDue[]
-  /** True when there is nothing actionable to report. */
+  /** Sections that have something to say, in the order they are shown. */
+  sections: DigestSection[]
+  /** True when there is nothing that needs the user today. */
   empty: boolean
 }
