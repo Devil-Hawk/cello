@@ -159,6 +159,13 @@ const PROMPT_BUILDERS: Record<string, string> = {
     'lib/graph/verify/matcher.ts / cv-tailor.ts / outreach.ts). Uses frameJobTextList, same ' +
     "batch shape as lib/harness/agents/bulk_matcher.ts, so this file's own scan-mutation check " +
     'documented in its header stays true.',
+  'apps/web/lib/scoring/requirements.ts':
+    'extractRequirements puts each posting description in the extraction prompt. Frames the batch ' +
+    'with frameJobTextList (one preface, one marker per posting). The output is then grounded in code: ' +
+    'a requirement whose quote is not verbatim in the posting is discarded.',
+  'apps/web/lib/scoring/want-judge.ts':
+    'judgeWant puts a posting excerpt per role in the judging prompt. Frames the batch with ' +
+    'frameJobTextList. The model only returns a probability and one sentence, clamped and parsed in code.',
 }
 
 /**
