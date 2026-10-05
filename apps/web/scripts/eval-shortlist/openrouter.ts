@@ -24,6 +24,8 @@ export class FreeModelClient {
   live = 0
   cached = 0
   failures = 0
+  /** Set when a request cap stopped the run, so a report built after that can say its figures are incomplete. */
+  stoppedBy: string | null = null
   private last = 0
   private chain: Promise<void> = Promise.resolve()
   readonly byModel = new Map<string, number>()
@@ -37,6 +39,11 @@ export class FreeModelClient {
   }
 
   /** Serialises live requests and spaces them out. */
+  private stop(message: string): Error {
+    this.stoppedBy = message
+    return new Error(message)
+  }
+
   private async slot(): Promise<void> {
     const prev = this.chain
     let release!: () => void
@@ -60,8 +67,9 @@ export class FreeModelClient {
 
   private async live_(url: string, body: unknown, model: string, timeoutMs = 240_000, attempts = 8): Promise<any> {
     for (let attempt = 0; attempt < attempts; attempt++) {
-      if (this.live >= this.opts.maxRequests) throw new Error(`request budget of ${this.opts.maxRequests} live requests reached`)
-      if (this.failures >= this.opts.maxRequests) throw new Error('too many failed requests, stopping')
+      if (this.live >= this.opts.maxRequests) throw this.stop(`request budget of ${this.opts.maxRequests} live requests reached`)
+      // Refused attempts cost time and no quota, so they get their own, larger cap.
+      if (this.failures >= this.opts.maxRequests * 4) throw this.stop('too many failed requests, stopping')
       await this.slot()
       let r: { status: number; json: any }
       try {
@@ -70,6 +78,11 @@ export class FreeModelClient {
         this.failures += 1
         await new Promise((res) => setTimeout(res, 4000 * (attempt + 1)))
         continue
+      }
+      // The daily allowance does not come back by waiting a few seconds, so stop and say when it does.
+      if (r.status === 429 && String(r.json?.error?.message ?? '').includes('per-day')) {
+        const reset = Number(r.json?.error?.metadata?.headers?.['X-RateLimit-Reset'])
+        throw this.stop(`the free-model daily limit is used up${Number.isFinite(reset) ? `; it resets at ${new Date(reset).toISOString()}` : ''}`)
       }
       // A rate-limited or overloaded answer is not an answer: it costs no quota and is retried after a pause.
       if (r.status === 429 || r.status >= 500 || !r.json || r.json.error) {

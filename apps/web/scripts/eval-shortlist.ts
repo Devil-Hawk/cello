@@ -585,6 +585,7 @@ async function main(): Promise<void> {
   const bars = args.quick ? thresholds.quick : thresholds.full
   const final = meanByRound[meanByRound.length - 1]
   const checks: { bar: string; pass: boolean; value: unknown }[] = [
+    { bar: 'the run was not cut short by a request cap, so every figure below is complete', pass: client.stoppedBy === null, value: client.stoppedBy },
     { bar: `held-out p@5 gain from start to last round >= ${bars.p5GainMin}`, pass: final - meanByRound[0] >= bars.p5GainMin, value: round(final - meanByRound[0]) },
     ...(bars.finalAtLeastOldScorer && !args.skipOld ? [{ bar: 'last round p@5 >= Release 1 scorer', pass: final >= summaryRows.oldScorerP5, value: [final, summaryRows.oldScorerP5] }] : []),
     ...(bars.finalAtLeastNaivePoints ? [{ bar: 'last round p@5 >= naive points', pass: final >= summaryRows.naivePointsP5, value: [final, summaryRows.naivePointsP5] }] : []),
