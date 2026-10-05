@@ -60,17 +60,17 @@ describe('CelloSpend', () => {
     spend.reserveSpend.mockImplementation(async () => (order.push('reserve'), { id: 'r1', userId: 'u1', model: 'm', rung: 'R4', estimateUsd: 0.1 }))
     spend.settleSpend.mockImplementation(async () => void order.push('settle'))
     const model = new ScriptedChatModel({
-      model: 'anthropic/claude-sonnet-5',
+      model: 'vendor/paid-model',
       script: [callTools([{ name: 'echo' }]), say('done')],
     })
     await run(createAgent({ model, tools: [echo], middleware: [celloSpend(ctx())] }))
     expect(order).toEqual(['reserve', 'settle', 'reserve', 'settle'])
     // Settled from the usage the model reported, not an estimate.
-    expect(spend.settleSpend).toHaveBeenCalledWith({}, expect.objectContaining({ id: 'r1' }), { model: 'anthropic/claude-sonnet-5', promptTokens: 100, completionTokens: 20 })
+    expect(spend.settleSpend).toHaveBeenCalledWith({}, expect.objectContaining({ id: 'r1' }), { model: 'vendor/paid-model', promptTokens: 100, completionTokens: 20 })
   })
 
   it('settles as failed when the call throws after reserving', async () => {
-    const model = new ScriptedChatModel({ model: 'anthropic/claude-sonnet-5', script: [new Error('provider exploded')] })
+    const model = new ScriptedChatModel({ model: 'vendor/paid-model', script: [new Error('provider exploded')] })
     await expect(run(createAgent({ model, tools: [echo], middleware: [celloSpend(ctx())] }))).rejects.toThrow('provider exploded')
     expect(spend.reserveSpend).toHaveBeenCalledTimes(1)
     // A failed call is settled as failed, never as a charge for tokens it did not use.
@@ -85,7 +85,7 @@ describe('CelloSpend', () => {
 
   it('falls back to a free model when the cap is reached, and the turn completes', async () => {
     capReached()
-    const paid = new ScriptedChatModel({ model: 'anthropic/claude-sonnet-5', script: [say('should not be used')] })
+    const paid = new ScriptedChatModel({ model: 'vendor/paid-model', script: [say('should not be used')] })
     const free = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('answered on the free model')] })
     const agent = createAgent({
       model: paid,
@@ -100,7 +100,7 @@ describe('CelloSpend', () => {
 
   it('a demo has no free fallback, so the cap error reaches the person', async () => {
     capReached()
-    const paid = new ScriptedChatModel({ model: 'anthropic/claude-sonnet-5', script: [say('nope')] })
+    const paid = new ScriptedChatModel({ model: 'vendor/paid-model', script: [say('nope')] })
     const free = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('should not run')] })
     const agent = createAgent({
       model: paid,
@@ -113,7 +113,7 @@ describe('CelloSpend', () => {
 
   it('does not retry a budget error', async () => {
     capReached()
-    const paid = new ScriptedChatModel({ model: 'anthropic/claude-sonnet-5', script: [say('x')] })
+    const paid = new ScriptedChatModel({ model: 'vendor/paid-model', script: [say('x')] })
     const agent = createAgent({
       model: paid,
       tools: [echo],

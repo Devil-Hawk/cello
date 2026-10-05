@@ -1,6 +1,8 @@
+Stale: this describes the engine as replayed in K8d. Chat (K24a) rewrites it.
+
 # The agent engine
 
-This is how Ask Cello works underneath: one orchestrator the person talks to, a few specialists it can hand work to, twelve tools, ten skills, and a small backend that lets the same agent run on a schedule. It replaces the earlier Copilot loop in `lib/graph/copilot.ts`, which stays in place until the list under Retiring is cleared.
+This is how Ask Cello works underneath: one orchestrator the person talks to, a few specialists it can hand work to, twelve tools, nine skills, and a small backend that lets the same agent run on a schedule. It replaces the earlier Copilot loop in `lib/graph/copilot.ts`, which stays in place until the list under Retiring is cleared.
 
 The rule that shapes everything: the agent can draft, but it cannot send. Anything that goes out to another person is a row the person approves.
 
@@ -16,7 +18,7 @@ Run now (UI) ────────────────────┘    
                                    handleContinue ──► executeTurn   orchestrator (Deep Agents)
                                                                     ├─ 12 Cello tools + file tools
                                                                     ├─ skills (read /skills/<name>/SKILL.md)
-                                                                    └─ task ──► scout, writer, coach (workflows)
+                                                                    └─ task ──► scout, writer (workflows)
                                                                               └► researcher (loop, 8 calls, read only)
 ```
 
@@ -29,9 +31,9 @@ Run now (UI) ────────────────────┘    
 | Piece | What it is |
 |---|---|
 | Agent | `deepagents` (`createDeepAgent`) on `langchain` v1 middleware |
-| Orchestration | `@langchain/langgraph`: `StateGraph` for Scout, Writer and Coach, `Send` for fan-out, `interrupt` for questions and handovers |
+| Orchestration | `@langchain/langgraph`: `StateGraph` for Scout and Writer, `Send` for fan-out, `interrupt` for questions and handovers |
 | Model door | `@langchain/openrouter` `ChatOpenRouter`, only in `lib/agents/model.ts`, with the person's own key |
-| Checkpoints and memory | `@langchain/langgraph-checkpoint-postgres` (`PostgresSaver`, `PostgresStore`) in the `langgraph` schema |
+| Checkpoints and memory | `@langchain/langgraph-checkpoint-postgres` (`PostgresSaver`) in the `langgraph` schema |
 | Outside tools | `@langchain/mcp-adapters` `MultiServerMCPClient`, after the SSRF and DNS checks |
 | Streaming | `@langchain/langgraph-sdk` `FetchStreamTransport` and `useStream` on the page |
 | Tracing | `@langfuse/langchain` `CallbackHandler`, one trace per request or occurrence |
@@ -69,7 +71,7 @@ One registry (`lib/agents/tools/registry.ts`) feeds both the agent and Cello's o
 | `people` | Contacts at a company, with how sure each email is |
 | `my_profile` | The person's resume, preferences, dealbreakers, taste or history |
 | `remember` | Saves a fact, only from the person's own quoted words |
-| `create_artifact` | Writes one document (resume, cover letter, email, follow-up, interview prep) as a draft |
+| `create_artifact` | Writes one document (resume, cover letter, email, follow-up) as a draft |
 | `update_artifact` | Revises a document as a new version |
 | `pipeline` | Lists applications by stage, moves one, attaches a document |
 | `request_approval` | Queues a send or a submit for the person to approve. Returns at once |
@@ -82,7 +84,6 @@ The Researcher's `web_search` and `read_page` are not among them. Only the Resea
 
 - Scout: a graph that sources, scores and saves a shortlist. Fans out across sources, four at a time.
 - Writer: draft, review, revise once, save. The reviewer runs code checks (every employer, title and number appears in the profile; length; one ask) and then a judge from a different model family.
-- Coach: builds an interview kit and keeps only the stories a resume line supports.
 - Researcher: a loop of at most 8 model calls with read-only access. Fewer than two independent sources means "not enough public information".
 - Applier: not a subagent. It is reached only through an approved `submit_application`.
 
@@ -94,7 +95,7 @@ Ten skills live in `apps/web/skills/<name>/SKILL.md`: role-fit, tailor-resume, c
 
 ## Memory and files
 
-The agent sees a virtual file system: `/memories` (the person's saved facts, from the store), `/memories/taste.md` (read only, built from their taste statements), `/artifacts` (their documents, versioned), `/skills` (read only) and a scratch area. The orchestrator cannot write `/memories`, `/artifacts` or `/skills` directly; documents change only through `create_artifact` and `update_artifact`, and memory only through `remember`.
+The agent sees a virtual file system: `/memories/taste.md` (read only: the person's last twenty reactions to roles), `/artifacts` (their documents, versioned), `/skills` (read only) and a scratch area. The orchestrator cannot write `/memories`, `/artifacts` or `/skills` directly; documents change only through `create_artifact` and `update_artifact`, and what the person tells Cello to keep only through `remember`.
 
 ## Approvals
 
@@ -157,7 +158,7 @@ A message with `additional_kwargs.cello_event` is an approval result told to the
 
 **Documents.** `GET /api/artifacts?type=&job_id=&limit=&offset=` lists them. `GET /api/artifacts/[id]` returns the document and every version, newest first, with who wrote it. `POST /api/artifacts/[id]` with `{ content }` saves the person's edit as a new version and scores how far they moved from Cello's draft.
 
-**Taste.** `GET /api/taste`, `PATCH /api/taste/[id]` with `{ statement }`, `DELETE /api/taste/[id]`. These use the person's own session, so row rules decide ownership.
+**Taste.** `GET /api/taste` returns the person's last twenty reactions to roles. It uses the person's own session, so row rules decide ownership. A reaction is taken back by undoing it, not by editing taste.
 
 **Realtime.** Subscribe to `postgres_changes` on `agent_tasks` and on `approvals`, filtered by `user_id=eq.<id>`. An `agent_tasks` root row (`parent_id` null) is one request or occurrence; its children are the specialists and fan-out branches. Status is `queued`, `working`, `waiting`, `done`, `partial` or `failed`, and `statusLabel` in `lib/agents/tasks.ts` gives the words to show.
 
@@ -181,7 +182,17 @@ RUN_AGENT_EVALS=1                          nice -n 19 ./node_modules/.bin/vitest
 
 Bars are in `lib/evals/agent/thresholds.json`. Judges come from a different model family than the generators they judge.
 
-RESULTS
+### Measured so far
+
+Before (the earlier Copilot, its own prompt and 19 tools, same 30 messages, qwen3.8-27b, laguna-s-2.1 and nemotron-3-super, free, run on 2026-10-05):
+
+| | overall (majority) | delegation | single |
+|---|---|---|---|
+| earlier Copilot | 60% (18/30) | 50% (5/10) | 65% |
+
+Per model: qwen 77%, nemotron 60%, laguna 17%. Laguna is a reasoning model and 24 of its 30 answers were cut off before any JSON at the 700 token cap used for that run, so the majority was in effect decided by qwen and nemotron, who were both right on 17 of 30. The cap is now 2500 for the earlier Copilot's prompt; that run was not finished (see below), so treat 60% as a floor.
+
+Not measured yet: the new orchestrator on the same cases, the injection set, the researcher set and the skill checks. OpenRouter's free allowance for this account is 1000 requests a day across all `:free` models, and rate-limited retries on two of the models used it up while the baseline ran. It resets at 2026-10-06 00:00 UTC. The commands above are ready; run the old mode again first (the token cap changed), then the new one, and write both into this table. The prompts for the orchestrator, the Researcher and the nine skills are therefore the first versions and have not been tuned against these numbers.
 
 ## Environment
 

@@ -98,7 +98,7 @@ export async function firstAction(modelId: string, message: string): Promise<Fir
 /** The earlier Copilot's first action for the same message: its own prompt, its JSON answer. */
 export async function oldFirstAction(modelId: string, message: string): Promise<{ action: string; raw: string }> {
   const { systemPrompt } = await import('@/lib/graph/copilot')
-  const raw = await freeComplete({ model: modelId, system: systemPrompt(undefined, '', '', '', '', '', '', ''), user: message, json: true, maxTokens: 700 })
+  const raw = await freeComplete({ model: modelId, system: systemPrompt(undefined, '', '', '', '', '', '', ''), user: message, json: true, maxTokens: 2500 })
   return { action: oldAction(raw), raw }
 }
 

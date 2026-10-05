@@ -9,7 +9,7 @@ const base = { admin, userId: 'u1', apiKeys: { openrouter: 'k' } }
 
 describe('code checks', () => {
   it('finds banned words, openers and the em dash, and nothing in plain text', () => {
-    expect(bannedPhrases('I will leverage synergy — it is seamless')).toEqual(['leverage', 'synergy', 'seamless', 'an em dash'])
+    expect(bannedPhrases('I will leverage synergy \u2014 it is seamless')).toEqual(['leverage', 'synergy', 'seamless', 'an em dash'])
     expect(bannedPhrases('I am excited to share. Just checking in.')).toEqual(['i am excited to', 'just checking in'])
     expect(bannedPhrases('I built the billing system at Acme.')).toEqual([])
   })

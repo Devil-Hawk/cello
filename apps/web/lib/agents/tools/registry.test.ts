@@ -49,7 +49,7 @@ describe('the twelve tools', () => {
     for (const t of CELLO_TOOLS) {
       expect(t.description.length, t.name).toBeGreaterThan(80)
       expect(t.description.length, t.name).toBeLessThan(900)
-      expect(t.description, t.name).not.toMatch(/—/)
+      expect(t.description, t.name).not.toMatch(/\u2014/)
       expect(t.description, t.name).not.toMatch(/\b(thread|graph|tick)\b/i)
     }
   })

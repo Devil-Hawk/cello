@@ -82,7 +82,7 @@ describe('the nine skills', () => {
       })
 
       it('has no em dash and no engine words for the person to read', () => {
-        expect(skill).not.toContain('—')
+        expect(skill).not.toContain('\u2014')
         expect(skill).not.toMatch(/\b(agent run|thread|graph|tick)\b/i)
       })
 
@@ -106,7 +106,7 @@ describe('the nine skills', () => {
         for (const o of evals.output) {
           // An empty answer and a rambling em dash answer must each break at least one check.
           expect(runChecks(o.checks, '').failures.length).toBeGreaterThan(0)
-          expect(runChecks(o.checks, 'It is fine — trust me. '.repeat(40)).failures.length).toBeGreaterThan(0)
+          expect(runChecks(o.checks, 'It is fine \u2014 trust me. '.repeat(40)).failures.length).toBeGreaterThan(0)
         }
       })
     })

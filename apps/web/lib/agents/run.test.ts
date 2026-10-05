@@ -264,7 +264,7 @@ describe('errors', () => {
   it('all of the sentences are plain: no run, thread, step, graph or agent, no exclamation marks, no em dashes', () => {
     for (const copy of [...Object.values(AGENT_COPY), budgetCopy()]) {
       expect(copy).not.toMatch(/\b(run|thread|step|graph|agent|tick)\b/i)
-      expect(copy).not.toMatch(/[!—]/)
+      expect(copy).not.toMatch(/[!\u2014]/)
     }
   })
 })

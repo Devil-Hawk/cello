@@ -224,7 +224,7 @@ describe('Writer: outreach and revision', () => {
 
   it('a banned phrase and an em dash are caught', async () => {
     const { deps } = setup()
-    mocks.outreach.mockResolvedValue({ subject: 's', body: 'Hi Sam, I am excited to leverage my billing work at Acme — could we talk?', tokensUsed: 0 })
+    mocks.outreach.mockResolvedValue({ subject: 's', body: 'Hi Sam, I am excited to leverage my billing work at Acme \u2014 could we talk?', tokensUsed: 0 })
     const result = await runWriter(deps, { type: 'outreach_email', contact_id: 'k1' })
     expect(result.status).toBe('needs_attention')
     expect(result.review?.checks.find((c) => c.name === 'Plain wording')?.detail).toMatch(/leverage/)

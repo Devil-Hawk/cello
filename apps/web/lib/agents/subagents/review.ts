@@ -60,7 +60,7 @@ export function bannedPhrases(text: string): string[] {
   const hits: string[] = []
   for (const w of BANNED_WORDS) if (new RegExp(`\\b${w.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}`, 'i').test(lower)) hits.push(w)
   for (const p of [...BANNED_OPENERS, ...BANNED_STATUS]) if (lower.includes(p)) hits.push(p)
-  if (text.includes('—')) hits.push('an em dash')
+  if (text.includes('\u2014')) hits.push('an em dash')
   return hits
 }
 
