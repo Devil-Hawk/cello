@@ -93,6 +93,20 @@ function slug(s: string): string {
   return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '').slice(0, 80)
 }
 
+/** The employer's own requisition id: identifier as a string, a number, or a PropertyValue's value. */
+function identifierOf(node: Json): string | undefined {
+  const raw = node.identifier
+  const first = Array.isArray(raw) ? raw[0] : raw
+  const value = isObject(first) ? first.value : first
+  if (typeof value === 'number') return String(value)
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, 80) : undefined
+}
+
+/** True when the markup is about an event, not a role (a career fair posted as a JobPosting). */
+function isEventNode(node: Json): boolean {
+  return /\b(career fair|webinar|info(?:rmation)? session|hackathon|meetup)\b/i.test(str(node.title) || str(node.name))
+}
+
 function isoDate(v: unknown): string | undefined {
   if (typeof v !== 'string' || !v.trim()) return undefined
   const t = Date.parse(v)
@@ -150,6 +164,9 @@ export function readJobPostings(html: string, pageUrl: string): AtsJob[] {
     const description = descriptionOf(node.description)
     const salary = salaryOf(node)
     const postedAt = isoDate(node.datePosted)
+    const validThrough = isoDate(node.validThrough)
+    const employer = str(node.hiringOrganization)
+    const requisitionId = identifierOf(node)
     jobs.push({
       title,
       url,
@@ -158,6 +175,10 @@ export function readJobPostings(html: string, pageUrl: string): AtsJob[] {
       ...(description ? { description } : {}),
       ...(salary ? { salary } : {}),
       ...(postedAt ? { postedAt } : {}),
+      ...(validThrough ? { validThrough } : {}),
+      ...(employer ? { employer } : {}),
+      ...(requisitionId ? { requisitionId } : {}),
+      ...(isEventNode(node) ? { isEvent: true } : {}),
     })
   }
   return jobs

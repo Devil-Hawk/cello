@@ -1,0 +1,2 @@
+HTTP/1.1 301 Moved Permanently
+location: https://job-boards.greenhouse.io/embed/job_app?for=digitalocean98&token=8212263

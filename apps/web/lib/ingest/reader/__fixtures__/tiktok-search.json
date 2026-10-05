@@ -1,0 +1,344 @@
+{
+ "code": 0,
+ "data": {
+  "job_post_list": [
+   {
+    "id": "7117084434700110094",
+    "code": "V0220",
+    "title": "Data Engineer, E-Commerce",
+    "description": "As a Data Engineer in the Data Platform E-Commerce team, you will have the opportunity to build, optimize and grow one of the largest data platforms in the world. You'll have the opportunity to gain hands-on experience on all kinds of systems in the data platform ecosystem. Your work will have a direct and huge impact on the company's core products as well as hundreds of millions of users.\n\nResponsibilities - What You'll Do\n\u2022 Design and build data transformations efficiently and reliably for dif",
+    "requirement": "Minimum Qualifications\n\u2022 BS or MS degree in Computer Science or related technical field or equivalent practical experience;\n\u2022 Experience in the Big Data technologies(Hadoop, M/R, Hive, Spark, Metastore, Presto, Flume, Kafka, ClickHouse, Flink etc.);\n\u2022 Experience with performing data analysis, data ingestion and data integration;\n\u2022 Experience with ETL(Extraction, Transformation & Loading) and architecting data systems;\n\u2022 Experience with schema design, data modeling and SQL queries;\n\u2022 Passionate a",
+    "recruit_type": {
+     "id": "101",
+     "name": null,
+     "en_name": "Regular",
+     "i18n_name": "Regular"
+    },
+    "job_category": {
+     "id": "6704215888985327886",
+     "name": null,
+     "en_name": "Big data",
+     "i18n_name": "Big data",
+     "parent": {
+      "id": "6704215862603155720",
+      "name": null,
+      "en_name": "R&D",
+      "i18n_name": "R&D",
+      "parent": null
+     }
+    },
+    "city_info": {
+     "code": "CT_1103355",
+     "location_type": 3,
+     "name": null,
+     "en_name": "San Jose",
+     "i18n_name": "San Jose",
+     "parent": {
+      "code": "ST_31",
+      "location_type": 2,
+      "name": null,
+      "en_name": "California",
+      "i18n_name": "California",
+      "parent": {
+       "code": "CN_6",
+       "location_type": 1,
+       "name": null,
+       "en_name": "United States of America",
+       "i18n_name": "United States of America",
+       "parent": null
+      }
+     }
+    },
+    "tag_list": null,
+    "job_subject": null,
+    "vacancies": null,
+    "department_info": null,
+    "job_post_info": {
+     "min_salary": null,
+     "max_salary": null,
+     "currency": null,
+     "required_degree": null,
+     "experience": null,
+     "sequence": null,
+     "min_level": null,
+     "max_level": null,
+     "highlight_list": null,
+     "job_post_object_value_list": null,
+     "expiry_time": null
+    },
+    "process_type": null,
+    "channel_online_status": null
+   },
+   {
+    "id": "7319565950097017138",
+    "code": "A242692",
+    "title": "Data Engineer, Global Live",
+    "description": "The Data Platform Global Live team is dedicated to empowering the growth of TikTok LIVE business through big data. We support our businesses in achieving their missions by building high quality real-time and offline data warehouses, creating various forms of efficient and data-friendly data assets, and exploring and implementing business oriented data solutions. We provide stable and reliable data capabilities for daily operations, analyses, decision-making of TikTok LIVE features, in addition t",
+    "requirement": "Minimum Qualifications:\n- Good experience in data solutions, such as data consulting, product development, and data tools creation.\n- Strong problem-solving and analytical skills with the ability to translate business needs into technical solutions and data metrics.\n- Have an understanding of data warehousing and the construction ideas of the data system.\n- Experience with coding (SQL, Python, etc.)\n- Passionate and self-motivated about using data to drive business decisions.\n",
+    "recruit_type": {
+     "id": "101",
+     "name": null,
+     "en_name": "Regular",
+     "i18n_name": "Regular"
+    },
+    "job_category": {
+     "id": "6704215888985327886",
+     "name": null,
+     "en_name": "Big data",
+     "i18n_name": "Big data",
+     "parent": {
+      "id": "6704215862603155720",
+      "name": null,
+      "en_name": "R&D",
+      "i18n_name": "R&D",
+      "parent": null
+     }
+    },
+    "city_info": {
+     "code": "CT_1103355",
+     "location_type": 3,
+     "name": null,
+     "en_name": "San Jose",
+     "i18n_name": "San Jose",
+     "parent": {
+      "code": "ST_31",
+      "location_type": 2,
+      "name": null,
+      "en_name": "California",
+      "i18n_name": "California",
+      "parent": {
+       "code": "CN_6",
+       "location_type": 1,
+       "name": null,
+       "en_name": "United States of America",
+       "i18n_name": "United States of America",
+       "parent": null
+      }
+     }
+    },
+    "tag_list": null,
+    "job_subject": null,
+    "vacancies": null,
+    "department_info": null,
+    "job_post_info": {
+     "min_salary": null,
+     "max_salary": null,
+     "currency": null,
+     "required_degree": null,
+     "experience": null,
+     "sequence": null,
+     "min_level": null,
+     "max_level": null,
+     "highlight_list": null,
+     "job_post_object_value_list": null,
+     "expiry_time": null
+    },
+    "process_type": null,
+    "channel_online_status": null
+   },
+   {
+    "id": "7184879550440950076",
+    "code": "I0947",
+    "title": "Data Engineer, E-Commerce",
+    "description": "As a data engineer in the Data Platform E-Commerce team, you will have the opportunity to build, optimize and grow one of the largest data platforms in the world. You'll have the opportunity to gain hands-on experience on all kinds of systems in the data platform ecosystem. Your work will have a direct and huge impact on the company's core products as well as hundreds of millions of users.\n\nResponsibilities - What You'll Do\n\u2022 Design and build data transformations efficiently and reliably for dif",
+    "requirement": "Minimum Qualifications: \n\u2022 BS or MS degree in Computer Science or related technical field or equivalent practical experience;\n\u2022 Experience in the Big Data technologies(Hadoop, M/R, Hive, Spark, Metastore, Presto, Flume, Kafka, ClickHouse, Flink etc.);\n\u2022 Experience with performing data analysis, data ingestion and data integration;\n\u2022 Experience with ETL(Extraction, Transformation & Loading) and architecting data systems;\n\u2022 Experience with schema design, data modeling and SQL queries;\n\u2022 Passionate",
+    "recruit_type": {
+     "id": "101",
+     "name": null,
+     "en_name": "Regular",
+     "i18n_name": "Regular"
+    },
+    "job_category": {
+     "id": "6704215888985327886",
+     "name": null,
+     "en_name": "Big data",
+     "i18n_name": "Big data",
+     "parent": {
+      "id": "6704215862603155720",
+      "name": null,
+      "en_name": "R&D",
+      "i18n_name": "R&D",
+      "parent": null
+     }
+    },
+    "city_info": {
+     "code": "CT_157",
+     "location_type": 3,
+     "name": null,
+     "en_name": "Seattle",
+     "i18n_name": "Seattle",
+     "parent": {
+      "code": "ST_54",
+      "location_type": 2,
+      "name": null,
+      "en_name": "Washington",
+      "i18n_name": "Washington",
+      "parent": {
+       "code": "CN_6",
+       "location_type": 1,
+       "name": null,
+       "en_name": "United States of America",
+       "i18n_name": "United States of America",
+       "parent": null
+      }
+     }
+    },
+    "tag_list": null,
+    "job_subject": null,
+    "vacancies": null,
+    "department_info": null,
+    "job_post_info": {
+     "min_salary": null,
+     "max_salary": null,
+     "currency": null,
+     "required_degree": null,
+     "experience": null,
+     "sequence": null,
+     "min_level": null,
+     "max_level": null,
+     "highlight_list": null,
+     "job_post_object_value_list": null,
+     "expiry_time": null
+    },
+    "process_type": null,
+    "channel_online_status": null
+   },
+   {
+    "id": "6834664619631741192",
+    "code": "J2861",
+    "title": "Data Engineer - Data Platform",
+    "description": "As a data engineer in the data platform team, you will have the opportunity to build, optimize and grow one of the largest data platforms in the world. You'll have the opportunity to gain hands-on experience on all kinds of systems in the data platform ecosystem. Your work will have a direct and huge impact on the company's core products as well as hundreds of millions of users.\n\nResponsibilities - What You'll Do\n\u2022 Design and build data transformations efficiently and reliably for different purp",
+    "requirement": "Minimum Qualifications: \n\u2022 BS or MS degree in Computer Science or related technical field or equivalent practical experience;\n\u2022 Experience in the Big Data technologies(Hadoop, M/R, Hive, Spark, Metastore, Presto, Flume, Kafka, ClickHouse, Flink etc.);\n\u2022 Experience with performing data analysis, data ingestion and data integration;\n\u2022 Experience with ETL(Extraction, Transformation & Loading) and architecting data systems;\n\u2022 Experience with schema design, data modeling and SQL queries;\n\u2022 Passionate",
+    "recruit_type": {
+     "id": "101",
+     "name": null,
+     "en_name": "Regular",
+     "i18n_name": "Regular"
+    },
+    "job_category": {
+     "id": "6704215862603155720",
+     "name": null,
+     "en_name": "R&D",
+     "i18n_name": "R&D",
+     "parent": null
+    },
+    "city_info": {
+     "code": "CT_1103355",
+     "location_type": 3,
+     "name": null,
+     "en_name": "San Jose",
+     "i18n_name": "San Jose",
+     "parent": {
+      "code": "ST_31",
+      "location_type": 2,
+      "name": null,
+      "en_name": "California",
+      "i18n_name": "California",
+      "parent": {
+       "code": "CN_6",
+       "location_type": 1,
+       "name": null,
+       "en_name": "United States of America",
+       "i18n_name": "United States of America",
+       "parent": null
+      }
+     }
+    },
+    "tag_list": null,
+    "job_subject": null,
+    "vacancies": null,
+    "department_info": null,
+    "job_post_info": {
+     "min_salary": null,
+     "max_salary": null,
+     "currency": null,
+     "required_degree": null,
+     "experience": null,
+     "sequence": null,
+     "min_level": null,
+     "max_level": null,
+     "highlight_list": null,
+     "job_post_object_value_list": null,
+     "expiry_time": null
+    },
+    "process_type": null,
+    "channel_online_status": null
+   },
+   {
+    "id": "7164188094698555655",
+    "code": "X9644",
+    "title": "Senior Software Engineer, Data Platform - Experimentation & Evaluation",
+    "description": "Team Introduction\nOur mission in experimentation and evaluation team is to build the next-gen A/B testing platform, that empowers the company to make data-driven decision for the products. The supported scenarios include recommendation, push, ads, search, mobile app, UI interaction and service upgrades etc.\nOur platform's capabilities cover the entire experiment life cycle, from experiment design, experiment creation, metrics calculation, statistical analysis to final evaluation and launch. In t",
+    "requirement": "Minimum Qualifications\n- BS or MS degree in Computer Science or a related technical field, or equivalent practical experience\n- Strong back-end engineering skills\n- Experience with big data technologies such as Hadoop, MapReduce, Hive, Spark, Metastore, Presto, Flume, Kafka, ClickHouse, or Flink\n- Experience with data analysis, data ingestion, and data integration\n- Solid communication and collaboration skills\n\nPreferred Qualifications\n- Industry experience building large-scale distributed syste",
+    "recruit_type": {
+     "id": "101",
+     "name": null,
+     "en_name": "Regular",
+     "i18n_name": "Regular"
+    },
+    "job_category": {
+     "id": "6704215888985327886",
+     "name": null,
+     "en_name": "Big data",
+     "i18n_name": "Big data",
+     "parent": {
+      "id": "6704215862603155720",
+      "name": null,
+      "en_name": "R&D",
+      "i18n_name": "R&D",
+      "parent": null
+     }
+    },
+    "city_info": {
+     "code": "CT_1103355",
+     "location_type": 3,
+     "name": null,
+     "en_name": "San Jose",
+     "i18n_name": "San Jose",
+     "parent": {
+      "code": "ST_31",
+      "location_type": 2,
+      "name": null,
+      "en_name": "California",
+      "i18n_name": "California",
+      "parent": {
+       "code": "CN_6",
+       "location_type": 1,
+       "name": null,
+       "en_name": "United States of America",
+       "i18n_name": "United States of America",
+       "parent": null
+      }
+     }
+    },
+    "tag_list": null,
+    "job_subject": null,
+    "vacancies": null,
+    "department_info": null,
+    "job_post_info": {
+     "min_salary": null,
+     "max_salary": null,
+     "currency": null,
+     "required_degree": null,
+     "experience": null,
+     "sequence": null,
+     "min_level": null,
+     "max_level": null,
+     "highlight_list": null,
+     "job_post_object_value_list": null,
+     "expiry_time": null
+    },
+    "process_type": null,
+    "channel_online_status": null
+   }
+  ],
+  "count": 1731,
+  "BaseResp": {
+   "StatusMessage": "Success",
+   "StatusCode": 0,
+   "Extra": null
+  }
+ },
+ "message": "ok",
+ "error": null
+}
