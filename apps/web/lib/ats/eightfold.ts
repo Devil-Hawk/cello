@@ -205,7 +205,13 @@ async function fetchJobs(token: string, ctx?: FetchContext): Promise<AtsJob[]> {
 
   const jobs = [...byId.values()]
   // The search lists no body; the few that have none stored yet get one.
-  const needBody = jobs.filter((j) => !isStalePosting(j.postedAt) && !j.description && !ctx?.hasDescription?.(j.externalId)).slice(0, DESCRIPTION_BUDGET)
+  // The search words decide which: roles whose title carries one of them (the person's targets) are read first.
+  const words = queries.flatMap((q) => q.toLowerCase().split(/[^a-z0-9+#]+/).filter((w) => w.length > 2))
+  const wanted = (j: AtsJob) => (words.some((w) => j.title.toLowerCase().includes(w)) ? 0 : 1)
+  const needBody = jobs
+    .filter((j) => !isStalePosting(j.postedAt) && !j.description && !ctx?.hasDescription?.(j.externalId))
+    .sort((a, b) => wanted(a) - wanted(b))
+    .slice(0, DESCRIPTION_BUDGET)
   const bodies = await mapWithConcurrency(needBody, 2, (j) => description(flavor, host, domain, j))
   needBody.forEach((j, i) => {
     if (bodies[i]) j.description = bodies[i]

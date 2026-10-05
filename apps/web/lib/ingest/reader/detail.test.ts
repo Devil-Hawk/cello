@@ -34,6 +34,18 @@ describe('readDetail: what a role page says about itself', () => {
     expect((job?.description ?? '').length).toBeGreaterThan(500)
   })
 
+  it('Walmart: the page data (__NEXT_DATA__) gives the store, the text and the qualifications', () => {
+    const url = 'https://careers.walmart.com/us/en/jobs/R-2666783'
+    const d = readDetail(fixture('walmart-job-data.html'), url)
+    expect(d.title).toBe('(USA) Overnight Stocking Coach, Non-Complex')
+    expect(d.location).toBe('ZANESVILLE, OH, United States')
+    expect(d.postedAt).toBe('2026-10-02T23:47:00.285Z')
+    expect(d.description).toContain('Minimum Qualifications')
+    expect(d.description).toContain('retail experience')
+    expect(d.description).toContain('Preferred Qualifications')
+    expect((d.description ?? '').length).toBeGreaterThan(800)
+  })
+
   it('a page whose data names another role does not lend it its place or text', () => {
     const html = '<html><head><title>Data Engineer - Jobs - Careers at Acme</title></head><body><script type="application/json">{"job":{"title":"Chef de Cuisine","description":"Lead the kitchen of our flagship restaurant for many years to come.","locations":[{"name":"Paris","countryName":"France"}]}}</script></body></html>'
     const d = readDetail(html, 'https://acme.test/jobs/1')

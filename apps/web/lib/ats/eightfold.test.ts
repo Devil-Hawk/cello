@@ -123,6 +123,29 @@ describe('eightfold adapter', () => {
     expect(jobs).toHaveLength(20)
   })
 
+  it('reads the few bodies it can afford for the roles that match the search words first', async () => {
+    const page = JSON.parse(fixture('netflix-v2.json')) as { positions: Record<string, unknown>[] }
+    const detailed: string[] = []
+    globalThis.fetch = vi.fn(async (input: unknown) => {
+      const url = String(input)
+      if (url.includes('/api/apply/v2/jobs/')) {
+        detailed.push(url.match(/jobs\/(\d+)/)![1])
+        return json('{"job_description":"<p>Build things.</p>"}')
+      }
+      const positions = Array.from({ length: 10 }, (_, i) => ({
+        ...page.positions[0],
+        id: String(100 + i),
+        posting_name: i < 6 ? `Line Cook ${i}` : `Data Engineer ${i}`,
+        canonicalPositionUrl: `https://explore.jobs.netflix.net/careers/job/${100 + i}`,
+      }))
+      return json(JSON.stringify({ count: 10, positions }))
+    }) as unknown as typeof fetch
+    await eightfold.fetch('explore.jobs.netflix.net_netflix.com', { query: ['data engineer'], sleep: async () => {} })
+    // Ten roles, a budget of eight: the four data roles come first, then the first four cooks.
+    expect(detailed.slice(0, 4).sort()).toEqual(['106', '107', '108', '109'])
+    expect(detailed).toHaveLength(8)
+  })
+
   it('refuses a token that is not a host and a domain', async () => {
     await expect(eightfold.fetch('netflix')).rejects.toThrow('invalid board token')
   })

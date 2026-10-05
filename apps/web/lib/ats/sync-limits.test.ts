@@ -129,9 +129,9 @@ describe('syncJobs: at most 200 open roles per company', () => {
       expect(result.excluded?.capped).toBe(2)
     })
 
-    it('stored roles inside the targets are never swapped for new ones outside them or equal to them', async () => {
+    it('stored roles inside the targets are never swapped for new ones outside them or no newer', async () => {
       const mine = full(200, { title: 'Data Engineer', jobFunction: 'data', postedAt: ago(0) }).map((e, i) => ({ ...e, title: `Data Engineer ${i}` }))
-      const listed = [inTarget(1), role(2, { title: 'Brand Marketing Manager', postedAt: ago(0) })]
+      const listed = [{ ...inTarget(1), postedAt: ago(1) }, role(2, { title: 'Brand Marketing Manager', postedAt: ago(0) })]
       const { upserted, evictAsked } = await run(listed, mine, { targeting })
       expect(upserted).toHaveLength(0)
       expect(evictAsked).toHaveLength(0)

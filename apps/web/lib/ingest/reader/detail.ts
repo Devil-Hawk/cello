@@ -53,7 +53,7 @@ export function pageTitle($: cheerio.CheerioAPI): string {
 export function readDetail(html: string, url: string): RoleDetail {
   const d = readDetailBase(html, url)
   // A page that carries its posting as embedded data (Apple) gives what the markup left empty.
-  const emb = d.employer ? null : readEmbeddedPosting(html)
+  const emb = d.employer ? null : readEmbeddedPosting(html, d.title || undefined)
   const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
   if (!emb || (d.title && !(norm(d.title).includes(norm(emb.title)) || norm(emb.title).includes(norm(d.title))))) return d
   return {
