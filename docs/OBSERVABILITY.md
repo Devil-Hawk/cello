@@ -122,7 +122,6 @@ Optional:
 | --- | --- | --- |
 | `LANGFUSE_CAPTURE_CONTENT` | on | The kill switch. Only an unset or blank value or `1`, `true`, `on`, `yes` keeps prompts and replies on. Anything else, a typo included, turns them off. Tokens, cost and timing still go. |
 | `LANGFUSE_CAPTURE_DEMO_CONTENT` | off | Demo workspaces send no prompt or reply text unless this is `1`, `true`, `on` or `yes`. A trace whose owner is unknown counts as a demo. |
-| `LANGFUSE_CAPTURE_USER_IDS` | unset | Comma-separated profile uuids. When set, only these accounts send prompt and reply text, and every other account sends metadata only. Unset means every non-demo account sends text. A demo is never opened by this list. |
 | `LANGFUSE_SAMPLE_RATE` | `1` | A number from 0 to 1. A value that is not a number means 0, so a typo never raises volume. Chosen per trace by a hash of the trace id, so a trace is sent whole or not at all. The SDK itself never reads this variable, so it is not applied twice. |
 | `LANGFUSE_DEMO_SAMPLE_RATE` | `0.25` | The same for demo traces, which use the lower of the two rates. It keeps a burst of demo visitors from eating the free unit budget. |
 
@@ -162,7 +161,11 @@ Inside a trace the observations nest the way the work did:
   Each has model, parameters, usage, and cost from Cello's own price table (the
   one the budget cap uses), so the two agree. Local CLI and local server calls
   carry an explicit zero cost, so Langfuse never guesses a price. A reply cut
-  off at the token limit is a `WARNING`.
+  off at the token limit is a `WARNING`. When the provider reports cached prompt
+  tokens or reasoning tokens they get their own buckets
+  (`input_cached_tokens`, `output_reasoning_tokens`) and are taken out of
+  `input` and `output`. The `attempt` metadata is 1 for a first try and higher
+  when the provider call was retried.
 - Copilot tools are `tool` observations named for the tool (`list_jobs`,
   `draft_outreach`), siblings of the generation that asked for them. `web_search`
   is a `retriever`. MCP tools are always `call-mcp-tool`, with the server and
@@ -248,11 +251,10 @@ the user id, the session id and the tags. No message text leaves.
 
 Tool results for contacts, company dossiers and applications (other people's
 names, urls and contact details) are sent as a count and ids only, even with
-capture on. That holds for the tool observation and for the copy the Copilot
-replays to the model in later steps: that replayed result is shown as
-`[withheld ...]`. With capture off, each observation carries
-`content: withheld` in its metadata, so an empty input and output is known to be
-deliberate.
+capture on. With capture off, each observation carries `content: withheld` in
+its metadata, so an empty input and output is known to be deliberate. A graph run
+that throws (the Copilot included) puts the scrubbed error message in the root observation's
+output, with capture on only.
 
 ### Redaction
 

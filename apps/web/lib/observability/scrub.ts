@@ -87,12 +87,12 @@ const URL_USERINFO_RE = /\b([a-z][a-z0-9+.-]{1,20}:\/\/)[^\s:@/]{1,256}:[^\s@/]{
 // userPassword). `pass` and `pw` are short enough to hit prose (bypass), so
 // they only match bare or after a `_`/`-` separator.
 const KEY_VALUE_RE =
-  /(?<![A-Za-z0-9])([A-Za-z0-9_-]{0,30}(?:password|passwd|passphrase|pwd|secret|secret[_-]?key|service[_-]?role[_-]?key|aws[_-]?secret[_-]?access[_-]?key|private[_-]?key|token|api[_-]?key|cookie)|(?:[A-Za-z0-9]{1,30}[_-])?(?:pass|pw))(\\?["']?\s{0,8}[:=]\s{0,8})(\\"[^"\\\n]{0,512}\\"|"(?:[^"\\\n]|\\.){0,512}"|'[^'\n]{0,512}'|(?:(?!\\[nrt"])[^\s"',;&]){1,512})/gi
+  /(?<![A-Za-z0-9])([A-Za-z0-9_-]{0,30}(?:password|passwd|passphrase|pwd|secret|secret[_-]?key|service[_-]?role[_-]?key|aws[_-]?secret[_-]?access[_-]?key|private[_-]?key|token|api[_-]?key|cookie)|(?:[A-Za-z0-9]{1,30}[_-])?(?:pass|pw))(\\?["']?\s{0,8}[:=]\s{0,8})(\\"[^"\\\n]{0,512}\\"|"(?:[^"\\\n]|\\.){0,512}"|'[^'\n]{0,512}'|[^\s"',;&]{1,512})/gi
 // A bare password value runs to the next whitespace, '&' and ',' included: a
 // password may contain them, and stopping early leaks the tail. Quoted values
 // are left to KEY_VALUE_RE. Same bounded prefix, one bounded value.
 const PASSWORD_BARE_RE =
-  /(?<![A-Za-z0-9])([A-Za-z0-9_-]{0,30}(?:password|passwd|pwd)(?:\\?["']?)\s{0,8}[:=]\s{0,8})(?![\\"'])(?:(?!\\[nrt"])\S){1,200}/gi
+  /(?<![A-Za-z0-9])([A-Za-z0-9_-]{0,30}(?:password|passwd|pwd)(?:\\?["']?)\s{0,8}[:=]\s{0,8})(?![\\"'])\S{1,200}/gi
 // Phone numbers need a separator, paren or plus so a bare digit run (an epoch,
 // a count, the all-digit tail of a uuid) is never hit; the leading guard keeps
 // a match from starting inside a token, a uuid or a decimal.

@@ -199,3 +199,17 @@ export { isSelfHosted } from '@/lib/self-hosted'
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
+
+/** The cached-prompt and reasoning token counts an OpenAI-style usage object
+ *  reports (`prompt_tokens_details.cached_tokens`, `completion_tokens_details.
+ *  reasoning_tokens`). Both are already included in prompt_tokens and
+ *  completion_tokens. Absent or zero means not reported. */
+export function tokenBuckets(usage: unknown): { cachedTokens?: number; reasoningTokens?: number } {
+  const u = usage as { prompt_tokens_details?: { cached_tokens?: unknown }; completion_tokens_details?: { reasoning_tokens?: unknown } } | null | undefined
+  const cached = u?.prompt_tokens_details?.cached_tokens
+  const reasoning = u?.completion_tokens_details?.reasoning_tokens
+  return {
+    ...(typeof cached === 'number' && cached > 0 ? { cachedTokens: cached } : {}),
+    ...(typeof reasoning === 'number' && reasoning > 0 ? { reasoningTokens: reasoning } : {}),
+  }
+}

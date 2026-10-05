@@ -14,7 +14,7 @@ import type {
 } from 'openai/resources/chat/completions'
 import type { DecryptedApiKeys, LlmResult, LlmRunOptions } from '../types'
 import { ANTHROPIC_THINKING_BUDGET } from '../types'
-import { MissingKeyError, TruncatedResponseError, estimateTokens } from './index'
+import { MissingKeyError, TruncatedResponseError, estimateTokens, tokenBuckets } from './index'
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 export const DEFAULT_MODEL = 'anthropic/claude-sonnet-5'
@@ -119,5 +119,5 @@ export async function callOpenRouter(
     throw new TruncatedResponseError(completionTokens, maxTokens)
   }
 
-  return { content, tokensUsed, promptTokens, completionTokens, model, finishReason, reasoning: reasoningText }
+  return { content, tokensUsed, promptTokens, completionTokens, model, finishReason, reasoning: reasoningText, ...tokenBuckets(usage) }
 }

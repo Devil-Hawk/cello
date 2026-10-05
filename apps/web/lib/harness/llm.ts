@@ -85,6 +85,20 @@ function requestedModel(opts: LlmRunOptions, apiKeys: DecryptedApiKeys, provider
   return opts.model || apiKeys.model || DEFAULT_MODEL
 }
 
+/** Exclusive buckets: cached prompt tokens and reasoning tokens are taken out of
+ *  input and output, so Langfuse prices and sums each token once. */
+function usageDetails(r: LlmResult): Record<string, number> {
+  const cached = Math.min(r.cachedTokens ?? 0, r.promptTokens)
+  const reasoning = Math.min(r.reasoningTokens ?? 0, r.completionTokens)
+  return {
+    input: r.promptTokens - cached,
+    output: r.completionTokens - reasoning,
+    total: r.tokensUsed,
+    ...(cached > 0 ? { input_cached_tokens: cached } : {}),
+    ...(reasoning > 0 ? { output_reasoning_tokens: reasoning } : {}),
+  }
+}
+
 /** The Langfuse generation for one callLlm: model, parameters, usage, cost
  *  and (capture on) the prompt and the reply. Cost comes from OUR price
  *  table. Unmetered backends (local CLI, local server) get explicit zeros so
@@ -95,7 +109,8 @@ function generationPayload(
   provider: string,
   metered: boolean,
   capture: boolean,
-  result: LlmResult | undefined
+  result: LlmResult | undefined,
+  attempt: number
 ): LfPayload {
   const modelParameters: Record<string, string | number> = {}
   if (opts.maxTokens !== undefined) modelParameters.max_tokens = opts.maxTokens
@@ -110,6 +125,8 @@ function generationPayload(
     metadata: {
       provider,
       metered,
+      // 1 is the first try; higher means the provider call was retried.
+      attempt,
       // Local backends report char/4 estimates, not provider token counts.
       ...(provider !== 'openrouter' ? { usage_estimated: true } : {}),
       ...(opts.promptRef ? { prompt_name: opts.promptRef.name } : {}),
@@ -121,7 +138,7 @@ function generationPayload(
   return {
     ...lf,
     model: result.model,
-    usage: { input: result.promptTokens, output: result.completionTokens, total: result.tokensUsed },
+    usage: usageDetails(result),
     cost: metered ? estimateCostDetails(result.model, result.promptTokens, result.completionTokens) : { input: 0, output: 0 },
     metadata: {
       ...lf.metadata,
@@ -185,14 +202,17 @@ export async function callLlm(
   // through to p-retry itself (not just the provider call) so a user
   // cancel/deadline stops retrying immediately instead of waiting out a
   // queued backoff.
+  let attempt = 0
   const runProviderCall = () =>
     pRetry(
-      () =>
-        provider === 'local-cli'
+      () => {
+        attempt += 1
+        return provider === 'local-cli'
           ? callLocalCli(apiKeys, effectiveOpts, signal)
           : provider === 'local-server'
             ? callLocalServer(apiKeys, effectiveOpts, signal)
-            : callOpenRouter(apiKeys, effectiveOpts, signal),
+            : callOpenRouter(apiKeys, effectiveOpts, signal)
+      },
       {
         retries: 3,
         factor: 2,
@@ -236,7 +256,7 @@ export async function callLlm(
                 userId: apiKeys.userId,
                 error: err instanceof Error ? err.message : String(err),
               },
-        (r, _err, capture) => generationPayload(effectiveOpts, apiKeys, provider, metered, capture, r)
+        (r, _err, capture) => generationPayload(effectiveOpts, apiKeys, provider, metered, capture, r, attempt)
       )
     } finally {
       // Only the invocation that CREATED this buffer flushes it — a call

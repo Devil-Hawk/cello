@@ -161,6 +161,28 @@ describe('callLlm -> trace_spans + Langfuse generation', () => {
     expect(input.map((m: { content: string }) => m.content)).toEqual(['sys', 'first', 'second'])
   })
 
+  it('cached and reasoning tokens get their own buckets and leave input and output', async () => {
+    configure()
+    callOpenRouterMock.mockResolvedValue({ content: 'x', tokensUsed: 150, promptTokens: 100, completionTokens: 50, cachedTokens: 40, reasoningTokens: 20, model: 'anthropic/claude-sonnet-5' })
+    await callLlm(keys, { prompt: 'hello' })
+    expect(JSON.parse(String(attr(gen(), 'langfuse.observation.usage_details')))).toEqual({ input: 60, output: 30, total: 150, input_cached_tokens: 40, output_reasoning_tokens: 20 })
+  })
+
+  it('a retried provider call says which attempt answered', async () => {
+    configure()
+    callOpenRouterMock.mockReset()
+    callOpenRouterMock.mockRejectedValueOnce(Object.assign(new Error('overloaded'), { status: 503 }))
+    callOpenRouterMock.mockResolvedValue({ content: 'x', tokensUsed: 10, promptTokens: 6, completionTokens: 4, model: 'anthropic/claude-sonnet-5' })
+    await callLlm(keys, { prompt: 'hello' })
+    expect(attr(gen(), 'langfuse.observation.metadata.attempt')).toBe('2')
+  }, 15_000)
+
+  it('a first-try success is attempt 1', async () => {
+    configure()
+    await callLlm(keys, { prompt: 'hello' })
+    expect(attr(gen(), 'langfuse.observation.metadata.attempt')).toBe('1')
+  })
+
   it('an unmetered backend (local server) has explicit zero cost so Langfuse infers none', async () => {
     configure()
     callLocalServerMock.mockResolvedValue({ content: 'hi', tokensUsed: 30, promptTokens: 20, completionTokens: 10, model: 'llama3' })

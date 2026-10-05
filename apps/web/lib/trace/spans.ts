@@ -269,7 +269,7 @@ export class SpanBuffer {
 
   /** Prompt and completion text may be sent for this trace. */
   get captureContent(): boolean {
-    return this.exportEnabled && contentCaptureFor(this.meta.isDemo, this.userId)
+    return this.exportEnabled && contentCaptureFor(this.meta.isDemo)
   }
 
   record(span: Omit<SpanRecord, 'trace_id' | 'user_id' | 'thread_id'>): void {

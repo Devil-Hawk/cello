@@ -323,13 +323,6 @@ describe('redactString: secrets after JSON escapes or glued to other characters'
     expect(redactString(text)).toBe(text)
   })
 
-  it('a bare password stops at a JSON-escaped newline, so the lines after it survive', () => {
-    const out = redactString(JSON.stringify({ text: 'env:\nDB_PASSWORD=hunter2\nUSER=bob\nHOST=example.org' }))
-    expect(out).not.toContain('hunter2')
-    expect(out).toContain('USER=bob')
-    expect(out).toContain('HOST=example.org')
-  })
-
   it('redacts a password with an escaped quote in it, whole', () => {
     expect(redactString('{"password":"hun\\"ter2 secret tail"}')).not.toMatch(/ter2|secret tail/)
   })

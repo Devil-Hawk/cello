@@ -183,6 +183,10 @@ export interface LlmResult {
   tokensUsed: number
   promptTokens: number
   completionTokens: number
+  /** Part of promptTokens the provider served from its cache, when it says so. */
+  cachedTokens?: number
+  /** Part of completionTokens spent on reasoning, when the provider says so. */
+  reasoningTokens?: number
   model: string
   /**
    * Why the model stopped. 'length' means the response hit max_tokens and the

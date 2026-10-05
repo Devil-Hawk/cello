@@ -462,7 +462,7 @@ export async function invokeGraphForUser(args: InvokeGraphForUserArgs): Promise<
         ),
       (_res, err) =>
         err ? { surface, threadId, error: err instanceof Error ? err.message : String(err) } : { surface, threadId },
-      (res, _err, capture) => ({
+      (res, err, capture) => ({
         name: traceName,
         type: trace?.type ?? defaults.type,
         metadata: { surface },
@@ -471,7 +471,13 @@ export async function invokeGraphForUser(args: InvokeGraphForUserArgs): Promise<
         ...(capture
           ? {
               input: trace?.input,
-              output: spanBuffer.meta.output ?? (res !== undefined && trace?.outputOf ? trace.outputOf(res) : undefined),
+              output:
+                spanBuffer.meta.output ??
+                (res !== undefined && trace?.outputOf
+                  ? trace.outputOf(res)
+                  : err
+                    ? { error: err instanceof Error ? err.message : String(err) }
+                    : undefined),
             }
           : {}),
       })

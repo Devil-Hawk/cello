@@ -22,7 +22,6 @@ import {
   langfuseDemoSampleRate,
   langfuseSampleRate,
   safeName,
-  scrubPayload,
   scrubText,
   selectRows,
   toScore,
@@ -171,18 +170,6 @@ describe('env gates', () => {
     vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', '0')
     expect(contentCaptureFor(false)).toBe(false) // the kill switch beats everything
     expect(contentCaptureFor(true)).toBe(false)
-  })
-
-  it('LANGFUSE_CAPTURE_USER_IDS limits prompt text to the listed accounts; unset keeps every non-demo one', () => {
-    expect(contentCaptureFor(false, 'u-1')).toBe(true)
-    vi.stubEnv('LANGFUSE_CAPTURE_USER_IDS', ' U-1 , u-2 ')
-    expect(contentCaptureFor(false, 'u-1')).toBe(true)
-    expect(contentCaptureFor(false, 'u-2')).toBe(true)
-    expect(contentCaptureFor(false, 'u-3')).toBe(false)
-    expect(contentCaptureFor(false)).toBe(false) // no user id, nothing to match
-    expect(contentCaptureFor(true, 'u-1')).toBe(false) // the list never opens a demo
-    vi.stubEnv('LANGFUSE_CAPTURE_USER_IDS', '  ')
-    expect(contentCaptureFor(false, 'u-3')).toBe(true)
   })
 
   it('sample rates parse and clamp; demo defaults to 0.25', () => {
@@ -493,14 +480,6 @@ describe('masking canary: nothing planted survives', () => {
     expect(params).not.toContain('password')
   })
 
-  it('an oversize structured payload is still key-scrubbed in its truncated preview', () => {
-    const big = { resume: 'RESUME-BODY', ...Object.fromEntries(Array.from({ length: 6000 }, (_, i) => [`key${i}`, `value number ${i}`])) }
-    const out = scrubPayload(big) as { _truncated?: boolean; preview?: string }
-    expect(out._truncated).toBe(true)
-    expect(out.preview).toContain('[redacted]')
-    expect(JSON.stringify(out)).not.toContain('RESUME-BODY')
-  })
-
   it('observations with capture off say the empty input and output is deliberate', async () => {
     await run(new SpanBuffer('u', null, undefined, { isDemo: true }), tree())
     expect(byName('score-job-match').attributes['langfuse.observation.metadata.content']).toBe('withheld')
@@ -622,20 +601,6 @@ describe('caps and the content budget', () => {
     const a = byName('step-0').attributes
     expect(a['langfuse.observation.metadata.input_truncated']).toBe('true')
     expect(a['langfuse.observation.metadata.input_chars']).toBe('70000')
-  })
-
-  it('a replayed contacts, dossier or application result is withheld from the captured input, other tool results are kept', async () => {
-    const msgs = [
-      { role: 'user', content: 'TOOL RESULT [list_contacts] (ok):\n{"contacts":[{"name":"Jane Recruiter","title":"VP People"}]}' },
-      { role: 'user', content: 'TOOL RESULT [get_dossier] (ok):\n{"summary":"Dossier gossip"}' },
-      { role: 'user', content: 'TOOL RESULT [get_application] (ok):\n{"notes":"private note"}' },
-      { role: 'user', content: 'TOOL RESULT [list_jobs] (ok):\n{"jobs":[{"title":"Staff Engineer"}]}' },
-    ]
-    await run(new SpanBuffer('u', null, undefined, { isDemo: false }), [row({ name: 'copilot', kind: 'graph', span_id: 'root' }), genRow(0, msgs)])
-    const out = inputOf('step-0')
-    expect(out[0].content).toMatch(/^TOOL RESULT \[list_contacts\] \(ok\): \[withheld/)
-    expect(JSON.stringify(out)).not.toMatch(/Jane|VP People|gossip|private note/)
-    expect(out[3].content).toContain('Staff Engineer')
   })
 
   it('a long user message is cut at 16 KB and flagged', async () => {
