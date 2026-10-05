@@ -40,6 +40,14 @@ export interface DetectInput {
 export interface FetchContext {
   /** Injectable sleep for tests; defaults to setTimeout. */
   sleep?: (ms: number) => Promise<void>
+  /**
+   * True when a job with this externalId is already stored WITH a description.
+   * A provider whose list call carries no body (Workday, SmartRecruiters) uses
+   * it to spend its per-run detail budget on the postings that still lack one,
+   * instead of re-reading the same newest few every refresh and leaving the
+   * rest of a large board empty forever.
+   */
+  hasDescription?: (externalId: string) => boolean
 }
 
 export interface AtsProvider {
@@ -48,6 +56,12 @@ export interface AtsProvider {
   detect(input: DetectInput): { token: string } | null
   /** Fetch all open roles for a board token. Throws on transport failure. */
   fetch(token: string, ctx?: FetchContext): Promise<AtsJob[]>
+  /**
+   * Set by a provider that returns at most this many postings however many are
+   * open. A list that reaches the cap is a window, not the whole board, so a
+   * posting missing from it has not necessarily closed.
+   */
+  maxJobs?: number
 }
 
 /** Shape persisted at companies.metadata.ats (column is additive/optional). */

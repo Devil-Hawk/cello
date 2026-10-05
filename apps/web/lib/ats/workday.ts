@@ -18,7 +18,7 @@
 // careers URL only — which is the common case, since that URL is exactly what
 // a company publishes.
 
-import type { AtsJob, AtsProvider, DetectInput } from './types'
+import type { AtsJob, AtsProvider, DetectInput, FetchContext } from './types'
 import { isValidToken } from './types'
 import { assertAllowedHostSuffix, fetchJson } from './http'
 import { htmlToPlainText } from './html'
@@ -44,11 +44,12 @@ const PAGE_SIZE = 20
 const MAX_PAGES = 25
 
 /**
- * How many postings get their body fetched per refresh. Same trade-off, and
- * the same newest-first reasoning, as ./smartrecruiters.ts: the list response
- * carries no description at all, only a per-posting detail call does.
+ * How many postings get their body fetched per refresh. The list response
+ * carries no description at all, only a per-posting detail call does, so the
+ * budget goes to postings that have no stored body yet (see
+ * FetchContext.hasDescription) and a large board fills in over a few refreshes.
  */
-const DESCRIPTION_BUDGET = 25
+const DESCRIPTION_BUDGET = 40
 const DESCRIPTION_CONCURRENCY = 4
 
 interface WorkdayJobPosting {
@@ -161,7 +162,7 @@ async function fetchDetail(
   }
 }
 
-async function fetchJobs(token: string): Promise<AtsJob[]> {
+async function fetchJobs(token: string, ctx?: FetchContext): Promise<AtsJob[]> {
   const board = parseToken(token)
   if (!board) throw new Error(`workday: invalid board token "${token}" (expected {tenant}.wd{N}.{site})`)
 
@@ -195,7 +196,12 @@ async function fetchJobs(token: string): Promise<AtsJob[]> {
     byPath.set(posting.externalPath, job)
   }
 
-  const head = paths.slice(0, DESCRIPTION_BUDGET)
+  // The budget goes to postings that have no stored body yet, newest first, so a
+  // board larger than the budget fills in over successive refreshes instead of
+  // re-reading the same head every time.
+  const head = paths
+    .filter((path) => !ctx?.hasDescription?.(byPath.get(path)?.externalId ?? ''))
+    .slice(0, DESCRIPTION_BUDGET)
   const details = await mapWithConcurrency(head, DESCRIPTION_CONCURRENCY, (path) => fetchDetail(board, path))
   head.forEach((path, i) => {
     const job = byPath.get(path)
@@ -211,4 +217,5 @@ export const workday: AtsProvider = {
   id: 'workday',
   detect,
   fetch: fetchJobs,
+  maxJobs: MAX_PAGES * PAGE_SIZE,
 }

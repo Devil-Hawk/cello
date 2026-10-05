@@ -138,26 +138,43 @@ describe('workday.fetch', () => {
     expect(listCalls[1].body).toMatchObject({ offset: 20 })
   })
 
-  it('caps description fetches at the budget and still returns the rest of the board', async () => {
-    const page = Array.from({ length: 20 }, (_, i) => ({
+  function board(total: number) {
+    const rows = Array.from({ length: total }, (_, i) => ({
       ...REAL_LIST_ENTRY,
       externalPath: `/job/US-CA-Santa-Clara/Role-${i}_JR${i}`,
     }))
-    const tail = Array.from({ length: 10 }, (_, i) => ({
-      ...REAL_LIST_ENTRY,
-      externalPath: `/job/US-CA-Santa-Clara/Tail-${i}_JR1${i}`,
-    }))
-    const calls = mockBoard([page, tail])
+    const pages: (typeof rows)[] = []
+    for (let i = 0; i < rows.length; i += 20) pages.push(rows.slice(i, i + 20))
+    return { rows, calls: mockBoard(pages) }
+  }
+
+  it('caps description fetches at the budget and still returns the rest of the board', async () => {
+    const { calls } = board(50)
 
     const jobs = await workday.fetch(TOKEN)
 
-    expect(jobs).toHaveLength(30)
-    // 25 detail GETs (the budget), not 30.
-    expect(calls.filter((c) => c.method === 'GET')).toHaveLength(25)
-    expect(jobs.filter((j) => j.description).length).toBe(25)
-    // The 5 past the budget are still returned — title/location/url intact —
-    // so a big board loses bodies, never postings.
-    expect(jobs.slice(25).every((j) => j.title && j.url && !j.description)).toBe(true)
+    expect(jobs).toHaveLength(50)
+    // 40 detail GETs (the budget), not 50.
+    expect(calls.filter((c) => c.method === 'GET')).toHaveLength(40)
+    expect(jobs.filter((j) => j.description).length).toBe(40)
+    // The 10 past the budget are still returned, title/location/url intact,
+    // so a big board loses bodies for one refresh, never postings.
+    expect(jobs.slice(40).every((j) => j.title && j.url && !j.description)).toBe(true)
+  })
+
+  it('spends the budget on postings that have no stored description, so a big board fills in', async () => {
+    const { calls } = board(50)
+    // The first 40 already have a body stored (a previous refresh read them).
+    const have = new Set(
+      Array.from({ length: 40 }, (_, i) => `https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/Role-${i}_JR${i}`)
+    )
+
+    const jobs = await workday.fetch(TOKEN, { hasDescription: (id) => have.has(id) })
+
+    // Only the 10 without a body are read, and they all get one.
+    expect(calls.filter((c) => c.method === 'GET')).toHaveLength(10)
+    expect(jobs.slice(40).every((j) => j.description)).toBe(true)
+    expect(jobs.slice(0, 40).every((j) => !j.description)).toBe(true)
   })
 
   // The real case: a posting is pulled between the list call and the detail
