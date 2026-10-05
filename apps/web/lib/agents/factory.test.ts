@@ -95,12 +95,12 @@ describe('createCelloAgent', () => {
     expect(system).toContain('Judge how well a role fits the person.')
   })
 
-  it('shows the orchestrator all ten real skills, by name and description', async () => {
+  it('shows the orchestrator all nine real skills, by name and description', async () => {
     const { agent, model } = build({ skillsDir: path.join(process.cwd(), 'skills') })
     await (agent as unknown as { invoke: (i: unknown, c: unknown) => Promise<unknown> }).invoke({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: 't-real-skills' } })
     const content = model.calls[0][0].content
     const system = typeof content === 'string' ? content : content.map((b) => (b as { text?: string }).text ?? '').join('')
-    for (const name of ['role-fit', 'tailor-resume', 'cover-letter', 'cold-outreach', 'follow-up', 'company-research', 'visa-sponsorship', 'interview-prep', 'negotiation', 'search-strategy']) {
+    for (const name of ['role-fit', 'tailor-resume', 'cover-letter', 'cold-outreach', 'follow-up', 'company-research', 'visa-sponsorship', 'negotiation', 'search-strategy']) {
       expect(system, name).toContain(`**${name}**`)
     }
     expect(system).toContain('Judge how well one role fits the person')

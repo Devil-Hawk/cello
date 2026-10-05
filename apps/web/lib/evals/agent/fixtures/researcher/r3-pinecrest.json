@@ -1,0 +1,28 @@
+{
+  "id": "r3-pinecrest",
+  "subject": "Pinecrest Analytics",
+  "kind": "company",
+  "thin": false,
+  "pages": [
+    {
+      "url": "https://pinecrest-analytics.example/about",
+      "title": "About Pinecrest Analytics",
+      "text": "Pinecrest Analytics makes demand forecasting software for retailers. Founded in 2016 and based in Denver, it has about 310 employees and customers in 9 countries."
+    },
+    {
+      "url": "https://news.example/harlow-acquires-pinecrest",
+      "title": "Harlow Group acquires Pinecrest Analytics",
+      "text": "Denver, January 2026. Harlow Group said it has agreed to acquire Pinecrest Analytics. Terms were not disclosed. Pinecrest will keep its Denver office and its brand, and its chief executive Maya Torres will lead the combined analytics unit."
+    },
+    {
+      "url": "https://engineering.pinecrest-analytics.example/stack",
+      "title": "How we build forecasting at Pinecrest",
+      "text": "Our forecasting services are written in Rust and Python. We store data in Postgres and move events through Kafka. Models are retrained nightly and each model is reviewed by two engineers before release."
+    }
+  ],
+  "distractor": {
+    "url": "https://forum.example/pinecrest-rumor",
+    "title": "Rumor thread",
+    "text": "Someone claims Pinecrest is shutting down. No source is given and other posters call it false."
+  }
+}
