@@ -60,6 +60,37 @@ function dateOf(text: string): string | undefined {
 
 const clean = (s: string | undefined) => (s ?? '').replace(/\s+/g, ' ').trim()
 
+/** "Sunnyvale, CA, USA; Atlanta, GA, USA; +5 more" -> "Sunnyvale, CA, USA · Atlanta, GA, USA". */
+function placesOf(text: string): string | undefined {
+  const place = text
+    .split(';')
+    .map((t) => t.trim())
+    .filter((t) => t && !/^\+\d+ more$/i.test(t))
+    .slice(0, 3)
+    .join(' · ')
+  return place.length >= 2 && place.length <= 120 ? place : undefined
+}
+
+/** Material icon names a card puts before its place. */
+const PLACE_ICON = /^(?:place|location_on|location_city|pin_drop)$/
+
+/**
+ * The place a card shows: under a heading inside the link (<a><h3>Title</h3><p>Mountain View, CA, USA; +4 more</p></a>),
+ * or beside a place icon elsewhere in the card (Google's results: <i>place</i><span>Boulder, CO, USA</span>).
+ */
+function cardPlace(a: cheerio.Cheerio<any>): string | undefined {
+  if (a.find('h1,h2,h3,h4,h5').length > 0) {
+    const inLink = placesOf(clean(a.find('p').first().text()))
+    if (inLink) return inLink
+  }
+  const icon = a
+    .closest('li,article')
+    .find('i')
+    .filter((_, el) => PLACE_ICON.test(clean(((el as any).children ?? []).map((c: any) => c.data ?? '').join(''))))
+    .first()
+  return icon.length ? placesOf(clean(icon.next().text())) : undefined
+}
+
 /** The texts a link and its card offer as the role's title, best guess first. */
 function titlesOf(a: cheerio.Cheerio<any>, idInUrl: string): string[] {
   const strip = (t: string) => t.replace(new RegExp(`\\s+${idInUrl.replace(/[^\w-]/g, '')}\\s*$`), '').replace(/\s+\d{6,}$/, '').trim()
@@ -118,7 +149,7 @@ export function roleLinks(html: string, pageUrl: string): RoleLink[] {
     /* keep the page's own address */
   }
   // One entry per role; the same role is linked more than once on many cards (its place, its title, a "learn more" button).
-  const entries = new Map<string, { url: string; titles: string[]; template: string; g: string; a: cheerio.Cheerio<any>; linkText: string }>()
+  const entries = new Map<string, { url: string; titles: string[]; template: string; g: string; a: cheerio.Cheerio<any>; linkText: string; place?: string }>()
   $('a[href]').each((_, el) => {
     const a = $(el)
     let to: URL
@@ -139,14 +170,14 @@ export function roleLinks(html: string, pageUrl: string): RoleLink[] {
       have.titles.push(...titles)
       return
     }
-    entries.set(key, { url: normalizeJobUrl(to.toString()), titles, template, g: `${to.hostname}${template}`, a, linkText: clean(a.text()) })
+    entries.set(key, { url: normalizeJobUrl(to.toString()), titles, template, g: `${to.hostname}${template}`, a, linkText: clean(a.text()), place: cardPlace(a) })
   })
   const groups = new Map<string, RoleLink[]>()
   for (const e of entries.values()) {
     const title = bestTitle(e.titles)
     if (title.length < 3) continue
     const postedAt = cardDate(e.a, e.template)
-    const location = e.linkText && e.linkText !== title && e.linkText.length <= 60 && !title.includes(e.linkText) ? e.linkText : undefined
+    const location = e.place ?? (e.linkText && e.linkText !== title && e.linkText.length <= 60 && !title.includes(e.linkText) ? e.linkText : undefined)
     groups.set(e.g, [...(groups.get(e.g) ?? []), { url: e.url, title, ...(postedAt ? { postedAt } : {}), ...(location ? { location } : {}) }])
   }
   const lists = [...groups.entries()].filter(([, links]) => links.length >= MIN_GROUP)

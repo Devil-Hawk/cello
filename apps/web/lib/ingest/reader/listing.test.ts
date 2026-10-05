@@ -27,6 +27,10 @@ describe('roleLinks', () => {
     expect(links[0].url).toBe('https://www.google.com/about/careers/applications/jobs/results/120374375760175814-senior-data-engineer-gtech-users-and-products?q=data+engineer&location=United+States')
     expect(links[0].title).toBe('Senior Data Engineer, gTech Users and Products')
     expect(links[0].postedAt).toBeUndefined()
+    // The card says where each role is, under its heading: that is the role's place (no detail page carries it as data).
+    expect(links.every((l) => (l.location ?? '').length > 2)).toBe(true)
+    expect(links[0].location).toBe('Boulder, CO, USA')
+    expect(links.some((l) => /\+\d+ more/.test(l.location ?? ''))).toBe(false)
   })
 
   it('NYT: the job-listings page lists roles by id-and-slug', () => {
