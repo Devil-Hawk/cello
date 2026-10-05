@@ -83,7 +83,7 @@ export function CompanyRow({
           name={company.name}
         />
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 sm:flex-nowrap">
             {/* title: this is the one place the full name survives — junk
                 like a pasted "Can you change this to..." prefix pushes the
                 real name past the truncate cutoff, so hover is the only way

@@ -140,7 +140,7 @@ export function JobRow({
         {/* Badges wrap onto their own line instead of squeezing the title to
             zero width; the title (with the NEW chip) keeps a line of its own
             on narrow screens. */}
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:flex-nowrap">
           <div className="flex min-w-0 max-w-full basis-full items-center gap-2 sm:basis-auto">
           {showNewMarker && (
             <span

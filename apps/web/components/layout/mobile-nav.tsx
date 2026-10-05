@@ -74,7 +74,7 @@ export function MobileNav() {
               // min-h-11 (44px) is the tap-target floor; the five items
               // split the full viewport width between them, so width is
               // never the constraint at any phone size.
-              'flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 py-1.5 text-label font-medium transition-colors',
+              'flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-1.5 text-[0.625rem] font-medium transition-colors',
               // Colour alone isn't a safe differentiator (WCAG 1.4.1) — active
               // also goes bold (font-semibold overrides the base font-medium)
               // so the tab reads as selected even without hue perception.
@@ -82,10 +82,10 @@ export function MobileNav() {
             )}
           >
             <Icon className="h-5 w-5" aria-hidden="true" />
-            {/* text-label carries +0.08em tracking (built for uppercase eyebrows);
-                at 11px that pushed "Opportunities" and "Applications" into each
-                other on a 390px phone. Tabs need natural spacing. */}
-            <span className="tracking-normal">{item.label}</span>
+            {/* text-label's +0.08em tracking (built for uppercase eyebrows) pushed
+                "Opportunities" and "Applications" into each other on phones, so
+                tabs use a plain 10px label with tight tracking. */}
+            <span className="tracking-tight">{item.label}</span>
           </Link>
         )
       })}
