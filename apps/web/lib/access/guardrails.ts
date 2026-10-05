@@ -379,7 +379,7 @@ function asRecord(value: unknown): Record<string, unknown> {
  * `openai` and `anthropic` are deliberately NOT here even though they are model
  * keys. The demo's provider is pinned to openrouter, so the harness would never
  * reach them — and as of the langgraph port (step 12), nothing under apps/web
- * does either: app/api/agents/{analyze,coach}/route.ts both used to construct
+ * does either: app/api/agents/analyze/route.ts and an old follow-up route both used to construct
  * '@cello/agents' createLLMClient, which PREFERS anthropic, then openai, over
  * openrouter, and would have moved a route's spend onto real provider
  * credentials while the rest of the demo stayed on the metered one. Both are

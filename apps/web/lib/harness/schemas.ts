@@ -33,7 +33,7 @@ export const AGENT_TYPES = [
   'resume_optimizer',
   'strategist',
   'analyst',
-  'coach',
+  'application_follow_up',
 ] as const
 
 export const AgentTypeSchema = z.enum(AGENT_TYPES)
@@ -74,7 +74,7 @@ export const UNIT_TYPES = [
   'resume_optimizer',
   'strategist',
   'analyst',
-  'coach',
+  'application_follow_up',
 ] as const
 
 export const UnitTypeSchema = z.enum(UNIT_TYPES)
@@ -725,14 +725,14 @@ export const StrategistOutput = z.object({
   proposals: z.array(StrategyProposalSchema),
 })
 
-// --- analyst + coach ----------------------------------------------------------
+// --- analyst + application follow-up ------------------------------------------
 //
 // Two MORE stragglers, joining the five above (step 9 of the langgraph port —
 // docs/superpowers/specs/2026-08-16-langgraph-port-design.md). Both used to
 // reach a model through packages/agents' own OpenAI/Anthropic-fetch client
 // (packages/agents/src/analyst/llm-client.ts) instead of the harness's own
 // metered model path; both now
-// run as lib/harness/agents/{analyst,coach}.ts, callable through
+// run as lib/harness/agents/{analyst,application_follow_up}.ts, callable through
 // runAgentUnit the same as everything else.
 
 // analyst — per-job AI insights for the job-detail modal
@@ -748,12 +748,12 @@ export const AnalystOutput = z.object({
   interviewTips: z.array(z.string()),
 })
 
-// coach — a follow-up suggestion (+ drafted message, when one is due) for one
-// application (lib/harness/agents/coach.ts).
-export const CoachInput = z.object({
+// application_follow_up: a follow-up suggestion (+ drafted message, when one is
+// due) for one application (lib/harness/agents/application_follow_up.ts).
+export const ApplicationFollowUpInput = z.object({
   applicationId: z.string(),
 })
-export const CoachOutput = z.object({
+export const ApplicationFollowUpOutput = z.object({
   applicationId: z.string(),
   suggestion: z.string(),
   suggestedContacts: z.array(z.string()).optional(),
@@ -780,5 +780,5 @@ export const agentSchemas = {
   resume_optimizer: { input: ResumeOptimizerInput, output: ResumeOptimizerOutput },
   strategist: { input: StrategistInput, output: StrategistOutput },
   analyst: { input: AnalystInput, output: AnalystOutput },
-  coach: { input: CoachInput, output: CoachOutput },
+  application_follow_up: { input: ApplicationFollowUpInput, output: ApplicationFollowUpOutput },
 } as const satisfies Record<(typeof AGENT_TYPES)[number], { input: z.ZodTypeAny; output: z.ZodTypeAny }>

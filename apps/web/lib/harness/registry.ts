@@ -25,7 +25,7 @@ import { generateOutreachDraft } from './agents/outreach'
 import { optimizeResume } from './agents/resume_optimizer'
 import { strategist } from './agents/strategist'
 import { analyst } from './agents/analyst'
-import { coach } from './agents/coach'
+import { application_follow_up } from './agents/application_follow_up'
 import { resolveTargeting } from '@/lib/targeting'
 import { resolveTargetTitles } from '@/lib/targeting/titles'
 
@@ -159,7 +159,7 @@ export const UNIT_REGISTRY: Record<UnitType, AgentFn> = {
   get resume_optimizer() { return resume_optimizer },
   get strategist() { return strategist },
   get analyst() { return analyst },
-  get coach() { return coach },
+  get application_follow_up() { return application_follow_up },
 }
 
 /** Runtime-checkable version of UNIT_REGISTRY's key set, for tests/assertions

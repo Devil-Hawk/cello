@@ -468,7 +468,7 @@ describe('demoProfilePreferences — (1) provisioning a demo that cannot overspe
   it('drops openai and anthropic too, so every model call lands on the metered backend', () => {
     // Not paranoia about the key type — see guardrails.ts's DEMO_API_KEY_ALLOWLIST
     // doc: '@cello/agents' createLLMClient (formerly used by app/api/agents/
-    // {analyze,coach}, both gone as of the langgraph port) PREFERS anthropic,
+    // analyze and an old follow-up route, both gone as of the langgraph port) PREFERS anthropic,
     // then openai, over openrouter. Kept as defense-in-depth even though
     // nothing reaches for it any more — a demo profile should never carry a
     // credential the guardrails can't meter.

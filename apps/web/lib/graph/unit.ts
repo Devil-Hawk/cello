@@ -154,7 +154,7 @@ export const UNIT_GENERATION_NAME: Record<UnitType, string> = {
   resume_optimizer: 'optimize-resume',
   strategist: 'plan-strategy',
   analyst: 'analyze-pipeline',
-  coach: 'coach-reply',
+  application_follow_up: 'draft-application-follow-up',
 }
 
 /** Langfuse agent-node name per unit type. */
@@ -175,7 +175,7 @@ export const UNIT_AGENT_NAME: Record<UnitType, string> = {
   resume_optimizer: 'run-resume-optimizer',
   strategist: 'run-strategist',
   analyst: 'run-analyst',
-  coach: 'run-coach',
+  application_follow_up: 'run-application-follow-up',
 }
 
 /** Unit types that author content a human or an employer reads, and so get a

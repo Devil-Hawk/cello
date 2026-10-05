@@ -27,9 +27,9 @@ import {
   parseGmailInfo,
 } from '@/components/pipeline/utils'
 
-interface CoachSuggestion {
+interface FollowUpSuggestion {
   suggestion: string
-  draftMessage: string
+  draftMessage?: string
   suggestedContacts?: string[]
 }
 
@@ -113,9 +113,9 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 }
 
 function DialogBody({ application }: { application: ApplicationWithJob }) {
-  const [coachSuggestion, setCoachSuggestion] = useState<CoachSuggestion | null>(null)
-  const [isLoadingCoach, setIsLoadingCoach] = useState(false)
-  const [coachError, setCoachError] = useState<string | null>(null)
+  const [followUp, setFollowUpSuggestion] = useState<FollowUpSuggestion | null>(null)
+  const [isLoadingFollowUp, setIsLoadingFollowUp] = useState(false)
+  const [followUpError, setFollowUpError] = useState<string | null>(null)
 
   // The manual receipt path — see log-application-dialog.tsx. Loaded here so
   // the honest monitoring line and any receipts already on file are visible
@@ -161,25 +161,27 @@ function DialogBody({ application }: { application: ApplicationWithJob }) {
       ? `https://www.google.com/s2/favicons?domain=${company.domain}&sz=128`
       : null)
 
+  const draft = followUp?.draftMessage
+
   async function getFollowUpDraft() {
-    setIsLoadingCoach(true)
-    setCoachError(null)
+    setIsLoadingFollowUp(true)
+    setFollowUpError(null)
     try {
-      const response = await fetch('/api/agents/coach', {
+      const response = await fetch('/api/applications/follow-up', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ applicationId: application.id }),
       })
       const result = await response.json()
       if (!response.ok) {
-        throw new Error(result.error || 'Failed to get coach suggestion')
+        throw new Error(result.error || 'Could not draft a follow-up')
       }
-      setCoachSuggestion(result)
+      setFollowUpSuggestion(result)
     } catch (e) {
-      console.error('Failed to get coach suggestion:', e)
-      setCoachError(e instanceof Error ? e.message : 'Failed to get coach suggestion')
+      console.error('Could not draft a follow-up:', e)
+      setFollowUpError(e instanceof Error ? e.message : 'Could not draft a follow-up')
     }
-    setIsLoadingCoach(false)
+    setIsLoadingFollowUp(false)
   }
 
   return (
@@ -344,76 +346,78 @@ function DialogBody({ application }: { application: ApplicationWithJob }) {
           )}
         </div>
 
-        {/* Follow-up coach */}
+        {/* Follow-up */}
         {['applied', 'screen', 'interview', 'offer'].includes(application.stage) && (
           <div className="border-t pt-4">
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                <span className="text-body font-medium text-foreground">Follow-up coach</span>
+                <span className="text-body font-medium text-foreground">Follow-up</span>
               </div>
               {alert && (
                 <Badge tone={alert.kind === 'ghosted' ? 'bad' : 'warn'}>{alert.title}</Badge>
               )}
             </div>
 
-            {!coachSuggestion && !isLoadingCoach && (
+            {!followUp && !isLoadingFollowUp && (
               <Button variant="outline" size="sm" onClick={getFollowUpDraft} className="w-full">
                 <MessageSquare className="h-4 w-4" />
                 Get follow-up draft
               </Button>
             )}
 
-            {isLoadingCoach && (
+            {isLoadingFollowUp && (
               <div className="flex items-center justify-center py-4 text-caption text-muted-foreground">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Generating follow-up draft…
               </div>
             )}
 
-            {coachError && (
+            {followUpError && (
               <div className="border-l-2 border-red-400/60 bg-red-50/60 py-2 pl-3 text-caption text-red-700 dark:bg-red-500/5 dark:text-red-300">
-                {coachError}
+                {followUpError}
               </div>
             )}
 
-            {coachSuggestion && (
+            {followUp && (
               <div className="space-y-3">
                 <p className="text-body font-medium text-foreground">
-                  {coachSuggestion.suggestion}
+                  {followUp.suggestion}
                 </p>
 
-                <div className="relative">
-                  <textarea
-                    readOnly
-                    value={coachSuggestion.draftMessage}
-                    className="h-32 w-full resize-none rounded-control border bg-sunken p-3 text-body text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="absolute right-2 top-2"
-                    onClick={() => {
-                      navigator.clipboard.writeText(coachSuggestion.draftMessage)
-                      toast({
-                        title: 'Copied',
-                        description: 'Message copied to clipboard',
-                      })
-                    }}
-                  >
-                    <Copy className="h-3 w-3" />
-                    Copy
-                  </Button>
-                </div>
+                {draft && (
+                  <div className="relative">
+                    <textarea
+                      readOnly
+                      value={draft}
+                      className="h-32 w-full resize-none rounded-control border bg-sunken p-3 text-body text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="absolute right-2 top-2"
+                      onClick={() => {
+                        navigator.clipboard.writeText(draft)
+                        toast({
+                          title: 'Copied',
+                          description: 'Message copied to clipboard',
+                        })
+                      }}
+                    >
+                      <Copy className="h-3 w-3" />
+                      Copy
+                    </Button>
+                  </div>
+                )}
 
-                {coachSuggestion.suggestedContacts &&
-                  coachSuggestion.suggestedContacts.length > 0 && (
+                {followUp.suggestedContacts &&
+                  followUp.suggestedContacts.length > 0 && (
                     <div className="text-body">
                       <p className="font-medium text-foreground">
                         Suggested contacts to reach out to:
                       </p>
                       <ul className="mt-1 space-y-1">
-                        {coachSuggestion.suggestedContacts.map((contact, i) => (
+                        {followUp.suggestedContacts.map((contact, i) => (
                           <li key={i} className="text-muted-foreground">
                             &#8226; {contact}
                           </li>

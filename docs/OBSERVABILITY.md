@@ -141,7 +141,7 @@ views. Filter by environment in the Langfuse UI.
 | `refresh-jobs`, `autopilot-tick` | The jobs refresh and the autopilot tick | none |
 | `summarize-conversation` | The rolling Copilot summary | The conversation id |
 | `draft-outreach`, `draft-follow-up`, `judge-outreach` | The outreach routes | none |
-| `match-job`, `match-jobs`, `analyze-pipeline`, `coach-job-search` | The agent routes | none |
+| `match-job`, `match-jobs`, `analyze-pipeline`, `application-follow-up` | The agent routes | none |
 | `import-resume`, `optimize-resume`, `generate-resume-document` | The resume routes | none |
 | `resolve-company`, `verify-careers-page`, `extract-jobs` | Company and scraper routes, only when a model call is made | none |
 | `sync-gmail` | One Gmail sync pass, every `classify-email` call under it | none |

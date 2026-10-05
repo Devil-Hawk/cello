@@ -1,25 +1,18 @@
-// Agent: coach — suggests a follow-up action for one application, and drafts
-// the message when a follow-up is due.
+// Agent: application_follow_up - drafts the message for an application whose
+// follow-up is due. When it is due and what to say about it is the pure rule in
+// lib/pipeline/follow-up.ts; this unit adds the model-drafted message (with a
+// deterministic template when no model is available) and the contacts on file.
 //
-// Ported from packages/agents/src/coach/{index,timing,message-generator,
-// templates}.ts onto ctx.llm. The timing math, the message prompts and the
-// deterministic fallback templates are pure (no model client, no fetch), so
-// they are copied in below rather than imported from '@cello/agents' — the
-// langgraph port (docs/superpowers/specs/2026-08-16-langgraph-port-design.md,
-// step 12) requires nothing under apps/web to import that package any more.
-// Only the thing that ACTUALLY reached a model (packages/agents/src/analyst/
-// llm-client.ts's createLLMClient, which CoachAgent also used) is replaced,
-// with a one-method LLMClient adapter backed by ctx.llm so
-// generateMessageByType's prompt-building code runs unchanged against the
+// The message prompts and fallback templates are pure, and ctx.llm is adapted
+// to a one-method client so the prompt-building code runs against the
 // metered/demo-gated/journaled path.
 //
-// app/api/agents/coach/route.ts now calls this unit via runUnitOnce('coach',
-// ...) instead of constructing packages/agents' CoachAgent directly — see
-// that route for the response-shape contract this unit's output must match
-// exactly (components/pipeline/application-detail-dialog.tsx is the reader).
+// app/api/applications/follow-up/route.ts calls this unit via
+// runUnitOnce('application_follow_up', ...); its response shape is read by
+// components/pipeline/application-detail-dialog.tsx.
 
 import type { AgentFn, LlmRunner } from '../types'
-import { CoachInput } from '../schemas'
+import { ApplicationFollowUpInput } from '../schemas'
 import { followUpStep } from '@/lib/pipeline/follow-up'
 import type { PipelineStage } from '@cello/shared'
 
@@ -38,8 +31,7 @@ interface JobRow {
   company_id: string | null
 }
 
-// --- message generation (packages/agents/src/coach/{templates,message-
-// generator}.ts) --------------------------------------------------------------
+// --- message generation -----------------------------------------------------
 
 type MessageType = 'follow_up' | 'thank_you' | 'cold_outreach' | 'check_in'
 
@@ -55,7 +47,7 @@ interface MessageContext {
   applicationNotes?: string
 }
 
-interface CoachCompletionOptions {
+interface CompletionOptions {
   maxTokens?: number
   temperature?: number
   systemPrompt?: string
@@ -64,10 +56,10 @@ interface CoachCompletionOptions {
 /** The one-method shape generateMessageByType needs — satisfied here by
  *  llmClientFrom() below, which adapts ctx.llm. */
 interface LLMClient {
-  complete(prompt: string, options?: CoachCompletionOptions): Promise<string>
+  complete(prompt: string, options?: CompletionOptions): Promise<string>
 }
 
-const COACH_SYSTEM_PROMPT = `You are an expert career coach specializing in professional communication for job seekers.
+const FOLLOW_UP_SYSTEM_PROMPT = `You write short professional messages for job seekers.
 
 ## Your Communication Philosophy
 
@@ -363,7 +355,7 @@ async function generateMessageByType(client: LLMClient, messageType: MessageType
     check_in: generateCheckInPrompt,
   }[messageType](context)
 
-  const response = await client.complete(prompt, { maxTokens: 500, temperature: 0.7, systemPrompt: COACH_SYSTEM_PROMPT })
+  const response = await client.complete(prompt, { maxTokens: 500, temperature: 0.7, systemPrompt: FOLLOW_UP_SYSTEM_PROMPT })
   return response.trim()
 }
 
@@ -372,8 +364,7 @@ function getFallbackMessage(messageType: MessageType, context: MessageContext): 
   return DEFAULT_TEMPLATES[messageType](context)
 }
 
-/** Same stage -> message-type mapping as packages/agents/src/coach/
- *  index.ts#getSuggestedMessageType. */
+/** Which kind of message a stage and elapsed time call for. */
 function suggestedMessageType(stage: string, days: number): MessageType {
   switch (stage) {
     case 'interview':
@@ -404,8 +395,8 @@ function llmClientFrom(llm: LlmRunner): LLMClient {
   }
 }
 
-export const coach: AgentFn = async (ctx) => {
-  const input = CoachInput.parse(ctx.input ?? {})
+export const application_follow_up: AgentFn = async (ctx) => {
+  const input = ApplicationFollowUpInput.parse(ctx.input ?? {})
 
   const { data: appData, error: appErr } = await ctx.admin
     .from('applications')
@@ -414,7 +405,7 @@ export const coach: AgentFn = async (ctx) => {
     .eq('user_id', ctx.userId)
     .single()
   if (appErr || !appData) {
-    throw new Error(`coach: application ${input.applicationId} not found: ${appErr?.message ?? 'no row'}`)
+    throw new Error(`application_follow_up: application ${input.applicationId} not found: ${appErr?.message ?? 'no row'}`)
   }
   const application = appData as ApplicationRow
 
@@ -452,7 +443,7 @@ export const coach: AgentFn = async (ctx) => {
   }
   // Computed once, used regardless of which branch below runs — a "too soon
   // to follow up" response still carries suggestedContacts when contacts
-  // exist, same as packages/agents/src/coach/index.ts did.
+  // exist.
   const suggestedContacts = contactRows.map((c) => c.name)
 
   const stage = application.stage as PipelineStage
@@ -489,7 +480,7 @@ export const coach: AgentFn = async (ctx) => {
   try {
     draftMessage = await generateMessageByType(llmClientFrom(ctx.llm), messageType, messageContext)
   } catch {
-    // No key, a provider failure, an aborted budget — the coach degrades to
+    // No key, a provider failure, an aborted budget — this unit degrades to
     // a deterministic template rather than leaving the suggestion undrafted.
     draftMessage = getFallbackMessage(messageType, messageContext)
   }
