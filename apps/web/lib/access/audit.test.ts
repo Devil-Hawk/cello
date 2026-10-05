@@ -1264,8 +1264,9 @@ vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: async () => ({ openrouter: '
 // exist for the module to resolve) — importOriginal keeps it real while still
 // overriding userCompanyIds, same pattern trail-producers.test.ts already uses
 // for @/lib/harness/agents/outreach below.
-vi.mock('@/lib/harness/agents/matcher', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/harness/agents/matcher')>()),
+vi.mock('@/lib/scoring/inputs', () => ({ countUnassessed: async () => ({ inRecall: 0, total: 0 }) }))
+vi.mock('@/lib/jobs/owned-query', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/jobs/owned-query')>()),
   userCompanyIds: async () => ['company-1'],
 }))
 vi.mock('@/lib/harness/agents/bulk_matcher', () => ({

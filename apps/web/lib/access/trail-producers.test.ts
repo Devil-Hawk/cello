@@ -83,14 +83,13 @@ const io = vi.hoisted(() => ({
 vi.mock('@/lib/contacts/sources', () => ({ sourceContactsForCompany: io.sourceContactsForCompany }))
 vi.mock('@/lib/contacts/keys', () => ({ readContactProviderKeys: io.readContactProviderKeys }))
 vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: io.loadApiKeys }))
-// importOriginal keeps the real `matcher` AgentFn intact — lib/harness/
-// registry.ts's UNIT_REGISTRY (now loaded transitively by runAgentUnit,
-// which match/batch/outreach's routes call) imports it even though neither
-// flow under test here ever invokes it.
-vi.mock('@/lib/harness/agents/matcher', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/harness/agents/matcher')>()),
+// userCompanyIds lives in lib/jobs/owned-query; the matcher module re-exports it.
+vi.mock('@/lib/jobs/owned-query', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/jobs/owned-query')>()),
   userCompanyIds: io.userCompanyIds,
 }))
+// How many roles still wait for an assessment is a head-count query; nothing waits here.
+vi.mock('@/lib/scoring/inputs', () => ({ countUnassessed: async () => ({ inRecall: 0, total: 0 }) }))
 vi.mock('@/lib/harness/agents/bulk_matcher', () => ({ runBulkMatch: io.runBulkMatch }))
 vi.mock('@/lib/outreach/config', () => ({ readOutreachConfig: io.readOutreachConfig }))
 vi.mock('@/lib/outreach/store', async (importOriginal) => ({
@@ -939,10 +938,10 @@ describe('producers that journal a failure and then rethrow', () => {
 
   it('records the scoring run when runBulkMatch blows up mid-spend', async () => {
     const { inserts } = useServiceRole({ profileRow: DEMO_WORKSPACE_PROFILE, codeRow: LIVE_CODE_ROW })
-    io.runBulkMatch.mockRejectedValue(new Error('tier-1 batch never returned'))
+    io.runBulkMatch.mockRejectedValue(new Error('the assessment never returned'))
 
     await expect(scoreBatch(post('/api/agents/match/batch', { limit: 10 }))).rejects.toThrow(
-      'tier-1 batch never returned'
+      'the assessment never returned'
     )
 
     const rows = auditRows(inserts)
@@ -953,7 +952,7 @@ describe('producers that journal a failure and then rethrow', () => {
 
   it('writes nothing for an ordinary user on either path', async () => {
     const { inserts } = useServiceRole({ profileRow: ORDINARY_WORKSPACE_PROFILE, codeRow: LIVE_CODE_ROW })
-    io.runBulkMatch.mockRejectedValue(new Error('tier-1 batch never returned'))
+    io.runBulkMatch.mockRejectedValue(new Error('the assessment never returned'))
 
     await expect(scoreBatch(post('/api/agents/match/batch', { limit: 10 }))).rejects.toThrow()
 

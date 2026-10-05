@@ -3,15 +3,15 @@
 // WHAT THIS FIXTURE HAS TO SUPPORT
 //   The demo is judged on the pages that read jobs, so the spread is chosen,
 //   not arbitrary:
-//     * match_score covers every band in lib/jobs/score-bands.ts — 5 strong
-//       (85+), 10 good (70-84), 12 fair (50-69), 10 weak (<50) and 3 UNSCORED.
-//       The unscored rows are deliberate: the dashboard's "Unscored" tile and
-//       the histogram's unscored bar are real product surfaces, and a demo that
-//       shows zero there hides them.
-//     * match_details is populated in the exact shape
-//       lib/harness/agents/matcher.ts buildMatchDetails() writes, so the score
-//       breakdown tooltip, the sub-score rubric and the evidence drill-down all
-//       render real content instead of degrading to "no details".
+//     * The assessment spans every state a role can be in: wanted strongly,
+//       somewhat and hardly (`want`), a chance of Strong, Possible or Stretch that
+//       follows from the requirements the résumé does not evidence, and 3 roles
+//       NOT ASSESSED YET. The unassessed rows are deliberate: the dashboard's "Not
+//       assessed yet" tile is a real product surface, and a demo that shows zero
+//       there hides it.
+//     * The chance carries cited evidence in the exact shape lib/scoring writes
+//       (buildDemoFit below), so the fit panel, the checklist and the resume-line
+//       citations all render real content instead of degrading to "no details".
 //     * `source` spans greenhouse/lever/ashby/workday/scraper so the insights
 //       source-performance chart has a mix.
 //     * posted_at spreads over the last three weeks so the "posted in 24h" tile,
@@ -24,6 +24,9 @@
 //   each description makes that impossible to mistake, and costs the demo
 //   nothing.
 
+import { labelChance, resumeLines } from '@/lib/scoring/chance'
+import type { Requirement } from '@/lib/scoring/requirements'
+import type { RequirementCheck } from '@/lib/scoring/types'
 import { companyBySlug, type DemoCompany } from './companies'
 
 export interface DemoJob {
@@ -43,8 +46,8 @@ export interface DemoJob {
   seniority: string
   /** Days before "now" the posting went up. Spread across the last 3 weeks. */
   postedDaysAgo: number
-  /** 0-100, or null for the deliberately unscored rows. */
-  score: number | null
+  /** How strongly the demo person wants this role, 0 to 1, or null for the deliberately unassessed rows. Authored, like the rest of the fixture. */
+  want: number | null
   qualityScore: number
   team: string
   /** What the role is actually about — drives the description AND the match evidence. */
@@ -81,7 +84,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 2,
-    score: 88,
+    want: 0.88,
     qualityScore: 93,
     team: 'Data Platform',
     focus: ['streaming ingestion at multi-billion-event scale', 'columnar storage layout', 'multi-tenant isolation'],
@@ -99,7 +102,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'staff',
     postedDaysAgo: 6,
-    score: 91,
+    want: 0.91,
     qualityScore: 95,
     team: 'Query Engine',
     focus: ['distributed query planning', 'vectorised execution', 'p99 latency work'],
@@ -117,7 +120,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'manager',
     postedDaysAgo: 12,
-    score: 61,
+    want: 0.61,
     qualityScore: 88,
     team: 'Ingestion',
     focus: ['team leadership for a 7-person group', 'ingestion reliability', 'roadmap ownership'],
@@ -135,7 +138,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'design',
     seniority: 'senior',
     postedDaysAgo: 9,
-    score: 34,
+    want: 0.34,
     qualityScore: 84,
     team: 'Console',
     focus: ['design systems', 'complex data visualisation', 'end-to-end product flows'],
@@ -155,7 +158,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 15,
-    score: 79,
+    want: 0.79,
     qualityScore: 90,
     team: 'Fleet Platform',
     focus: ['Kubernetes fleet operations', 'telemetry pipelines', 'deployment automation'],
@@ -173,7 +176,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'mid',
     postedDaysAgo: 18,
-    score: 44,
+    want: 0.44,
     qualityScore: 86,
     team: 'Motion',
     focus: ['real-time motion planning', 'sensor fusion', 'embedded C++'],
@@ -191,7 +194,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 4,
-    score: 74,
+    want: 0.74,
     qualityScore: 89,
     team: 'Reliability',
     focus: ['SLO design and error budgets', 'incident command', 'observability tooling'],
@@ -211,7 +214,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 20,
-    score: 86,
+    want: 0.86,
     qualityScore: 92,
     team: 'Payments Core',
     focus: ['idempotent ledger writes', 'high-throughput Go services', 'exactly-once reconciliation'],
@@ -229,7 +232,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'data',
     seniority: 'mid',
     postedDaysAgo: 16,
-    score: 68,
+    want: 0.68,
     qualityScore: 87,
     team: 'Risk',
     focus: ['feature pipelines for fraud models', 'dbt model design', 'data quality contracts'],
@@ -247,7 +250,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'operations',
     seniority: 'senior',
     postedDaysAgo: 11,
-    score: 41,
+    want: 0.41,
     qualityScore: 82,
     team: 'Platform PMO',
     focus: ['cross-team programme delivery', 'dependency mapping', 'executive reporting'],
@@ -267,7 +270,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 3,
-    score: 77,
+    want: 0.77,
     qualityScore: 91,
     team: 'Patient Platform',
     focus: ['event-driven service design', 'Postgres schema evolution', 'audit logging for regulated data'],
@@ -285,7 +288,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'mid',
     postedDaysAgo: 13,
-    score: 66,
+    want: 0.66,
     qualityScore: 85,
     team: 'Integrations',
     focus: ['third-party API integration', 'retry and backoff design', 'partner onboarding tooling'],
@@ -303,7 +306,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'data',
     seniority: 'mid',
     postedDaysAgo: 19,
-    score: 29,
+    want: 0.29,
     qualityScore: 79,
     team: 'Clinical Analytics',
     focus: ['clinical quality reporting', 'cohort analysis', 'stakeholder dashboards'],
@@ -323,7 +326,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'staff',
     postedDaysAgo: 8,
-    score: 83,
+    want: 0.83,
     qualityScore: 92,
     team: 'Detection Platform',
     focus: ['streaming rule evaluation', 'low-latency event enrichment', 'platform API design'],
@@ -341,7 +344,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 14,
-    score: 58,
+    want: 0.58,
     qualityScore: 88,
     team: 'Cloud Security',
     focus: ['IAM policy design', 'workload identity', 'secure-by-default infrastructure'],
@@ -359,7 +362,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'sales',
     seniority: 'mid',
     postedDaysAgo: 17,
-    score: 22,
+    want: 0.22,
     qualityScore: 74,
     team: 'Go To Market',
     focus: ['technical discovery calls', 'proof-of-concept delivery', 'competitive positioning'],
@@ -379,7 +382,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 10,
-    score: 72,
+    want: 0.72,
     qualityScore: 87,
     team: 'Routing',
     focus: ['constraint solving at scale', 'batch and online scoring', 'service decomposition'],
@@ -397,7 +400,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'mid',
     postedDaysAgo: 5,
-    score: 69,
+    want: 0.69,
     qualityScore: 86,
     team: 'Carrier Platform',
     focus: ['public API design and versioning', 'rate limiting', 'partner webhooks'],
@@ -415,7 +418,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'operations',
     seniority: 'junior',
     postedDaysAgo: 21,
-    score: 26,
+    want: 0.26,
     qualityScore: 71,
     team: 'Network Operations',
     focus: ['load board monitoring', 'carrier performance reporting', 'exception handling'],
@@ -435,7 +438,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'staff',
     postedDaysAgo: 1,
-    score: 90,
+    want: 0.90,
     qualityScore: 96,
     team: 'Inference',
     focus: ['serving-path latency optimisation', 'GPU utilisation and batching', 'high-throughput Go and Python services'],
@@ -453,7 +456,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 7,
-    score: 64,
+    want: 0.64,
     qualityScore: 90,
     team: 'Evaluation',
     focus: ['evaluation harness design', 'statistical rigour in benchmarking', 'reproducible pipelines'],
@@ -471,7 +474,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 11,
-    score: 81,
+    want: 0.81,
     qualityScore: 93,
     team: 'Compute',
     focus: ['multi-node scheduling', 'storage throughput tuning', 'cost attribution for shared compute'],
@@ -491,7 +494,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 6,
-    score: 75,
+    want: 0.75,
     qualityScore: 88,
     team: 'Marketplace',
     focus: ['search and ranking services', 'inventory consistency', 'read-heavy caching'],
@@ -509,7 +512,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'mid',
     postedDaysAgo: 12,
-    score: 62,
+    want: 0.62,
     qualityScore: 84,
     team: 'Seller Experience',
     focus: ['TypeScript and React product work', 'API-backed workflows', 'incremental migration of legacy screens'],
@@ -527,7 +530,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'marketing',
     seniority: 'manager',
     postedDaysAgo: 18,
-    score: null,
+    want: null,
     qualityScore: 76,
     team: 'Growth',
     focus: ['lifecycle campaign design', 'paid acquisition analysis', 'experiment design'],
@@ -547,7 +550,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'staff',
     postedDaysAgo: 4,
-    score: 87,
+    want: 0.87,
     qualityScore: 94,
     team: 'Control Plane',
     focus: ['reconciliation-loop design', 'multi-region control planes', 'API compatibility guarantees'],
@@ -565,7 +568,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 9,
-    score: 71,
+    want: 0.71,
     qualityScore: 89,
     team: 'Edge Network',
     focus: ['request routing at the edge', 'connection pooling and backpressure', 'load-shedding policy'],
@@ -583,7 +586,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'support',
     seniority: 'mid',
     postedDaysAgo: 15,
-    score: 31,
+    want: 0.31,
     qualityScore: 77,
     team: 'Enterprise Support',
     focus: ['escalation triage', 'customer debugging sessions', 'runbook authoring'],
@@ -603,7 +606,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 13,
-    score: 70,
+    want: 0.70,
     qualityScore: 87,
     team: 'Ledger Core',
     focus: ['double-entry ledger correctness', 'transactional consistency', 'Postgres performance work'],
@@ -621,7 +624,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 7,
-    score: 65,
+    want: 0.65,
     qualityScore: 85,
     team: 'Developer Experience',
     focus: ['CI pipeline throughput', 'local development environments', 'internal tooling ergonomics'],
@@ -639,7 +642,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'operations',
     seniority: 'mid',
     postedDaysAgo: 20,
-    score: 24,
+    want: 0.24,
     qualityScore: 72,
     team: 'Professional Services',
     focus: ['customer onboarding projects', 'data migration planning', 'stakeholder training'],
@@ -659,7 +662,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 14,
-    score: 67,
+    want: 0.67,
     qualityScore: 86,
     team: 'Grid Analytics',
     focus: ['time-series storage at scale', 'streaming aggregation', 'anomaly detection pipelines'],
@@ -677,7 +680,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'data',
     seniority: 'senior',
     postedDaysAgo: 2,
-    score: 73,
+    want: 0.73,
     qualityScore: 88,
     team: 'Data Platform',
     focus: ['lakehouse table design', 'orchestration and backfills', 'data quality contracts'],
@@ -695,7 +698,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'operations',
     seniority: 'manager',
     postedDaysAgo: 19,
-    score: 19,
+    want: 0.19,
     qualityScore: 68,
     team: 'Field Operations',
     focus: ['crew scheduling', 'site safety compliance', 'vendor management'],
@@ -715,7 +718,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 3,
-    score: 63,
+    want: 0.63,
     qualityScore: 83,
     team: 'Playback',
     focus: ['CDN-fronted service design', 'session state at scale', 'graceful degradation'],
@@ -733,7 +736,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'mid',
     postedDaysAgo: 8,
-    score: 57,
+    want: 0.57,
     qualityScore: 81,
     team: 'Content Pipeline',
     focus: ['workflow orchestration', 'large-object storage handling', 'idempotent job retries'],
@@ -751,7 +754,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'senior',
     postedDaysAgo: 16,
-    score: 52,
+    want: 0.52,
     qualityScore: 80,
     team: 'Encoding',
     focus: ['transcode farm throughput', 'quality/bitrate tuning', 'batch job scheduling'],
@@ -769,7 +772,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'product',
     seniority: 'senior',
     postedDaysAgo: 10,
-    score: null,
+    want: null,
     qualityScore: 79,
     team: 'Discovery',
     focus: ['recommendation product strategy', 'experiment prioritisation', 'cross-functional delivery'],
@@ -787,7 +790,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'mid',
     postedDaysAgo: 21,
-    score: 47,
+    want: 0.47,
     qualityScore: 78,
     team: 'Quality',
     focus: ['end-to-end test automation', 'flake reduction', 'device-matrix coverage'],
@@ -805,7 +808,7 @@ export const DEMO_JOBS: readonly DemoJob[] = [
     jobFunction: 'engineering',
     seniority: 'manager',
     postedDaysAgo: 5,
-    score: null,
+    want: null,
     qualityScore: 85,
     team: 'Streaming Infrastructure',
     focus: ['managing a 9-person infrastructure group', 'reliability roadmap', 'cost governance'],
@@ -863,73 +866,95 @@ export function buildJobDescription(job: DemoJob, company: DemoCompany): string 
   return lines.join('\n')
 }
 
-/** Clamp to the 0-100 range every score column and sub-score uses. */
-function clampPct(value: number): number {
-  return Math.max(0, Math.min(100, Math.round(value)))
+const STOP = new Set(['with', 'from', 'that', 'this', 'into', 'across', 'work', 'design', 'scale', 'end', 'direct'])
+
+/** Content words of a phrase, lowercase, long enough to mean something. */
+function contentWords(phrase: string): string[] {
+  return (phrase.toLowerCase().match(/[a-z0-9+#.]{4,}/g) ?? []).filter((w) => !STOP.has(w))
 }
 
-/** Plain-language seniority fit line, keyed off how the score landed. */
-function seniorityFitFor(job: DemoJob, score: number): string {
-  if (score >= 85) return `Strong fit for the ${job.seniority} band this role is scoped at`
-  if (score >= 70) return `Reasonable fit for ${job.seniority}, with room to stretch`
-  if (score >= 50) return `Plausible for ${job.seniority}, but the scope is adjacent rather than direct`
-  return `Scoped at ${job.seniority} in a function this résumé does not evidence`
+/** The résumé line that best shows a phrase, by shared content words. Null when no line shares one. */
+function lineShowing(phrase: string, lines: readonly { n: number; text: string }[]): { n: number; text: string } | null {
+  const words = contentWords(phrase)
+  let best: { n: number; text: string } | null = null
+  let bestHits = 0
+  for (const l of lines) {
+    if (l.text.startsWith('#')) continue
+    const hay = l.text.toLowerCase()
+    const hits = words.filter((w) => hay.includes(w)).length
+    if (hits > bestHits) {
+      best = l
+      bestHits = hits
+    }
+  }
+  return best
+}
+
+export interface DemoFit {
+  fit_assessed_at: string | null
+  blocked_reasons: unknown[]
+  want_p: number | null
+  want_reason: string | null
+  want_detail: Record<string, unknown> | null
+  chance: 'strong' | 'possible' | 'stretch' | null
+  chance_detail: Record<string, unknown> | null
+}
+
+/** One sentence in the person's terms for why they might want the role. Curated, not model output. */
+function wantReasonFor(job: DemoJob, want: number): string {
+  const [first, second] = job.focus
+  if (want >= 0.7) return `Centres on ${first} and ${second}, the kind of work you have led.`
+  if (want >= 0.5) return `Overlaps with your backend work, though the ${job.team} remit is adjacent.`
+  return `A ${job.jobFunction} role, away from the platform work you have been doing.`
 }
 
 /**
- * jobs.match_details in EXACTLY the shape lib/harness/agents/matcher.ts
- * buildMatchDetails() persists — same keys, same duplication of `score` and
- * `overallScore`, same `skills: { matched, missing }` nesting. The UI reads
- * that shape (components/jobs/match-types.ts), so anything else would render a
- * half-empty breakdown and make the demo look broken.
+ * The assessment a demo role carries, in EXACTLY the shape lib/scoring writes to
+ * the job row: a want with a reason, and a chance with a cited line for every
+ * requirement the résumé shows and a named gap for every one it does not. The chance
+ * follows the same rule the product uses (lib/scoring/chance.ts labelChance): no
+ * gap is Strong, one is Possible, two or more, or a role in a function the résumé
+ * does not evidence, is a Stretch.
  *
- * `source` is 'demo/seed' rather than 'harness/matcher': these verdicts were
- * never produced by the model, and labelling them as if they were would be a
- * lie told to whoever inspects the row.
+ * `source` is 'demo/seed' rather than a model: these verdicts were never produced
+ * by one, and labelling them as if they were would be a lie told to whoever
+ * inspects the row. Roles with no `want` are returned unassessed.
  */
-export function buildMatchDetails(
-  job: DemoJob,
-  company: DemoCompany,
-  matchedAt: string
-): Record<string, unknown> | null {
-  if (job.score == null) return null
-
-  const score = job.score
-  const [first, second, third] = job.focus
-  const strengths = [
-    `Direct overlap on ${first}`,
-    `Shipped ${second} at comparable scale at Cobalt Harbor Systems`,
-    `Eight years of backend/platform ownership lines up with the ${job.team} remit`,
-  ]
-  const gaps = job.missing.map(
-    (skill) => `The posting emphasises ${skill}; the résumé does not evidence it.`
-  )
-  if (score < 50) {
-    gaps.unshift(
-      `This is a ${job.jobFunction} role — the résumé's experience is in backend and platform engineering.`
-    )
+export function buildDemoFit(job: DemoJob, resume: string, assessedAt: string): DemoFit {
+  if (job.want == null) {
+    return { fit_assessed_at: null, blocked_reasons: [], want_p: null, want_reason: null, want_detail: null, chance: null, chance_detail: null }
   }
-
+  const lines = resumeLines(resume)
+  const requirements: Requirement[] = []
+  const checks: RequirementCheck[] = []
+  job.focus.forEach((skill, i) => {
+    const line = lineShowing(skill, lines)
+    requirements.push({ id: `r${i + 1}`, text: skill, kind: 'skill', mustHave: true, quote: skill })
+    checks.push({ requirement: skill, mustHave: true, status: line ? 'met' : 'not_met', evidence: line ? { line: line.n, quote: line.text.slice(0, 160) } : null })
+  })
+  // For the roles the person wants most, the skills the résumé lacks are things the posting only
+  // mentions in passing (nice to have), so those roles can honestly read Strong.
+  const mild = job.want >= 0.85
+  job.missing.forEach((skill, i) => {
+    requirements.push({ id: `r${job.focus.length + i + 1}`, text: skill, kind: 'skill', mustHave: !mild, quote: skill })
+    checks.push({ requirement: skill, mustHave: !mild, status: 'not_met', evidence: null })
+  })
+  // A role in a function the résumé does not evidence is a stretch however the skills line up.
+  if (job.jobFunction !== 'engineering') {
+    const text = `Experience in ${job.jobFunction}`
+    requirements.push({ id: `r${requirements.length + 1}`, text, kind: 'experience', mustHave: true, quote: text })
+    checks.push({ requirement: text, mustHave: true, status: 'not_met', evidence: null })
+  }
+  const labelled = labelChance(requirements, checks)
+  const chance = labelled.chance === 'cannot_assess' ? null : labelled.chance
   return {
-    overallScore: score,
-    score,
-    skillsMatch: clampPct(score + 5),
-    experienceMatch: clampPct(score - 4),
-    // Remote roles never lose points on geography; on-site roles are discounted
-    // more outside the persona's home country than inside it.
-    locationMatch: job.isRemote ? 96 : job.country === 'US' ? 84 : 61,
-    highlights: strengths,
-    strengths,
-    gaps,
-    seniorityFit: seniorityFitFor(job, score),
-    summary:
-      `${company.name}'s ${job.title} centres on ${first} and ${second}, both of which the résumé ` +
-      `evidences directly. ${gaps[0]} Overall this reads as a ${score >= 70 ? 'strong' : 'partial'} ` +
-      `match worth ${score >= 70 ? 'a tailored application' : 'a closer read before applying'}.`,
-    skills: { matched: [first, second, third], missing: [...job.missing] },
-    matchedAt,
-    // Honest provenance: seeded, not scored by a model. Never 'harness/matcher'.
-    source: 'demo/seed',
+    fit_assessed_at: assessedAt,
+    blocked_reasons: [],
+    want_p: job.want,
+    want_reason: wantReasonFor(job, job.want),
+    want_detail: { judge: job.want, embedding: null, stated: job.want, statedKey: null, calibrated: false, nReactions: 0, source: 'demo/seed' },
+    chance,
+    chance_detail: chance ? { checks, gaps: labelled.gaps, confirm: [], note: labelled.note, resumeKey: null } : null,
   }
 }
 
