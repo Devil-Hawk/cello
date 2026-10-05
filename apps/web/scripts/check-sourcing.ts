@@ -147,7 +147,8 @@ async function main(): Promise<void> {
     const noPlace = rows.filter((r) => !r.location?.trim())
     const noText = rows.filter((r) => !r.description?.trim())
     for (const r of noPlace.slice(0, 3)) failures.push(`${e.name}: ${r.url} has no location`)
-    for (const r of noText.slice(0, 3)) failures.push(`${e.name}: ${r.url} has no description`)
+    // A board's adapter fills text a few roles per refresh (its own budget), so only the reader's own tiers must have it at once.
+    if (!onBoard) for (const r of noText.slice(0, 3)) failures.push(`${e.name}: ${r.url} has no description`)
     for (const r of rows) {
       if (!onBoard && !onOwnSite(r.url, ctx)) failures.push(`${e.name}: ${r.url} is not on the employer's own site`)
       if (r.posted_at && Date.now() - Date.parse(r.posted_at) > ROLE_MAX_AGE_DAYS * day) failures.push(`${e.name}: ${r.url} is older than ${ROLE_MAX_AGE_DAYS} days`)
