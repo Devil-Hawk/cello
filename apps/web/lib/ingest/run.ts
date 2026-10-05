@@ -36,7 +36,7 @@ import type { FetchPage } from './fetch-page'
 import type { ModelBudget, ModelCall } from './model'
 import type { ReadReason } from './page-reader'
 import { readSite, type SiteDeps, type SiteRead, type Tier } from './reader'
-import { makeSiteFetcher, type ReaderMode, type ReaderReason, type SiteFetcher } from './reader/site-fetch'
+import { makeSiteFetcher, ReaderError, type ReaderMode, type ReaderReason, type SiteFetcher } from './reader/site-fetch'
 import { NO_TARGETS, searchTerms, type ReaderTargets } from './reader/targets'
 import { recheckStoredRoles } from './reader/recheck'
 import { runRequirementsPass, type RequirementsRows } from './requirements-pass'
@@ -154,7 +154,8 @@ function boardReader(company: DueCompany, stored: Map<string, ExistingJob>): Non
     try {
       jobs = await provider.fetch(candidate.token, { hasDescription: (id) => stored.get(id)?.descriptionMd5 != null, ...(query.length ? { query } : {}) })
     } catch {
-      return null
+      // The board answered with an error (a rate limit, a timeout): not "no board", so the company says it did not answer rather than "reading".
+      throw new ReaderError('unreachable')
     }
     if (jobs.length === 0) return null
     if (candidate.via === 'url') return { ...candidate, jobs, verifiedBy: 'careers_url' }

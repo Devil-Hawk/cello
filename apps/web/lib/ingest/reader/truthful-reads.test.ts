@@ -238,3 +238,18 @@ describe('a role that has left a site is closed by its own page', () => {
     expect(closed).toEqual([])
   })
 })
+
+describe('a board that answers with an error is "did not answer", not "reading"', () => {
+  it('keeps the reason through to the answer', async () => {
+    const url = 'https://acme.test/careers'
+    const page = '<a href="https://boards.greenhouse.io/acmehq">Roles</a>'
+    const read = await readSite(input(url, 'Acme', 'acme.test'), {
+      fetcher: fakeFetcher({ [url]: page }),
+      renderedLater: true,
+      readBoard: async () => {
+        throw new ReaderError('unreachable')
+      },
+    })
+    expect(read).toMatchObject({ tier: null, reason: 'unreachable' })
+  })
+})

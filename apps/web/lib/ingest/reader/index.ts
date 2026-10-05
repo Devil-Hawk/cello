@@ -268,8 +268,8 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
   const err = firstError as ReaderError | null
   if (err && ['bot_check', 'login_required', 'robots'].includes(err.reason)) out.reason = err.reason
   else if (renderFailed) out.reason = 'render_failed'
-  else if (f.mode === 'inline' && deps.renderedLater && (pages.length > 0 || listedNoRoles)) out.reason = 'reading'
   else if (err) out.reason = err.reason
+  else if (f.mode === 'inline' && deps.renderedLater && (pages.length > 0 || listedNoRoles)) out.reason = 'reading'
   else out.reason = listedNoRoles ? 'role_pages' : 'no_roles'
   return finish()
 }
