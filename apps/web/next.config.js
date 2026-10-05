@@ -87,6 +87,12 @@ const nextConfig = {
       '@langfuse/core',
       '@opentelemetry/sdk-trace-base',
       '@opentelemetry/exporter-trace-otlp-http',
+      // The agent engine (lib/agents). Large, server-only, and deepagents
+      // pulls node-only backends, so they stay external like the Langfuse SDK.
+      'deepagents',
+      'langchain',
+      '@langchain/openrouter',
+      '@langchain/mcp-adapters',
     ],
     // lib/harness/prompts.ts reads apps/web/prompts/*.md at RUNTIME via
     // fs.readFileSync(path.join(process.cwd(), 'prompts', ...)). That call is
@@ -101,7 +107,9 @@ const nextConfig = {
     // comment in lib/harness/prompts.ts for the full reasoning and the
     // alternative (build-time codegen) this was weighed against.
     outputFileTracingIncludes: {
-      '**': ['./prompts/**/*'],
+      // skills/ is read at runtime by the agent's skills backend, the same
+      // invisible-to-the-tracer pattern as prompts/.
+      '**': ['./prompts/**/*', './skills/**/*'],
     },
   },
 }
