@@ -43,6 +43,7 @@ describe('assertPromptDocsResolve', () => {
       'judge_claims',
       'judge_specificity',
       'analyst',
+      'distill',
     ]))
   })
 })
@@ -173,7 +174,7 @@ describe('the prompt policy', () => {
 })
 
 describe('the rewritten prompt documents', () => {
-  const REWRITTEN = ['planner', 'analyst'] as const
+  const REWRITTEN = ['planner', 'analyst', 'distill'] as const
 
   it.each(REWRITTEN)('%s states its job, inputs, output, rules and examples, and no em dash', (name) => {
     const doc = loadModeDoc(name)
