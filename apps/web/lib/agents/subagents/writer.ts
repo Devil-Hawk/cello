@@ -207,7 +207,8 @@ export function buildWriterGraph(deps: WriterDeps) {
       if (brief.type === 'resume') {
         const out = await optimizeResume({
           resumeText: facts.resumeText,
-          job: { title: job?.title ?? 'the role', company, description: job?.description ?? null },
+          // Framed here because the optimizer's own job block is a plain slice (it is on the PENDING_WIRING list).
+          job: { title: job?.title ?? 'the role', company, description: job ? frameJobText(job.description, { maxChars: 4500, emptyPlaceholder: '' }) || null : null },
           llm,
           signal: ctx.signal,
         })
