@@ -289,68 +289,29 @@ export function firstRefusal(...gates: DemoGate[]): DemoGate {
 export const DEMO_MONTHLY_USD = 1
 
 export interface DemoBudget {
-  periodStart: string
-  spentUsd: number
   monthlyUsd: number
 }
 
 /**
- * The `preferences.budget` block a demo profile is provisioned with.
- *
- * Shaped for lib/harness/spend.ts's reader, which is the only thing that ever
- * interprets it: `monthlyUsd` becomes the cap, and an empty `periodStart` fails
- * that file's `period !== currentPeriod()` test so the ledger resets to zero on
- * first read. Encoding "no period yet" as '' rather than duplicating spend.ts's
- * private "YYYY-MM" format keeps this file from silently drifting out of sync
- * with it.
- *
- * SPEND ALREADY ON THE ROW IS CARRIED FORWARD, NEVER ZEROED. Pass the demo
- * profile's CURRENT `preferences.budget` and this returns the same ledger with
- * a demo cap on top. That is a security decision, not politeness:
- * provisioning is not guaranteed to happen exactly once per workspace —
- * app/api/access/redeem/route.ts re-runs it whenever a first redemption failed
- * mid-seed and released its claim, and the retry lands on a profile that may
- * already have spent money. A block that reset `spentUsd` would turn every such
- * retry into an allowance refill, and the $1 cap would bound nothing. It is
- * also the rule lib/access/seed-demo.ts's buildDemoPreferences already follows
- * for re-seeding; the two now agree instead of one quietly undoing the other.
- *
- * `periodStart` has to travel WITH the spend or preserving it is theatre:
- * spend.ts zeroes the counter whenever the stored period is not the current
- * one, so carrying `spentUsd: 0.9` under `periodStart: ''` would read back as
- * $0.00 spent. It is only carried when there is a spend to protect — a fresh
- * workspace still gets '' and the reset-on-first-read behaviour.
+ * The `preferences.budget` block a demo profile is provisioned with: the cap
+ * only. What a demo has SPENT is not stored here at all. It lives in the
+ * llm_spend ledger (migration 20261006002000), which only the service role
+ * writes, so re-provisioning or re-seeding a workspace can never refill its
+ * allowance, and nothing in this block can be edited to reset it.
  *
  * THE CAP ONLY EVER GOES DOWN, matching seed-demo.ts. A row already carrying a
  * cap below $1 keeps the lower number; provisioning must never be a way to
  * raise a spending limit.
  *
- * KNOWN, ACCEPTED LEAK: a 72-hour code that straddles a UTC month boundary gets
- * a fresh $1 on the far side, because spend.ts resets per calendar month. Worst
- * case per code is therefore $2, not $1. Fixing it properly means a per-session
- * ledger, which is a change to spend.ts; the bound is small and known, so it is
- * recorded here rather than papered over.
+ * Every demo funded by one owner also shares a monthly pool
+ * (demo_allowance_usd() in the same migration), enforced inside the spend
+ * reservation, so the owner's exposure is bounded however many codes exist.
  */
 export function demoBudget(existingBudget?: unknown): DemoBudget {
   const existing = asRecord(existingBudget)
-
-  // `> 0` on purpose: a negative or NaN spend is corruption, and reading it as
-  // "nothing spent" is the safe direction only because the cap still applies.
-  const spentUsd = typeof existing.spentUsd === 'number' && existing.spentUsd > 0 ? existing.spentUsd : 0
-
-  const periodStart =
-    spentUsd > 0 && typeof existing.periodStart === 'string' && existing.periodStart
-      ? existing.periodStart
-      : ''
-
   const existingCap =
     typeof existing.monthlyUsd === 'number' && existing.monthlyUsd > 0 ? existing.monthlyUsd : null
-
-  return {
-    periodStart,
-    spentUsd,
-    monthlyUsd: existingCap === null ? DEMO_MONTHLY_USD : Math.min(DEMO_MONTHLY_USD, existingCap),
-  }
+  return { monthlyUsd: existingCap === null ? DEMO_MONTHLY_USD : Math.min(DEMO_MONTHLY_USD, existingCap) }
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -493,10 +454,10 @@ export function demoProfilePreferences(
  * Make a demo request's model calls chargeable ONLY to the demo.
  *
  * WHY A DEMO CAN NEVER DRAW ON THE OWNER'S ALLOWANCE. spend.ts is keyed
- * entirely by user id: assertWithinBudget(admin, userId) reads that user's
- * profiles.preferences.budget, and recordSpend(admin, userId, …) writes back to
- * the same row. There is no shared pool, so "whose allowance" is decided by one
- * value — `apiKeys.userId`. This function guarantees that for a demo profile
+ * entirely by user id: reserveSpend(admin, {userId, ...}) holds the cost against
+ * that user's own cap and ledger rows (a demo's reservation also draws on its
+ * owner's shared demo allowance, but never on the owner's own cap), so "whose
+ * allowance" is decided by one value — `apiKeys.userId`. This function guarantees that for a demo profile
  * that value is the demo's own id, whatever the loader did. Two concrete ways
  * it could otherwise go wrong:
  *
