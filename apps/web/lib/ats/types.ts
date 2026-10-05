@@ -14,6 +14,7 @@ export type AtsProviderId =
   | 'workable'
   | 'recruitee'
   | 'personio'
+  | 'eightfold'
 
 /** A single job posting normalized across providers. */
 export interface AtsJob {
@@ -32,6 +33,14 @@ export interface AtsJob {
   postedAt?: string
   /** Human-readable salary string (annualized when the source uses intervals). */
   salary?: string
+  /** The employer the posting names, when the source says (a JobPosting's hiringOrganization, a search result's company_name). */
+  employer?: string
+  /** ISO 8601: the posting is not open after this. */
+  validThrough?: string
+  /** The employer's own requisition id, one per role across every way of reading it. */
+  requisitionId?: string
+  /** The page describes an event (a career fair, a webinar), not a role. */
+  isEvent?: boolean
 }
 
 export interface DetectInput {
@@ -50,6 +59,12 @@ export interface FetchContext {
    * rest of a large board empty forever.
    */
   hasDescription?: (externalId: string) => boolean
+  /**
+   * What the person is looking for, as search words ("data engineer"). A board
+   * with a search of its own asks for these instead of listing everything; one
+   * without ignores them.
+   */
+  query?: string[]
 }
 
 export interface AtsProvider {
@@ -64,6 +79,8 @@ export interface AtsProvider {
    * posting missing from it has not necessarily closed.
    */
   maxJobs?: number
+  /** True for a board that lists only what matches FetchContext.query: a role missing from the list is not thereby closed. */
+  searchesByQuery?: boolean
 }
 
 /** Shape persisted at companies.metadata.ats (column is additive/optional). */

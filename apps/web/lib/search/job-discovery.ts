@@ -62,6 +62,7 @@ import { smartrecruiters } from '../ats/smartrecruiters'
 import { workable } from '../ats/workable'
 import { recruitee } from '../ats/recruitee'
 import { personio } from '../ats/personio'
+import { eightfold } from '../ats/eightfold'
 import type { JobLead } from '../sources/types'
 import type { Targeting } from '../targeting'
 import type { RoleIntentDef } from '../jobs/role-taxonomy'
@@ -143,6 +144,7 @@ const ATS_PROVIDERS: Record<AtsProviderId, AtsProvider> = {
   workable,
   recruitee,
   personio,
+  eightfold,
 }
 
 /** Strip query string/hash/trailing slash so URL variants of the same

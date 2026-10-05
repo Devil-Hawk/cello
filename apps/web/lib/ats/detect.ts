@@ -26,6 +26,7 @@ import { smartrecruiters } from './smartrecruiters'
 import { workable } from './workable'
 import { recruitee } from './recruitee'
 import { personio } from './personio'
+import { eightfold } from './eightfold'
 import { fetchCareersHtml, findBoardLinks } from './careers-page'
 import { isRecentBoard, verifyBoard, type BoardRef, type VerifiedBy } from './verify'
 import { isKnownEmployer, knownBoard } from '../companies/known-companies'
@@ -43,6 +44,7 @@ const URL_DETECT_ORDER: readonly AtsProvider[] = [
   workable,
   recruitee,
   personio,
+  eightfold,
 ]
 
 /**

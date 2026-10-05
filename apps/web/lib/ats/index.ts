@@ -16,6 +16,7 @@ import { smartrecruiters } from './smartrecruiters'
 import { workable } from './workable'
 import { recruitee } from './recruitee'
 import { personio } from './personio'
+import { eightfold } from './eightfold'
 import { detectAts } from './detect'
 import { healStoredBoard, needsVerification } from './heal'
 import { isStalePosting } from '../jobs/freshness'
@@ -48,6 +49,7 @@ export { smartrecruiters } from './smartrecruiters'
 export { workable } from './workable'
 export { recruitee } from './recruitee'
 export { personio } from './personio'
+export { eightfold } from './eightfold'
 export { makeSupabaseAtsStore } from './store'
 
 export const providers: Record<AtsProviderId, AtsProvider> = {
@@ -59,6 +61,7 @@ export const providers: Record<AtsProviderId, AtsProvider> = {
   workable,
   recruitee,
   personio,
+  eightfold,
 }
 
 /** The company fields refreshCompany needs (subset of the companies row). */
