@@ -11,9 +11,11 @@ import { getOutreach, findFollowUp, insertOutreach } from '@/lib/outreach/store'
 import { followUpWindowElapsed } from '@/lib/outreach/guardrails'
 import { REPLY_CHECK_UNKNOWN_MESSAGE, threadHasReply } from '@/lib/outreach/gmail'
 import { resolveGmailAccessToken } from '@/lib/gmail/token'
-import type { OutreachDraftInput } from '@/lib/harness/agents/outreach'
+import type { OutreachDraftInput, OutreachDraftResult } from '@/lib/harness/agents/outreach'
 import { runUnitOnce } from '@/lib/graph/oneshot'
-import { fitHighlights, fitRowOf } from '@/lib/scoring/read'
+import { verifyOutreachDraft } from '@/lib/graph/verify/outreach'
+import { loadOutreachSources } from '@/lib/outreach/sources'
+import { writeReviewVerdicts } from '@/lib/outreach/persist-review'
 import { setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
 
 export const dynamic = 'force-dynamic'
@@ -95,63 +97,57 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Build context for a short, low-pressure follow-up.
-    let jobTitle = 'the role'
-    let companyName = 'your company'
-    let matchHighlights: string[] = []
-    if (parent.job_id) {
-      const { data: job } = await supabase
-        .from('jobs')
-        .select('title, person_roles(chance_detail)')
-        .eq('id', parent.job_id)
-        .single()
-      if (job) {
-        jobTitle = job.title || jobTitle
-        matchHighlights = fitHighlights(fitRowOf(job).chance_detail)
-      }
-    }
-    if (parent.company_id) {
-      const { data: company } = await supabase
-        .from('companies')
-        .select('name')
-        .eq('id', parent.company_id)
-        .eq('user_id', user.id)
-        .single()
-      if (company) companyName = company.name
-    }
-
-    setTraceInput({ jobTitle, companyName })
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('full_name, resume_text')
-      .eq('id', user.id)
-      .single()
-
-    const draftInput: OutreachDraftInput = {
-      userName: profile?.full_name || user.email?.split('@')[0] || 'Me',
+    // The job post, company research, the earlier history and the sender's
+    // identity and resume: the same sources the first email was written from.
+    const sources = await loadOutreachSources({
+      supabase,
+      admin,
+      userId: user.id,
       userEmail: user.email || '',
-      jobTitle,
-      companyName,
-      contactName: parent.to_name,
-      resumeText: profile?.resume_text ?? null,
-      matchHighlights,
-      kind: 'follow_up',
+      contactId: parent.contact_id,
+      jobId: parent.job_id,
+      companyId: parent.company_id,
+    })
+    // No name, no draft: a follow-up is signed like the first email.
+    if (!sources.senderName) {
+      return NextResponse.json(
+        { error: 'Add your full name in Settings first. Drafts are signed with it.', needsName: true },
+        { status: 409 }
+      )
     }
 
-    // runAgentUnit('outreach') — same unit the initial-draft route uses,
-    // distinguished by draftInput.kind ('follow_up' here) — builds its own
-    // metered LlmRunner from the user's stored keys (lib/harness/keys.ts#
-    // loadApiKeys); no more makeLlmRunner here. generateOutreachDraft never
-    // throws (falls back to a deterministic template on any model failure).
+    setTraceInput({ jobTitle: sources.input.jobTitle, companyName: sources.input.companyName })
+
+    const daysSinceSent = parent.sent_at ? Math.max(0, Math.floor((Date.now() - Date.parse(parent.sent_at)) / 86_400_000)) : null
+    const draftInput: OutreachDraftInput = {
+      ...sources.input,
+      userName: sources.senderName,
+      contactName: parent.to_name,
+      kind: 'follow_up',
+      previousEmail: { subject: parent.subject, body: parent.body, sentAt: parent.sent_at },
+      daysSinceSent,
+    }
+
+    // runUnitOnce builds its own metered LlmRunner from the user's stored keys.
+    // generateOutreachDraft never throws: any model failure returns the standard
+    // template with the reason, which the card then says out loud.
     const unitResult = await runUnitOnce('outreach', {
       admin,
       userId: user.id,
       goal: 'Draft outreach follow-up email',
       input: draftInput,
     })
-    const draft = unitResult.output as { subject: string; body: string; tokensUsed: number }
-    const usedLlm = draft.tokensUsed > 0
+    // The same review as the first email: checks, claims judge, specificity
+    // judge, one regeneration that names what to fix.
+    const review = await verifyOutreachDraft({
+      admin,
+      userId: user.id,
+      goal: 'Draft outreach follow-up email (review regeneration)',
+      input: draftInput,
+      draft: unitResult.output as OutreachDraftResult,
+    })
+    const usedLlm = review.source === 'model'
+    const templateReason = usedLlm ? null : (review.templateReason ?? null)
 
     try {
       const row = await insertOutreach(admin, {
@@ -161,16 +157,18 @@ export async function POST(request: NextRequest) {
         company_id: parent.company_id,
         to_email: parent.to_email,
         to_name: parent.to_name,
-        subject: draft.subject,
-        body: draft.body,
+        subject: review.subject,
+        body: review.body,
         status: 'pending_review',
         kind: 'follow_up',
         parent_id: parentId,
         used_llm: usedLlm,
+        template_reason: templateReason,
       })
+      await writeReviewVerdicts(admin, user.id, row.id, review)
       setTraceMeta({ message_id: row.id })
-      setTraceOutput({ subject: draft.subject, usedLlm })
-      return NextResponse.json({ ok: true, message: row, usedLlm })
+      setTraceOutput({ subject: review.subject, usedLlm, templateReason })
+      return NextResponse.json({ ok: true, message: row, usedLlm, templateReason, checks: review.checks })
     } catch (e) {
       return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed to save follow-up' }, { status: 500 })
     }
