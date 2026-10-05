@@ -89,11 +89,8 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       're-validation (approveOne) always calls this with a single-element array — never an owned-id set.',
   },
   'apps/web/lib/graph/autopilot.ts': {
-    calls: [".in('job_id', jobIds)", ".in('subject_id', jobIds)"],
-    reason:
-      "jobIds is pendingDraftJobIds(goal) — one autopilot goal's own small kept-list, not an owned-id set; the " +
-      "second call (loadFailedVerdictJobIds) filters rows already capped by loadCandidateJobs' own " +
-      'CANDIDATE_JOB_LIMIT (150) query above it.',
+    calls: [".in('job_id', jobIds)"],
+    reason: "jobIds is pendingDraftJobIds(goal): one autopilot goal's own small kept-list, not an owned-id set.",
   },
   'apps/web/lib/graph/distill.ts': {
     calls: [".in('id', ids)"],
@@ -113,10 +110,18 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       'ACTIVE_STAGES is a fixed 3-element const, not user data.',
   },
   'apps/web/lib/harness/agents/matcher.ts': {
-    calls: [".in('id', ids)"],
+    calls: [".in('id', jobIds)"],
     reason:
-      'fetchJobsByIds: every caller caps the id list (score_jobs\' SCORE_JOBS_MAX_LIMIT=15, or selectCandidateJobs\' ' +
-      'poolSize) before it reaches here; ownership is enforced separately by ownedJobsQuery\'s FK join.',
+      "diagnoseCandidateJobs: the caller is score_jobs, whose id list is capped at SCORE_JOBS_MAX_LIMIT=15 before " +
+      "it reaches here; ownership is enforced separately by ownedJobsQuery's FK join.",
+  },
+  'apps/web/lib/scoring/index.ts': {
+    calls: [".in('id', rows.map((r)"],
+    reason: "rows is one day's saved shortlist (at most a handful of picks), one job id per row; ownership is enforced by ownedJobsQuery's FK join.",
+  },
+  'apps/web/lib/scoring/supabase-store.ts': {
+    calls: [".in('id', part)"],
+    reason: 'part is one slice of at most IN_CHUNK (100) ids, cut by chunks() on every call; ownership is enforced by ownedJobsQuery\'s FK join.',
   },
   'apps/web/lib/harness/agents/verifier.ts': {
     calls: [".in('id', knockouts)"],

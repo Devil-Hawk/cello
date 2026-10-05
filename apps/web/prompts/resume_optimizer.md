@@ -71,7 +71,7 @@ the actual text.
 
 **SCORING BANDS for `atsScore`: use the full 0-100 range. Clustering every
 score low is itself a bug, in exactly the way a rubric that always returned
-100 would be** (see `_shared.md`'s Shared Fit-Score Bands table and its
+100 would be** (see `_shared.md`'s ATS Score Bands table and its
 calibration warning; restated here with the ATS-specific meaning of each
 band, as that table requires):
 

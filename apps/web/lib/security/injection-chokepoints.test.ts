@@ -113,13 +113,6 @@ const FRAMING_CALL = /\b(?:frameJobText|frameJobTextList|prepareJobText)\s*\(/
  * instruction for whoever does the mechanical follow-up.
  */
 const PROMPT_BUILDERS: Record<string, string> = {
-  'apps/web/lib/harness/agents/matcher.ts':
-    'scoreJobWithLlm builds `Description:\\n${job.description}` into the user prompt (~L178). ' +
-    'Highest-volume model call in the product, so this is the widest exposure.',
-  'apps/web/lib/harness/agents/bulk_matcher.ts':
-    'buildTier1Prompt inlines each job description into a batched list (~L132) — one hostile ' +
-    'posting sits next to 49 honest ones in the same prompt. Use frameJobTextList(), which ' +
-    'exists for this shape: one preface for the batch, one marker per job.',
   'apps/web/lib/harness/agents/cv_tailor.ts':
     'The tailoring path (~L82-L89). THE one that ends in a document sent to an employer under ' +
     'the user’s name; also the site that should run checkTailoringContainment on the output.',
@@ -156,8 +149,8 @@ const PROMPT_BUILDERS: Record<string, string> = {
     'Step 6, the reward-loop distiller: buildDistillPrompt (~L200) quotes a SAMPLE of judged ' +
     "verdicts' rationale text into the distillation prompt — those rationales can carry model " +
     'output built from framed job text (matcher gaps/missingSkills, a judge summary — see ' +
-    'lib/graph/verify/matcher.ts / cv-tailor.ts / outreach.ts). Uses frameJobTextList, same ' +
-    "batch shape as lib/harness/agents/bulk_matcher.ts, so this file's own scan-mutation check " +
+    'lib/graph/verify/cv-tailor.ts / outreach.ts). Uses frameJobTextList, same ' +
+    "batch shape as lib/scoring/want-judge.ts, so this file's own scan-mutation check " +
     'documented in its header stays true.',
   'apps/web/lib/scoring/requirements.ts':
     'extractRequirements puts each posting description in the extraction prompt. Frames the batch ' +
@@ -191,6 +184,10 @@ const PENDING_WIRING: string[] = [
  * fences, so they are exempt BY CLASSIFICATION, not by omission.
  */
 const FORWARDERS: Record<string, string> = {
+  'apps/web/lib/harness/agents/matcher.ts':
+    'Hands roles to lib/scoring (assessJobs), which frames every description it sends to a model ' +
+    '(lib/scoring/want-judge.ts and requirements.ts use frameJobTextList). diagnoseCandidateJobs only ' +
+    'checks whether a posting has a description; it never puts one in a prompt.',
   'apps/web/lib/graph/autopilot.ts':
     'Selects jobs and hands them to the matcher/tailorer agents (moved from lib/harness/autopilot.ts ' +
     'in the langgraph port step 10 — draftTask now reaches cv_tailor/applier through ' +
@@ -211,7 +208,6 @@ const FORWARDERS: Record<string, string> = {
     "currently match this scan's CANDIDATES filter (no `.description`/prompt marker in its source, " +
     'or in lib/a2a/executor.ts, which is the same shape) — listed here per ruling 7\'s instruction, ' +
     'same as app/api/mcp/route.ts above.',
-  'apps/web/app/api/agents/match/route.ts': 'Loads the job row, calls scoreJobWithLlm.',
   'apps/web/app/api/resume/documents/route.ts': 'Passes {title, company, description} to cv_tailor.',
   'apps/web/app/api/resume/optimize/route.ts': 'Passes the job to resume_optimizer.',
   'apps/web/app/api/outreach/draft/route.ts':

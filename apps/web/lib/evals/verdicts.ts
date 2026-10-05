@@ -32,7 +32,6 @@ import type { AdminClient } from '../harness/types'
 
 /** Matches the `subject_kind` CHECK constraint on public.eval_verdicts. */
 export type VerdictSubjectKind =
-  | 'match_score'
   | 'cv_tailor_draft'
   | 'outreach_draft'
   | 'plan'
