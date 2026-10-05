@@ -211,6 +211,21 @@ export default function CompaniesPage() {
     })
   }
 
+  // A new company is checked at once, so its first line is "Checking now" and
+  // then its real state, not "Never checked" until the next scheduled run.
+  async function onCompanyAdded(companyId?: string) {
+    await fetchCompanies()
+    if (!companyId) return
+    setRefreshingIds((prev) => new Set(prev).add(companyId))
+    const outcome = await refreshCompanyJobs(companyId)
+    if (outcome.success) await fetchCompanies()
+    setRefreshingIds((prev) => {
+      const next = new Set(prev)
+      next.delete(companyId)
+      return next
+    })
+  }
+
   async function toggleDreamCompany(company: CompanySummary) {
     const { error } = await supabase
       .from('companies')
@@ -415,7 +430,7 @@ export default function CompaniesPage() {
       <AddCompanyDialog
         open={showAddDialog}
         onOpenChange={setShowAddDialog}
-        onAdded={fetchCompanies}
+        onAdded={onCompanyAdded}
       />
     </div>
   )

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CompanyLogo, getCompanyLogoSrc } from '@/components/companies/company-logo'
 import { formatShortDate, matchTone } from '@/lib/format'
+import { rolesStatus, rolesStatusLine } from '@/lib/companies/roles-status'
 
 export interface CompanySummary {
   id: string
@@ -16,6 +17,9 @@ export interface CompanySummary {
   is_dream_company: boolean
   created_at: string
   last_scraped_at: string | null
+  /** companies.metadata: carries the last check (source_check) for the status line. */
+  metadata?: unknown
+  scrape_frequency?: number | null
   jobs_count?: number
   /** Max `jobs.match_score` across this company's jobs. Null (not 0) when none of its jobs are scored yet. */
   best_match_score?: number | null
@@ -37,14 +41,16 @@ export function CompanyRow({
   onRefresh,
   onDelete,
 }: CompanyRowProps) {
+  // Never a bare "0 open roles" or "Never checked": with nothing to show the
+  // line says what is true (checking now, next check, or can't read the site).
+  const status = rolesStatus(company, company.jobs_count ?? 0, { checking: isRefreshing })
+  const statusLine = rolesStatusLine(status)
   const meta: string[] = []
   if (company.domain) meta.push(company.domain)
-  meta.push(`${company.jobs_count ?? 0} open roles`)
-  meta.push(
-    company.last_scraped_at
-      ? `Checked ${formatShortDate(company.last_scraped_at)}`
-      : 'Never checked'
-  )
+  meta.push(statusLine.text)
+  if (status.kind === 'roles' && company.last_scraped_at) {
+    meta.push(`Checked ${formatShortDate(company.last_scraped_at)}`)
+  }
 
   // undefined (field not yet requested by some caller) collapses to the same
   // "unscored" badge as an explicit null — only a real number counts as scored.
@@ -107,7 +113,29 @@ export function CompanyRow({
               {bestScore === null ? 'Not scored' : `${bestScore}% match`}
             </Badge>
           </div>
-          <p className="truncate text-caption text-muted-foreground">{meta.join(' · ')}</p>
+          <p
+            className={
+              status.kind === 'roles'
+                ? 'truncate text-caption text-muted-foreground'
+                : 'text-caption text-muted-foreground'
+            }
+          >
+            {meta.join(' · ')}
+            {statusLine.href && (
+              <>
+                {' · '}
+                {/* relative z-10 lifts the link above the row's stretched link. */}
+                <a
+                  href={statusLine.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="relative z-10 underline underline-offset-2 hover:text-foreground"
+                >
+                  Open the careers page
+                </a>
+              </>
+            )}
+          </p>
         </div>
       </Link>
 
