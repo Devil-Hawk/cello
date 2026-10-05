@@ -93,7 +93,7 @@ async function main() {
   const genuine = drafts.filter((d) => d.profiles?.is_demo !== true)
 
   const verdicts = await rest<VerdictRow[]>(
-    'eval_verdicts?select=subject_id,score,verdict&subject_kind=eq.cv_tailor_draft&judge=eq.factuality&limit=1000'
+    'eval_verdicts?select=subject_id,score,verdict&subject_kind=eq.cv_tailor_draft&judge=in.(factuality,groundedness)&limit=1000'
   )
   const verdictByDraft = new Map(verdicts.map((v) => [v.subject_id, v]))
 

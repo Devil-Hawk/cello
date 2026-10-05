@@ -442,6 +442,7 @@ export async function prepareApplicationDraft(unitConfig: UnitConfig, canTailor:
   const admin = createAdminClient()
   let resumeSummary: string | undefined
   let coverLetter: string | undefined
+  let coverLetterMeta: Awaited<ReturnType<typeof verifyCvTailorDraft>>['coverLetterMeta']
   let tokensUsed = 0
   // Set only for the two outcomes that persist WITH a verdict to flag
   // (ruling 2c: 'judge-failed' -> status 'failed'; 'unjudged' -> requires
@@ -461,6 +462,7 @@ export async function prepareApplicationDraft(unitConfig: UnitConfig, canTailor:
       tokensUsed += outcome.tokensUsed
       resumeSummary = outcome.resumeSummary
       coverLetter = outcome.coverLetter
+      coverLetterMeta = outcome.coverLetterMeta
       if (outcome.kind === 'judge-failed') {
         flaggedVerdict = { verdict: 'fail', rationale: outcome.verdict.summary, judgeSpanId: outcome.verdict.spanId }
       } else if (outcome.kind === 'unjudged') {
@@ -485,7 +487,7 @@ export async function prepareApplicationDraft(unitConfig: UnitConfig, canTailor:
   const autoSubmit = false
   try {
     const applyOut = await runAgentUnit('applier', {
-      input: { jobId, resumeSummary, coverLetter, autoSubmit },
+      input: { jobId, resumeSummary, coverLetter, coverLetterMeta, autoSubmit },
       admin,
       config: unitConfig,
       label: `apply:${jobId}`,
@@ -507,7 +509,7 @@ export async function prepareApplicationDraft(unitConfig: UnitConfig, canTailor:
         runId: unitConfig.configurable.runId,
         subjectKind: 'cv_tailor_draft',
         subjectId: out.draftId,
-        judge: 'factuality',
+        judge: 'groundedness',
         verdict: flaggedVerdict.verdict,
         rationale: flaggedVerdict.rationale,
         judgeSpanId: flaggedVerdict.judgeSpanId,

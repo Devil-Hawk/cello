@@ -174,6 +174,7 @@ export const applier: AgentFn = async (ctx) => {
     run_id: ctx.runId,
     resume_summary: content.resumeSummary ?? null,
     cover_letter: content.coverLetter ?? null,
+    cover_letter_meta: input.coverLetterMeta ?? null,
     answers,
     status,
     submission_ref: submissionRef,
