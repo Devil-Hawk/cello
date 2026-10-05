@@ -189,7 +189,8 @@ export default function CompanyDetailPage() {
   const matchingJobs = jobs.filter((j) => targetVerdict(j, targeting, company.name) === 'inside')
   const shownJobs = roleTargets && scope === 'matching' ? matchingJobs : jobs
   const newThisWeek = shownJobs.filter((j) => j.is_new).length
-  const statusLine = rolesStatusLine(rolesStatus(company, jobs.length, { checking: isRefreshing }))
+  const status = rolesStatus(company, jobs.length, { checking: isRefreshing })
+  const statusLine = rolesStatusLine(status)
   const lastChecked = lastCheckedMs(company)
 
   return (
@@ -316,9 +317,11 @@ export default function CompanyDetailPage() {
             icon={Briefcase}
             title={statusLine.text}
             body={
-              statusLine.href
-                ? 'You can still open its careers page yourself.'
-                : 'Refresh to check this company now.'
+              status.kind === 'checking'
+                ? 'This takes a few seconds.'
+                : status.kind === 'unreadable' && status.careersUrl
+                  ? 'You can still open its careers page yourself.'
+                  : 'Use Refresh jobs to check it now.'
             }
             action={
               company.career_url ? (
