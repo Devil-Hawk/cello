@@ -747,6 +747,22 @@ describe('dispatchTool in Langfuse', () => {
     for (const secret of ['Jane', 'jane@acme.com', 'Recruiter', 'Joe']) expect(dump).not.toContain(secret)
   })
 
+  it('get_dossier and get_application report a real count and the ids asked about, still no details', async () => {
+    const admin = fakeAdmin({
+      jobs: [{ id: 'job-1', title: 'Secret Role', company_id: 'co-1', user_id: 'me' }],
+      companies: [{ id: 'co-1', name: 'Acme', user_id: 'me' }],
+      applications: [{ id: 'app-1', job_id: 'job-1', user_id: 'me', stage: 'applied', notes: 'private note' }],
+      company_dossiers: [{ company_id: 'co-1', user_id: 'me', summary: 'Dossier gossip', sponsors_visa: 'likely', signals: {}, comp_intel: {}, refreshed_at: null }],
+    })
+    const dossier = await traced(configure(false), baseCtx(admin), 'get_dossier', { companyId: 'co-1' })
+    expect(dossier.rows[0].lf?.output).toEqual({ count: 1, ids: ['co-1'] })
+    expect(dossier.rows[0].attributes).toBeDefined()
+    const app = await traced(configure(false), baseCtx(admin), 'get_application', { jobId: 'job-1' })
+    expect(app.rows[0].lf?.output).toMatchObject({ count: 1, ids: expect.arrayContaining(['job-1', 'app-1']) })
+    const dump = JSON.stringify([dossier.rows[0].lf, app.rows[0].lf])
+    for (const secret of ['Dossier gossip', 'private note', 'Secret Role']) expect(dump).not.toContain(secret)
+  })
+
   it('an MCP tool is always call-mcp-tool; the server and tool names only travel as capture-gated detail', async () => {
     const admin = { from: () => { throw new Error('mcp server lookup failed') } } as unknown as AdminClient
     const { rows } = await traced(configure(false), baseCtx(admin), 'mcp:evil sk-ant-api03-CANARY_x:sometool', {})

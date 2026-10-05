@@ -97,10 +97,21 @@ export function langfuseCaptureDemoEnabled(): boolean {
   return flag('LANGFUSE_CAPTURE_DEMO_CONTENT', false)
 }
 
+/** LANGFUSE_CAPTURE_USER_IDS: comma-separated profile uuids. When set, only
+ *  these accounts send prompt text; everyone else sends metadata only. Unset or
+ *  blank keeps the default (every non-demo account). */
+function captureAllowlist(): Set<string> | undefined {
+  const ids = (env('LANGFUSE_CAPTURE_USER_IDS') ?? '').split(',').map((id) => id.trim().toLowerCase()).filter(Boolean)
+  return ids.length > 0 ? new Set(ids) : undefined
+}
+
 /** May prompt text of this trace leave the process? isDemo undefined counts as
- *  demo: the fail-closed side. */
-export function contentCaptureFor(isDemo: boolean | undefined): boolean {
-  return langfuseCaptureEnabled() && (isDemo === false || langfuseCaptureDemoEnabled())
+ *  demo: the fail-closed side. With an allowlist, the account must be on it. */
+export function contentCaptureFor(isDemo: boolean | undefined, userId?: string): boolean {
+  if (!langfuseCaptureEnabled()) return false
+  if (isDemo !== false) return langfuseCaptureDemoEnabled()
+  const allow = captureAllowlist()
+  return !allow || (userId !== undefined && allow.has(userId.toLowerCase()))
 }
 
 function rate(name: string, dflt: number): number {
@@ -155,7 +166,19 @@ export function scrubText(text: string, cap: number = CONTENT_CAP_CHARS): string
 /** Structured payloads: bounded first (capPayload also bounds wide objects),
  *  then key deny-list plus patterns (resume, email, token... keys are blanked). */
 export function scrubPayload(value: unknown): unknown {
-  return scrubMetadata(capPayload(value, PAYLOAD_CAP_BYTES))
+  const capped = capPayload(value, PAYLOAD_CAP_BYTES) as { _truncated?: unknown; preview?: unknown } | null
+  // capPayload's oversize fallback previews the raw JSON text, which no key
+  // name can match. Rebuild that preview from the key-scrubbed value.
+  if (capped && typeof capped === 'object' && capped._truncated === true && typeof capped.preview === 'string') {
+    let preview = ''
+    try {
+      preview = JSON.stringify(scrubMetadata(value)).slice(0, Math.max(0, PAYLOAD_CAP_BYTES - 128))
+    } catch {
+      /* unserializable: keep the empty preview */
+    }
+    return scrubMetadata({ _truncated: true, preview })
+  }
+  return scrubMetadata(capped)
 }
 
 /** The one choke function for every non-input/output string: slice, redact, cut. */
@@ -195,6 +218,11 @@ const isMsg = (v: unknown): v is Msg => {
   return typeof o === 'object' && o !== null && typeof o.role === 'string' && typeof o.content === 'string'
 }
 
+/** The Copilot replays every earlier tool result to the model as a user message.
+ *  Results of the tools that return other people's details (see
+ *  THIRD_PARTY_TOOLS in copilot-tools.ts) are never captured in those replays. */
+const THIRD_PARTY_RESULT_RE = /^TOOL RESULT \[(?:list_contacts|get_dossier|get_application)\] \([a-z_]{1,20}\):/
+
 /** Chat messages keep their readable text. The first copy of a system prompt in
  *  a trace is captured whole (64 KB); a later identical one (every Copilot step
  *  re-sends it) becomes a one-line pointer and costs no budget. Other roles get
@@ -213,7 +241,10 @@ function scrubMessages(msgs: Msg[], budget: Budget, name: string, cut: Cut): Msg
         content = scrubText(m.content, SYSTEM_CAP_CHARS)
       }
     } else {
-      content = scrubText(m.content, Math.max(0, Math.min(CONTENT_CAP_CHARS, left)))
+      const withheld = THIRD_PARTY_RESULT_RE.exec(m.content)
+      content = withheld
+        ? `${withheld[0]} [withheld: other people's details, see the tool observation]`
+        : scrubText(m.content, Math.max(0, Math.min(CONTENT_CAP_CHARS, left)))
       left -= content.length
     }
     if (content.endsWith('…[truncated]')) cut.truncated = true
@@ -287,6 +318,8 @@ function toAttributes(r: SpanRecord, budget: Budget, capture: boolean): Attrs {
   if (inCut.truncated) Object.assign(metadata, { input_chars: inCut.chars, input_truncated: true })
   if (outCut.truncated) Object.assign(metadata, { output_chars: outCut.chars, output_truncated: true })
   if (r.run_id) metadata.run_id = r.run_id
+  // Empty input and output on a demo or kill-switched trace is deliberate; say so.
+  if (!capture) metadata.content = 'withheld'
   if (capture) {
     for (const [k, v] of Object.entries(lf.detail ?? {})) if (NAME_RE.test(k)) metadata[k] = clean(v, 200)
   }
@@ -555,13 +588,27 @@ function bounded(job: () => Promise<void>): () => Promise<void> {
     })
 }
 
+/** Replays waiting behind a slow Langfuse. Past this a trace is dropped, so
+ *  memory and instance lifetime stay bounded. */
+const MAX_QUEUED = 20
+let queued = 0
+
 function deliver(unbounded: () => Promise<void>): Promise<void> {
+  if (queued >= MAX_QUEUED) {
+    console.warn(`[langfuse] export queue full (${MAX_QUEUED}); trace dropped`)
+    return Promise.resolve()
+  }
+  queued += 1
   const job = bounded(unbounded)
   const run = tail.then(job, job)
   tail = run.catch(() => undefined)
-  const safe = run.catch((err) => {
-    console.warn(`[langfuse] export failed: ${redactString(String(err).slice(0, 300))}`)
-  })
+  const safe = run
+    .catch((err) => {
+      console.warn(`[langfuse] export failed: ${redactString(String(err).slice(0, 300))}`)
+    })
+    .finally(() => {
+      queued -= 1
+    })
   const ctx = (globalThis as unknown as Record<symbol, { get?: () => { waitUntil?: (p: Promise<unknown>) => void } | undefined } | undefined>)[REQ_CTX]?.get?.()
   if (typeof ctx?.waitUntil === 'function') {
     ctx.waitUntil(safe)

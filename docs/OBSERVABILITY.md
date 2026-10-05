@@ -122,6 +122,7 @@ Optional:
 | --- | --- | --- |
 | `LANGFUSE_CAPTURE_CONTENT` | on | The kill switch. Only an unset or blank value or `1`, `true`, `on`, `yes` keeps prompts and replies on. Anything else, a typo included, turns them off. Tokens, cost and timing still go. |
 | `LANGFUSE_CAPTURE_DEMO_CONTENT` | off | Demo workspaces send no prompt or reply text unless this is `1`, `true`, `on` or `yes`. A trace whose owner is unknown counts as a demo. |
+| `LANGFUSE_CAPTURE_USER_IDS` | unset | Comma-separated profile uuids. When set, only these accounts send prompt and reply text, and every other account sends metadata only. Unset means every non-demo account sends text. A demo is never opened by this list. |
 | `LANGFUSE_SAMPLE_RATE` | `1` | A number from 0 to 1. A value that is not a number means 0, so a typo never raises volume. Chosen per trace by a hash of the trace id, so a trace is sent whole or not at all. The SDK itself never reads this variable, so it is not applied twice. |
 | `LANGFUSE_DEMO_SAMPLE_RATE` | `0.25` | The same for demo traces, which use the lower of the two rates. It keeps a burst of demo visitors from eating the free unit budget. |
 
@@ -247,7 +248,11 @@ the user id, the session id and the tags. No message text leaves.
 
 Tool results for contacts, company dossiers and applications (other people's
 names, urls and contact details) are sent as a count and ids only, even with
-capture on.
+capture on. That holds for the tool observation and for the copy the Copilot
+replays to the model in later steps: that replayed result is shown as
+`[withheld ...]`. With capture off, each observation carries
+`content: withheld` in its metadata, so an empty input and output is known to be
+deliberate.
 
 ### Redaction
 

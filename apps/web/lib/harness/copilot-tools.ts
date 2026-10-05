@@ -426,7 +426,7 @@ export async function dispatchTool(ctx: CopilotToolContext, tool: string, args: 
         ...(capture
           ? {
               input: thirdParty ? { ids: idsIn(args) } : args,
-              output: thirdParty ? { count: countOf(result), ids: idsOf(result) } : result,
+              output: thirdParty ? { count: countOf(result), ids: idsOf(result, args) } : result,
             }
           : {}),
         ...(failure ? { level: 'ERROR' as const, errorCode: failure.code, errorMessage: failure.message } : {}),
@@ -461,23 +461,38 @@ function idsIn(args: Args): Record<string, unknown> {
   return Object.fromEntries(Object.entries(args).filter(([k]) => /(^id$|Ids?$)/.test(k)))
 }
 
-/** The `id` of every row a read tool returned (capped), for `{ count, ids }`. */
-function idsOf(result: unknown): string[] {
+/** The id of every row a read tool returned (capped), for `{ count, ids }`:
+ *  `id` on list rows, `applicationId` and `jobId` on application rows, and the
+ *  `jobId` / `companyId` the caller asked about when the result names no row. */
+function idsOf(result: unknown, args: Args = {}): string[] {
   const out: string[] = []
   const take = (v: unknown) => {
-    const id = (v as { id?: unknown } | null)?.id
-    if (typeof id === 'string' && out.length < 50) out.push(id)
+    const o = v as Record<string, unknown> | null
+    if (!o || typeof o !== 'object') return
+    for (const k of ['id', 'applicationId', 'jobId']) {
+      if (typeof o[k] === 'string' && out.length < 50 && !out.includes(o[k] as string)) out.push(o[k] as string)
+    }
   }
   const r = result as Record<string, unknown> | null
   if (!r || typeof r !== 'object') return out
   take(r)
-  for (const v of Object.values(r)) if (Array.isArray(v)) v.forEach(take)
+  for (const v of Object.values(r)) {
+    if (Array.isArray(v)) v.forEach(take)
+    else take(v)
+  }
+  for (const v of Object.values(idsIn(args))) if (typeof v === 'string' && out.length < 50 && !out.includes(v)) out.push(v)
   return out
 }
 
+/** list_contacts reports `count`, get_application `total` (or one application
+ *  and draft), get_dossier `exists`. */
 function countOf(result: unknown): number {
-  const r = result as { count?: unknown } | null
-  return typeof r?.count === 'number' ? r.count : idsOf(result).length
+  const r = result as Record<string, unknown> | null
+  if (typeof r?.count === 'number') return r.count
+  if (typeof r?.total === 'number') return r.total
+  if (typeof r?.exists === 'boolean') return r.exists ? 1 : 0
+  if (r && 'application' in r) return r.application || r.draft ? 1 : 0
+  return idsOf(result).length
 }
 
 async function dispatchToolInner(ctx: CopilotToolContext, tool: string, args: Args, mcp: boolean): Promise<unknown> {
