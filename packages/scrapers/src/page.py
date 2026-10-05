@@ -1,4 +1,4 @@
-"""Fetch one careers page the way a browser would show it, and print its HTML.
+"""Fetch one careers page as a browser builds it, and print its HTML.
 
     python -m src.page <url>
 
@@ -7,10 +7,14 @@ data, the model, verification) is TypeScript, so the scheduled check and the
 in-app button read a page identically; the one thing only this side can do is
 get HTML from a page that builds its list with script.
 
-The ladder is the existing one, cheapest first: a plain request, then a
-Scrapling browser render when the result looks like an empty shell, then a
-Playwright click-through to a "see open roles" page. Each later rung is used
-only when it surfaces more job links than the one before it.
+Everything here is plain and honest. The page's robots.txt is read first and
+obeyed. Requests and the browser both send the Cello user agent (polite.py),
+which names the product and its repository; nothing pretends to be a person.
+The ladder is cheapest first: a plain request, then a browser render when the
+result looks like an empty shell, then a click-through to a "see open roles"
+page. Each later rung is used only when it surfaces more job links than the one
+before it. A site that answers with a bot check, a login or a CAPTCHA is not
+read.
 
 Output is exactly one JSON line on stdout:
 
@@ -28,15 +32,15 @@ import json
 import logging
 import sys
 
+from urllib.parse import urlsplit
+
 import httpx
 
 from .browser_tier import fetch_with_browser_fallback
+from .polite import USER_AGENT, RobotsCache
 from .render import fetch_with_render_fallback
 
-_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
+_USER_AGENT = USER_AGENT
 _MAX_BYTES = 5_000_000
 
 
@@ -50,8 +54,19 @@ def _static_get(url: str) -> tuple[str, str]:
         return response.text[:_MAX_BYTES], str(response.url)
 
 
+def _allowed(url: str, robots: RobotsCache | None = None) -> bool:
+    """Does the site's robots.txt let Cello read `url`?"""
+    parts = urlsplit(url)
+    path = parts.path or "/"
+    if parts.query:
+        path += "?" + parts.query
+    return (robots or RobotsCache()).for_url(url).allows(path)
+
+
 def fetch_page(url: str) -> dict[str, object]:
     """Fetch `url`; always returns the output dict, never raises."""
+    if not _allowed(url):
+        return {"ok": False, "error": "RobotsDisallowed"}
     static_html: str | None = None
     final_url = url
     first_error: Exception | None = None
@@ -74,7 +89,7 @@ def fetch_page(url: str) -> dict[str, object]:
 
 
 def main(argv: list[str]) -> int:
-    # Scrapling logs the address it fetched on its own handler; this output is
+    # Libraries log the address they fetched on their own handlers; this output is
     # public. disable() survives any handler setup.
     logging.disable(logging.CRITICAL)
     if len(argv) != 2 or not argv[1].startswith(("http://", "https://")):

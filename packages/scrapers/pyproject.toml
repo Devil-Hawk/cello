@@ -17,9 +17,9 @@ dependencies = [
 # Browser-rendered fetching for career pages that ship an empty shell to plain
 # HTTP. Optional on purpose: src/render.py imports it lazily and degrades to the
 # httpx-only path when it is absent, so CI and local installs need not provision
-# a browser. Install with `pip install -e ".[render]" && scrapling install`.
+# a browser. Install with `pip install -e ".[render]" && playwright install chromium`.
 render = [
-    "scrapling>=0.2.9",
+    "playwright>=1.40",
 ]
 # The last escalation rung, for boards that sit behind a click rather than
 # just behind rendering (see src/browser_tier.py). Also optional and lazily

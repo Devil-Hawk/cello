@@ -12,7 +12,7 @@ python -m src.page https://company.com/careers
 
 That prints one JSON line, `{"ok": true, "html": "...", "final_url": "...", "rendered": false}`,
 or `{"ok": false, "error": "<ExceptionClass>"}`. It tries a plain request, then a
-Scrapling render when the page is an empty shell, then a Playwright click-through
+rendered browser view when the page is an empty shell, then a Playwright click-through
 to a "see open roles" page. Reading the HTML (job markup, the model, checking
 what the model named) is TypeScript, so the scheduled check and the in-app
 button read a page the same way.

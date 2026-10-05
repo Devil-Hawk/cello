@@ -1,7 +1,7 @@
 """A real browser, for the career pages a rendered fetch still cannot reach.
 
 WHY THIS EXISTS
-    render.py escalates a plain-HTTP shell to Scrapling's single rendered fetch
+    render.py escalates a plain-HTTP shell to one rendered fetch
     of the SAME url. That closes most of the gap (see render.py's docstring for
     the 69.5%-of-watchlist numbers), but it still misses boards that sit behind
     a click: a homepage whose "Careers" link leads to the real listings, or a
@@ -60,6 +60,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
+from .polite import USER_AGENT
 from .render import count_job_links, looks_like_unrendered_shell
 
 logger = logging.getLogger(__name__)
@@ -128,7 +129,7 @@ def browser_use_available() -> bool:
     """True when the browser-use package is importable in this environment.
 
     Checked at call time, never at import time — like render.py's
-    scrapling_available(), this tier must keep degrading cleanly wherever the
+    playwright_available(), this tier must keep degrading cleanly wherever the
     `[browser]` extra is not provisioned (CI without it, a bare dev install).
     """
     try:
@@ -227,7 +228,7 @@ def _deterministic_click_through(url: str) -> str | None:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             try:
-                page = browser.new_page()
+                page = browser.new_context(user_agent=USER_AGENT).new_page()
                 page.goto(url, timeout=_PAGE_LOAD_TIMEOUT_MS, wait_until="networkidle")
                 html = page.content()
                 if not looks_like_unrendered_shell(html).is_shell:
@@ -304,7 +305,7 @@ def fetch_with_browser_fallback(url: str, best_html: str | None) -> tuple[str, b
     still looks like an unrendered shell.
 
     Call this ONLY after the render tier; it is the last, most expensive rung
-    of the ladder (plain HTTP -> Scrapling render -> this). Same
+    of the ladder (plain HTTP -> rendered fetch -> this). Same
     discard-unless-better contract as render.py: a browser result is only
     kept when it actually surfaced more job-shaped links than what came in.
     """

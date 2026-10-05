@@ -56,7 +56,7 @@ EVERYTHING HERE IS OFFLINE-TESTABLE
     The robots parser, the limiter, the backoff record and the retry-after
     parser are pure given an injected clock; only RobotsCache touches the
     network, through an injectable fetcher that lazily imports httpx exactly the
-    way render.py lazily imports Scrapling.
+    way render.py lazily imports Playwright.
 """
 
 from __future__ import annotations
@@ -87,7 +87,7 @@ logger = logging.getLogger(__name__)
 # User-Agent; that is the opposite of this policy and should be replaced with
 # USER_AGENT (see the report accompanying this module).
 USER_AGENT_TOKEN = "cello-job-tracker"
-USER_AGENT = f"{USER_AGENT_TOKEN}/1.0 (+https://cello-two.vercel.app)"
+USER_AGENT = f"{USER_AGENT_TOKEN}/1.0 (+https://github.com/Devil-Hawk/cello)"
 
 # ---------------------------------------------------------------------------
 # Tunables
@@ -369,7 +369,7 @@ def parse_robots(text: str, user_agent_token: str = USER_AGENT_TOKEN) -> RobotsR
 def _default_fetcher(url: str, timeout: float = 10.0) -> tuple[int, str]:
     """Fetch a URL with httpx, lazily imported.
 
-    Same lazy-import contract as render.scrapling_available(): this package must
+    Same lazy-import contract as render.playwright_available(): this package must
     keep working wherever a dependency is not provisioned, and a fetch failure
     must degrade to a status code rather than an exception. Status 0 means "no
     answer at all".
