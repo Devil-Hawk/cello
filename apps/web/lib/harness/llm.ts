@@ -87,9 +87,6 @@ function requestMessages(opts: LlmRunOptions): { role: string; content: string }
   return input
 }
 
-/** The model a call was aimed at, for a call that failed before any result
- *  named it (so errors can be grouped by model). DEFAULT_MODEL is only the
- *  OpenRouter default; the local backends name their own. */
 /** A ledger client for a call that costs nothing. Without a service key (a
  *  self-hosted setup that never configured one) it is null and the call carries on
  *  unrecorded: bookkeeping never fails a free call. */
@@ -101,6 +98,9 @@ function tryAdminClient(): AdminClient | null {
   }
 }
 
+/** The model a call was aimed at, for a call that failed before any result
+ *  named it (so errors can be grouped by model). DEFAULT_MODEL is only the
+ *  OpenRouter default; the local backends name their own. */
 function requestedModel(opts: LlmRunOptions, apiKeys: DecryptedApiKeys, provider: string): string {
   if (provider === 'local-cli') return `local-cli/${resolveLocalCliId(apiKeys.provider?.localCli)}`
   if (provider === 'local-server') return opts.model || apiKeys.provider?.localServerModel || apiKeys.model || 'local-server'

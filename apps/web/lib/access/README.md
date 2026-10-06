@@ -8,7 +8,6 @@ for real against seeded data. The owner can see what was done with the code.
 [`docs/demo-access-codes.md`](../../../../docs/demo-access-codes.md).**
 Read it before applying anything: the first two migrations this feature needs are
 not applied to any database yet, and applying them out of order fails by design.
-Section 9 covers the October 2026 hardening and its deploy order.
 
 ---
 
