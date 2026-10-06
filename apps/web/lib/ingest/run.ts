@@ -377,6 +377,9 @@ export function makeSupabaseRunsStore(db: Db, dryRun = false): RunsStore {
   return {
     async start(row) {
       if (dryRun) return null
+      // Status lines older than 30 days are of no use: about 4 rows a day per person, so at most about 120 are kept.
+      const keepSince = new Date(Date.now() - 30 * 86_400_000).toISOString()
+      await db.from('ingestion_runs').delete().eq('user_id', row.user_id).lt('started_at', keepSince)
       const { data, error } = await db.from('ingestion_runs').insert({ ...row, status: 'running' }).select('id').single()
       if (error) return null
       return (data as { id: string }).id
