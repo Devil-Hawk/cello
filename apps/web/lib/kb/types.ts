@@ -8,10 +8,15 @@
 //   kb_sources    one configured connector (a resume, an Apify actor, a URL, ...)
 //   kb_documents  one retrieved item from a source
 //   kb_chunks     retrieval-sized slices of a document, each with a GENERATED
-//                 `tsv` tsvector. Search is Postgres full-text only — there is
-//                 no embedding column and pgvector is not installed.
+//                 `tsv` tsvector and an optional 384 dimension `embedding_384`.
+//                 Search is Postgres full-text, fused with the vector when one
+//                 exists (search_material).
 
-import type { ChunkOptions } from './chunk'
+/** Chunk sizing for one document. Defaults: 1200 characters, 150 of overlap. */
+export interface ChunkOptions {
+  chunkSize?: number
+  chunkOverlap?: number
+}
 
 /**
  * Connector kinds. Enforced in TypeScript only — kb_sources.kind has no CHECK
@@ -83,6 +88,10 @@ export interface KbSource {
   label: string | null
   config: KbSourceConfig | null
   enabled: boolean
+  /** person: the person gave it to Cello. fetched: Cello fetched it (company_site, dossier). Generated from kind. */
+  material_kind: 'person' | 'fetched'
+  /** "Cello may use this". False hides the source from search. */
+  may_use: boolean
   /** ISO timestamp of the last successful sync, or null if never synced. */
   last_synced_at: string | null
   /** Message from the last failed sync. Null once a sync succeeds. */
@@ -154,7 +163,7 @@ export interface UpsertDocumentInput {
   url?: string | null
   content: string
   metadata?: Record<string, unknown> | null
-  /** Override chunk sizing for this document. Defaults come from ./chunk.ts. */
+  /** Override chunk sizing for this document. Defaults: 1200 characters, 150 of overlap. */
   chunkOptions?: ChunkOptions
   /** Stamps kb_documents.company_id — see supabase/migrations/20260816000003_kb_entity_refs.sql. */
   companyId?: string | null
@@ -172,7 +181,7 @@ export interface UpsertDocumentResult {
 
 /**
  * One ranked search result, joined to its document so the caller can cite it.
- * Returned by searchKb() from the search_kb_chunks() SQL function.
+ * Returned by searchKb() from the search_material() SQL function.
  */
 export interface KbSearchHit {
   chunkId: string

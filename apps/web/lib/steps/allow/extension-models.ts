@@ -3,13 +3,4 @@
 
 import type { AllowEntry } from './types'
 
-export const allow: AllowEntry[] = [
-  {
-    file: 'lib/kb/retrieve.ts',
-    reason: 'Embeds a knowledge-base query; extension-models moves it behind the embed step.',
-  },
-  {
-    file: 'lib/kb/store.ts',
-    reason: 'Embeds knowledge-base chunks; extension-models moves it behind the embed step.',
-  },
-]
+export const allow: AllowEntry[] = []

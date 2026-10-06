@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, 'fix/**', 'feat/**', 'wp2/**', 'v2/**', 'chore/**', 'v3/**']
+    branches: [main, 'fix/**', 'feat/**', 'wp2/**', 'v2/**', 'chore/**', 'v3/**', 'v4/**']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -12,13 +12,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # 20, not 18. undici (a transitive dep, via the Supabase client) reaches for
-  # the `File` global, which only exists from Node 20 — on 18 three test suites
-  # threw `ReferenceError: File is not defined` at import time and never ran a
-  # single assertion, reporting 6 phantom failures while the same suites pass
-  # locally. Vercel builds on Node 20+ too, so 18 was testing a runtime this app
-  # never actually executes on.
-  NODE_VERSION: '20'
+  # 22: the extension's WXT 0.21 needs it, and every job runs the same Node so
+  # a test never passes on one version and ships on another. (It was 20, not 18,
+  # because undici reaches for the `File` global, which exists from Node 20.)
+  NODE_VERSION: '22'
   PYTHON_VERSION: '3.11'
   PNPM_VERSION: '8'
 
@@ -75,6 +72,71 @@ jobs:
 
       - name: Run tests
         run: pnpm test
+
+  test-extension:
+    name: Test Extension
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # The test build talks to the stub server on loopback, and waits 4 s, not 30 s,
+      # for a confirmation that never comes.
+      - name: Build the extension for the fixtures
+        run: pnpm --filter @cello/extension build
+        env:
+          WXT_CELLO_ORIGIN: http://127.0.0.1:4599
+          WXT_CELLO_CONFIRM_MS: '4000'
+
+      - name: Install Chromium
+        run: pnpm --filter @cello/extension exec playwright install --with-deps chromium
+
+      - name: Run the fixtures
+        run: pnpm --filter @cello/extension test:e2e
+
+      - name: Upload the fixture report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-e2e-report
+          path: apps/extension/test-results/
+          if-no-files-found: ignore
+
+      # The package for the store and for loading by hand is built with the real origin.
+      - name: Build the store package
+        run: pnpm --filter @cello/extension zip
+
+      # The folder itself, so one unzip of the download is the folder to Load unpacked.
+      - name: Upload the unpacked extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: cello-extension
+          path: apps/extension/.output/chrome-mv3
+          if-no-files-found: error
+          include-hidden-files: true
+
+      - name: Upload the store zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: cello-extension-store-zip
+          path: apps/extension/.output/*-chrome.zip
+          if-no-files-found: error
+          include-hidden-files: true
 
   test-scrapers:
     name: Test Scrapers

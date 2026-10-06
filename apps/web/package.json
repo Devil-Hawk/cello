@@ -19,7 +19,8 @@
     "role-types:go-live": "npx tsx scripts/role-types-go-live.ts",
     "role-types:label-set": "npx tsx scripts/role-types-label-set.ts",
     "directory:coverage": "npx tsx scripts/directory-coverage.ts",
-    "directory:add-links": "npx tsx scripts/directory-add-links.ts"
+    "directory:add-links": "npx tsx scripts/directory-add-links.ts",
+    "rungs:eval": "npx tsx scripts/rungs-eval.ts"
   },
   "dependencies": {
     "@a2a-js/sdk": "1.0.1",
@@ -30,6 +31,7 @@
     "@googleapis/gmail": "18.0.0",
     "@langchain/anthropic": "1.5.12",
     "@huggingface/transformers": "3.8.1",
+    "@langchain/community": "1.1.29",
     "@langchain/core": "1.2.14",
     "@langchain/langgraph": "1.4.19",
     "@langchain/langgraph-checkpoint": "^1.1.5",
@@ -38,10 +40,12 @@
     "@langchain/mcp-adapters": "^2.0.0",
     "@langchain/openai": "1.6.2",
     "@langchain/openrouter": "^0.4.17",
+    "@langchain/textsplitters": "1.0.2",
     "@langfuse/client": "5.12.1",
     "@langfuse/langchain": "5.12.1",
     "@langfuse/otel": "5.12.1",
     "@langfuse/tracing": "5.12.1",
+    "@mlc-ai/web-llm": "0.2.85",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/context-async-hooks": "2.11.0",

@@ -66,7 +66,8 @@
 import { createAdminClient } from '../lib/harness/supabase-admin'
 import { loadApiKeys } from '../lib/harness/keys'
 import { MissingKeyError, parseJsonLoose } from '../lib/harness/llm'
-import { embedStep, legacyStep } from '../lib/steps'
+import { legacyStep } from '../lib/steps'
+import { EMBEDDER_READY, embedMaterial } from '../lib/kb/embed'
 import { BudgetCapError } from '../lib/harness/spend'
 import { getBaseResume } from '../lib/resume/store'
 import { listDocuments } from '../lib/kb/store'
@@ -299,23 +300,27 @@ async function main(): Promise<void> {
 
     // Embed every claim just written, in one batch — matches lib/kb/store.ts
     // #embedChunksBestEffort's shape: best-effort, never fails the run.
-    try {
+    // Until K15's 384 embedder is on main (EMBEDDER_READY) claims are matched by exact key.
+    if (EMBEDDER_READY) try {
       const texts = extracted.map((c) => c.claimText)
-      const { embeddings } = await embedStep.call(keys, { texts })
+      const embeddings = await embedMaterial(keys, texts, 'embed-claims')
       for (let i = 0; i < extracted.length; i++) {
         const id = claimIds.get(extracted[i].claimText)
         if (!id) continue
-        const { error: embErr } = await admin.from('resume_claims').update({ embedding: embeddings[i] }).eq('id', id)
+        // No 384 vector for this claim: it stays on exact-key matching.
+        if (!embeddings[i]) continue
+        const { error: embErr } = await admin.from('resume_claims').update({ embedding_384: embeddings[i] }).eq('id', id)
         if (embErr) console.error(`\n  claim ${id}: embedding persist failed — ${embErr.message}`)
       }
     } catch (err) {
       console.error(`\n  user ${userId}: embedding failed (claims kept, exact-match only) — ${err instanceof Error ? err.message : err}`)
     }
 
-    // Pass 2: KB documents.
+    // Pass 2: KB documents. Only what the person gave Cello and left on: a page Cello
+    // fetched (company site, dossier) is not evidence of the person's own claims.
     let kbDocs: KbDocument[] = []
     try {
-      kbDocs = await listDocuments(admin, userId, { limit: KB_DOCS_PER_USER })
+      kbDocs = await listDocuments(admin, userId, { limit: KB_DOCS_PER_USER, personOnly: true })
     } catch (err) {
       console.error(`\n  user ${userId}: KB document list failed — ${err instanceof Error ? err.message : err}`)
     }

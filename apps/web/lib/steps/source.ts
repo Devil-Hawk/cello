@@ -24,7 +24,8 @@ export const RAW_CALL_PATTERNS: { name: string; re: RegExp }[] = [
 ]
 
 /** The model doors and the steps: they are the code the rule is about. */
-const EXEMPT = ['lib/harness/llm.ts', 'lib/harness/providers/', 'lib/steps/', 'lib/models/factory.ts']
+// The R1 door is the model running inside the person's own browser (a worker the relay carriers start).
+const EXEMPT = ['lib/harness/llm.ts', 'lib/harness/providers/', 'lib/steps/', 'lib/models/factory.ts', 'lib/models/webllm.worker.ts']
 
 export const isExempt = (rel: string) => EXEMPT.some((e) => (e.endsWith('/') ? rel.startsWith(e) : rel === e))
 

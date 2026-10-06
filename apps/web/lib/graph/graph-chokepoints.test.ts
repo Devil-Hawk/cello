@@ -140,6 +140,13 @@ const BANNED_BIND_TOOLS = /\.bindTools\(/
  */
 const AGENT_MODEL_DOOR = 'lib/agents/model.ts'
 
+/**
+ * R1 runs a small model inside the person's own browser (ChatWebLLM in a worker the
+ * relay carriers start). It holds no key and spends nothing, and the server only ever
+ * sees its text through the relay, where the step parses it like any other reply.
+ */
+const BROWSER_MODEL_FILES = new Set(['lib/models/webllm.worker.ts'])
+
 function findLangchainBanOffenses(src: string, file = ''): string[] {
   const stripped = stripComments(src)
   const offenses: string[] = []
@@ -199,6 +206,7 @@ describe('LangChain model abstractions stay banned', () => {
       // The ladder's model doors build every chat model and embedder here, and nowhere else:
       // callLlm and the Chat door call them, so the ceiling and the spend ledger sit in front.
       if (MODEL_FACTORY_FILES.includes(rel(file))) continue
+      if (BROWSER_MODEL_FILES.has(rel(file))) continue
       const offenses = findLangchainBanOffenses(readFileSync(file, 'utf8'), rel(file))
       if (offenses.length > 0) offenders.push(`${rel(file)}: ${offenses.join(', ')}`)
     }

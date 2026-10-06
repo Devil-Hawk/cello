@@ -15,9 +15,10 @@
 // sees `true`) — proving the test actually exercises the contract it claims
 // to, not just the happy path. Reverted immediately after.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { checkTailoringContainment } from '../security/job-text'
-import { matchClaim, normalizeClaimKey, type ResumeClaim } from './claims'
+import { claimsFor, matchClaim, normalizeClaimKey, type ResumeClaim } from './claims'
+import type { AdminClient } from '../harness/types'
 
 function claim(over: Partial<ResumeClaim> = {}): ResumeClaim {
   return {
@@ -176,5 +177,24 @@ describe('deterministic flag survives a high-similarity embedding neighbor', () 
     expect(matches.length).toBeGreaterThan(0)
     expect(matches.every((m) => !('ok' in m))).toBe(true)
     expect(report.ok).toBe(false)
+  })
+})
+
+describe('claimsFor reads the 384 dimension column', () => {
+  it('asks for embedding_384 and parses its text form into the claim embedding', async () => {
+    const select = vi.fn(() => ({
+      eq: async () => ({
+        data: [
+          { id: 'c1', user_id: 'u1', resume_document_id: null, claim_text: 'Led payments', claim_kind: 'employment', normalized_key: 'led payments', embedding_384: '[1,0,0]', claim_evidence: [] },
+        ],
+        error: null,
+      }),
+    }))
+    const admin = { from: () => ({ select }) } as unknown as AdminClient
+
+    const claims = await claimsFor(admin, 'u1')
+
+    expect(String((select.mock.calls as unknown[][])[0]?.[0])).toContain('embedding_384')
+    expect(claims[0]?.embedding).toEqual([1, 0, 0])
   })
 })

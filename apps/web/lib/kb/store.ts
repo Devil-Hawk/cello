@@ -11,20 +11,22 @@
 //   predicate is the only thing separating users. Never remove it. The
 //   cookie-scoped RLS client also works (reads are then filtered twice).
 //
-// SEARCH IS HYBRID (FTS + optional vector)
-//   searchKb() calls the search_kb_chunks() SQL function, which ranks with
+// SEARCH IS HYBRID (FTS + optional vector), OVER THE PERSON'S OWN MATERIAL
+//   searchKb() calls the search_material() SQL function, which ranks with
 //   ts_rank_cd over the GENERATED `tsv` column and, when `opts.vector` is
-//   given, fuses that with a cosine-distance ranking over kb_chunks.embedding
-//   via Reciprocal Rank Fusion — see
-//   supabase/migrations/20260816000007_hybrid_search.sql. Omit `opts.vector`
-//   (or call via lib/kb/retrieve.ts#retrieveKb, which degrades to FTS-only on
-//   its own) for byte-compatible pure-FTS behavior.
+//   given, fuses that with a cosine-distance ranking over
+//   kb_chunks.embedding_384 via Reciprocal Rank Fusion - see
+//   supabase/migrations/20261123000000_material_expand.sql. It returns only
+//   what the person gave Cello (never a page Cello fetched) and only sources
+//   whose "Cello may use this" switch is on. Omit `opts.vector` (or call via
+//   lib/kb/retrieve.ts#retrieveKb, which degrades to words only on its own)
+//   for pure full-text behavior.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { chunkText, type TextChunk } from './chunk'
+import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters'
 import { createAdminClient } from '../harness/supabase-admin'
 import { loadApiKeys } from '../harness/keys'
-import { callEmbedding } from '../harness/llm'
+import { embedMaterial } from './embed'
 import { captureError } from '../observability/sentry'
 import { withTrace } from '../trace/spans'
 import type {
@@ -41,8 +43,18 @@ const SOURCES = 'kb_sources'
 const DOCUMENTS = 'kb_documents'
 const CHUNKS = 'kb_chunks'
 
-/** Name of the ranked-search SQL function created by the Phase B migration. */
-const SEARCH_FN = 'search_kb_chunks'
+/** Name of the ranked-search SQL function (material expand migration). */
+const SEARCH_FN = 'search_material'
+
+/** Default chunk sizing: about 300 tokens, with a seam overlap so a fact on a boundary is in one chunk. */
+const CHUNK_SIZE = 1200
+const CHUNK_OVERLAP = 150
+
+interface Piece {
+  /** 0-based position within the document. */
+  ord: number
+  content: string
+}
 
 /** Rows per chunk INSERT. Keeps a single request body well under any body cap. */
 const CHUNK_INSERT_BATCH = 200
@@ -109,12 +121,13 @@ export async function updateSource(
   client: SupabaseClient,
   userId: string,
   id: string,
-  patch: { label?: string | null; config?: KbSourceConfig | null; enabled?: boolean }
+  patch: { label?: string | null; config?: KbSourceConfig | null; enabled?: boolean; mayUse?: boolean }
 ): Promise<KbSource> {
   const fields: Record<string, unknown> = {}
   if (patch.label !== undefined) fields.label = patch.label
   if (patch.config !== undefined) fields.config = patch.config
   if (patch.enabled !== undefined) fields.enabled = patch.enabled
+  if (patch.mayUse !== undefined) fields.may_use = patch.mayUse
   if (Object.keys(fields).length === 0) {
     throw new Error('updateSource failed: nothing to update')
   }
@@ -328,7 +341,14 @@ export async function replaceChunks(
     throw new Error(`replaceChunks failed (delete): ${deleteError.message}`)
   }
 
-  const pieces = chunkText(content, chunkOptions ?? {})
+  const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: chunkOptions?.chunkSize ?? CHUNK_SIZE,
+    chunkOverlap: chunkOptions?.chunkOverlap ?? CHUNK_OVERLAP,
+  })
+  const pieces: Piece[] = (await splitter.splitText(content))
+    .map((text) => text.trim())
+    .filter(Boolean)
+    .map((text, ord) => ({ ord, content: text }))
   if (pieces.length === 0) return 0
 
   // NOTE: `tsv` is GENERATED ALWAYS — it must never appear in an insert payload.
@@ -351,11 +371,11 @@ export async function replaceChunks(
 
 /**
  * Embed the chunks just written by replaceChunks() and persist them onto
- * their rows, so search_kb_chunks can rank this document in its vector
- * candidate list too (see 20260816000007_hybrid_search.sql). NEVER throws:
+ * their rows, so search_material can rank this document in its vector
+ * candidate list too (see 20261123000000_material_expand.sql). NEVER throws:
  * any failure — no provider configured, budget cap hit, a transient provider
  * error, a persist error on some subset of rows — leaves the affected
- * chunk(s) at their default NULL embedding, which search_kb_chunks already
+ * chunk(s) at their default NULL embedding, which search_material already
  * treats as "FTS-only for this row". Ingestion (upsertDocument) must never
  * fail because embedding did.
  *
@@ -364,7 +384,7 @@ export async function replaceChunks(
  * header) — loadApiKeys needs service-role access to read the user's
  * decrypted provider keys, which a cookie-scoped RLS client cannot do.
  *
- * One callEmbedding call batches every chunk's text (provider embedding APIs
+ * One embedMaterial call batches every chunk's text (provider embedding APIs
  * are batch-native), so this is one provider round trip per document
  * regardless of chunk count — only the per-row persist afterward is N calls,
  * and kb_chunks has no unique constraint on (document_id, ord) to upsert
@@ -374,7 +394,7 @@ export async function replaceChunks(
 async function embedChunksBestEffort(
   userId: string,
   documentId: string,
-  pieces: TextChunk[]
+  pieces: Piece[]
 ): Promise<void> {
   if (pieces.length === 0) return
   try {
@@ -382,16 +402,18 @@ async function embedChunksBestEffort(
     const keys = await loadApiKeys(admin, userId)
     // Its own Langfuse trace when no request trace is active (ingest runs from
     // upload routes and scripts). Counts only: chunk text is never captured.
-    const { embeddings } = await withTrace(
+    const embeddings = await withTrace(
       admin,
       userId,
       { name: 'ingest-knowledge', input: { chunks: pieces.length, document_id: documentId }, isDemo: keys.isDemo },
-      () => callEmbedding(keys, { texts: pieces.map((p) => p.content), name: 'embed-chunks' })
+      () => embedMaterial(keys, pieces.map((p) => p.content), 'embed-chunks')
     )
     for (let i = 0; i < pieces.length; i++) {
+      // No 384 vector for this chunk: it stays NULL and is found by words.
+      if (!embeddings[i]) continue
       const { error } = await admin
         .from(CHUNKS)
-        .update({ embedding: embeddings[i] })
+        .update({ embedding_384: embeddings[i] })
         .eq('document_id', documentId)
         .eq('user_id', userId)
         .eq('ord', pieces[i].ord)
@@ -409,21 +431,32 @@ async function embedChunksBestEffort(
   }
 }
 
-/** Documents for a user, newest first. Optionally filtered to one source. */
+/**
+ * Documents for a user, newest first. Optionally filtered to one source, or (`personOnly`)
+ * to what the person gave Cello and left switched on: never a page Cello fetched, never a
+ * source with "Cello may use this" off. Anything that quotes material as the person's own
+ * words (resume claims) must pass it.
+ */
 export async function listDocuments(
   client: SupabaseClient,
   userId: string,
-  opts: { sourceId?: string; limit?: number } = {}
+  opts: { sourceId?: string; limit?: number; personOnly?: boolean } = {}
 ): Promise<KbDocument[]> {
   const limit = Math.min(MAX_LIST_LIMIT, Math.max(1, opts.limit ?? 100))
-  let query = client.from(DOCUMENTS).select('*').eq('user_id', userId)
+  // The join keeps the filter in one query and off a list of ids (see the .in() allowlist test).
+  let query = client
+    .from(DOCUMENTS)
+    .select(opts.personOnly ? '*, kb_sources!inner(material_kind, may_use)' : '*')
+    .eq('user_id', userId)
   if (opts.sourceId) query = query.eq('source_id', opts.sourceId)
+  if (opts.personOnly) query = query.eq('kb_sources.material_kind', 'person').eq('kb_sources.may_use', true)
 
   const { data, error } = await query
     .order('updated_at', { ascending: false })
     .limit(limit)
   if (error) throw new Error(`listDocuments failed: ${error.message}`)
-  return (data as KbDocument[]) ?? []
+  // The embedded source is only there to filter on; callers get plain documents.
+  return ((data ?? []) as unknown as Array<KbDocument & { kb_sources?: unknown }>).map(({ kb_sources: _joined, ...doc }) => doc)
 }
 
 /** One document by id, scoped to its owner. */
@@ -458,7 +491,7 @@ export async function deleteDocument(
 
 // --- search ------------------------------------------------------------------
 
-/** Raw row shape returned by the search_kb_chunks() SQL function. */
+/** Raw row shape returned by the search_material() SQL function. */
 interface SearchRow {
   chunk_id: string
   document_id: string
@@ -474,7 +507,7 @@ interface SearchRow {
  * Ranked search over the user's chunks, joined to their documents for
  * citation. FTS-only (ts_rank_cd desc) unless `opts.vector` is given, in
  * which case the SQL side fuses it with the FTS ranking via Reciprocal Rank
- * Fusion — see supabase/migrations/20260816000007_hybrid_search.sql. This
+ * Fusion - see supabase/migrations/20261123000000_material_expand.sql. This
  * function itself does no fusion math; it is a pure RPC wrapper, same as
  * before hybrid search existed. lib/kb/retrieve.ts is what supplies
  * `opts.vector` (embedding the query, degrading to FTS-only on failure) —
@@ -556,7 +589,8 @@ export function formatKbContext(
   for (let i = 0; i < hits.length; i++) {
     const hit = hits[i]
     const label = hit.title || hit.url || 'untitled source'
-    const header = `[${i + 1}] ${label}${hit.url ? ` (${hit.url})` : ''}`
+    // Only the person's own material reaches here (search_material), so every hit is theirs to cite.
+    const header = `[${i + 1}] From your notes: ${label}${hit.url ? ` (${hit.url})` : ''}`
     const block = `${header}\n${hit.content}`
     const cost = total ? CONTEXT_SEP.length + block.length : block.length
 

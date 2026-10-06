@@ -7,7 +7,7 @@ vi.mock('../harness/supabase-admin', () => ({ createAdminClient: () => ({}) }))
 const loadApiKeysMock = vi.fn()
 vi.mock('../harness/keys', () => ({ loadApiKeys: (...args: unknown[]) => loadApiKeysMock(...args) }))
 
-import { buildDocumentPatch, formatKbContext, replaceChunks, searchKb } from './store'
+import { buildDocumentPatch, formatKbContext, listDocuments, replaceChunks, searchKb } from './store'
 import type { KbSearchHit } from './types'
 
 // Locks the omitted-means-unchanged contract of upsertDocument()'s UPDATE half.
@@ -79,14 +79,14 @@ describe('formatKbContext', () => {
       hit({ title: 'First', url: 'https://a.com', content: 'alpha' }),
       hit({ title: 'Second', content: 'beta' }),
     ])
-    expect(out).toBe('[1] First (https://a.com)\nalpha\n\n[2] Second\nbeta')
+    expect(out).toBe('[1] From your notes: First (https://a.com)\nalpha\n\n[2] From your notes: Second\nbeta')
   })
 
   it('falls back to url then a placeholder when the title is null', () => {
     expect(formatKbContext([hit({ title: null, url: 'https://b.com' })])).toContain(
-      '[1] https://b.com (https://b.com)'
+      '[1] From your notes: https://b.com (https://b.com)'
     )
-    expect(formatKbContext([hit({ title: null, url: null })])).toContain('[1] untitled source')
+    expect(formatKbContext([hit({ title: null, url: null })])).toContain('[1] From your notes: untitled source')
   })
 
   it('stops before exceeding maxChars', () => {
@@ -95,7 +95,7 @@ describe('formatKbContext', () => {
     )
     const out = formatKbContext(hits, { maxChars: 900 })
     expect(out.length).toBeLessThanOrEqual(900)
-    expect(out).toContain('[1] D0')
+    expect(out).toContain('[1] From your notes: D0')
   })
 
   it('enforces a 500-char floor on maxChars so context is never unusably tiny', () => {
@@ -110,7 +110,7 @@ describe('formatKbContext', () => {
       maxChars: 800,
     })
     expect(out).not.toBe('')
-    expect(out.startsWith('[1] Big')).toBe(true)
+    expect(out.startsWith('[1] From your notes: Big')).toBe(true)
     expect(out.endsWith('…')).toBe(true)
     expect(out.length).toBeLessThanOrEqual(800)
   })
@@ -135,7 +135,7 @@ describe('formatKbContext', () => {
       ],
       { maxChars: 500 }
     )
-    expect(out).toContain('[1] First')
+    expect(out).toContain('[1] From your notes: First')
     expect(out).not.toContain('Second')
     expect(out).not.toContain('…')
   })
@@ -153,8 +153,8 @@ describe('formatKbContext', () => {
 
 // --- searchKb hybrid (RRF) fusion --------------------------------------------
 //
-// The actual fusion runs in SQL (supabase/migrations/20260816000007_hybrid_
-// search.sql) — there is no Postgres in this test run, so these two halves
+// The actual fusion runs in SQL (supabase/migrations/20261123000000_
+// material_expand.sql) - there is no Postgres in this test run, so these two halves
 // split the guarantee the way the spec asks:
 //   1. the formula itself, `score = sum(1/(60+rank))`, mirrored here exactly
 //      and checked on the fixture the migration's own comment cites;
@@ -195,7 +195,7 @@ describe('searchKb hybrid (RRF) fusion', () => {
     const vector = [0.1, 0.2, 0.3]
     const hits = await searchKb(client, 'user-1', 'query text', { vector, companyId: 'co-1' })
 
-    expect(rpc).toHaveBeenCalledWith('search_kb_chunks', {
+    expect(rpc).toHaveBeenCalledWith('search_material', {
       p_user_id: 'user-1',
       p_query: 'query text',
       p_limit: 12,
@@ -213,7 +213,7 @@ describe('searchKb hybrid (RRF) fusion', () => {
     await searchKb(client, 'user-1', 'query')
 
     expect(rpc).toHaveBeenCalledWith(
-      'search_kb_chunks',
+      'search_material',
       expect.objectContaining({ p_vec: null, p_company_id: null })
     )
   })
@@ -243,6 +243,18 @@ describe('replaceChunks embed-failure isolation', () => {
     return { client: client as unknown as Parameters<typeof replaceChunks>[0], inserted }
   }
 
+  it('stores chunks of at most 1200 characters, in order', async () => {
+    loadApiKeysMock.mockRejectedValueOnce(new Error('no embedding provider configured'))
+    const { client, inserted } = fakeChunksClient()
+    const paragraph = 'A sentence about shipping a product with a small team. '.repeat(20)
+
+    await replaceChunks(client, 'user-1', 'doc-1', Array.from({ length: 8 }, () => paragraph).join('\n\n'))
+
+    expect(inserted.length).toBeGreaterThan(1)
+    expect(inserted.every((r) => (r.content as string).length <= 1200)).toBe(true)
+    expect(inserted.map((r) => r.ord)).toEqual(inserted.map((_, i) => i))
+  })
+
   it('a rejected loadApiKeys (no provider configured) never blocks or fails ingestion', async () => {
     loadApiKeysMock.mockRejectedValueOnce(new Error('no embedding provider configured'))
     const { client, inserted } = fakeChunksClient()
@@ -255,5 +267,42 @@ describe('replaceChunks embed-failure isolation', () => {
     // it carries no `embedding` key at all (the column stays NULL by default,
     // not by an explicit null write).
     expect(inserted.every((r) => !('embedding' in r))).toBe(true)
+  })
+})
+
+// --- listDocuments personOnly ------------------------------------------------
+//
+// Resume claims quote material as the person's own words. A page Cello fetched, and a
+// source with "Cello may use this" off, must never be listed for that.
+describe('listDocuments personOnly', () => {
+  function fake(rows: unknown[]) {
+    const calls: Array<[string, unknown]> = []
+    const q = {
+      select: (cols: string) => (calls.push(['select', cols]), q),
+      eq: (c: string, v: unknown) => (calls.push([c, v]), q),
+      order: () => q,
+      limit: () => Promise.resolve({ data: rows, error: null }),
+    }
+    return { client: { from: () => q } as unknown as Parameters<typeof listDocuments>[0], calls }
+  }
+
+  it('joins the source and asks only for person sources that are switched on', async () => {
+    const { client, calls } = fake([])
+    await listDocuments(client, 'u1', { personOnly: true })
+    expect(calls).toContainEqual(['select', expect.stringContaining('kb_sources!inner')])
+    expect(calls).toContainEqual(['kb_sources.material_kind', 'person'])
+    expect(calls).toContainEqual(['kb_sources.may_use', true])
+  })
+
+  it('returns plain documents, without the joined source', async () => {
+    const { client } = fake([{ id: 'd1', content: 'x', kb_sources: { material_kind: 'person', may_use: true } }])
+    expect(await listDocuments(client, 'u1', { personOnly: true })).toEqual([{ id: 'd1', content: 'x' }])
+  })
+
+  it('does not join without personOnly', async () => {
+    const { client, calls } = fake([])
+    await listDocuments(client, 'u1')
+    expect(calls).toContainEqual(['select', '*'])
+    expect(calls.some(([c]) => c.startsWith('kb_sources'))).toBe(false)
   })
 })

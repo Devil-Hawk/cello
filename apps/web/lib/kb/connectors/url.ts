@@ -2,18 +2,22 @@
 //
 // SAFETY:
 //   - timeout-bounded (FETCH_TIMEOUT_MS)
-//   - http/https only, refuses literal localhost / private-IP hostnames
+//   - http/https only; the host is resolved and every address checked before
+//     the request AND before every redirect hop (lib/security/untrusted.ts
+//     checkSsrf), so a name that points at a private address is refused, not
+//     just a literal one
 //   - caps the response body it reads (MAX_BODY_BYTES)
-//   - SAME-SITE REDIRECT DISCIPLINE: the final URL (after following redirects)
-//     must stay on the same registrable host as the one the user configured —
-//     an apex<->www hop is allowed, a hop to an unrelated host is refused
-//     rather than silently indexed. Mirrors lib/dossier/sources.ts's
-//     sameSite() discipline for the company-page fetch.
+//   - SAME-SITE REDIRECT DISCIPLINE: redirects are followed by hand, at most
+//     MAX_REDIRECTS hops, and every hop must stay on the same registrable host
+//     as the one the user configured - an apex<->www hop is allowed, a hop to
+//     an unrelated host is refused rather than silently indexed. Mirrors
+//     lib/dossier/sources.ts's sameSite() discipline for the company-page fetch.
 //
 // No API key needed — this is a plain unauthenticated GET, same as a browser
 // loading a public page.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { checkSsrf, type SsrfCheckOptions } from '../../security/untrusted'
 import { upsertDocument } from '../store'
 import type { KbSource } from '../types'
 import type { KbSyncOutcome } from './types'
@@ -23,22 +27,7 @@ const FETCH_TIMEOUT_MS = 10_000
 /** 3MB cap — plenty for a text-heavy page, cheap to hold in memory. */
 const MAX_BODY_BYTES = 3_000_000
 
-const LITERAL_PRIVATE_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1'])
-
-/** Hostname-level SSRF guard. Does not resolve DNS (no lookup available from
- *  a serverless fetch without extra deps), so this catches literal private
- *  addresses/hostnames, not DNS-rebinding — an acceptable bar for a
- *  single-tenant BYOK feature the user themselves configures. */
-function isPrivateHost(hostname: string): boolean {
-  const h = hostname.toLowerCase()
-  if (LITERAL_PRIVATE_HOSTS.has(h)) return true
-  if (/^10\./.test(h)) return true
-  if (/^192\.168\./.test(h)) return true
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true
-  if (/^169\.254\./.test(h)) return true
-  if (h.endsWith('.local')) return true
-  return false
-}
+const MAX_REDIRECTS = 5
 
 function sameRegistrableHost(a: string, b: string): boolean {
   const norm = (h: string) => h.toLowerCase().replace(/^www\./, '')
@@ -107,7 +96,8 @@ function extractTitle(html: string): string | null {
 export async function syncUrlSource(
   client: SupabaseClient,
   userId: string,
-  source: KbSource
+  source: KbSource,
+  deps: SsrfCheckOptions = {}
 ): Promise<KbSyncOutcome> {
   const url = typeof source.config?.url === 'string' ? source.config.url.trim() : ''
   if (!url) return { status: 'disabled', message: 'No URL configured for this source yet.' }
@@ -121,31 +111,34 @@ export async function syncUrlSource(
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return { status: 'error', message: 'Only http/https URLs are supported.' }
   }
-  if (isPrivateHost(parsed.hostname)) {
-    return { status: 'error', message: 'Refusing to fetch a private/internal address.' }
-  }
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { 'user-agent': USER_AGENT, accept: 'text/html,application/xhtml+xml,text/plain' },
-      redirect: 'follow',
-      signal: controller.signal,
-    })
+    let target = url
+    let res: Response
+    for (let hop = 0; ; hop++) {
+      const safe = await checkSsrf(target, deps)
+      if (!safe.ok) {
+        const isPrivate = safe.reason === 'blocked_address' || safe.reason === 'blocked_hostname'
+        return { status: 'error', message: isPrivate ? 'Refusing to fetch a private/internal address.' : safe.message }
+      }
+      res = await fetch(target, {
+        method: 'GET',
+        headers: { 'user-agent': USER_AGENT, accept: 'text/html,application/xhtml+xml,text/plain' },
+        redirect: 'manual',
+        signal: controller.signal,
+      })
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null
+      if (!location) break
+      if (hop >= MAX_REDIRECTS) return { status: 'error', message: 'Too many redirects.' }
+      target = new URL(location, target).toString()
+      if (!sameRegistrableHost(url, target)) {
+        return { status: 'error', message: `Refusing a cross-site redirect (${parsed.hostname} → ${new URL(target).hostname}).` }
+      }
+    }
     if (!res.ok) {
       return { status: 'error', message: `Fetch failed: HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}` }
-    }
-    if (!sameRegistrableHost(url, res.url)) {
-      const finalHost = (() => {
-        try {
-          return new URL(res.url).hostname
-        } catch {
-          return res.url
-        }
-      })()
-      return { status: 'error', message: `Refusing a cross-site redirect (${parsed.hostname} → ${finalHost}).` }
     }
     const contentType = (res.headers.get('content-type') || '').toLowerCase()
     if (contentType && !/text\/html|application\/xhtml|text\/plain|xml/.test(contentType)) {

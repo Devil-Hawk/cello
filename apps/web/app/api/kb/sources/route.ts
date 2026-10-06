@@ -1,5 +1,6 @@
 // GET/POST /api/kb/sources — list + create the signed-in user's knowledge-base
-// connectors.
+// connectors. The list is Your material: what the person gave Cello. Pages
+// Cello fetched itself (company sites, dossiers) are not listed.
 //
 // Creation is deliberately conservative: only the four connector kinds this
 // builder wired sync logic for (paste, url, resume, apify — see
@@ -33,7 +34,7 @@ export async function GET() {
 
   const admin = createAdminClient()
   try {
-    const sources = await listSources(admin, user.id)
+    const sources = (await listSources(admin, user.id)).filter((s) => s.material_kind === 'person')
     return NextResponse.json({ ok: true, sources })
   } catch (e) {
     console.error('[kb/sources] list failed:', e instanceof Error ? e.message : e)

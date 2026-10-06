@@ -18,10 +18,11 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadApiKeys } from '../harness/keys'
-import { callEmbedding, MissingKeyError } from '../harness/llm'
+import { MissingKeyError } from '../harness/llm'
 import { BudgetCapError } from '../harness/spend'
 import { captureError } from '../observability/sentry'
 import { observe } from '../trace/spans'
+import { embedMaterial } from './embed'
 import { searchKb } from './store'
 import type { KbSearchHit } from './types'
 
@@ -77,12 +78,9 @@ async function retrieveKbInner(
   let vector: number[] | undefined
   try {
     const keys = await loadApiKeys(admin, userId)
-    const { embeddings } = await callEmbedding(
-      keys,
-      { texts: [trimmed], name: 'embed-query' },
-      AbortSignal.timeout(EMBED_TIMEOUT_MS)
-    )
-    vector = embeddings[0]
+    const [embedded] = await embedMaterial(keys, [trimmed], 'embed-query', AbortSignal.timeout(EMBED_TIMEOUT_MS))
+    // A vector that is not 384 long comes back null: the search is words only.
+    vector = embedded ?? undefined
   } catch (err) {
     if (!(err instanceof MissingKeyError) && !(err instanceof BudgetCapError) && !isTimeout(err)) {
       const error = err instanceof Error ? err : new Error(String(err))
