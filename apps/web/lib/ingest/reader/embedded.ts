@@ -5,7 +5,7 @@
 // plus a description or summary), so a site's menu data or config is never a role.
 
 import * as cheerio from 'cheerio'
-import { htmlToPlainText } from '../../ats/html'
+import { htmlToPlainText, rawHtmlOf } from '../../ats/html'
 
 type Json = Record<string, unknown>
 
@@ -13,6 +13,8 @@ export interface EmbeddedPosting {
   title: string
   location?: string
   description?: string
+  /** The same body as HTML, in the same order, for the Markdown copy. */
+  descriptionHtml?: string
   postedAt?: string
 }
 
@@ -115,7 +117,9 @@ function locationOf(o: Json): string | undefined {
   return places.length ? places.join(' · ') : undefined
 }
 
-const plain = (s: string) => htmlToPlainText(s.includes('<') ? s : `<p>${s.replace(/\n/g, '<br>')}</p>`)
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+const asHtml = (s: string) => (s.includes('<') ? s : `<p>${escapeHtml(s).replace(/\n/g, '<br>')}</p>`)
+const plain = (s: string) => htmlToPlainText(asHtml(s))
 
 /** The posting a page's embedded data carries (the one titled `titleHint`, the page's own title), or null. Qualifications go in as headed sections so the requirements parser finds them. */
 export function readEmbeddedPosting(html: string, titleHint?: string): EmbeddedPosting | null {
@@ -134,9 +138,18 @@ export function readEmbeddedPosting(html: string, titleHint?: string): EmbeddedP
     ]
       .filter(Boolean)
       .join('\n\n')
+    const sectionHtml = (heading: string, v: unknown) => (text(v) ? `<h3>${heading}</h3>${asHtml(text(v))}` : '')
+    const bodyHtml = rawHtmlOf(
+      text(o.jobSummary) ? asHtml(text(o.jobSummary)) : '',
+      text(o.description ?? o.jobDescription) ? asHtml(text(o.description ?? o.jobDescription)) : '',
+      text(o.jobPostingDescription) && text(o.jobPostingDescription) !== text(o.description) ? asHtml(text(o.jobPostingDescription)) : '',
+      sectionHtml('Responsibilities', o.responsibilities),
+      sectionHtml('Minimum Qualifications', o.minimumQualifications ?? o.minimumQualification),
+      sectionHtml('Preferred Qualifications', o.preferredQualifications ?? o.preferredQualification)
+    )
     const posted = text(o.postDateInGMT) || text(o.datePosted) || text(o.postingDate) || text(o.jobPostingStartDate) || text(o.createdAt)
     const t = Date.parse(posted)
-    return { title, location: locationOf(o), description: body || undefined, postedAt: Number.isNaN(t) ? undefined : new Date(t).toISOString() }
+    return { title, location: locationOf(o), description: body || undefined, ...(bodyHtml ? { descriptionHtml: bodyHtml } : {}), postedAt: Number.isNaN(t) ? undefined : new Date(t).toISOString() }
   }
   return null
 }

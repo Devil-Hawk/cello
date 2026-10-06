@@ -10,7 +10,7 @@
 // reported as not readable.
 
 import type { AtsJob } from '../../ats/types'
-import { htmlToPlainText } from '../../ats/html'
+import { htmlToPlainText, rawHtmlOf } from '../../ats/html'
 import { MAX_DESCRIPTION_CHARS } from './legit'
 import { searchTerms, type ReaderTargets } from './targets'
 import type { SiteFetcher } from './site-fetch'
@@ -23,6 +23,10 @@ export interface SiteRecipe {
 }
 
 const norm = (host: string) => host.toLowerCase().replace(/^www\./, '')
+
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+/** A headed section of a posting, as HTML, from a body a site's search answer carries as text or markup. */
+const section = (heading: string, body: unknown) => (typeof body === 'string' && body.trim() ? `<h3>${escapeHtml(heading)}</h3>${body}` : '')
 
 // --- Amazon -----------------------------------------------------------------
 
@@ -53,6 +57,7 @@ export function amazonJobs(json: { jobs?: AmazonJob[] }): AtsJob[] {
       .filter(Boolean)
       .join('\n\n')
     const description = htmlToPlainText(body, MAX_DESCRIPTION_CHARS)
+    const descriptionHtml = rawHtmlOf(j.description, section('Basic qualifications', j.basic_qualifications), section('Preferred qualifications', j.preferred_qualifications))
     out.push({
       title,
       url,
@@ -62,6 +67,7 @@ export function amazonJobs(json: { jobs?: AmazonJob[] }): AtsJob[] {
       ...(j.company_name ? { employer: j.company_name } : {}),
       ...(j.id_icims ? { requisitionId: String(j.id_icims) } : {}),
       ...(description ? { description } : {}),
+      ...(descriptionHtml ? { descriptionHtml, descriptionSource: 'api' as const } : {}),
     })
   }
   return out
@@ -114,7 +120,8 @@ export function tiktokJobs(json: { data?: { job_post_list?: TikTokJob[] } }): At
     const url = `https://lifeattiktok.com/search/${j.id}`
     const body = [j.description, j.requirement && `Requirements\n${j.requirement}`].filter(Boolean).join('\n\n')
     const description = htmlToPlainText(body, MAX_DESCRIPTION_CHARS)
-    out.push({ title, url, externalId: url, location: placeOf(j.city_info), requisitionId: j.id, ...(description ? { description } : {}) })
+    const descriptionHtml = rawHtmlOf(j.description, section('Requirements', j.requirement))
+    out.push({ title, url, externalId: url, location: placeOf(j.city_info), requisitionId: j.id, ...(description ? { description } : {}), ...(descriptionHtml ? { descriptionHtml, descriptionSource: 'api' as const } : {}) })
   }
   return out
 }
@@ -174,7 +181,10 @@ export function bendingSpoonsJobs(html: string): AtsJob[] {
       .join('\n\n')
     const description = htmlToPlainText(body, MAX_DESCRIPTION_CHARS)
     const location = (j.officeLocations ?? []).map((l) => l.title).filter(Boolean).join(' · ')
-    out.push({ title, url, externalId: url, ...(location ? { location } : {}), ...(description ? { description } : {}) })
+    const list = (items?: { title?: string; description?: string }[]) =>
+      items?.length ? `<ul>${items.map((x) => `<li>${escapeHtml(`${x.title ?? ''}: ${x.description ?? ''}`.trim())}</li>`).join('')}</ul>` : ''
+    const descriptionHtml = rawHtmlOf(j.highLevelDescription && `<p>${escapeHtml(j.highLevelDescription)}</p>`, j.responsibilities?.length ? `<h3>Responsibilities</h3>${list(j.responsibilities)}` : '', j.requirements?.length ? `<h3>Requirements</h3>${list(j.requirements)}` : '')
+    out.push({ title, url, externalId: url, ...(location ? { location } : {}), ...(description ? { description } : {}), ...(descriptionHtml ? { descriptionHtml, descriptionSource: 'api' as const } : {}) })
   }
   return out
 }
