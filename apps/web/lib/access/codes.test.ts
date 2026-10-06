@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ACCESS_CODE_TTL_HOURS,
   accessCodeExpiry,
+  accessCodeLookupHashes,
+  legacyAccessCodeHash,
   accessCodePrefix,
   accessCodeUsability,
   describeTimeRemaining,
@@ -60,11 +63,39 @@ describe('hashAccessCode', () => {
     expect(hashAccessCode('P7QK-3M9X-TCR2')).not.toBe(hashAccessCode('P7QK-3M9X-TCR3'))
   })
 
-  it('does not contain the code itself — a table dump must not yield a working code', () => {
+  it('does not contain the code itself, so a table dump must not yield a working code', () => {
     const code = generateAccessCode()
     const hash = hashAccessCode(code)
-    expect(hash).toMatch(/^[0-9a-f]{64}$/)
+    expect(hash).toMatch(/^h1:[0-9a-f]{64}$/)
     expect(hash).not.toContain(normalizeAccessCode(code))
+  })
+
+  it('is a KEYED hash: not the bare SHA-256, so it cannot be tested offline without the server key', () => {
+    const code = 'P7QK-3M9X-TCR2'
+    const bare = createHash('sha256').update(normalizeAccessCode(code)).digest('hex')
+    expect(hashAccessCode(code)).not.toContain(bare)
+    expect(legacyAccessCodeHash(code)).toBe(bare)
+  })
+
+  describe('with a different server key', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it('changes when API_ENCRYPTION_KEY changes (and rotating it voids live codes)', () => {
+      vi.stubEnv('API_ENCRYPTION_KEY', 'a'.repeat(64))
+      const first = hashAccessCode('P7QK-3M9X-TCR2')
+      vi.stubEnv('API_ENCRYPTION_KEY', 'b'.repeat(64))
+      expect(hashAccessCode('P7QK-3M9X-TCR2')).not.toBe(first)
+      vi.stubEnv('API_ENCRYPTION_KEY', 'a'.repeat(64))
+      expect(hashAccessCode('P7QK-3M9X-TCR2')).toBe(first)
+    })
+  })
+
+  it('looks up the keyed hash first and the legacy SHA-256 second', () => {
+    const code = 'P7QK-3M9X-TCR2'
+    expect(accessCodeLookupHashes(code)).toEqual([hashAccessCode(code), legacyAccessCodeHash(code)])
+    expect(accessCodeLookupHashes('p7qk 3m9x tcr2')).toEqual(accessCodeLookupHashes(code))
   })
 })
 

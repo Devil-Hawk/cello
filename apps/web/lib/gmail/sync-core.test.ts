@@ -147,12 +147,13 @@ vi.mock('@/lib/harness/providers/openrouter', () => ({
   callOpenRouter: (...args: unknown[]) => callOpenRouterMock(...args),
   DEFAULT_MODEL: 'anthropic/claude-sonnet-5',
 }))
-const assertWithinBudgetMock = vi.fn()
-const recordSpendMock = vi.fn()
+const reserveSpendMock = vi.fn()
+const settleSpendMock = vi.fn()
+const RESERVATION = { id: 'res-1', userId: 'user-1', model: 'm', estimateUsd: 0.01 }
 vi.mock('@/lib/harness/spend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/harness/spend')>()),
-  assertWithinBudget: (...args: unknown[]) => assertWithinBudgetMock(...args),
-  recordSpend: (...args: unknown[]) => recordSpendMock(...args),
+  reserveSpend: (...args: unknown[]) => reserveSpendMock(...args),
+  settleSpend: (...args: unknown[]) => settleSpendMock(...args),
 }))
 
 import { runGmailSyncCore } from './sync-core'
@@ -182,8 +183,8 @@ describe('runGmailSyncCore — idempotency', () => {
       completionTokens: 100,
       model: 'google/gemini-2.0-flash-001',
     })
-    assertWithinBudgetMock.mockReset().mockResolvedValue(undefined)
-    recordSpendMock.mockReset().mockResolvedValue(undefined)
+    reserveSpendMock.mockReset().mockResolvedValue(RESERVATION)
+    settleSpendMock.mockReset().mockResolvedValue(undefined)
     fakeDb = makeFakeDb()
     fakeDb.tables.set('companies', [
       { id: 'company-1', user_id: USER_ID, name: 'Acme Corp', domain: 'acme.com', metadata: null },
@@ -251,7 +252,7 @@ describe('runGmailSyncCore — LLM metering', () => {
       preferences: preferences(),
     })
     expect(callOpenRouterMock).toHaveBeenCalled()
-    expect(assertWithinBudgetMock).toHaveBeenCalledWith(expect.anything(), USER_ID)
-    expect(recordSpendMock).toHaveBeenCalledWith(expect.anything(), USER_ID, 'google/gemini-2.0-flash-001', 500, 100)
+    expect(reserveSpendMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ userId: USER_ID, model: 'google/gemini-2.0-flash-001' }))
+    expect(settleSpendMock).toHaveBeenCalledWith(expect.anything(), RESERVATION, { model: 'google/gemini-2.0-flash-001', promptTokens: 500, completionTokens: 100, costUsd: undefined })
   })
 })

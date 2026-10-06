@@ -1,14 +1,17 @@
-// POST /api/access-codes/:id/revoke — revoking must end sessions already minted.
+// POST /api/access-codes/:id/revoke: revoking must end sessions already minted.
 //
 // Revoking used to set access_codes.revoked_at and nothing else, so a demo that
 // had already redeemed kept working (and spending the owner's key) until its 72
-// hours ran out. The route now also pulls profiles.demo_expires_at to now() for
-// the code's demo user, through the service role. What this file pins:
-//   * the demo id comes from the DATABASE row, never the request;
-//   * only a profile with is_demo = true can be touched;
-//   * an unredeemed code touches no profile;
-//   * the already-revoked branch does it too, so a retry finishes the job;
-//   * a failed cutoff is a 500, not a silent success.
+// hours ran out. The route now calls revoke_access_code, which in ONE transaction
+// revokes the code and pulls the demo profile's deadline to now(), then bans the
+// demo's auth user so its refresh tokens die too. What this file pins:
+//   * the demo id comes from the DATABASE's answer, never the request;
+//   * a cross-site request, a demo caller, a signed-out caller and another
+//     owner's code never reach the revocation or the ban;
+//   * the already-revoked branch bans too, so a retry finishes the job;
+//   * a failed ban is a 500, not a silent success.
+// The transaction itself (revoked_at, the profile deadline, ownership) is proven
+// against a real database in lib/access/access-codes.db.test.ts.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
@@ -17,183 +20,154 @@ const OWNER = '11111111-1111-4111-8111-111111111111'
 const CODE = '22222222-2222-4222-8222-222222222222'
 const DEMO = '33333333-3333-4333-8333-333333333333'
 
-interface Row {
-  id: string
-  owner_user_id: string
-  demo_user_id: string | null
-  revoked_at: string | null
-  [k: string]: unknown
-}
-
-let rows: Row[]
 let user: { id: string } | null
-let adminError: { message: string } | null
-let adminCalls: Array<{ table: string; patch: Record<string, unknown>; filters: Array<[string, unknown]> }>
+let profile: Record<string, unknown> | null
+let revokeResult: { data?: unknown; error?: { message: string } | null }
+let banError: { message: string } | null
+let rpcCalls: Array<{ fn: string; args: Record<string, unknown> }>
+let bans: Array<{ id: string; attrs: Record<string, unknown> }>
 
-function ownerQuery(table: string) {
-  const filters: Array<[string, unknown, 'eq' | 'is']> = []
-  let patch: Record<string, unknown> | null = null
-  const matching = () =>
-    rows.filter((r) =>
-      filters.every(([col, val, kind]) => (kind === 'is' ? (r[col] ?? null) === val : r[col] === val))
-    )
-  const builder: Record<string, unknown> = {
-    update(p: Record<string, unknown>) {
-      patch = p
-      return builder
-    },
-    select() {
-      return builder
-    },
-    eq(col: string, val: unknown) {
-      filters.push([col, val, 'eq'])
-      return builder
-    },
-    is(col: string, val: unknown) {
-      filters.push([col, val, 'is'])
-      return builder
-    },
-    async maybeSingle() {
-      expect(table).toBe('access_codes')
-      const hit = matching()[0]
-      if (!hit) return { data: null, error: null }
-      if (patch) Object.assign(hit, patch)
-      return { data: { ...hit }, error: null }
-    },
-  }
-  return builder
+const ROW = {
+  id: CODE,
+  label: null,
+  code_prefix: 'P7QK',
+  created_at: '2026-10-01T00:00:00.000Z',
+  expires_at: '2026-10-04T00:00:00.000Z',
+  revoked_at: '2026-10-02T00:00:00.000Z',
+  first_redeemed_at: null,
+  last_used_at: null,
+  redemption_count: 0,
 }
 
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
     auth: { getUser: async () => ({ data: { user }, error: null }) },
-    from: (table: string) => ownerQuery(table),
+    from: () => {
+      const b: Record<string, unknown> = {}
+      Object.assign(b, {
+        select: () => b,
+        eq: () => b,
+        maybeSingle: async () => ({ data: profile ?? ROW, error: null }),
+      })
+      return b
+    },
   }),
 }))
 
 vi.mock('@/lib/harness/supabase-admin', () => ({
   createAdminClient: () => ({
-    from: (table: string) => ({
-      update: (patch: Record<string, unknown>) => {
-        const call = { table, patch, filters: [] as Array<[string, unknown]> }
-        adminCalls.push(call)
-        const b = {
-          eq(col: string, val: unknown) {
-            call.filters.push([col, val])
-            return call.filters.length < 2 ? b : Promise.resolve({ error: adminError })
-          },
-        }
-        return b
+    rpc: async (fn: string, args: Record<string, unknown>) => {
+      rpcCalls.push({ fn, args })
+      return { data: null, error: null, ...revokeResult }
+    },
+    auth: {
+      admin: {
+        updateUserById: async (id: string, attrs: Record<string, unknown>) => {
+          bans.push({ id, attrs })
+          return { data: null, error: banError }
+        },
       },
-    }),
+    },
   }),
 }))
 
 import { POST } from './route'
 
-function post(id: string = CODE) {
-  return POST(new NextRequest(`http://localhost/api/access-codes/${id}/revoke`, { method: 'POST' }), {
+function post(id: string = CODE, headers: Record<string, string> = { 'sec-fetch-site': 'same-origin' }) {
+  return POST(new NextRequest(`http://localhost/api/access-codes/${id}/revoke`, { method: 'POST', headers }), {
     params: { id },
   })
 }
 
-function row(over: Partial<Row> = {}): Row {
-  return {
-    id: CODE,
-    owner_user_id: OWNER,
-    demo_user_id: DEMO,
-    revoked_at: null,
-    label: null,
-    code_prefix: 'P7QK',
-    created_at: '2026-10-01T00:00:00.000Z',
-    expires_at: '2026-10-04T00:00:00.000Z',
-    first_redeemed_at: null,
-    last_used_at: null,
-    redemption_count: 0,
-    ...over,
-  }
-}
-
 beforeEach(() => {
-  rows = [row()]
   user = { id: OWNER }
-  adminError = null
-  adminCalls = []
+  // The profile read and the code re-read share one fake: an owner's profile has
+  // no demo signal; the re-read returns ROW because `profile` is cleared there.
+  profile = { is_demo: false, demo_expires_at: null, ...ROW }
+  revokeResult = { data: { found: true, revoked: true, demo_user_id: DEMO } }
+  banError = null
+  rpcCalls = []
+  bans = []
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
 describe('POST /api/access-codes/:id/revoke', () => {
-  it('ends the already-minted demo session by pulling demo_expires_at to now', async () => {
-    const before = Date.now()
+  it('revokes through the function with the owner id from the session, then bans the demo user', async () => {
     const res = await post()
     expect(res.status).toBe(200)
     expect((await res.json()).alreadyRevoked).toBe(false)
 
-    expect(adminCalls).toHaveLength(1)
-    const call = adminCalls[0]
-    expect(call.table).toBe('profiles')
-    const stamped = Date.parse(call.patch.demo_expires_at as string)
-    expect(stamped).toBeGreaterThanOrEqual(before - 1000)
-    expect(stamped).toBeLessThanOrEqual(Date.now() + 1000)
-    // Only the deadline moves; the demo workspace and its audit trail stay.
-    expect(Object.keys(call.patch)).toEqual(['demo_expires_at'])
+    expect(rpcCalls).toEqual([{ fn: 'revoke_access_code', args: { p_code_id: CODE, p_owner_id: OWNER } }])
+    // The demo id is the one the DATABASE answered with, banned permanently.
+    expect(bans).toEqual([{ id: DEMO, attrs: { ban_duration: '87600h' } }])
   })
 
-  it('targets the demo id stored on the row and only a demo profile', async () => {
-    await post()
-    const filters = Object.fromEntries(adminCalls[0].filters)
-    expect(filters.id).toBe(DEMO)
-    expect(filters.is_demo).toBe(true)
-  })
-
-  it('an unredeemed code touches no profile', async () => {
-    rows = [row({ demo_user_id: null })]
+  it('an unredeemed code bans nobody', async () => {
+    revokeResult = { data: { found: true, revoked: true, demo_user_id: null } }
     const res = await post()
     expect(res.status).toBe(200)
-    expect(adminCalls).toHaveLength(0)
+    expect(bans).toEqual([])
   })
 
-  it('the already-revoked branch ends the session too, without moving revoked_at', async () => {
-    rows = [row({ revoked_at: '2026-10-02T00:00:00.000Z' })]
+  it('the already-revoked branch bans too, so a retry finishes the job', async () => {
+    revokeResult = { data: { found: true, revoked: false, demo_user_id: DEMO } }
     const res = await post()
     expect(res.status).toBe(200)
     expect((await res.json()).alreadyRevoked).toBe(true)
-    expect(rows[0].revoked_at).toBe('2026-10-02T00:00:00.000Z')
-    expect(adminCalls).toHaveLength(1)
-    expect(Object.fromEntries(adminCalls[0].filters).id).toBe(DEMO)
+    expect(bans).toHaveLength(1)
   })
 
-  it("another owner's code is a 404 and never reaches the admin client", async () => {
-    rows = [row({ owner_user_id: '44444444-4444-4444-8444-444444444444' })]
+  it("another owner's or a missing code is a 404 and bans nobody", async () => {
+    revokeResult = { data: { found: false, revoked: false, demo_user_id: null } }
     const res = await post()
     expect(res.status).toBe(404)
-    expect(adminCalls).toHaveLength(0)
+    expect(bans).toEqual([])
   })
 
-  it('a malformed id is a 404 and never reaches the admin client', async () => {
+  it('a malformed id is a 404 and never reaches the database', async () => {
     const res = await post('not-a-uuid')
     expect(res.status).toBe(404)
-    expect(adminCalls).toHaveLength(0)
+    expect(rpcCalls).toEqual([])
   })
 
-  it('signed out is a 401 and never reaches the admin client', async () => {
+  it('signed out is a 401 and never reaches the database', async () => {
     user = null
     const res = await post()
     expect(res.status).toBe(401)
-    expect(adminCalls).toHaveLength(0)
+    expect(rpcCalls).toEqual([])
   })
 
-  it('a failed cutoff is a 500 so the owner retries, and the retry finishes the job', async () => {
-    adminError = { message: 'boom' }
-    const first = await post()
-    expect(first.status).toBe(500)
-    // revoked_at is already set, so the retry takes the already-revoked branch.
-    expect(rows[0].revoked_at).not.toBeNull()
+  it('a cross-site request is refused before anything else', async () => {
+    for (const headers of <Record<string, string>[]>[{ 'sec-fetch-site': 'cross-site' }, {}]) {
+      const res = await post(CODE, headers)
+      expect(res.status).toBe(403)
+      expect((await res.json()).error).toMatch(/didn't come from Cello/)
+    }
+    expect(rpcCalls).toEqual([])
+    expect(bans).toEqual([])
+  })
 
-    adminError = null
+  it('a demo caller cannot revoke', async () => {
+    profile = { is_demo: true, demo_expires_at: '2026-10-04T00:00:00.000Z' }
+    expect((await post()).status).toBe(403)
+    expect(rpcCalls).toEqual([])
+  })
+
+  it('a failed revocation is a 500 and bans nobody', async () => {
+    revokeResult = { error: { message: 'boom' } }
+    expect((await post()).status).toBe(500)
+    expect(bans).toEqual([])
+  })
+
+  it('a failed ban is a 500 so the owner retries, and the retry takes the already-revoked path', async () => {
+    banError = { message: 'auth admin down' }
+    expect((await post()).status).toBe(500)
+
+    banError = null
+    revokeResult = { data: { found: true, revoked: false, demo_user_id: DEMO } }
     const retry = await post()
     expect(retry.status).toBe(200)
     expect((await retry.json()).alreadyRevoked).toBe(true)
-    expect(adminCalls).toHaveLength(2)
+    expect(bans).toHaveLength(2)
   })
 })

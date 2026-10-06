@@ -386,6 +386,7 @@ describe('invokeGraphForUser: the root observation when the graph throws', () =>
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
     vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
     vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'user-owner')
     vi.stubEnv('LANGFUSE_DEMO_SAMPLE_RATE', '1')
     for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v)
     const exporter = new InMemorySpanExporter()

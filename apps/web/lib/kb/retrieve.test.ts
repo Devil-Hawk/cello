@@ -131,6 +131,7 @@ describe('retrieveKb in Langfuse', () => {
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
     vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
     vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'u1,u,me,user-1')
     vi.stubEnv('LANGFUSE_DEMO_SAMPLE_RATE', '1')
     loadApiKeysMock.mockResolvedValue({ userId: 'u1' })
     callEmbeddingMock.mockResolvedValue({ embeddings: [[0.1]], model: 'x', promptTokens: 1 })

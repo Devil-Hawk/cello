@@ -48,7 +48,7 @@ vi.mock('../harness/providers/openrouter', () => ({
 
 vi.mock('../harness/spend', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../harness/spend')>()
-  return { ...actual, assertWithinBudget: async () => undefined, recordSpend: async () => undefined }
+  return { ...actual, reserveSpend: async () => ({ id: 'res-1', userId: 'user-1', model: 'm', estimateUsd: 0.01 }), settleSpend: async () => undefined }
 })
 
 // callLlm's metered path builds its own admin client for the budget guards
@@ -286,6 +286,7 @@ describe('invoke.ts -> unit.ts -> llm.ts: the Langfuse trace', () => {
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
     vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
     vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'user-owner')
     vi.stubEnv('LANGFUSE_DEMO_SAMPLE_RATE', '1')
     exporter = new InMemorySpanExporter()
     __setLangfuseForTest({ exporter })

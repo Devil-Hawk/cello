@@ -1,70 +1,28 @@
-// Tests for the hard monthly spend cap (lib/harness/spend.ts) — the single
-// choke point that stops a background cron from quietly burning a user's
-// whole month's AI budget. ZERO network, ZERO real LLM calls, ZERO real DB:
-// AdminClient is an in-memory fake built per test (see fakeAdmin below).
+// Tests for the hard monthly spend cap (lib/harness/spend.ts): the pure price
+// and estimate maths, and the reserve/settle client against a recording fake.
+// ZERO network, ZERO real LLM calls. The atomic arithmetic itself (parallel
+// reservations, rollover, sweeper, demo pool) is proven against a REAL Postgres
+// in spend.db.test.ts.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   BudgetCapError,
+  DEFAULT_MAX_TOKENS,
   DEFAULT_MONTHLY_USD,
+  actualCostUsd,
   assertWithinBudget,
   canMeter,
+  estimateCostDetails,
   estimateCostUsd,
+  estimatePromptTokens,
   getSpendState,
-  recordSpend,
+  hasListedPrice,
+  reserveSpend,
+  rungFor,
+  settleSpend,
+  worstCaseUsd,
 } from './spend'
 import type { AdminClient } from './types'
-
-/** Minimal in-memory fake of the exact PostgREST chain shape spend.ts uses:
- *  `.from('profiles').select('preferences').eq('id', userId).single()` and
- *  `.from('profiles').update({ preferences }).eq('id', userId)`. Not a
- *  general Supabase mock — just enough surface for this one table. */
-function fakeAdmin(initialPreferences: Record<string, unknown> | null): {
-  admin: AdminClient
-  getPreferences: () => Record<string, unknown> | null
-} {
-  let preferences = initialPreferences
-
-  function selectBuilder() {
-    const builder = {
-      eq(_col: string, _val: string) {
-        return builder
-      },
-      async single() {
-        return { data: preferences === null ? null : { preferences }, error: null }
-      },
-    }
-    return builder
-  }
-
-  function updateBuilder(patch: { preferences: Record<string, unknown> }) {
-    const builder = {
-      eq(_col: string, _val: string) {
-        preferences = patch.preferences
-        return Promise.resolve({ data: null, error: null })
-      },
-    }
-    return builder
-  }
-
-  const admin = {
-    from(_table: string) {
-      return {
-        select: () => selectBuilder(),
-        update: (patch: { preferences: Record<string, unknown> }) => updateBuilder(patch),
-      }
-    },
-  }
-  return { admin: admin as unknown as AdminClient, getPreferences: () => preferences }
-}
-
-/** Current UTC billing period in the same "YYYY-MM" shape spend.ts computes
- *  internally, so tests can assert against a real period without importing
- *  the (unexported) currentPeriod helper. */
-function currentPeriod(): string {
-  const now = new Date()
-  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
-}
 
 describe('estimateCostUsd', () => {
   it('prices a known model correctly (per-million-token in/out rates)', () => {
@@ -108,154 +66,240 @@ describe('estimateCostUsd', () => {
     }
   })
 
+  it('a :free OpenRouter model costs nothing and is a listed price, not the fallback', () => {
+    expect(estimateCostUsd('google/gemma-4-31b-it:free', 1_000_000, 1_000_000)).toBe(0)
+    expect(estimateCostDetails('qwen/qwen3.8-27b:free', 1_000_000, 1_000_000)).toEqual({ input: 0, output: 0 })
+    expect(hasListedPrice('google/gemma-4-31b-it:free')).toBe(true)
+    // The suffix must be exact: a paid model whose id merely contains "free" stays on the fallback.
+    expect(estimateCostUsd('some/free-model', 1_000_000, 0)).toBeCloseTo(5, 6)
+  })
+
   it('zero tokens costs zero even for an unknown model', () => {
     expect(estimateCostUsd('unknown/model', 0, 0)).toBe(0)
   })
 })
 
-describe('getSpendState / readState', () => {
-  it('a user with no preferences row gets the default cap and zero spend', async () => {
-    const { admin } = fakeAdmin(null)
-    const state = await getSpendState(admin, 'user-1')
-    expect(state.spentUsd).toBe(0)
-    expect(state.capUsd).toBe(DEFAULT_MONTHLY_USD)
-    expect(state.periodStart).toBe(currentPeriod())
+/** A recording fake of the one method spend.ts uses on the admin client. */
+function rpcAdmin(reply: (fn: string, args: Record<string, unknown>) => { data?: unknown; error?: { message: string } | null }) {
+  const rpc = vi.fn(async (fn: string, args: Record<string, unknown>) => ({ data: null, error: null, ...reply(fn, args) }))
+  return { admin: { rpc } as unknown as AdminClient, rpc }
+}
+
+const SONNET = 'anthropic/claude-sonnet-5'
+
+describe('estimatePromptTokens and worstCaseUsd', () => {
+  it('estimates 3 characters per token plus 8 per message, rounded up', () => {
+    expect(estimatePromptTokens('x'.repeat(300))).toBe(100 + 8)
+    expect(estimatePromptTokens('x'.repeat(301), 3)).toBe(101 + 24)
+    expect(estimatePromptTokens('')).toBe(8)
   })
 
-  it('reads an existing in-period spend + custom cap unchanged', async () => {
-    const { admin } = fakeAdmin({ budget: { periodStart: currentPeriod(), spentUsd: 3.5, monthlyUsd: 20 } })
-    const state = await getSpendState(admin, 'user-1')
-    expect(state.spentUsd).toBe(3.5)
-    expect(state.capUsd).toBe(20)
-    expect(state.periodStart).toBe(currentPeriod())
+  it('worst case is the prompt at the input price plus the WHOLE max_tokens at the output price', () => {
+    // sonnet-5: $2 in, $10 out per M. 1000 in = 0.002, 2048 out = 0.02048.
+    expect(worstCaseUsd(SONNET, 1000, DEFAULT_MAX_TOKENS)).toBeCloseTo(0.02248, 6)
   })
 
-  it('a stored period different from the current one resets spend to zero (new billing month), but keeps the configured cap', async () => {
-    const { admin } = fakeAdmin({ budget: { periodStart: '2020-01', spentUsd: 999, monthlyUsd: 20 } })
-    const state = await getSpendState(admin, 'user-1')
-    expect(state.spentUsd).toBe(0)
-    expect(state.periodStart).toBe(currentPeriod())
-    // The user's configured monthly cap is read independent of the period
-    // check, so a rollover resets spend but must NOT silently reset the cap
-    // back to default.
-    expect(state.capUsd).toBe(20)
+  it('a :free model reserves zero, and an unknown model the most expensive rate', () => {
+    expect(worstCaseUsd('google/gemma-4-31b-it:free', 1_000_000, 100_000)).toBe(0)
+    expect(worstCaseUsd('some/unrecognized-model', 1_000_000, 0)).toBe(5)
   })
 
-  it('a non-positive or non-numeric monthlyUsd falls back to the default cap', async () => {
-    const { admin } = fakeAdmin({ budget: { periodStart: currentPeriod(), spentUsd: 1, monthlyUsd: -5 } })
-    const state = await getSpendState(admin, 'user-1')
-    expect(state.capUsd).toBe(DEFAULT_MONTHLY_USD)
-  })
-
-  it('a negative stored spentUsd is treated as zero, never negative', async () => {
-    const { admin } = fakeAdmin({ budget: { periodStart: currentPeriod(), spentUsd: -10, monthlyUsd: 20 } })
-    const state = await getSpendState(admin, 'user-1')
-    expect(state.spentUsd).toBe(0)
+  it('rounds UP to the ledger precision, never down', () => {
+    // 1 token at $0.02/M is $0.00000002, which a 6-decimal column would store as 0.
+    expect(worstCaseUsd('openai/text-embedding-3-small', 1, 0)).toBe(0.000001)
   })
 })
 
-describe('assertWithinBudget', () => {
-  it('does not throw when spend is well under the cap', async () => {
-    const { admin } = fakeAdmin({ budget: { periodStart: currentPeriod(), spentUsd: 1, monthlyUsd: 10 } })
-    await expect(assertWithinBudget(admin, 'user-1')).resolves.toBeUndefined()
-  })
-
-  it('throws BudgetCapError when spend is exactly AT the cap', async () => {
-    const { admin } = fakeAdmin({ budget: { periodStart: currentPeriod(), spentUsd: 10, monthlyUsd: 10 } })
-    await expect(assertWithinBudget(admin, 'user-1')).rejects.toBeInstanceOf(BudgetCapError)
-  })
-
-  it('throws BudgetCapError when spend is OVER the cap', async () => {
-    const { admin } = fakeAdmin({ budget: { periodStart: currentPeriod(), spentUsd: 15, monthlyUsd: 10 } })
-    await expect(assertWithinBudget(admin, 'user-1')).rejects.toBeInstanceOf(BudgetCapError)
-  })
-
-  it('the thrown error carries the exact spent/cap figures for an honest user-facing message', async () => {
-    const { admin } = fakeAdmin({ budget: { periodStart: currentPeriod(), spentUsd: 12, monthlyUsd: 10 } })
-    try {
-      await assertWithinBudget(admin, 'user-1')
-      throw new Error('expected assertWithinBudget to throw')
-    } catch (err) {
-      expect(err).toBeInstanceOf(BudgetCapError)
-      const capErr = err as BudgetCapError
-      expect(capErr.spentUsd).toBe(12)
-      expect(capErr.capUsd).toBe(10)
-      expect(capErr.message).toContain('$12.00')
-      expect(capErr.message).toContain('$10.00')
-    }
-  })
-
-  it('a fresh billing month is never blocked, even if last month ended over cap', async () => {
-    const { admin } = fakeAdmin({ budget: { periodStart: '2020-01', spentUsd: 9999, monthlyUsd: 10 } })
-    await expect(assertWithinBudget(admin, 'user-1')).resolves.toBeUndefined()
+describe('rungFor', () => {
+  it('reads the rung from the backend that ran', () => {
+    expect(rungFor('local-server', 'llama3.1')).toBe('R2')
+    expect(rungFor('local-cli', 'local-cli/claude')).toBe('R2')
+    expect(rungFor('openrouter', 'google/gemma-4-31b-it:free')).toBe('R3')
+    expect(rungFor('openrouter', 'anthropic/claude-haiku-4.5')).toBe('R4')
   })
 })
 
-describe('recordSpend', () => {
-  /** recordSpend is ONE rpc now (migration 20261005000005), so the fake only
-   *  records calls. The SQL arithmetic is proven by
-   *  supabase/checks/access_codes_and_spend.sql. */
-  function rpcAdmin(result: { data?: unknown; error: { message: string } | null } = { error: null }) {
-    const rpc = vi.fn(async (_fn: string, _args: Record<string, unknown>) => ({ data: null, ...result }))
-    return { admin: { rpc } as unknown as AdminClient, rpc }
+describe('reserveSpend', () => {
+  const input = {
+    userId: 'user-1',
+    model: SONNET,
+    promptTokens: 1000,
+    maxTokens: 2048,
+    rung: 'R4' as const,
+    step: 'score-job-match',
+    traceId: 'trace-1',
   }
 
-  it('records the estimated cost through the atomic record_llm_spend rpc', async () => {
-    const { admin, rpc } = rpcAdmin()
-    await recordSpend(admin, 'user-1', 'anthropic/claude-sonnet-5', 1_000_000, 1_000_000)
+  it('reserves the worst case in ONE rpc and returns the reservation id', async () => {
+    const { admin, rpc } = rpcAdmin(() => ({ data: { ok: true, id: 'res-9' } }))
+    const res = await reserveSpend(admin, input)
     expect(rpc).toHaveBeenCalledTimes(1)
-    // 2 (in) + 10 (out) = 12.
-    expect(rpc).toHaveBeenCalledWith('record_llm_spend', { p_user_id: 'user-1', p_cost: 12 })
-  })
-
-  it('prices an unknown model at the most expensive rate, never zero', async () => {
-    const { admin, rpc } = rpcAdmin()
-    await recordSpend(admin, 'user-1', 'unknown/model', 1_000_000, 0)
-    expect(rpc).toHaveBeenCalledWith('record_llm_spend', { p_user_id: 'user-1', p_cost: 5 })
-  })
-
-  it('never reads or rewrites the preferences blob (that was the race)', async () => {
-    const from = vi.fn()
-    const rpc = vi.fn(async () => ({ data: null, error: null }))
-    await recordSpend({ from, rpc } as unknown as AdminClient, 'user-1', 'anthropic/claude-sonnet-5', 1, 1)
-    expect(from).not.toHaveBeenCalled()
-  })
-
-  it('parallel calls each reach the database; none is dropped client-side', async () => {
-    // The database serialises on the row lock; this pins that the client fires
-    // every increment instead of coalescing or read-modify-writing them.
-    let total = 0
-    const rpc = vi.fn(async (_fn: string, args: Record<string, unknown>) => {
-      await new Promise((r) => setTimeout(r, Math.random() * 5))
-      total += args.p_cost as number
-      return { data: total, error: null }
+    expect(rpc).toHaveBeenCalledWith('reserve_llm_spend', {
+      p_user_id: 'user-1',
+      p_model: SONNET,
+      p_estimate: 0.02248,
+      p_rung: 'R4',
+      p_step: 'score-job-match',
+      p_trace_id: 'trace-1',
+      p_door: null,
     })
-    const admin = { rpc } as unknown as AdminClient
-    await Promise.all(
-      Array.from({ length: 10 }, () => recordSpend(admin, 'user-1', 'anthropic/claude-haiku-4.5', 100_000, 0))
-    )
-    expect(rpc).toHaveBeenCalledTimes(10)
-    expect(total).toBeCloseTo(1, 6) // 10 x $0.10
+    expect(res).toEqual({ id: 'res-9', userId: 'user-1', model: SONNET, rung: 'R4', estimateUsd: 0.02248 })
   })
 
-  it('never throws on an rpc error, and logs loudly', async () => {
-    const { admin } = rpcAdmin({ error: { message: 'function not found' } })
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    await expect(recordSpend(admin, 'user-1', 'anthropic/claude-sonnet-5', 100, 100)).resolves.toBeUndefined()
-    expect(consoleSpy).toHaveBeenCalled()
-    consoleSpy.mockRestore()
+  it('a free model reserves a $0 row: one rpc, rung R3, the step, and the row id back', async () => {
+    const { admin, rpc } = rpcAdmin(() => ({ data: { ok: true, id: 'free-1' } }))
+    const res = await reserveSpend(admin, { ...input, model: 'google/gemma-4-31b-it:free', rung: 'R3', door: 'chat' })
+    expect(rpc).toHaveBeenCalledTimes(1)
+    expect(rpc).toHaveBeenCalledWith('reserve_llm_spend', {
+      p_user_id: 'user-1',
+      p_model: 'google/gemma-4-31b-it:free',
+      p_estimate: 0,
+      p_rung: 'R3',
+      p_step: 'score-job-match',
+      p_trace_id: 'trace-1',
+      p_door: 'chat',
+    })
+    expect(res).toMatchObject({ id: 'free-1', rung: 'R3', estimateUsd: 0 })
   })
 
-  it('never throws when the rpc itself throws', async () => {
-    const admin = {
+  it('a local model reserves 0 even when its id would hit the fallback price', async () => {
+    const { admin, rpc } = rpcAdmin(() => ({ data: { ok: true, id: 'local-1' } }))
+    const res = await reserveSpend(admin, { ...input, model: 'llama3.1', rung: 'R2' })
+    expect(rpc.mock.calls[0][1]).toMatchObject({ p_estimate: 0, p_rung: 'R2' })
+    expect(res.estimateUsd).toBe(0)
+  })
+
+  it('a zero-cost reservation whose ledger errors carries on without a row; a paid one refuses', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { admin } = rpcAdmin(() => ({ error: { message: 'connection refused' } }))
+    const free = await reserveSpend(admin, { ...input, model: 'x:free', rung: 'R3' })
+    expect(free.id).toBeNull()
+    expect(spy).toHaveBeenCalled()
+    await expect(reserveSpend(admin, input)).rejects.toThrow('spend ledger unavailable')
+    spy.mockRestore()
+  })
+
+  it('a refusal becomes a BudgetCapError carrying the figures and the scope', async () => {
+    const { admin } = rpcAdmin(() => ({ data: { ok: false, scope: 'user', spent_usd: 9.99, cap_usd: 10 } }))
+    const err = await reserveSpend(admin, input).catch((e) => e)
+    expect(err).toBeInstanceOf(BudgetCapError)
+    expect(err).toMatchObject({ spentUsd: 9.99, capUsd: 10, scope: 'user' })
+    expect(err.message).toContain('$9.99')
+
+    const { admin: pool } = rpcAdmin(() => ({ data: { ok: false, scope: 'demo-pool', spent_usd: 5, cap_usd: 5 } }))
+    const poolErr = await reserveSpend(pool, input).catch((e) => e)
+    expect(poolErr).toMatchObject({ scope: 'demo-pool', capUsd: 5 })
+  })
+
+  it('an unreachable ledger refuses the call: it is never read as free', async () => {
+    const { admin } = rpcAdmin(() => ({ error: { message: 'connection refused' } }))
+    await expect(reserveSpend(admin, input)).rejects.toThrow('spend ledger unavailable')
+    const { admin: empty } = rpcAdmin(() => ({ data: null }))
+    await expect(reserveSpend(empty, input)).rejects.toThrow('spend ledger unavailable')
+  })
+})
+
+describe('settleSpend', () => {
+  const res = { id: 'res-1', userId: 'user-1', model: SONNET, rung: 'R4' as const, estimateUsd: 0.02 }
+
+  it('settles the provider-reported cost over our own estimate', async () => {
+    const { admin, rpc } = rpcAdmin(() => ({ data: true }))
+    await settleSpend(admin, res, { model: SONNET, promptTokens: 1_000_000, completionTokens: 1_000_000, costUsd: 0.00042 })
+    expect(rpc).toHaveBeenCalledWith('settle_llm_spend', { p_id: 'res-1', p_actual: 0.00042, p_status: null })
+  })
+
+  it('falls back to the price table when the provider reported no cost', async () => {
+    const { admin, rpc } = rpcAdmin(() => ({ data: true }))
+    await settleSpend(admin, res, { model: SONNET, promptTokens: 1_000_000, completionTokens: 1_000_000 })
+    expect(rpc).toHaveBeenCalledWith('settle_llm_spend', { p_id: 'res-1', p_actual: 12, p_status: null })
+  })
+
+  it('a provider error with an HTTP status settles at zero and stores the status', async () => {
+    const { admin, rpc } = rpcAdmin(() => ({ data: true }))
+    await settleSpend(admin, res, { failed: Object.assign(new Error('rate limited'), { status: 429 }) })
+    expect(rpc).toHaveBeenCalledWith('settle_llm_spend', { p_id: 'res-1', p_actual: 0, p_status: 429 })
+  })
+
+  it('a non-R4 reservation settles at 0 even when a cost is given', async () => {
+    const { admin, rpc } = rpcAdmin(() => ({ data: true }))
+    await settleSpend(admin, { ...res, rung: 'R2', model: 'llama3.1' }, { model: 'llama3.1', promptTokens: 1000, completionTokens: 1000, costUsd: 0.5 })
+    expect(rpc).toHaveBeenCalledWith('settle_llm_spend', { p_id: 'res-1', p_actual: 0, p_status: null })
+  })
+
+  it('an abort or network failure is left reserved for the sweeper', async () => {
+    const { admin, rpc } = rpcAdmin(() => ({ data: true }))
+    await settleSpend(admin, res, { failed: new DOMException('aborted', 'AbortError') })
+    await settleSpend(admin, res, { failed: new Error('socket hang up') })
+    expect(rpc).not.toHaveBeenCalled()
+  })
+
+  it('a reservation with no id (a free model) is a no-op', async () => {
+    const { admin, rpc } = rpcAdmin(() => ({ data: true }))
+    await settleSpend(admin, { ...res, id: null }, { model: SONNET, promptTokens: 1, completionTokens: 1 })
+    expect(rpc).not.toHaveBeenCalled()
+  })
+
+  it('never throws on an rpc error or a thrown rpc, and logs loudly', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { admin } = rpcAdmin(() => ({ error: { message: 'function not found' } }))
+    await expect(settleSpend(admin, res, { model: SONNET, promptTokens: 1, completionTokens: 1 })).resolves.toBeUndefined()
+    const throwing = {
       rpc() {
         throw new Error('simulated DB outage')
       },
     } as unknown as AdminClient
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    await expect(recordSpend(admin, 'user-1', 'anthropic/claude-sonnet-5', 100, 100)).resolves.toBeUndefined()
-    expect(consoleSpy).toHaveBeenCalled()
-    consoleSpy.mockRestore()
+    await expect(settleSpend(throwing, res, { model: SONNET, promptTokens: 1, completionTokens: 1 })).resolves.toBeUndefined()
+    expect(spy).toHaveBeenCalledTimes(2)
+    spy.mockRestore()
+  })
+})
+
+describe('actualCostUsd', () => {
+  it('reads usage.cost', () => {
+    expect(actualCostUsd({ cost: 0.00042, is_byok: false })).toBe(0.00042)
+    expect(actualCostUsd({ cost: 0 })).toBe(0)
+  })
+
+  it('adds the upstream charge only for a bring-your-own-key request', () => {
+    const usage = { cost: 0.001, cost_details: { upstream_inference_cost: 0.019 } }
+    expect(actualCostUsd({ ...usage, is_byok: true })).toBeCloseTo(0.02, 9)
+    expect(actualCostUsd({ ...usage, is_byok: false })).toBe(0.001)
+  })
+
+  it('is undefined when there is no usable figure, so the caller uses the price table', () => {
+    for (const bad of [undefined, null, {}, { cost: '0.1' }, { cost: -1 }, { cost: Number.NaN }, 'x']) {
+      expect(actualCostUsd(bad)).toBeUndefined()
+    }
+  })
+})
+
+describe('getSpendState and assertWithinBudget', () => {
+  const state = (over: Record<string, unknown> = {}) => ({
+    data: { period: '2026-10-01', spent_usd: 3.5, held_usd: 0.5, cap_usd: 20, ...over },
+  })
+
+  it('maps the ledger state', async () => {
+    const { admin, rpc } = rpcAdmin(() => state())
+    expect(await getSpendState(admin, 'user-1')).toEqual({ periodStart: '2026-10', spentUsd: 3.5, heldUsd: 0.5, capUsd: 20 })
+    expect(rpc).toHaveBeenCalledWith('llm_spend_state', { p_user_id: 'user-1' })
+  })
+
+  it('throws when the ledger cannot be read', async () => {
+    const { admin } = rpcAdmin(() => ({ error: { message: 'down' } }))
+    await expect(getSpendState(admin, 'user-1')).rejects.toThrow('spend ledger unavailable')
+  })
+
+  it('the read-only pre-check counts money held for work in progress', async () => {
+    const { admin } = rpcAdmin(() => state({ spent_usd: 9.5, held_usd: 0.5, cap_usd: 10 }))
+    const err = await assertWithinBudget(admin, 'user-1').catch((e) => e)
+    expect(err).toBeInstanceOf(BudgetCapError)
+    expect(err).toMatchObject({ spentUsd: 10, capUsd: 10 })
+    const { admin: ok } = rpcAdmin(() => state())
+    await expect(assertWithinBudget(ok, 'user-1')).resolves.toBeUndefined()
+  })
+
+  it('the default cap constant is unchanged', () => {
+    expect(DEFAULT_MONTHLY_USD).toBe(10)
   })
 })
 
@@ -264,7 +308,7 @@ describe('canMeter', () => {
     expect(canMeter({ openrouter: 'key', userId: 'user-1' })).toBe(true)
   })
 
-  it('false when userId is absent — spend cannot be enforced without a user to attribute it to', () => {
+  it('false when userId is absent: spend cannot be enforced without a user to attribute it to', () => {
     expect(canMeter({ openrouter: 'key' })).toBe(false)
   })
 })

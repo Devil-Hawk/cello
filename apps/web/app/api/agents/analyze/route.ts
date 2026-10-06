@@ -8,7 +8,7 @@
 //
 // Everything that used to live here — building a Job/Company/UserProfile out
 // of three separate reads, constructing a provider client, and the hand-
-// placed assertWithinBudget/recordSpend this route needed because that
+// placed spend reservation this route needed because that
 // client bypassed callLlm entirely — is gone. lib/graph/oneshot.ts#
 // runUnitOnce -> lib/graph/unit.ts#runAgentUnit('analyst') now does the DB
 // reads, the metered/demo-gated model call, and the journaling; this route's
