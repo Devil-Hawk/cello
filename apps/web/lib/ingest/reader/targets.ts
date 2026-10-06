@@ -8,6 +8,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { EMPTY_TARGETING, resolveTargeting, type Targeting } from '../../targeting'
 import { resolveTargetTitles } from '../../targeting/titles'
+import { getRoleType, ROLE_TYPES } from '../../jobs/role-types'
+import type { TypeStep } from '../../jobs/target-relevance'
 
 export interface ReaderTargets {
   targeting: Targeting
@@ -15,6 +17,8 @@ export interface ReaderTargets {
   titles: string[]
   /** profiles.targets_version when the targets were read: roles are kept under it. 0 when none were set. */
   version?: number
+  /** The role types the person chose, their own words for titles, and whether the type step decides (K5c). Absent when none are chosen. */
+  typeStep?: TypeStep
 }
 
 export const NO_TARGETS: ReaderTargets = { targeting: EMPTY_TARGETING, titles: [] }
@@ -79,7 +83,31 @@ export async function loadTargets(client: Db, userId?: string): Promise<ReaderTa
     const query = client.from('profiles').select('preferences, targets_version')
     const { data } = await (userId ? query.eq('id', userId) : query).maybeSingle()
     const row = data as { preferences?: unknown; targets_version?: number | null } | null
-    return { targeting: resolveTargeting(row?.preferences), titles: resolveTargetTitles(row?.preferences), version: row?.targets_version ?? 0 }
+    const targeting = resolveTargeting(row?.preferences)
+    const out: ReaderTargets = { targeting, titles: resolveTargetTitles(row?.preferences), version: row?.targets_version ?? 0 }
+    const chosen = (targeting.role_types ?? []).filter((id) => getRoleType(id))
+    if (chosen.length === 0) return out
+
+    // The old filter keeps deciding until the switch is on, with the chosen types' labels among the titles it matches.
+    const labels = chosen.map((id) => getRoleType(id)!.label)
+    out.titles = [...new Set([...out.titles, ...labels])]
+    const synonymsQuery = client.from('role_type_synonyms').select('title_norm, role_type')
+    const [synonyms, flag] = await Promise.all([
+      userId ? synonymsQuery.eq('user_id', userId) : synonymsQuery,
+      client.from('instance_flags').select('on').eq('key', 'role_types_live').maybeSingle(),
+    ])
+    const words = new Set<string>()
+    for (const id of chosen) {
+      const def = ROLE_TYPES.find((r) => r.id === id)!
+      for (const phrase of [def.label.toLowerCase(), ...def.synonyms]) for (const w of phrase.split(/[^\p{L}\p{N}]+/u)) if (w.length > 2) words.add(w)
+    }
+    out.typeStep = {
+      chosen,
+      synonyms: Object.fromEntries(((synonyms.data ?? []) as { title_norm: string; role_type: string }[]).map((s) => [s.title_norm, s.role_type])),
+      words,
+      live: (flag.data as { on?: boolean } | null)?.on === true,
+    }
+    return out
   } catch {
     return NO_TARGETS
   }
