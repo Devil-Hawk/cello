@@ -353,16 +353,18 @@ end $$;
 -- through upsert_shared_jobs, and only when the company still has that employer.
 do $$
 declare
-  f record; cr uuid := gen_random_uuid(); jh uuid;
+  f record; cr uuid := gen_random_uuid(); e4 uuid := gen_random_uuid(); jh uuid;
   forged jsonb := '{"ats": {"provider": "greenhouse", "token": "evilboard", "source": "config", "verified_by": "manual"}}';
   rowj jsonb;
 begin
   select * into f from fx;
+  insert into public.company_directory (id, name, name_norm, domain, ats_provider, ats_token, verified_by, verified_at, source)
+  values (e4, 'Racer Co', 'racer co', 'racer2.example', 'greenhouse', 'racerco', 'careers_link', now(), 'person');
   -- the race: an unlinked company with a forged board is read; A links it to the employer; the read's rows are then written
   insert into public.companies (id, user_id, name, domain, career_url, metadata) values (cr, f.a, 'Racer', 'racer.example', 'https://racer.example/c', forged);
   if (select employer_id from public.companies where id = cr) is not null then raise exception 'the racing company starts unlinked'; end if;
-  perform pg_temp.as_user(f.a, format($q$with u as (update public.companies set domain = 'shared.example' where id = %L returning 1) select count(*) from u$q$, cr));
-  if (select employer_id from public.companies where id = cr) is distinct from f.emp then raise exception 'the company is linked by its domain'; end if;
+  perform pg_temp.as_user(f.a, format($q$with u as (update public.companies set domain = 'racer2.example' where id = %L returning 1) select count(*) from u$q$, cr));
+  if (select employer_id from public.companies where id = cr) is distinct from e4 then raise exception 'the company is linked by its domain'; end if;
   insert into public.jobs (company_id, title, description, url, external_id, source) values (cr, 'EVIL phishing role', 'x', 'https://evil.example/p', 'race-1', 'greenhouse');
   if (select employer_id from public.jobs where external_id = 'race-1') is not null then raise exception 'a row inserted after the company was linked is not shared'; end if;
   -- the other variant: a read made for another employer is refused once the company has changed employer
@@ -378,7 +380,7 @@ begin
     raise exception 'upsert_shared_jobs must refuse rows that name no employer';
   exception when sqlstate '22023' then null;
   end;
-  rowj := jsonb_build_array(jsonb_build_object('company_id', cr, 'employer_id', f.emp, 'external_id', 'race-2', 'title', 'Not the board', 'url', 'https://shared.example/jobs/r2', 'source', 'lever'));
+  rowj := jsonb_build_array(jsonb_build_object('company_id', cr, 'employer_id', e4, 'external_id', 'race-2', 'title', 'Not the board', 'url', 'https://shared.example/jobs/r2', 'source', 'lever'));
   begin
     perform public.upsert_shared_jobs(rowj);
     raise exception 'a board employer''s roles must come from its board';
@@ -387,6 +389,7 @@ begin
   if exists (select 1 from public.jobs where external_id = 'race-2') then raise exception 'no refused row is stored'; end if;
   delete from public.jobs where company_id = cr;
   delete from public.companies where id = cr;
+  delete from public.company_directory where id = e4;
 
   -- a shared role holds no one's score: the matcher writes it, the other follower reads nothing of it
   select id into jh from public.jobs where employer_id = f.emp and external_id = 'held-1';
