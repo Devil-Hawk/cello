@@ -131,6 +131,17 @@ create policy job_heartbeats_select on public.job_heartbeats
 -- Heartbeats and the meter
 -- ---------------------------------------------------------------------------
 
+create or replace function public.record_meter(p_ms bigint)
+returns void
+language sql
+security definer
+set search_path = ''
+as $$
+  insert into public.clock_meter (month, duration_ms)
+  values (date_trunc('month', now())::date, greatest(coalesce(p_ms, 0), 0))
+  on conflict (month) do update set duration_ms = public.clock_meter.duration_ms + excluded.duration_ms
+$$;
+
 create or replace function public.start_heartbeat(p_job text, p_user uuid default null)
 returns void
 language plpgsql
@@ -178,9 +189,7 @@ begin
     failure = case when p_ok then null else left(coalesce(p_failure, 'failed'), 500) end,
     duration_ms = greatest(coalesce(p_duration_ms, 0), 0);
 
-  insert into public.clock_meter (month, duration_ms)
-  values (date_trunc('month', now())::date, greatest(coalesce(p_duration_ms, 0), 0))
-  on conflict (month) do update set duration_ms = public.clock_meter.duration_ms + excluded.duration_ms;
+  perform public.record_meter(p_duration_ms);
 end;
 $$;
 
@@ -467,6 +476,7 @@ $$;
 -- Housekeeping, not an API: nobody but the service role runs these over the Data API.
 -- ---------------------------------------------------------------------------
 
+revoke all on function public.record_meter(bigint) from public, anon, authenticated;
 revoke all on function public.start_heartbeat(text, uuid) from public, anon, authenticated;
 revoke all on function public.finish_heartbeat(text, uuid, boolean, jsonb, text, bigint, timestamptz) from public, anon, authenticated;
 revoke all on function public.clock_allowance_ms() from public, anon, authenticated;
@@ -476,6 +486,7 @@ revoke all on function public.background_ready() from public, anon, authenticate
 revoke all on function public.clock_post(text, text, jsonb) from public, anon, authenticated;
 revoke all on function public.agent_sweep() from public, anon, authenticated;
 revoke all on function public.clock_prune() from public, anon, authenticated;
+grant execute on function public.record_meter(bigint) to service_role;
 grant execute on function public.start_heartbeat(text, uuid) to service_role;
 grant execute on function public.finish_heartbeat(text, uuid, boolean, jsonb, text, bigint, timestamptz) to service_role;
 grant execute on function public.clock_allowance_ms() to service_role;
@@ -489,6 +500,7 @@ declare
   f text;
 begin
   foreach f in array array[
+    'public.record_meter(bigint)',
     'public.start_heartbeat(text, uuid)',
     'public.finish_heartbeat(text, uuid, boolean, jsonb, text, bigint, timestamptz)',
     'public.clock_allowance_ms()',
