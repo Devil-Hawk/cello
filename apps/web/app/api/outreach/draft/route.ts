@@ -13,15 +13,11 @@ import { verifyOutreachDraft } from '@/lib/graph/verify/outreach'
 import { writeVerdict } from '@/lib/evals/verdicts'
 import { recordDemoEvent } from '@/lib/access/session'
 import { buildOutreachContext } from '@/lib/context/assemble'
+import { fitHighlights, fitRowOf } from '@/lib/scoring/read'
 import { setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
-
-interface MatchDetails {
-  highlights?: unknown
-  skillsMatch?: { matched?: unknown }
-}
 
 // --- the demo trail ----------------------------------------------------
 //
@@ -60,18 +56,6 @@ async function recordDraftOutcome(
     detail,
     headers,
   })
-}
-
-function highlightsFrom(matchDetails: unknown): string[] {
-  const md = (matchDetails ?? {}) as MatchDetails
-  const out: string[] = []
-  if (Array.isArray(md.highlights)) {
-    for (const h of md.highlights) if (typeof h === 'string') out.push(h)
-  }
-  if (out.length === 0 && md.skillsMatch && Array.isArray(md.skillsMatch.matched)) {
-    for (const s of md.skillsMatch.matched) if (typeof s === 'string') out.push(s)
-  }
-  return out.slice(0, 6)
 }
 
 export async function POST(request: NextRequest) {
@@ -129,14 +113,15 @@ export async function POST(request: NextRequest) {
     if (jobId) {
       const { data: job } = await supabase
         .from('jobs')
-        .select('id, title, description, company_id, match_details')
+        .select('id, title, description, company_id, person_roles(chance_detail)')
         .eq('id', jobId)
         .single()
       if (job) {
         jobTitle = job.title || jobTitle
         jobDescription = job.description ?? null
         companyId = job.company_id ?? companyId
-        matchHighlights = highlightsFrom(job.match_details)
+        // Only what the resume really shows, each with the line that shows it: nothing the model could invent.
+        matchHighlights = fitHighlights(fitRowOf(job).chance_detail)
       }
     }
 

@@ -36,7 +36,7 @@ interface ScenarioSpec {
   company: string
   jobFunction: string
   seniority: string
-  matchScore: number | null
+  chance: string | null
   n: number
   /** Outcome split — must sum to <= n. Remainder = no-reply. */
   interviews: number
@@ -61,13 +61,13 @@ function fillerResume(atsScore: number, extra: string): ResumeSpec {
 
 const SCENARIOS: ScenarioSpec[] = [
   {
-    // Strong performer: high match_score, greenhouse, mostly interviews.
+    // Strong performer: a Strong chance call, greenhouse, mostly interviews.
     key: 'A',
     source: 'greenhouse',
     company: 'Acme Robotics',
     jobFunction: 'engineering',
     seniority: 'mid',
-    matchScore: 88,
+    chance: 'strong',
     n: 14,
     interviews: 9,
     screens: 2,
@@ -91,13 +91,13 @@ const SCENARIOS: ScenarioSpec[] = [
     ],
   },
   {
-    // Mid-tier: lower match_score, lever, mixed outcome, real silence.
+    // Mid-tier: a Possible chance call, lever, mixed outcome, real silence.
     key: 'B',
     source: 'lever',
     company: 'Globex',
     jobFunction: 'engineering',
     seniority: 'mid',
-    matchScore: 60,
+    chance: 'possible',
     n: 12,
     interviews: 1,
     screens: 1,
@@ -117,7 +117,7 @@ const SCENARIOS: ScenarioSpec[] = [
     company: 'Initech',
     jobFunction: 'data',
     seniority: 'senior',
-    matchScore: 72,
+    chance: 'possible',
     n: 4,
     interviews: 0,
     screens: 1,
@@ -137,7 +137,7 @@ const SCENARIOS: ScenarioSpec[] = [
     company: 'Umbrella Labs',
     jobFunction: 'product',
     seniority: 'junior',
-    matchScore: null,
+    chance: null,
     n: 3,
     interviews: 0,
     screens: 0,
@@ -154,7 +154,7 @@ const SCENARIOS: ScenarioSpec[] = [
     company: 'Wonka Industries',
     jobFunction: 'operations',
     seniority: 'senior',
-    matchScore: null,
+    chance: null,
     n: 6,
     interviews: 0,
     screens: 1,
@@ -215,7 +215,7 @@ function buildScenario(spec: ScenarioSpec): {
       companyName: spec.company,
       jobSource: spec.source,
       jobPostedAt: postedAt,
-      matchScore: spec.matchScore,
+      chance: spec.chance,
       jobFunction: spec.jobFunction,
       seniority: spec.seniority,
     })
@@ -312,7 +312,6 @@ export function buildSyntheticFixture(): StrategyDataSource {
 
       const totalPassingAllConfiguredFilters = Math.round(totalJobs * passingFraction)
       const excludedByKeywords = targeting.excludedKeywords.length > 0 || targeting.excludedCompanies.length > 0 ? Math.round(totalPassingAllConfiguredFilters * 0.08) : null
-      const excludedByMinScoreHypothetical = targeting.minScore !== null ? Math.round(totalJobs * (targeting.minScore / 100) * 0.6) : null
 
       return {
         totalJobs,
@@ -320,7 +319,6 @@ export function buildSyntheticFixture(): StrategyDataSource {
         jobsWithNoDescription,
         excludedByDimension,
         excludedByKeywords,
-        excludedByMinScoreHypothetical,
       }
     },
   }

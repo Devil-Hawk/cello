@@ -31,10 +31,13 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { markdownToPlainText } from '@/lib/resume/markdown'
 import { DEFAULT_TEMPLATE_ID } from '@/lib/resume/templates'
 import { toResumeContentJson } from '@/lib/resume/types'
+import { PICKS_ON } from '@/lib/scoring'
+import { chooseShortlist, toPicks } from '@/lib/scoring/shortlist'
 
 import {
+  buildDemoFit,
+  type DemoFit,
   buildJobDescription,
-  buildMatchDetails,
   careerUrl,
   companyBySlug,
   contactBySlug,
@@ -209,6 +212,10 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
 
   // --- jobs ----------------------------------------------------------------
   const jobIdBySlug = new Map<string, string>()
+  const demoResumeText = markdownToPlainText(DEMO_RESUME_MARKDOWN)
+  // What Cello concluded about each demo role is the demo person's own: it goes on their
+  // person_roles row, never on the shared posting.
+  const fitByJobId = new Map<string, DemoFit>()
   const jobRows = DEMO_JOBS.map((job) => {
     const company = companyBySlug(job.companySlug)
     const rowId = id(`job:${job.slug}`)
@@ -218,6 +225,8 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
     // Discovered a couple of hours after it was posted — always in the past,
     // because every postedDaysAgo in the fixture is at least 1.
     const discoveredAt = new Date(Date.parse(postedAt) + 2 * HOUR_MS).toISOString()
+
+    fitByJobId.set(rowId, buildDemoFit(job, demoResumeText, discoveredAt))
 
     return {
       id: rowId,
@@ -230,8 +239,6 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
       job_type: job.jobType,
       posted_at: postedAt,
       discovered_at: discoveredAt,
-      match_score: job.score,
-      match_details: buildMatchDetails(job, company, discoveredAt),
       is_new: job.postedDaysAgo <= 3,
       external_id: externalIdFor(job),
       job_function: job.jobFunction,
@@ -246,28 +253,28 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
     }
   })
 
-  // Step 4 item 3: autopilot's action-selection query (lib/graph/autopilot.ts
-  // #loadCandidateJobs) allowlists on a verdict row, not just "not failing" —
-  // a scored demo job with no eval_verdicts row would be silently starved
-  // from autopilot the same way a real pre-verify-stage score would (see
-  // 20260818000004_backfill_match_verdicts.sql's header for that side).
-  // 'pass'/deterministic, never 'closed_qa': these scores were curated, not
-  // produced by checkMatchVerdictDeterministic, so labelling them as a real
-  // judge run would be a lie the migration's own comment already refuses to
-  // tell for the same reason (see buildMatchDetails's 'demo/seed' provenance
-  // note in lib/access/fixtures/jobs.ts).
-  const evalVerdictRows = jobRows
-    .filter((job) => job.match_score != null)
-    .map((job) => ({
-      id: id(`eval_verdict:match_score:${job.id}`),
-      user_id: demoUserId,
-      subject_kind: 'match_score',
-      subject_id: job.id,
-      judge: 'deterministic',
-      verdict: 'pass',
-      rationale: 'Seeded demo score — curated fixture, not model output.',
-      created_at: job.discovered_at,
-    }))
+  // The demo person's own row for each role, carrying the verdict.
+  const personRoleRows = jobRows.map((r) => ({ user_id: demoUserId, job_id: r.id, ...fitByJobId.get(r.id)! }))
+
+  // Today's shortlist: the five roles the demo person wants most that are not a
+  // stretch, then one exploration pick (a role they are least sure about), each with
+  // its one sentence. Built with the same functions the product uses to pick and to
+  // explain, so the demo shows what a real list looks like. The daily picks are off
+  // (PICKS_ON), and a demo does not show a list the product does not make, so none is
+  // seeded until they are on.
+  const rankable = personRoleRows
+    .filter((r) => r.want_p != null && r.chance != null)
+    .map((r) => ({ jobId: r.job_id, p: r.want_p as number, reason: r.want_reason as string, chance: r.chance as 'strong' | 'possible' | 'stretch', gaps: ((r.chance_detail as { gaps?: string[] } | null)?.gaps ?? []) as string[] }))
+  const shortlistRows = !PICKS_ON
+    ? []
+    : toPicks(chooseShortlist(rankable, { size: 6, exploreCount: 1 })).map((pick) => ({
+        user_id: demoUserId,
+        for_date: now.toISOString().slice(0, 10),
+        job_id: pick.jobId,
+        position: pick.position,
+        pick_kind: pick.kind,
+        explanation: pick.explanation,
+      }))
 
   // --- applications + activities -------------------------------------------
   const applicationIdByJobSlug = new Map<string, string>()
@@ -514,7 +521,8 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
     batches: [
       { table: 'companies', rows: companyRows, required: true },
       { table: 'jobs', rows: jobRows, required: true },
-      { table: 'eval_verdicts', rows: evalVerdictRows, required: false },
+      { table: 'person_roles', rows: personRoleRows, required: true, conflictColumn: 'user_id,job_id' },
+      ...(shortlistRows.length > 0 ? [{ table: 'shortlist_items', rows: shortlistRows, required: false, conflictColumn: 'user_id,for_date,job_id' }] : []),
       { table: 'applications', rows: applicationRows, required: true },
       { table: 'activities', rows: activityRows, required: false },
       { table: 'contacts', rows: contactRows, required: false },

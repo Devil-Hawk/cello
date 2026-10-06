@@ -137,8 +137,8 @@ function makeRpcHandlers(overrides: Partial<Record<string, RpcHandler>> = {}) {
   let seq = 0
   const insightInserts: Record<string, unknown>[] = []
   const base: Record<string, RpcHandler> = {
-    distill_match_score_by_score_band: () => ({ data: [], error: null }),
-    distill_match_score_by_source: () => ({ data: [], error: null }),
+    distill_chance_by_label: () => ({ data: [], error: null }),
+    distill_chance_by_source: () => ({ data: [], error: null }),
     distill_draft_by_seniority: () => ({ data: [], error: null }),
     distill_outreach_by_company: () => ({ data: [], error: null }),
     upsert_insight: (params) => {
@@ -186,7 +186,7 @@ function makeFakeAdmin(rpcHandlers: Partial<Record<string, RpcHandler>>) {
 /** Seed a batch of eval_verdicts rows the fake table can answer `.in('id',
  *  ids)` reads against — what fetchRationales/evidence-traceability need. */
 function seedVerdicts(table: FakeTable, ids: string[], rationale: string | null = 'A rationale sentence.'): void {
-  for (const id of ids) table.rows.push({ id, user_id: 'u1', subject_kind: 'match_score', judge: 'deterministic', verdict: 'pass', rationale })
+  for (const id of ids) table.rows.push({ id, user_id: 'u1', subject_kind: 'cv_tailor_draft', judge: 'deterministic', verdict: 'pass', rationale })
 }
 
 beforeEach(() => {
@@ -236,7 +236,7 @@ describe('distillInsights — floor-first, structurally (invariant 7)', () => {
   it('a below-floor candidate never reaches callLlm — the refusal is a typed eval_verdicts row instead', async () => {
     const belowFloorIds = ['v1', 'v2', 'v3'] // 3 positive < MIN_SAMPLE_PER_CLASS
     const { handlers } = makeRpcHandlers({
-      distill_match_score_by_score_band: () => ({
+      distill_chance_by_label: () => ({
         data: [{ band: '85-100', positive_count: 3, negative_count: 2, verdict_ids: belowFloorIds }],
         error: null,
       }),
@@ -282,7 +282,7 @@ describe('distillInsights — insight evidence traceability', () => {
   it('every verdict id an insight cites in its evidence is a real eval_verdicts row', async () => {
     const ids = Array.from({ length: 23 }, (_, i) => `v${i}`) // 12 positive / 11 negative, both over the floor
     const { handlers, insightInserts } = makeRpcHandlers({
-      distill_match_score_by_score_band: () => ({
+      distill_chance_by_label: () => ({
         data: [{ band: '85-100', positive_count: 12, negative_count: 11, verdict_ids: ids }],
         error: null,
       }),
@@ -318,7 +318,7 @@ describe('distillInsights — insight evidence traceability', () => {
   it('a candidate at exactly MIN_SAMPLE_PER_CLASS on both sides is distilled, not refused', async () => {
     const ids = Array.from({ length: MIN_SAMPLE_PER_CLASS * 2 }, (_, i) => `v${i}`)
     const { handlers } = makeRpcHandlers({
-      distill_match_score_by_source: () => ({
+      distill_chance_by_source: () => ({
         data: [{ band: 'greenhouse', positive_count: MIN_SAMPLE_PER_CLASS, negative_count: MIN_SAMPLE_PER_CLASS, verdict_ids: ids }],
         error: null,
       }),

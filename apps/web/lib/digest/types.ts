@@ -48,7 +48,8 @@ export interface DigestTopJob {
   jobId: string
   title: string
   companyName: string | null
-  matchScore: number | null
+  /** strong | possible | stretch | cannot_assess, or null before the role is assessed. */
+  chance: string | null
   url: string | null
 }
 

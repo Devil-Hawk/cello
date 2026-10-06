@@ -12,12 +12,15 @@
 import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { ResumeDiff } from '@/components/resume/resume-diff'
+import { chanceLabel, fitHighlights } from '@/lib/scoring/read'
+import type { Chance, RoleFit } from '@/lib/scoring/types'
 
 interface JobRow {
   jobId?: string
   title?: string
   company?: string
-  matchScore?: number | null
+  /** strong | possible | stretch | cannot_assess, or null before the role is assessed. */
+  chance?: string | null
   location?: string | null
   fresh?: boolean
   postedAt?: string | null
@@ -47,8 +50,8 @@ function JobsTable({ jobs, count }: { jobs: JobRow[]; count?: number }) {
                 <td className="py-1 pr-2 font-medium text-foreground">{j.title ?? '—'}</td>
                 <td className="py-1 pr-2 text-muted-foreground">{j.company ?? '—'}</td>
                 <td className="py-1 pr-2 text-muted-foreground">{j.location ?? '—'}</td>
-                <td className={cn('py-1 text-right tabular-nums', scoreTone(j.matchScore))}>
-                  {typeof j.matchScore === 'number' ? `${j.matchScore}%` : 'unscored'}
+                <td className={cn('py-1 text-right', j.chance === 'strong' ? 'text-accent-deep' : 'text-muted-foreground')}>
+                  {chanceLabel((j.chance ?? null) as Chance | null)}
                 </td>
               </tr>
             ))}
@@ -253,8 +256,23 @@ function SourceSummary({ o }: { o: Record<string, unknown> }) {
   )
 }
 
-/** score_jobs result: how many of the candidate batch got scored/failed/
- *  skipped, why (skippedReasons), and the resulting scores via JobsTable. */
+/** explain_match: the person's own read of a role, in words and with the resume lines behind it. */
+function FitSummary({ title, fit }: { title?: string; fit: RoleFit }) {
+  const gaps = fit.chance?.gaps ?? []
+  return (
+    <div className="space-y-2">
+      {title && <p className="text-[11px] font-medium text-foreground">{title}</p>}
+      {fit.blocked.length > 0 && <Bullets title="Filtered out" items={fit.blocked.map((b) => b.text)} tone="bad" />}
+      {fit.want?.reason && <p className="text-[11px] leading-relaxed text-foreground">{fit.want.reason}</p>}
+      {fit.chance && <p className="text-[11px] text-muted-foreground">Chance: <span className="font-medium text-foreground">{chanceLabel(fit.chance.label)}</span></p>}
+      <Bullets title="Shown on your resume" items={fitHighlights({ checks: fit.chance?.checks ?? [] })} tone="good" />
+      <Bullets title="Not clearly on your resume" items={gaps} tone="bad" />
+    </div>
+  )
+}
+
+/** score_jobs result: how many of the batch were assessed, why some were not
+ *  (skippedReasons), and each role's chance via JobsTable. */
 function ScoreSummary({ o }: { o: Record<string, unknown> }) {
   const scored = typeof o.scored === 'number' ? o.scored : 0
   const failed = typeof o.failed === 'number' ? o.failed : 0
@@ -267,9 +285,9 @@ function ScoreSummary({ o }: { o: Record<string, unknown> }) {
   return (
     <div className="space-y-2">
       <p className="text-[11px] text-muted-foreground">
-        Scored <span className="font-medium text-foreground">{scored}</span> of {considered} candidate
+        Assessed <span className="font-medium text-foreground">{scored}</span> of {considered} role
         {considered === 1 ? '' : 's'}
-        {failed > 0 && ` · ${failed} failed`}
+        {failed > 0 && ` · ${failed} could not be assessed`}
       </p>
       {Object.keys(skipped).length > 0 && (
         <div className="flex flex-wrap gap-1">
@@ -382,22 +400,10 @@ export function ObservationView({ observation }: { observation: unknown }) {
     return <JobsTable jobs={o.jobs as JobRow[]} count={typeof o.count === 'number' ? o.count : undefined} />
   }
 
-  // explain_match / match details
-  if (typeof o.overallScore === 'number' || typeof o.score === 'number') {
-    const overall = (typeof o.overallScore === 'number' ? o.overallScore : (o.score as number)) ?? 0
-    return (
-      <div className="space-y-2">
-        <ScoreBar label="Overall" value={overall} />
-        {typeof o.skillsMatch === 'number' && <ScoreBar label="Skills" value={o.skillsMatch} />}
-        {typeof o.experienceMatch === 'number' && <ScoreBar label="Experience" value={o.experienceMatch} />}
-        {typeof o.locationMatch === 'number' && <ScoreBar label="Location" value={o.locationMatch} />}
-        {typeof o.summary === 'string' && (
-          <p className="text-[11px] leading-relaxed text-foreground">{o.summary}</p>
-        )}
-        <Bullets title="Strengths" items={strList(o.highlights ?? o.strengths)} tone="good" />
-        <Bullets title="Gaps" items={strList(o.gaps)} tone="bad" />
-      </div>
-    )
+  // explain_match: why the person might want the role and their chance with cited evidence.
+  if (typeof o.matched === 'boolean') {
+    if (!o.matched || !o.fit) return <p className="text-[11px] leading-relaxed text-muted-foreground">{typeof o.note === 'string' ? o.note : 'This role has not been assessed yet.'}</p>
+    return <FitSummary title={typeof o.title === 'string' ? o.title : undefined} fit={o.fit as RoleFit} />
   }
 
   // get_dossier / research_company — checked ahead of the generic o.note

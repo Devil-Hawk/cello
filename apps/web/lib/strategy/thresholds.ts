@@ -21,8 +21,8 @@ export const MIN_PER_BUCKET = 5
 /** Which sources create interviews — needs enough applications for at least two buckets to individually cross MIN_PER_BUCKET. */
 export const MIN_TOTAL_FOR_SOURCE_FUNNEL = 15
 
-/** What match_score range predicts responses — needs enough SCORED applications to form comparable bands. */
-export const MIN_TOTAL_FOR_SCORE_ACCURACY = 20
+/** Whether Cello's chance call predicts replies: needs enough applications with a chance to form comparable groups. */
+export const MIN_TOTAL_FOR_CHANCE_ACCURACY = 20
 
 /** Which resume variants perform better — needs enough applications with a resume_documents link. */
 export const MIN_TOTAL_FOR_RESUME_VARIANTS = 10

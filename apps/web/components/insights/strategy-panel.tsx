@@ -188,7 +188,7 @@ export function StrategyPanel() {
   const rows: QuestionRowSpec[] = report
     ? [
         { id: 'sourceFunnel', label: 'Which sources produce interviews', result: report.sourceFunnel },
-        { id: 'matchScoreAccuracy', label: 'Does match score predict responses', result: report.matchScoreAccuracy },
+        { id: 'chanceAccuracy', label: "Does Cello's chance call predict replies", result: report.chanceAccuracy },
         { id: 'resumeVariants', label: 'Which resume variant performs best', result: report.resumeVariants },
         { id: 'outreachImpact', label: 'Does outreach improve response rate', result: report.outreachImpact },
         {

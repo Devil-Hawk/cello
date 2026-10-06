@@ -3,7 +3,7 @@
 // read the site, so the line says what is true: checking now, when the next
 // check is, or that the careers site cannot be read and why.
 //
-// Pure and framework-free: scripts/ats-refresh.ts imports dueAt from here, so
+// Pure and framework-free: scripts/ingest.ts imports dueAt from here, so
 // the line on screen and the scheduler agree on when a company is next checked.
 
 /** The result of the last attempt to read a company's roles (companies.metadata.source_check). */
@@ -35,12 +35,16 @@ export const REASON_COPY: Record<string, string> = {
   read_failed: 'reading it failed with an error, and the next check tries again',
   role_pages: 'it lists roles, but their pages cannot be read without a browser',
   render_failed: "Cello's browser could not read it just now, and the next check tries again",
+  model_unavailable: 'no free reading slot was available, and the next check tries again',
+  model_limit: "today's free reading limit was reached, and the next check tries again",
 }
 
 /** The check recorded while only a browser could read the site: the scheduled pass is next. */
 export const READING_REASON = 'reading'
+/** The page was reached and only the free reading step could not run: a wait for a slot, not a verdict on the site. */
+export const WAITING_REASONS = ['model_unavailable', 'model_limit']
 
-// The scheduler (scripts/ats-refresh.ts) and the runner use these: dream companies hourly, others daily.
+// The scheduled pass (scripts/ingest.ts, every six hours) uses these: dream companies are due after an hour and the rest after a day, so a pass picks them up at its next tick.
 const DREAM_INTERVAL_MINUTES = 60
 const DEFAULT_INTERVAL_MINUTES = 1440
 const DUE_SLACK_MINUTES = 5
@@ -102,7 +106,7 @@ export function nextCheckAt(company: StatusCompany, now: number = Date.now()): n
 export type RolesStatus =
   | { kind: 'roles'; count: number }
   | { kind: 'checking' }
-  | { kind: 'reading'; nextCheckAt: number }
+  | { kind: 'reading'; nextCheckAt: number; waiting?: boolean }
   | { kind: 'not_checked'; nextCheckAt: number; now: number }
   | { kind: 'empty'; nextCheckAt: number; now: number }
   | { kind: 'unreadable'; reason: string; careersUrl: string | null }
@@ -118,6 +122,9 @@ export function rolesStatus(
   const check = readSourceCheck(company.metadata)
   if (check && !check.readable && check.reason === READING_REASON) {
     return { kind: 'reading', nextCheckAt: firstTickAtOrAfter(now) }
+  }
+  if (check && !check.readable && check.reason && WAITING_REASONS.includes(check.reason)) {
+    return { kind: 'reading', nextCheckAt: firstTickAtOrAfter(now), waiting: true }
   }
   if (check && !check.readable) {
     const reason = (check.reason && REASON_COPY[check.reason]) || 'it could not be read'
@@ -164,7 +171,7 @@ export function rolesStatusLine(s: RolesStatus): { text: string; href?: string }
       return { text: 'Checking now' }
     case 'reading': {
       const t = new Date(s.nextCheckAt).toISOString().slice(11, 16)
-      return { text: `Cello is reading this site. Next check around ${t} UTC` }
+      return { text: s.waiting ? `Waiting for a free reading slot. Next check around ${t} UTC` : `Cello is reading this site. Next check around ${t} UTC` }
     }
     case 'not_checked':
       return { text: `Not checked yet, next check ${inAbout(s.nextCheckAt - s.now)}` }

@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AtsStore, ExistingJob, JobUpsertRow } from '../ats/index'
 import { MODEL_LIMIT, newModelBudget, type ModelCall } from './model'
-import { ingestCompany, ingestUser, isDue, type DueCompany, type RunPatch, type RunsStore } from './run'
+import { ingestCompany, ingestUser, isDue, type CompanyDeps, type DueCompany, type RunPatch, type RunsStore } from './run'
 import type { FetchPage } from './fetch-page'
 import { createHash } from 'node:crypto'
 import { fakeFetcher, fixture, type Route } from './reader/fake-fetcher'
 import { normalizeJobUrl } from './snapshot'
-import { searchTerms, NO_TARGETS } from './reader/targets'
+import { searchTerms, NO_TARGETS, type ReaderTargets } from './reader/targets'
 
 const realFetch = globalThis.fetch
 beforeEach(() => {
@@ -110,6 +110,30 @@ describe('ingestCompany', () => {
 
   const CAREERS = 'https://acme.example/careers'
   const site = (routes: Record<string, Route>) => fakeFetcher({ 'https://acme.example/robots.txt': { status: 404, body: '' }, ...routes })
+
+  it('a Workday board is searched with the person\'s words, and the company says it shows a window onto the board', async () => {
+    const searches: string[] = []
+    globalThis.fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}') as { searchText?: string }
+      searches.push(body.searchText ?? '')
+      const jobPostings = body.searchText ? [{ title: 'Software Developer II', externalPath: '/job/OH/Software-Developer-II_R1', locationsText: 'Cleveland', postedOn: 'Posted Today' }] : []
+      return new Response(JSON.stringify({ total: jobPostings.length, jobPostings }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }) as unknown as typeof fetch
+    const { store } = memoryStore()
+    const saved: Record<string, unknown>[] = []
+    store.saveCompanyMetadata = async (_id, meta) => {
+      saved.push(meta as Record<string, unknown>)
+    }
+    const targets = { targeting: { ...NO_TARGETS.targeting, functions: ['engineering'] as const }, titles: [] } as unknown as ReaderTargets
+    const out = await ingestCompany(
+      store,
+      company('c1', { metadata: { ats: { provider: 'workday', token: 'ccf.wd1.Careers', source: 'url', verified_by: 'careers_url' } } }),
+      { fetchPage: fetcher(''), model: null, targets }
+    )
+    expect(out.reader).toBe('workday')
+    expect(searches).toContain('software engineer')
+    expect(saved.at(-1)?.reader).toMatchObject({ window: true, tier: 'board' })
+  })
 
   it('reads a company with no board through the one reader and stores what its page declares, as the employer own roles', async () => {
     const { store, calls } = memoryStore()
@@ -269,14 +293,17 @@ describe('ingestCompany', () => {
     expect((await run('a', { [CAREERS]: { error: 'bot_check' } })).failure).toBe('bot_check')
     expect((await run('b', { [CAREERS]: { error: 'login_required' } })).failure).toBe('login_required')
     expect((await run('c', { 'https://acme.example/robots.txt': 'User-agent: *\nDisallow: /\n', [CAREERS]: PLAIN_PAGE })).failure).toBe('robots')
-    // Scheduled, the browser has had its turn: no roles it is.
-    const done = await ingestCompany(store, company('d'), {
-      fetchPage: vi.fn(async (url: string) => ({ html: PLAIN_PAGE, finalUrl: url, rendered: true })),
-      model: null,
-      mode: 'scheduled',
-      fetcher: fakeFetcher({ [CAREERS]: PLAIN_PAGE }, 'scheduled'),
-    })
-    expect(done.failure).toBe('no_roles')
+    // Scheduled, the browser has had its turn. With no free model the page was not read, which is not "no roles".
+    const scheduled = (id: string, model: CompanyDeps['model']) =>
+      ingestCompany(store, company(id), {
+        fetchPage: vi.fn(async (url: string) => ({ html: PLAIN_PAGE, finalUrl: url, rendered: true })),
+        model,
+        mode: 'scheduled',
+        fetcher: fakeFetcher({ [CAREERS]: PLAIN_PAGE }, 'scheduled'),
+      })
+    expect((await scheduled('d', null)).failure).toBe('model_unavailable')
+    // A model that read the page and found no listing is the site having no roles.
+    expect((await scheduled('e', async () => JSON.stringify({ page_kind: 'other', jobs: [] }))).failure).toBe('no_roles')
   })
 
   it('writes the reason into the company so the screen can say it instead of "0 open roles"', async () => {

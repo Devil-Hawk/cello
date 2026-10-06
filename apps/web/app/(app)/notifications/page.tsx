@@ -12,17 +12,13 @@ import { StaggerGroup, StaggerItem } from '@/components/ui/motion'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { createClient } from '@/lib/supabase/client'
-import { openRolesOnly } from '@/lib/jobs/freshness'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { hotRolesQuery, toHotRoles, type HotRole } from '@/lib/scoring/hot-roles'
+import { ChanceChip } from '@/components/fit/chance-chip'
+import { fitFromLabel } from '@/lib/scoring/read'
 import { cn, formatRelativeTime } from '@/lib/utils'
 
-interface HotJob {
-  id: string
-  title: string
-  match_score: number | null
-  posted_at: string | null
-  discovered_at: string
-  companies: { name: string | null } | null
-}
+type HotJob = HotRole
 
 interface InterviewActivity {
   id: string
@@ -122,17 +118,9 @@ export default function NotificationsPage() {
       const now = new Date().toISOString()
 
       const [hotJobsRes, interviewsRes, followUpsRes] = await Promise.all([
-        // New, unreviewed jobs that scored well. RLS already scopes jobs to
-        // this user's tracked companies.
-        openRolesOnly(
-          supabase
-            .from('jobs')
-            .select('id, title, match_score, posted_at, discovered_at, companies(name)')
-            .eq('is_new', true)
-            .gte('match_score', 70)
-        )
-          .order('match_score', { ascending: false })
-          .limit(8),
+        // New, open roles with a real chance for this person (a role a stated fact rules out has
+        // no chance), most wanted first. Their own person_roles rows are all their session can read.
+        hotRolesQuery(supabase as unknown as SupabaseClient, 8),
         // Interview-stage signal picked up from Gmail sync (or manual notes).
         supabase
           .from('activities')
@@ -160,7 +148,7 @@ export default function NotificationsPage() {
         return
       }
 
-      setHotJobs((hotJobsRes.data as unknown as HotJob[]) || [])
+      setHotJobs(toHotRoles(hotJobsRes.data))
       setInterviews((interviewsRes.data as unknown as InterviewActivity[]) || [])
       setOverdueFollowUps((followUpsRes.data as OverdueFollowUp[]) || [])
     } catch {
@@ -260,8 +248,8 @@ export default function NotificationsPage() {
     sections.push({
       key: 'hot-jobs',
       icon: Star,
-      title: 'New high-scoring jobs',
-      description: 'Unreviewed jobs matching your resume well',
+      title: 'New roles worth a look',
+      description: 'Unreviewed roles you are likely to want, with a real chance',
       tone: 'opportunity',
       rows: hotJobs.map((job) => (
         <Row
@@ -272,10 +260,10 @@ export default function NotificationsPage() {
             ' · '
           )}
           // Opens THIS job, not the list. This row names a specific role and
-          // its score; linking at bare /jobs dropped the user into an
+          // its chance; linking at bare /jobs dropped the user into an
           // unfiltered feed of ~11,800 rows to find it by title from memory.
           href={`/jobs?job=${job.id}`}
-          trailing={<Badge tone="good">{job.match_score}</Badge>}
+          trailing={<ChanceChip fit={fitFromLabel(job.chance)} />}
         />
       )),
     })
@@ -294,7 +282,7 @@ export default function NotificationsPage() {
         <EmptyState
           icon={Bell}
           title="Nothing needs your attention"
-          body="This fills in once jobs are scored, an interview email is picked up by the Gmail tracker, or a follow-up goes overdue."
+          body="This fills in once roles are checked against your resume, an interview email is picked up by the Gmail tracker, or a follow-up goes overdue."
           action={
             <Button asChild>
               <Link href="/jobs">Review jobs</Link>

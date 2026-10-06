@@ -58,7 +58,8 @@ import {
   AUTHORIZATION_MAX_AGE_MS,
   type SubmitAuthorization,
 } from '@/lib/ats-apply'
-import { parseMatchDetails, type MatchDetails } from '@/components/jobs/match-types'
+import { FIT_COLUMNS, parseFit, type FitRow } from '@/lib/scoring/read'
+import type { RoleFit } from '@/lib/scoring/types'
 import { logApiError } from '@/lib/observability/log'
 import { unjudgedCvTailorDraftIds } from '@/lib/evals/verdicts'
 import {
@@ -86,8 +87,8 @@ interface JobRel {
   url: string | null
   description: string | null
   location: string | null
-  match_score: number | null
-  match_details: unknown
+  /** The person's own verdict on the role: their person_roles row, embedded. */
+  person_roles?: FitRow | FitRow[] | null
   companies?: CompanyRel | CompanyRel[] | null
 }
 
@@ -109,7 +110,7 @@ function one<T>(value: T | T[] | null | undefined): T | null {
 
 const DRAFT_SELECT =
   'id, job_id, status, resume_summary, cover_letter, answers, created_at, ' +
-  'jobs(id, title, url, description, location, match_score, match_details, companies(name, metadata))'
+  'jobs(id, title, url, description, location, person_roles(' + FIT_COLUMNS + '), companies(name, metadata))'
 
 /** answers.deferredToHuman, defensively — the column is free-form jsonb. */
 function storedDeferred(answers: unknown): string[] {
@@ -131,8 +132,11 @@ export interface ReviewItem {
   jobUrl: string | null
   location: string | null
   companyName: string
-  matchScore: number | null
-  /** Why the matcher scored it that way, in its own words. */
+  /** strong | possible | stretch | cannot_assess, or null before the role is assessed. */
+  chance: string | null
+  /** Probability the person is interested, for ordering only. Never shown as a number. */
+  want: number | null
+  /** Why they might want it, in their terms. */
   matchWhy: string | null
   matchHighlights: string[]
   matchGaps: string[]
@@ -147,14 +151,8 @@ export interface ReviewItem {
   createdAt: string
 }
 
-function matchWhyFrom(details: MatchDetails | null): string | null {
-  if (!details) return null
-  const summary = details.summary?.trim()
-  if (summary) return summary
-  const seniority = details.seniorityFit?.trim()
-  if (seniority) return seniority
-  const highlights = (details.highlights ?? []).filter(Boolean)
-  return highlights.length > 0 ? highlights.slice(0, 2).join(' · ') : null
+function matchWhyFrom(fit: RoleFit | null): string | null {
+  return fit?.want?.reason?.trim() || null
 }
 
 /** Trim the tailored summary to a scannable length — the review surface is for
@@ -168,7 +166,7 @@ function clip(text: string | null | undefined, max: number): string | null {
 function buildReviewItem(draft: DraftRowRaw, decision: BatchDecision): ReviewItem {
   const job = one(draft.jobs)
   const company = one(job?.companies)
-  const details = parseMatchDetails(job?.match_details as MatchDetails | string | null)
+  const fit = job ? parseFit(job) : null
   return {
     draftId: draft.id,
     jobId: draft.job_id,
@@ -176,10 +174,11 @@ function buildReviewItem(draft: DraftRowRaw, decision: BatchDecision): ReviewIte
     jobUrl: job?.url ?? null,
     location: job?.location ?? null,
     companyName: company?.name?.trim() || 'Unknown company',
-    matchScore: typeof job?.match_score === 'number' ? job.match_score : null,
-    matchWhy: clip(matchWhyFrom(details), 220),
-    matchHighlights: (details?.highlights ?? []).filter(Boolean).slice(0, 3),
-    matchGaps: (details?.gaps ?? []).filter(Boolean).slice(0, 2),
+    chance: fit?.chance?.label ?? null,
+    want: fit?.want?.p ?? null,
+    matchWhy: clip(matchWhyFrom(fit), 220),
+    matchHighlights: fit?.chance ? fit.chance.checks.filter((c) => c.status === 'met' && c.evidence).slice(0, 3).map((c) => c.requirement) : [],
+    matchGaps: (fit?.chance?.gaps ?? []).filter(Boolean).slice(0, 2),
     tailoredSummary: clip(draft.resume_summary, 220),
     hasCoverLetter: !!draft.cover_letter?.trim(),
     knockouts: decision.knockouts,
@@ -191,11 +190,11 @@ function buildReviewItem(draft: DraftRowRaw, decision: BatchDecision): ReviewIte
   }
 }
 
-/** Highest-scoring first, unscored last, newest first within a tie — the order
+/** Most wanted first, unassessed last, newest first within a tie, the order
  *  a person reviewing 50 of these actually wants to read them in. */
 function byWorthReadingFirst(a: ReviewItem, b: ReviewItem): number {
-  const left = a.matchScore ?? -1
-  const right = b.matchScore ?? -1
+  const left = a.want ?? -1
+  const right = b.want ?? -1
   if (left !== right) return right - left
   return b.createdAt.localeCompare(a.createdAt)
 }
@@ -223,6 +222,7 @@ export async function GET() {
     .from('application_drafts')
     .select(DRAFT_SELECT)
     .eq('user_id', user.id)
+    .eq('jobs.person_roles.user_id', user.id)
     .eq('status', 'pending_review')
     .order('created_at', { ascending: false })
     .limit(200)
@@ -551,6 +551,7 @@ async function approveOne(params: ApproveOneParams): Promise<ItemResult> {
       .select(DRAFT_SELECT)
       .eq('id', draftId)
       .eq('user_id', userId)
+      .eq('jobs.person_roles.user_id', userId)
       .maybeSingle()
     if (error) return { ...base, outcome: 'failed', reason: error.message }
     if (!data) return { ...base, reason: 'No such application in your queue.' }

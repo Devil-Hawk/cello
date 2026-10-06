@@ -23,6 +23,19 @@ describe('sitemap tier: Meta', () => {
     expect(complete).toBe(true)
   })
 
+  it('says the list is not complete when a job sitemap was left unread', async () => {
+    const map = (name: string) => `<sitemap><loc>https://acme.test/${name}-jobs.xml</loc></sitemap>`
+    const urls = '<url><loc>https://acme.test/jobs/1234567</loc></url>'
+    const routes: Record<string, string> = {
+      'https://acme.test/robots.txt': 'Sitemap: https://acme.test/jobs-index.xml\n',
+      'https://acme.test/jobs-index.xml': `<sitemapindex>${['a', 'b', 'c', 'd', 'e', 'f'].map(map).join('')}</sitemapindex>`,
+    }
+    for (const n of ['a', 'b', 'c', 'd', 'e', 'f']) routes[`https://acme.test/${n}-jobs.xml`] = `<urlset>${urls}</urlset>`
+    const read = await readSitemapEntries('https://acme.test', fakeFetcher(routes))
+    expect(read.entries.length).toBeGreaterThan(0)
+    expect(read.complete).toBe(false)
+  })
+
   it('orders by the largest numeric id when lastmod is the same everywhere', async () => {
     const { entries } = await readSitemapEntries('https://www.metacareers.com', meta())
     const ids = orderEntries(entries, targets).map((e) => Number(/details\/(\d+)/.exec(e.url)![1]))

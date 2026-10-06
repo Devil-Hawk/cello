@@ -1,0 +1,245 @@
+[
+ {
+  "id": "r1",
+  "synthetic": true,
+  "name": "Marcus Delgado",
+  "note": "SYNTHETIC persona for the shortlist evaluation. Fictional person; the hidden taste is only ever shown to the model that plays the person reacting.",
+  "resume": "[SYNTHETIC RESUME - fictional person, written for an evaluation set. Not a real candidate.]\n\nMarcus Delgado\nSeattle, WA | marcus.delgado@example.com | github.com/example-mdelgado\n\nSUMMARY\nSenior backend engineer with 8 years building high-throughput payment and ledger systems in Go. Runs services on Kubernetes at scale, owns on-call for money-movement paths, and mentors mid-level engineers.\n\nEXPERIENCE\nSenior Software Engineer, Payments Platform - Halcyon Pay (Series D fintech), Seattle, WA | 2021 - present\n- Lead engineer for the card-authorization service (Go, gRPC, Postgres, Kafka); handles 4,000 requests/sec at p99 under 60 ms.\n- Designed an idempotent double-entry ledger that cut reconciliation breaks by 92%.\n- Migrated 30 services from VMs to Kubernetes (EKS) with Helm and Argo CD; reduced deploy time from 40 to 6 minutes.\n- Drove PCI-DSS scope reduction by moving card data behind a tokenization service.\n- Mentor 4 engineers; run the quarterly incident review.\n\nSoftware Engineer II - Northgate Commerce, Seattle, WA | 2018 - 2021\n- Built the refunds and disputes API (Go, PostgreSQL, Redis), integrated with Visa and Mastercard dispute networks.\n- Introduced OpenTelemetry tracing across 12 services.\n- Wrote the payout scheduler processing 1.2M payouts per night.\n\nSoftware Engineer - Brightline Logistics, Portland, OR | 2016 - 2018\n- Built REST APIs in Java and later Go for shipment tracking; moved the team to Docker and Kubernetes.\n\nSKILLS\nGo, Java, SQL, PostgreSQL, Kafka, Redis, gRPC, Kubernetes, Docker, Terraform, AWS, Datadog, OpenTelemetry, distributed systems, payments (ISO 8583, ACH, card networks), PCI-DSS\n\nEDUCATION\nB.S. Computer Science, University of Washington, 2016",
+  "stated": {
+   "titles": [
+    "Senior Backend Engineer",
+    "Senior Software Engineer, Payments",
+    "Staff Backend Engineer"
+   ],
+   "functions": [
+    "engineering"
+   ],
+   "seniority": [
+    "senior",
+    "staff"
+   ],
+   "countries": [
+    "US"
+   ],
+   "remoteOnly": false,
+   "likedCompanies": [
+    "Stripe",
+    "Brex"
+   ],
+   "dislikedCompanies": [
+    "Coinbase",
+    "Robinhood"
+   ],
+   "notes": [
+    "Wants to work in Seattle, WA or remote within the US; hybrid only in the Seattle area.",
+    "Looking for pay of at least $190,000.",
+    "Does not want: crypto / gambling companies.",
+    "Does not want: on-site outside Seattle.",
+    "Does not want: people-management track."
+   ],
+   "background": "Senior backend engineer with 8 years building high-throughput payment and ledger systems in Go. Runs services on Kubernetes at scale, owns on-call for money-movement paths, and mentors mid-level engineers."
+  },
+  "constraints": {
+   "blockedCountries": [],
+   "onlyCountries": [
+    "US"
+   ],
+   "onsiteCities": [],
+   "needsSponsorship": false,
+   "salaryFloorUsd": 190000,
+   "remoteOnly": false,
+   "excludedCompanies": [],
+   "refusedSeniority": [
+    "intern",
+    "manager",
+    "director"
+   ],
+   "excludedTitleWords": [
+    "crypto",
+    "casino",
+    "gambling",
+    "manager"
+   ]
+  },
+  "hiddenTaste": "You want backend work where correctness and reliability are the product: payments, billing, fraud and risk, compliance, and developer platforms or infrastructure for other engineers. You are not interested in ads, growth, engagement, consumer feed or home-page products, machine learning or data-science roles, or security operations. You will not take a people-management role. Deep technical ownership beats breadth. Roles at your level in those areas are worth saving, and payments or risk roles you would apply to."
+ },
+ {
+  "id": "r2",
+  "synthetic": true,
+  "name": "Priya Raman",
+  "note": "SYNTHETIC persona for the shortlist evaluation. Fictional person; the hidden taste is only ever shown to the model that plays the person reacting.",
+  "resume": "[SYNTHETIC RESUME - fictional person, written for an evaluation set. Not a real candidate.]\n\nPriya Raman\nBoston, MA | priya.raman@example.com | github.com/example-praman\n\nSUMMARY\nData scientist with 4 years in healthcare analytics and machine learning. Builds risk models on claims and EHR data in Python, ships them to production with the engineering team, and explains results to clinicians.\n\nEXPERIENCE\nData Scientist - Meridian Health Analytics, Boston, MA | 2022 - present\n- Built a 30-day readmission risk model (gradient boosting, scikit-learn, XGBoost) on 2.1M claims; AUC 0.81, adopted by 3 hospital systems.\n- Created NLP pipeline (spaCy, transformers) to extract diagnoses from clinical notes; F1 0.88.\n- Productionized models with MLflow and Airflow on AWS; wrote SQL feature pipelines in Snowflake.\n- Ran an A/B test of care-outreach messaging (n=18k patients) showing a 6% lift in appointment adherence.\n- Worked under HIPAA controls; de-identified datasets with the privacy office.\n\nJunior Data Scientist - CarePath Insurance, Hartford, CT | 2021 - 2022\n- Forecasted claim volume with Prophet and ARIMA; reduced staffing forecast error by 15%.\n- Built Tableau dashboards for the utilization-management team.\n\nData Analyst Intern - Mass General Research Institute, Boston, MA | Summer 2020\n- Cohort selection in SQL for an oncology study; cleaned REDCap exports in pandas.\n\nSKILLS\nPython, pandas, NumPy, scikit-learn, XGBoost, PyTorch (basic), spaCy, SQL, Snowflake, Airflow, MLflow, AWS (S3, SageMaker), statistics, A/B testing, causal inference basics, Tableau, HIPAA, ICD-10 / HCC coding\n\nEDUCATION\nM.S. Biostatistics, Boston University, 2021\nB.S. Mathematics, Tufts University, 2020",
+  "stated": {
+   "titles": [
+    "Data Scientist",
+    "Machine Learning Scientist",
+    "Applied Scientist"
+   ],
+   "functions": [
+    "data"
+   ],
+   "seniority": [
+    "mid",
+    "senior"
+   ],
+   "countries": [
+    "US"
+   ],
+   "remoteOnly": false,
+   "likedCompanies": [
+    "healthcare and health-tech employers"
+   ],
+   "dislikedCompanies": [
+    "Coinbase"
+   ],
+   "notes": [
+    "Wants to work in Boston, MA or remote within the US.",
+    "Looking for pay of at least $140,000.",
+    "Does not want: crypto / gambling.",
+    "Does not want: on-site outside Boston.",
+    "Does not want: roles below mid level."
+   ],
+   "background": "Data scientist with 4 years in healthcare analytics and machine learning. Builds risk models on claims and EHR data in Python, ships them to production with the engineering team, and explains results to clinicians."
+  },
+  "constraints": {
+   "blockedCountries": [],
+   "onlyCountries": [
+    "US"
+   ],
+   "onsiteCities": [],
+   "needsSponsorship": false,
+   "salaryFloorUsd": 140000,
+   "remoteOnly": false,
+   "excludedCompanies": [],
+   "refusedSeniority": [
+    "intern",
+    "junior"
+   ],
+   "excludedTitleWords": [
+    "crypto",
+    "intern"
+   ]
+  },
+  "hiddenTaste": "You want to own the question as a data scientist: experimentation, causal inference and decision science on marketplace, payments, trust and safety, pricing or product problems where the result changes a real decision. You are not interested in ads ranking, recommendation and feed relevance, LLM tooling, machine-learning platform or infrastructure engineering, or pure dashboard and BI reporting work. You pass on anything below mid level, and on roles that are really software engineering. Roles at your level in decision science or applied experimentation are worth saving."
+ },
+ {
+  "id": "r3",
+  "synthetic": true,
+  "name": "Jordan Okafor",
+  "note": "SYNTHETIC persona for the shortlist evaluation. Fictional person; the hidden taste is only ever shown to the model that plays the person reacting.",
+  "resume": "[SYNTHETIC RESUME - fictional person, written for an evaluation set. Not a real candidate.]\n\nJordan Okafor\nNew York, NY | jordan.okafor@example.com | portfolio: example.com/jordan-okafor\n\nSUMMARY\nProduct designer with 5 years designing B2B SaaS workflow and data-heavy products. Comfortable from discovery research through shipped UI, works closely with engineers, and has built a design system from scratch.\n\nEXPERIENCE\nProduct Designer - Ledgerly (B2B finance operations SaaS), New York, NY | 2022 - present\n- Own design for the approvals and invoicing workflow used by 2,000 finance teams; redesign cut time-to-approve by 35%.\n- Built the Ledgerly design system in Figma (180 components, tokens, documentation) adopted by 3 product squads.\n- Ran 40+ customer interviews and usability tests; synthesized into quarterly opportunity briefs.\n- Partner with PMs and 6 engineers in weekly ship cycles; prototype in Figma and sometimes React.\n\nProduct Designer - Taskbridge (project management SaaS), Remote | 2020 - 2022\n- Designed reporting dashboards and the admin/permissions experience for enterprise accounts.\n- Led accessibility audit to WCAG 2.1 AA; fixed 60 issues.\n\nUX Designer - Pixelhaus Agency, Brooklyn, NY | 2019 - 2020\n- Designed web apps and marketing sites for 8 client projects.\n\nSKILLS\nFigma, FigJam, design systems, prototyping, user research, usability testing, information architecture, data visualization, enterprise UX, accessibility (WCAG), HTML/CSS, basic React, Amplitude, Dovetail\n\nEDUCATION\nB.F.A. Interaction Design, Parsons School of Design, 2019",
+  "stated": {
+   "titles": [
+    "Product Designer",
+    "Senior Product Designer"
+   ],
+   "functions": [
+    "design"
+   ],
+   "seniority": [
+    "mid",
+    "senior"
+   ],
+   "countries": [
+    "US"
+   ],
+   "remoteOnly": false,
+   "likedCompanies": [
+    "Ramp",
+    "Notion",
+    "Linear",
+    "Figma"
+   ],
+   "dislikedCompanies": [
+    "Coinbase",
+    "Robinhood"
+   ],
+   "notes": [
+    "Wants to work in New York, NY or remote within the US.",
+    "Looking for pay of at least $150,000.",
+    "Does not want: crypto.",
+    "Does not want: marketing / brand-only design.",
+    "Does not want: on-site outside NYC."
+   ],
+   "background": "Product designer with 5 years designing B2B SaaS workflow and data-heavy products. Comfortable from discovery research through shipped UI, works closely with engineers, and has built a design system from scratch."
+  },
+  "constraints": {
+   "blockedCountries": [],
+   "onlyCountries": [
+    "US"
+   ],
+   "onsiteCities": [],
+   "needsSponsorship": false,
+   "salaryFloorUsd": 150000,
+   "remoteOnly": false,
+   "excludedCompanies": [],
+   "refusedSeniority": [
+    "intern"
+   ],
+   "excludedTitleWords": [
+    "crypto",
+    "brand designer",
+    "intern"
+   ]
+  },
+  "hiddenTaste": "You want to design complex B2B workflow tools: dense, expert-user products such as finance operations, admin consoles, internal tools, developer and data platforms, design systems and AI tooling for professionals. You pass on brand, marketing, growth, lifecycle and campaign design, on consumer social, on design management, and on roles that are mostly visual polish. Roles at your level on professional tools, with real research access and strong engineering partners, are worth saving."
+ },
+ {
+  "id": "r4",
+  "synthetic": true,
+  "name": "Aiden Brooks",
+  "note": "SYNTHETIC persona for the shortlist evaluation. Fictional person; the hidden taste is only ever shown to the model that plays the person reacting.",
+  "resume": "[SYNTHETIC RESUME - fictional person, written for an evaluation set. Not a real candidate.]\n\nAiden Brooks\nAustin, TX | aiden.brooks@example.com | github.com/example-abrooks\n\nSUMMARY\nRecent computer science graduate with two internships and a full-stack capstone. Strongest in React and Node.js; looking for a first full-time software engineering role.\n\nEXPERIENCE\nSoftware Engineering Intern - Lumen Retail Tech, Austin, TX | Summer 2025\n- Built a React + TypeScript admin dashboard for inventory managers; shipped 3 features to production.\n- Wrote Node.js (Express) endpoints and PostgreSQL queries; added Jest tests raising coverage from 55% to 78%.\n\nSoftware Engineering Intern - Cobalt Health Startup, Remote | Summer 2024\n- Implemented patient-intake forms in React with form validation; fixed 25 UI bugs.\n- Set up a GitHub Actions CI pipeline.\n\nTeaching Assistant, Data Structures - UT Austin | 2023 - 2025\n- Held weekly office hours for 120 students; graded projects in Java.\n\nPROJECTS\n- StudyBuddy (capstone): MERN-stack app for group study scheduling; 400 student users; Socket.IO for live updates; deployed on Render.\n- Open-source: 4 merged PRs to a React component library (docs and accessibility fixes).\n\nSKILLS\nJavaScript, TypeScript, React, Node.js, Express, HTML/CSS, PostgreSQL, MongoDB, Git, Jest, GitHub Actions, REST, Java, Python (coursework)\n\nEDUCATION\nB.S. Computer Science, University of Texas at Austin, May 2026 (GPA 3.6)",
+  "stated": {
+   "titles": [
+    "Software Engineer",
+    "Software Engineer, Early Career",
+    "Full Stack Engineer",
+    "Frontend Engineer"
+   ],
+   "functions": [
+    "engineering"
+   ],
+   "seniority": [
+    "junior",
+    "mid"
+   ],
+   "countries": [
+    "US"
+   ],
+   "remoteOnly": false,
+   "likedCompanies": [
+    "Notion",
+    "Linear",
+    "Figma"
+   ],
+   "dislikedCompanies": [],
+   "notes": [
+    "Wants to work in Austin, San Francisco, New York or remote within the US.",
+    "Looking for pay of at least $110,000.",
+    "Does not want: internships (wants full-time).",
+    "Does not want: senior/staff roles.",
+    "Does not want: requires relocation outside the US."
+   ],
+   "background": "Recent computer science graduate with two internships and a full-stack capstone. Strongest in React and Node.js; looking for a first full-time software engineering role."
+  },
+  "constraints": {
+   "blockedCountries": [],
+   "onlyCountries": [
+    "US"
+   ],
+   "onsiteCities": [],
+   "needsSponsorship": false,
+   "salaryFloorUsd": 110000,
+   "remoteOnly": false,
+   "excludedCompanies": [],
+   "refusedSeniority": [
+    "intern",
+    "staff",
+    "principal"
+   ],
+   "excludedTitleWords": []
+  },
+  "hiddenTaste": "You want frontend or product engineering where you ship user-facing features and get mentorship from stronger engineers; early-career programs are ideal. You pass on SRE, infrastructure, on-call heavy and security roles, on anything senior or staff level that expects years of ownership, and on pure backend data plumbing. You like small, product-focused teams. Roles at your level building product are worth saving."
+ }
+]

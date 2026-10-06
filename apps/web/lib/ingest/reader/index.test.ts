@@ -273,6 +273,32 @@ describe('the rendered tier meets a bot check', () => {
   })
 })
 
+describe('the rendered tier reached a page and no model was free', () => {
+  const careers = 'https://acme.example/careers'
+  const shell = '<html><body><div id="root"></div></body></html>'
+  const filler = '<p>We are a team that cares about customers and about each other, and we work in the open.</p>'.repeat(4)
+  const html = `<html><body><h1>Open roles</h1>${filler}<ul><li>Platform Engineer, Remote</li><li>Data Analyst, Seattle</li></ul></body></html>`
+  const run = (model: SiteDeps['model']) => {
+    const fetchPage = vi.fn(async (url: string) => ({ html, finalUrl: url, rendered: true }))
+    return readSite(company('Acme', '', careers), { fetcher: fakeFetcher({ [careers]: shell }, 'scheduled'), fetchPage, model, readBoard: async () => null })
+  }
+
+  it('with no model configured the site was not read, and that is not "no roles"', async () => {
+    const read = await run(null)
+    expect(read.jobs).toEqual([])
+    expect(read.reason).toBe('model_unavailable')
+    expect(read.tried.at(-1)).toMatchObject({ tier: 'model', outcome: 'skipped' })
+  })
+
+  it("with today's free limit spent it says so, not no roles", async () => {
+    const read = await run(async () => {
+      throw Object.assign(new Error('rate limited'), { status: 429 })
+    })
+    expect(read.reason).not.toBe('no_roles')
+    expect(['model_limit', 'model_unavailable']).toContain(read.reason)
+  })
+})
+
 describe("the rendered tier stores only what is the employer's own", () => {
   const careers = 'https://acme.example/careers'
   const shell = '<html><body><div id="root"></div></body></html>'

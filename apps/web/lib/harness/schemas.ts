@@ -4,7 +4,6 @@
 // an agent implementation surfaces as a failed step rather than corrupt data.
 
 import { z } from 'zod'
-import { REASONING_EFFORTS } from './types'
 
 /**
  * Full agent_type enum (matches the agent_steps CHECK values) PLUS the five
@@ -92,7 +91,7 @@ export const SourcerOutput = z.object({
   notes: z.string().optional(),
 })
 
-// matcher — score jobs against the user's resume.
+// matcher, decide which roles to show: filter on stated facts, rank by want, check the chance against the resume.
 export const MatcherInput = z.object({
   jobIds: z.array(z.string()).optional(),
 })
@@ -100,7 +99,9 @@ export const MatcherOutput = z.object({
   matches: z.array(
     z.object({
       jobId: z.string(),
-      score: z.number(),
+      chance: z.enum(['strong', 'possible', 'stretch', 'cannot_assess']),
+      /** Probability (0 to 1) the person is interested. Orders roles; never shown as a number. */
+      want: z.number().min(0).max(1),
       highlights: z.array(z.string()).default([]),
       gaps: z.array(z.string()).default([]),
     })
@@ -462,20 +463,18 @@ export const PlannerInput = z.object({
 // re-declared, so the schema stays byte-identical to the one that file's own
 // AgentFn parses against.
 
-// bulk_matcher — two-tier batch scoring (lib/harness/agents/bulk_matcher.ts#runBulkMatch).
+// bulk_matcher, batch assessment (lib/harness/agents/bulk_matcher.ts#runBulkMatch).
 export const BulkMatcherInput = z.object({
   companyIds: z.array(z.string()).optional(),
   jobIds: z.array(z.string()).optional(),
   limit: z.number().int().positive().max(2000).optional(),
   model: z.string().optional(),
-  effort: z.enum(REASONING_EFFORTS).optional(),
-  targetTitles: z.array(z.string()).optional(),
 })
 const JobScoreOutcomeSchema = z.object({
   jobId: z.string(),
-  status: z.enum(['scored', 'no-verdict']),
-  tier: z.union([z.literal(1), z.literal(2), z.null()]),
-  score: z.number().nullable(),
+  /** assessed: want and chance recorded. blocked: filtered, with the stated fact it breaks. not-assessed: try again later. */
+  status: z.enum(['assessed', 'blocked', 'not-assessed']),
+  chance: z.enum(['strong', 'possible', 'stretch', 'cannot_assess']).nullable(),
   reason: z.string(),
   titleOnly: z.boolean(),
 })
@@ -615,11 +614,11 @@ const SourceFunnelDataSchema = z.object({
   buckets: z.array(OutcomeBucketSchema),
 })
 
-const ScoreBandBucketSchema = OutcomeBucketSchema.extend({ min: z.number(), max: z.number() })
-const MatchScoreAccuracyDataSchema = z.object({
+const ChanceBucketSchema = OutcomeBucketSchema.extend({ chance: z.enum(['strong', 'possible', 'stretch']) })
+const ChanceAccuracyDataSchema = z.object({
   totalApplications: z.number().int().nonnegative(),
-  totalScored: z.number().int().nonnegative(),
-  bands: z.array(ScoreBandBucketSchema),
+  totalAssessed: z.number().int().nonnegative(),
+  buckets: z.array(ChanceBucketSchema),
   verdict: z.enum(['validates', 'refutes', 'inconclusive']),
 })
 
@@ -658,7 +657,7 @@ const ApplicationTimingDataSchema = z.object({
 })
 
 const FilterDimensionImpactSchema = z.object({
-  dimension: z.enum(['functions', 'seniority', 'countries', 'remoteOnly', 'languages', 'excludedCompanies', 'excludedKeywords', 'minScore (not enforced)']),
+  dimension: z.enum(['functions', 'seniority', 'countries', 'remoteOnly', 'languages', 'excludedCompanies', 'excludedKeywords']),
   configured: z.boolean(),
   jobsExcludedByThisAlone: z.number().int().nonnegative(),
 })
@@ -698,7 +697,7 @@ export const StrategistOutput = z.object({
   userId: z.string(),
   totalApplications: z.number().int().nonnegative(),
   sourceFunnel: questionResultSchema(SourceFunnelDataSchema),
-  matchScoreAccuracy: questionResultSchema(MatchScoreAccuracyDataSchema),
+  chanceAccuracy: questionResultSchema(ChanceAccuracyDataSchema),
   resumeVariants: questionResultSchema(ResumeVariantDataSchema),
   outreachImpact: questionResultSchema(OutreachImpactDataSchema),
   rejectionPatterns: questionResultSchema(RejectionPatternsDataSchema),

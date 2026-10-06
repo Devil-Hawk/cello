@@ -3,9 +3,8 @@
 // against.
 //
 // WHY THIS EXISTS
-//   The match scorer (see match-scorer.eval.test.ts) has behavioural labels —
-//   did the user apply? — so it's judged by ranking, for free, forever. The
-//   outreach draft has no such signal: it goes to a named human under the
+//   Some outputs have behavioural labels (did the user reply?), so they are judged by
+//   ranking, for free, forever. The outreach draft has no such signal: it goes to a named human under the
 //   user's name, and "is this actually about THIS company, or would it read
 //   fine pasted into any cover letter" is a judgement call, not a computation.
 //   That is exactly the gap an LLM judge fills, and exactly why it must not
@@ -523,40 +522,6 @@ export interface SpecificityInput {
  * answer", it's "does this message satisfy one written rule", which is what
  * ClosedQA is for.
  */
-export interface MatchQualityInput {
-  /** The matcher verdict's own summary + strengths/gaps — what it claims. */
-  verdictSummary: string
-  /** The job + resume facts the verdict was scored against. */
-  jobAndResume: string
-}
-
-/**
- * Is a SAMPLED match verdict's stated summary/strengths/gaps internally
- * consistent with the job and resume it was scored against, or does it read
- * like a fabricated / self-contradictory assessment? Step 4, item 3's
- * "judge (ClosedQA rubric check) on a SAMPLE" — built on ClosedQA for the
- * same reason judgeSpecificity is: this is a yes/no rubric check against one
- * written criterion, not a reference-answer diff.
- */
-export async function judgeMatchQuality(
-  client: OpenAI,
-  input: MatchQualityInput,
-  opts: JudgeCallOpts = {}
-): Promise<EvalResult> {
-  const { value: result, spanId } = await runJudge('judge-match-quality', () =>
-    ClosedQA({
-      input: 'Is this match assessment consistent with the job and resume it claims to be scored against?',
-      output: input.verdictSummary,
-      criteria:
-        'Every strength, gap and the overall score is plausibly supported by the job and resume facts given, ' +
-        'with nothing that contradicts them or reads as invented.',
-      client,
-      model: opts.model ?? JUDGE_MODEL,
-    })
-  )
-  return toEvalResult('match quality', result, opts.threshold ?? 0.6, opts.userId, spanId)
-}
-
 export async function judgeSpecificity(
   client: OpenAI,
   input: SpecificityInput,

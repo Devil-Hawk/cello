@@ -83,14 +83,14 @@ export interface CompanyDeps {
 
 // --- when a company is due -------------------------------------------------
 
-/** Dream companies hourly, the rest daily (a larger scrape_frequency stretches that); a site still to be read in a browser is always due. */
+/** Dream companies after an hour, the rest after a day (a larger scrape_frequency stretches that; the pass itself runs every six hours); a site still to be read in a browser is always due. */
 export function isDue(
   company: Pick<DueCompany, 'last_scraped_at' | 'is_dream_company' | 'scrape_frequency'> & { metadata?: unknown },
   now: number
 ): boolean {
   // A site still to be read in a browser, or whose browser step failed, is tried again at the next scheduled pass.
   const reason = readSourceCheck(company.metadata)?.reason
-  if (reason === 'reading' || reason === 'render_failed' || reason === 'read_failed') return true
+  if (reason === 'reading' || reason === 'render_failed' || reason === 'read_failed' || reason === 'model_unavailable' || reason === 'model_limit') return true
   return now >= dueAt(company)
 }
 
@@ -194,6 +194,15 @@ export async function ingestCompany(store: AtsStore, company: DueCompany, deps: 
       outcome.reader = result.provider
       outcome.tier = 'board'
       if (boardFailed(result)) outcome.failure = 'board_error'
+      // A board searched with the person's words (Workday, Eightfold) shows a window onto it, never the whole board: say so. Any note left by an earlier way of reading goes.
+      const words = searchTerms(targets)
+      const stale = board.meta.reader && typeof board.meta.reader === 'object' ? (board.meta.reader as Record<string, unknown>) : null
+      if (providers[result.provider].searchesByQuery === true && words.length > 0) {
+        board.meta.reader = { checked: [], targets_key: words.join('|'), at: new Date().toISOString(), read: 0, window: true, tier: 'board', tried: [] }
+      } else if (stale) {
+        const { window: _w, listed: _l, untitled: _u, ...rest } = stale
+        board.meta.reader = rest
+      }
       await saveSourceCheck(store, company, board, { tier: 'board' })
       return
     }

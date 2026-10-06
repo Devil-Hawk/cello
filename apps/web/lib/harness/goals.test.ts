@@ -98,7 +98,8 @@ function candidate(id: string, over: Partial<GoalCandidate> = {}): GoalCandidate
     description: 'Work with customers to deploy the product.',
     location: 'Remote (US)',
     companyName: 'Acme',
-    matchScore: 80,
+    chance: 'possible',
+    want: 0.8,
     ...over,
   }
 }
@@ -772,11 +773,11 @@ describe('reading and writing goals', () => {
 // --- candidate ordering ------------------------------------------------------
 
 describe('candidate ordering', () => {
-  it('puts goal-term title matches first, then the best scores', () => {
+  it('puts goal-term title matches first, then the roles the person most likely wants', () => {
     const ordered = orderCandidates(goal(), [
-      candidate('x', { title: 'Backend Engineer', matchScore: 95 }),
-      candidate('y', { title: 'Forward Deployed Engineer', matchScore: 60 }),
-      candidate('z', { title: 'Backend Engineer', matchScore: 99 }),
+      candidate('x', { title: 'Backend Engineer', want: 0.95 }),
+      candidate('y', { title: 'Forward Deployed Engineer', want: 0.6 }),
+      candidate('z', { title: 'Backend Engineer', want: 0.99 }),
     ])
     expect(ordered.map((c) => c.id)).toEqual(['y', 'z', 'x'])
   })

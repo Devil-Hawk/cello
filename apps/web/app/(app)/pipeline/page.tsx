@@ -145,7 +145,7 @@ function PipelinePageInner() {
 
       const { data, error } = await supabase
         .from('applications')
-        .select('*, jobs(id, title, url, match_score, companies(name, domain, logo_url))')
+        .select('*, jobs(id, title, url, person_roles(chance), companies(name, domain, logo_url))')
         .eq('user_id', user.id)
         .order('updated_at', { ascending: false })
 

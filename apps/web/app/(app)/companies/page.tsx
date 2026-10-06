@@ -20,20 +20,20 @@ import {
 import { formatShortDate } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
 import { openRolesOnly } from '@/lib/jobs/freshness'
+import { fitRowOf } from '@/lib/scoring/read'
 
 /**
- * Highest best-match-score first, unscored companies last (never coerced to
- * 0 — that would bury them among genuinely weak matches instead of the
- * honest "not scored yet" bucket). Dream company no longer wins the primary
- * sort: it stays visible via the star badge on every row (and the "Dream
- * only" filter/stat above), but a starred company with a weak or no match
- * shouldn't outrank a strong, unstarred match — that would defeat the point
- * of ranking by fit at all. Dream only breaks ties, and only among
- * companies that are otherwise equal (same score, or both unscored).
+ * Most strong roles first, companies with nothing assessed last (never coerced
+ * to 0: that would bury them among companies that were checked and have none).
+ * Dream company does not win the primary sort: it stays visible via the star
+ * badge on every row (and the "Dream only" filter/stat above), but a starred
+ * company with no strong role should not outrank an unstarred one with several,
+ * or ranking by fit would mean nothing. Dream only breaks ties, among companies
+ * that are otherwise equal.
  */
 function compareByMatchThenDream(a: CompanySummary, b: CompanySummary): number {
-  const aScore = a.best_match_score ?? null
-  const bScore = b.best_match_score ?? null
+  const aScore = a.strong_roles ?? null
+  const bScore = b.strong_roles ?? null
   if (aScore !== bScore) {
     if (aScore === null) return 1
     if (bScore === null) return -1
@@ -78,10 +78,9 @@ export default function CompaniesPage() {
         return
       }
 
-      // A per-company `count` aggregate can't also tell us the best score, so
-      // this pulls each company's jobs' match_score in the same query and
-      // reduces client-side below — one query for every company, not one
-      // query per company.
+      // A per-company `count` aggregate can't also tell us how many roles are
+      // strong, so this pulls each company's roles' chance in the same query and
+      // reduces client-side below: one query for every company, not one per company.
       // jobs_count below counts open roles only: recent and not closed.
       const { data, error } = await openRolesOnly(
         trackedOnly(
@@ -90,7 +89,7 @@ export default function CompaniesPage() {
             .select(
               `
         *,
-        jobs:jobs(match_score)
+        jobs:jobs(person_roles(chance, blocked_reasons))
       `
             )
             .eq('user_id', user.id)
@@ -107,15 +106,16 @@ export default function CompaniesPage() {
         (data ?? [])
           .map((company) => {
             const jobs = company.jobs ?? []
-            const scores = jobs
-              .map((j) => j.match_score)
-              .filter((s): s is number => typeof s === 'number')
+            // The person's own verdict on each role: their person_roles row, embedded.
+            const verdicts = jobs.map((j) => fitRowOf(j))
+            const assessed = verdicts.filter((v) => typeof v.chance === 'string')
+            const strong = assessed.filter((v) => v.chance === 'strong' && !(Array.isArray(v.blocked_reasons) && v.blocked_reasons.length > 0))
             return {
               ...company,
               jobs_count: jobs.length,
-              // null (not 0) when nothing is scored yet — "scored badly" and
-              // "not scored" are different facts and must sort differently.
-              best_match_score: scores.length > 0 ? Math.max(...scores) : null,
+              // null (not 0) when nothing is assessed yet: "checked, none strong" and
+              // "not checked" are different facts and must sort differently.
+              strong_roles: assessed.length > 0 ? strong.length : null,
             }
           })
           .sort(compareByMatchThenDream)

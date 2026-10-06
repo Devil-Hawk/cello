@@ -46,7 +46,7 @@ describe('getSharedDoc', () => {
     expect(doc.length).toBeGreaterThan(500)
     expect(doc).toContain('Sources of Truth (EXCLUSIVE)')
     expect(doc).toContain('profiles.resume_text')
-    expect(doc).toContain('Shared Fit-Score Bands')
+    expect(doc).toContain('ATS Score Bands')
   })
 
   it('is memoized (same string instance on repeat calls)', () => {

@@ -95,7 +95,7 @@ function stepDetail(step: AgentStepRow): string | null {
   if (typeof out.skippedReason === 'string' && out.skippedReason) return out.skippedReason
   if (Array.isArray(out.topJobIds)) {
     const matches = Array.isArray(out.matches) ? out.matches.length : 0
-    return `${matches} scored, ${out.topJobIds.length} above threshold`
+    return `${matches} assessed, ${out.topJobIds.length} on today's list`
   }
   if (Array.isArray(out.jobIds)) return `${out.jobIds.length} job(s)`
   if (typeof out.draftId !== 'undefined' && typeof out.status === 'string') return `draft: ${out.status}`

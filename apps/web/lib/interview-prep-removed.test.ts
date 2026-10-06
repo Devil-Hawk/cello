@@ -21,6 +21,10 @@ const ALLOWED = [
   /^apps\/web\/lib\/ingest\/reader\/__fixtures__\//,
   /^apps\/web\/lib\/ingest\/reader\/detail\.test\.ts:/,
   /^apps\/web\/scripts\/eval-ingest\/(pages|postings)/,
+  // Recorded postings of real employers used by the shortlist and output evaluations.
+  /^apps\/web\/scripts\/eval-shortlist\/data\/jobs\.json:/,
+  /^apps\/web\/scripts\/evals\/outputs\/data\/jobs\.json:/,
+  /^apps\/web\/scripts\/evals\/quality\/data\/jobs\.json:/,
 ]
 
 function hits(): string[] {

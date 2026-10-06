@@ -132,7 +132,6 @@ export const DEMO_PREFERENCES = {
     countries: ['US', 'CA'],
     remoteOnly: false,
     languages: ['en'],
-    minScore: 50,
     excludedCompanies: [],
     excludedKeywords: ['unpaid', 'commission only'],
   },

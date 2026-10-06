@@ -25,6 +25,8 @@ import { assertSsrfSafe, readLimitedText } from '../../security/untrusted'
  * `render_failed`: the browser step that was to read it crashed or timed out, which says nothing about the site.
  */
 export type ReaderReason = 'bot_check' | 'login_required' | 'robots' | 'no_roles' | 'unreachable' | 'reading' | 'budget' | 'role_pages' | 'render_failed'
+  // The page was rendered, and the step that reads it needs a free model: not available just now. Says nothing about the site.
+  | 'model_unavailable' | 'model_limit'
 
 /** Why Cello stopped reading a site, never carrying the address. */
 export class ReaderError extends Error {
@@ -140,6 +142,8 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
   const startedAt = now()
   const used = { requests: 0, bytes: 0 }
   const lastByHost = new Map<string, number>()
+  /** A host's own Crawl-delay from its robots.txt (seconds there, ms here, at most 10 s so one site cannot stall a read): the gap is the larger of it and ours. */
+  const crawlDelayMs = new Map<string, number>()
   const chains = new Map<string, Promise<void>>()
   const robotsByOrigin = new Map<string, Promise<Robots>>()
 
@@ -156,7 +160,7 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
   function politely(host: string): Promise<void> {
     const prev = chains.get(host) ?? Promise.resolve()
     const mine = prev.then(async () => {
-      const wait = (lastByHost.get(host) ?? -Infinity) + budget.gapMs - now()
+      const wait = (lastByHost.get(host) ?? -Infinity) + Math.max(budget.gapMs, crawlDelayMs.get(host) ?? 0) - now()
       if (wait > 0) await sleep(wait)
       lastByHost.set(host, now())
     })
@@ -193,7 +197,10 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
       if (/html/i.test(res.headers.get('content-type') ?? '')) return 'allow'
       const text = await readLimitedText(res, 500_000)
       used.bytes += text.length
-      return robotsParser(url, text)
+      const parsed = robotsParser(url, text)
+      const delay = parsed.getCrawlDelay(ROBOTS_TOKEN)
+      if (typeof delay === 'number' && delay > 0) crawlDelayMs.set(new URL(origin).host, Math.min(delay * 1000, 10_000))
+      return parsed
     } catch (error) {
       if (error instanceof ReaderError && error.reason === 'budget') throw error
       return 'unreachable'

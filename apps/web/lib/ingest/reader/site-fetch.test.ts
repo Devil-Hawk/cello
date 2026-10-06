@@ -115,6 +115,16 @@ describe('site fetcher: identity, pace and budget', () => {
     }
   })
 
+  it("waits a host's own Crawl-delay when it is longer than ours, and never more than 10 s", async () => {
+    for (const [delay, wanted] of [[2, 2000], [60, 10_000]] as const) {
+      const { fetcher, calls } = harness({ 'https://acme.test/robots.txt': robots(`User-agent: *\nCrawl-delay: ${delay}\n`), 'https://acme.test/*': html('x') })
+      await fetcher.get('https://acme.test/a')
+      await fetcher.get('https://acme.test/b')
+      expect(calls[2].at - calls[1].at).toBeGreaterThanOrEqual(wanted)
+      expect(calls[2].at - calls[1].at).toBeLessThan(wanted + 300)
+    }
+  })
+
   it('stops with a budget error on the 26th inline request', async () => {
     const { fetcher } = harness({ 'https://acme.test/robots.txt': robots('', 404) }, { budget: { gapMs: 0 } })
     // robots.txt took one request; 24 pages bring it to 25.

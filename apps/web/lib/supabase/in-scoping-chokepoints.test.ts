@@ -89,11 +89,8 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       're-validation (approveOne) always calls this with a single-element array — never an owned-id set.',
   },
   'apps/web/lib/graph/autopilot.ts': {
-    calls: [".in('job_id', jobIds)", ".in('subject_id', jobIds)"],
-    reason:
-      "jobIds is pendingDraftJobIds(goal) — one autopilot goal's own small kept-list, not an owned-id set; the " +
-      "second call (loadFailedVerdictJobIds) filters rows already capped by loadCandidateJobs' own " +
-      'CANDIDATE_JOB_LIMIT (150) query above it.',
+    calls: [".in('job_id', jobIds)"],
+    reason: "jobIds is pendingDraftJobIds(goal): one autopilot goal's own small kept-list, not an owned-id set.",
   },
   'apps/web/lib/graph/distill.ts': {
     calls: [".in('id', ids)"],
@@ -113,19 +110,27 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       'ACTIVE_STAGES is a fixed 3-element const, not user data.',
   },
   'apps/web/lib/harness/agents/matcher.ts': {
-    calls: [".in('id', ids)"],
+    calls: [".in('id', jobIds)"],
     reason:
-      'fetchJobsByIds: every caller caps the id list (score_jobs\' SCORE_JOBS_MAX_LIMIT=15, or selectCandidateJobs\' ' +
-      'poolSize) before it reaches here; ownership is enforced separately by ownedJobsQuery\'s FK join.',
+      "diagnoseCandidateJobs: the caller is score_jobs, whose id list is capped at SCORE_JOBS_MAX_LIMIT=15 before " +
+      "it reaches here; ownership is enforced separately by ownedJobsQuery's FK join.",
+  },
+  'apps/web/lib/scoring/index.ts': {
+    calls: [".in('job_id', rows.map((r)"],
+    reason: "rows is one day's saved shortlist (at most a handful of picks), one job id per row; the query is on the person's own person_roles rows (filtered by user_id).",
+  },
+  'apps/web/lib/scoring/supabase-store.ts': {
+    calls: [".in('job_id', part)"],
+    reason: 'part is one slice of at most IN_CHUNK (100) ids, cut by chunks() on every call; the query is on the person\'s own person_roles rows (filtered by user_id).',
   },
   'apps/web/lib/harness/agents/verifier.ts': {
     calls: [".in('id', knockouts)"],
     reason: 'knockouts can never exceed the MAX_JOBS (30) batch it was collected from in the same run.',
   },
   'apps/web/lib/harness/copilot-tools.ts': {
-    calls: [".in('id', jobIds)", ".in('id', companyIds)", ".in('id', trgmIds)", ".in('id', contactIds)"],
+    calls: [".in('id', jobIds)", ".in('job_id', jobIds)", ".in('id', companyIds)", ".in('id', trgmIds)", ".in('id', contactIds)"],
     reason:
-      "loadJobBriefs: jobIds is always ≤20 ids (every caller slices/caps before calling); companyIds is the " +
+      "loadJobBriefs: jobIds is always ≤20 ids (every caller slices/caps before calling), for the jobs and for the person's own person_roles rows; companyIds is the " +
       'deduped company_id set of those ≤20 job rows. listJobs\' trgmIds and listContacts\' contactIds are both ' +
       "search_*_by_*_trgm()'s p_limit-bounded RPC result (clampLimit'd to ≤15/≤25, hard RPC ceiling 50 — see " +
       '20260816000009_job_search.sql), never an owned-id set.',

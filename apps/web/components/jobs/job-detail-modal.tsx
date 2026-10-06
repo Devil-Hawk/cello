@@ -19,9 +19,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { knownParts, matchTone, type MatchTone } from '@/lib/format'
-import { parseMatchDetails, type MatchDetails } from './match-badge'
-import { MatchScoreBreakdown } from './match-score-breakdown'
+import { knownParts } from '@/lib/format'
+import { ChanceChip } from '@/components/fit/chance-chip'
+import { FitPanel } from '@/components/fit/fit-panel'
+import { TriageControl } from '@/components/fit/triage-control'
+import { parseFit, type FitRow } from '@/lib/scoring/read'
 import { ResumeOptimizerPanel } from '@/components/resume/resume-optimizer-panel'
 import { JobProvenancePanel } from './job-provenance-panel'
 import { ContactNetworkPanel } from '@/components/contacts/contact-network-panel'
@@ -35,8 +37,8 @@ interface JobWithCompany {
   salary_range: string | null
   job_type: string | null
   posted_at: string | null
-  match_score: number | null
-  match_details: MatchDetails | string | null
+  // The person's own verdict on the role, embedded from person_roles (lib/scoring/read.ts FIT_EMBED). Absent or empty means it has not been assessed yet.
+  person_roles?: FitRow | FitRow[] | null
   /** Present at runtime (jobs/page.tsx passes the full row); enables company research link. */
   company_id?: string | null
   companies: {
@@ -94,14 +96,6 @@ export function toRenderableInsights(payload: unknown): Insights | null {
   return summary && hasSection ? insights : null
 }
 
-const TONE_TEXT: Record<MatchTone, string> = {
-  good: 'text-emerald-600 dark:text-emerald-400',
-  warn: 'text-amber-600 dark:text-amber-400',
-  muted: 'text-muted-foreground',
-  bad: 'text-red-600 dark:text-red-400',
-  none: 'text-muted-foreground',
-}
-
 export function JobDetailModal({
   job,
   onClose,
@@ -110,6 +104,8 @@ export function JobDetailModal({
   apiKeyMessage,
   statusError,
   onRetryStatus,
+  onAssess,
+  assessing = false,
 }: {
   job: JobWithCompany
   onClose: () => void
@@ -121,6 +117,9 @@ export function JobDetailModal({
   statusError?: string | null
   /** Wired to retry the account-status fetch when statusError is set. */
   onRetryStatus?: () => void
+  /** Assesses this role now (POST /api/roles/:id/fit). Offered when it has not been assessed yet. */
+  onAssess?: () => void
+  assessing?: boolean
 }) {
   const [insights, setInsights] = useState<Insights | null>(insightsCache.get(job.id) || null)
   const [isLoadingInsights, setIsLoadingInsights] = useState(false)
@@ -252,8 +251,12 @@ export function JobDetailModal({
     }
   }
 
-  const matchDetails = parseMatchDetails(job.match_details)
-  const tone = matchTone(job.match_score)
+  const fit = parseFit(job)
+  const assessDisabledReason = !hasResume
+    ? 'Add your resume so Cello can check your chances.'
+    : !hasApiKey
+      ? (apiKeyMessage ?? 'Cello needs your model key to check your chances.')
+      : (statusError ?? null)
   const meta = knownParts(job.location, job.salary_range, job.job_type)
 
   return (
@@ -313,36 +316,16 @@ export function JobDetailModal({
             <JobProvenancePanel jobId={job.id} />
           </div>
 
-          {/* Match score section — career-ops-style: the overall number,
-              broken into named sub-scores with an explicit rubric, every
-              claim backed by evidence (strengths/gaps), not just a badge. */}
-          {job.match_score !== null && (
-            <div className="border-t px-5 py-4 first:border-t-0">
-              <h3 className="mb-2 text-body font-medium text-foreground">Match analysis</h3>
-              <div className={`font-display text-stat tabular-nums ${TONE_TEXT[tone]}`}>
-                {job.match_score}% match
-              </div>
-              <div className="mt-3">
-                <MatchScoreBreakdown score={job.match_score} details={matchDetails} />
-              </div>
-              {matchDetails?.skills?.matched && matchDetails.skills.matched.length > 0 && (
-                <div className="mt-3 text-caption">
-                  <span className="text-muted-foreground">Matched skills: </span>
-                  <span className="text-emerald-600 dark:text-emerald-400">
-                    {matchDetails.skills.matched.join(', ')}
-                  </span>
-                </div>
-              )}
-              {matchDetails?.skills?.missing && matchDetails.skills.missing.length > 0 && (
-                <div className="mt-1 text-caption">
-                  <span className="text-muted-foreground">Skills to highlight: </span>
-                  <span className="text-amber-600 dark:text-amber-400">
-                    {matchDetails.skills.missing.join(', ')}
-                  </span>
-                </div>
-              )}
+          {/* What Cello concluded about this role: why the person might want it, their chance with
+              the resume line behind each requirement, and a way to react to it. */}
+          <div className="border-t px-5 py-4 first:border-t-0">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-body font-medium text-foreground">Fit for you</h3>
+              <ChanceChip fit={fit.chance ? fit : null} />
             </div>
-          )}
+            <FitPanel fit={fit} onAssess={onAssess} assessing={assessing} assessDisabledReason={assessDisabledReason} />
+            <TriageControl jobId={job.id} surface="roles" className="mt-4" />
+          </div>
 
           {/* Resume ATS optimizer */}
           <div className="border-t px-5 py-4 first:border-t-0">

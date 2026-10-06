@@ -26,7 +26,7 @@ they sound.
 | Candidate resume | `profiles.resume_text` | The candidate's skills, employers, titles, dates, degrees, certifications, metrics, location, availability, and relocation willingness | The ONLY source for anything said about the candidate. A skill named in a job description is not evidence the candidate has it — see RULE below. Location/relocation phrasing (e.g. "Baltimore, MD (Open to NYC)") is a protected fact exactly like an employer or a date: never drop, soften, or embellish it. |
 | Job row | `jobs.title`, `jobs.description`, `jobs.location`, `jobs.company_id` → `companies.name`, `jobs.salary_range`, `jobs.url` | The target role and its stated requirements | 14,281 of 20,254 jobs (last count) have `description = null`. A missing description is a real, common state, not an edge case — treat it as "no signal," never as license to guess what a role "probably" requires. |
 | Company dossier | `company_dossiers.summary`, `.signals` (funding, headcountTrend, news, culture, techStack, whatTheyWant, uncertainty, summarySource), `.comp_intel`, `.sponsors_visa` | Anything about the company beyond its name/domain | The dossier already carries its own honesty gate — `summarySource: 'ai' \| 'wikipedia'`, `summaryUnavailable` when there's nothing to say, each signal field `null` when unsupported. A prompt consuming a dossier INHERITS that gate; it may not add confidence the dossier itself doesn't have. No dossier for a company = no company facts, full stop. |
-| User targeting | `profiles.preferences.targeting` via `resolveTargeting()` | What the user says they want (function, seniority, countries, remote, languages, minimum score, exclusions) | An empty/unset field means "no constraint on this dimension" — this is a deliberate product decision (see `lib/targeting.ts`), never "assume the common case" (e.g. never assume `remoteOnly` because most users prefer it). |
+| User targeting | `profiles.preferences.targeting` via `resolveTargeting()` | What the user says they want (function, seniority, countries, remote, languages, exclusions) | An empty/unset field means "no constraint on this dimension", this is a deliberate product decision (see `lib/targeting.ts`), never "assume the common case" (e.g. never assume `remoteOnly` because most users prefer it). |
 
 Everything else — the model's own world knowledge about a specific employer,
 prior-session memory, another user's data, any table not listed above — is OUT
@@ -119,35 +119,33 @@ job that was never actually viable for them.
 | Confident-hedge-down (or up) | Scores cluster at one end of the range regardless of actual fit, because the model is hedging instead of judging | matcher, resume_optimizer |
 | Silent-conflict-netting | A hard contradiction (targeting vs. JD, resume vs. requirement) gets averaged away instead of flagged | matcher |
 
-## Shared Fit-Score Bands (0-100)
+## ATS Score Bands (0-100)
 
-Cello has two 0-100 "how well does X fit Y" scores today: the **job match
-score** (candidate vs. job — matcher / bulk_matcher) and the **ATS score**
-(resume vs. job, mechanical keyword/format screening — resume_optimizer). They
-measure different things but share ONE band table below, so a "72" means the
-same rough thing everywhere in the product.
+Cello has one 0-100 score today: the **ATS score** (resume vs. job, mechanical
+keyword/format screening, produced by resume_optimizer). Whether a role fits a
+person is not a number: it is a chance (Strong, Possible or Stretch) with a cited
+resume line behind every requirement, produced by the chance check.
 
-**CALIBRATION WARNING (binding on every prompt that produces one of these
-scores):** an earlier run of the job-match scorer put 70 of the first 71 scored
-jobs in the 0-39 band. That was not a sign the jobs were bad — it was a sign
-the prompt hedged low by default with no anchors to push back against.
-Clustering scores at one end of the range regardless of actual fit is itself a
-defect, in exactly the way a prompt that always returned 100 would be. **Every
-scoring prompt MUST restate the bands below explicitly and instruct the model
-to use the full range** — do not assume a model will infer calibration from a
-bare "0-100" instruction; it will not.
+**CALIBRATION WARNING (binding on every prompt that produces an ATS score):** an
+earlier scorer put 70 of its first 71 scores in the 0-39 band. That was not a sign
+the jobs were bad; it was a sign the prompt hedged low by default with no anchors
+to push back against. Clustering scores at one end of the range regardless of
+actual fit is itself a defect, in exactly the way a prompt that always returned
+100 would be. **Every scoring prompt MUST restate the bands below explicitly and
+instruct the model to use the full range**: do not assume a model will infer
+calibration from a bare "0-100" instruction; it will not.
 
-| Band | Meaning | Job match score implies | ATS score implies |
-|---|---|---|---|
-| 85-100 | Exceptional fit — nearly every requirement/keyword is met with direct evidence | Eligible for auto-triage (`matchThreshold`, default 85) — an application row is created automatically | Resume will very likely clear automated keyword/format screening as-is |
-| 70-84 | Strong fit — core requirements are met; a handful of secondary ones are missing or unconfirmed | Surface prominently, worth applying | Minor, named edits would close the gap |
-| 50-69 | Moderate fit — real overlap alongside real gaps (skills, seniority, format) | Worth applying only with a specific stated angle on the gap — never auto-triage | Rewrite is likely to help; name concrete `formatIssues` |
-| 30-49 | Weak fit — several core requirements unmet, or real structural problems (tables/columns, no parseable skills section) | Apply only with a clear, stated reason — this is not a default yes | Format problems probably matter as much as keyword gaps; name both |
-| 0-29 | Poor fit — little to no overlap, or the input itself is unusable (no real description, unparseable resume) | Do not recommend applying | Low-confidence estimate — say so explicitly when it stems from a missing/short job description; never present it as a firm verdict |
+| Band | Meaning | ATS score implies |
+|---|---|---|
+| 85-100 | Exceptional fit: nearly every keyword is met with direct evidence | Resume will very likely clear automated keyword/format screening as-is |
+| 70-84 | Strong fit: core keywords are met; a handful of secondary ones are missing or unconfirmed | Minor, named edits would close the gap |
+| 50-69 | Moderate fit: real overlap alongside real gaps (skills, seniority, format) | Rewrite is likely to help; name concrete `formatIssues` |
+| 30-49 | Weak fit: several core keywords unmet, or real structural problems (tables/columns, no parseable skills section) | Format problems probably matter as much as keyword gaps; name both |
+| 0-29 | Poor fit: little to no overlap, or the input itself is unusable (no real description, unparseable resume) | Low-confidence estimate: say so explicitly when it stems from a missing/short job description; never present it as a firm verdict |
 
 **RULE: If the input itself is too thin to score with real confidence** (job
 description empty or a few words, resume near-empty) **say so explicitly in
-the output — a `formatIssues`/`gaps`/summary line — instead of returning a
+the output (a `formatIssues` or summary line) instead of returning a
 confident-looking number anyway.** RATIONALE: a bare "23/100" with no caveat
 reads as a firm verdict; the same number with "resume had no description to
 score against" reads as what it actually is — a best-effort guess.

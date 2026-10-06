@@ -40,6 +40,9 @@ import {
 import { JobRow, type JobRowJob } from '@/components/jobs/job-row'
 import { RefreshJobsButton } from '@/components/jobs/refresh-button'
 import { JobDetailModal } from '@/components/jobs/job-detail-modal'
+import { FIT_COLUMNS, FIT_EMBED, chanceLabel, fitToColumns, type FitRow } from '@/lib/scoring/read'
+import { OnJobs } from '@/lib/scoring/person-roles-query'
+import type { RoleFit } from '@/lib/scoring/types'
 import { ProvenanceSummaryBar } from '@/components/jobs/provenance-summary-bar'
 import { JOB_FUNCTIONS, QUALITY_REJECT_THRESHOLD, SENIORITY_LEVELS } from '@/lib/jobs/classify'
 import { resolveTargeting, type Targeting } from '@/lib/targeting'
@@ -101,15 +104,15 @@ interface BatchMatchResult {
   failed: number
   /** Back-compat alias for remainingInTargeting — see the route's header. */
   remaining: number
-  /** Unscored rows the scorer can ACTUALLY reach: they pass quality + targeting. */
+  /** Unassessed roles that are worth assessing: they pass quality and the function and level asked for. */
   remainingInTargeting?: number
-  /** Unscored rows targeting/quality exclude. Never scored under current filters. */
+  /** Unassessed roles outside the function and level asked for. Never assessed under current filters. */
   excludedByTargeting?: number
   skippedReasons?: Record<string, number>
 }
 
 const PAGE_SIZE = 30
-/** Jobs scored per click of the batch trigger — click again to keep draining the backlog. */
+/** Roles checked per click of the batch trigger; click again to keep draining the backlog. */
 // The route's own default is 200 with a 500 hard cap, and bulk_matcher is built
 // to triage a whole backlog in internal 60-job batches. Sending 25 meant ~451
 // manual clicks to cover 11,275 rows — against a finish line that, before the
@@ -122,10 +125,26 @@ const BATCH_LIMIT = 200
  *  still covers 4,000 jobs, far past any real in-targeting backlog. */
 const MAX_BATCH_ROUNDS = 20
 
-const JOB_SELECT_COLUMNS =
+// The posting's own columns. The person's verdict on it is not one of them: it lives
+// on their person_roles row. A list starts at that row (so it can be ordered by what
+// the person wants) and embeds the posting; a single role starts at the posting and
+// embeds the row.
+const JOB_COLUMNS =
   'id, company_id, title, url, location, salary_range, posted_at, discovered_at, ' +
-  'match_score, match_details, is_new, job_function, seniority, language, country, ' +
+  'is_new, job_function, seniority, language, country, ' +
   'is_remote, quality_score, description, job_type, companies(name, logo_url, domain)'
+const JOB_SELECT_COLUMNS = JOB_COLUMNS + ', ' + FIT_EMBED
+const LIST_SELECT_COLUMNS = FIT_COLUMNS + ', jobs!inner(' + JOB_COLUMNS + ')'
+
+/** A person_roles list row, as LIST_SELECT_COLUMNS returns it: the verdict columns beside the embedded posting. */
+type ListRow = { jobs: Job | Job[] | null } & Record<string, unknown>
+
+/** The posting with the person's verdict embedded, the shape every job component reads. */
+function toJob(row: ListRow): Job | null {
+  const { jobs, ...verdict } = row
+  const job = Array.isArray(jobs) ? jobs[0] : jobs
+  return job ? { ...job, person_roles: verdict as FitRow } : null
+}
 
 /**
  * Plain-language "$X of your $Y monthly AI budget left", from the same route the
@@ -418,8 +437,8 @@ function JobsPageInner() {
   const visaFilter: VisaFilter = isVisaFilter(visaParam) ? visaParam : 'all'
   // Show-low-quality is the inverse of the default-on "hide low quality" toggle.
   const hideLowQuality = searchParams.get('showLowQuality') !== '1'
-  // Only rows the scorer has not reached yet. Exists so the dashboard's
-  // "Unscored 11,603" readout — by far the largest number in the product — can
+  // Only rows that have not been assessed yet. Exists so the dashboard's
+  // "Not assessed yet 11,603" readout, by far the largest number in the product, can
   // link somewhere that actually shows those rows. It used to point at bare
   // /jobs, which opens the default recency feed and answers nothing.
   const unscoredOnly = searchParams.get('unscored') === '1'
@@ -639,59 +658,62 @@ function JobsPageInner() {
     // the other side of the switch, so both counts follow the same facets.
     // Open roles only: posted in the last 180 days (or undated) and not closed.
     const excludedIds = targeting ? excludedCompanyIds(companies, targeting) : []
-    const withFacets = (start: JobsQuery, side: TargetScope): JobsQuery => {
-      let q = openRolesOnly(start)
+    // The list starts at the person's own rows (person_roles) so it can be ordered by
+    // what they want; the posting's columns are filtered through the embed (OnJobs).
+    // A role they said is not for them stays out of the list.
+    const withFacets = (query: JobsQuery, side: TargetScope): JobsQuery => {
+      query.is('hidden_reason', null)
+      const start = new OnJobs(query)
+      openRolesOnly(start)
 
       if (selectedCompany !== 'all') {
-        q = q.eq('company_id', selectedCompany)
+        start.eq('company_id', selectedCompany)
       }
-      // No 'all companies' filter: jobs RLS already scopes every row to the
-      // user's own companies (EXISTS companies.id = jobs.company_id AND
-      // companies.user_id = auth.uid()). The old .in('company_id', companyIds)
-      // here re-sent every company id in the querystring, which passed the
-      // gateway's URL limit until the account grew past ~600 companies and then
-      // failed every load with a bare 400. The empty-companies early return
-      // above keeps the zero-companies UX identical.
+      // No 'all companies' filter: RLS already scopes every row to the person's own
+      // person_roles rows. The old .in('company_id', companyIds) re-sent every
+      // company id in the querystring, which passed the gateway's URL limit until
+      // the account grew past ~600 companies and then failed every load with a bare
+      // 400. The empty-companies early return above keeps the zero-companies UX
+      // identical.
 
       if (freshness !== 'all') {
         const cutoffIso = new Date(Date.now() - FRESHNESS_HOURS[freshness] * 60 * 60 * 1000).toISOString()
-        q = includeUndated
-          ? q.or(`posted_at.gte.${cutoffIso},posted_at.is.null`)
-          : q.gte('posted_at', cutoffIso)
+        if (includeUndated) start.or('posted_at.gte.' + cutoffIso + ',posted_at.is.null')
+        else start.gte('posted_at', cutoffIso)
       }
 
-      if (jobFunction !== 'all') q = q.eq('job_function', jobFunction)
-      if (seniority !== 'all') q = q.eq('seniority', seniority)
-      if (remoteOnly) q = q.eq('is_remote', true)
-      if (country.trim().length === 2) q = q.eq('country', country.trim().toUpperCase())
-      if (language !== 'all') q = q.eq('language', language)
+      if (jobFunction !== 'all') start.eq('job_function', jobFunction)
+      if (seniority !== 'all') start.eq('seniority', seniority)
+      if (remoteOnly) start.eq('is_remote', true)
+      if (country.trim().length === 2) start.eq('country', country.trim().toUpperCase())
+      if (language !== 'all') start.eq('language', language)
       if (hideLowQuality) {
         // NULL quality_score means "not classified yet" — never hide those,
         // only rows the classifier has actually scored below the threshold.
-        q = q.or(`quality_score.gte.${QUALITY_REJECT_THRESHOLD},quality_score.is.null`)
+        start.or('quality_score.gte.' + QUALITY_REJECT_THRESHOLD + ',quality_score.is.null')
       }
       if (debouncedLocationQuery.trim()) {
-        q = q.ilike('location', `%${debouncedLocationQuery.trim()}%`)
+        start.ilike('location', '%' + debouncedLocationQuery.trim() + '%')
       }
-      if (unscoredOnly) q = q.is('match_score', null)
-      if (side === 'matching' && targeting) q = applyRoleTargets(q, targeting, excludedIds)
-      return q
+      if (unscoredOnly) query.is('assessed_at', null)
+      if (side === 'matching' && targeting) applyRoleTargets(start, targeting, excludedIds)
+      return start.query
     }
 
-    let query = withFacets(untyped.from('jobs').select(JOB_SELECT_COLUMNS, { count: 'exact' }), scope)
+    let query = withFacets(untyped.from('person_roles').select(LIST_SELECT_COLUMNS, { count: 'exact' }), scope)
 
     // Sort on posted_at (never discovered_at, a single per-batch timestamp).
-    // best_match puts scored jobs above unscored via nullsFirst:false instead
-    // of collapsing null match_score to 0 in a client-side sort.
+    // best_match puts the roles the person is likely to want above unassessed ones via
+    // nullsFirst:false, instead of collapsing a missing want to 0 in a client-side sort.
     if (sortBy === 'best_match') {
       query = query
-        .order('match_score', { ascending: false, nullsFirst: false })
-        .order('posted_at', { ascending: false, nullsFirst: false })
+        .order('want_p', { ascending: false, nullsFirst: false })
+        .order('jobs(posted_at)', { ascending: false, nullsFirst: false })
     } else {
-      query = query.order('posted_at', { ascending: false, nullsFirst: false })
+      query = query.order('jobs(posted_at)', { ascending: false, nullsFirst: false })
     }
     // Deterministic tiebreaker so range() pagination never skips/repeats rows.
-    query = query.order('id', { ascending: true })
+    query = query.order('job_id', { ascending: true })
 
     const from = pageIndex * PAGE_SIZE
     const to = from + PAGE_SIZE - 1
@@ -701,7 +723,7 @@ function JobsPageInner() {
     const [{ data, count, error }, other] = await Promise.all([
       query.range(from, to),
       roleTargets
-        ? withFacets(untyped.from('jobs').select('id', { count: 'exact', head: true }), otherSide)
+        ? withFacets(untyped.from('person_roles').select('job_id, jobs!inner(id)', { count: 'exact', head: true }), otherSide)
         : Promise.resolve(null),
     ])
 
@@ -716,7 +738,7 @@ function JobsPageInner() {
       // clearing them — a failed refetch shouldn't blank out a list the user
       // was already looking at.
     } else if (data) {
-      const rows = data as unknown as Job[]
+      const rows = (data as unknown as ListRow[]).map(toJob).filter((j): j is Job => j !== null)
       setJobs((prev) => (append ? [...prev, ...rows] : rows))
       setTotalCount(count ?? 0)
       const here = count ?? 0
@@ -788,25 +810,18 @@ function JobsPageInner() {
   async function calculateMatch(jobId: string) {
     setCalculatingMatch(jobId)
     try {
-      const response = await fetch('/api/agents/match', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId }),
-      })
-      // Read as text first — a non-JSON body (platform error page, etc.)
-      // must not collapse into an opaque generic error.
+      const response = await fetch(`/api/roles/${jobId}/fit`, { method: 'POST' })
+      // Read as text first: a non-JSON body (platform error page, etc.) must not
+      // collapse into an opaque generic error.
       const rawText = await response.text()
-      let result: { error?: string; overallScore?: number } | null = null
+      let result: (RoleFit & { error?: string }) | null = null
       try {
         result = rawText ? JSON.parse(rawText) : null
-      } catch (parseErr) {
-        console.error('[jobs] calculateMatch: non-JSON response', {
-          status: response.status,
-          body: rawText.slice(0, 500),
-        })
+      } catch {
+        console.error('[jobs] calculateMatch: non-JSON response', { status: response.status, body: rawText.slice(0, 500) })
         toast({
           title: 'Error',
-          description: `Match calculation returned an unexpected response (HTTP ${response.status}).`,
+          description: `Checking this role returned an unexpected response (HTTP ${response.status}).`,
           variant: 'destructive',
         })
         return
@@ -815,26 +830,22 @@ function JobsPageInner() {
       if (!response.ok || !result || result.error) {
         toast({
           title: 'Error',
-          description: result?.error ?? `Failed to calculate match (HTTP ${response.status})`,
+          description: result?.error ?? `Could not check this role (HTTP ${response.status})`,
           variant: 'destructive',
         })
       } else {
-        // Update local state with new score
-        setJobs((prevJobs) =>
-          prevJobs.map((j) =>
-            j.id === jobId ? { ...j, match_score: result.overallScore ?? null, match_details: result } : j
-          )
-        )
+        const fit = result
+        setJobs((prevJobs) => prevJobs.map((j) => (j.id === jobId ? { ...j, person_roles: fitToColumns(fit) } : j)))
         toast({
-          title: 'Match calculated',
-          description: `Score: ${result.overallScore}%`,
+          title: fit.blocked.length > 0 ? 'Filtered out' : `Your chances: ${chanceLabel(fit.chance)}`,
+          description: fit.blocked[0]?.text ?? fit.want?.reason ?? undefined,
         })
       }
     } catch (error) {
       console.error('[jobs] calculateMatch failed:', error)
       toast({
         title: 'Error',
-        description: error instanceof Error ? `Failed to calculate match: ${error.message}` : 'Failed to calculate match',
+        description: error instanceof Error ? `Could not check this role: ${error.message}` : 'Could not check this role',
         variant: 'destructive',
       })
     }
@@ -863,7 +874,7 @@ function JobsPageInner() {
           body: rawText.slice(0, 500),
         })
         toast({
-          title: 'Batch scoring failed',
+          title: 'Could not check your roles',
           description: `Unexpected response from the server (HTTP ${response.status}). Try again.`,
           variant: 'destructive',
         })
@@ -927,25 +938,25 @@ function JobsPageInner() {
         const reachable = last.remainingInTargeting ?? last.remaining
         const excluded = last.excludedByTargeting ?? 0
         const parts = [
-          `Scored ${totalScored}${totalFailed > 0 ? `, ${totalFailed} failed` : ''}.`,
+          `Checked ${totalScored}${totalFailed > 0 ? `, ${totalFailed} could not be checked` : ''}.`,
           reachable === 0
-            ? 'Everything your filters allow is now scored.'
-            : `${reachable} still to score.`,
+            ? 'Everything your filters allow has been checked.'
+            : `${reachable} still to check.`,
         ]
-        // The number that actually explains this account: rows the scorer can
-        // never reach. Reporting them as "left to score" was the original lie.
+        // The number that actually explains this account: roles outside the function
+        // and level they asked for, which stay unchecked on purpose.
         if (excluded > 0) {
           parts.push(
-            `${excluded} more are excluded by your targeting and will not be scored — widen it in Settings → Job targeting.`
+            `${excluded} more are outside your targeting and will not be checked. Widen it in Settings, Job targeting.`
           )
         }
         toast({
-          title: stopBatchRef.current ? 'Scoring stopped' : 'Scoring complete',
+          title: stopBatchRef.current ? 'Checking stopped' : 'Checking complete',
           description: parts.join(' '),
         })
       }
 
-      // Refresh the current page so freshly scored jobs show updated badges.
+      // Refresh the current page so freshly checked roles show their chance.
       await fetchJobsPage(0, false)
     } catch (error) {
       console.error('[jobs] calculateBatch network error:', error)
@@ -1025,7 +1036,7 @@ function JobsPageInner() {
   // list, they never remove a row from it. Counting them would make "Clear
   // filters" the offered fix for an empty result set that titles cannot
   // possibly have caused.
-  const sortLabel = sortBy === 'best_match' ? 'Best match' : 'Newest first'
+  const sortLabel = sortBy === 'best_match' ? 'Best for you' : 'Newest first'
   const canLoadMore = jobs.length < totalCount
   // Derived from the live `jobs` array (not captured by value) so a match
   // calculated from a row, its badge, or a batch run updates this modal
@@ -1057,7 +1068,7 @@ function JobsPageInner() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="newest">Newest first</SelectItem>
-                <SelectItem value="best_match">Best match</SelectItem>
+                <SelectItem value="best_match">Best for you</SelectItem>
               </SelectContent>
             </Select>
           )}
@@ -1096,13 +1107,13 @@ function JobsPageInner() {
                     {/* Live count across rounds, so a multi-minute run is not a
                         spinner the user has to take on faith. */}
                     {batchProgress
-                      ? `Scored ${batchProgress.scored} · ${batchProgress.remaining} left`
-                      : 'Scoring…'}
+                      ? `Checked ${batchProgress.scored} · ${batchProgress.remaining} left`
+                      : 'Checking'}
                   </>
                 ) : (
                   <>
                     <LogoMark className="h-4 w-4" />
-                    {allScored ? 'All jobs scored' : 'Score unscored jobs'}
+                    {allScored ? 'All roles checked' : 'Check my roles'}
                   </>
                 )}
               </Button>
@@ -1136,9 +1147,9 @@ function JobsPageInner() {
                     <TooltipTrigger asChild>{batchButton}</TooltipTrigger>
                     <TooltipContent side="bottom" className="max-w-xs p-3">
                       <p className="text-caption text-muted-foreground">
-                        Keeps scoring until everything your filters allow is
-                        done — {BATCH_LIMIT} at a time, one metered AI call per
-                        job. You can stop it at any point. {budgetHint}.
+                        Keeps checking until everything your filters allow is
+                        done, {BATCH_LIMIT} at a time, with metered AI calls.
+                        You can stop it at any point. {budgetHint}.
                       </p>
                     </TooltipContent>
                   </Tooltip>
@@ -1152,7 +1163,7 @@ function JobsPageInner() {
                   <TooltipContent side="bottom" className="max-w-xs p-3">
                     <div className="space-y-2">
                       <p className="text-caption">
-                        {matchDisabledReason ?? 'No unscored jobs left in your backlog — nice work.'}
+                        {matchDisabledReason ?? 'Every role in your backlog has been checked.'}
                       </p>
                       {statusError && (
                         <Button size="sm" variant="outline" onClick={refetchStatus}>
@@ -1333,6 +1344,8 @@ function JobsPageInner() {
           apiKeyMessage={accountStatus?.llmKeyMessage}
           statusError={statusError}
           onRetryStatus={refetchStatus}
+          onAssess={() => calculateMatch(selectedJob.id)}
+          assessing={calculatingMatch === selectedJob.id}
         />
       )}
     </div>
