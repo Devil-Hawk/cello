@@ -186,9 +186,9 @@ export async function GET(request: NextRequest) {
         .range(from, from + SUMMARY_PAGE - 1)
       if (error && isMissingColumnError(error)) {
         columnsAvailable = false
-        ;({ data, error } = await openRolesOnly(personJobs(supabase).select(SUMMARY_COLUMNS_BASE))
+        ;({ data, error } = (await openRolesOnly(personJobs(supabase).select(SUMMARY_COLUMNS_BASE))
           .order('id', { ascending: true })
-          .range(from, from + SUMMARY_PAGE - 1))
+          .range(from, from + SUMMARY_PAGE - 1)) as unknown as { data: typeof data; error: typeof error })
       }
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       // description is intentionally absent from SUMMARY_COLUMNS — every
@@ -233,9 +233,9 @@ export async function GET(request: NextRequest) {
         .select(FULL_COLUMNS)
         .in('id', exampleIds)
       if (exampleError && isMissingColumnError(exampleError)) {
-        ;({ data: exampleRows, error: exampleError } = await personJobs(supabase)
+        ;({ data: exampleRows, error: exampleError } = (await personJobs(supabase)
           .select(BASE_COLUMNS)
-          .in('id', exampleIds))
+          .in('id', exampleIds)) as unknown as { data: typeof exampleRows; error: typeof exampleError })
       }
       if (exampleError) return NextResponse.json({ error: exampleError.message }, { status: 500 })
       for (const row of (exampleRows ?? []) as unknown as JobRow[]) {

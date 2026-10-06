@@ -361,6 +361,15 @@ describe('readSite: a single pasted posting is one role, never the whole site be
     expect(f.calls.filter((u) => u.includes('results?'))).toEqual([])
   })
 
+  it('a pasted Google posting keeps its place, and the person is not told the page names none', async () => {
+    const url = 'https://www.google.com/about/careers/applications/jobs/results/94350111848440518-senior-software-engineer-infrastructure-platforms-infrastructure-engineering'
+    const f = fakeFetcher({ 'https://www.google.com/robots.txt': fixture('google-robots.txt'), [url]: fixture('google-role.html') })
+    const read = await readSite(company('Google', 'google.com', url), { fetcher: f })
+    expect(read.single).toBe(true)
+    expect(read.jobs[0]).toMatchObject({ title: 'Senior Software Engineer, Infrastructure, Platforms Infrastructure Engineering', location: 'Sunnyvale, CA, USA' })
+    expect(read.message).toBeUndefined()
+  })
+
   it("a Microsoft posting link takes its place from the host's detail answer, as its page names none", async () => {
     const url = 'https://apply.careers.microsoft.com/careers/job/1970393557022797'
     const f = fakeFetcher({
@@ -384,7 +393,7 @@ describe('readSite: a single pasted posting is one role, never the whole site be
     const read = await readSite(company('Acme', 'acme.test', url), { fetcher: fakeFetcher({ [url]: html }) })
     expect(read.jobs).toHaveLength(1)
     expect(read.jobs[0].location).toBeUndefined()
-    expect(read.message).toBe('Found the posting. Its page does not say where the role is.')
+    expect(read.message).toBe('Found the posting. Cello could not read where the role is from its page.')
   })
 
   it('a link that is not a posting stores nothing, says so, and does not read the site around it', async () => {
@@ -446,5 +455,144 @@ describe('the rendered tier and the roles outside the targets', () => {
     expect(read.jobs.map((j) => j.title)).toEqual(['Data Engineer'])
     expect(read.complete).toBe(true)
     expect(read.listedIds).toHaveLength(2)
+  })
+})
+
+// The second host has no job word in its name, so only the standard-address rule can let its sitemap through.
+describe.each([
+  ['https://www.kaiserpermanentejobs.org', 'kaiserpermanentejobs.org'],
+  ['https://www.kphealth.test', 'kphealth.test'],
+])('a site that publishes its roles in a plain /sitemap.xml and names no sitemap in robots.txt (Kaiser Permanente at %s)', (origin, domain) => {
+  const home = `${origin}/`
+  const day = new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10)
+  const posting = (title: string) =>
+    `<html><head><title>${title}</title><script type="application/ld+json">${JSON.stringify({
+      '@type': 'JobPosting',
+      title,
+      description: `<p>${'You will care for patients, work with the care team and keep clear records. '.repeat(6)}</p>`,
+      datePosted: day,
+      hiringOrganization: { '@type': 'Organization', name: 'Kaiser Permanente' },
+      jobLocation: { '@type': 'Place', address: { '@type': 'PostalAddress', addressLocality: 'Seattle', addressRegion: 'WA', addressCountry: 'US' } },
+    })}</script></head><body><h1>${title}</h1></body></html>`
+  const roles = [
+    ['seattle-wa', 'data-engineer', '641', '84000001'],
+    ['oakland-ca', 'data-analyst', '641', '84000002'],
+    ['denver-co', 'software-engineer', '641', '84000003'],
+  ]
+  const urlOf = (r: string[]) => `${origin}/job/${r[0]}/${r[1]}/${r[2]}/${r[3]}`
+  const mixed = `<?xml version="1.0"?><urlset>${[`${origin}/`, `${origin}/about-us/`, `${origin}/search-jobs`, ...roles.map(urlOf)].map((u) => `<url><loc>${u}</loc></url>`).join('')}</urlset>`
+  const routes = (): Record<string, Route> => ({
+    [`${origin}/robots.txt`]: 'User-agent: *\nDisallow: /admin\n',
+    [home]: '<html><body><div id="app"></div></body></html>',
+    [`${origin}/sitemap.xml`]: mixed,
+    ...Object.fromEntries(roles.map((r) => [urlOf(r), posting(r[1].split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' '))])),
+  })
+
+  it('is read by the sitemap tier with no model and no browser', async () => {
+    const fetchPage = notCalled('the rendered fetch')
+    const read = await readSite(company('Kaiser Permanente', domain, home), { fetcher: fakeFetcher(routes()), fetchPage, model: null })
+    expect(read.reason).toBeNull()
+    expect(read.tier).toBe('sitemap')
+    expect(read.jobs.map((j) => j.title).sort()).toEqual(['Data Analyst', 'Data Engineer', 'Software Engineer'])
+    expect(fetchPage).not.toHaveBeenCalled()
+  })
+
+  it('is the same when robots.txt does not exist', async () => {
+    const r = routes()
+    delete r[`${origin}/robots.txt`]
+    const read = await readSite(company('Kaiser Permanente', domain, home), { fetcher: fakeFetcher(r) })
+    expect(read.tier).toBe('sitemap')
+    expect(read.jobs).toHaveLength(3)
+  })
+})
+
+describe('a pasted search page, and a landing page with a search form', () => {
+  const origin = 'https://careers.acme.test'
+  const day = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10)
+  const posting = (title: string) =>
+    `<html><head><title>${title}</title><script type="application/ld+json">${JSON.stringify({
+      '@type': 'JobPosting',
+      title,
+      description: `<p>${'You will build and ship data pipelines for the team and own your projects. '.repeat(6)}</p>`,
+      datePosted: day,
+      hiringOrganization: { '@type': 'Organization', name: 'Acme' },
+      jobLocation: { '@type': 'Place', address: { '@type': 'PostalAddress', addressLocality: 'Austin', addressRegion: 'TX', addressCountry: 'US' } },
+    })}</script></head><body><h1>${title}</h1></body></html>`
+  const results = (titles: string[]) =>
+    `<html><body><ul>${titles.map((t, i) => `<li><a href="/jobs/${72000001 + i}/${t.toLowerCase().replace(/\W+/g, '-')}">${t}</a></li>`).join('')}</ul></body></html>`
+  const searched = ['Data Engineer', 'Software Engineer', 'Analytics Engineer']
+  const pagesOf = (): Record<string, Route> =>
+    Object.fromEntries(searched.map((t, i) => [`${origin}/jobs/${72000001 + i}/${t.toLowerCase().replace(/\W+/g, '-')}`, posting(t)]))
+  // A sitemap full of other roles (stores, kitchens): what a person who searched did not ask for.
+  const sitemap = `<urlset>${[1, 2, 3].map((n) => `<url><loc>${origin}/jobs/store-associate/9100000${n}</loc></url>`).join('')}</urlset>`
+
+  it('the pasted results page is read before the sitemap that lists everything', async () => {
+    const url = `${origin}/us/en/search-results?keywords=software+engineer`
+    const f = fakeFetcher({
+      [`${origin}/robots.txt`]: `Sitemap: ${origin}/sitemap.xml`,
+      [`${origin}/sitemap.xml`]: sitemap,
+      [url]: results(searched),
+      ...pagesOf(),
+      ...Object.fromEntries([1, 2, 3].map((n) => [`${origin}/jobs/store-associate/9100000${n}`, posting('Store Associate')])),
+    })
+    const read = await readSite(company('Acme', 'acme.test', url), { fetcher: f })
+    expect(read.tier).toBe('listing')
+    expect(read.jobs.map((j) => j.title).sort()).toEqual([...searched].sort())
+    expect(f.calls).not.toContain(`${origin}/sitemap.xml`)
+  })
+
+  it('a landing page with a plain GET search form is searched with the person\'s words', async () => {
+    const landing = `${origin}/search`
+    const form = `<html><body><form action="/search/results" method="get"><input type="hidden" name="lang" value="en"><input type="search" name="keyword"><input type="submit"></form></body></html>`
+    const f = fakeFetcher({
+      [`${origin}/robots.txt`]: 'User-agent: *\nAllow: /',
+      [landing]: form,
+      [`${origin}/search/results?lang=en&keyword=engineer`]: results(searched),
+      ...pagesOf(),
+    })
+    const read = await readSite({ company: { name: 'Acme', domain: 'acme.test', careerUrl: landing }, targets: { ...targets, titles: ['engineer'] } }, { fetcher: f })
+    expect(read.tier).toBe('listing')
+    expect(read.jobs).toHaveLength(3)
+  })
+
+  it('a POST search form (NHS Jobs: CSRF token) is never submitted, and the result says the site could not be read', async () => {
+    const landing = `${origin}/candidate/search`
+    const form = `<html><body><form method="post" id="search_form"><input type="hidden" name="_csrf" value="x"><input name="keyword" type="search"><input type="submit"></form></body></html>`
+    const f = fakeFetcher({ [`${origin}/robots.txt`]: 'User-agent: *\nAllow: /', [landing]: form })
+    const read = await readSite(company('Acme', 'acme.test', landing), { fetcher: f })
+    expect(read.jobs).toEqual([])
+    expect(read.reason).toBe('no_roles')
+    expect(f.calls.some((c) => c.includes('keyword='))).toBe(false)
+  })
+})
+
+describe('a plain server-rendered university careers site (University of Michigan)', () => {
+  const origin = 'https://careers.umich.edu'
+  const jobUrl = `${origin}/job_detail/282948/atlas-platform-developer`
+  const landing = '<html><body><form action="/search-jobs" method="get"><input type="text" name="keyword"><input type="submit"></form></body></html>'
+
+  it('is read by the listing tier with no browser and no model, each role with its place and date', async () => {
+    // The page's posting window ends 2026-10-13: read as it was recorded.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-06T12:00:00Z'))
+    try {
+      const f = fakeFetcher({
+        [`${origin}/robots.txt`]: 'User-agent: *\nAllow: /',
+        [`${origin}/`]: landing,
+        [`${origin}/search-jobs?keyword=software+engineer`]: fixture('umich-search.html'),
+        [jobUrl]: fixture('umich-job.html'),
+      })
+      const fetchPage = notCalled('the rendered fetch')
+      const model = notCalled('the model')
+      const read = await readSite({ company: { name: 'University of Michigan', domain: 'umich.edu', careerUrl: `${origin}/` }, targets }, { fetcher: f, fetchPage, model })
+      expect(read.tier).toBe('listing')
+      expect(read.jobs).toHaveLength(1)
+      expect(read.jobs[0]).toMatchObject({ title: 'Atlas Platform Developer', location: 'Ann Arbor Campus / Ann Arbor, MI', requisitionId: '282948' })
+      expect(read.jobs[0].postedAt?.slice(0, 10)).toBe('2026-09-13')
+      expect(fetchPage).not.toHaveBeenCalled()
+      expect(model).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -38,7 +38,7 @@ import { EMPTY_TARGETING, type Targeting } from '../targeting'
 // Relative import (not `@/...`): lib/ats/* stays framework-free, and
 // lib/jobs/classify.ts is itself a zero-dependency pure module, so this is
 // safe in both the Next.js route and the plain-tsx scheduled script.
-import { classifyJob, isLowQuality } from '../jobs/classify'
+import { classifyJob, isLowQuality, parseLocation } from '../jobs/classify'
 // Same reasoning as classify above: lib/jobs/mojibake.ts is pure and
 // dependency-free, so importing it here keeps lib/ats framework-free.
 import { repairMojibake } from '../jobs/mojibake'
@@ -919,7 +919,12 @@ export async function syncJobs(
       fields.title = title
       Object.assign(fields, typeFields(typeTitle(title)))
     }
-    if (job.location && job.location !== have.location) fields.location = job.location
+    if (job.location && job.location !== have.location) {
+      fields.location = job.location
+      // A place that fills in later is what the country is read from: a role stored without one matched no country target.
+      const country = parseLocation(job.location).country
+      if (country) fields.country = country
+    }
     if (job.salary && job.salary !== have.salaryRange) fields.salary_range = job.salary
     // The body is re-read only when its hash changes. A snippet never replaces a body already stored, and a read that
     // found no body (a provider that did not send one this time) leaves the stored one alone.

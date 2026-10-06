@@ -252,8 +252,10 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
 
     async sitemapsOf(origin) {
       const robots = await robotsFor(`${origin}/`)
-      if (robots === 'allow' || robots === 'unreachable') return []
-      return robots.getSitemaps()
+      if (robots === 'unreachable') return []
+      // A site whose robots.txt names no sitemap may still publish one at the standard address (Kaiser Permanente does).
+      const named = robots === 'allow' ? [] : robots.getSitemaps()
+      return named.length ? named : [`${origin}/sitemap.xml`]
     },
 
     async get(url, opts = {}) {

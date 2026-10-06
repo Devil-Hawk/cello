@@ -60,4 +60,28 @@ begin
     raise notice 'a signed-in owner was refused';
   end;
 end $$;
+
+-- Fail closed: a signed-in role whose claims are missing or empty is refused too, and nothing is deleted.
+insert into public.jobs (id, company_id, title, description, url, external_id, source)
+select gen_random_uuid(), co, 'Fresh Role', 'd', 'https://p.invalid/9', 'cb-9', 'personio' from fx;
+select set_config('chk.co', co::text, true) from fx;
+set local role authenticated;
+select set_config('request.jwt.claims', '', true);
+do $$
+begin
+  begin
+    perform * from public.clear_unverified_board_jobs(current_setting('chk.co')::uuid, 'personio');
+    raise exception 'should have been refused';
+  exception when sqlstate '42501' then
+    raise notice 'empty claims were refused';
+  end;
+end $$;
+reset role;
+do $$
+declare f record;
+begin
+  select * into f from fx;
+  assert exists (select 1 from public.jobs where id = (select id from public.jobs where external_id = 'cb-9')), 'the role survives an empty-claims call';
+  raise notice 'ROLE SURVIVED';
+end $$;
 rollback;

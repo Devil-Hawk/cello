@@ -59,4 +59,26 @@ begin
     raise notice 'a signed-in owner was refused';
   end;
 end $$;
+
+-- Fail closed: a signed-in role whose claims are missing or empty is refused too, and nothing is deleted.
+select set_config('chk.co', co::text, true) from fx;
+set local role authenticated;
+select set_config('request.jwt.claims', '', true);
+do $$
+begin
+  begin
+    perform public.evict_company_jobs(current_setting('chk.co')::uuid, array['ev-3']);
+    raise exception 'should have been refused';
+  exception when sqlstate '42501' then
+    raise notice 'empty claims were refused';
+  end;
+end $$;
+reset role;
+do $$
+declare f record;
+begin
+  select * into f from fx;
+  assert exists (select 1 from public.jobs where id = f.unnamed_job), 'the role survives an empty-claims call';
+  raise notice 'ROLE SURVIVED';
+end $$;
 rollback;

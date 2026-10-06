@@ -119,6 +119,7 @@ function readDetailBase(html: string, url: string): RoleDetail {
   return {
     title,
     postedAt: posted,
+    ...(labelled.validThrough ? { validThrough: labelled.validThrough } : {}),
     ...(place ?? labelled.place ? { location: place ?? labelled.place } : {}),
     ...(labelled.requisitionId ? { requisitionId: labelled.requisitionId } : {}),
     jobTerms: terms,
@@ -128,11 +129,20 @@ function readDetailBase(html: string, url: string): RoleDetail {
   }
 }
 
+/** Material icon names a page puts before its place. */
+const PLACE_ICON = /^(?:place|location_on|location_pin|pin_drop)$/
+
 /**
  * A place the page marks up rather than labels in its text: a site's location icon (Amazon: an element with aria-label="location"
- * beside its list) or, on a page that shows its list beside the role, the card of the role being read (aria-current="page"; Google).
+ * beside its list; Google: a place icon beside the text) or, on a page that shows its list beside the role, the card of the role being read (aria-current="page"; Google).
  */
 function pagePlace($: cheerio.CheerioAPI): string | undefined {
+  // A location icon (Google's role page: <i aria-hidden="true">place</i><span>Sunnyvale, CA, USA</span>) is followed by the role's own place.
+  const pin = $('[aria-hidden="true"]')
+    .filter((_, el) => PLACE_ICON.test(clean($(el).text())))
+    .first()
+  const beside = clean(pin.next().text())
+  if (beside && beside.length <= 120) return beside
   const icon = clean($('[aria-label="location"]').first().parent().find('li').first().text())
   if (icon) return icon
   const cardLine = $('a[aria-current="page"] p').first()
@@ -157,29 +167,45 @@ const LABELLED_PLACE = /\b(?:office|job location|work location|locations?)\s*:\s
  * Facts a page lists as label, then value on the next line (a definition list: "Date posted", "Reference number", "Job locations").
  * Only labels that name one fact: a bare "Locations" heading is a menu as often as a place.
  */
-const LABEL_THEN_VALUE = (label: string) => new RegExp(`(?:^|\\n)\\s*(?:${label})\\s*:?[ \\t]*\\n+\\s*([^\\n]{2,80})`, 'i')
-const POSTED_LABEL = LABEL_THEN_VALUE('date posted|posted on|publication date|date published')
-const REQ_LABEL = LABEL_THEN_VALUE('reference number|job reference|reference|requisition(?: id| number)?|job id|req(?:uisition)? id')
+// The value's line is group 1; the line after it, when there is one, is group 2.
+const LABEL_THEN_VALUE = (label: string) => new RegExp(`(?:^|\\n)\\s*(?:${label})\\s*:?[ \\t]*\\n+\\s*([^\\n]{2,80})(?:\\n+[ \\t]*([^\\n]{2,60}))?`, 'i')
+const POSTED_LABEL = LABEL_THEN_VALUE('date posted|posted on|publication date|date published|posting (?:begin|start)(?:/end)? date|posting date|posted date')
+const REQ_LABEL = LABEL_THEN_VALUE('reference number|job reference|reference|requisition(?: id| number)?|job (?:opening )?(?:id|number)|req(?:uisition)? id')
 const PLACE_LABEL = LABEL_THEN_VALUE('job locations?|work locations?')
+/** The second line of a place ("Ann Arbor Campus", then "Ann Arbor, MI"): a city and a two-letter state, case-sensitive. */
+const CITY_STATE = /^[A-Z][\w .'-]{1,40}, [A-Z]{2}$/
+/** "9/13/2026 - 10/13/2026", "Sep 13, 2026 to Oct 13, 2026": spaces around the separator, so an ISO date is not split. */
+const DATE_RANGE = /\s+(?:-|\u2013|\u2014|to)\s+/
 
-function jobTermsAndPlace(html: string): { terms: number; place?: string; labelled: { postedAt?: string; requisitionId?: string; place?: string } } {
+function jobTermsAndPlace(html: string): { terms: number; place?: string; labelled: { postedAt?: string; validThrough?: string; requisitionId?: string; place?: string } } {
   let $: cheerio.CheerioAPI
   try {
     $ = cheerio.load(html)
   } catch {
     return { terms: 0, labelled: {} }
   }
-  $('script,style,noscript,svg,iframe,template,nav,header,footer,form,aside').remove()
+  $('script,style,noscript,svg,iframe,template,nav,header,footer,form').remove()
+  // A sidebar is where many sites keep a role's fact panel (UMich: Job Opening ID, Work Location, Posting Begin/End Date): its labelled
+  // facts are read, after the main text's own. It is not job language or a "Location:" line, which a menu would also supply.
+  const asideText = $('aside').toArray().map((el) => htmlToPlainText($.html(el), 50_000) ?? '').join('\n')
+  $('aside').remove()
   const text = htmlToPlainText($('body').html() ?? '', 200_000) ?? ''
-  const req = REQ_LABEL.exec(text)?.[1]?.trim()
-  const when = POSTED_LABEL.exec(text)?.[1]?.trim()
+  const facts = `${text}\n${asideText}`
+  const req = REQ_LABEL.exec(facts)?.[1]?.trim()
+  const [from, to] = (POSTED_LABEL.exec(facts)?.[1]?.trim() ?? '').split(DATE_RANGE)
+  const place = PLACE_LABEL.exec(facts)
+  const next = place?.[2]?.trim()
+  const dateOf = (v: string | undefined) => (v && /\d{4}/.test(v) ? isoOf(`${v} UTC`) : undefined)
+  const end = dateOf(to)
   return {
     terms: JOB_TERMS.filter((re) => re.test(text)).length,
     place: LABELLED_PLACE.exec(text)?.[1]?.trim(),
     labelled: {
-      postedAt: when && /\d{4}/.test(when) ? isoOf(`${when} UTC`) : undefined,
+      postedAt: dateOf(from),
+      // A posting window's end is the last day it is open: kept to the end of that day.
+      validThrough: end ? new Date(Date.parse(end) + 86_399_000).toISOString() : undefined,
       requisitionId: req && /\d/.test(req) && /^[\w./-]{3,40}$/.test(req) ? req : undefined,
-      place: PLACE_LABEL.exec(text)?.[1]?.trim(),
+      place: place?.[1] ? (next && CITY_STATE.test(next) ? `${place[1].trim()} / ${next}` : place[1].trim()) : undefined,
     },
   }
 }

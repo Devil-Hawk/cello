@@ -230,6 +230,14 @@ describe('refreshCompany: stored jobs', () => {
     expect(updated).toEqual([])
   })
 
+  it('a stored role whose place fills in gets its country', async () => {
+    listJobs({ absolute_url: 'https://acme.com/jobs/a', title: 'Data Engineer', location: { name: 'Sunnyvale, CA, USA' }, content: BODY })
+    const md5 = createHash('md5').update('Minimum requirements').digest('hex')
+    const { store, updated } = makeStore([stored('https://acme.com/jobs/a', { title: 'Data Engineer', location: null, descriptionMd5: md5 })])
+    await refreshCompany(store, COMPANY)
+    expect(updated[0].fields).toMatchObject({ location: 'Sunnyvale, CA, USA', country: 'US' })
+  })
+
   it('tells the provider which stored jobs already have a description', async () => {
     const seen: Array<(id: string) => boolean> = []
     const spy = vi.spyOn(providers.greenhouse, 'fetch').mockImplementation(async (_t, ctx) => {
