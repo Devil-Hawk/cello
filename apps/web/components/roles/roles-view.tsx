@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { useRouter } from 'next/navigation'
 import { AddCompanyDialog } from '@/components/companies/add-company-dialog'
 import { Key } from '@/components/ui/key'
@@ -81,7 +82,8 @@ export function RolesView({ query, items, picks, total, newToday, groupCounts, f
   const outsideText = query.tab === 'for-you' ? outsideLine(outside) : null
 
   async function removeSaved(id: string) {
-    await createClient().from('person_roles').update({ saved_at: null }).eq('job_id', id)
+    // The generated types predate person_roles.saved_at.
+    await (createClient() as unknown as SupabaseClient).from('person_roles').update({ saved_at: null }).eq('job_id', id)
     router.refresh()
   }
 
