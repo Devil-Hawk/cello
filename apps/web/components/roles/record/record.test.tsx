@@ -238,6 +238,8 @@ describe('checking the chance from the record', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/roles/4f5ad7eb-912c-4e15-ab3c-0f8248113d69/fit', { method: 'POST' })
     fetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'No resume uploaded. Add one in Settings first.' }) })
     expect(await checkChance('x')).toEqual({ ok: false, message: 'No resume uploaded. Add one in Settings first.' })
+    fetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'No model.', skippedReason: 'no-llm-key' }) })
+    expect(await checkChance('x')).toEqual({ ok: false, message: 'No model.', stop: true })
     fetchMock.mockRejectedValueOnce(new Error('offline'))
     expect((await checkChance('x')).ok).toBe(false)
     vi.unstubAllGlobals()

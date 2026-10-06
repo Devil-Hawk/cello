@@ -12,7 +12,7 @@ export async function checkChance(jobId: string): Promise<CheckResult> {
   try {
     const res = await fetch(`/api/roles/${jobId}/fit`, { method: 'POST' })
     const body = (await res.json().catch(() => null)) as (RoleFit & { error?: string; skippedReason?: string }) | null
-    if (!res.ok || !body) return { ok: false, message: body?.error ?? 'Could not check your chance. Try again.', stop: !!body?.skippedReason }
+    if (!res.ok || !body) return { ok: false, message: body?.error ?? 'Could not check your chance. Try again.', ...(body?.skippedReason ? { stop: true } : {}) }
     return { ok: true, fit: body }
   } catch {
     return { ok: false, message: 'Could not check your chance. Try again.' }
