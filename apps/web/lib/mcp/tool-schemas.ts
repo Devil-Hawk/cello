@@ -58,6 +58,14 @@ export const TOOL_SCHEMAS: Record<string, ZodRawShape> = {
   },
   web_search: { query: requiredQuery, limit },
   source_jobs: { query, limit },
+  search_roles: {
+    title: z.string().optional().describe('A role or its short form, such as FDE or ML engineer.'),
+    place: z.string().optional().describe('A city, a state code or remote.'),
+    postedWithinDays: z.number().int().positive().optional().describe('Only roles posted within this many days.'),
+    company: z.string().optional().describe('Only this followed company.'),
+    limit,
+    adjacent: z.boolean().optional().describe('Add adjacent titles. Only when the person asks for them.'),
+  },
   score_jobs: {
     query,
     limit,

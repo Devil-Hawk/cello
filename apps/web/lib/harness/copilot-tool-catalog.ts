@@ -114,6 +114,18 @@ export const COPILOT_TOOLS: ToolSpec[] = [
       'cannot browse further, take any action, or change anything.',
   },
   {
+    name: 'search_roles',
+    kind: 'read',
+    signature: 'search_roles {"title"?:string,"place"?:string,"postedWithinDays"?:number,"company"?:string,"limit"?:number,"adjacent"?:boolean}',
+    desc:
+      'Find roles in the companies the person follows: the same stored roles the Jobs page shows, inside their ' +
+      'targets. title takes a role or its short form (FDE, ML engineer); place takes a city, a state code or ' +
+      'remote; adjacent:true adds adjacent titles (Solutions Engineer for FDE) and is used only when the person ' +
+      'asks for them. Returns at most limit roles (default 10, max 25) with title, company, place, posted date ' +
+      'and link, plus answer: the reply to give for a find request. Lists followed companies not checked in the ' +
+      'last 6 hours under notChecked.',
+  },
+  {
     name: 'source_jobs',
     kind: 'act',
     signature: 'source_jobs {"query"?:string,"limit"?:number}',

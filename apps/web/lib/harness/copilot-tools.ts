@@ -55,6 +55,9 @@ import { getServerByName, toConfig, recordConnectionResult, buildMcpPromptContex
 import { callMcpTool } from '../mcp/client'
 import { McpError } from '../mcp/types'
 import { openRolesOnly } from '../jobs/freshness'
+import { applyRoleTargets, excludedCompanyIds, hasRoleTargets, quote } from '../targeting/roles'
+import { isTrackedCompany } from '../companies/watchlist'
+import { formatRoleAnswer, pickCompaniesToRefresh, placeMatcher, titleMatcher } from '../jobs/role-search'
 
 export {
   COPILOT_TOOLS,
@@ -524,6 +527,8 @@ async function dispatchToolInner(ctx: CopilotToolContext, tool: string, args: Ar
         return await getDossier(ctx, args)
       case 'check_sponsorship':
         return await checkSponsorship(args)
+      case 'search_roles':
+        return await doSearchRoles(ctx, args)
       case 'source_jobs':
         return await doSourceJobs(ctx, args)
       case 'score_jobs':
@@ -931,6 +936,119 @@ async function doWebSearch(ctx: CopilotToolContext, args: Args) {
 }
 
 // --- act tools ---------------------------------------------------------------
+
+/** How many stored roles one search_roles pass reads before the in-memory title and place match. */
+const SEARCH_ROLES_POOL = 300
+
+/**
+ * search_roles: the roles stored for the companies the person follows (the
+ * rows the Jobs page shows), inside their targets. No feed, no model: the
+ * answer is written by formatRoleAnswer.
+ */
+async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
+  const limit = clampLimit(args.limit, 10, 25)
+  const place = str(args.place)
+  const companyArg = str(args.company).toLowerCase()
+  const days = clampLimit(args.postedWithinDays, 0, 365)
+  const titleM = titleMatcher(str(args.title), args.adjacent === true)
+  const placeM = placeMatcher(place)
+
+  type CompanyRow = { id: string; name: string; metadata: unknown; last_scraped_at: string | null; career_url: string | null }
+  const { data: companyData } = await ctx.admin
+    .from('companies')
+    .select('id, name, metadata, last_scraped_at, career_url')
+    .eq('user_id', ctx.userId)
+  const followed = ((companyData as CompanyRow[]) ?? []).filter(isTrackedCompany)
+  const tracked = companyArg ? followed.filter((c) => c.name.toLowerCase().includes(companyArg)) : followed
+  const noRoles = (answer: string) => ({ jobs: [], count: 0, searched: [], notChecked: [], answer })
+  if (followed.length === 0) return noRoles(formatRoleAnswer({ searched: [], poolCount: 0, scoped: false, roles: [], limit, notChecked: [] }))
+  if (tracked.length === 0) {
+    return noRoles(`You do not follow a company named ${str(args.company)}. Following it on [Companies](/companies) brings its board in.`)
+  }
+
+  const { data: profile } = await ctx.admin.from('profiles').select('preferences').eq('id', ctx.userId).maybeSingle()
+  const targeting = resolveTargeting((profile?.preferences as Record<string, unknown> | null) ?? null)
+  const hasTargets = hasRoleTargets(targeting)
+  const excludedIds = excludedCompanyIds(tracked, targeting)
+  const ids = tracked.map((c) => c.id)
+  const nameById = new Map(tracked.map((c) => [c.id, c.name]))
+  const searched = tracked.map((c) => c.name)
+  const notChecked = pickCompaniesToRefresh(tracked, Date.now()).stale
+
+  // ponytail: the id list rides in the URL, which holds to about 600 followed companies; move to a companies.metadata filter past that.
+  const base = (scoped: boolean, columns: string, opts?: { count?: 'exact'; head?: boolean }) => {
+    let q: any = openRolesOnly(ownedJobsQuery(ctx.admin, ctx.userId, columns, opts)).in('company_id', ids)
+    if (scoped && hasTargets) q = applyRoleTargets(q, targeting, excludedIds)
+    return q
+  }
+  const { count } = await base(true, 'id, companies!inner(user_id)', { count: 'exact', head: true })
+
+  type RoleRow = {
+    id: string
+    title: string | null
+    url: string | null
+    location: string | null
+    is_remote: boolean | null
+    posted_at: string | null
+    company_id: string
+    match_score: number | null
+    is_new: boolean | null
+  }
+  const find = async (scoped: boolean): Promise<RoleRow[]> => {
+    let q = base(scoped, 'id, title, url, location, is_remote, posted_at, company_id, match_score, is_new, companies!inner(user_id, name)')
+    if (titleM) q = q.or(titleM.keywords.map((k) => `title.ilike.${quote(`%${k}%`)}`).join(','))
+    if (placeM) {
+      q = q.or(
+        placeM.remote
+          ? 'is_remote.eq.true,location.ilike.%remote%'
+          : placeM.patterns.map((p) => `location.ilike.${quote(`%${p}%`)}`).join(',')
+      )
+    }
+    if (days > 0) q = q.gte('posted_at', new Date(Date.now() - days * 86_400_000).toISOString())
+    // ponytail: the pool is the newest 300 matches of the title and place words; raise it if a title is that common.
+    const { data } = await q.order('posted_at', { ascending: false, nullsFirst: false }).limit(SEARCH_ROLES_POOL)
+    return ((data as RoleRow[]) ?? []).filter(
+      (r) => (!titleM || titleM.matches(r.title ?? '')) && (!placeM || placeM.matches(r.location, r.is_remote))
+    )
+  }
+
+  let rows = await find(true)
+  let inside = true
+  // The Jobs page shows these under "All roles"; never answer none while they exist.
+  if (rows.length === 0 && hasTargets) {
+    rows = await find(false)
+    inside = rows.length === 0
+  }
+  const picked = rows.slice(0, limit)
+  const jobs = picked.map((r) => ({
+    jobId: r.id,
+    title: r.title,
+    company: nameById.get(r.company_id) ?? null,
+    companyId: r.company_id,
+    matchScore: r.match_score,
+    fresh: r.is_new === true,
+    location: r.location,
+    postedAt: r.posted_at,
+    url: r.url,
+    insideTargets: inside,
+  }))
+  return {
+    jobs,
+    count: jobs.length,
+    searched,
+    notChecked,
+    answer: formatRoleAnswer({
+      searched,
+      poolCount: count ?? 0,
+      scoped: hasTargets,
+      title: titleM?.label,
+      place: place || undefined,
+      roles: picked.map((r, i) => ({ ...jobs[i], location: r.location, isRemote: r.is_remote, postedAt: r.posted_at })),
+      limit,
+      notChecked,
+    }),
+  }
+}
 
 /**
  * source_jobs: run the sourcing pass inline instead of handing the user off
