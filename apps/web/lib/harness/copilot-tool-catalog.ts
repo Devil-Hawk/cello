@@ -108,10 +108,9 @@ export const COPILOT_TOOLS: ToolSpec[] = [
       'Search the open web for anything Cello does not already know — a company fact, a recent event, docs for ' +
       'an unfamiliar tool, checking a claim. Free by default (DuckDuckGo); automatically upgrades to Exa if the ' +
       'user has configured that BYOK key in Settings. Returns raw titles/URLs/snippets from THIRD-PARTY pages — ' +
-      'unverified, not facts, and never a job lead on its own: for discovering NEW job postings (beyond Cello\'s ' +
-      'own tracked sources), use source_jobs instead — it already falls back to this same search as a last ' +
-      'resort and VERIFIES every hit against a live posting before it is ever treated as a job. Read-only: this ' +
-      'cannot browse further, take any action, or change anything.',
+      'unverified, not facts, and never a job lead on its own: for roles, use search_roles, which reads the ' +
+      'roles stored for the companies the person follows. Read-only: this cannot browse further, take any ' +
+      'action, or change anything.',
   },
   {
     name: 'search_roles',
@@ -134,25 +133,6 @@ export const COPILOT_TOOLS: ToolSpec[] = [
       'call, and report what was read. Call it before search_roles when search_roles lists companies under notChecked.',
   },
   {
-    name: 'source_jobs',
-    kind: 'act',
-    signature: 'source_jobs {"query"?:string,"limit"?:number}',
-    desc:
-      'Search 11 keyless job-aggregator APIs (TheMuse, Arbeitnow, RemoteOK, HN "Who is hiring", Y Combinator, and ' +
-      'more) for fresh postings, auto-track any new companies they name as suggestions, and insert what is new — ' +
-      'right here, no separate run to go watch. If those free sources still come up short after broadening ' +
-      '(adjacent titles, relaxed location/seniority), this automatically falls back to the harness\'s own ' +
-      'web_search tool as a last resort — site:-scoped queries against real ATS boards, every hit verified ' +
-      'against a live posting before it becomes a job — and reports that in notes. query narrows by role/keyword ' +
-      '(omit it to derive keywords from the resume); limit caps results (default 20, max 40). No LLM calls, so ' +
-      'it works even with no key configured. Use this instead of trigger_run for an ordinary "find more jobs" ' +
-      "ask. If a query inserts 0 new jobs, that's a signal to broaden and call it again with an adjacent query " +
-      '(a synonym title, a wider net) before concluding nothing is out there — do not stop at one empty pass. ' +
-      'Returned rows include companyId — use it directly with get_dossier/research_company for any company ' +
-      'worth checking.',
-    agent: 'sourcer',
-  },
-  {
     name: 'score_jobs',
     kind: 'act',
     signature: 'score_jobs {"query"?:string,"limit"?:number,"jobIds"?:string[]}',
@@ -163,7 +143,7 @@ export const COPILOT_TOOLS: ToolSpec[] = [
       'asking, and do not call this repeatedly in one turn to route around the cap. Omit BOTH jobIds and query ' +
       'ONLY when the ask is genuinely "score whatever is unscored" — it then falls back to oldest-first. When ' +
       'the user names criteria that narrow which jobs matter (a role, seniority, company trait), prefer passing ' +
-      'the specific jobIds you already identified from list_jobs/source_jobs; if you have not (or the pool is ' +
+      'the specific jobIds you already identified from list_jobs/search_roles; if you have not (or the pool is ' +
       'larger than what you listed), pass query (e.g. "AI Engineer") instead and it ranks the user\'s unscored ' +
       'jobs by relevance to that ask itself (title/description word matching, not oldest-first) and scores the ' +
       'top matches. Either way, do not let this default to oldest-first when the ask was about which roles fit, ' +
@@ -216,7 +196,7 @@ export const COPILOT_TOOLS: ToolSpec[] = [
       'Batch version of research_company: research several companies AT ONCE, fanned out internally with bounded ' +
       'concurrency, in a single tool call — this is how you verify/research a list of companies without burning a ' +
       'turn per company. Pass every companyId the ask needs checked (use the companyId already returned by ' +
-      'list_jobs/source_jobs — never invent one). COSTS REAL MONEY PER COMPANY, so batch size defaults to 5 and is ' +
+      'list_jobs/search_roles, never invent one). COSTS REAL MONEY PER COMPANY, so batch size defaults to 5 and is ' +
       'capped at 8 regardless of how many ids you pass; call again for the rest rather than raising limit past the ' +
       'cap. Returns one result row per company id with its own status/reason — a company that could not be found ' +
       'or researched never silently disappears from the response, and one bad id never fails the whole batch. For ' +
@@ -232,7 +212,7 @@ export const COPILOT_TOOLS: ToolSpec[] = [
       'Plan + execute a full autonomous multi-agent DAG server-side, in the background, for a goal genuinely ' +
       'bigger than a few direct tool calls — an explicit unattended or repeating campaign the user asked for ' +
       '(e.g. "keep sourcing and drafting applications for anything above 90 while I\'m away"). NOT the default ' +
-      'for ordinary "find/score/tailor/draft" requests: those have their own direct tools (source_jobs, ' +
+      'for ordinary "find/score/tailor/draft" requests: those have their own direct tools (search_roles, ' +
       'score_jobs, tailor_cv, draft_outreach, research_company), call those yourself, one at a ' +
       'time, and only reach for this when the ask cannot reasonably be narrated as a handful of tool calls in ' +
       'this conversation.',

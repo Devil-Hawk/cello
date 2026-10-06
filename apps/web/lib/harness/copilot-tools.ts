@@ -34,7 +34,6 @@ import { optimizeResume } from './agents/resume_optimizer'
 import { generateOutreachDraft, fallbackOutreachDraft, type OutreachDraftInput } from './agents/outreach'
 import { generateDossier, type CompanyResearcherResult } from './agents/company_researcher'
 import { cv_tailor } from './agents/cv_tailor'
-import { sourcer } from './agents/sourcer'
 import { runBulkMatch, type BulkMatchResult } from './agents/bulk_matcher'
 import { userCompanyIds, diagnoseCandidateJobs, ownedJobsQuery, type CandidateDiagnosis } from './agents/matcher'
 import { canRunLlm, missingOpenRouterMessage } from './llm-key-message'
@@ -117,17 +116,6 @@ const COPILOT_RUN_BUDGET = 90_000
  *  so a slow third-party server degrades one tool call, not the whole turn. */
 const MCP_CALL_TIMEOUT_MS = 20_000
 
-/** source_jobs result size. Default modest, hard cap generous enough for a
- *  real "find more roles" ask without turning one tool call into a firehose. */
-const SOURCE_JOBS_DEFAULT_LIMIT = 20
-const SOURCE_JOBS_MAX_LIMIT = 40
-/** Wall-clock ceiling for one source_jobs call. Each aggregator adapter
- *  retries internally (lib/sources/util.ts), and they run in parallel — this
- *  bounds the whole fan-out so one slow public API can't eat the turn (same
- *  reasoning as MCP_CALL_TIMEOUT_MS above, just a bit more headroom for 5
- *  adapters instead of 1). */
-const SOURCE_JOBS_TIMEOUT_MS = 25_000
-
 /** score_jobs batch size. Deliberately small: every job scored is a real LLM
  *  spend (bulk_matcher's tier-1 triage, plus tier-2 for anything promising) —
  *  this is the "bound it hard" the copilot's inline scoring tool needs that
@@ -135,7 +123,7 @@ const SOURCE_JOBS_TIMEOUT_MS = 25_000
 const SCORE_JOBS_DEFAULT_LIMIT = 10
 const SCORE_JOBS_MAX_LIMIT = 15
 /** Wall-clock ceiling for one score_jobs call (tier-1 triage plus any tier-2
- *  deep-pass calls for winners) — same defense as SOURCE_JOBS_TIMEOUT_MS, just
+ *  deep-pass calls for winners) — same defense as MCP_CALL_TIMEOUT_MS, just
  *  sized for LLM latency instead of HTTP fan-out. */
 const SCORE_JOBS_TIMEOUT_MS = 70_000
 
@@ -250,7 +238,7 @@ async function loadResume(ctx: CopilotToolContext): Promise<string> {
   return String((data?.resume_text as string | null) ?? '').trim()
 }
 
-/** Compact job row shared by list_jobs, source_jobs and score_jobs — this
+/** Compact job row shared by list_jobs, search_roles and score_jobs — this
  *  exact shape (jobId/title/company/matchScore/fresh/location/postedAt) is
  *  what components/copilot/observation-view.tsx's JobsTable renders, so
  *  every tool that hands the model a set of jobs renders the same way.
@@ -535,8 +523,6 @@ async function dispatchToolInner(ctx: CopilotToolContext, tool: string, args: Ar
         return await doRefreshCompanies(ctx)
       case 'search_roles':
         return await doSearchRoles(ctx, args)
-      case 'source_jobs':
-        return await doSourceJobs(ctx, args)
       case 'score_jobs':
         return await doScoreJobs(ctx, args)
       case 'optimize_resume':
@@ -937,7 +923,7 @@ async function doWebSearch(ctx: CopilotToolContext, args: Args) {
     count: res.results.length,
     backend: res.backend,
     results: res.results.map((r) => ({ title: r.title, url: r.url, snippet: r.snippet, publishedAt: r.publishedAt, source: r.source })),
-    note: 'Open-web search results — unverified third-party pages, not confirmed facts. For job leads specifically, use source_jobs instead (it verifies every hit before it becomes a job).',
+    note: 'Open-web search results — unverified third-party pages, not confirmed facts. For job leads, use search_roles, which reads the roles stored for the companies the person follows.',
   }
 }
 
@@ -1103,54 +1089,6 @@ async function doRefreshCompanies(ctx: CopilotToolContext) {
   return { companies, skippedFresh: fresh, noCareersPage: noSource }
 }
 
-/**
- * source_jobs: run the sourcing pass inline instead of handing the user off
- * to trigger_run. Calls the SAME sourcer agent (lib/harness/agents/sourcer.ts)
- * the harness DAG uses — via a lightweight in-file StepContext, exactly the
- * pattern doTailorCv already established below for cv_tailor — so nothing
- * about sourcing itself is reimplemented here. No LLM calls (queryAllSources
- * hits public JSON APIs only), so this works even with no key configured.
- */
-async function doSourceJobs(ctx: CopilotToolContext, args: Args) {
-  const query = str(args.query) || undefined
-  const limit = clampLimit(args.limit, SOURCE_JOBS_DEFAULT_LIMIT, SOURCE_JOBS_MAX_LIMIT)
-  const signal = boundSignal(ctx.signal, SOURCE_JOBS_TIMEOUT_MS)
-
-  const stepCtx: StepContext = {
-    userId: ctx.userId,
-    runId: 'copilot',
-    stepLabel: 'source_jobs',
-    agentType: 'sourcer',
-    input: { query, limit },
-    deps: {},
-    admin: ctx.admin,
-    apiKeys: ctx.apiKeys,
-    llm: makeRunner(ctx, signal, 'source-jobs'),
-    signal,
-  }
-
-  let output: unknown
-  try {
-    ;({ output } = await sourcer(stepCtx))
-  } catch (e) {
-    return { error: `Sourcing failed: ${errMsg(e)}` }
-  }
-  const out = output as { jobIds: string[]; found: number; inserted: number; notes?: string }
-  const jobs = await loadJobBriefs(ctx, out.jobIds.slice(0, 20))
-
-  return {
-    query: query ?? '(derived from your resume)',
-    found: out.found,
-    inserted: out.inserted,
-    jobs,
-    notes: out.notes,
-    note:
-      out.inserted === 0
-        ? 'No new postings this pass — try a broader query, or use score_jobs on what is already tracked.'
-        : undefined,
-  }
-}
-
 /** One job's outcome in score_jobs's per-job report — replaces the old bare
  *  aggregate "N failed" with a concrete, always-populated reason for every
  *  job that was asked about, whether or not it ever reached the model. */
@@ -1188,7 +1126,7 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
 
   const companyIds = await userCompanyIds(ctx.admin, ctx.userId)
   if (companyIds.length === 0) {
-    return { scored: 0, failed: 0, candidatesConsidered: 0, note: 'No companies tracked yet — use source_jobs first.' }
+    return { scored: 0, failed: 0, candidatesConsidered: 0, note: 'No companies tracked yet — follow companies on the Companies page first.' }
   }
 
   const limit = clampLimit(args.limit, SCORE_JOBS_DEFAULT_LIMIT, SCORE_JOBS_MAX_LIMIT)
@@ -1212,7 +1150,7 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
       scored: 0,
       failed: 0,
       candidatesConsidered: 0,
-      note: 'No unscored jobs found for your tracked companies — try source_jobs first.',
+      note: 'No unscored jobs found for your tracked companies — refresh_companies reads the boards of followed companies.',
     }
   }
 
@@ -1302,10 +1240,10 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
     note:
       relevanceInfo?.broadened
         ? `Nothing unscored matched "${relevanceInfo.query}" in the ${relevanceInfo.poolSize} most recent unscored ` +
-          'jobs, so this broadened to the newest unscored jobs instead of scoring nothing — consider source_jobs ' +
-          'with a matching query first if you want fresher candidates for this ask.'
+          'jobs, so this broadened to the newest unscored jobs instead of scoring nothing — consider refresh_companies ' +
+          'if you want fresher candidates for this ask.'
         : result.scored === 0 && result.candidatesConsidered === 0
-          ? 'Nothing scoreable in this batch — try source_jobs first, or widen targeting in Settings.'
+          ? 'Nothing scoreable in this batch — run refresh_companies, or widen targeting in Settings.'
           : undefined,
   }
 }
@@ -1608,9 +1546,16 @@ const PARTIAL_DOSSIER_NOTE: Record<string, string> = {
   unknown: 'Partial dossier: public signals collected, no AI summary.',
 }
 
+const FIND_ROLES_GOAL = /\b(find|source|search|discover|look(?:ing)? for)\b[^.]*\b(roles?|jobs?|postings?|openings?|positions?)\b/i
+
 async function doTriggerRun(ctx: CopilotToolContext, args: Args) {
   const goal = str(args.goal)
   if (!goal) return { error: 'goal is required' }
+  // ponytail: a campaign run's harness DAG can still plan the sourcer agent; closing that is a per-run agent
+  // allowlist in lib/harness/planner.ts, and the harness sourcer is out of scope here.
+  if (FIND_ROLES_GOAL.test(goal)) {
+    return { error: 'Finding roles is search_roles, over the companies the person follows. A background run is not used for it.' }
+  }
   const { data: run } = await ctx.admin
     .from('agent_runs')
     .insert({ user_id: ctx.userId, goal, status: 'queued', budget_tokens: COPILOT_RUN_BUDGET })

@@ -479,11 +479,15 @@ Operating rules:
   item, or once the batch's own cap is smaller than what's left to do (its result says so).
 - DO THE WORK YOURSELF, ONE TOOL AT A TIME, RIGHT HERE — the way you'd work in a coding
   session, not by handing off to a separate run the user has to go watch elsewhere. You have
-  direct tools for the things people actually ask for: source_jobs to pull fresh postings,
+  direct tools for the things people actually ask for: search_roles to find roles,
   score_jobs to rank a batch against the resume, optimize_resume / tailor_cv /
   draft_outreach to act on one job. Call one, read what it found, decide the
-  next step. A request like "find fresh roles and score them" is TWO ordinary tool calls
-  (source_jobs then score_jobs) in this conversation — not a reason to hand off.
+  next step. A request like "find roles and score them" is TWO ordinary tool calls
+  (search_roles then score_jobs) in this conversation — not a reason to hand off.
+  Finding roles: call search_roles (title, place, postedWithinDays, company, limit as asked).
+  If it lists notChecked companies, call refresh_companies once, then search_roles again.
+  Its answer is the reply. Never offer adjacent titles or other sources; use adjacent:true
+  only when the person asked for adjacent titles.
 - HOLD THE GOAL, DON'T JUST REACT TO THE LAST RESULT. Every planning call ends with a
   restatement of your standing objective for this turn (see "[standing objective]" at the
   bottom of your context) — judge your next move against THAT, not against the shape of the
@@ -504,7 +508,8 @@ Operating rules:
   offer "research X first" as one of several options in a question, that is the tell that you
   should just call research_company on X right now instead of asking — an offer to do the work
   is not the work; do it, then report what you found.
-- BROADEN ON EMPTY. A tool coming back with nothing usable (source_jobs inserted 0, score_jobs
+- BROADEN ON EMPTY, except a role search: search_roles answers an empty result itself. A tool
+  coming back with nothing usable (score_jobs
   had nothing scoreable, search_kb found no hits, or a filter you applied leaves zero results)
   is not a stopping point — it's a signal to relax the narrowest constraint and try again, the
   way a good recruiter would: an exact title -> an adjacent one (e.g. "AI Engineer" ->
@@ -557,7 +562,7 @@ function objectiveReminder(objective: string, trace: TraceEntry[]): string {
     `Steps taken so far this turn: ${recap}.\n` +
     'Decide your NEXT action by checking it against that objective, not just the last tool ' +
     "result: which part is still unmet, and which tool closes the gap? If a step came back " +
-    'empty or thin, broaden and retry (adjacent titles, wider location/freshness) before you ' +
+    'empty or thin, except a role search (search_roles answers an empty result itself), broaden and retry (a wider location/freshness) before you ' +
     'consider anything else. If a fact is missing but a tool could find it (visa sponsorship, ' +
     'funding stage, which jobs fit the resume), go get it — do not ask for it. If you can only ' +
     'partially satisfy the objective after genuinely trying, deliver that partial result with a ' +
@@ -1110,7 +1115,7 @@ async function dispatch(state: CopilotStateType, config: LangGraphRunnableConfig
                 'Not yet — the objective names a funding-stage/visa fact and you have not called ' +
                 'research_company, research_companies, or get_dossier this turn, with research budget ' +
                 'still available. Look it up for the specific companies still in play (use the companyId ' +
-                'values already returned by source_jobs/list_jobs — research_companies takes several at ' +
+                'values already returned by search_roles/list_jobs, research_companies takes several at ' +
                 'once) instead of asking or guessing, then decide with what you find. Only ask again if ' +
                 'something genuinely stays ambiguous after that.',
             },

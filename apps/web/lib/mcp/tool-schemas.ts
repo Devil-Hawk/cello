@@ -29,8 +29,8 @@
 import { z, type ZodRawShape } from 'zod'
 import { COPILOT_TOOLS } from '../harness/copilot-tool-catalog'
 
-const jobId = z.string().describe('A real jobId from list_jobs/source_jobs/score_jobs — never invented.')
-const companyId = z.string().describe('A real companyId from list_jobs/source_jobs — never invented.')
+const jobId = z.string().describe('A real jobId from list_jobs or search_roles, never invented.')
+const companyId = z.string().describe('A real companyId from list_jobs or search_roles, never invented.')
 const limit = z.number().int().positive().optional().describe('Caps how many results come back; each tool has its own default and hard max.')
 const query = z.string().optional().describe('Free-text filter/search query.')
 /** search_kb/web_search's own required variant — these two tools refuse to
@@ -58,7 +58,6 @@ export const TOOL_SCHEMAS: Record<string, ZodRawShape> = {
   },
   web_search: { query: requiredQuery, limit },
   refresh_companies: {},
-  source_jobs: { query, limit },
   search_roles: {
     title: z.string().optional().describe('A role or its short form, such as FDE or ML engineer.'),
     place: z.string().optional().describe('A city, a state code or remote.'),
