@@ -369,6 +369,7 @@ function clearAuthCookies(request: NextRequest, response: NextResponse): NextRes
 export const RETIRED_PAGES: Record<string, string> = {
   agent: '/copilot',
   prep: '/dashboard',
+  onboarding: '/welcome',
 }
 
 export async function middleware(request: NextRequest) {
@@ -396,7 +397,8 @@ export async function middleware(request: NextRequest) {
   const { response, user } = await updateSession(request)
 
   const isApi = pathname.startsWith('/api')
-  const isPublic = publicRoutes.some(route => pathname.startsWith(route))
+  // Landing is public by exact match: a startsWith('/') would make every page public.
+  const isPublic = pathname === '/' || publicRoutes.some(route => pathname.startsWith(route))
 
   if (!user) {
     // Allow public routes; API routes return their own 401s

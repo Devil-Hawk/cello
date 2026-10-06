@@ -1,10 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+
+// Throws unless a test hands it a session, so a page that must answer before
+// the session is read (a retired page, a fixture) proves it by never reaching this.
+const readSession = vi.hoisted(() =>
+  vi.fn(async (): Promise<{ response: unknown; user: unknown }> => {
+    throw new Error('a retired page must redirect before the session is read')
+  }),
+)
 
 vi.mock('@/lib/supabase/middleware', () => ({
-  updateSession: async () => {
-    throw new Error('a retired page must redirect before the session is read')
-  },
+  updateSession: () => readSession(),
 }))
 
 import { middleware, RETIRED_PAGES } from './middleware'
@@ -44,5 +50,27 @@ describe('fixture pages', () => {
     vi.stubEnv('VERCEL_ENV', 'preview')
     expect((await middleware(new NextRequest('http://localhost/fixtures/roles'))).status).toBe(200)
     vi.unstubAllEnvs()
+  })
+})
+
+describe('Landing and the first-run page', () => {
+  it('sends the old onboarding address to Welcome', async () => {
+    const res = await middleware(new NextRequest('http://localhost/onboarding'))
+    expect(res.status).toBe(307)
+    expect(new URL(res.headers.get('location')!).pathname).toBe('/welcome')
+  })
+
+  it('does not redirect a signed-out visitor away from Landing', async () => {
+    readSession.mockResolvedValueOnce({ response: NextResponse.next(), user: null })
+    const res = await middleware(new NextRequest('http://localhost/'))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('location')).toBeNull()
+  })
+
+  it('still sends a signed-out visitor to sign in from any other page', async () => {
+    readSession.mockResolvedValueOnce({ response: NextResponse.next(), user: null })
+    const res = await middleware(new NextRequest('http://localhost/roles'))
+    expect(res.status).toBe(307)
+    expect(new URL(res.headers.get('location')!).pathname).toBe('/login')
   })
 })
