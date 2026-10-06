@@ -195,7 +195,7 @@ const FORWARDERS: Record<string, string> = {
     'the same way it is for copilot-tools.ts.',
   'apps/web/app/api/a2a/route.ts':
     "The A2A endpoint (langgraph port step 3): parses an inbound message into an id-only request " +
-    "(lib/a2a/agent.ts's A2aAgentRequest — jobIds/companyId, no free-text override field at " +
+    "(lib/a2a/agent.ts's A2aAgentRequest, jobIds/companyId, no free-text override field at " +
     'all: see that file\'s header) and hands it to invokeGraphForUser. Builds no prompt of its own and does not ' +
     "currently match this scan's CANDIDATES filter (no `.description`/prompt marker in its source, " +
     'or in lib/a2a/executor.ts, which is the same shape) — listed here per ruling 7\'s instruction, ' +

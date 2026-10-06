@@ -31,7 +31,7 @@ export type AgentType = z.infer<typeof AgentTypeSchema>
 export type StepAgentType = z.infer<typeof StepAgentTypeSchema>
 
 /**
- * Every unit lib/graph/unit.ts#runAgentUnit can run — sixteen total:
+ * Every unit lib/graph/unit.ts#runAgentUnit can run, sixteen total:
  * StepAgentType's nine plannable agents, the five graph-port stragglers
  * (bulk_matcher, digest, outreach, resume_optimizer, strategist) that are
  * real, callable units without being plannable, plus analyst and application_follow_up. See

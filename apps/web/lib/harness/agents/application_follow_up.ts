@@ -480,7 +480,7 @@ export const application_follow_up: AgentFn = async (ctx) => {
   try {
     draftMessage = await generateMessageByType(llmClientFrom(ctx.llm), messageType, messageContext)
   } catch {
-    // No key, a provider failure, an aborted budget — this unit degrades to
+    // No key, a provider failure, an aborted budget, this unit degrades to
     // a deterministic template rather than leaving the suggestion undrafted.
     draftMessage = getFallbackMessage(messageType, messageContext)
   }

@@ -1,7 +1,7 @@
 // Question: "Which resume variants perform better?" (resume_documents -> application outcome)
 //
 // applications.resume_version is written by NOTHING in this codebase today
-// (grepped: read nowhere either, as of the langgraph port — an old follow-up
+// (grepped: read nowhere either, as of the langgraph port, an old follow-up
 // route was the last reader, and it built that field into an
 // AgentContext its unit never actually consulted) so it cannot be used
 // to link an application to the resume that was actually sent.

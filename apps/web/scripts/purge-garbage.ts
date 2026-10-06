@@ -25,7 +25,7 @@
  *
  * WHAT IS NEVER DELETED
  *   jobs      any job with an application, an application draft or an outreach
- *             message attached (applications cascade off jobs — deleting the
+ *             message attached (applications cascade off jobs, deleting the
  *             job would delete the user's pipeline row).
  *   companies anything with an application, a generated dossier, a contact, an
  *             outreach message, a working ATS provider in

@@ -1,4 +1,4 @@
-// POST /api/mcp — Cello as an MCP server: the same 18 first-party copilot
+// POST /api/mcp, Cello as an MCP server: the same 18 first-party copilot
 // tools (lib/harness/copilot-tool-catalog.ts's COPILOT_TOOLS, the registry
 // dispatchTool switches on), reachable by any MCP host, behind the same
 // guards the copilot's own graph enforces before it ever runs one.

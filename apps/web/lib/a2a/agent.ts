@@ -24,7 +24,7 @@ import type { Message, Part } from '@a2a-js/sdk'
 import { PlanSchema, MatcherInput, CompanyResearcherInput } from '../harness/schemas'
 import type { Plan, RunStatus } from '../harness/types'
 
-/** The two read/draft-only agents A2A exposes — matches
+/** The two read/draft-only agents A2A exposes, matches
  *  supabase/migrations/20260819000002_a2a_tasks.sql's `agent` CHECK. */
 export const A2A_AGENTS = ['matcher', 'company_researcher'] as const
 export type A2aAgent = (typeof A2A_AGENTS)[number]

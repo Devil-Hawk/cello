@@ -33,7 +33,7 @@
 // app/api/mcp/route.ts joins this file for the SAME invariant (MCP step of
 // the port): submitOrSendReason must run unconditionally, strictly before
 // dispatchTool, inside the one tool-callback template buildServer() registers
-// for all 18 tools — MCP has no confirm/review interrupt to fall back on (no
+// for all 18 tools, MCP has no confirm/review interrupt to fall back on (no
 // human is watching this connection), so a guard that could be skipped here
 // would be a silent auto-approval, not a pause. See that file's own header.
 

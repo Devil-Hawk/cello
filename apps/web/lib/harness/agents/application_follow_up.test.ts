@@ -175,7 +175,7 @@ describe('follow-up timing', () => {
     expect(capturedSystem).toContain('professional messages')
     expect(capturedPrompt).toContain('thank you email')
     // The chain-of-thought block is part of the actual prompt sent to the
-    // model, not decoration — every prompt builder embeds it.
+    // model, not decoration, every prompt builder embeds it.
     expect(capturedPrompt).toContain('## REASONING PROCESS')
     expect(capturedPrompt).toContain('<think>')
   })

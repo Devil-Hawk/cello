@@ -213,7 +213,7 @@ export const COPILOT_TOOLS: ToolSpec[] = [
       'bigger than a few direct tool calls — an explicit unattended or repeating campaign the user asked for ' +
       '(e.g. "keep sourcing and drafting applications for anything above 90 while I\'m away"). NOT the default ' +
       'for ordinary "find/score/tailor/draft" requests: those have their own direct tools (source_jobs, ' +
-      'score_jobs, tailor_cv, draft_outreach, research_company) — call those yourself, one at a ' +
+      'score_jobs, tailor_cv, draft_outreach, research_company), call those yourself, one at a ' +
       'time, and only reach for this when the ask cannot reasonably be narrated as a handful of tool calls in ' +
       'this conversation.',
   },

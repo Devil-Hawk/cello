@@ -23,7 +23,7 @@ const SKILL_DESCRIPTIONS: Record<(typeof A2A_AGENTS)[number], string> = {
 
 const NAME = 'cello'
 const DESCRIPTION =
-  'Cello: read/draft-only job-search agents over A2A. matcher and company_researcher — neither of these ' +
+  'Cello: read/draft-only job-search agents over A2A: matcher and company_researcher. Neither of these ' +
   'agents has a submit-capable code path (see lib/a2a/graph-shape.test.ts). Every field is an id into the caller\'s ' +
   'own already-tracked jobs/companies; no free-text job posting or resume override is accepted.'
 const VERSION = '1.0.0'
