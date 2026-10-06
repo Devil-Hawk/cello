@@ -68,6 +68,8 @@ export type RoleIntentId =
   | 'security-engineer'
   | 'qa-engineer'
   | 'product-manager'
+  | 'fde'
+  | 'analytics-engineer'
 
 export interface RoleIntentDef {
   id: RoleIntentId
@@ -346,6 +348,25 @@ export const ROLE_TAXONOMY: readonly RoleIntentDef[] = [
       'full stack engineer', 'executive assistant', 'recruiter',
       'sales representative', 'account executive',
     ],
+  },
+  {
+    id: 'fde',
+    label: 'Forward Deployed Engineer',
+    queryTokenGroups: [['forward', 'deployed'], ['fde']],
+    titleKeywords: ['forward deployed', 'forward-deployed', 'fde'],
+    adjacentKeywords: [
+      'solutions engineer', 'deployment strategist', 'implementation engineer',
+      'customer engineer', 'solutions architect',
+    ],
+    excludeKeywords: IC_EXCLUDES,
+  },
+  {
+    id: 'analytics-engineer',
+    label: 'Analytics Engineer',
+    queryTokenGroups: [['analytics', 'engineer']],
+    titleKeywords: ['analytics engineer'],
+    adjacentKeywords: ['data engineer', 'data analyst', 'business intelligence engineer'],
+    excludeKeywords: IC_EXCLUDES,
   },
 ]
 
