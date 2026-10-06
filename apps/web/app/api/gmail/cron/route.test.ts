@@ -84,7 +84,7 @@ beforeEach(() => {
   loadApiKeysMock.mockReset()
   getGmailAccessTokenMock.mockResolvedValue({ ok: true, accessToken: 'live-token' })
   loadApiKeysMock.mockResolvedValue({})
-  runGmailSyncCoreMock.mockResolvedValue({ success: true, processed: 0, isFirstSync: false, message: 'ok', totalScanned: 0, createdCompanies: [], createdApplications: [], statusUpdates: [], unmatched: [] })
+  runGmailSyncCoreMock.mockResolvedValue({ success: true, processed: 0, isFirstSync: false, message: 'ok', totalScanned: 0, unmatchedEmployers: 0, createdApplications: [], statusUpdates: [], unmatched: [] })
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -129,7 +129,7 @@ describe('POST /api/gmail/cron — per-user isolation', () => {
     profiles = [makeProfile('user-ok'), makeProfile('user-bad')]
     runGmailSyncCoreMock.mockImplementation(async ({ userId }: { userId: string }) => {
       if (userId === 'user-bad') throw new Error('Gmail API rate limited')
-      return { success: true, processed: 1, isFirstSync: false, message: 'ok', totalScanned: 1, createdCompanies: [], createdApplications: [], statusUpdates: [], unmatched: [] }
+      return { success: true, processed: 1, isFirstSync: false, message: 'ok', totalScanned: 1, unmatchedEmployers: 0, createdApplications: [], statusUpdates: [], unmatched: [] }
     })
 
     const response = await POST(cronRequest())

@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge'
 import { CompanyLogo } from '@/components/companies/company-logo'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
+import { saveCompany } from '@/lib/companies/add'
 
 interface VerificationResult {
   isValid: boolean
@@ -28,7 +29,7 @@ interface VerificationResult {
   aiVerified: boolean
 }
 
-type ResolveSource = 'known' | 'greenhouse' | 'lever' | 'ashby' | 'ai'
+type ResolveSource = 'known' | 'possible' | 'ai'
 
 interface ResolveCandidate {
   name: string
@@ -37,6 +38,7 @@ interface ResolveCandidate {
   source: ResolveSource
   confidence: 'high' | 'medium' | 'low'
   logoUrl?: string
+  note?: string
 }
 
 interface ResolveResponse {
@@ -46,9 +48,7 @@ interface ResolveResponse {
 
 const SOURCE_LABEL: Record<ResolveSource, string> = {
   known: 'Known company',
-  greenhouse: 'Greenhouse board found',
-  lever: 'Lever board found',
-  ashby: 'Ashby board found',
+  possible: 'Possible match',
   ai: 'AI suggested · verified',
 }
 
@@ -58,7 +58,8 @@ export interface AddCompanyDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Called after a company was successfully inserted. */
-  onAdded: () => void
+  /** Called with the new company's id so the caller can check its roles at once. */
+  onAdded: (companyId?: string) => void
 }
 
 export function AddCompanyDialog({ open, onOpenChange, onAdded }: AddCompanyDialogProps) {
@@ -81,6 +82,7 @@ export function AddCompanyDialog({ open, onOpenChange, onAdded }: AddCompanyDial
   // Shared.
   const [isDreamCompany, setIsDreamCompany] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   function reset() {
     setMode('name')
@@ -92,6 +94,7 @@ export function AddCompanyDialog({ open, onOpenChange, onAdded }: AddCompanyDial
     setCareerUrl('')
     setVerification(null)
     setIsDreamCompany(false)
+    setSaveError(null)
   }
 
   function handleOpenChange(next: boolean) {
@@ -185,31 +188,30 @@ export function AddCompanyDialog({ open, onOpenChange, onAdded }: AddCompanyDial
     if (!ready) return
 
     setIsSaving(true)
+    setSaveError(null)
     const {
       data: { user },
     } = await supabase.auth.getUser()
     if (!user) {
+      setSaveError('You are signed out. Sign in again to add a company.')
       setIsSaving(false)
       return
     }
 
-    const { error } = await supabase.from('companies').insert({
-      user_id: user.id,
+    const result = await saveCompany(supabase, user.id, {
       name: ready.name,
       domain: ready.domain,
-      logo_url: ready.logoUrl,
-      // companies.career_url is NOT NULL — '' is the established "no career page
-      // yet" sentinel (see getCompanyDomain/isBareHomepage). A tracked company
-      // with no board is legitimate; a bare homepage URL is not (that's what
-      // fed the garbage HTML-scraper fallback), so we never write one here.
-      career_url: ready.careerUrl ?? '',
-      is_dream_company: isDreamCompany,
+      careerUrl: ready.careerUrl,
+      logoUrl: ready.logoUrl,
+      isDream: isDreamCompany,
     })
 
-    if (!error) {
+    if (result.error === undefined) {
       reset()
       onOpenChange(false)
-      onAdded()
+      onAdded(result.id)
+    } else {
+      setSaveError(result.error)
     }
 
     setIsSaving(false)
@@ -311,6 +313,7 @@ export function AddCompanyDialog({ open, onOpenChange, onAdded }: AddCompanyDial
                             </div>
                             <p className="mt-0.5 truncate text-caption text-muted-foreground">
                               {candidate.careerUrl ??
+                                candidate.note ??
                                 (candidate.domain
                                   ? `${candidate.domain} · no verified career page yet`
                                   : 'No verified career page yet — you can still add it')}
@@ -448,6 +451,11 @@ export function AddCompanyDialog({ open, onOpenChange, onAdded }: AddCompanyDial
                 Mark as dream company
               </span>
             </label>
+          )}
+          {saveError && (
+            <p role="alert" className="text-caption text-destructive">
+              {saveError}
+            </p>
           )}
         </div>
 

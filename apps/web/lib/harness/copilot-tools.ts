@@ -54,6 +54,7 @@ import { isValidTool, getToolSpec, isMcpToolName, parseMcpToolName, type StepAge
 import { getServerByName, toConfig, recordConnectionResult, buildMcpPromptContext } from '../mcp/registry'
 import { callMcpTool } from '../mcp/client'
 import { McpError } from '../mcp/types'
+import { openRolesOnly } from '../jobs/freshness'
 
 export {
   COPILOT_TOOLS,
@@ -599,7 +600,7 @@ async function listJobs(ctx: CopilotToolContext, args: Args) {
   // pushed into the FK join rather than an .in('company_id', ids) array —
   // ids can run into the hundreds, past the request URL length limit.
   const baseQuery = () => {
-    let q = ownedJobsQuery(ctx.admin, ctx.userId, SELECT)
+    let q = openRolesOnly(ownedJobsQuery(ctx.admin, ctx.userId, SELECT))
     if (dreamOnly) q = q.eq('companies.is_dream_company', true)
     if (fresh) q = q.eq('is_new', true)
     return q

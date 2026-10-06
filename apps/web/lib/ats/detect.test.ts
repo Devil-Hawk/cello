@@ -85,20 +85,29 @@ describe('probeAts', () => {
     expect(urls.some((u) => u.includes('myworkdayjobs.com'))).toBe(false)
   })
 
-  it('stops at the first provider returning a job and reuses its payload', async () => {
-    const urls = mockProbes('apply.workable.com', {
-      jobs: [{ title: 'Staff Engineer', url: 'https://apply.workable.com/j/ABCD1234', published_on: '2026-07-01' }],
-    })
+  it('skips a first hit nothing ties to the company, and takes the next board that verifies', async () => {
+    const recent = new Date(Date.now() - 30 * 86_400_000).toISOString()
+    const urls: string[] = []
+    globalThis.fetch = vi.fn(async (url: string) => {
+      urls.push(url)
+      // Greenhouse answers with a namesake: jobs, but nothing points at acme.com.
+      if (url.includes('boards-api.greenhouse.io/v1/boards/acme/jobs')) {
+        return jsonResponse({ jobs: [{ absolute_url: 'https://boards.greenhouse.io/other/jobs/1', title: 'Chef', first_published: recent }] })
+      }
+      // Workable's board links to the company's own domain.
+      if (url.includes('apply.workable.com') && url.includes('acme')) {
+        return jsonResponse({ jobs: [{ title: 'Staff Engineer', url: 'https://acme.com/careers/ABCD1234', published_on: recent }] })
+      }
+      return new Response('not found', { status: 404, statusText: 'Not Found' })
+    }) as unknown as typeof fetch
 
     const detected = await probeAts({ domain: 'acme.com', name: 'Acme' })
 
-    expect(detected).toMatchObject({ provider: 'workable', token: 'acme', source: 'probe' })
+    expect(detected).toMatchObject({ provider: 'workable', token: 'acme', source: 'probe', verifiedBy: 'board_links_home' })
     expect(detected?.jobs).toHaveLength(1)
-    expect(detected?.jobs?.[0].externalId).toBe('https://apply.workable.com/j/ABCD1234')
+    expect(detected?.jobs?.[0].externalId).toBe('https://acme.com/careers/ABCD1234')
     // Nothing after workable in PROBE_ORDER was touched.
-    expect(urls.some((u) => u.includes('recruitee') || u.includes('smartrecruiters') || u.includes('personio'))).toBe(
-      false
-    )
+    expect(urls.some((u) => u.includes('recruitee') || u.includes('smartrecruiters') || u.includes('personio'))).toBe(false)
   })
 
   it('returns null (never throws) when nothing matches', async () => {

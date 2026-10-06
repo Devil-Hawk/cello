@@ -92,3 +92,17 @@ export function htmlSectionsToPlainText(
   if (parts.length === 0) return undefined
   return parts.join('\n\n').slice(0, maxChars)
 }
+
+/** The distinct hosts a posting's HTML links to (href values), at most 10, www. dropped. */
+export function linkHostsOf(html: string): string[] {
+  const hosts = new Set<string>()
+  for (const m of html.matchAll(/href\s*=\s*["']([^"']+)["']/gi)) {
+    try {
+      hosts.add(new URL(m[1]).hostname.toLowerCase().replace(/^www\./, ''))
+    } catch {
+      /* relative or mailto: */
+    }
+    if (hosts.size >= 10) break
+  }
+  return [...hosts]
+}

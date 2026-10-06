@@ -38,6 +38,8 @@ function makeSupabase() {
       const filters: { col: string; val: unknown }[] = []
       const builder = {
         select: () => builder,
+        // trackedOnly's null-safe filter: the fixtures here have no suggested rows.
+        or: () => builder,
         eq(col: string, val: unknown) {
           filters.push({ col, val })
           return builder

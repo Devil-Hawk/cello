@@ -1,5 +1,6 @@
 'use client'
 
+import { trackedOnly } from '@/lib/companies/watchlist'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
@@ -85,10 +86,9 @@ export default function DashboardLayout({
               supabase as unknown as SupabaseClient
             )
             if (!prefs?.onboardedAt) {
-              const { count } = await supabase
-                .from('companies')
-                .select('id', { count: 'exact', head: true })
-                .eq('user_id', user.id)
+              const { count } = await trackedOnly(
+                supabase.from('companies').select('id', { count: 'exact', head: true }).eq('user_id', user.id)
+              )
               if (!count) router.push('/onboarding')
             }
           } catch {

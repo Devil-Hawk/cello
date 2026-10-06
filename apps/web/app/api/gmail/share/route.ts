@@ -13,6 +13,7 @@
 import { createHash } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { trackedOnly } from '@/lib/companies/watchlist'
 import { getDecryptedApiKeys } from '@/lib/apikeys'
 import { classifyJob } from '@/lib/jobs/classify'
 import type { PipelineStage } from '@/lib/format'
@@ -109,18 +110,12 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const { data: existingCompanies } = await supabase
-      .from('companies')
-      .select('id, name, domain, metadata')
-      .eq('user_id', user.id)
-
-    const isSuggested = (metadata: unknown) =>
-      !!metadata && typeof metadata === 'object' && !Array.isArray(metadata) &&
-      (metadata as Record<string, unknown>).suggested === true
+    const { data: existingCompanies } = await trackedOnly(
+      supabase.from('companies').select('id, name, domain').eq('user_id', user.id)
+    )
 
     let trackedCompany: { id: string; name: string; domain: string | null } | null = null
     for (const c of existingCompanies ?? []) {
-      if (isSuggested(c.metadata)) continue
       if (parsed.companyDomain && c.domain && c.domain.toLowerCase() === parsed.companyDomain.toLowerCase()) {
         trackedCompany = c
         break
@@ -129,7 +124,7 @@ export async function POST(request: NextRequest) {
     if (!trackedCompany && parsed.companyName) {
       const target = normalizeCompanyName(parsed.companyName)
       trackedCompany = (existingCompanies ?? []).find(
-        (c) => !isSuggested(c.metadata) && normalizeCompanyName(c.name) === target
+        (c) => normalizeCompanyName(c.name) === target
       ) ?? null
     }
 

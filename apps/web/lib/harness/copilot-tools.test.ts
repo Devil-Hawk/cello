@@ -104,6 +104,13 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
     })
     return this
   }
+  // openRolesOnly: the fixtures hold no stale or closed rows (freshness.test.ts covers the filter).
+  or(_filters: string, _opts?: unknown) {
+    return this
+  }
+  not(_col: string, _op: string, _val: unknown) {
+    return this
+  }
   order(_col: string, _opts?: unknown) {
     return this
   }

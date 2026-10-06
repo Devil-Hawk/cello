@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import runpy
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -13,6 +13,7 @@ from src import runner
 from src.runner import is_due
 
 NOW = datetime(2026, 10, 4, 12, 0, 0)
+URL = "https://careers.example.com"
 
 
 def _ago(minutes: float) -> str:
@@ -63,6 +64,9 @@ class _Table:
     def select(self, *_):
         return self
 
+    def eq(self, *_):
+        return self
+
     def execute(self):
         return _Result(self.rows)
 
@@ -83,12 +87,101 @@ def test_get_companies_to_scrape_applies_the_clamp_and_orders_dream_first(monkey
 
     monkeypatch.setattr(runner, "datetime", FrozenNow)
     rows = [
-        {"id": "a", "name": "b-regular", "last_scraped_at": None},
-        {"id": "b", "name": "a-dream", "is_dream_company": True, "last_scraped_at": _ago(61)},
-        {"id": "c", "name": "c-fast", "scrape_frequency": 1, "last_scraped_at": _ago(120)},
+        {"id": "a", "name": "b-regular", "career_url": URL, "last_scraped_at": None},
+        {"id": "b", "name": "a-dream", "career_url": URL, "is_dream_company": True, "last_scraped_at": _ago(61)},
+        {"id": "c", "name": "c-fast", "career_url": URL, "scrape_frequency": 1, "last_scraped_at": _ago(120)},
     ]
     due = asyncio.run(runner.get_companies_to_scrape(_Client(rows)))
     assert [c["id"] for c in due] == ["b", "a"]
+
+
+def _frozen(monkeypatch):
+    class FrozenNow(datetime):
+        @classmethod
+        def utcnow(cls):
+            return NOW
+
+    monkeypatch.setattr(runner, "datetime", FrozenNow)
+
+
+class TestOnlyTrackedCompaniesWithACareersPage:
+    def _due(self, monkeypatch, extra):
+        _frozen(monkeypatch)
+        rows = [{"id": "kept", "career_url": URL, "last_scraped_at": None}, {"id": "other", **extra}]
+        due = asyncio.run(runner.get_companies_to_scrape(_Client(rows)))
+        return [c["id"] for c in due]
+
+    def test_suggested_leads_are_skipped(self, monkeypatch):
+        assert self._due(monkeypatch, {"career_url": URL, "metadata": {"suggested": True}}) == ["kept"]
+
+    def test_rows_without_a_careers_url_are_skipped(self, monkeypatch):
+        assert self._due(monkeypatch, {"career_url": ""}) == ["kept"]
+        assert self._due(monkeypatch, {"career_url": None}) == ["kept"]
+        assert self._due(monkeypatch, {"career_url": "  "}) == ["kept"]
+
+    def test_null_or_unflagged_metadata_is_kept(self, monkeypatch):
+        assert self._due(monkeypatch, {"career_url": URL, "metadata": None}) == ["kept", "other"]
+        assert self._due(monkeypatch, {"career_url": URL, "metadata": {"suggested": False}}) == ["kept", "other"]
+
+    def test_a_specific_company_id_is_not_filtered(self, monkeypatch):
+        rows = [{"id": "x", "career_url": "", "metadata": {"suggested": True}}]
+        assert asyncio.run(runner.get_companies_to_scrape(_Client(rows), "x")) == rows
+
+
+class TestOldPostingsAreNotStored:
+    def test_a_200_day_old_posting_is_dropped_and_a_10_day_old_one_kept(self, monkeypatch):
+        now = datetime.now(UTC)
+
+        def job(i, age_days):
+            return type(
+                "Job",
+                (),
+                {
+                    "title": f"t{i}", "description": "d", "url": f"https://careers.example.com/{i}",
+                    "location": None, "salary_range": None, "job_type": None, "external_id": str(i),
+                    "posted_at": now - timedelta(days=age_days) if age_days is not None else None,
+                },
+            )()
+
+        class Res:
+            success = True
+            error = None
+            jobs = [job(1, 200), job(2, 10), job(3, None)]
+            duration_ms = 1
+
+        stored = []
+
+        class Table:
+            def __init__(self, name):
+                self.name = name
+
+            def upsert(self, row, **_):
+                stored.append(row["external_id"])
+                return self
+
+            def update(self, *_):
+                return self
+
+            def eq(self, *_):
+                return self
+
+            def execute(self):
+                return None
+
+        class Sb:
+            def table(self, name):
+                return Table(name)
+
+        monkeypatch.setattr(runner, "IntelligentScraper", _scraper_returning(Res()))
+        asyncio.run(runner.scrape_company({"id": "c", "career_url": URL}, None, Sb()))
+        assert stored == ["2", "3"]
+
+    def test_the_cutoff_is_180_days(self):
+        now = datetime(2026, 10, 4, tzinfo=UTC)
+        assert not runner.is_stale_posting(now - timedelta(days=180), now)
+        assert runner.is_stale_posting(now - timedelta(days=181), now)
+        assert runner.is_stale_posting(datetime(2026, 1, 1), now)  # naive reads as UTC
+        assert not runner.is_stale_posting(None, now)
 
 
 def _scraper_returning(res):

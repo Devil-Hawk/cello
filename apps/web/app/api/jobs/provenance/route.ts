@@ -26,6 +26,7 @@ import {
   type JobProvenanceInput,
 } from '@/lib/sources/provenance'
 import type { ApplyProviderId } from '@/lib/ats-apply/types'
+import { openRolesOnly } from '@/lib/jobs/freshness'
 
 export const dynamic = 'force-dynamic'
 
@@ -174,16 +175,12 @@ export async function GET(request: NextRequest) {
 
     let from = 0
     for (; from < SUMMARY_MAX_ROWS; from += SUMMARY_PAGE) {
-      let { data, error } = await supabase
-        .from('jobs')
-        .select(SUMMARY_COLUMNS)
+      let { data, error } = await openRolesOnly(supabase.from('jobs').select(SUMMARY_COLUMNS))
         .order('id', { ascending: true })
         .range(from, from + SUMMARY_PAGE - 1)
       if (error && isMissingColumnError(error)) {
         columnsAvailable = false
-        ;({ data, error } = await supabase
-          .from('jobs')
-          .select(SUMMARY_COLUMNS_BASE)
+        ;({ data, error } = await openRolesOnly(supabase.from('jobs').select(SUMMARY_COLUMNS_BASE))
           .order('id', { ascending: true })
           .range(from, from + SUMMARY_PAGE - 1))
       }
@@ -213,10 +210,9 @@ export async function GET(request: NextRequest) {
     // description text. Verified byte-for-byte identical to the JS
     // trim().length check against this table's full production data (0
     // mismatches across all 21,157 rows) — this is not an approximation.
-    const { count: descriptionComplete, error: descCountError } = await supabase
-      .from('jobs')
-      .select('id', { count: 'exact', head: true })
-      .ilike('description', '_'.repeat(MIN_DESCRIPTION_CHARS) + '%')
+    const { count: descriptionComplete, error: descCountError } = await openRolesOnly(
+      supabase.from('jobs').select('id', { count: 'exact', head: true })
+    ).ilike('description', '_'.repeat(MIN_DESCRIPTION_CHARS) + '%')
     if (descCountError) return NextResponse.json({ error: descCountError.message }, { status: 500 })
     breakdown.descriptionComplete = descriptionComplete ?? 0
     breakdown.descriptionMissing = breakdown.total - breakdown.descriptionComplete
@@ -253,9 +249,7 @@ export async function GET(request: NextRequest) {
   const offset = Math.max(0, Number(searchParams.get('offset')) || 0)
 
   const build = (columns: string) => {
-    let query = supabase
-      .from('jobs')
-      .select(columns, { count: 'exact' })
+    let query = openRolesOnly(supabase.from('jobs').select(columns, { count: 'exact' }))
       .order('discovered_at', { ascending: false })
       .range(offset, offset + limit - 1)
     if (companyId) query = query.eq('company_id', companyId)
