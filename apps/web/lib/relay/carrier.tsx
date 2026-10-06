@@ -1,8 +1,9 @@
 'use client'
 
 // The page carrier: while a Cello page is open, it runs the person's queued model jobs
-// on their own computer. Supabase Realtime tells it a job was queued (one websocket,
-// no polling); it claims once per announcement, runs the job on loopback and posts the
+// on their own computer (R2, Ollama or LM Studio on loopback) or in their own browser
+// (R1, a small model in a worker). Supabase Realtime tells it a job was queued (one
+// websocket, no polling); it claims once per announcement, runs the job and posts the
 // text back. It holds no key, no tool and no command, and it renders nothing.
 //
 // Drained by recursion, not a timer: a claim that finds a job runs it and claims
@@ -10,10 +11,11 @@
 
 import { useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { askWorker, DEFAULT_BASE, deviceCanRun, type DeviceNav, type LocalConfig, type LocalRequest, runLocal } from './local'
 import type { ClaimedJob } from './protocol'
-import { DEFAULT_BASE, type LocalConfig, runLocal } from './local'
 
 const STORAGE_KEY = 'cello.relay.local'
+const BROWSER_KEY = 'cello.relay.browser'
 
 /** The person's own choice of local runtime and model, set up in Settings. */
 export function readLocalConfig(): LocalConfig | null {
@@ -36,29 +38,53 @@ export function saveLocalConfig(cfg: LocalConfig): void {
   }
 }
 
+/** "This browser" is on or off for this device. */
+export const readBrowserModelOn = (): boolean => {
+  try {
+    return window.localStorage.getItem(BROWSER_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function saveBrowserModelOn(on: boolean): void {
+  try {
+    window.localStorage.setItem(BROWSER_KEY, on ? '1' : '0')
+  } catch {
+    /* blocked storage: the browser model stays off */
+  }
+}
+
 async function post(path: string, body: unknown): Promise<Response> {
   return fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
 }
 
-/** Claim one job, run it, post the answer, then look for the next. Exported for the tests. */
+/** Claim one job at this rung, run it, post the answer, then look for the next. Exported for the tests. */
 export async function drain(
-  cfg: LocalConfig,
-  deps: { post?: typeof post; run?: typeof runLocal; doFetch?: Parameters<typeof runLocal>[2] } = {},
+  rung: 'R1' | 'R2',
+  run: (req: LocalRequest) => Promise<string>,
+  send: typeof post = post,
 ): Promise<number> {
-  const send = deps.post ?? post
-  const run = deps.run ?? runLocal
-  const claimed = await send('/api/model-jobs/claim', { rung: 'R2' })
+  const claimed = await send('/api/model-jobs/claim', { rung })
   if (!claimed.ok) return 0
   const { job } = (await claimed.json()) as { job: ClaimedJob | null }
   if (!job) return 0
   let answer: { text: string } | { error: string }
   try {
-    answer = { text: await run(cfg, job.request, deps.doFetch) }
+    answer = { text: await run(job.request) }
   } catch (err) {
-    answer = { error: err instanceof Error ? err.message.slice(0, 500) : 'The local model failed.' }
+    answer = { error: err instanceof Error ? err.message.slice(0, 500) : 'The model failed.' }
   }
   await send('/api/model-jobs/result', { job_id: job.job_id, claim_id: job.claim_id, ...answer })
-  return 1 + (await drain(cfg, deps))
+  return 1 + (await drain(rung, run, send))
+}
+
+// One worker per page, made the first time an R1 job needs it. The WebLLM chunk is
+// fetched then and never otherwise.
+let worker: Worker | null = null
+const browserModel = (req: LocalRequest): Promise<string> => {
+  worker ??= new Worker(new URL('../models/webllm.worker.ts', import.meta.url), { type: 'module' })
+  return askWorker(worker, req)
 }
 
 export function PageCarrier({ userId, enabled }: { userId: string; enabled: boolean }) {
@@ -68,15 +94,15 @@ export function PageCarrier({ userId, enabled }: { userId: string; enabled: bool
     let busy = false
     let again = false
     const work = async (): Promise<void> => {
-      const cfg = readLocalConfig()
-      if (!cfg) return
       if (busy) {
         again = true
         return
       }
       busy = true
       try {
-        await drain(cfg)
+        const cfg = readLocalConfig()
+        if (cfg) await drain('R2', (req) => runLocal(cfg, req))
+        if (readBrowserModelOn() && (await deviceCanRun(navigator as unknown as DeviceNav)) === null) await drain('R1', browserModel)
       } finally {
         busy = false
       }
@@ -90,11 +116,11 @@ export function PageCarrier({ userId, enabled }: { userId: string; enabled: bool
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'model_jobs', filter: `user_id=eq.${userId}` },
-        () => void work(),
+        () => void work().catch(() => undefined),
       )
       .subscribe((status) => {
         // Jobs queued while no page was open are claimed on connect.
-        if (status === 'SUBSCRIBED') void work()
+        if (status === 'SUBSCRIBED') void work().catch(() => undefined)
       })
     return () => {
       void supabase.removeChannel(channel)
