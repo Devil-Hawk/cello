@@ -3,7 +3,7 @@ import { HttpError } from '../ats/http'
 import type { AtsJob } from '../ats/types'
 import type { BoardIdentity, BoardRef } from '../ats/verify'
 import { fakeDb } from './fake-db'
-import { checkBoard, declaredDomain, settleCandidate, writeEmployer, type CandidateRow, type VerifyDeps } from './verify-directory'
+import { checkBoard, declaredDomain, settleCandidate, verifyEmployer, writeEmployer, type CandidateRow, type VerifyDeps } from './verify-directory'
 
 const NOW = Date.parse('2026-10-06T12:00:00Z')
 const DAY = 86_400_000
@@ -149,6 +149,43 @@ describe('writeEmployer: the one writer of company_directory', () => {
     // a site-only check never nulls the board either
     await writeEmployer(client, { ...base, domain: 'retellai.com', provider: null, token: null, careersUrl: 'https://evil.example/jobs' }, () => NOW)
     expect(tables.company_directory).toEqual([real])
+  })
+
+  it('a person or a lead leaves a row that is there exactly as it is: found by board, by domain with a board, or by domain site-only', async () => {
+    const real = { id: 'e1', source: 'person', name: 'Retell AI', domain: 'retellai.com', ats_provider: 'greenhouse', ats_token: 'real', verified_by: 'careers_page_link', careers_url: 'https://retellai.com/jobs' }
+    const siteOnly = { id: 'e2', source: 'person', name: 'Acme', domain: 'acme.com', ats_provider: null, ats_token: null, verified_by: 'careers_url_host', careers_url: 'https://acme.com/jobs' }
+    const { client, tables } = fakeDb({ company_directory: [{ ...real }, { ...siteOnly }] })
+    // a pasted page the person controls that links the verified board
+    const hit = await writeEmployer(client, { ...base, name: 'Evil', domain: 'evil.example', careersUrl: 'https://evil.example/jobs', provider: 'greenhouse', token: 'real', verifiedBy: 'careers_page_link', keepExisting: true }, () => NOW)
+    expect(hit).toBe('e1')
+    // a lead whose companyDomain is the site-only employer's, with a board of its own
+    const lead = await writeEmployer(client, { ...base, domain: 'acme.com', provider: 'ashby', token: 'attacker', keepExisting: true, source: 'lead' }, () => NOW)
+    expect(lead).toBe('e2')
+    expect(tables.company_directory).toEqual([real, siteOnly])
+  })
+})
+
+describe('verifyEmployer: a lead never gives a site-only row a board, and a board never gives a row its domain', () => {
+  it('a lead with the employer domain leaves a site-only row without a board', async () => {
+    const siteOnly = { id: 'e2', source: 'person', name: 'Acme', domain: 'acme.com', ats_provider: null, ats_token: null, verified_by: 'careers_url_host', careers_url: 'https://acme.com/jobs' }
+    const { client, tables } = fakeDb({ company_directory: [{ ...siteOnly }] })
+    const r = await verifyEmployer(client, { name: 'Acme', domain: 'acme.com', boards: [{ provider: 'greenhouse', token: 'acme' }], source: 'lead' }, world({ identity: { name: 'Acme', homeUrls: ['https://acme.com'] } }))
+    expect(r).toEqual({ ok: true, employerId: 'e2' })
+    expect(tables.company_directory).toEqual([siteOnly])
+  })
+
+  it('a board that declares a domain does not give it to a seed row that has none', async () => {
+    const { client, tables } = fakeDb({ company_directory: [] })
+    await verifyEmployer(client, { name: 'Gusto', domain: null, boards: [{ provider: 'greenhouse', token: 'gusto' }], source: 'seed' }, world({ identity: { name: 'Gusto', homeUrls: ['https://gusto.com'] } }))
+    expect(tables.company_directory[0].domain ?? null).toBeNull()
+  })
+
+  it('a page link alone does not verify a board whose provider names another employer and declares no home', async () => {
+    const r = await checkBoard(
+      { name: 'Evil', domain: 'evil.example', careerUrl: 'https://evil.example/careers', provider: 'workable', token: 'retell' },
+      world({ identity: { name: 'Retell AI', homeUrls: [] }, page: [{ provider: 'workable', token: 'retell' }] })
+    )
+    expect(r).toMatchObject({ ok: false, reason: 'other_owner' })
   })
 })
 
