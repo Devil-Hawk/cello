@@ -175,15 +175,17 @@ export interface Settled {
  * `ask(null)` is the model's first answer; `ask(feedback)` asks again with what failed.
  * A failing part goes back once. If the second ask itself fails, the first answer's passing parts stand.
  */
-export async function settleAnswer(ask: (feedback: string | null) => Promise<ModelAnswer>, input: CheckInput): Promise<Settled> {
-  let checked = checkAnswer(await ask(null), input)
+export async function settleAnswer(ask: (feedback: string | null) => Promise<ModelAnswer>, inputOf: CheckInput | (() => CheckInput)): Promise<Settled> {
+  // The results a turn checks against are the ones its tools returned, so they are read after each ask, not before.
+  const input = () => (typeof inputOf === 'function' ? inputOf() : inputOf)
+  let checked = checkAnswer(await ask(null), input())
   if (checked.failures.length) {
     const feedback = [
       'Some statements were not tied to the right thing. Fix each or remove it. Use only numbers, dates and quotations from the command results for the thing a part is about.',
       ...checked.failures.map((f) => `Part ${f.part}: ${f.reason}.`),
     ].join('\n')
     try {
-      checked = checkAnswer(await ask(feedback), input)
+      checked = checkAnswer(await ask(feedback), input())
     } catch {
       // Keep the first answer's passing parts rather than lose the turn.
     }
