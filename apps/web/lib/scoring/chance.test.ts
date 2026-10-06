@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { LlmResult, LlmRunOptions } from '@/lib/harness/types'
 import { MissingKeyError } from '@/lib/harness/llm'
 import { assessChances, labelChance, resumeLines, verifyChecks, type CitationStats } from './chance'
-import type { Requirement, RequirementsOutcome } from './requirements'
+import type { Requirement, RequirementsOutcome } from './posting-requirements'
 import type { RequirementCheck, RoleFacts } from './types'
 
 const RESUME = `Jane Doe
@@ -14,7 +14,7 @@ Skills: Go, Java, PostgreSQL, AWS`
 const lines = resumeLines(RESUME)
 
 function req(id: string, text: string, mustHave = true, kind: Requirement['kind'] = 'skill'): Requirement {
-  return { id, text, kind, mustHave, quote: text }
+  return { id, text, kind, mustHave, quote: text, origin: 'code' }
 }
 
 function chk(status: RequirementCheck['status'], mustHave = true, text = 'x'): RequirementCheck {
@@ -149,16 +149,14 @@ describe('assessChances', () => {
     return { fn, calls }
   }
 
-  it('answers without a model call when the posting is thin, unreadable or the resume is missing', async () => {
+  it('answers without a model call when the posting is thin or the resume is missing', async () => {
     const { fn } = llmReturning('{}')
     const res = await assessChances(fn, RESUME, [
       { role: role('thin'), outcome: { kind: 'thin', reason: 'The posting has no description yet.' } },
-      { role: role('bad'), outcome: { kind: 'failed', reason: 'x' } },
     ])
     expect(fn).not.toHaveBeenCalled()
     expect(res.get('thin')).toMatchObject({ chance: 'cannot_assess', checks: [] })
     expect(res.get('thin')!.note).toContain('Cannot assess yet')
-    expect(res.get('bad')!.chance).toBe('cannot_assess')
     const none = await assessChances(fn, '', [{ role: role('a'), outcome: ok(reqs) }])
     expect(none.get('a')!.note).toContain('Add your resume')
   })

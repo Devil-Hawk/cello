@@ -3,7 +3,7 @@
 // offline evaluation, so both run exactly the same pipeline code.
 
 import type { BlendModel, FitEvidence } from './taste'
-import type { RequirementsOutcome } from './requirements'
+import type { RequirementsOutcome } from './posting-requirements'
 import type { Assessment, ChanceResult, ReactionRecord, ShortlistPick } from './types'
 
 export interface StoredTaste {
@@ -32,9 +32,8 @@ export interface ScoringStore {
   /** The person's reactions, newest first is not guaranteed; callers sort. */
   reactions(userId: string): Promise<ReactionRecord[]>
   setReactionEmbeddings(userId: string, items: { id: string; embedding: number[]; model: string }[]): Promise<void>
-  /** Cached requirement reads that are still current. Failed reads are never cached. */
+  /** What each role asks for, from the posting reader's record. A role the store knows nothing about is left out of the map. */
   requirements(userId: string, jobIds: string[]): Promise<Map<string, RequirementsOutcome>>
-  saveRequirements(userId: string, entries: Map<string, RequirementsOutcome>): Promise<void>
   priorAssessments(userId: string, jobIds: string[]): Promise<Map<string, PriorAssessment>>
   taste(userId: string): Promise<StoredTaste | null>
   saveTaste(userId: string, taste: StoredTaste, counts: { n: number; positive: number }): Promise<void>
@@ -70,9 +69,6 @@ export class MemoryStore implements ScoringStore {
       if (v) out.set(id, v)
     }
     return out
-  }
-  async saveRequirements(_u: string, entries: Map<string, RequirementsOutcome>): Promise<void> {
-    for (const [id, v] of entries) if (v.kind !== 'failed') this.requirementRows.set(id, v)
   }
   async priorAssessments(_u: string, jobIds: string[]): Promise<Map<string, PriorAssessment>> {
     const out = new Map<string, PriorAssessment>()

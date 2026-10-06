@@ -152,10 +152,6 @@ const PROMPT_BUILDERS: Record<string, string> = {
     'lib/graph/verify/cv-tailor.ts / outreach.ts). Uses frameJobTextList, same ' +
     "batch shape as lib/scoring/want-judge.ts, so this file's own scan-mutation check " +
     'documented in its header stays true.',
-  'apps/web/lib/scoring/requirements.ts':
-    'extractRequirements puts each posting description in the extraction prompt. Frames the batch ' +
-    'with frameJobTextList (one preface, one marker per posting). The output is then grounded in code: ' +
-    'a requirement whose quote is not verbatim in the posting is discarded.',
   'apps/web/lib/scoring/want-judge.ts':
     'judgeWant puts a posting excerpt per role in the judging prompt. Frames the batch with ' +
     'frameJobTextList. The model only returns a probability and one sentence, clamped and parsed in code.',
@@ -186,7 +182,7 @@ const PENDING_WIRING: string[] = [
 const FORWARDERS: Record<string, string> = {
   'apps/web/lib/harness/agents/matcher.ts':
     'Hands roles to lib/scoring (assessJobs), which frames every description it sends to a model ' +
-    '(lib/scoring/want-judge.ts and requirements.ts use frameJobTextList). diagnoseCandidateJobs only ' +
+    '(lib/scoring/want-judge.ts uses frameJobTextList; what a posting asks for comes from the stored reader record, mapped in lib/scoring/posting-requirements.ts, with no prompt of its own). diagnoseCandidateJobs only ' +
     'checks whether a posting has a description; it never puts one in a prompt.',
   'apps/web/lib/graph/autopilot.ts':
     'Selects jobs and hands them to the matcher/tailorer agents (moved from lib/harness/autopilot.ts ' +

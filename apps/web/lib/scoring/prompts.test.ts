@@ -13,13 +13,13 @@ describe('scoringSystem', () => {
   })
 
   it('leaves out the voice document, which would contradict one-sentence reasons', () => {
-    for (const name of ['role_want', 'role_requirements', 'role_chance'] as const) {
+    for (const name of ['role_want', 'role_chance'] as const) {
       expect(scoringSystem(name)).not.toContain('Voice Guardrail')
     }
   })
 
   it('carries no 0-100 score bands for a role, so nothing asks the model for a number', () => {
-    for (const name of ['role_want', 'role_requirements', 'role_chance'] as const) {
+    for (const name of ['role_want', 'role_chance'] as const) {
       const sys = scoringSystem(name)
       expect(sys).not.toMatch(/job match score/i)
       expect(sys).not.toMatch(/matchThreshold|minimum score/i)

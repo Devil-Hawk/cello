@@ -12,7 +12,7 @@
 import type { LlmRunner } from '@/lib/harness/types'
 import { MissingKeyError, parseJsonLoose } from '@/lib/harness/llm'
 import { BudgetCapError } from '@/lib/harness/spend'
-import { quoteIsIn, type Requirement, type RequirementsOutcome } from './requirements'
+import { quoteIsIn, type Requirement, type RequirementsOutcome } from './posting-requirements'
 import { scoringPromptRef, scoringSystem } from './prompts'
 import type { ChanceResult, RequirementCheck, RoleFacts } from './types'
 
@@ -59,7 +59,7 @@ export function verifyChecks(raw: unknown, requirements: readonly Requirement[],
     }
   }
   return requirements.map((req): RequirementCheck => {
-    const base = { requirement: req.text, mustHave: req.mustHave }
+    const base = { requirement: req.text, mustHave: req.mustHave, ...(req.origin === 'model' ? { origin: 'model' as const } : {}) }
     const c = byId.get(idOf(req))
     if (!c) return { ...base, status: 'unclear', evidence: null }
     const status = (STATUSES as readonly string[]).includes(c.status as string) ? (c.status as (typeof STATUSES)[number]) : 'not_met'
@@ -127,7 +127,7 @@ function cannot(note: string): ChanceResult {
 
 /**
  * Checks several roles against one resume, three to a model call. Roles whose
- * posting could not be read come back as "cannot assess" without a call.
+ * posting has no readable requirements come back as "cannot assess" without a call.
  */
 export async function assessChances(llm: LlmRunner, resumeText: string, inputs: readonly ChanceInput[], stats?: CitationStats): Promise<Map<string, ChanceResult>> {
   const out = new Map<string, ChanceResult>()
@@ -136,7 +136,6 @@ export async function assessChances(llm: LlmRunner, resumeText: string, inputs: 
   for (const { role, outcome } of inputs) {
     if (lines.length === 0) out.set(role.id, cannot('Add your resume so Cello can check the requirements against it.'))
     else if (outcome.kind === 'thin') out.set(role.id, cannot(`Cannot assess yet. ${outcome.reason}`))
-    else if (outcome.kind === 'failed') out.set(role.id, cannot('Cannot assess yet. The posting could not be read just now.'))
     else ready.push({ role, reqs: outcome.requirements })
   }
 

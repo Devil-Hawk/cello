@@ -1,5 +1,5 @@
 // Prompt documents for the shortlist. Each one is a self-contained mode document
-// under apps/web/prompts (role_requirements, role_chance, role_want), composed
+// under apps/web/prompts (role_chance, role_want), composed
 // with the shared grounding rules (_shared.md) the same way every other agent's
 // prompt is, so the central prompt policy reaches them.
 //
@@ -10,7 +10,7 @@
 
 import { composeSystemPrompt, loadModeDoc, promptRef } from '@/lib/harness/prompts'
 
-export type ScoringPromptName = 'role_requirements' | 'role_chance' | 'role_want'
+export type ScoringPromptName = 'role_chance' | 'role_want'
 
 /** The system prompt for one of the scoring documents, with per-person stable context (stated preferences and decisions, or the resume) after it. */
 export function scoringSystem(name: ScoringPromptName, stableContext?: string): string {

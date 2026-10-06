@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { LlmResult, LlmRunOptions } from '@/lib/harness/types'
 import { NO_CONSTRAINTS } from './constraints'
 import { assessRoles, buildShortlist, retrievePool, roleText, type Embedder } from './pipeline'
+import { fromReaderRequirements } from './posting-requirements'
 import { MemoryStore } from './store'
 import { NO_STATED } from './want-judge'
 import type { ReactionRecord, RoleFacts } from './types'
@@ -37,7 +38,21 @@ interface Calls {
   systems: string[]
 }
 
-/** A fake model that likes payments roles and answers requirement and chance checks consistently. */
+/** What the posting reader stored on jobs.requirements for the postings above: two must haves in one item and years, one nice to have. */
+const READER_RECORD = {
+  version: 1,
+  source: 'deterministic',
+  skills_resolved: true,
+  must_have: ['Strong Go or Java'],
+  nice_to_have: ['Kubernetes'],
+  years_experience: { min: 3, max: null },
+  seniority: null,
+  location: { mode: null, places: [] },
+  visa: { sponsorship: 'not_stated', evidence: null },
+  salary: null,
+}
+
+/** A fake model that likes payments roles and answers chance checks consistently. */
 function fakeLlm(calls: Calls) {
   return async (opts: LlmRunOptions): Promise<LlmResult> => {
     // A judge call that is told there are no decisions is the stated-only read.
@@ -52,19 +67,6 @@ function fakeLlm(calls: Calls) {
           const payments = /payments/i.test(m[2])
           return { id: m[1], p: payments ? 0.85 : 0.2, reason: payments ? 'Payments backend like the roles you liked.' : 'Not the kind of work you went for.' }
         }),
-      })
-    } else if (opts.name === 'extract-role-requirements') {
-      const blocks = [...prompt.matchAll(/\[\[POSTING (p\d+) /g)]
-      content = JSON.stringify({
-        postings: blocks.map((m) => ({
-          id: m[1],
-          enough_detail: true,
-          requirements: [
-            { text: '3+ years backend', kind: 'experience', must_have: true, quote: '3+ years of backend engineering' },
-            { text: 'Strong Go or Java', kind: 'skill', must_have: true, quote: 'Strong Go or Java' },
-            { text: 'Kubernetes', kind: 'skill', must_have: false, quote: 'Nice to have: Kubernetes' },
-          ],
-        })),
       })
     } else if (opts.name === 'check-role-requirements') {
       const ids = [...prompt.matchAll(/^(j\d+\.r\d+) /gm)].map((m) => m[1])
@@ -81,6 +83,8 @@ function fakeLlm(calls: Calls) {
 }
 
 function req(store: MemoryStore, candidates: RoleFacts[], over: Partial<Parameters<typeof buildShortlist>[1]> = {}, calls: Calls = { names: [], systems: [] }) {
+  // The posting reader has already read every posting that has a description.
+  for (const c of candidates) if (c.description && !store.requirementRows.has(c.id)) store.requirementRows.set(c.id, fromReaderRequirements(READER_RECORD))
   const base = { userId: 'u', resumeText: RESUME, stated: { ...NO_STATED, titles: ['Backend Engineer'] }, constraints: NO_CONSTRAINTS, candidates, forDate: '2026-10-06', ...over }
   const deps = { llm: fakeLlm(calls), embed: embedder, store, rng: () => 0.5 }
   return { calls, run: () => buildShortlist(deps, base), assess: () => assessRoles(deps, base) }
@@ -127,10 +131,12 @@ describe('buildShortlist', () => {
     expect(calls.names.filter((n) => n.startsWith('judge-')).length).toBeGreaterThan(0)
   })
 
-  it('says cannot assess for a posting with no description and never calls the model for its requirements', async () => {
+  it('says cannot assess for a posting the reader has no requirements for, without a model call for it', async () => {
     const store = new MemoryStore()
-    const { run } = req(store, [role('thin', 'payments', { description: null }), role('ok', 'payments')])
+    const { run, calls } = req(store, [role('thin', 'payments', { description: null }), role('ok', 'payments')])
     const out = await run()
+    // One role is checked against the resume; the other has nothing to check and costs no call.
+    expect(calls.names.filter((n) => n === 'check-role-requirements')).toHaveLength(1)
     expect(store.assessmentRows.get('thin')!.chance?.chance).toBe('cannot_assess')
     expect(store.assessmentRows.get('ok')!.chance?.chance).toBe('strong')
     expect(out.picks.find((p) => p.jobId === 'thin')?.explanation).toContain('too thin')
@@ -240,6 +246,14 @@ describe('assessRoles', () => {
     expect(count(other.calls, 'check-role-requirements')).toBeGreaterThan(0)
   })
 
+  it('never reads a posting with a model: the posting reader\'s record is the only source of requirements', async () => {
+    const store = new MemoryStore()
+    const { assess, calls } = req(store, candidates)
+    await assess()
+    expect(calls.names).not.toContain('extract-role-requirements')
+    expect(count(calls, 'check-role-requirements')).toBeGreaterThan(0)
+  })
+
   it('never stores a vector for a posting, only for reactions', async () => {
     const store = new MemoryStore()
     store.reactionRows = reactionsFor(2)
@@ -261,7 +275,7 @@ describe('assessRoles', () => {
     const store = new MemoryStore()
     const { assess, calls } = req(store, candidates, { chanceFor: 0 })
     const out = await assess()
-    expect(count(calls, 'extract-role-requirements') + count(calls, 'check-role-requirements')).toBe(0)
+    expect(count(calls, 'check-role-requirements')).toBe(0)
     expect(out.rankables).toEqual([])
     expect(out.assessed.length).toBe(8)
   })

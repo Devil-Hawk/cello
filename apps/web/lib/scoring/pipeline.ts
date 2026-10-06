@@ -23,7 +23,7 @@ import type { LlmRunner } from '@/lib/harness/types'
 import { assessChances } from './chance'
 import { checkConstraints, type StatedConstraints } from './constraints'
 import { entropy } from './math'
-import { extractRequirements, type RequirementsOutcome } from './requirements'
+import { NOT_READ_YET } from './posting-requirements'
 import { chooseShortlist, toPicks, type Rankable } from './shortlist'
 import type { AssessmentToStore, ScoringStore } from './store'
 import { blendWant, chooseTau, fitBlend, kernelWant, toExamples, type BlendModel } from './taste'
@@ -268,15 +268,12 @@ export async function assessRoles(deps: PipelineDeps, req: AssessRequest): Promi
     else toCheck.push(role)
   }
   if (toCheck.length > 0) {
-    const cached = await store.requirements(req.userId, toCheck.map((r) => r.id))
-    const toRead = toCheck.filter((r) => !cached.has(r.id))
-    const read = toRead.length > 0 ? await extractRequirements(llm, toRead) : new Map<string, RequirementsOutcome>()
-    await store.saveRequirements(req.userId, read)
-    const outcomes = new Map<string, RequirementsOutcome>([...cached, ...read])
+    // What each posting asks for was read once by the posting reader and is only looked up here: nothing in this pass reads a posting.
+    const outcomes = await store.requirements(req.userId, toCheck.map((r) => r.id))
     const fresh = await assessChances(
       llm,
       req.resumeText,
-      toCheck.map((role) => ({ role, outcome: outcomes.get(role.id) ?? { kind: 'failed' as const, reason: 'not read' } }))
+      toCheck.map((role) => ({ role, outcome: outcomes.get(role.id) ?? { kind: 'thin' as const, reason: NOT_READ_YET } }))
     )
     for (const [id, c] of fresh) chances.set(id, c)
   }

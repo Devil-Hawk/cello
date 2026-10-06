@@ -25,7 +25,8 @@ import type { LlmRunner } from '@/lib/harness/types'
 import { assessChances, type CitationStats } from '@/lib/scoring/chance'
 import { checkConstraints, type StatedConstraints } from '@/lib/scoring/constraints'
 import { classifyJob } from '@/lib/jobs/classify'
-import { extractRequirements } from '@/lib/scoring/requirements'
+import { parseRequirements } from '@/lib/jobs/requirements'
+import { fromReaderRequirements } from '@/lib/scoring/posting-requirements'
 import { buildShortlist, roleText, type Embedder } from '@/lib/scoring/pipeline'
 import { scoringPromptRef } from '@/lib/scoring/prompts'
 import { MemoryStore } from '@/lib/scoring/store'
@@ -34,7 +35,6 @@ import { naivePoints, oldBand, oldScore, resumeSkillTokens } from './eval-shortl
 import { agreement, auc, brier, cohenKappa, mean, mulberry32, precisionAtK, round, shuffled, stratifiedSplit } from './eval-shortlist/metrics'
 import { isPositive, labelPostings, type OracleLabel, type SyntheticPersona } from './eval-shortlist/oracle'
 import { FreeModelClient } from './eval-shortlist/openrouter'
-import { requirementsStudy } from './eval-shortlist/studies'
 import thresholds from './eval-shortlist/thresholds.json'
 
 // ---------------------------------------------------------------------------
@@ -118,6 +118,9 @@ interface Posting {
 }
 
 const toFacts = (j: Posting): RoleFacts => ({ id: j.id, title: j.title, company: j.company, location: j.location, description: j.description })
+
+// What a posting asks for is read by the posting parser, the same code the reader runs at ingest.
+const requirementsOf = (j: Posting) => fromReaderRequirements(parseRequirements({ title: j.title, description: j.description, location: j.location }))
 
 function memoEmbedder(client: FreeModelClient, model: string): Embedder {
   const memo = new Map<string, number[]>()
@@ -255,6 +258,7 @@ async function runPersona(
   const heldFacts = heldOut.map(toFacts)
   const heldLabelPos = new Set(heldOut.filter((j) => isPositive(labels.get(j.id)!)).map((j) => j.id))
   const store = new MemoryStore()
+  for (const j of jobs) store.requirementRows.set(j.id, requirementsOf(j))
   const deps: Deps = { llm: gen, embed, store, rng: mulberry32(args.seed * 7 + seedOffset) }
   const reacted = new Set<string>()
   const rounds: RoundReport[] = []
@@ -422,16 +426,13 @@ async function judgeChance(llm: LlmRunner, resume: string, postings: Posting[]):
 
 async function chanceStudy(args: Args, gen: LlmRunner, judgeA: LlmRunner, judgeB: LlmRunner, personas: SyntheticPersona[], jobs: Posting[]) {
   const pairs: ChancePair[] = []
-  const store = new MemoryStore()
   const citations: CitationStats = { claimed: 0, kept: 0 }
   await Promise.all(personas.map(async (persona) => {
     const held = heldOutByPersona.get(persona.id)
     if (!held) return
     // Twelve held-out roles per person, drawn at random so the sample does not depend on what Cello thinks of them.
     const sample = shuffled(held.heldOut, mulberry32(args.seed + 99)).slice(0, 12)
-    const outcomes = await extractRequirements(gen, sample.map(toFacts))
-    await store.saveRequirements(persona.id, outcomes)
-    const ours = await assessChances(gen, persona.resume, sample.map((j) => ({ role: toFacts(j), outcome: outcomes.get(j.id)! })), citations)
+    const ours = await assessChances(gen, persona.resume, sample.map((j) => ({ role: toFacts(j), outcome: requirementsOf(j) })), citations)
     // The Release 1 score for the same roles, so its bands can be compared on the same pairs.
     if (!args.skipOld) {
       const known = oldScores.get(persona.id) ?? new Map<string, number>()
@@ -541,16 +542,14 @@ async function main(): Promise<void> {
   // whole run under the free tier's request rate.
   if (args.studiesOnly) {
     await Promise.all(personas.map((persona, i) => prepare(args, oracle, persona, jobs, i)))
-    const requirements = await requirementsStudy(gen, oracle, jobs, args.seed)
     const chance = await chanceStudy(args, gen, oracle, judge2, personas, jobs)
     const out = {
       label: args.label,
       at: new Date().toISOString(),
       mode: 'studies-only',
       models: { generator: GENERATOR, simulatedPerson: ORACLE, secondChanceJudge: JUDGE2, answeredBy: Object.fromEntries(client.byModel) },
-      prompts: { role_want: scoringPromptRef('role_want').hash, role_requirements: scoringPromptRef('role_requirements').hash, role_chance: scoringPromptRef('role_chance').hash },
+      prompts: { role_want: scoringPromptRef('role_want').hash, role_chance: scoringPromptRef('role_chance').hash },
       requests: { live: client.live, cached: client.cached, refusedAndRetried: client.failures, budget: args.maxRequests },
-      requirements,
       chance,
     }
     const dir = args.outDir ?? process.env.EVAL_REPORT_DIR
@@ -563,7 +562,6 @@ async function main(): Promise<void> {
   }
 
   const reports: PersonaReport[] = await Promise.all(personas.map((persona, i) => runPersona(args, client, gen, oracle, embed, persona, jobs, i)))
-  const requirements = args.skipChance ? null : await requirementsStudy(gen, oracle, jobs, args.seed)
   const chance = args.skipChance ? null : await chanceStudy(args, gen, oracle, judge2, personas, jobs)
 
   const nRounds = Math.max(...reports.map((r) => r.rounds.length))
@@ -590,13 +588,6 @@ async function main(): Promise<void> {
     ...(bars.finalAtLeastOldScorer && !args.skipOld ? [{ bar: 'last round p@5 >= Release 1 scorer', pass: final >= summaryRows.oldScorerP5, value: [final, summaryRows.oldScorerP5] }] : []),
     ...(bars.finalAtLeastNaivePoints ? [{ bar: 'last round p@5 >= naive points', pass: final >= summaryRows.naivePointsP5, value: [final, summaryRows.naivePointsP5] }] : []),
     { bar: `sentences pass the code checks >= ${bars.reasonChecksMin}`, pass: reasonOk >= bars.reasonChecksMin, value: round(reasonOk) },
-    ...(requirements
-      ? [
-          { bar: `requirement quotes found in the posting >= ${bars.requirementsQuoteRateMin}`, pass: requirements.quoteRate >= bars.requirementsQuoteRateMin, value: requirements.quoteRate },
-          { bar: `requirements a second model agrees are stated >= ${bars.requirementsPrecisionMin}`, pass: requirements.precision >= bars.requirementsPrecisionMin, value: requirements.precision },
-          { bar: 'postings that say too little are called thin', pass: requirements.thin.tested > 0 && requirements.thin.detected / requirements.thin.tested >= bars.thinDetectionMin, value: `${requirements.thin.detected}/${requirements.thin.tested}` },
-        ]
-      : []),
     ...(chance
       ? [
           { bar: `chance agreement with the judges >= ${bars.chanceAgreementMin}`, pass: chance.ours.agreement >= bars.chanceAgreementMin, value: chance.ours.agreement },
@@ -611,12 +602,11 @@ async function main(): Promise<void> {
     at: new Date().toISOString(),
     mode: args.quick ? 'quick' : 'full',
     models: { generator: GENERATOR, simulatedPerson: ORACLE, secondChanceJudge: JUDGE2, embedding: EMBEDDER, answeredBy: Object.fromEntries(client.byModel) },
-    prompts: { role_want: scoringPromptRef('role_want').hash, role_requirements: scoringPromptRef('role_requirements').hash, role_chance: scoringPromptRef('role_chance').hash },
+    prompts: { role_want: scoringPromptRef('role_want').hash, role_chance: scoringPromptRef('role_chance').hash },
     requests: { live: client.live, cached: client.cached, refusedAndRetried: client.failures, budget: args.maxRequests },
     synthetic: 'All people in this evaluation are SYNTHETIC. The postings are real public postings.',
     summary: { ...summaryRows, reasonSentencesChecked: allReasons.length, reasonChecksPassed: round(reasonOk) },
     personas: reports.map((r) => ({ ...r, reasons: undefined })),
-    requirements,
     chance: chance ? { ...chance, pairs: chance.pairs.map((p) => ({ ...p })) } : null,
     checks,
     pass: checks.every((c) => c.pass),
