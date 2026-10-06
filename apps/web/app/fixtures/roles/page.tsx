@@ -18,7 +18,7 @@ export default function RolesFixture({ searchParams }: { searchParams: Record<st
     hiddenReason: query.tab === 'hidden' ? ('not_for_me' as const) : null,
   }))
   return (
-    <Shell pathname="/roles" user={{ email: 'sam@example.com', fullName: 'Sam Rivera', avatarUrl: null }} onSignOut={() => undefined} bell={false}>
+    <Shell pathname="/roles" user={{ email: 'sam@example.com', fullName: 'Sam Rivera', avatarUrl: null }} onSignOut={() => undefined}>
       <RolesView
         query={query}
         items={items}

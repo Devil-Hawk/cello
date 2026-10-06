@@ -17,7 +17,7 @@ export default function RecordFixture({ searchParams }: { searchParams: Record<s
     sponsorship: searchParams.visa ? ['The posting does not mention sponsorship.', 'Past H-1B filings.'] : [],
   })
   return (
-    <Shell pathname="/roles/fx-1" user={{ email: 'sam@example.com', fullName: 'Sam Rivera', avatarUrl: null }} onSignOut={() => undefined} bell={false}>
+    <Shell pathname="/roles/fx-1" user={{ email: 'sam@example.com', fullName: 'Sam Rivera', avatarUrl: null }} onSignOut={() => undefined}>
       <RecordView data={data} />
     </Shell>
   )

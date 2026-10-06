@@ -3,7 +3,6 @@ import { Mark } from '@/components/depth/mark'
 import { Key } from '@/components/ui/key'
 import { Plinth } from '@/components/ui/plinth'
 import { AccountMenu, type ShellUser } from '@/components/layout/account-menu'
-import { NotificationBell } from '@/components/layout/notification-bell'
 import { ThemeKey } from '@/components/layout/theme-key'
 import { barRoutes, chat, isCurrent, today } from '@/lib/routes'
 
@@ -13,13 +12,12 @@ export interface BarProps {
   onSignOut: () => void
   /** Today's copper numeral. Absent until the Needs you count exists. */
   needsYou?: number
-  bell?: boolean
 }
 
 // The laptop bar: a raised plinth on the ground with the Cello mark, a key per
 // page, and the person's own things at the right. The current page is a key
 // standing 1px proud. Roles come before Companies, each a page of its own.
-export function Bar({ pathname, user, onSignOut, needsYou, bell = true }: BarProps) {
+export function Bar({ pathname, user, onSignOut, needsYou }: BarProps) {
   return (
     <header className="relative z-40 hidden shrink-0 px-6 py-3 md:block">
       <Plinth className="mx-auto flex h-14 max-w-[1200px] items-center gap-2 pl-3 pr-2">
@@ -47,7 +45,6 @@ export function Bar({ pathname, user, onSignOut, needsYou, bell = true }: BarPro
             <Link href={chat.href}>{chat.label}</Link>
           </Key>
         )}
-        {bell && <NotificationBell side="bottom" align="end" />}
         <ThemeKey />
         <AccountMenu user={user} onSignOut={onSignOut} />
       </Plinth>

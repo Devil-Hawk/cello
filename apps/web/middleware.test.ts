@@ -16,8 +16,8 @@ vi.mock('@/lib/supabase/middleware', () => ({
 import { middleware, RETIRED_PAGES } from './middleware'
 
 describe('retired pages', () => {
-  it('sends the prep page to Today', () => {
-    expect(RETIRED_PAGES.prep).toBe('/dashboard')
+  it('sends the dashboard, notifications and prep pages to Today', () => {
+    for (const segment of ['dashboard', 'notifications', 'prep']) expect(RETIRED_PAGES[segment]).toBe('/today')
   })
 
   it.each(Object.entries(RETIRED_PAGES))('%s and its sub-paths answer 307 to %s before auth', async (segment, to) => {

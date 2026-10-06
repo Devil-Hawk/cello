@@ -72,9 +72,9 @@ describe('untrue copy stays out of live UI files', () => {
   it('has no run vocabulary on Today', () => {
     const today = LIVE_FILES.filter((f) => {
       const r = rel(f)
-      return r === 'app/(app)/dashboard/page.tsx' || (r.startsWith('components/dashboard/') && !r.slice(21).includes('/'))
+      return r === 'app/(app)/today/page.tsx' || r.startsWith('components/today/')
     })
-    expect(today.length).toBeGreaterThan(3)
+    expect(today.length).toBeGreaterThan(2)
     expect(hits(today, BANNED_TODAY)).toEqual([])
   })
 })

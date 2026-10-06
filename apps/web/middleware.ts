@@ -368,7 +368,9 @@ function clearAuthCookies(request: NextRequest, response: NextResponse): NextRes
  */
 export const RETIRED_PAGES: Record<string, string> = {
   agent: '/copilot',
-  prep: '/dashboard',
+  dashboard: '/today',
+  notifications: '/today',
+  prep: '/today',
   onboarding: '/welcome',
 }
 

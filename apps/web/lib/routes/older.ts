@@ -4,6 +4,5 @@
 // Demo access with Settings.
 export const older: Array<{ label: string; href: string }> = [
   { label: 'What is working', href: '/insights' },
-  { label: 'Notifications', href: '/notifications' },
   { label: 'Demo access', href: '/settings/access' },
 ]

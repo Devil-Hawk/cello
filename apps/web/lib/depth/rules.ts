@@ -5,12 +5,8 @@
 
 const TOKENS_FILE = 'app/relief.css'
 
-// ponytail: legacy files, emptied as their pages ship; PG2 removes pulse-ribbon
-export const LEGACY_ALLOW = [
-  'app/globals.css',
-  'components/ui/empty-state-hero.tsx',
-  'components/dashboard/pulse-ribbon.tsx',
-]
+// ponytail: legacy files, emptied as their pages ship
+export const LEGACY_ALLOW = ['app/globals.css', 'components/ui/empty-state-hero.tsx']
 
 // This file and its test hold the patterns as text.
 const SELF = ['lib/depth/rules.ts', 'lib/depth/rules.test.ts']

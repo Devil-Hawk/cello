@@ -15,7 +15,7 @@ export default function ShellFixture({ searchParams }: { searchParams: { at?: st
       user={{ email: 'sam@example.com', fullName: 'Sam Rivera', avatarUrl: null }}
       onSignOut={() => undefined}
       needsYou={needs}
-      bell={false}
+     
     >
       <div className="mx-auto max-w-[1200px]">
         <h1 className="r-display">Roles</h1>
