@@ -275,35 +275,34 @@ describe('replaceChunks embed-failure isolation', () => {
 // Resume claims quote material as the person's own words. A page Cello fetched, and a
 // source with "Cello may use this" off, must never be listed for that.
 describe('listDocuments personOnly', () => {
-  function fake(sourceIds: string[]) {
-    const calls: Array<[string, string, unknown]> = []
-    const from = (table: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const q: any = {
-        select: () => q,
-        eq: (c: string, v: unknown) => (calls.push([table, c, v]), q),
-        in: (c: string, v: unknown) => (calls.push([table, `in ${c}`, v]), q),
-        order: () => q,
-        limit: () => q,
-        then: (ok: (v: unknown) => unknown, bad: (e: unknown) => unknown) =>
-          Promise.resolve({ data: table === 'kb_sources' ? sourceIds.map((id) => ({ id })) : [], error: null }).then(ok, bad),
-      }
-      return q
+  function fake(rows: unknown[]) {
+    const calls: Array<[string, unknown]> = []
+    const q = {
+      select: (cols: string) => (calls.push(['select', cols]), q),
+      eq: (c: string, v: unknown) => (calls.push([c, v]), q),
+      order: () => q,
+      limit: () => Promise.resolve({ data: rows, error: null }),
     }
-    return { client: { from } as unknown as Parameters<typeof listDocuments>[0], calls }
+    return { client: { from: () => q } as unknown as Parameters<typeof listDocuments>[0], calls }
   }
 
-  it('asks only for documents of person sources that are switched on', async () => {
-    const { client, calls } = fake(['s1', 's2'])
+  it('joins the source and asks only for person sources that are switched on', async () => {
+    const { client, calls } = fake([])
     await listDocuments(client, 'u1', { personOnly: true })
-    expect(calls).toContainEqual(['kb_sources', 'material_kind', 'person'])
-    expect(calls).toContainEqual(['kb_sources', 'may_use', true])
-    expect(calls).toContainEqual(['kb_documents', 'in source_id', ['s1', 's2']])
+    expect(calls).toContainEqual(['select', expect.stringContaining('kb_sources!inner')])
+    expect(calls).toContainEqual(['kb_sources.material_kind', 'person'])
+    expect(calls).toContainEqual(['kb_sources.may_use', true])
   })
 
-  it('lists nothing when the person has no such source', async () => {
+  it('returns plain documents, without the joined source', async () => {
+    const { client } = fake([{ id: 'd1', content: 'x', kb_sources: { material_kind: 'person', may_use: true } }])
+    expect(await listDocuments(client, 'u1', { personOnly: true })).toEqual([{ id: 'd1', content: 'x' }])
+  })
+
+  it('does not join without personOnly', async () => {
     const { client, calls } = fake([])
-    expect(await listDocuments(client, 'u1', { personOnly: true })).toEqual([])
-    expect(calls.some(([t, c]) => t === 'kb_documents' && c.startsWith('in '))).toBe(false)
+    await listDocuments(client, 'u1')
+    expect(calls).toContainEqual(['select', '*'])
+    expect(calls.some(([c]) => c.startsWith('kb_sources'))).toBe(false)
   })
 })

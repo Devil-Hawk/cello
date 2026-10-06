@@ -443,26 +443,20 @@ export async function listDocuments(
   opts: { sourceId?: string; limit?: number; personOnly?: boolean } = {}
 ): Promise<KbDocument[]> {
   const limit = Math.min(MAX_LIST_LIMIT, Math.max(1, opts.limit ?? 100))
-  let query = client.from(DOCUMENTS).select('*').eq('user_id', userId)
+  // The join keeps the filter in one query and off a list of ids (see the .in() allowlist test).
+  let query = client
+    .from(DOCUMENTS)
+    .select(opts.personOnly ? '*, kb_sources!inner(material_kind, may_use)' : '*')
+    .eq('user_id', userId)
   if (opts.sourceId) query = query.eq('source_id', opts.sourceId)
-  if (opts.personOnly) {
-    const { data, error: srcErr } = await client
-      .from(SOURCES)
-      .select('id')
-      .eq('user_id', userId)
-      .eq('material_kind', 'person')
-      .eq('may_use', true)
-    if (srcErr) throw new Error(`listDocuments failed: ${srcErr.message}`)
-    const ids = (data ?? []).map((r) => r.id as string)
-    if (ids.length === 0) return []
-    query = query.in('source_id', ids)
-  }
+  if (opts.personOnly) query = query.eq('kb_sources.material_kind', 'person').eq('kb_sources.may_use', true)
 
   const { data, error } = await query
     .order('updated_at', { ascending: false })
     .limit(limit)
   if (error) throw new Error(`listDocuments failed: ${error.message}`)
-  return (data as KbDocument[]) ?? []
+  // The embedded source is only there to filter on; callers get plain documents.
+  return ((data ?? []) as unknown as Array<KbDocument & { kb_sources?: unknown }>).map(({ kb_sources: _joined, ...doc }) => doc)
 }
 
 /** One document by id, scoped to its owner. */
