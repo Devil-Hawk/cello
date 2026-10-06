@@ -13,13 +13,17 @@ select pr.user_id as viewer_id,
        pr.visible_since,
        pr.saved_at,
        pr.hidden_reason,
-       vc.id as viewer_company_id,
+       -- an expression, not a bare column: PostgREST would otherwise read this column as companies.id
+       -- and offer a second path from the view to companies, making every companies(...) embed ambiguous
+       coalesce(vc.id, null::uuid) as viewer_company_id,
        vc.name as viewer_company_name,
+       vc.domain as viewer_company_domain,
+       vc.metadata as viewer_company_metadata,
        j.*
   from public.jobs j
   join public.person_roles pr on pr.job_id = j.id
   left join lateral (
-    select c.id, c.name
+    select c.id, c.name, c.domain, c.metadata
       from public.companies c
      where c.user_id = pr.user_id
        and (c.id = j.company_id or (j.employer_id is not null and c.employer_id = j.employer_id))
