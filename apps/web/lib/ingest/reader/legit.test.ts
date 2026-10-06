@@ -33,6 +33,15 @@ describe('judgeRole: own', () => {
     expect(off('Meta Platforms', 'Meta')).toEqual({ keep: true })
   })
 
+  it("a careers link on a shared host does not make the whole host the employer's own site", () => {
+    for (const careerUrl of ['https://jobs.lever.co/acme', 'https://sites.google.com/view/acme-jobs', 'https://acme.notion.site/jobs']) {
+      const ctx: JudgeContext = { company: { name: 'Acme', domain: 'acme.com', careerUrl }, now: NOW }
+      expect(onOwnSite('https://jobs.lever.co/othercorp/1', ctx)).toBe(false)
+      expect(judgeRole(job({ employer: 'Othercorp', url: new URL('/x/1', careerUrl).toString() }), ctx)).toEqual({ keep: false, why: 'other_employer' })
+    }
+    expect(onOwnSite('https://careers.acme.com/jobs/1', { company: { name: 'Acme', domain: 'acme.com', careerUrl: 'https://careers.acme.com' }, now: NOW })).toBe(true)
+  })
+
   it("a tracked staffing firm's own roles are kept under it", () => {
     const rh: JudgeContext = { company: { name: 'Robert Half', domain: 'roberthalf.com', careerUrl: 'https://roberthalf.com/careers' }, now: NOW }
     expect(judgeRole(job({ employer: 'Robert Half', url: 'https://roberthalf.com/jobs/1' }), rh)).toEqual({ keep: true })

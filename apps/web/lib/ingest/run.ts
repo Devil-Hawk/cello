@@ -83,7 +83,7 @@ export interface CompanyDeps {
 
 // --- when a company is due -------------------------------------------------
 
-/** Dream companies hourly, the rest daily (a larger scrape_frequency stretches that); a site still to be read in a browser is always due. */
+/** Dream companies after an hour, the rest after a day (a larger scrape_frequency stretches that; the pass itself runs every six hours); a site still to be read in a browser is always due. */
 export function isDue(
   company: Pick<DueCompany, 'last_scraped_at' | 'is_dream_company' | 'scrape_frequency'> & { metadata?: unknown },
   now: number

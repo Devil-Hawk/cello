@@ -3,7 +3,7 @@
 // read the site, so the line says what is true: checking now, when the next
 // check is, or that the careers site cannot be read and why.
 //
-// Pure and framework-free: scripts/ats-refresh.ts imports dueAt from here, so
+// Pure and framework-free: scripts/ingest.ts imports dueAt from here, so
 // the line on screen and the scheduler agree on when a company is next checked.
 
 /** The result of the last attempt to read a company's roles (companies.metadata.source_check). */
@@ -44,7 +44,7 @@ export const READING_REASON = 'reading'
 /** The page was reached and only the free reading step could not run: a wait for a slot, not a verdict on the site. */
 export const WAITING_REASONS = ['model_unavailable', 'model_limit']
 
-// The scheduler (scripts/ats-refresh.ts) and the runner use these: dream companies hourly, others daily.
+// The scheduled pass (scripts/ingest.ts, every six hours) uses these: dream companies are due after an hour and the rest after a day, so a pass picks them up at its next tick.
 const DREAM_INTERVAL_MINUTES = 60
 const DEFAULT_INTERVAL_MINUTES = 1440
 const DUE_SLACK_MINUTES = 5

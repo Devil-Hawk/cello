@@ -16,6 +16,7 @@ import type { AtsJob } from '../../ats/types'
 import { normalizeEmployerName, onCompanyDomain, sameEmployerName } from '../../ats/verify'
 import { classifyJob, isLowQuality } from '../../jobs/classify'
 import { isStalePosting } from '../../jobs/freshness'
+import { KNOWN_JOB_HOSTS } from '../snapshot'
 import type { TargetVerdict } from '../../targeting/roles'
 
 export type ExcludeReason = 'agency' | 'reposting' | 'other_employer' | 'expired' | 'stale' | 'gone' | 'non_role' | 'duplicate'
@@ -111,6 +112,8 @@ export function employerAgrees(employer: string, companyName: string): boolean {
   return normalizeEmployerName(companyName).length >= 3 && (we === wc || we.startsWith(`${wc} `))
 }
 
+const SHARED_HOSTS = [...KNOWN_JOB_HOSTS, 'sites.google.com', 'notion.site', 'notion.so', 'github.io', 'wixsite.com', 'webflow.io', 'carrd.co', 'squarespace.com', 'wordpress.com']
+
 /** Is the role's address on the employer's own site: its domain, or the host of its careers page? */
 export function onOwnSite(url: string, ctx: JudgeContext): boolean {
   const { domain, careerUrl } = ctx.company
@@ -118,6 +121,8 @@ export function onOwnSite(url: string, ctx: JudgeContext): boolean {
   // A reposting site is the employer's own only when it IS the company's domain: a careers link on builtin.com does not make builtin.com the employer's site.
   if (repostHostOf(url)) return false
   const careerHost = careerUrl ? hostOf(careerUrl) : ''
+  // A careers link on a shared host (an applicant system, a page builder) does not make that whole host the employer's own site.
+  if (SHARED_HOSTS.some((h) => careerHost === h || careerHost.endsWith(`.${h}`))) return false
   const host = hostOf(url)
   return !!careerHost && (host === careerHost || host.endsWith(`.${careerHost}`))
 }
