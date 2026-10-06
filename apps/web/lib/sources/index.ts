@@ -30,6 +30,7 @@ import { himalayas } from './himalayas'
 import { workingnomads } from './workingnomads'
 import { jobicy } from './jobicy'
 import { postingCapture } from '../ingest/markdown'
+import { leadsAreTraced, traceLeads } from './trace-leads'
 
 export type { JobLead, SourceAdapter, SourceId, SourceQuery } from './types'
 export { themuse } from './themuse'
@@ -122,6 +123,8 @@ export interface IngestResult {
   inserted: number
   /** Companies auto-created this run. */
   createdCompanies: number
+  /** Leads not traced to an employer's own posting, kept as a count (trace-leads.ts). */
+  untraced?: number
   errors: string[]
 }
 
@@ -174,6 +177,13 @@ export async function ingestLeads(
     location: repairMojibake(lead.location),
     description: repairMojibake(lead.description),
   }))
+
+  // Once the directory has filled, a lead is a role only when traced to the employer's own posting, else a count:
+  // no company is made from it and no role stored from an aggregator's copy (lib/sources/trace-leads.ts).
+  if (await leadsAreTraced(admin)) {
+    const traced = await traceLeads(admin, userId, leads)
+    return { ...result, jobIds: traced.jobIds, inserted: traced.inserted, untraced: traced.untraced, errors: traced.errors }
+  }
 
   // 1. Resolve every distinct company named in this batch through the
   //    identity chokepoint (lib/entities/companies.ts) instead of a

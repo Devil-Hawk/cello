@@ -160,6 +160,11 @@ begin
   perform public.upsert_employer_jobs(f.retell, jsonb_build_array(jsonb_build_object('external_id', 'req-1', 'title', 'Platform Engineer II', 'description', 'd', 'url', 'https://retellai.com/jobs/1', 'source', 'ashby', 'last_seen_at', now())));
   if (select description_md from public.jobs where employer_id = f.retell and posting_key = 'req-1') <> '# Platform Engineer' then raise exception 'a stored body is not blanked by a read without one'; end if;
   if (select title from public.jobs where employer_id = f.retell and posting_key = 'req-1') <> 'Platform Engineer II' then raise exception 'the title is updated'; end if;
+  -- tracing a lead finds a stored role by its title key or by its posting id
+  update public.jobs set title_norm = 'platform engineer' where employer_id = f.retell and posting_key = 'req-1';
+  if (select count(*) from public.employer_roles(f.retell, 'platform engineer')) <> 1 then raise exception 'employer_roles finds a role by its title key'; end if;
+  if (select count(*) from public.employer_roles(f.retell, 'designer')) <> 0 then raise exception 'another title key finds nothing'; end if;
+  if (select count(*) from public.employer_roles(f.retell, null, array['req-1'])) <> 1 then raise exception 'employer_roles finds a role by its posting id'; end if;
   begin
     perform public.upsert_employer_jobs(f.unverified, one);
     raise exception 'an employer that is not verified must be refused';
@@ -212,6 +217,7 @@ select pg_temp.must_be_denied('select public.bump_employer_stats(gen_random_uuid
 select pg_temp.must_be_denied('select public.upsert_employer_jobs(gen_random_uuid(), ''[]''::jsonb)');
 select pg_temp.must_be_denied('select public.record_employer_sightings(gen_random_uuid(), array[''x''], array[''ashby''], 2)');
 select pg_temp.must_be_denied('select public.directory_progress()');
+select pg_temp.must_be_denied('select * from public.employer_roles(gen_random_uuid())');
 
 -- 10. The measures read the directory.
 do $$
