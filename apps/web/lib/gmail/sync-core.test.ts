@@ -248,7 +248,9 @@ describe('runGmailSyncCore: calendar invite', () => {
     start.setUTCMinutes(0, 0, 0)
     const stamp = start.toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '')
     const calendar = ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', `DTSTART:${stamp}`, 'SUMMARY:Interview', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n')
-    mailbox = [{ ...FIXED_MESSAGE, payload: { ...FIXED_MESSAGE.payload, calendar } }]
+    // The mail says interview in words too, so the model's sort is believed and the signed mail counts.
+    const headers = FIXED_MESSAGE.payload.headers.map((h) => (h.name === 'subject' ? { ...h, value: 'Your technical interview is scheduled' } : h))
+    mailbox = [{ ...FIXED_MESSAGE, payload: { ...FIXED_MESSAGE.payload, headers, calendar } }]
     callOpenRouterMock.mockReset().mockResolvedValue({
       content: JSON.stringify({
         isJobRelated: true,
@@ -257,7 +259,7 @@ describe('runGmailSyncCore: calendar invite', () => {
         jobTitle: 'Backend Engineer',
         status: 'interview',
         // A status needs a quote the email really holds.
-        evidence: 'Thank you for applying to Acme Corp',
+        evidence: 'technical interview',
         careerPageUrl: null,
         interviewDateTime: new Date(start.getTime() + 3 * 24 * 3600 * 1000).toISOString(),
         confidence: 0.95,
@@ -478,7 +480,7 @@ describe('runGmailSyncCore: mail that cannot be verified', () => {
     fakeDb.tables.set('jobs', [{ id: 'job-1', company_id: 'company-1', title: 'Backend Engineer' }])
     fakeDb.tables.set('applications', [{ id: 'app-1', user_id: USER_ID, job_id: 'job-1', stage: 'applied', state: null }])
     callOpenRouterMock.mockReset().mockResolvedValue({
-      content: JSON.stringify({ isJobRelated: true, employerName: 'Acme Corp', employerDomain: 'acme.com', jobTitle: 'Backend Engineer', status: 'rejected', careerPageUrl: null, interviewDateTime: null, confidence: 0.95, reasoning: null }),
+      content: JSON.stringify({ isJobRelated: true, employerName: 'Acme Corp', employerDomain: 'acme.com', jobTitle: 'Backend Engineer', status: 'rejected', evidence: 'not moving forward', careerPageUrl: null, interviewDateTime: null, confidence: 0.95, reasoning: null }),
       tokensUsed: 600, promptTokens: 500, completionTokens: 100, model: 'google/gemini-2.0-flash-001',
     })
   })
@@ -525,7 +527,7 @@ describe('runGmailSyncCore: mail that cannot be verified', () => {
     fakeDb.tables.set('jobs', [])
     mailbox = [unsigned('spoof-2', 'Acme Corp <careers@acme.com>', 'Thank you for applying to Acme Corp', 'mx.google.com; dkim=fail header.d=acme.com')]
     callOpenRouterMock.mockResolvedValue({
-      content: JSON.stringify({ isJobRelated: true, employerName: 'Acme Corp', employerDomain: 'acme.com', jobTitle: 'Backend Engineer', status: 'applied', careerPageUrl: null, interviewDateTime: null, confidence: 0.95, reasoning: null }),
+      content: JSON.stringify({ isJobRelated: true, employerName: 'Acme Corp', employerDomain: 'acme.com', jobTitle: 'Backend Engineer', status: 'applied', evidence: 'Thank you for applying', careerPageUrl: null, interviewDateTime: null, confidence: 0.95, reasoning: null }),
       tokensUsed: 600, promptTokens: 500, completionTokens: 100, model: 'google/gemini-2.0-flash-001',
     })
     const result = await run()
@@ -540,7 +542,7 @@ describe('runGmailSyncCore: mail that cannot be verified', () => {
     fakeDb.tables.set('jobs', [])
     mailbox = [FIXED_MESSAGE]
     callOpenRouterMock.mockResolvedValue({
-      content: JSON.stringify({ isJobRelated: true, employerName: 'Acme Corp', employerDomain: 'acme.com', jobTitle: 'Backend Engineer', status: 'applied', careerPageUrl: null, interviewDateTime: null, confidence: 0.95, reasoning: null }),
+      content: JSON.stringify({ isJobRelated: true, employerName: 'Acme Corp', employerDomain: 'acme.com', jobTitle: 'Backend Engineer', status: 'applied', evidence: 'Thank you for applying', careerPageUrl: null, interviewDateTime: null, confidence: 0.95, reasoning: null }),
       tokensUsed: 600, promptTokens: 500, completionTokens: 100, model: 'google/gemini-2.0-flash-001',
     })
     await run()
@@ -556,9 +558,11 @@ describe('runGmailSyncCore: telling the person', () => {
     payload: { headers: [{ name: 'from', value: 'Acme Talent <careers@acme.com>' }, { name: 'subject', value: subject }, { name: 'Authentication-Results', value: `mx.google.com; dkim=${dkim} header.d=acme.com` }], body: { data: '' } },
     internalDate: String(Date.now()),
   })
+  // A status needs a quote the mail really holds.
+  const EVIDENCE: Record<string, string> = { interview: 'technical interview', offer: 'pleased to offer', rejected: 'not moving forward', applied: 'Thank you for applying' }
   const as = (status: string) =>
     callOpenRouterMock.mockResolvedValue({
-      content: JSON.stringify({ isJobRelated: true, employerName: 'Acme Corp', employerDomain: 'acme.com', jobTitle: 'Backend Engineer', status, careerPageUrl: null, interviewDateTime: null, confidence: 0.95, reasoning: null }),
+      content: JSON.stringify({ isJobRelated: true, employerName: 'Acme Corp', employerDomain: 'acme.com', jobTitle: 'Backend Engineer', status, evidence: EVIDENCE[status], careerPageUrl: null, interviewDateTime: null, confidence: 0.95, reasoning: null }),
       tokensUsed: 600, promptTokens: 500, completionTokens: 100, model: 'google/gemini-2.0-flash-001',
     })
   const run = () => runGmailSyncCore({ db: fakeDb as any, userId: USER_ID, accessToken: 'fake-access-token', apiKeys: { openrouter: 'fake-key', userId: USER_ID }, preferences: preferences() })
