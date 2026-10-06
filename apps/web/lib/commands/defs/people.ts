@@ -445,6 +445,88 @@ export const learnedDelete = personCommand({
 export const learnedCommands: AnyCommand[] = [learnedList, learnedSearch, learnedKeep, learnedNotRight, learnedOff, learnedOn, learnedEdit, learnedDelete]
 
 // ---------------------------------------------------------------------------
+// What is working (4.8): results.get reads, proposals.confirm (Keep) and proposals.dismiss (Not right) record the
+// person's choice on one finding. A choice is one learning of the person's own, keyed by the finding; it carries the
+// effect and the counted group so the code that acts on it can read them, and a Keep changes nothing else.
+// ---------------------------------------------------------------------------
+
+export const resultsGet = personCommand({
+  id: 'results.get',
+  label: 'What is working',
+  input: z.strictObject({}),
+  measure: 'T33',
+  async run(ctx) {
+    const [{ loadResults }, { viewFrom }] = await Promise.all([import('@/lib/strategy/load'), import('@/lib/strategy/results')])
+    const l = await loadResults(ctx.admin() as never, readClient(ctx), ctx.userId)
+    return viewFrom(l.report, l.shape, l.learnings, l.kept, l.followed)
+  },
+})
+
+const finding = z.strictObject({ key: z.string().min(1).max(200) })
+
+async function recordChoice(ctx: CommandContext, key: string, status: 'active' | 'off') {
+  const [{ loadResults }, { findingsFrom }, { choiceKey }, { setLearningStatus }] = await Promise.all([
+    import('@/lib/strategy/load'),
+    import('@/lib/strategy/findings'),
+    import('@/lib/strategy/results'),
+    import('@/lib/learning/store'),
+  ])
+  const l = await loadResults(ctx.admin() as never, readClient(ctx), ctx.userId)
+  const f = findingsFrom(l.report, l.shape)
+  // the stored payload is re-checked: only a finding the record still shows, and has a change to keep, can be chosen
+  const hit = [...f.working, ...f.notWorking, ...f.noticed].find((x) => x.key === key && x.keep && x.change)
+  if (!hit || !hit.keep || !hit.change) throw new CommandRefusal(404, 'That finding is gone.', 'not_found')
+  const existing = l.learnings.find((x) => x.key === choiceKey(key))
+  if (existing) await setLearningStatus(ctx.userId, existing.id, status)
+  else {
+    const [{ getMemoryStore }, { LEARNING_SCOPE }, { DemoMemoryWriteRefusedError }] = await Promise.all([import('@/lib/memory/mem0-store'), import('@/lib/learning/types'), import('@/lib/memory/types')])
+    const demo = await isDemoWorkspace(ctx)
+    try {
+      await getMemoryStore().add(ctx.userId, {
+        fact: status === 'active' ? hit.change : `Not right: ${hit.line}`,
+        scope: LEARNING_SCOPE,
+        isDemo: demo,
+        refs: { key: choiceKey(key), kind: 'outcome', effect: hit.keep.effect, params: hit.keep.params, status, origin: 'person', evidence: [], n: hit.applications, updated_at: new Date().toISOString() },
+      })
+    } catch (e) {
+      if (e instanceof DemoMemoryWriteRefusedError) throw new CommandRefusal(403, 'Demo accounts cannot keep a change.', 'demo')
+      throw e
+    }
+  }
+  return hit
+}
+
+async function isDemoWorkspace(ctx: CommandContext): Promise<boolean> {
+  const [{ readProfileForDemoGuards }, { isDemoProfile }] = await Promise.all([import('@/lib/harness/keys'), import('@/lib/access/guardrails')])
+  const { row } = await readProfileForDemoGuards(ctx.admin() as never, ctx.userId)
+  return row ? isDemoProfile({ is_demo: row.is_demo ?? null, demo_expires_at: row.demo_expires_at ?? null }) : false
+}
+
+export const proposalsConfirm = personCommand({
+  id: 'proposals.confirm',
+  label: 'Keep',
+  input: finding,
+  measure: 'T33',
+  async run(ctx, i) {
+    const hit = await recordChoice(ctx, i.key, 'active')
+    return { key: i.key, kept: hit.change, acts: hit.acts }
+  },
+})
+
+export const proposalsDismiss = personCommand({
+  id: 'proposals.dismiss',
+  label: 'Not right',
+  input: finding,
+  measure: 'T33',
+  async run(ctx, i) {
+    await recordChoice(ctx, i.key, 'off')
+    return { key: i.key, dismissed: true }
+  },
+})
+
+export const resultsCommands: AnyCommand[] = [resultsGet, proposalsConfirm, proposalsDismiss]
+
+// ---------------------------------------------------------------------------
 // conversations.handled: "I have handled this". The person's own mark on a reply; the mail itself is untouched.
 // ---------------------------------------------------------------------------
 
@@ -485,5 +567,6 @@ export const peopleCommands: AnyCommand[] = [
   networkNudges,
   networkSetRule,
   ...learnedCommands,
+  ...resultsCommands,
   ...conversationsCommands,
 ]

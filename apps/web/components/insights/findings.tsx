@@ -1,94 +1,113 @@
 'use client'
 
 // What is working (blueprint 4.8): two lists, What is working and What is not, each line a finding with the counts
-// behind it and the change Cello proposes. Keep confirms the proposal (it becomes a learning, section 9) and says
-// where it acts; Not right dismisses it. Below a threshold the threshold's own sentence is shown, never a rate.
+// behind it. Where Cello has a change to propose, Keep stores the person's choice and says where it acts, and Not
+// right stores that it is not right, so the finding is gone next time. Then what Cello noticed, where your roles come
+// from and how your roles spread, each with See them where Roles can filter by it. Below a threshold the threshold's
+// own sentence is shown, never a rate. Every number is counted by code.
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import { Key } from '@/components/ui/key'
-import { findingsFrom, type Finding, type Findings as FindingsData } from '@/lib/strategy/findings'
-import type { StrategyReport } from '@/lib/strategy/types'
+import { callCommand } from '@/lib/network/client'
+import type { GroupRow, ResultsView, ViewFinding } from '@/lib/strategy/results'
 
-const DISMISSED = 'cello:findings:dismissed'
+const DOOR = '/api/strategy/results'
 
-// ponytail: a dismissed finding is remembered in this browser only; a stored dismissal arrives with results.get.
-const readDismissed = (): string[] => {
-  try {
-    return JSON.parse(localStorage.getItem(DISMISSED) ?? '[]')
-  } catch {
-    return []
-  }
-}
-
-function Line({ f, onKeep, onNotRight, kept }: { f: Finding; onKeep: (f: Finding) => void; onNotRight: (f: Finding) => void; kept: boolean }) {
+function Line({ f, busy, onKeep, onNotRight }: { f: ViewFinding; busy: boolean; onKeep: (f: ViewFinding) => void; onNotRight: (f: ViewFinding) => void }) {
   return (
     <li className="py-3">
       <p className="r-name">{f.line}</p>
-      {f.proposal && (
+      {f.change && f.state === 'new' && (
         <>
-          <p className="r-meta mt-1">{f.proposal.change}</p>
-          {kept ? (
-            <p className="r-meta mt-1">Kept. Cello will use this when it suggests and orders your roles. You can turn it off in Your search.</p>
-          ) : (
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Key onClick={() => onKeep(f)}>Keep</Key>
-              <Key variant="raised" onClick={() => onNotRight(f)}>Not right</Key>
-            </div>
-          )}
+          <p className="r-meta mt-1">{f.change}. If you keep it, it changes: {f.acts}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Key disabled={busy} onClick={() => onKeep(f)}>Keep</Key>
+            <Key variant="raised" disabled={busy} onClick={() => onNotRight(f)}>Not right</Key>
+          </div>
         </>
+      )}
+      {f.change && f.state === 'kept' && (
+        <p className="r-meta mt-1">
+          Kept: {f.change}. It changes: {f.acts} Turn it off in <Link href="/search" className="underline">Your search</Link>, under What Cello learned.
+        </p>
       )}
     </li>
   )
 }
 
+function List({ id, title, empty, items, ...rest }: { id: string; title: string; empty: string; items: ViewFinding[]; busy: boolean; onKeep: (f: ViewFinding) => void; onNotRight: (f: ViewFinding) => void }) {
+  return (
+    <section aria-labelledby={id} className="r-sheet p-6">
+      <h2 id={id} className="r-title">{title}</h2>
+      {items.length === 0 ? <p className="r-body mt-2">{empty}</p> : <ul className="divide-y divide-[var(--r-line)]">{items.map((f) => <Line key={f.key} f={f} {...rest} />)}</ul>}
+    </section>
+  )
+}
+
+function Groups({ id, title, rows }: { id: string; title: string; rows: GroupRow[] }) {
+  if (rows.length === 0) return null
+  return (
+    <section aria-labelledby={id} className="r-sheet p-6">
+      <h2 id={id} className="r-title">{title}</h2>
+      <ul className="divide-y divide-[var(--r-line)]">
+        {rows.map((g) => (
+          <li key={g.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-3">
+            <p className="r-name min-w-0 flex-1 basis-56">{g.label}</p>
+            <p className="r-body">{g.n} {g.n === 1 ? 'role' : 'roles'}</p>
+            {g.href && <Key asChild variant="raised"><Link href={g.href}>See them</Link></Key>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+/** The page as the person reads it. Pure over its props, so each state has a fixture. */
+export function ResultsPanel({ view, busy = false, error, onKeep, onNotRight }: { view: ResultsView; busy?: boolean; error?: string | null; onKeep: (f: ViewFinding) => void; onNotRight: (f: ViewFinding) => void }) {
+  const act = { busy, onKeep, onNotRight }
+  return (
+    <div className="space-y-8">
+      {error && <p className="r-body" role="alert">{error}</p>}
+      <List id="working-h" title="What is working" empty="Nothing to say yet." items={view.working} {...act} />
+      <List id="not-h" title="What is not" empty="Nothing to say yet." items={view.notWorking} {...act} />
+      {view.noticed.length > 0 && <List id="noticed-h" title="Cello noticed" empty="" items={view.noticed} {...act} />}
+      <Groups id="source-h" title="Where your roles come from" rows={view.source} />
+      <Groups id="spread-h" title="How your roles spread" rows={view.spread} />
+      {view.thresholds.length > 0 && <ul className="space-y-1">{view.thresholds.map((t) => <li key={t} className="r-meta">{t}</li>)}</ul>}
+    </div>
+  )
+}
+
 export function FindingsView() {
-  const [findings, setFindings] = useState<FindingsData | null>(null)
+  const [view, setView] = useState<ResultsView | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [dismissed, setDismissed] = useState<string[]>([])
-  const [kept, setKept] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
-    setDismissed(readDismissed())
-    fetch('/api/strategy')
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { report: StrategyReport }) => setFindings(findingsFrom(d.report)))
-      .catch(() => setError('Could not read your results. Try again in a moment.'))
-  }, [])
-
-  async function keep(f: Finding) {
-    if (!f.proposal) return
-    const res = await fetch('/api/strategy/outcomes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proposalId: f.proposal.id, question: f.proposal.question, title: f.proposal.title }) })
-    if (res.ok) setKept((k) => [...k, f.key])
-    else setError('Could not keep that. Nothing changed.')
-  }
-  function notRight(f: Finding) {
-    const next = [...dismissed, f.key]
-    setDismissed(next)
+  const load = useCallback(async () => {
     try {
-      localStorage.setItem(DISMISSED, JSON.stringify(next))
+      setView(await callCommand<ResultsView>(DOOR, 'results.get'))
+      setError(null)
     } catch {
-      // a private window forgets it on reload; the page still hides it now
+      setError('Could not read your results. Try again in a moment.')
+    }
+  }, [])
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  async function choose(command: 'proposals.confirm' | 'proposals.dismiss', f: ViewFinding) {
+    setBusy(true)
+    try {
+      await callCommand(DOOR, command, { key: f.key })
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save that. Nothing changed.')
+    } finally {
+      setBusy(false)
     }
   }
 
-  if (error) return <p className="r-body" role="alert">{error}</p>
-  if (!findings) return <p className="r-meta">Reading.</p>
-  const show = (xs: Finding[]) => xs.filter((f) => !dismissed.includes(f.key))
-  const working = show(findings.working)
-  const notWorking = show(findings.notWorking)
-  return (
-    <div className="space-y-8">
-      <section aria-labelledby="working-h" className="r-sheet p-6">
-        <h2 id="working-h" className="r-title">What is working</h2>
-        {working.length === 0 ? <p className="r-body mt-2">Nothing to say yet.</p> : <ul className="divide-y divide-[var(--r-line)]">{working.map((f) => <Line key={f.key} f={f} onKeep={keep} onNotRight={notRight} kept={kept.includes(f.key)} />)}</ul>}
-      </section>
-      <section aria-labelledby="not-h" className="r-sheet p-6">
-        <h2 id="not-h" className="r-title">What is not</h2>
-        {notWorking.length === 0 ? <p className="r-body mt-2">Nothing to say yet.</p> : <ul className="divide-y divide-[var(--r-line)]">{notWorking.map((f) => <Line key={f.key} f={f} onKeep={keep} onNotRight={notRight} kept={kept.includes(f.key)} />)}</ul>}
-      </section>
-      {findings.thresholds.length > 0 && (
-        <ul className="space-y-1">{findings.thresholds.map((t) => <li key={t} className="r-meta">{t}</li>)}</ul>
-      )}
-    </div>
-  )
+  if (!view) return error ? <p className="r-body" role="alert">{error}</p> : <p className="r-meta">Reading.</p>
+  return <ResultsPanel view={view} busy={busy} error={error} onKeep={(f) => choose('proposals.confirm', f)} onNotRight={(f) => choose('proposals.dismiss', f)} />
 }
