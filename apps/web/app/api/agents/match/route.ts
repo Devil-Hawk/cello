@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { loadApiKeys } from '@/lib/harness/keys'
-import { callLlm, MissingKeyError } from '@/lib/harness/llm'
+import { MissingKeyError } from '@/lib/harness/llm'
+import { chanceStep } from '@/lib/steps'
 import { scoreJobWithLlm, buildMatchDetails } from '@/lib/harness/agents/matcher'
 import { canRunLlm, missingOpenRouterMessage } from '@/lib/harness/llm-key-message'
 import type { LlmRunner } from '@/lib/harness/types'
@@ -101,7 +102,7 @@ export async function POST(request: NextRequest) {
     setTraceInput({ jobTitle: typedJob.title, companyName: companyName ?? null })
 
     try {
-      const llm: LlmRunner = (opts) => callLlm(apiKeys, { ...opts, name: opts.name ?? 'score-job-match' })
+      const llm: LlmRunner = chanceStep.runner(apiKeys, { door: 'session' })
       const { verdict } = await scoreJobWithLlm(
         llm,
         resume,

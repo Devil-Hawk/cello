@@ -147,7 +147,7 @@ import { ingestCompany, type DueCompany } from '../ingest/run'
 import { trackedOnly } from '../companies/watchlist'
 import { resolveTargeting, type Targeting } from '../targeting'
 import { loadApiKeys } from '../harness/keys'
-import { callLlm } from '../harness/llm'
+import { legacyStep } from '../steps'
 import { canRunLlm } from '../harness/llm-key-message'
 import { scoreJobBatch, ownedJobsQuery } from '../harness/agents/matcher'
 import { BudgetCapError } from '../harness/spend'
@@ -333,7 +333,7 @@ function meteredLlm(apiKeys: DecryptedApiKeys, budgetRemaining: number, name: st
   let used = 0
   const llm: LlmRunner = async (opts: LlmRunOptions): Promise<LlmResult> => {
     if (controller.signal.aborted) throw new BudgetExceededError()
-    const res = await callLlm(apiKeys, { ...opts, name: opts.name ?? name }, controller.signal)
+    const res = await legacyStep(name).call(apiKeys, opts, { signal: controller.signal })
     used += res.tokensUsed
     if (used > budgetRemaining) {
       controller.abort()

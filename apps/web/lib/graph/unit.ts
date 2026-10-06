@@ -62,7 +62,8 @@ import type {
 import { agentSchemas } from '../harness/schemas'
 import { UNIT_REGISTRY } from '../harness/registry'
 import { loadApiKeys } from '../harness/keys'
-import { callLlm, parseJsonLoose, TruncatedResponseError } from '../harness/llm'
+import { parseJsonLoose, TruncatedResponseError } from '../harness/llm'
+import { legacyStep } from '../steps'
 import { checkTailoringContainment, type TailoringContainmentReport } from '../security/job-text'
 import { journalStepFinish, journalStepStart } from './journal'
 import { checkToolPostcondition, recordToolPostcondition } from './postcondition'
@@ -401,8 +402,8 @@ async function runUnitBody<T extends UnitType>(
   // lib/graph/runs.ts would never trip.
   const meter = { used: 0 }
   const rawLlm: LlmRunner = async (opts) => {
-    // The Langfuse generation name; a call that names itself keeps its name.
-    const res = await callLlm(apiKeys, { ...opts, name: opts.name ?? UNIT_GENERATION_NAME[unitType] }, controller.signal)
+    // The declared step for this unit type: its id is the Langfuse generation name.
+    const res = await legacyStep(UNIT_GENERATION_NAME[unitType]).call(apiKeys, opts, { signal: controller.signal })
     meter.used += res.tokensUsed
     return res
   }

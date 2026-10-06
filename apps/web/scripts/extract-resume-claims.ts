@@ -65,7 +65,8 @@
  */
 import { createAdminClient } from '../lib/harness/supabase-admin'
 import { loadApiKeys } from '../lib/harness/keys'
-import { callLlm, callEmbedding, MissingKeyError, parseJsonLoose } from '../lib/harness/llm'
+import { MissingKeyError, parseJsonLoose } from '../lib/harness/llm'
+import { embedStep, legacyStep } from '../lib/steps'
 import { BudgetCapError } from '../lib/harness/spend'
 import { getBaseResume } from '../lib/resume/store'
 import { listDocuments } from '../lib/kb/store'
@@ -123,7 +124,7 @@ function kbEvidencePrompt(claimTexts: string[], framedDocument: string): string 
 }
 
 async function extractResumeClaims(keys: DecryptedApiKeys, resumeText: string): Promise<ExtractedClaim[]> {
-  const res = await callLlm(keys, {
+  const res = await legacyStep('extract-resume-claims').call(keys, {
     system: RESUME_CLAIM_SYSTEM_PROMPT,
     prompt: resumeExtractionPrompt(resumeText),
     json: true,
@@ -152,7 +153,7 @@ interface KbEvidenceCandidate {
 
 async function extractKbEvidence(keys: DecryptedApiKeys, claimTexts: string[], doc: KbDocument): Promise<KbEvidenceCandidate[]> {
   const framed = frameJobText(doc.content, { label: 'KB DOCUMENT' })
-  const res = await callLlm(keys, {
+  const res = await legacyStep('extract-kb-evidence').call(keys, {
     system: KB_EVIDENCE_SYSTEM_PROMPT,
     prompt: kbEvidencePrompt(claimTexts, framed),
     json: true,
@@ -297,7 +298,7 @@ async function main(): Promise<void> {
     // #embedChunksBestEffort's shape: best-effort, never fails the run.
     try {
       const texts = extracted.map((c) => c.claimText)
-      const { embeddings } = await callEmbedding(keys, { texts })
+      const { embeddings } = await embedStep.call(keys, { texts })
       for (let i = 0; i < extracted.length; i++) {
         const id = claimIds.get(extracted[i].claimText)
         if (!id) continue

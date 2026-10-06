@@ -4,7 +4,7 @@
 // an ATS, not the employer.
 
 import type { ParsedEmail } from './types'
-import { callLlm } from '../harness/llm'
+import { inboxClassifyStep } from '../steps'
 import type { DecryptedApiKeys } from '../harness/types'
 import { warnLlmFallback } from '../observability/llm-fallback'
 import { extractEmployerFromContent } from './employer'
@@ -90,9 +90,9 @@ Return ONLY the JSON object, no markdown.`
 }
 
 /**
- * Use an LLM (through callLlm, so budget-checked, spend-recorded and traced) to
+ * Use an LLM (through the inbox.classify step, so budget-checked, spend-recorded and traced) to
  * parse an email into structured job-application info. Takes the whole
- * DecryptedApiKeys (with userId), never a bare key: without a userId callLlm
+ * DecryptedApiKeys (with userId), never a bare key: without a userId it
  * cannot meter or trace the call.
  */
 export async function parseEmailWithAI(
@@ -106,7 +106,7 @@ export async function parseEmailWithAI(
   const senderIsAts = isAtsOrJobBoardDomain(fromDomain)
 
   try {
-    const response = await callLlm(apiKeys, {
+    const response = await inboxClassifyStep.call(apiKeys, {
       model: CLASSIFY_MODEL,
       maxTokens: 350,
       temperature: 0.1,
@@ -114,7 +114,6 @@ export async function parseEmailWithAI(
       // that never used them.
       reasoning: { effort: 'none' },
       prompt: buildPrompt(from, subject, body),
-      name: 'classify-email',
     })
 
     const content = response.content || '{}'

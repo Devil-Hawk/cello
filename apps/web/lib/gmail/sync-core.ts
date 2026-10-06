@@ -92,7 +92,7 @@ export interface GmailSyncCoreResult {
  * callers (the route, the cron) are responsible for catching and reporting.
  */
 export async function runGmailSyncCore(params: GmailSyncCoreParams): Promise<GmailSyncCoreResult> {
-  // One Langfuse trace per sync pass, every classify-email generation under it
+  // One Langfuse trace per sync pass, every inbox.classify generation under it
   // (the 400-observation cap bounds a large scan). Counts only as output:
   // sender names and subjects are other people's data.
   return withTrace(
