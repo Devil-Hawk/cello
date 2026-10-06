@@ -22,6 +22,9 @@ export type ChoiceCeiling = 'R0' | ChoiceRung
 
 const RANK: Record<ChoiceCeiling, number> = { R0: 0, R2: 1, R3: 2, R4: 3 }
 
+/** True when a rung is at or under the highest the person allows. */
+export const withinCeiling = (rung: ChoiceRung, ceiling: ChoiceCeiling) => RANK[rung] <= RANK[ceiling]
+
 export const ModelChoiceSchema = z.strictObject({
   rung: z.enum(CHOICE_RUNGS),
   model: z.string().min(1).max(200),

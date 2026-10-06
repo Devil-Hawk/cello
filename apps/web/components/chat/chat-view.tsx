@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Menu, X } from 'lucide-react'
 import { Markdown } from '@/components/chat/markdown'
+import { ModelPicker, type PickScope } from '@/components/chat/model-picker'
 import { Composer } from '@/components/chat/composer'
 import { AnswerParts, type Named } from '@/components/chat/parts'
 import { Rail, type RailChat } from '@/components/chat/rail'
@@ -18,8 +19,10 @@ import { TasksLine, type TaskRow, type TaskStatus } from '@/components/chat/task
 import { Tiles, type TileData } from '@/components/chat/tiles'
 import { disclosureLine, type Disclosure } from '@/lib/chat/disclosure'
 import type { ChatPageData } from '@/lib/chat/page-data'
+import type { SettingsView } from '@/lib/chat/settings'
 import type { Suggestions } from '@/lib/chat/suggest'
 import { refId, type AttachKind } from '@/lib/chat/types'
+import type { ModelChoice } from '@/lib/models/choice'
 
 export interface ChatViewProps {
   /** The chat to open; null for a new one. */
@@ -73,6 +76,10 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
   const [quoted, setQuoted] = useState<{ text: string; turn_id: string } | null>(null)
   const [chips, setChips] = useState<{ kind: string; ref: string; name: string }[]>([])
   const [selection, setSelection] = useState<{ text: string; turnId: string; x: number; y: number } | null>(null)
+  const [settings, setSettings] = useState<SettingsView | null>(null)
+  // A choice made before the chat exists, or for one message: used by the next send. ponytail: stored on the chat when the first turn creates it.
+  const [pending, setPending] = useState<ModelChoice | null>(null)
+  const [estimate, setEstimate] = useState<string | null>(null)
   const poll = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadChats = useCallback(async () => {
@@ -97,6 +104,26 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
     setPanel(null)
     void loadPage()
   }, [loadPage])
+
+  const loadSettings = useCallback(async () => {
+    setSettings(await getJson<SettingsView>(`/api/chat/settings${chatId ? `?chat=${encodeURIComponent(chatId)}` : ''}`))
+  }, [chatId])
+  useEffect(() => {
+    void loadSettings()
+  }, [loadSettings])
+
+  const choice: ModelChoice | null = pending ?? (settings?.ran ? { rung: settings.ran.rung, model: settings.ran.model, effort: settings.ran.effort } : null)
+  useEffect(() => {
+    if (!choice) return setEstimate(null)
+    void getJson<{ text: string }>(`/api/chat/estimate?rung=${choice.rung}&model=${encodeURIComponent(choice.model)}&effort=${choice.effort}`).then((e) => setEstimate(e?.text ?? null))
+  }, [choice?.rung, choice?.model, choice?.effort]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function pick(next: ModelChoice, scope: PickScope) {
+    if (!chatId || scope === 'once') return setPending(next)
+    const ok = await send('/api/chat/settings', 'POST', { chat: chatId, choice: next, as_default: scope === 'default' })
+    if (ok) setPending(null)
+    await loadSettings()
+  }
 
   const tasks = useMemo(() => (page?.tasks ?? []).map(toTaskRow), [page])
   const running = tasks.some(alive)
@@ -232,6 +259,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
         <div className="mx-auto w-full max-w-3xl px-4 pb-3">
           <Composer value={draft} onChange={setDraft} onSend={() => undefined} onStop={() => undefined} running={false} notice={SEND_NOTICE} quoted={quoted}
             onRemoveQuote={() => setQuoted(null)}
+            controls={settings ? <ModelPicker key={`${choice?.rung}:${choice?.model}:${choice?.effort}`} choice={choice} rungs={settings.rungs} estimate={estimate} onPick={(c, scope) => void pick(c, scope)} /> : null}
             above={
               chips.length > 0 ? (
                 <ul className="mb-2 flex flex-wrap gap-2" aria-label="Will be attached when you send">
