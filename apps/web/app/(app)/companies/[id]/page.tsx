@@ -114,7 +114,7 @@ export default function CompanyDetailPage() {
       ])
 
       if (jobsData) {
-        setJobs(jobsData)
+        setJobs(jobsData as unknown as Job[])
       }
       setTargeting(resolveTargeting(prefs))
     }

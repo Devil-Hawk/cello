@@ -661,13 +661,13 @@ function JobsPageInner() {
     // The list starts at the person's own rows (person_roles) so it can be ordered by
     // what they want; the posting's columns are filtered through the embed (OnJobs).
     // A role they said is not for them stays out of the list.
-    const withFacets = (start: JobsQuery, side: TargetScope): JobsQuery => {
-      start.is('hidden_reason', null)
-      const on = new OnJobs(start)
-      openRolesOnly(on)
+    const withFacets = (query: JobsQuery, side: TargetScope): JobsQuery => {
+      query.is('hidden_reason', null)
+      const start = new OnJobs(query)
+      openRolesOnly(start)
 
       if (selectedCompany !== 'all') {
-        on.eq('company_id', selectedCompany)
+        start.eq('company_id', selectedCompany)
       }
       // No 'all companies' filter: RLS already scopes every row to the person's own
       // person_roles rows. The old .in('company_id', companyIds) re-sent every
@@ -678,26 +678,26 @@ function JobsPageInner() {
 
       if (freshness !== 'all') {
         const cutoffIso = new Date(Date.now() - FRESHNESS_HOURS[freshness] * 60 * 60 * 1000).toISOString()
-        if (includeUndated) on.or('posted_at.gte.' + cutoffIso + ',posted_at.is.null')
-        else on.gte('posted_at', cutoffIso)
+        if (includeUndated) start.or('posted_at.gte.' + cutoffIso + ',posted_at.is.null')
+        else start.gte('posted_at', cutoffIso)
       }
 
-      if (jobFunction !== 'all') on.eq('job_function', jobFunction)
-      if (seniority !== 'all') on.eq('seniority', seniority)
-      if (remoteOnly) on.eq('is_remote', true)
-      if (country.trim().length === 2) on.eq('country', country.trim().toUpperCase())
-      if (language !== 'all') on.eq('language', language)
+      if (jobFunction !== 'all') start.eq('job_function', jobFunction)
+      if (seniority !== 'all') start.eq('seniority', seniority)
+      if (remoteOnly) start.eq('is_remote', true)
+      if (country.trim().length === 2) start.eq('country', country.trim().toUpperCase())
+      if (language !== 'all') start.eq('language', language)
       if (hideLowQuality) {
         // NULL quality_score means "not classified yet" — never hide those,
         // only rows the classifier has actually scored below the threshold.
-        on.or('quality_score.gte.' + QUALITY_REJECT_THRESHOLD + ',quality_score.is.null')
+        start.or('quality_score.gte.' + QUALITY_REJECT_THRESHOLD + ',quality_score.is.null')
       }
       if (debouncedLocationQuery.trim()) {
-        on.ilike('location', '%' + debouncedLocationQuery.trim() + '%')
+        start.ilike('location', '%' + debouncedLocationQuery.trim() + '%')
       }
-      if (unscoredOnly) start.is('checked_at', null)
-      if (side === 'matching' && targeting) applyRoleTargets(on, targeting, excludedIds)
-      return on.query
+      if (unscoredOnly) query.is('checked_at', null)
+      if (side === 'matching' && targeting) applyRoleTargets(start, targeting, excludedIds)
+      return start.query
     }
 
     let query = withFacets(untyped.from('person_roles').select(LIST_SELECT_COLUMNS, { count: 'exact' }), scope)
