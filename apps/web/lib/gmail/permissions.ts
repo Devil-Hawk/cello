@@ -98,7 +98,7 @@ export const GMAIL_PERMISSION_TIER_META: Record<GmailPermissionTier | 'prepare',
   },
   send: {
     id: 'send',
-    label: 'Send approved messages',
+    label: 'Send from my Gmail',
     advanced: false,
     requiresGoogleScope: GMAIL_PERMISSION_SCOPES.send,
     description:
@@ -128,16 +128,17 @@ export const GMAIL_PERMISSION_TIER_META: Record<GmailPermissionTier | 'prepare',
   },
   monitor: {
     id: 'monitor',
-    label: 'Monitor mailbox',
+    label: 'Read mail for your search',
     advanced: true,
     requiresGoogleScope: GMAIL_PERMISSION_SCOPES.monitor,
     description:
-      'Cello scans your inbox in the background for job-application email and updates your pipeline automatically.',
+      "Cello reads job mail, and the headers of your threads with people at employers' own addresses. It never sends without your click.",
     canSee: [
-      "Every message a Gmail search for application-shaped subjects/senders matches — sender, subject, and body — across your whole mailbox.",
+      'Job mail: sender, subject and text, to track your applications and replies.',
+      "The headers (who, when, subject) of your threads with people at employers' own addresses, to build your network. Never their text.",
     ],
     cannotSee: [
-      "Nothing is walled off within the grant itself: gmail.readonly covers your entire mailbox. Cello only processes messages that match its application-email search, but Google's permission screen does not limit access to those messages.",
+      "Nothing is walled off within the grant itself: gmail.readonly covers your entire mailbox. Cello only reads the mail described above, but Google's permission screen does not limit access to it.",
     ],
     selfHostWarning:
       "Gmail read scopes are Google-restricted: any OAuth app requesting them must pass Google's CASA security assessment annually, and until an app has, Google shows an unverified-app warning and limits how many people can grant it. If you self-host Cello, this permission will not work until you register your own Google Cloud OAuth client and complete CASA yourself, a real, recurring cost specific to this tier, not the others.",

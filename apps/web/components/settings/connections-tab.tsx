@@ -194,7 +194,6 @@ export function ConnectionsTab({ onStatus }: ConnectionsTabProps) {
   return (
     <div className="space-y-6">
       <div className="space-y-1">
-        <h2 className="font-display text-section text-foreground">Connections</h2>
         <p className="text-caption text-muted-foreground">
           Gmail access is four separate permissions, not one. Turn on exactly what you
           want — sending doesn&apos;t require letting Cello read your inbox.
@@ -206,7 +205,7 @@ export function ConnectionsTab({ onStatus }: ConnectionsTabProps) {
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-accent-deep" />
           <p className="text-caption text-foreground">
             <span className="font-medium">Carried over from before:</span> your account already
-            had Gmail sync running, so &quot;Monitor mailbox&quot; below stayed on — nothing
+            had Gmail sync running, so &quot;Read mail for your search&quot; below stayed on — nothing
             broke. Turn it off anytime; it&apos;s just like any other permission now.
           </p>
         </Panel>
@@ -239,8 +238,8 @@ export function ConnectionsTab({ onStatus }: ConnectionsTabProps) {
                 readyWithoutReconnect={liveScopesCoverTier(liveScopes, 'send')}
                 isGoogle={isGoogle}
                 onGrant={() => grantGoogleTier('send')}
-                onConfirmLive={() => persistTier('send', true, 'Send approved messages: turned on.')}
-                onRevoke={() => persistTier('send', false, 'Send approved messages: turned off.')}
+                onConfirmLive={() => persistTier('send', true, 'Send from my Gmail: turned on.')}
+                onRevoke={() => persistTier('send', false, 'Send from my Gmail: turned off.')}
               />
             }
           />
@@ -336,8 +335,8 @@ export function ConnectionsTab({ onStatus }: ConnectionsTabProps) {
                 readyWithoutReconnect={backgroundReady}
                 isGoogle={isGoogle}
                 onGrant={() => grantGoogleTier('monitor')}
-                onConfirmLive={() => persistTier('monitor', true, 'Monitor mailbox: turned on.')}
-                onRevoke={() => persistTier('monitor', false, 'Monitor mailbox: turned off.')}
+                onConfirmLive={() => persistTier('monitor', true, 'Read mail for your search: turned on.')}
+                onRevoke={() => persistTier('monitor', false, 'Read mail for your search: turned off.')}
               />
             }
           >

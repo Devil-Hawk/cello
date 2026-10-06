@@ -156,4 +156,4 @@ export async function threadHasReply(
 
 /** What to tell the user when the reply state could not be read. */
 export const REPLY_CHECK_UNKNOWN_MESSAGE =
-  'Cello cannot see replies without the Monitor mailbox permission, so it will not draft or send a follow-up it cannot vet. Turn on "Monitor mailbox" in Settings > Connections.'
+  'Cello cannot see replies without the Monitor mailbox permission, so it will not draft or send a follow-up it cannot vet. Turn on "Read mail for your search" in Settings, under Connections.'
