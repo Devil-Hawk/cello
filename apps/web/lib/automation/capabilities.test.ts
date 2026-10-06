@@ -34,7 +34,7 @@ describe('auto-submit capability', () => {
   })
 
   it('does not let onboarding offer a switch for an unavailable capability', () => {
-    const onboarding = readFileSync(join(root, 'app/(app)/onboarding/page.tsx'), 'utf8')
+    const onboarding = readFileSync(join(root, 'app/(app)/welcome/welcome-flow.tsx'), 'utf8')
     if (!AUTO_SUBMIT_AVAILABLE) {
       expect(onboarding).not.toMatch(/aria-label="Auto-submit applications"/)
       expect(onboarding).not.toMatch(/^\s*autoSubmit,$/m)
