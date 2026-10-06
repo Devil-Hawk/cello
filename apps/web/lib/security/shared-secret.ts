@@ -5,6 +5,10 @@
 // Both sides are hashed first so timingSafeEqual always sees two 32-byte
 // buffers: it never throws on a length mismatch and the secret's length is
 // not leaked either.
+//
+// The clock's own door, /api/agent/continue, does not use CRON_SECRET: it checks a
+// signed body with verifyContinue (lib/clock/sign.ts). The browser runner keeps its
+// own secret (isRunnerAuthorized below).
 
 import { createHash, timingSafeEqual } from 'node:crypto'
 

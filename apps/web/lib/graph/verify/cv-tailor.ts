@@ -62,15 +62,19 @@ interface JobFacts {
   description: string | null
 }
 
-async function loadJobFacts(admin: AdminClient, jobId: string): Promise<JobFacts> {
-  const { data } = await admin.from('jobs').select('title, description, companies(name)').eq('id', jobId).single()
+async function loadJobFacts(admin: AdminClient, userId: string, jobId: string): Promise<JobFacts> {
+  const { data } = await admin
+    .from('person_jobs')
+    .select('title, description, viewer_company_name')
+    .eq('viewer_id', userId)
+    .eq('id', jobId)
+    .single()
   const row = (data ?? {}) as {
     title?: string | null
     description?: string | null
-    companies?: { name?: string | null } | { name?: string | null }[] | null
+    viewer_company_name?: string | null
   }
-  const c = row.companies
-  const company = (Array.isArray(c) ? c[0]?.name : c?.name) ?? 'the company'
+  const company = row.viewer_company_name ?? 'the company'
   return { title: row.title ?? '(untitled role)', company, description: row.description ?? null }
 }
 
@@ -157,7 +161,7 @@ export async function verifyCvTailorDraft(args: CvTailorVerifyArgs): Promise<CvT
         : ''
 
     // (c) FACTUAL-GROUNDING JUDGE — ruling 2c.
-    const [job, resumeText] = await Promise.all([loadJobFacts(args.admin, args.jobId), loadResumeText(args.admin, userId)])
+    const [job, resumeText] = await Promise.all([loadJobFacts(args.admin, userId, args.jobId), loadResumeText(args.admin, userId)])
     const sourceFacts =
       `CANDIDATE RESUME:\n${resumeText}\n\nJOB FACTS:\nTitle: ${job.title}\nCompany: ${job.company}\n` +
       `Description:\n${frameJobText(job.description, { maxChars: JUDGE_JD_CHARS, emptyPlaceholder: '(no description provided)' })}`

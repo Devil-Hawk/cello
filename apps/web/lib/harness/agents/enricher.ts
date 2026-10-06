@@ -58,7 +58,11 @@ export const enricher: AgentFn = async (ctx) => {
     // joined; no caller sends more than a handful today, but nothing in the
     // schema stops one from growing past the URL length limit.
     const jobs = await chunkedIn(input.jobIds, async (chunk) => {
-      const { data } = await ctx.admin.from('jobs').select('id, company_id').in('id', chunk)
+      const { data } = await ctx.admin
+        .from('person_jobs')
+        .select('id, company_id:viewer_company_id')
+        .eq('viewer_id', ctx.userId)
+        .in('id', chunk)
       return (data as { id: string; company_id: string }[]) ?? []
     })
     for (const j of jobs) {

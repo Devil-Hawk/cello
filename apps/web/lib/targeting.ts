@@ -13,8 +13,12 @@
 // they have not, we show everything and say so.
 
 export interface Targeting {
-  /** Job function slugs from lib/jobs/classify.ts JOB_FUNCTIONS. Empty = any. */
+  /** Job function slugs from lib/jobs/classify.ts JOB_FUNCTIONS. Empty = any. From K5c they are derived from the chosen role types' families. */
   functions: string[]
+  /** Role type ids from lib/jobs/role-types, at most 8 (K5c). Empty or absent = none chosen: the old filter decides. Stored as `role_types`. */
+  role_types?: string[]
+  /** Cello mapped the person's old choices to role types and they have not reviewed them yet (K5c); cleared when they save. */
+  role_types_review?: boolean
   /** Seniority slugs from lib/jobs/classify.ts SENIORITY_LEVELS. Empty = any. */
   seniority: string[]
   /** ISO 3166-1 alpha-2 country codes, uppercased. Empty = any country. */
@@ -58,6 +62,8 @@ function toStringArray(value: unknown, transform: (s: string) => string): string
   return out
 }
 
+/** A person chooses at most this many role types (lib/jobs/role-types MAX_ROLE_TYPES). */
+const MAX_ROLE_TYPES = 8
 const lower = (s: string) => s.toLowerCase()
 const upper = (s: string) => s.toUpperCase()
 
@@ -80,6 +86,8 @@ export function resolveTargeting(preferences: unknown): Targeting {
 
   return {
     functions: toStringArray(raw.functions, lower),
+    role_types: toStringArray(raw.role_types, lower).slice(0, MAX_ROLE_TYPES),
+    role_types_review: raw.role_types_review === true,
     seniority: toStringArray(raw.seniority, lower),
     countries: toStringArray(raw.countries, upper),
     remoteOnly: raw.remoteOnly === true,
@@ -100,6 +108,7 @@ export function resolveTargeting(preferences: unknown): Targeting {
 export function isTargetingConfigured(t: Targeting): boolean {
   return (
     t.functions.length > 0 ||
+    (t.role_types?.length ?? 0) > 0 ||
     t.seniority.length > 0 ||
     t.countries.length > 0 ||
     t.remoteOnly ||

@@ -14,6 +14,7 @@ import { resolveGmailAccessToken } from '@/lib/gmail/token'
 import type { OutreachDraftInput } from '@/lib/harness/agents/outreach'
 import { runUnitOnce } from '@/lib/graph/oneshot'
 import { setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -99,8 +100,7 @@ export async function POST(request: NextRequest) {
     let companyName = 'your company'
     let matchHighlights: string[] = []
     if (parent.job_id) {
-      const { data: job } = await supabase
-        .from('jobs')
+      const { data: job } = await personJobs(supabase)
         .select('title, match_details')
         .eq('id', parent.job_id)
         .single()

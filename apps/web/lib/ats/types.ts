@@ -28,7 +28,18 @@ export interface AtsJob {
    */
   externalId: string
   location?: string
+  /** The capped plain text of the posting: what search and the parsers read. */
   description?: string
+  /**
+   * The employer's own HTML for the posting, whole and uncleaned (the provider's content field, a JSON-LD
+   * description, a detail page's main block). syncJobs cleans it and keeps it as Markdown (lib/ingest/markdown.ts).
+   * Absent when the source listed only a snippet.
+   */
+  descriptionHtml?: string
+  /** Where descriptionHtml came from. Defaults to the applicant system's API for a board, else the tier that read it. */
+  descriptionSource?: 'api' | 'jsonld' | 'detail' | 'rendered' | 'listing'
+  /** The employer's apply link, when it is not the posting's own address. */
+  applyUrl?: string
   /** ISO 8601 timestamp when the posting was published, if known. */
   postedAt?: string
   /** Human-readable salary string (annualized when the source uses intervals). */

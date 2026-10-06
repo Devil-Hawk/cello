@@ -54,14 +54,17 @@ function found(s: FindNewRolesStatus): string {
   return parts.join(', ')
 }
 
+/** " around 18:41", or nothing when the clock has not said. */
+const around = (s: FindNewRolesStatus) => (s.nextCheckAt ? ` around ${clockTime(s.nextCheckAt)}` : '')
+
 export function statusCopy(s: FindNewRolesStatus, now: Date): StatusCopy {
-  const next = `Next around ${clockTime(s.nextCheckAt)}`
+  const next = s.nextCheckAt ? `Next around ${clockTime(s.nextCheckAt)}` : null
   const base = { tone: 'ink' as const, working: false, details: false }
 
   switch (s.state) {
     case 'never':
       return s.hasCompanies
-        ? { ...base, long: `First check around ${clockTime(s.nextCheckAt)}. You can refresh now.`, short: `First check around ${clockTime(s.nextCheckAt)}. You can refresh now.`, next: null }
+        ? { ...base, long: s.nextCheckAt ? `First check${around(s)}. You can refresh now.` : 'Not checked yet. You can refresh now.', short: s.nextCheckAt ? `First check${around(s)}. You can refresh now.` : 'Not checked yet. You can refresh now.', next: null }
         : { ...base, long: 'Find new roles checks your companies every 6 hours. Add a company to start.', short: 'Find new roles checks your companies every 6 hours. Add a company to start.', next: null }
 
     case 'checking': {
@@ -96,7 +99,7 @@ export function statusCopy(s: FindNewRolesStatus, now: Date): StatusCopy {
     }
 
     case 'failed': {
-      const line = `The last check did not finish. Cello tries again around ${clockTime(s.nextCheckAt)}.`
+      const line = s.nextCheckAt ? `The last check did not finish. Cello tries again around ${clockTime(s.nextCheckAt)}.` : 'The last check did not finish.'
       return { ...base, tone: 'danger', long: line, short: line, next: null }
     }
   }
@@ -111,6 +114,6 @@ export function detailsLines(s: FindNewRolesStatus, total: number | null = null)
   return {
     items: shown.map((f) => `${f.companyName}: ${f.text}`),
     more: hidden > 0 ? `and ${hidden} more` : null,
-    footer: `These are checked again around ${clockTime(s.nextCheckAt)}.`,
+    footer: s.nextCheckAt ? `These are checked again around ${clockTime(s.nextCheckAt)}.` : 'These are checked again at the next check.',
   }
 }

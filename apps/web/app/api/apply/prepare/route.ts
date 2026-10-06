@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const { data: job } = await admin.from('jobs').select('url').eq('id', draft.job_id).maybeSingle()
+  const { data: job } = await admin.from('person_jobs').select('url').eq('viewer_id', user.id).eq('id', draft.job_id).maybeSingle()
   if (!job?.url) {
     return NextResponse.json({ error: 'This job has no URL to apply to.' }, { status: 422, headers: NO_STORE })
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ROLE_MAX_AGE_DAYS, isStalePosting, openRolesOnly, staleCutoffIso } from './freshness'
+import { DIRECTORY_MAX_AGE_DAYS, ROLE_MAX_AGE_DAYS, isStalePosting, openRolesOnly, staleCutoffIso } from './freshness'
 
 const NOW = Date.parse('2026-10-05T12:00:00Z')
 const DAY = 86_400_000
@@ -24,6 +24,13 @@ describe('isStalePosting', () => {
     expect(isStalePosting(null, NOW)).toBe(false)
     expect(isStalePosting('', NOW)).toBe(false)
     expect(isStalePosting('last tuesday', NOW)).toBe(false)
+  })
+
+  it('is 30 days at an employer nobody follows', () => {
+    expect(DIRECTORY_MAX_AGE_DAYS).toBe(30)
+    const posted = new Date(NOW - 31 * DAY).toISOString()
+    expect(isStalePosting(posted, NOW, DIRECTORY_MAX_AGE_DAYS)).toBe(true)
+    expect(isStalePosting(posted, NOW)).toBe(false)
   })
 
   it('drops the Amazon 2017 post', () => {

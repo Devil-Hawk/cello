@@ -53,6 +53,7 @@ import { createClient } from '@/lib/supabase/client'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import type { ReviewQueueItem } from '@/lib/notifications/queue'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 type NotificationKind = 'queue' | 'outreach' | 'overdue' | 'interview' | 'job'
 
@@ -182,14 +183,13 @@ async function fetchFeed(): Promise<NotificationItem[]> {
       .limit(LIMITS.overdue),
     supabase
       .from('activities')
-      .select('id, title, occurred_at, applications(id, jobs(title, companies(name)))')
+      .select('id, title, occurred_at, applications(id, jobs(title, companies(name), employer:company_directory(name)))')
       .ilike('type', '%interview%')
       .order('occurred_at', { ascending: false })
       .limit(LIMITS.interview),
     openRolesOnly(
-      supabase
-        .from('jobs')
-        .select('id, title, match_score, posted_at, discovered_at, companies(name)')
+      personJobs(supabase)
+        .select('id, title, match_score, posted_at, discovered_at, viewer_company_name')
         .eq('is_new', true)
         .gte('match_score', 70)
     )
@@ -224,7 +224,7 @@ async function fetchFeed(): Promise<NotificationItem[]> {
     id: string
     title: string
     occurred_at: string
-    applications: { jobs: { title: string; companies: { name: string | null } | null } | null } | null
+    applications: { jobs: { title: string; companies: { name: string | null } | null; employer: { name: string | null } | null } | null } | null
   }[]) {
     items.push({
       id: `activity:${row.id}`,
@@ -232,7 +232,7 @@ async function fetchFeed(): Promise<NotificationItem[]> {
       title: row.title,
       subtitle: [
         row.applications?.jobs?.title,
-        relatedName(row.applications?.jobs?.companies),
+        relatedName(row.applications?.jobs?.companies ?? row.applications?.jobs?.employer),
         formatRelativeTime(row.occurred_at),
       ]
         .filter(Boolean)
@@ -247,14 +247,14 @@ async function fetchFeed(): Promise<NotificationItem[]> {
     match_score: number | null
     posted_at: string | null
     discovered_at: string
-    companies: { name: string | null } | { name: string | null }[] | null
+    viewer_company_name: string | null
   }[]) {
     items.push({
       id: `job:${row.id}`,
       kind: 'job',
       title: row.title,
       subtitle: [
-        relatedName(row.companies) ?? 'Unknown company',
+        row.viewer_company_name ?? 'Unknown company',
         formatRelativeTime(row.posted_at ?? row.discovered_at),
       ].join(' · '),
       // The specific job, not the list — same reason the page's row does it:

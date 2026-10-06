@@ -10,6 +10,7 @@
 // seen), and only a few pages per refresh. Pages already read are remembered
 // (`checked`), so the next pass reads only what is new.
 
+import * as cheerio from 'cheerio'
 import type { AtsJob } from '../../ats/types'
 import { mapWithConcurrency } from '../../ats/concurrency'
 import { normalizeJobUrl } from '../snapshot'
@@ -32,15 +33,22 @@ const SITEMAP_WORDS = /job|career|position|opening|vacanc/i
 /** Pages fetched per refresh: the budget decides how fast a big site is covered. */
 export const DETAIL_PER_READ = { inline: 10, scheduled: 60 } as const
 
+/** The `<url>` or `<sitemap>` entries of a sitemap, read as XML: entities decoded, CDATA and namespaces handled. */
 function locs(xml: string, tag: 'url' | 'sitemap'): SitemapEntry[] {
   const out: SitemapEntry[] = []
-  for (const m of xml.matchAll(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'g'))) {
-    const url = /<loc>\s*([^<\s]+)\s*<\/loc>/.exec(m[1])?.[1]?.replace(/&amp;/g, '&')
-    if (!url) continue
-    const lastmod = /<lastmod>\s*([^<\s]+)\s*<\/lastmod>/.exec(m[1])?.[1]
-    out.push({ url, ...(lastmod ? { lastmod } : {}) })
-    if (out.length >= MAX_ENTRIES) break
+  let $: cheerio.CheerioAPI
+  try {
+    $ = cheerio.load(xml, { xml: true })
+  } catch {
+    return out
   }
+  $(tag).each((_, el) => {
+    if (out.length >= MAX_ENTRIES) return false
+    const url = $(el).children('loc').first().text().trim()
+    if (!url || /\s/.test(url)) return
+    const lastmod = $(el).children('lastmod').first().text().trim()
+    out.push({ url, ...(lastmod && !/\s/.test(lastmod) ? { lastmod } : {}) })
+  })
   return out
 }
 

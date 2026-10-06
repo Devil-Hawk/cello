@@ -8,6 +8,7 @@ import { canRunLlm, missingOpenRouterMessage } from '@/lib/harness/llm-key-messa
 import type { LlmRunner } from '@/lib/harness/types'
 import type { Database, Json } from '@cello/shared'
 import { setTraceError, setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 type ProfileRow = Database['public']['Tables']['profiles']['Row']
 type JobRow = Database['public']['Tables']['jobs']['Row']
@@ -39,7 +40,8 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  return withTrace(createAdminClient(), user.id, { name: 'match-job' }, async () => {
+  const admin = createAdminClient()
+  return withTrace(admin, user.id, { name: 'match-job' }, async () => {
 
     const body = await request.json().catch(() => ({}))
     const jobId = typeof (body as { jobId?: unknown })?.jobId === 'string' ? (body as { jobId: string }).jobId : null
@@ -64,14 +66,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data: job, error: jobError } = await supabase
-      .from('jobs')
-      .select('id, title, description, location, company_id, companies(name)')
+    const { data: job, error: jobError } = await personJobs(supabase)
+      .select('id, title, description, location, company_id:viewer_company_id, viewer_company_name')
       .eq('id', jobId)
       .single()
 
     type JobWithCompany = Pick<JobRow, 'id' | 'title' | 'description' | 'location' | 'company_id'> & {
-      companies: { name: string | null } | { name: string | null }[] | null
+      viewer_company_name: string | null
     }
     const typedJob = job as JobWithCompany | null
 
@@ -95,8 +96,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const companies = typedJob.companies
-    const companyName = Array.isArray(companies) ? companies[0]?.name : companies?.name
+    const companyName = typedJob.viewer_company_name
     // What a reviewer needs at a glance in Langfuse, not a bare uuid.
     setTraceInput({ jobTitle: typedJob.title, companyName: companyName ?? null })
 
@@ -118,7 +118,8 @@ export async function POST(request: NextRequest) {
       )
       const matchDetails = buildMatchDetails(verdict)
 
-      await supabase
+      // The score is written by the service role: a role is a shared row, and a person cannot update it (migration 20261008055000).
+      await admin
         .from('jobs')
         .update({ match_score: verdict.score, match_details: matchDetails as unknown as Json })
         .eq('id', jobId)

@@ -4,6 +4,8 @@
 
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/harness/supabase-admin'
+import { checksStatus } from '@/lib/clock/status'
 import { readFindNewRoles } from '@/lib/ingest/status'
 
 export const dynamic = 'force-dynamic'
@@ -16,7 +18,16 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: NO_STORE })
 
   try {
-    return NextResponse.json(await readFindNewRoles(supabase), { headers: NO_STORE })
+    // The clock's record: last and next check, whether background work is on, whether it is paused.
+    let admin = null
+    try {
+      admin = createAdminClient()
+    } catch {
+      /* no service role on this deployment: background work reads as off */
+    }
+    const checks = await checksStatus(supabase, admin)
+    const status = await readFindNewRoles(supabase, new Date(), checks.rolesCheck?.nextDueAt ?? null)
+    return NextResponse.json({ ...status, checks }, { headers: NO_STORE })
   } catch {
     return NextResponse.json({ error: 'Could not read the last check' }, { status: 500, headers: NO_STORE })
   }

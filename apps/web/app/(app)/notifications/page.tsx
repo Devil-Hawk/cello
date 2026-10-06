@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { createClient } from '@/lib/supabase/client'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { cn, formatRelativeTime } from '@/lib/utils'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 interface HotJob {
   id: string
@@ -21,7 +22,7 @@ interface HotJob {
   match_score: number | null
   posted_at: string | null
   discovered_at: string
-  companies: { name: string | null } | null
+  viewer_company_name: string | null
 }
 
 interface InterviewActivity {
@@ -32,7 +33,7 @@ interface InterviewActivity {
   application_id: string
   applications: {
     id: string
-    jobs: { title: string; companies: { name: string | null } | null } | null
+    jobs: { title: string; companies: { name: string | null } | null; employer: { name: string | null } | null } | null
   } | null
 }
 
@@ -125,9 +126,8 @@ export default function NotificationsPage() {
         // New, unreviewed jobs that scored well. RLS already scopes jobs to
         // this user's tracked companies.
         openRolesOnly(
-          supabase
-            .from('jobs')
-            .select('id, title, match_score, posted_at, discovered_at, companies(name)')
+          personJobs(supabase)
+            .select('id, title, match_score, posted_at, discovered_at, viewer_company_name')
             .eq('is_new', true)
             .gte('match_score', 70)
         )
@@ -137,7 +137,7 @@ export default function NotificationsPage() {
         supabase
           .from('activities')
           .select(
-            'id, type, title, occurred_at, application_id, applications(id, jobs(title, companies(name)))'
+            'id, type, title, occurred_at, application_id, applications(id, jobs(title, companies(name), employer:company_directory(name)))'
           )
           .ilike('type', '%interview%')
           .order('occurred_at', { ascending: false })
@@ -245,7 +245,7 @@ export default function NotificationsPage() {
           title={activity.title}
           subtitle={[
             activity.applications?.jobs?.title,
-            activity.applications?.jobs?.companies?.name,
+            activity.applications?.jobs?.companies?.name ?? activity.applications?.jobs?.employer?.name,
             formatRelativeTime(activity.occurred_at),
           ]
             .filter(Boolean)
@@ -268,7 +268,7 @@ export default function NotificationsPage() {
           key={job.id}
           tone="opportunity"
           title={job.title}
-          subtitle={[job.companies?.name ?? 'Unknown company', formatRelativeTime(job.posted_at ?? job.discovered_at)].join(
+          subtitle={[job.viewer_company_name ?? 'Unknown company', formatRelativeTime(job.posted_at ?? job.discovered_at)].join(
             ' · '
           )}
           // Opens THIS job, not the list. This row names a specific role and

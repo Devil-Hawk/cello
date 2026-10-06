@@ -25,16 +25,19 @@ vi.mock('@/lib/harness/agents/matcher', () => ({
 vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: async () => ({ openrouter: 'k' }) }))
 vi.mock('@/lib/harness/llm', () => ({ callLlm: vi.fn(), MissingKeyError: class extends Error {} }))
 vi.mock('@/lib/harness/llm-key-message', () => ({ canRunLlm: () => true, missingOpenRouterMessage: () => 'no key' }))
-vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({}) }))
+// Who wrote the score: a person cannot update a shared role (migration 20261008055000), so only the service role may.
+const writes: { by: 'admin' | 'user'; table: string; values: unknown }[] = []
+const admin = { from: (table: string) => ({ update: (values: unknown) => (writes.push({ by: 'admin', table, values }), { eq: async () => ({ error: null }) }) }) }
+vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => admin }))
 
 const rows: Record<string, unknown> = {
   profiles: { resume_text: 'Senior engineer.' },
-  jobs: { id: 'job-1', title: 'Staff Engineer', description: 'd', location: null, company_id: 'co-1', companies: { name: 'Acme' } },
+  person_jobs: { id: 'job-1', title: 'Staff Engineer', description: 'd', location: null, company_id: 'co-1', viewer_company_name: 'Acme' },
 }
 const supabase = {
   auth: { getUser: async () => ({ data: { user: { id: 'u1' } }, error: null }) },
   from: (table: string) => {
-    const chain = { select: () => chain, eq: () => chain, update: () => chain, single: async () => ({ data: rows[table] ?? null, error: null }) }
+    const chain = { select: () => chain, eq: () => chain, update: (values: unknown) => (writes.push({ by: 'user', table, values }), chain), single: async () => ({ data: rows[table] ?? null, error: null }) }
     return chain
   },
 }
@@ -47,6 +50,7 @@ const post = () =>
 
 beforeEach(() => {
   scoreMock.mockReset()
+  writes.length = 0
   traced.input.length = traced.output.length = traced.meta.length = traced.error.length = 0
 })
 
@@ -59,6 +63,12 @@ describe('POST /api/agents/match in Langfuse', () => {
     expect(traced.meta).toEqual([{ job_id: 'job-1' }])
     expect(traced.output).toEqual([{ score: 85, seniorityFit: 'Strong fit for senior IC' }])
     expect(traced.error).toEqual([])
+  })
+
+  it('saves the score with the admin client, never the person\'s own session', async () => {
+    scoreMock.mockResolvedValue({ verdict: { score: 85, seniorityFit: 'Strong fit for senior IC' } })
+    await post()
+    expect(writes).toEqual([{ by: 'admin', table: 'jobs', values: { match_score: 85, match_details: { score: 85 } } }])
   })
 
   it('a handled scoring failure answers 500 and marks the root failed', async () => {

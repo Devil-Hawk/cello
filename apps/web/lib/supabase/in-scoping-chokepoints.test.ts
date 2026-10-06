@@ -67,7 +67,7 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       'the request body — never server-derived from the full owned-company set, so it never replays the ~600+ ' +
       'company incident.',
   },
-  'apps/web/app/api/harness/cron/route.ts': {
+  'apps/web/lib/clock/routines/harness.ts': {
     calls: [".in('thread_id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",
   },
@@ -101,6 +101,20 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       "fetchRationales's only caller (distillCandidate) passes candidate.verdictIds.slice(0, " +
       'RATIONALE_SAMPLE_SIZE) — capped at 6 before this call ever runs, regardless of how many verdict ids ' +
       "a candidate's own SQL aggregation carries.",
+  },
+  'apps/web/lib/clock/routines/roles-check.ts': {
+    calls: [
+      ".in('job_id', ids)",
+      ".in('job_id', drop)",
+      ".in('job_id', hide)",
+      ".in('job_id', show)",
+      ".in('job_id', left)",
+    ],
+    reason: 'every list is a subset of one REJUDGE_PAGE (100) page of the person\'s own held roles, never an owned-id set.',
+  },
+  'apps/web/lib/jobs/role-types/sync.ts': {
+    calls: [".in('id', retired)"],
+    reason: 'retired is the ids of role types the module no longer has: a handful, never user data.',
   },
   'apps/web/lib/harness/agents/enricher.ts': {
     calls: [".in('id', chunk)"],

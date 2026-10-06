@@ -94,6 +94,7 @@ const OPEN_ROLE_FILTER = 'still_open.is.null,still_open.eq.true'
  */
 async function countOpenRoles(
   jobs: SupabaseClient,
+  userId: string,
   companyId: string
 ): Promise<{ count: number | null; basis: string }> {
   // A duplicate id gets chased to its survivor first (lib/entities/companies.ts)
@@ -101,7 +102,11 @@ async function countOpenRoles(
   // as zero postings, mislabeling a real company as "size unknown".
   const resolvedCompanyId = await resolveCompanyId(jobs, companyId)
   const build = (filtered: boolean) => {
-    const query = jobs.from('jobs').select('id', { count: 'exact', head: true }).eq('company_id', resolvedCompanyId)
+    const query = jobs
+      .from('person_jobs')
+      .select('id', { count: 'exact', head: true })
+      .eq('viewer_id', userId)
+      .eq('viewer_company_id', resolvedCompanyId)
     return filtered ? query.or(OPEN_ROLE_FILTER) : query
   }
 
@@ -131,11 +136,18 @@ async function countOpenRoles(
 /** The specific posting being pursued, when the caller named one. */
 async function readPosting(
   jobs: SupabaseClient,
+  userId: string,
   companyId: string,
   jobId: string
 ): Promise<{ title: string | null; jobFunction: JobFunction | null } | null> {
   const build = (columns: string) =>
-    jobs.from('jobs').select(columns).eq('id', jobId).eq('company_id', companyId).maybeSingle()
+    jobs
+      .from('person_jobs')
+      .select(columns)
+      .eq('viewer_id', userId)
+      .eq('id', jobId)
+      .eq('viewer_company_id', companyId)
+      .maybeSingle()
 
   let { data, error } = await build('title, job_function')
   if (error && isMissingColumnError(error)) {
@@ -158,6 +170,7 @@ async function readPosting(
 
 async function readRoleContext(
   supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
   companyId: string,
   jobId: string | null
 ): Promise<RoleContextPayload> {
@@ -170,8 +183,8 @@ async function readRoleContext(
 
   try {
     const [openRoles, posting] = await Promise.all([
-      countOpenRoles(jobs, companyId),
-      jobId ? readPosting(jobs, companyId, jobId) : Promise.resolve(null),
+      countOpenRoles(jobs, userId, companyId),
+      jobId ? readPosting(jobs, userId, companyId, jobId) : Promise.resolve(null),
     ])
 
     return {
@@ -277,7 +290,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Company not found (or not owned by this user)' }, { status: 404 })
   }
 
-  const payload = await readRoleContext(supabase, companyId, jobId)
+  const payload = await readRoleContext(supabase, user.id, companyId, jobId)
   return NextResponse.json({ ok: true, ...payload })
 }
 
@@ -312,7 +325,7 @@ export async function POST(request: NextRequest) {
     // "who is worth writing to?"), but a caller that just sourced needs both
     // at once — so the role context rides along instead of costing a second
     // request. Read after sourcing, on the same RLS-scoped client.
-    const roleContext = await readRoleContext(supabase, body.companyId, body.jobId ?? null)
+    const roleContext = await readRoleContext(supabase, user.id, body.companyId, body.jobId ?? null)
 
     // THE DEMO TRAIL — "we should be able to see what someone did with a
     // particular access code". See recordSourcingOutcome above for what this

@@ -5,7 +5,6 @@
 // the Next.js route (user-scoped supabase-js client, RLS enforced) and in the
 // scheduled script (scripts/ingest.ts, service-role client).
 
-import { createHash } from 'node:crypto'
 import type { AtsJob, AtsMetadata, AtsProvider, AtsProviderId, FetchContext } from './types'
 import { isValidToken } from './types'
 import { greenhouse } from './greenhouse'
@@ -32,6 +31,9 @@ import {
 } from '../ingest/reader/legit'
 import { searchTerms, type ReaderTargets } from '../ingest/reader/targets'
 import { targetVerdict, type TargetVerdict } from '../targeting/roles'
+import { hasPersonTargets, judgeForPerson, prepareTargets, type OutsideReason, type TypeStep } from '../jobs/target-relevance'
+import type { PostingCapture, SourceTier, TypeProv } from '../jobs/relevance-types'
+import { typeTitle } from '../jobs/role-types'
 import { EMPTY_TARGETING, type Targeting } from '../targeting'
 // Relative import (not `@/...`): lib/ats/* stays framework-free, and
 // lib/jobs/classify.ts is itself a zero-dependency pure module, so this is
@@ -43,6 +45,7 @@ import { repairMojibake } from '../jobs/mojibake'
 // Pure and import-light too (zod + the classifier): the requirements read at
 // ingest, so a row is stored with what it asks for.
 import { parseRequirements, type Requirements } from '../jobs/requirements'
+import { postingCapture } from '../ingest/markdown'
 
 export type {
   AtsJob,
@@ -85,11 +88,17 @@ export interface CompanyInput {
   career_url: string | null
   /** companies.metadata jsonb — may be absent when the column doesn't exist yet. */
   metadata?: unknown
+  /** The person who follows the company: the roles a read keeps are kept for them. */
+  user_id?: string
+  /** The shared employer (company_directory), when the company's board passed the verifier. */
+  employer_id?: string | null
 }
 
 /** Row shape upserted into jobs (onConflict company_id,external_id). */
-export interface JobUpsertRow {
+export interface JobUpsertRow extends Partial<PostingCapture> {
   company_id: string
+  /** Set only for a company in the directory: its rows are written once per employer, whoever reads first. */
+  employer_id?: string
   title: string
   description: string
   url: string
@@ -109,11 +118,19 @@ export interface JobUpsertRow {
   quality_score: number
   /** Ingest provenance: the ATS provider (or 'scraper', the page reader) that produced this row. */
   source: string
+  /** Which tier of the reader produced it: a board, the site's search, a sitemap, a listing or the rendered page. */
+  source_tier?: SourceTier | null
   /** The refresh that listed this posting; the prune and the closed check read it. */
   last_seen_at: string
   /** What the posting asks for (lib/jobs/requirements.ts), read from the description now. */
   requirements: Requirements
   requirements_extracted_at: string
+  /** The title's key and its tier 1 type (lib/jobs/role-types); the type is null when no rule placed the title. */
+  title_norm?: string
+  dept_norm?: string
+  role_type?: string | null
+  type_origin?: 'code' | null
+  type_prov?: TypeProv | null
 }
 
 /** A stored job, as much of it as a refresh needs to decide whether anything changed. */
@@ -122,7 +139,7 @@ export interface ExistingJob {
   title: string
   location: string | null
   salaryRange: string | null
-  /** md5 of the stored description (jobs.description_md5); null when it is empty. */
+  /** md5 of the stored Markdown (jobs.description_md5); null when there is no body yet. */
   descriptionMd5: string | null
   /** jobs.source of the stored row. */
   source?: string | null
@@ -140,9 +157,23 @@ export interface ExistingJob {
   postedAt?: string | null
 }
 
+/**
+ * One count of a read, at one employer: what was found outside the person's targets, for one reason, or (while
+ * role_types_live is off) the roles the type step would keep that the old filter drops, and the reverse.
+ */
+export interface CountWrite {
+  employer_id: string | null
+  company_id: string | null
+  kind: 'outside_targets' | 'shadow_keep' | 'shadow_drop'
+  reason: OutsideReason | ''
+  n: number
+}
+
 /** Column changes for one stored job. Only the fields that differ are present. */
 export interface JobUpdate {
   companyId: string
+  /** The company's employer, when it has one: the stored row is the employer's, not the company's. */
+  employerId?: string
   externalId: string
   fields: Record<string, unknown>
 }
@@ -161,8 +192,8 @@ export interface SightingResult {
  * isolates failures per company.
  */
 export interface AtsStore {
-  /** The company's stored jobs (paged internally). */
-  listJobs(companyId: string): Promise<ExistingJob[]>
+  /** The company's stored jobs (paged internally); the employer's, when the company has one, since a role is shared by everyone who follows it. */
+  listJobs(companyId: string, employerId?: string | null): Promise<ExistingJob[]>
   /**
    * Make room in a full company: delete the named stored roles that nothing
    * points at (an application, a draft...) and return the external ids it
@@ -170,8 +201,16 @@ export interface AtsStore {
    * full company simply drops the roles that do not fit.
    */
   evictJobs?(companyId: string, externalIds: string[]): Promise<string[]>
-  /** Insert new rows (on_conflict company_id,external_id, merge). */
+  /** Insert new rows (on_conflict company_id,external_id, merge; employer rows on_conflict employer_id,posting_key). */
   upsertJobs(rows: JobUpsertRow[]): Promise<void>
+  /**
+   * Give the person the roles a read kept (person_roles), `hiddenIds` of them hidden because nothing
+   * disagreed with their targets but a dimension could not be read. Optional so a store that cannot
+   * (a test double) keeps compiling.
+   */
+  keepForPerson?(input: { userId: string; companyId: string; externalIds: string[]; hiddenIds: string[]; targetsVersion: number; via?: 'check' | 'link' }): Promise<void>
+  /** Record how many listed roles were outside the person's targets, by reason (person_counts); numbers, never rows. */
+  setCounts?(userId: string, rows: CountWrite[]): Promise<void>
   /** Apply column changes to stored rows; returns how many rows changed. Never touches match data. */
   updateJobs(updates: JobUpdate[]): Promise<number>
   /**
@@ -228,7 +267,7 @@ function errorMessage(error: unknown): string {
 }
 
 /** Read a valid cached ATS pointer out of companies.metadata, if any. */
-function readCachedAts(
+export function readCachedAts(
   metadata: unknown
 ): { provider: AtsProviderId; token: string; source?: string; verifiedBy?: string } | null {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null
@@ -276,7 +315,7 @@ function repairJobText(job: AtsJob): AtsJob {
 }
 
 /** Keep only http(s) jobs with a title and an absolute URL; dedup by URL. */
-function sanitizeJobs(jobs: AtsJob[]): AtsJob[] {
+export function sanitizeJobs(jobs: AtsJob[]): AtsJob[] {
   const seen = new Set<string>()
   const clean: AtsJob[] = []
   for (const job of jobs) {
@@ -297,8 +336,51 @@ function sanitizeJobs(jobs: AtsJob[]): AtsJob[] {
   return clean
 }
 
-function md5(text: string): string {
-  return createHash('md5').update(text).digest('hex')
+const typeFields = (t: ReturnType<typeof typeTitle>) => ({ title_norm: t.title_norm, dept_norm: t.dept_norm, role_type: t.role_type, type_origin: t.type_origin, type_prov: t.type_prov })
+
+/** The row a read stores for one listed posting: its classification, its whole body as Markdown, its requirements and its type. */
+export function jobRow(
+  company: Pick<CompanyInput, 'id' | 'employer_id'>,
+  job: AtsJob,
+  title: string,
+  c: ReturnType<typeof classifyJob>,
+  source: string,
+  now: string
+): JobUpsertRow {
+  const cap = postingCapture(job)
+  return {
+    company_id: company.id,
+    ...(company.employer_id ? { employer_id: company.employer_id } : {}),
+    title,
+    description: (job.description ?? '').slice(0, MAX_DESCRIPTION_CHARS),
+    url: job.url,
+    location: job.location ?? null,
+    salary_range: job.salary ?? null,
+    posted_at: job.postedAt ?? null,
+    external_id: job.externalId,
+    is_new: true,
+    discovered_at: now,
+    job_function: c.jobFunction,
+    seniority: c.seniority,
+    language: c.language,
+    country: c.country,
+    is_remote: c.isRemote,
+    job_type: c.jobType,
+    quality_score: c.qualityScore,
+    source,
+    source_tier: tierOfSource(source),
+    last_seen_at: now,
+    requirements: parseRequirements({
+      title,
+      description: job.description ?? '',
+      descriptionMd: cap.description_md,
+      location: job.location,
+      salaryRange: job.salary,
+    }),
+    requirements_extracted_at: now,
+    ...cap,
+    ...typeFields(typeTitle(title)),
+  }
 }
 
 /** The sources whose rows one refresh of `provider` may count as missed. */
@@ -380,10 +462,11 @@ export async function withCompanyLock(
 export async function loadStoredJobs(
   store: AtsStore,
   companyId: string,
-  result: CompanyRefreshResult
+  result: CompanyRefreshResult,
+  employerId?: string | null
 ): Promise<Map<string, ExistingJob> | null> {
   try {
-    return new Map((await store.listJobs(companyId)).map((job) => [job.externalId, job]))
+    return new Map((await store.listJobs(companyId, employerId)).map((job) => [job.externalId, job]))
   } catch (error) {
     result.errors.push(`listing existing jobs failed: ${errorMessage(error)}`)
     return null
@@ -435,7 +518,7 @@ export async function refreshLocked(
   // 0. What is stored already. Read first so a provider that needs a second
   //    request per posting (Workday, SmartRecruiters) spends it on the postings
   //    that have no description yet.
-  const stored = await loadStoredJobs(store, company.id, result)
+  const stored = await loadStoredJobs(store, company.id, result, company.employer_id)
   if (!stored) {
     board.skipSave = true
     return board
@@ -538,6 +621,7 @@ export async function refreshLocked(
     stored,
     judge: { name: company.name, domain: company.domain ?? null, careerUrl: company.career_url },
     targeting: targets?.targeting,
+    ...(company.user_id ? { owner: { userId: company.user_id, targetsVersion: targets?.version ?? 0 }, titles: targets?.titles, typeStep: targets?.typeStep } : {}),
     windowed: providers[provider].searchesByQuery === true && query.length > 0,
   }, result)
   return board
@@ -559,6 +643,21 @@ export interface SyncOptions {
   listedIds?: string[]
   /** The list is a window onto the board (a search, a few pages): a role missing from it is not thereby gone. */
   windowed?: boolean
+  /** The person the roles are kept for, and the version of their targets. Without it nothing is kept per person. */
+  owner?: { userId: string; targetsVersion: number }
+  /** The role titles the person typed: with the targets, they decide what is kept. */
+  titles?: readonly string[]
+  /** The role types the person chose and what they are worth (K5c): counted beside the old filter, or deciding once the switch is on. */
+  typeStep?: TypeStep
+  /** The person pasted this role: it is kept for them whatever their targets say, and marked as a link's. */
+  pasted?: boolean
+}
+
+/** jobs.source_tier of what a source wrote. */
+export function tierOfSource(source: string): SourceTier {
+  if (source === 'site_search' || source === 'sitemap' || source === 'listing') return source
+  if (source === 'scraper') return 'rendered'
+  return Object.prototype.hasOwnProperty.call(providers, source) ? 'board' : 'listing'
 }
 
 /**
@@ -581,9 +680,11 @@ export async function syncJobs(
   // Roles the source lists that are not open roles of this employer (stale, expired, agency, repost, other employer, non-role)
   // are not sighted either, so a stored one of them misses and closes instead of being kept open by the listing.
   const notOpen = new Set<string>()
+  let tooOld = 0
   const clean = sanitizeJobs(listed).filter((job) => {
     if (!isStalePosting(job.postedAt)) return true
     notOpen.add(job.externalId)
+    tooOld++
     return false
   })
   result.found = clean.length
@@ -637,7 +738,7 @@ export async function syncJobs(
   let room = Math.max(0, MAX_ROLES_PER_COMPANY - stored.size)
   const targeting = opts.targeting ?? EMPTY_TARGETING
   const fresh = candidates.filter((job) => !stored.has(job.externalId)).map(classify).filter(({ c }) => !c.rejectReason && !isLowQuality(c))
-  const ranked = orderForCap(fresh, ({ job, c }) =>
+  let ranked = orderForCap(fresh, ({ job, c }) =>
     targetVerdict(
       { title: job.title, description: job.description, job_function: c.jobFunction, seniority: c.seniority, country: c.country, language: c.language, is_remote: c.isRemote },
       targeting,
@@ -645,6 +746,43 @@ export async function syncJobs(
     ),
     ({ job }) => job.postedAt
   )
+  // Only roles inside the person's stated targets are stored, and the rest are counted by why. With no
+  // targets stated the followed employer keeps up to the cap, as before, and those roles are marked
+  // by targets version 0. A role nothing disagrees with, whose place or level could not be read, is
+  // kept hidden for the person.
+  const personTargets = { targeting, titles: opts.titles ?? [], typeStep: opts.typeStep }
+  const filtering = Boolean(opts.owner) && !opts.pasted && hasPersonTargets(personTargets)
+  const outside: Record<OutsideReason, number> = { place: 0, age: tooOld, excluded: 0, level: 0, title: 0, type: 0, untyped: 0 }
+  const hiddenIds = new Set<string>()
+  // Every title is typed by code before it is judged, so the type step and the stored row see the same answer.
+  const typed = new Map<string, ReturnType<typeof typeTitle>>()
+  const typedFor = (job: AtsJob, title: string) => {
+    let t = typed.get(job.externalId)
+    if (!t) typed.set(job.externalId, (t = typeTitle(title)))
+    return t
+  }
+  // While the switch is off the old filter decides and the type step is only counted beside it (T20).
+  const shadow = Boolean(opts.typeStep) && opts.typeStep!.live === false && opts.typeStep!.chosen.length > 0
+  const shadowCount = { keep: 0, drop: 0 }
+  if (filtering) {
+    const prepared = prepareTargets(personTargets.titles)
+    ranked = ranked.filter(({ job, title, c }) => {
+      const t = typedFor(job, title)
+      const role = { title: job.title, description: job.description, job_function: c.jobFunction, seniority: c.seniority, country: c.country, language: c.language, is_remote: c.isRemote, postedAt: job.postedAt, title_norm: t.title_norm, role_type: t.role_type }
+      const verdict = judgeForPerson(role, personTargets, company.name, prepared)
+      if (shadow) {
+        const typeStepVerdict = judgeForPerson(role, { ...personTargets, typeStep: { ...opts.typeStep!, live: true } }, company.name, prepared)
+        if (typeStepVerdict.keep && !verdict.keep) shadowCount.keep++
+        if (verdict.keep && !typeStepVerdict.keep) shadowCount.drop++
+      }
+      if (!verdict.keep) {
+        outside[verdict.reason]++
+        return false
+      }
+      if (verdict.hidden) hiddenIds.add(job.externalId)
+      return true
+    })
+  }
   // Closed roles go first, oldest first: the ones nothing points at are deleted, the rest stay and count.
   const closedStoredRows = [...stored.values()].filter((s) => s.open === false)
   if (ranked.length > room && store.evictJobs && closedStoredRows.length > 0) {
@@ -702,36 +840,7 @@ export async function syncJobs(
     }
   }
   excluded.capped = Math.max(0, ranked.length - room)
-  const newRows: JobUpsertRow[] = ranked
-    .slice(0, room)
-    .map(({ job, title, c }) => ({
-      company_id: company.id,
-      title,
-      description: (job.description ?? '').slice(0, MAX_DESCRIPTION_CHARS),
-      url: job.url,
-      location: job.location ?? null,
-      salary_range: job.salary ?? null,
-      posted_at: job.postedAt ?? null,
-      external_id: job.externalId,
-      is_new: true,
-      discovered_at: now,
-      job_function: c.jobFunction,
-      seniority: c.seniority,
-      language: c.language,
-      country: c.country,
-      is_remote: c.isRemote,
-      job_type: c.jobType,
-      quality_score: c.qualityScore,
-      source: opts.source,
-      last_seen_at: now,
-      requirements: parseRequirements({
-        title,
-        description: job.description ?? '',
-        location: job.location,
-        salaryRange: job.salary,
-      }),
-      requirements_extracted_at: now,
-    }))
+  const newRows: JobUpsertRow[] = ranked.slice(0, room).map(({ job, title, c }) => jobRow(company, job, title, c, opts.source, now))
 
   if (newRows.length > 0) {
     try {
@@ -740,6 +849,51 @@ export async function syncJobs(
     } catch (error) {
       result.errors.push(`upsert failed: ${errorMessage(error)}`)
       return
+    }
+  }
+
+  // The roles this read kept are the person's: one person_roles row each, beside the old reads.
+  if (opts.owner && store.keepForPerson && newRows.length > 0) {
+    try {
+      await store.keepForPerson({
+        userId: opts.owner.userId,
+        companyId: company.id,
+        externalIds: newRows.map((r) => r.external_id),
+        hiddenIds: [...hiddenIds],
+        targetsVersion: filtering ? opts.owner.targetsVersion : 0,
+        ...(opts.pasted ? { via: 'link' as const } : {}),
+      })
+    } catch (error) {
+      result.errors.push(`person roles failed: ${errorMessage(error)}`)
+    }
+  }
+  // What was left out is a number. A read of the employer replaces that day's numbers for it, every reason sent so a zero resets.
+  if (filtering && opts.owner && store.setCounts) {
+    const employerId = company.employer_id ?? null
+    try {
+      await store.setCounts(
+        opts.owner.userId,
+        [
+          ...(Object.keys(outside) as OutsideReason[]).map((reason) => ({
+            employer_id: employerId,
+            company_id: employerId ? null : company.id,
+            kind: 'outside_targets' as const,
+            reason,
+            n: outside[reason],
+          })),
+          ...(shadow
+            ? (['shadow_keep', 'shadow_drop'] as const).map((kind) => ({
+                employer_id: employerId,
+                company_id: employerId ? null : company.id,
+                kind,
+                reason: '' as const,
+                n: kind === 'shadow_keep' ? shadowCount.keep : shadowCount.drop,
+              }))
+            : []),
+        ]
+      )
+    } catch (error) {
+      result.errors.push(`counts failed: ${errorMessage(error)}`)
     }
   }
 
@@ -754,21 +908,30 @@ export async function syncJobs(
     if (!have) continue
     const fields: Record<string, unknown> = {}
     const title = job.title.trim()
-    if (title && title !== have.title) fields.title = title
+    if (title && title !== have.title) {
+      fields.title = title
+      Object.assign(fields, typeFields(typeTitle(title)))
+    }
     if (job.location && job.location !== have.location) fields.location = job.location
     if (job.salary && job.salary !== have.salaryRange) fields.salary_range = job.salary
+    // The body is re-read only when its hash changes. A snippet never replaces a body already stored, and a read that
+    // found no body (a provider that did not send one this time) leaves the stored one alone.
+    const cap = postingCapture(job)
     const description = (job.description ?? '').trim().slice(0, MAX_DESCRIPTION_CHARS)
-    if (description && md5(description) !== have.descriptionMd5) {
-      fields.description = description
+    const changed = cap.description_md !== null && cap.description_md5 !== have.descriptionMd5
+    if (changed && !(cap.description_state === 'partial' && have.descriptionMd5 !== null)) {
+      if (description) fields.description = description
+      Object.assign(fields, cap)
       fields.requirements = parseRequirements({
         title: title || have.title,
-        description,
+        description: description || '',
+        descriptionMd: cap.description_md,
         location: job.location ?? have.location,
         salaryRange: job.salary ?? have.salaryRange,
       })
       fields.requirements_extracted_at = now
     }
-    if (Object.keys(fields).length > 0) updates.push({ companyId: company.id, externalId: job.externalId, fields })
+    if (Object.keys(fields).length > 0) updates.push({ companyId: company.id, ...(company.employer_id ? { employerId: company.employer_id } : {}), externalId: job.externalId, fields })
   }
   if (updates.length > 0) {
     try {

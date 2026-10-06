@@ -67,7 +67,7 @@ function fakeAdmin(opts: FakeAdminOpts = {}): AdminClient {
           if (table === 'applications') {
             return application ? { data: application, error: null } : { data: null, error: { message: 'no row' } }
           }
-          if (table === 'jobs') return { data: job, error: null }
+          if (table === 'person_jobs') return { data: job, error: null }
           if (table === 'companies') return { data: company, error: null }
           if (table === 'profiles') return { data: PROFILE_ROW, error: null }
           throw new Error(`fakeAdmin: unexpected single() on table "${table}"`)

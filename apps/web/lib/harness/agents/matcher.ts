@@ -72,7 +72,7 @@ const RESUME_LIMIT = 8000
 
 interface JobRow {
   id: string
-  company_id: string
+  company_id: string | null
   title: string
   description: string | null
   location: string | null
@@ -86,7 +86,9 @@ interface JobRow {
   country: string | null
   is_remote: boolean | null
   quality_score: number | null
-  companies?: { name: string | null } | { name: string | null }[] | null
+  /** The person's own company for the role (person_jobs.viewer_company_*): null for a role they hold from the directory without following the employer. */
+  viewer_company_id?: string | null
+  viewer_company_name?: string | null
 }
 
 export interface LlmVerdict {
@@ -126,9 +128,7 @@ function strArray(v: unknown): string[] {
 }
 
 function companyName(job: JobRow): string {
-  const c = job.companies
-  if (Array.isArray(c)) return c[0]?.name ?? ''
-  return c?.name ?? ''
+  return job.viewer_company_name ?? ''
 }
 
 /** Exported so callers scoring jobs outside scoreJobBatch (e.g. the batch match
@@ -141,7 +141,7 @@ export function toScorable(job: JobRow): ScorableJob {
     description: job.description,
     location: job.location,
     companyName: companyName(job),
-    companyId: job.company_id,
+    companyId: job.viewer_company_id ?? job.company_id,
   }
 }
 
@@ -157,20 +157,18 @@ export async function userCompanyIds(admin: AdminClient, userId: string): Promis
 }
 
 /**
- * A `jobs` query scoped to userId's own companies through the FK join
+ * The roles userId holds (a person_roles row), through the person_jobs view
  * instead of an `.in('company_id', companyIds)` querystring array — which
  * broke every load once an account passed ~600 companies (the array crossed
- * the request URL length limit). Ownership semantics are identical: RLS
- * itself scopes jobs the same way (EXISTS companies.id = jobs.company_id AND
- * companies.user_id = auth.uid()), this just does it server-side against an
- * admin client that bypasses RLS.
+ * the request URL length limit). A role is one shared row, so ownership is
+ * the person's person_roles row, not the company that stored it first. Done
+ * server-side against an admin client that bypasses RLS.
  *
- * `columns` must embed the join as `companies!inner(...)` (any fields) —
- * `!inner` is what turns the embed into a row-restricting join; without it
- * the `.eq('companies.user_id', ...)` filter has nothing to attach to.
+ * Never embed `companies!inner(...)` in `columns`: a role the sweep stored has company_id null, and an inner
+ * join drops it. The viewer_id filter is the fence; a name comes from viewer_company_name.
  */
 export function ownedJobsQuery(admin: AdminClient, userId: string, columns: string, opts?: { count?: 'exact'; head?: boolean }) {
-  return admin.from('jobs').select(columns, opts).eq('companies.user_id', userId)
+  return admin.from('person_jobs').select(columns, opts).eq('viewer_id', userId)
 }
 
 /** Collect jobIds from static input and any dependency step output carrying jobIds. */
@@ -360,12 +358,11 @@ function passesQualityAndTargeting(job: JobRow, targeting: Targeting): boolean {
 
 const SELECT_COLUMNS =
   'id, company_id, title, description, location, url, is_new, match_score, posted_at, ' +
-  'job_function, seniority, language, country, is_remote, quality_score, companies!inner(name)'
+  'job_function, seniority, language, country, is_remote, quality_score, viewer_company_id, viewer_company_name'
 
 async function fetchJobsByIds(admin: AdminClient, ids: string[], userId: string): Promise<JobRow[]> {
   if (ids.length === 0) return []
-  // Ownership enforced via the FK join (SELECT_COLUMNS' companies!inner +
-  // this .eq), not an .in('company_id', companyIds) array — see
+  // Ownership enforced by ownedJobsQuery's viewer_id fence, not an .in('company_id', companyIds) array — see
   // ownedJobsQuery. `ids` itself stays a bounded literal (every caller caps
   // it well under Postgres URL limits before it gets here).
   const { data, error } = await ownedJobsQuery(admin, userId, SELECT_COLUMNS).in('id', ids)
@@ -586,7 +583,7 @@ async function fetchDefaultCandidatePool(
  */
 async function countUnscoredJobs(admin: AdminClient, userId: string): Promise<number | null> {
   const { count, error } = await openRolesOnly(
-    ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', { count: 'exact', head: true })
+    ownedJobsQuery(admin, userId, 'id', { count: 'exact', head: true })
   ).is('match_score', null)
   if (error) {
     console.error('[harness] matcher: unscored-count query failed', error)

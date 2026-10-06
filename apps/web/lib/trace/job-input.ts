@@ -11,11 +11,11 @@ export async function traceJobInput(db: AdminClient, jobId: string): Promise<voi
   setTraceMeta({ job_id: jobId })
   if (!currentTraceContext()?.buffer.captureContent) return
   try {
-    const { data } = await db.from('jobs').select('title, companies(name)').eq('id', jobId).single()
-    const job = data as { title?: string; companies?: { name?: string | null } | { name?: string | null }[] | null } | null
+    // Both callers pass the person's own client, so the view returns their one row; limit(1) keeps a service-role caller safe.
+    const { data } = await db.from('person_jobs').select('title, viewer_company_name').eq('id', jobId).limit(1).maybeSingle()
+    const job = data as { title?: string; viewer_company_name?: string | null } | null
     if (!job) return
-    const company = Array.isArray(job.companies) ? job.companies[0] : job.companies
-    setTraceInput({ jobTitle: job.title ?? null, companyName: company?.name ?? null })
+    setTraceInput({ jobTitle: job.title ?? null, companyName: job.viewer_company_name ?? null })
   } catch {
     // Observability only: the id in the metadata is enough.
   }

@@ -181,6 +181,11 @@ const SOURCE_OF: Record<Exclude<Tier, 'board'>, string> = {
   model: 'scraper',
 }
 
+/** The roles a read keeps are kept for the person who follows the company, under the version of their targets. */
+function ownerOf(company: DueCompany, targets: ReaderTargets): { userId: string; targetsVersion: number } | undefined {
+  return company.user_id ? { userId: company.user_id, targetsVersion: targets.version ?? 0 } : undefined
+}
+
 export async function ingestCompany(store: AtsStore, company: DueCompany, deps: CompanyDeps): Promise<CompanyOutcome> {
   const outcome: CompanyOutcome = { result: emptyResult(company), reader: null, tier: null, skipped: false, reading: false, failure: null }
   const mode = deps.mode ?? 'inline'
@@ -227,7 +232,7 @@ export async function ingestCompany(store: AtsStore, company: DueCompany, deps: 
         await saveSourceCheck(store, company, board)
         return
       }
-      const stored = await loadStoredJobs(store, company.id, result)
+      const stored = await loadStoredJobs(store, company.id, result, company.employer_id)
       if (!stored) {
         outcome.failure = 'board_error'
         return
@@ -310,6 +315,9 @@ export async function ingestCompany(store: AtsStore, company: DueCompany, deps: 
             stored,
             judge,
             targeting: targets.targeting,
+            owner: ownerOf(company, targets),
+            titles: targets.titles,
+            typeStep: targets.typeStep,
             windowed: providers[b.provider].searchesByQuery === true && searchTerms(targets).length > 0,
           },
           result
@@ -323,7 +331,7 @@ export async function ingestCompany(store: AtsStore, company: DueCompany, deps: 
           store,
           company,
           read.jobs,
-          { source, sightingSources: read.complete ? [source] : [], stored, judge, targeting: targets.targeting, listedIds: read.listedIds, windowed: !read.complete },
+          { source, sightingSources: read.complete ? [source] : [], stored, judge, targeting: targets.targeting, owner: ownerOf(company, targets), titles: targets.titles, typeStep: targets.typeStep, listedIds: read.listedIds, windowed: !read.complete },
           result
         )
         // A window onto the site never counts a role as missed, so the scheduled pass asks a few stored roles' own pages whether they are still there.

@@ -34,6 +34,7 @@ import { openRolesOnly } from '@/lib/jobs/freshness'
 import { fetchClientSafePreferences } from '@/lib/preferences/client-safe'
 import { EMPTY_TARGETING, resolveTargeting, type Targeting } from '@/lib/targeting'
 import { hasRoleTargets, targetVerdict } from '@/lib/targeting/roles'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 interface Company {
   id: string
@@ -104,7 +105,7 @@ export default function CompanyDetailPage() {
 
       // Open roles only: posted in the last 180 days (or undated) and not closed.
       const [{ data: jobsData }, prefs] = await Promise.all([
-        openRolesOnly(supabase.from('jobs').select('*').eq('company_id', companyId)).order('discovered_at', {
+        openRolesOnly(personJobs(supabase).select('*').eq('viewer_company_id', companyId)).order('discovered_at', {
           ascending: false,
         }),
         fetchClientSafePreferences(supabase as unknown as SupabaseClient),

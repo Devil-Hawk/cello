@@ -14,6 +14,7 @@ import { writeVerdict } from '@/lib/evals/verdicts'
 import { recordDemoEvent } from '@/lib/access/session'
 import { buildOutreachContext } from '@/lib/context/assemble'
 import { setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -127,9 +128,8 @@ export async function POST(request: NextRequest) {
     let companyId: string | null = contact.company_id ?? null
     let matchHighlights: string[] = []
     if (jobId) {
-      const { data: job } = await supabase
-        .from('jobs')
-        .select('id, title, description, company_id, match_details')
+      const { data: job } = await personJobs(supabase)
+        .select('id, title, description, company_id:viewer_company_id, match_details')
         .eq('id', jobId)
         .single()
       if (job) {

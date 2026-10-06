@@ -1,4 +1,5 @@
-// POST /api/harness/cron's resume pass replaces the pre-port
+// The harness routines (resume, demo.expire, digest, distill) were the daily tick at
+// POST /api/harness/cron. Their resume pass replaces the pre-port
 // continueIncompleteRuns() + reapStuckRuns(): every 'paused' run (a clean
 // deadline interrupt) and every 'running' run whose thread has gone stale (a
 // killed invocation) gets re-entered through invokeGraphForUser via THE
@@ -6,13 +7,12 @@
 // checkpoint-count ceiling instead of the old continuation counter.
 //
 // invokeGraphForUser, markRunPausedOnInterrupt, countThreadCheckpoints and
-// composeAndStoreDigest are mocked — this file proves the ROUTE's own
+// composeAndStoreDigest are mocked — this file proves the passes' own
 // selection/ordering/capping/close-out logic, not invoke.ts's resume
 // semantics (invoke.test.ts/invoke.langgraph.test.ts) or harnessRunGraph's
 // own wave scheduler (runs.test.ts).
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { NextRequest } from 'next/server'
 
 interface AgentRunRow {
   id: string
@@ -154,9 +154,6 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
   }
 }
 
-vi.mock('@/lib/harness/supabase-admin', () => ({
-  createAdminClient: () => ({ from: (table: string) => new FakeQuery(table) }),
-}))
 vi.mock('@/lib/graph/invoke', () => ({
   invokeGraphForUser: (...args: unknown[]) => invokeGraphForUserMock(...args),
 }))
@@ -177,15 +174,29 @@ vi.mock('@/lib/graph/distill', () => ({
   distillInsights: (...args: unknown[]) => distillInsightsMock(...args),
 }))
 
-import { GET, POST, dynamic } from './route'
+import { resumeCheckpointedRuns, runDemoPasses, runDigestPasses, runDistillPass } from './harness'
 
-const SECRET = 'test-cron-secret'
+const admin = { from: (table: string) => new FakeQuery(table) } as never
+
+/** The four passes in the order the old daily tick ran them. */
+async function POST(_request?: unknown) {
+  const resume = await resumeCheckpointedRuns(admin)
+  const demo = await runDemoPasses(admin)
+  const digest = await runDigestPasses(admin)
+  const distill = await runDistillPass(admin)
+  const body = {
+    ok: true,
+    ...digest,
+    distill,
+    demoWipe: demo.demoWipe,
+    traceSpansPruned: demo.traceSpansPruned,
+    resumed: { count: resume.resumed.length, deferredToNextTick: resume.deferred, runs: resume.resumed },
+  }
+  return { status: 200, json: async () => body }
+}
 
 function cronRequest() {
-  return new NextRequest('http://localhost/api/harness/cron', {
-    method: 'POST',
-    headers: { authorization: `Bearer ${SECRET}` },
-  })
+  return undefined
 }
 
 function terminalOutcome(status: string) {
@@ -197,7 +208,6 @@ function iso(minutesAgo: number): string {
 }
 
 beforeEach(() => {
-  process.env.CRON_SECRET = SECRET
   agentRuns = new Map()
   graphThreads = new Map()
   profiles = [] // no digest-pass activity unless a test opts in
@@ -212,15 +222,7 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
-describe('POST /api/harness/cron — auth', () => {
-  it('rejects a request without the correct CRON_SECRET', async () => {
-    const response = await POST(new NextRequest('http://localhost/api/harness/cron', { method: 'POST' }))
-    expect(response.status).toBe(401)
-    expect(invokeGraphForUserMock).not.toHaveBeenCalled()
-  })
-})
-
-describe('POST /api/harness/cron — resume pass', () => {
+describe('harness routines — resume pass', () => {
   it('resumes a paused thread to completion', async () => {
     agentRuns.set('run-p', { id: 'run-p', user_id: 'u1', status: 'paused', thread_id: 'thread-p', created_at: iso(30) })
     invokeGraphForUserMock.mockResolvedValue({ threadId: 'thread-p', result: terminalOutcome('completed') })
@@ -377,7 +379,7 @@ describe('POST /api/harness/cron — resume pass', () => {
   })
 })
 
-describe('POST /api/harness/cron — digest pass creates a fresh thread per run', () => {
+describe('harness routines — digest pass creates a fresh thread per run', () => {
   it('drives a digest run through invokeGraphForUser with a fresh thread and reports its outcome', async () => {
     profiles = [{ id: 'user-active', resume_text: 'Staff engineer, 8 years.', preferences: null }]
     invokeGraphForUserMock.mockResolvedValue({ threadId: 'thread-fresh-digest', result: terminalOutcome('completed') })
@@ -411,7 +413,7 @@ describe('POST /api/harness/cron — digest pass creates a fresh thread per run'
   })
 })
 
-describe('POST /api/harness/cron — demo profiles', () => {
+describe('harness routines — demo profiles', () => {
   it('never selects a demo profile for the digest, distill or run passes, but still runs the demo wipe', async () => {
     profiles = [
       { id: 'demo-flag', resume_text: 'Resume.', preferences: null, is_demo: true, demo_expires_at: null },
@@ -442,36 +444,5 @@ describe('POST /api/harness/cron — demo profiles', () => {
     const body = await (await POST(cronRequest())).json()
     expect(body.processed).toBe(1)
     expect(body.skippedForCapacity).toBe(0)
-  })
-})
-
-describe('GET /api/harness/cron — Vercel Cron entry point', () => {
-  function getRequest(headers: Record<string, string> = {}) {
-    return new NextRequest('http://localhost/api/harness/cron', { method: 'GET', headers })
-  }
-
-  it('is force-dynamic so it is never statically rendered or cached', () => {
-    expect(dynamic).toBe('force-dynamic')
-  })
-
-  it('refuses without the secret, with a wrong one, and with the secret in the query string', async () => {
-    expect((await GET(getRequest())).status).toBe(401)
-    expect((await GET(getRequest({ authorization: 'Bearer nope' }))).status).toBe(401)
-    const viaQuery = new NextRequest(`http://localhost/api/harness/cron?secret=${SECRET}`, { method: 'GET' })
-    expect((await GET(viaQuery)).status).toBe(401)
-    expect(wipeExpiredDemoDataMock).not.toHaveBeenCalled()
-  })
-
-  it('refuses when CRON_SECRET is unset', async () => {
-    delete process.env.CRON_SECRET
-    expect((await GET(getRequest({ authorization: 'Bearer ' }))).status).toBe(401)
-    expect((await GET(getRequest({ 'x-cron-secret': '' }))).status).toBe(401)
-  })
-
-  it('runs the same tick as POST when Vercel presents Authorization: Bearer', async () => {
-    const response = await GET(getRequest({ authorization: `Bearer ${SECRET}` }))
-    expect(response.status).toBe(200)
-    expect((await response.json()).ok).toBe(true)
-    expect(wipeExpiredDemoDataMock).toHaveBeenCalledTimes(1)
   })
 })
