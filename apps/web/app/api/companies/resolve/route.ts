@@ -7,6 +7,7 @@ import { callLlm, parseJsonLoose, MissingKeyError } from '@/lib/harness/llm'
 import type { DecryptedApiKeys } from '@/lib/harness/types'
 import { IDENTIFY } from '@/lib/ats/verify'
 import { isValidToken } from '@/lib/ats/types'
+import { makeSiteFetcher } from '@/lib/ingest/reader/site-fetch'
 import {
   lookupKnownCompanyByName,
   stripCompanySuffix,
@@ -189,22 +190,10 @@ async function resolveWithLlm(apiKeys: DecryptedApiKeys, name: string): Promise<
   // Never trust a bare homepage as a career URL, LLM-suggested or otherwise.
   if (isBareHomepage(parsedUrl)) return null
 
+  // The address came from a model, so it is only ever asked for through the one guarded door: SSRF check on every hop,
+  // robots.txt, a request budget and the Cello user agent. A refusal or a failure means the address is not trusted.
   try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
-    let res: Response
-    try {
-      res = await fetch(parsedUrl.toString(), {
-        signal: controller.signal,
-        redirect: 'follow',
-        headers: {
-          'User-Agent': 'cello-job-tracker/1.0 (+https://cello-two.vercel.app)',
-          Accept: 'text/html,application/xhtml+xml',
-        },
-      })
-    } finally {
-      clearTimeout(timer)
-    }
+    const res = await makeSiteFetcher({ mode: 'inline', budget: { requests: 4, ms: PROBE_TIMEOUT_MS } }).get(parsedUrl.toString())
     if (!res.ok) return null
   } catch {
     return null

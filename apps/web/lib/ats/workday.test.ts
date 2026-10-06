@@ -193,6 +193,68 @@ describe('workday.fetch', () => {
     expect(jobs[0].description).toBeUndefined()
   })
 
+  // Recorded from ccf.wd1.myworkdayjobs.com/ClevelandClinicCareers (2,147 open roles) on 2026-10-06: the unfiltered
+  // newest window is all clinical roles, the search for "software engineer" returns the engineering ones.
+  describe("searching by the person's targets", () => {
+    const CCF = 'ccf.wd1.ClevelandClinicCareers'
+    const entry = (title: string, id: string, postedOn: string) => ({
+      title,
+      externalPath: `/job/US-OH-Cleveland/${id}`,
+      locationsText: 'Cleveland, Ohio',
+      postedOn,
+    })
+    const clinical = Array.from({ length: 500 }, (_, i) => entry(`RN Ambulatory ${i}`, `RN-${i}_R${i}`, 'Posted Today'))
+    const engineering = [
+      entry('Health Physics Associate', 'HP_R1', 'Posted 3 Days Ago'),
+      entry('Software Developer III - Next.js and Sanity', 'SD3_R2', 'Posted 18 Days Ago'),
+      entry('Research Data Scientist I - Cole Eye', 'RDS_R3', 'Posted 21 Days Ago'),
+    ]
+    const data = [entry('Data Registry Coordinator', 'DRC_R4', 'Posted Today'), entry('Systems Analyst II', 'SA2_R5', 'Posted 30+ Days Ago')]
+
+    function searchable() {
+      const searches: string[] = []
+      globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+        if ((init?.method ?? 'GET') !== 'POST') return jsonResponse({ jobPostingInfo: {} })
+        const body = JSON.parse(init?.body as string) as { offset: number; searchText: string }
+        searches.push(body.searchText)
+        const all = body.searchText === 'software engineer' ? engineering : body.searchText === 'data' ? data : body.searchText === '' ? clinical : []
+        return jsonResponse({ total: all.length, jobPostings: all.slice(body.offset, body.offset + 20) })
+      }) as unknown as typeof fetch
+      return searches
+    }
+
+    it('without targets reads only the newest 500, which hold none of the engineering roles', async () => {
+      searchable()
+      const jobs = await workday.fetch(CCF)
+      expect(jobs).toHaveLength(500)
+      expect(jobs.some((j) => /software/i.test(j.title))).toBe(false)
+    })
+
+    it('with targets searches each word and returns roles the unfiltered window lacks, newest first', async () => {
+      const searches = searchable()
+      const jobs = await workday.fetch(CCF, { query: ['software engineer', 'data'] })
+      expect(searches).toEqual(['software engineer', 'data'])
+      expect(jobs.map((j) => j.title)).toEqual([
+        'Data Registry Coordinator',
+        'Health Physics Associate',
+        'Software Developer III - Next.js and Sanity',
+        'Research Data Scientist I - Cole Eye',
+        'Systems Analyst II',
+      ])
+    })
+
+    it('searches at most three words and counts a role found by two of them once', async () => {
+      const searches = searchable()
+      const jobs = await workday.fetch(CCF, { query: ['data', 'software engineer', 'data analyst', 'ignored', 'data'] })
+      expect(searches).toEqual(['data', 'software engineer', 'data analyst'])
+      expect(new Set(jobs.map((j) => j.externalId)).size).toBe(jobs.length)
+    })
+
+    it('says it is searched, so a role missing from the list is not taken as closed', () => {
+      expect(workday.searchesByQuery).toBe(true)
+    })
+  })
+
   it('rejects a token that is not {tenant}.wd{N}.{site} before any request', async () => {
     const fetchMock = vi.fn()
     globalThis.fetch = fetchMock as unknown as typeof fetch

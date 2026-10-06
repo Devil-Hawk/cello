@@ -115,6 +115,16 @@ describe('site fetcher: identity, pace and budget', () => {
     }
   })
 
+  it("waits a host's own Crawl-delay when it is longer than ours, and never more than 10 s", async () => {
+    for (const [delay, wanted] of [[2, 2000], [60, 10_000]] as const) {
+      const { fetcher, calls } = harness({ 'https://acme.test/robots.txt': robots(`User-agent: *\nCrawl-delay: ${delay}\n`), 'https://acme.test/*': html('x') })
+      await fetcher.get('https://acme.test/a')
+      await fetcher.get('https://acme.test/b')
+      expect(calls[2].at - calls[1].at).toBeGreaterThanOrEqual(wanted)
+      expect(calls[2].at - calls[1].at).toBeLessThan(wanted + 300)
+    }
+  })
+
   it('stops with a budget error on the 26th inline request', async () => {
     const { fetcher } = harness({ 'https://acme.test/robots.txt': robots('', 404) }, { budget: { gapMs: 0 } })
     // robots.txt took one request; 24 pages bring it to 25.
@@ -206,5 +216,20 @@ describe('site fetcher: internal addresses', () => {
     )
     await expect(fetcher.get('https://acme.test/jobs')).rejects.toBeInstanceOf(ReaderError)
     expect(calls.some((c) => c.url.includes('localhost'))).toBe(false)
+  })
+})
+
+describe('site fetcher: a host that says slow down', () => {
+  it('is asked once more after a pause, and a second refusal is unreachable', async () => {
+    let n = 0
+    const { fetcher, calls } = harness({
+      'https://acme.test/robots.txt': robots('nf', 404),
+      'https://acme.test/jobs': () => (++n === 1 ? html('slow down', 429) : html('<p>roles</p>')),
+      'https://acme.test/busy': html('slow down', 429),
+    })
+    expect((await fetcher.get('https://acme.test/jobs')).text).toContain('roles')
+    expect(calls.filter((c) => c.url.endsWith('/jobs')).length).toBe(2)
+    await expect(fetcher.get('https://acme.test/busy')).rejects.toMatchObject({ reason: 'unreachable' })
+    expect(calls.filter((c) => c.url.endsWith('/busy')).length).toBe(2)
   })
 })
