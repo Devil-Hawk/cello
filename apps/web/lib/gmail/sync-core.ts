@@ -42,7 +42,7 @@ import { kindOfStatus, saveMessage, verifiedEmployer } from './messages'
 import { sendAlert } from '@/lib/notifications/deliver'
 import { selfMailer } from '@/lib/notifications/mail'
 import { mailAlert } from '@/lib/notifications/quiet'
-import { headerVerdict, senderEmployerDomain, trustOf } from './trust'
+import { headerVerdict, isRelay, senderEmployerDomain, trustOf } from './trust'
 
 interface CompanyRecord {
   id: string
@@ -94,6 +94,8 @@ export interface GmailSyncCoreResult {
   unmatchedEmployers: number
   isFirstSync: boolean
 }
+
+const ALERT_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
 
 /**
  * Run one Gmail sync pass for a single user. Throws on unexpected failure —
@@ -242,7 +244,10 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
       continue
     }
 
-    const trust = modelSorted ? 'unconfirmed' : trustOf({ fromDomain, employerDomain: matchedCompany.domain, verdict })
+    // A relay (an applicant system) signs for its own domain and can name any company in the body, so
+    // its mail may only confirm an application, never move a later stage.
+    // ponytail: relay confirmations are matched by company and title; a job-id match is the upgrade.
+    const trust = modelSorted || (isRelay(fromDomain) && parsed.status !== 'applied') ? 'unconfirmed' : trustOf({ fromDomain, employerDomain: matchedCompany.domain, verdict })
 
     // --- From here on `matchedCompany` is a company the user actually
     // tracks. Match the email to a specific job by title similarity — never
@@ -403,7 +408,9 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
     const line = `Mail from ${matchedCompany.name}: ${subject}`.slice(0, 280)
     await note(admin, userId, applicationId, { kind: 'message.received', actor: DOORS.inbox.actor, channel: DOORS.inbox.channel, sentence: line, idempotencyKey: `msg:${msg.id}`, trust, origin, prov, headerVerdict: verdict }).catch(() => undefined)
     // A mail the sender's own domain vouches for that is an offer, an invitation or a reply tells the person, once.
-    const alert = trust === 'proven' ? mailAlert(parsed.status, ck.kind === 'recruiter' || ck.kind === 'agency_recruiter') : null
+    // Only mail from the last three days: a first sync's backfill or a first run after a gap must not tell the person about old mail.
+    const fresh = !isFirstSync && Date.now() - receivedAt.getTime() < ALERT_WINDOW_MS
+    const alert = trust === 'proven' && fresh ? mailAlert(parsed.status, ck.kind === 'recruiter' || ck.kind === 'agency_recruiter') : null
     if (alert) {
       await sendAlert({ admin, sendToSelf: selfMailer(admin), now: new Date() }, userId, { kind: alert, subjectId: msg.id, company: matchedCompany.name, role: jobMatch?.title ?? parsed.jobTitle ?? null, url: '/notifications' }).catch(() => undefined)
     }

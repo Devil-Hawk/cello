@@ -448,6 +448,26 @@ describe('runGmailSyncCore: mail that cannot be verified', () => {
     expect((fakeDb.tables.get('activities') as any[])[0].metadata.trust).toBe('unconfirmed')
   })
 
+  it('a rejection carrying the sender own forged Authentication-Results stays unconfirmed and moves no stage', async () => {
+    const forged = { name: 'Authentication-Results', value: 'other.example; dkim=pass header.d=acme.com' }
+    // Gmail's own header says fail; the sender's forged pass sits below it. And with no Gmail header at all.
+    for (const gmail of [[{ name: 'Authentication-Results', value: 'mx.google.com; dkim=fail header.d=acme.com' }], []]) {
+      const m = unsigned(`forged-${gmail.length}`, 'Acme Talent <careers@acme.com>', 'Unfortunately we are not moving forward')
+      m.payload.headers.push(...gmail, forged)
+      mailbox = [m]
+      await run()
+      expect(fakeDb.tables.get('applications')?.[0].stage).toBe('applied')
+    }
+    expect((fakeDb.tables.get('activities') as any[]).every((a) => a.metadata.trust === 'unconfirmed')).toBe(true)
+  })
+
+  it('a relay may confirm an application but not move a later stage', async () => {
+    mailbox = [unsigned('relay-1', 'Acme <no-reply@us.greenhouse-mail.io>', 'Unfortunately we are not moving forward', 'mx.google.com; dkim=pass header.d=us.greenhouse-mail.io')]
+    await run()
+    expect(fakeDb.tables.get('applications')?.[0].stage).toBe('applied')
+    expect((fakeDb.tables.get('activities') as any[])[0].metadata.trust).toBe('unconfirmed')
+  })
+
   it('the same rejection signed by the employer moves the stage', async () => {
     mailbox = [unsigned('real-1', 'Acme Talent <careers@acme.com>', 'Unfortunately we are not moving forward', 'mx.google.com; dkim=pass header.d=acme.com')]
     await run()
@@ -532,6 +552,17 @@ describe('runGmailSyncCore: telling the person', () => {
     mailbox = [mail('a-1', 'Thank you for applying to Acme Corp', 'pass')]
     as('applied')
     await run()
+    expect(sendAlertMock).not.toHaveBeenCalled()
+  })
+
+  it('old proven mail tells no one, and neither does a first sync', async () => {
+    const old = { ...mail('old-1', 'Your technical interview is scheduled', 'pass'), internalDate: String(Date.now() - 10 * 24 * 60 * 60 * 1000) }
+    mailbox = [old]
+    as('interview')
+    await run()
+    expect(sendAlertMock).not.toHaveBeenCalled()
+    mailbox = [mail('first-1', 'Your technical interview is scheduled', 'pass')]
+    await runGmailSyncCore({ db: fakeDb as any, userId: USER_ID, accessToken: 'fake-access-token', apiKeys: { openrouter: 'fake-key', userId: USER_ID }, preferences: {} })
     expect(sendAlertMock).not.toHaveBeenCalled()
   })
 
