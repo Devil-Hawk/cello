@@ -10,6 +10,10 @@ const NOW = Date.parse('2026-10-06T12:00:00Z')
 const day = (n: number) => new Date(NOW - n * 86_400_000).toISOString()
 const USER = 'user-1'
 
+function role(user: string, job: { id: string; title: string; url: string | null; discovered_at: string; company_id: string }, chance: string, want_p: number, want_reason: string | null) {
+  return { user_id: user, job_id: job.id, hidden_reason: null, chance, want_p, want_reason, jobs: { ...job, still_open: true } }
+}
+
 function tables() {
   return {
     companies: [
@@ -18,18 +22,18 @@ function tables() {
       { id: 'co-x', user_id: 'someone-else', name: 'Secret Inc' },
     ],
     profiles: [{ id: USER, preferences: { outreach: { followUpDays: 5 } } }],
-    jobs: [
-      { id: 'j-new', title: 'Staff Engineer', url: 'https://linear.app/1', match_score: 90, match_details: { summary: 'Maps to your ledger work.' }, still_open: true, discovered_at: day(1), company_id: 'co-1', companies: { user_id: USER } },
-      { id: 'j-applied', title: 'Applied Role', url: null, match_score: 95, match_details: null, still_open: true, discovered_at: day(1), company_id: 'co-1', companies: { user_id: USER } },
-      { id: 'j-old', title: 'Old Role', url: null, match_score: 99, match_details: null, still_open: true, discovered_at: day(30), company_id: 'co-1', companies: { user_id: USER } },
-      { id: 'j-other', title: 'Not Yours', url: null, match_score: 99, match_details: null, still_open: true, discovered_at: day(1), company_id: 'co-x', companies: { user_id: 'someone-else' } },
-      { id: 'j-title', title: 'Senior Backend Engineer' },
+    // The role a person is shown is their own row (their want and chance on it) with the posting embedded.
+    person_roles: [
+      role(USER, { id: 'j-new', title: 'Staff Engineer', url: 'https://linear.app/1', discovered_at: day(1), company_id: 'co-1' }, 'strong', 0.9, 'Maps to your ledger work.'),
+      role(USER, { id: 'j-applied', title: 'Applied Role', url: null, discovered_at: day(1), company_id: 'co-1' }, 'strong', 0.95, null),
+      role(USER, { id: 'j-old', title: 'Old Role', url: null, discovered_at: day(30), company_id: 'co-1' }, 'strong', 0.99, null),
+      role('someone-else', { id: 'j-other', title: 'Not Yours', url: null, discovered_at: day(1), company_id: 'co-x' }, 'strong', 0.99, null),
     ],
+    jobs: [{ id: 'j-title', title: 'Senior Backend Engineer' }],
     applications: [
       { id: 'a1', user_id: USER, job_id: 'j-applied', stage: 'interview', updated_at: day(2), applied_at: day(20), jobs: { id: 'j-applied', title: 'Applied Role', company_id: 'co-1' } },
       { id: 'a2', user_id: 'someone-else', job_id: 'j-other', stage: 'applied', updated_at: day(30), applied_at: day(30), jobs: { id: 'j-other', title: 'Not Yours', company_id: 'co-x' } },
     ],
-    interview_kits: [{ id: 'k1', user_id: USER, job_id: 'j-applied', questions: [1, 2, 3], star_stories: [1] }],
     application_drafts: [
       { id: 'd1', user_id: USER, status: 'pending_review' },
       { id: 'd2', user_id: USER, status: 'approved' },
@@ -57,8 +61,10 @@ describe('loadDigestState', () => {
       ['j-applied', true],
       ['j-new', false],
     ])
+    // The want and the chance are the person's own, read from their row.
+    expect(state.roles.find((r) => r.id === 'j-new')).toMatchObject({ chance: 'strong', want: 0.9, reason: 'Maps to your ledger work.' })
     expect(state.applications.map((a) => a.id)).toEqual(['a1'])
-    expect(state.applications[0].kit).toEqual({ id: 'k1', questions: 3, stories: 1 })
+    expect(Object.keys(state.applications[0])).not.toContain('kit')
   })
 
   it('finds the reply, the follow-up that is allowed, and leaves out the bounce and the thread that has one', async () => {

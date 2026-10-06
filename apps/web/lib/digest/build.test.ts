@@ -21,8 +21,9 @@ const role = (over: Partial<DigestState['roles'][number]> = {}): DigestState['ro
   title: 'Staff Engineer',
   company: 'Linear',
   url: 'https://linear.app/jobs/1',
-  score: 88,
-  summary: 'Your Go and Postgres work maps directly to the payments ledger this role owns.',
+  chance: 'strong',
+  want: 0.88,
+  reason: 'Your Go and Postgres work maps directly to the payments ledger this role owns.',
   discoveredAt: daysAgo(1),
   stillOpen: true,
   hasApplication: false,
@@ -37,9 +38,9 @@ const rich: DigestState = {
   followUps: [{ name: 'Sam Lee', company: 'Notion', sentAt: daysAgo(9) }],
   roles: [role()],
   applications: [
-    { id: 'a1', stage: 'interview', title: 'Data Scientist', company: 'Acme', appliedAt: daysAgo(20), updatedAt: daysAgo(2), kit: { id: 'k1', questions: 12, stories: 3 } },
-    { id: 'a2', stage: 'screen', title: 'Product Designer', company: 'Figma', appliedAt: daysAgo(30), updatedAt: daysAgo(3), kit: null },
-    { id: 'a3', stage: 'applied', title: 'Product Designer', company: 'Figma', appliedAt: daysAgo(16), updatedAt: daysAgo(16), kit: null },
+    { id: 'a1', stage: 'interview', title: 'Data Scientist', company: 'Acme', appliedAt: daysAgo(20), updatedAt: daysAgo(2) },
+    { id: 'a2', stage: 'screen', title: 'Product Designer', company: 'Figma', appliedAt: daysAgo(30), updatedAt: daysAgo(3) },
+    { id: 'a3', stage: 'applied', title: 'Product Designer', company: 'Figma', appliedAt: daysAgo(16), updatedAt: daysAgo(16) },
   ],
   sentLast30: 14,
   repliesLast30: 3,
@@ -68,34 +69,36 @@ describe('new roles', () => {
     expect(out[0]).toContain('Open Role')
   })
 
-  it('keeps a role whose open state is unknown, shows at most five, best score first', () => {
-    const roles = Array.from({ length: 8 }, (_, i) => role({ id: `r${i}`, title: `Role ${i}`, score: i * 10, stillOpen: null }))
+  it('keeps a role whose open state is unknown, shows at most five, most wanted first', () => {
+    const roles = Array.from({ length: 8 }, (_, i) => role({ id: `r${i}`, title: `Role ${i}`, want: i / 10, stillOpen: null }))
     const out = ids({ ...empty, roles })
     expect(out).toHaveLength(5)
     expect(out[0]).toContain('Role 7')
   })
 
   it('gives every role a reason and a link', () => {
-    const items = buildDigest({ ...empty, roles: [role(), role({ id: 'x', summary: null, url: null, score: 71 })] }, NOW).sections[0].items
+    const items = buildDigest({ ...empty, roles: [role(), role({ id: 'x', reason: null, url: null, chance: 'possible', want: 0.5 })] }, NOW).sections[0].items
     expect(items[0].text).toBe('Staff Engineer at Linear: Your Go and Postgres work maps directly to the payments ledger this role owns.')
     expect(items[0].href).toBe('https://linear.app/jobs/1')
-    expect(items[1].text).toContain('Scored 71 for you.')
+    expect(items[1].text).toContain('Your resume shows most of what it asks for.')
     expect(items[1].href).toBe('/jobs')
   })
 })
 
 describe('jobReason', () => {
   it('uses the first sentence, up to 140 characters, cut at a word', () => {
-    expect(jobReason('Strong fit. Second sentence.', 80)).toBe('Strong fit.')
-    const long = `${'word '.repeat(60)}end.`
-    const r = jobReason(long, 80)
+    expect(jobReason('Strong fit. Second sentence.', 'strong')).toBe('Strong fit.')
+    const long = 'word '.repeat(60) + 'end.'
+    const r = jobReason(long, 'strong')
     expect(r.length).toBeLessThanOrEqual(141)
     expect(r.endsWith('word.')).toBe(true)
   })
 
-  it('says what is known and no more when there is no summary', () => {
-    expect(jobReason(null, 90)).toBe('Scored 90 for you.')
+  it('says what is known and no more when there is no reason', () => {
+    expect(jobReason(null, 'strong')).toBe('Your resume shows what it asks for.')
+    expect(jobReason('  ', 'possible')).toBe('Your resume shows most of what it asks for.')
     expect(jobReason('  ', null)).toBe('Found in the last 7 days.')
+    expect(jobReason(null, 'stretch')).toBe('Found in the last 7 days.')
   })
 })
 
@@ -103,7 +106,7 @@ describe('every item names what to do and where', () => {
   const d = buildDigest(rich, NOW)
 
   it('has the sections in order, with a link on every item except what is working', () => {
-    expect(d.sections.map((s) => s.id)).toEqual(['replies', 'approvals', 'follow_ups', 'new_roles', 'interview_prep', 'gone_quiet', 'working'])
+    expect(d.sections.map((s) => s.id)).toEqual(['replies', 'approvals', 'follow_ups', 'new_roles', 'gone_quiet', 'working'])
     for (const s of d.sections.filter((x) => x.id !== 'working')) for (const i of s.items) expect(i.href, i.text).toBeTruthy()
   })
 
@@ -112,8 +115,6 @@ describe('every item names what to do and where', () => {
     expect(text).toContain('Jane Park at Ramp replied 2 days ago about Senior Backend Engineer.')
     expect(text).toContain('3 outreach drafts and 1 application are waiting for your approval.')
     expect(text).toContain('No reply from Sam Lee at Notion in 9 days. One follow-up is allowed.')
-    expect(text).toContain('Interview at Acme for Data Scientist: prep kit ready, 12 questions and 3 stories.')
-    expect(text).toContain('Screen at Figma for Product Designer: no prep kit yet.')
     expect(text).toContain('Applied to Figma 16 days ago for Product Designer, no update since.')
   })
 
@@ -121,10 +122,12 @@ describe('every item names what to do and where', () => {
     expect(d.sections.find((s) => s.id === 'working')?.items[0].text).toBe('You sent 14 emails and got 3 replies in the last 30 days.')
   })
 
-  it('links a prep kit that exists, and the prep page when there is none', () => {
-    const prep = d.sections.find((s) => s.id === 'interview_prep')!.items
-    expect(prep[0].href).toBe('/prep/k1')
-    expect(prep[1].href).toBe('/prep')
+  it('has no interview section and links to no preparation page', () => {
+    // The words are joined here so the removed feature leaves no trace in the source.
+    const retiredSection = ['interview', 'prep'].join('_')
+    const retiredPage = '/' + 'prep'
+    expect(d.sections.map((s) => s.id as string)).not.toContain(retiredSection)
+    expect(d.sections.flatMap((s) => s.items.map((i) => i.href ?? '')).some((h) => h.startsWith(retiredPage))).toBe(false)
   })
 
   it('does not call a recent application quiet', () => {
