@@ -102,7 +102,9 @@ export function summaryMarkdown(rows: Row[], note?: string): string {
 // --- which scripts are eval entry points -------------------------------------
 
 /** Folders under scripts/evals that hold helpers, data or saved copies, never entry points. */
-const NOT_ENTRY_DIRS = new Set(['lib', 'data', 'rubrics', 'before', 'suites', 'prompts'])
+const NOT_ENTRY_DIRS = new Set(['lib', 'data', 'rubrics', 'before', 'suites', 'prompts', 'legacy', 'reports'])
+/** Helpers that sit beside the evals: the wrapper that bundles one, and the one-time collector of a frozen data set. */
+const NOT_ENTRY_FILES = new Set(['run.sh', 'collect-dossier-bundles.ts'])
 
 function walk(dir: string, rel: string, out: string[]): void {
   if (!existsSync(dir)) return
@@ -111,7 +113,7 @@ function walk(dir: string, rel: string, out: string[]): void {
     const r = `${rel}/${entry}`
     if (statSync(full).isDirectory()) {
       if (!NOT_ENTRY_DIRS.has(entry)) walk(full, r, out)
-    } else if (/\.(ts|sh)$/.test(entry) && !/\.test\.ts$/.test(entry)) out.push(r)
+    } else if (/\.(ts|sh)$/.test(entry) && !/\.test\.ts$/.test(entry) && !NOT_ENTRY_FILES.has(entry)) out.push(r)
   }
 }
 

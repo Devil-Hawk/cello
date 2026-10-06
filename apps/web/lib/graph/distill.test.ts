@@ -340,7 +340,7 @@ describe('distillInsights: the sentence must show its counts', () => {
   const setup = (statement: string) => {
     const ids = Array.from({ length: 23 }, (_, i) => `v${i}`)
     const { handlers, insightInserts } = makeRpcHandlers({
-      distill_match_score_by_score_band: () => ({ data: [{ band: '85-100', positive_count: 12, negative_count: 11, verdict_ids: ids }], error: null }),
+      distill_chance_by_label: () => ({ data: [{ band: '85-100', positive_count: 12, negative_count: 11, verdict_ids: ids }], error: null }),
     })
     const { admin, tables } = makeFakeAdmin(handlers)
     seedVerdicts(tables.eval_verdicts, ids)

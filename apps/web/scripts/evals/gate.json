@@ -30,7 +30,16 @@
     },
     {
       "name": "outputs",
-      "scripts": ["scripts/evals/outputs/*.ts"],
+      "scripts": [
+        "scripts/evals/outputs/cover-letter.ts",
+        "scripts/evals/outputs/digest.ts",
+        "scripts/evals/outputs/dossier.ts",
+        "scripts/evals/outputs/follow-upper.ts",
+        "scripts/evals/outputs/gmail.ts",
+        "scripts/evals/outputs/judges.ts",
+        "scripts/evals/outputs/outreach.ts",
+        "scripts/evals/outputs/reply.ts"
+      ],
       "args": ["--quick"],
       "paths": [
         "prompts/outreach.md",
