@@ -15,6 +15,15 @@ Open an application on Greenhouse, Lever or Ashby. Click Fill with Cello in the 
 
 Pause Cello in the popup stops anything Cello is doing before its next step.
 
+## Use a model on this computer (optional)
+
+If you run Ollama or LM Studio, the extension can let Cello use it for work you set to run on this computer, at no cost. In Cello, open Settings, then Tokens, and make a token with the scope `relay`. Open the extension's options page, paste it under Relay token, choose Ollama or LM Studio, give the model name and save. It only ever talks to this computer, never to another address.
+
+- Ollama: set `OLLAMA_ORIGINS=chrome-extension://*` and restart Ollama, so it accepts the extension.
+- LM Studio: in the Developer tab start the local server and turn on Enable CORS.
+
+The extension looks for waiting work about every five minutes.
+
 ## Update it
 
 There is no automatic update yet. Download the new zip, unzip it over the same folder, then open `chrome://extensions` and press the reload arrow on the Cello card. If Cello says "Update the Cello extension", your build is older than the minimum it allows.
