@@ -53,6 +53,8 @@ function setup(over: { profile?: Record<string, unknown>; state?: Record<string,
   admin = fakeDb({}, { autoId: [] })
   ;(admin.client as unknown as { from: (t: string) => unknown }).from = (table: string) =>
     ((table === 'company_directory' ? directory.client : db.client) as unknown as { from: (t: string) => unknown }).from(table)
+  // companies_follow acts on the same companies rows
+  ;(admin.client as unknown as { rpc: unknown }).rpc = (db.client as unknown as { rpc: unknown }).rpc
 }
 
 const json = (body: unknown) => new NextRequest('http://localhost/api/companies/suggestions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })

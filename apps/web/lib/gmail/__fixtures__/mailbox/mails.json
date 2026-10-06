@@ -1,0 +1,233 @@
+{
+ "note": "A mailbox in the shape of the owner's: raw sender, subject, first lines and the Authentication-Results header, anonymised. `employer` is the verified employer's domain when the person follows one. Each mail carries what code must conclude. This is a fixture; S8 and S9 are measured on the owner's own mailbox once it is granted.",
+ "mails": [
+  {
+   "id": "m01",
+   "label": "employer confirms an application, signed",
+   "from": "Acme Talent <careers@acme.com>",
+   "subject": "Thank you for applying to Acme",
+   "body": "Hi Sam,\nThank you for applying to the Backend Engineer role.\nWe will be in touch.",
+   "employer": "acme.com",
+   "expect": {
+    "trust": "proven",
+    "status": "applied",
+    "kind": "applied"
+   },
+   "headers": [
+    {
+     "name": "Authentication-Results",
+     "value": "mx.google.com; dkim=pass header.i=@acme.com header.s=s1; spf=pass smtp.mailfrom=acme.com"
+    }
+   ]
+  },
+  {
+   "id": "m02",
+   "label": "display name equal to the employer, DKIM failing",
+   "from": "Acme Careers <careers@acme-hiring.example>",
+   "subject": "Thank you for applying to Acme",
+   "body": "Thank you for applying.\nClick here to confirm your details.",
+   "employer": "acme.com",
+   "expect": {
+    "trust": "unconfirmed",
+    "status": "applied",
+    "kind": "applied"
+   },
+   "headers": [
+    {
+     "name": "Authentication-Results",
+     "value": "mx.google.com; dkim=fail header.i=@acme-hiring.example header.s=s1; spf=pass smtp.mailfrom=acme-hiring.example"
+    }
+   ]
+  },
+  {
+   "id": "m03",
+   "label": "employer domain, DKIM signed by someone else",
+   "from": "Acme Talent <careers@acme.com>",
+   "subject": "Unfortunately we are not moving forward",
+   "body": "Unfortunately we will not be moving forward with your application.",
+   "employer": "acme.com",
+   "expect": {
+    "trust": "unconfirmed",
+    "status": "rejected",
+    "kind": "rejection"
+   },
+   "headers": [
+    {
+     "name": "Authentication-Results",
+     "value": "mx.google.com; dkim=pass header.i=@mailer.example header.s=s1; spf=pass smtp.mailfrom=mailer.example"
+    }
+   ]
+  },
+  {
+   "id": "m04",
+   "label": "no authentication result at all",
+   "from": "Acme Talent <careers@acme.com>",
+   "subject": "We regret to inform you",
+   "body": "We regret to inform you that the position has been filled.",
+   "employer": "acme.com",
+   "expect": {
+    "trust": "unconfirmed",
+    "status": "rejected",
+    "kind": "rejection"
+   },
+   "headers": []
+  },
+  {
+   "id": "m05",
+   "label": "applicant system relay, signed by the relay",
+   "from": "Northwind <no-reply@us.greenhouse-mail.io>",
+   "subject": "Thank you for applying to Northwind",
+   "body": "Thank you for applying to Northwind.\nYour application was received.",
+   "employer": "northwind.example",
+   "expect": {
+    "trust": "proven",
+    "status": "applied",
+    "kind": "applied",
+    "employerFromSender": null
+   },
+   "headers": [
+    {
+     "name": "Authentication-Results",
+     "value": "mx.google.com; dkim=pass header.i=@us.greenhouse-mail.io header.s=s1; spf=pass smtp.mailfrom=us.greenhouse-mail.io"
+    }
+   ]
+  },
+  {
+   "id": "m06",
+   "label": "ticket draw application",
+   "from": "FIFA <tickets@fifa.example>",
+   "subject": "Application received for the ticket draw",
+   "body": "Your application received for the World Cup ticket draw.",
+   "employer": null,
+   "expect": {
+    "trust": "unconfirmed",
+    "status": "applied",
+    "kind": "applied"
+   },
+   "headers": [
+    {
+     "name": "Authentication-Results",
+     "value": "mx.google.com; dkim=pass header.i=@fifa.example header.s=s1; spf=pass smtp.mailfrom=fifa.example"
+    }
+   ]
+  },
+  {
+   "id": "m07",
+   "label": "apartment rental application",
+   "from": "Leasing <leasing@rentals.example>",
+   "subject": "Thank you for your application",
+   "body": "Thank you for your application for unit 4B.",
+   "employer": null,
+   "expect": {
+    "trust": "unconfirmed",
+    "status": "applied",
+    "kind": "applied"
+   },
+   "headers": [
+    {
+     "name": "Authentication-Results",
+     "value": "mx.google.com; dkim=pass header.i=@rentals.example header.s=s1; spf=pass smtp.mailfrom=rentals.example"
+    }
+   ]
+  },
+  {
+   "id": "m08",
+   "label": "recruiter at the employer",
+   "from": "Riley Park <riley@acme.com>",
+   "subject": "Phone screen with Acme",
+   "body": "Hi Sam,\nI'm a technical recruiter at Acme. We'd like to schedule a phone screen this week.",
+   "employer": "acme.com",
+   "expect": {
+    "trust": "proven",
+    "status": "screen",
+    "kind": "interview",
+    "contact": "recruiter"
+   },
+   "headers": [
+    {
+     "name": "Authentication-Results",
+     "value": "mx.google.com; dkim=pass header.i=@acme.com header.s=s1; spf=pass smtp.mailfrom=acme.com"
+    }
+   ]
+  },
+  {
+   "id": "m09",
+   "label": "agency recruiter",
+   "from": "Jordan Lee <jordan@brightpath-staffing.example>",
+   "subject": "Great opportunity for you",
+   "body": "Hello,\nBrightPath Staffing is hiring a backend engineer for a client. Are you open to a call?",
+   "employer": null,
+   "expect": {
+    "trust": "unconfirmed",
+    "status": "unknown",
+    "kind": "recruiter",
+    "contact": "agency_recruiter"
+   },
+   "headers": [
+    {
+     "name": "Authentication-Results",
+     "value": "mx.google.com; dkim=pass header.i=@brightpath-staffing.example header.s=s1; spf=pass smtp.mailfrom=brightpath-staffing.example"
+    }
+   ]
+  },
+  {
+   "id": "m10",
+   "label": "free-mail sender",
+   "from": "Taylor <taylor.hr@gmail.com>",
+   "subject": "Thank you for applying",
+   "body": "Thank you for applying to our company.",
+   "employer": null,
+   "expect": {
+    "trust": "unconfirmed",
+    "status": "applied",
+    "kind": "applied",
+    "personal": true
+   },
+   "headers": [
+    {
+     "name": "Authentication-Results",
+     "value": "mx.google.com; dkim=pass header.i=@gmail.com header.s=s1; spf=pass smtp.mailfrom=gmail.com"
+    }
+   ]
+  },
+  {
+   "id": "m11",
+   "label": "offer from the employer, signed",
+   "from": "Acme People <people@acme.com>",
+   "subject": "Offer letter",
+   "body": "We're pleased to offer you the position. Please see the offer letter attached.",
+   "employer": "acme.com",
+   "expect": {
+    "trust": "proven",
+    "status": "offer",
+    "kind": "offer"
+   },
+   "headers": [
+    {
+     "name": "Authentication-Results",
+     "value": "mx.google.com; dkim=pass header.i=@acme.com header.s=s1; spf=pass smtp.mailfrom=acme.com"
+    }
+   ]
+  },
+  {
+   "id": "m12",
+   "label": "a person offering a referral",
+   "from": "Casey Moore <casey@acme.com>",
+   "subject": "Referral",
+   "body": "Hi Sam, I can refer you to the team. Send me your resume.",
+   "employer": "acme.com",
+   "expect": {
+    "trust": "proven",
+    "status": "unknown",
+    "kind": "other",
+    "contact": "referrer"
+   },
+   "headers": [
+    {
+     "name": "Authentication-Results",
+     "value": "mx.google.com; dkim=pass header.i=@acme.com header.s=s1; spf=pass smtp.mailfrom=acme.com"
+    }
+   ]
+  }
+ ]
+}

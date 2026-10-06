@@ -193,6 +193,19 @@ export function fakeDb(seed: Record<string, Row[]> = {}, options: FakeDbOptions 
   const client = {
     from: (table: string) => builder(table),
     rpc: async (name: string, args: Record<string, unknown>) => {
+      // companies_follow, as the database does it: the person's own rows, followed or not.
+      if (name === 'companies_follow' && !options.rpc?.[name]) {
+        const ids = args.p_ids as string[]
+        let changed = 0
+        for (const r of rowsOf('companies')) {
+          if (ids.includes(r.id as string) && r.user_id === args.p_user && Boolean(r.watching) !== args.p_on) {
+            r.watching = args.p_on
+            r.followed_at = args.p_on ? '2026-10-13T00:00:00Z' : null
+            changed++
+          }
+        }
+        return { data: { ok: true, changed }, error: null }
+      }
       const fn = options.rpc?.[name]
       if (!fn) return { data: null, error: { message: `unknown rpc ${name}` } }
       return { data: fn(args), error: null }

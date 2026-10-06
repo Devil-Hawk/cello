@@ -1,4 +1,4 @@
-// What this tests: the same ownership guarantee as the receipts route — an
+// What this tests: the same ownership guarantee as the attempts route — an
 // application belonging to another user is refused exactly like one that
 // doesn't exist, never leaking which — and that this user's own activities
 // come back newest-first, capped, without another user's rows ever

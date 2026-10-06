@@ -367,7 +367,7 @@ export function resolveApplicationIdentity(row: IdentityProfileRow): Application
  * Who is being written to, and therefore which address is correct.
  *
  * THE WHOLE POINT OF THIS FUNCTION: only an employer-facing surface may use
- * the application address. A password reset, a receipt, or "your autopilot run
+ * the application address. A password reset, a confirmation, or "your autopilot run
  * failed" sent to a job-search alias the user set up for recruiter mail — an
  * address Cello has never verified and the user may check weekly — locks them
  * out of their own account, loses them money, or silently drops the one alert

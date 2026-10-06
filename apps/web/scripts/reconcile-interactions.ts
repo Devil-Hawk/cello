@@ -103,17 +103,17 @@ async function reconcileFollowUps(admin: Admin): Promise<Drift> {
   return { missing }
 }
 
-async function reconcileReceipts(admin: Admin): Promise<Drift> {
+async function reconcileAttempts(admin: Admin): Promise<Drift> {
   const missing: string[] = []
   let cursor: string | null = null
   for (;;) {
-    let q = admin.from('application_receipts').select('id').order('id', { ascending: true }).limit(READ_PAGE)
+    let q = admin.from('application_attempts').select('id').order('id', { ascending: true }).limit(READ_PAGE)
     if (cursor) q = q.gt('id', cursor)
     const { data, error } = await q
-    if (error) throw new Error(`load application_receipts: ${error.message}`)
+    if (error) throw new Error(`load application_attempts: ${error.message}`)
     const rows = (data ?? []) as { id: string }[]
     if (rows.length === 0) break
-    const projected = await alreadyProjected(admin, 'application_receipts', rows.map((r) => r.id))
+    const projected = await alreadyProjected(admin, 'application_attempts', rows.map((r) => r.id))
     for (const r of rows) if (!projected.has(r.id)) missing.push(r.id)
     cursor = rows[rows.length - 1].id
     if (rows.length < READ_PAGE) break
@@ -135,7 +135,7 @@ async function main(): Promise<void> {
   report('outreach_messages', await reconcileOutreach(admin), show)
   report('activities', await reconcileActivities(admin), show)
   report('follow_ups', await reconcileFollowUps(admin), show)
-  report('application_receipts', await reconcileReceipts(admin), show)
+  report('application_attempts', await reconcileAttempts(admin), show)
 }
 
 main().catch((err) => {
