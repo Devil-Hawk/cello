@@ -33,7 +33,7 @@ interface InterviewActivity {
   application_id: string
   applications: {
     id: string
-    jobs: { title: string; companies: { name: string | null } | null } | null
+    jobs: { title: string; companies: { name: string | null } | null; employer: { name: string | null } | null } | null
   } | null
 }
 
@@ -137,7 +137,7 @@ export default function NotificationsPage() {
         supabase
           .from('activities')
           .select(
-            'id, type, title, occurred_at, application_id, applications(id, jobs(title, companies(name)))'
+            'id, type, title, occurred_at, application_id, applications(id, jobs(title, companies(name), employer:company_directory(name)))'
           )
           .ilike('type', '%interview%')
           .order('occurred_at', { ascending: false })
@@ -245,7 +245,7 @@ export default function NotificationsPage() {
           title={activity.title}
           subtitle={[
             activity.applications?.jobs?.title,
-            activity.applications?.jobs?.companies?.name,
+            activity.applications?.jobs?.companies?.name ?? activity.applications?.jobs?.employer?.name,
             formatRelativeTime(activity.occurred_at),
           ]
             .filter(Boolean)

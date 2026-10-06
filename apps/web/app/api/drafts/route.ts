@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
   let query = admin
     .from('application_drafts')
     .select(
-      'id, job_id, run_id, resume_summary, cover_letter, answers, status, submission_ref, submitted_at, created_at, updated_at, fill_state, screenshots, review_confirmed_at, jobs(id, title, url, location, company_id, companies(name, logo_url, domain))'
+      'id, job_id, run_id, resume_summary, cover_letter, answers, status, submission_ref, submitted_at, created_at, updated_at, fill_state, screenshots, review_confirmed_at, jobs(id, title, url, location, company_id, companies(name, logo_url, domain), employer:company_directory(name, domain, logo_url))'
     )
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
@@ -49,5 +49,7 @@ export async function GET(request: NextRequest) {
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json({ drafts: data ?? [] })
+  // A role stored under no company of this person's (the directory sweep, or another follower's) names its employer through the directory.
+  const drafts = (data ?? []).map((d: { jobs?: { companies?: unknown; employer?: unknown } | null }) => (d.jobs ? { ...d, jobs: { ...d.jobs, companies: d.jobs.companies ?? d.jobs.employer } } : d))
+  return NextResponse.json({ drafts })
 }

@@ -140,7 +140,7 @@ async function countUnscoredNoFilter(admin: AdminClient, userId: string, company
   // Ownership via the companies FK join (ownedJobsQuery), not an
   // .in('company_id', companyIds) array — that breaks past ~600 companies.
   const { count, error } = await openRolesOnly(
-    ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', { count: 'exact', head: true })
+    ownedJobsQuery(admin, userId, 'id', { count: 'exact', head: true })
   ).is('match_score', null)
   if (error) {
     console.error('[agents/match/batch] unscored-count query failed', error)
@@ -160,7 +160,7 @@ async function countRemainingInTargeting(
 ): Promise<number> {
   if (companyIds.length === 0) return 0
   let query = openRolesOnly(
-    ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', { count: 'exact', head: true })
+    ownedJobsQuery(admin, userId, 'id', { count: 'exact', head: true })
   )
     .is('match_score', null)
     .or(`quality_score.is.null,quality_score.gte.${QUALITY_REJECT_THRESHOLD}`)

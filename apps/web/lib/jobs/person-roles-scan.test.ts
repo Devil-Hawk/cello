@@ -49,4 +49,14 @@ describe('person roles scan', () => {
     expect(found, "read through .from('person_jobs')").toEqual([])
     expect(stale, 'no longer reads jobs: remove it from person-roles-scan.allow.ts').toEqual([])
   })
+
+  it('has no inner join to companies: a role the sweep stored has company_id null, and the join drops it', () => {
+    const found: string[] = []
+    for (const root of ROOTS) {
+      for (const file of walk(path.join(WEB, root))) {
+        if (/companies!inner/.test(strip(readFileSync(file, 'utf8')))) found.push(path.relative(WEB, file).split(path.sep).join('/'))
+      }
+    }
+    expect(found, 'read the name from viewer_company_name, or company_directory through jobs.employer_id').toEqual([])
+  })
 })
