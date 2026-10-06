@@ -430,7 +430,7 @@ export default function DashboardPage() {
           />
           {/* Side by side from `sm` up: neither of these needs full width, and
               pairing them stops the primary column ending in a ragged stack. */}
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-6 sm:grid-cols-2 [&>*]:min-w-0">
             <AgentActivityCard run={latestRun} />
             <BudgetMeterCard
               budget={budget}
