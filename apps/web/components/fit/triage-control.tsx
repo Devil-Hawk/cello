@@ -9,7 +9,7 @@ import { toast } from '@/components/ui/use-toast'
 import { cn } from '@/lib/utils'
 
 export type TriageReaction = 'interested' | 'not_for_me' | 'applied'
-export type TriageReason = 'too_junior' | 'too_senior' | 'company' | 'domain' | 'location' | 'pay' | 'other'
+export type TriageReason = 'too_junior' | 'too_senior' | 'company' | 'domain' | 'location' | 'relocation' | 'agency' | 'sponsorship' | 'pay' | 'other'
 
 const REASONS: { value: TriageReason; label: string }[] = [
   { value: 'too_junior', label: 'Too junior' },
@@ -17,6 +17,9 @@ const REASONS: { value: TriageReason; label: string }[] = [
   { value: 'company', label: 'Company' },
   { value: 'domain', label: 'Domain' },
   { value: 'location', label: 'Location' },
+  { value: 'relocation', label: 'Needs relocation' },
+  { value: 'agency', label: 'Agency posting' },
+  { value: 'sponsorship', label: 'No sponsorship' },
   { value: 'pay', label: 'Pay' },
   { value: 'other', label: 'Other' },
 ]
@@ -24,7 +27,7 @@ const REASONS: { value: TriageReason; label: string }[] = [
 export interface TriageControlProps {
   jobId: string
   /** Where the person is looking at the role, so learning can tell a shortlist pick from browsing. */
-  surface: 'today' | 'opportunities' | 'chat' | 'pipeline'
+  surface: 'roles' | 'record' | 'today' | 'applications' | 'company' | 'chat'
   /** An exploration pick is marked, so what is learned from it is weighed that way. */
   pickKind?: 'top' | 'explore' | null
   /** What the person already said about this role. */
@@ -34,11 +37,11 @@ export interface TriageControlProps {
   className?: string
 }
 
-async function send(jobId: string, body: Record<string, unknown>): Promise<{ receipt: string } | { error: string }> {
+async function send(jobId: string, body: Record<string, unknown>): Promise<{ message: string } | { error: string }> {
   try {
     const res = await fetch(`/api/roles/${jobId}/reaction`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-    const json = (await res.json().catch(() => ({}))) as { receipt?: string; error?: string }
-    return res.ok && json.receipt ? { receipt: json.receipt } : { error: json.error ?? 'Could not save that.' }
+    const json = (await res.json().catch(() => ({}))) as { message?: string; error?: string }
+    return res.ok && json.message ? { message: json.message } : { error: json.error ?? 'Could not save that.' }
   } catch {
     return { error: 'Could not save that. Check your connection and try again.' }
   }
@@ -46,7 +49,7 @@ async function send(jobId: string, body: Record<string, unknown>): Promise<{ rec
 
 /**
  * Interested and Not for me on a role, with an optional one-tap reason after a
- * pass, and Applied in the overflow. Every tap is confirmed with a receipt and an
+ * pass, and Applied in the overflow. Every tap is confirmed with a short message and an
  * Undo. On a phone the two buttons are full-width halves at 44px.
  */
 export function TriageControl({ jobId, surface, pickKind = null, reaction = null, onChange, className }: TriageControlProps) {
@@ -83,7 +86,7 @@ export function TriageControl({ jobId, surface, pickKind = null, reaction = null
     setAsking(next === 'not_for_me' && !reason)
     onChange?.({ reaction: next, reason })
     toast({
-      title: out.receipt,
+      title: out.message,
       action: (
         <ToastAction altText="Undo" onClick={() => void undo()}>
           Undo

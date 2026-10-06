@@ -17,7 +17,7 @@ const Body = z.object({
   reaction: z.enum(['interested', 'not_for_me', 'applied']),
   reason: z.enum(PASS_REASONS).nullish(),
   note: z.string().max(500).nullish(),
-  surface: z.enum(['today', 'opportunities', 'chat', 'pipeline']),
+  surface: z.enum(['roles', 'record', 'today', 'applications', 'company', 'chat']),
   pickKind: z.enum(['top', 'explore']).nullish(),
 })
 

@@ -87,7 +87,7 @@ describe('TriageControl', () => {
   })
 
   it('marks what the person already said', () => {
-    const out = html(createElement(TriageControl, { jobId: 'j1', surface: 'opportunities', reaction: { reaction: 'interested' } }))
+    const out = html(createElement(TriageControl, { jobId: 'j1', surface: 'roles', reaction: { reaction: 'interested' } }))
     expect(out).toMatch(/aria-pressed="true"[^>]*>(<svg[^>]*>.*?<\/svg>)?Interested/)
   })
 

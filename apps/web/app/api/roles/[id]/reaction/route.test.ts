@@ -35,12 +35,25 @@ describe('POST /api/roles/:id/reaction', () => {
     expect(triageRole).not.toHaveBeenCalled()
   })
 
-  it('saves the reaction as the signed-in person and returns the receipt', async () => {
-    triageRole.mockResolvedValue({ reaction: 'not_for_me', receipt: 'Got it. Fewer roles in this area.' })
-    const res = await post({ reaction: 'not_for_me', reason: 'domain', surface: 'opportunities', pickKind: 'explore', note: 'ads again' })
+  it('saves the reaction as the signed-in person and returns the message', async () => {
+    triageRole.mockResolvedValue({ reaction: 'not_for_me', message: 'Got it. Fewer roles in this area.' })
+    const res = await post({ reaction: 'not_for_me', reason: 'domain', surface: 'roles', pickKind: 'explore', note: 'ads again' })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ reaction: 'not_for_me', receipt: 'Got it. Fewer roles in this area.' })
-    expect(triageRole).toHaveBeenCalledWith({ db: client, userId: 'u1', jobId: ID, reaction: 'not_for_me', reason: 'domain', note: 'ads again', surface: 'opportunities', pickKind: 'explore' })
+    expect(await res.json()).toEqual({ reaction: 'not_for_me', message: 'Got it. Fewer roles in this area.' })
+    expect(triageRole).toHaveBeenCalledWith({ db: client, userId: 'u1', jobId: ID, reaction: 'not_for_me', reason: 'domain', note: 'ads again', surface: 'roles', pickKind: 'explore' })
+  })
+
+  it('takes the new page names and the three added reasons, and refuses the old page names', async () => {
+    triageRole.mockResolvedValue({ reaction: 'not_for_me', message: 'Got it.' })
+    for (const surface of ['roles', 'record', 'today', 'applications', 'company', 'chat']) {
+      expect((await post({ reaction: 'not_for_me', reason: 'sponsorship', surface })).status, surface).toBe(200)
+    }
+    for (const reason of ['relocation', 'agency', 'sponsorship']) {
+      expect((await post({ reaction: 'not_for_me', reason, surface: 'roles' })).status, reason).toBe(200)
+    }
+    for (const surface of ['opportunities', 'pipeline']) {
+      expect((await post({ reaction: 'interested', surface })).status, surface).toBe(400)
+    }
   })
 
   it('refuses a body that is not a reaction, a made-up reason or surface, and a role id that is not an id', async () => {
