@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { CANONICAL_RESUME } from '@/lib/resume/test-fixtures'
 import { resumeToMarkdown } from '@/lib/resume/render'
 import { buildFacts } from './facts'
-import { ProfileView, type ProfileViewProps } from './profile-view'
+import { DiscardPrompt, needsDiscardPrompt, ProfileView, type ProfileViewProps } from './profile-view'
 import { readIsShowable, TailorRead } from './tailor-read'
 import type { VersionRow } from './versions'
 
@@ -119,5 +119,20 @@ describe('TailorRead', () => {
     const html = renderToStaticMarkup(createElement(TailorRead, { report: bare }))
     expect(html).not.toMatch(/\d+ of 100/)
     expect(html).toContain('no read of this resume')
+  })
+})
+
+describe('leaving an editor with unsaved edits', () => {
+  it('asks only when an editor is open and dirty', () => {
+    expect(needsDiscardPrompt(true, true)).toBe(true)
+    expect(needsDiscardPrompt(false, true)).toBe(false)
+    expect(needsDiscardPrompt(true, false)).toBe(false)
+  })
+
+  it('offers Keep editing and Discard as 44px targets', () => {
+    const html = renderToStaticMarkup(createElement(DiscardPrompt, { onKeep: () => undefined, onDiscard: () => undefined }))
+    expect(html).toContain('Discard your unsaved changes?')
+    expect(html).toContain('Keep editing')
+    expect((html.match(/min-h-11/g) ?? []).length).toBe(2)
   })
 })

@@ -76,10 +76,13 @@ export function ResumeEditor({
   readOnly = false,
   defaultMode = 'edit',
   className,
+  onDirtyChange,
 }: EditorProps) {
   const [state, dispatch] = useReducer(editorReducer, { markdown, templateId, versionLabel }, initEditor)
   const dirty = isDirty(state)
   const saving = state.status === 'saving'
+
+  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange])
 
   // Leaving with unsaved text would lose it.
   useEffect(() => {

@@ -57,6 +57,23 @@ interface Session {
   report: TailorReport | null
 }
 
+/** Replacing an open editor that holds unsaved edits needs a yes first. */
+export const needsDiscardPrompt = (dirty: boolean, open: boolean) => dirty && open
+
+export function DiscardPrompt({ onKeep, onDiscard }: { onKeep: () => void; onDiscard: () => void }) {
+  return (
+    <div role="group" aria-label="Unsaved changes" className="flex flex-wrap items-center gap-2 rounded-card border border-destructive/40 p-3">
+      <p className="mr-auto text-body text-foreground">Discard your unsaved changes?</p>
+      <Button type="button" className="min-h-11" autoFocus onClick={onKeep}>
+        Keep editing
+      </Button>
+      <Button type="button" variant="outline" className="min-h-11" onClick={onDiscard}>
+        Discard
+      </Button>
+    </div>
+  )
+}
+
 const templateOf = (doc: ResumeDocument | null) => (doc ? getTemplate(getResumeTemplateId(doc.content_json)).id : DEFAULT_TEMPLATE_ID)
 
 function Group({ title, count, defaultOpen, children }: { title: string; count?: number | string; defaultOpen?: boolean; children: ReactNode }) {
@@ -79,7 +96,12 @@ export function ProfileView({ facts, versions, fallbackText, targets, hasModel, 
   const savedTemplate = templateOf(base)
 
   const [templateId, setTemplateId] = useState(savedTemplate)
-  const [session, setSession] = useState<Session | null>(null)
+  const [session, setSessionNow] = useState<Session | null>(null)
+  const [dirty, setDirty] = useState(false)
+  // Part of the editor's key, so Discard remounts it even when the wanted version is the one already open.
+  const [generation, setGeneration] = useState(0)
+  // What the person asked to open while the editor held unsaved edits. A wrapper, because the wanted session can be null (close).
+  const [pending, setPending] = useState<{ next: Session | null } | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [tailorOpen, setTailorOpen] = useState(Boolean(openTailor))
   const editorRef = useRef<HTMLElement>(null)
@@ -93,8 +115,19 @@ export function ProfileView({ facts, versions, fallbackText, targets, hasModel, 
   const health = resumeHealth(words)
   const fixes = useMemo(() => (base ? formatFixes(resolveResume(base), plain) : []), [base, plain])
 
+  function setSession(next: Session | null) {
+    setDirty(false)
+    setPending(null)
+    setGeneration((g) => g + 1)
+    setSessionNow(next)
+  }
+  function replaceSession(next: Session | null) {
+    if (needsDiscardPrompt(dirty, session !== null)) setPending({ next })
+    else setSession(next)
+  }
+
   function open(v: VersionRow, compare: VersionRow | null) {
-    setSession({
+    replaceSession({
       key: `${v.id}:${compare ? 'compare' : 'open'}`,
       jobId: v.job_id,
       markdown: resolveResumeMarkdown(v),
@@ -107,7 +140,7 @@ export function ProfileView({ facts, versions, fallbackText, targets, hasModel, 
 
   function edit() {
     if (base) return open(base, null)
-    setSession({ key: 'text', jobId: null, markdown: baseMarkdown, templateId, label: 'Your resume text', compare: null, report: null })
+    replaceSession({ key: 'text', jobId: null, markdown: baseMarkdown, templateId, label: 'Your resume text', compare: null, report: null })
   }
 
   async function remove(v: VersionRow): Promise<string | null> {
@@ -118,7 +151,8 @@ export function ProfileView({ facts, versions, fallbackText, targets, hasModel, 
         body: JSON.stringify({ action: 'delete', id: v.id }),
       })
       if (!res.ok) return 'Could not delete that version.'
-      if (session?.key.startsWith(v.id)) setSession(null)
+      // A dirty editor stays open: the person's text is not ours to drop. Saving appends a new version.
+      if (session?.key.startsWith(v.id) && !dirty) setSession(null)
       refresh?.()
       return null
     } catch {
@@ -137,18 +171,20 @@ export function ProfileView({ facts, versions, fallbackText, targets, hasModel, 
         <section ref={editorRef} tabIndex={-1} aria-label="Resume editor" className="space-y-4 rounded-card border p-4 focus:outline-none sm:p-6">
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-display text-title text-foreground">{session.label}</h2>
-            <Button type="button" variant="ghost" className="min-h-11" onClick={() => setSession(null)}>
+            <Button type="button" variant="ghost" className="min-h-11" onClick={() => replaceSession(null)}>
               Close editor
             </Button>
           </div>
+          {pending && <DiscardPrompt onKeep={() => setPending(null)} onDiscard={() => setSession(pending.next)} />}
           {session.report && <TailorRead report={session.report} />}
           <ResumeEditor
-            key={session.key}
+            key={`${session.key}:${generation}`}
             markdown={session.markdown}
             versionLabel={session.label}
             templateId={session.templateId}
             compare={session.compare}
             defaultMode={session.compare ? 'diff' : 'edit'}
+            onDirtyChange={setDirty}
             onSave={async (draft) => {
               const result = await saveResumeVersion({ jobId: session.jobId, ...draft })
               if (result.ok) refresh?.()
@@ -235,7 +271,7 @@ export function ProfileView({ facts, versions, fallbackText, targets, hasModel, 
         preselect={openTailor}
         hasModel={hasModel}
         onDone={({ document, report }) => {
-          setSession({
+          replaceSession({
             key: document.id,
             jobId: document.job_id,
             markdown: resolveResumeMarkdown(document),

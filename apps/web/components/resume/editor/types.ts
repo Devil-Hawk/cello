@@ -26,4 +26,6 @@ export interface EditorProps {
   readOnly?: boolean
   defaultMode?: EditorMode
   className?: string
+  /** Called whenever unsaved edits appear or are saved away, so the page around the editor can ask before it replaces it. */
+  onDirtyChange?: (dirty: boolean) => void
 }
