@@ -1,27 +1,18 @@
 import type { LiveData } from '@/app/(app)/companies/[id]/read'
 import { CompanyView } from '@/components/companies/company-view'
 import { parseCompanyQuery } from '@/components/companies/company-logic'
-import { FIXTURE_NOW, fixtureCompany, fixtureLive, fixturePreview } from '@/components/companies/fixtures'
-import { PreviewView } from '@/components/companies/preview-view'
+import { FIXTURE_NOW, fixtureCompany, fixtureLive } from '@/components/companies/fixtures'
 import { fixtureRoles } from '@/components/roles/fixtures'
 import { FixtureShell } from '../_shell'
 
 // One Company on made-up data, in the shell. ?n=0|1|25|26|636 sets how many roles the employer lists; the address is
 // the page's own (?all=1 opens the whole list, ?q=forward searches it, ?p=2 is the third page). ?cannot=1 is a site
 // Cello cannot read, ?rendered=1 one it reads only in the background, ?email=1 an employer known only from mail,
-// ?preview=1 the preview of one posting, ?follow=0 an employer the person does not follow.
+// ?follow=0 an employer the person does not follow. The preview of one posting is /fixtures/company/preview.
 export default function CompanyFixture({ searchParams }: { searchParams: Record<string, string | undefined> }) {
   const query = parseCompanyQuery(searchParams)
   const n = Number(searchParams.n ?? 636)
   const count = Number.isFinite(n) ? Math.min(Math.max(n, 0), 5000) : 636
-
-  if (searchParams.preview) {
-    return (
-      <FixtureShell pathname="/companies">
-        <PreviewView data={fixturePreview} query={{ ...query, all: true }} now={FIXTURE_NOW} />
-      </FixtureShell>
-    )
-  }
 
   const cannot = Boolean(searchParams.cannot)
   const data = searchParams.email
