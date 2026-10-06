@@ -15,11 +15,13 @@
   --r-raised: #fefefd;
   --r-ink: #1a1b1f;
   --r-ink-2: #5a5d65;
-  --r-ink-3: #8b8e96;
+  --r-ink-3: #666971; /* 4.6 to 1 on the ground; the mocks' #8b8e96 failed AA */
   --r-line: rgba(26, 27, 31, 0.08);
   --r-line-2: rgba(26, 27, 31, 0.14);
-  --r-copper: #c2641a;
-  --r-petrol: #3a8686;
+  --r-copper: #c2641a; /* the bead and the ring */
+  --r-copper-text: #a9500f; /* words and numerals, 4.6 to 1 on the ground */
+  --r-petrol: #3a8686; /* the mark and the spiral */
+  --r-petrol-text: #2e7373;
   --r-ok: #2f7a4d;
   --r-stop: #b4402d;
   --r-mark: #1a1b1f;
@@ -84,7 +86,9 @@
   --r-line: rgba(236, 235, 231, 0.09);
   --r-line-2: rgba(236, 235, 231, 0.16);
   --r-copper: #e0905a;
+  --r-copper-text: #e0905a;
   --r-petrol: #5fb3b3;
+  --r-petrol-text: #5fb3b3;
   --r-ok: #5cb57e;
   --r-stop: #e07a66;
   --r-mark: #0e0f12;
