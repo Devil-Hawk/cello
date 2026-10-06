@@ -184,7 +184,7 @@ interface OwnedJob {
   // The person's own verdict on the job (their person_roles row), merged in by loadOwnedJob when it is asked for.
   chance?: string | null
   chance_detail?: unknown
-  checked_at?: string | null
+  assessed_at?: string | null
   want_p?: number | null
   want_reason?: string | null
   want_detail?: unknown
@@ -337,7 +337,7 @@ async function pickUnscoredJobIds(ctx: CopilotToolContext, limit: number): Promi
     .select('job_id, jobs!inner(id)')
     .eq('user_id', ctx.userId)
     .is('hidden_reason', null)
-    .is('checked_at', null)
+    .is('assessed_at', null)
     .order('jobs(posted_at)', { ascending: false, nullsFirst: false })
     .limit(limit)
   return ((data as { job_id: string }[] | null) ?? []).map((r) => r.job_id)
@@ -394,7 +394,7 @@ async function pickScoringCandidateIds(
     .select('jobs!inner(id, title, description)')
     .eq('user_id', ctx.userId)
     .is('hidden_reason', null)
-    .is('checked_at', null)
+    .is('assessed_at', null)
     .order('jobs(posted_at)', { ascending: false, nullsFirst: false })
     .limit(poolSize)
   const rows = ((data as unknown as { jobs: PoolJob | PoolJob[] | null }[] | null) ?? []).flatMap((r) => {
@@ -713,7 +713,7 @@ async function explainMatch(ctx: CopilotToolContext, args: Args) {
   const res = await loadOwnedJob(ctx, jobId, 'id, title, company_id', { fit: true })
   if ('error' in res) return res
   const { job, companyName } = res
-  if (job.chance == null && job.want_p == null && !job.checked_at) {
+  if (job.chance == null && job.want_p == null && !job.assessed_at) {
     return {
       title: job.title,
       company: companyName,

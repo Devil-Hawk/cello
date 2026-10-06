@@ -157,7 +157,7 @@ export class SupabaseScoringStore implements ScoringStore {
     for (const part of chunks(rows, WRITE_CHUNK)) {
       await Promise.all(
         part.map(async (r) => {
-          const patch: Record<string, unknown> = { checked_at: at, blocked_reasons: r.blockedReasons }
+          const patch: Record<string, unknown> = { assessed_at: at, blocked_reasons: r.blockedReasons }
           if (r.blocked || !r.want) {
             // A role the person ruled out has no want and no chance worth keeping.
             Object.assign(patch, { want_p: null, want_reason: null, want_detail: null, chance: null, chance_detail: null })

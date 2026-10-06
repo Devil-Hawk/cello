@@ -106,7 +106,7 @@ describe('PUT /api/settings/constraints', () => {
 
   it('marks the person\'s roles for another look so the new facts apply', async () => {
     await put(BODY)
-    expect(adminUpdates).toEqual([{ table: 'person_roles', patch: { checked_at: null }, col: 'user_id', value: 'u1' }])
+    expect(adminUpdates).toEqual([{ table: 'person_roles', patch: { assessed_at: null }, col: 'user_id', value: 'u1' }])
   })
 
   it('refuses a body that is not a set of dealbreakers, and writes nothing', async () => {

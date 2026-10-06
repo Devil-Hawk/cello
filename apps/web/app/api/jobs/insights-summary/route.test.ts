@@ -16,11 +16,11 @@ function chain(table: string): Record<string, unknown> {
   }
   q.range = (...args: unknown[]) => {
     calls.push(['range', ...args])
-    return Promise.resolve({ data: [{ chance: 'strong', blocked_reasons: [], checked_at: '2026-10-06T00:00:00Z', jobs: { source: 'greenhouse' } }], error: null })
+    return Promise.resolve({ data: [{ chance: 'strong', blocked_reasons: [], assessed_at: '2026-10-06T00:00:00Z', jobs: { source: 'greenhouse' } }], error: null })
   }
   q.then = (resolve: (v: unknown) => unknown) =>
     resolve({
-      data: [{ chance: 'strong', blocked_reasons: [], checked_at: '2026-10-06T00:00:00Z', want_p: 0.8, jobs: { id: 'j1', title: 'Engineer', url: null, posted_at: null, companies: { name: 'Acme', domain: null } } }],
+      data: [{ chance: 'strong', blocked_reasons: [], assessed_at: '2026-10-06T00:00:00Z', want_p: 0.8, jobs: { id: 'j1', title: 'Engineer', url: null, posted_at: null, companies: { name: 'Acme', domain: null } } }],
       error: null,
       count: 1,
     })
@@ -59,13 +59,13 @@ describe('GET /api/jobs/insights-summary', () => {
     expect(calls).toContainEqual(['not', 'jobs.still_open', 'is', false])
     expect(calls).toContainEqual(['eq', 'chance', 'strong'])
     const body = await res.json()
-    expect(body.jobs[0]).toMatchObject({ id: 'j1', title: 'Engineer', chance: 'strong', checked_at: '2026-10-06T00:00:00Z', company: { name: 'Acme' } })
+    expect(body.jobs[0]).toMatchObject({ id: 'j1', title: 'Engineer', chance: 'strong', assessed_at: '2026-10-06T00:00:00Z', company: { name: 'Acme' } })
     expect(Object.keys(body.jobs[0])).not.toContain('fit_assessed_at')
   })
 
   it('finds the roles not yet assessed by the person\'s own check date', async () => {
     calls.length = 0
     await get('?band=unassessed')
-    expect(calls).toContainEqual(['is', 'checked_at', null])
+    expect(calls).toContainEqual(['is', 'assessed_at', null])
   })
 })

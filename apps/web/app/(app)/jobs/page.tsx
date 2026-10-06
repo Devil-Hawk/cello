@@ -695,7 +695,7 @@ function JobsPageInner() {
       if (debouncedLocationQuery.trim()) {
         start.ilike('location', '%' + debouncedLocationQuery.trim() + '%')
       }
-      if (unscoredOnly) query.is('checked_at', null)
+      if (unscoredOnly) query.is('assessed_at', null)
       if (side === 'matching' && targeting) applyRoleTargets(start, targeting, excludedIds)
       return start.query
     }

@@ -891,7 +891,7 @@ function lineShowing(phrase: string, lines: readonly { n: number; text: string }
 }
 
 export interface DemoFit {
-  checked_at: string | null
+  assessed_at: string | null
   blocked_reasons: unknown[]
   want_p: number | null
   want_reason: string | null
@@ -922,7 +922,7 @@ function wantReasonFor(job: DemoJob, want: number): string {
  */
 export function buildDemoFit(job: DemoJob, resume: string, assessedAt: string): DemoFit {
   if (job.want == null) {
-    return { checked_at: null, blocked_reasons: [], want_p: null, want_reason: null, want_detail: null, chance: null, chance_detail: null }
+    return { assessed_at: null, blocked_reasons: [], want_p: null, want_reason: null, want_detail: null, chance: null, chance_detail: null }
   }
   const lines = resumeLines(resume)
   const requirements: Requirement[] = []
@@ -948,7 +948,7 @@ export function buildDemoFit(job: DemoJob, resume: string, assessedAt: string): 
   const labelled = labelChance(requirements, checks)
   const chance = labelled.chance === 'cannot_assess' ? null : labelled.chance
   return {
-    checked_at: assessedAt,
+    assessed_at: assessedAt,
     blocked_reasons: [],
     want_p: job.want,
     want_reason: wantReasonFor(job, job.want),

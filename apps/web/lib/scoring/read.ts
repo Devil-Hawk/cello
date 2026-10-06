@@ -9,13 +9,13 @@ import { wantTier } from './shortlist'
 import type { BlockReason, Chance, RequirementCheck, RoleFit } from './types'
 
 /** The person_roles columns that hold the verdict. */
-export const FIT_COLUMNS = 'checked_at, blocked_reasons, want_p, want_reason, want_detail, chance, chance_detail'
+export const FIT_COLUMNS = 'assessed_at, blocked_reasons, want_p, want_reason, want_detail, chance, chance_detail'
 
 /** Embeds the person's own verdict in a jobs select. A session client sees only its own row; a service client also filters `person_roles.user_id`. */
 export const FIT_EMBED = `person_roles!inner(${FIT_COLUMNS})`
 
 export interface FitRow {
-  checked_at?: string | null
+  assessed_at?: string | null
   blocked_reasons?: unknown
   want_p?: number | null
   want_reason?: string | null
@@ -82,7 +82,7 @@ export function parseFit(source: FitSource | null | undefined): RoleFit {
   const label = CHANCES.includes(row.chance as Chance) ? (row.chance as Chance) : null
   return {
     jobId: source?.id ?? null,
-    assessedAt: row.checked_at ?? null,
+    assessedAt: row.assessed_at ?? null,
     blocked: blockReasons(row.blocked_reasons),
     want:
       p == null
@@ -155,7 +155,7 @@ export function firstGapCopy(fit: RoleFit): string | null {
 /** The person_roles columns a verdict fills, for a screen that has just assessed a role and wants its row to show it without a reload. */
 export function fitToColumns(fit: RoleFit): Required<FitRow> {
   return {
-    checked_at: fit.assessedAt,
+    assessed_at: fit.assessedAt,
     blocked_reasons: fit.blocked,
     want_p: fit.want?.p ?? null,
     want_reason: fit.want?.reason ?? null,

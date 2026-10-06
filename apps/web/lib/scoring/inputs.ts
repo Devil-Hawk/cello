@@ -88,7 +88,7 @@ export async function loadScoringInputs(admin: AdminClient, userId: string): Pro
 
 // The roles come from the person's own rows (public.person_roles) with the posting
 // embedded: a role the person has no row for is not theirs to assess, and the
-// verdict columns are on the row, so "not assessed yet" is `checked_at is null`.
+// verdict columns are on the row, so "not assessed yet" is `assessed_at is null`.
 // The posting's own columns are filtered through the embed (`referencedTable`).
 
 interface CandidateRow {
@@ -175,7 +175,7 @@ export async function candidateRoles(admin: AdminClient, userId: string, targeti
     'quality_score.is.null,quality_score.gte.' + QUALITY_REJECT_THRESHOLD,
     JOBS
   )
-  if (opts.onlyUnassessed) query = query.is('checked_at', null)
+  if (opts.onlyUnassessed) query = query.is('assessed_at', null)
   if (targeting.functions.length > 0) query = query.or(facet('job_function', targeting.functions), JOBS)
   if (targeting.seniority.length > 0) query = query.or(facet('seniority', targeting.seniority), JOBS)
   if (targeting.languages.length > 0) query = query.or(facet('language', targeting.languages), JOBS)
@@ -200,7 +200,7 @@ export async function candidateRoles(admin: AdminClient, userId: string, targeti
  */
 export async function countUnassessed(admin: AdminClient, userId: string, targeting: Targeting): Promise<{ inRecall: number; total: number }> {
   const head = { count: 'exact' as const, head: true }
-  const base = () => admin.from('person_roles').select('job_id, jobs!inner(id)', head).eq('user_id', userId).is('hidden_reason', null).is('checked_at', null)
+  const base = () => admin.from('person_roles').select('job_id, jobs!inner(id)', head).eq('user_id', userId).is('hidden_reason', null).is('assessed_at', null)
   const total = await base()
   let q = openRolesOnly(base(), JOBS).or('quality_score.is.null,quality_score.gte.' + QUALITY_REJECT_THRESHOLD, JOBS)
   if (targeting.functions.length > 0) q = q.or(facet('job_function', targeting.functions), JOBS)

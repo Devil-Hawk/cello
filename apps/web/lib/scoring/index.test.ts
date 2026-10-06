@@ -89,7 +89,7 @@ const MINE = {
   user_id: 'u',
   job_id: 'job1',
   hidden_reason: null,
-  checked_at: '2026-10-06T08:00:00Z',
+  assessed_at: '2026-10-06T08:00:00Z',
   want_p: 0.7,
   want_detail: { judge: 0.8, embedding: 0.6, stated: 0.5 },
   chance: 'possible',

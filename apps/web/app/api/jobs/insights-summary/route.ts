@@ -98,7 +98,7 @@ export async function GET(request: NextRequest) {
 
     // A role a stated fact filtered has no chance; a role not yet assessed has neither.
     if (band === 'filtered') query = query.neq('blocked_reasons', '[]')
-    else if (band === 'unassessed') query = query.is('checked_at', null)
+    else if (band === 'unassessed') query = query.is('assessed_at', null)
     else query = query.eq('chance', band).eq('blocked_reasons', '[]')
 
     const { data, error, count } = await query
@@ -119,7 +119,7 @@ export async function GET(request: NextRequest) {
           postedAt: job.posted_at,
           company: embeddedCompany(job.companies),
           // The verdict columns, which the client reads with parseFit.
-          checked_at: row.checked_at,
+          assessed_at: row.assessed_at,
           blocked_reasons: row.blocked_reasons,
           want_p: row.want_p,
           want_reason: row.want_reason,
@@ -146,7 +146,7 @@ export async function GET(request: NextRequest) {
 
   let from = 0
   for (; from < SUMMARY_MAX_ROWS; from += SUMMARY_PAGE) {
-    const on = new OnJobs(supabase.from('person_roles').select('chance, blocked_reasons, checked_at, jobs!inner(source)').is('hidden_reason', null))
+    const on = new OnJobs(supabase.from('person_roles').select('chance, blocked_reasons, assessed_at, jobs!inner(source)').is('hidden_reason', null))
     openRolesOnly(on)
     const { data, error } = await on.query.order('job_id', { ascending: true }).range(from, from + SUMMARY_PAGE - 1)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -155,7 +155,7 @@ export async function GET(request: NextRequest) {
     // jobs.source, the same stale-schema situation /api/jobs/provenance's module doc
     // explains, so supabase-js's typed generic can't confirm the select string
     // client-side; cast through `unknown` like that route does.
-    const rows = (data ?? []) as unknown as { chance: string | null; blocked_reasons: unknown; checked_at: string | null; jobs: { source: string | null } | { source: string | null }[] | null }[]
+    const rows = (data ?? []) as unknown as { chance: string | null; blocked_reasons: unknown; assessed_at: string | null; jobs: { source: string | null } | { source: string | null }[] | null }[]
     for (const row of rows) {
       totalJobs += 1
       chanceHistogram[chanceBandFor(row.chance, row.blocked_reasons)] += 1
@@ -164,7 +164,7 @@ export async function GET(request: NextRequest) {
       const key = job?.source?.trim() || '(untagged)'
       const counts = bySource.get(key) ?? { total: 0, scored: 0 }
       counts.total += 1
-      if (row.checked_at != null) counts.scored += 1
+      if (row.assessed_at != null) counts.scored += 1
       bySource.set(key, counts)
     }
     if (rows.length < SUMMARY_PAGE) break

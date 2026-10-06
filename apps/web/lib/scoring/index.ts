@@ -195,7 +195,7 @@ export async function readShortlist(db: Db, userId: string, forDate: string): Pr
     db.from('shortlist_items').select('job_id, position, pick_kind, explanation').eq('user_id', userId).eq('for_date', forDate).order('position', { ascending: true }),
     db.from('role_reactions').select('job_id, reaction, reason').eq('user_id', userId).not('job_id', 'is', null).limit(5000),
     db.from('taste_models').select('n_reactions, fitted').eq('user_id', userId).maybeSingle(),
-    db.from('person_roles').select('job_id', head).eq('user_id', userId).is('hidden_reason', null).is('checked_at', null),
+    db.from('person_roles').select('job_id', head).eq('user_id', userId).is('hidden_reason', null).is('assessed_at', null),
     db.from('person_roles').select('job_id', head).eq('user_id', userId).neq('blocked_reasons', '[]'),
   ])
   const rows = (items.data as { job_id: string; position: number; pick_kind: PickKind; explanation: string }[] | null) ?? []

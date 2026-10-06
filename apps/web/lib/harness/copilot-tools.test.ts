@@ -174,7 +174,7 @@ const BASE_KEYS: DecryptedApiKeys = { openrouter: 'fake-key', userId: 'me' }
 function verdict(over: Row = {}): Row {
   return {
     user_id: 'me',
-    checked_at: '2026-10-06T08:00:00Z',
+    assessed_at: '2026-10-06T08:00:00Z',
     blocked_reasons: [],
     want_p: 0.7,
     want_reason: 'Payments work.',

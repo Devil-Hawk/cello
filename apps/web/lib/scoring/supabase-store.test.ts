@@ -86,7 +86,7 @@ describe('SupabaseScoringStore', () => {
     expect(updates[0].filters).toContainEqual(['job_id', 'eq', 'mine'])
     const patch = updates[0].payload as Record<string, unknown>
     expect(patch).toMatchObject({ want_p: 0.7, chance: 'possible', blocked_reasons: [] })
-    expect(typeof patch.checked_at).toBe('string')
+    expect(typeof patch.assessed_at).toBe('string')
     expect(patch.want_detail).toMatchObject({ judge: 0.8, embedding: 0.6, stated: 0.5, statedKey: 'sk', calibrated: false, nReactions: 4 })
     expect(patch.chance_detail).toMatchObject({ gaps: ['Kubernetes'], confirm: ['Authorized to work in the US'], resumeKey: 'rk' })
     expect(Object.keys(patch)).not.toContain('match_score')

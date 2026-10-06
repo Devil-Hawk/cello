@@ -85,7 +85,7 @@ export async function PUT(request: NextRequest) {
   try {
     // The person's own rows: the check date is theirs, so nobody else's roles are touched.
     const admin = createAdminClient()
-    await admin.from('person_roles').update({ checked_at: null }).eq('user_id', user.id)
+    await admin.from('person_roles').update({ assessed_at: null }).eq('user_id', user.id)
   } catch (err) {
     console.error('[settings/constraints] could not mark roles for another look', err)
   }

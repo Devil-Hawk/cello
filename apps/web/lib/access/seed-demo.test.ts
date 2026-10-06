@@ -258,7 +258,7 @@ describe('buildDemoWorkspace — shape', () => {
     const lines = resumeLines(resume)
     // The posting carries no verdict: it is shared, and what Cello concluded is the person's own.
     for (const row of batch(workspace.batches, 'jobs').rows) {
-      for (const column of ['match_score', 'match_details', 'chance', 'chance_detail', 'want_p', 'want_reason', 'want_detail', 'blocked_reasons', 'fit_assessed_at', 'checked_at']) {
+      for (const column of ['match_score', 'match_details', 'chance', 'chance_detail', 'want_p', 'want_reason', 'want_detail', 'blocked_reasons', 'fit_assessed_at', 'assessed_at']) {
         expect(row).not.toHaveProperty(column)
       }
     }
@@ -266,7 +266,7 @@ describe('buildDemoWorkspace — shape', () => {
       expect(row.user_id).toBe(DEMO_USER)
       if (row.chance == null) {
         expect(row.want_p).toBeNull()
-        expect(row.checked_at).toBeNull()
+        expect(row.assessed_at).toBeNull()
         expect(row.chance_detail).toBeNull()
         continue
       }
