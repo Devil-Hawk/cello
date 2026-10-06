@@ -29,13 +29,13 @@ Chance words carry weight by colour: Strong in ink 600, Possible in ink 2, Stret
 | Raised | #FEFEFD | #292A30 | Level 2 sheets, keys, the current page key. |
 | Ink | #1A1B1F | #ECEBE7 | Text, primary keys, done things, Strong. |
 | Ink 2 | #5A5D65 | #B4B7BF | Secondary text, every state word, Cello's read. |
-| Ink 3 | #8B8E96 | #94979F | Meta, group labels, Stretch. |
-| Copper | #C2641A | #E0905A | Needs you, and nothing else: the bead, the word inside a Needs you group, the nav numeral, the ring on the lead tile. Never a fill or a button. |
-| Petrol | #3A8686 | #5FB3B3 | Cello's own mark and the spiral beside work Cello did. Never on every row. |
+| Ink 3 | #666971 | #94979F | Meta, group labels, Stretch. Darker than the mock's #8B8E96, which was 2.7 to 1 on the ground. |
+| Copper | #C2641A (words and numerals #A9500F) | #E0905A | Needs you, and nothing else: the bead, the word inside a Needs you group, the nav numeral, the ring on the lead tile. Never a fill or a button. |
+| Petrol | #3A8686 (words #2E7373) | #5FB3B3 | Cello's own mark and the spiral beside work Cello did. Never on every row. |
 | Confirmed | #2F7A4D | #5CB57E | The double check glyph only. |
 | Blocked | #B4402D | #E07A66 | The lock glyph only. Red appears nowhere else. |
 
-The line is the ink at 8 percent (9 percent of light in dark) and is the only border in the system. Every text token passes 4.5 to 1 on ground, surface and raised, in both appearances. Ink keys carry white text in light and the ground colour in dark.
+The line is the ink at 8 percent (9 percent of light in dark) and is the only border in the system. Every text token (ink, ink 2, ink 3, the copper and petrol word colours) passes 4.5 to 1 on ground, surface and raised, in both appearances; the bead, ring, mark and glyph colours pass 3 to 1. `components/ui/contract.test.ts` computes both. Ink keys carry white text in light and the ground colour in dark.
 
 ## Space and radii
 
