@@ -5,10 +5,14 @@
 export interface AutoHost {
   /** The hosted form's hostname, exactly. */
   host: string
+  /** Regular expression source for the posting's address; named groups `board` and `job`. */
+  urlPattern: string
   /** Texts of the one submit control, as the host words them. */
   submitLabels: string[]
-  /** Patterns that mean the host confirmed the application, on the page after Send. */
-  confirmation: RegExp[]
+  /** Regular expression sources that mean the host confirmed the application, on the page after Send. */
+  confirmationPatterns: string[]
+  /** Regular expression sources for the address of the host's confirmation page. */
+  confirmationUrls: string[]
 }
 
 export const AUTO_HOSTS: AutoHost[] = []

@@ -24,11 +24,14 @@ export interface EligibleField {
 
 export function eligibility(input: { company: string; url: string; fields: readonly EligibleField[]; hosts?: readonly AutoHost[] }): string | null {
   for (const f of input.fields) {
-    if (!f.required) continue
-    if (f.category === 'consent') return `${input.company}'s form asks you to agree to something. Send this one yourself.`
-    if (f.category === 'eeo') return 'A required question about you is for you to answer. Send this one yourself.'
+    if (f.required && f.category === 'consent') return `${input.company}'s form asks you to agree to something. Send this one yourself.`
+    if (f.required && f.category === 'eeo') return 'A required question about you is for you to answer. Send this one yourself.'
     const r = f.resolved
-    if (!r) return 'A required question has no answer yet.'
+    if (!r) {
+      if (f.required) return 'A required question has no answer yet.'
+      continue
+    }
+    // every value the form would get, required or not: the extension fills all of them
     if (r.via === 'similar') return 'Cello used a similar saved answer here. Confirm it to let Cello send this.'
     if (r.origin === 'code') return 'Cello read an answer from your resume. Answer it yourself to let Cello send this.'
     if (r.origin === 'model') return 'Answer it yourself to let Cello send this.'
