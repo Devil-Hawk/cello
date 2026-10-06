@@ -67,7 +67,7 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       'the request body — never server-derived from the full owned-company set, so it never replays the ~600+ ' +
       'company incident.',
   },
-  'apps/web/app/api/harness/cron/route.ts': {
+  'apps/web/lib/clock/routines/harness.ts': {
     calls: [".in('thread_id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",
   },
