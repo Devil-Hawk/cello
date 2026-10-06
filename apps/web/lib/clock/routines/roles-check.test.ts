@@ -289,6 +289,17 @@ describe('after a change of targets', () => {
     expect(rpcs[0].args.p_rows).toEqual([{ employer_id: 'emp-1', company_id: null, kind: 'outside_targets', reason: 'place', n: 1 }])
   })
 
+  it('drops an excluded-company role the sweep stored with no company, named by its employer', async () => {
+    const { admin, held } = store([
+      row('owned', { jobs: job('Engineer') }),
+      row('swept', { jobs: { ...job('Engineer'), company_id: null, companies: null, employer: { name: 'Overlap Co' } } as never }),
+      row('other', { jobs: { ...job('Engineer'), company_id: null, companies: null, employer: { name: 'Fine Inc' } } as never }),
+    ])
+    const out = await rejudgeHeldRoles(admin, 'u1', targets({ excludedCompanies: ['overlap'] }), () => START, START + 200_000)
+    expect(out).toEqual({ checked: 3, removed: 2 })
+    expect(held.map((r) => r.job_id)).toEqual(['other'])
+  })
+
   it('leaves roles already under the current version alone, and does nothing for a person with no saved targets', async () => {
     const { admin, held } = store([row('a', { targets_version: 2, jobs: job('Engineer', { country: 'DE' }) })])
     expect(await rejudgeHeldRoles(admin, 'u1', targets(), () => START, START + 200_000)).toEqual({ checked: 0, removed: 0 })
