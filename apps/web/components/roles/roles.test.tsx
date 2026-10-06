@@ -252,6 +252,16 @@ describe('role types', () => {
     expect(html).toContain('Filters (3)')
   })
 
+  it('hangs the filter panel from the toolbar on a phone and never fixes it to the screen', () => {
+    const html = view({ items: fixtureRoles(2, 2), total: 2 })
+    const form = (html.match(/<form action="\/roles"[^>]*class="([^"]*)"/)?.[1] ?? '').split(/\s+/)
+    expect(form).toEqual(expect.arrayContaining(['absolute', 'inset-x-0', 'top-full', 'sm:left-0', 'sm:w-[360px]', 'sm:max-h-[80vh]']))
+    // fixed, or any unprefixed height cap or screen inset, is what put Apply below a phone screen
+    expect(form.filter((c) => c === 'fixed' || /^(max-h-|inset-\d|top-\d|bottom-\d)/.test(c))).toEqual([])
+    expect(html).toContain('<details class="sm:relative">')
+    expect(html).toMatch(/<div class="relative flex flex-wrap items-center gap-x-6/)
+  })
+
   it('says how many roles are being checked, from the count it is given, and nothing when none are', () => {
     expect(uncheckedLine(12)).toBe('12 more are being checked. Until then they are listed by title and date.')
     expect(uncheckedLine(1)).toBe('1 more is being checked. Until then it is listed by title and date.')

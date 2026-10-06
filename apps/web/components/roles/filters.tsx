@@ -37,9 +37,10 @@ export function Filters({ query, typeOptions, companyOptions, needsSponsorship }
   ]
   if (needsSponsorship) checks.splice(4, 0, ['h1b', '1', query.h1b, 'Past H-1B filings'])
   return (
-    <details className="relative">
+    <details className="sm:relative">
       <summary className="r-key r-key-raised min-h-11 min-w-11 cursor-pointer list-none font-r">Filters{n > 0 ? ` (${n})` : ''}</summary>
-      <form action="/roles" method="get" className="r-sheet-lead absolute left-0 top-full z-30 mt-2 max-h-[80vh] w-[min(92vw,360px)] space-y-4 overflow-y-auto p-4">
+      {/* Under 640 the panel hangs from the whole toolbar row and scrolls with the page, so it fits the gutters and Apply is always reachable; from 640 it hangs from the button. */}
+      <form action="/roles" method="get" className="r-sheet-lead absolute inset-x-0 top-full z-30 mt-2 space-y-4 p-4 sm:inset-x-auto sm:left-0 sm:w-[360px] sm:max-h-[80vh] sm:overflow-y-auto">
         {query.sort !== 'ranked' && <input type="hidden" name="sort" value={query.sort} />}
         {query.group !== 'ranked' && <input type="hidden" name="group" value={query.group} />}
 
