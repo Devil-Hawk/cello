@@ -197,7 +197,7 @@ function makeNonce(): string {
  * trying to smuggle something — and the user deciding not to apply is a better
  * outcome than a quietly cleaned posting they never learn about.
  */
-function scrubStructuralEscapes(text: string): string {
+export function scrubStructuralEscapes(text: string): string {
   return text
     .replace(FENCE_SHAPED, SCRUBBED)
     .replace(CHAT_TEMPLATE_TOKENS, SCRUBBED)

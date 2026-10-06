@@ -59,7 +59,7 @@ function formatObservation(obs: unknown): { summary: string; pretty: string } {
   }
   if (typeof o.scored === 'number' && typeof o.candidatesConsidered === 'number') {
     return {
-      summary: `scored ${o.scored}/${o.candidatesConsidered}${(o.failed as number) > 0 ? `, ${o.failed} failed` : ''}`,
+      summary: `assessed ${o.scored}/${o.candidatesConsidered}${(o.failed as number) > 0 ? `, ${o.failed} could not be assessed` : ''}`,
       pretty,
     }
   }

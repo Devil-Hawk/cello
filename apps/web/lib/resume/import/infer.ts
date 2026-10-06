@@ -64,8 +64,8 @@ const SECTION_TITLES: ReadonlySet<string> = new Set([
   'CONTACT', 'CONTACT INFORMATION', 'ADDITIONAL INFORMATION',
 ])
 
-/** Bullet glyphs seen in the wild, plus ASCII `-`/`*`/`+` and the dashes. */
-const BULLET_PREFIX = /^([\u2022\u00b7\u25aa\u25cf\u25cb\u2023\u2219\u25e6\u25a0\u25b8\u2043\u2013\u2014*+-])[ \t]+(.*)$/
+/** Bullet glyphs seen in the wild (including what OCR makes of a bullet: « » °), plus ASCII `-`/`*`/`+` and the dashes. */
+const BULLET_PREFIX = /^([\u2022\u00b7\u00ab\u00bb\u00b0\u25aa\u25cf\u25cb\u2023\u2219\u25e6\u25a0\u25b8\u2043\u2013\u2014*+-])[ \t]+(.*)$/
 /** `1.` / `1)` / `(1)` ordered markers. */
 const ORDERED_PREFIX = /^\(?(\d{1,2})[.)][ \t]+(.*)$/
 /** A line of only dashes/underscores/equals — a typed-out horizontal rule. */
@@ -105,12 +105,29 @@ function isDateOnlyLine(text: string): boolean {
  * text an ATS reads.
  */
 export function escapeInlineMarkdown(text: string): string {
-  return text
-    .replace(/([\\`*_[\]~])/g, '\\$1')
-    .replace(/^(\s*)(#{1,6})(\s|$)/, '$1\\$2$3')
-    .replace(/^(\s*)>/, '$1\\>')
-    // A leading "2019." would otherwise open an ordered list numbered 2019.
-    .replace(/^(\s*)(\d{1,9})([.)])(\s)/, '$1$2\\$3$4')
+  // Per line, so a multi-line string (a summary) is protected on every line,
+  // not only the first.
+  return text.split('\n').map(escapeLine).join('\n')
+}
+
+function escapeLine(text: string): string {
+  return (
+    text
+      .replace(/([\\`*_[\]~])/g, '\\$1')
+      .replace(/^(\s*)(#{1,6})(\s|$)/, '$1\\$2$3')
+      .replace(/^(\s*)>/, '$1\\>')
+      // A leading "2019." would otherwise open an ordered list numbered 2019.
+      .replace(/^(\s*)(\d{1,9})([.)])(\s)/, '$1$2\\$3$4')
+      // A leading "- " or "+ " would open a list.
+      .replace(/^(\s*)([-+])(\s|$)/, '$1\\$2$3')
+      // A line of only dashes is a thematic break or a setext underline, and a
+      // line of only "=" is a setext underline.
+      .replace(/^(\s*)(-{2,}|={1,})(\s*)$/, (_m, a: string, run: string, b: string) =>
+        a + run.split('').map((c) => `\\${c}`).join('') + b
+      )
+      // A leading pipe would start a GFM table.
+      .replace(/^(\s*)\|/, '$1\\|')
+  )
 }
 
 /** Normalize a heading candidate for vocabulary lookup. */
@@ -297,6 +314,15 @@ export function inferResumeMarkdown(raw: string | null | undefined): string {
       }
       // A lone glyph with no text after it: fall through and treat as prose.
     }
+    // --- a wrapped bullet: PDF extraction breaks a long bullet across lines,
+    // and the tail starts lowercase or with a digit ("14s to 2.1s."). Keep it in
+    // its bullet instead of leaving a stray paragraph.
+    // ponytail: only a lowercase/digit/paren start counts; an uppercase wrap stays a paragraph.
+    const above = last()
+    if (above && above.kind === 'list' && !precededByBlank && /^[a-z0-9(]/.test(text) && !DATE_RANGE.test(text)) {
+      above.items[above.items.length - 1].text += ' ' + escapeInlineMarkdown(text)
+      continue
+    }
     bulletBaseIndent = null
 
     // --- section headings ---
@@ -316,7 +342,11 @@ export function inferResumeMarkdown(raw: string | null | undefined): string {
     }
 
     // --- role line (carries a date range) vs ordinary prose ---
-    const escaped = escapeInlineMarkdown(text)
+    // A right-aligned column ("Role, Company      San Francisco, CA") reaches us
+    // as a run of spaces. Make it a pipe so the structurer reads the tail as
+    // the location, not as part of the company.
+    const isRole = text.length <= 120 && (DATE_RANGE.test(text) || isDateOnlyLine((lines[i + 1] ?? '').trim()))
+    const escaped = escapeInlineMarkdown(isRole ? text.replace(/\s{2,}|\s+(?=(?:Remote|Hybrid)$)/g, ' | ') : text)
     const line = DATE_RANGE.test(text) && text.length <= 120 ? bold(escaped) : escaped
 
     if (!precededByBlank && tail && tail.kind === 'para') {

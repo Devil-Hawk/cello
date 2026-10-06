@@ -11,10 +11,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { GmailMessage } from '@/lib/gmail/types'
 import { extractBody, fetchGmailAddress, fetchGmailThread, getHeader } from '@/lib/gmail/gmail-api'
-import { classifyWithPatterns } from '@/lib/gmail/classify'
-import { classifyReply } from '@/lib/gmail/stage'
+import { CLASSIFY_MODEL } from '@/lib/gmail/classify'
+import { callLlm } from '@/lib/harness/llm'
+import type { DecryptedApiKeys } from '@/lib/harness/types'
 import { logApiError } from '@/lib/observability/log'
 import { parseFromHeader } from './gmail'
+import { classifyReplyPatterns, classifyReplyWith, isAutoReply, isBounce, stripQuoted } from './reply-classify'
+import type { ReplyClassification } from './types'
 import { recordOutreachReply } from './store'
 
 /** Threads checked per sync pass (most recently sent first). One Gmail call each. */
@@ -23,7 +26,10 @@ const MAX_THREADS_PER_PASS = 25
 /**
  * The first message in a thread that came from someone other than the user.
  * "From the user" is Gmail's own SENT label, or the mailbox address when it is
- * known. `messages` may arrive in any order; the earliest inbound one wins.
+ * known. An out-of-office or other automatic answer is not a person replying, so
+ * it is skipped: counting it stamped replied_at and blocked the follow-up for
+ * good. A bounce is kept, since it is something the user needs to see.
+ * `messages` may arrive in any order; the earliest inbound one wins.
  */
 export function pickInboundReply(messages: GmailMessage[], ownEmail: string | null): GmailMessage | null {
   const own = ownEmail?.toLowerCase() ?? null
@@ -32,6 +38,8 @@ export function pickInboundReply(messages: GmailMessage[], ownEmail: string | nu
     if (m.labelIds?.includes('SENT')) continue
     const from = parseFromHeader(getHeader(m.payload.headers, 'from')).email
     if (own && from === own) continue
+    const subject = getHeader(m.payload.headers, 'subject')
+    if (!isBounce(getHeader(m.payload.headers, 'from'), subject) && isAutoReply(m.payload.headers, subject)) continue
     if (!best || Number(m.internalDate) < Number(best.internalDate)) best = m
   }
   return best
@@ -46,8 +54,10 @@ export async function syncOutreachReplies(args: {
   admin: SupabaseClient
   userId: string
   accessToken: string
+  /** With an OpenRouter key the reply is read by a model; without one, by patterns. */
+  apiKeys?: DecryptedApiKeys
 }): Promise<number> {
-  const { admin, userId, accessToken } = args
+  const { admin, userId, accessToken, apiKeys } = args
   try {
     const { data } = await admin
       .from('outreach_messages')
@@ -73,14 +83,22 @@ export async function syncOutreachReplies(args: {
       const subject = getHeader(reply.payload.headers, 'subject')
       const at = new Date(parseInt(reply.internalDate, 10))
       const receivedAt = isNaN(at.getTime()) ? new Date() : at
-      // Pattern classification only: free, and a reply to cold outreach rarely
-      // reads as a job-application stage, so most land on 'neutral' by design.
-      const status = classifyWithPatterns(from, subject, extractBody(reply.payload), receivedAt).status
+      // Read what the person wrote, not the quoted copy of the user's email.
+      const text = stripQuoted(extractBody(reply.payload))
+      let classification: ReplyClassification
+      if (isBounce(from, subject)) classification = 'bounce'
+      else if (apiKeys?.openrouter) {
+        classification = await classifyReplyWith(
+          (opts) => callLlm(apiKeys, { ...opts, model: CLASSIFY_MODEL, reasoning: { effort: 'none' }, name: 'classify-reply' }),
+          subject,
+          text
+        )
+      } else classification = classifyReplyPatterns(subject, text)
       const rows = await recordOutreachReply(admin, {
         userId,
         gmailThreadId: threadId,
         gmailMessageId: reply.id,
-        classification: classifyReply(from, subject, status),
+        classification,
         occurredAt: receivedAt.toISOString(),
       })
       if (rows.length > 0) replied++

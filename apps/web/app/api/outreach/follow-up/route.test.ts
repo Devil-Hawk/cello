@@ -19,7 +19,7 @@ const supabase = {
     const chain = {
       select: () => chain,
       eq: () => chain,
-      single: async () => ({ data: { preferences: {}, full_name: 'Alex', resume_text: 'r', title: 'Staff', match_details: null, name: 'Acme' } }),
+      single: async () => ({ data: { preferences: {}, full_name: 'Alex', resume_text: 'r', title: 'Staff', person_roles: [{ chance_detail: null }], name: 'Acme' } }),
     }
     return chain
   },
@@ -45,8 +45,45 @@ vi.mock('@/lib/outreach/gmail', async (importOriginal) => ({
   threadHasReply: (...a: unknown[]) => threadHasReplyMock(...a),
 }))
 
-const runUnitOnceMock = vi.fn(async (..._a: unknown[]) => ({ output: { subject: 'Following up', body: 'Hi again', tokensUsed: 12 } }))
+const runUnitOnceMock = vi.fn(async (..._a: unknown[]) => ({ output: { subject: 'Re: Staff', body: 'Hi again', tokensUsed: 12, source: 'model' } }))
 vi.mock('@/lib/graph/oneshot', () => ({ runUnitOnce: (...a: unknown[]) => runUnitOnceMock(...a) }))
+
+let senderName: string | null = 'Alex Candidate'
+vi.mock('@/lib/outreach/sources', () => ({
+  loadOutreachSources: async () => ({
+    senderName,
+    companyId: 'co-1',
+    hasHistory: true,
+    input: {
+      userEmail: 'alex@example.com',
+      jobTitle: 'Staff Engineer',
+      companyName: 'Acme',
+      resumeText: 'Senior engineer.',
+      jobDescription: 'Build things.',
+      matchHighlights: [],
+      facts: [],
+      history: [{ id: 'H1', text: '2026-09-01 outreach_sent: Initial note' }],
+      patterns: [],
+    },
+  }),
+}))
+
+interface ReviewFixture {
+  subject: string
+  body: string
+  tokensUsed: number
+  source: 'model' | 'template'
+  templateReason?: string
+  verdicts: unknown[]
+  checks: { ok: boolean; checks: unknown[] }
+  failed: boolean
+  judgeUnavailable: boolean
+}
+let review: ReviewFixture
+const verifyMock = vi.fn(async (..._a: unknown[]) => review)
+vi.mock('@/lib/graph/verify/outreach', () => ({ verifyOutreachDraft: (...a: unknown[]) => verifyMock(...a) }))
+const writeVerdictMock = vi.fn().mockResolvedValue(undefined)
+vi.mock('@/lib/evals/verdicts', () => ({ writeVerdict: (...a: unknown[]) => writeVerdictMock(...a) }))
 
 import { POST } from './route'
 import { REPLY_CHECK_UNKNOWN_MESSAGE } from '@/lib/outreach/gmail'
@@ -79,6 +116,18 @@ beforeEach(() => {
   }
   resolveTokenMock.mockResolvedValue({ ok: true, accessToken: 'stored-token' })
   threadHasReplyMock.mockResolvedValue('none')
+  senderName = 'Alex Candidate'
+  review = {
+    subject: 'Re: Staff',
+    body: 'Hi again',
+    tokensUsed: 12,
+    source: 'model',
+    verdicts: [],
+    checks: { ok: true, checks: [] },
+    failed: false,
+    judgeUnavailable: false,
+  }
+  parent = { ...parent, subject: 'Staff Engineer at Acme', body: 'Hi Jordan,\n\nThe first email.\n\nThanks,\nAlex Candidate' }
 })
 
 describe('the reply gate', () => {
@@ -139,7 +188,44 @@ describe('the reply gate', () => {
     expect(res.ok).toBe(true)
     expect(insertOutreachMock).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ kind: 'follow_up', parent_id: 'parent-1', status: 'pending_review', used_llm: true })
+      expect.objectContaining({ kind: 'follow_up', parent_id: 'parent-1', status: 'pending_review', used_llm: true, template_reason: null })
     )
+  })
+})
+
+describe('what the follow-up is written from', () => {
+  it('gives the writer the email it follows, how long ago it went out, and the sender name', async () => {
+    await post()
+
+    const input = (runUnitOnceMock.mock.calls[0][1] as { input: Record<string, unknown> }).input
+    expect(input).toMatchObject({
+      kind: 'follow_up',
+      userName: 'Alex Candidate',
+      jobTitle: 'Staff Engineer',
+      previousEmail: { subject: 'Staff Engineer at Acme', body: expect.stringContaining('The first email.') },
+    })
+    expect(typeof input.daysSinceSent).toBe('number')
+  })
+
+  it('gets the same review as the first email, and its verdict rows', async () => {
+    await post()
+
+    expect(verifyMock).toHaveBeenCalledTimes(1)
+    expect(writeVerdictMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ judge: 'deterministic', subjectId: 'fu-1' }))
+  })
+
+  it('answers 409 needsName with no draft when the profile has no full name', async () => {
+    senderName = null
+    const res = await post()
+    expect(res.status).toBe(409)
+    expect((await res.json()).needsName).toBe(true)
+    expect(runUnitOnceMock).not.toHaveBeenCalled()
+  })
+
+  it('stores a template with its reason so the card can say so', async () => {
+    review = { ...review, source: 'template', templateReason: 'provider_error', tokensUsed: 0 }
+    const body = await (await post()).json()
+    expect(body).toMatchObject({ usedLlm: false, templateReason: 'provider_error' })
+    expect(insertOutreachMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ used_llm: false, template_reason: 'provider_error' }))
   })
 })

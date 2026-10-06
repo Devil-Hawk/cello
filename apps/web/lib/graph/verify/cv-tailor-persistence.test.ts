@@ -130,9 +130,9 @@ vi.mock('../../resume/claims', () => ({ claimsFor: async () => [], matchClaim: (
 vi.mock('../../harness/keys', () => ({ loadApiKeys: async () => ({ openrouter: 'fake-key' }) }))
 
 let judgeImpl: () => { verdict: 'pass' | 'fail'; score: number; threshold: number; n: number; summary: string; name: string }
-vi.mock('../../evals/judge', () => ({
-  meteredJudgeClient: vi.fn(() => ({})),
-  judgeGroundedness: () => judgeImpl(),
+vi.mock('../../evals/claims-judge', () => ({
+  judgeRunner: vi.fn(() => ({})),
+  judgeClaims: async () => judgeImpl(),
 }))
 
 const { prepareApplicationDraft } = await import('../autopilot')
@@ -176,7 +176,7 @@ describe('ruling 2c — a persistent judge failure persists status "failed", nev
     expect(tables.application_drafts.rows[0].status).not.toBe('pending_review')
     const verdictRows = tables.eval_verdicts.rows
     expect(verdictRows).toHaveLength(1)
-    expect(verdictRows[0]).toMatchObject({ subject_kind: 'cv_tailor_draft', judge: 'factuality', verdict: 'fail' })
+    expect(verdictRows[0]).toMatchObject({ subject_kind: 'cv_tailor_draft', judge: 'groundedness', verdict: 'fail' })
   })
 })
 

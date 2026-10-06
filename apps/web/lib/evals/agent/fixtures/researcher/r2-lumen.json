@@ -1,0 +1,28 @@
+{
+  "id": "r2-lumen",
+  "subject": "Lumen Health",
+  "kind": "company",
+  "thin": false,
+  "pages": [
+    {
+      "url": "https://lumenhealth.example/company",
+      "title": "Lumen Health: company",
+      "text": "Lumen Health is a telehealth provider founded in 2018 and headquartered in Boston. It employs about 900 people and serves patients in 14 states. The company offers primary care, mental health and chronic condition programs."
+    },
+    {
+      "url": "https://news.example/lumen-layoffs",
+      "title": "Lumen Health cuts 12% of staff",
+      "text": "Boston, March 2025. Lumen Health said it is reducing its workforce by 12 percent, about 120 roles, as it refocuses on primary care and mental health. In a memo, chief executive Dev Rao said the company expects to reach profitability in 2026. Customer-support and marketing teams were most affected."
+    },
+    {
+      "url": "https://lumenhealth.example/careers",
+      "title": "Careers at Lumen Health",
+      "text": "We are hiring registered nurses, a senior product manager for our scheduling product, and two data engineers. Most roles are remote-first within the United States. Benefits include health coverage from day one and a home-office stipend."
+    }
+  ],
+  "distractor": {
+    "url": "https://blog.example/telehealth-trends",
+    "title": "Telehealth trends",
+    "text": "Telehealth visits grew across the industry. This post names no specific company."
+  }
+}

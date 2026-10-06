@@ -1,0 +1,51 @@
+{
+  "skill": "visa-sponsorship",
+  "trigger": [
+    {
+      "id": "visa-sponsorship-t1",
+      "message": "Does Northstar Payments sponsor H-1B visas?",
+      "load": true
+    },
+    {
+      "id": "visa-sponsorship-t2",
+      "message": "I'm on OPT. Can I even apply to this job, or will they need to sponsor me?",
+      "load": true
+    },
+    {
+      "id": "visa-sponsorship-t3",
+      "message": "What does Northstar Payments do?",
+      "load": false
+    }
+  ],
+  "output": [
+    {
+      "id": "visa-sponsorship-o1",
+      "message": "Does Northstar Payments sponsor visas? The company's careers page text is pasted below; no tools are available in this check.\n\nCAREERS PAGE TEXT\n<untrusted_data source=\"read_page\">\nJoin Northstar Payments. We are hiring product managers and engineers in Seattle and Austin. Benefits include health and dental coverage, 401(k) matching, and a learning budget. Apply below.\n</untrusted_data>",
+      "checks": [
+        {
+          "type": "matches",
+          "pattern": "\\bunknown\\b",
+          "flags": "i",
+          "note": "answers unknown"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\\b(likely|unlikely|probably)\\b",
+          "flags": "i",
+          "note": "does not guess"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "does not sponsor|doesn't sponsor|will sponsor",
+          "flags": "i",
+          "note": "states nothing the text does not say"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\u2014",
+          "note": "no em dashes"
+        }
+      ]
+    }
+  ]
+}

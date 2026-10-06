@@ -8,12 +8,14 @@
 // packages/agents/src/analyst/llm-client.ts's own hand-rolled OpenAI/
 // Anthropic fetch clients. app/api/agents/analyze/route.ts's consumer
 // (components/jobs/job-detail-modal.tsx) depends on this staying exact in two
-// places: the OUTPUT shape ({summary, talkingPoints, companyInsights,
-// nothing else) and the PROMPT itself
-// (ANALYST_SYSTEM_PROMPT / generateFullAnalysisPrompt below, copied verbatim
-// from packages/agents/src/analyst/prompts.ts) — a differently-worded prompt
-// is a different analysis, which is exactly what "preserve exactly" rules
-// out here.
+// places: the OUTPUT shape ({summary, talkingPoints, companyInsights}, plus
+// `thin`, and strings in the two lists).
+//
+// THE PROMPT is prompts/analyst.md, rewritten from scratch (the verbatim port
+// of packages/agents' prompt asked the model to infer culture from writing
+// style and cited nothing). It now receives the resume and the posting as
+// numbered lines and answers with items that cite them; parseAnalysis below
+// drops any item whose citations do not exist or share no word with it.
 //
 // HONESTY CONTRACT (preserved from packages/agents/src/analyst/analysis.ts):
 // every failure branch below THROWS an AnalystError. There is no
@@ -38,6 +40,8 @@ import { AnalystInput } from '../schemas'
 import { frameJobText } from '@/lib/security/job-text'
 import { MissingKeyError, parseJsonLoose } from '../llm'
 import { BudgetCapError } from '../spend'
+import { composeSystemPrompt, loadModeDoc, promptRef } from '../prompts'
+import { citesSupport, cleanCites, mergeLines, numberLines } from '@/lib/quality/lines'
 
 /**
  * Why an analysis could not be produced — mirrors packages/agents/src/
@@ -132,119 +136,57 @@ function classifyLlmFailure(err: unknown): Error {
   return new AnalystError('provider_error', message || 'The analysis failed to run.', status)
 }
 
-// --- prompt (verbatim from packages/agents/src/analyst/prompts.ts) ---------
+// --- prompt (prompts/analyst.md) --------------------------------------------
 
-const ANALYST_SYSTEM_PROMPT = `You are an expert career analyst. You use structured reasoning to analyze job opportunities and judge how well a candidate fits them.
+/** A posting with less description than this gives the model little to cite. */
+export const THIN_POSTING_CHARS = 300
 
-## Your Reasoning Process
-
-Before answering, you MUST think through each step carefully:
-
-1. **UNDERSTAND** - Read and comprehend the job requirements fully
-2. **ANALYZE** - Compare against the candidate's background systematically
-3. **SYNTHESIZE** - Form connections and insights
-4. **VALIDATE** - Check your conclusions make sense
-5. **RESPOND** - Provide clear, actionable output
-
-## Quality Standards
-
-- Be SPECIFIC - generic advice is unhelpful
-- Be HONEST - acknowledge gaps, don't oversell
-- Be ACTIONABLE - every point should be something they can DO
-- Be CONCISE - respect the candidate's time
-
-Always respond in the exact JSON format requested.`
-
-interface AnalysisPromptInput {
+export interface AnalysisPromptInput {
   jobTitle: string
-  jobDescription: string
+  jobDescription: string | null
   companyName: string
   companyNotes?: string | null
   resumeText: string
 }
 
-function generateFullAnalysisPrompt(input: AnalysisPromptInput): string {
-  return `Analyze this job opportunity and judge how well the candidate fits.
+export interface AnalystPrompt {
+  system: string
+  prompt: string
+  /** R and J ids to their text, for checking the model's citations. */
+  lines: Map<string, string>
+  thin: boolean
+}
 
-## INPUT DATA
-
-### Job Details
-**Title:** ${input.jobTitle}
-**Company:** ${input.companyName}
-${input.companyNotes ? `**Company Notes:** ${input.companyNotes}` : ''}
-
-**Full Job Description:**
-${input.jobDescription}
-
-### Candidate Resume
-${input.resumeText}
-
----
-
-## YOUR ANALYSIS PROCESS
-
-Think through this step by step:
-
-### Step 1: Job Requirements Extraction
-<think>
-First, identify the KEY requirements from this job:
-- What are the MUST-HAVE skills? (explicitly stated as required)
-- What are the NICE-TO-HAVE skills? (preferred/bonus)
-- What experience level is needed?
-- What domain knowledge is important?
-- What soft skills or traits are emphasized?
-</think>
-
-### Step 2: Candidate-Job Fit Analysis
-<think>
-Now compare the candidate's resume to these requirements:
-- Which requirements does the candidate STRONGLY match?
-- Which requirements are a PARTIAL match?
-- What GAPS exist that the candidate should address?
-- What TRANSFERABLE skills could bridge gaps?
-</think>
-
-### Step 3: Company & Culture Analysis
-<think>
-Based on the job description language and any notes:
-- What does the writing style suggest about company culture?
-- What values seem important to this company?
-- What kind of work environment is implied?
-- What growth/impact opportunities are mentioned?
-</think>
-
----
-
-## OUTPUT
-
-Now provide your analysis in this exact JSON format:
-
-{
-  "summary": "[2-3 sentence summary of the role and fit]",
-  "talkingPoints": [
-    "[Point 1: Connect specific resume experience to specific job requirement]",
-    "[Point 2: Another concrete match with example/metric]",
-    "[Point 3: Transferable skill that addresses a requirement]",
-    "[Point 4: Unique value proposition]",
-    "[Point 5: Cultural/soft skill alignment]"
-  ],
-  "companyInsights": [
-    "[Insight about company culture from job description]",
-    "[Insight about team dynamics or work style]",
-    "[Insight about growth/learning opportunities]",
-    "[Insight about company values/mission]"
+/** The system and user halves of the analysis call. The resume and the posting
+ *  go in as numbered lines; the posting stays inside the untrusted frame. */
+export function buildAnalystPrompt(input: AnalysisPromptInput): AnalystPrompt {
+  const resume = numberLines(input.resumeText, 'R', { maxLines: 90 })
+  const description = (input.jobDescription ?? '').trim()
+  // The title is part of the posting, so it is line J1 and can be cited.
+  const job = numberLines(`${input.jobTitle}\n${description.slice(0, 12_000)}`, 'J')
+  const thin = description.length < THIN_POSTING_CHARS
+  const prompt = [
+    `COMPANY: ${input.companyName}`,
+    input.companyNotes ? `NOTES: ${input.companyNotes}` : '',
+    `POSTING LENGTH: ${thin ? 'short' : 'full'}`,
+    `RESUME:\n${resume.block}`,
+    // INJECTION DEFENCE (lib/security/job-text.ts): the description is
+    // EMPLOYER-CONTROLLED, and frameJobText fences it as data before it
+    // reaches the prompt; see lib/security/injection-chokepoints.test.ts's
+    // PROMPT_BUILDERS entry for this file.
+    `JOB:\n${frameJobText(job.block)}`,
   ]
+    .filter(Boolean)
+    .join('\n\n')
+  return {
+    system: composeSystemPrompt({ mode: loadModeDoc('analyst') }),
+    prompt,
+    lines: mergeLines(resume, job),
+    thin,
+  }
 }
 
-IMPORTANT:
-- Every talking point must reference SPECIFIC content from both the job description AND resume
-- Company insights should be inferred from the job posting, not generic
-- If you cannot find specific evidence, acknowledge uncertainty
-
-Respond with ONLY the JSON object.`
-}
-
-// --- response parsing (ported from packages/agents/src/analyst/analysis.ts) -
+// --- response parsing --------------------------------------------------------
 
 /** No `|| 'placeholder'` fallback: a placeholder in the summary slot reads as
  *  the model's verdict on the job. An absent summary is a failed generation,
@@ -253,12 +195,64 @@ function sanitizeString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function sanitizeStringArray(value: unknown): string[] {
+/** Items the model cited properly: {text, cites} where every id exists and the
+ *  cited lines share a word with the text. Plain strings carry no citation and
+ *  are dropped, as is anything else. */
+function citedItems(value: unknown, lines: Map<string, string>): string[] {
   if (!Array.isArray(value)) return []
-  return value
-    .filter((item): item is string => typeof item === 'string')
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0)
+  const out: string[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue
+    const text = sanitizeString((item as { text?: unknown }).text)
+    if (!text) continue
+    if (citesSupport(text, cleanCites((item as { cites?: unknown }).cites), lines)) out.push(text)
+  }
+  return out
+}
+
+export interface ParsedAnalysis {
+  summary: string
+  talkingPoints: string[]
+  companyInsights: string[]
+  thin: boolean
+}
+
+/** The model's JSON as the panel's shape, keeping only what is cited. A short
+ *  posting gets no company insights whatever the model wrote. Throws AnalystError for a response that is not an analysis. */
+export function parseAnalysis(raw: string, lines: Map<string, string>, thin: boolean): ParsedAnalysis {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    throw new AnalystError('empty_response', 'The model returned an empty response, so there is no analysis for this job yet.')
+  }
+
+  let parsed: unknown
+  try {
+    parsed = parseJsonLoose(trimmed)
+  } catch {
+    throw new AnalystError('unparseable_response', 'The model replied, but not with the structured analysis Cello asked for.')
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new AnalystError('incomplete_response', 'The model returned JSON that was not an analysis object.')
+  }
+
+  const fields = parsed as Record<string, unknown>
+  const summary = sanitizeString(fields.summary)
+  const talkingPoints = citedItems(fields.talkingPoints, lines)
+  const companyInsights = thin ? [] : citedItems(fields.companyInsights, lines)
+
+  // A partial analysis is still honest: every item rendered is cited. A short
+  // posting may leave nothing but the summary, which then says so. Otherwise a
+  // response with no summary, or nothing in ANY section, is a failed generation
+  // dressed as a result: refuse it rather than let the modal announce insights
+  // and show nothing.
+  const hasAnySection = talkingPoints.length > 0 || companyInsights.length > 0
+  if (!summary || (!hasAnySection && !thin)) {
+    throw new AnalystError(
+      'incomplete_response',
+      'The model returned an incomplete analysis, so there is nothing reliable to show for this job.'
+    )
+  }
+  return { summary, talkingPoints, companyInsights, thin }
 }
 
 // --- DB shape ----------------------------------------------------------------
@@ -300,13 +294,9 @@ export const analyst: AgentFn = async (ctx) => {
     )
   }
 
-  const prompt = generateFullAnalysisPrompt({
+  const built = buildAnalystPrompt({
     jobTitle: job.title ?? '(untitled)',
-    // INJECTION DEFENCE (lib/security/job-text.ts): the description is
-    // EMPLOYER-CONTROLLED, and frameJobText fences it as data before it
-    // reaches the prompt — see lib/security/injection-chokepoints.test.ts's
-    // PROMPT_BUILDERS entry for this file.
-    jobDescription: frameJobText(job.description),
+    jobDescription: job.description,
     companyName,
     companyNotes,
     resumeText,
@@ -314,52 +304,24 @@ export const analyst: AgentFn = async (ctx) => {
 
   let res
   try {
-    res = await ctx.llm({ system: ANALYST_SYSTEM_PROMPT, prompt, json: true, maxTokens: 2000, temperature: 0.7 })
+    res = await ctx.llm({
+      system: built.system,
+      prompt: built.prompt,
+      json: true,
+      maxTokens: 2000,
+      // Prep notes must stay on the page in front of the model: low temperature.
+      temperature: 0.2,
+      cachePrefix: true,
+      promptRef: promptRef('analyst'),
+    })
   } catch (err) {
     throw classifyLlmFailure(err)
   }
 
-  const raw = res.content.trim()
-  if (!raw) {
-    throw new AnalystError(
-      'empty_response',
-      'The model returned an empty response, so there is no analysis for this job yet.'
-    )
-  }
-
-  let parsed: unknown
-  try {
-    parsed = parseJsonLoose(raw)
-  } catch {
-    throw new AnalystError(
-      'unparseable_response',
-      'The model replied, but not with the structured analysis Cello asked for.'
-    )
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new AnalystError('incomplete_response', 'The model returned JSON that was not an analysis object.')
-  }
-
-  const fields = parsed as Record<string, unknown>
-  const summary = sanitizeString(fields.summary)
-  const talkingPoints = sanitizeStringArray(fields.talkingPoints)
-  const companyInsights = sanitizeStringArray(fields.companyInsights)
-
-  // A partial analysis is still honest — every section rendered is real
-  // model output, and empty sections just don't render. But a response with
-  // no summary, or nothing in ANY section, is a failed generation dressed as
-  // a result: refuse it rather than let the modal announce insights and show
-  // nothing.
-  const hasAnySection = talkingPoints.length > 0 || companyInsights.length > 0
-  if (!summary || !hasAnySection) {
-    throw new AnalystError(
-      'incomplete_response',
-      'The model returned an incomplete analysis, so there is nothing reliable to show for this job.'
-    )
-  }
+  const output = parseAnalysis(res.content, built.lines, built.thin)
 
   return {
-    output: { summary, talkingPoints, companyInsights },
+    output,
     // ctx.llm already metered the tokens.
     tokensUsed: 0,
   }

@@ -225,8 +225,8 @@ export function ApiKeysTab({
       <div>
         <h2 className="font-display text-section text-foreground">API keys</h2>
         <p className="mt-1 text-caption text-muted-foreground">
-          Add your own API keys to enable AI-powered features like career page verification, job
-          matching, and resume analysis. Keys are encrypted at rest and never shared.
+          Add your own API keys to turn on career page verification, role fit
+          and resume analysis. Keys are encrypted at rest and never shared.
         </p>
       </div>
 

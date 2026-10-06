@@ -15,6 +15,7 @@ import type { AgentFn, AdminClient } from '../types'
 import { FollowUpperInput } from '../schemas'
 import { MissingKeyError } from '../llm'
 import { composeSystemPrompt, loadModeDoc, promptRef } from '../prompts'
+import { unbackedTokens } from '@/lib/dossier/backing'
 
 const STUCK_DAYS = 10
 const ACTIVE_STAGES = ['applied', 'screen', 'interview']
@@ -62,6 +63,43 @@ async function pickContactId(
     .eq('company_id', companyId)
     .limit(1)
   return ((data as { id: string }[] | null) ?? [])[0]?.id ?? null
+}
+
+const NUMBER_WORDS = /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty|dozen|couple|several|week|weeks|month|months|fortnight)\b/i
+const SENTENCE_STARTERS = new Set(['queued', 'follow', 'followup', 'followups', 'the', 'your', 'it', 'they', 'all', 'both', 'this', 'that', 'these', 'those', 'there', 'each', 'one', 'a', 'an', 'no'])
+const APPROXIMATION = /\b(about|around|roughly|approximately|nearly|almost|over|more than|under|some)\b/i
+
+/** The deterministic sentence for a list, used when the model's line cannot be checked against it. */
+export function deterministicLine(items: { company: string; days: number }[]): string {
+  return (
+    `Queued ${items.length} follow-up${items.length === 1 ? '' : 's'} (due tomorrow) for ` +
+    `${items.map((c) => `${c.company} (${c.days}d silent)`).join(', ')}.`
+  )
+}
+
+/**
+ * Is a model's status line only restating the list it was given? Every number in
+ * it must be a day count from the list (or the count of entries), every name a
+ * company from the list, and it may not round, approximate or turn days into
+ * weeks. A line that fails is replaced by the deterministic sentence.
+ */
+export function lineMatchesInput(line: string, items: { company: string; days: number }[]): boolean {
+  const text = line.trim()
+  if (!text || /[\u2013\u2014]/.test(text)) return false
+  if (NUMBER_WORDS.test(text) || APPROXIMATION.test(text)) return false
+  // A status line says something about the list: a company on it, or how many.
+  const lower = text.toLowerCase()
+  if (!items.some((c) => lower.includes(c.company.toLowerCase())) && !new RegExp(`\\b${items.length}\\b`).test(text)) return false
+  const support = [`${items.length}`, ...items.map((c) => `${c.company} ${c.days}`)].join('\n')
+  if (unbackedTokens(text, support).length > 0) return false
+  // The first word of a sentence is capitalised by grammar, so the name check
+  // skips it; a made-up company there must still be caught.
+  const known = items.map((c) => c.company.toLowerCase()).join(' ')
+  for (const sentence of text.split(/(?<=[.!?])\s+/)) {
+    const first = sentence.match(/^[A-Za-z0-9'&-]+/)?.[0]
+    if (first && /^[A-Z]/.test(first) && !SENTENCE_STARTERS.has(first.toLowerCase()) && !known.includes(first.toLowerCase())) return false
+  }
+  return true
 }
 
 export const follow_upper: AgentFn = async (ctx) => {
@@ -132,7 +170,7 @@ export const follow_upper: AgentFn = async (ctx) => {
       application_id: app.id,
       contact_id: contactId,
       due_date: dueTomorrow,
-      note: `Follow up on ${company} (${app.stage}) — silent for ${days} days.`,
+      note: `Follow up on ${company} (${app.stage}), silent for ${days} days.`,
       is_completed: false,
     })
     if (error) {
@@ -151,9 +189,7 @@ export const follow_upper: AgentFn = async (ctx) => {
     }
   }
 
-  const deterministic =
-    `Queued ${created.length} follow-up${created.length === 1 ? '' : 's'} (due tomorrow) for ` +
-    `${created.map((c) => `${c.company} (${c.days}d silent)`).join(', ')}.`
+  const deterministic = deterministicLine(created)
 
   let message = deterministic
   let tokensUsed = 0
@@ -171,7 +207,8 @@ export const follow_upper: AgentFn = async (ctx) => {
       temperature: 0.5,
       cachePrefix: true,
     })
-    if (res.content.trim()) message = res.content.trim()
+    // The model's line is kept only when it restates the list exactly.
+    if (lineMatchesInput(res.content, created)) message = res.content.trim()
     tokensUsed = res.tokensUsed
   } catch (err) {
     if (!(err instanceof MissingKeyError)) {

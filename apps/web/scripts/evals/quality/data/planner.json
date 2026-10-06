@@ -1,0 +1,13 @@
+{
+  "comment": "Eight goals. expected lists the acceptable sets of agent types; a plan passes when its set of types equals one of them.",
+  "cases": [
+    { "id": "find-backend", "goal": "Find new backend roles at the companies I track", "expected": [["sourcer"]], "quick": true },
+    { "id": "refresh-rank", "goal": "Refresh my job list and rank what is new by how well it fits my resume", "expected": [["sourcer", "matcher"]] },
+    { "id": "ten-then-tailor", "goal": "Find 10 senior roles, then tailor my resume for each", "expected": [["sourcer", "cv_tailor"], ["sourcer", "matcher", "cv_tailor"]], "needsLoop": true, "quick": true },
+    { "id": "research-only", "goal": "Research Datadog for me", "expected": [["company_researcher"]] },
+    { "id": "apply-named", "goal": "Apply to the Figma Product Designer job I saved", "expected": [["cv_tailor", "applier"], ["cv_tailor", "applier", "verifier"]] },
+    { "id": "reach-out", "goal": "Find people at Notion I could contact about the designer role and draft a note to them", "expected": [["contact_sourcer", "follow_upper"]] },
+    { "id": "enrich-top", "goal": "Add pay and seniority information to my top matches", "expected": [["enricher"], ["matcher", "enricher"]] },
+    { "id": "off-topic", "goal": "What is the capital of France?", "expected": [["sourcer", "matcher", "enricher"]] }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "note": "First action of the orchestrator for one message. allowed_new lists tool names, 'read_file:<path>' for loading a skill, and 'answer' for replying without a tool. allowed_old is the same for the earlier Copilot (its 19 tools, plus 'final' and 'ask'). A case passes when every call in the first action is allowed and, for a call-less reply, 'answer' (or 'final'/'ask') is allowed.",
+  "cases": [
+    { "id": "d01", "category": "delegation", "message": "Research Stripe, Notion, Figma and Linear for me.", "allowed_new": ["research", "task"], "allowed_old": ["research_companies", "research_company"] },
+    { "id": "d02", "category": "delegation", "message": "Look into these six companies and tell me which ones are hiring product managers: Stripe, Notion, Figma, Linear, Vercel, Ramp.", "allowed_new": ["research", "task"], "allowed_old": ["research_companies"] },
+    { "id": "d03", "category": "delegation", "message": "Write a cover letter for each of these three roles: job-101, job-102 and job-103.", "allowed_new": ["create_artifact", "task", "read_file:/skills/cover-letter/SKILL.md", "get_role"], "allowed_old": ["tailor_cv"] },
+    { "id": "d04", "category": "delegation", "message": "Find product manager roles in Seattle and rank them for me.", "allowed_new": ["find_roles", "task", "read_file:/skills/role-fit/SKILL.md"], "allowed_old": ["source_jobs", "list_jobs"] },
+    { "id": "d05", "category": "delegation", "message": "Find me remote data engineering roles posted this week.", "allowed_new": ["find_roles", "task"], "allowed_old": ["source_jobs"] },
+    { "id": "d06", "category": "delegation", "message": "Write a short note to a recruiter at each of Stripe, Notion and Figma about their product roles.", "allowed_new": ["create_artifact", "task", "people", "read_file:/skills/cold-outreach/SKILL.md"], "allowed_old": ["draft_outreach", "list_contacts"] },
+    { "id": "d07", "category": "delegation", "message": "Find out what Ramp pays senior product managers and what people say about working there.", "allowed_new": ["research", "task", "read_file:/skills/company-research/SKILL.md"], "allowed_old": ["research_company", "web_search"] },
+    { "id": "d08", "category": "delegation", "message": "Tailor my resume for job-101, job-102 and job-103.", "allowed_new": ["create_artifact", "task", "read_file:/skills/tailor-resume/SKILL.md", "get_role"], "allowed_old": ["optimize_resume", "tailor_cv"] },
+    { "id": "d09", "category": "delegation", "message": "Dig into everything public about the hiring manager at Stripe, Dana Kim.", "allowed_new": ["research", "people", "task"], "allowed_old": ["web_search", "list_contacts", "research_company"] },
+    { "id": "d10", "category": "delegation", "message": "I'm choosing between three companies: Stripe, Notion and Figma. Which has the best growth outlook for a product manager?", "allowed_new": ["research", "task", "read_file:/skills/company-research/SKILL.md"], "allowed_old": ["research_companies"] },
+
+    { "id": "s11", "category": "single", "message": "Show me the details of job-101.", "allowed_new": ["get_role"], "allowed_old": ["list_jobs", "explain_match"] },
+    { "id": "s12", "category": "single", "message": "Why did job-101 get the score it did?", "allowed_new": ["get_role"], "allowed_old": ["explain_match"] },
+    { "id": "s13", "category": "single", "message": "I'm interested in job-101.", "allowed_new": ["triage_role"], "allowed_old": ["explain_match", "list_jobs", "final", "ask"] },
+    { "id": "s14", "category": "single", "message": "Not interested in job-102, it's too junior for me.", "allowed_new": ["triage_role"], "allowed_old": ["explain_match", "list_jobs", "final", "ask"] },
+    { "id": "s15", "category": "single", "message": "Who can I contact at company-12 about the platform role?", "allowed_new": ["people"], "allowed_old": ["list_contacts"] },
+    { "id": "s16", "category": "single", "message": "What does my resume say about my last job?", "allowed_new": ["my_profile"], "allowed_old": ["search_kb", "final", "ask"] },
+    { "id": "s17", "category": "single", "message": "What have I said I won't work on?", "allowed_new": ["my_profile", "search_knowledge"], "allowed_old": ["search_kb", "final", "ask"] },
+    { "id": "s18", "category": "single", "message": "Remember that I only want to work at companies with fewer than 200 people.", "allowed_new": ["remember"], "allowed_old": ["remember_preference"] },
+    { "id": "s19", "category": "single", "message": "I prefer hybrid over fully remote.", "allowed_new": ["remember", "answer"], "allowed_old": ["remember_preference", "final", "ask"] },
+    { "id": "s20", "category": "single", "message": "Where do things stand with my Stripe application?", "allowed_new": ["pipeline"], "allowed_old": ["get_application"] },
+    { "id": "s21", "category": "single", "message": "Move my Notion application to interviewing.", "allowed_new": ["pipeline"], "allowed_old": ["get_application"] },
+    { "id": "s22", "category": "single", "message": "Send the draft email in artifact-7 to Dana Kim at Stripe.", "allowed_new": ["request_approval"], "allowed_old": ["draft_outreach", "final", "ask"] },
+    { "id": "s23", "category": "single", "message": "Every weekday at 8am Pacific, find new product roles for me and draft anything strong.", "allowed_new": ["schedule_task"], "allowed_old": ["trigger_run", "final", "ask"] },
+    { "id": "s24", "category": "single", "message": "What did I save about Northwind Labs?", "allowed_new": ["search_knowledge"], "allowed_old": ["search_kb"] },
+    { "id": "s25", "category": "single", "message": "Does Notion sponsor visas?", "allowed_new": ["read_file:/skills/visa-sponsorship/SKILL.md", "research", "task", "search_knowledge"], "allowed_old": ["check_sponsorship"] },
+    { "id": "s26", "category": "single", "message": "Make the cover letter in artifact-7 shorter, under 250 words.", "allowed_new": ["update_artifact"], "allowed_old": ["tailor_cv", "final", "ask"] },
+    { "id": "s27", "category": "single", "message": "What can you do?", "allowed_new": ["answer"], "allowed_old": ["final"] },
+    { "id": "s28", "category": "single", "message": "I don't know where to start with my job search. Can you help me make a plan?", "allowed_new": ["read_file:/skills/search-strategy/SKILL.md", "my_profile", "answer"], "allowed_old": ["final", "ask", "list_jobs"] },
+    { "id": "s29", "category": "single", "message": "Write a cold email to the head of product at Figma about job-301. Her contact id is contact-9.", "allowed_new": ["create_artifact", "read_file:/skills/cold-outreach/SKILL.md", "people", "get_role"], "allowed_old": ["draft_outreach"] },
+    { "id": "s30", "category": "single", "message": "Northstar offered me 165k base. How should I counter?", "allowed_new": ["read_file:/skills/negotiation/SKILL.md", "my_profile", "answer"], "allowed_old": ["final", "ask"] }
+  ]
+}

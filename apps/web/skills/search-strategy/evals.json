@@ -1,0 +1,49 @@
+{
+  "skill": "search-strategy",
+  "trigger": [
+    {
+      "id": "search-strategy-t1",
+      "message": "I don't know where to start with my job search. Can you help me make a plan?",
+      "load": true
+    },
+    {
+      "id": "search-strategy-t2",
+      "message": "I've applied to 40 places and heard nothing. What should I change about my approach?",
+      "load": true
+    },
+    {
+      "id": "search-strategy-t3",
+      "message": "Find me product manager roles in Seattle.",
+      "load": false
+    }
+  ],
+  "output": [
+    {
+      "id": "search-strategy-o1",
+      "message": "I want a new job but I don't know where to start. (Nothing is on record yet for me: no resume, no preferences. No tools are available in this check.)",
+      "checks": [
+        {
+          "type": "matches",
+          "pattern": "\\?",
+          "note": "asks before assuming"
+        },
+        {
+          "type": "max_words",
+          "value": 220,
+          "note": "short"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "guarantee|you will (get|land|find)|\\d+% of (people|applicants|candidates)",
+          "flags": "i",
+          "note": "promises no result and invents no statistic"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\u2014",
+          "note": "no em dashes"
+        }
+      ]
+    }
+  ]
+}

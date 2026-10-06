@@ -61,3 +61,13 @@ export function isAtsOrJobBoardDomain(domain: string | null): boolean {
   }
   return false
 }
+
+/** The name a tracking system or job board goes by ("Greenhouse"), not its domain. */
+const ATS_JOB_BOARD_NAMES = new Set([...ATS_JOB_BOARD_DOMAINS].map((d) => d.split('.')[0]).concat(['ashby', 'workday']))
+
+/** True when `name` is a tracking system or job board itself, which is never an employer. */
+export function isAtsOrJobBoardName(name: string | null): boolean {
+  if (!name) return false
+  const n = name.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/(inc|llc|ltd)$/, '')
+  return ATS_JOB_BOARD_NAMES.has(n)
+}

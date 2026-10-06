@@ -20,9 +20,11 @@ import {
   type RecentCompany,
 } from '@/components/dashboard/recent-companies-list'
 import { BudgetMeterCard, type BudgetSummary } from '@/components/dashboard/budget-meter-card'
+import { OwnerHealthCard } from '@/components/dashboard/health-card'
 import type { PipelineStage } from '@/lib/format'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { personJobs } from '@/lib/jobs/person-jobs'
+import { unassessedCountQuery } from '@/lib/scoring/role-counts'
 
 interface Stats {
   companiesCount: number
@@ -223,7 +225,7 @@ export default function DashboardPage() {
         // scraper stamps discovered_at with one `now` for the whole batch, so
         // filtering on it makes "24h" match everything.
         openRolesOnly(personJobs(supabase).select('*', { count: 'exact', head: true }).gte('posted_at', dayAgo)),
-        openRolesOnly(personJobs(supabase).select('*', { count: 'exact', head: true }).is('match_score', null)),
+        unassessedCountQuery(untypedSupabase),
         supabase.from('applications').select('id, stage').eq('user_id', user.id),
         supabase
           .from('follow_ups')
@@ -324,9 +326,9 @@ export default function DashboardPage() {
   }
 
   /**
-   * Same server batch scorer the jobs page drives (POST /api/agents/match/batch)
-   * — the dashboard's "Unscored" tile used to be a plain link to /jobs that
-   * scored nothing on its own. Safe to click repeatedly; each call reports
+   * Same server batch the jobs page drives (POST /api/agents/match/batch): the
+   * dashboard's "Not assessed yet" tile used to be a plain link to /jobs that
+   * assessed nothing on its own. Safe to click repeatedly; each call reports
    * how many are left so the count can keep draining.
    */
   async function calculateBatch() {
@@ -347,7 +349,7 @@ export default function DashboardPage() {
           body: rawText.slice(0, 500),
         })
         toast({
-          title: 'Batch scoring failed',
+          title: 'Could not check your roles',
           description: `Unexpected response from the server (HTTP ${response.status}). Try again.`,
           variant: 'destructive',
         })
@@ -355,9 +357,9 @@ export default function DashboardPage() {
       }
 
       if (!response.ok || !data || typeof data.scored !== 'number') {
-        const message = data?.error ?? `Batch scoring failed (HTTP ${response.status})`
+        const message = data?.error ?? `Could not check your roles (HTTP ${response.status})`
         console.error('[dashboard] calculateBatch failed:', message)
-        toast({ title: 'Batch scoring failed', description: message, variant: 'destructive' })
+        toast({ title: 'Could not check your roles', description: message, variant: 'destructive' })
         return
       }
 
@@ -368,19 +370,19 @@ export default function DashboardPage() {
         : null
 
       toast({
-        title: 'Batch scoring complete',
+        title: 'Roles checked',
         description:
-          `Scored ${data.scored}, ${data.failed} failed, ${data.remaining} left to score.` +
-          (skippedSummary ? ` Skipped — ${skippedSummary}.` : ''),
+          `Checked ${data.scored}, ${data.failed} could not be checked, ${data.remaining} left.` +
+          (skippedSummary ? ` Skipped: ${skippedSummary}.` : ''),
       })
 
-      // Refresh the unscored count (and everything else) so the tile reflects it.
+      // Refresh the not-assessed count (and everything else) so the tile reflects it.
       await fetchDashboardData()
     } catch (error) {
       console.error('[dashboard] calculateBatch network error:', error)
       toast({
-        title: 'Batch scoring failed',
-        description: error instanceof Error ? error.message : 'Network error while scoring jobs.',
+        title: 'Could not check your roles',
+        description: error instanceof Error ? error.message : 'Network error while checking your roles.',
         variant: 'destructive',
       })
     } finally {
@@ -445,6 +447,8 @@ export default function DashboardPage() {
                 setBudget((b) => (b ? { ...b, monthlyUsd } : b))
               }
             />
+            {/* Only the person who runs the deployment gets this; it renders nothing for anyone else. */}
+            <OwnerHealthCard />
           </div>
         </div>
         <div className="space-y-6">

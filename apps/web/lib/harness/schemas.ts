@@ -4,7 +4,6 @@
 // an agent implementation surfaces as a failed step rather than corrupt data.
 
 import { z } from 'zod'
-import { REASONING_EFFORTS } from './types'
 
 /**
  * Full agent_type enum (matches the agent_steps CHECK values) PLUS the five
@@ -92,7 +91,7 @@ export const SourcerOutput = z.object({
   notes: z.string().optional(),
 })
 
-// matcher — score jobs against the user's resume.
+// matcher, decide which roles to show: filter on stated facts, rank by want, check the chance against the resume.
 export const MatcherInput = z.object({
   jobIds: z.array(z.string()).optional(),
 })
@@ -100,7 +99,9 @@ export const MatcherOutput = z.object({
   matches: z.array(
     z.object({
       jobId: z.string(),
-      score: z.number(),
+      chance: z.enum(['strong', 'possible', 'stretch', 'cannot_assess']),
+      /** Probability (0 to 1) the person is interested. Orders roles; never shown as a number. */
+      want: z.number().min(0).max(1),
       highlights: z.array(z.string()).default([]),
       gaps: z.array(z.string()).default([]),
     })
@@ -144,11 +145,25 @@ export const CvTailorInput = z.object({
    *  attempt. */
   correctiveContext: z.string().optional(),
 })
+/** Why the cover letter is the length it is, and what code checked (see cv_tailor.ts). */
+export const CoverLetterMeta = z.object({
+  tier: z.enum(['full', 'focused', 'brief']),
+  words: z.number().int().nonnegative(),
+  /** The job lines the resume backs, each with the resume line that backs it. */
+  evidence: z.array(z.object({ job: z.string(), resume: z.string() })),
+  /** The one company fact the letter mentions, with the page it came from. */
+  companyFact: z.object({ text: z.string(), url: z.string() }).nullable(),
+  /** Whether the job had a post to read, and whether company research was on file. */
+  hasJobPost: z.boolean().optional(),
+  hasCompanyFacts: z.boolean().optional(),
+  checks: z.array(z.object({ id: z.string(), ok: z.boolean(), message: z.string() })),
+})
 export const CvTailorOutput = z.object({
   jobId: z.string(),
   resumeSummary: z.string(),
   coverLetter: z.string(),
   keywords: z.array(z.string()).default([]),
+  coverLetterMeta: CoverLetterMeta.optional(),
 })
 
 // applier — build an application_draft + handoff (never auto-POST past policy).
@@ -156,6 +171,8 @@ export const ApplierInput = z.object({
   jobId: z.string(),
   resumeSummary: z.string().optional(),
   coverLetter: z.string().optional(),
+  /** From cv_tailor: why the letter is the length it is. Stored with the draft. */
+  coverLetterMeta: CoverLetterMeta.optional(),
   answers: z.record(z.string(), z.unknown()).optional(),
   autoSubmit: z.boolean().optional(),
 })
@@ -462,20 +479,18 @@ export const PlannerInput = z.object({
 // re-declared, so the schema stays byte-identical to the one that file's own
 // AgentFn parses against.
 
-// bulk_matcher — two-tier batch scoring (lib/harness/agents/bulk_matcher.ts#runBulkMatch).
+// bulk_matcher, batch assessment (lib/harness/agents/bulk_matcher.ts#runBulkMatch).
 export const BulkMatcherInput = z.object({
   companyIds: z.array(z.string()).optional(),
   jobIds: z.array(z.string()).optional(),
   limit: z.number().int().positive().max(2000).optional(),
   model: z.string().optional(),
-  effort: z.enum(REASONING_EFFORTS).optional(),
-  targetTitles: z.array(z.string()).optional(),
 })
 const JobScoreOutcomeSchema = z.object({
   jobId: z.string(),
-  status: z.enum(['scored', 'no-verdict']),
-  tier: z.union([z.literal(1), z.literal(2), z.null()]),
-  score: z.number().nullable(),
+  /** assessed: want and chance recorded. blocked: filtered, with the stated fact it breaks. not-assessed: try again later. */
+  status: z.enum(['assessed', 'blocked', 'not-assessed']),
+  chance: z.enum(['strong', 'possible', 'stretch', 'cannot_assess']).nullable(),
   reason: z.string(),
   titleOnly: z.boolean(),
 })
@@ -505,26 +520,39 @@ export const DigestOutput = z.object({
 })
 
 // outreach — draft a cold-outreach / follow-up email (lib/harness/agents/outreach.ts#generateOutreachDraft).
+const OutreachSourceLine = z.object({ id: z.string(), text: z.string(), url: z.string().optional() })
 export const OutreachInput = z.object({
   userName: z.string(),
   userEmail: z.string(),
-  jobTitle: z.string(),
-  companyName: z.string(),
+  jobTitle: z.string().nullable(),
+  companyName: z.string().nullable(),
   contactName: z.string().nullable().optional(),
   contactTitle: z.string().nullable().optional(),
   resumeText: z.string().nullable().optional(),
   matchHighlights: z.array(z.string()).optional(),
   jobDescription: z.string().nullable().optional(),
+  /** Researched company facts (D1..) and recorded earlier contact (H1..). */
+  facts: z.array(OutreachSourceLine).optional(),
+  history: z.array(OutreachSourceLine).optional(),
+  patterns: z.array(z.string()).optional(),
   kind: z.enum(['initial', 'follow_up']).optional(),
-  /** Set by lib/graph/verify/outreach.ts's ONE bounded regeneration when the
-   *  groundedness/specificity judge failed the first draft — fed into the
-   *  prompt as corrective instruction. Absent on a first attempt. */
+  /** For a follow-up: the email that got no answer, and how long ago it went out. */
+  previousEmail: z
+    .object({ subject: z.string(), body: z.string(), sentAt: z.string().nullable().optional() })
+    .nullable()
+    .optional(),
+  daysSinceSent: z.number().nullable().optional(),
+  /** Set by lib/graph/verify/outreach.ts's ONE bounded regeneration: a numbered
+   *  list of what the checks and judges flagged. Absent on a first attempt. */
   correctiveContext: z.string().optional(),
 })
 export const OutreachOutput = z.object({
   subject: z.string(),
   body: z.string(),
   tokensUsed: z.number().int().nonnegative(),
+  /** Written by the model, or the standard template. Absent only on older callers. */
+  source: z.enum(['model', 'template']).optional(),
+  templateReason: z.enum(['missing_key', 'spend_cap', 'provider_error', 'unusable_output']).optional(),
 })
 
 // resume_optimizer — score/rewrite/rescore a resume against one job
@@ -550,6 +578,11 @@ const AtsScoreSchema = z.object({
 })
 export const ResumeOptimizerOutput = AtsScoreSchema.extend({
   suggestedRewrite: z.string(),
+  /** The merged structured Resume (lib/resume/schema.ts). Left loose here so
+   *  this contract does not import the resume module. */
+  resume: z.unknown().optional(),
+  /** Tailoring suggestions dropped because they were not in the base resume. */
+  warnings: z.array(z.string()).optional(),
   rescore: AtsScoreSchema,
   tokensUsed: z.number().int().nonnegative(),
   /** Unused by the current ACT-ONLY unit wrapper (lib/harness/registry.ts
@@ -615,11 +648,11 @@ const SourceFunnelDataSchema = z.object({
   buckets: z.array(OutcomeBucketSchema),
 })
 
-const ScoreBandBucketSchema = OutcomeBucketSchema.extend({ min: z.number(), max: z.number() })
-const MatchScoreAccuracyDataSchema = z.object({
+const ChanceBucketSchema = OutcomeBucketSchema.extend({ chance: z.enum(['strong', 'possible', 'stretch']) })
+const ChanceAccuracyDataSchema = z.object({
   totalApplications: z.number().int().nonnegative(),
-  totalScored: z.number().int().nonnegative(),
-  bands: z.array(ScoreBandBucketSchema),
+  totalAssessed: z.number().int().nonnegative(),
+  buckets: z.array(ChanceBucketSchema),
   verdict: z.enum(['validates', 'refutes', 'inconclusive']),
 })
 
@@ -658,7 +691,7 @@ const ApplicationTimingDataSchema = z.object({
 })
 
 const FilterDimensionImpactSchema = z.object({
-  dimension: z.enum(['functions', 'seniority', 'countries', 'remoteOnly', 'languages', 'excludedCompanies', 'excludedKeywords', 'minScore (not enforced)']),
+  dimension: z.enum(['functions', 'seniority', 'countries', 'remoteOnly', 'languages', 'excludedCompanies', 'excludedKeywords']),
   configured: z.boolean(),
   jobsExcludedByThisAlone: z.number().int().nonnegative(),
 })
@@ -698,7 +731,7 @@ export const StrategistOutput = z.object({
   userId: z.string(),
   totalApplications: z.number().int().nonnegative(),
   sourceFunnel: questionResultSchema(SourceFunnelDataSchema),
-  matchScoreAccuracy: questionResultSchema(MatchScoreAccuracyDataSchema),
+  chanceAccuracy: questionResultSchema(ChanceAccuracyDataSchema),
   resumeVariants: questionResultSchema(ResumeVariantDataSchema),
   outreachImpact: questionResultSchema(OutreachImpactDataSchema),
   rejectionPatterns: questionResultSchema(RejectionPatternsDataSchema),
@@ -728,6 +761,8 @@ export const AnalystOutput = z.object({
   summary: z.string(),
   talkingPoints: z.array(z.string()),
   companyInsights: z.array(z.string()),
+  /** The posting was too short to say much; the panel can say so. */
+  thin: z.boolean().optional(),
 })
 
 // application_follow_up: a follow-up suggestion (+ drafted message, when one is

@@ -45,10 +45,27 @@ describe('readStoredVerdicts', () => {
     )
 
     expect(out.get('m1')?.map((x) => [x.judge, x.verdict]).sort()).toEqual([
-      ['closed_qa', 'pass'],
-      ['factuality', 'pass'],
+      ['groundedness', 'pass'],
+      ['specificity', 'pass'],
     ])
     expect(out.get('m2')).toHaveLength(1)
+  })
+
+  it('reads the claim-level judges and the code checks under their own names', async () => {
+    const out = await readStoredVerdicts(
+      fakeAdmin([
+        v('m1', 'groundedness', 'fail', '2026-10-01T00:00:05Z', 'Not in your sources: "led a team of 8"'),
+        v('m1', 'specificity', 'pass', '2026-10-01T00:00:05Z'),
+        v('m1', 'deterministic', 'fail', '2026-10-01T00:00:05Z', '131 words. Keep it under 120.'),
+      ]),
+      'user-1',
+      [{ id: 'm1', updated_at: '2026-10-01T00:00:00Z' }]
+    )
+    expect(out.get('m1')?.map((x) => [x.judge, x.verdict]).sort()).toEqual([
+      ['deterministic', 'fail'],
+      ['groundedness', 'fail'],
+      ['specificity', 'pass'],
+    ])
   })
 
   it('drops a verdict older than the last edit: it describes text that no longer exists', async () => {
@@ -65,7 +82,7 @@ describe('readStoredVerdicts', () => {
       [{ id: 'm1', updated_at: '2026-10-01T00:00:00Z' }]
     )
     expect(out.get('m1')).toEqual([
-      { judge: 'factuality', verdict: 'unjudged', score: null, rationale: 'Quality check failed to run unexpectedly.' },
+      { judge: 'groundedness', verdict: 'unjudged', score: null, rationale: 'Quality check failed to run unexpectedly.' },
     ])
   })
 

@@ -1,19 +1,19 @@
 // GET /api/jobs/insights-summary — aggregates for the /insights charts
-// (match-score distribution + source performance). Read-only, RLS-scoped: the
+// (how roles break down by chance + source performance). Read-only, RLS-scoped: the
 // request-context client (not the admin client) does the query, so — exactly
-// like /api/jobs/provenance — "Users can view jobs for own companies" already
-// restricts every row to the caller's own jobs with no manual user_id filter.
+// like /api/jobs/provenance, the row level policy on person_roles already
+// restricts every row to the caller's own person_roles rows with no manual user_id filter.
 //
 // Two modes:
-//   (default)         -> { ok, totalJobs, scoreHistogram, bySource }
+//   (default)          -> { ok, totalJobs, chanceHistogram, bySource }
 //                         aggregated counts only — never ships one row per job
 //                         to the browser for what is ultimately five numbers
 //                         and a per-source count.
-//   ?band=<ScoreBand>  -> { ok, band, jobs, count }
-//                         the "explorable" drill-down: the actual jobs in one
-//                         score band, evidence (match_details) included, so a
-//                         histogram bar can open into the real rows behind it
-//                         instead of staying a decorative count.
+//   ?band=<ChanceBand> -> { ok, band, jobs, count }
+//                         the "explorable" drill-down: the actual roles in one
+//                         band, with their verdict columns (chance with cited
+//                         evidence), so a bar can open into the real rows behind
+//                         it instead of staying a decorative count.
 //
 // Paginates the aggregate scan in SUMMARY_PAGE-row chunks exactly like
 // /api/jobs/provenance's summary mode, for the same reason: Supabase's
@@ -23,9 +23,10 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { SCORE_BANDS, scoreBandFor, type ScoreBand } from '@/lib/jobs/score-bands'
+import { CHANCE_BANDS, chanceBandFor, type ChanceBand } from '@/lib/jobs/chance-bands'
+import { FIT_COLUMNS, type FitRow } from '@/lib/scoring/read'
+import { OnJobs } from '@/lib/scoring/person-roles-query'
 import { openRolesOnly } from '@/lib/jobs/freshness'
-import { personJobs } from '@/lib/jobs/person-jobs'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,11 +37,34 @@ const SUMMARY_MAX_ROWS = 200_000
 const DEFAULT_DRILLDOWN_LIMIT = 25
 const MAX_DRILLDOWN_LIMIT = 100
 
-const VALID_BANDS = new Set<string>(SCORE_BANDS.map((b) => b.key))
+const VALID_BANDS = new Set<string>(CHANCE_BANDS.map((b) => b.key))
 
 interface SourceCounts {
   total: number
   scored: number
+}
+
+interface CompanyEmbed {
+  name: string | null
+  domain: string | null
+}
+
+interface DrilldownJob {
+  id: string
+  title: string
+  url: string | null
+  posted_at: string | null
+  companies: CompanyEmbed | CompanyEmbed[] | null
+  /** The employer's directory row: names a role this person holds without a company of their own. */
+  employer?: CompanyEmbed | CompanyEmbed[] | null
+}
+
+/** Supabase returns the joined row as an object OR a one-item array depending on
+ *  how it infers the relationship direction — normalize once here so the
+ *  client-side type is a plain object, not a union it has to defend against. */
+function embeddedCompany(value: CompanyEmbed | CompanyEmbed[] | null): CompanyEmbed | null {
+  if (!value) return null
+  return Array.isArray(value) ? (value[0] ?? null) : value
 }
 
 export async function GET(request: NextRequest) {
@@ -63,52 +87,60 @@ export async function GET(request: NextRequest) {
       Math.max(1, Number(searchParams.get('limit')) || DEFAULT_DRILLDOWN_LIMIT)
     )
 
-    let query = openRolesOnly(
-      personJobs(supabase)
-        .select(
-          'id, title, url, match_score, match_details, posted_at, viewer_company_name, viewer_company_domain',
-          { count: 'exact' }
-        )
+    // Starts at the person's own rows (their verdict is on them) and embeds the posting.
+    // A role they hid stays out, as on the Jobs list.
+    const on = new OnJobs(
+      supabase
+        .from('person_roles')
+        .select(FIT_COLUMNS + ', jobs!inner(id, title, url, posted_at, companies(name, domain), employer:company_directory(name, domain))', { count: 'exact' })
+        .is('hidden_reason', null)
     )
-      .order('match_score', { ascending: false, nullsFirst: false })
-      .limit(limit)
+    openRolesOnly(on)
+    let query = on.query.order('want_p', { ascending: false, nullsFirst: false }).limit(limit)
 
-    const meta = SCORE_BANDS.find((b) => b.key === band)!
-    query = band === 'unscored' ? query.is('match_score', null) : query.gte('match_score', meta.min!).lte('match_score', meta.max!)
+    // A role a stated fact filtered has no chance; a role not yet assessed has neither.
+    if (band === 'filtered') query = query.neq('blocked_reasons', '[]')
+    else if (band === 'unassessed') query = query.is('assessed_at', null)
+    else query = query.eq('chance', band).eq('blocked_reasons', '[]')
 
     const { data, error, count } = await query
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    const rows = (data ?? []) as unknown as {
-      id: string
-      title: string
-      url: string | null
-      match_score: number | null
-      match_details: unknown
-      posted_at: string | null
-      viewer_company_name: string | null
-      viewer_company_domain: string | null
-    }[]
+    const rows = (data ?? []) as unknown as (FitRow & {
+      jobs: DrilldownJob | DrilldownJob[] | null
+    })[]
 
-    const jobs = rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      url: row.url,
-      matchScore: row.match_score,
-      matchDetails: row.match_details,
-      postedAt: row.posted_at,
-      company: { name: row.viewer_company_name, domain: row.viewer_company_domain },
-    }))
+    const jobs = rows.flatMap((row) => {
+      const job = Array.isArray(row.jobs) ? row.jobs[0] : row.jobs
+      if (!job) return []
+      return [
+        {
+          id: job.id,
+          title: job.title,
+          url: job.url,
+          postedAt: job.posted_at,
+          company: embeddedCompany(job.companies) ?? embeddedCompany(job.employer ?? null),
+          // The verdict columns, which the client reads with parseFit.
+          assessed_at: row.assessed_at,
+          blocked_reasons: row.blocked_reasons,
+          want_p: row.want_p,
+          want_reason: row.want_reason,
+          want_detail: row.want_detail,
+          chance: row.chance,
+          chance_detail: row.chance_detail,
+        },
+      ]
+    })
 
     return NextResponse.json({ ok: true, band, jobs, count: count ?? jobs.length })
   }
 
   // ---- aggregate summary -----------------------------------------------
-  const scoreHistogram: Record<ScoreBand, number> = {
-    unscored: 0,
-    weak: 0,
-    fair: 0,
-    good: 0,
+  const chanceHistogram: Record<ChanceBand, number> = {
+    unassessed: 0,
+    filtered: 0,
+    stretch: 0,
+    possible: 0,
     strong: 0,
   }
   const bySource = new Map<string, SourceCounts>()
@@ -116,24 +148,25 @@ export async function GET(request: NextRequest) {
 
   let from = 0
   for (; from < SUMMARY_MAX_ROWS; from += SUMMARY_PAGE) {
-    const { data, error } = await openRolesOnly(personJobs(supabase).select('source, match_score'))
-      .order('id', { ascending: true })
-      .range(from, from + SUMMARY_PAGE - 1)
+    const on = new OnJobs(supabase.from('person_roles').select('chance, blocked_reasons, assessed_at, jobs!inner(source)').is('hidden_reason', null))
+    openRolesOnly(on)
+    const { data, error } = await on.query.order('job_id', { ascending: true }).range(from, from + SUMMARY_PAGE - 1)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     // The generated Database type (packages/shared/src/types/database.ts) predates
-    // jobs.source — same stale-schema situation /api/jobs/provenance's module doc
-    // explains — so supabase-js's typed generic can't confirm the select string
+    // jobs.source, the same stale-schema situation /api/jobs/provenance's module doc
+    // explains, so supabase-js's typed generic can't confirm the select string
     // client-side; cast through `unknown` like that route does.
-    const rows = (data ?? []) as unknown as { source: string | null; match_score: number | null }[]
+    const rows = (data ?? []) as unknown as { chance: string | null; blocked_reasons: unknown; assessed_at: string | null; jobs: { source: string | null } | { source: string | null }[] | null }[]
     for (const row of rows) {
       totalJobs += 1
-      scoreHistogram[scoreBandFor(row.match_score)] += 1
+      chanceHistogram[chanceBandFor(row.chance, row.blocked_reasons)] += 1
 
-      const key = row.source?.trim() || '(untagged)'
+      const job = Array.isArray(row.jobs) ? row.jobs[0] : row.jobs
+      const key = job?.source?.trim() || '(untagged)'
       const counts = bySource.get(key) ?? { total: 0, scored: 0 }
       counts.total += 1
-      if (row.match_score != null) counts.scored += 1
+      if (row.assessed_at != null) counts.scored += 1
       bySource.set(key, counts)
     }
     if (rows.length < SUMMARY_PAGE) break
@@ -142,7 +175,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     ok: true,
     totalJobs,
-    scoreHistogram,
+    chanceHistogram,
     bySource: Object.fromEntries(bySource),
   })
 }

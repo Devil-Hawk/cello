@@ -1,0 +1,29 @@
+[SYNTHETIC RESUME - fictional person, written for an evaluation set. Not a real candidate.]
+
+Aiden Brooks
+Austin, TX | aiden.brooks@example.com | github.com/example-abrooks
+
+SUMMARY
+Recent computer science graduate with two internships and a full-stack capstone. Strongest in React and Node.js; looking for a first full-time software engineering role.
+
+EXPERIENCE
+Software Engineering Intern - Lumen Retail Tech, Austin, TX | Summer 2025
+- Built a React + TypeScript admin dashboard for inventory managers; shipped 3 features to production.
+- Wrote Node.js (Express) endpoints and PostgreSQL queries; added Jest tests raising coverage from 55% to 78%.
+
+Software Engineering Intern - Cobalt Health Startup, Remote | Summer 2024
+- Implemented patient-intake forms in React with form validation; fixed 25 UI bugs.
+- Set up a GitHub Actions CI pipeline.
+
+Teaching Assistant, Data Structures - UT Austin | 2023 - 2025
+- Held weekly office hours for 120 students; graded projects in Java.
+
+PROJECTS
+- StudyBuddy (capstone): MERN-stack app for group study scheduling; 400 student users; Socket.IO for live updates; deployed on Render.
+- Open-source: 4 merged PRs to a React component library (docs and accessibility fixes).
+
+SKILLS
+JavaScript, TypeScript, React, Node.js, Express, HTML/CSS, PostgreSQL, MongoDB, Git, Jest, GitHub Actions, REST, Java, Python (coursework)
+
+EDUCATION
+B.S. Computer Science, University of Texas at Austin, May 2026 (GPA 3.6)

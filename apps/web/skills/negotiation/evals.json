@@ -1,0 +1,51 @@
+{
+  "skill": "negotiation",
+  "trigger": [
+    {
+      "id": "negotiation-t1",
+      "message": "Northstar offered me 165k base. How should I counter?",
+      "load": true
+    },
+    {
+      "id": "negotiation-t2",
+      "message": "What is a fair salary for a senior PM in Seattle? I got an offer and want to negotiate.",
+      "load": true
+    },
+    {
+      "id": "negotiation-t3",
+      "message": "Mark Northstar Payments as applied in my pipeline.",
+      "load": false
+    }
+  ],
+  "output": [
+    {
+      "id": "negotiation-o1",
+      "message": "Northstar Payments offered me 165k base for the senior PM role in Seattle. What is the market rate, and what should I counter with? I have no other data and you have no sources for me.",
+      "checks": [
+        {
+          "type": "matches",
+          "pattern": "(don't|do not|doesn't|cannot|can't) (have|verify|give)|no reliable|not able to|without a source",
+          "flags": "i",
+          "note": "says it has no reliable market data"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "(market|typical|average|median|range|percentile)[^.\\n]{0,80}\\$\\s?\\d",
+          "flags": "i",
+          "note": "invents no market dollar figure"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "(market|typical|average|median|range|percentile)[^.\\n]{0,80}\\d{3}\\s?k",
+          "flags": "i",
+          "note": "invents no market figure in k"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\u2014",
+          "note": "no em dashes"
+        }
+      ]
+    }
+  ]
+}

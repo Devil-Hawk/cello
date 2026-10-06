@@ -14,6 +14,7 @@
 import type { LlmRunner } from '@/lib/harness/types'
 import { parseJsonLoose } from '@/lib/harness/llm'
 import { composeSystemPrompt, loadModeDoc, promptRef } from '@/lib/harness/prompts'
+import { frameJobText } from '@/lib/security/job-text'
 import sponsorData from './h1b-sponsors.json'
 import type { VisaSignal } from './store'
 
@@ -113,6 +114,27 @@ export function sponsorshipSignalForCompanies(names: string[]): SponsorshipLooku
   return names.map(sponsorshipSignalForCompany)
 }
 
+function normalizeSpace(s: string): string {
+  return s.replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+/**
+ * A model's visa answer, held to the page: a `likely` or `unlikely` is kept only
+ * when its evidence is a passage that really is on the careers page (whitespace
+ * and quote style aside). Anything else is `unknown`, because a stance with no
+ * quote to point at is a guess. Pure.
+ */
+export function verifyVisaAnswer(
+  raw: { signal?: unknown; evidence?: unknown } | null | undefined,
+  careersText: string
+): { signal: VisaSignal; evidence?: string } {
+  const s = raw?.signal
+  if (s !== 'likely' && s !== 'unlikely') return { signal: 'unknown' }
+  const evidence = typeof raw?.evidence === 'string' ? raw.evidence.trim() : ''
+  if (evidence.length < 12 || !normalizeSpace(careersText).includes(normalizeSpace(evidence))) return { signal: 'unknown' }
+  return { signal: s, evidence }
+}
+
 /**
  * Parse a careers-page text blob for an explicit sponsorship statement.
  * Returns null when no LLM runner is available (caller falls back to curated).
@@ -126,6 +148,7 @@ export async function parseCareersSponsorship(
   if (!run || !text) return null
   void signal
   try {
+    const page = text.slice(0, 6000)
     const res = await run({
       // _shared.md + prompts/visa.md (the house-style mode document — see
       // docs/PROMPT-GENERATOR.md; `_voice.md` is deliberately excluded, since
@@ -134,18 +157,14 @@ export async function parseCareersSponsorship(
       // prefix to mark.
       system: composeSystemPrompt({ mode: loadModeDoc('visa'), includeVoice: false }),
       promptRef: promptRef('visa'),
-      prompt: `CAREERS PAGE TEXT:\n${text.slice(0, 6000)}`,
+      // Company-written text: fenced as data, and the page the answer is checked against.
+      prompt: frameJobText(page, { label: 'CAREERS PAGE' }),
       json: true,
       maxTokens: 300,
       temperature: 0,
       cachePrefix: true,
     })
-    const raw = parseJsonLoose<{ signal?: string; evidence?: string }>(res.content)
-    const s = raw?.signal
-    if (s === 'likely' || s === 'unlikely' || s === 'unknown') {
-      return { signal: s, evidence: (raw.evidence || '').trim() || undefined }
-    }
-    return { signal: 'unknown' }
+    return verifyVisaAnswer(parseJsonLoose<{ signal?: string; evidence?: string }>(res.content), page)
   } catch {
     return null
   }

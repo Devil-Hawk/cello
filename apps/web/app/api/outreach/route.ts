@@ -38,7 +38,32 @@ export async function GET(request: NextRequest) {
       user.id,
       rows.filter((m) => m.status === 'pending_review' || m.status === 'approved')
     )
-    const messages = rows.map((m) => ({ ...m, verdicts: verdicts.get(m.id) ?? [] }))
+    // What the card needs to run the same checks the draft was held to as the
+    // user edits: the sign-off name, the company, whether there is real earlier
+    // contact, and for a follow-up the email it must be shorter than.
+    const pendingRows = rows.filter((m) => m.status === 'pending_review' || m.status === 'approved')
+    const ids = (pick: (m: (typeof rows)[number]) => string | null) => [...new Set(pendingRows.map(pick).filter((v): v is string => !!v))]
+    const companyIds = ids((m) => m.company_id)
+    const contactIds = ids((m) => m.contact_id)
+    const parentIds = ids((m) => m.parent_id)
+    const [{ data: profile }, { data: companies }, { data: touched }, { data: parents }] = await Promise.all([
+      admin.from('profiles').select('full_name').eq('id', user.id).maybeSingle(),
+      companyIds.length ? admin.from('companies').select('id, name').eq('user_id', user.id).in('id', companyIds.slice(0, 200)) : { data: [] },
+      contactIds.length ? admin.from('interactions').select('contact_id').eq('user_id', user.id).in('contact_id', contactIds.slice(0, 200)) : { data: [] },
+      parentIds.length ? admin.from('outreach_messages').select('id, body').eq('user_id', user.id).in('id', parentIds.slice(0, 200)) : { data: [] },
+    ])
+    const senderName = (profile as { full_name?: string | null } | null)?.full_name?.trim() || null
+    const companyName = new Map(((companies ?? []) as { id: string; name: string }[]).map((c) => [c.id, c.name]))
+    const withHistory = new Set(((touched ?? []) as { contact_id: string }[]).map((r) => r.contact_id))
+    const parentBody = new Map(((parents ?? []) as { id: string; body: string }[]).map((p) => [p.id, p.body]))
+    const messages = rows.map((m) => ({
+      ...m,
+      verdicts: verdicts.get(m.id) ?? [],
+      sender_name: senderName,
+      company_name: m.company_id ? (companyName.get(m.company_id) ?? null) : null,
+      has_history: m.contact_id ? withHistory.has(m.contact_id) : false,
+      parent_body: m.parent_id ? (parentBody.get(m.parent_id) ?? null) : null,
+    }))
     return NextResponse.json({ ok: true, messages })
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed to list' }, { status: 500 })

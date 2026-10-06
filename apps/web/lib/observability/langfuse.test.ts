@@ -21,7 +21,9 @@ import {
   langfuseConfigured,
   langfuseDemoSampleRate,
   langfuseSampleRate,
+  observationIdFor,
   safeName,
+  sendScores,
   scrubText,
   selectRows,
   toScore,
@@ -835,5 +837,63 @@ describe('judge verdicts as scores', () => {
     await run(buffer, tree())
     await run(buffer, [row({ name: 'again', kind: 'graph', span_id: 'again-root' })])
     expect(created).toHaveLength(1)
+  })
+})
+
+describe('observation ids and outcome scores', () => {
+  const sink = () => {
+    const created: Record<string, unknown>[] = []
+    const flush = vi.fn(async () => undefined)
+    return { created, flush, scores: { score: { create: (b: Record<string, unknown>) => void created.push(b) }, flush } as never }
+  }
+
+  it('observationIdFor is the first 16 hex of the span uuid, and stable for other ids', () => {
+    expect(observationIdFor('0f7b5d5a-1d75-4c5b-9d31-e984c3b9e5b6')).toBe('0f7b5d5a1d754c5b')
+    expect(observationIdFor('span-1')).toMatch(/^[0-9a-f]{16}$/)
+    expect(observationIdFor('span-1')).toBe(observationIdFor('span-1'))
+    expect(observationIdFor('span-1')).not.toBe(observationIdFor('span-2'))
+  })
+
+  it('every exported span id equals observationIdFor(span_id), parents included', async () => {
+    const uuids = ['11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '22222222-bbbb-4bbb-8bbb-bbbbbbbbbbbb', '33333333-cccc-4ccc-8ccc-cccccccccccc']
+    const root = row({ name: 'copilot', kind: 'graph', span_id: uuids[0] })
+    const mid = row({ name: 'run-agent-step', kind: 'node', span_id: uuids[1], parent_span_id: uuids[0], lf: { name: 'run-job-matcher', type: 'agent' } })
+    const gen = row({ name: 'llm', kind: 'llm', span_id: uuids[2], parent_span_id: uuids[1], lf: { name: 'score-job-match', type: 'generation', model: 'm', usage: { input: 1, output: 1, total: 2 } } })
+    await run(new SpanBuffer('user-1', null, undefined, { isDemo: false }), [root, mid, gen])
+    expect(byName('copilot').spanContext().spanId).toBe('11111111aaaa4aaa')
+    expect(byName('run-job-matcher').spanContext().spanId).toBe('22222222bbbb4bbb')
+    expect(byName('score-job-match').spanContext().spanId).toBe('33333333cccc4ccc')
+    expect(byName('score-job-match').parentSpanContext?.spanId).toBe('22222222bbbb4bbb')
+  })
+
+  it('sendScores sends the given ids, name, value and data type, then flushes', async () => {
+    const { created, flush, scores } = sink()
+    __setLangfuseForTest({ exporter, scores })
+    const ok = await sendScores([
+      { id: 'a'.repeat(32), traceId: 'b'.repeat(32), observationId: 'c'.repeat(16), name: 'draft_approved', value: 1, dataType: 'BOOLEAN' },
+      { id: 'd'.repeat(32), traceId: 'e'.repeat(32), name: 'draft_edited', value: 0.25, dataType: 'NUMERIC', comment: 'outreach_messages' },
+    ])
+    expect(ok).toBe(true)
+    expect(created[0]).toMatchObject({ id: 'a'.repeat(32), traceId: 'b'.repeat(32), observationId: 'c'.repeat(16), name: 'draft_approved', value: 1, dataType: 'BOOLEAN', environment: 'development' })
+    expect(created[1]).toMatchObject({ name: 'draft_edited', value: 0.25, dataType: 'NUMERIC', comment: 'outreach_messages' })
+    expect(created[1].observationId).toBeUndefined()
+    expect(flush).toHaveBeenCalledTimes(1)
+  })
+
+  it('sendScores returns false and sends nothing when Langfuse is not configured', async () => {
+    vi.unstubAllEnvs()
+    delete process.env.LANGFUSE_PUBLIC_KEY
+    const { created, scores } = sink()
+    __setLangfuseForTest({ exporter, scores })
+    expect(await sendScores([{ id: 'a'.repeat(32), traceId: 'b'.repeat(32), name: 'draft_approved', value: 1, dataType: 'BOOLEAN' }])).toBe(false)
+    expect(created).toEqual([])
+  })
+
+  it('sendScores returns false when the flush fails', async () => {
+    const created: Record<string, unknown>[] = []
+    const scores = { score: { create: (b: Record<string, unknown>) => void created.push(b) }, flush: vi.fn(async () => { throw new Error('boom') }) } as never
+    __setLangfuseForTest({ exporter, scores })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(await sendScores([{ id: 'a'.repeat(32), traceId: 'b'.repeat(32), name: 'job_applied', value: 1, dataType: 'BOOLEAN' }])).toBe(false)
   })
 })

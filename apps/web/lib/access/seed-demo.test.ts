@@ -27,9 +27,11 @@ import {
   seedDemoWorkspace,
   type DemoBatch,
 } from './seed-demo'
-import { DEMO_COMPANIES, DEMO_CONTACTS, DEMO_JOBS, DEMO_APPLICATIONS } from './fixtures'
-import { scoreBandFor, type ScoreBand } from '@/lib/jobs/score-bands'
-import { markdownToPlainText } from '@/lib/resume/markdown'
+import { DEMO_COMPANIES, DEMO_CONTACTS, DEMO_JOBS, DEMO_APPLICATIONS, DEMO_RESUME } from './fixtures'
+import { resumeLines } from '@/lib/scoring/chance'
+import { quoteIsIn } from '@/lib/scoring/posting-requirements'
+import { resumeToPlainText } from '@/lib/resume/render'
+import { ResumeSchema } from '@/lib/resume/schema'
 
 const DEMO_USER = '11111111-2222-4333-8444-555555555555'
 const OTHER_USER = '99999999-8888-4777-8666-555555555555'
@@ -137,7 +139,8 @@ function fakeAdmin(profile: Partial<FakeProfile> = {}): Fake {
           const target = store(table)
           const idKey = opts?.onConflict ?? 'id'
           for (const row of rows) {
-            const id = row[idKey] as string
+            // A composite conflict key (user_id,job_id) is the values of its columns together.
+            const id = idKey.split(',').map((k) => String(row[k])).join('|')
             if (target.has(id) && opts?.ignoreDuplicates) continue
             target.set(id, row)
           }
@@ -195,7 +198,7 @@ describe('buildDemoWorkspace — shape', () => {
     expect(workspace.batches.map((b) => b.table)).toEqual([
       'companies',
       'jobs',
-      'eval_verdicts',
+      'person_roles',
       'applications',
       'activities',
       'contacts',
@@ -236,54 +239,74 @@ describe('buildDemoWorkspace — shape', () => {
     ])
   })
 
-  it('spreads match_score across every band, including some unscored', () => {
-    const counts: Record<ScoreBand, number> = { strong: 0, good: 0, fair: 0, weak: 0, unscored: 0 }
-    for (const row of batch(workspace.batches, 'jobs').rows) {
-      counts[scoreBandFor(row.match_score as number | null)] += 1
+  it('spans every chance, including some roles not assessed yet', () => {
+    const counts = { strong: 0, possible: 0, stretch: 0, unassessed: 0 }
+    for (const row of batch(workspace.batches, 'person_roles').rows) {
+      const c = row.chance as 'strong' | 'possible' | 'stretch' | null
+      counts[c ?? 'unassessed'] += 1
     }
-    // A few 80+, many mid, some low — plus a handful genuinely unscored so the
-    // dashboard's "Unscored" tile and the histogram's unscored bar are real.
-    expect(counts).toEqual({ strong: 5, good: 10, fair: 12, weak: 10, unscored: 3 })
+    // Every state a role can be in, plus a handful genuinely unassessed so the
+    // dashboard's "Not assessed yet" tile is a real product surface.
+    expect(counts.unassessed).toBe(3)
+    expect(counts.strong).toBeGreaterThan(0)
+    expect(counts.possible).toBeGreaterThan(0)
+    expect(counts.stretch).toBeGreaterThan(0)
+    expect(counts.strong + counts.possible + counts.stretch + counts.unassessed).toBe(40)
   })
 
-  it('populates match_details in the shape the UI reads, and only for scored rows', () => {
+  it('writes the assessment in the shape lib/scoring reads, with every cited resume line really on the resume', () => {
+    const resume = resumeToPlainText(DEMO_RESUME)
+    const lines = resumeLines(resume)
+    // The posting carries no verdict: it is shared, and what Cello concluded is the person's own.
     for (const row of batch(workspace.batches, 'jobs').rows) {
-      const details = row.match_details as Record<string, unknown> | null
-      if (row.match_score == null) {
-        expect(details).toBeNull()
+      for (const column of ['match_score', 'match_details', 'chance', 'chance_detail', 'want_p', 'want_reason', 'want_detail', 'blocked_reasons', 'fit_assessed_at', 'assessed_at']) {
+        expect(row).not.toHaveProperty(column)
+      }
+    }
+    for (const row of batch(workspace.batches, 'person_roles').rows) {
+      expect(row.user_id).toBe(DEMO_USER)
+      if (row.chance == null) {
+        expect(row.want_p).toBeNull()
+        expect(row.assessed_at).toBeNull()
+        expect(row.chance_detail).toBeNull()
         continue
       }
-      expect(details).toBeTruthy()
-      expect(details!.overallScore).toBe(row.match_score)
-      expect(details!.score).toBe(row.match_score)
-      expect(Array.isArray(details!.highlights)).toBe(true)
-      expect((details!.highlights as string[]).length).toBeGreaterThan(0)
-      expect(Array.isArray(details!.gaps)).toBe(true)
-      expect(typeof details!.summary).toBe('string')
-      expect(details!.skills).toMatchObject({ matched: expect.any(Array), missing: expect.any(Array) })
-      for (const key of ['skillsMatch', 'experienceMatch', 'locationMatch'] as const) {
-        expect(details![key]).toBeGreaterThanOrEqual(0)
-        expect(details![key]).toBeLessThanOrEqual(100)
+      expect(row.want_p as number).toBeGreaterThanOrEqual(0)
+      expect(row.want_p as number).toBeLessThanOrEqual(1)
+      expect(typeof row.want_reason).toBe('string')
+      expect((row.want_reason as string).length).toBeLessThanOrEqual(300)
+      expect(row.blocked_reasons).toEqual([])
+      const detail = row.chance_detail as { checks: { requirement: string; mustHave: boolean; status: string; evidence: { line: number; quote: string } | null }[]; gaps: string[] }
+      expect(detail.checks.length).toBeGreaterThan(0)
+      for (const c of detail.checks) {
+        if (c.status === 'met') {
+          const line = lines.find((l) => l.n === c.evidence!.line)
+          expect(line, `${c.requirement} cites a line that exists`).toBeTruthy()
+          expect(quoteIsIn(c.evidence!.quote, line!.text)).toBe(true)
+        } else {
+          expect(c.evidence).toBeNull()
+        }
       }
-      // Honest provenance: nothing here came out of the matcher.
-      expect(details!.source).toBe('demo/seed')
+      // The label follows from the gaps, the way the product's own rule says.
+      const unmet = detail.checks.filter((c) => c.mustHave && c.status !== 'met').length
+      if (row.chance === 'strong') expect(unmet).toBe(0)
+      if (row.chance === 'stretch') expect(unmet).toBeGreaterThanOrEqual(1)
+      // Honest provenance: nothing here came out of a model.
+      expect((row.want_detail as { source: string }).source).toBe('demo/seed')
     }
   })
 
-  it('seeds a matching eval_verdicts pass row for every scored job — Step 4 item 3 allowlist bait (lib/graph/autopilot.ts#loadCandidateJobs)', () => {
-    const jobs = batch(workspace.batches, 'jobs').rows
-    const scoredJobIds = new Set(jobs.filter((r) => r.match_score != null).map((r) => r.id))
-    const verdicts = batch(workspace.batches, 'eval_verdicts').rows
+  it('seeds no shortlist while the daily picks are off, and no verdict rows', () => {
+    expect(workspace.batches.map((b) => b.table)).not.toContain('shortlist_items')
+    // Nothing here was produced by a model, so there is nothing to grade.
+    expect(workspace.batches.map((b) => b.table)).not.toContain('eval_verdicts')
+  })
 
-    expect(verdicts).toHaveLength(scoredJobIds.size)
-    const verdictSubjectIds = new Set(verdicts.map((r) => r.subject_id))
-    expect(verdictSubjectIds).toEqual(scoredJobIds)
-    for (const row of verdicts) {
-      expect(row.subject_kind).toBe('match_score')
-      expect(row.judge).toBe('deterministic')
-      expect(row.verdict).toBe('pass')
-      expect(row.user_id).toBe(DEMO_USER)
-    }
+  it('gives the demo person one row for every role, keyed by person and role', () => {
+    const jobs = batch(workspace.batches, 'jobs').rows
+    const mine = batch(workspace.batches, 'person_roles')
+    expect(mine.conflictColumn).toBe('user_id,job_id')
+    expect(mine.rows.map((r) => r.job_id).sort()).toEqual(jobs.map((r) => r.id).sort())
   })
 
   it('spreads posted_at over the last three weeks, with a few flagged new', () => {
@@ -316,7 +339,7 @@ describe('buildDemoWorkspace — shape', () => {
       expect(applicationIds.has(row.application_id)).toBe(true)
     }
     for (const row of batch(workspace.batches, 'contacts').rows) expect(companyIds.has(row.company_id)).toBe(true)
-    for (const row of batch(workspace.batches, 'eval_verdicts').rows) expect(jobIds.has(row.subject_id)).toBe(true)
+    for (const row of batch(workspace.batches, 'person_roles').rows) expect(jobIds.has(row.job_id)).toBe(true)
     for (const row of batch(workspace.batches, 'trace_spans').rows) expect(runIds.has(row.run_id)).toBe(true)
     for (const row of batch(workspace.batches, 'application_drafts').rows) {
       expect(jobIds.has(row.job_id)).toBe(true)
@@ -345,16 +368,16 @@ describe('buildDemoWorkspace — shape', () => {
     }
   })
 
-  it('stores the resume as authored Markdown AND the derived plain text together', () => {
+  it('stores a schema-valid structured resume and derives the text from it', () => {
     const resume = batch(workspace.batches, 'resume_documents').rows[0]!
-    const contentJson = resume.content_json as { markdown?: string; templateId?: string }
+    const contentJson = resume.content_json as { resume?: unknown; markdown?: string; templateId?: string }
+    expect(ResumeSchema.safeParse(contentJson.resume).success).toBe(true)
     expect(typeof contentJson.markdown).toBe('string')
-    expect(contentJson.markdown!.length).toBeGreaterThan(500)
     expect(typeof contentJson.templateId).toBe('string')
-    // lib/resume/types.ts: `content` is DERIVED from `markdown`, never authored
-    // separately. If these ever diverge the exported PDF and the text an ATS
-    // reads describe different resumes.
-    expect(resume.content).toBe(markdownToPlainText(contentJson.markdown!))
+    // lib/resume/types.ts: `content` is DERIVED from the structure, never
+    // authored separately. If these ever diverge the exported PDF and the text
+    // an ATS reads describe different resumes.
+    expect(resume.content).toBe(resumeToPlainText(ResumeSchema.parse(contentJson.resume)))
     expect(resume.version).toBe(1)
     expect(resume.job_id).toBeNull()
     expect(resume.source).toBe('base')
@@ -375,7 +398,8 @@ describe('buildDemoWorkspace — shape', () => {
 describe('buildDemoWorkspace — determinism', () => {
   // Every batch's row identity lives under `id`, except trace_spans (its own
   // vocabulary is `span_id` — see DemoBatch.conflictColumn's doc).
-  const rowKey = (b: DemoBatch, row: Record<string, unknown>): string => row[b.conflictColumn ?? 'id'] as string
+  // The shortlist's key is a composite; the role it points at is the part that varies per demo user.
+  const rowKey = (b: DemoBatch, row: Record<string, unknown>): string => (b.conflictColumn?.includes(',') ? (row.job_id as string) : (row[b.conflictColumn ?? 'id'] as string))
 
   it('produces byte-identical output for the same user and clock', () => {
     const a = buildDemoWorkspace(DEMO_USER, NOW)

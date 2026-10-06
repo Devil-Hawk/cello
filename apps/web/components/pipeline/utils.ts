@@ -6,6 +6,7 @@
 
 import { GHOST_THRESHOLDS } from '@cello/shared'
 import { FOLLOW_UP_TIMING } from '@/lib/pipeline/follow-up'
+import type { FitRow } from '@/lib/scoring/read'
 
 export interface ApplicationWithJob {
   id: string
@@ -21,7 +22,8 @@ export interface ApplicationWithJob {
     id: string
     title: string
     url: string
-    match_score: number | null
+    /** The person's own verdict on the role (person_roles): chance is strong | possible | stretch | cannot_assess, or null before the role is assessed. */
+    person_roles?: FitRow | FitRow[] | null
     companies: {
       name: string
       domain: string | null

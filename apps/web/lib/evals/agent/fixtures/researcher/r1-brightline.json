@@ -1,0 +1,28 @@
+{
+  "id": "r1-brightline",
+  "subject": "Brightline Robotics",
+  "kind": "company",
+  "thin": false,
+  "pages": [
+    {
+      "url": "https://brightline-robotics.example/about",
+      "title": "About Brightline Robotics",
+      "text": "Brightline Robotics builds warehouse picking robots for mid-size distributors. The company was founded in 2021 in Pittsburgh and has about 140 employees. Its robots are installed in 38 warehouses across the United States. Our mission is to make small warehouses as efficient as the largest ones."
+    },
+    {
+      "url": "https://news.example/brightline-series-b",
+      "title": "Brightline Robotics raises $48M Series B",
+      "text": "Pittsburgh, October 2025. Brightline Robotics announced a $48 million Series B led by Cedar Peak Ventures. The company said it will open a second plant in Reno, Nevada and hire about 60 people in 2026, mostly in manufacturing and robotics software. Chief executive Priya Anand said revenue doubled over the past year."
+    },
+    {
+      "url": "https://reviews.example/brightline-robotics",
+      "title": "Brightline Robotics reviews",
+      "text": "Brightline Robotics has a 3.9 out of 5 rating from 212 employee reviews. Reviewers praise fast decisions and strong engineers. Common complaints are long hours before product launches and unclear promotion paths."
+    }
+  ],
+  "distractor": {
+    "url": "https://directory.example/brightline-2",
+    "title": "Brightline Systems (different company)",
+    "text": "Brightline Systems provides payroll software in Toronto. Not related to robotics."
+  }
+}

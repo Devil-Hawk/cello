@@ -23,6 +23,7 @@ import { userCompanyIds, ownedJobsQuery } from '../harness/agents/matcher'
 import { chunkedIn } from '../supabase/chunked-in'
 import { QUALITY_REJECT_THRESHOLD } from '../jobs/classify'
 import type { Targeting } from '../targeting'
+import { fitRowOf } from '../scoring/read'
 
 export interface ApplicationRow {
   id: string
@@ -37,7 +38,8 @@ export interface ApplicationRow {
   /** jobs.source — the ingest channel (greenhouse, lever, arbeitnow, ...). This IS the job board / ATS. */
   jobSource: string | null
   jobPostedAt: string | null
-  matchScore: number | null
+  /** The person's own person_roles.chance: strong | possible | stretch | cannot_assess, or null before the role was assessed. */
+  chance: string | null
   jobFunction: string | null
   seniority: string | null
 }
@@ -76,8 +78,6 @@ export interface JobScopeCounts {
   excludedByDimension: Record<string, number>
   /** How many jobs a configured excludedKeywords list WOULD additionally exclude (title+description ILIKE). Null when excludedKeywords is empty (never evaluated, never a fabricated zero). */
   excludedByKeywords: number | null
-  /** How many jobs a configured targeting.minScore WOULD exclude, computed for transparency even though nothing in the product enforces targeting.minScore today (see lib/targeting.ts / lib/harness/agents/matcher.ts — only preferences.autopilot.minScore is enforced, a different field). Null when minScore is unset. */
-  excludedByMinScoreHypothetical: number | null
 }
 
 export interface StrategyDataSource {
@@ -104,10 +104,11 @@ interface RawJob {
   company_id: string
   source: string | null
   posted_at: string | null
-  match_score: number | null
   job_function: string | null
   seniority: string | null
   viewer_company_name?: string | null
+  /** This person's own row for the role (the chance is theirs, not the posting's). */
+  person_roles?: { chance: string | null }[] | { chance: string | null } | null
 }
 
 function rawJobCompanyName(job: RawJob): string {
@@ -145,11 +146,14 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
       const jobs = await chunkedIn(jobIds, async (chunk) => {
         const { data, error } = await admin
           .from('person_jobs')
-          .select('id, company_id:viewer_company_id, source, posted_at, match_score, job_function, seniority, viewer_company_name')
+          .select('id, company_id:viewer_company_id, source, posted_at, job_function, seniority, viewer_company_name')
           .eq('viewer_id', userId)
           .in('id', chunk)
         if (error) console.error('[strategy] getApplications: jobs query failed', error)
-        return (data as RawJob[] | null) ?? []
+        // The chance is the person's own, on their person_roles row for the role.
+        const { data: mine } = await admin.from('person_roles').select('job_id, chance').eq('user_id', userId).in('job_id', chunk)
+        const chanceOf = new Map(((mine as { job_id: string; chance: string | null }[] | null) ?? []).map((r) => [r.job_id, r.chance]))
+        return ((data as RawJob[] | null) ?? []).map((j) => ({ ...j, person_roles: { chance: chanceOf.get(j.id) ?? null } }))
       })
       const jobById = new Map<string, RawJob>(jobs.map((j) => [j.id, j]))
 
@@ -168,7 +172,7 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
             companyName: rawJobCompanyName(job),
             jobSource: job.source,
             jobPostedAt: job.posted_at,
-            matchScore: job.match_score,
+            chance: fitRowOf(job).chance ?? null,
             jobFunction: job.job_function,
             seniority: job.seniority,
           }
@@ -378,23 +382,12 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
         }
       }
 
-      // targeting.minScore is validated/stored but NOT enforced by any
-      // filtering code path today (see the field comment in datasource.ts /
-      // lib/targeting.ts) — computed here purely as a "what if it were"
-      // transparency number, never folded into totalPassingAllConfiguredFilters.
-      let excludedByMinScoreHypothetical: number | null = null
-      if (targeting.minScore !== null) {
-        const passingScore = await count((q) => q.gte('match_score', targeting.minScore as number))
-        excludedByMinScoreHypothetical = totalJobs - passingScore
-      }
-
       return {
         totalJobs,
         totalPassingAllConfiguredFilters: combinedCount ?? passingAll,
         jobsWithNoDescription,
         excludedByDimension,
         excludedByKeywords,
-        excludedByMinScoreHypothetical,
       }
     },
   }

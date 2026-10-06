@@ -39,29 +39,47 @@ importers:
         specifier: ^3.2.2
         version: 3.2.2(react@18.3.1)
       '@langchain/core':
-        specifier: 1.2.8
-        version: 1.2.8(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
+        specifier: 1.2.14
+        version: 1.2.14(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
       '@langchain/langgraph':
-        specifier: 1.4.10
-        version: 1.4.10(@langchain/core@1.2.8)(react-dom@18.3.1)(react@18.3.1)(zod@4.4.3)
+        specifier: 1.4.19
+        version: 1.4.19(@langchain/core@1.2.14)(react-dom@18.3.1)(react@18.3.1)(zod@4.4.3)
+      '@langchain/langgraph-checkpoint':
+        specifier: ^1.1.5
+        version: 1.1.5(@langchain/core@1.2.14)
       '@langchain/langgraph-checkpoint-postgres':
-        specifier: 1.0.4
-        version: 1.0.4(@langchain/core@1.2.8)(@langchain/langgraph-checkpoint@1.1.3)
+        specifier: 1.0.5
+        version: 1.0.5(@langchain/core@1.2.14)(@langchain/langgraph-checkpoint@1.1.5)
+      '@langchain/langgraph-sdk':
+        specifier: ^1.12.1
+        version: 1.12.1(@langchain/core@1.2.14)(react-dom@18.3.1)(react@18.3.1)
+      '@langchain/mcp-adapters':
+        specifier: ^2.0.0
+        version: 2.0.1(@langchain/core@1.2.14)(@langchain/langgraph@1.4.19)
+      '@langchain/openrouter':
+        specifier: ^0.4.17
+        version: 0.4.17(@langchain/core@1.2.14)(zod@4.4.3)
       '@langfuse/client':
-        specifier: 5.11.1
-        version: 5.11.1(@opentelemetry/api@1.9.1)
+        specifier: 5.12.1
+        version: 5.12.1(@opentelemetry/api@1.9.1)
+      '@langfuse/langchain':
+        specifier: 5.12.1
+        version: 5.12.1(@langchain/core@1.2.14)(@opentelemetry/api@1.9.1)
       '@langfuse/otel':
-        specifier: 5.11.1
-        version: 5.11.1(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.11.0)(@opentelemetry/exporter-trace-otlp-http@0.222.0)(@opentelemetry/sdk-trace-base@2.11.0)
+        specifier: 5.12.1
+        version: 5.12.1(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.11.0)(@opentelemetry/exporter-trace-otlp-http@0.222.0)(@opentelemetry/otlp-exporter-base@0.222.0)(@opentelemetry/otlp-transformer@0.222.0)(@opentelemetry/sdk-trace-base@2.11.0)
       '@langfuse/tracing':
-        specifier: 5.11.1
-        version: 5.11.1(@opentelemetry/api@1.9.1)
+        specifier: 5.12.1
+        version: 5.12.1(@opentelemetry/api@1.9.1)
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.30.0(zod@4.4.3)
       '@opentelemetry/api':
         specifier: 1.9.1
         version: 1.9.1
+      '@opentelemetry/context-async-hooks':
+        specifier: 2.11.0
+        version: 2.11.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/core':
         specifier: 2.11.0
         version: 2.11.0(@opentelemetry/api@1.9.1)
@@ -122,6 +140,9 @@ importers:
       croner:
         specifier: ^9
         version: 9.1.0
+      deepagents:
+        specifier: 1.14.1
+        version: 1.14.1(@langchain/core@1.2.14)(@langchain/langgraph-checkpoint@1.1.5)(@langchain/langgraph-sdk@1.12.1)(@langchain/langgraph@1.4.19)(langchain@1.5.15)(langsmith@0.9.0)
       diff:
         specifier: ^9.0.0
         version: 9.0.0
@@ -134,6 +155,12 @@ importers:
       html-to-text:
         specifier: ^10.0.1
         version: 10.0.1
+      langchain:
+        specifier: ^1.5.15
+        version: 1.5.15(@langchain/core@1.2.14)(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)(react-dom@18.3.1)(react@18.3.1)
+      langsmith:
+        specifier: ^0.9.0
+        version: 0.9.0(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
       lucide-react:
         specifier: ^1.52.0
         version: 1.52.0(@types/react@18.3.27)(react@18.3.1)
@@ -142,7 +169,7 @@ importers:
         version: 1.12.0
       mem0ai:
         specifier: 3.1.6
-        version: 3.1.6(@anthropic-ai/sdk@0.72.1)(@cloudflare/workers-types@4.20260702.1)(@langchain/core@1.2.8)(@supabase/supabase-js@2.93.3)(@types/jest@29.5.14)(@types/pg@8.21.0)(better-sqlite3@12.11.1)(compromise@14.16.0)(natural@8.1.1)(pg@8.23.0)
+        version: 3.1.6(@anthropic-ai/sdk@0.72.1)(@cloudflare/workers-types@4.20260702.1)(@langchain/core@1.2.14)(@supabase/supabase-js@2.93.3)(@types/jest@29.5.14)(@types/pg@8.21.0)(better-sqlite3@12.11.1)(compromise@14.16.0)(natural@8.1.1)(pg@8.23.0)
       next:
         specifier: 14.2.35
         version: 14.2.35(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(react-dom@18.3.1)(react@18.3.1)
@@ -943,14 +970,14 @@ packages:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  /@langchain/core@1.2.8(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0):
-    resolution: {integrity: sha512-ppi2UaCYKqM4LEY8NWQ/JZ0Of0MAngHRvclceVeEQklcD/M6QKanlHPWblDnLO2m4vz7987b1Z4r33Ps6lf/ig==}
+  /@langchain/core@1.2.14(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0):
+    resolution: {integrity: sha512-NP+FZMDO8kzVf79kiVHByveErVbTc1kUm0OvJuASxy5dt2xo/m7mi4O0npskU71A9h0vke3YUDYEciiAsXdCoA==}
     engines: {node: '>=20'}
     dependencies:
       '@cfworker/json-schema': 4.1.1
       '@standard-schema/spec': 1.1.0
       js-tiktoken: 1.0.21
-      langsmith: 0.8.11(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
+      langsmith: 0.9.0(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
       mustache: 4.2.0
       p-queue: 6.6.2
       zod: 4.4.3
@@ -962,49 +989,43 @@ packages:
       - ws
     dev: false
 
-  /@langchain/langgraph-checkpoint-postgres@1.0.4(@langchain/core@1.2.8)(@langchain/langgraph-checkpoint@1.1.3):
-    resolution: {integrity: sha512-wuCPq7VVqwi0+nQC5GOmheoXGJHAybgXbkA9Nn0J8nYW61WFJ3uqb4wyMbLFhAlya99EaxNNsi3FzdzV2COSzw==}
+  /@langchain/langgraph-checkpoint-postgres@1.0.5(@langchain/core@1.2.14)(@langchain/langgraph-checkpoint@1.1.5):
+    resolution: {integrity: sha512-kCpp9pOidYDexhOvpWN4Z6G4npr4+OH8Qe/2oo38NLbRa+AzMcuZDiEI8y9bh4v5fcMy/dhlJClCSQzl86ddUw==}
     engines: {node: '>=18'}
     peerDependencies:
       '@langchain/core': ^1.1.44
-      '@langchain/langgraph-checkpoint': ^1.0.0
+      '@langchain/langgraph-checkpoint': ^1.1.4
     dependencies:
-      '@langchain/core': 1.2.8(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
-      '@langchain/langgraph-checkpoint': 1.1.3(@langchain/core@1.2.8)
+      '@langchain/core': 1.2.14(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
+      '@langchain/langgraph-checkpoint': 1.1.5(@langchain/core@1.2.14)
       pg: 8.23.0
     transitivePeerDependencies:
       - pg-native
     dev: false
 
-  /@langchain/langgraph-checkpoint@1.1.3(@langchain/core@1.2.8):
-    resolution: {integrity: sha512-wgzdQNeEsdw1e+4lvlj0tdq/RYR/k1vPin10g0ymGoehZDDgd9nvIllGXSXN4TFgF9sf5qQP/KTkOcLfeseIhA==}
+  /@langchain/langgraph-checkpoint@1.1.5(@langchain/core@1.2.14):
+    resolution: {integrity: sha512-BwDwl5VeTOh6CVuiIPgsUgfK51vTJDMSbFcSCUfjJWsl8/DPdK/mbv+ejxJstkSk/BlSPMP4JfXWcN6jD2ea2Q==}
     engines: {node: '>=18'}
     peerDependencies:
       '@langchain/core': ^1.1.48
     dependencies:
-      '@langchain/core': 1.2.8(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
+      '@langchain/core': 1.2.14(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
     dev: false
 
-  /@langchain/langgraph-sdk@1.9.29(@langchain/core@1.2.8)(react-dom@18.3.1)(react@18.3.1):
-    resolution: {integrity: sha512-W+ccugM5EzBHvaOieyYxlSbhAy6HWF8Tyn6b/BlTWuFd8xtcnQOz2WuFyofcAc9+aQHE+6yHJfIywGOvjxS+bA==}
+  /@langchain/langgraph-sdk@1.12.1(@langchain/core@1.2.14)(react-dom@18.3.1)(react@18.3.1):
+    resolution: {integrity: sha512-V/XSE7auTpfS5p3ByggDM6bKvRLeEjImb7/H+ng9qHkwCrYCGrZpVcuve2lH9pHQVOQlEtnHUsRZKQTWumcdhw==}
     peerDependencies:
       '@langchain/core': ^1.1.48
       react: ^18 || ^19
       react-dom: ^18 || ^19
-      svelte: ^4.0.0 || ^5.0.0
-      vue: ^3.0.0
     peerDependenciesMeta:
       react:
         optional: true
       react-dom:
         optional: true
-      svelte:
-        optional: true
-      vue:
-        optional: true
     dependencies:
-      '@langchain/core': 1.2.8(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
-      '@langchain/protocol': 0.0.18
+      '@langchain/core': 1.2.14(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
+      '@langchain/protocol': 0.0.19
       '@types/json-schema': 7.0.15
       p-queue: 9.3.3
       p-retry: 7.1.1
@@ -1012,77 +1033,162 @@ packages:
       react-dom: 18.3.1(react@18.3.1)
     dev: false
 
-  /@langchain/langgraph@1.4.10(@langchain/core@1.2.8)(react-dom@18.3.1)(react@18.3.1)(zod@4.4.3):
-    resolution: {integrity: sha512-QBNbbIWDp3pcyvaINGEYHdekGYSQm6ZYuC9/h7arEAZckAl5mRLaoRGw5t61V4Bf+rspEj2VcylqNAN3fcdBNQ==}
+  /@langchain/langgraph@1.4.19(@langchain/core@1.2.14)(react-dom@18.3.1)(react@18.3.1)(zod@4.4.3):
+    resolution: {integrity: sha512-wfT1Nyfwnu/N56piXRXxX6SQQ48ju6rqkGOQPD3/9laSB91ht+pVnq97/3FKO+LybvXfXKiBkfxyIlumdBhIQQ==}
     engines: {node: '>=18'}
     peerDependencies:
       '@langchain/core': ^1.1.48
       zod: ^3.25.32 || ^4.2.0
     dependencies:
-      '@langchain/core': 1.2.8(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
-      '@langchain/langgraph-checkpoint': 1.1.3(@langchain/core@1.2.8)
-      '@langchain/langgraph-sdk': 1.9.29(@langchain/core@1.2.8)(react-dom@18.3.1)(react@18.3.1)
-      '@langchain/protocol': 0.0.18
+      '@langchain/core': 1.2.14(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
+      '@langchain/langgraph-checkpoint': 1.1.5(@langchain/core@1.2.14)
+      '@langchain/langgraph-sdk': 1.12.1(@langchain/core@1.2.14)(react-dom@18.3.1)(react@18.3.1)
+      '@langchain/protocol': 0.0.19
       '@standard-schema/spec': 1.1.0
       zod: 4.4.3
     transitivePeerDependencies:
       - react
       - react-dom
-      - svelte
-      - vue
     dev: false
 
-  /@langchain/protocol@0.0.18:
-    resolution: {integrity: sha512-XW1egQtPfsGI41w2AMZNFZrUIwFSQHTjVMZs0OaTpCAvht/QLoaPN8FQcsysMVypOhupG28J29yOorrc70otBQ==}
+  /@langchain/mcp-adapters@2.0.1(@langchain/core@1.2.14)(@langchain/langgraph@1.4.19):
+    resolution: {integrity: sha512-dYijIiyN5JdufWX1I8cGrhKnmtSzl50cKLPuH9196xpsEJBz9TO+Z/ZM9pcHNyKM7+OZJDJvwB+DS7cAVhyheA==}
+    engines: {node: '>=20.10.0'}
+    peerDependencies:
+      '@langchain/core': ^1.2.6
+      '@langchain/langgraph': ^1.4.18
+    dependencies:
+      '@langchain/core': 1.2.14(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
+      '@langchain/langgraph': 1.4.19(@langchain/core@1.2.14)(react-dom@18.3.1)(react@18.3.1)(zod@4.4.3)
+      '@modelcontextprotocol/client': 2.3.1
+      '@modelcontextprotocol/core': 2.3.1
+      zod: 4.4.3
     dev: false
 
-  /@langfuse/client@5.11.1(@opentelemetry/api@1.9.1):
-    resolution: {integrity: sha512-8xqjQKAo9TKSSgclnphdforUTDY8H3lv6Cf/yq2q6STkG8fmIV8AxJWm27/AI9XVodtQPYjj8jKWt55qgGqqCg==}
+  /@langchain/openai@1.6.2(@langchain/core@1.2.14):
+    resolution: {integrity: sha512-KaXc3zjdM2/E24FdBlsk5NTT2Dyxh46vzCS2by78ehN6G5zdx+4OfVnPvyLl8r2tv2TqQCHpEhImVXgnAZaOvg==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@langchain/core': ^1.2.14
+    dependencies:
+      '@langchain/core': 1.2.14(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
+      js-tiktoken: 1.0.21
+      openai: 7.28.0(zod@4.4.3)
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@aws-sdk/credential-provider-node'
+      - '@smithy/hash-node'
+      - '@smithy/signature-v4'
+      - undici
+      - ws
+    dev: false
+
+  /@langchain/openrouter@0.4.17(@langchain/core@1.2.14)(zod@4.4.3):
+    resolution: {integrity: sha512-Bj+XHGk5alI5R12+BTDfJq0Ex+pfFaLOEfcPbbDRWO55ar6sA+McNFpcSmiwCSRxQ9BlUS1tIKgCMnx0I5pY8A==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@langchain/core': ^1.0.0
+    dependencies:
+      '@langchain/core': 1.2.14(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
+      '@langchain/openai': 1.6.2(@langchain/core@1.2.14)
+      eventsource-parser: 4.1.1
+      openai: 7.28.0(zod@4.4.3)
+    transitivePeerDependencies:
+      - '@aws-sdk/credential-provider-node'
+      - '@smithy/hash-node'
+      - '@smithy/signature-v4'
+      - undici
+      - ws
+      - zod
+    dev: false
+
+  /@langchain/protocol@0.0.19:
+    resolution: {integrity: sha512-9hKcRrH7cBX6gfutdfXPoft1OCchHe4FEpALoDJMl5Qu+n/YG5ynZmyu8+8cxORlPwHBoKTxggvXz+76M1yX1Q==}
+    dev: false
+
+  /@langfuse/client@5.12.1(@opentelemetry/api@1.9.1):
+    resolution: {integrity: sha512-iyBzBKjUmtRkO82x+1nvzrRU+jhfLxTSImUs9P1VhwtuXEJMInU6zl1oM+AoLZi3Oo4pnBhxYmSZGk22anprEQ==}
     peerDependencies:
       '@opentelemetry/api': ^1.9.0
     dependencies:
-      '@langfuse/core': 5.11.1(@opentelemetry/api@1.9.1)
-      '@langfuse/tracing': 5.11.1(@opentelemetry/api@1.9.1)
+      '@langfuse/core': 5.13.0(@opentelemetry/api@1.9.1)
+      '@langfuse/tracing': 5.12.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/api': 1.9.1
       mustache: 4.2.0
     dev: false
 
-  /@langfuse/core@5.11.1(@opentelemetry/api@1.9.1):
-    resolution: {integrity: sha512-Oor1z4BlgI5RaUrRYYKf3ijyCAx0tiGCWsABzfm6ZDAgbaaFuiwvJVtXGohiq5evcnjGGE5h4Mf4ZjH1yd5vjw==}
+  /@langfuse/core@5.13.0(@opentelemetry/api@1.9.1):
+    resolution: {integrity: sha512-s7VgCfHWLTIEluw/qP40SpsC4drWVtLVLE9X3iPiVDugdmmAY95Bc7kxJB5OtidLXakNRkgSCDzB/Spp9KkQAw==}
     peerDependencies:
       '@opentelemetry/api': ^1.9.0
     dependencies:
       '@opentelemetry/api': 1.9.1
     dev: false
 
-  /@langfuse/otel@5.11.1(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.11.0)(@opentelemetry/exporter-trace-otlp-http@0.222.0)(@opentelemetry/sdk-trace-base@2.11.0):
-    resolution: {integrity: sha512-Urn2WMvOINh7tNCTrq7qvDvNuA1VkxnJstLAHZghDeo1TFGQE7Ok9GoWmyBEwl6uX3D04TL2vkX9Vr7XDORvxQ==}
+  /@langfuse/langchain@5.12.1(@langchain/core@1.2.14)(@opentelemetry/api@1.9.1):
+    resolution: {integrity: sha512-IviOe7ZEiytfwsSuRnMhtRk/dNODWCQ8Au7DxzfXFflh5mrqvAVQ0avtPvqIDYpce9h+PtOsm9mkl6xvzf/Fvg==}
+    peerDependencies:
+      '@langchain/core': '>=0.3.8'
+      '@opentelemetry/api': ^1.9.0
+    dependencies:
+      '@langchain/core': 1.2.14(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
+      '@langfuse/core': 5.13.0(@opentelemetry/api@1.9.1)
+      '@langfuse/tracing': 5.12.1(@opentelemetry/api@1.9.1)
+      '@opentelemetry/api': 1.9.1
+    dev: false
+
+  /@langfuse/otel@5.12.1(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.11.0)(@opentelemetry/exporter-trace-otlp-http@0.222.0)(@opentelemetry/otlp-exporter-base@0.222.0)(@opentelemetry/otlp-transformer@0.222.0)(@opentelemetry/sdk-trace-base@2.11.0):
+    resolution: {integrity: sha512-swkflauMwfkdi17oU+uhzDcfoacd+y5XqlP/PgyiSHwNs1gs5AWgQzwCW5UN2YiPj3Xn66vZy4pglFklyD0SxQ==}
     engines: {node: '>=20'}
     peerDependencies:
       '@opentelemetry/api': ^1.9.0
       '@opentelemetry/core': ^2.0.1
       '@opentelemetry/exporter-trace-otlp-http': '>=0.202.0 <1.0.0'
+      '@opentelemetry/otlp-exporter-base': '>=0.202.0 <1.0.0'
+      '@opentelemetry/otlp-transformer': '>=0.202.0 <1.0.0'
       '@opentelemetry/sdk-trace-base': ^2.0.1
     dependencies:
-      '@langfuse/core': 5.11.1(@opentelemetry/api@1.9.1)
+      '@langfuse/core': 5.13.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/core': 2.11.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/exporter-trace-otlp-http': 0.222.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/otlp-exporter-base': 0.222.0(@opentelemetry/api@1.9.1)
+      '@opentelemetry/otlp-transformer': 0.222.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/sdk-trace-base': 2.11.0(@opentelemetry/api@1.9.1)
     dev: false
 
-  /@langfuse/tracing@5.11.1(@opentelemetry/api@1.9.1):
-    resolution: {integrity: sha512-5lT0VhKSI3P5z3jylAE7Qf+V6GJ6IT0TZhvAQdU5bP0oUx2kRoXcnpdxwqEr7NdKIzaAPiN9E08ehO9wk/8xTA==}
+  /@langfuse/tracing@5.12.1(@opentelemetry/api@1.9.1):
+    resolution: {integrity: sha512-8JDhIUN9sSRdIbO+w2NOZ0f8b1EtnpbxUEMn7aGQ6gHgeqIlnwK96rRRvZ8pjwuHPeMfdEAu2Fc76NgIWj1L7w==}
     engines: {node: '>=20'}
     peerDependencies:
       '@opentelemetry/api': ^1.9.0
     dependencies:
-      '@langfuse/core': 5.11.1(@opentelemetry/api@1.9.1)
+      '@langfuse/core': 5.13.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/api': 1.9.1
     dev: false
 
   /@mixmark-io/domino@2.2.0:
     resolution: {integrity: sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw==}
+    dev: false
+
+  /@modelcontextprotocol/client@2.3.1:
+    resolution: {integrity: sha512-mIGZXpHsjnZ6lD+gD/WCMpR5k8yVQQ8nNFH1N0Srf7AvnwTUMYD6pvTY8ng2+He5FfV7YMZLmrjL7cLa/cc3dQ==}
+    engines: {node: '>=20'}
+    dependencies:
+      '@modelcontextprotocol/core': 2.3.1
+      cross-spawn: 7.0.6
+      eventsource: 3.0.7
+      eventsource-parser: 3.1.0
+      jose: 6.2.4
+      pkce-challenge: 5.0.1
+      zod: 4.4.3
+    dev: false
+
+  /@modelcontextprotocol/core@2.3.1:
+    resolution: {integrity: sha512-laVmIhPGpWi7rG9q+0UigblRN0Hws/Yjlb6qLFtVqryXVLkc4h+yN8z731POD2LnAGQlFe7/tXhUm7Bi0YB91g==}
+    engines: {node: '>=20'}
+    dependencies:
+      zod: 4.4.3
     dev: false
 
   /@modelcontextprotocol/sdk@1.30.0(zod@4.4.3):
@@ -1263,6 +1369,15 @@ packages:
   /@opentelemetry/api@1.9.1:
     resolution: {integrity: sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q==}
     engines: {node: '>=8.0.0'}
+    dev: false
+
+  /@opentelemetry/context-async-hooks@2.11.0(@opentelemetry/api@1.9.1):
+    resolution: {integrity: sha512-Tr79DyWI8itsBdg+jH+opjfrwLzX+erk1/ExkIwhWoAVjVrJIn2y5+cGjTC0Vy8fyNIA/y8wuJPZwr1T3xCZeQ==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': '>=1.0.0 <1.10.0'
+    dependencies:
+      '@opentelemetry/api': 1.9.1
     dev: false
 
   /@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1):
@@ -4851,6 +4966,28 @@ packages:
     resolution: {integrity: sha512-oIPzksmTg4/MriiaYGO+okXDT7ztn/w3Eptv/+gSIdMdKsJo0u4CfYNFJPy+4SKMuCqGw2wxnA+URMg3t8a/bQ==}
     dev: true
 
+  /deepagents@1.14.1(@langchain/core@1.2.14)(@langchain/langgraph-checkpoint@1.1.5)(@langchain/langgraph-sdk@1.12.1)(@langchain/langgraph@1.4.19)(langchain@1.5.15)(langsmith@0.9.0):
+    resolution: {integrity: sha512-a3HXtHKZiwWzj/8zPzZaL9YdEHEdYfaGPsfebKcWLeNF38OZjTJrjoCO+4GZVy1gfDXF0t4a+MLvrW+G1YViwQ==}
+    peerDependencies:
+      '@langchain/core': ^1.2.9
+      '@langchain/langgraph': ^1.4.10
+      '@langchain/langgraph-checkpoint': ^1.1.5
+      '@langchain/langgraph-sdk': ^1.9.23
+      langchain: ^1.5.10
+      langsmith: '>=0.7.1 <0.10.0'
+    dependencies:
+      '@langchain/core': 1.2.14(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
+      '@langchain/langgraph': 1.4.19(@langchain/core@1.2.14)(react-dom@18.3.1)(react@18.3.1)(zod@4.4.3)
+      '@langchain/langgraph-checkpoint': 1.1.5(@langchain/core@1.2.14)
+      '@langchain/langgraph-sdk': 1.12.1(@langchain/core@1.2.14)(react-dom@18.3.1)(react@18.3.1)
+      fast-glob: 3.3.3
+      langchain: 1.5.15(@langchain/core@1.2.14)(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)(react-dom@18.3.1)(react@18.3.1)
+      langsmith: 0.9.0(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
+      micromatch: 4.0.8
+      yaml: 2.9.1
+      zod: 4.4.3
+    dev: false
+
   /deepmerge-ts@8.0.2:
     resolution: {integrity: sha512-uqbvqLUMrc6p0MO+WBRtTxY55hmyh94WRwI5a++PZe54X+bfVh59FSN7uWCBCW1CCVjzjnrwzfI8zidE2obMMw==}
     engines: {node: '>=16.9.0'}
@@ -5598,6 +5735,11 @@ packages:
   /eventsource-parser@3.1.0:
     resolution: {integrity: sha512-kJezFj9YFAMLeORyi7aCLxLbD5/qWMQnoMVlVPyHIll7lgRJCc3JVln9Vgl9nwQi0YkMnhdGTMNn7CkRRAptMg==}
     engines: {node: '>=18.0.0'}
+    dev: false
+
+  /eventsource-parser@4.1.1:
+    resolution: {integrity: sha512-zaWNqeSLeyzEAAt2Q6aDBRDRk/VnPmsKqvToyGvv6aahvLv71A4Jw7jG93Hckf11zXurbqgsffvpSgKPoeU1Qw==}
+    engines: {node: '>=22.12'}
     dev: false
 
   /eventsource@3.0.7:
@@ -6829,8 +6971,29 @@ packages:
       json-buffer: 3.0.1
     dev: true
 
-  /langsmith@0.8.11(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0):
-    resolution: {integrity: sha512-dNKtyEiNS6L10qsRGKExQVHoMsRGBJt+xiBHn6G8JxslapedUhXVkvcDkhi00EuiIMeil+RevAVG8k6VM0B9ew==}
+  /langchain@1.5.15(@langchain/core@1.2.14)(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)(react-dom@18.3.1)(react@18.3.1):
+    resolution: {integrity: sha512-AlXdwsNf9e3e9QbGkW+qgII3QNdr/tntQPijobQAt5rNG/4O6ggOpVkH79+CegFDPFpR0/8LYAJbP54jCHaqmA==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@langchain/core': ^1.2.14
+    dependencies:
+      '@langchain/core': 1.2.14(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
+      '@langchain/langgraph': 1.4.19(@langchain/core@1.2.14)(react-dom@18.3.1)(react@18.3.1)(zod@4.4.3)
+      '@langchain/langgraph-checkpoint': 1.1.5(@langchain/core@1.2.14)
+      langsmith: 0.9.0(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@opentelemetry/api'
+      - '@opentelemetry/exporter-trace-otlp-proto'
+      - '@opentelemetry/sdk-trace-base'
+      - openai
+      - react
+      - react-dom
+      - ws
+    dev: false
+
+  /langsmith@0.9.0(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0):
+    resolution: {integrity: sha512-tlg/aG7qezAKY6G3fgADSX7PkRj+JKoF3z7QNkCMsAOvwvuzhiwP9Amn1Z+zAIxuKoWuXQdIjtFN0LVmUC1oUQ==}
     peerDependencies:
       '@opentelemetry/api': '*'
       '@opentelemetry/exporter-trace-otlp-proto': '*'
@@ -7194,7 +7357,7 @@ packages:
     engines: {node: '>= 0.8'}
     dev: false
 
-  /mem0ai@3.1.6(@anthropic-ai/sdk@0.72.1)(@cloudflare/workers-types@4.20260702.1)(@langchain/core@1.2.8)(@supabase/supabase-js@2.93.3)(@types/jest@29.5.14)(@types/pg@8.21.0)(better-sqlite3@12.11.1)(compromise@14.16.0)(natural@8.1.1)(pg@8.23.0):
+  /mem0ai@3.1.6(@anthropic-ai/sdk@0.72.1)(@cloudflare/workers-types@4.20260702.1)(@langchain/core@1.2.14)(@supabase/supabase-js@2.93.3)(@types/jest@29.5.14)(@types/pg@8.21.0)(better-sqlite3@12.11.1)(compromise@14.16.0)(natural@8.1.1)(pg@8.23.0):
     resolution: {integrity: sha512-arbotbiNxevHgs/GoVMfqS77SV9yO7F7tUWU9VqU8qKHNzXUXH7CNGk7dKeRpdQESdkooPIpI3E4B6ppc1WTEA==}
     engines: {node: '>=18'}
     peerDependencies:
@@ -7314,7 +7477,7 @@ packages:
     dependencies:
       '@anthropic-ai/sdk': 0.72.1(zod@4.4.3)
       '@cloudflare/workers-types': 4.20260702.1
-      '@langchain/core': 1.2.8(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
+      '@langchain/core': 1.2.14(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
       '@supabase/supabase-js': 2.93.3
       '@types/jest': 29.5.14
       '@types/pg': 8.21.0
@@ -8188,6 +8351,33 @@ packages:
         optional: true
     dependencies:
       zod: 4.4.3
+
+  /openai@7.28.0(zod@4.4.3):
+    resolution: {integrity: sha512-HSY4fFLflQGYe2kvO0atm6/GzhD61gpyiOZZUvO4nptMUhuB1to2K3wwFpFqc5gfEK0SxyIIFiu1yE2MtygWcA==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
+      '@smithy/hash-node': '>=4.3.0 <5'
+      '@smithy/signature-v4': '>=5.4.0 <6'
+      undici: ^7.29.1
+      ws: ^8.21.0
+      zod: ^3.25 || ^4.0
+    peerDependenciesMeta:
+      '@aws-sdk/credential-provider-node':
+        optional: true
+      '@smithy/hash-node':
+        optional: true
+      '@smithy/signature-v4':
+        optional: true
+      undici:
+        optional: true
+      ws:
+        optional: true
+      zod:
+        optional: true
+    dependencies:
+      zod: 4.4.3
+    dev: false
 
   /option@0.2.4:
     resolution: {integrity: sha512-pkEqbDyl8ou5cpq+VsnQbe/WlEy5qS7xPzMS1U55OCG9KPvwFD46zDbxQIj3egJSFc3D+XhYOPUzz49zQAVy7A==}
@@ -10598,6 +10788,12 @@ packages:
 
   /yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
+    dev: false
+
+  /yaml@2.9.1:
+    resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
     dev: false
 
   /yocto-queue@0.1.0:

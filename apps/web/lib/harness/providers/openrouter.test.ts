@@ -78,3 +78,27 @@ describe('callOpenRouter provider-reported cost', () => {
     expect(createMock.mock.calls[0][0].max_tokens).toBe(2048)
   })
 })
+
+describe('callOpenRouter structured output', () => {
+  const keys = { openrouter: 'k' } as DecryptedApiKeys
+
+  it('sends a strict json_schema response format and the response-healing plugin', async () => {
+    const schema = { type: 'object', properties: {}, additionalProperties: false }
+    await callOpenRouter(keys, { prompt: 'x', json: true, jsonSchema: { name: 'resume', schema } })
+    const body = createMock.mock.calls[0][0]
+    expect(body.response_format).toEqual({
+      type: 'json_schema',
+      json_schema: { name: 'resume', strict: true, schema },
+    })
+    expect(body.plugins).toEqual([{ id: 'response-healing' }])
+    // would route away from the user's model, so it must never be set
+    expect(body.provider).toBeUndefined()
+  })
+
+  it('falls back to a plain JSON object without a schema', async () => {
+    await callOpenRouter(keys, { prompt: 'x', json: true })
+    const body = createMock.mock.calls[0][0]
+    expect(body.response_format).toEqual({ type: 'json_object' })
+    expect(body.plugins).toBeUndefined()
+  })
+})

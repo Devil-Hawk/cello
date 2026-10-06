@@ -71,7 +71,8 @@ import {
   type TextAlign,
   type TextCasing,
 } from './templates'
-import { getResumeTemplateId, resolveResumeMarkdown, type ResumeContentJson } from './types'
+import { getResumeTemplateId, type ResumeContentJson } from './types'
+import { resolveResumeMarkdown } from './resolve'
 
 // ---------------------------------------------------------------------------
 // Units and small conversions

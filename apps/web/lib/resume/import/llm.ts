@@ -1,78 +1,25 @@
-// The OPTIONAL LLM leg of resume import: turn undesigned text into resume
-// Markdown, and refuse the result if the model wrote a different resume.
+// Faithfulness checks for model output: did the model reformat the text, or
+// write a different resume?
 //
-// WHAT CHANGED AND WHY
-//   The route used to send a prompt that said "clean it up and format it
-//   nicely" and then stored whatever came back as the user's resume. That
-//   instruction invites a model to improve prose, merge bullets and — the
-//   expensive failure — invent plausible achievements and dates. This module
-//   replaces it with a REFORMATTING instruction (structure only, no new words)
-//   plus a mechanical check on the output.
+// WHAT THIS IS FOR NOW
+//   The model's job is structuring (lib/resume/import/structure.ts), and its
+//   output is checked here before it is allowed anywhere near the user's
+//   resume. findInventedFacts() is the check that matters, and it is also what
+//   the tailoring guards (lib/resume/tailor.ts) use.
 //
 // THE CHECK IS THE POINT
 //   A prompt is a request, not a guarantee. checkReformatFaithfulness() runs
 //   two independent tests, because they fail in opposite directions:
 //     - CONTAINMENT (findInventedFacts) catches the small, targeted lie. Every
 //       proper noun and figure in the output must already exist in the source.
-//       This is the test that matters, and it is the one that was missing: an
-//       earlier version compared only word-set RATIOS, which divide by the
+//       An earlier version compared only word-set RATIOS, which divide by the
 //       output's vocabulary and therefore score one invented employer in a
-//       400-word resume at ~0.5% — invisible at any threshold. Adversarial
-//       testing passed a wholly fabricated job, a swapped degree, a renamed
-//       employer, an inflated title and a moved metric, all with ok=true and
-//       no warnings.
+//       400-word resume at ~0.5%, invisible at any threshold.
 //     - RATIOS still catch the bulk rewrite, which containment alone would
 //       miss if a model paraphrased using only words already present.
-//   Both are order-insensitive on purpose — that is what lets them verify a
-//   vision model's read of a two-column PDF against unpdf's text extraction of
-//   the same file, where the words are identical and only the order differs.
-//
-// AND IT IS ALWAYS OPTIONAL
-//   Callers that hold no API key pass no `complete` function and get
-//   inferResumeMarkdown()'s deterministic structure instead. Every failure path
-//   here — no key, network error, empty answer, unfaithful answer, answer that
-//   parses to nothing — lands on the same fallback with a warning that says
-//   what happened. Nothing here can produce an unstructured blob, and nothing
-//   here can silently substitute invented text.
+//   Both are order-insensitive, so a different reading order passes and
+//   invented content does not.
 
-import { parseResumeMarkdown } from '../markdown'
-import { inferResumeMarkdown } from './infer'
-
-/**
- * The instruction set. Deliberately negative-heavy: the model's default
- * behaviour on a resume is to improve it, and every one of these lines exists
- * to stop a specific way that ruins the document.
- */
-export const RESUME_MARKDOWN_PROMPT = `You are converting a resume into Markdown. You are REFORMATTING, not writing.
-
-Return ONLY the Markdown. No preamble, no explanation, no code fences.
-
-STRUCTURE TO EMIT
-- \`# \` for the candidate's name, once, at the top.
-- \`## \` for each section heading (Summary, Experience, Education, Skills, Projects, Certifications, ...). Use the section names the resume already uses.
-- \`**bold**\` for a role/company line (job title, employer, dates). Keep the dates on that same line.
-- \`- \` for each bullet. Indent a sub-bullet by two spaces.
-- Plain paragraphs for everything else (contact details, summary prose).
-- One blank line between blocks.
-
-ABSOLUTE RULES
-- Do NOT invent anything: no employers, job titles, dates, locations, degrees, schools, skills, metrics, or achievements that are not in the text below.
-- Do NOT embellish, reword, summarise, expand, reorder or "improve" any sentence. Copy the wording exactly.
-- Do NOT delete content. Every line of the input must appear in the output.
-- Do NOT add a section that is not in the input, and do NOT add filler like "References available on request".
-- The ONLY text repairs allowed are artifacts of text extraction: rejoining a word split across a line break, removing a hyphen left by line wrapping, deleting page numbers and repeated headers/footers.
-- If you cannot tell whether a line is a heading, leave it as a plain paragraph.
-
-FORMATTING LIMITS
-- No tables, no images, no HTML, no horizontal rules, no headings deeper than \`###\`.
-- No links unless the text already contains a URL; write it bare.`
-
-/** Prompt + payload, ready to send as a single user message. */
-export function buildReformatPrompt(rawText: string): string {
-  return `${RESUME_MARKDOWN_PROMPT}\n\n--- RESUME TEXT ---\n${rawText}\n--- END RESUME TEXT ---`
-}
-
-/** Strip a ```markdown fence the model added despite being told not to. */
 export function stripCodeFence(text: string): string {
   const trimmed = text.trim()
   const fenced = /^```[a-zA-Z]*\n([\s\S]*?)\n?```$/.exec(trimmed)
@@ -110,7 +57,20 @@ export interface FaithfulnessReport {
  * reformat scores ~1.0; the slack is for hyphen/ligature repairs and dropped
  * page furniture.
  */
-const MIN_RETENTION = 0.85
+export const MIN_RETENTION = 0.85
+/**
+ * Share of the source's distinct words found in `output`, or null when the
+ * source is too short to judge. The dropped-content check for structured output.
+ */
+export function wordRetention(source: string, output: string): number | null {
+  const sourceWords = tokenize(source)
+  if (sourceWords.size < MIN_TOKENS_TO_JUDGE) return null
+  const outputWords = tokenize(output)
+  let kept = 0
+  for (const word of sourceWords) if (outputWords.has(word)) kept++
+  return kept / sourceWords.size
+}
+
 /**
  * At most this share of the output's distinct words may be new. Rejoining
  * "expe rience" legitimately creates a token, so this cannot be zero — but a
@@ -336,60 +296,4 @@ export function checkReformatFaithfulness(source: string, output: string): Faith
     }
   }
   return { ok: true, retention, novelty, invented: [], reason: null }
-}
-
-/** Sends one prompt, returns the model's text. Supplied by the caller. */
-export type CompletionFn = (prompt: string) => Promise<string>
-
-export type ReformatMethod = 'llm' | 'heuristic'
-
-export interface ReformatResult {
-  markdown: string
-  /** Which leg produced the Markdown that is actually being returned. */
-  method: ReformatMethod
-  /** Everything the user deserves to know about how this was produced. */
-  warnings: string[]
-}
-
-/**
- * Plain text -> resume Markdown, using the LLM when one is available and
- * falling back to deterministic inference otherwise. Never throws: an LLM
- * failure is a downgrade, not an error.
- */
-export async function reformatToMarkdown(
-  rawText: string,
-  complete?: CompletionFn | null
-): Promise<ReformatResult> {
-  const fallback = (warnings: string[]): ReformatResult => ({
-    markdown: inferResumeMarkdown(rawText),
-    method: 'heuristic',
-    warnings,
-  })
-
-  if (!complete) return fallback([])
-
-  let answer: string
-  try {
-    answer = stripCodeFence(await complete(buildReformatPrompt(rawText)))
-  } catch (error) {
-    console.error('[resume/import] LLM reformat failed:', error)
-    return fallback(['AI formatting was unavailable, so the layout was inferred from the text.'])
-  }
-
-  if (!answer) {
-    return fallback(['AI formatting returned nothing, so the layout was inferred from the text.'])
-  }
-
-  const report = checkReformatFaithfulness(rawText, answer)
-  if (!report.ok) {
-    return fallback([
-      `AI formatting was discarded because ${report.reason}. The layout was inferred from your text instead, so nothing was invented.`,
-    ])
-  }
-
-  if (parseResumeMarkdown(answer).length === 0) {
-    return fallback(['AI formatting produced nothing renderable, so the layout was inferred from the text.'])
-  }
-
-  return { markdown: answer, method: 'llm', warnings: [] }
 }

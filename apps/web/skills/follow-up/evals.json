@@ -1,0 +1,50 @@
+{
+  "skill": "follow-up",
+  "trigger": [
+    {
+      "id": "follow-up-t1",
+      "message": "Follow up with Sam Rivera, I emailed him last week and heard nothing.",
+      "load": true
+    },
+    {
+      "id": "follow-up-t2",
+      "message": "Draft a nudge to the recruiter I wrote to on Monday.",
+      "load": true
+    },
+    {
+      "id": "follow-up-t3",
+      "message": "Write a first email to a recruiter at Northstar.",
+      "load": false
+    }
+  ],
+  "output": [
+    {
+      "id": "follow-up-o1",
+      "message": "Follow up with Sam Rivera. The tool results are pasted below; no tools are available in this check.\n\nFIRST EMAIL, sent 6 days ago, no reply, no follow-up sent yet:\nSubject: Billing roadmap at Northstar\n\nHi Sam,\n\nI led the invoicing product at Acme Billing, used by 3,200 customers, and cut invoice disputes by 31%. I saw the Senior PM, Billing role at Northstar and would value 15 minutes to hear how the team thinks about usage-based pricing.\n\nDana\n\nMY RESUME:\nDana Lee, Product Manager, Seattle\nAcme Billing (2021-2025), Senior Product Manager: Led the invoicing product used by 3,200 customers. Cut invoice disputes by 31% by redesigning the payment-status page. Managed 2 engineers and 1 designer. Shipped usage-based pricing in 6 months.\nNorthwind Labs (2018-2021), Product Manager: Launched the self-serve onboarding flow, lifting trial-to-paid conversion from 9% to 14%. Ran weekly customer interviews.\nSkills: SQL, Looker, Figma, roadmapping, A/B testing.\nEducation: BS Economics, University of Washington.",
+      "checks": [
+        {
+          "type": "not_matches",
+          "pattern": "just checking in|circling back|touching base|following up on my (last|previous|earlier)",
+          "flags": "i",
+          "note": "no empty follow-up phrases"
+        },
+        {
+          "type": "max_words",
+          "value": 120,
+          "note": "shorter than the first note"
+        },
+        {
+          "type": "matches",
+          "pattern": "\\?|call|chat|minutes",
+          "flags": "i",
+          "note": "gives an easy next step"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\u2014",
+          "note": "no em dashes"
+        }
+      ]
+    }
+  ]
+}

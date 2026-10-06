@@ -1,0 +1,260 @@
+{
+  "feature": "outreach",
+  "label": "before-stub",
+  "writer": "google/gemma-4-31b-it:free",
+  "judge": "production qwen/qwen3.8-27b:free, yardstick nvidia/nemotron-3-super-120b-a12b:free",
+  "metrics": [
+    {
+      "name": "all checks pass",
+      "value": 0,
+      "n": 14,
+      "failures": [
+        "o01",
+        "o02",
+        "o03",
+        "o04",
+        "o05",
+        "o06",
+        "o07",
+        "o08",
+        "o09",
+        "o10",
+        "f01",
+        "f03",
+        "f07",
+        "f10"
+      ]
+    },
+    {
+      "name": "grounded (yardstick)",
+      "value": 0,
+      "n": 0,
+      "failures": [],
+      "note": "judged 0 of 14"
+    },
+    {
+      "name": "specific (yardstick)",
+      "value": 0,
+      "n": 0,
+      "failures": [],
+      "note": "items with job text"
+    },
+    {
+      "name": "template without notice",
+      "value": 14,
+      "n": 14,
+      "kind": "count",
+      "note": "14 templates in 14 drafts"
+    },
+    {
+      "name": "average words",
+      "value": 73,
+      "n": 14,
+      "kind": "count"
+    }
+  ],
+  "items": [
+    {
+      "id": "o01",
+      "kind": "initial",
+      "subject": "Backend Engineer, Payments and Risk at Stripe — quick note",
+      "body": "Hi Maya,\n\nI came across the Backend Engineer, Payments and Risk role at Stripe and wanted to reach out directly. I believe my background is a strong match for what the role calls for.\n\nWould you be open to a brief chat, or could you point me to the right person? Happy to share more on how I can contribute.\n\nThanks for your time,\nMarcus Delgado\nsender@example.com",
+      "template": true,
+      "failedChecks": [
+        "no_em_dash",
+        "banned_phrases",
+        "one_ask",
+        "signed_by_sender"
+      ],
+      "unsupported": null
+    },
+    {
+      "id": "o02",
+      "kind": "initial",
+      "subject": "Senior Software Engineer, Backend (Product Engineering) at Brex — quick note",
+      "body": "Hi Luis,\n\nI came across the Senior Software Engineer, Backend (Product Engineering) role at Brex and wanted to reach out directly. I believe my background is a strong match for what the role calls for.\n\nWould you be open to a brief chat, or could you point me to the right person? Happy to share more on how I can contribute.\n\nThanks for your time,\nMarcus Delgado\nsender@example.com",
+      "template": true,
+      "failedChecks": [
+        "no_em_dash",
+        "banned_phrases",
+        "one_ask",
+        "signed_by_sender"
+      ],
+      "unsupported": null
+    },
+    {
+      "id": "o03",
+      "kind": "initial",
+      "subject": "Senior Software Engineer, Backend - Payments Platform at Coinbase — quick note",
+      "body": "Hi Dana,\n\nI came across the Senior Software Engineer, Backend - Payments Platform role at Coinbase and wanted to reach out directly. I believe my background is a strong match for what the role calls for.\n\nWould you be open to a brief chat, or could you point me to the right person? Happy to share more on how I can contribute.\n\nThanks for your time,\nElena Vasquez\nsender@example.com",
+      "template": true,
+      "failedChecks": [
+        "no_em_dash",
+        "banned_phrases",
+        "one_ask",
+        "signed_by_sender"
+      ],
+      "unsupported": null
+    },
+    {
+      "id": "o04",
+      "kind": "initial",
+      "subject": "Senior Backend Engineer, Compliance Engineering at Reddit — quick note",
+      "body": "Hi Chris,\n\nI came across the Senior Backend Engineer, Compliance Engineering role at Reddit and wanted to reach out directly. I believe my background is a strong match for what the role calls for.\n\nWould you be open to a brief chat, or could you point me to the right person? Happy to share more on how I can contribute.\n\nThanks for your time,\nElena Vasquez\nsender@example.com",
+      "template": true,
+      "failedChecks": [
+        "no_em_dash",
+        "banned_phrases",
+        "one_ask",
+        "signed_by_sender"
+      ],
+      "unsupported": null
+    },
+    {
+      "id": "o05",
+      "kind": "initial",
+      "subject": "a role at Airbnb — quick note",
+      "body": "Hi there,\n\nI came across the a role role at Airbnb and wanted to reach out directly. I believe my background is a strong match for what the role calls for.\n\nWould you be open to a brief chat, or could you point me to the right person? Happy to share more on how I can contribute.\n\nThanks for your time,\nPriya Raman\nsender@example.com",
+      "template": true,
+      "failedChecks": [
+        "no_em_dash",
+        "banned_phrases",
+        "one_ask",
+        "signed_by_sender"
+      ],
+      "unsupported": null
+    },
+    {
+      "id": "o06",
+      "kind": "initial",
+      "subject": "Data Scientist II, Applied ML at Brex — quick note",
+      "body": "Hi Omar,\n\nI came across the Data Scientist II, Applied ML role at Brex and wanted to reach out directly. I believe my background is a strong match for what the role calls for.\n\nWould you be open to a brief chat, or could you point me to the right person? Happy to share more on how I can contribute.\n\nThanks for your time,\nPriya Raman\nsender@example.com",
+      "template": true,
+      "failedChecks": [
+        "no_em_dash",
+        "banned_phrases",
+        "one_ask",
+        "signed_by_sender"
+      ],
+      "unsupported": null
+    },
+    {
+      "id": "o07",
+      "kind": "initial",
+      "subject": "Product Designer at Ramp — quick note",
+      "body": "Hi Jess,\n\nI came across the Product Designer role at Ramp and wanted to reach out directly. I believe my background is a strong match for what the role calls for.\n\nWould you be open to a brief chat, or could you point me to the right person? Happy to share more on how I can contribute.\n\nThanks for your time,\nJordan Okafor\nsender@example.com",
+      "template": true,
+      "failedChecks": [
+        "no_em_dash",
+        "banned_phrases",
+        "one_ask",
+        "signed_by_sender"
+      ],
+      "unsupported": null
+    },
+    {
+      "id": "o08",
+      "kind": "initial",
+      "subject": "Product Designer at Notion — quick note",
+      "body": "Hi there,\n\nI came across the Product Designer role at Notion and wanted to reach out directly. I believe my background is a strong match for what the role calls for.\n\nWould you be open to a brief chat, or could you point me to the right person? Happy to share more on how I can contribute.\n\nThanks for your time,\nJordan Okafor\nsender@example.com",
+      "template": true,
+      "failedChecks": [
+        "no_em_dash",
+        "banned_phrases",
+        "one_ask",
+        "signed_by_sender"
+      ],
+      "unsupported": null
+    },
+    {
+      "id": "o09",
+      "kind": "initial",
+      "subject": "a role at Notion — quick note",
+      "body": "Hi Tom,\n\nI came across the a role role at Notion and wanted to reach out directly. I believe my background is a strong match for what the role calls for.\n\nWould you be open to a brief chat, or could you point me to the right person? Happy to share more on how I can contribute.\n\nThanks for your time,\nAiden Brooks\nsender@example.com",
+      "template": true,
+      "failedChecks": [
+        "no_em_dash",
+        "banned_phrases",
+        "one_ask",
+        "signed_by_sender"
+      ],
+      "unsupported": null
+    },
+    {
+      "id": "o10",
+      "kind": "initial",
+      "subject": "Data Scientist  at Lyft — quick note",
+      "body": "Hi Kim,\n\nI came across the Data Scientist  role at Lyft and wanted to reach out directly. I believe my background is a strong match for what the role calls for.\n\nWould you be open to a brief chat, or could you point me to the right person? Happy to share more on how I can contribute.\n\nThanks for your time,\nRosa Delacroix\nsender@example.com",
+      "template": true,
+      "failedChecks": [
+        "no_em_dash",
+        "banned_phrases",
+        "one_ask",
+        "signed_by_sender"
+      ],
+      "unsupported": null
+    },
+    {
+      "id": "f01",
+      "kind": "follow_up",
+      "subject": "Following up: Backend Engineer, Payments and Risk at Stripe",
+      "body": "Hi Maya,\n\nI came across the Backend Engineer, Payments and Risk role at Stripe and wanted to reach out directly. I believe my background is a strong match for what the role calls for.\n\nI wanted to gently follow up on my note below in case it slipped through — no worries at all if the timing isn't right.\n\nWould you be open to a brief chat, or could you point me to the right person? Happy to share more on how I can contribute.\n\nThanks for your time,\nMarcus Delgado\nsender@example.com",
+      "template": true,
+      "failedChecks": [
+        "word_count",
+        "no_em_dash",
+        "banned_phrases",
+        "one_ask",
+        "signed_by_sender"
+      ],
+      "unsupported": null
+    },
+    {
+      "id": "f03",
+      "kind": "follow_up",
+      "subject": "Following up: Senior Software Engineer, Backend - Payments Platform at Coinbase",
+      "body": "Hi Dana,\n\nI came across the Senior Software Engineer, Backend - Payments Platform role at Coinbase and wanted to reach out directly. I believe my background is a strong match for what the role calls for.\n\nI wanted to gently follow up on my note below in case it slipped through — no worries at all if the timing isn't right.\n\nWould you be open to a brief chat, or could you point me to the right person? Happy to share more on how I can contribute.\n\nThanks for your time,\nElena Vasquez\nsender@example.com",
+      "template": true,
+      "failedChecks": [
+        "word_count",
+        "no_em_dash",
+        "banned_phrases",
+        "one_ask",
+        "signed_by_sender"
+      ],
+      "unsupported": null
+    },
+    {
+      "id": "f07",
+      "kind": "follow_up",
+      "subject": "Following up: Product Designer at Ramp",
+      "body": "Hi Jess,\n\nI came across the Product Designer role at Ramp and wanted to reach out directly. I believe my background is a strong match for what the role calls for.\n\nI wanted to gently follow up on my note below in case it slipped through — no worries at all if the timing isn't right.\n\nWould you be open to a brief chat, or could you point me to the right person? Happy to share more on how I can contribute.\n\nThanks for your time,\nJordan Okafor\nsender@example.com",
+      "template": true,
+      "failedChecks": [
+        "word_count",
+        "no_em_dash",
+        "banned_phrases",
+        "one_ask",
+        "signed_by_sender"
+      ],
+      "unsupported": null
+    },
+    {
+      "id": "f10",
+      "kind": "follow_up",
+      "subject": "Following up: Data Scientist  at Lyft",
+      "body": "Hi Kim,\n\nI came across the Data Scientist  role at Lyft and wanted to reach out directly. I believe my background is a strong match for what the role calls for.\n\nI wanted to gently follow up on my note below in case it slipped through — no worries at all if the timing isn't right.\n\nWould you be open to a brief chat, or could you point me to the right person? Happy to share more on how I can contribute.\n\nThanks for your time,\nRosa Delacroix\nsender@example.com",
+      "template": true,
+      "failedChecks": [
+        "word_count",
+        "no_em_dash",
+        "banned_phrases",
+        "one_ask",
+        "signed_by_sender"
+      ],
+      "unsupported": null
+    }
+  ],
+  "at": "2026-10-05T13:34:44.432Z",
+  "requests": 40
+}

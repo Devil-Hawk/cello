@@ -1,0 +1,29 @@
+[SYNTHETIC RESUME - fictional person, written for an evaluation set. Not a real candidate.]
+
+Rosa Delacroix
+Columbus, OH | rosa.delacroix@example.com | github.com/example-rdelacroix
+
+SUMMARY
+Former middle-school math teacher moving into data analysis. Completed a 6-month data bootcamp and a two-quarter analytics apprenticeship. Comfortable with SQL, Python and dashboards; no full-time analytics title yet.
+
+EXPERIENCE
+Data Analytics Apprentice - Riverbend Health Clinics, Columbus, OH | Jan 2026 - Jun 2026
+- Wrote SQL against a Postgres reporting database to track appointment no-show rates across 9 clinics.
+- Built a Tableau dashboard used by 4 clinic managers each Monday.
+- Cleaned a 180,000-row patient scheduling export with pandas.
+
+Middle School Math Teacher - Columbus City Schools, Columbus, OH | 2017 - 2025
+- Taught 5 sections of Algebra I, about 140 students a year.
+- Built a spreadsheet model of student growth scores that the math team adopted for quarterly reviews.
+- Led a 3-person committee that redesigned the grade-7 pacing guide.
+
+PROJECTS
+- Bootcamp capstone: predicted ride-share demand by hour with scikit-learn (linear regression, random forest); presented results to a panel of 6.
+- Public-data dashboard: Ohio school lunch participation by district, built in Python and Plotly.
+
+SKILLS
+SQL, Python (pandas, scikit-learn, Plotly), Tableau, Excel, Google Sheets, Git, A/B testing basics, communication with non-technical audiences
+
+EDUCATION
+B.A. Mathematics Education, Ohio State University, 2017
+Data Analytics Bootcamp certificate, 2025

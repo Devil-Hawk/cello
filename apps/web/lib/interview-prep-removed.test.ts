@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest'
 const REPO_ROOT = path.resolve(process.cwd(), '../..')
 
 const RETIRED =
-  'interview_prep|interview_kits|interview ?kit|prep_interview|interviewTips|interview prep|interview tips|/prep\\b|coach([^i]|$)|prep ?kit|star stor|kitId|questionCount|prep/\\[id\\]'
+  'interview[-_ ]prep|interview_kits|interview ?kit|prep_interview|interviewTips|interview tips|/prep\\b|coach([^i]|$)|prep ?kit|star stor|kitId|questionCount|prep/\\[id\\]'
 
 // Recorded third-party pages and postings (the reader's fixtures and the ingest eval) say "coach" and "interview" in their own words.
 const ALLOWED = [
@@ -21,6 +21,14 @@ const ALLOWED = [
   /^apps\/web\/lib\/ingest\/reader\/__fixtures__\//,
   /^apps\/web\/lib\/ingest\/reader\/detail\.test\.ts:/,
   /^apps\/web\/scripts\/eval-ingest\/(pages|postings)/,
+  // The frozen copy of the old prompts that the output evaluation compares against.
+  /^apps\/web\/scripts\/evals\/outputs\/legacy\/prompts\//,
+  // Recorded postings of real employers used by the shortlist and output evaluations.
+  /^apps\/web\/scripts\/eval-shortlist\/data\/jobs\.json:/,
+  /^apps\/web\/scripts\/evals\/outputs\/data\/jobs\.json:/,
+  /^apps\/web\/scripts\/evals\/quality\/data\/jobs\.json:/,
+  // A company's own careers page, recorded for the research evaluation, names a customer's "offer coach".
+  /^apps\/web\/scripts\/evals\/outputs\/data\/dossier\/bundles\.json:/,
 ]
 
 function hits(): string[] {
@@ -29,7 +37,7 @@ function hits(): string[] {
       'git',
       [
         'grep', '-n', '-i', '-E', RETIRED, '--',
-        'apps', 'scripts', 'supabase', '.github',
+        'apps', 'scripts', 'supabase', '.github', 'docs',
         ':!supabase/migrations',
         ':!apps/web/lib/interview-prep-removed.test.ts',
       ],

@@ -1,0 +1,171 @@
+{
+  "feature": "outreach",
+  "label": "after-stub",
+  "writer": "google/gemma-4-31b-it:free",
+  "judge": "production qwen/qwen3.8-27b:free, yardstick nvidia/nemotron-3-super-120b-a12b:free",
+  "metrics": [
+    {
+      "name": "all checks pass",
+      "value": 1,
+      "n": 14,
+      "failures": []
+    },
+    {
+      "name": "grounded (yardstick)",
+      "value": 0,
+      "n": 0,
+      "failures": [],
+      "note": "judged 0 of 14"
+    },
+    {
+      "name": "specific (yardstick)",
+      "value": 0,
+      "n": 0,
+      "failures": [],
+      "note": "items with job text"
+    },
+    {
+      "name": "template without notice",
+      "value": 0,
+      "n": 14,
+      "kind": "count",
+      "note": "14 templates in 14 drafts"
+    },
+    {
+      "name": "average words",
+      "value": 32,
+      "n": 14,
+      "kind": "count"
+    }
+  ],
+  "items": [
+    {
+      "id": "o01",
+      "kind": "initial",
+      "subject": "Backend Engineer, Payments and Risk at Stripe",
+      "body": "Hi Maya,\n\nI am interested in the Backend Engineer, Payments and Risk role at Stripe. Would you be open to a short chat, or could you point me to the right person?\n\nThanks,\nMarcus Delgado",
+      "template": true,
+      "failedChecks": [],
+      "unsupported": null
+    },
+    {
+      "id": "o02",
+      "kind": "initial",
+      "subject": "Senior Software Engineer, Backend (Product Engineering) at Brex",
+      "body": "Hi Luis,\n\nI am interested in the Senior Software Engineer, Backend (Product Engineering) role at Brex. Would you be open to a short chat, or could you point me to the right person?\n\nThanks,\nMarcus Delgado",
+      "template": true,
+      "failedChecks": [],
+      "unsupported": null
+    },
+    {
+      "id": "o03",
+      "kind": "initial",
+      "subject": "Senior Software Engineer, Backend - Payments Platform at Coinbase",
+      "body": "Hi Dana,\n\nI am interested in the Senior Software Engineer, Backend - Payments Platform role at Coinbase. Would you be open to a short chat, or could you point me to the right person?\n\nThanks,\nElena Vasquez",
+      "template": true,
+      "failedChecks": [],
+      "unsupported": null
+    },
+    {
+      "id": "o04",
+      "kind": "initial",
+      "subject": "Senior Backend Engineer, Compliance Engineering at Reddit",
+      "body": "Hi Chris,\n\nI am interested in the Senior Backend Engineer, Compliance Engineering role at Reddit. Would you be open to a short chat, or could you point me to the right person?\n\nThanks,\nElena Vasquez",
+      "template": true,
+      "failedChecks": [],
+      "unsupported": null
+    },
+    {
+      "id": "o05",
+      "kind": "initial",
+      "subject": "Interested in Airbnb",
+      "body": "Hi there,\n\nI am interested in working at Airbnb. Would you be open to a short chat, or could you point me to the right person?\n\nThanks,\nPriya Raman",
+      "template": true,
+      "failedChecks": [],
+      "unsupported": null
+    },
+    {
+      "id": "o06",
+      "kind": "initial",
+      "subject": "Data Scientist II, Applied ML at Brex",
+      "body": "Hi Omar,\n\nI am interested in the Data Scientist II, Applied ML role at Brex. Would you be open to a short chat, or could you point me to the right person?\n\nThanks,\nPriya Raman",
+      "template": true,
+      "failedChecks": [],
+      "unsupported": null
+    },
+    {
+      "id": "o07",
+      "kind": "initial",
+      "subject": "Product Designer at Ramp",
+      "body": "Hi Jess,\n\nI am interested in the Product Designer role at Ramp. Would you be open to a short chat, or could you point me to the right person?\n\nThanks,\nJordan Okafor",
+      "template": true,
+      "failedChecks": [],
+      "unsupported": null
+    },
+    {
+      "id": "o08",
+      "kind": "initial",
+      "subject": "Product Designer at Notion",
+      "body": "Hi there,\n\nI am interested in the Product Designer role at Notion. Would you be open to a short chat, or could you point me to the right person?\n\nThanks,\nJordan Okafor",
+      "template": true,
+      "failedChecks": [],
+      "unsupported": null
+    },
+    {
+      "id": "o09",
+      "kind": "initial",
+      "subject": "Interested in Notion",
+      "body": "Hi Tom,\n\nI am interested in working at Notion. Would you be open to a short chat, or could you point me to the right person?\n\nThanks,\nAiden Brooks",
+      "template": true,
+      "failedChecks": [],
+      "unsupported": null
+    },
+    {
+      "id": "o10",
+      "kind": "initial",
+      "subject": "Data Scientist at Lyft",
+      "body": "Hi Kim,\n\nI am interested in the Data Scientist role at Lyft. Would you be open to a short chat, or could you point me to the right person?\n\nThanks,\nRosa Delacroix",
+      "template": true,
+      "failedChecks": [],
+      "unsupported": null
+    },
+    {
+      "id": "f01",
+      "kind": "follow_up",
+      "subject": "Re: Backend Engineer, Payments and Risk at Stripe",
+      "body": "Hi Maya,\n\nI am still interested in the Backend Engineer, Payments and Risk role at Stripe. Would you be open to pointing me to the right person?\n\nThanks,\nMarcus Delgado",
+      "template": true,
+      "failedChecks": [],
+      "unsupported": null
+    },
+    {
+      "id": "f03",
+      "kind": "follow_up",
+      "subject": "Re: Senior Software Engineer, Backend - Payments Platform at Coinbase",
+      "body": "Hi Dana,\n\nI am still interested in the Senior Software Engineer, Backend - Payments Platform role at Coinbase. Would you be open to pointing me to the right person?\n\nThanks,\nElena Vasquez",
+      "template": true,
+      "failedChecks": [],
+      "unsupported": null
+    },
+    {
+      "id": "f07",
+      "kind": "follow_up",
+      "subject": "Re: Product Designer at Ramp",
+      "body": "Hi Jess,\n\nI am still interested in the Product Designer role at Ramp. Would you be open to pointing me to the right person?\n\nThanks,\nJordan Okafor",
+      "template": true,
+      "failedChecks": [],
+      "unsupported": null
+    },
+    {
+      "id": "f10",
+      "kind": "follow_up",
+      "subject": "Re: Data Scientist at Lyft",
+      "body": "Hi Kim,\n\nI am still interested in the Data Scientist role at Lyft. Would you be open to pointing me to the right person?\n\nThanks,\nRosa Delacroix",
+      "template": true,
+      "failedChecks": [],
+      "unsupported": null
+    }
+  ],
+  "at": "2026-10-05T13:34:44.622Z",
+  "requests": 40
+}

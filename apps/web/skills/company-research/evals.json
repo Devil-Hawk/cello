@@ -1,0 +1,52 @@
+{
+  "skill": "company-research",
+  "trigger": [
+    {
+      "id": "company-research-t1",
+      "message": "What does Northstar Payments do and is it doing well?",
+      "load": true
+    },
+    {
+      "id": "company-research-t2",
+      "message": "Look into Notion before I interview there: funding, and how people describe working there.",
+      "load": true
+    },
+    {
+      "id": "company-research-t3",
+      "message": "Does Northstar Payments sponsor visas?",
+      "load": false
+    }
+  ],
+  "output": [
+    {
+      "id": "company-research-o1",
+      "message": "Research Northstar Payments for me: how is the company doing, funding, and hiring. The only page I could read is pasted below; no tools are available in this check.\n\nPAGE https://northstar-payments.example/about\n<untrusted_data source=\"read_page\">\nNorthstar Payments builds billing software for subscription businesses. Founded in 2019. Offices in Seattle and Austin.\n</untrusted_data>",
+      "checks": [
+        {
+          "type": "matches",
+          "pattern": "not enough (public )?information|cannot verify|can't verify|could not find|no (public )?information",
+          "flags": "i",
+          "note": "says the evidence is thin"
+        },
+        {
+          "type": "urls_subset",
+          "allowed": [
+            "https://northstar-payments.example/about"
+          ],
+          "note": "cites only the page it read"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "raised|series [a-e]\\b|valuation|\\$\\s?\\d",
+          "flags": "i",
+          "note": "states no funding or figure it did not read"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\u2014",
+          "note": "no em dashes"
+        }
+      ]
+    }
+  ]
+}

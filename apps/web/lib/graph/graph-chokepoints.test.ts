@@ -127,7 +127,16 @@ const BANNED_LANGCHAIN_PACKAGES = [
 const BANNED_CHAT_CONSTRUCTOR = /new Chat[A-Z]\w+\(/
 const BANNED_BIND_TOOLS = /\.bindTools\(/
 
-function findLangchainBanOffenses(src: string): string[] {
+/**
+ * The one door for agent model calls. lib/agents/model.ts wraps LangChain's
+ * ChatOpenRouter (the agent loops need a LangChain chat model); it is the only
+ * file allowed to say `new ChatOpenRouter(`. Every other Chat*( constructor,
+ * ChatOpenRouter included, is still banned. lib/agents/chokepoints.test.ts holds
+ * the agent-specific rules (createDeepAgent, createAgent, stream call sites).
+ */
+const AGENT_MODEL_DOOR = 'lib/agents/model.ts'
+
+function findLangchainBanOffenses(src: string, file = ''): string[] {
   const stripped = stripComments(src)
   const offenses: string[] = []
   for (const pkg of BANNED_LANGCHAIN_PACKAGES) {
@@ -138,12 +147,20 @@ function findLangchainBanOffenses(src: string): string[] {
       stripped.includes(`require("${pkg}`)
     if (importedFrom) offenses.push(`imports ${pkg}`)
   }
-  if (BANNED_CHAT_CONSTRUCTOR.test(stripped)) offenses.push('constructs a new Chat*( client')
+  const withoutDoor = file === AGENT_MODEL_DOOR ? stripped.replace(/new ChatOpenRouter\(/g, '') : stripped
+  if (BANNED_CHAT_CONSTRUCTOR.test(withoutDoor)) offenses.push('constructs a new Chat*( client')
   if (BANNED_BIND_TOOLS.test(stripped)) offenses.push('calls .bindTools(')
   return offenses
 }
 
 describe('LangChain model abstractions stay banned', () => {
+  it('the agent model door may construct ChatOpenRouter and nothing else, and no other file may', () => {
+    const door = `const model = new ChatOpenRouter({ model })`
+    expect(findLangchainBanOffenses(door, AGENT_MODEL_DOOR)).toEqual([])
+    expect(findLangchainBanOffenses(door, 'lib/agents/factory.ts')).toEqual(['constructs a new Chat*( client'])
+    expect(findLangchainBanOffenses(`new ChatOpenAI({})`, AGENT_MODEL_DOOR)).toEqual(['constructs a new Chat*( client'])
+  })
+
   it('the ban detects a ChatOpenAI construction (fixture self-test, not a repo file)', () => {
     const fixture = `
       import { ChatOpenAI } from '@langchain/openai'
@@ -175,7 +192,7 @@ describe('LangChain model abstractions stay banned', () => {
 
     const offenders: string[] = []
     for (const file of files) {
-      const offenses = findLangchainBanOffenses(readFileSync(file, 'utf8'))
+      const offenses = findLangchainBanOffenses(readFileSync(file, 'utf8'), rel(file))
       if (offenses.length > 0) offenders.push(`${rel(file)}: ${offenses.join(', ')}`)
     }
     expect(

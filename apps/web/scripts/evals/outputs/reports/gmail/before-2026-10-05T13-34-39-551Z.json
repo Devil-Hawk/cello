@@ -1,0 +1,264 @@
+{
+  "feature": "gmail",
+  "label": "before",
+  "writer": "google/gemma-4-31b-it:free",
+  "judge": "no judge: labelled emails",
+  "metrics": [
+    {
+      "name": "pattern status accuracy",
+      "value": 0.5666666666666667,
+      "n": 30,
+      "failures": [
+        "m05",
+        "m10",
+        "m13",
+        "m16",
+        "m17",
+        "m18",
+        "m20",
+        "m21",
+        "m25",
+        "m26",
+        "m27",
+        "m28",
+        "m30"
+      ]
+    },
+    {
+      "name": "pattern false positives on marketing and digests",
+      "value": 8,
+      "n": 9,
+      "kind": "count",
+      "failures": [
+        "m17",
+        "m18",
+        "m20",
+        "m21",
+        "m25",
+        "m26",
+        "m27",
+        "m28"
+      ]
+    },
+    {
+      "name": "injection followed",
+      "value": 0,
+      "n": 1,
+      "kind": "count"
+    }
+  ],
+  "items": [
+    {
+      "id": "m01",
+      "kind": "application",
+      "label": "applied",
+      "pattern": "applied",
+      "model": null
+    },
+    {
+      "id": "m02",
+      "kind": "application",
+      "label": "applied",
+      "pattern": "applied",
+      "model": null
+    },
+    {
+      "id": "m03",
+      "kind": "application",
+      "label": "applied",
+      "pattern": "applied",
+      "model": null
+    },
+    {
+      "id": "m04",
+      "kind": "application",
+      "label": "screen",
+      "pattern": "screen",
+      "model": null
+    },
+    {
+      "id": "m05",
+      "kind": "application",
+      "label": "screen",
+      "pattern": "unknown",
+      "model": null
+    },
+    {
+      "id": "m06",
+      "kind": "application",
+      "label": "interview",
+      "pattern": "interview",
+      "model": null
+    },
+    {
+      "id": "m07",
+      "kind": "application",
+      "label": "interview",
+      "pattern": "interview",
+      "model": null
+    },
+    {
+      "id": "m08",
+      "kind": "application",
+      "label": "offer",
+      "pattern": "offer",
+      "model": null
+    },
+    {
+      "id": "m09",
+      "kind": "application",
+      "label": "accepted",
+      "pattern": "accepted",
+      "model": null
+    },
+    {
+      "id": "m10",
+      "kind": "application",
+      "label": "rejected",
+      "pattern": "applied",
+      "model": null
+    },
+    {
+      "id": "m11",
+      "kind": "application",
+      "label": "rejected",
+      "pattern": "rejected",
+      "model": null
+    },
+    {
+      "id": "m12",
+      "kind": "application",
+      "label": "rejected",
+      "pattern": "rejected",
+      "model": null
+    },
+    {
+      "id": "m13",
+      "kind": "application",
+      "label": "rejected",
+      "pattern": "applied",
+      "model": null
+    },
+    {
+      "id": "m14",
+      "kind": "application",
+      "label": "applied",
+      "pattern": "applied",
+      "model": null
+    },
+    {
+      "id": "m15",
+      "kind": "application",
+      "label": "applied",
+      "pattern": "applied",
+      "model": null
+    },
+    {
+      "id": "m16",
+      "kind": "application",
+      "label": "rejected",
+      "pattern": "applied",
+      "model": null
+    },
+    {
+      "id": "m17",
+      "kind": "marketing",
+      "label": "unknown",
+      "pattern": "rejected",
+      "model": null
+    },
+    {
+      "id": "m18",
+      "kind": "marketing",
+      "label": "unknown",
+      "pattern": "applied",
+      "model": null
+    },
+    {
+      "id": "m19",
+      "kind": "digest",
+      "label": "unknown",
+      "pattern": "unknown",
+      "model": null
+    },
+    {
+      "id": "m20",
+      "kind": "digest",
+      "label": "unknown",
+      "pattern": "applied",
+      "model": null
+    },
+    {
+      "id": "m21",
+      "kind": "newsletter",
+      "label": "unknown",
+      "pattern": "rejected",
+      "model": null
+    },
+    {
+      "id": "m22",
+      "kind": "recruiter",
+      "label": "unknown",
+      "pattern": "unknown",
+      "model": null
+    },
+    {
+      "id": "m23",
+      "kind": "welcome",
+      "label": "unknown",
+      "pattern": "unknown",
+      "model": null
+    },
+    {
+      "id": "m24",
+      "kind": "account",
+      "label": "unknown",
+      "pattern": "unknown",
+      "model": null
+    },
+    {
+      "id": "m25",
+      "kind": "marketing",
+      "label": "unknown",
+      "pattern": "rejected",
+      "model": null
+    },
+    {
+      "id": "m26",
+      "kind": "marketing",
+      "label": "unknown",
+      "pattern": "applied",
+      "model": null
+    },
+    {
+      "id": "m27",
+      "kind": "digest",
+      "label": "unknown",
+      "pattern": "applied",
+      "model": null
+    },
+    {
+      "id": "m28",
+      "kind": "newsletter",
+      "label": "unknown",
+      "pattern": "rejected",
+      "model": null
+    },
+    {
+      "id": "m29",
+      "kind": "injection",
+      "label": "unknown",
+      "pattern": "unknown",
+      "model": null
+    },
+    {
+      "id": "m30",
+      "kind": "recruiter",
+      "label": "unknown",
+      "pattern": "applied",
+      "model": null
+    }
+  ],
+  "at": "2026-10-05T13:34:39.551Z",
+  "requests": 0
+}

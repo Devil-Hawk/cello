@@ -61,7 +61,7 @@ import { randomUUID } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { readProfileForDemoGuards } from '../harness/keys'
 import type { AdminClient } from '../harness/types'
-import { contentCaptureFor, exportTrace, langfuseConfigured, traceSampled } from '../observability/langfuse'
+import { contentCaptureFor, exportTrace, langfuseConfigured, observationIdFor, traceSampled } from '../observability/langfuse'
 
 /** Matches the `kind` CHECK constraint on public.trace_spans. */
 export type SpanKind = 'graph' | 'node' | 'llm' | 'tool' | 'judge' | 'http'
@@ -225,6 +225,10 @@ export class SpanBuffer {
   private exportCache: boolean | undefined
   meta: TraceMeta
   readonly scores: PendingScore[] = []
+  /** Generation name to the Langfuse observation id of its latest call in this
+   *  trace, so a row written later in the request can say which generation
+   *  produced it (see traceRefFor). */
+  readonly generations = new Map<string, string>()
 
   constructor(userId: string, threadId: string | null = null, traceId: string = randomUUID(), meta: TraceMeta = {}) {
     this.userId = userId
@@ -243,6 +247,16 @@ export class SpanBuffer {
    *  trace is not exported. */
   addScore(score: PendingScore): void {
     if (this.exportEnabled) this.scores.push(score)
+  }
+
+  /** Remember a generation's observation id. Null (nothing remembered) when
+   *  the trace is not exported, because then Langfuse never sees it. */
+  noteGeneration(name: string, spanId: string): { traceId: string; observationId: string } | null {
+    const traceId = this.traceId.replace(/-/g, '')
+    if (!this.exportEnabled || !/^[0-9a-f]{32}$/.test(traceId)) return null
+    const observationId = observationIdFor(spanId)
+    this.generations.set(name, observationId)
+    return { traceId, observationId }
   }
 
   /** Hand the queued scores to one replay (each is sent once). */
@@ -363,6 +377,21 @@ const traceContext = new AsyncLocalStorage<TraceContext>()
 
 export function currentTraceContext(): TraceContext | undefined {
   return traceContext.getStore()
+}
+
+/**
+ * Where the current request's output went in Langfuse, for stamping on the row
+ * that stores it (trace_id and observation_id columns), so a later outcome
+ * such as an approval or a reply can be scored on the generation that wrote it.
+ * Pass the generation name (the `name` given to callLlm) to name the
+ * observation; without it only the trace is known. Null outside a trace and
+ * when the trace is not exported, which spreads to nothing.
+ */
+export function traceRefFor(name?: string): { trace_id: string; observation_id: string | null } | null {
+  const buffer = currentTraceContext()?.buffer
+  const traceId = buffer?.traceId.replace(/-/g, '')
+  if (!buffer || !buffer.exportEnabled || !traceId || !/^[0-9a-f]{32}$/.test(traceId)) return null
+  return { trace_id: traceId, observation_id: (name && buffer.generations.get(name)) || null }
 }
 
 export function runInTraceContext<T>(ctx: TraceContext, fn: () => Promise<T>): Promise<T> {

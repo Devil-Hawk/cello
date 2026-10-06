@@ -77,8 +77,9 @@ const BANNED_LANGCHAIN_PACKAGES = [
 ]
 const BANNED_CHAT_CONSTRUCTOR = /new Chat[A-Z]\w+\(/
 const BANNED_BIND_TOOLS = /\.bindTools\(/
+const AGENT_MODEL_DOOR = 'lib/agents/model.ts'
 
-function findLangchainBanOffenses(src: string): string[] {
+function findLangchainBanOffenses(src: string, file = ''): string[] {
   const stripped = stripComments(src)
   const offenses: string[] = []
   for (const pkg of BANNED_LANGCHAIN_PACKAGES) {
@@ -89,9 +90,24 @@ function findLangchainBanOffenses(src: string): string[] {
       stripped.includes(`require("${pkg}`)
     if (importedFrom) offenses.push(`imports ${pkg}`)
   }
-  if (BANNED_CHAT_CONSTRUCTOR.test(stripped)) offenses.push('constructs a new Chat*( client')
+  const withoutDoor = file === AGENT_MODEL_DOOR ? stripped.replace(/new ChatOpenRouter\(/g, '') : stripped
+  if (BANNED_CHAT_CONSTRUCTOR.test(withoutDoor)) offenses.push('constructs a new Chat*( client')
   if (BANNED_BIND_TOOLS.test(stripped)) offenses.push('calls .bindTools(')
   return offenses
+}
+
+// --- kept in sync with lib/agents/chokepoints.test.ts -----------------------
+
+const AGENT_DOOR_RULES: { name: string; pattern: RegExp; allowed: string[]; offending: string }[] = [
+  { name: 'new ChatOpenRouter(', pattern: /\bnew\s+ChatOpenRouter\s*\(/, allowed: ['lib/agents/model.ts'], offending: 'const m = new ChatOpenRouter({ model })' },
+  { name: 'createDeepAgent(', pattern: /\bcreateDeepAgent\s*\(/, allowed: ['lib/agents/factory.ts'], offending: 'const a = createDeepAgent({ tools })' },
+  { name: 'createSubAgent(', pattern: /\bcreateSubAgent\s*\(/, allowed: ['lib/agents/factory.ts'], offending: 'const a = createSubAgent(spec)' },
+  { name: 'createAgent(', pattern: /\bcreateAgent\s*\(/, allowed: [], offending: 'const a = createAgent({ model })' },
+  { name: 'new MultiServerMCPClient(', pattern: /\bnew\s+MultiServerMCPClient\s*\(/, allowed: ['lib/agents/user-mcp.ts'], offending: 'const c = new MultiServerMCPClient({ mcpServers })' },
+]
+
+function agentDoorOffender(rule: (typeof AGENT_DOOR_RULES)[number], src: string, file: string): boolean {
+  return rule.pattern.test(stripComments(src)) && !rule.allowed.includes(file)
 }
 
 // --- kept in sync with lib/graph/graph-chokepoints.test.ts: (b) ------------
@@ -255,6 +271,19 @@ const MUTATION_CASES: MutationCase[] = [
     mutate: (src) => src.replace('makeLlmRunner(config.key, userId)', 'makeLlmRunner(config.key)'),
     scanReportsOffender: (src) => isUnmeteredWrapperCall(src, 'makeLlmRunner('),
   },
+  ...AGENT_DOOR_RULES.map(
+    (rule): MutationCase => ({
+      name: `Agent engine door: ${rule.name} in a file that is not the door`,
+      expectedFailingTest: `lib/agents/chokepoints.test.ts > 'the agent engine has one door for each dangerous thing' > '${rule.name} appears only in ${rule.allowed.join(', ') || 'no file'}'`,
+      baseline: `
+      export function ok() {
+        return 1
+      }
+    `,
+      mutate: (src) => src.replace('return 1', `${rule.offending}\n        return 1`),
+      scanReportsOffender: (src) => agentDoorOffender(rule, src, 'lib/agents/rogue.ts'),
+    })
+  ),
 ]
 
 function run(): boolean {

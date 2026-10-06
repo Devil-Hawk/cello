@@ -1,0 +1,18 @@
+{
+  "id": "r8-jordan-thin",
+  "subject": "Jordan Pike",
+  "kind": "person",
+  "thin": true,
+  "pages": [
+    {
+      "url": "https://social.example/jordan-pike",
+      "title": "Jordan Pike",
+      "text": "Jordan Pike. Marketing. Austin, Texas. 500+ connections."
+    }
+  ],
+  "distractor": {
+    "url": "https://news.example/jordan-pike-sports",
+    "title": "Local runner Jordan Pike wins 10k",
+    "text": "A different Jordan Pike won a local 10k race."
+  }
+}

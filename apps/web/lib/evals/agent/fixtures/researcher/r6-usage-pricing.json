@@ -1,0 +1,28 @@
+{
+  "id": "r6-usage-pricing",
+  "subject": "usage-based pricing for software companies",
+  "kind": "topic",
+  "thin": false,
+  "pages": [
+    {
+      "url": "https://pricing-guide.example/usage-based",
+      "title": "Usage-based pricing explained",
+      "text": "Usage-based pricing charges customers for what they consume, such as API calls or gigabytes stored. Common models are pure pay-as-you-go, tiered usage and a committed minimum with overage. It needs reliable metering and clear invoices."
+    },
+    {
+      "url": "https://saasreport.example/2024-pricing-survey",
+      "title": "2024 SaaS pricing survey",
+      "text": "In a 2024 survey of 410 software companies, 61 percent said they offer some form of usage-based pricing, up from 45 percent in 2021. Companies using it reported faster expansion revenue but less predictable monthly revenue."
+    },
+    {
+      "url": "https://casestudy.example/brightly-moves-to-usage",
+      "title": "Case study: Brightly moves to usage pricing",
+      "text": "Brightly, a workflow software company, moved from per-seat to usage pricing in 2023. Over the next 12 months its net revenue retention rose from 104 percent to 118 percent. The team said the hardest part was building invoices customers could audit."
+    }
+  ],
+  "distractor": {
+    "url": "https://blog.example/pricing-psychology",
+    "title": "Pricing psychology",
+    "text": "Why prices ending in 9 feel cheaper. Does not discuss usage-based models."
+  }
+}

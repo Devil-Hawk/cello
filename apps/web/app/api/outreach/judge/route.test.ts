@@ -1,14 +1,12 @@
-// Tests for POST /api/outreach/judge — the two things the metered-judge
-// migration was FOR: (1) verdict persistence, every judged draft leaves a
-// row behind via writeVerdict instead of dying with the HTTP response, and
-// (2) the insufficient-budget path, where BudgetCapError from inside
-// meteredJudgeClient becomes a typed, PERSISTED refusal (REFUSE-OVER-GUESS,
-// invariant 7) rather than just a 429 the client has to remember.
+// Tests for POST /api/outreach/judge: the check the user asks for on one draft.
+// What matters: (1) every judged draft leaves rows behind via writeVerdict
+// instead of dying with the HTTP response, (2) the insufficient-budget path,
+// where BudgetCapError from the model call becomes a typed, PERSISTED refusal
+// (refuse over guess) and not just a 429 the client has to remember, and (3)
+// the judges are shown the same numbered sources the draft was written from.
 //
-// Everything below meteredJudgeClient/writeVerdict is mocked — this is a
-// route test, not a re-test of judge.ts's fetch wrapper (that's
-// lib/evals/judge.test.ts) or verdicts.ts's insert shape (that's
-// lib/evals/verdicts.test.ts).
+// The judges themselves (lib/evals/claims-judge.ts) and the source loader are
+// mocked: this is a route test.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
@@ -18,31 +16,44 @@ vi.mock('@/lib/evals/verdicts', () => ({
   writeVerdict: (...args: unknown[]) => writeVerdictMock(...args),
 }))
 
-const meteredJudgeClientMock = vi.fn()
-const judgeGroundednessMock = vi.fn()
+const judgeClaimsMock = vi.fn()
 const judgeSpecificityMock = vi.fn()
-vi.mock('@/lib/evals/judge', () => ({
-  meteredJudgeClient: (...args: unknown[]) => meteredJudgeClientMock(...args),
-  judgeGroundedness: (...args: unknown[]) => judgeGroundednessMock(...args),
+const judgeRunnerMock = vi.fn((_keys: unknown, name: string) => `runner:${name}`)
+vi.mock('@/lib/evals/claims-judge', () => ({
+  judgeClaims: (...args: unknown[]) => judgeClaimsMock(...args),
   judgeSpecificity: (...args: unknown[]) => judgeSpecificityMock(...args),
-  JUDGE_MODEL: 'anthropic/claude-haiku-4.5',
+  judgeRunner: (...args: [unknown, string]) => judgeRunnerMock(...args),
+  judgeModelFor: () => 'anthropic/claude-haiku-4.5',
 }))
-
-const assertWithinBudgetMock = vi.fn().mockResolvedValue(undefined)
-vi.mock('@/lib/harness/spend', async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>()
-  return { ...actual, assertWithinBudget: (...args: unknown[]) => assertWithinBudgetMock(...args) }
-})
 
 const loadApiKeysMock = vi.fn()
 vi.mock('@/lib/harness/keys', () => ({
   loadApiKeys: (...args: unknown[]) => loadApiKeysMock(...args),
 }))
 
+vi.mock('@/lib/outreach/sources', () => ({
+  loadOutreachSources: async () => ({
+    senderName: 'Ada Lovelace',
+    companyId: 'co-1',
+    hasHistory: false,
+    input: {
+      userEmail: 'ada@example.com',
+      jobTitle: 'Senior Backend Engineer',
+      companyName: 'Acme',
+      resumeText: 'Ada Lovelace\nBuilt the analytical engine',
+      jobDescription: 'Build services.\nOwn the ledger.',
+      facts: [{ id: 'D1', text: 'Acme ships weekly', url: 'https://acme.test/about' }],
+      history: [],
+    },
+  }),
+}))
+
 interface MessageFixture {
   id: string
   user_id: string
+  subject: string
   body: string
+  contact_id: string | null
   job_id: string | null
   company_id: string | null
 }
@@ -53,29 +64,14 @@ vi.mock('@/lib/outreach/store', () => ({
   getOutreach: (...args: unknown[]) => getOutreachMock(...args),
 }))
 
-let user: { id: string } | null
-const supabaseTableRow: Record<string, Record<string, unknown> | null> = {
-  jobs: { title: 'Senior Backend Engineer', description: 'Build services.' },
-  companies: { name: 'Acme' },
-  profiles: { resume_text: 'Ada Lovelace — engineer.' },
-}
-function tableChain(table: string) {
-  const chain = {
-    select: () => chain,
-    eq: () => chain,
-    single: async () => ({ data: supabaseTableRow[table] ?? null, error: null }),
-  }
-  return chain
-}
-const supabase = {
-  auth: { getUser: async () => ({ data: { user }, error: null }) },
-  from: (table: string) => tableChain(table),
-}
+let user: { id: string; email?: string } | null
+const supabase = { auth: { getUser: async () => ({ data: { user }, error: null }) } }
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => supabase }))
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({}) }))
 
 import { POST } from './route'
 import { BudgetCapError } from '@/lib/harness/spend'
+import { MissingKeyError } from '@/lib/harness/providers'
 
 function post(body: unknown) {
   return new NextRequest('http://localhost/api/outreach/judge', {
@@ -85,69 +81,58 @@ function post(body: unknown) {
   })
 }
 
-const PASS_RESULT = { verdict: 'pass', score: 0.9, threshold: 0.5, summary: 'looks grounded' }
-const FAIL_RESULT = { verdict: 'fail', score: 0.2, threshold: 0.6, summary: 'too generic' }
+const PASS_RESULT = { name: 'groundedness', verdict: 'pass', score: 1, threshold: 1, summary: 'All 2 statements trace to your sources.', claims: [], unsupported: [] }
+const FAIL_RESULT = { name: 'specificity', verdict: 'fail', score: 0, threshold: 1, summary: 'Generic: nothing ties to the post.', detail: null, source: null }
 
 beforeEach(() => {
   vi.clearAllMocks()
-  assertWithinBudgetMock.mockResolvedValue(undefined)
   writeVerdictMock.mockResolvedValue(undefined)
   loadApiKeysMock.mockResolvedValue({ openrouter: 'sk-or-test' })
-  meteredJudgeClientMock.mockReturnValue({ fakeClient: true })
-  judgeGroundednessMock.mockResolvedValue(PASS_RESULT)
+  judgeClaimsMock.mockResolvedValue(PASS_RESULT)
   judgeSpecificityMock.mockResolvedValue(FAIL_RESULT)
-  user = { id: 'user-1' }
-  message = { id: 'msg-1', user_id: 'user-1', body: 'Hi, I saw your posting...', job_id: 'job-1', company_id: 'co-1' }
+  user = { id: 'user-1', email: 'ada@example.com' }
+  message = { id: 'msg-1', user_id: 'user-1', subject: 'S', body: 'Hi, I saw your posting...', contact_id: 'c-1', job_id: 'job-1', company_id: 'co-1' }
 })
 
-describe('POST — verdict persistence from the route', () => {
-  it('persists both judged verdicts via writeVerdict, keyed to the draft, and returns them in the response', async () => {
+describe('POST, verdict persistence from the route', () => {
+  it('persists both verdicts under the claim-level judge names and returns them', async () => {
     const response = await POST(post({ id: 'msg-1' }))
     const body = await response.json()
 
     expect(response.status).toBe(200)
     expect(body).toMatchObject({ ok: true, groundedness: PASS_RESULT, specificity: FAIL_RESULT })
-
     expect(writeVerdictMock).toHaveBeenCalledTimes(2)
     expect(writeVerdictMock).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        userId: 'user-1',
-        subjectKind: 'outreach_draft',
-        subjectId: 'msg-1',
-        judge: 'factuality',
-        verdict: 'pass',
-        score: 0.9,
-        threshold: 0.5,
-        rationale: 'looks grounded',
-        model: 'anthropic/claude-haiku-4.5',
-      })
+      expect.objectContaining({ userId: 'user-1', subjectKind: 'outreach_draft', subjectId: 'msg-1', judge: 'groundedness', verdict: 'pass', score: 1, threshold: 1, model: 'anthropic/claude-haiku-4.5' })
     )
     expect(writeVerdictMock).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        userId: 'user-1',
-        subjectKind: 'outreach_draft',
-        subjectId: 'msg-1',
-        judge: 'closed_qa',
-        verdict: 'fail',
-        score: 0.2,
-        threshold: 0.6,
-        rationale: 'too generic',
-      })
+      expect.objectContaining({ judge: 'specificity', verdict: 'fail', score: 0, rationale: 'Generic: nothing ties to the post.' })
     )
   })
 
-  it('builds the client through meteredJudgeClient with the caller userId, not a second key path', async () => {
+  it('shows the claims judge the numbered resume, job, research and history lines', async () => {
     await POST(post({ id: 'msg-1' }))
-    expect(meteredJudgeClientMock).toHaveBeenCalledWith(expect.anything(), 'user-1', { openrouter: 'sk-or-test' })
+    const args = judgeClaimsMock.mock.calls[0]
+    expect(args[0]).toBe('runner:judge-claims')
+    expect(args[1].text).toBe('Hi, I saw your posting...')
+    expect(args[1].sources.map((l: { id: string }) => l.id)).toEqual(['R1', 'R2', 'J1', 'J2', 'D1'])
+  })
+
+  it('shows the specificity judge the job lines and the company facts', async () => {
+    await POST(post({ id: 'msg-1' }))
+    const args = judgeSpecificityMock.mock.calls[0][1]
+    expect(args.jobLines.map((l: { id: string }) => l.id)).toEqual(['J1', 'J2'])
+    expect(args.facts[0]).toMatchObject({ id: 'D1', url: 'https://acme.test/about' })
+    expect(args).toMatchObject({ role: 'Senior Backend Engineer', company: 'Acme' })
   })
 })
 
-describe('POST — the insufficient-budget verdict path', () => {
-  it('persists both judges as insufficient-budget and returns 429 when the judge call hits the cap', async () => {
+describe('POST, the insufficient-budget verdict path', () => {
+  it('persists both judges as insufficient-budget and returns 429 when the call hits the cap', async () => {
     const capError = new BudgetCapError(12.5, 10)
-    judgeGroundednessMock.mockRejectedValue(capError)
+    judgeClaimsMock.mockRejectedValue(capError)
     judgeSpecificityMock.mockRejectedValue(capError)
 
     const response = await POST(post({ id: 'msg-1' }))
@@ -155,64 +140,34 @@ describe('POST — the insufficient-budget verdict path', () => {
 
     expect(response.status).toBe(429)
     expect(body).toMatchObject({ error: capError.message, budgetExhausted: true })
-
     expect(writeVerdictMock).toHaveBeenCalledTimes(2)
-    expect(writeVerdictMock).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        userId: 'user-1',
-        subjectKind: 'outreach_draft',
-        subjectId: 'msg-1',
-        judge: 'factuality',
-        verdict: 'insufficient-budget',
-        rationale: capError.message,
-      })
-    )
-    expect(writeVerdictMock).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        userId: 'user-1',
-        subjectKind: 'outreach_draft',
-        subjectId: 'msg-1',
-        judge: 'closed_qa',
-        verdict: 'insufficient-budget',
-        rationale: capError.message,
-      })
-    )
-    // A refusal is typed, not a substituted score.
-    for (const call of writeVerdictMock.mock.calls) {
-      expect((call[1] as { score?: number }).score).toBeUndefined()
+    for (const judge of ['groundedness', 'specificity']) {
+      expect(writeVerdictMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ userId: 'user-1', subjectKind: 'outreach_draft', subjectId: 'msg-1', judge, verdict: 'insufficient-budget', rationale: capError.message })
+      )
     }
-  })
-
-  it('never reaches writeVerdict when assertWithinBudget itself refuses before any client is built', async () => {
-    assertWithinBudgetMock.mockRejectedValue(new BudgetCapError(12.5, 10))
-
-    const response = await POST(post({ id: 'msg-1' }))
-
-    expect(response.status).toBe(429)
-    expect(meteredJudgeClientMock).not.toHaveBeenCalled()
-    expect(writeVerdictMock).toHaveBeenCalledTimes(2)
-    expect(writeVerdictMock.mock.calls.every(([, input]) => (input as { verdict: string }).verdict === 'insufficient-budget')).toBe(true)
+    // A refusal is typed, not a substituted score.
+    for (const call of writeVerdictMock.mock.calls) expect((call[1] as { score?: number }).score).toBeUndefined()
   })
 })
 
-describe('POST — the rest of the contract stays intact', () => {
-  it('404s a draft that does not belong to (or does not exist for) this user, and never judges it', async () => {
+describe('POST, the rest of the contract stays intact', () => {
+  it('404s a draft that does not belong to this user, and never judges it', async () => {
     message = null
     const response = await POST(post({ id: 'not-mine' }))
     expect(response.status).toBe(404)
-    expect(meteredJudgeClientMock).not.toHaveBeenCalled()
+    expect(judgeClaimsMock).not.toHaveBeenCalled()
     expect(writeVerdictMock).not.toHaveBeenCalled()
   })
 
-  it('400s with needsKey when no OpenRouter key is configured, before building a client', async () => {
-    loadApiKeysMock.mockResolvedValue({})
+  it('400s with needsKey when the model call finds no key', async () => {
+    judgeClaimsMock.mockRejectedValue(new MissingKeyError())
     const response = await POST(post({ id: 'msg-1' }))
     const body = await response.json()
     expect(response.status).toBe(400)
     expect(body.needsKey).toBe(true)
-    expect(meteredJudgeClientMock).not.toHaveBeenCalled()
+    expect(writeVerdictMock).not.toHaveBeenCalled()
   })
 
   it('401s when nobody is signed in', async () => {

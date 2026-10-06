@@ -1,0 +1,54 @@
+{
+  "skill": "cold-outreach",
+  "trigger": [
+    {
+      "id": "cold-outreach-t1",
+      "message": "Write an email to the hiring manager at Northstar Payments about the PM role.",
+      "load": true
+    },
+    {
+      "id": "cold-outreach-t2",
+      "message": "Reach out to someone on the billing team at Northstar for me.",
+      "load": true
+    },
+    {
+      "id": "cold-outreach-t3",
+      "message": "Follow up with Sam Rivera, I emailed him last week and heard nothing.",
+      "load": false
+    }
+  ],
+  "output": [
+    {
+      "id": "cold-outreach-o1",
+      "message": "Draft the first email for this contact. The tool results are pasted below; no tools are available in this check.\n\nMY RESUME:\nDana Lee, Product Manager, Seattle\nAcme Billing (2021-2025), Senior Product Manager: Led the invoicing product used by 3,200 customers. Cut invoice disputes by 31% by redesigning the payment-status page. Managed 2 engineers and 1 designer. Shipped usage-based pricing in 6 months.\nNorthwind Labs (2018-2021), Product Manager: Launched the self-serve onboarding flow, lifting trial-to-paid conversion from 9% to 14%. Ran weekly customer interviews.\nSkills: SQL, Looker, Figma, roadmapping, A/B testing.\nEducation: BS Economics, University of Washington.\n\nROLE:\n<untrusted_data source=\"get_role\">\nNorthstar Payments, Senior Product Manager, Billing (Seattle or remote in the US).\nRequirements: 5+ years of product management; experience shipping usage-based pricing; strong SQL; Kubernetes-based infrastructure experience is a plus.\nYou will own the billing roadmap and work with 6 engineers.\n</untrusted_data>\n\nCONTACT: a person on the billing team at Northstar Payments. No name is on record. Email status: inferred.",
+      "checks": [
+        {
+          "type": "matches",
+          "pattern": "Hi there,",
+          "note": "neutral greeting when there is no name"
+        },
+        {
+          "type": "max_words",
+          "value": 150,
+          "note": "short (body under 120 plus subject and a note)"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "as we discussed|great meeting|following up on|hope this finds|reaching out",
+          "flags": "i",
+          "note": "no invented relationship or filler"
+        },
+        {
+          "type": "matches",
+          "pattern": "\\?",
+          "note": "makes an ask"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\u2014",
+          "note": "no em dashes"
+        }
+      ]
+    }
+  ]
+}

@@ -12,6 +12,8 @@
 //     linkedin.com/in/<slug> would eventually resolve to a real stranger's
 //     profile, which is precisely the thing a demo must not do.
 
+import { ResumeSchema, type Resume } from '@/lib/resume/schema'
+
 /** Identity written onto the demo profile and echoed in the seeded resume. */
 export const DEMO_PERSONA = {
   fullName: 'Riley Marsh',
@@ -25,95 +27,99 @@ export const DEMO_PERSONA = {
 } as const
 
 /**
- * The demo profile's base resume, in the AUTHORED Markdown shape the resume
- * tooling expects (lib/resume/types.ts: `content_json.markdown` is authored,
- * `content` is derived from it via markdownToPlainText — the seeder does both
- * together through the same helpers the studio uses, never one without the
- * other).
+ * The demo profile's base resume, as the structured Resume the resume tooling
+ * stores (lib/resume/schema.ts). The seeder derives every stored column from
+ * it with deriveResumeColumns, the same helper the writer uses, so the
+ * Markdown, the plain text and the structure cannot disagree.
  *
- * Headings, bullet lists and inline bold only: that is exactly the grammar
- * lib/resume/markdown.ts parses and every template renders, so this document
- * exports cleanly to PDF/DOCX without the demo hitting an unsupported
- * construct.
+ * Fictional throughout, and free of em dashes: separators are " | " and " - ".
  */
-export const DEMO_RESUME_MARKDOWN = `# Riley Marsh
-
-Senior Backend / Platform Engineer — Seattle, WA (open to remote, US)
-
-riley.marsh@demo.example.com | (206) 555-0142 | riley-marsh.example.com
-
-## Summary
-
-Backend and platform engineer with eight years building high-throughput data
-services. Most recently led the ingestion and query tier for a multi-tenant
-analytics product serving 4B events/day, cutting p99 read latency from 1.9s to
-310ms while halving infrastructure spend. Comfortable owning a system end to
-end: schema design, service code, rollout, on-call, and the cost line.
-
-## Experience
-
-### Staff Software Engineer — Cobalt Harbor Systems
-
-*Seattle, WA — Mar 2022 to present*
-
-- Rebuilt the event ingestion pipeline (Kafka to a columnar store) behind a
-  dual-write migration, moving 4B events/day with **zero customer-visible
-  downtime** and no backfill gaps.
-- Designed the sharded query planner that took p99 dashboard reads from 1.9s to
-  310ms; published the load-shedding policy the whole platform group adopted.
-- Cut compute spend 48% by right-sizing the streaming tier and introducing
-  tiered storage for cold partitions — roughly $1.1M/year.
-- Ran the on-call rotation for six services and drove incident review; MTTR fell
-  from 74 to 22 minutes over four quarters.
-- Mentored four engineers, two of whom were promoted to senior.
-
-### Senior Software Engineer — Trellis Point Analytics
-
-*Remote — Jun 2019 to Feb 2022*
-
-- Owned the metrics API used by every customer-facing dashboard: Go services on
-  Kubernetes, Postgres and ClickHouse behind them, 12k RPS at peak.
-- Introduced contract tests and a staged rollout pipeline that took change
-  failure rate from 18% to under 4%.
-- Led the SOC 2 workstream for the data plane: audit logging, key rotation, and
-  tenant isolation review across nine services.
-- Built the internal query-cost attribution tool that made per-tenant unit
-  economics visible to product for the first time.
-
-### Software Engineer — Halden & Reeve
-
-*Portland, OR — Aug 2017 to May 2019*
-
-- Shipped the billing reconciliation service that closed a recurring six-figure
-  revenue leak from unmatched invoice lines.
-- Migrated a monolithic Rails scheduler to a queue-backed Python worker fleet,
-  cutting nightly batch runtime from 6h to 40m.
-- First engineer on the internal API gateway; wrote the auth middleware still in
-  use today.
-
-## Skills
-
-- **Languages:** Go, Python, TypeScript, SQL, some Rust
-- **Data:** Postgres, ClickHouse, Kafka, Spark, dbt, Iceberg
-- **Platform:** Kubernetes, Terraform, AWS (EKS, S3, RDS, MSK), GitHub Actions
-- **Practice:** distributed systems design, performance and cost work, incident
-  command, technical mentoring
-
-## Education
-
-### B.S. Computer Science — Cascade Ridge University
-
-*Portland, OR — 2013 to 2017*
-
-- Senior project: a fault-injection harness for stream processors.
-
-## Selected Projects
-
-- **Tidewater** — an open-source CLI that diffs two Postgres query plans and
-  explains the regression in plain language. 2.1k stars.
-- **Slate** — a tiny Go library for typed feature flags with compile-time
-  exhaustiveness checks, used in production at two former employers.
-`
+export const DEMO_RESUME: Resume = ResumeSchema.parse({
+  basics: {
+    name: DEMO_PERSONA.fullName,
+    label: 'Senior Backend / Platform Engineer',
+    email: 'riley.marsh@demo.example.com',
+    phone: DEMO_PERSONA.phone,
+    location: { city: 'Seattle', region: 'WA (open to remote, US)' },
+    url: 'riley-marsh.example.com',
+    summary:
+      'Backend and platform engineer with eight years building high-throughput data services. Most recently led the ingestion and query tier for a multi-tenant analytics product serving 4B events/day, cutting p99 read latency from 1.9s to 310ms while halving infrastructure spend. Comfortable owning a system end to end: schema design, service code, rollout, on-call, and the cost line.',
+  },
+  work: [
+    {
+      name: 'Cobalt Harbor Systems',
+      position: 'Staff Software Engineer',
+      location: 'Seattle, WA',
+      startDate: '2022-03',
+      current: true,
+      highlights: [
+        'Rebuilt the event ingestion pipeline (Kafka to a columnar store) behind a dual-write migration, moving 4B events/day with zero customer-visible downtime and no backfill gaps.',
+        'Designed the sharded query planner that took p99 dashboard reads from 1.9s to 310ms; published the load-shedding policy the whole platform group adopted.',
+        'Cut compute spend 48% by right-sizing the streaming tier and introducing tiered storage for cold partitions, roughly $1.1M/year.',
+        'Ran the on-call rotation for six services and drove incident review; MTTR fell from 74 to 22 minutes over four quarters.',
+        'Mentored four engineers, two of whom were promoted to senior.',
+      ],
+    },
+    {
+      name: 'Trellis Point Analytics',
+      position: 'Senior Software Engineer',
+      location: 'Remote',
+      startDate: '2019-06',
+      endDate: '2022-02',
+      highlights: [
+        'Owned the metrics API used by every customer-facing dashboard: Go services on Kubernetes, Postgres and ClickHouse behind them, 12k RPS at peak.',
+        'Introduced contract tests and a staged rollout pipeline that took change failure rate from 18% to under 4%.',
+        'Led the SOC 2 workstream for the data plane: audit logging, key rotation, and tenant isolation review across nine services.',
+        'Built the internal query-cost attribution tool that made per-tenant unit economics visible to product for the first time.',
+      ],
+    },
+    {
+      name: 'Halden & Reeve',
+      position: 'Software Engineer',
+      location: 'Portland, OR',
+      startDate: '2017-08',
+      endDate: '2019-05',
+      highlights: [
+        'Shipped the billing reconciliation service that closed a recurring six-figure revenue leak from unmatched invoice lines.',
+        'Migrated a monolithic Rails scheduler to a queue-backed Python worker fleet, cutting nightly batch runtime from 6h to 40m.',
+        'First engineer on the internal API gateway; wrote the auth middleware still in use today.',
+      ],
+    },
+  ],
+  projects: [
+    {
+      name: 'Tidewater',
+      description:
+        'An open-source CLI that diffs two Postgres query plans and explains the regression in plain language. 2.1k stars.',
+    },
+    {
+      name: 'Slate',
+      description:
+        'A tiny Go library for typed feature flags with compile-time exhaustiveness checks, used in production at two former employers.',
+    },
+  ],
+  skills: [
+    { name: 'Languages', keywords: ['Go', 'Python', 'TypeScript', 'SQL', 'some Rust'] },
+    { name: 'Data', keywords: ['Postgres', 'ClickHouse', 'Kafka', 'Spark', 'dbt', 'Iceberg'] },
+    { name: 'Platform', keywords: ['Kubernetes', 'Terraform', 'AWS (EKS, S3, RDS, MSK)', 'GitHub Actions'] },
+    {
+      name: 'Practice',
+      keywords: ['distributed systems design', 'performance and cost work', 'incident command', 'technical mentoring'],
+    },
+  ],
+  education: [
+    {
+      institution: 'Cascade Ridge University',
+      studyType: 'B.S.',
+      area: 'Computer Science',
+      location: 'Portland, OR',
+      startDate: '2013',
+      endDate: '2017',
+      courses: ['Senior project: a fault-injection harness for stream processors.'],
+    },
+  ],
+  meta: { cello: { templateId: 'modern', parsedFrom: 'demo' } },
+})
 
 /**
  * Non-budget profile preferences for the demo.
@@ -132,7 +138,6 @@ export const DEMO_PREFERENCES = {
     countries: ['US', 'CA'],
     remoteOnly: false,
     languages: ['en'],
-    minScore: 50,
     excludedCompanies: [],
     excludedKeywords: ['unpaid', 'commission only'],
   },

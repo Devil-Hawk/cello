@@ -162,27 +162,22 @@ export async function buildGoalStrategyContext(admin: AdminClient, userId: strin
 
 // --- buildOutreachContext -----------------------------------------------------
 
-const OUTREACH_CONTEXT_MAX_CHARS = 1500
 const OUTREACH_HISTORY_LIMIT = 8
 const OUTREACH_INSIGHTS_LIMIT = 3
 
 /**
- * Context for one outreach draft: chronological relationship history +
- * provenance-constrained phrasing rules + reply-pattern insights.
- *
- * The phrasing rules are Cello's own instruction lines, not employer text —
- * they exist so the draft can never claim a familiarity its basis doesn't
- * support (a fabricated "great talking with you last week" to someone never
- * contacted before is exactly the kind of confident-sounding lie a resume
- * fabrication is, just aimed at a person instead of an ATS).
+ * Data for one outreach draft: the recorded history with this contact or
+ * company (one line each, oldest first, as recorded, never embellished) and the
+ * reply-pattern insights. Data only. The rules for how a draft may use them
+ * (never claim a conversation that is not on record) live in prompts/outreach.md.
  */
-export async function buildOutreachContext(
+export async function outreachHistory(
   admin: AdminClient,
   userId: string,
   contactId: string | null,
   companyId: string | null
-): Promise<string> {
-  if (!contactId && !companyId) return ''
+): Promise<{ lines: string[]; patterns: string[] }> {
+  if (!contactId && !companyId) return { lines: [], patterns: [] }
 
   const [history, insights] = await Promise.all([
     timelineFor(admin, userId, { contactId: contactId ?? undefined, companyId: companyId ?? undefined }, OUTREACH_HISTORY_LIMIT).catch(
@@ -194,18 +189,10 @@ export async function buildOutreachContext(
     relevantInsights(admin, userId, companyId, ['pattern', 'strategy'], OUTREACH_INSIGHTS_LIMIT),
   ])
 
-  const parts: string[] = []
-  parts.push(
-    history.length > 0
-      ? `RELATIONSHIP HISTORY (real, recorded contact — you may reference these facts, never embellish beyond them):\n${formatTimeline(history)}`
-      : 'RELATIONSHIP HISTORY: none recorded. Do not claim a prior conversation, reply, or any existing familiarity with this person or company — this is a first contact.'
-  )
-  if (insights.length > 0) {
-    parts.push(`What has worked in past outreach (apply if relevant, never state as fact about THIS recipient):\n${insights.map((i) => `- ${i.statement}`).join('\n')}`)
+  return {
+    lines: [...history].reverse().map((r) => `${r.occurred_at.slice(0, 10)} ${r.kind}${r.title ? `: ${r.title}` : ''}`),
+    patterns: insights.map((i) => i.statement),
   }
-
-  const block = parts.join('\n\n')
-  return block.length > OUTREACH_CONTEXT_MAX_CHARS ? `${block.slice(0, OUTREACH_CONTEXT_MAX_CHARS)}…` : block
 }
 
 // --- buildTurnContext (copilot) ----------------------------------------------

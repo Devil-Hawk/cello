@@ -51,10 +51,10 @@ interface JudgeVerdict {
   n: number
   summary: string
 }
-const judgeGroundednessMock = vi.fn<[client: unknown, input: unknown, opts: unknown], Promise<JudgeVerdict>>()
-vi.mock('../../evals/judge', () => ({
-  meteredJudgeClient: vi.fn(() => ({})),
-  judgeGroundedness: (...args: unknown[]) => (judgeGroundednessMock as unknown as (...a: unknown[]) => Promise<JudgeVerdict>)(...args),
+const judgeGroundednessMock = vi.fn<[run: unknown, input: unknown], Promise<JudgeVerdict>>()
+vi.mock('../../evals/claims-judge', () => ({
+  judgeRunner: vi.fn(() => ({})),
+  judgeClaims: (...args: unknown[]) => (judgeGroundednessMock as unknown as (...a: unknown[]) => Promise<JudgeVerdict>)(...args),
 }))
 
 const logHarnessErrorMock = vi.fn()
@@ -222,5 +222,63 @@ describe('verifyCvTailorDraft — the factual-grounding judge (ruling 2c)', () =
     const [ctx, err] = logHarnessErrorMock.mock.calls[0] as [Record<string, unknown>, Error]
     expect(ctx).toMatchObject({ runId: 'run-1', agentType: 'cv_tailor', phase: 'judge', userId: 'user-1' })
     expect(err.message).toBe('ECONNRESET')
+  })
+})
+
+describe('verifyCvTailorDraft: the letter checks share the retry budget', () => {
+  const meta = (ok: boolean) => ({
+    tier: 'focused' as const,
+    words: ok ? 200 : 380,
+    evidence: [{ job: 'Build services.', resume: 'Senior engineer with 8 years of Go.' }],
+    companyFact: null,
+    checks: ok
+      ? [{ id: 'word_count', ok: true, message: '200 words' }]
+      : [{ id: 'word_count', ok: false, message: '380 words. A focused letter runs 150 to 250.' }],
+  })
+
+  it('retries a letter whose length does not fit its evidence tier, with the check text as the corrective context', async () => {
+    runAgentUnitMock
+      .mockResolvedValueOnce({ output: { ...cleanContent, coverLetterMeta: meta(false) } as never, tokensUsed: 5, containment: okContainment })
+      .mockResolvedValueOnce({ output: { ...cleanContent, coverLetterMeta: meta(true) } as never, tokensUsed: 5, containment: okContainment })
+    judgeGroundednessMock.mockResolvedValue(passVerdict())
+
+    const outcome = await verifyCvTailorDraft(baseArgs())
+
+    expect(outcome.kind).toBe('verified')
+    expect(runAgentUnitMock).toHaveBeenCalledTimes(2)
+    const second = runAgentUnitMock.mock.calls[1][1] as { input: { correctiveContext?: string } }
+    expect(second.input.correctiveContext).toContain('380 words. A focused letter runs 150 to 250.')
+    expect(outcome.coverLetterMeta?.words).toBe(200)
+  })
+
+  it('keeps the draft on the last attempt and lets the card show what still fails', async () => {
+    runAgentUnitMock.mockResolvedValue({ output: { ...cleanContent, coverLetterMeta: meta(false) } as never, tokensUsed: 5, containment: okContainment })
+    judgeGroundednessMock.mockResolvedValue(passVerdict())
+
+    const outcome = await verifyCvTailorDraft(baseArgs())
+
+    expect(runAgentUnitMock).toHaveBeenCalledTimes(3)
+    expect(outcome.coverLetterMeta?.checks[0].ok).toBe(false)
+  })
+
+  it('reads the judge the resume and job lines, numbered', async () => {
+    runAgentUnitMock.mockResolvedValue({ output: cleanContent, tokensUsed: 5, containment: okContainment })
+    judgeGroundednessMock.mockResolvedValue(passVerdict())
+
+    await verifyCvTailorDraft(baseArgs())
+
+    const input = judgeGroundednessMock.mock.calls[0][1] as { sources: { id: string; text: string }[] }
+    expect(input.sources.map((l) => l.id)).toEqual(['R1', 'J1'])
+    expect(input.sources[0].text).toBe('Senior engineer with 8 years of Go.')
+  })
+
+  it('persists a verdict the judge could not read as unjudged, not as a pass or a retry', async () => {
+    runAgentUnitMock.mockResolvedValue({ output: cleanContent, tokensUsed: 5, containment: okContainment })
+    judgeGroundednessMock.mockResolvedValue({ ...passVerdict(), verdict: 'insufficient-data' as never, score: null })
+
+    const outcome = await verifyCvTailorDraft(baseArgs())
+
+    expect(outcome.kind).toBe('unjudged')
+    expect(runAgentUnitMock).toHaveBeenCalledTimes(1)
   })
 })

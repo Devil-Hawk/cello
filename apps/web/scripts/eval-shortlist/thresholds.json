@@ -1,0 +1,20 @@
+{
+  "full": {
+    "p5GainMin": 0.1,
+    "finalAtLeastOldScorer": true,
+    "finalAtLeastNaivePoints": true,
+    "reasonChecksMin": 0.95,
+    "chanceAgreementMin": 0.6,
+    "chanceKappaMin": 0.4,
+    "chanceAtLeastOldScorer": true
+  },
+  "quick": {
+    "p5GainMin": 0.0,
+    "finalAtLeastOldScorer": false,
+    "finalAtLeastNaivePoints": false,
+    "reasonChecksMin": 0.9,
+    "chanceAgreementMin": 0.5,
+    "chanceKappaMin": 0.2,
+    "chanceAtLeastOldScorer": false
+  }
+}

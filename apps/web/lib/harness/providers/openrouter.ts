@@ -83,7 +83,22 @@ export async function callOpenRouter(
     // `user` is deprecated in the OpenAI SDK types but is the field OpenRouter
     // documents for end-user attribution.
     ...(apiKeys.userId ? { user: openRouterUserTag(apiKeys.userId) } : {}),
-    ...(opts.json ? { response_format: { type: 'json_object' as const } } : {}),
+    ...(opts.jsonSchema
+      ? {
+          response_format: {
+            type: 'json_schema' as const,
+            json_schema: { name: opts.jsonSchema.name, strict: true, schema: opts.jsonSchema.schema },
+          },
+        }
+      : opts.json
+        ? { response_format: { type: 'json_object' as const } }
+        : {}),
+  }
+  // Heals malformed JSON server-side. Deliberately NOT provider.require_parameters,
+  // which would route away from (or fail on) the user's chosen model: Zod catches
+  // whatever a non-strict provider gets wrong.
+  if (opts.jsonSchema) {
+    ;(body as unknown as Record<string, unknown>).plugins = [{ id: 'response-healing' }]
   }
   // OpenRouter's `reasoning` field isn't in the OpenAI SDK's types. Attach it
   // after construction so the non-streaming overload still resolves.

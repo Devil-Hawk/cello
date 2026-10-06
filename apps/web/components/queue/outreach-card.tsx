@@ -2,8 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { AlertTriangle, Check, CornerDownRight, Loader2, Mail, Pencil, RotateCcw, Send, ShieldAlert, User, X } from 'lucide-react'
-import { LogoMark } from '@/components/brand/logo'
+import { AlertTriangle, Check, CornerDownRight, Info, ListChecks, Loader2, Mail, Pencil, RotateCcw, Send, ShieldAlert, User, X } from 'lucide-react'
 import { Badge, type BadgeTone } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -15,6 +14,10 @@ import { cn } from '@/lib/utils'
 import { formatShortDate } from '@/lib/format'
 import type { EvalResult } from '@/lib/evals/harness'
 import type { StoredOutreachVerdict } from '@/lib/outreach/verdicts'
+import type { TemplateReason } from '@/lib/outreach/types'
+import { templateNotice } from '@/lib/outreach/template-notice'
+import { checkDraft as runDraftChecks } from '@/lib/writing/checks'
+import { DraftChecks } from '@/components/writing/draft-checks'
 
 export interface OutreachRow {
   id: string
@@ -32,8 +35,17 @@ export interface OutreachRow {
   /** Set by the Gmail reply sync once the contact has answered. */
   replied_at?: string | null
   reply_classification?: 'positive' | 'neutral' | 'negative' | 'bounce' | null
-  /** False when no model wrote this draft (the generic template). */
+  /** False when no model wrote this draft (the standard template). */
   used_llm?: boolean | null
+  /** Why it is the template. Null on rows from before the reason was recorded. */
+  template_reason?: TemplateReason | null
+  /** The user's full name, the only valid sign-off. */
+  sender_name?: string | null
+  company_name?: string | null
+  /** True when there is recorded earlier contact with this person or company. */
+  has_history?: boolean
+  /** For a follow-up: the first email's body, which a follow-up must be shorter than. */
+  parent_body?: string | null
   /** Quality-check verdicts already stored for this draft. */
   verdicts?: StoredOutreachVerdict[]
 }
@@ -108,8 +120,24 @@ export function OutreachCard({
   // Stored verdicts describe the text as drafted. Once this card's text has been
   // edited they no longer do (the server stops sending them on the next load).
   const stored = edited ? [] : message.verdicts ?? []
-  const storedGround = storedAsResult(stored.find((v) => v.judge === 'factuality'))
-  const storedSpecific = storedAsResult(stored.find((v) => v.judge === 'closed_qa'))
+  const storedGround = storedAsResult(stored.find((v) => v.judge === 'groundedness'))
+  const storedSpecific = storedAsResult(stored.find((v) => v.judge === 'specificity'))
+  // A check has been run for this draft (stored, or just now) but the text
+  // changed since: say so instead of leaving rows that describe other words.
+  const checkedBefore = (message.verdicts ?? []).some((v) => v.judge !== 'deterministic') || judgeResult !== null
+  const textChanged = edited || (editing && (subject !== message.subject || body !== message.body))
+  // The checks code can run, recomputed on every keystroke while editing.
+  const liveChecks = runDraftChecks({
+    kind: message.kind === 'follow_up' ? 'follow_up' : 'outreach',
+    subject: editing ? subject : message.subject,
+    body: editing ? body : message.body,
+    senderName: message.sender_name,
+    contactName: message.to_name,
+    companyName: message.company_name,
+    hasHistory: message.kind === 'follow_up' ? true : message.has_history ?? false,
+    previousBody: message.parent_body ?? null,
+  }).checks
+  const notice = message.used_llm === false ? templateNotice(message.template_reason) : null
 
   async function save() {
     setBusy('save')
@@ -238,11 +266,8 @@ export function OutreachCard({
       if (data.skipped) {
         toast({ title: 'No follow-up needed', description: `${message.to_name ?? message.to_email} already replied.` })
       } else if (data.usedLlm === false) {
-        toast({
-          title: 'Follow-up drafted from a template',
-          description: 'No model wrote it: check your OpenRouter key and budget in Settings.',
-          variant: 'destructive',
-        })
+        const n = templateNotice(data.templateReason)
+        toast({ title: n.title, description: n.body, variant: 'destructive' })
       } else {
         toast({ title: 'Follow-up drafted', description: 'It is waiting for your review.' })
       }
@@ -295,11 +320,6 @@ export function OutreachCard({
               {message.kind === 'follow_up' ? 'Follow-up' : 'Initial'}
             </Badge>
             <span>{formatShortDate(message.created_at)}</span>
-            {message.used_llm === false && (
-              <Badge tone="warn" className="text-[11px]" title="No model wrote this draft: it is the generic template.">
-                Generic template
-              </Badge>
-            )}
             {sent && message.sent_at && <span>Sent {formatShortDate(message.sent_at)}</span>}
             {sent &&
               (message.replied_at ? (
@@ -315,6 +335,18 @@ export function OutreachCard({
           {STATUS_LABEL[message.status]}
         </Badge>
       </div>
+
+      {/* A template is never shown as a written draft: a visible block, not a
+          tooltip, so it reads on a phone too, with the reason and the next step. */}
+      {notice && (pending || approved) && (
+        <div className="mt-3 flex items-start gap-2 rounded-control border bg-sunken/40 p-2.5" role="note">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <div className="min-w-0">
+            <p className="text-caption font-semibold text-foreground">{notice.title}</p>
+            <p className="mt-0.5 text-caption text-muted-foreground">{notice.body}</p>
+          </div>
+        </div>
+      )}
 
       <div className="mt-3 space-y-2">
         {editing ? (
@@ -391,62 +423,60 @@ export function OutreachCard({
         </div>
       )}
 
-      {/* Quality check — advisory, user-triggered, never a gate on send.
-          Stays visible through the confirm step below: a failed groundedness
-          check is most useful exactly when the human is one click from
-          sending. */}
-      {(pending || approved) && !editing && (
-        <div className="mt-3">
-          {judgeResult || storedGround || storedSpecific ? (
-            <div className="space-y-2">
-              {/* A fresh check wins; otherwise what was stored when the draft
-                  was written. Nothing re-runs, so showing them costs nothing. */}
-              {(judgeResult?.groundedness ?? storedGround) && (
-                <JudgeVerdictRow
-                  label="Groundedness"
-                  result={(judgeResult?.groundedness ?? storedGround)!}
-                  failureWarning="This draft may be lying about the company — it asserts something your resume and the job post don't support."
-                />
-              )}
-              {(judgeResult?.specificity ?? storedSpecific) && (
-                <JudgeVerdictRow label="Specificity" result={(judgeResult?.specificity ?? storedSpecific)!} />
-              )}
-              {!judgeResult && (
-                <Button size="sm" variant="ghost" onClick={checkDraft} disabled={judging || busy !== null}>
-                  {judging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogoMark className="h-3.5 w-3.5" />}
-                  {judging ? 'Checking…' : 'Check again (two paid AI calls)'}
+      {/* Checks. The first list is code (length, filler, one ask, greeting,
+          sign-off) and recomputes as the text changes. The two rows below it
+          are the model check, run when the draft was written or on request;
+          after an edit they describe other words, so they say so. Advisory,
+          user-triggered, never a gate on send, and kept visible through the
+          confirm step: a failed check matters most one click before sending. */}
+      {(pending || approved) && (
+        <div className="mt-3 space-y-2">
+          <DraftChecks checks={liveChecks} />
+          {!editing &&
+            (textChanged && checkedBefore ? (
+              <div className="rounded-control border bg-sunken/40 p-2.5">
+                <p className="text-caption text-muted-foreground">Edited after the check.</p>
+                <Button size="sm" variant="ghost" className="mt-1" onClick={checkDraft} disabled={judging || busy !== null}>
+                  {judging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListChecks className="h-3.5 w-3.5" />}
+                  {judging ? 'Checking' : 'Check again (two model calls on your key)'}
                 </Button>
-              )}
-            </div>
-          ) : (
-            <TooltipProvider delayDuration={200}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={checkDraft}
-                    disabled={judging || busy !== null}
-                  >
-                    {judging ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <LogoMark className="h-3.5 w-3.5" />
-                    )}
-                    {judging ? 'Checking…' : 'Check this draft'}
+              </div>
+            ) : judgeResult || storedGround || storedSpecific ? (
+              <div className="space-y-2">
+                {/* A fresh check wins; otherwise what was stored when the draft
+                    was written. Nothing re-runs, so showing them costs nothing. */}
+                {(judgeResult?.groundedness ?? storedGround) && (
+                  <JudgeVerdictRow label="Backed by your resume" result={(judgeResult?.groundedness ?? storedGround)!} claims />
+                )}
+                {(judgeResult?.specificity ?? storedSpecific) && (
+                  <JudgeVerdictRow label="Specific to this role" result={(judgeResult?.specificity ?? storedSpecific)!} />
+                )}
+                {!judgeResult && (
+                  <Button size="sm" variant="ghost" onClick={checkDraft} disabled={judging || busy !== null}>
+                    {judging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListChecks className="h-3.5 w-3.5" />}
+                    {judging ? 'Checking' : 'Check again (two model calls on your key)'}
                   </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" className="max-w-xs p-3">
-                  <p className="text-caption text-muted-foreground">
-                    Two metered AI calls against your own OpenRouter key: one checks the draft only
-                    asserts what your resume and this job post support, the other checks it&apos;s
-                    actually about this company and role, not boilerplate.
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
-          {judgeError && <p className="mt-2 text-caption text-pipeline-rejected">{judgeError}</p>}
+                )}
+              </div>
+            ) : notice ? null : (
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button size="sm" variant="outline" onClick={checkDraft} disabled={judging || busy !== null}>
+                      {judging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListChecks className="h-3.5 w-3.5" />}
+                      {judging ? 'Checking' : 'Check this draft'}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-xs p-3">
+                    <p className="text-caption text-muted-foreground">
+                      Two model calls on your own key: one checks every statement traces to your resume or the job
+                      post, the other checks the draft is about this role and company, not boilerplate.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ))}
+          {judgeError && <p className="text-caption text-pipeline-rejected">{judgeError}</p>}
         </div>
       )}
 
@@ -513,43 +543,46 @@ export function OutreachCard({
 }
 
 /**
- * One judge verdict, rendered better than formatEvalResult's plain-text line
- * (which still exists for anywhere text-only output is fine — this is not a
- * replacement for it). `failureWarning` is only for groundedness: a failed
- * groundedness check means the draft may assert something the resume/job
- * facts don't support, and that reading must be unmistakable, not just a red
- * badge among other red badges.
+ * One model verdict as a labelled row. For the claims check (`claims`), a
+ * failure lists each statement no source line backs, quoted, and says what to
+ * do next, so the user can fix the lines instead of guessing which one it was.
  */
 function JudgeVerdictRow({
   label,
   result,
-  failureWarning,
+  claims = false,
 }: {
   label: string
   result: Pick<EvalResult, 'verdict' | 'summary'>
-  failureWarning?: string
+  claims?: boolean
 }) {
   const tone: BadgeTone = result.verdict === 'pass' ? 'good' : result.verdict === 'fail' ? 'bad' : 'muted'
-  const mark = result.verdict === 'pass' ? 'Pass' : result.verdict === 'fail' ? 'Fail' : 'Inconclusive'
+  const mark = result.verdict === 'pass' ? 'Pass' : result.verdict === 'fail' ? 'Fail' : 'Not checked'
   const isFailure = result.verdict === 'fail'
+  const unsupported = claims && isFailure ? result.summary.split(/(?=Not in your sources: )/).map((s) => s.trim()).filter(Boolean) : []
   return (
-    <div
-      className={cn(
-        'rounded-control border p-2.5',
-        isFailure && failureWarning ? 'border-pipeline-rejected/50 bg-pipeline-rejected/10' : 'bg-sunken/40'
-      )}
-    >
+    <div className={cn('rounded-control border p-2.5', isFailure && claims ? 'border-pipeline-rejected/50 bg-pipeline-rejected/10' : 'bg-sunken/40')}>
       <div className="flex items-center gap-1.5">
-        {isFailure && failureWarning && <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-pipeline-rejected" />}
+        {isFailure && claims && <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-pipeline-rejected" />}
         <span className="text-caption font-medium text-foreground">{label}</span>
         <Badge tone={tone} className="text-[11px]">
           {mark}
         </Badge>
       </div>
-      {isFailure && failureWarning && (
-        <p className="mt-1 text-caption font-semibold text-pipeline-rejected">{failureWarning}</p>
+      {unsupported.length > 0 ? (
+        <>
+          <ul className="mt-1 space-y-1">
+            {unsupported.map((line) => (
+              <li key={line} className="break-words text-caption text-foreground">
+                {line}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-caption font-semibold text-pipeline-rejected">Edit the draft or remove these lines before sending.</p>
+        </>
+      ) : (
+        <p className="mt-1 text-caption text-muted-foreground">{result.summary}</p>
       )}
-      <p className="mt-1 text-caption text-muted-foreground">{result.summary}</p>
     </div>
   )
 }

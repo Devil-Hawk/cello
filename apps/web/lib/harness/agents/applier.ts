@@ -16,6 +16,7 @@
 
 import type { AgentFn } from '../types'
 import { ApplierInput } from '../schemas'
+import { traceRefFor } from '@/lib/trace/spans'
 import {
   submitApplication,
   buildApplyProfile,
@@ -169,17 +170,26 @@ export const applier: AgentFn = async (ctx) => {
   const submissionRef = result.outcome === 'submitted' ? result.submissionRef : null
 
   // 6) Upsert the draft (one per user+job).
+  const ref = traceRefFor('tailor-cv')
+  const tailorRef = ref
+    ? { ...ref, generated_cover_letter: content.coverLetter ?? null, generated_resume_summary: content.resumeSummary ?? null }
+    : {}
   const row: Record<string, unknown> = {
     user_id: ctx.userId,
     job_id: input.jobId,
     run_id: ctx.runId,
     resume_summary: content.resumeSummary ?? null,
     cover_letter: content.coverLetter ?? null,
+    cover_letter_meta: input.coverLetterMeta ?? null,
     answers,
     status,
     submission_ref: submissionRef,
     submitted_at: status === 'submitted' ? new Date().toISOString() : null,
     updated_at: new Date().toISOString(),
+    // What the model wrote and where it came from, so an edit, an approval or an
+    // interview later can be scored on the call that tailored it. The latest
+    // 'tailor-cv' generation in this trace: tailoring and applying run one job at a time.
+    ...tailorRef,
   }
 
   const { data: upserted, error: upsertErr } = await ctx.admin

@@ -55,9 +55,9 @@ This agent runs three passes. Each pass is a separate LLM call; passes 2 and
 2. **Rewrite the resume** (GATE: only proceeds using Pass 1's
    `missingKeywords`/`formatIssues` as the improvement targets; never
    invents new targets Pass 1 did not surface.) Apply the Rewrite Rules
-   below. Output is the rewritten resume as plain text, not JSON: no
-   commentary, no markdown, no preamble or sign-off, single-column,
-   ATS-friendly.
+   below. Output is a JSON PATCH, not a whole resume: only the fields you
+   change. The system merges it into the candidate's structured resume, so
+   layout, headings and the template are never yours to produce.
 3. **Rescore the REWRITE** using the exact same Scoring Rubric as Pass 1,
    against the same job. This is not a new rubric or a lighter pass. The
    rewrite has to earn its score under identical scrutiny to the original,
@@ -71,7 +71,7 @@ the actual text.
 
 **SCORING BANDS for `atsScore`: use the full 0-100 range. Clustering every
 score low is itself a bug, in exactly the way a rubric that always returned
-100 would be** (see `_shared.md`'s Shared Fit-Score Bands table and its
+100 would be** (see `_shared.md`'s ATS Score Bands table and its
 calibration warning; restated here with the ATS-specific meaning of each
 band, as that table requires):
 
@@ -137,7 +137,7 @@ vice versa).
 Apply `_voice.md`'s hard bans in full. The rewritten resume is ATS-dense,
 formal-register text (`_voice.md`'s "Resume summary" calibration applies to
 the whole rewritten document, not just a summary section). Tier 2
-conversational looseness never applies here. The rewrite is plain text, not
+conversational looseness never applies here. The rewrite is resume text, not
 prose meant to read as a letter: no greeting, no sign-off, no commentary
 about the rewrite itself. This agent rephrases the candidate's OWN original
 bullets more than any other, so the buzzword ban's word-vs-fact distinction
@@ -158,9 +158,23 @@ concrete alternative ("built", "ran") that names the same thing.
 - `missingKeywords` = important job keywords/skills absent from the resume.
 - `formatIssues` = concrete ATS-format problems; empty array if none.
 
-**Pass 2 (rewrite), plain text only, not JSON:** output ONLY the rewritten
-resume as clean, single-column, ATS-friendly plain text. No commentary, no
-markdown, no preamble or sign-off.
+**Pass 2 (rewrite), a JSON patch:**
+
+```json
+{"summary": "", "skills": [{"name": "", "keywords": []}], "work": [{"index": 0, "highlights": []}], "projects": [{"index": 0, "highlights": []}]}
+```
+
+Return only the fields you change: the summary, the skills, and the
+highlights of an entry by its index (the ENTRIES list in the prompt gives the
+indexes). Use `""` or `[]` for anything you leave alone, and a changed entry
+carries ALL of its highlights, not just the new ones, and a changed skills
+list carries EVERY group and keyword of the original, reordered if you like.
+Never return names,
+titles, employers, dates or education: the patch has no slot for them and the
+system keeps them from the original. No commentary, no markdown, no preamble
+or sign-off. Any suggestion that is not in the original resume is dropped by
+the system and shown to the candidate as a warning, so inventing one gains
+nothing.
 
 ## Self-check
 

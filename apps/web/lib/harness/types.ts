@@ -202,6 +202,9 @@ export interface LlmResult {
   /** What the provider says the call cost, USD (OpenRouter usage.cost). Absent when
    *  the provider does not report one; the ledger then uses the price table. */
   costUsd?: number
+  /** Where this call went in Langfuse, set only when its trace is exported.
+   *  Rows that store the output can keep it so later outcomes find it. */
+  trace?: { traceId: string; observationId: string }
 }
 
 /**
@@ -297,6 +300,14 @@ export interface LlmRunOptions {
   temperature?: number
   /** Ask the model for a JSON object response. */
   json?: boolean
+  /**
+   * Strict structured output: a named JSON Schema (every property required,
+   * closed objects). OpenRouter sends it as response_format json_schema with
+   * strict:true plus the response-healing plugin. Set `json: true` alongside
+   * it: providers that cannot enforce a schema fall back to a JSON object, and
+   * callers still validate the result.
+   */
+  jsonSchema?: { name: string; schema: Record<string, unknown> }
   /**
    * Turn on extended reasoning. Reasoning tokens are billed as OUTPUT, so
    * enable it where judgement quality matters (scoring, planning) rather than

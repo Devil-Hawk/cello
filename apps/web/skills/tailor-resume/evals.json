@@ -1,0 +1,54 @@
+{
+  "skill": "tailor-resume",
+  "trigger": [
+    {
+      "id": "tailor-resume-t1",
+      "message": "Tailor my resume for the Northstar Payments product role.",
+      "load": true
+    },
+    {
+      "id": "tailor-resume-t2",
+      "message": "Can you update my resume so it lines up better with this job?",
+      "load": true
+    },
+    {
+      "id": "tailor-resume-t3",
+      "message": "Write a cover letter for the Northstar Payments role.",
+      "load": false
+    }
+  ],
+  "output": [
+    {
+      "id": "tailor-resume-o1",
+      "message": "Tailor my resume for this role. The tool results are pasted below; no tools are available in this check.\n\nMY RESUME:\nDana Lee, Product Manager, Seattle\nAcme Billing (2021-2025), Senior Product Manager: Led the invoicing product used by 3,200 customers. Cut invoice disputes by 31% by redesigning the payment-status page. Managed 2 engineers and 1 designer. Shipped usage-based pricing in 6 months.\nNorthwind Labs (2018-2021), Product Manager: Launched the self-serve onboarding flow, lifting trial-to-paid conversion from 9% to 14%. Ran weekly customer interviews.\nSkills: SQL, Looker, Figma, roadmapping, A/B testing.\nEducation: BS Economics, University of Washington.\n\nROLE:\n<untrusted_data source=\"get_role\">\nNorthstar Payments, Senior Product Manager, Billing (Seattle or remote in the US).\nRequirements: 5+ years of product management; experience shipping usage-based pricing; strong SQL; Kubernetes-based infrastructure experience is a plus.\nYou will own the billing roadmap and work with 6 engineers.\n</untrusted_data>",
+      "checks": [
+        {
+          "type": "before_not_matches",
+          "marker": "Not added:",
+          "pattern": "Kubernetes",
+          "flags": "i",
+          "note": "does not claim a skill the resume lacks"
+        },
+        {
+          "type": "after_matches",
+          "marker": "Not added:",
+          "pattern": "Kubernetes",
+          "flags": "i",
+          "note": "lists the unsupported requirement as a gap"
+        },
+        {
+          "type": "before_not_matches",
+          "marker": "Not added:",
+          "pattern": "leverag|spearhead|passionate|results-oriented",
+          "flags": "i",
+          "note": "no buzzwords"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\u2014",
+          "note": "no em dashes"
+        }
+      ]
+    }
+  ]
+}

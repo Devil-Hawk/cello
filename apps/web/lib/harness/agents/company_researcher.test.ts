@@ -58,7 +58,7 @@ async function runFakeLlm(_opts: LlmRunOptions): Promise<LlmResult> {
   callLog.push('llm-synthesis')
   return {
     content: JSON.stringify({
-      summary: 'Acme makes widgets.',
+      summary: [{ text: 'Acme makes widgets.', sources: ['S2'] }],
       whatTheyWant: null,
       uncertainty: null,
       funding: null,

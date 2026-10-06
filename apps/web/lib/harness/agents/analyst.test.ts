@@ -15,14 +15,19 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { analyst, AnalystError } from './analyst'
+import { analyst, AnalystError, buildAnalystPrompt, parseAnalysis, THIN_POSTING_CHARS } from './analyst'
+import { numberLines, mergeLines } from '@/lib/quality/lines'
+import { getPolicyDoc } from '../prompts'
 import { MissingKeyError } from '../llm'
 import type { AdminClient, LlmResult, LlmRunOptions, StepContext } from '../types'
 
 const JOB_ROW = {
   id: 'job-1',
   title: 'Senior Backend Engineer',
-  description: 'We need someone who knows Node.js.',
+  description:
+    'We need a senior engineer who knows Node.js and PostgreSQL.\nYou will own the queueing stack, which uses Kafka.\n' +
+    'You will design APIs, review code, and mentor junior engineers on a team that ships weekly. The role reports to the head of platform. ' +
+    'We value clear writing and careful testing, and the work touches billing, ledgers and reconciliation every day.',
   viewer_company_id: 'company-1',
   viewer_company_name: 'Acme Corp',
 }
@@ -34,7 +39,7 @@ function fakeAdmin(opts: { resumeText?: string | null } = {}): AdminClient {
   // 'resumeText' in opts (not `opts.resumeText ?? default`) so an explicit
   // `{ resumeText: null }` — the no-resume test's whole point — isn't
   // silently swapped back to the default by `??` treating null as unset.
-  const resumeText = 'resumeText' in opts ? opts.resumeText : '8 years of Node.js'
+  const resumeText = 'resumeText' in opts ? opts.resumeText : 'Eight years of Node.js\nBuilt a Kafka queueing platform\nMentored four engineers'
   return {
     from(table: string) {
       const builder = {
@@ -97,7 +102,7 @@ describe('a failed analysis never becomes renderable advice', () => {
     ],
     [
       'sections but no summary',
-      JSON.stringify({ summary: '   ', talkingPoints: ['a real point'] }),
+      JSON.stringify({ summary: '   ', talkingPoints: [{ text: 'Node.js work', cites: ['R1', 'J2'] }] }),
       'incomplete_response',
     ],
     [
@@ -123,28 +128,95 @@ describe('a failed analysis never becomes renderable advice', () => {
     expect((thrown as AnalystError).code).toBe(code)
   })
 
-  it('keeps a partial BUT REAL analysis, only sections the model actually wrote, and nothing else', async () => {
+  it('keeps a partial BUT REAL analysis: only sections the model actually wrote', async () => {
     const response = JSON.stringify({
       summary: 'A backend role that leans on your Node.js work.',
-      talkingPoints: ['Your queue work maps to their stack.'],
-      companyInsights: [],
+      talkingPoints: [],
+      companyInsights: [{ text: 'The posting says they run a queueing stack on Kafka.', cites: ['J3'] }],
     })
     const result = await analyst(ctxWith(stubLlm(response)))
-    expect(result.output).toEqual({
-      summary: 'A backend role that leans on your Node.js work.',
-      talkingPoints: ['Your queue work maps to their stack.'],
-      companyInsights: [],
-    })
+    const output = result.output as { summary: string; talkingPoints: string[]; companyInsights: string[] }
+    expect(output.summary).toContain('Node.js')
+    expect(output.talkingPoints).toEqual([])
+    expect(output.companyInsights).toHaveLength(1)
+  })
+})
+
+describe('the prompt and what comes back are cited', () => {
+  const RESUME = 'Senior Engineer\nBuilt a Kafka queueing platform at 4,000 requests per second\nMentored four engineers'
+  const DESC = 'Own the queueing stack on Kafka. Mentor junior engineers. '.repeat(8)
+  const built = buildAnalystPrompt({ jobTitle: 'Backend Engineer', jobDescription: DESC, companyName: 'Acme', resumeText: RESUME })
+
+  it('numbers the resume as R lines and the posting as J lines, framed as untrusted, with the title as J1', () => {
+    expect(built.prompt).toContain('R2: Built a Kafka queueing platform at 4,000 requests per second')
+    expect(built.prompt).toContain('J1: Backend Engineer')
+    expect(built.prompt).toMatch(/\[\[BEGIN UNTRUSTED JOB POSTING [0-9a-f]+\]\][\s\S]*J2: Own the queueing stack/)
+    expect(built.prompt).toContain('POSTING LENGTH: full')
+    expect(built.thin).toBe(false)
   })
 
-  it('ignores a section the analysis no longer has: a reply with only that section is incomplete', async () => {
-    const response = JSON.stringify({
-      summary: 'A backend role.',
-      talkingPoints: [],
-      companyInsights: [],
-      [['interview', 'Tips'].join('')]: ['Review their queueing stack.'],
-    })
-    await expect(analyst(ctxWith(stubLlm(response)))).rejects.toMatchObject({ code: 'incomplete_response' })
+  it('composes the policy and the analyst document into the system prompt', () => {
+    expect(built.system.startsWith(getPolicyDoc())).toBe(true)
+    expect(built.system).toContain('Write notes on how one person fits one job')
+  })
+
+  it('a posting under the threshold is marked short', () => {
+    const thin = buildAnalystPrompt({ jobTitle: 'Engineer', jobDescription: 'x'.repeat(THIN_POSTING_CHARS - 1), companyName: 'Acme', resumeText: RESUME })
+    expect(thin.thin).toBe(true)
+    expect(thin.prompt).toContain('POSTING LENGTH: short')
+    expect(buildAnalystPrompt({ jobTitle: 'Engineer', jobDescription: null, companyName: 'Acme', resumeText: RESUME }).thin).toBe(true)
+  })
+
+  const lines = mergeLines(numberLines(RESUME, 'R'), numberLines(`Backend Engineer\n${DESC}`, 'J', { maxLines: 20 }))
+  const good = { text: 'You built a Kafka queueing platform, which matches owning their queueing stack.', cites: ['R2', 'J2'] }
+
+  it('keeps cited items and drops the ones whose citations do not exist or do not match', () => {
+    const out = parseAnalysis(
+      JSON.stringify({
+        summary: 'A backend role.',
+        talkingPoints: [good, { text: 'You led a team of forty.', cites: ['R9'] }, { text: 'You know Rust.', cites: ['R1'] }, 'a bare string', { text: 'No cites at all', cites: [] }],
+        companyInsights: [{ text: 'They run Kafka queueing.', cites: ['J2'] }],
+      }),
+      lines,
+      false
+    )
+    expect(out.talkingPoints).toEqual([good.text])
+    expect(out.companyInsights).toEqual(['They run Kafka queueing.'])
+    expect(out.thin).toBe(false)
+  })
+
+  it('a short posting gets no company insights', () => {
+    const out = parseAnalysis(
+      JSON.stringify({ summary: 'Too short to say much.', talkingPoints: [], companyInsights: [{ text: 'They run Kafka.', cites: ['J2'] }] }),
+      lines,
+      true
+    )
+    expect(out.companyInsights).toEqual([])
+    expect(out.thin).toBe(true)
+  })
+
+  it('a short posting may be a summary and nothing else, a full one may not', () => {
+    const empty = JSON.stringify({ summary: 'The posting is too short to say much.', talkingPoints: [], companyInsights: [] })
+    expect(parseAnalysis(empty, lines, true).summary).toContain('too short')
+    expect(() => parseAnalysis(empty, lines, false)).toThrow(AnalystError)
+  })
+
+  it('items that all lose their citations leave nothing to show for a full posting', () => {
+    const raw = JSON.stringify({ summary: 'A backend role.', talkingPoints: [{ text: 'You know Rust.', cites: ['R7'] }], companyInsights: [] })
+    expect(() => parseAnalysis(raw, lines, false)).toThrow(/incomplete analysis/)
+  })
+
+  it('the unit sends the built prompt at low temperature with its prompt reference', async () => {
+    let seen: LlmRunOptions | undefined
+    const llm = async (opts: LlmRunOptions): Promise<LlmResult> => {
+      seen = opts
+      return { content: JSON.stringify({ summary: 'ok', talkingPoints: [{ text: 'Node.js and PostgreSQL experience', cites: ['R1', 'J2'] }], companyInsights: [] }), tokensUsed: 0, promptTokens: 0, completionTokens: 0, model: 'stub' }
+    }
+    const result = await analyst(ctxWith(llm))
+    expect(seen?.temperature).toBe(0.2)
+    expect(seen?.promptRef?.name).toBe('analyst')
+    expect(seen?.system).toContain(getPolicyDoc())
+    expect((result.output as { talkingPoints: string[] }).talkingPoints).toHaveLength(1)
   })
 })
 

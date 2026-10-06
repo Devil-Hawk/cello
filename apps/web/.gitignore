@@ -1,2 +1,5 @@
 .vercel
 .env*
+
+# model-answer caches written by the evaluation scripts
+.cache/

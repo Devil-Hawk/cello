@@ -14,10 +14,11 @@ import { FunnelBar } from '@/components/insights/funnel-bar'
 import { WhatsWorking } from '@/components/insights/whats-working'
 import { DigestCard } from '@/components/insights/digest-card'
 import { StrategyPanel } from '@/components/insights/strategy-panel'
-import { ScoreHistogramCard } from '@/components/insights/score-histogram-card'
+import { ChanceBreakdownCard } from '@/components/insights/chance-breakdown-card'
 import { SourcePerformanceCard } from '@/components/insights/source-performance-card'
 import { ProvenanceMixCard } from '@/components/insights/provenance-mix-card'
 import { useInsightsSummary } from '@/components/insights/use-insights-summary'
+import { fitRowOf, type FitRow } from '@/lib/scoring/read'
 import {
   computeInsights,
   type AppInput,
@@ -55,7 +56,7 @@ export default function InsightsPage() {
     const [appsRes, activitiesRes, outreachJson, followUpsRes, digestRes] = await Promise.all([
       supabase
         .from('applications')
-        .select('id, job_id, stage, applied_at, source, created_at, updated_at, jobs(match_score)')
+        .select('id, job_id, stage, applied_at, source, created_at, updated_at, jobs(person_roles(chance, blocked_reasons))')
         .eq('user_id', user.id),
       supabase.from('activities').select('application_id, type, occurred_at'),
       // outreach_messages is not in the generated Database type — read it through
@@ -65,8 +66,8 @@ export default function InsightsPage() {
       fetch('/api/digest').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ])
 
-    const apps: AppInput[] = ((appsRes.data as unknown as (Omit<AppInput, 'match_score'> & {
-      jobs: { match_score: number | null } | null
+    const apps: AppInput[] = ((appsRes.data as unknown as (Omit<AppInput, 'chance' | 'blocked_reasons'> & {
+      jobs: { person_roles: FitRow | FitRow[] | null } | null
     })[]) ?? []).map((row) => ({
       id: row.id,
       job_id: row.job_id,
@@ -75,7 +76,8 @@ export default function InsightsPage() {
       source: row.source,
       created_at: row.created_at,
       updated_at: row.updated_at,
-      match_score: row.jobs?.match_score ?? null,
+      chance: fitRowOf(row.jobs).chance ?? null,
+      blocked_reasons: fitRowOf(row.jobs).blocked_reasons,
     }))
 
     const activities = (activitiesRes.data as ActivityInput[] | null) ?? []
@@ -205,9 +207,9 @@ export default function InsightsPage() {
               <div className="space-y-6 p-5">
                 <h2 className="font-display text-section text-foreground">What&apos;s working</h2>
                 <WhatsWorking
-                  title="By match score"
-                  description="Response rate for applications, bucketed by the match score Cello assigned."
-                  rows={insights!.byScoreBand}
+                  title="By chance"
+                  description="Response rate for applications, grouped by the chance Cello gave each role: Strong, Possible or Stretch."
+                  rows={insights!.byChance}
                 />
                 <WhatsWorking
                   title="By source"
@@ -229,7 +231,7 @@ export default function InsightsPage() {
           they render even before the pipeline has real volume: match quality
           and sourcing are visible from day one, not just after applying. */}
       <div className="space-y-6">
-        <ScoreHistogramCard
+        <ChanceBreakdownCard
           summary={jobsSummary.summary}
           loading={jobsSummary.loading}
           error={jobsSummary.error}

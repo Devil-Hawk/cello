@@ -53,6 +53,7 @@ vi.mock('./providers/embeddings', async (importOriginal) => {
 
 import { __setLangfuseForTest } from '../observability/langfuse'
 import { callEmbedding, callLlm } from './llm'
+import { traceRefFor, withTrace } from '../trace/spans'
 
 const keys = { openrouter: 'or-key', userId: 'user-1', isDemo: false } as unknown as DecryptedApiKeys
 const PROMPT = 'Tailor my CV. Contact: jane.doe@example.com, key sk-or-v1-abcdefghijklmnopqrstuv'
@@ -102,6 +103,35 @@ describe('callLlm -> trace_spans + Langfuse generation', () => {
     expect(attr(g, 'langfuse.observation.metadata.prompt_hash')).toBe('a1b2c3d4')
     // metadata only: nothing about the prompt text rides along, and Postgres never sees it
     expect(JSON.stringify(insertCalls)).not.toContain('a1b2c3d4')
+  })
+
+  it('result.trace names the exported generation, and traceRefFor finds it by name inside a trace', async () => {
+    configure()
+    let ref: ReturnType<typeof traceRefFor> = null
+    let result
+    await withTrace({ from: () => ({ insert: async () => ({ error: null }) }) } as never, 'user-1', { name: 'draft-outreach', isDemo: false }, async () => {
+      result = await callLlm(keys, { name: 'draft-outreach-message', prompt: 'x' })
+      ref = traceRefFor('draft-outreach-message')
+      expect(traceRefFor('some-other-name')).toMatchObject({ trace_id: ref!.trace_id, observation_id: null })
+    })
+    const g = gen()
+    expect((result as unknown as { trace: { traceId: string; observationId: string } }).trace).toEqual({
+      traceId: g.spanContext().traceId,
+      observationId: g.spanContext().spanId,
+    })
+    expect(ref).toEqual({ trace_id: g.spanContext().traceId, observation_id: g.spanContext().spanId })
+  })
+
+  it('result.trace is absent when the trace is not exported, and traceRefFor gives null', async () => {
+    // Langfuse not configured: no stubbed env.
+    let ref: ReturnType<typeof traceRefFor> | undefined
+    const result = await withTrace({ from: () => ({ insert: async () => ({ error: null }) }) } as never, 'user-1', { name: 'draft-outreach', isDemo: false }, async () => {
+      const r = await callLlm(keys, { name: 'draft-outreach-message', prompt: 'x' })
+      ref = traceRefFor('draft-outreach-message')
+      return r
+    })
+    expect(result.trace).toBeUndefined()
+    expect(ref).toBeNull()
   })
 
   it('an inline prompt has no version (the release stands in) and no prompt metadata', async () => {

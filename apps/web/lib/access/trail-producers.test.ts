@@ -71,7 +71,7 @@ const io = vi.hoisted(() => ({
   insertOutreach: vi.fn(),
   generateOutreachDraft: vi.fn(),
   optimizeResumeAndSave: vi.fn(),
-  createMarkdownVersion: vi.fn(),
+  createResumeVersion: vi.fn(),
   deleteVersion: vi.fn(),
   getVersionById: vi.fn(),
   listVersions: vi.fn(),
@@ -83,14 +83,13 @@ const io = vi.hoisted(() => ({
 vi.mock('@/lib/contacts/sources', () => ({ sourceContactsForCompany: io.sourceContactsForCompany }))
 vi.mock('@/lib/contacts/keys', () => ({ readContactProviderKeys: io.readContactProviderKeys }))
 vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: io.loadApiKeys }))
-// importOriginal keeps the real `matcher` AgentFn intact — lib/harness/
-// registry.ts's UNIT_REGISTRY (now loaded transitively by runAgentUnit,
-// which match/batch/outreach's routes call) imports it even though neither
-// flow under test here ever invokes it.
-vi.mock('@/lib/harness/agents/matcher', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/harness/agents/matcher')>()),
+// userCompanyIds lives in lib/jobs/owned-query; the matcher module re-exports it.
+vi.mock('@/lib/jobs/owned-query', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/jobs/owned-query')>()),
   userCompanyIds: io.userCompanyIds,
 }))
+// How many roles still wait for an assessment is a head-count query; nothing waits here.
+vi.mock('@/lib/scoring/inputs', () => ({ countUnassessed: async () => ({ inRecall: 0, total: 0 }) }))
 vi.mock('@/lib/harness/agents/bulk_matcher', () => ({ runBulkMatch: io.runBulkMatch }))
 vi.mock('@/lib/outreach/config', () => ({ readOutreachConfig: io.readOutreachConfig }))
 vi.mock('@/lib/outreach/store', async (importOriginal) => ({
@@ -113,13 +112,17 @@ vi.mock('@/lib/graph/verify/outreach', () => ({
     subject: draft.subject,
     body: draft.body,
     tokensUsed: draft.tokensUsed,
+    source: draft.tokensUsed > 0 ? 'model' : 'template',
+    templateReason: draft.tokensUsed > 0 ? undefined : 'missing_key',
     verdicts: [],
-    failedVerdict: false,
+    checks: { ok: true, checks: [] },
+    failed: false,
+    judgeUnavailable: false,
   }),
 }))
 vi.mock('@/lib/harness/agents/resume_optimizer', () => ({ optimizeResumeAndSave: io.optimizeResumeAndSave }))
 vi.mock('@/lib/resume/store', () => ({
-  createMarkdownVersion: io.createMarkdownVersion,
+  createResumeVersion: io.createResumeVersion,
   deleteVersion: io.deleteVersion,
   getVersionById: io.getVersionById,
   listVersions: io.listVersions,
@@ -348,7 +351,7 @@ function installDefaults(): void {
     document: { id: 'doc-1', version: 5, title: null },
     rescore: { atsScore: 80 },
   })
-  io.createMarkdownVersion.mockResolvedValue({ id: 'doc-1', version: 4, title: null })
+  io.createResumeVersion.mockResolvedValue({ id: 'doc-1', version: 4, title: null })
   io.deleteVersion.mockResolvedValue(undefined)
   io.getVersionById.mockResolvedValue({ id: 'doc-1', version: 4, title: null })
   io.listVersions.mockResolvedValue([])
@@ -631,7 +634,7 @@ const PRODUCERS: Producer[] = [
   },
   {
     name: 'resume save — failed (edited)',
-    arrange: () => io.createMarkdownVersion.mockRejectedValue(new Error('insert failed')),
+    arrange: () => io.createResumeVersion.mockRejectedValue(new Error('insert failed')),
     run: () => resumePost(post('/api/resume/documents', { ...SAVE_BODY, source: 'edited' })),
     status: 500,
     action: 'resume.edit',
@@ -644,7 +647,7 @@ const PRODUCERS: Producer[] = [
     // row is, and a table read correctly in one branch and not the other is
     // exactly the bug that survives a single-case test.
     name: 'resume save — failed (base)',
-    arrange: () => io.createMarkdownVersion.mockRejectedValue(new Error('insert failed')),
+    arrange: () => io.createResumeVersion.mockRejectedValue(new Error('insert failed')),
     run: () => resumePost(post('/api/resume/documents', { ...SAVE_BODY, source: 'base' })),
     status: 500,
     action: 'resume.upload',
@@ -939,10 +942,10 @@ describe('producers that journal a failure and then rethrow', () => {
 
   it('records the scoring run when runBulkMatch blows up mid-spend', async () => {
     const { inserts } = useServiceRole({ profileRow: DEMO_WORKSPACE_PROFILE, codeRow: LIVE_CODE_ROW })
-    io.runBulkMatch.mockRejectedValue(new Error('tier-1 batch never returned'))
+    io.runBulkMatch.mockRejectedValue(new Error('the assessment never returned'))
 
     await expect(scoreBatch(post('/api/agents/match/batch', { limit: 10 }))).rejects.toThrow(
-      'tier-1 batch never returned'
+      'the assessment never returned'
     )
 
     const rows = auditRows(inserts)
@@ -953,7 +956,7 @@ describe('producers that journal a failure and then rethrow', () => {
 
   it('writes nothing for an ordinary user on either path', async () => {
     const { inserts } = useServiceRole({ profileRow: ORDINARY_WORKSPACE_PROFILE, codeRow: LIVE_CODE_ROW })
-    io.runBulkMatch.mockRejectedValue(new Error('tier-1 batch never returned'))
+    io.runBulkMatch.mockRejectedValue(new Error('the assessment never returned'))
 
     await expect(scoreBatch(post('/api/agents/match/batch', { limit: 10 }))).rejects.toThrow()
 

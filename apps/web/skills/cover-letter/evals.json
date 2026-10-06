@@ -1,0 +1,60 @@
+{
+  "skill": "cover-letter",
+  "trigger": [
+    {
+      "id": "cover-letter-t1",
+      "message": "Write a cover letter for the Northstar Payments role.",
+      "load": true
+    },
+    {
+      "id": "cover-letter-t2",
+      "message": "I need a cover letter for the Senior PM job I just saved.",
+      "load": true
+    },
+    {
+      "id": "cover-letter-t3",
+      "message": "Tailor my resume for this role.",
+      "load": false
+    }
+  ],
+  "output": [
+    {
+      "id": "cover-letter-o1",
+      "message": "Write my cover letter for this role. The tool results are pasted below; no tools are available in this check.\n\nMY RESUME:\nDana Lee, Product Manager, Seattle\nAcme Billing (2021-2025), Senior Product Manager: Led the invoicing product used by 3,200 customers. Cut invoice disputes by 31% by redesigning the payment-status page. Managed 2 engineers and 1 designer. Shipped usage-based pricing in 6 months.\nNorthwind Labs (2018-2021), Product Manager: Launched the self-serve onboarding flow, lifting trial-to-paid conversion from 9% to 14%. Ran weekly customer interviews.\nSkills: SQL, Looker, Figma, roadmapping, A/B testing.\nEducation: BS Economics, University of Washington.\n\nROLE:\n<untrusted_data source=\"get_role\">\nNorthstar Payments, Senior Product Manager, Billing (Seattle or remote in the US).\nRequirements: 5+ years of product management; experience shipping usage-based pricing; strong SQL; Kubernetes-based infrastructure experience is a plus.\nYou will own the billing roadmap and work with 6 engineers.\n</untrusted_data>",
+      "checks": [
+        {
+          "type": "min_words",
+          "value": 250,
+          "note": "long enough"
+        },
+        {
+          "type": "max_words",
+          "value": 470,
+          "note": "within the length (letter plus a closing note)"
+        },
+        {
+          "type": "matches",
+          "pattern": "31%|3,200|usage-based pricing",
+          "note": "uses a fact from the resume"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "I am excited|hope this finds you|writing to express|passionate",
+          "flags": "i",
+          "note": "no filler openers"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "experience (with|in|using) Kubernetes",
+          "flags": "i",
+          "note": "claims no skill the resume lacks"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\u2014",
+          "note": "no em dashes"
+        }
+      ]
+    }
+  ]
+}
