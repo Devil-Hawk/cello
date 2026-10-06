@@ -116,21 +116,21 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       "it reaches here; ownership is enforced separately by ownedJobsQuery's FK join.",
   },
   'apps/web/lib/scoring/index.ts': {
-    calls: [".in('id', rows.map((r)"],
-    reason: "rows is one day's saved shortlist (at most a handful of picks), one job id per row; ownership is enforced by ownedJobsQuery's FK join.",
+    calls: [".in('job_id', rows.map((r)"],
+    reason: "rows is one day's saved shortlist (at most a handful of picks), one job id per row; the query is on the person's own person_roles rows (filtered by user_id).",
   },
   'apps/web/lib/scoring/supabase-store.ts': {
-    calls: [".in('id', part)"],
-    reason: 'part is one slice of at most IN_CHUNK (100) ids, cut by chunks() on every call; ownership is enforced by ownedJobsQuery\'s FK join.',
+    calls: [".in('job_id', part)"],
+    reason: 'part is one slice of at most IN_CHUNK (100) ids, cut by chunks() on every call; the query is on the person\'s own person_roles rows (filtered by user_id).',
   },
   'apps/web/lib/harness/agents/verifier.ts': {
     calls: [".in('id', knockouts)"],
     reason: 'knockouts can never exceed the MAX_JOBS (30) batch it was collected from in the same run.',
   },
   'apps/web/lib/harness/copilot-tools.ts': {
-    calls: [".in('id', jobIds)", ".in('id', companyIds)", ".in('id', trgmIds)", ".in('id', contactIds)"],
+    calls: [".in('id', jobIds)", ".in('job_id', jobIds)", ".in('id', companyIds)", ".in('id', trgmIds)", ".in('id', contactIds)"],
     reason:
-      "loadJobBriefs: jobIds is always ≤20 ids (every caller slices/caps before calling); companyIds is the " +
+      "loadJobBriefs: jobIds is always ≤20 ids (every caller slices/caps before calling), for the jobs and for the person's own person_roles rows; companyIds is the " +
       'deduped company_id set of those ≤20 job rows. listJobs\' trgmIds and listContacts\' contactIds are both ' +
       "search_*_by_*_trgm()'s p_limit-bounded RPC result (clampLimit'd to ≤15/≤25, hard RPC ceiling 50 — see " +
       '20260816000009_job_search.sql), never an owned-id set.',
