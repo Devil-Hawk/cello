@@ -274,7 +274,7 @@ async function verifyLink(db: Db, url: URL, domain: string | null, directToken: 
   if (read.board) {
     const ok = passed.get(`${read.board.provider}:${read.board.token}`)
     if (ok) {
-      const employerId = await writeEmployer(db, {
+      return writeEmployer(db, {
         name: ok.name,
         // the host of the pasted link, never the board's own declared home (whoever owns a board can edit that)
         domain,
@@ -287,12 +287,11 @@ async function verifyLink(db: Db, url: URL, domain: string | null, directToken: 
         readTier: 'board',
         keepExisting: true,
       })
-      return { ok: true, employerId }
     }
   }
   // No board, but the employer's own site lists roles Cello could read: tied to the employer by the address it was read at.
   if (domain && read.tier && read.tier !== 'board' && read.jobs.length > 0) {
-    const employerId = await writeEmployer(db, {
+    return writeEmployer(db, {
       name: guess ?? domain,
       domain,
       careersUrl: url.href,
@@ -304,7 +303,6 @@ async function verifyLink(db: Db, url: URL, domain: string | null, directToken: 
       readTier: read.tier,
       keepExisting: true,
     })
-    return { ok: true, employerId }
   }
 
   // Nothing verified: the board that failed says why; otherwise the reader's own reason.
