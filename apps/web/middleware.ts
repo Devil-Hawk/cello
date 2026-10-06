@@ -376,9 +376,10 @@ export async function middleware(request: NextRequest) {
   // A page-level redirect() in a retired page's own file only fires
   // client-side once React mounts (the parent layout is a client component
   // that streams a 200 first), so plain HTTP clients (curl, old bookmarks
-  // with no JS) never leave. Redirect here instead — middleware runs before
+  // with no JS) never leave. Redirect here instead, middleware runs before
   // any rendering and always returns a real 307.
-  const retiredTo = RETIRED_PAGES[pathname.split('/')[1] ?? '']
+  const segment = pathname.split('/')[1] ?? ''
+  const retiredTo = Object.hasOwn(RETIRED_PAGES, segment) ? RETIRED_PAGES[segment] : undefined
   if (retiredTo) {
     const url = request.nextUrl.clone()
     url.pathname = retiredTo

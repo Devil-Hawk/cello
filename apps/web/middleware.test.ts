@@ -21,4 +21,9 @@ describe('retired pages', () => {
       expect(new URL(res.headers.get('location')!).pathname).toBe(to)
     }
   })
+
+  it.each(['constructor', 'toString', '__proto__', 'hasOwnProperty'])('does not treat /%s as a retired page', async (name) => {
+    // Falling through to the session read (mocked to throw) proves no redirect.
+    await expect(middleware(new NextRequest(`http://localhost/${name}`))).rejects.toThrow('a retired page must redirect')
+  })
 })
