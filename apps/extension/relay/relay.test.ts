@@ -33,7 +33,7 @@ describe('the extension carrier', () => {
     expect(await relayTick(d)).toBe(true)
     expect(d.calls.map(([r]) => r)).toEqual(['/api/model-jobs/claim', '/api/model-jobs/result'])
     expect(d.calls[0]![1]).toEqual({ rung: 'R2', wait: 25 })
-    expect(d.calls[1]![1]).toEqual({ job_id: 'j1', claim_id: 'c1', text: 'a reply' })
+    expect(d.calls[1]![1]).toEqual({ job_id: 'j1', claim_id: 'c1', model: 'llama3.1:8b', text: 'a reply' })
     expect(d.keepAlive.start).toHaveBeenCalledTimes(1)
     expect(d.keepAlive.stop).toHaveBeenCalledTimes(1)
     expect(d.unlock).toHaveBeenCalledTimes(1)
@@ -42,7 +42,7 @@ describe('the extension carrier', () => {
   it('posts an error sentence when the local model fails', async () => {
     const d = deps({ run: async () => { throw new Error('Cello could not reach Ollama on this computer.') } })
     await relayTick(d)
-    expect(d.calls[1]![1]).toEqual({ job_id: 'j1', claim_id: 'c1', error: 'Cello could not reach Ollama on this computer.' })
+    expect(d.calls[1]![1]).toEqual({ job_id: 'j1', claim_id: 'c1', model: 'llama3.1:8b', error: 'Cello could not reach Ollama on this computer.' })
   })
 
   it('does nothing without a token or a local model, or while a send holds the lock', async () => {
@@ -72,7 +72,7 @@ describe('the extension carrier', () => {
     expect(d.calls.map(([, b]) => b)).toEqual([
       { rung: 'R2', wait: 0 },
       { rung: 'R1', wait: 0 },
-      { job_id: 'j1', claim_id: 'c1', text: 'a browser reply' },
+      { job_id: 'j1', claim_id: 'c1', model: 'Qwen3-1.7B-q4f16_1-MLC', text: 'a browser reply' },
     ])
   })
 

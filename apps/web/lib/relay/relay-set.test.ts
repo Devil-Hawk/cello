@@ -77,13 +77,20 @@ describe('the result route', () => {
   }
 
   it('1 refuses a body without a job, a claim and text or an error', async () => {
-    const res = await resultRoute(post('/api/model-jobs/result', { job_id: 'x', text: 'hi' }, asRelayToken))
+    const res = await resultRoute(post('/api/model-jobs/result', { job_id: 'x', model: 'llama3.1:8b', text: 'hi' }, asRelayToken))
     expect(res.status).toBe(400)
+  })
+
+  it('1b refuses a result that names no model, and the job stays claimed', async () => {
+    const { jobId, claimId } = await claimed()
+    const res = await resultRoute(post('/api/model-jobs/result', { job_id: jobId, claim_id: claimId, text: 'hi' }, asRelayToken))
+    expect(res.status).toBe(400)
+    expect(relay.jobs[0]!.status).toBe('claimed')
   })
 
   it('2 refuses a wrong claim id', async () => {
     const { jobId } = await claimed()
-    const res = await resultRoute(post('/api/model-jobs/result', { job_id: jobId, claim_id: OTHER_CLAIM, text: 'hi' }, asRelayToken))
+    const res = await resultRoute(post('/api/model-jobs/result', { job_id: jobId, claim_id: OTHER_CLAIM, model: 'llama3.1:8b', text: 'hi' }, asRelayToken))
     expect(res.status).toBe(409)
     expect(relay.jobs[0]!.status).toBe('claimed')
   })
@@ -92,13 +99,13 @@ describe('the result route', () => {
     const { jobId, claimId } = await claimed()
     // The same token holder is person A; the job belongs to B.
     relay.jobs[0]!.user_id = B
-    const res = await resultRoute(post('/api/model-jobs/result', { job_id: jobId, claim_id: claimId, text: 'hi' }, asRelayToken))
+    const res = await resultRoute(post('/api/model-jobs/result', { job_id: jobId, claim_id: claimId, model: 'llama3.1:8b', text: 'hi' }, asRelayToken))
     expect(res.status).toBe(409)
   })
 
   it('4 refuses a job nobody claimed', async () => {
     const q = await queue(A)
-    const res = await resultRoute(post('/api/model-jobs/result', { job_id: q.jobId, claim_id: OTHER_CLAIM, text: 'hi' }, asRelayToken))
+    const res = await resultRoute(post('/api/model-jobs/result', { job_id: q.jobId, claim_id: OTHER_CLAIM, model: 'llama3.1:8b', text: 'hi' }, asRelayToken))
     expect(res.status).toBe(409)
     expect(relay.jobs[0]!.status).toBe('queued')
   })
@@ -106,17 +113,18 @@ describe('the result route', () => {
   it('5 refuses a result over 64 KB before it touches the queue', async () => {
     const { jobId, claimId } = await claimed()
     const rpc = vi.spyOn(relay.admin, 'rpc')
-    const res = await resultRoute(post('/api/model-jobs/result', { job_id: jobId, claim_id: claimId, text: 'x'.repeat(70_000) }, asRelayToken))
+    const res = await resultRoute(post('/api/model-jobs/result', { job_id: jobId, claim_id: claimId, model: 'm', text: 'x'.repeat(70_000) }, asRelayToken))
     expect(res.status).toBe(413)
     expect(rpc).not.toHaveBeenCalled()
   })
 
   it('6 takes one answer per claim and refuses the second', async () => {
     const { jobId, claimId } = await claimed()
-    const first = await resultRoute(post('/api/model-jobs/result', { job_id: jobId, claim_id: claimId, text: 'one' }, asRelayToken))
-    const second = await resultRoute(post('/api/model-jobs/result', { job_id: jobId, claim_id: claimId, text: 'two' }, asRelayToken))
+    const first = await resultRoute(post('/api/model-jobs/result', { job_id: jobId, claim_id: claimId, model: 'llama3.1:8b', text: 'one' }, asRelayToken))
+    const second = await resultRoute(post('/api/model-jobs/result', { job_id: jobId, claim_id: claimId, model: 'llama3.1:8b', text: 'two' }, asRelayToken))
     expect([first.status, second.status]).toEqual([200, 409])
-    expect(relay.jobs[0]!.result).toEqual({ text: 'one' })
+    expect(relay.jobs[0]!.result).toEqual({ text: 'one', model: 'llama3.1:8b' })
+    expect(relay.jobs[0]!.prov).toMatchObject({ step: 'inbox.classify', model: 'llama3.1:8b', rung: 'R2', evidence: [] })
   })
 })
 
@@ -142,11 +150,20 @@ describe('RelayChatModel', () => {
   it('8 returns a job that is already done without waiting', async () => {
     const q = await queue(A)
     const job = await claimJob(relay.admin, A, 'R2')
-    await completeJob(relay.admin, { userId: A, jobId: q.jobId, claimId: job!.claim_id, text: 'noise' })
+    await completeJob(relay.admin, { userId: A, jobId: q.jobId, claimId: job!.claim_id, model: 'llama3.1:8b', text: 'noise' })
     const waiter = vi.fn()
     const out = await model({ waiter }).invoke([new HumanMessage('sort this mail')])
     expect(out.content).toBe('noise')
     expect(waiter).not.toHaveBeenCalled()
+  })
+
+  it('8b tells the ledger which model answered', async () => {
+    const q = await queue(A)
+    const job = await claimJob(relay.admin, A, 'R2')
+    await completeJob(relay.admin, { userId: A, jobId: q.jobId, claimId: job!.claim_id, model: 'llama3.1:8b', text: 'noise' })
+    const onAnswer = vi.fn()
+    await model({ onAnswer }).invoke([new HumanMessage('sort this mail')])
+    expect(onAnswer).toHaveBeenCalledWith(expect.objectContaining({ model: 'llama3.1:8b' }))
   })
 
   it('9 throws RelayWaitError when no one answers, and the re-run asks nothing new and reads the answer once', async () => {
@@ -155,7 +172,7 @@ describe('RelayChatModel', () => {
     expect(relay.jobs).toHaveLength(1)
 
     const job = await claimJob(relay.admin, A, 'R2')
-    await completeJob(relay.admin, { userId: A, jobId: job!.job_id, claimId: job!.claim_id, text: 'late answer' })
+    await completeJob(relay.admin, { userId: A, jobId: job!.job_id, claimId: job!.claim_id, model: 'llama3.1:8b', text: 'late answer' })
 
     const out = await model({ waiter: async () => null }).invoke([new HumanMessage('sort this mail')])
     expect(out.content).toBe('late answer')

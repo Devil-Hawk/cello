@@ -30,6 +30,8 @@ export interface RelaySpendNote {
   userId: string
   stepId: string
   rung: RelayRung
+  /** The model the carrier says it ran, from the job's result. */
+  model: string
   promptText: string
   completionText: string
 }
@@ -117,6 +119,7 @@ export class RelayChatModel extends BaseChatModel {
         userId: this.userId,
         stepId: this.stepId,
         rung: this.rung,
+        model: result?.model ?? 'unknown',
         promptText: request.messages.map((m) => m.content).join('\n'),
         completionText: text,
       })

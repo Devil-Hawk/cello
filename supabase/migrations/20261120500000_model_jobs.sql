@@ -21,6 +21,13 @@ do $pgmq$
 begin
   if exists (select 1 from pg_available_extensions where name = 'pgmq') then
     create extension if not exists pgmq;
+    -- relay_claim needs pgmq's conditional read (1.5 and later). Fail here, when the
+    -- migration is applied, not later when the first job is claimed.
+    alter extension pgmq update;
+    if string_to_array((select extversion from pg_extension where extname = 'pgmq'), '.')::int[] < array[1, 5, 0] then
+      raise exception 'The relay queue needs pgmq 1.5 or later; this database has %.',
+        (select extversion from pg_extension where extname = 'pgmq');
+    end if;
     if not exists (select 1 from pgmq.meta where queue_name = 'model_jobs') then
       perform pgmq.create('model_jobs');
     end if;
@@ -40,12 +47,19 @@ create table if not exists public.model_jobs (
   claim_id uuid,
   result jsonb,
   error text,
+  -- Provenance (directive 20): every result here is model text. prov says which model
+  -- answered, as {step, model, rung, evidence, at}; relay_complete writes it.
+  origin text not null default 'model' check (origin = 'model'),
+  prov jsonb,
+  confirmed_at timestamptz,
   msg_id bigint,
   created_at timestamptz not null default now(),
   claimed_at timestamptz,
   done_at timestamptz,
   -- A carrier's answer is text for one step. 64 KB is far more than any step asks for.
-  constraint model_jobs_result_size check (result is null or octet_length(result::text) <= 65536)
+  -- Measured on the text itself: jsonb escapes quotes and newlines, so the stored
+  -- form can be longer than the 64 KB the route and the carriers allow.
+  constraint model_jobs_result_size check (result is null or octet_length(result ->> 'text') <= 65536)
 );
 
 -- One job in flight per person, step and prompt: a step that re-runs finds its job.
@@ -193,9 +207,10 @@ $fn$;
 
 -- relay_complete: finish a claimed job once. Refuses the wrong person, the wrong
 -- claim, and any job that is not claimed (so a second answer, or a forged one for a
--- job nobody claimed, changes nothing). Returns whether it took the answer.
+-- job nobody claimed, changes nothing), and an answer that names no model. Returns
+-- whether it took the answer.
 create or replace function public.relay_complete(
-  p_user uuid, p_job uuid, p_claim uuid, p_result jsonb, p_error text
+  p_user uuid, p_job uuid, p_claim uuid, p_result jsonb, p_model text, p_error text
 ) returns boolean
 language plpgsql
 security definer
@@ -204,9 +219,15 @@ as $fn$
 declare
   v_row public.model_jobs;
 begin
+  if p_model is null or p_model = '' then
+    raise exception 'a result must name the model that answered';
+  end if;
+  -- The model rides in the result as well as in prov, so every reader of a finished
+  -- job (the waiter, the re-run, the ledger) has it without another column.
   update public.model_jobs
      set status = case when p_error is null then 'done' else 'failed' end,
-         result = case when p_error is null then p_result else null end,
+         result = case when p_error is null then p_result || jsonb_build_object('model', p_model) else null end,
+         prov = jsonb_build_object('step', step_id, 'model', p_model, 'rung', rung, 'evidence', '[]'::jsonb, 'at', now()),
          error = p_error,
          done_at = now()
    where id = p_job and user_id = p_user and claim_id = p_claim and status = 'claimed'
@@ -223,9 +244,9 @@ $fn$;
 
 revoke all on function public.relay_enqueue(uuid, text, text, text, jsonb) from public, anon, authenticated;
 revoke all on function public.relay_claim(uuid, text) from public, anon, authenticated;
-revoke all on function public.relay_complete(uuid, uuid, uuid, jsonb, text) from public, anon, authenticated;
+revoke all on function public.relay_complete(uuid, uuid, uuid, jsonb, text, text) from public, anon, authenticated;
 grant execute on function public.relay_enqueue(uuid, text, text, text, jsonb) to service_role;
 grant execute on function public.relay_claim(uuid, text) to service_role;
-grant execute on function public.relay_complete(uuid, uuid, uuid, jsonb, text) to service_role;
+grant execute on function public.relay_complete(uuid, uuid, uuid, jsonb, text, text) to service_role;
 
 notify pgrst, 'reload schema';

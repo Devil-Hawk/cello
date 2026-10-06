@@ -11,7 +11,7 @@ export type JobStatus = 'queued' | 'claimed' | 'done' | 'failed'
 export interface JobRow {
   id: string
   status: JobStatus
-  result: { text?: string } | null
+  result: { text?: string; model?: string } | null
   error: string | null
 }
 
@@ -26,7 +26,7 @@ export interface EnqueueInput {
 export interface EnqueueResult {
   jobId: string
   status: JobStatus
-  result: { text?: string } | null
+  result: { text?: string; model?: string } | null
   /** False when the job (or its finished answer) was already there: nothing new was queued. */
   created: boolean
 }
@@ -43,7 +43,7 @@ export async function enqueueJob(admin: AdminClient, i: EnqueueInput): Promise<E
     p_request: i.request,
   })
   if (error) throw new Error(`relay_enqueue failed: ${error.message}`)
-  const row = first<{ job_id: string; status: JobStatus; result: { text?: string } | null; created: boolean }>(data)
+  const row = first<{ job_id: string; status: JobStatus; result: { text?: string; model?: string } | null; created: boolean }>(data)
   if (!row) throw new Error('relay_enqueue returned nothing')
   return { jobId: row.job_id, status: row.status, result: row.result, created: row.created }
 }
@@ -64,6 +64,8 @@ export interface CompleteInput {
   userId: string
   jobId: string
   claimId: string
+  /** The model the carrier ran: it goes to the job's provenance and the ledger row. */
+  model: string
   text?: string
   error?: string
 }
@@ -75,6 +77,7 @@ export async function completeJob(admin: AdminClient, i: CompleteInput): Promise
     p_job: i.jobId,
     p_claim: i.claimId,
     p_result: i.error === undefined ? { text: i.text ?? '' } : null,
+    p_model: i.model,
     p_error: i.error ?? null,
   })
   if (error) throw new Error(`relay_complete failed: ${error.message}`)

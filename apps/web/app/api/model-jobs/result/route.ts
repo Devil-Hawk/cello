@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
       userId: auth.userId,
       jobId: body.data.job_id,
       claimId: body.data.claim_id,
+      model: body.data.model,
       text: body.data.text,
       error: body.data.error,
     })

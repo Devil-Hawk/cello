@@ -35,7 +35,7 @@ test('with no Cello tab open, the alarm runs a model job on this computer and po
     await expect.poll(() => stub.calls('/api/model-jobs/result').length).toBe(1)
 
     expect(stub.calls('/api/model-jobs/claim')[0]!.headers.authorization).toBe(`Bearer ${RELAY_TOKEN}`)
-    expect(stub.calls('/api/model-jobs/result')[0]!.body).toEqual({ job_id: 'job-1', claim_id: 'claim-1', text: 'a reply from the fake model' })
+    expect(stub.calls('/api/model-jobs/result')[0]!.body).toEqual({ job_id: 'job-1', claim_id: 'claim-1', model: 'fake', text: 'a reply from the fake model' })
     expect(model.bodies).toHaveLength(1)
     // Nothing but model job routes was touched with the relay token, and the fill routes saw no relay token.
     expect(stub.requests.filter((r) => r.headers.authorization === `Bearer ${RELAY_TOKEN}`).every((r) => r.path.startsWith('/api/model-jobs/'))).toBe(true)

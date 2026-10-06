@@ -1,7 +1,7 @@
 import { browser } from 'wxt/browser'
 import { startKeepAlive, stopKeepAlive } from '../worker/keepalive'
 import { acquireLock, releaseLock } from '../worker/lock'
-import { runLocal } from '../../web/lib/relay/local'
+import { R1_MODEL, runLocal } from '../../web/lib/relay/local'
 import type { LocalConfig, LocalRequest } from '../../web/lib/relay/local'
 import { relayCall } from './api'
 import type { RelayRoute } from './api'
@@ -62,15 +62,15 @@ export async function relayTick(d: RelayDeps = defaults): Promise<boolean> {
     const browserModel = await d.browserReady()
     if (!cfg && !browserModel) return false
     // R2 first; the long wait only when R2 is the one rung this device serves.
-    if (cfg && (await serve(d, 'R2', browserModel ? 0 : 25, (req) => d.run(cfg, req)))) return true
-    return browserModel ? await serve(d, 'R1', 0, d.runBrowser) : false
+    if (cfg && (await serve(d, 'R2', browserModel ? 0 : 25, cfg.model, (req) => d.run(cfg, req)))) return true
+    return browserModel ? await serve(d, 'R1', 0, R1_MODEL, d.runBrowser) : false
   } finally {
     await d.keepAlive.stop()
     await d.unlock()
   }
 }
 
-async function serve(d: RelayDeps, rung: 'R1' | 'R2', wait: number, run: (req: LocalRequest) => Promise<string>): Promise<boolean> {
+async function serve(d: RelayDeps, rung: 'R1' | 'R2', wait: number, model: string, run: (req: LocalRequest) => Promise<string>): Promise<boolean> {
   const claimed = await d.call<Claimed>('/api/model-jobs/claim', { rung, wait })
   const job = claimed?.job
   if (!job) return false
@@ -80,6 +80,6 @@ async function serve(d: RelayDeps, rung: 'R1' | 'R2', wait: number, run: (req: L
   } catch (err) {
     answer = { error: err instanceof Error ? err.message.slice(0, 500) : 'The model failed.' }
   }
-  await d.call('/api/model-jobs/result', { job_id: job.job_id, claim_id: job.claim_id, ...answer })
+  await d.call('/api/model-jobs/result', { job_id: job.job_id, claim_id: job.claim_id, model, ...answer })
   return true
 }

@@ -58,11 +58,12 @@ export const JobRequest = z.object({
 })
 export type JobRequest = z.infer<typeof JobRequest>
 
-/** What a carrier posts back: text, or an error sentence. */
+/** What a carrier posts back: text, or an error sentence, and the model that ran. */
 export const ResultBody = z
   .object({
     job_id: z.string().uuid(),
     claim_id: z.string().uuid(),
+    model: z.string().min(1).max(100),
     text: z.string().optional(),
     error: z.string().max(500).optional(),
   })

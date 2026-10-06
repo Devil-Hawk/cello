@@ -14,8 +14,9 @@ export interface FakeJob {
   request: unknown
   status: 'queued' | 'claimed' | 'done' | 'failed'
   claim_id: string | null
-  result: { text?: string } | null
+  result: { text?: string; model?: string } | null
   error: string | null
+  prov: Record<string, unknown> | null
 }
 
 export function fakeRelay() {
@@ -42,6 +43,7 @@ export function fakeRelay() {
         claim_id: null,
         result: null,
         error: null,
+        prov: null,
       }
       jobs.push(job)
       return { data: [{ job_id: job.id, status: 'queued', result: null, created: true }], error: null }
@@ -55,9 +57,11 @@ export function fakeRelay() {
     }
     if (name === 'relay_complete') {
       const job = jobs.find((j) => j.id === a.p_job && j.user_id === a.p_user && j.claim_id === a.p_claim && j.status === 'claimed')
+      if (!a.p_model) return { data: null, error: { message: 'a result must name the model that answered' } }
       if (!job) return { data: false, error: null }
+      job.prov = { step: job.step_id, model: a.p_model, rung: job.rung, evidence: [] }
       job.status = a.p_error === null ? 'done' : 'failed'
-      job.result = a.p_error === null ? (a.p_result as { text?: string }) : null
+      job.result = a.p_error === null ? { ...(a.p_result as { text?: string }), model: a.p_model as string } : null
       job.error = (a.p_error as string | null) ?? null
       return { data: true, error: null }
     }

@@ -25,7 +25,8 @@ export function relayLive(rung: RelayRung, userId: string): boolean {
 
 /** A relayed call spends nothing; it is still one row in the ledger, so the door share counts it. */
 async function recordRelayCall(admin: AdminClient, n: RelaySpendNote): Promise<void> {
-  const model = n.rung === 'R2' ? 'relay:this-computer' : 'relay:this-browser'
+  // The model the carrier ran, as it said so, behind the rung: relay:R2:llama3.1:8b.
+  const model = `relay:${n.rung}:${n.model}`
   const promptTokens = estimatePromptTokens(n.promptText)
   const completionTokens = estimatePromptTokens(n.completionText)
   const held = await reserveSpend(admin, {

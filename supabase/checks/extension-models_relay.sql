@@ -64,7 +64,7 @@ begin
 
   begin
     perform public.relay_complete('cccccccc-0000-0000-0000-000000000001', 'dddddddd-0000-0000-0000-000000000001',
-      'eeeeeeee-0000-0000-0000-000000000001', '{"text":"forged"}', null);
+      'eeeeeeee-0000-0000-0000-000000000001', '{"text":"forged"}', 'llama3.1:8b', null);
     assert false, 'authenticated could call relay_complete';
   exception when insufficient_privilege then null;
   end;
@@ -86,34 +86,52 @@ declare ok boolean; st text;
 begin
   -- The wrong claim id.
   ok := public.relay_complete('cccccccc-0000-0000-0000-000000000001', 'dddddddd-0000-0000-0000-000000000001',
-    'eeeeeeee-0000-0000-0000-0000000000ff', '{"text":"x"}', null);
+    'eeeeeeee-0000-0000-0000-0000000000ff', '{"text":"x"}', 'llama3.1:8b', null);
   assert not ok, 'a wrong claim id was accepted';
   -- Another person's job, even with its right claim id.
   ok := public.relay_complete('cccccccc-0000-0000-0000-000000000001', 'dddddddd-0000-0000-0000-000000000002',
-    'eeeeeeee-0000-0000-0000-000000000002', '{"text":"x"}', null);
+    'eeeeeeee-0000-0000-0000-000000000002', '{"text":"x"}', 'llama3.1:8b', null);
   assert not ok, 'another person''s job was accepted';
   -- A job nobody claimed.
   ok := public.relay_complete('cccccccc-0000-0000-0000-000000000001', 'dddddddd-0000-0000-0000-000000000003',
-    null, '{"text":"x"}', null);
+    null, '{"text":"x"}', 'llama3.1:8b', null);
   assert not ok, 'an unclaimed job was accepted';
   select status into st from public.model_jobs where id = 'dddddddd-0000-0000-0000-000000000003';
   assert st = 'queued', 'the unclaimed job changed';
 
+  -- A result that names no model is refused and leaves the job claimed.
+  begin
+    perform public.relay_complete('cccccccc-0000-0000-0000-000000000001', 'dddddddd-0000-0000-0000-000000000001',
+      'eeeeeeee-0000-0000-0000-000000000001', '{"text":"x"}', null, null);
+    assert false, 'a result with no model was accepted';
+  exception when raise_exception then
+    assert sqlerrm like '%name the model%', 'the refusal was not about the model: ' || sqlerrm;
+  end;
+  assert (select status from public.model_jobs where id = 'dddddddd-0000-0000-0000-000000000001') = 'claimed', 'a refused result changed the job';
+
   -- The right answer is taken once.
   ok := public.relay_complete('cccccccc-0000-0000-0000-000000000001', 'dddddddd-0000-0000-0000-000000000001',
-    'eeeeeeee-0000-0000-0000-000000000001', '{"text":"hello"}', null);
+    'eeeeeeee-0000-0000-0000-000000000001', '{"text":"hello"}', 'llama3.1:8b', null);
   assert ok, 'the right answer was refused';
   ok := public.relay_complete('cccccccc-0000-0000-0000-000000000001', 'dddddddd-0000-0000-0000-000000000001',
-    'eeeeeeee-0000-0000-0000-000000000001', '{"text":"again"}', null);
+    'eeeeeeee-0000-0000-0000-000000000001', '{"text":"again"}', 'llama3.1:8b', null);
   assert not ok, 'a second answer was accepted';
   select status into st from public.model_jobs where id = 'dddddddd-0000-0000-0000-000000000001';
   assert st = 'done', 'the finished job is not done';
   assert (select result ->> 'text' from public.model_jobs where id = 'dddddddd-0000-0000-0000-000000000001') = 'hello',
     'the second answer replaced the first';
+  -- Provenance: the model that answered is on the job, in prov and in the result.
+  assert (select prov ->> 'model' from public.model_jobs where id = 'dddddddd-0000-0000-0000-000000000001') = 'llama3.1:8b', 'prov does not name the model';
+  assert (select prov ->> 'step' from public.model_jobs where id = 'dddddddd-0000-0000-0000-000000000001') = 'inbox.classify'
+     and (select prov ->> 'rung' from public.model_jobs where id = 'dddddddd-0000-0000-0000-000000000001') = 'R2'
+     and (select prov -> 'evidence' from public.model_jobs where id = 'dddddddd-0000-0000-0000-000000000001') = '[]'::jsonb
+     and (select prov ->> 'at' from public.model_jobs where id = 'dddddddd-0000-0000-0000-000000000001') is not null, 'prov is not {step, model, rung, evidence, at}';
+  assert (select result ->> 'model' from public.model_jobs where id = 'dddddddd-0000-0000-0000-000000000001') = 'llama3.1:8b', 'the result does not carry the model';
+  assert (select origin from public.model_jobs where id = 'dddddddd-0000-0000-0000-000000000001') = 'model', 'origin is not model';
 
   -- An answer that is an error fails the job and stores no result.
   ok := public.relay_complete('cccccccc-0000-0000-0000-000000000002', 'dddddddd-0000-0000-0000-000000000002',
-    'eeeeeeee-0000-0000-0000-000000000002', null, 'The local model is not running.');
+    'eeeeeeee-0000-0000-0000-000000000002', null, 'llama3.1:8b', 'The local model is not running.');
   assert ok, 'a carrier error was refused';
   assert (select status from public.model_jobs where id = 'dddddddd-0000-0000-0000-000000000002') = 'failed', 'an error did not fail the job';
   assert (select result from public.model_jobs where id = 'dddddddd-0000-0000-0000-000000000002') is null, 'a failed job kept a result';
@@ -126,6 +144,16 @@ begin
   values ('cccccccc-0000-0000-0000-000000000001', 'big', 'R2', 'big', '{}', jsonb_build_object('text', repeat('x', 70000)));
   assert false, 'a result over 64 KB was stored';
 exception when check_violation then null;
+end $$;
+
+-- 64 KB of text that jsonb must escape (every character a quote) is still stored: the
+-- limit is on the text a carrier sent, not on its escaped form.
+do $$
+begin
+  insert into public.model_jobs (user_id, step_id, rung, prompt_hash, request, result)
+  values ('cccccccc-0000-0000-0000-000000000001', 'quotes', 'R2', 'quotes', '{}', jsonb_build_object('text', repeat('"', 65536)));
+exception when check_violation then
+  assert false, 'a 64 KB answer full of quotes was refused';
 end $$;
 
 -- One job in flight per person, step and prompt.
@@ -199,11 +227,11 @@ begin
   update pgmq.q_model_jobs set vt = now() - interval '1 second';
   select * into later from public.relay_claim('cccccccc-0000-0000-0000-000000000001', 'R2');
   assert later.job_id = a.job_id and later.claim_id <> first_claim, 'an expired lease did not give a new claim id';
-  ok := public.relay_complete('cccccccc-0000-0000-0000-000000000001', a.job_id, first_claim, '{"text":"late"}', null);
+  ok := public.relay_complete('cccccccc-0000-0000-0000-000000000001', a.job_id, first_claim, '{"text":"late"}', 'llama3.1:8b', null);
   assert not ok, 'the old carrier answered after its lease ran out';
 
   -- Finished once, then handed back with its result instead of asked again.
-  ok := public.relay_complete('cccccccc-0000-0000-0000-000000000001', a.job_id, later.claim_id, '{"text":"done"}', null);
+  ok := public.relay_complete('cccccccc-0000-0000-0000-000000000001', a.job_id, later.claim_id, '{"text":"done"}', 'llama3.1:8b', null);
   assert ok, 'the claimed job could not be finished';
   select * into again from public.relay_enqueue('cccccccc-0000-0000-0000-000000000001', 'chance', 'R2', 'hq', '{"messages":[]}');
   assert not again.created and again.status = 'done' and again.result ->> 'text' = 'done', 'a finished job was asked again';

@@ -11,7 +11,7 @@
 
 import { useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { askWorker, DEFAULT_BASE, deviceCanRun, type DeviceNav, type LocalConfig, type LocalRequest, runLocal } from './local'
+import { askWorker, DEFAULT_BASE, deviceCanRun, type DeviceNav, type LocalConfig, type LocalRequest, R1_MODEL, runLocal } from './local'
 import type { ClaimedJob } from './protocol'
 
 const STORAGE_KEY = 'cello.relay.local'
@@ -62,6 +62,7 @@ async function post(path: string, body: unknown): Promise<Response> {
 /** Claim one job at this rung, run it, post the answer, then look for the next. Exported for the tests. */
 export async function drain(
   rung: 'R1' | 'R2',
+  model: string,
   run: (req: LocalRequest) => Promise<string>,
   send: typeof post = post,
 ): Promise<number> {
@@ -75,8 +76,8 @@ export async function drain(
   } catch (err) {
     answer = { error: err instanceof Error ? err.message.slice(0, 500) : 'The model failed.' }
   }
-  await send('/api/model-jobs/result', { job_id: job.job_id, claim_id: job.claim_id, ...answer })
-  return 1 + (await drain(rung, run, send))
+  await send('/api/model-jobs/result', { job_id: job.job_id, claim_id: job.claim_id, model, ...answer })
+  return 1 + (await drain(rung, model, run, send))
 }
 
 // One worker per page, made the first time an R1 job needs it. The WebLLM chunk is
@@ -101,8 +102,8 @@ export function PageCarrier({ userId, enabled }: { userId: string; enabled: bool
       busy = true
       try {
         const cfg = readLocalConfig()
-        if (cfg) await drain('R2', (req) => runLocal(cfg, req))
-        if (readBrowserModelOn() && (await deviceCanRun(navigator as unknown as DeviceNav)) === null) await drain('R1', browserModel)
+        if (cfg) await drain('R2', cfg.model, (req) => runLocal(cfg, req))
+        if (readBrowserModelOn() && (await deviceCanRun(navigator as unknown as DeviceNav)) === null) await drain('R1', R1_MODEL, browserModel)
       } finally {
         busy = false
       }
