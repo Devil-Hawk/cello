@@ -5,7 +5,7 @@
 import { callEmbedding, EMBEDDING_MODEL, isEmbeddingFallback } from '@/lib/harness/llm'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { QUALITY_REJECT_THRESHOLD } from '@/lib/jobs/classify'
-import { ownedJobsQuery } from '@/lib/jobs/owned-query'
+import { openRolesOnly } from '@/lib/jobs/freshness'
 import { prioritiseByTargetTitles } from '@/lib/jobs/target-relevance'
 import { getMemoryStore } from '@/lib/memory/mem0-store'
 import { resolveTargeting, type Targeting } from '@/lib/targeting'
@@ -86,6 +86,11 @@ export async function loadScoringInputs(admin: AdminClient, userId: string): Pro
 // Candidate roles
 // ---------------------------------------------------------------------------
 
+// The roles come from the person's own rows (public.person_roles) with the posting
+// embedded: a role the person has no row for is not theirs to assess, and the
+// verdict columns are on the row, so "not assessed yet" is `checked_at is null`.
+// The posting's own columns are filtered through the embed (`referencedTable`).
+
 interface CandidateRow {
   id: string
   title: string
@@ -99,15 +104,22 @@ interface CandidateRow {
   companies: { name: string | null } | { name: string | null }[] | null
 }
 
-const CANDIDATE_COLUMNS = 'id, title, description, location, salary_range, seniority, country, is_remote, job_function, companies!inner(name)'
+interface PersonRoleRow {
+  job_id: string
+  jobs: CandidateRow | CandidateRow[] | null
+}
+
+const JOB_COLUMNS = 'id, title, description, location, salary_range, seniority, country, is_remote, job_function, companies(name)'
+const CANDIDATE_SELECT = 'job_id, jobs!inner(' + JOB_COLUMNS + ')'
+const JOBS = { referencedTable: 'jobs' } as const
 
 function quote(v: string): string {
-  return /[,()"]/.test(v) ? `"${v.replace(/"/g, '\\"')}"` : v
+  return /[,()"]/.test(v) ? '"' + v.replace(/"/g, '\\"') + '"' : v
 }
 
 /** A facet matches a wanted value, or is not classified yet. The same rule the jobs list uses. */
 function facet(column: string, values: string[]): string {
-  return `${column}.is.null,${column}.eq.unknown,${column}.in.(${values.map(quote).join(',')})`
+  return column + '.is.null,' + column + '.eq.unknown,' + column + '.in.(' + values.map(quote).join(',') + ')'
 }
 
 export function toRoleFacts(row: CandidateRow): RoleFacts {
@@ -126,6 +138,15 @@ export function toRoleFacts(row: CandidateRow): RoleFacts {
   }
 }
 
+function factsOf(rows: PersonRoleRow[] | null): RoleFacts[] {
+  const out: RoleFacts[] = []
+  for (const row of rows ?? []) {
+    const job = Array.isArray(row.jobs) ? row.jobs[0] : row.jobs
+    if (job) out.push(toRoleFacts(job))
+  }
+  return out
+}
+
 export interface CandidateOptions {
   limit: number
   /** Only roles that have never been assessed. */
@@ -140,25 +161,27 @@ export interface CandidateOptions {
  * The open roles worth assessing, newest first. Junk postings are skipped and the
  * function and level the person asked for narrow the recall, but nothing they
  * ruled out (country, company, words in a title) is dropped here: those roles are
- * assessed so each one carries the reason it was filtered.
+ * assessed so each one carries the reason it was filtered. A role the person hid
+ * is not assessed again.
  */
 export async function candidateRoles(admin: AdminClient, userId: string, targeting: Targeting, titles: readonly string[], opts: CandidateOptions): Promise<RoleFacts[]> {
   if (opts.jobIds && opts.jobIds.length > 0) {
-    const { data, error } = await ownedJobsQuery(admin, userId, CANDIDATE_COLUMNS).in('id', opts.jobIds.slice(0, 200))
-    if (error) throw new Error(`could not read roles: ${error.message}`)
-    return ((data as unknown as CandidateRow[] | null) ?? []).map(toRoleFacts)
+    const { data, error } = await admin.from('person_roles').select(CANDIDATE_SELECT).eq('user_id', userId).in('job_id', opts.jobIds.slice(0, 200))
+    if (error) throw new Error('could not read roles: ' + error.message)
+    return factsOf(data as unknown as PersonRoleRow[] | null)
   }
   const pool = Math.min(400, Math.max(opts.limit * 4, 80))
-  let query = ownedJobsQuery(admin, userId, CANDIDATE_COLUMNS)
-    .or('still_open.is.null,still_open.eq.true')
-    .or(`quality_score.is.null,quality_score.gte.${QUALITY_REJECT_THRESHOLD}`)
-  if (opts.onlyUnassessed) query = query.is('fit_assessed_at', null)
-  if (targeting.functions.length > 0) query = query.or(facet('job_function', targeting.functions))
-  if (targeting.seniority.length > 0) query = query.or(facet('seniority', targeting.seniority))
-  if (targeting.languages.length > 0) query = query.or(facet('language', targeting.languages))
-  const { data, error } = await query.order('posted_at', { ascending: false, nullsFirst: false }).limit(pool)
-  if (error) throw new Error(`could not read roles: ${error.message}`)
-  let rows = ((data as unknown as CandidateRow[] | null) ?? []).map(toRoleFacts)
+  let query = openRolesOnly(admin.from('person_roles').select(CANDIDATE_SELECT).eq('user_id', userId).is('hidden_reason', null), JOBS).or(
+    'quality_score.is.null,quality_score.gte.' + QUALITY_REJECT_THRESHOLD,
+    JOBS
+  )
+  if (opts.onlyUnassessed) query = query.is('checked_at', null)
+  if (targeting.functions.length > 0) query = query.or(facet('job_function', targeting.functions), JOBS)
+  if (targeting.seniority.length > 0) query = query.or(facet('seniority', targeting.seniority), JOBS)
+  if (targeting.languages.length > 0) query = query.or(facet('language', targeting.languages), JOBS)
+  const { data, error } = await query.order('jobs(posted_at)', { ascending: false, nullsFirst: false }).limit(pool)
+  if (error) throw new Error('could not read roles: ' + error.message)
+  let rows = factsOf(data as unknown as PersonRoleRow[] | null)
 
   if (!opts.includeReacted && rows.length > 0) {
     const reacted = new Set<string>()
@@ -177,14 +200,12 @@ export async function candidateRoles(admin: AdminClient, userId: string, targeti
  */
 export async function countUnassessed(admin: AdminClient, userId: string, targeting: Targeting): Promise<{ inRecall: number; total: number }> {
   const head = { count: 'exact' as const, head: true }
-  const total = await ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', head).is('fit_assessed_at', null)
-  let q = ownedJobsQuery(admin, userId, 'id, companies!inner(user_id)', head)
-    .is('fit_assessed_at', null)
-    .or('still_open.is.null,still_open.eq.true')
-    .or(`quality_score.is.null,quality_score.gte.${QUALITY_REJECT_THRESHOLD}`)
-  if (targeting.functions.length > 0) q = q.or(facet('job_function', targeting.functions))
-  if (targeting.seniority.length > 0) q = q.or(facet('seniority', targeting.seniority))
-  if (targeting.languages.length > 0) q = q.or(facet('language', targeting.languages))
+  const base = () => admin.from('person_roles').select('job_id, jobs!inner(id)', head).eq('user_id', userId).is('hidden_reason', null).is('checked_at', null)
+  const total = await base()
+  let q = openRolesOnly(base(), JOBS).or('quality_score.is.null,quality_score.gte.' + QUALITY_REJECT_THRESHOLD, JOBS)
+  if (targeting.functions.length > 0) q = q.or(facet('job_function', targeting.functions), JOBS)
+  if (targeting.seniority.length > 0) q = q.or(facet('seniority', targeting.seniority), JOBS)
+  if (targeting.languages.length > 0) q = q.or(facet('language', targeting.languages), JOBS)
   const inRecall = await q
   return { inRecall: inRecall.count ?? 0, total: total.count ?? 0 }
 }

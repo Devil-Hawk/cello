@@ -31,8 +31,8 @@ export const PRIOR_STRENGTH = 5
 export const MIN_FIT_REACTIONS = 20
 export const MIN_PER_CLASS = 5
 
-/** A pass for one of these reasons is about level, place or pay, not about the role's content. */
-const NOT_A_CONTENT_SIGNAL: ReadonlySet<PassReason> = new Set(['too_junior', 'too_senior', 'location', 'pay'])
+/** A pass for one of these reasons is about level, place, the kind of posting, work authorization or pay, not about the role's content. */
+const NOT_A_CONTENT_SIGNAL: ReadonlySet<PassReason> = new Set(['too_junior', 'too_senior', 'location', 'relocation', 'agency', 'sponsorship', 'pay'])
 
 export interface TasteExample {
   vec: number[]

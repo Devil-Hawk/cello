@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdminClient } from '@/lib/harness/types'
-import { ScoringInputError, getRoleFit, learningMode, readShortlist, receiptFor, todayUtc, triageRole, undoReaction } from './index'
+import { PICKS_ON, ScoringInputError, getRoleFit, learningMode, readShortlist, runDailyShortlist, todayUtc, triageMessage, triageRole, undoReaction } from './index'
 
 type Row = Record<string, unknown>
 
@@ -8,9 +8,14 @@ type Row = Record<string, unknown>
 function fakeDb(seed: Record<string, Row[]>) {
   const tables: Record<string, Row[]> = JSON.parse(JSON.stringify(seed))
   let nextId = 1
+  const writes: { table: string; op: string }[] = []
+  const reads = new Set<string>()
   const db = {
     tables,
+    writes,
+    reads,
     from(name: string) {
+      reads.add(name)
       const rows = (tables[name] ??= [])
       const filters: ((r: Row) => boolean)[] = []
       let op: 'select' | 'insert' | 'update' | 'delete' | 'upsert' = 'select'
@@ -18,9 +23,10 @@ function fakeDb(seed: Record<string, Row[]>) {
       let conflict: string[] = []
       let countOnly = false
       const b: Record<string, unknown> = {}
-      const get = (r: Row, col: string): unknown => (col === 'companies.user_id' ? r._owner : r[col])
+      const get = (r: Row, col: string): unknown => r[col]
       const run = () => {
         const hit = rows.filter((r) => filters.every((f) => f(r)))
+        if (op !== 'select') writes.push({ table: name, op })
         if (op === 'insert') {
           for (const p of [payload].flat() as Row[]) rows.push({ id: `row${nextId++}`, ...p })
           return { data: null, error: null }
@@ -65,28 +71,42 @@ function fakeDb(seed: Record<string, Row[]>) {
       return b
     },
   }
-  return db as unknown as AdminClient & { tables: Record<string, Row[]> }
+  return db as unknown as AdminClient & { tables: Record<string, Row[]>; writes: { table: string; op: string }[]; reads: Set<string> }
 }
 
-const JOB = {
+const JOB_ROW = {
   id: 'job1',
-  _owner: 'u',
   title: 'Senior Backend Engineer',
   location: 'Seattle, WA',
+  url: 'https://acme.example/jobs/1',
+  posted_at: '2026-10-01T00:00:00Z',
   description: 'Build payment services in Go.',
   companies: { name: 'Acme' },
-  is_new: true,
+}
+
+/** One person's own row for a shared role, with the posting embedded the way the query asks for it. */
+const MINE = {
+  user_id: 'u',
+  job_id: 'job1',
+  hidden_reason: null,
+  checked_at: '2026-10-06T08:00:00Z',
   want_p: 0.7,
   want_detail: { judge: 0.8, embedding: 0.6, stated: 0.5 },
   chance: 'possible',
   want_reason: 'Payments work.',
   chance_detail: { checks: [], gaps: [], confirm: [], note: null },
   blocked_reasons: [],
+  jobs: JOB_ROW,
 }
 
 let db: ReturnType<typeof fakeDb>
 beforeEach(() => {
-  db = fakeDb({ jobs: [JOB, { ...JOB, id: 'other', _owner: 'someone-else' }], role_reactions: [], applications: [] })
+  db = fakeDb({
+    jobs: [{ ...JOB_ROW, is_new: true }, { ...JOB_ROW, id: 'other', is_new: true }],
+    person_roles: [MINE, { ...MINE, user_id: 'someone-else', job_id: 'other', jobs: { ...JOB_ROW, id: 'other' } }],
+    role_reactions: [],
+    applications: [],
+  })
 })
 
 const triage = (over: Partial<Parameters<typeof triageRole>[0]> = {}) => triageRole({ db, userId: 'u', jobId: 'job1', reaction: 'interested', surface: 'today', ...over })
@@ -94,7 +114,7 @@ const triage = (over: Partial<Parameters<typeof triageRole>[0]> = {}) => triageR
 describe('triageRole', () => {
   it('Interested saves the role to Pipeline as discovered with source triage, and snapshots what Cello predicted', async () => {
     const out = await triage({ pickKind: 'explore' })
-    expect(out.receipt).toBe('Saved to Pipeline. Cello will show more like this.')
+    expect(out.message).toBe('Saved to Pipeline. Cello will show more like this.')
     expect(db.tables.applications).toHaveLength(1)
     expect(db.tables.applications[0]).toMatchObject({ user_id: 'u', job_id: 'job1', stage: 'discovered', source: 'triage' })
     expect(db.tables.role_reactions[0]).toMatchObject({
@@ -121,13 +141,16 @@ describe('triageRole', () => {
   it('Not for me stores the reason and removes only an application that triage itself created', async () => {
     await triage()
     const out = await triage({ reaction: 'not_for_me', reason: 'pay' })
-    expect(out.receipt).toBe('Got it. Pay noted for this one; it will not count against similar roles.')
+    expect(out.message).toBe('Got it. Pay noted for this one; it will not count against similar roles.')
     expect(db.tables.role_reactions[0]).toMatchObject({ reaction: 'not_for_me', reason: 'pay' })
     expect(db.tables.applications).toHaveLength(0)
-    expect(db.tables.jobs[0]).toMatchObject({ is_new: false })
+    // The role is hidden for this person only: their own row says so, and the shared posting is never written.
+    expect(db.tables.person_roles.find((r) => r.user_id === 'u')).toMatchObject({ hidden_reason: 'not_for_me' })
+    expect(db.tables.person_roles.find((r) => r.user_id === 'someone-else')).toMatchObject({ hidden_reason: null })
+    expect(db.writes.filter((w) => w.table === 'jobs')).toEqual([])
 
-    const mine = fakeDb({ jobs: [JOB], role_reactions: [], applications: [{ id: 'a1', user_id: 'u', job_id: 'job1', stage: 'discovered', source: 'manual' }] })
-    await triageRole({ db: mine, userId: 'u', jobId: 'job1', reaction: 'not_for_me', surface: 'opportunities' })
+    const mine = fakeDb({ person_roles: [MINE], role_reactions: [], applications: [{ id: 'a1', user_id: 'u', job_id: 'job1', stage: 'discovered', source: 'manual' }] })
+    await triageRole({ db: mine, userId: 'u', jobId: 'job1', reaction: 'not_for_me', surface: 'roles' })
     expect(mine.tables.applications).toHaveLength(1)
   })
 
@@ -140,11 +163,11 @@ describe('triageRole', () => {
 })
 
 describe('undoReaction', () => {
-  it('takes the reaction and the Pipeline entry triage made back, and makes a passed role new again', async () => {
+  it('takes the reaction and the Pipeline entry triage made back, and shows a passed role again', async () => {
     await triage({ reaction: 'not_for_me' })
     expect((await undoReaction({ db, userId: 'u', jobId: 'job1' })).undone).toBe(true)
     expect(db.tables.role_reactions).toHaveLength(0)
-    expect(db.tables.jobs[0]).toMatchObject({ is_new: true })
+    expect(db.tables.person_roles.find((r) => r.user_id === 'u')).toMatchObject({ hidden_reason: null })
 
     await triage()
     expect(db.tables.applications).toHaveLength(1)
@@ -154,11 +177,12 @@ describe('undoReaction', () => {
   })
 })
 
-describe('receipts and modes', () => {
-  it('words each receipt in the person\'s terms', () => {
-    expect(receiptFor('not_for_me', 'domain')).toBe('Got it. Fewer roles in this area.')
-    expect(receiptFor('not_for_me', null)).toBe('Got it. Cello will show fewer like this.')
-    expect(receiptFor('applied', null)).toContain('applied')
+describe('messages and modes', () => {
+  it('words each message in the person\'s terms', () => {
+    expect(triageMessage('not_for_me', 'domain')).toBe('Got it. Fewer roles in this area.')
+    expect(triageMessage('not_for_me', null)).toBe('Got it. Cello will show fewer like this.')
+    expect(triageMessage('not_for_me', 'sponsorship')).toBe('Got it. Fewer roles that cannot sponsor.')
+    expect(triageMessage('applied', null)).toContain('applied')
   })
 
   it('says how the list was ranked', () => {
@@ -187,5 +211,17 @@ describe('reading', () => {
     expect(ready.status).toBe('ready')
     expect(ready.picks[0]).toMatchObject({ position: 1, kind: 'top', job: { id: 'job1', company: 'Acme' }, reaction: { reaction: 'interested' } })
     expect(ready.picks[0].fit?.want?.tier).toBe('high')
+  })
+})
+
+describe('the daily picks', () => {
+  it('are off: nothing is read, no model is asked and no list is written', async () => {
+    expect(PICKS_ON).toBe(false)
+    const llm = vi.fn()
+    const out = await runDailyShortlist({ admin: db, userId: 'u', llm: llm as never, skipIfBuilt: true })
+    expect(out).toMatchObject({ status: 'off', picks: [], notes: ['Daily picks are off until they beat plain ordering.'] })
+    expect(llm).not.toHaveBeenCalled()
+    expect([...db.reads]).toEqual([])
+    expect(db.writes).toEqual([])
   })
 })

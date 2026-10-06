@@ -3,11 +3,11 @@
 
 export type Reaction = 'interested' | 'not_for_me' | 'applied'
 
-export const PASS_REASONS = ['too_junior', 'too_senior', 'company', 'domain', 'location', 'pay', 'other'] as const
+export const PASS_REASONS = ['too_junior', 'too_senior', 'company', 'domain', 'location', 'relocation', 'agency', 'sponsorship', 'pay', 'other'] as const
 export type PassReason = (typeof PASS_REASONS)[number]
 
 /** Where a role was shown when the person reacted to it. */
-export type Surface = 'today' | 'opportunities' | 'chat' | 'pipeline'
+export type Surface = 'roles' | 'record' | 'today' | 'applications' | 'company' | 'chat'
 
 export type PickKind = 'top' | 'explore'
 
@@ -74,6 +74,8 @@ export interface RequirementCheck {
   status: 'met' | 'partial' | 'not_met' | 'unclear'
   /** The line of the resume that supports it. Null when nothing does. */
   evidence: { line: number; quote: string } | null
+  /** Set to 'model' when a model, not the parser, found the requirement in the posting. Absent means the parser did. */
+  origin?: 'model'
 }
 
 export interface ChanceResult {

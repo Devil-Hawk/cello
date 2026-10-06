@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { FIT_COLUMNS, chanceLabel, firstGapCopy, fitHighlights, parseFit } from './read'
+import { FIT_COLUMNS, FIT_EMBED, chanceLabel, firstGapCopy, fitHighlights, fitRowOf, fitToColumns, parseFit } from './read'
 
 describe('parseFit', () => {
   it('gives an unassessed role no want and no chance', () => {
-    const fit = parseFit({ id: 'j1', fit_assessed_at: null, blocked_reasons: [], want_p: null, want_reason: null, want_detail: null, chance: null, chance_detail: null })
+    const fit = parseFit({ id: 'j1', checked_at: null, blocked_reasons: [], want_p: null, want_reason: null, want_detail: null, chance: null, chance_detail: null })
     expect(fit).toEqual({ jobId: 'j1', assessedAt: null, blocked: [], want: null, chance: null })
     expect(chanceLabel(fit.chance)).toBe('Not assessed yet')
   })
@@ -16,7 +16,7 @@ describe('parseFit', () => {
   it('reads the stated reasons, the want band and the cited chance', () => {
     const fit = parseFit({
       id: 'j2',
-      fit_assessed_at: '2026-10-06T08:00:00Z',
+      checked_at: '2026-10-06T08:00:00Z',
       blocked_reasons: [{ kind: 'location', text: 'It is based in Germany, and you said you work in the United States.' }, { nope: 1 }],
       want_p: 0.71,
       want_reason: ' Payments work like the Stripe role you applied to. ',
@@ -41,6 +41,36 @@ describe('parseFit', () => {
     expect(chanceLabel('cannot_assess')).toBe('Not assessed yet')
     expect(chanceLabel('strong')).toBe('Strong')
     expect(chanceLabel('stretch')).toBe('Stretch')
+  })
+})
+
+describe('the person_roles embed', () => {
+  const verdict = { checked_at: '2026-10-06T08:00:00Z', blocked_reasons: [], want_p: 0.6, want_reason: 'Fits.', want_detail: null, chance: 'strong', chance_detail: { checks: [] } }
+
+  it('reads an embed object, an embed array and a bare verdict row alike', () => {
+    expect(parseFit({ id: 'j1', person_roles: verdict }).chance?.label).toBe('strong')
+    expect(parseFit({ id: 'j1', person_roles: [verdict] }).chance?.label).toBe('strong')
+    expect(parseFit({ id: 'j1', ...verdict }).chance?.label).toBe('strong')
+    expect(parseFit({ id: 'j1', person_roles: [] }).chance).toBeNull()
+    expect(parseFit({ id: 'j1', person_roles: null }).want).toBeNull()
+  })
+
+  it('maps checked_at to assessedAt and keeps the job id from the outer row', () => {
+    const fit = parseFit({ id: 'j9', person_roles: verdict })
+    expect(fit.assessedAt).toBe('2026-10-06T08:00:00Z')
+    expect(fit.jobId).toBe('j9')
+    expect(fitRowOf({ person_roles: [verdict] })).toBe(verdict)
+  })
+
+  it('writes a verdict back into the columns of the embed', () => {
+    const cols = fitToColumns(parseFit({ id: 'j9', person_roles: verdict }))
+    expect(cols.checked_at).toBe('2026-10-06T08:00:00Z')
+    expect(cols.chance).toBe('strong')
+    expect(Object.keys(cols)).not.toContain('fit_assessed_at')
+  })
+
+  it('embeds the person row as an inner join', () => {
+    expect(FIT_EMBED).toBe(`person_roles!inner(${FIT_COLUMNS})`)
   })
 })
 

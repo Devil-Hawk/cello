@@ -1,24 +1,38 @@
-// Reading the verdict on a role. The assessment lives on the job row (see
-// migration 20261009000200), so every screen selects FIT_COLUMNS next to the
-// columns it already reads and passes the row through parseFit. Nothing here
-// produces a number to show: the chance is a label with evidence, and the want
-// is a band.
+// Reading the verdict on a role. What Cello concluded about a role is stored per
+// person on public.person_roles (migration 20261009000200), never on jobs, so a
+// screen that lists roles either embeds the person's row (FIT_EMBED, next to the
+// columns it already reads) or starts from person_roles and embeds the job. Either
+// way the row goes through parseFit. Nothing here produces a number to show: the
+// chance is a label with evidence, and the want is a band.
 
 import { wantTier } from './shortlist'
 import type { BlockReason, Chance, RequirementCheck, RoleFit } from './types'
 
-/** The jobs columns that hold the verdict. Add to a select string. */
-export const FIT_COLUMNS = 'fit_assessed_at, blocked_reasons, want_p, want_reason, want_detail, chance, chance_detail'
+/** The person_roles columns that hold the verdict. */
+export const FIT_COLUMNS = 'checked_at, blocked_reasons, want_p, want_reason, want_detail, chance, chance_detail'
+
+/** Embeds the person's own verdict in a jobs select. A session client sees only its own row; a service client also filters `person_roles.user_id`. */
+export const FIT_EMBED = `person_roles!inner(${FIT_COLUMNS})`
 
 export interface FitRow {
-  id?: string | null
-  fit_assessed_at?: string | null
+  checked_at?: string | null
   blocked_reasons?: unknown
   want_p?: number | null
   want_reason?: string | null
   want_detail?: unknown
   chance?: string | null
   chance_detail?: unknown
+}
+
+/** A jobs row that carries the person's verdict as an embed, or a bare verdict row. */
+export type FitSource = FitRow & { id?: string | null; person_roles?: FitRow | FitRow[] | null }
+
+/** The verdict columns of a row: its person_roles embed (the first when PostgREST returns an array), or the row itself when it already is a verdict row. */
+export function fitRowOf(row: FitSource | null | undefined): FitRow {
+  if (!row) return {}
+  const e = row.person_roles
+  if (Array.isArray(e)) return e[0] ?? {}
+  return e ?? row
 }
 
 function obj(v: unknown): Record<string, unknown> {
@@ -51,6 +65,7 @@ function checks(v: unknown): RequirementCheck[] {
       mustHave: o.mustHave !== false,
       status: (['met', 'partial', 'not_met', 'unclear'] as const).includes(o.status as 'met') ? (o.status as RequirementCheck['status']) : 'unclear',
       evidence: typeof ev.line === 'number' && typeof ev.quote === 'string' ? { line: ev.line, quote: ev.quote } : null,
+      ...(o.origin === 'model' ? { origin: 'model' as const } : {}),
     })
   }
   return out
@@ -59,14 +74,15 @@ function checks(v: unknown): RequirementCheck[] {
 const CHANCES: readonly Chance[] = ['strong', 'possible', 'stretch', 'cannot_assess']
 
 /** Turns the verdict columns of a job row into what a screen needs. Tolerates null columns: an unassessed role has no want and no chance. */
-export function parseFit(row: FitRow): RoleFit {
+export function parseFit(source: FitSource | null | undefined): RoleFit {
+  const row = fitRowOf(source)
   const detail = obj(row.chance_detail)
   const want = obj(row.want_detail)
   const p = typeof row.want_p === 'number' && Number.isFinite(row.want_p) ? row.want_p : null
   const label = CHANCES.includes(row.chance as Chance) ? (row.chance as Chance) : null
   return {
-    jobId: row.id ?? null,
-    assessedAt: row.fit_assessed_at ?? null,
+    jobId: source?.id ?? null,
+    assessedAt: row.checked_at ?? null,
     blocked: blockReasons(row.blocked_reasons),
     want:
       p == null
@@ -136,10 +152,10 @@ export function firstGapCopy(fit: RoleFit): string | null {
   return `Not clearly on your resume: ${gap.replace(/^(?:Only partly shown|Nice to have):\s*/i, '').replace(/[.]+$/, '')}.`
 }
 
-/** The jobs columns a verdict fills, for a screen that has just assessed a role and wants its row to show it without a reload. */
-export function fitToColumns(fit: RoleFit): Required<Omit<FitRow, 'id'>> {
+/** The person_roles columns a verdict fills, for a screen that has just assessed a role and wants its row to show it without a reload. */
+export function fitToColumns(fit: RoleFit): Required<FitRow> {
   return {
-    fit_assessed_at: fit.assessedAt,
+    checked_at: fit.assessedAt,
     blocked_reasons: fit.blocked,
     want_p: fit.want?.p ?? null,
     want_reason: fit.want?.reason ?? null,

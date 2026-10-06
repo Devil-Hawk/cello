@@ -1,10 +1,11 @@
 // The Supabase implementation of ScoringStore. It runs with the service client,
-// so every read and write is scoped by hand: a job is touched only when it
-// belongs to one of the person's own companies.
+// so every read and write is scoped by hand: a verdict is read or written only on
+// the row the person has for that role (public.person_roles, keyed by user and
+// job). A role the person has no row for is never assessed and never gets a
+// verdict, which is also what keeps one person's conclusions off another's screen.
 
 import type { AdminClient } from '@/lib/harness/types'
-import { ownedJobsQuery } from '@/lib/jobs/owned-query'
-import { EXTRACTOR_VERSION, REQUIREMENT_KINDS, type Requirement, type RequirementsOutcome } from './requirements'
+import { fromReaderRequirements, type RequirementsOutcome } from './posting-requirements'
 import type { AssessmentToStore, PriorAssessment, ScoringStore, StoredTaste } from './store'
 import type { Chance, ChanceResult, PassReason, Predicted, Reaction, ReactionRecord, RequirementCheck, ShortlistPick } from './types'
 
@@ -24,42 +25,7 @@ function obj(v: unknown): Record<string, unknown> {
 }
 
 // ---------------------------------------------------------------------------
-// Requirement items <-> jobs.requirement_items
-// ---------------------------------------------------------------------------
-
-export function toStoredRequirements(outcome: RequirementsOutcome): Record<string, unknown> | null {
-  if (outcome.kind === 'failed') return null
-  if (outcome.kind === 'thin') return { version: EXTRACTOR_VERSION, kind: 'thin', reason: outcome.reason }
-  return {
-    version: EXTRACTOR_VERSION,
-    kind: 'ok',
-    items: outcome.requirements.map((r) => ({ id: r.id, text: r.text, kind: r.kind, mustHave: r.mustHave, quote: r.quote })),
-  }
-}
-
-/** Null when nothing is stored, or when it was read by an older version of the extractor. */
-export function fromStoredRequirements(raw: unknown): RequirementsOutcome | null {
-  const o = obj(raw)
-  if (o.version !== EXTRACTOR_VERSION) return null
-  if (o.kind === 'thin') return { kind: 'thin', reason: typeof o.reason === 'string' ? o.reason : 'The posting does not list what the role needs.' }
-  if (o.kind !== 'ok' || !Array.isArray(o.items)) return null
-  const requirements: Requirement[] = []
-  for (const it of o.items) {
-    const r = obj(it)
-    if (typeof r.id !== 'string' || typeof r.text !== 'string' || typeof r.quote !== 'string') continue
-    requirements.push({
-      id: r.id,
-      text: r.text,
-      kind: (REQUIREMENT_KINDS as readonly string[]).includes(r.kind as string) ? (r.kind as Requirement['kind']) : 'other',
-      mustHave: r.mustHave !== false,
-      quote: r.quote,
-    })
-  }
-  return requirements.length > 0 ? { kind: 'ok', requirements } : null
-}
-
-// ---------------------------------------------------------------------------
-// Chance <-> jobs.chance + jobs.chance_detail
+// Chance <-> person_roles.chance + person_roles.chance_detail
 // ---------------------------------------------------------------------------
 
 const CHANCES: readonly Chance[] = ['strong', 'possible', 'stretch', 'cannot_assess']
@@ -83,17 +49,6 @@ export class SupabaseScoringStore implements ScoringStore {
 
   private assertUser(userId: string): void {
     if (userId !== this.userId) throw new Error('scoring store was opened for a different person')
-  }
-
-  /** The subset of these job ids that belong to the person. */
-  private async owned(jobIds: readonly string[]): Promise<Set<string>> {
-    const out = new Set<string>()
-    for (const part of chunks([...new Set(jobIds)], IN_CHUNK)) {
-      const { data, error } = await ownedJobsQuery(this.admin, this.userId, 'id, companies!inner(user_id)').in('id', part)
-      if (error) throw new Error(`could not check job ownership: ${error.message}`)
-      for (const row of (data as unknown as { id: string }[] | null) ?? []) out.add(row.id)
-    }
-    return out
   }
 
   async reactions(userId: string): Promise<ReactionRecord[]> {
@@ -133,46 +88,31 @@ export class SupabaseScoringStore implements ScoringStore {
     }
   }
 
+  /** What each of the person's roles asks for, from the reader's own record on jobs.requirements. Roles the person has no row for are left out. */
   async requirements(userId: string, jobIds: string[]): Promise<Map<string, RequirementsOutcome>> {
     this.assertUser(userId)
     const out = new Map<string, RequirementsOutcome>()
     for (const part of chunks(jobIds, IN_CHUNK)) {
-      const { data, error } = await ownedJobsQuery(this.admin, userId, 'id, requirement_items, companies!inner(user_id)').in('id', part)
+      const { data, error } = await this.admin.from('person_roles').select('job_id, jobs!inner(requirements)').eq('user_id', userId).in('job_id', part)
       if (error) throw new Error(`could not read requirements: ${error.message}`)
-      for (const row of (data as unknown as { id: string; requirement_items: unknown }[] | null) ?? []) {
-        const v = fromStoredRequirements(row.requirement_items)
-        if (v) out.set(row.id, v)
+      for (const row of (data as unknown as { job_id: string; jobs: { requirements: unknown } | { requirements: unknown }[] | null }[] | null) ?? []) {
+        const job = Array.isArray(row.jobs) ? row.jobs[0] : row.jobs
+        out.set(row.job_id, fromReaderRequirements(job?.requirements ?? null))
       }
     }
     return out
-  }
-
-  async saveRequirements(userId: string, entries: Map<string, RequirementsOutcome>): Promise<void> {
-    this.assertUser(userId)
-    // A read that failed is never stored: it would be remembered as the posting's answer.
-    const writable = [...entries].filter(([, v]) => v.kind !== 'failed')
-    if (writable.length === 0) return
-    const owned = await this.owned(writable.map(([id]) => id))
-    for (const part of chunks(writable.filter(([id]) => owned.has(id)), WRITE_CHUNK)) {
-      await Promise.all(
-        part.map(async ([id, outcome]) => {
-          const { error } = await this.admin.from('jobs').update({ requirement_items: toStoredRequirements(outcome) }).eq('id', id)
-          if (error) console.error('[scoring] could not store requirements', error.message)
-        })
-      )
-    }
   }
 
   async priorAssessments(userId: string, jobIds: string[]): Promise<Map<string, PriorAssessment>> {
     this.assertUser(userId)
     const out = new Map<string, PriorAssessment>()
     for (const part of chunks(jobIds, IN_CHUNK)) {
-      const { data, error } = await ownedJobsQuery(this.admin, userId, 'id, want_detail, chance, chance_detail, companies!inner(user_id)').in('id', part)
+      const { data, error } = await this.admin.from('person_roles').select('job_id, want_detail, chance, chance_detail').eq('user_id', userId).in('job_id', part)
       if (error) throw new Error(`could not read earlier assessments: ${error.message}`)
-      for (const row of (data as unknown as { id: string; want_detail: unknown; chance: unknown; chance_detail: unknown }[] | null) ?? []) {
+      for (const row of (data as unknown as { job_id: string; want_detail: unknown; chance: unknown; chance_detail: unknown }[] | null) ?? []) {
         const w = obj(row.want_detail)
         const c = chanceFromRow(row.chance, row.chance_detail)
-        out.set(row.id, {
+        out.set(row.job_id, {
           statedP: typeof w.stated === 'number' ? w.stated : null,
           statedKey: typeof w.statedKey === 'string' ? w.statedKey : null,
           chance: c?.result ?? null,
@@ -208,16 +148,16 @@ export class SupabaseScoringStore implements ScoringStore {
     if (error) throw new Error(`could not store the taste model: ${error.message}`)
   }
 
+  /** Writes each verdict onto the person's own row for the role. It only updates: a role the person has no row for stays without one. */
   async saveAssessments(userId: string, rows: AssessmentToStore[]): Promise<void> {
     this.assertUser(userId)
     if (rows.length === 0) return
-    const owned = await this.owned(rows.map((r) => r.jobId))
     const at = new Date().toISOString()
     let failed = 0
-    for (const part of chunks(rows.filter((r) => owned.has(r.jobId)), WRITE_CHUNK)) {
+    for (const part of chunks(rows, WRITE_CHUNK)) {
       await Promise.all(
         part.map(async (r) => {
-          const patch: Record<string, unknown> = { fit_assessed_at: at, blocked_reasons: r.blockedReasons }
+          const patch: Record<string, unknown> = { checked_at: at, blocked_reasons: r.blockedReasons }
           if (r.blocked || !r.want) {
             // A role the person ruled out has no want and no chance worth keeping.
             Object.assign(patch, { want_p: null, want_reason: null, want_detail: null, chance: null, chance_detail: null })
@@ -243,7 +183,7 @@ export class SupabaseScoringStore implements ScoringStore {
               })
             }
           }
-          const { error } = await this.admin.from('jobs').update(patch).eq('id', r.jobId)
+          const { error } = await this.admin.from('person_roles').update(patch).eq('user_id', userId).eq('job_id', r.jobId)
           if (error) {
             failed++
             console.error('[scoring] could not store an assessment', error.message)
