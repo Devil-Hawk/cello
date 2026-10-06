@@ -311,7 +311,7 @@ async function loadJobBriefs(ctx: CopilotToolContext, jobIds: string[]): Promise
  *  caller) — this is just picking a bounded id list to hand it, not
  *  re-deciding what counts as scoreable. */
 async function pickUnscoredJobIds(ctx: CopilotToolContext, limit: number): Promise<string[]> {
-  const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, 'id, companies!inner(user_id)')
+  const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, 'id')
     .is('match_score', null)
     .order('posted_at', { ascending: false, nullsFirst: false })
     .limit(limit)
@@ -362,7 +362,7 @@ async function pickScoringCandidateIds(
   }
 
   const poolSize = Math.min(RELEVANCE_POOL_MAX, Math.max(limit * RELEVANCE_POOL_MULTIPLIER, 100))
-  const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, 'id, title, description, companies!inner(user_id)')
+  const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, 'id, title, description')
     .is('match_score', null)
     .order('posted_at', { ascending: false, nullsFirst: false })
     .limit(poolSize)
@@ -563,7 +563,9 @@ const JOB_TITLE_FTS_MIN_LENGTH = 4
 type JobListRow = {
   id: string
   title: string | null
-  company_id: string
+  company_id: string | null
+  viewer_company_id: string | null
+  viewer_company_name: string | null
   match_score: number | null
   is_new: boolean | null
   location: string | null
@@ -589,17 +591,15 @@ async function listJobs(ctx: CopilotToolContext, args: Args) {
     .select('id, name, is_dream_company')
     .eq('user_id', ctx.userId)
   const companyRows = (companies as { id: string; name: string; is_dream_company: boolean }[]) ?? []
-  const nameById = new Map(companyRows.map((c) => [c.id, c.name]))
   const ids = (dreamOnly ? companyRows.filter((c) => c.is_dream_company) : companyRows).map((c) => c.id)
   if (ids.length === 0) return { jobs: [], note: dreamOnly ? 'No dream companies tracked yet.' : 'No companies tracked yet.' }
 
-  const SELECT = 'id, title, company_id, match_score, is_new, location, posted_at, companies!inner(user_id, is_dream_company)'
-  // Ownership (and, when dreamOnly, the is_dream_company narrowing) is
-  // pushed into the FK join rather than an .in('company_id', ids) array —
-  // ids can run into the hundreds, past the request URL length limit.
+  const SELECT = 'id, title, company_id, viewer_company_id, viewer_company_name, match_score, is_new, location, posted_at'
+  // Ownership is the viewer_id fence. Only dreamOnly narrows by company ids, which are few; the plain list
+  // needs none (hundreds of ids would pass the request URL length limit).
   const baseQuery = () => {
     let q = openRolesOnly(ownedJobsQuery(ctx.admin, ctx.userId, SELECT))
-    if (dreamOnly) q = q.eq('companies.is_dream_company', true)
+    if (dreamOnly) q = q.in('viewer_company_id', ids)
     if (fresh) q = q.eq('is_new', true)
     return q
   }
@@ -643,8 +643,8 @@ async function listJobs(ctx: CopilotToolContext, args: Args) {
     jobs: rows.map((j) => ({
       jobId: j.id,
       title: j.title,
-      company: nameById.get(j.company_id) ?? null,
-      companyId: j.company_id,
+      company: j.viewer_company_name ?? null,
+      companyId: j.viewer_company_id ?? j.company_id,
       matchScore: j.match_score,
       fresh: j.is_new === true,
       location: j.location,
