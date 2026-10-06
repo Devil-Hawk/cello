@@ -6,6 +6,7 @@
 import type { AdminClient } from '@/lib/harness/types'
 import { readCard, type Card } from './cards'
 import { getObject } from './ports/commands.stub'
+import { readStatusLines, type StatusLine } from './status'
 import { getChat, type ChatView } from './store'
 import type { ObjectReader } from './types'
 
@@ -26,6 +27,8 @@ export interface ChatPageData extends ChatView {
   names: Record<string, string | null>
   cards: Card[]
   tasks: WorkerRow[]
+  /** Event id to the line a status turn shows, read from the event row. */
+  statuses: Record<string, StatusLine>
 }
 
 export async function loadChatPage(db: AdminClient, userId: string, chatId: string, get: ObjectReader = getObject): Promise<ChatPageData | null> {
@@ -37,15 +40,17 @@ export async function loadChatPage(db: AdminClient, userId: string, chatId: stri
       if ('card' in part && (part.card.kind === 'role' || part.card.kind === 'company')) subjects.set(`${part.card.kind}:${part.card.ref}`, { kind: part.card.kind, ref: part.card.ref })
     }
   }
-  const [named, cards, workers] = await Promise.all([
+  const [named, cards, workers, statuses] = await Promise.all([
     Promise.all(view.attachments.map(async (a) => [a.id, (await get(db, userId, a.kind, a.ref))?.title ?? null] as const)),
     Promise.all([...subjects.values()].map((s) => readCard(db, userId, s))),
     db.from('agent_tasks').select('id, turn_id, title, status, command, reads, created_at, started_at, finished_at').eq('chat_id', chatId).eq('user_id', userId).order('created_at', { ascending: true }),
+    readStatusLines(db, userId, view.turns.flatMap((t) => (t.kind === 'status' && t.event_id ? [t.event_id] : []))),
   ])
   return {
     ...view,
     names: Object.fromEntries(named),
     cards: cards.filter((c): c is Card => c !== null),
     tasks: (workers.data as WorkerRow[] | null) ?? [],
+    statuses,
   }
 }

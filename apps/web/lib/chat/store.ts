@@ -47,7 +47,7 @@ export async function getChat(db: AdminClient, userId: string, chatId: string): 
   const [turns, attachments] = await Promise.all([
     db
       .from('chat_turns')
-      .select('id, user_id, chat_id, kind, typed, answer, origin, parts, links, quoted, disclosure, superseded_at, created_at')
+      .select('id, user_id, chat_id, kind, typed, answer, origin, parts, links, quoted, event_id, disclosure, superseded_at, created_at')
       .eq('chat_id', chatId)
       .eq('user_id', userId)
       .order('created_at', { ascending: true }),

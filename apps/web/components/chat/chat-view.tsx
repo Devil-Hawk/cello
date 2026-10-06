@@ -13,6 +13,7 @@ import { Composer } from '@/components/chat/composer'
 import { AnswerParts, type Named } from '@/components/chat/parts'
 import { Rail, type RailChat } from '@/components/chat/rail'
 import { SidePanel } from '@/components/chat/side-panel'
+import { StatusTurn } from '@/components/chat/status-turn'
 import { TasksLine, type TaskRow, type TaskStatus } from '@/components/chat/tasks-line'
 import { Tiles, type TileData } from '@/components/chat/tiles'
 import { disclosureLine, type Disclosure } from '@/lib/chat/disclosure'
@@ -211,9 +212,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
                       {t.disclosure ? <p className="text-caption text-muted-foreground">{disclosureLine(t.disclosure as Disclosure)}</p> : null}
                     </div>
                   ) : (
-                    <p key={t.id} className="text-caption text-muted-foreground">
-                      {t.answer}
-                    </p>
+                    <StatusTurn key={t.id} line={t.event_id ? page?.statuses[t.event_id] : undefined} />
                   )
                 )
             )}

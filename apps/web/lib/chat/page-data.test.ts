@@ -61,4 +61,12 @@ describe('loadChatPage', () => {
   it('is null for another person\'s chat', async () => {
     expect(await loadChatPage(seed(), 'u2', 'c1', get)).toBeNull()
   })
+
+  it('reads a status turn\'s words from its event row, never from the turn', async () => {
+    const db = seed()
+    db.tables.chat_turns.push({ id: 't3', user_id: 'u1', chat_id: 'c1', kind: 'status', typed: null, answer: 'forged words', event_id: 'e1', created_at: '2026-10-05T10:01:00Z', parts: [] })
+    db.tables.pipeline_events = [{ id: 'e1', user_id: 'u1', application_id: 'app1', sentence: 'Sent.', to_state: 'sent', created_at: '2026-10-05T10:01:00Z' }]
+    const page = await loadChatPage(db, 'u1', 'c1', get)
+    expect(page?.statuses.e1.sentence).toBe('Sent.')
+  })
 })
