@@ -61,7 +61,7 @@ Only transform, opacity and shadow animate.
 
 CSS 3D carries most of it: the bar is a raised plinth with the current page a key 1px proud; keys sit down when pressed; tiles are app icons with bevel, sheen and a contact shadow and lift 1px toward the pointer; beads are small lit objects marking live states only; the fit strip stands up for a strength and lies flat for a gap; an opened group rises 250 ms with translateZ.
 
-WebGL is allowed only for the Cello mark in the bar and on its own the working mark beside "Cello is working". Two canvases a page at most, each 96 CSS px or smaller, rendered on demand, stopped when the tab is hidden. Each has an SVG twin of the same silhouette in the same box. Reduced motion draws one still frame. Without WebGL, with Save-Data, or on a device with 2 GB of memory or less, the twin renders and nothing shifts.
+WebGL is allowed only for the Cello mark in the bar and on its own the working mark beside "Cello is working". A resting mark is the pre-rendered still until a mouse or pen arrives (or focus does), then the canvas mounts; the scene only turns for the pointer, so this keeps three out of every page load, and phones keep the still. A working mark mounts on idle. Two canvases a page at most, each 96 CSS px or smaller, rendered on demand, stopped when the tab is hidden. Each has an SVG twin of the same silhouette in the same box. Reduced motion draws one still frame. Without WebGL, with Save-Data, or on a device with 2 GB of memory or less, the twin renders and nothing shifts.
 
 Still objects for empty and done states (the quiet Today, an empty For you) are pre-rendered images in webp at 1x and 2x, never canvases.
 

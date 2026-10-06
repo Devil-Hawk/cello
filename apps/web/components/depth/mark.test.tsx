@@ -16,6 +16,12 @@ describe('Mark on the server', () => {
     expect(html).not.toContain('<canvas')
   })
 
+  it('shows the resting mark as the still over its twin, and the working mark as the twin', () => {
+    const resting = renderToStaticMarkup(<Mark />)
+    expect(resting).toContain('/depth/mark@1x.webp')
+    expect(renderToStaticMarkup(<WorkingMark />)).not.toContain('/depth/mark@1x.webp')
+  })
+
   it('keeps the same box for the working mark at 24px, live only when working', () => {
     const html = renderToStaticMarkup(<WorkingMark />)
     expect(html).toContain('width:24px')
