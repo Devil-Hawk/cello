@@ -13,12 +13,13 @@ export interface BarProps {
   onSignOut: () => void
   /** Today's copper numeral. Absent until the Needs you count exists. */
   needsYou?: number
+  bell?: boolean
 }
 
 // The laptop bar: a raised plinth on the ground with the Cello mark, a key per
 // page, and the person's own things at the right. The current page is a key
 // standing 1px proud. Roles come before Companies, each a page of its own.
-export function Bar({ pathname, user, onSignOut, needsYou }: BarProps) {
+export function Bar({ pathname, user, onSignOut, needsYou, bell = true }: BarProps) {
   return (
     <header className="relative z-40 hidden shrink-0 px-6 py-3 md:block">
       <Plinth className="mx-auto flex h-14 max-w-[1200px] items-center gap-2 pl-3 pr-2">
@@ -46,7 +47,7 @@ export function Bar({ pathname, user, onSignOut, needsYou }: BarProps) {
             <Link href={chat.href}>{chat.label}</Link>
           </Key>
         )}
-        <NotificationBell side="bottom" align="end" />
+        {bell && <NotificationBell side="bottom" align="end" />}
         <ThemeKey />
         <AccountMenu user={user} onSignOut={onSignOut} />
       </Plinth>

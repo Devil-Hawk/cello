@@ -38,8 +38,11 @@ export interface ResumeRead {
   thin: boolean
 }
 
+// A word has a letter or a digit; a markdown mark on its own is not one.
+const WORD = new RegExp('[\\p{L}\\p{N}]', 'u')
+
 export function readResume(text: string): ResumeRead {
-  const words = text.split(/\s+/).filter(Boolean).length
+  const words = text.split(/\s+/).filter((w) => WORD.test(w)).length
   const heading = text.match(/^#{1,3}\s+(.+?)\s*$/m)?.[1] ?? null
   return { words, heading, thin: words < THIN_WORDS }
 }
