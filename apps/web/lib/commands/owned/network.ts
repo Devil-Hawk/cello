@@ -3,4 +3,7 @@
 
 import type { OwnedTable } from './types'
 
-export const owned: OwnedTable[] = []
+export const owned: OwnedTable[] = [
+  { table: 'contact_applications', demoWipe: true },
+  { table: 'contact_profiles', demoWipe: true },
+]
