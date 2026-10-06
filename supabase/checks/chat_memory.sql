@@ -1,5 +1,6 @@
 -- Proves the chat memory columns (migration 20261024200000):
---   * words search finds a typed line by its words and a chat by its title, and never matches Cello's answer;
+--   * words search finds a typed line by its words (stemmed) and a chat by its title, and never matches Cello's answer;
+--   * chat_recall_words finds typed lines, chats and made things for one person only;
 --   * deleting a chat deletes its turns and keeps what it made, with the turn link cleared.
 -- Everything runs in one transaction and rolls back.
 --
@@ -23,9 +24,17 @@ insert into public.artifacts (id, user_id, type, title, chat_turn_id) values
 
 do $$
 begin
-  assert (select count(*) from public.chat_turns where tsv @@ plainto_tsquery('simple', 'compare')) = 1, 'a typed word finds its turn';
-  assert (select count(*) from public.chat_turns where tsv @@ plainto_tsquery('simple', 'zebra')) = 0, 'an answer is not searched';
-  assert (select count(*) from public.chats where tsv @@ plainto_tsquery('simple', 'fintechs')) = 1, 'a title word finds its chat';
+  assert (select count(*) from public.chat_turns where tsv @@ plainto_tsquery('english', 'compared')) = 1, 'a typed word finds its turn';
+  assert (select count(*) from public.chat_turns where tsv @@ plainto_tsquery('english', 'zebra')) = 0, 'an answer is not searched';
+  assert (select count(*) from public.chats where tsv @@ plainto_tsquery('english', 'fintechs')) = 1, 'a title word finds its chat';
+
+  -- The words path: any word matches, stemmed, for this person only, and an answer is never searched.
+  assert (select count(*) from public.chat_recall_words('dddddddd-0000-0000-0000-000000000011', 'six or compared or yesterday', 10) where kind = 'turn') = 1,
+    'words recall finds the typed line by a stemmed word';
+  assert (select count(*) from public.chat_recall_words('dddddddd-0000-0000-0000-000000000011', 'comparison', 10) where kind = 'made' and artifact_id = 'dddddddd-3333-0000-0000-000000000011') = 1,
+    'words recall finds the made thing by its title';
+  assert (select count(*) from public.chat_recall_words('dddddddd-0000-0000-0000-000000000011', 'zebra', 10)) = 0, 'words recall never reads an answer';
+  assert (select count(*) from public.chat_recall_words('dddddddd-0000-0000-0000-000000000099', 'compared or comparison or fintechs', 10)) = 0, 'another person finds nothing';
 
   delete from public.chats where id = 'dddddddd-1111-0000-0000-000000000011';
   assert (select count(*) from public.chat_turns where chat_id = 'dddddddd-1111-0000-0000-000000000011') = 0, 'deleting a chat deletes its turns';
