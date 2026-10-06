@@ -14,13 +14,16 @@ export interface ByHand {
   url?: string | null
   stage?: string | null
   appliedAt?: string | null
+  /** The verified employer this is at, when one is known (an application found in email). */
+  employerId?: string | null
+  domain?: string | null
 }
 
 export type Added = { ok: true; applicationId: string; existed: boolean } | { ok: false; sentence: string }
 
 const isStage = (s: string): s is Stage => (STAGES as readonly string[]).includes(s)
 
-export async function addByHand(admin: SupabaseClient, userId: string, input: ByHand, source: 'manual' | 'import' = 'manual'): Promise<Added> {
+export async function addByHand(admin: SupabaseClient, userId: string, input: ByHand, source: 'manual' | 'import' | 'gmail_sync' = 'manual'): Promise<Added> {
   const company = input.company.trim().slice(0, 200)
   const title = input.title.trim().slice(0, 300)
   if (!company || !title) return { ok: false, sentence: 'Add a company and a job title.' }
@@ -39,7 +42,7 @@ export async function addByHand(admin: SupabaseClient, userId: string, input: By
   if (!companyId) {
     const ins = await admin
       .from('companies')
-      .insert({ user_id: userId, name: company, name_key: normalizeCompanyName(company) || null, career_url: '' })
+      .insert({ user_id: userId, name: company, name_key: normalizeCompanyName(company) || null, career_url: '', ...(input.employerId ? { employer_id: input.employerId } : {}), ...(input.domain ? { domain: input.domain.toLowerCase() } : {}) })
       .select('id')
       .single()
     if (ins.error || !ins.data) return { ok: false, sentence: 'Could not save that. Try again.' }

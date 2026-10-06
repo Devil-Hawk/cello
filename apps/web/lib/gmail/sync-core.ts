@@ -35,6 +35,11 @@ import { decideStageTransition, type StageDecision } from './stage'
 import { recordStageActivity } from './activity'
 import { syncOutreachReplies } from '@/lib/outreach/reply'
 import { trackedOnly } from '@/lib/companies/watchlist'
+import { DOORS } from '@/lib/pipeline/actors'
+import { note, transition } from '@/lib/pipeline/transition'
+import { contactKind, linkContact } from '@/lib/contacts/kind'
+import { kindOfStatus, saveMessage, verifiedEmployer } from './messages'
+import { headerVerdict, senderEmployerDomain, trustOf } from './trust'
 
 interface CompanyRecord {
   id: string
@@ -116,6 +121,8 @@ export async function runGmailSyncCore(params: GmailSyncCoreParams): Promise<Gma
 
 async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncCoreResult> {
   const { db, userId, accessToken, apiKeys, preferences } = params
+  // The service role writes what the session may not: found applications, messages and the pipeline's events.
+  const admin = createAdminClient()
 
   const syncState: SyncState = (preferences.gmail_sync || {}) as SyncState
   const scannedIds = new Set(syncState.scannedEmailIds || [])
@@ -191,6 +198,15 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
       continue
     }
 
+    // How far to believe this mail, by code: the sender's domain and its DKIM result. A model's sort of
+    // the mail is believed only where a code pattern reads it the same way.
+    const verdict = headerVerdict(msg.payload.headers, fromDomain)
+    const byPatterns = classifyWithPatterns(from, subject, body, receivedAt)
+    const modelSorted = Boolean(apiKeys.openrouter) && !(byPatterns.isJobRelated && byPatterns.status === parsed.status)
+    const origin = modelSorted ? 'model' : 'code'
+    const prov = modelSorted ? { step: 'inbox.classify', at: receivedAt.toISOString() } : { rule: 'status patterns' }
+    const sentAt = receivedAt.toISOString()
+
     // --- Resolve company: domain match, then normalized-name match. Only a
     // company the person tracks is eligible for job/application attachment. ---
     let matchedCompany: CompanyRecord | null = null
@@ -203,7 +219,16 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
 
     if (!matchedCompany) {
       // Email never creates a company. Unmatched job mail is counted so the
-      // card can say so, and the person decides what to track.
+      // card can say so, and the person decides what to track. When the sender
+      // is a verified employer's own domain the message is kept, so the person
+      // can Confirm an application found there (lib/applications/found.ts).
+      const employer = await verifiedEmployer(admin, parsed.companyDomain ?? senderEmployerDomain(fromDomain))
+      await saveMessage(admin, {
+        userId, gmailMessageId: msg.id, threadId: msg.threadId, applicationId: null, contactId: null, sentAt, fromDomain, subject, body,
+        kind: kindOfStatus(parsed.status), origin, prov,
+        trust: modelSorted ? 'unconfirmed' : trustOf({ fromDomain, employerDomain: employer?.domain ?? null, verdict }),
+        verdict, employerId: employer?.id ?? null, employerOrigin: employer ? (senderEmployerDomain(fromDomain) ? 'code' : 'model') : null, jobTitle: parsed.jobTitle,
+      })
       unmatchedEmployers++
       unmatched.push({
         subject,
@@ -213,6 +238,8 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
       })
       continue
     }
+
+    const trust = modelSorted ? 'unconfirmed' : trustOf({ fromDomain, employerDomain: matchedCompany.domain, verdict })
 
     // --- From here on `matchedCompany` is a company the user actually
     // tracks. Match the email to a specific job by title similarity — never
@@ -230,7 +257,7 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
 
     if (jobMatch) {
       jobId = jobMatch.id
-    } else if (parsed.jobTitle) {
+    } else if (parsed.jobTitle && trust === 'proven') {
       // No confident match at this company — create a clearly-labelled
       // placeholder using the ACTUAL parsed title, never "Position".
       const classification = classifyJob({
@@ -279,17 +306,23 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
     // policy (rejected from any stage, no silent terminal regression). ---
     const { data: existingApp } = await db
       .from('applications')
-      .select('id, stage')
+      .select('id, stage, state')
       .eq('user_id', userId)
       .eq('job_id', jobId)
       .maybeSingle()
 
     let applicationId: string
     let decision: StageDecision
+    let appState: string | null = null
 
     if (existingApp) {
       applicationId = existingApp.id
-      decision = decideStageTransition(existingApp.stage, parsed.status)
+      appState = (existingApp as { state?: string | null }).state ?? null
+      // Only mail from a verified sender moves a stage; the rest is recorded and the stage stays.
+      decision =
+        trust === 'proven'
+          ? decideStageTransition(existingApp.stage, parsed.status)
+          : { action: 'no_change', fromStage: existingApp.stage, toStage: existingApp.stage, reason: 'the sender could not be verified, so the stage stays as it is' }
 
       if (decision.action === 'advanced') {
         const nextStage = toPipelineStage(decision.toStage)
@@ -311,13 +344,19 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
         continue
       }
 
+      if (trust !== 'proven') {
+        unmatched.push({ subject, from, receivedAt: receivedAt.toISOString(), reason: 'the sender could not be verified, so no application was made' })
+        continue
+      }
       const gmailThreadUrl = `https://mail.google.com/mail/u/0/#inbox/${msg.threadId}`
       const initialStage = toPipelineStage(parsed.status)
-      const { data: newApp, error: appError } = await db
+      // found in email: it waits for the person's Confirm before it counts for anything
+      const { data: newApp, error: appError } = await admin
         .from('applications')
         .insert({
           user_id: userId,
           job_id: jobId,
+          found_state: 'to_confirm',
           stage: initialStage,
           applied_at: receivedAt.toISOString(),
           source: 'gmail_sync',
@@ -343,6 +382,29 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
       applicationId = newApp.id
       createdApplications.push(matchedCompany.name)
       decision = { action: 'advanced', fromStage: 'discovered', toStage: parsed.status, reason: 'new application created from Gmail' }
+    }
+
+    // --- The message, its contact and a line on the application's timeline.
+    const addr = /<([^>]+)>/.exec(from)?.[1] ?? from.trim()
+    const display = from.replace(/<[^>]*>/, '').replace(/"/g, '').trim() || null
+    const ck = contactKind({ displayName: display, address: addr, subject, body })
+    const contactId =
+      ck.kind === 'other'
+        ? null
+        : await linkContact(admin, userId, { name: display, address: addr, kind: ck.kind, agencyName: ck.agencyName, companyId: matchedCompany.id, employerId: null }).catch(() => null)
+    await saveMessage(admin, {
+      userId, gmailMessageId: msg.id, threadId: msg.threadId, applicationId, contactId, sentAt, fromDomain, subject, body,
+      kind: kindOfStatus(parsed.status, ck.kind === 'recruiter' || ck.kind === 'agency_recruiter'), origin, prov, trust, verdict,
+      employerId: null, employerOrigin: null, jobTitle: parsed.jobTitle,
+    })
+    const line = `Mail from ${matchedCompany.name}: ${subject}`.slice(0, 280)
+    await note(admin, userId, applicationId, { kind: 'message.received', actor: DOORS.inbox.actor, channel: DOORS.inbox.channel, sentence: line, idempotencyKey: `msg:${msg.id}`, trust, origin, prov, headerVerdict: verdict }).catch(() => undefined)
+    if (trust !== 'proven' && parsed.status !== 'unknown') {
+      await note(admin, userId, applicationId, { kind: 'stage.suggested', actor: DOORS.inbox.actor, channel: DOORS.inbox.channel, sentence: `A mail says ${parsed.status}. Cello could not verify the sender, so the stage stays.`, idempotencyKey: `suggest:${msg.id}`, trust: 'unconfirmed', origin, prov, headerVerdict: verdict }).catch(() => undefined)
+    }
+    // The employer's own confirmation of a send the person made: Sent becomes Confirmed.
+    if (trust === 'proven' && parsed.status === 'applied' && appState === 'sent') {
+      await transition(admin, { applicationId, from: ['sent'], to: 'confirmed', event: { kind: 'submission.confirmed', actor: DOORS.inbox.actor, channel: DOORS.inbox.channel, sentence: `${matchedCompany.name} confirmed it.`, idempotencyKey: `confirmed:${applicationId}`, trust: 'proven', origin: 'code', prov, headerVerdict: verdict } }).catch(() => undefined)
     }
 
     // --- Activity + follow-up. Idempotent: skip if this exact Gmail message
@@ -374,6 +436,7 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
         gmail_thread_id: msg.threadId,
         from,
         subject,
+        trust,
         stage_decision: decision as unknown as Json,
         interview_datetime: parsed.interviewDateTime,
       },

@@ -299,7 +299,7 @@ export async function answerArrived(admin: SupabaseClient, userId: string, answe
     .contains('needs_detail', { answer_ids: [answerId] })
   let moved = 0
   for (const a of (waiting ?? []) as { id: string; needs_detail: { answer_ids: string[] }; last_event_at: string | null }[]) {
-    const { data: asked } = await admin.from('answer_bank').select('id, answer, declined').eq('user_id', userId).in('id', a.needs_detail.answer_ids)
+    const { data: asked } = await admin.from('answer_bank').select('id, answer, declined').eq('user_id', userId).in('id', a.needs_detail.answer_ids.slice(0, 50))
     const stillOpen = ((asked ?? []) as { answer: unknown; declined: boolean }[]).some((r) => r.answer === null && !r.declined)
     if (stillOpen) continue
     const r = await transition(admin, {
