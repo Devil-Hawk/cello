@@ -36,13 +36,8 @@ interface JobRow {
   url: string | null
   description: string | null
   company_id: string | null
-  companies?: { metadata?: unknown } | { metadata?: unknown }[] | null
-}
-
-function companyMetadata(job: JobRow): unknown {
-  const c = job.companies
-  if (Array.isArray(c)) return c[0]?.metadata
-  return c?.metadata
+  /** The person's own company metadata, never the first storer's (a companies(...) embed follows jobs.company_id). */
+  viewer_company_metadata?: unknown
 }
 
 /** Pull cv_tailor content from an explicit input or an upstream dep output. */
@@ -67,7 +62,7 @@ export const applier: AgentFn = async (ctx) => {
   // 1) Load job + company metadata.
   const { data: jobData, error: jobErr } = await ctx.admin
     .from('person_jobs')
-    .select('id, url, description, company_id:viewer_company_id, companies(metadata)')
+    .select('id, url, description, company_id:viewer_company_id, viewer_company_metadata')
     .eq('viewer_id', ctx.userId)
     .eq('id', input.jobId)
     .single()
@@ -119,7 +114,7 @@ export const applier: AgentFn = async (ctx) => {
     preferences: profile?.preferences,
   })
   const content = resolveContent(ctx, input)
-  const credentials = resolveApplyCredentials(companyMetadata(job), profile?.preferences)
+  const credentials = resolveApplyCredentials(job.viewer_company_metadata,profile?.preferences)
 
   // 4) Decide the result: submit only under policy (autoSubmit), else prepare a
   //    handoff so the draft lands in the human-approve queue with a prefill link.
