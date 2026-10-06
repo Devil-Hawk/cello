@@ -10,8 +10,10 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({ auth: { getUser: async () => ({ data: { user: { id: 'u1' } } }) } }),
 }))
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({}) }))
+const listed = vi.hoisted(() => ({ rows: null as unknown[] | null }))
 vi.mock('@/lib/kb/store', () => ({
   listSources: async () => {
+    if (listed.rows) return listed.rows
     throw new Error(DB_MESSAGE)
   },
   createSource: async () => {
@@ -23,6 +25,7 @@ import { GET, POST } from './route'
 
 afterEach(() => {
   vi.restoreAllMocks()
+  listed.rows = null
 })
 
 describe('/api/kb/sources failures', () => {
@@ -42,5 +45,19 @@ describe('/api/kb/sources failures', () => {
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: 'Failed to create source' })
     expect(log.mock.calls.flat().join(' ')).toContain(DB_MESSAGE)
+  })
+})
+
+describe('/api/kb/sources list', () => {
+  it('lists the sources the person gave Cello and leaves out the pages Cello fetched', async () => {
+    listed.rows = [
+      { id: 'a', kind: 'paste', material_kind: 'person' },
+      { id: 'b', kind: 'company_site', material_kind: 'fetched' },
+      { id: 'c', kind: 'dossier', material_kind: 'fetched' },
+      { id: 'd', kind: 'url', material_kind: 'person' },
+    ]
+    const res = await GET()
+    const body = (await res.json()) as { sources: Array<{ id: string }> }
+    expect(body.sources.map((s) => s.id)).toEqual(['a', 'd'])
   })
 })

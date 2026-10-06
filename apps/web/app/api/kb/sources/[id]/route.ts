@@ -28,7 +28,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
   const b = (body || {}) as Record<string, unknown>
-  const patch: { label?: string | null; config?: KbSourceConfig | null; enabled?: boolean } = {}
+  const patch: { label?: string | null; config?: KbSourceConfig | null; enabled?: boolean; mayUse?: boolean } = {}
   if ('label' in b) patch.label = typeof b.label === 'string' ? b.label.trim().slice(0, 200) || null : null
   if ('config' in b) {
     patch.config = (b.config && typeof b.config === 'object' ? b.config : null) as KbSourceConfig | null
@@ -38,6 +38,13 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       return NextResponse.json({ error: 'enabled must be a boolean' }, { status: 400 })
     }
     patch.enabled = b.enabled
+  }
+  // "Cello may use this": off hides the source from search and from every draft.
+  if ('may_use' in b) {
+    if (typeof b.may_use !== 'boolean') {
+      return NextResponse.json({ error: 'may_use must be a boolean' }, { status: 400 })
+    }
+    patch.mayUse = b.may_use
   }
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
