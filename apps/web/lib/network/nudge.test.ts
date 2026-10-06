@@ -2,6 +2,7 @@
 // follow-ups, the person's own rule, snooze, a closed application, a DST change and a zone change.
 
 import { describe, expect, it } from 'vitest'
+import { scoreT32, T32_CASES } from './measures'
 import { nudgeFor, type ThreadMessage } from './nudge'
 
 const at = (s: string) => new Date(s)
@@ -87,5 +88,13 @@ describe('zones', () => {
     expect(utc).toMatchObject({ due: true })
     expect(tokyo).toMatchObject({ due: true })
     if (utc.due && tokyo.due) expect(tokyo.dueAt.getTime()).toBeLessThan(utc.dueAt.getTime())
+  })
+})
+
+describe('T32 scripted threads', () => {
+  it('are all due exactly when the rule says', () => {
+    const s = scoreT32(T32_CASES)
+    expect(s.note).toBe(`All ${T32_CASES.length} scripted threads are due exactly when the rule says.`)
+    expect(s.passed).toBe(true)
   })
 })

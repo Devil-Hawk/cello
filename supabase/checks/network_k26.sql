@@ -64,7 +64,7 @@ begin
   -- the person's own rule never touched the global one
   select preferences -> 'network' -> 'nudge' into p from public.profiles where id = u;
   if p -> 'after_yours_bd' <> '7'::jsonb then raise exception 'a person rule changed the global rule'; end if;
-  perform public.set_network_rule(u, c, 'null');
+  perform public.set_network_rule(u, c, null);
   if (select nudge from public.contacts where id = c) is not null then raise exception 'null did not return to the default'; end if;
 end $$;
 

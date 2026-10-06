@@ -64,13 +64,6 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     calls: [".in('id', missing)"],
     reason: 'missing is built via .slice(0, TAILOR_LIMIT) immediately above — already capped before this call.',
   },
-  'apps/web/app/api/gmail/enrich/route.ts': {
-    calls: [".in('id', companyFilter)"],
-    reason:
-      'RLS-scoped request client (not the admin client), and companyFilter is whatever subset the CALLER put in ' +
-      'the request body — never server-derived from the full owned-company set, so it never replays the ~600+ ' +
-      'company incident.',
-  },
   'apps/web/lib/clock/routines/harness.ts': {
     calls: [".in('thread_id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",

@@ -1,17 +1,10 @@
-// Gmail helpers for cold outreach + contact mining.
+// Gmail helpers for cold outreach.
 //
 // Sending goes through the user's OWN Gmail account via the Gmail API (no paid
-// vendor, no spoofing — From is the authenticated account). Contact mining reads
-// the user's OWN mailbox headers only. Framework-free (the Gmail client on the
+// vendor, no spoofing — From is the authenticated account). Framework-free (the Gmail client on the
 // global fetch), so this is safe to import from both request handlers and the harness.
 
 import { gmailErrorStatus, gmailFor } from '@/lib/gmail/gmail-api'
-import type { MinedContact } from './types'
-
-const PERSONAL_DOMAINS = new Set([
-  'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com',
-  'aol.com', 'protonmail.com', 'mail.com', 'live.com', 'msn.com',
-])
 
 export interface GmailSendInput {
   accessToken: string
@@ -123,109 +116,6 @@ export function parseFromHeader(from: string): { name: string | null; email: str
   }
   const bare = from.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)
   return { name: null, email: bare ? bare[0].toLowerCase() : null }
-}
-
-export function emailDomain(email: string): string | null {
-  const m = email.toLowerCase().match(/@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/)
-  return m ? m[1] : null
-}
-
-function inferRelationship(name: string | null, title: string, from: string): string {
-  const hay = `${name ?? ''} ${title} ${from}`.toLowerCase()
-  if (/hiring manager|engineering manager|\bhead of\b|\bdirector\b|\bvp\b|\blead\b/.test(hay)) {
-    return 'hiring_manager'
-  }
-  if (/recruit|talent|sourcer|people ops|\bhr\b|staffing/.test(hay)) {
-    return 'recruiter'
-  }
-  return 'contact'
-}
-
-export interface MineOptions {
-  accessToken: string
-  /** Tracked companies to mine correspondence for. */
-  companies: { id: string; name: string; domain: string | null }[]
-  /** Cap on Gmail messages scanned per run. */
-  maxMessages?: number
-}
-
-/**
- * Mine the user's OWN inbox for recruiter / hiring-manager correspondence tied
- * to a tracked company (matched by the company's email domain). Extracts
- * {name, email, company, last_contact_at} from message headers only. Returns the
- * most-recent contact per email. NO third-party / LinkedIn scraping.
- */
-export async function mineRecruiterContacts(opts: MineOptions): Promise<MinedContact[]> {
-  const byDomain = new Map<string, { id: string; name: string }>()
-  for (const c of opts.companies) {
-    if (c.domain) {
-      const d = c.domain.toLowerCase().replace(/^www\./, '')
-      if (!PERSONAL_DOMAINS.has(d)) byDomain.set(d, { id: c.id, name: c.name })
-    }
-  }
-  if (byDomain.size === 0) return []
-
-  const maxMessages = opts.maxMessages ?? 120
-  // Build an OR query over the tracked company domains.
-  const query = Array.from(byDomain.keys())
-    .slice(0, 30)
-    .map((d) => `from:${d}`)
-    .join(' OR ')
-
-  const g = gmailFor(opts.accessToken)
-  let ids: { id?: string | null }[]
-  try {
-    const { data } = await g.users.messages.list({ userId: 'me', q: query, maxResults: Math.min(100, maxMessages) })
-    ids = (data.messages ?? []).slice(0, maxMessages)
-  } catch (error) {
-    throw new Error(`Gmail search failed (${gmailErrorStatus(error) ?? 'no response'}): ${(error as Error).message.slice(0, 200)}`)
-  }
-
-  const best = new Map<string, MinedContact>()
-
-  const batchSize = 10
-  for (let i = 0; i < ids.length; i += batchSize) {
-    const batch = ids.slice(i, i + batchSize)
-    const results = await Promise.all(
-      batch.map(({ id }) =>
-        g.users.messages
-          .get({ userId: 'me', id: id as string, format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] })
-          .then((r) => r.data)
-          .catch(() => null)
-      )
-    )
-    for (const msg of results) {
-      if (!msg?.payload?.headers) continue
-      const headers = headersOf(msg)
-      const from = getHeader(headers, 'from')
-      const subject = getHeader(headers, 'subject')
-      const { name, email } = parseFromHeader(from)
-      if (!email) continue
-      const domain = emailDomain(email)
-      if (!domain) continue
-      const company = byDomain.get(domain) || byDomain.get(domain.replace(/^mail\./, ''))
-      if (!company) continue
-
-      const lastContactAt = msg.internalDate
-        ? new Date(parseInt(msg.internalDate, 10)).toISOString()
-        : new Date().toISOString()
-
-      const existing = best.get(email)
-      if (existing && existing.lastContactAt >= lastContactAt) continue
-
-      best.set(email, {
-        name: name || email.split('@')[0],
-        email,
-        companyId: company.id,
-        companyName: company.name,
-        title: null,
-        relationship: inferRelationship(name, subject, from),
-        lastContactAt,
-      })
-    }
-  }
-
-  return Array.from(best.values())
 }
 
 /** What a thread check found: someone else wrote, nobody did, or Gmail would not say. */

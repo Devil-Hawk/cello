@@ -188,7 +188,7 @@ grant select on public.contact_touch to service_role;
 -- the follow-up rule: one atomic write, so it never races another preferences write
 -- ---------------------------------------------------------------------------
 
-create or replace function public.set_network_rule(p_user uuid, p_contact uuid, p_rule jsonb)
+create or replace function public.set_network_rule(p_user uuid, p_contact uuid, p_rule jsonb default null)
 returns void
 language plpgsql
 security definer
@@ -199,11 +199,11 @@ declare
   v jsonb;
   clean jsonb := '{}'::jsonb;
 begin
-  if p_contact is not null and p_rule = 'null'::jsonb then
+  if p_contact is not null and (p_rule is null or p_rule = 'null'::jsonb) then
     update public.contacts set nudge = null where id = p_contact and user_id = p_user;
     return;
   end if;
-  if jsonb_typeof(p_rule) <> 'object' then
+  if p_rule is null or jsonb_typeof(p_rule) <> 'object' then
     raise exception 'the follow-up rule must be an object';
   end if;
   for k, v in select * from jsonb_each(p_rule) loop
