@@ -10,9 +10,11 @@ import { isOwner } from '@/lib/measures/owner'
 import { draftNudges } from './nudges'
 import { remember } from './memory'
 import { networkSync, type SyncFound } from './sync'
+import { proposeTiming } from './timing'
 
 const SYNC_MS = 15_000
 const NUDGE_MS = 5_000
+const REMEMBER_UNTIL_MS = 35_000
 
 async function beat(admin: SupabaseClient, userId: string, job: string, patch: Record<string, unknown>): Promise<void> {
   const { data } = await admin.from('job_heartbeats').update(patch).eq('job', job).eq('user_id', userId).select('job')
@@ -40,6 +42,7 @@ export async function runNetwork(
       // memories: job threads only; for the owner until S26 passes
       if (isOwner(a.userId) || (await flag(admin, 'network_memory_live', false).catch(() => false))) {
         for (const t of res.jobThreads) {
+          if (Date.now() - started > REMEMBER_UNTIL_MS) break // ponytail: the cron has 60 s, so threads cut here are remembered when they next get mail; carry them in the heartbeat if that proves too slow
           for (const contactId of t.contactIds.slice(0, 1)) {
             await remember(admin, a.userId, { threadId: t.threadId, contactId, employerId: t.employerId, applicationId: t.applicationId, accessToken: a.accessToken, isDemo: false }).catch((e) => logApiError('network/remember', e, { userId: a.userId }))
           }
@@ -55,7 +58,14 @@ export async function runNetwork(
   await beat(admin, a.userId, 'network.nudge', { started_at: new Date(started).toISOString() }).catch(() => undefined)
   try {
     const r = await withTimeout(draftNudges(admin, { id: a.userId, email: a.email }), NUDGE_MS, 'network nudge')
-    await beat(admin, a.userId, 'network.nudge', { succeeded_at: new Date().toISOString(), failure: null, duration_ms: Date.now() - started, found: r })
+    // once a day: count the replies to the person's follow-ups; a clear lead becomes a proposal for Keep
+    const day = new Date().toISOString().slice(0, 10)
+    const { data: prev } = await admin.from('job_heartbeats').select('found').eq('job', 'network.nudge').eq('user_id', a.userId).maybeSingle()
+    let timingDay = (prev as { found?: { timing_day?: string } } | null)?.found?.timing_day
+    if (!a.isDemo && timingDay !== day) {
+      await proposeTiming(admin, a.userId).then(() => { timingDay = day }).catch((e) => logApiError('network/timing', e, { userId: a.userId }))
+    }
+    await beat(admin, a.userId, 'network.nudge', { succeeded_at: new Date().toISOString(), failure: null, duration_ms: Date.now() - started, found: { ...r, timing_day: timingDay } })
   } catch (e) {
     logApiError('network/nudge', e, { userId: a.userId })
     await beat(admin, a.userId, 'network.nudge', { failure: 'nudge_failed' }).catch(() => undefined)
