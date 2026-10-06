@@ -47,16 +47,14 @@ export async function addByHand(admin: SupabaseClient, userId: string, input: By
   }
 
   const externalId = `by-hand:${createHash('sha256').update(`${title.toLowerCase()}|${url ?? ''}`).digest('hex').slice(0, 24)}`
-  let { data: job } = await admin.from('jobs').select('id').eq('company_id', companyId).eq('external_id', externalId).maybeSingle()
-  if (!job) {
-    const ins = await admin
-      .from('jobs')
-      .insert({ company_id: companyId, title, description: '', url: url ?? `https://cello.invalid/by-hand/${externalId}`, external_id: externalId })
-      .select('id')
-      .single()
-    if (ins.error || !ins.data) return { ok: false, sentence: 'Could not save that. Try again.' }
-    job = ins.data
-  }
+  // upsert, not a read: the same title and link at the same company is the same role
+  const made0 = await admin
+    .from('jobs')
+    .upsert({ company_id: companyId, title, description: '', url: url ?? `https://cello.invalid/by-hand/${externalId}`, external_id: externalId }, { onConflict: 'company_id,external_id' })
+    .select('id')
+    .single()
+  if (made0.error || !made0.data) return { ok: false, sentence: 'Could not save that. Try again.' }
+  const job = made0.data
   const jobId = (job as { id: string }).id
 
   const have = await admin.from('applications').select('id').eq('user_id', userId).eq('job_id', jobId).maybeSingle()

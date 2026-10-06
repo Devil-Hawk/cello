@@ -85,8 +85,6 @@ async function move(
 
 /** Apply: Cello prepares this role. A role already sent becomes "Already applied?" for the person and is refused for everyone else. */
 export async function start(c: Ctx, jobId: string): Promise<MoveResult> {
-  const { data: job } = await c.admin.from('jobs').select('id').eq('id', jobId).maybeSingle()
-  if (!job) return refuse('missing', 'That role is gone.')
   let { data: row } = await c.admin.from('applications').select('id').eq('user_id', c.userId).eq('job_id', jobId).maybeSingle()
   if (!row) {
     const ins = await c.admin.from('applications').insert({ user_id: c.userId, job_id: jobId, source: c.door.actor }).select('id').single()
@@ -96,7 +94,8 @@ export async function start(c: Ctx, jobId: string): Promise<MoveResult> {
       row = again.data
     } else row = ins.data
   }
-  if (!row) return refuse('error', 'Could not save that. Try again.')
+  // no row and none made: the role is gone (the foreign key refused it)
+  if (!row) return refuse('missing', 'That role is gone.')
   const a = await load(c, (row as { id: string }).id)
   if (!a) return refuse('missing', 'That application is gone.')
   if (a.state && !['skipped', 'not_sent'].includes(a.state)) return refuse('already', 'Cello is already working on this one.')
