@@ -33,7 +33,7 @@ end $$;
 create temp table fx as select gen_random_uuid() as user_id, gen_random_uuid() as thread_id;
 insert into auth.users (id, email) select user_id, 'a2a-check@example.invalid' from fx;
 insert into public.profiles (id, email) select user_id, 'a2a-check@example.invalid' from fx on conflict (id) do nothing;
-insert into public.graph_threads (thread_id, user_id, surface) select thread_id, user_id, 'agent' from fx;
+insert into public.graph_threads (thread_id, user_id, surface) select thread_id, user_id, 'run' from fx;
 
 insert into public.a2a_tasks (user_id, thread_id, agent) select user_id, thread_id, 'matcher' from fx;
 
