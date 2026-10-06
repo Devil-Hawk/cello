@@ -6,6 +6,7 @@ import { useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { useRouter } from 'next/navigation'
 import { Key } from '@/components/ui/key'
+import { OpenRouterDoor } from '@/components/settings/openrouter-door'
 import { companyHref } from '@/lib/routes/companies'
 import { companies, search } from '@/lib/routes'
 import {
@@ -20,13 +21,17 @@ import {
   groupByType,
   groupCountLine,
   metaLine,
+  NO_FILTERS,
+  NO_MODEL_LINE,
   orderItems,
   outsideLine,
   rolesHref,
   typeGroupHeader,
+  uncheckedLine,
   type EmployerFacts,
   type RolesQuery,
 } from './logic'
+import { CheckAllMenu } from './check-all'
 import { Filters } from './filters'
 import { NOT_FOR_ME_REASONS, deleteReaction, visibleItems } from './reactions'
 import { ChangeType } from './change-type'
@@ -68,6 +73,14 @@ export interface RolesViewProps {
   checkLine?: string | null
   /** The list could not be read. */
   failed?: boolean
+  /** Kept roles Cello has not checked yet, counted in SQL. */
+  unchecked?: number
+  /** The first of them, for Check chances for all. */
+  uncheckedIds?: string[]
+  /** A model can run for the person (a key of theirs or a free one). */
+  hasModel?: boolean
+  /** The person has reacted to at least one role. */
+  reacted?: boolean
 }
 
 // The add dialog and the browser client load when they are used, not with the page.
@@ -78,7 +91,7 @@ const reasonLabel = (r: string | null | undefined) => NOT_FOR_ME_REASONS.find((x
 // Roles: every role kept for the person, today's picks first, in the order of
 // their address. The reactions live here, above the rows, so a regroup, a filter
 // or a page of more rows never loses an Undo that is still open.
-export function RolesView({ query, items: read, picks, total, newToday, groupCounts, typeCounts, typeOptions, companyOptions, needsSponsorship, untypedTotal, facts, outside, checkLine, failed }: RolesViewProps) {
+export function RolesView({ query, items: read, picks, total, newToday, groupCounts, typeCounts, typeOptions, companyOptions, needsSponsorship, untypedTotal, facts, outside, checkLine, failed, unchecked = 0, uncheckedIds = [], hasModel = true, reacted = true }: RolesViewProps) {
   const router = useRouter()
   const { state, dispatch, now } = useReactionState()
   const [pasting, setPasting] = useState(false)
@@ -119,9 +132,12 @@ export function RolesView({ query, items: read, picks, total, newToday, groupCou
     <div className="mx-auto max-w-[1200px] space-y-6 pb-16">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <h1 className="r-display">Roles</h1>
-        <Key variant="raised" onClick={() => setPasting(true)}>
-          Paste a link
-        </Key>
+        <div className="flex items-center gap-2">
+          <Key variant="raised" onClick={() => setPasting(true)}>
+            Paste a link
+          </Key>
+          {query.tab === 'for-you' && hasModel && <CheckAllMenu ids={uncheckedIds} />}
+        </div>
       </header>
       {pasting && <AddCompanyDialog open onOpenChange={setPasting} onAdded={() => router.refresh()} />}
 
@@ -176,7 +192,7 @@ export function RolesView({ query, items: read, picks, total, newToday, groupCou
           <div className="flex flex-wrap gap-3">
             {filtered ? (
               <Key asChild variant="raised">
-                <Link href={rolesHref(query, { level: null, posted: 'any', remote: false, country: null, company: null, roleType: null, following: false, h1b: false, hideAgency: false })}>Clear filters</Link>
+                <Link href={rolesHref(query, NO_FILTERS)}>Clear filters</Link>
               </Key>
             ) : (
               <>
@@ -205,6 +221,18 @@ export function RolesView({ query, items: read, picks, total, newToday, groupCou
       )}
 
       {!failed && query.tab === 'for-you' && query.group === 'ranked' && rest.length > 0 && <div className="r-sheet">{rest.map((i) => line(i))}</div>}
+
+      {!failed && query.tab === 'for-you' && query.group === 'ranked' && (
+        <>
+          {hasModel && uncheckedLine(unchecked) && <p className="r-meta">{uncheckedLine(unchecked)}</p>}
+          {!hasModel && !reacted && rest.length > 0 && (
+            <div className="space-y-3">
+              <p className="r-body">{NO_MODEL_LINE}</p>
+              <OpenRouterDoor returnTo="/roles" />
+            </div>
+          )}
+        </>
+      )}
 
       {!failed && query.tab === 'for-you' && query.group === 'company' && (
         <div className="space-y-8">

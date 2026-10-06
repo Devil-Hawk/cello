@@ -13,7 +13,7 @@ import { FIT_COLUMNS } from '@/lib/scoring'
 import { parseFit } from '@/lib/scoring/read'
 import { resolveTargeting } from '@/lib/targeting'
 import { NOT_FOR_ME_REASONS } from '@/components/roles/reactions'
-import { TYPE_OPTIONS, toItem, type ListRow } from '../read'
+import { toItem, typeOptionsFor, type ListRow } from '../read'
 import { pastedLine, sponsorshipLines, statusSentence, whyKept, whyType } from '@/components/roles/record/logic'
 import type { RecordData, RecordHistoryItem, RecordPerson } from '@/components/roles/record/record-view'
 import type { PassReason, Reaction } from '@/lib/scoring/types'
@@ -104,7 +104,7 @@ export async function readRecord(db: Db, userId: string, id: string): Promise<Re
     why: whyKept({ roleType: role.type, jobFunction: job.job_function ?? null, seniority: job.seniority ?? null, isRemote: job.is_remote ?? null, country: job.country ?? null }, { ...targets, roleTypes: targets.role_types ?? [] }),
     typeWhy: whyType(role.type, (job.type_prov ?? null) as TypeProv | null),
     pasted: pastedLine(role.pasted, role.type, targets.role_types ?? []),
-    typeOptions: TYPE_OPTIONS,
+    typeOptions: typeOptionsFor(prefs),
     fit,
     kinds: Object.fromEntries(items.map((i) => [i.id, i.kind])),
     // ponytail: no route stores a correction until K17b's roles.correct_evidence is on main, so Correct is not offered.

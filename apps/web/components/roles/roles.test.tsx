@@ -5,7 +5,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push: () => undefined, r
 vi.mock('@/lib/supabase/client', () => ({ createClient: () => ({}) }))
 
 import { RolesView } from './roles-view'
-import { DEFAULT_QUERY, bandOf, groupByCompany, groupByType, groupCountLine, metaLine, orderItems, outsideLine, parseRolesQuery, postedAgo, rankItems, rolesHref, typeGroupHeader } from './logic'
+import { DEFAULT_QUERY, NO_FILTERS, NO_MODEL_LINE, bandOf, filterCount, pastedTraceLine, uncheckedLine, groupByCompany, groupByType, groupCountLine, metaLine, orderItems, outsideLine, parseRolesQuery, postedAgo, rankItems, rolesHref, typeGroupHeader } from './logic'
 import { applyTypeChanges, previousOwn, typeUndoOpen } from './type-change'
 import { NO_REACTIONS, UNDO_MS, reactionReducer, undoOpen, visibleItems } from './reactions'
 import { employerId, fixtureRoles, fixtureTypeCounts, fixtureTypeOptions } from './fixtures'
@@ -23,6 +23,16 @@ describe('the address', () => {
     const q = parseRolesQuery({ tab: 'saved', group: 'company', level: 'senior', posted: '7d', country: 'us', remote: '1', agency: 'hide', limit: '50' })
     expect(q).toMatchObject({ tab: 'saved', group: 'company', level: 'senior', posted: '7d', country: 'US', remote: true, hideAgency: true, limit: 50 })
     expect(parseRolesQuery(Object.fromEntries(new URL(`http://x${rolesHref(q)}`).searchParams))).toEqual(q)
+  })
+
+  it('keeps Language, Chance and Mentions sponsorship in the address, counts them, and clears them', () => {
+    const q = parseRolesQuery({ lang: 'de', chance: 'strong', sponsor: '1' })
+    expect(q).toMatchObject({ language: 'de', chance: 'strong', sponsorship: true })
+    expect(filterCount(q)).toBe(3)
+    expect(rolesHref(q)).toBe('/roles?lang=de&chance=strong&sponsor=1')
+    expect(parseRolesQuery(Object.fromEntries(new URL(`http://x${rolesHref(q)}`).searchParams))).toEqual(q)
+    expect(rolesHref(q, NO_FILTERS)).toBe('/roles')
+    expect(parseRolesQuery({ lang: 'klingon', chance: 'cannot_assess', sponsor: 'yes' })).toEqual(DEFAULT_QUERY)
   })
 
   it('falls back to the default for anything it does not know', () => {
@@ -232,6 +242,39 @@ describe('role types', () => {
     expect(html).toContain('Following only')
     expect(html).not.toContain('Past H-1B filings')
     expect(text(view({ needsSponsorship: true }))).toContain('Past H-1B filings')
+  })
+
+  it('offers Language, Chance and Mentions sponsorship in the filter row', () => {
+    const html = text(view({ query: parseRolesQuery({ lang: 'fr', chance: 'possible', sponsor: '1' }), items: fixtureRoles(2, 2), total: 2 }))
+    expect(html).toContain('Any language')
+    expect(html).toContain('Any chance')
+    expect(html).toContain('Mentions sponsorship')
+    expect(html).toContain('Filters (3)')
+  })
+
+  it('says how many roles are being checked, from the count it is given, and nothing when none are', () => {
+    expect(uncheckedLine(12)).toBe('12 more are being checked. Until then they are listed by title and date.')
+    expect(uncheckedLine(1)).toBe('1 more is being checked. Until then it is listed by title and date.')
+    expect(uncheckedLine(0)).toBeNull()
+    expect(text(view({ items: fixtureRoles(3, 1), total: 3, unchecked: 12 }))).toContain('12 more are being checked.')
+    expect(text(view({ items: fixtureRoles(3, 1), total: 3, unchecked: 0 }))).not.toContain('being checked')
+  })
+
+  it('lists by title and date with a door to a free model when no model can run and nothing was reacted to', () => {
+    const html = text(view({ items: fixtureRoles(3, 1), total: 3, hasModel: false, reacted: false }))
+    expect(html).toContain(NO_MODEL_LINE)
+    expect(html).toContain('Use free models')
+    expect(text(view({ items: fixtureRoles(3, 1), total: 3, hasModel: false, reacted: true }))).not.toContain(NO_MODEL_LINE)
+    expect(text(view({ items: fixtureRoles(3, 1), total: 3 }))).not.toContain(NO_MODEL_LINE)
+  })
+
+  it('says what a pasted link turned out to be, from the stored posting', () => {
+    const [a] = fixtureRoles(1, 1)
+    expect(pastedTraceLine({ ...a, pasted: false, traced: false })).toBeNull()
+    expect(pastedTraceLine({ ...a, pasted: true, traced: false })).toBe("Cello could not trace this to the employer's own site.")
+    expect(pastedTraceLine({ ...a, pasted: true, traced: true, legit: 'repost' })).toBe("This link is a repost on a job board. Cello found the employer's own posting.")
+    expect(pastedTraceLine({ ...a, pasted: true, traced: true, legit: null })).toBeNull()
+    expect(text(view({ items: [{ ...a, pasted: true, traced: false }], total: 1 }))).toContain('could not trace this')
   })
 
   it('moves a row to its new type at once, and Undo puts back what the person had', () => {

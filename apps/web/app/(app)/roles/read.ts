@@ -7,9 +7,12 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { checksStatus } from '@/lib/clock/status'
 import { visaFromCuratedList } from '@/lib/dossier/visa'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
+import { loadApiKeys } from '@/lib/harness/keys'
+import { canRunLlm } from '@/lib/harness/llm-key-message'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { getRoleType, ROLE_TYPES } from '@/lib/jobs/role-types/taxonomy'
 import { resolveConstraints } from '@/lib/scoring/constraints'
+import { resolveTargeting } from '@/lib/targeting'
 import { checkLine } from '@/components/today/logic'
 import { FIT_COLUMNS, parseFit, readShortlist, todayUtc } from '@/lib/scoring'
 import { OnJobs } from '@/lib/scoring/person-roles-query'
@@ -77,6 +80,12 @@ export function typeView(own: string | null | undefined, posting: string | null,
 /** The choices Change type and the Role type filter offer: every type a person can pick (not `other`), by label. */
 export const TYPE_OPTIONS = ROLE_TYPES.filter((t) => t.id !== 'other').map((t) => ({ id: t.id, label: t.label }))
 
+/** The same choices with the person's own role types first (their order), then the rest. */
+export function typeOptionsFor(prefs: unknown): { id: string; label: string }[] {
+  const own = resolveTargeting(prefs).role_types ?? []
+  return [...own.flatMap((id) => TYPE_OPTIONS.filter((o) => o.id === id)), ...TYPE_OPTIONS.filter((o) => !own.includes(o.id))]
+}
+
 export function toItem(row: ListRow): RoleItem | null {
   const job = Array.isArray(row.jobs) ? row.jobs[0] : row.jobs
   if (!job) return null
@@ -95,6 +104,7 @@ export function toItem(row: ListRow): RoleItem | null {
     level: job.seniority,
     type: typeView(row.role_type, job.role_type, job.type_origin),
     pasted: row.via === 'link',
+    traced: job.employer_id != null,
     legit: job.legit_label,
     chance: fit.chance?.label === 'cannot_assess' ? null : (fit.chance?.label ?? null),
     wantP: fit.want?.p ?? null,
@@ -121,11 +131,12 @@ interface ListRows {
   error: { message: string } | null
 }
 
-function filtered(db: Db, q: RolesQuery, followed: Followed | null, match: TypeMatch | null = null) {
+export function filtered(db: Db, q: RolesQuery, followed: Followed | null, match: TypeMatch | null = null) {
   let query = db.from('person_roles').select(LIST, { count: 'exact' })
   if (q.tab === 'for-you') query = query.is('hidden_reason', null)
   else if (q.tab === 'saved') query = query.not('saved_at', 'is', null)
   else query = query.not('hidden_reason', 'is', null)
+  if (q.tab === 'for-you' && q.chance) query = query.eq('chance', q.chance)
   if (match === 'own') query = query.eq('role_type', q.roleType)
   if (match === 'posting') query = query.is('role_type', null)
 
@@ -134,6 +145,9 @@ function filtered(db: Db, q: RolesQuery, followed: Followed | null, match: TypeM
   if (q.tab === 'for-you') {
     openRolesOnly(on)
     if (q.level) on.eq('seniority', q.level)
+    if (q.language) on.eq('language', q.language)
+    // ponytail: a plain text match over the posting, as the record's own sponsorship line reads it; a stored flag when the window outgrows it.
+    if (q.sponsorship) on.or('description.ilike.*sponsor*,description_md.ilike.*sponsor*')
     if (q.remote) on.eq('is_remote', true)
     if (q.country) on.eq('country', q.country)
     if (q.company) on.or(`employer_id.eq.${q.company},company_id.eq.${q.company}`)
@@ -214,7 +228,10 @@ export async function readRoles(db: Db, userId: string, q: RolesQuery): Promise<
   const nobodyFollowed = followed !== null && followed.employer.length + followed.company.length === 0
 
   const typed = q.tab === 'for-you' && q.roleType !== null
-  const [list, employerCounts, typeCounts, outsideCounts, today, untyped, profile, checks] = await Promise.all([
+  // The kept roles Cello has not checked yet, counted in SQL, with the first of them for Check chances for all.
+  const waiting = new OnJobs(db.from('person_roles').select('job_id, jobs!inner(id)', { count: 'exact' }).is('hidden_reason', null).is('assessed_at', null))
+  openRolesOnly(waiting)
+  const [list, employerCounts, typeCounts, outsideCounts, today, untyped, profile, checks, unchecked, keys, reacted] = await Promise.all([
     nobodyFollowed
       ? Promise.resolve({ data: [], count: 0, error: null } as ListRows)
       : typed
@@ -227,8 +244,11 @@ export async function readRoles(db: Db, userId: string, q: RolesQuery): Promise<
     q.tab === 'hidden' ? db.from('person_roles').select('job_id', { count: 'exact', head: true }).eq('hidden_reason', 'unclassified') : Promise.resolve({ count: 0 }),
     db.from('profiles').select('preferences').eq('id', userId).maybeSingle(),
     checksStatus(db, admin, new Date(nowMs)).catch(() => null),
+    q.tab === 'for-you' ? (waiting.query.limit(WINDOW) as unknown as Promise<{ data: { job_id: string }[] | null; count: number | null }>) : Promise.resolve({ data: [], count: 0 }),
+    admin ? loadApiKeys(admin as never, userId).catch(() => null) : Promise.resolve(null),
+    db.from('role_reactions').select('job_id', { count: 'exact', head: true }),
   ])
-  const base = { typeOptions: TYPE_OPTIONS, needsSponsorship: false, companyOptions: [] as { id: string; label: string }[], untypedTotal: 0, checkLine: checks ? checkLine(checks, nowMs) : null }
+  const base = { typeOptions: TYPE_OPTIONS, needsSponsorship: false, companyOptions: [] as { id: string; label: string }[], untypedTotal: 0, unchecked: 0, uncheckedIds: [] as string[], hasModel: true, reacted: false, checkLine: checks ? checkLine(checks, nowMs) : null }
   if (list.error) {
     console.error('[roles] list failed:', list.error.message)
     return { ...base, items: [], picks: [], total: 0, newToday: 0, groupCounts: {}, typeCounts: {}, facts: {}, outside: {}, failed: true }
@@ -266,12 +286,18 @@ export async function readRoles(db: Db, userId: string, q: RolesQuery): Promise<
   const prefs = (profile.data as { preferences?: unknown } | null)?.preferences ?? null
   return {
     ...base,
+    typeOptions: typeOptionsFor(prefs),
     needsSponsorship: resolveConstraints(prefs).needsSponsorship,
     companyOptions: Object.keys(withCount)
       .flatMap((id) => (names.has(id) ? [{ id, label: names.get(id)! }] : []))
       .sort((a, b) => a.label.localeCompare(b.label))
       .slice(0, 300),
     untypedTotal: (untyped as { count: number | null }).count ?? 0,
+    unchecked: unchecked.count ?? 0,
+    // ponytail: Check chances for all walks the first 300 waiting roles by id list; past that, the next press picks up the rest.
+    uncheckedIds: (unchecked.data ?? []).map((r) => r.job_id),
+    hasModel: keys ? canRunLlm(keys) : true,
+    reacted: (reacted.count ?? 0) > 0,
     items,
     picks,
     total,
