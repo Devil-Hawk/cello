@@ -50,6 +50,8 @@ const REASON_WORDS: Record<string, string> = {
   location: 'location',
   pay: 'pay',
   other: 'other',
+  level: 'level',
+  role_type: 'role type',
 }
 
 const BATCH_SIZE = 10

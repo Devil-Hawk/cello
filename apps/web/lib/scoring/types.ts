@@ -3,7 +3,7 @@
 
 export type Reaction = 'interested' | 'not_for_me' | 'applied'
 
-export const PASS_REASONS = ['too_junior', 'too_senior', 'company', 'domain', 'location', 'relocation', 'agency', 'sponsorship', 'pay', 'other'] as const
+export const PASS_REASONS = ['too_junior', 'too_senior', 'company', 'domain', 'location', 'relocation', 'agency', 'sponsorship', 'pay', 'other', 'level', 'role_type'] as const
 export type PassReason = (typeof PASS_REASONS)[number]
 
 /** Where a role was shown when the person reacted to it. */

@@ -347,6 +347,8 @@ const PASS_MESSAGES: Record<PassReason, string> = {
   sponsorship: 'Got it. Fewer roles that cannot sponsor.',
   pay: 'Got it. Pay noted for this one; it will not count against similar roles.',
   other: 'Got it. Cello will show fewer like this.',
+  level: 'Got it. Fewer roles at this level.',
+  role_type: 'Got it. Fewer roles of this type.',
 }
 
 export function triageMessage(reaction: Reaction, reason: PassReason | null | undefined): string {
