@@ -3,7 +3,8 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { deleteChat } from '@/lib/chat/memory'
-import { archiveChat, getChat, pinChat, renameChat } from '@/lib/chat/store'
+import { loadChatPage } from '@/lib/chat/page-data'
+import { archiveChat, pinChat, renameChat } from '@/lib/chat/store'
 import { getMemoryStore } from '@/lib/memory/mem0-store'
 import { badRequest, chatNotFound, chatSession, isResponse, readJson } from '../door'
 
@@ -12,8 +13,8 @@ export const dynamic = 'force-dynamic'
 export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
   const session = await chatSession()
   if (isResponse(session)) return session
-  const view = await getChat(session.db, session.userId, params.id)
-  return view ? NextResponse.json(view, { headers: { 'Cache-Control': 'no-store' } }) : chatNotFound()
+  const page = await loadChatPage(session.db, session.userId, params.id)
+  return page ? NextResponse.json(page, { headers: { 'Cache-Control': 'no-store' } }) : chatNotFound()
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {

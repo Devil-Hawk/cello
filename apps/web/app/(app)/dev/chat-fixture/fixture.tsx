@@ -11,6 +11,10 @@
 import { useEffect, useState } from 'react'
 import { Markdown } from '@/components/chat/markdown'
 import { splitMarkdownBlocks } from '@/components/chat/render/block-split'
+import { AnswerParts, type Named } from '@/components/chat/parts'
+import { Tiles, type TileData } from '@/components/chat/tiles'
+import type { Card } from '@/lib/chat/cards'
+import type { Part } from '@/lib/chat/types'
 
 function Bubble({ label, content }: { label: string; content: string }) {
   return (
@@ -145,6 +149,28 @@ function StreamSim() {
   )
 }
 
+// Parts and cards as the page draws them. The card's pay is the stored row's; the model's text below states another
+// and the card still shows the stored one.
+const FIXTURE_CARDS: Card[] = [
+  { kind: 'role', id: 'r1', title: 'Senior Backend Engineer, Payments', company: 'Vantage Loom', companyId: 'c1', logoUrl: null, place: 'New York, NY (Hybrid)', chance: 'strong', pay: '$190,000 - $230,000', state: 'applied' },
+  { kind: 'company', id: 'c1', name: 'Vantage Loom', logoUrl: null, domain: 'vantage.example.com', openCount: 3, keptCount: 1, following: true },
+]
+const FIXTURE_NAMES: Named[] = [
+  { kind: 'role', ref: 'r1', name: 'Senior Backend Engineer, Payments' },
+  { kind: 'company', ref: 'c1', name: 'Vantage Loom' },
+]
+const FIXTURE_PARTS: Part[] = [
+  { card: { kind: 'role', ref: 'r1' } },
+  { about: [{ kind: 'role', ref: 'r1' }], text: 'The posting states **$190,000 to $230,000**, and a model that wrote $250,000 here would be ignored by the card above. See [Vantage Loom](cello:company/c1).' },
+  { about: [{ kind: 'company', ref: 'c1' }], text: 'It has **3** roles open and you have one application there.' },
+  { about: [], text: 'A part about nothing in particular has no lead.' },
+]
+const FIXTURE_TILES: TileData[] = [
+  { id: 't1', kind: 'role', ref: 'r1', name: 'Senior Backend Engineer, Payments', origin: 'person' },
+  { id: 't2', kind: 'company', ref: 'c1', name: 'Vantage Loom', origin: 'model' },
+  { id: 't3', kind: 'made', ref: 'm1', name: 'A made thing with a title long enough to need cutting at a phone width', origin: 'person' },
+]
+
 export default function ChatFixture() {
   return (
     <div className="mx-auto max-w-3xl space-y-8 py-8">
@@ -179,8 +205,16 @@ export default function ChatFixture() {
       </div>
 
       <div className="space-y-1.5">
+        <div className="text-label uppercase tracking-wide text-muted-foreground">6 · Tiles, then an answer in parts with a role card</div>
+        <div className="w-full space-y-4 rounded-card border border-border bg-card px-4 py-3 text-foreground">
+          <Tiles tiles={FIXTURE_TILES} onRemove={() => undefined} onAdd={() => undefined} />
+          <AnswerParts parts={FIXTURE_PARTS} names={FIXTURE_NAMES} tileCount={3} cards={FIXTURE_CARDS} />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
         <div className="text-label uppercase tracking-wide text-muted-foreground">
-          6 · Live simulated stream (~1-3 chars every 35ms) — click to replay
+          7 · Live simulated stream (~1-3 chars every 35ms) — click to replay
         </div>
         <StreamSim />
       </div>

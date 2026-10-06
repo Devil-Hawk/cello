@@ -95,6 +95,9 @@ export interface TurnRow {
   parts: Part[]
   links: TurnLink[]
   quoted: { text: string; turn_id: string } | null
+  /** Written by code at the turn's end (lib/chat/disclosure.ts). */
+  disclosure: unknown
+  superseded_at: string | null
   created_at: string
 }
 

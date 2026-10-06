@@ -4,7 +4,7 @@
 // doc comment): as the model's answer grows token by token, every block
 // before the last one is byte-for-byte identical to the previous render, so
 // React.memo bails out and react-markdown never re-parses it. Only the last
-// ("tail") block, which is genuinely still being written, gets re-parsed —
+// ("tail") block, which is genuinely still being written, gets re-parsed -
 // and it is typically one short paragraph, list, or table, not the whole
 // message.
 //
@@ -32,12 +32,12 @@ function looksLikeListItem(line: string): boolean {
  * Blocks are separated at blank lines, with two deliberate exceptions so a
  * naive split never fragments a construct markdown treats as one unit:
  *
- * 1. **Fenced code blocks** — a blank line inside an open ``` or ~~~ fence
+ * 1. **Fenced code blocks**, a blank line inside an open ``` or ~~~ fence
  *    never splits (it's code, not paragraph structure); tracked with a tiny
  *    fence-state machine so an *unclosed* trailing fence (the mid-stream
  *    case) just rides to the end of the last block, which is exactly how
  *    CommonMark itself defines an unterminated fence.
- * 2. **Loose lists** — CommonMark allows blank lines between list items
+ * 2. **Loose lists**, CommonMark allows blank lines between list items
  *    (`1. a\n\n2. b`) as a single ordered/unordered list. Splitting there
  *    would hand each item to its own react-markdown call, which would each
  *    restart numbering at 1. We only merge across the gap when *both* sides

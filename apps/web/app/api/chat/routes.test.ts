@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({ user: { id: 'u1' } as { id: string } | null, d
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: async () => ({ data: { user: state.user } }) } }) }))
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => state.db }))
 vi.mock('@/lib/memory/mem0-store', () => ({ getMemoryStore: () => ({ getAll: async () => [], add: async () => undefined, search: async () => [], deleteAll: async () => undefined }) }))
+vi.mock('@/lib/agents/scoring-port', () => ({ roleView: async () => null }))
 // The default reader loads the scoring module; the routes here only need "this person's thing reads, another's does not".
 vi.mock('@/lib/chat/ports/commands.stub', () => ({
   getObject: async (_db: unknown, userId: string, kind: string, ref: Record<string, string>) =>

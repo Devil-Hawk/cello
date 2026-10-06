@@ -6,7 +6,7 @@
 //
 // Fenced code is special-cased at the `pre` level (not `code`) because that
 // is the only place react-markdown reliably distinguishes "this is a code
-// block" from "this is an inline code span" — CommonMark always wraps block
+// block" from "this is an inline code span", CommonMark always wraps block
 // code in <pre><code>, and never wraps inline code in <pre>. Reading the
 // language out of `pre`'s child `<code className="language-xxx">` and
 // handing it to <CodeBlock> means we never touch `code` twice.
@@ -40,7 +40,7 @@ export const mdComponents: Components = {
   },
 
   code({ className, children, ...props }) {
-    // Only inline code spans reach here — block code is fully handled by
+    // Only inline code spans reach here, block code is fully handled by
     // the `pre` override above and never recurses into this renderer.
     return (
       <code
@@ -97,11 +97,11 @@ export const mdComponents: Components = {
 
   hr: () => <hr className="my-4 border-border" />,
 
+  // A link to one of Cello's own pages opens in place; any other link opens in a new tab.
   a: ({ children, href }) => (
     <a
       href={href}
-      target="_blank"
-      rel="noopener noreferrer"
+      {...(href?.startsWith('/') && !href.startsWith('//') ? {} : { target: '_blank', rel: 'noopener noreferrer' })}
       className="text-foreground underline underline-offset-2 hover:text-accent-deep"
     >
       {children}

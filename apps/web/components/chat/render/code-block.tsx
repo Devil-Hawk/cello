@@ -2,7 +2,7 @@
 
 // Fenced code rendering: a small language/copy header over a highlighted
 // body. Syntax colour comes from react-syntax-highlighter's "Light" build
-// (see markdown.tsx's doc comment for why — the short version: it lets us
+// (see markdown.tsx's doc comment for why, the short version: it lets us
 // register only the languages we actually see instead of shipping Prism's
 // full ~300-grammar catalogue).
 
@@ -23,10 +23,10 @@ import { Check, Copy } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // Deliberately small: this is every language we've registered, nothing
-// more. An unregistered language name (or none at all) still renders —
+// more. An unregistered language name (or none at all) still renders -
 // react-syntax-highlighter catches the lookup failure internally and falls
 // back to plain, unhighlighted text (see its highlight.js: the refractor
-// path wraps `astGenerator.highlight` in try/catch) — so "unknown language"
+// path wraps `astGenerator.highlight` in try/catch), so "unknown language"
 // degrades to readable code, never a crash or blank block.
 PrismLight.registerLanguage('typescript', typescript)
 PrismLight.registerLanguage('tsx', tsx)
@@ -64,13 +64,13 @@ function normalizeLanguage(raw: string | undefined): string {
 }
 
 // Token colours. Two are fixed, code-only hues (not reused as app-wide
-// semantic colour — see tailwind.config.ts's `pipeline` comment for the
+// semantic colour, see tailwind.config.ts's `pipeline` comment for the
 // precedent of "fixed, desaturated instrument tones" this follows); the
 // rest reuse existing design tokens so code blocks stay in register with
 // the rest of the product and invert correctly for dark mode with zero
 // extra work.
-const CODE_STRING = '#5E7FA0' // fixed slate blue — string/attr literals
-const CODE_FUNC = '#7A6BA6' // fixed muted violet — function/class names
+const CODE_STRING = '#5E7FA0' // fixed slate blue, string/attr literals
+const CODE_FUNC = '#7A6BA6' // fixed muted violet, function/class names
 
 const codeStyle: Record<string, React.CSSProperties> = {
   'pre[class*="language-"]': { background: 'transparent', margin: 0 },
@@ -138,7 +138,7 @@ interface CodeBlockProps {
   code: string
 }
 
-/** Memoized on (language, code) — an unrelated re-render of the surrounding
+/** Memoized on (language, code), an unrelated re-render of the surrounding
  *  message (or even a sibling block) never re-runs Prism's tokenizer. */
 export const CodeBlock = memo(function CodeBlock({ language, code }: CodeBlockProps) {
   const lang = normalizeLanguage(language)
