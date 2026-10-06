@@ -49,6 +49,7 @@ import {
   type ResumeSource,
 } from '@/lib/resume/types'
 import type { ResumeOptimizerResult } from '@/lib/harness/agents/resume_optimizer'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 interface OptimizationState {
   /** The resume_documents id this report describes — a generate result goes stale once you select away from it. */
@@ -273,18 +274,16 @@ export default function ResumeStudioPage() {
       if (apiJobId) {
         tasks.push(
           (async () => {
-            const { data: job } = await supabase
-              .from('jobs')
-              .select('id, title, companies(name)')
+            const { data: job } = await personJobs(supabase)
+              .select('id, title, viewer_company_name')
               .eq('id', apiJobId)
               .maybeSingle()
             if (!job) {
               setJobNotFound(true)
               return
             }
-            const companyRel = (job as { companies?: { name?: string } | { name?: string }[] | null }).companies
-            const companyName = Array.isArray(companyRel) ? companyRel[0]?.name : companyRel?.name
-            setJobMeta({ title: (job as { title: string }).title, company: companyName ?? null })
+            const row = job as { title: string; viewer_company_name: string | null }
+            setJobMeta({ title: row.title, company: row.viewer_company_name })
           })()
         )
       }

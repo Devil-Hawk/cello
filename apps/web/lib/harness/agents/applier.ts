@@ -66,8 +66,9 @@ export const applier: AgentFn = async (ctx) => {
 
   // 1) Load job + company metadata.
   const { data: jobData, error: jobErr } = await ctx.admin
-    .from('jobs')
-    .select('id, url, description, company_id, companies(metadata)')
+    .from('person_jobs')
+    .select('id, url, description, company_id:viewer_company_id, companies(metadata)')
+    .eq('viewer_id', ctx.userId)
     .eq('id', input.jobId)
     .single()
   if (jobErr || !jobData) {

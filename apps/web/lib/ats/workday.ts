@@ -21,7 +21,7 @@
 import type { AtsJob, AtsProvider, DetectInput, FetchContext } from './types'
 import { isValidToken } from './types'
 import { assertAllowedHostSuffix, fetchJson } from './http'
-import { htmlToPlainText } from './html'
+import { htmlToPlainText, rawHtmlOf } from './html'
 import { mapWithConcurrency } from './concurrency'
 
 const API_HOST_SUFFIXES = ['.myworkdayjobs.com']
@@ -159,13 +159,14 @@ async function fetchPage(board: BoardCoordinates, offset: number, searchText = '
 async function fetchDetail(
   board: BoardCoordinates,
   externalPath: string
-): Promise<{ description?: string; postedAt?: string }> {
+): Promise<{ description?: string; descriptionHtml?: string; postedAt?: string }> {
   const apiUrl = `${boardOrigin(board)}/wday/cxs/${board.tenant}/${board.site}${externalPath}`
   assertAllowedHostSuffix(apiUrl, API_HOST_SUFFIXES)
   try {
     const json = await fetchJson<WorkdayDetailResponse>(apiUrl)
     return {
       description: htmlToPlainText(json?.jobPostingInfo?.jobDescription),
+      descriptionHtml: rawHtmlOf(json?.jobPostingInfo?.jobDescription),
       postedAt: toIso(json?.jobPostingInfo?.startDate),
     }
   } catch {
@@ -228,6 +229,7 @@ async function fetchJobs(token: string, ctx?: FetchContext): Promise<AtsJob[]> {
     const job = byPath.get(path)
     if (!job) return
     if (details[i].description) job.description = details[i].description
+    if (details[i].descriptionHtml) job.descriptionHtml = details[i].descriptionHtml
     if (details[i].postedAt) job.postedAt = details[i].postedAt
   })
 

@@ -40,7 +40,7 @@ function adminFrom(table: string) {
     },
     async maybeSingle() {
       if (table === 'profiles') return { data: state.profile, error: state.profileError }
-      if (table === 'jobs') return { data: state.job, error: null }
+      if (table === 'person_jobs') return { data: state.job, error: null }
       if (table !== 'application_drafts') return { data: null, error: null }
       if (pendingUpdate) {
         // The status-guarded transition UPDATE: evaluated against the

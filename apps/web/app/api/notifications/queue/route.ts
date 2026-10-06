@@ -42,6 +42,8 @@ interface JobRel {
   description?: string | null
   location?: string | null
   companies?: CompanyRel | CompanyRel[] | null
+  /** The employer's directory row: names a role this person holds without a company of their own. */
+  employer?: CompanyRel | CompanyRel[] | null
 }
 
 interface DraftRowRaw {
@@ -60,7 +62,7 @@ function one<T>(value: T | T[] | null | undefined): T | null {
 
 function toQueueDraftRow(row: DraftRowRaw): QueueDraftRow {
   const job = one(row.jobs)
-  const company = one(job?.companies)
+  const company = one(job?.companies) ?? one(job?.employer)
   return {
     id: row.id,
     jobId: row.job_id,
@@ -101,7 +103,7 @@ export async function GET(request: NextRequest) {
     admin
       .from('application_drafts')
       .select(
-        'id, job_id, resume_summary, answers, created_at, jobs(title, url, description, location, companies(name, metadata))'
+        'id, job_id, resume_summary, answers, created_at, jobs(title, url, description, location, companies(name, metadata), employer:company_directory(name))'
       )
       .eq('user_id', user.id)
       .eq('status', 'pending_review')

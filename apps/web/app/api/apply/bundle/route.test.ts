@@ -30,7 +30,7 @@ function adminFrom(table: string) {
     eq: () => self,
     async maybeSingle() {
       if (table === 'application_drafts') return { data: state.draft, error: null }
-      if (table === 'jobs') return { data: state.job, error: null }
+      if (table === 'person_jobs') return { data: state.job, error: null }
       if (table === 'profiles') return { data: state.profileRow, error: null }
       return { data: null, error: null }
     },

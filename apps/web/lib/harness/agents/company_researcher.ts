@@ -360,9 +360,10 @@ export const company_researcher: AgentFn = async (ctx) => {
   }
 
   const { data: jobData } = await ctx.admin
-    .from('jobs')
+    .from('person_jobs')
     .select('salary_range, title')
-    .eq('company_id', companyId)
+    .eq('viewer_id', ctx.userId)
+    .eq('viewer_company_id', companyId)
   const jobs = (jobData as JobRow[]) ?? []
 
   const result = await generateDossier({

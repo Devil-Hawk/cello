@@ -9,9 +9,15 @@ import { clockMeter } from './meter'
 import { ownerHealth } from './owner-health'
 import { clockPrune } from './prune'
 import { rolesCheck } from './roles-check'
+import { postingsBackfill } from './postings-backfill'
+import { rolesRetype } from './roles-retype'
+import { storageAlert } from './storage-alert'
 
 export const HANDLERS: Record<string, RoutineHandler> = {
   'roles.check': (ctx) => rolesCheck(ctx),
+  'roles.retype': rolesRetype,
+  'postings.backfill': postingsBackfill,
+  'storage.alert': storageAlert,
   'inbox.sync': inboxSync,
   'owner.health': ownerHealth,
   'clock.meter': clockMeter,

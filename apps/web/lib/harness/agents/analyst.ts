@@ -267,29 +267,29 @@ interface JobRow {
   id: string
   title: string | null
   description: string | null
-  company_id: string | null
-  companies?: { name?: string | null; notes?: string | null } | { name?: string | null; notes?: string | null }[] | null
-}
-
-function companyFields(job: JobRow): { name: string; notes: string | null } {
-  const c = job.companies
-  const row = Array.isArray(c) ? c[0] : c
-  return { name: row?.name ?? 'Unknown Company', notes: row?.notes ?? null }
+  viewer_company_id: string | null
+  viewer_company_name: string | null
 }
 
 export const analyst: AgentFn = async (ctx) => {
   const input = AnalystInput.parse(ctx.input ?? {})
 
   const { data: jobData, error: jobErr } = await ctx.admin
-    .from('jobs')
-    .select('id, title, description, company_id, companies(name, notes)')
+    .from('person_jobs')
+    .select('id, title, description, viewer_company_id, viewer_company_name')
+    .eq('viewer_id', ctx.userId)
     .eq('id', input.jobId)
     .single()
   if (jobErr || !jobData) {
     throw new Error(`analyst: job ${input.jobId} not found: ${jobErr?.message ?? 'no row'}`)
   }
   const job = jobData as JobRow
-  const { name: companyName, notes: companyNotes } = companyFields(job)
+  const companyName = job.viewer_company_name ?? 'Unknown Company'
+  // Notes are the person's own, so they come from their company, never the shared role's first owner.
+  const { data: companyRow } = job.viewer_company_id
+    ? await ctx.admin.from('companies').select('notes').eq('id', job.viewer_company_id).eq('user_id', ctx.userId).maybeSingle()
+    : { data: null }
+  const companyNotes = (companyRow as { notes?: string | null } | null)?.notes ?? null
 
   const { data: profile } = await ctx.admin.from('profiles').select('resume_text').eq('id', ctx.userId).single()
   const resumeText = ((profile?.resume_text as string | null) ?? '').trim()

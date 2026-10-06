@@ -34,6 +34,7 @@ export const REASON_COPY: Record<string, string> = {
   no_roles: 'no open roles were found on it',
   unreachable: 'it did not answer',
   read_failed: 'reading it failed with an error, and the next check tries again',
+  budget: 'its site is large, and one check reads only part of it, so the next check reads more',
   role_pages: 'it lists roles, but their pages cannot be read without a browser',
   render_failed: "Cello's browser could not read it just now, and the next check tries again",
   model_unavailable: 'no free reading slot was available, and the next check tries again',
@@ -86,7 +87,7 @@ export function dueAt(company: StatusCompany): number {
 export type RolesStatus =
   | { kind: 'roles'; count: number }
   | { kind: 'checking' }
-  | { kind: 'reading'; nextCheckAt: number | null; waiting?: boolean }
+  | { kind: 'reading'; nextCheckAt: number | null; waiting?: boolean; large?: boolean }
   | { kind: 'not_checked'; nextCheckAt: number | null; now: number }
   | { kind: 'empty'; nextCheckAt: number | null; now: number }
   | { kind: 'unreadable'; reason: string; careersUrl: string | null }
@@ -104,6 +105,10 @@ export function rolesStatus(
   const check = readSourceCheck(company.metadata)
   if (check && !check.readable && check.reason === READING_REASON) {
     return { kind: 'reading', nextCheckAt }
+  }
+  // The site is bigger than one check reads: not "no roles", and the next scheduled check goes on.
+  if (check && !check.readable && check.reason === 'budget') {
+    return { kind: 'reading', nextCheckAt, large: true }
   }
   if (check && !check.readable && check.reason && WAITING_REASONS.includes(check.reason)) {
     return { kind: 'reading', nextCheckAt, waiting: true }
@@ -151,9 +156,9 @@ export function rolesStatusLine(s: RolesStatus): { text: string; href?: string }
     case 'checking':
       return { text: 'Checking now' }
     case 'reading': {
-      if (s.nextCheckAt === null) return { text: s.waiting ? 'Waiting for a free reading slot' : 'Cello is reading this site' }
-      const t = new Date(s.nextCheckAt).toISOString().slice(11, 16)
-      return { text: s.waiting ? `Waiting for a free reading slot. Next check around ${t} UTC` : `Cello is reading this site. Next check around ${t} UTC` }
+      const t = s.nextCheckAt === null ? '' : `. Next check around ${new Date(s.nextCheckAt).toISOString().slice(11, 16)} UTC`
+      if (s.large) return { text: `This site is large and Cello is still reading it${t}` }
+      return { text: `${s.waiting ? 'Waiting for a free reading slot' : 'Cello is reading this site'}${t}` }
     }
     case 'not_checked':
       return { text: s.nextCheckAt === null ? 'Not checked yet' : `Not checked yet, next check ${inAbout(s.nextCheckAt - s.now)}` }

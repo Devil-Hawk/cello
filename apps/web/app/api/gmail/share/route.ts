@@ -28,6 +28,7 @@ import { normalizeCompanyName, findBestJobMatch } from '@/lib/gmail/matching'
 import { decideStageTransition, type StageDecision } from '@/lib/gmail/stage'
 import { recordStageActivity } from '@/lib/gmail/activity'
 import { logApiError } from '@/lib/observability/log'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
@@ -138,10 +139,9 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const { data: companyJobs } = await supabase
-      .from('jobs')
+    const { data: companyJobs } = await personJobs(supabase)
       .select('id, title')
-      .eq('company_id', trackedCompany.id)
+      .eq('viewer_company_id', trackedCompany.id)
       .limit(500)
 
     const jobMatch = findBestJobMatch(parsed.jobTitle, companyJobs || [])

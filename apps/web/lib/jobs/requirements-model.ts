@@ -29,7 +29,7 @@ export function requirementsUserPrompt(title: string, description: string): stri
 /** Fill the skill lists of `base` from a model, or return `base` unchanged. Never throws. */
 export async function completeRequirements(
   base: Requirements,
-  input: { title: string; description: string },
+  input: { title: string; description: string; descriptionMd?: string | null },
   call: ModelCall,
   now: () => Date = () => new Date()
 ): Promise<Requirements> {
@@ -52,7 +52,7 @@ export async function completeRequirements(
     }
     const answer = ModelAnswerSchema.safeParse(parsed)
     if (!answer.success) return { ...base, model_checked_at: checked }
-    return { ...groundModelAnswer(base, input.description, answer.data), model_checked_at: checked }
+    return { ...groundModelAnswer(base, input.description, answer.data, { descriptionMd: input.descriptionMd, at: checked }), model_checked_at: checked }
   } catch {
     return base
   }

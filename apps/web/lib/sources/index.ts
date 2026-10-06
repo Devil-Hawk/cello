@@ -29,6 +29,7 @@ import { weworkremotely } from './weworkremotely'
 import { himalayas } from './himalayas'
 import { workingnomads } from './workingnomads'
 import { jobicy } from './jobicy'
+import { postingCapture } from '../ingest/markdown'
 
 export type { JobLead, SourceAdapter, SourceId, SourceQuery } from './types'
 export { themuse } from './themuse'
@@ -278,7 +279,7 @@ export async function ingestLeads(
     const { data, error } = await ownedJobsQuery(
       admin,
       userId,
-      'id, external_id, url, description_md5, companies!inner(user_id)'
+      'id, external_id, url, description_md5'
     )
     if (error) {
       result.errors.push(`load jobs: ${error.message}`)
@@ -291,7 +292,7 @@ export async function ingestLeads(
     }[]) {
       if (j.external_id) existing.set(j.external_id, j.id)
       if (j.url) existing.set(j.url, j.id)
-      if (!j.description_md5 || j.description_md5 === EMPTY_MD5) bodiless.add(j.id)
+      if (!j.description_md5) bodiless.add(j.id)
     }
   }
 
@@ -344,6 +345,8 @@ export async function ingestLeads(
       quality_score: c.qualityScore,
       source: lead.source,
       last_seen_at: now,
+      // an aggregator's copy is the listing's own text: kept, marked partial, and read again by the employer's board
+      ...postingCapture({ url: lead.url, description: lead.description }),
       requirements: parseRequirements({
         title: lead.title,
         description: lead.description,
@@ -375,6 +378,7 @@ export async function ingestLeads(
       .from('jobs')
       .update({
         description: lead.description,
+        ...postingCapture({ url: lead.url, description: lead.description }),
         requirements: parseRequirements({
           title: lead.title,
           description: lead.description,
@@ -406,8 +410,6 @@ export async function ingestLeads(
   return result
 }
 
-/** md5('') is jobs.description_md5 of a row with no description. */
-const EMPTY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e'
 /** Ids per update, so the querystring stays short. */
 const SEEN_CHUNK = 200
 

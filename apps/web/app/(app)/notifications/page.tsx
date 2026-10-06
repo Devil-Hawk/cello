@@ -17,6 +17,7 @@ import { hotRolesQuery, toHotRoles, type HotRole } from '@/lib/scoring/hot-roles
 import { ChanceChip } from '@/components/fit/chance-chip'
 import { fitFromLabel } from '@/lib/scoring/read'
 import { cn, formatRelativeTime } from '@/lib/utils'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 type HotJob = HotRole
 
@@ -28,7 +29,7 @@ interface InterviewActivity {
   application_id: string
   applications: {
     id: string
-    jobs: { title: string; companies: { name: string | null } | null } | null
+    jobs: { title: string; companies: { name: string | null } | null; employer: { name: string | null } | null } | null
   } | null
 }
 
@@ -125,7 +126,7 @@ export default function NotificationsPage() {
         supabase
           .from('activities')
           .select(
-            'id, type, title, occurred_at, application_id, applications(id, jobs(title, companies(name)))'
+            'id, type, title, occurred_at, application_id, applications(id, jobs(title, companies(name), employer:company_directory(name)))'
           )
           .ilike('type', '%interview%')
           .order('occurred_at', { ascending: false })
@@ -233,7 +234,7 @@ export default function NotificationsPage() {
           title={activity.title}
           subtitle={[
             activity.applications?.jobs?.title,
-            activity.applications?.jobs?.companies?.name,
+            activity.applications?.jobs?.companies?.name ?? activity.applications?.jobs?.employer?.name,
             formatRelativeTime(activity.occurred_at),
           ]
             .filter(Boolean)
@@ -256,7 +257,7 @@ export default function NotificationsPage() {
           key={job.id}
           tone="opportunity"
           title={job.title}
-          subtitle={[job.companies?.name ?? 'Unknown company', formatRelativeTime(job.posted_at ?? job.discovered_at)].join(
+          subtitle={[job.viewer_company_name ?? 'Unknown company', formatRelativeTime(job.posted_at ?? job.discovered_at)].join(
             ' · '
           )}
           // Opens THIS job, not the list. This row names a specific role and

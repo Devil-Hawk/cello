@@ -90,6 +90,8 @@ interface JobRel {
   /** The person's own verdict on the role: their person_roles row, embedded. */
   person_roles?: FitRow | FitRow[] | null
   companies?: CompanyRel | CompanyRel[] | null
+  /** The employer's directory row: names a role this person holds without a company of their own. */
+  employer?: CompanyRel | CompanyRel[] | null
 }
 
 interface DraftRowRaw {
@@ -232,7 +234,7 @@ export async function GET() {
   const unjudged = await unjudgedCvTailorDraftIds(admin, user.id, drafts.map((d) => d.id))
   const items = drafts.map((draft) => {
     const job = one(draft.jobs)
-    const company = one(job?.companies)
+    const company = one(job?.companies) ?? one(job?.employer)
     const credentials = resolveApplyCredentials(company?.metadata, profile?.preferences)
     const decision = decideBatchEligibility({
       jobUrl: job?.url ?? null,
@@ -558,7 +560,7 @@ async function approveOne(params: ApproveOneParams): Promise<ItemResult> {
 
     const draft = data as unknown as DraftRowRaw
     const job = one(draft.jobs)
-    const company = one(job?.companies)
+    const company = one(job?.companies) ?? one(job?.employer)
     const companyName = company?.name?.trim() || null
     const jobTitle = job?.title?.trim() || null
     const named: ItemResult = { ...base, companyName, jobTitle }

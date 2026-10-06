@@ -413,8 +413,9 @@ export const application_follow_up: AgentFn = async (ctx) => {
   let companyName = 'the company'
   if (application.job_id) {
     const { data: jobData } = await ctx.admin
-      .from('jobs')
-      .select('id, title, company_id')
+      .from('person_jobs')
+      .select('id, title, company_id:viewer_company_id')
+      .eq('viewer_id', ctx.userId)
       .eq('id', application.job_id)
       .single()
     job = (jobData as JobRow | null) ?? null

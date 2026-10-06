@@ -156,7 +156,7 @@ describe('extractDossierCandidates', () => {
 
 interface FakeTables {
   companies?: Record<string, unknown>[]
-  jobs?: Record<string, unknown>[]
+  person_jobs?: Record<string, unknown>[]
   company_dossiers?: Record<string, unknown>[]
   contacts?: Record<string, unknown>[]
 }
@@ -207,7 +207,7 @@ const call = (rows: FakeTables, inserted: Record<string, unknown>[] = [], insert
 describe('sourceContactsForCompany — the report is never a bare "nothing usable"', () => {
   const barren: FakeTables = {
     companies: [{ id: 'c1', name: 'Atolls', domain: null, user_id: 'u1' }],
-    jobs: [{ id: 'j1', description: null, url: null, company_id: 'c1' }],
+    person_jobs: [{ viewer_id: 'u1', id: 'j1', description: null, url: null, company_id: 'c1' }],
     company_dossiers: [],
     contacts: [],
   }
@@ -269,7 +269,7 @@ describe('sourceContactsForCompany — the report is never a bare "nothing usabl
   it('recovers the domain from the posting URL when nothing else has one', async () => {
     const res = await call({
       ...barren,
-      jobs: [{ id: 'j1', description: null, url: 'https://careers.acme.com/jobs/1', company_id: 'c1' }],
+      person_jobs: [{ viewer_id: 'u1', id: 'j1', description: null, url: 'https://careers.acme.com/jobs/1', company_id: 'c1' }],
     })
     expect(res.domain).toBe('careers.acme.com')
     expect(res.search.domainBasis).toMatch(/posting/i)
@@ -280,7 +280,7 @@ describe('sourceContactsForCompany — the report is never a bare "nothing usabl
     const res = await call(
       {
         companies: [{ id: 'c1', name: 'Acme', domain: 'acme.com', user_id: 'u1' }],
-        jobs: [{ id: 'j1', description: 'You will report to Jane Roberts, Head of Engineering.', url: null, company_id: 'c1' }],
+        person_jobs: [{ viewer_id: 'u1', id: 'j1', description: 'You will report to Jane Roberts, Head of Engineering.', url: null, company_id: 'c1' }],
         company_dossiers: [],
         contacts: [{ id: 'x1', name: 'Sam Patel', email: 'sam.patel@acme.com', title: null }],
       },
@@ -300,7 +300,7 @@ describe('sourceContactsForCompany — the report is never a bare "nothing usabl
       const res = await call(
         {
           companies: [{ id: 'c1', name: 'Doist', domain: 'doist.com', user_id: 'u1' }],
-          jobs: [{ id: 'j1', description: 'Questions? Write to careers@doist.com.', url: null, company_id: 'c1' }],
+          person_jobs: [{ viewer_id: 'u1', id: 'j1', description: 'Questions? Write to careers@doist.com.', url: null, company_id: 'c1' }],
           company_dossiers: [],
           contacts: [],
         },
@@ -322,7 +322,7 @@ describe('sourceContactsForCompany — the report is never a bare "nothing usabl
     await call(
       {
         companies: [{ id: 'c1', name: 'Doist', domain: 'doist.com', user_id: 'u1' }],
-        jobs: [{ id: 'j1', description: 'Questions? Write to careers@doist.com.', url: null, company_id: 'c1' }],
+        person_jobs: [{ viewer_id: 'u1', id: 'j1', description: 'Questions? Write to careers@doist.com.', url: null, company_id: 'c1' }],
         company_dossiers: [],
         contacts: [],
       },
@@ -388,7 +388,7 @@ describe('name/title extraction never attributes a person to the wrong employer'
 describe('sourceContactsForCompany — reads stored company pages before fetching', () => {
   const withDomain: FakeTables = {
     companies: [{ id: 'c1', name: 'Acme', domain: 'acme.com', user_id: 'u1' }],
-    jobs: [{ id: 'j1', description: null, url: null, company_id: 'c1' }],
+    person_jobs: [{ viewer_id: 'u1', id: 'j1', description: null, url: null, company_id: 'c1' }],
     company_dossiers: [],
     contacts: [],
   }

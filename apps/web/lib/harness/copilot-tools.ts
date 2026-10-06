@@ -622,7 +622,6 @@ async function listJobs(ctx: CopilotToolContext, args: Args) {
     .select('id, name, is_dream_company')
     .eq('user_id', ctx.userId)
   const companyRows = (companies as { id: string; name: string; is_dream_company: boolean }[]) ?? []
-  const nameById = new Map(companyRows.map((c) => [c.id, c.name]))
   const ids = (dreamOnly ? companyRows.filter((c) => c.is_dream_company) : companyRows).map((c) => c.id)
   if (ids.length === 0) return { jobs: [], note: dreamOnly ? 'No dream companies tracked yet.' : 'No companies tracked yet.' }
 

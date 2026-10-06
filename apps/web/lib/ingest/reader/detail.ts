@@ -5,7 +5,7 @@
 
 import * as cheerio from 'cheerio'
 import type { AtsJob } from '../../ats/types'
-import { descriptionFromPage } from '../details'
+import { bodyFromPage } from '../details'
 import { readJobPostings } from '../jsonld'
 import { normalizeJobUrl } from '../snapshot'
 import { htmlToPlainText } from '../../ats/html'
@@ -18,6 +18,9 @@ export interface RoleDetail {
   employer?: string
   requisitionId?: string
   description?: string
+  /** The employer's HTML for the posting, and which way it was read, for the Markdown copy. */
+  descriptionHtml?: string
+  descriptionSource?: 'jsonld' | 'detail'
   location?: string
   isEvent?: boolean
   /** Job language in the page's text (responsibilities, qualifications, "you will"), whether or not the page names its role. */
@@ -67,6 +70,7 @@ export function readDetail(html: string, url: string): RoleDetail {
     location: d.location ?? emb.location,
     // Structured data beats the text of a rendered region, which may be a menu.
     description: emb.description ?? d.description,
+    ...(emb.descriptionHtml ? { descriptionHtml: emb.descriptionHtml, descriptionSource: 'detail' as const } : {}),
     postedAt: d.postedAt ?? emb.postedAt,
   }
 }
@@ -97,6 +101,8 @@ function readDetailBase(html: string, url: string): RoleDetail {
       employer: declared.employer,
       requisitionId: declared.requisitionId,
       description: declared.description,
+      descriptionHtml: declared.descriptionHtml,
+      ...(declared.descriptionHtml ? { descriptionSource: 'jsonld' as const } : {}),
       location: declared.location,
       isEvent: declared.isEvent,
       declared: true,
@@ -104,8 +110,10 @@ function readDetailBase(html: string, url: string): RoleDetail {
     }
   }
 
-  const { terms, place, labelled } = jobTermsAndPlace(html)
+  const { terms, place: textPlace, labelled } = jobTermsAndPlace(html)
+  const place = textPlace ?? pagePlace($)
   const title = pageTitle($)
+  const body = title ? bodyFromPage(html, url, title) : undefined
   const embedded = EMBEDDED_DATE.exec(html)?.[1]
   const posted = isoOf(embedded) ?? isoOf($('meta[property="article:published_time"]').attr('content')) ?? isoOf($('time[datetime]').first().attr('datetime')) ?? labelled.postedAt
   return {
@@ -114,9 +122,22 @@ function readDetailBase(html: string, url: string): RoleDetail {
     ...(place ?? labelled.place ? { location: place ?? labelled.place } : {}),
     ...(labelled.requisitionId ? { requisitionId: labelled.requisitionId } : {}),
     jobTerms: terms,
-    description: title ? descriptionFromPage(html, url, title) : undefined,
+    description: body?.text,
+    ...(body ? { descriptionHtml: body.html, descriptionSource: body.source } : {}),
     hrefs,
   }
+}
+
+/**
+ * A place the page marks up rather than labels in its text: a site's location icon (Amazon: an element with aria-label="location"
+ * beside its list) or, on a page that shows its list beside the role, the card of the role being read (aria-current="page"; Google).
+ */
+function pagePlace($: cheerio.CheerioAPI): string | undefined {
+  const icon = clean($('[aria-label="location"]').first().parent().find('li').first().text())
+  if (icon) return icon
+  const cardLine = $('a[aria-current="page"] p').first()
+  const card = clean(cardLine.find('span span').first().text()) || clean(cardLine.text())
+  return card || undefined
 }
 
 /** What a posting says and a department, category or landing page does not (a footer's "equal opportunity" or a menu's "apply" is not here). */
@@ -168,7 +189,7 @@ function jobTermsAndPlace(html: string): { terms: number; place?: string; labell
  * JobPosting is proof; otherwise at least two of: a place, a date, a requisition id, and a
  * description in job language. (The card a link sat in may supply the place or the date.)
  */
-export function isPostingPage(detail: RoleDetail, card?: { location?: string; postedAt?: string }): boolean {
+export function isPostingPage(detail: RoleDetail, card?: { location?: string; postedAt?: string }, signs = 2): boolean {
   if (detail.declared) return true
   const evidence = [
     detail.location ?? card?.location,
@@ -177,7 +198,7 @@ export function isPostingPage(detail: RoleDetail, card?: { location?: string; po
     // Two different job terms: a department page that says "responsibilities" once is not a posting.
     (detail.jobTerms ?? 0) >= 2 ? 'language' : undefined,
   ].filter(Boolean)
-  return evidence.length >= 2
+  return evidence.length >= signs
 }
 
 /** A role built from what its own page says, or null when the page does not name `expectedTitle` (a redirect to somewhere generic). */
@@ -185,9 +206,9 @@ export function jobFromDetail(
   url: string,
   detail: RoleDetail,
   expected?: { title?: string; location?: string; postedAt?: string },
-  opts: { requirePosting?: boolean } = {}
+  opts: { requirePosting?: boolean; /** Signs of a posting a page must show (default 2); a link a person pasted as one needs 1. */ signs?: number } = {}
 ): AtsJob | null {
-  if (opts.requirePosting && !isPostingPage(detail, expected)) return null
+  if (opts.requirePosting && !isPostingPage(detail, expected, opts.signs)) return null
   const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
   // A role is confirmed by its own page: a page with no title of its own (a script shell) confirms nothing, so the card's title alone never makes a role.
   if (expected?.title && !detail.title) return null
@@ -204,6 +225,7 @@ export function jobFromDetail(
     ...(detail.employer ? { employer: detail.employer } : {}),
     ...(detail.requisitionId ? { requisitionId: detail.requisitionId } : {}),
     ...(detail.description ? { description: detail.description } : {}),
+    ...(detail.descriptionHtml ? { descriptionHtml: detail.descriptionHtml, descriptionSource: detail.descriptionSource ?? 'detail' } : {}),
     ...(detail.isEvent ? { isEvent: true } : {}),
   }
 }

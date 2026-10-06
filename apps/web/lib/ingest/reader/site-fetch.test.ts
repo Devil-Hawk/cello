@@ -218,3 +218,18 @@ describe('site fetcher: internal addresses', () => {
     expect(calls.some((c) => c.url.includes('localhost'))).toBe(false)
   })
 })
+
+describe('site fetcher: a host that says slow down', () => {
+  it('is asked once more after a pause, and a second refusal is unreachable', async () => {
+    let n = 0
+    const { fetcher, calls } = harness({
+      'https://acme.test/robots.txt': robots('nf', 404),
+      'https://acme.test/jobs': () => (++n === 1 ? html('slow down', 429) : html('<p>roles</p>')),
+      'https://acme.test/busy': html('slow down', 429),
+    })
+    expect((await fetcher.get('https://acme.test/jobs')).text).toContain('roles')
+    expect(calls.filter((c) => c.url.endsWith('/jobs')).length).toBe(2)
+    await expect(fetcher.get('https://acme.test/busy')).rejects.toMatchObject({ reason: 'unreachable' })
+    expect(calls.filter((c) => c.url.endsWith('/busy')).length).toBe(2)
+  })
+})

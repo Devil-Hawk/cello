@@ -27,6 +27,7 @@ import { CHANCE_BANDS, chanceBandFor, type ChanceBand } from '@/lib/jobs/chance-
 import { FIT_COLUMNS, type FitRow } from '@/lib/scoring/read'
 import { OnJobs } from '@/lib/scoring/person-roles-query'
 import { openRolesOnly } from '@/lib/jobs/freshness'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 export const dynamic = 'force-dynamic'
 

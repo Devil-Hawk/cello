@@ -223,12 +223,10 @@ class FakeQueryBuilder implements PromiseLike<{ data: unknown; error: unknown; c
 
   private matches(row: FakeRow): boolean {
     const eqOk = this.filters.every(({ col, op, val }) => {
-      // Fakes the FK-join filter ownedJobsQuery builds (`companies!inner`
-      // embedded, filtered by `.eq('companies.user_id', ...)`) — this
-      // FakeQueryBuilder has no real embed support, so this is the one
-      // column PostgREST would resolve through a join instead of a plain
-      // row field.
-      if (col === 'companies.user_id') {
+      // Fakes the person_jobs view ownedJobsQuery reads: `viewer_id` is the person whose
+      // company stored the (unshared) fixture role — a column PostgREST would take from
+      // person_roles, not a plain row field.
+      if (col === 'viewer_id') {
         const company = this.tables.get('companies')?.rows.get(row.company_id as string)
         return company?.user_id === val
       }
@@ -292,7 +290,9 @@ class FakeAdmin {
     return this.tables.get(name)!
   }
   from(name: string) {
-    return new FakeQueryBuilder(this.tableFor(name), name, this.tables)
+    // person_jobs is the view over jobs
+    const table = name === 'person_jobs' ? 'jobs' : name
+    return new FakeQueryBuilder(this.tableFor(table), table, this.tables)
   }
   seed(tableName: string, row: FakeRow): void {
     this.tableFor(tableName).rows.set(row.id, { ...row })

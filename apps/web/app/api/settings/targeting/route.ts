@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { resolveTargeting, serializeTargeting, type Targeting } from '@/lib/targeting'
+import { getRoleType, MAX_ROLE_TYPES } from '@/lib/jobs/role-types/taxonomy'
 
 // GET/PUT for profiles.preferences.targeting.
 //
@@ -22,6 +23,17 @@ function validate(body: unknown): string | null {
     if (field in b && b[field] !== undefined && !isStringArray(b[field])) {
       return `${field} must be an array of strings`
     }
+  }
+
+  if ('role_types' in b && b.role_types !== undefined) {
+    if (!isStringArray(b.role_types)) return 'role_types must be an array of strings'
+    // the ids a person may choose are the taxonomy's, and `other` is what the typing tiers answer, never a choice
+    const unknown = b.role_types.find((id) => !getRoleType(id) || id === 'other')
+    if (unknown !== undefined) return `Unknown role type "${unknown.slice(0, 60)}"`
+    if (new Set(b.role_types).size > MAX_ROLE_TYPES) return `Choose at most ${MAX_ROLE_TYPES} role types`
+  }
+  if ('role_types_review' in b && b.role_types_review !== undefined && typeof b.role_types_review !== 'boolean') {
+    return 'role_types_review must be a boolean'
   }
 
   if ('remoteOnly' in b && b.remoteOnly !== undefined && typeof b.remoteOnly !== 'boolean') {
@@ -83,6 +95,11 @@ export async function PUT(request: NextRequest) {
   // Normalize casing/dedupe/clamping the same way every other reader does, by
   // routing the validated body back through resolveTargeting.
   const targeting: Targeting = resolveTargeting({ targeting: body })
+  // The coarse `functions` filter follows the chosen types: the families of the types, so the old filter and
+  // every reader of `functions` agree with what the person chose.
+  if (targeting.role_types?.length) {
+    targeting.functions = [...new Set(targeting.role_types.map((id) => getRoleType(id)?.family).filter((f): f is string => !!f))]
+  }
 
   const { data: profile, error: readError } = await supabase
     .from('profiles')
@@ -104,6 +121,9 @@ export async function PUT(request: NextRequest) {
   // it through JSON to get a plain, Json-compatible value — every Targeting
   // field is already a string/number/boolean/null/array, so this is lossless.
   const targetingRecord = JSON.parse(JSON.stringify(serializeTargeting(targeting)))
+  // The target titles live in the same object and are not this form's to rewrite: keep what is stored.
+  const stored = preferences.targeting as { titles?: unknown } | undefined
+  if (stored && Array.isArray(stored.titles)) targetingRecord.titles = stored.titles
 
   const { error: writeError } = await supabase
     .from('profiles')

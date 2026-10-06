@@ -14,11 +14,11 @@
 import type { AtsJob, AtsProvider, DetectInput, FetchContext } from './types'
 import { isValidToken } from './types'
 import { CircuitOpenError, HttpError, fetchJson } from './http'
-import { htmlToPlainText } from './html'
+import { htmlToPlainText, rawHtmlOf } from './html'
 import { mapWithConcurrency } from './concurrency'
 import { isStalePosting } from '../jobs/freshness'
 import { assertSsrfSafe } from '../security/untrusted'
-import { makeSiteFetcher, type SiteFetcher } from '../ingest/reader/site-fetch'
+import { makeSiteFetcher, ReaderError, type SiteFetcher } from '../ingest/reader/site-fetch'
 
 const PAGE_SIZE = 10
 /** 5 pages x 10 = 50 roles per search word; at most 3 words, and 20 pages (200 roles) with none. */
@@ -94,7 +94,7 @@ function fromV2(host: string, p: V2Position): AtsJob | null {
     location: p.location || (Array.isArray(p.locations) ? p.locations.join(' · ') : undefined) || undefined,
     postedAt: iso(p.t_create),
     ...(requisitionId ? { requisitionId } : {}),
-    ...(p.job_description ? { description: htmlToPlainText(p.job_description, MAX_DESCRIPTION_CHARS) } : {}),
+    ...(p.job_description ? { description: htmlToPlainText(p.job_description, MAX_DESCRIPTION_CHARS), descriptionHtml: rawHtmlOf(p.job_description) } : {}),
   }
 }
 
@@ -164,7 +164,7 @@ async function politePage(run: () => Promise<{ jobs: AtsJob[]; count: number }>,
   }
 }
 
-async function description(flavor: Flavor, host: string, domain: string, job: AtsJob, site: SiteFetcher): Promise<string | undefined> {
+async function description(flavor: Flavor, host: string, domain: string, job: AtsJob, site: SiteFetcher): Promise<{ text?: string; html?: string } | undefined> {
   const id = job.url.match(/\/careers\/job\/(\d+)/)?.[1]
   if (!id) return undefined
   try {
@@ -172,15 +172,38 @@ async function description(flavor: Flavor, host: string, domain: string, job: At
       const url = `https://${host}/api/apply/v2/jobs/${id}?domain=${domain}`
       await site.gate(url)
       const json = await fetchJson<V2Position>(url, { redirect: 'manual', retries: 1 })
-      return json.job_description ? htmlToPlainText(json.job_description, MAX_DESCRIPTION_CHARS) : undefined
+      return json.job_description ? { text: htmlToPlainText(json.job_description, MAX_DESCRIPTION_CHARS), html: rawHtmlOf(json.job_description) } : undefined
     }
     const url = `https://${host}/api/pcsx/position_details?position_id=${id}&domain=${domain}&hl=en`
     await site.gate(url)
     const json = await fetchJson<{ data?: { jobDescription?: string } }>(url, { redirect: 'manual', retries: 1 })
-    return json.data?.jobDescription ? htmlToPlainText(json.data.jobDescription, MAX_DESCRIPTION_CHARS) : undefined
+    return json.data?.jobDescription ? { text: htmlToPlainText(json.data.jobDescription, MAX_DESCRIPTION_CHARS), html: rawHtmlOf(json.data.jobDescription) } : undefined
   } catch {
     return undefined
   }
+}
+
+/**
+ * Where one position is, from its host's own detail answer. A tenant's posting page is a script shell that
+ * names no place, and its JobPosting block leaves the place empty; the detail API names it. Undefined when
+ * the host gives none, and when a request is refused (robots, a bot check, the budget): never a guess.
+ */
+export async function eightfoldPlace(site: SiteFetcher, token: string, id: string): Promise<string | undefined> {
+  const parts = splitEightfoldToken(token)
+  if (!parts || !/^\d{5,}$/.test(id)) return undefined
+  const { host, domain } = parts
+  const allowedHosts = new Set([host])
+  for (const url of [`https://${host}/api/pcsx/position_details?position_id=${id}&domain=${domain}&hl=en`, `https://${host}/api/apply/v2/jobs/${id}?domain=${domain}`]) {
+    try {
+      const json = await site.json<{ data?: V2Position; location?: string; locations?: string[] }>(url, { allowedHosts })
+      const d: V2Position = json.data ?? json
+      const place = d.location || (Array.isArray(d.locations) ? d.locations.join(' · ') : '')
+      if (place) return place
+    } catch (error) {
+      if (error instanceof ReaderError && error.reason !== 'unreachable') return undefined
+    }
+  }
+  return undefined
 }
 
 function detect(input: DetectInput): { token: string } | null {
@@ -247,7 +270,11 @@ async function fetchJobs(token: string, ctx?: FetchContext): Promise<AtsJob[]> {
     .slice(0, DESCRIPTION_BUDGET)
   const bodies = await mapWithConcurrency(needBody, 2, (j) => description(flavor, host, domain, j, site))
   needBody.forEach((j, i) => {
-    if (bodies[i]) j.description = bodies[i]
+    const body = bodies[i]
+    if (body?.text) {
+      j.description = body.text
+      if (body.html) j.descriptionHtml = body.html
+    }
   })
   return jobs
 }
