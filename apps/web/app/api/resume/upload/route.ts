@@ -259,12 +259,13 @@ async function importResume(request: NextRequest, user: { id: string; email?: st
   const warnings = [...result.warnings, ...structureWarnings]
   setTraceOutput({ format: result.format, method: result.method, warnings: warnings.length })
 
+  const method = resume.meta.cello.structuredBy === 'llm' ? 'Structured with AI' : result.method
   const base = {
     success: true,
-    message: `Resume imported from ${result.format.toUpperCase()} · ${result.method}`,
+    message: `Resume imported from ${result.format.toUpperCase()} · ${method}`,
     // `extractionMethod` and `wordCount` are the field names the settings card
     // already renders — kept.
-    extractionMethod: result.method,
+    extractionMethod: method,
     wordCount: result.plainText.split(/\s+/).filter(Boolean).length,
     format: result.format,
     structurePreserved: result.structurePreserved,
