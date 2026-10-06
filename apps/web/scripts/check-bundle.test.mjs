@@ -49,6 +49,18 @@ describe('checkBundle', () => {
     expect(THREE_ASYNC_MAX).toBe(200 * KB)
   })
 
+  it('fails a route that has no entry in the baseline, so a new page cannot dodge the growth check', () => {
+    const r = checkBundle({
+      ...base,
+      routes: { ...base.routes, '/roles/page': ['a.js', 'planted.js'] },
+      chunkGzip: { ...base.chunkGzip, 'planted.js': 300 * KB },
+      chunkHasThree: { ...base.chunkHasThree, 'planted.js': false },
+    })
+    expect(r.ok).toBe(false)
+    expect(r.failures.join(' ')).toContain('/roles/page')
+    expect(r.failures.join(' ')).toContain('has no baseline')
+  })
+
   it('skips the growth check with no baseline', () => {
     const { baseline: _unused, ...noBaseline } = base
     expect(checkBundle(noBaseline).ok).toBe(true)

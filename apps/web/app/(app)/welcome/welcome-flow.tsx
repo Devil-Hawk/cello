@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { hasRoleTargets } from '@/lib/targeting/roles'
@@ -15,13 +16,16 @@ import {
   type WelcomeRole,
   type WelcomeTargets,
 } from '@/lib/welcome/commands.stub'
-import { ConnectScreen } from './_parts/connect'
 import { DemoScreen } from './_parts/demo-tour'
 import { nextScreen, type Screen } from './_parts/logic'
 import { Progress } from './_parts/progress'
 import { ResumeScreen } from './_parts/resume'
-import { WantScreen } from './_parts/want'
-import { YourRolesScreen } from './_parts/your-roles'
+
+// The first screen loads with the page. The ones after it load when the person reaches them, so the
+// role list's menus and toasts, the taxonomy and the Gmail scopes stay out of the page's first load.
+const WantScreen = dynamic(() => import('./_parts/want').then((m) => m.WantScreen), { ssr: false })
+const YourRolesScreen = dynamic(() => import('./_parts/your-roles').then((m) => m.YourRolesScreen), { ssr: false })
+const ConnectScreen = dynamic(() => import('./_parts/connect').then((m) => m.ConnectScreen), { ssr: false })
 
 export interface WelcomeFlowProps {
   demo: boolean

@@ -3,12 +3,15 @@
 //   - three and React Three Fiber never appear in a route's first-load JS
 //   - the chunks that do carry them (loaded on idle) total at most 200 KB gzipped
 //   - no route's first-load JS grows more than 5 KB gzipped over the baseline
+//   - every route has a baseline: a new page records its size (--write-baseline) in the commit that adds it,
+//     so it cannot grow unwatched
 //
 //   node scripts/check-bundle.mjs                   check .next against bundle-baseline.json
 //   node scripts/check-bundle.mjs --write-baseline  record the current sizes as the baseline
 //
 // Run from apps/web after `next build`. With no baseline file the growth check
-// is skipped and the sizes are printed, so the first CI build can make one.
+// is skipped and the sizes are printed, so the first CI build can make one. With a baseline file, a route
+// that has no entry in it fails.
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { gzipSync } from 'node:zlib'
@@ -37,6 +40,9 @@ export function checkBundle({ routes, chunkGzip, chunkHasThree, baseline }) {
       if (chunkHasThree[c]) failures.push(`${route}: first-load chunk ${c} contains three`)
     }
     const base = baseline?.[route]
+    if (baseline && base === undefined) {
+      failures.push(`${route}: first-load ${kb(firstLoad[route])} has no baseline (a new page records one with --write-baseline)`)
+    }
     if (base !== undefined && firstLoad[route] - base > ROUTE_GROWTH_MAX) {
       failures.push(
         `${route}: first-load ${kb(firstLoad[route])} is ${kb(firstLoad[route] - base)} over its baseline ${kb(base)} (limit ${kb(ROUTE_GROWTH_MAX)})`,
