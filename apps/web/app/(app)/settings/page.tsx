@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { AlertCircle, CheckCircle, ChevronRight, Cpu, Database, FileWarning, Key, KeyRound, Network, Plug, Search, Server, Target, Terminal } from 'lucide-react'
+import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -19,8 +20,10 @@ import { SourcesTab } from '@/components/settings/sources-tab'
 import { SearchTab } from '@/components/settings/search-tab'
 import { McpTab } from '@/components/settings/mcp-tab'
 import { TokensTab } from '@/components/settings/tokens-tab'
-import { AccountStatus } from '@/components/settings/account-status'
 import { EMPTY_TARGETING, type Targeting } from '@/lib/targeting'
+
+// Loaded after the page: the cards carry the meter, the toast and the sync motion, which the tabs do not need first.
+const AccountStatus = dynamic(() => import('@/components/settings/account-status').then((m) => m.AccountStatus), { ssr: false })
 
 type TabId = 'connections' | 'sources' | 'search' | 'mcp' | 'tokens' | 'api-keys' | 'provider' | 'model' | 'targeting'
 
