@@ -31,7 +31,7 @@ import {
   type EmployerFacts,
   type RolesQuery,
 } from './logic'
-import { CheckAllMenu } from './check-all'
+import { CheckAllMenu } from './check-all-menu'
 import { Filters } from './filters'
 import { NOT_FOR_ME_REASONS, deleteReaction, visibleItems } from './reactions'
 import { ChangeType } from './change-type'
