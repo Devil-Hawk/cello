@@ -159,6 +159,7 @@ with m as (
    group by contact_id
 ), t as (
   select c.id as contact_id, c.user_id,
+         c.name, c.email, c.title, c.kind, c.address_kind, c.employer_id, c.agency_name, c.relationship, c.last_contact_at, c.first_seen_at, c.created_at,
          greatest(m.last_out, c.last_contact_at) as last_yours_at,
          m.last_in as last_theirs_at,
          coalesce(m.sent_n, 0) as sent_n,
@@ -168,6 +169,7 @@ with m as (
     left join m on m.contact_id = c.id
 )
 select contact_id, user_id,
+       name, email, title, kind, address_kind, employer_id, agency_name, relationship, last_contact_at, first_seen_at, created_at,
        greatest(last_yours_at, last_theirs_at) as last_at,
        case when last_yours_at is null and last_theirs_at is null then null
             when last_theirs_at is null or last_yours_at >= last_theirs_at then 'you'
