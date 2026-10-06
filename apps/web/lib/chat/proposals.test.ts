@@ -43,7 +43,7 @@ describe('propose', () => {
     const db = room()
     expect(await propose(db, 'u1', { ...base, ...search, quote: 'you said you hate agencies' }, all())).toMatchObject({ ok: false })
     expect(await propose(db, 'u1', { ...base, kind: 'search', payload: { exclude_keywords: ['agency'] }, quote: 'hide every staffing agency' }, all())).toMatchObject({ ok: false })
-    expect(await propose(db, 'u1', { ...base, ...search, quote: 'crypto' }, all())).toMatchObject({ ok: false })
+    expect(await propose(db, 'u1', { ...base, ...search, quote: 'roles' }, all())).toMatchObject({ ok: false })
     expect(await propose(db, 'u1', { ...base, ...search, quote: undefined }, all())).toMatchObject({ ok: false })
     expect(await propose(db, 'u2', { ...base, ...search }, all())).toMatchObject({ ok: false })
   })

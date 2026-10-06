@@ -57,7 +57,7 @@ describe('checkAnswer', () => {
   })
 
   it('checks a part about nothing in particular against every result of the turn', () => {
-    expect(checkAnswer(answer(part([], 'Two roles, $120,000 and $180,000.')), input()).failures).toEqual([{ part: 1, reason: expect.stringContaining('the number 2') }])
+    expect(checkAnswer(answer(part([], '2 roles, $120,000 and $180,000.')), input()).failures).toEqual([{ part: 1, reason: expect.stringContaining('the number 2') }])
     expect(checkAnswer(answer(part([], 'Pay runs from $120,000 to $180,000.')), input()).failures).toEqual([])
   })
 
