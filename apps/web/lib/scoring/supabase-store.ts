@@ -5,6 +5,7 @@
 // verdict, which is also what keeps one person's conclusions off another's screen.
 
 import type { AdminClient } from '@/lib/harness/types'
+import { traceRefFor } from '@/lib/trace/spans'
 import { fromReaderRequirements, type RequirementsOutcome } from './posting-requirements'
 import type { AssessmentToStore, PriorAssessment, ScoringStore, StoredTaste } from './store'
 import type { Chance, ChanceResult, PassReason, Predicted, Reaction, ReactionRecord, RequirementCheck, ShortlistPick } from './types'
@@ -157,7 +158,9 @@ export class SupabaseScoringStore implements ScoringStore {
     for (const part of chunks(rows, WRITE_CHUNK)) {
       await Promise.all(
         part.map(async (r) => {
-          const patch: Record<string, unknown> = { assessed_at: at, blocked_reasons: r.blockedReasons }
+          // The trace that wrote the verdicts, so a later reaction is scored on it. A run writes several
+          // batches, so only the trace is stamped. ponytail: add each batch's observation id when scoring needs it.
+          const patch: Record<string, unknown> = { assessed_at: at, blocked_reasons: r.blockedReasons, ...traceRefFor() }
           if (r.blocked || !r.want) {
             // A role the person ruled out has no want and no chance worth keeping.
             Object.assign(patch, { want_p: null, want_reason: null, want_detail: null, chance: null, chance_detail: null })

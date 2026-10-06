@@ -202,6 +202,9 @@ export interface LlmResult {
   /** What the provider says the call cost, USD (OpenRouter usage.cost). Absent when
    *  the provider does not report one; the ledger then uses the price table. */
   costUsd?: number
+  /** Where this call went in Langfuse, set only when its trace is exported.
+   *  Rows that store the output can keep it so later outcomes find it. */
+  trace?: { traceId: string; observationId: string }
 }
 
 /**

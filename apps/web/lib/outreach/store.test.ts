@@ -256,3 +256,82 @@ describe('insertOutreach errors', () => {
     expect(isDuplicateOutreachError(null)).toBe(false)
   })
 })
+
+describe('insertOutreach stamps the call that wrote the draft', () => {
+  const row = { user_id: 'u', to_email: 'a@b.com', subject: 'Hello', body: 'Original body', kind: 'initial' as const }
+  const capture = () => {
+    const sent: Row[] = []
+    const db = {
+      from: () => ({
+        insert: (r: Row) => {
+          sent.push(r)
+          return { select: () => ({ single: async () => ({ data: r, error: null }) }) }
+        },
+      }),
+    } as unknown as SupabaseClient
+    return { db, sent }
+  }
+  const spansAdmin = { from: () => ({ insert: async () => ({ error: null }) }) } as never
+
+  async function inTrace<T>(fn: () => Promise<T>): Promise<T> {
+    const { withTrace } = await import('../trace/spans')
+    return withTrace(spansAdmin, 'u', { name: 'draft-outreach', isDemo: false }, fn)
+  }
+  const configure = () => {
+    vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
+    vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
+    vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+  }
+
+  it('inside an exported trace it stores trace_id, observation_id and what the model wrote', async () => {
+    configure()
+    const { db, sent } = capture()
+    const { currentTraceContext } = await import('../trace/spans')
+    await inTrace(async () => {
+      currentTraceContext()!.buffer.noteGeneration('draft-outreach-message', '0f7b5d5a-1d75-4c5b-9d31-e984c3b9e5b6')
+      await insertOutreach(db, row)
+    })
+    expect(sent[0]).toMatchObject({
+      trace_id: expect.stringMatching(/^[0-9a-f]{32}$/),
+      observation_id: '0f7b5d5a1d754c5b',
+      generated_subject: 'Hello',
+      generated_body: 'Original body',
+    })
+    vi.unstubAllEnvs()
+  })
+
+  it('a follow-up looks for the follow-up generation', async () => {
+    configure()
+    const { db, sent } = capture()
+    const { currentTraceContext } = await import('../trace/spans')
+    await inTrace(async () => {
+      currentTraceContext()!.buffer.noteGeneration('draft-outreach-message', '11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+      currentTraceContext()!.buffer.noteGeneration('draft-follow-up', '22222222-bbbb-4bbb-8bbb-bbbbbbbbbbbb')
+      await insertOutreach(db, { ...row, kind: 'follow_up' })
+    })
+    expect(sent[0].observation_id).toBe('22222222bbbb4bbb')
+    vi.unstubAllEnvs()
+  })
+
+  it('stamps nothing for a template, nothing outside a trace, and nothing when the trace is not exported', async () => {
+    configure()
+    const a = capture()
+    const { currentTraceContext } = await import('../trace/spans')
+    await inTrace(async () => {
+      currentTraceContext()!.buffer.noteGeneration('draft-outreach-message', '0f7b5d5a-1d75-4c5b-9d31-e984c3b9e5b6')
+      await insertOutreach(a.db, { ...row, used_llm: false })
+    })
+    expect(a.sent[0]).toEqual({ ...row, used_llm: false })
+
+    const b = capture()
+    await insertOutreach(b.db, row)
+    expect(b.sent[0]).toEqual(row)
+    vi.unstubAllEnvs()
+
+    const c = capture()
+    await inTrace(async () => {
+      await insertOutreach(c.db, row)
+    })
+    expect(c.sent[0]).toEqual(row)
+  })
+})

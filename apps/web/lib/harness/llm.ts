@@ -293,7 +293,11 @@ export async function callLlm(
       result = await withSpan(
         scope.buffer,
         { parentSpanId: scope.parentSpanId, runId: scope.runId, kind: 'llm', name: 'llm' },
-        () => runProviderCall(),
+        async (spanId) => {
+          const r = await runProviderCall()
+          const trace = spanId ? scope.buffer.noteGeneration(effectiveOpts.name ?? 'call-llm', spanId) : null
+          return trace ? { ...r, trace } : r
+        },
         (r, err) =>
           r
             ? {

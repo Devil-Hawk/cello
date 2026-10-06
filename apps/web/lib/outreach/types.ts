@@ -42,6 +42,12 @@ export interface OutreachMessageRow {
   used_llm?: boolean | null
   /** Why the text is the standard template: set only when used_llm is false. */
   template_reason?: TemplateReason | null
+  /** Langfuse trace and generation of the model call that wrote this draft, and what it first wrote
+   *  (kept so an edit can be measured). Null for templates and rows from before these existed. */
+  trace_id?: string | null
+  observation_id?: string | null
+  generated_subject?: string | null
+  generated_body?: string | null
   sent_at: string | null
   /** When an inbound reply was matched to this thread. NULL = no reply yet. */
   replied_at: string | null
