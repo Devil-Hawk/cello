@@ -7,7 +7,7 @@ vi.mock('../harness/supabase-admin', () => ({ createAdminClient: () => ({}) }))
 const loadApiKeysMock = vi.fn()
 vi.mock('../harness/keys', () => ({ loadApiKeys: (...args: unknown[]) => loadApiKeysMock(...args) }))
 
-import { buildDocumentPatch, formatKbContext, replaceChunks, searchKb } from './store'
+import { buildDocumentPatch, formatKbContext, listDocuments, replaceChunks, searchKb } from './store'
 import type { KbSearchHit } from './types'
 
 // Locks the omitted-means-unchanged contract of upsertDocument()'s UPDATE half.
@@ -154,7 +154,7 @@ describe('formatKbContext', () => {
 // --- searchKb hybrid (RRF) fusion --------------------------------------------
 //
 // The actual fusion runs in SQL (supabase/migrations/20261123000000_
-// material_expand.sql) — there is no Postgres in this test run, so these two halves
+// material_expand.sql) - there is no Postgres in this test run, so these two halves
 // split the guarantee the way the spec asks:
 //   1. the formula itself, `score = sum(1/(60+rank))`, mirrored here exactly
 //      and checked on the fixture the migration's own comment cites;
@@ -267,5 +267,43 @@ describe('replaceChunks embed-failure isolation', () => {
     // it carries no `embedding` key at all (the column stays NULL by default,
     // not by an explicit null write).
     expect(inserted.every((r) => !('embedding' in r))).toBe(true)
+  })
+})
+
+// --- listDocuments personOnly ------------------------------------------------
+//
+// Resume claims quote material as the person's own words. A page Cello fetched, and a
+// source with "Cello may use this" off, must never be listed for that.
+describe('listDocuments personOnly', () => {
+  function fake(sourceIds: string[]) {
+    const calls: Array<[string, string, unknown]> = []
+    const from = (table: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const q: any = {
+        select: () => q,
+        eq: (c: string, v: unknown) => (calls.push([table, c, v]), q),
+        in: (c: string, v: unknown) => (calls.push([table, `in ${c}`, v]), q),
+        order: () => q,
+        limit: () => q,
+        then: (ok: (v: unknown) => unknown, bad: (e: unknown) => unknown) =>
+          Promise.resolve({ data: table === 'kb_sources' ? sourceIds.map((id) => ({ id })) : [], error: null }).then(ok, bad),
+      }
+      return q
+    }
+    return { client: { from } as unknown as Parameters<typeof listDocuments>[0], calls }
+  }
+
+  it('asks only for documents of person sources that are switched on', async () => {
+    const { client, calls } = fake(['s1', 's2'])
+    await listDocuments(client, 'u1', { personOnly: true })
+    expect(calls).toContainEqual(['kb_sources', 'material_kind', 'person'])
+    expect(calls).toContainEqual(['kb_sources', 'may_use', true])
+    expect(calls).toContainEqual(['kb_documents', 'in source_id', ['s1', 's2']])
+  })
+
+  it('lists nothing when the person has no such source', async () => {
+    const { client, calls } = fake([])
+    expect(await listDocuments(client, 'u1', { personOnly: true })).toEqual([])
+    expect(calls.some(([t, c]) => t === 'kb_documents' && c.startsWith('in '))).toBe(false)
   })
 })

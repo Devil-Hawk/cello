@@ -15,7 +15,7 @@
 //   searchKb() calls the search_material() SQL function, which ranks with
 //   ts_rank_cd over the GENERATED `tsv` column and, when `opts.vector` is
 //   given, fuses that with a cosine-distance ranking over
-//   kb_chunks.embedding_384 via Reciprocal Rank Fusion — see
+//   kb_chunks.embedding_384 via Reciprocal Rank Fusion - see
 //   supabase/migrations/20261123000000_material_expand.sql. It returns only
 //   what the person gave Cello (never a page Cello fetched) and only sources
 //   whose "Cello may use this" switch is on. Omit `opts.vector` (or call via
@@ -431,15 +431,32 @@ async function embedChunksBestEffort(
   }
 }
 
-/** Documents for a user, newest first. Optionally filtered to one source. */
+/**
+ * Documents for a user, newest first. Optionally filtered to one source, or (`personOnly`)
+ * to what the person gave Cello and left switched on: never a page Cello fetched, never a
+ * source with "Cello may use this" off. Anything that quotes material as the person's own
+ * words (resume claims) must pass it.
+ */
 export async function listDocuments(
   client: SupabaseClient,
   userId: string,
-  opts: { sourceId?: string; limit?: number } = {}
+  opts: { sourceId?: string; limit?: number; personOnly?: boolean } = {}
 ): Promise<KbDocument[]> {
   const limit = Math.min(MAX_LIST_LIMIT, Math.max(1, opts.limit ?? 100))
   let query = client.from(DOCUMENTS).select('*').eq('user_id', userId)
   if (opts.sourceId) query = query.eq('source_id', opts.sourceId)
+  if (opts.personOnly) {
+    const { data, error: srcErr } = await client
+      .from(SOURCES)
+      .select('id')
+      .eq('user_id', userId)
+      .eq('material_kind', 'person')
+      .eq('may_use', true)
+    if (srcErr) throw new Error(`listDocuments failed: ${srcErr.message}`)
+    const ids = (data ?? []).map((r) => r.id as string)
+    if (ids.length === 0) return []
+    query = query.in('source_id', ids)
+  }
 
   const { data, error } = await query
     .order('updated_at', { ascending: false })
@@ -496,7 +513,7 @@ interface SearchRow {
  * Ranked search over the user's chunks, joined to their documents for
  * citation. FTS-only (ts_rank_cd desc) unless `opts.vector` is given, in
  * which case the SQL side fuses it with the FTS ranking via Reciprocal Rank
- * Fusion — see supabase/migrations/20261123000000_material_expand.sql. This
+ * Fusion - see supabase/migrations/20261123000000_material_expand.sql. This
  * function itself does no fusion math; it is a pure RPC wrapper, same as
  * before hybrid search existed. lib/kb/retrieve.ts is what supplies
  * `opts.vector` (embedding the query, degrading to FTS-only on failure) —
