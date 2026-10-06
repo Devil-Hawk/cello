@@ -159,6 +159,35 @@ create trigger companies_link_employer
   before insert or update of domain, metadata on public.companies
   for each row execute function public.companies_link_employer();
 
+-- The name of a person-added or traced employer is the one it was verified under, and no second one takes a name
+-- another verified employer holds (anyone can open a provider account under any name). Seed and yc rows are lists:
+-- namesakes from them stay. An insert is skipped, not refused, so the backfill below never aborts.
+-- ponytail: a real rebrand of a person-added employer is renamed by hand.
+create or replace function public.company_directory_name_claim()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.source not in ('seed', 'yc') and new.name_norm <> ''
+       and exists (select 1 from public.company_directory d where d.name_norm = new.name_norm and d.verified_at is not null and d.id <> new.id) then
+      return null;
+    end if;
+  elsif old.source not in ('seed', 'yc') then
+    new.name := old.name;
+    new.name_norm := old.name_norm;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.company_directory_name_claim() from public, anon, authenticated;
+
+drop trigger if exists company_directory_name_claim on public.company_directory;
+create trigger company_directory_name_claim
+  before insert or update of name, name_norm on public.company_directory
+  for each row execute function public.company_directory_name_claim();
+
 -- One employer per verified board, from what truth's verifier recorded. A company whose board was
 -- only guessed (no verified_by) is not an employer yet.
 insert into public.company_directory (name, name_norm, domain, ats_provider, ats_token, careers_url, verified_by, verified_at, source)
