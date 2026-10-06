@@ -11,7 +11,10 @@
 import { useEffect, useState } from 'react'
 import { Markdown } from '@/components/chat/markdown'
 import { splitMarkdownBlocks } from '@/components/chat/render/block-split'
+import { ApplicationMadeView } from '@/components/chat/application-made'
+import { ModelPicker } from '@/components/chat/model-picker'
 import { AnswerParts, type Named } from '@/components/chat/parts'
+import { StatusTurn } from '@/components/chat/status-turn'
 import { Tiles, type TileData } from '@/components/chat/tiles'
 import type { Card } from '@/lib/chat/cards'
 import type { Part } from '@/lib/chat/types'
@@ -171,6 +174,12 @@ const FIXTURE_TILES: TileData[] = [
   { id: 't3', kind: 'made', ref: 'm1', name: 'A made thing with a title long enough to need cutting at a phone width', origin: 'person' },
 ]
 
+const FIXTURE_RUNGS = [
+  { rung: 'R2' as const, label: 'This computer', why: 'Not set up.', models: [] },
+  { rung: 'R3' as const, label: 'Free models', why: '', models: [{ id: 'qwen/qwen3.8-27b:free', label: 'qwen3.8-27b' }] },
+  { rung: 'R4' as const, label: 'Your own key', why: 'Above your highest. Change in Settings.', models: [{ id: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5' }] },
+]
+
 export default function ChatFixture() {
   return (
     <div className="mx-auto max-w-3xl space-y-8 py-8">
@@ -209,6 +218,15 @@ export default function ChatFixture() {
         <div className="w-full space-y-4 rounded-card border border-border bg-card px-4 py-3 text-foreground">
           <Tiles tiles={FIXTURE_TILES} onRemove={() => undefined} onAdd={() => undefined} />
           <AnswerParts parts={FIXTURE_PARTS} names={FIXTURE_NAMES} tileCount={3} cards={FIXTURE_CARDS} />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="text-label uppercase tracking-wide text-muted-foreground">8 · A status turn, the model picker, and an application's made things and chats</div>
+        <div className="w-full space-y-4 rounded-card border border-border bg-card px-4 py-3 text-foreground">
+          <StatusTurn line={{ eventId: 'e1', sentence: 'Cello is filling the form for Vantage Loom.', applicationId: 'a1', state: 'applying', at: '2026-10-05T10:00:00Z' }} />
+          <ModelPicker choice={{ rung: 'R3', model: 'qwen/qwen3.8-27b:free', effort: 'medium' }} rungs={FIXTURE_RUNGS} estimate="Free" onPick={() => undefined} />
+          <ApplicationMadeView made={[{ id: 'm1', type: 'comparison', title: 'Vantage Loom and Ramp', updated_at: '2026-10-05T10:00:00Z' }]} chats={[{ id: 'c1', title: 'Apply to Vantage Loom' }]} />
         </div>
       </div>
 
