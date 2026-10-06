@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "steps": {
+    "requirements": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "role.type": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "chance": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "role.evidence": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "want": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "learning.read": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "writer.draft": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "reviewer.judge": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "inbox.classify": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "inbox.employer": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "person.memory": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "profile.pick": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "answer.category": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "answer.draft": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "embed": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "companies.resolve_name": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "resume.photo": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "reader.rendered": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "research.summary": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false },
+    "chat": { "promptHash": null, "measuredAt": null, "rungs": {}, "minRung": null, "route": false }
+  }
+}
