@@ -14,6 +14,7 @@ import { rolesCheck } from './roles-check'
 import { postingsBackfill } from './postings-backfill'
 import { rolesRetype } from './roles-retype'
 import { storageAlert } from './storage-alert'
+import { summarySend } from './summary-send'
 import { suggestionsRefresh } from './suggestions-refresh'
 
 export const HANDLERS: Record<string, RoutineHandler> = {
@@ -25,6 +26,7 @@ export const HANDLERS: Record<string, RoutineHandler> = {
   'directory.seed': directorySeed,
   'suggestions.refresh': suggestionsRefresh,
   'inbox.sync': inboxSync,
+  'summary.send': summarySend,
   'owner.health': ownerHealth,
   'clock.meter': clockMeter,
   'clock.prune': clockPrune,
