@@ -9,7 +9,7 @@ const input = (over: Partial<FactsInput> = {}): FactsInput => ({
   resumeLabel: 'Data Platform',
   resumeAt: '2026-10-04T10:00:00Z',
   mail: true,
-  model: 'openai/gpt-4o-mini',
+  model: 'anthropic/claude-sonnet-5',
   emailCount: null,
   now: new Date('2026-10-06T00:00:00Z'),
   ...over,
@@ -17,6 +17,12 @@ const input = (over: Partial<FactsInput> = {}): FactsInput => ({
 const by = (facts: ReturnType<typeof buildFacts>, key: string) => facts.find((f) => f.key === key)
 
 describe('buildFacts', () => {
+  it('shows a model by its name, never its id', () => {
+    const model = by(buildFacts(input()), 'model')
+    expect(model?.value).toBe('Claude Sonnet 5')
+    expect(JSON.stringify(buildFacts(input()))).not.toContain('anthropic/')
+  })
+
   it('gives every fact a source', () => {
     const facts = buildFacts(
       input({

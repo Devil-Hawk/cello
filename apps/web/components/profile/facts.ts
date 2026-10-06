@@ -4,6 +4,7 @@
 
 import { JOB_FUNCTIONS, SENIORITY_LEVELS } from '@/lib/jobs/classify'
 import type { Resume } from '@/lib/resume/schema'
+import { getModelInfo } from '@/lib/models'
 import { resolveConstraints } from '@/lib/scoring/constraints'
 import { resolveTargeting } from '@/lib/targeting'
 
@@ -124,7 +125,7 @@ export function buildFacts(input: FactsInput): Fact[] {
     ['roleTypes', t.functions.join(', '), t.functions.join(', '), set],
     ['leaveOut', c.excludedCompanies.join(', '), c.excludedCompanies.join(', '), set],
     ['mail', input.mail ? 'Connected' : 'Not connected', '', 'From your connections'],
-    ['model', input.model ?? '', '', 'From your settings'],
+    ['model', (input.model && getModelInfo(input.model)?.label) || '', '', 'From your settings'],
     ['emailCount', input.emailCount === null ? '' : `${input.emailCount} past applications found in your email`, '', 'Counted from your email'],
   ]
 
