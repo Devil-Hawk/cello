@@ -105,6 +105,9 @@ export async function deleteLearning(userId: string, id: string, store: MemorySt
   await store.delete(userId, id)
 }
 
+/** Longest preference a person can ask Cello to remember: one short sentence. */
+export const MAX_PREFERENCE_LENGTH = 200
+
 /** How many kept lines ride in a prompt, as the old standing preferences did. */
 export const MAX_KEPT_IN_PROMPT = 12
 
