@@ -8,7 +8,7 @@ import type { RelayRoute } from './api'
 
 // The extension carrier. It runs inside the existing five minute alarm: one claim,
 // which the server may hold up to 25 seconds, then the job on this computer (R2,
-// loopback) or in this browser (R1, the offscreen document) and the answer back.
+// loopback) and the answer back. R1 (a model in this browser) is off here, see browserReady.
 // There is no timer of its own and no loop. A send and a relay job never run
 // together: both take the same lock.
 
@@ -18,7 +18,7 @@ interface Claimed {
 
 export interface RelayDeps {
   config: () => Promise<LocalConfig | null>
-  /** "Run small steps in this browser" is on and this device can do it. */
+  /** A model in this browser can answer. Always false in the extension for now. */
   browserReady: () => Promise<boolean>
   haveToken: () => Promise<boolean>
   lock: () => Promise<boolean>
@@ -29,19 +29,16 @@ export interface RelayDeps {
   runBrowser: (req: LocalRequest) => Promise<string>
 }
 
-type Reply = { text?: string; error?: string; reason?: string | null }
-const ask = (message: unknown): Promise<Reply> => browser.runtime.sendMessage(message) as Promise<Reply>
-
 const defaults: RelayDeps = {
   config: async () => {
     const r = (await browser.storage.local.get('relayLocal')) as { relayLocal?: LocalConfig }
     return r.relayLocal ?? null
   },
-  // The offscreen document answers; it exists while the keep-alive holds it.
-  browserReady: async () => {
-    const r = (await browser.storage.local.get('relayBrowser')) as { relayBrowser?: boolean }
-    return r.relayBrowser === true && (await ask({ type: 'relay-r1-check' }).catch(() => ({ reason: 'x' }))).reason === null
-  },
+  // ponytail: R1 in the extension is off. Its WebLLM worker did not build into the
+  // package, and the model library it downloads is remote code the store does not allow.
+  // The upgrade path is to bundle the worker and the library, then answer here through
+  // the offscreen document. R1 in an open Cello tab is unaffected (lib/relay/carrier.tsx).
+  browserReady: async () => false,
   haveToken: async () => !!((await browser.storage.local.get('relayToken')) as { relayToken?: string }).relayToken,
   lock: () => acquireLock('relay'),
   unlock: () => releaseLock('relay'),
@@ -50,10 +47,8 @@ const defaults: RelayDeps = {
   // Plain fetch: the extension's host permission covers loopback, and the page-only
   // local network hint would make Chrome ask for a permission a worker cannot answer.
   run: (cfg, req) => runLocal(cfg, req, (url, init) => fetch(url, init)),
-  runBrowser: async (request) => {
-    const r = await ask({ type: 'relay-r1', request })
-    if (typeof r.text !== 'string') throw new Error(r.error ?? 'The browser model failed.')
-    return r.text
+  runBrowser: async () => {
+    throw new Error('A model in this browser is not available in the extension yet.')
   },
 }
 

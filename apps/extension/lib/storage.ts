@@ -21,8 +21,6 @@ export interface Local {
   relayToken: string
   /** The model on this computer that relay jobs run on. */
   relayLocal: { runtime: 'ollama' | 'lmstudio'; baseUrl: string; model: string }
-  /** Run small steps (R1) in this browser, in the offscreen document. */
-  relayBrowser: boolean
   paused: boolean
   /** Applications an automatic send has clicked Send on. Never clicked twice. */
   clicked: Record<string, number>
