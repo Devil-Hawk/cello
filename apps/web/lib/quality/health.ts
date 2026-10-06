@@ -12,14 +12,13 @@
 // shown as zero and never raises an issue.
 
 import type { AdminClient } from '../harness/types'
+import { DB_LIMIT_BYTES, DB_WARN_BYTES } from './db-limits'
 import { exportFeedback } from './feedback'
 
 const HOUR_MS = 60 * 60 * 1000
 const MB = 1024 * 1024
 
-/** The report warns past this size. The free plan stops at 500 MB. */
-export const DB_WARN_BYTES = 350 * MB
-export const DB_LIMIT_BYTES = 500 * MB
+export { DB_LIMIT_BYTES, DB_WARN_BYTES }
 
 /** The routines whose heartbeat is checked, and what the owner calls each. */
 export const SCHEDULES: Record<string, string> = {

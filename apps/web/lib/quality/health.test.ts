@@ -90,8 +90,8 @@ describe('the report', () => {
   })
 
   it('sends the queued feedback after the report is stored, and a failure there does not throw', async () => {
-    const w = world()
-    await runHealthCheck(fakeAdmin(w).admin, NOW)
+    vi.mocked(exportFeedback).mockClear()
+    await runHealthCheck(fakeAdmin(world()).admin, NOW)
     expect(exportFeedback).toHaveBeenCalledTimes(1)
     vi.mocked(exportFeedback).mockRejectedValueOnce(new Error('langfuse down'))
     const w2 = world()
