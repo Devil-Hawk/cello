@@ -322,6 +322,47 @@ begin
   if (select employer_id from public.companies where id = cd) is distinct from emp3 or (select metadata ? 'ats' from public.companies where id = cd) then raise exception 'a board-less employer is linked by its careers address and carries no board'; end if;
 end $$;
 
+-- 6e. A company's clean-up and sightings never touch a shared role. held-1 is stored under A's company, has an employer,
+-- and is held by A and B. A signed-in person cannot call the two clean-ups at all; the service role can, and they spare it.
+do $$
+declare f record; jh uuid;
+begin
+  select * into f from fx;
+  select id into jh from public.jobs where employer_id = f.emp and external_id = 'held-1';
+  update public.jobs set source = 'greenhouse', last_seen_at = now() - interval '1 hour' where id = jh;
+  begin
+    perform pg_temp.as_user(f.a, format($q$select cardinality(public.evict_company_jobs(%L, array['held-1']))$q$, f.co_a));
+    raise exception 'a signed-in person must not call evict_company_jobs';
+  exception when insufficient_privilege then reset role;
+  end;
+  begin
+    perform pg_temp.as_user(f.a, format($q$select count(*) from public.clear_unverified_board_jobs(%L, 'greenhouse')$q$, f.co_a));
+    raise exception 'a signed-in person must not call clear_unverified_board_jobs';
+  exception when insufficient_privilege then reset role;
+  end;
+  if cardinality(public.evict_company_jobs(f.co_a, array['held-1'])) <> 0 then raise exception 'evict spares a shared role'; end if;
+  perform public.clear_unverified_board_jobs(f.co_a, 'greenhouse');
+  perform public.record_job_sightings(f.co_a, array['other'], array['greenhouse'], 1, now() + interval '1 minute');
+  if not exists (select 1 from public.jobs where id = jh and still_open is not false and missed_checks = 0) then raise exception 'the shared role is still open and uncounted'; end if;
+  if (select count(*) from public.person_roles where job_id = jh) <> 2 then raise exception 'both followers still hold the shared role'; end if;
+  -- the employer's own sighting closes it when its board stops listing it
+  perform public.record_employer_sightings(f.emp, array['other'], array['greenhouse'], 1);
+  if (select still_open from public.jobs where id = jh) is not false then raise exception 'the employer''s read closes a role it no longer lists'; end if;
+  update public.jobs set still_open = true, missed_checks = 0, closed_at = null where id = jh;
+end $$;
+
+-- 6f. No function a signed-in person may call writes jobs as definer. The next one to forget its revoke fails here.
+do $$
+declare bad text;
+begin
+  select string_agg(p.proname, ', ') into bad
+    from pg_proc p
+   where p.pronamespace = 'public'::regnamespace and p.prosecdef
+     and has_function_privilege('authenticated', p.oid, 'execute')
+     and p.prosrc ~* '(update|delete\s+from|insert\s+into)\s+public\.jobs\M';
+  if bad is not null then raise exception 'a security definer function that writes jobs is callable by a signed-in person: %', bad; end if;
+end $$;
+
 -- 7. A shared role outlives the follower whose company stored it: removing the company, or the account, keeps it for the others.
 do $$
 declare f record; jd uuid := gen_random_uuid(); jp uuid := gen_random_uuid(); c uuid := gen_random_uuid(); d uuid := gen_random_uuid(); co_c uuid := gen_random_uuid(); co_d uuid := gen_random_uuid();
