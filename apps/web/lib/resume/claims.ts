@@ -79,7 +79,7 @@ interface ResumeClaimRow {
   claim_text: string
   claim_kind: ClaimKind
   normalized_key: string | null
-  embedding: unknown
+  embedding_384: unknown
   claim_evidence: ClaimEvidenceRow[] | null
 }
 
@@ -120,7 +120,7 @@ export async function claimsFor(admin: AdminClient, userId: string): Promise<Res
   const { data, error } = await admin
     .from('resume_claims')
     .select(
-      'id, user_id, resume_document_id, claim_text, claim_kind, normalized_key, embedding, claim_evidence(id, kb_document_id, kb_chunk_id, quote, strength)'
+      'id, user_id, resume_document_id, claim_text, claim_kind, normalized_key, embedding_384, claim_evidence(id, kb_document_id, kb_chunk_id, quote, strength)'
     )
     .eq('user_id', userId)
   if (error) throw new Error(`claimsFor failed: ${error.message}`)
@@ -132,7 +132,7 @@ export async function claimsFor(admin: AdminClient, userId: string): Promise<Res
     claimText: row.claim_text,
     claimKind: row.claim_kind,
     normalizedKey: row.normalized_key ?? normalizeClaimKey(row.claim_text),
-    embedding: parseEmbedding(row.embedding),
+    embedding: parseEmbedding(row.embedding_384),
     evidence: (row.claim_evidence ?? []).map((e) => ({
       id: e.id,
       kbDocumentId: e.kb_document_id,
@@ -145,7 +145,9 @@ export async function claimsFor(admin: AdminClient, userId: string): Promise<Res
 
 /**
  * ponytail: fixed cosine-similarity cutoff, not tuned against a labeled eval
- * set — chosen high enough that a genuine paraphrase of a stored claim
+ * set. It was set for 1536 dimension OpenAI vectors; the 384 dimension MiniLM
+ * vectors sit on a different scale, so set it from S12's run on claims before
+ * the 1536 column is dropped. Until then — chosen high enough that a genuine paraphrase of a stored claim
  * clears it while two claims that merely share a topic ("led the payments
  * migration" vs. "owns payments billing") do not. Tighten/loosen here, in
  * one place, if a near-miss neighbor starts surfacing as a false match once

@@ -65,7 +65,8 @@
  */
 import { createAdminClient } from '../lib/harness/supabase-admin'
 import { loadApiKeys } from '../lib/harness/keys'
-import { callLlm, callEmbedding, MissingKeyError, parseJsonLoose } from '../lib/harness/llm'
+import { callLlm, MissingKeyError, parseJsonLoose } from '../lib/harness/llm'
+import { embedMaterial } from '../lib/kb/embed'
 import { BudgetCapError } from '../lib/harness/spend'
 import { getBaseResume } from '../lib/resume/store'
 import { listDocuments } from '../lib/kb/store'
@@ -297,11 +298,13 @@ async function main(): Promise<void> {
     // #embedChunksBestEffort's shape: best-effort, never fails the run.
     try {
       const texts = extracted.map((c) => c.claimText)
-      const { embeddings } = await callEmbedding(keys, { texts })
+      const embeddings = await embedMaterial(keys, texts, 'embed-claims')
       for (let i = 0; i < extracted.length; i++) {
         const id = claimIds.get(extracted[i].claimText)
         if (!id) continue
-        const { error: embErr } = await admin.from('resume_claims').update({ embedding: embeddings[i] }).eq('id', id)
+        // No 384 vector for this claim: it stays on exact-key matching.
+        if (!embeddings[i]) continue
+        const { error: embErr } = await admin.from('resume_claims').update({ embedding_384: embeddings[i] }).eq('id', id)
         if (embErr) console.error(`\n  claim ${id}: embedding persist failed — ${embErr.message}`)
       }
     } catch (err) {

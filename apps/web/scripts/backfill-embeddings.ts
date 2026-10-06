@@ -1,13 +1,15 @@
 /**
- * OWNER-RUN, METERED. Embeds every existing kb_chunks row that still has a
- * NULL embedding, via the same chokepoint feature code uses
- * (lib/harness/keys.ts#loadApiKeys -> lib/harness/llm.ts#callEmbedding), so
+ * OWNER-RUN, METERED. Embeds every existing kb_chunks row that still has no
+ * 384 dimension vector (embedding_384), via the same chokepoint feature code uses
+ * (lib/harness/keys.ts#loadApiKeys -> lib/kb/embed.ts#embedMaterial), so
  * spend is recorded to each chunk owner's OWN monthly ledger exactly as if
  * they had triggered the embed themselves. NEVER auto-run: not scheduled, not
  * called by any request path, not invoked by this task — a human operator
- * runs it once, after the hybrid-search migration
- * (20260816000007_hybrid_search.sql) has landed, to backfill the vector
- * candidate list for content ingested before hybrid search existed. New
+ * runs it once, after the material migration
+ * (20261123000000_material_expand.sql) has landed, to backfill the vector
+ * candidate list for content ingested before it existed. --rechunk first
+ * re-splits every document with the current splitter. Once the count of chunks with
+ * no vector is 0 on production, the contract migration may drop the 1536 columns. New
  * ingests need no backfill: lib/kb/store.ts#replaceChunks embeds every chunk
  * it writes, going forward.
  *
@@ -38,10 +40,12 @@
  */
 import { createAdminClient } from '../lib/harness/supabase-admin'
 import { loadApiKeys } from '../lib/harness/keys'
-import { callEmbedding, MissingKeyError } from '../lib/harness/llm'
+import { MissingKeyError } from '../lib/harness/llm'
 import { BudgetCapError } from '../lib/harness/spend'
+import { embedMaterial } from '../lib/kb/embed'
+import { replaceChunks } from '../lib/kb/store'
 
-/** Chunks embedded per callEmbedding() call — one provider round trip per
+/** Chunks embedded per embedMaterial() call — one provider round trip per
  *  batch, well under any provider's per-request item cap. */
 const EMBED_BATCH = 100
 
@@ -59,6 +63,7 @@ function parseArgs(argv: string[]) {
   const limitIdx = argv.indexOf('--limit')
   return {
     dryRun: argv.includes('--dry-run'),
+    rechunk: argv.includes('--rechunk'),
     limit: limitIdx > -1 && argv[limitIdx + 1] ? Number(argv[limitIdx + 1]) : null,
   }
 }
@@ -69,12 +74,31 @@ async function main(): Promise<void> {
 
   console.log('backfill-embeddings')
   console.log(`  mode  : ${args.dryRun ? 'DRY RUN (no writes, no spend)' : 'APPLY (writes + spends against each user\'s own cap)'}`)
-  console.log(`  limit : ${args.limit ?? '(none — every NULL-embedding chunk)'}`)
+  console.log(`  limit : ${args.limit ?? '(none — every chunk with no 384 vector)'}`)
+
+  // Material moved to 384 dimension vectors (20261123000000_material_expand.sql). --rechunk
+  // first re-splits every document with the current splitter, which also embeds its chunks
+  // at 384 (replaceChunks); the pass below then picks up whatever is still missing, so the
+  // script is safe to stop and run again.
+  if (args.rechunk && !args.dryRun) {
+    const { data: docs, error: docErr } = await admin.from('kb_documents').select('id, user_id, content')
+    if (docErr) throw new Error(`document scan failed: ${docErr.message}`)
+    let done = 0
+    for (const d of (docs ?? []) as Array<{ id: string; user_id: string; content: string }>) {
+      try {
+        await replaceChunks(admin, d.user_id, d.id, d.content)
+        done++
+      } catch (err) {
+        console.error(`\n  document ${d.id}: rechunk failed — ${err instanceof Error ? err.message : err}`)
+      }
+    }
+    console.log(`  rechunked ${done} document(s)`)
+  }
 
   const { data: userRows, error: userErr } = await admin
     .from('kb_chunks')
     .select('user_id')
-    .is('embedding', null)
+    .is('embedding_384', null)
   if (userErr) throw new Error(`user scan failed: ${userErr.message}`)
   const userIds = [...new Set((userRows ?? []).map((r) => r.user_id as string))]
   console.log(`\n${userIds.length} user(s) with at least one NULL-embedding chunk`)
@@ -97,7 +121,7 @@ async function main(): Promise<void> {
         .from('kb_chunks')
         .select('id, document_id, ord, content')
         .eq('user_id', userId)
-        .is('embedding', null)
+        .is('embedding_384', null)
         .order('id', { ascending: true })
         .limit(remaining)
       if (afterId) query = query.gt('id', afterId)
@@ -126,10 +150,9 @@ async function main(): Promise<void> {
 
       for (let i = 0; i < rows.length; i += EMBED_BATCH) {
         const batch = rows.slice(i, i + EMBED_BATCH)
-        let embeddings: number[][]
+        let embeddings: Array<number[] | null>
         try {
-          const result = await callEmbedding(keys, { texts: batch.map((r) => r.content) })
-          embeddings = result.embeddings
+          embeddings = await embedMaterial(keys, batch.map((r) => r.content), 'backfill-material')
         } catch (err) {
           if (err instanceof MissingKeyError || err instanceof BudgetCapError) {
             console.error(`\n  user ${userId}: ${err.message} — skipping this user's remaining chunks`)
@@ -142,9 +165,11 @@ async function main(): Promise<void> {
         }
 
         for (let j = 0; j < batch.length; j++) {
+          // No 384 vector for this chunk: it stays NULL and is found by words.
+          if (!embeddings[j]) continue
           const { error: updErr } = await admin
             .from('kb_chunks')
-            .update({ embedding: embeddings[j] })
+            .update({ embedding_384: embeddings[j] })
             .eq('id', batch[j].id)
           if (updErr) {
             console.error(`\n  chunk ${batch[j].id}: persist failed — ${updErr.message}`)

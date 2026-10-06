@@ -29,6 +29,8 @@ const { BudgetCapError } = await import('../harness/spend')
 
 const admin = {} as Parameters<typeof retrieveKb>[0]
 
+const VECTOR_384 = Array.from({ length: 384 }, (_, i) => i / 1000)
+
 const FTS_HIT = [
   { chunkId: 'c1', documentId: 'd1', sourceId: 's1', ord: 0, content: 'x', title: null, url: null, rank: 0.1 },
 ]
@@ -43,7 +45,7 @@ beforeEach(() => {
 describe('retrieveKb', () => {
   it('embeds the query and passes the vector through on the happy path', async () => {
     loadApiKeysMock.mockResolvedValue({ userId: 'u1' })
-    callEmbeddingMock.mockResolvedValue({ embeddings: [[0.1, 0.2, 0.3]], model: 'x', promptTokens: 3 })
+    callEmbeddingMock.mockResolvedValue({ embeddings: [VECTOR_384], model: 'x', promptTokens: 3 })
 
     const hits = await retrieveKb(admin, 'u1', 'search this')
 
@@ -52,8 +54,18 @@ describe('retrieveKb', () => {
       admin,
       'u1',
       'search this',
-      expect.objectContaining({ vector: [0.1, 0.2, 0.3] })
+      expect.objectContaining({ vector: VECTOR_384 })
     )
+  })
+
+  it('ignores a vector that is not 384 long, so search stays words only', async () => {
+    loadApiKeysMock.mockResolvedValue({ userId: 'u1' })
+    callEmbeddingMock.mockResolvedValue({ embeddings: [new Array(1536).fill(0.1)], model: 'x', promptTokens: 3 })
+
+    const hits = await retrieveKb(admin, 'u1', 'search this')
+
+    expect(hits).toEqual(FTS_HIT)
+    expect(searchKbMock).toHaveBeenCalledWith(admin, 'u1', 'search this', expect.objectContaining({ vector: undefined }))
   })
 
   it('degrades to FTS-only when no embedding provider is configured (MissingKeyError)', async () => {
