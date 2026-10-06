@@ -147,7 +147,7 @@ async function fetchPage(board: BoardCoordinates, offset: number): Promise<Workd
 async function fetchDetail(
   board: BoardCoordinates,
   externalPath: string
-): Promise<{ description?: string; postedAt?: string }> {
+): Promise<{ description?: string; descriptionHtml?: string; postedAt?: string }> {
   const apiUrl = `${boardOrigin(board)}/wday/cxs/${board.tenant}/${board.site}${externalPath}`
   assertAllowedHostSuffix(apiUrl, API_HOST_SUFFIXES)
   try {
@@ -208,6 +208,7 @@ async function fetchJobs(token: string, ctx?: FetchContext): Promise<AtsJob[]> {
     const job = byPath.get(path)
     if (!job) return
     if (details[i].description) job.description = details[i].description
+    if (details[i].descriptionHtml) job.descriptionHtml = details[i].descriptionHtml
     if (details[i].postedAt) job.postedAt = details[i].postedAt
   })
 

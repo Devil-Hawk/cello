@@ -200,7 +200,7 @@ describe('refreshCompany: stored jobs', () => {
     expect(upserted).toHaveLength(0)
     expect(result.updated).toBe(2)
     for (const u of updated) {
-      expect(Object.keys(u.fields).sort()).toEqual(['description', 'requirements', 'requirements_extracted_at'])
+      expect(Object.keys(u.fields).sort()).toEqual(['apply_url', 'description', 'description_md', 'description_md5', 'description_source', 'description_state', 'requirements', 'requirements_extracted_at'])
     }
   })
 
@@ -208,7 +208,9 @@ describe('refreshCompany: stored jobs', () => {
     listJobs(JOB_A)
     const first = makeStore()
     await refreshCompany(first.store, COMPANY)
-    const md5 = createHash('md5').update(first.upserted[0].description).digest('hex')
+    // the hash is the md5 of the stored Markdown, which is what the first read wrote
+    const md5 = createHash('md5').update(first.upserted[0].description_md as string).digest('hex')
+    expect(first.upserted[0].description_md5).toBe(md5)
 
     listJobs(JOB_A)
     const { store, updated } = makeStore([
