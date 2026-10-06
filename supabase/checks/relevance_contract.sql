@@ -287,7 +287,7 @@ end $$;
 -- updating it, not by a pointer the person wrote, not by a careers address that is not the board-less employer's.
 do $$
 declare
-  f record; emp3 uuid := gen_random_uuid(); ca uuid := gen_random_uuid(); cb uuid := gen_random_uuid(); cc uuid := gen_random_uuid(); cd uuid := gen_random_uuid();
+  f record; emp3 uuid := gen_random_uuid(); emp4 uuid := gen_random_uuid(); ce uuid := gen_random_uuid(); ca uuid := gen_random_uuid(); cb uuid := gen_random_uuid(); cc uuid := gen_random_uuid(); cd uuid := gen_random_uuid();
   forged jsonb := '{"ats": {"provider": "greenhouse", "token": "evilboard", "source": "config", "verified_by": "manual"}}';
 begin
   select * into f from fx;
@@ -318,6 +318,12 @@ begin
   if (select employer_id from public.companies where id = cc) is not null then raise exception 'a board-less employer is not linked by domain or another address'; end if;
   perform pg_temp.as_user(f.a, format($q$with i as (insert into public.companies (id, user_id, name, domain, career_url, metadata) values (%L, %L, 'Own Site', 'x.example', 'https://ownsite.example/jobs', %L::jsonb) returning 1) select count(*) from i$q$, cd, f.a, forged));
   if (select employer_id from public.companies where id = cd) is distinct from emp3 or (select metadata ? 'ats' from public.companies where id = cd) then raise exception 'a board-less employer is linked by its careers address and carries no board'; end if;
+
+  -- (e) a board a person pasted on say-so (no domain) is nobody's by domain: a company typed with the victim's domain is not linked to it
+  insert into public.company_directory (id, name, name_norm, ats_provider, ats_token, verified_by, verified_at, source)
+  values (emp4, 'Pasted Board Co', 'pasted board co', 'personio', 'pastedboard', 'careers_url', now(), 'person');
+  perform pg_temp.as_user(f.a, format($q$with i as (insert into public.companies (id, user_id, name, domain, career_url, metadata) values (%L, %L, 'Victim', 'victim.example', 'https://victim.example/careers', '{}'::jsonb) returning 1) select count(*) from i$q$, ce, f.a));
+  if (select employer_id from public.companies where id = ce) is not null or (select metadata ? 'ats' from public.companies where id = ce) then raise exception 'a company typed with a domain is not linked to a person-created row that has none'; end if;
 end $$;
 
 -- 6e. A company's clean-up and sightings never touch a shared role. held-1 is stored under A's company, has an employer,
