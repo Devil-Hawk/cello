@@ -6,7 +6,7 @@ import type { FetchPage } from './fetch-page'
 import { createHash } from 'node:crypto'
 import { fakeFetcher, fixture, type Route } from './reader/fake-fetcher'
 import { normalizeJobUrl } from './snapshot'
-import { searchTerms, NO_TARGETS } from './reader/targets'
+import { searchTerms, NO_TARGETS, type ReaderTargets } from './reader/targets'
 
 const realFetch = globalThis.fetch
 beforeEach(() => {
@@ -110,6 +110,30 @@ describe('ingestCompany', () => {
 
   const CAREERS = 'https://acme.example/careers'
   const site = (routes: Record<string, Route>) => fakeFetcher({ 'https://acme.example/robots.txt': { status: 404, body: '' }, ...routes })
+
+  it('a Workday board is searched with the person\'s words, and the company says it shows a window onto the board', async () => {
+    const searches: string[] = []
+    globalThis.fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? '{}') as { searchText?: string }
+      searches.push(body.searchText ?? '')
+      const jobPostings = body.searchText ? [{ title: 'Software Developer II', externalPath: '/job/OH/Software-Developer-II_R1', locationsText: 'Cleveland', postedOn: 'Posted Today' }] : []
+      return new Response(JSON.stringify({ total: jobPostings.length, jobPostings }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }) as unknown as typeof fetch
+    const { store } = memoryStore()
+    const saved: Record<string, unknown>[] = []
+    store.saveCompanyMetadata = async (_id, meta) => {
+      saved.push(meta as Record<string, unknown>)
+    }
+    const targets = { targeting: { ...NO_TARGETS.targeting, functions: ['engineering'] as const }, titles: [] } as unknown as ReaderTargets
+    const out = await ingestCompany(
+      store,
+      company('c1', { metadata: { ats: { provider: 'workday', token: 'ccf.wd1.Careers', source: 'url', verified_by: 'careers_url' } } }),
+      { fetchPage: fetcher(''), model: null, targets }
+    )
+    expect(out.reader).toBe('workday')
+    expect(searches).toContain('software engineer')
+    expect(saved.at(-1)?.reader).toMatchObject({ window: true, tier: 'board' })
+  })
 
   it('reads a company with no board through the one reader and stores what its page declares, as the employer own roles', async () => {
     const { store, calls } = memoryStore()

@@ -194,6 +194,15 @@ export async function ingestCompany(store: AtsStore, company: DueCompany, deps: 
       outcome.reader = result.provider
       outcome.tier = 'board'
       if (boardFailed(result)) outcome.failure = 'board_error'
+      // A board searched with the person's words (Workday, Eightfold) shows a window onto it, never the whole board: say so. Any note left by an earlier way of reading goes.
+      const words = searchTerms(targets)
+      const stale = board.meta.reader && typeof board.meta.reader === 'object' ? (board.meta.reader as Record<string, unknown>) : null
+      if (providers[result.provider].searchesByQuery === true && words.length > 0) {
+        board.meta.reader = { checked: [], targets_key: words.join('|'), at: new Date().toISOString(), read: 0, window: true, tier: 'board', tried: [] }
+      } else if (stale) {
+        const { window: _w, listed: _l, untitled: _u, ...rest } = stale
+        board.meta.reader = rest
+      }
       await saveSourceCheck(store, company, board, { tier: 'board' })
       return
     }
