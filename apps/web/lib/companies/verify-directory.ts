@@ -20,7 +20,7 @@ import { HttpError } from '../ats/http'
 import type { AtsJob, AtsProviderId, FetchContext } from '../ats/types'
 import { IDENTIFY, sameEmployerName, verifyBoard, type BoardIdentity, type BoardRef } from '../ats/verify'
 import { normalizeCompanyName } from '../entities/companies'
-import { faviconForDomain, isKnownEmployer } from './known-companies'
+import { faviconForDomain, isKnownEmployer, lookupKnownCompanyByDomain, lookupKnownCompanyByName } from './known-companies'
 
 type Db = SupabaseClient<any, any, any>
 
@@ -156,11 +156,17 @@ export interface EmployerWrite {
 
 const MS_AFTER_VERIFY = 6 * 3_600_000
 
+export type Written = { ok: true; employerId: string } | { ok: false; reason: 'other_owner'; offers: Offer[] }
+
 /**
  * Write one verified employer: the only place a row of company_directory is made or changed. An employer already
  * there (by board, then by domain) is updated, never doubled. Returns its id.
+ *
+ * A person's or a lead's new row never takes a name another employer holds: a verified row with that name and another
+ * board or domain, or a big employer's name on evidence that is only the provider's own account name (anyone can open
+ * an account under any name), is refused as other_owner. The seed and the sweep (lists, not people) keep their path.
  */
-export async function writeEmployer(db: Db, w: EmployerWrite, now: () => number = Date.now): Promise<string> {
+export async function writeEmployer(db: Db, w: EmployerWrite, now: () => number = Date.now): Promise<Written> {
   const at = new Date(now()).toISOString()
   const fields = {
     name: w.name.slice(0, 200),
@@ -197,17 +203,25 @@ export async function writeEmployer(db: Db, w: EmployerWrite, now: () => number 
   // (or whose lead names it), so a board that is not the row's is never written over the row's board, owner or careers address.
   // A person or a lead never changes a row that is there, however it was found: the row decides what every follower reads.
   // ponytail: an employer that moves to another provider keeps its old board here until the row is changed by hand.
-  if (existing && ((byDomain && existing.ats_provider) || w.keepExisting)) return existing.id
+  if (existing && ((byDomain && existing.ats_provider) || w.keepExisting)) return { ok: true, employerId: existing.id }
   if (existing) {
     // a person's own add or a traced lead outranks the seed's label for how the employer came
     const source = existing.source === 'seed' || existing.source === 'yc' ? w.source : existing.source
     const { error } = await db.from('company_directory').update({ ...fields, source }).eq('id', existing.id)
     if (error) throw new Error('could not write the employer')
-    return existing.id
+    return { ok: true, employerId: existing.id }
+  }
+  if (w.source !== 'seed' && w.source !== 'yc' && fields.name_norm) {
+    const { data: held } = await db.from('company_directory').select('id').eq('name_norm', fields.name_norm).not('verified_at', 'is', null).limit(1)
+    const known = lookupKnownCompanyByName(w.name)
+    if (((held ?? []) as unknown[]).length > 0 || (known && (!w.domain || lookupKnownCompanyByDomain(w.domain)?.name !== known.name))) {
+      // ponytail: two checks racing on one new name can both pass; the company_directory_name_claim trigger skips the second
+      return { ok: false, reason: 'other_owner', offers: await directoryOffers(db, { name: w.name }) }
+    }
   }
   const { data, error } = await db.from('company_directory').insert({ ...fields, source: w.source }).select('id').single()
   if (error || !data) throw new Error('could not write the employer')
-  return (data as { id: string }).id
+  return { ok: true, employerId: (data as { id: string }).id }
 }
 
 // --- what a read of a verified board did to its row ----------------------------
@@ -296,13 +310,12 @@ export async function verifyEmployer(
   for (const b of boards) {
     const check = await checkBoard({ name: input.name, domain: input.domain, provider: b.provider, token: b.token }, once)
     if (check.ok) {
-      const employerId = await writeEmployer(
+      return writeEmployer(
         db,
         // never the domain the board declares for itself (its owner can edit that); check.domain is for display
         { name: check.name, domain: input.domain, careersUrl: null, provider: b.provider, token: b.token, verifiedBy: check.verifiedBy, source: input.source, openCount: check.jobs.length, readTier: 'board', keepExisting: input.source === 'lead' || input.source === 'person' },
         deps.now
       )
-      return { ok: true, employerId }
     }
     failed ??= check
   }
