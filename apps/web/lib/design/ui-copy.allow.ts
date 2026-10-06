@@ -8,7 +8,6 @@
 export const UI_COPY_BASELINE: Record<string, number> = {
   'app/(app)/companies/[id]/page.tsx': 1,
   'app/(app)/companies/page.tsx': 1,
-  'app/(app)/contacts/page.tsx': 1,
   'app/(app)/copilot/dev-markdown-fixture/page.tsx': 5,
   'app/(app)/copilot/page.tsx': 4,
   'app/(app)/error.tsx': 1,
@@ -26,7 +25,6 @@ export const UI_COPY_BASELINE: Record<string, number> = {
   'app/not-found.tsx': 1,
   'components/companies/add-company-dialog.tsx': 2,
   'components/contacts/contact-network-panel.tsx': 1,
-  'components/contacts/contact-row.tsx': 3,
   'components/contacts/csv-import.tsx': 6,
   'components/copilot/composer.tsx': 1,
   'components/copilot/graph-view.tsx': 1,
