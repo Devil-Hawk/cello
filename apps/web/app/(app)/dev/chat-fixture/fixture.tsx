@@ -1,16 +1,16 @@
 'use client'
 
-// DEV-ONLY fixture for the copilot markdown renderer rewrite. Not linked
+// DEV-ONLY fixture for Chat's markdown renderer. Not linked
 // from product navigation — exists purely so the rewritten
-// components/copilot/markdown.tsx can be screenshotted and read back for
+// components/chat/markdown.tsx can be screenshotted and read back for
 // verification with real, representative assistant output (a GFM table,
 // fenced code, links, nested lists, a blockquote, bold/italic, and the
 // mid-stream unclosed-fence / half-built-table cases) instead of paying for
 // a live model turn. Safe to delete once the renderer has landed.
 
 import { useEffect, useState } from 'react'
-import { Markdown } from '@/components/copilot/markdown'
-import { splitMarkdownBlocks } from '@/components/copilot/render/block-split'
+import { Markdown } from '@/components/chat/markdown'
+import { splitMarkdownBlocks } from '@/components/chat/render/block-split'
 
 function Bubble({ label, content }: { label: string; content: string }) {
   return (
@@ -145,13 +145,13 @@ function StreamSim() {
   )
 }
 
-export default function MarkdownFixturePage() {
+export default function ChatFixture() {
   return (
     <div className="mx-auto max-w-3xl space-y-8 py-8">
       <div>
         <h1 className="font-display text-title text-foreground">Markdown renderer fixture</h1>
         <p className="mt-1 text-caption text-muted-foreground">
-          Dev-only harness for components/copilot/markdown.tsx. Static assistant-message samples plus a
+          Dev-only harness for components/chat/markdown.tsx. Static assistant-message samples plus a
           simulated token stream, rendered through the real production component.
         </p>
       </div>

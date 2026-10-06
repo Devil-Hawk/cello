@@ -55,7 +55,7 @@ import { ConversationSidebar } from '@/components/copilot/conversation-sidebar'
 import { Composer, DEFAULT_MODEL_SENTINEL } from '@/components/copilot/composer'
 import { RunsPanel } from '@/components/copilot/runs-panel'
 import { StepList } from '@/components/copilot/step-card'
-import { Markdown } from '@/components/copilot/markdown'
+import { Markdown } from '@/components/chat/markdown'
 import { useIsMobile, useRevealedText } from '@/components/copilot/hooks'
 import {
   RECONNECT_MAX_ATTEMPTS,
