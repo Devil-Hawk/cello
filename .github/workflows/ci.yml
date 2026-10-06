@@ -189,6 +189,14 @@ jobs:
       - name: Lighthouse budgets (mobile preset, median of 3)
         run: npx -y @lhci/cli@0.14.0 autorun --config=apps/web/lighthouserc.json
 
+      - name: Keep the Lighthouse reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse
+          path: .lighthouseci
+          if-no-files-found: ignore
+
   sql-checks:
     name: SQL checks
     runs-on: ubuntu-latest
