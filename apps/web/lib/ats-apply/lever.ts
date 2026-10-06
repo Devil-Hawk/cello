@@ -100,7 +100,7 @@ export async function submitLever(
   if (Object.keys(urls).length > 0) body.urls = urls
 
   // `silent` is left unset ON PURPOSE. Lever emails the candidate a
-  // confirmation unless it is true, and that email is the user's own receipt
+  // confirmation unless it is true, and that email is the user's own confirmation
   // that something went out in their name. Suppressing it would make the
   // product harder to audit for the person it acts for.
 

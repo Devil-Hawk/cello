@@ -11,7 +11,7 @@
 // visible in a GitHub Actions run's own logs/UI) from reporting an outcome
 // for a run that never actually fetched a bundle at all: without this
 // check, a forged callback could write a fabricated 'submitted' result and
-// receipt for any draft sitting in 'approved', with prepare/bundle/confirm
+// attempt for any draft sitting in 'approved', with prepare/bundle/confirm
 // never having been called. Each branch is additionally gated on the draft
 // already being in the state that phase implies (filling / approved), so a
 // stray or replayed callback cannot move a draft through the state machine
@@ -26,8 +26,8 @@
 //                                               aborts rather than guess)
 //           approved -> failed                (result: 'failed')
 //
-// RECEIPT HONESTY (ruling per docs/superpowers/specs/...#browser-use
-// assisted apply): a submitted outcome writes an application_receipts row
+// ATTEMPT HONESTY (ruling per docs/superpowers/specs/...#browser-use
+// assisted apply): a submitted outcome writes an application_attempts row
 // with provenance='browser_companion' and verification_state
 // 'system_confirmed' ONLY when the runner explicitly witnessed a
 // confirmation (body.confirmed === true) — anything else is 'unconfirmed'.
@@ -36,8 +36,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { verifyReportToken } from '@/lib/ats-apply/phase-tokens'
-import { createReceipt } from '@/lib/applications/store'
-import { DATA_URL_RE, MAX_ATTACHMENT_BYTES, base64ByteSize } from '@/lib/applications/receipts'
+import { createAttempt } from '@/lib/applications/attempts'
+import { DATA_URL_RE, MAX_ATTACHMENT_BYTES, base64ByteSize } from '@/lib/applications/attempt-rules'
 import { isRunnerAuthorized } from '@/lib/security/shared-secret'
 
 export const dynamic = 'force-dynamic'
@@ -225,7 +225,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    await createReceipt(
+    await createAttempt(
       admin,
       draft.user_id,
       {
@@ -242,8 +242,8 @@ export async function PATCH(request: NextRequest) {
       { id: ownedApplicationId, user_id: draft.user_id, job_id: draft.job_id, stage: 'applied', applied_at: nowIso, source: 'cello-assisted-apply' }
     )
   } catch (err) {
-    console.error('[apply/state] createReceipt failed', err)
-    return NextResponse.json({ error: 'Submitted, but could not record a receipt.' }, { status: 500, headers: NO_STORE })
+    console.error('[apply/state] createAttempt failed', err)
+    return NextResponse.json({ error: 'Submitted, but could not record an attempt.' }, { status: 500, headers: NO_STORE })
   }
 
   const { error: updErr } = await admin

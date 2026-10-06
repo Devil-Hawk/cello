@@ -69,7 +69,7 @@ const TABLE = 'interactions'
 /**
  * Idempotent upsert on (ref_table, ref_id, kind). Never throws: a
  * projection failure must not roll back or fail the source write it
- * follows (the send, the stage transition, the receipt) — it is
+ * follows (the send, the stage transition, the attempt) — it is
  * observability riding along on a write that already succeeded, matching
  * lib/graph/journal.ts's log-and-continue idiom for the same reason.
  */
