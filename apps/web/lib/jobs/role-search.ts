@@ -90,7 +90,7 @@ interface CompanyRow {
   name: string
   metadata?: unknown
   last_scraped_at?: string | null
-  career_url?: string | null
+  career_url: string | null
 }
 
 /** Followed companies worth reading again: never checked first, then the oldest, at most 5. */

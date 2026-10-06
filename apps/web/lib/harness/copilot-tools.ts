@@ -55,7 +55,7 @@ import { callMcpTool } from '../mcp/client'
 import { McpError } from '../mcp/types'
 import { openRolesOnly } from '../jobs/freshness'
 import { applyRoleTargets, excludedCompanyIds, hasRoleTargets, quote } from '../targeting/roles'
-import { isTrackedCompany } from '../companies/watchlist'
+import { TRACKED_FILTER, isTrackedCompany } from '../companies/watchlist'
 import { REFRESH_MAX_PER_TURN, formatRoleAnswer, pickCompaniesToRefresh, placeMatcher, titleMatcher } from '../jobs/role-search'
 import { ingestCompany, type DueCompany } from '../ingest/run'
 import { staticFetchPage } from '../ingest/fetch-page'
@@ -962,14 +962,14 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
   const targeting = resolveTargeting((profile?.preferences as Record<string, unknown> | null) ?? null)
   const hasTargets = hasRoleTargets(targeting)
   const excludedIds = excludedCompanyIds(tracked, targeting)
-  const ids = tracked.map((c) => c.id)
   const nameById = new Map(tracked.map((c) => [c.id, c.name]))
   const searched = tracked.map((c) => c.name)
   const notChecked = pickCompaniesToRefresh(tracked, Date.now()).stale
 
-  // ponytail: the id list rides in the URL, which holds to about 600 followed companies; move to a companies.metadata filter past that.
+  // The followed companies (and the named one) are filtered through the FK join, not an id list in the URL.
   const base = (scoped: boolean, columns: string, opts?: { count?: 'exact'; head?: boolean }) => {
-    let q: any = openRolesOnly(ownedJobsQuery(ctx.admin, ctx.userId, columns, opts)).in('company_id', ids)
+    let q: any = openRolesOnly(ownedJobsQuery(ctx.admin, ctx.userId, columns, opts)).or(TRACKED_FILTER, { referencedTable: 'companies' })
+    if (companyArg) q = q.ilike('companies.name', `%${companyArg}%`)
     if (scoped && hasTargets) q = applyRoleTargets(q, targeting, excludedIds)
     return q
   }
