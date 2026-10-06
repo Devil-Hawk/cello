@@ -336,8 +336,8 @@ describe('what the page never says', () => {
     }
   })
 
-  it('reaches no model: no step, no model call and no model list on a row', () => {
-    for (const f of files) expect(src(f), rel(f)).not.toMatch(/lib\/steps|lib\/harness\/llm|lib\/models/)
+  it('reaches no model itself: no step, no model call, no model list on a row (Check my chance goes through the fit step)', () => {
+    for (const f of files) expect(src(f), rel(f)).not.toMatch(/lib\/steps|lib\/models|lib\/harness\/llm['"/]|callLlm/)
   })
 
   it('writes a follow only through the one follow function', () => {
