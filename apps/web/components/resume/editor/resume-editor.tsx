@@ -26,7 +26,8 @@ export type EditorAction =
   | { type: 'template'; templateId: string }
   | { type: 'saving' }
   | { type: 'failed' }
-  | { type: 'saved'; markdown: string; versionLabel: string }
+  /** `sent` is the draft that went to the server; the rest is what it stored. */
+  | { type: 'saved'; sent: { markdown: string; templateId: string | null }; markdown: string; versionLabel: string }
 
 export function initEditor(p: Pick<EditorProps, 'markdown' | 'templateId' | 'versionLabel'>): EditorState {
   return {
@@ -53,12 +54,13 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
       // The buffer stays exactly as typed.
       return { ...s, status: 'failed' }
     case 'saved':
-      // The server hands back the canonical Markdown: show what was stored.
+      // The server hands back the canonical Markdown: show it only if nothing was typed
+      // since the draft left. Otherwise keep the buffer, which stays dirty.
       return {
         ...s,
-        markdown: a.markdown,
+        markdown: s.markdown === a.sent.markdown ? a.markdown : s.markdown,
         savedMarkdown: a.markdown,
-        savedTemplateId: s.templateId,
+        savedTemplateId: a.sent.templateId,
         versionLabel: a.versionLabel,
         status: 'saved',
       }
@@ -91,8 +93,9 @@ export function ResumeEditor({
     if (!dirty || saving || readOnly) return
     dispatch({ type: 'saving' })
     try {
-      const result = await onSave({ markdown: state.markdown, templateId: state.templateId })
-      dispatch(result.ok ? { type: 'saved', markdown: result.markdown, versionLabel: result.versionLabel } : { type: 'failed' })
+      const sent = { markdown: state.markdown, templateId: state.templateId }
+      const result = await onSave(sent)
+      dispatch(result.ok ? { type: 'saved', sent, markdown: result.markdown, versionLabel: result.versionLabel } : { type: 'failed' })
     } catch {
       dispatch({ type: 'failed' })
     }

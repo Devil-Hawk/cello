@@ -47,10 +47,31 @@ describe('editorReducer', () => {
 
   it('a good save takes the canonical Markdown, the new label and is clean', () => {
     const typed = editorReducer(base, { type: 'edit', markdown: 'typed text' })
-    const saved = editorReducer(typed, { type: 'saved', markdown: '# Canonical', versionLabel: 'Version 2' })
+    const sent = { markdown: 'typed text', templateId: DEFAULT_TEMPLATE_ID }
+    const saved = editorReducer(typed, { type: 'saved', sent, markdown: '# Canonical', versionLabel: 'Version 2' })
     expect(saved.markdown).toBe('# Canonical')
     expect(saved.versionLabel).toBe('Version 2')
     expect(isDirty(saved)).toBe(false)
+  })
+
+  it('text typed while a save is in flight survives it and stays dirty', () => {
+    const first = editorReducer(base, { type: 'edit', markdown: 'first draft' })
+    const sent = { markdown: first.markdown, templateId: first.templateId }
+    const saving = editorReducer(first, { type: 'saving' })
+    const more = editorReducer(saving, { type: 'edit', markdown: 'first draft, and more' })
+    const saved = editorReducer(more, { type: 'saved', sent, markdown: '# Canonical', versionLabel: 'Version 2' })
+    expect(saved.markdown).toBe('first draft, and more')
+    expect(saved.savedMarkdown).toBe('# Canonical')
+    expect(isDirty(saved)).toBe(true)
+  })
+
+  it('a template picked during a save stays unsaved', () => {
+    const typed = editorReducer(base, { type: 'edit', markdown: 'typed text' })
+    const sent = { markdown: typed.markdown, templateId: typed.templateId }
+    const changed = editorReducer(editorReducer(typed, { type: 'saving' }), { type: 'template', templateId: 'other' })
+    const saved = editorReducer(changed, { type: 'saved', sent, markdown: 'typed text', versionLabel: 'Version 2' })
+    expect(saved.templateId).toBe('other')
+    expect(isDirty(saved)).toBe(true)
   })
 })
 
