@@ -4,6 +4,7 @@ import { ROUTES } from '../lib/fill-contract'
 import type { NextResponse } from '../lib/fill-contract'
 import { needsUpdate } from '../lib/version'
 import { isPaused, setLocal } from '../lib/storage'
+import { relayTick } from '../relay/carrier'
 import { lockHolder } from './lock'
 import { runAutoSend } from './send'
 
@@ -21,7 +22,7 @@ export async function ensureAlarm(): Promise<void> {
  * asks for one claimed application. The server answers with nothing while Send for
  * me is off, paused, in quiet hours or below the minimum version.
  */
-export async function presence(): Promise<void> {
+async function ping(): Promise<void> {
   // Ask for a claim only when this browser could act on it right now.
   const canSend = !(await isPaused()) && (await lockHolder()) === null
   const r = await callApi<NextResponse>(ROUTES.next, { auto: canSend, version: version() })
@@ -36,4 +37,10 @@ export async function presence(): Promise<void> {
   if (await isPaused()) return
   if ((await lockHolder()) !== null) return
   await runAutoSend(claim)
+}
+
+/** What each alarm does: presence and any send first, then one relay claim. They never overlap. */
+export async function presence(): Promise<void> {
+  await ping()
+  await relayTick().catch(() => false)
 }

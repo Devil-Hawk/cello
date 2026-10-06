@@ -17,6 +17,10 @@ export interface PresenceInfo {
 export interface Local {
   origin: string
   token: string
+  /** The relay token: scope `relay` only. Never the fill token. */
+  relayToken: string
+  /** The model on this computer that relay jobs run on. */
+  relayLocal: { runtime: 'ollama' | 'lmstudio'; baseUrl: string; model: string }
   paused: boolean
   /** Applications an automatic send has clicked Send on. Never clicked twice. */
   clicked: Record<string, number>

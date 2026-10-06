@@ -9,6 +9,8 @@
       body { width: auto; max-width: 520px; }
       label { display: block; margin: 12px 0 4px; font-weight: 600; }
       input { width: 100%; min-height: 44px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); font: inherit; }
+      select { width: 100%; min-height: 44px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); font: inherit; }
+      h2 { font-size: 15px; margin: 24px 0 4px; }
       input:focus-visible { outline: 2px solid #0f766e; outline-offset: 2px; }
       .row { margin-top: 16px; }
       #status { margin-top: 12px; }
@@ -22,6 +24,14 @@
       <input id="origin" type="url" autocomplete="off" spellcheck="false" />
       <label for="token">Token</label>
       <input id="token" type="password" autocomplete="off" spellcheck="false" />
+      <h2>This computer</h2>
+      <p>Lets Cello use a model running on this computer (Ollama or LM Studio) for work you have set to run here. Leave empty to turn it off.</p>
+      <label for="relay-token">Relay token</label>
+      <input id="relay-token" type="password" autocomplete="off" spellcheck="false" />
+      <label for="runtime">Runs on</label>
+      <select id="runtime"><option value="ollama">Ollama</option><option value="lmstudio">LM Studio</option></select>
+      <label for="model">Model name</label>
+      <input id="model" type="text" autocomplete="off" spellcheck="false" placeholder="llama3.1:8b" />
       <div class="row"><button id="save" class="primary" type="button">Save</button></div>
       <p id="status" role="status"></p>
     </main>
