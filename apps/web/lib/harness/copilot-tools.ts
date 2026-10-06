@@ -599,7 +599,8 @@ async function listJobs(ctx: CopilotToolContext, args: Args) {
   // needs none (hundreds of ids would pass the request URL length limit).
   const baseQuery = () => {
     let q = openRolesOnly(ownedJobsQuery(ctx.admin, ctx.userId, SELECT))
-    if (dreamOnly) q = q.in('viewer_company_id', ids)
+    // ponytail: the first 200 dream companies; a person with more would need chunkedIn.
+    if (dreamOnly) q = q.in('viewer_company_id', ids.slice(0, 200))
     if (fresh) q = q.eq('is_new', true)
     return q
   }

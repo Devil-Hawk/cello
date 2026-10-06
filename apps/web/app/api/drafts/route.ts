@@ -50,6 +50,6 @@ export async function GET(request: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   // A role stored under no company of this person's (the directory sweep, or another follower's) names its employer through the directory.
-  const drafts = (data ?? []).map((d: { jobs?: { companies?: unknown; employer?: unknown } | null }) => (d.jobs ? { ...d, jobs: { ...d.jobs, companies: d.jobs.companies ?? d.jobs.employer } } : d))
+  const drafts = ((data ?? []) as unknown as { jobs?: { companies?: unknown; employer?: unknown } | null }[]).map((d) => (d.jobs ? { ...d, jobs: { ...d.jobs, companies: d.jobs.companies ?? d.jobs.employer } } : d))
   return NextResponse.json({ drafts })
 }
