@@ -3,8 +3,9 @@
 // read the site, so the line says what is true: checking now, when the next
 // check is, or that the careers site cannot be read and why.
 //
-// Pure and framework-free: scripts/ats-refresh.ts imports dueAt from here, so
-// the line on screen and the scheduler agree on when a company is next checked.
+// Pure and framework-free: lib/ingest/run.ts imports dueAt from here, so the
+// reader and the line on screen agree on when a company is due. When the next
+// check is, the clock says (lib/clock/status.ts); this file never guesses it.
 
 /** The result of the last attempt to read a company's roles (companies.metadata.source_check). */
 export interface SourceCheck {
@@ -40,13 +41,10 @@ export const REASON_COPY: Record<string, string> = {
 /** The check recorded while only a browser could read the site: the scheduled pass is next. */
 export const READING_REASON = 'reading'
 
-// The scheduler (scripts/ats-refresh.ts) and the runner use these: dream companies hourly, others daily.
+// The reader uses these: dream companies hourly, others daily.
 const DREAM_INTERVAL_MINUTES = 60
 const DEFAULT_INTERVAL_MINUTES = 1440
 const DUE_SLACK_MINUTES = 5
-// .github/workflows/scrape.yml: '41 */6 * * *' (a test keeps the two in step).
-const TICK_MINUTE = 41
-const TICK_EVERY_HOURS = 6
 const MIN_MS = 60_000
 const HOUR_MS = 3_600_000
 
@@ -81,50 +79,33 @@ export function dueAt(company: StatusCompany): number {
   return last + (Math.max(base, freq) - DUE_SLACK_MINUTES) * MIN_MS
 }
 
-/** The first scheduler tick (minute 41 of 00/06/12/18 UTC) at or after `ms`. */
-export function firstTickAtOrAfter(ms: number): number {
-  const d = new Date(ms)
-  const hourStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours())
-  for (let h = 0; h <= TICK_EVERY_HOURS + 1; h++) {
-    const t = new Date(hourStart + h * HOUR_MS)
-    if (t.getUTCHours() % TICK_EVERY_HOURS !== 0) continue
-    const tick = Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate(), t.getUTCHours(), TICK_MINUTE)
-    if (tick >= ms) return tick
-  }
-  return ms
-}
-
-/** When the next scheduled check will run. */
-export function nextCheckAt(company: StatusCompany, now: number = Date.now()): number {
-  return firstTickAtOrAfter(Math.max(now, dueAt(company)))
-}
-
 export type RolesStatus =
   | { kind: 'roles'; count: number }
   | { kind: 'checking' }
-  | { kind: 'reading'; nextCheckAt: number }
-  | { kind: 'not_checked'; nextCheckAt: number; now: number }
-  | { kind: 'empty'; nextCheckAt: number; now: number }
+  | { kind: 'reading'; nextCheckAt: number | null }
+  | { kind: 'not_checked'; nextCheckAt: number | null; now: number }
+  | { kind: 'empty'; nextCheckAt: number | null; now: number }
   | { kind: 'unreadable'; reason: string; careersUrl: string | null }
 
 export function rolesStatus(
   company: StatusCompany,
   openRoles: number,
-  opts: { checking?: boolean; now?: number } = {}
+  /** `nextCheckAt` is the person's next check from the clock (epoch ms); without it a line leaves the time out. */
+  opts: { checking?: boolean; now?: number; nextCheckAt?: number | null } = {}
 ): RolesStatus {
   const now = opts.now ?? Date.now()
+  const nextCheckAt = opts.nextCheckAt ?? null
   if (openRoles > 0) return { kind: 'roles', count: openRoles }
   if (opts.checking) return { kind: 'checking' }
   const check = readSourceCheck(company.metadata)
   if (check && !check.readable && check.reason === READING_REASON) {
-    return { kind: 'reading', nextCheckAt: firstTickAtOrAfter(now) }
+    return { kind: 'reading', nextCheckAt }
   }
   if (check && !check.readable) {
     const reason = (check.reason && REASON_COPY[check.reason]) || 'it could not be read'
     return { kind: 'unreadable', reason, careersUrl: company.career_url?.trim() || null }
   }
-  const next = nextCheckAt(company, now)
-  return { kind: lastCheckedMs(company) === null ? 'not_checked' : 'empty', nextCheckAt: next, now }
+  return { kind: lastCheckedMs(company) === null ? 'not_checked' : 'empty', nextCheckAt, now }
 }
 
 /**
@@ -163,13 +144,14 @@ export function rolesStatusLine(s: RolesStatus): { text: string; href?: string }
     case 'checking':
       return { text: 'Checking now' }
     case 'reading': {
+      if (s.nextCheckAt === null) return { text: 'Cello is reading this site' }
       const t = new Date(s.nextCheckAt).toISOString().slice(11, 16)
       return { text: `Cello is reading this site. Next check around ${t} UTC` }
     }
     case 'not_checked':
-      return { text: `Not checked yet, next check ${inAbout(s.nextCheckAt - s.now)}` }
+      return { text: s.nextCheckAt === null ? 'Not checked yet' : `Not checked yet, next check ${inAbout(s.nextCheckAt - s.now)}` }
     case 'empty':
-      return { text: `No open roles right now, next check ${inAbout(s.nextCheckAt - s.now)}` }
+      return { text: s.nextCheckAt === null ? 'No open roles right now' : `No open roles right now, next check ${inAbout(s.nextCheckAt - s.now)}` }
     case 'unreadable':
       return { text: `Cello can't read this careers site: ${s.reason}`, href: s.careersUrl ?? undefined }
   }
