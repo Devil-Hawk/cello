@@ -393,7 +393,7 @@ describe('every path that can deliver mail refuses a demo first', () => {
   })
 
   it.each([
-    ['app/api/outreach/send/route.ts', 'outreach'],
+    ['lib/commands/send/outreach.ts', 'outreach'],
     ['app/api/digest/send/route.ts', 'digest'],
   ])('%s selects the demo columns and gates on them', (route) => {
     const src = read(path.resolve(WEB_ROOT, route))

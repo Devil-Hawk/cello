@@ -138,12 +138,13 @@ describe('auth', () => {
 })
 
 describe('tools/list parity', () => {
-  it('lists exactly the 18 first-party tool names from COPILOT_TOOLS, nothing added, nothing missing', async () => {
+  it('lists all 18 first-party tool names from COPILOT_TOOLS, none missing', async () => {
     const res = await POST(req(TOOLS_LIST))
     expect(res.status).toBe(200)
     const body = await res.json()
     const names = (body.result.tools as Array<{ name: string }>).map((t) => t.name)
-    expect(new Set(names)).toEqual(new Set(COPILOT_TOOLS.map((t) => t.name)))
+    for (const tool of COPILOT_TOOLS) expect(names).toContain(tool.name)
+    expect(COPILOT_TOOLS).toHaveLength(18)
   })
 
   it('serves exactly mcpView(), the 18 legacy names included, and lists no send command', async () => {

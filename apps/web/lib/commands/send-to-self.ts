@@ -25,14 +25,16 @@ const defaultDeps: SendToSelfDeps = {
     return typeof data?.user?.email === 'string' ? data.user.email : ''
   },
   async tokenFor(ctx) {
-    const [{ readProfileForDemoGuards }, { hasGmailPermission }, { resolveGmailAccessToken }] = await Promise.all([
+    const [{ readProfileForDemoGuards }, { hasGmailPermission }, { resolveGmailAccessToken }, { demoSendGate }] = await Promise.all([
       import('@/lib/harness/keys'),
       import('@/lib/gmail/permissions'),
       import('@/lib/gmail/token'),
+      import('@/lib/access/guardrails'),
     ])
     const admin = ctx.admin()
     const { row } = await readProfileForDemoGuards(admin, ctx.userId)
-    if (!row || !hasGmailPermission(row.preferences, 'send')) return null
+    // A demo never delivers mail, not even to its own address.
+    if (!row || !demoSendGate({ is_demo: row.is_demo ?? null, demo_expires_at: row.demo_expires_at ?? null }).allowed || !hasGmailPermission(row.preferences, 'send')) return null
     const token = await resolveGmailAccessToken(admin, ctx.userId, (row.preferences ?? {}) as Record<string, unknown>, undefined)
     return token.ok ? token.accessToken : null
   },
