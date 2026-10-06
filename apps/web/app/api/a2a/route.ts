@@ -1,5 +1,5 @@
-// POST /api/a2a — Cello's A2A endpoint: matcher, company_researcher and
-// interview_prep, reachable by any A2A caller holding a PAT with the 'a2a'
+// POST /api/a2a — Cello's A2A endpoint: matcher and
+// company_researcher, reachable by any A2A caller holding a PAT with the 'a2a'
 // scope (lib/access/tokens.ts).
 //
 // TRANSPORT DECISION (spec Step 3, item 1 — see scripts/spike-a2a-roundtrip.ts
@@ -34,10 +34,10 @@
 // lib/graph/invoke.ts, exactly like MCP's trigger_run.
 //
 // "IT NEVER SENDS/SUBMITS ANYTHING YOU HAVE NOT READ" — no guard needed
-// HERE, unlike MCP's dispatchTool surface: the three agents A2A exposes
+// HERE, unlike MCP's dispatchTool surface: the two agents A2A exposes
 // (lib/a2a/agent.ts#A2A_AGENTS) have no submit-capable code path AT ALL —
-// buildA2aPlan only ever emits a matcher | company_researcher |
-// interview_prep step, never 'applier' — so there is no guarded tool call
+// buildA2aPlan only ever emits a matcher | company_researcher
+// step, never 'applier' — so there is no guarded tool call
 // to refuse in the first place. lib/a2a/graph-shape.test.ts asserts this by
 // construction.
 //

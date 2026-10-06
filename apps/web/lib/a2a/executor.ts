@@ -19,7 +19,7 @@
 //
 // READ/DRAFT-ONLY BY CONSTRUCTION, NOT BY A RUNTIME GUARD
 //   buildA2aPlan (lib/a2a/agent.ts) only ever emits a single step whose
-//   agent_type is matcher | company_researcher | interview_prep — none of
+//   agent_type is matcher | company_researcher — neither of
 //   which is 'applier' (the only step type that can submit — see
 //   lib/harness/schemas.ts's stripUntrustedSubmit) — so no plan this file
 //   builds can ever reach a submit-capable node. lib/a2a/graph-shape.test.ts
