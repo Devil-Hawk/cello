@@ -1,6 +1,6 @@
 // Question: "Does Cello's chance call predict replies?"
 // This is the one question framed as validating OR refuting the chance call.
-// Strong, Possible and Stretch come off the job row (jobs.chance); a call that is
+// Strong, Possible and Stretch come off the person's own row for the role (person_roles.chance); a call that is
 // right shows a reply rate that falls as the call weakens. The verdict is only
 // set once at least two groups individually cross MIN_PER_BUCKET; otherwise the
 // whole question stays insufficient_data, like every other one.

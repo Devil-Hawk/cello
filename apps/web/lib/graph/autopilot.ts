@@ -151,7 +151,7 @@ import { trackedOnly } from '../companies/watchlist'
 import { loadApiKeys } from '../harness/keys'
 import { callLlm, MissingKeyError } from '../harness/llm'
 import { canRunLlm } from '../harness/llm-key-message'
-import { scoreJobBatch, ownedJobsQuery } from '../harness/agents/matcher'
+import { scoreJobBatch } from '../harness/agents/matcher'
 import { runDailyShortlist } from '../scoring'
 import { BudgetCapError } from '../harness/spend'
 import { createAdminClient } from '../harness/supabase-admin'
@@ -862,6 +862,9 @@ interface CandidateJob {
   wanted?: boolean
 }
 
+/** The posting columns of a candidate: the person's verdict is beside them, on their own row. */
+type PostingRow = Pick<CandidateJob, 'id' | 'title' | 'description' | 'location' | 'url' | 'company_id'>
+
 async function loadCompanies(admin: AdminClient, userId: string): Promise<CompanyInput[]> {
   const { data } = await trackedOnly(
     admin.from('companies').select('id, name, domain, career_url, metadata, is_dream_company').eq('user_id', userId)
@@ -910,18 +913,21 @@ function isEligible(job: CandidateJob): boolean {
 }
 
 async function loadCandidateJobs(admin: AdminClient, userId: string, excluded: Set<string>): Promise<CandidateJob[]> {
-  // Order by recency so freshly discovered jobs are always in the window, not
-  // crowded out by a backlog of older postings. Ownership via the companies FK
-  // join (ownedJobsQuery), not an .in('company_id', companyIds) array: that
-  // breaks past ~600 companies.
-  const { data } = await ownedJobsQuery(
-    admin,
-    userId,
-    'id, title, description, location, url, company_id, chance, want_p, blocked_reasons, companies!inner(user_id)'
-  )
-    .order('discovered_at', { ascending: false })
+  // The person's own rows (person_roles) carry the verdict, so the list starts there
+  // and embeds the posting. Order by recency so freshly discovered jobs are always in
+  // the window, not crowded out by a backlog of older postings. A role they hid is not
+  // a candidate.
+  const { data } = await admin
+    .from('person_roles')
+    .select('chance, want_p, blocked_reasons, jobs!inner(id, title, description, location, url, company_id)')
+    .eq('user_id', userId)
+    .is('hidden_reason', null)
+    .order('jobs(discovered_at)', { ascending: false })
     .limit(CANDIDATE_JOB_LIMIT)
-  const rows = (data ?? []) as unknown as CandidateJob[]
+  const rows = ((data ?? []) as unknown as { chance: string | null; want_p: number | null; blocked_reasons: unknown; jobs: PostingRow | PostingRow[] | null }[]).flatMap((r) => {
+    const job = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs
+    return job ? [{ ...job, chance: r.chance, want_p: r.want_p, blocked_reasons: r.blocked_reasons }] : []
+  })
   const wanted = await loadWantedJobIds(admin, userId)
   return rows.filter((j) => j.url && !excluded.has(j.id)).map((j) => ({ ...j, wanted: wanted.has(j.id) }))
 }

@@ -69,22 +69,38 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
   select(_cols?: string) {
     return this
   }
+  // A column of the posting embedded in a person_roles row (`jobs.title`), or of that posting's company (`jobs.companies.user_id`).
+  private get(r: Row, col: string): unknown {
+    if (col.startsWith('jobs.companies.')) {
+      const field = col.slice('jobs.companies.'.length)
+      const company = (this.allTables.companies ?? []).find((c) => c.id === (r.jobs as Row | undefined)?.company_id)
+      return company?.[field]
+    }
+    if (col.startsWith('jobs.')) return (r.jobs as Row | undefined)?.[col.slice('jobs.'.length)]
+    return r[col]
+  }
   eq(col: string, val: unknown) {
+    // A filter on the embedded person_roles rows keeps only those rows inside each job, as PostgREST does.
+    if (col.startsWith('person_roles.')) {
+      const field = col.slice('person_roles.'.length)
+      this.rows = this.rows.map((r) => ({ ...r, person_roles: ([] as Row[]).concat((r.person_roles as Row[] | Row | undefined) ?? []).filter((p) => p[field] === val) }))
+      return this
+    }
     if (col.startsWith('companies.')) {
       const field = col.slice('companies.'.length)
       const byId = new Map((this.allTables.companies ?? []).map((c) => [c.id, c]))
       this.rows = this.rows.filter((r) => byId.get(r.company_id as string)?.[field] === val)
       return this
     }
-    this.rows = this.rows.filter((r) => r[col] === val)
+    this.rows = this.rows.filter((r) => this.get(r, col) === val)
     return this
   }
   in(col: string, vals: unknown[]) {
-    this.rows = this.rows.filter((r) => vals.includes(r[col]))
+    this.rows = this.rows.filter((r) => vals.includes(this.get(r, col)))
     return this
   }
   is(col: string, val: unknown) {
-    this.rows = this.rows.filter((r) => r[col] === val)
+    this.rows = this.rows.filter((r) => (val === null ? this.get(r, col) == null : this.get(r, col) === val))
     return this
   }
   ilike(col: string, pattern: string) {
@@ -99,7 +115,7 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
   textSearch(col: string, query: string, _opts?: unknown) {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean)
     this.rows = this.rows.filter((r) => {
-      const haystack = String(r[col] ?? r.title ?? '').toLowerCase()
+      const haystack = String(this.get(r, col) ?? this.get(r, col.startsWith('jobs.') ? 'jobs.title' : 'title') ?? '').toLowerCase()
       return words.every((w) => haystack.includes(w))
     })
     return this
@@ -154,6 +170,21 @@ function fakeAdmin(tables: Record<string, Row[]>, rpc: Record<string, Row[]> = {
 
 const BASE_KEYS: DecryptedApiKeys = { openrouter: 'fake-key', userId: 'me' }
 
+/** The person's own row for a role (public.person_roles), as it comes back embedded in a job. */
+function verdict(over: Row = {}): Row {
+  return {
+    user_id: 'me',
+    checked_at: '2026-10-06T08:00:00Z',
+    blocked_reasons: [],
+    want_p: 0.7,
+    want_reason: 'Payments work.',
+    want_detail: null,
+    chance: 'possible',
+    chance_detail: { checks: [], gaps: [], confirm: [], note: null },
+    ...over,
+  }
+}
+
 function baseCtx(admin: AdminClient, overrides: Partial<CopilotToolContext> = {}): CopilotToolContext {
   return {
     admin,
@@ -167,7 +198,7 @@ function baseCtx(admin: AdminClient, overrides: Partial<CopilotToolContext> = {}
 describe('dispatchTool — agent gating (server-side, not merely prompt-hidden)', () => {
   it('rejects a tool whose spec names an agent NOT in enabledAgents', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', chance: 'possible', want_p: 0.7, want_reason: 'Payments work.', fit_assessed_at: '2026-10-06T08:00:00Z', blocked_reasons: [], chance_detail: { checks: [], gaps: [], confirm: [], note: null } }],
+      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', person_roles: [verdict()] }],
       companies: [{ id: 'co-1', name: 'Acme', user_id: 'me' }],
     })
     // explain_match's catalog spec has agent: 'matcher' — exclude it.
@@ -181,7 +212,7 @@ describe('dispatchTool — agent gating (server-side, not merely prompt-hidden)'
 
   it('the SAME tool succeeds once its backing agent IS enabled', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', chance: 'possible', want_p: 0.7, want_reason: 'Payments work.', fit_assessed_at: '2026-10-06T08:00:00Z', blocked_reasons: [], chance_detail: { checks: [], gaps: [], confirm: [], note: null } }],
+      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', person_roles: [verdict()] }],
       companies: [{ id: 'co-1', name: 'Acme', user_id: 'me' }],
     })
     const ctx = baseCtx(admin, { enabledAgents: new Set(['matcher']) })
@@ -195,7 +226,7 @@ describe('dispatchTool — agent gating (server-side, not merely prompt-hidden)'
 
   it('undefined enabledAgents means "all enabled" (default, unchanged behavior)', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', chance: 'possible', want_p: 0.7, want_reason: 'Payments work.', fit_assessed_at: '2026-10-06T08:00:00Z', blocked_reasons: [], chance_detail: { checks: [], gaps: [], confirm: [], note: null } }],
+      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', person_roles: [verdict()] }],
       companies: [{ id: 'co-1', name: 'Acme', user_id: 'me' }],
     })
     const ctx = baseCtx(admin) // no enabledAgents field at all
@@ -283,7 +314,7 @@ describe('dispatchTool — always resolves to {error}, never throws', () => {
 describe('dispatchTool — job ownership enforced transitively via companies.user_id', () => {
   it('a job owned by a DIFFERENT user is not reachable via explain_match, even with the correct jobId', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'Secret Role', company_id: 'co-1', chance: 'strong', want_p: 0.99, want_reason: 'secret reason', fit_assessed_at: '2026-10-06T08:00:00Z' }],
+      jobs: [{ id: 'job-1', title: 'Secret Role', company_id: 'co-1', person_roles: [verdict({ chance: 'strong', want_p: 0.99, want_reason: 'secret reason' })] }],
       // co-1 belongs to someone else, NOT 'me'.
       companies: [{ id: 'co-1', name: 'Other Person Co', user_id: 'someone-else' }],
     })
@@ -303,7 +334,7 @@ describe('dispatchTool — job ownership enforced transitively via companies.use
 
   it('the identical job IS reachable once it belongs to the caller', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'My Role', company_id: 'co-1', chance: 'strong', want_p: 0.77, want_reason: 'Good fit.', fit_assessed_at: '2026-10-06T08:00:00Z', blocked_reasons: [], chance_detail: { checks: [], gaps: [], confirm: [], note: null } }],
+      jobs: [{ id: 'job-1', title: 'My Role', company_id: 'co-1', person_roles: [verdict({ chance: 'strong', want_p: 0.77, want_reason: 'Good fit.' })] }],
       companies: [{ id: 'co-1', name: 'My Co', user_id: 'me' }],
     })
     const ctx = baseCtx(admin)
@@ -625,13 +656,19 @@ describe('dispatchTool — research_companies (batch: caps, partial failure, bou
 // ---------------------------------------------------------------------------
 describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
   const co = { id: 'co-1', name: 'Acme', user_id: 'me', is_dream_company: false }
-  const jobs = [
-    { id: 'job-1', title: 'Staff Backend Engineer', company_id: 'co-1', chance: 'strong', want_p: 0.8, is_new: false, location: null, posted_at: null },
-    { id: 'job-2', title: 'Product Designer', company_id: 'co-1', chance: 'possible', want_p: 0.6, is_new: false, location: null, posted_at: null },
-  ]
+  // The person's own rows, each with its posting embedded, as the list query returns them.
+  const posting = (id: string, title: string, chance: string, want_p: number) => ({
+    user_id: 'me',
+    job_id: id,
+    hidden_reason: null,
+    chance,
+    want_p,
+    jobs: { id, title, company_id: 'co-1', is_new: false, location: null, posted_at: null },
+  })
+  const person_roles = [posting('job-1', 'Staff Backend Engineer', 'strong', 0.8), posting('job-2', 'Product Designer', 'possible', 0.6)]
 
   it('a real word query (>=4 chars) matches via FTS (textSearch), no rpc needed', async () => {
-    const admin = fakeAdmin({ companies: [co], jobs })
+    const admin = fakeAdmin({ companies: [co], person_roles })
     const ctx = baseCtx(admin)
 
     const result = (await dispatchTool(ctx, 'list_jobs', { query: 'backend' })) as { jobs: { jobId: string }[] }
@@ -641,7 +678,7 @@ describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
   })
 
   it('a short query (<4 chars) skips FTS and goes straight to the trgm rpc', async () => {
-    const admin = fakeAdmin({ companies: [co], jobs }, { search_jobs_by_title_trgm: [{ job_id: 'job-2', score: 0.9 }] })
+    const admin = fakeAdmin({ companies: [co], person_roles }, { search_jobs_by_title_trgm: [{ job_id: 'job-2', score: 0.9 }] })
     const ctx = baseCtx(admin)
 
     const result = (await dispatchTool(ctx, 'list_jobs', { query: 'dsn' })) as { jobs: { jobId: string }[] }
@@ -654,7 +691,7 @@ describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
     // "enginer" matches no title via the FTS stand-in (textSearch is a
     // straight substring match), but the trgm rpc fixture stands in for
     // Postgres finding job-1 by similarity anyway.
-    const admin = fakeAdmin({ companies: [co], jobs }, { search_jobs_by_title_trgm: [{ job_id: 'job-1', score: 0.5 }] })
+    const admin = fakeAdmin({ companies: [co], person_roles }, { search_jobs_by_title_trgm: [{ job_id: 'job-1', score: 0.5 }] })
     const ctx = baseCtx(admin)
 
     const result = (await dispatchTool(ctx, 'list_jobs', { query: 'enginer' })) as { jobs: { jobId: string }[] }
@@ -709,7 +746,7 @@ describe('dispatchTool in Langfuse', () => {
 
   it('a built-in tool is a tool observation named for the tool, under the active span, with its args and result', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', chance: 'possible', want_p: 0.7, want_reason: 'Payments work.', fit_assessed_at: '2026-10-06T08:00:00Z', blocked_reasons: [], chance_detail: { checks: [], gaps: [], confirm: [], note: null } }],
+      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', person_roles: [verdict()] }],
       companies: [{ id: 'co-1', name: 'Acme', user_id: 'me' }],
     })
     const { rows } = await traced(configure(false), baseCtx(admin), 'explain_match', { jobId: 'job-1' })

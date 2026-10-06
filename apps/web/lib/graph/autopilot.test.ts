@@ -51,10 +51,8 @@ const scoreJobBatchMock = vi.fn(async (_opts: unknown): Promise<{ scored: unknow
   skippedReason: 'no-companies',
 }))
 vi.mock('../harness/agents/matcher', async (importOriginal) => {
-  // Real ownedJobsQuery is kept (loadCandidateJobs builds its FK-join filter
-  // through it — see FakeQueryBuilder's companies.user_id special case
-  // above); only scoreJobBatch is faked, since that's the metered LLM path
-  // this file never wants to actually run.
+  // Only scoreJobBatch is faked, since that's the metered LLM path this file
+  // never wants to actually run.
   const actual = await importOriginal<typeof import('../harness/agents/matcher')>()
   return {
     ...actual,
@@ -330,6 +328,16 @@ function seedCompanies(admin: FakeAdmin, userId: string, count: number): void {
   }
 }
 
+// The person's own row for a role: their verdict beside the embedded posting, as the query returns it.
+function seedPersonRole(
+  admin: FakeAdmin,
+  userId: string,
+  posting: { id: string; title: string; description: string; location: string; url: string; company_id: string },
+  verdict: { chance: string; want_p: number; blocked_reasons: unknown[] }
+) {
+  admin.seed('person_roles', { id: `${userId}:${posting.id}`, user_id: userId, job_id: posting.id, hidden_reason: null, ...verdict, jobs: posting })
+}
+
 // userId defaults to makeProfile()'s own default ('user-1') — every existing
 // call site relies on this. Seeds each job as assessed (a chance, a want, nothing
 // blocked) and as wanted (the person tapped Interested on it): the two things
@@ -348,18 +356,16 @@ function seedJobs(
       n += 1
       const id = `job-${n}`
       ids.push(id)
-      admin.seed('jobs', {
+      const posting = {
         id,
         title: `Role ${n}`,
         description: 'Do the work.',
         location: 'Remote',
         url: `https://example.com/${id}`,
         company_id: companyId,
-        chance,
-        want_p: 0.8,
-        blocked_reasons: [],
-        discovered_at: new Date(2026, 0, 1, 0, 0, n).toISOString(),
-      })
+      }
+      admin.seed('jobs', { ...posting, discovered_at: new Date(2026, 0, 1, 0, 0, n).toISOString() })
+      seedPersonRole(admin, userId, posting, { chance, want_p: 0.8, blocked_reasons: [] })
       admin.seed('role_reactions', { id: `${id}-reaction`, user_id: userId, job_id: id, reaction: 'interested' })
     }
   }
@@ -494,24 +500,26 @@ describe('autopilotTickGraph — untargeted sweep, happy path', () => {
       description: 'Do the work.',
       location: 'Remote',
       company_id: companyId,
-      want_p: 0.8,
-      blocked_reasons: [] as unknown[],
-      discovered_at: '2026-01-01T00:00:00.000Z',
+    }
+    const role = (id: string, chance: string, over: { want_p?: number; blocked_reasons?: unknown[] } = {}) => {
+      const posting = { id, url: 'https://example.com/' + id.replace('job-', ''), ...jobBase }
+      admin.seed('jobs', { ...posting, discovered_at: '2026-01-01T00:00:00.000Z' })
+      seedPersonRole(admin, profile.id, posting, { chance, want_p: over.want_p ?? 0.8, blocked_reasons: over.blocked_reasons ?? [] })
     }
     const wanted = (id: string) => admin.seed('role_reactions', { id: `${id}-r`, user_id: profile.id, job_id: id, reaction: 'interested' })
     // Wanted, Possible, nothing blocking: the only one that should reach `eligible`.
-    admin.seed('jobs', { id: 'job-ok', url: 'https://example.com/ok', chance: 'possible', ...jobBase })
+    role('job-ok', 'possible')
     wanted('job-ok')
     // Wanted, but a stretch.
-    admin.seed('jobs', { id: 'job-stretch', url: 'https://example.com/stretch', chance: 'stretch', ...jobBase })
+    role('job-stretch', 'stretch')
     wanted('job-stretch')
     // Wanted and strong, but it breaks something the person stated.
-    admin.seed('jobs', { id: 'job-blocked', url: 'https://example.com/blocked', chance: 'strong', ...jobBase, blocked_reasons: [{ kind: 'location', text: 'x' }] })
+    role('job-blocked', 'strong', { blocked_reasons: [{ kind: 'location', text: 'x' }] })
     wanted('job-blocked')
     // Strong, but the person has not shown they want it: not on today's list and not Interested.
-    admin.seed('jobs', { id: 'job-unwanted', url: 'https://example.com/unwanted', chance: 'strong', ...jobBase })
+    role('job-unwanted', 'strong')
     // Strong and on today's shortlist: wanted.
-    admin.seed('jobs', { id: 'job-listed', url: 'https://example.com/listed', chance: 'strong', ...jobBase, want_p: 0.9 })
+    role('job-listed', 'strong', { want_p: 0.9 })
     admin.seed('shortlist_items', { id: 'item-1', user_id: profile.id, for_date: new Date().toISOString().slice(0, 10), job_id: 'job-listed' })
 
     scoreJobBatchMock.mockResolvedValueOnce({ scored: [], failedCount: 0, candidatesConsidered: 5 })

@@ -36,8 +36,9 @@ import { generateDossier, type CompanyResearcherResult } from './agents/company_
 import { cv_tailor } from './agents/cv_tailor'
 import { sourcer } from './agents/sourcer'
 import { runBulkMatch, type BulkMatchResult } from './agents/bulk_matcher'
-import { FIT_COLUMNS, fitHighlights, parseFit } from '@/lib/scoring/read'
-import { userCompanyIds, diagnoseCandidateJobs, ownedJobsQuery, type CandidateDiagnosis } from './agents/matcher'
+import { FIT_COLUMNS, fitHighlights, fitRowOf, parseFit, type FitRow } from '@/lib/scoring/read'
+import { OnJobs } from '@/lib/scoring/person-roles-query'
+import { userCompanyIds, diagnoseCandidateJobs, type CandidateDiagnosis } from './agents/matcher'
 import { canRunLlm, missingOpenRouterMessage } from './llm-key-message'
 import { resolveTargeting } from '@/lib/targeting'
 import { formatKbContext, searchKb } from '@/lib/kb/store'
@@ -180,9 +181,10 @@ interface OwnedJob {
   description?: string | null
   location?: string | null
   company_id: string | null
+  // The person's own verdict on the job (their person_roles row), merged in by loadOwnedJob when it is asked for.
   chance?: string | null
   chance_detail?: unknown
-  fit_assessed_at?: string | null
+  checked_at?: string | null
   want_p?: number | null
   want_reason?: string | null
   want_detail?: unknown
@@ -208,15 +210,24 @@ function companyNotFoundError(companyId: string): string {
   )
 }
 
-/** Load a job and verify the user owns it (via companies.user_id). */
+/** Load a job and verify the user owns it (via companies.user_id). With `fit`, the person's own verdict on it (their person_roles row) is merged into the job. */
 async function loadOwnedJob(
   ctx: CopilotToolContext,
   jobId: string,
-  columns: string
+  columns: string,
+  opts: { fit?: boolean } = {}
 ): Promise<{ job: OwnedJob; companyName: string } | { error: string }> {
-  const { data } = await ctx.admin.from('jobs').select(columns).eq('id', jobId).maybeSingle()
+  let query = ctx.admin
+    .from('jobs')
+    .select(opts.fit ? columns + ', person_roles(' + FIT_COLUMNS + ')' : columns)
+    .eq('id', jobId)
+  // Only this person's own row comes back inside the job.
+  if (opts.fit) query = query.eq('person_roles.user_id', ctx.userId)
+  const { data } = await query.maybeSingle()
   if (!data) return { error: jobNotFoundError(jobId) }
-  const job = data as unknown as OwnedJob
+  const raw = data as unknown as OwnedJob & { person_roles?: FitRow | FitRow[] | null }
+  const { person_roles: _embedded, ...posting } = raw
+  const job: OwnedJob = opts.fit ? { ...posting, ...fitRowOf(raw) } : posting
   const companyId = job.company_id
   if (!companyId) return { error: 'Job has no company' }
   const { data: company } = await ctx.admin
@@ -280,13 +291,15 @@ async function loadJobBriefs(ctx: CopilotToolContext, jobIds: string[]): Promise
   if (jobIds.length === 0) return []
   const { data: jobs } = await ctx.admin
     .from('jobs')
-    .select('id, title, company_id, chance, is_new, location, posted_at')
+    .select('id, title, company_id, is_new, location, posted_at')
     .in('id', jobIds)
+  // The chance is the person's own: it lives on their person_roles row for the role.
+  const { data: mine } = await ctx.admin.from('person_roles').select('job_id, chance').eq('user_id', ctx.userId).in('job_id', jobIds)
+  const chanceByJob = new Map(((mine as { job_id: string; chance: string | null }[] | null) ?? []).map((r) => [r.job_id, r.chance]))
   type Row = {
     id: string
     title: string | null
     company_id: string | null
-    chance: string | null
     is_new: boolean | null
     location: string | null
     posted_at: string | null
@@ -307,7 +320,7 @@ async function loadJobBriefs(ctx: CopilotToolContext, jobIds: string[]): Promise
       title: r.title,
       company: r.company_id ? nameById.get(r.company_id) ?? null : null,
       companyId: r.company_id,
-      chance: r.chance,
+      chance: chanceByJob.get(r.id) ?? null,
       fresh: r.is_new === true,
       location: r.location,
       postedAt: r.posted_at,
@@ -319,11 +332,15 @@ async function loadJobBriefs(ctx: CopilotToolContext, jobIds: string[]): Promise
  *  user's companies. What the person ruled out is decided once, inside the
  *  assessment itself, so this only picks a bounded id list to hand it. */
 async function pickUnscoredJobIds(ctx: CopilotToolContext, limit: number): Promise<string[]> {
-  const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, 'id, companies!inner(user_id)')
-    .is('fit_assessed_at', null)
-    .order('posted_at', { ascending: false, nullsFirst: false })
+  const { data } = await ctx.admin
+    .from('person_roles')
+    .select('job_id, jobs!inner(id)')
+    .eq('user_id', ctx.userId)
+    .is('hidden_reason', null)
+    .is('checked_at', null)
+    .order('jobs(posted_at)', { ascending: false, nullsFirst: false })
     .limit(limit)
-  return ((data as { id: string }[] | null) ?? []).map((r) => r.id)
+  return ((data as { job_id: string }[] | null) ?? []).map((r) => r.job_id)
 }
 
 /** How much wider a pool to pull for RELEVANCE ranking than the final `limit`
@@ -332,6 +349,8 @@ async function pickUnscoredJobIds(ctx: CopilotToolContext, limit: number): Promi
  *  into memory for one tool call. */
 const RELEVANCE_POOL_MULTIPLIER = 15
 const RELEVANCE_POOL_MAX = 300
+
+type PoolJob = { id: string; title: string | null; description: string | null }
 
 export interface ScoringCandidatePick {
   jobIds: string[]
@@ -370,11 +389,18 @@ async function pickScoringCandidateIds(
   }
 
   const poolSize = Math.min(RELEVANCE_POOL_MAX, Math.max(limit * RELEVANCE_POOL_MULTIPLIER, 100))
-  const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, 'id, title, description, companies!inner(user_id)')
-    .is('fit_assessed_at', null)
-    .order('posted_at', { ascending: false, nullsFirst: false })
+  const { data } = await ctx.admin
+    .from('person_roles')
+    .select('jobs!inner(id, title, description)')
+    .eq('user_id', ctx.userId)
+    .is('hidden_reason', null)
+    .is('checked_at', null)
+    .order('jobs(posted_at)', { ascending: false, nullsFirst: false })
     .limit(poolSize)
-  const rows = (data as unknown as { id: string; title: string | null; description: string | null }[] | null) ?? []
+  const rows = ((data as unknown as { jobs: PoolJob | PoolJob[] | null }[] | null) ?? []).flatMap((r) => {
+    const job = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs
+    return job ? [job] : []
+  })
 
   const ranked = rankJobsByRelevance(rows, parsed)
   const matched = ranked.filter((r) => r.relevance.score > 0)
@@ -566,16 +592,16 @@ async function dispatchToolInner(ctx: CopilotToolContext, tool: string, args: Ar
  *  20260816000009_job_search.sql's header for why title search needs both. */
 const JOB_TITLE_FTS_MIN_LENGTH = 4
 
-type JobListRow = {
+type ListedJob = {
   id: string
   title: string | null
   company_id: string
-  chance: string | null
-  want_p: number | null
   is_new: boolean | null
   location: string | null
   posted_at: string | null
 }
+
+type JobListRow = ListedJob & { chance: string | null; want_p: number | null }
 
 /** trgm-similarity job ids for `query`, ranked best-first, scoped to this
  *  user via the RPC's own p_user_id predicate (the admin client bypasses RLS,
@@ -600,46 +626,54 @@ async function listJobs(ctx: CopilotToolContext, args: Args) {
   const ids = (dreamOnly ? companyRows.filter((c) => c.is_dream_company) : companyRows).map((c) => c.id)
   if (ids.length === 0) return { jobs: [], note: dreamOnly ? 'No dream companies tracked yet.' : 'No companies tracked yet.' }
 
-  const SELECT = 'id, title, company_id, chance, want_p, is_new, location, posted_at, companies!inner(user_id, is_dream_company)'
-  // Ownership (and, when dreamOnly, the is_dream_company narrowing) is
-  // pushed into the FK join rather than an .in('company_id', ids) array —
-  // ids can run into the hundreds, past the request URL length limit.
+  // The list starts at the person's own rows (their want and chance are on them) and
+  // embeds the posting. Ownership of the company (and, when dreamOnly, the
+  // is_dream_company narrowing) is pushed into the FK join rather than an
+  // .in('company_id', ids) array: ids can run into the hundreds, past the request
+  // URL length limit.
+  const SELECT = 'chance, want_p, jobs!inner(id, title, company_id, is_new, location, posted_at, companies!inner(user_id, is_dream_company))'
   const baseQuery = () => {
-    let q = openRolesOnly(ownedJobsQuery(ctx.admin, ctx.userId, SELECT))
-    if (dreamOnly) q = q.eq('companies.is_dream_company', true)
-    if (fresh) q = q.eq('is_new', true)
-    return q
+    const on = new OnJobs(ctx.admin.from('person_roles').select(SELECT).eq('user_id', ctx.userId).is('hidden_reason', null))
+    on.eq('companies.user_id', ctx.userId)
+    openRolesOnly(on)
+    if (dreamOnly) on.eq('companies.is_dream_company', true)
+    if (fresh) on.eq('is_new', true)
+    return on
   }
+  const toRows = (data: unknown): JobListRow[] =>
+    ((data as { chance: string | null; want_p: number | null; jobs: ListedJob | ListedJob[] | null }[] | null) ?? []).flatMap((r) => {
+      const job = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs
+      return job ? [{ ...job, chance: r.chance, want_p: r.want_p }] : []
+    })
 
   let rows: JobListRow[] = []
   if (query && query.length < JOB_TITLE_FTS_MIN_LENGTH) {
-    // Short query — trgm only, ranked by similarity (no want/posted_at
+    // Short query: trgm only, ranked by similarity (no want/posted_at
     // reorder: relevance to the typed text IS the ranking the user asked for).
     const trgmIds = await searchJobIdsByTitleTrgm(ctx, query, limit)
     if (trgmIds.length > 0) {
-      const { data } = await baseQuery().in('id', trgmIds)
-      const byId = new Map(((data as unknown as JobListRow[]) ?? []).map((j) => [j.id, j]))
+      const { data } = await baseQuery().in('id', trgmIds).query
+      const byId = new Map(toRows(data).map((j) => [j.id, j]))
       rows = trgmIds.map((id) => byId.get(id)).filter((r): r is JobListRow => !!r)
     }
   } else {
-    let q = baseQuery()
-    if (query) q = q.textSearch('tsv', query, { type: 'websearch', config: 'english' })
-    q = q
+    const on = baseQuery()
+    if (query) on.textSearch('tsv', query, { type: 'websearch', config: 'english' })
+    const { data } = await on.query
       .order('want_p', { ascending: false, nullsFirst: false })
-      .order('posted_at', { ascending: false, nullsFirst: false })
+      .order('jobs(posted_at)', { ascending: false, nullsFirst: false })
       .limit(limit)
-    const { data } = await q
-    rows = (data as unknown as JobListRow[]) ?? []
+    rows = toRows(data)
 
-    // websearch_to_tsquery found nothing — most likely a typo or a term the
+    // websearch_to_tsquery found nothing: most likely a typo or a term the
     // stemmer/stopword list didn't help with. Fall back to trgm rather than
     // reporting an empty result for a query that IS in the data, just
     // misspelled.
     if (query && rows.length === 0) {
       const trgmIds = await searchJobIdsByTitleTrgm(ctx, query, limit)
       if (trgmIds.length > 0) {
-        const { data: fallbackData } = await baseQuery().in('id', trgmIds)
-        const byId = new Map(((fallbackData as unknown as JobListRow[]) ?? []).map((j) => [j.id, j]))
+        const { data: fallbackData } = await baseQuery().in('id', trgmIds).query
+        const byId = new Map(toRows(fallbackData).map((j) => [j.id, j]))
         rows = trgmIds.map((id) => byId.get(id)).filter((r): r is JobListRow => !!r)
       }
     }
@@ -676,10 +710,10 @@ async function listRuns(ctx: CopilotToolContext) {
 async function explainMatch(ctx: CopilotToolContext, args: Args) {
   const jobId = str(args.jobId)
   if (!jobId) return { error: 'jobId is required' }
-  const res = await loadOwnedJob(ctx, jobId, `id, title, company_id, ${FIT_COLUMNS}`)
+  const res = await loadOwnedJob(ctx, jobId, 'id, title, company_id', { fit: true })
   if ('error' in res) return res
   const { job, companyName } = res
-  if (job.chance == null && job.want_p == null && !job.fit_assessed_at) {
+  if (job.chance == null && job.want_p == null && !job.checked_at) {
     return {
       title: job.title,
       company: companyName,
@@ -1210,7 +1244,7 @@ async function doDraftOutreach(ctx: CopilotToolContext, args: Args) {
   let matchHighlights: string[] = []
 
   if (jobId) {
-    const res = await loadOwnedJob(ctx, jobId, 'id, title, description, company_id, chance_detail')
+    const res = await loadOwnedJob(ctx, jobId, 'id, title, description, company_id', { fit: true })
     if ('error' in res) return res
     jobTitle = res.job.title ?? jobTitle
     jobDescription = res.job.description ?? null

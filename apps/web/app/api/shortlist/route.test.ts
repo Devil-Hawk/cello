@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { BudgetCapError } from '@/lib/harness/spend'
 
-const state = { user: { id: 'u1' } as { id: string } | null, canRun: true }
+const state = { user: { id: 'u1' } as { id: string } | null, canRun: true, picksOn: true }
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: async () => ({ data: { user: state.user }, error: null }) } }) }))
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({}) }))
 vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: async () => ({ openrouter: 'k' }) }))
@@ -17,6 +17,10 @@ const readShortlist = vi.fn()
 const runDailyShortlist = vi.fn()
 vi.mock('@/lib/scoring', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/scoring')>()),
+  // The daily picks are off in the product; most of this file checks the route as it will behave once they are on.
+  get PICKS_ON() {
+    return state.picksOn
+  },
   readShortlist: (...a: unknown[]) => readShortlist(...a),
   runDailyShortlist: (...a: unknown[]) => runDailyShortlist(...a),
 }))
@@ -31,6 +35,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   state.user = { id: 'u1' }
   state.canRun = true
+  state.picksOn = true
 })
 
 describe('GET /api/shortlist', () => {
@@ -58,6 +63,16 @@ describe('POST /api/shortlist', () => {
   it('is 401 for a signed-out visitor', async () => {
     state.user = null
     expect((await post()).status).toBe(401)
+  })
+
+  it('while the daily picks are off, answers with the stored view, picks nothing and asks for no key', async () => {
+    state.picksOn = false
+    state.canRun = false
+    readShortlist.mockResolvedValue(view('not_built'))
+    const res = await post({ date: '2026-10-06', refresh: true })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ status: 'not_built', picks: [], run: { status: 'off', unfinished: 0 } })
+    expect(runDailyShortlist).not.toHaveBeenCalled()
   })
 
   it('answers from storage and spends nothing when today\'s list already exists', async () => {

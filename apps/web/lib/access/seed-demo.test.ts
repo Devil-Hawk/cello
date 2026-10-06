@@ -29,7 +29,7 @@ import {
 } from './seed-demo'
 import { DEMO_COMPANIES, DEMO_CONTACTS, DEMO_JOBS, DEMO_APPLICATIONS, DEMO_RESUME_MARKDOWN } from './fixtures'
 import { resumeLines } from '@/lib/scoring/chance'
-import { quoteIsIn } from '@/lib/scoring/requirements'
+import { quoteIsIn } from '@/lib/scoring/posting-requirements'
 import { markdownToPlainText } from '@/lib/resume/markdown'
 
 const DEMO_USER = '11111111-2222-4333-8444-555555555555'
@@ -138,7 +138,8 @@ function fakeAdmin(profile: Partial<FakeProfile> = {}): Fake {
           const target = store(table)
           const idKey = opts?.onConflict ?? 'id'
           for (const row of rows) {
-            const id = row[idKey] as string
+            // A composite conflict key (user_id,job_id) is the values of its columns together.
+            const id = idKey.split(',').map((k) => String(row[k])).join('|')
             if (target.has(id) && opts?.ignoreDuplicates) continue
             target.set(id, row)
           }
@@ -196,7 +197,7 @@ describe('buildDemoWorkspace — shape', () => {
     expect(workspace.batches.map((b) => b.table)).toEqual([
       'companies',
       'jobs',
-      'shortlist_items',
+      'person_roles',
       'applications',
       'activities',
       'contacts',
@@ -239,7 +240,7 @@ describe('buildDemoWorkspace — shape', () => {
 
   it('spans every chance, including some roles not assessed yet', () => {
     const counts = { strong: 0, possible: 0, stretch: 0, unassessed: 0 }
-    for (const row of batch(workspace.batches, 'jobs').rows) {
+    for (const row of batch(workspace.batches, 'person_roles').rows) {
       const c = row.chance as 'strong' | 'possible' | 'stretch' | null
       counts[c ?? 'unassessed'] += 1
     }
@@ -255,12 +256,17 @@ describe('buildDemoWorkspace — shape', () => {
   it('writes the assessment in the shape lib/scoring reads, with every cited resume line really on the resume', () => {
     const resume = markdownToPlainText(DEMO_RESUME_MARKDOWN)
     const lines = resumeLines(resume)
+    // The posting carries no verdict: it is shared, and what Cello concluded is the person's own.
     for (const row of batch(workspace.batches, 'jobs').rows) {
-      expect(row).not.toHaveProperty('match_score')
-      expect(row).not.toHaveProperty('match_details')
+      for (const column of ['match_score', 'match_details', 'chance', 'chance_detail', 'want_p', 'want_reason', 'want_detail', 'blocked_reasons', 'fit_assessed_at', 'checked_at']) {
+        expect(row).not.toHaveProperty(column)
+      }
+    }
+    for (const row of batch(workspace.batches, 'person_roles').rows) {
+      expect(row.user_id).toBe(DEMO_USER)
       if (row.chance == null) {
         expect(row.want_p).toBeNull()
-        expect(row.fit_assessed_at).toBeNull()
+        expect(row.checked_at).toBeNull()
         expect(row.chance_detail).toBeNull()
         continue
       }
@@ -289,20 +295,17 @@ describe('buildDemoWorkspace — shape', () => {
     }
   })
 
-  it('seeds today\'s shortlist: five picks and one labelled exploration pick, each with a sentence', () => {
-    const jobs = batch(workspace.batches, 'jobs').rows
-    const items = batch(workspace.batches, 'shortlist_items').rows
-    expect(items).toHaveLength(6)
-    expect(items.filter((r) => r.pick_kind === 'explore')).toHaveLength(1)
-    expect(items.map((r) => r.position)).toEqual([1, 2, 3, 4, 5, 6])
-    for (const item of items) {
-      expect(item.user_id).toBe(DEMO_USER)
-      expect(item.for_date).toBe('2026-08-03')
-      expect(item.explanation as string).toMatch(/\.$/)
-      expect(jobs.find((j) => j.id === item.job_id)!.chance).not.toBeNull()
-    }
-    // No verdict rows are seeded: nothing here was produced by a model, so there is nothing to grade.
+  it('seeds no shortlist while the daily picks are off, and no verdict rows', () => {
+    expect(workspace.batches.map((b) => b.table)).not.toContain('shortlist_items')
+    // Nothing here was produced by a model, so there is nothing to grade.
     expect(workspace.batches.map((b) => b.table)).not.toContain('eval_verdicts')
+  })
+
+  it('gives the demo person one row for every role, keyed by person and role', () => {
+    const jobs = batch(workspace.batches, 'jobs').rows
+    const mine = batch(workspace.batches, 'person_roles')
+    expect(mine.conflictColumn).toBe('user_id,job_id')
+    expect(mine.rows.map((r) => r.job_id).sort()).toEqual(jobs.map((r) => r.id).sort())
   })
 
   it('spreads posted_at over the last three weeks, with a few flagged new', () => {
@@ -335,7 +338,7 @@ describe('buildDemoWorkspace — shape', () => {
       expect(applicationIds.has(row.application_id)).toBe(true)
     }
     for (const row of batch(workspace.batches, 'contacts').rows) expect(companyIds.has(row.company_id)).toBe(true)
-    for (const row of batch(workspace.batches, 'shortlist_items').rows) expect(jobIds.has(row.job_id)).toBe(true)
+    for (const row of batch(workspace.batches, 'person_roles').rows) expect(jobIds.has(row.job_id)).toBe(true)
     for (const row of batch(workspace.batches, 'trace_spans').rows) expect(runIds.has(row.run_id)).toBe(true)
     for (const row of batch(workspace.batches, 'application_drafts').rows) {
       expect(jobIds.has(row.job_id)).toBe(true)

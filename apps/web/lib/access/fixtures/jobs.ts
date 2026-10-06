@@ -25,7 +25,7 @@
 //   nothing.
 
 import { labelChance, resumeLines } from '@/lib/scoring/chance'
-import type { Requirement } from '@/lib/scoring/requirements'
+import type { Requirement } from '@/lib/scoring/posting-requirements'
 import type { RequirementCheck } from '@/lib/scoring/types'
 import { companyBySlug, type DemoCompany } from './companies'
 
@@ -891,7 +891,7 @@ function lineShowing(phrase: string, lines: readonly { n: number; text: string }
 }
 
 export interface DemoFit {
-  fit_assessed_at: string | null
+  checked_at: string | null
   blocked_reasons: unknown[]
   want_p: number | null
   want_reason: string | null
@@ -910,7 +910,7 @@ function wantReasonFor(job: DemoJob, want: number): string {
 
 /**
  * The assessment a demo role carries, in EXACTLY the shape lib/scoring writes to
- * the job row: a want with a reason, and a chance with a cited line for every
+ * the person's row for it (person_roles): a want with a reason, and a chance with a cited line for every
  * requirement the résumé shows and a named gap for every one it does not. The chance
  * follows the same rule the product uses (lib/scoring/chance.ts labelChance): no
  * gap is Strong, one is Possible, two or more, or a role in a function the résumé
@@ -922,33 +922,33 @@ function wantReasonFor(job: DemoJob, want: number): string {
  */
 export function buildDemoFit(job: DemoJob, resume: string, assessedAt: string): DemoFit {
   if (job.want == null) {
-    return { fit_assessed_at: null, blocked_reasons: [], want_p: null, want_reason: null, want_detail: null, chance: null, chance_detail: null }
+    return { checked_at: null, blocked_reasons: [], want_p: null, want_reason: null, want_detail: null, chance: null, chance_detail: null }
   }
   const lines = resumeLines(resume)
   const requirements: Requirement[] = []
   const checks: RequirementCheck[] = []
   job.focus.forEach((skill, i) => {
     const line = lineShowing(skill, lines)
-    requirements.push({ id: `r${i + 1}`, text: skill, kind: 'skill', mustHave: true, quote: skill })
+    requirements.push({ id: `r${i + 1}`, text: skill, kind: 'skill', mustHave: true, quote: skill, origin: 'code' })
     checks.push({ requirement: skill, mustHave: true, status: line ? 'met' : 'not_met', evidence: line ? { line: line.n, quote: line.text.slice(0, 160) } : null })
   })
   // For the roles the person wants most, the skills the résumé lacks are things the posting only
   // mentions in passing (nice to have), so those roles can honestly read Strong.
   const mild = job.want >= 0.85
   job.missing.forEach((skill, i) => {
-    requirements.push({ id: `r${job.focus.length + i + 1}`, text: skill, kind: 'skill', mustHave: !mild, quote: skill })
+    requirements.push({ id: `r${job.focus.length + i + 1}`, text: skill, kind: 'skill', mustHave: !mild, quote: skill, origin: 'code' })
     checks.push({ requirement: skill, mustHave: !mild, status: 'not_met', evidence: null })
   })
   // A role in a function the résumé does not evidence is a stretch however the skills line up.
   if (job.jobFunction !== 'engineering') {
     const text = `Experience in ${job.jobFunction}`
-    requirements.push({ id: `r${requirements.length + 1}`, text, kind: 'experience', mustHave: true, quote: text })
+    requirements.push({ id: `r${requirements.length + 1}`, text, kind: 'experience', mustHave: true, quote: text, origin: 'code' })
     checks.push({ requirement: text, mustHave: true, status: 'not_met', evidence: null })
   }
   const labelled = labelChance(requirements, checks)
   const chance = labelled.chance === 'cannot_assess' ? null : labelled.chance
   return {
-    fit_assessed_at: assessedAt,
+    checked_at: assessedAt,
     blocked_reasons: [],
     want_p: job.want,
     want_reason: wantReasonFor(job, job.want),

@@ -23,6 +23,7 @@ import { userCompanyIds, ownedJobsQuery } from '../harness/agents/matcher'
 import { chunkedIn } from '../supabase/chunked-in'
 import { QUALITY_REJECT_THRESHOLD } from '../jobs/classify'
 import type { Targeting } from '../targeting'
+import { fitRowOf } from '../scoring/read'
 
 export interface ApplicationRow {
   id: string
@@ -37,7 +38,7 @@ export interface ApplicationRow {
   /** jobs.source — the ingest channel (greenhouse, lever, arbeitnow, ...). This IS the job board / ATS. */
   jobSource: string | null
   jobPostedAt: string | null
-  /** jobs.chance: strong | possible | stretch | cannot_assess, or null before the role was assessed. */
+  /** The person's own person_roles.chance: strong | possible | stretch | cannot_assess, or null before the role was assessed. */
   chance: string | null
   jobFunction: string | null
   seniority: string | null
@@ -103,9 +104,10 @@ interface RawJob {
   company_id: string
   source: string | null
   posted_at: string | null
-  chance: string | null
   job_function: string | null
   seniority: string | null
+  /** This person's own row for the role (the chance is theirs, not the posting's). */
+  person_roles?: { chance: string | null }[] | { chance: string | null } | null
   companies?: { name: string | null } | { name: string | null }[] | null
 }
 
@@ -145,7 +147,8 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
       const jobs = await chunkedIn(jobIds, async (chunk) => {
         const { data, error } = await admin
           .from('jobs')
-          .select('id, company_id, source, posted_at, chance, job_function, seniority, companies(name)')
+          .select('id, company_id, source, posted_at, job_function, seniority, companies(name), person_roles(chance)')
+          .eq('person_roles.user_id', userId)
           .in('id', chunk)
         if (error) console.error('[strategy] getApplications: jobs query failed', error)
         return (data as RawJob[] | null) ?? []
@@ -167,7 +170,7 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
             companyName: rawJobCompanyName(job),
             jobSource: job.source,
             jobPostedAt: job.posted_at,
-            chance: job.chance,
+            chance: fitRowOf(job).chance ?? null,
             jobFunction: job.job_function,
             seniority: job.seniority,
           }

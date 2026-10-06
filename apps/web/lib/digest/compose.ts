@@ -7,10 +7,10 @@
 //
 // Because the admin (service-role) client bypasses RLS, EVERY query here filters
 // explicitly by user ownership (user_id, or company_id restricted to the user's
-// own companies).
+// own person_roles rows).
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { ownedJobsQuery } from '@/lib/harness/agents/matcher'
+import { OnJobs } from '@/lib/scoring/person-roles-query'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { STAGE_META, type PipelineStage } from '@/lib/format'
 import {
@@ -37,8 +37,6 @@ interface JobRow {
   id: string
   title: string
   url: string | null
-  chance: string | null
-  want_p: number | null
   is_new: boolean | null
   company_id: string
   discovered_at: string | null
@@ -80,38 +78,36 @@ export async function composeDigest(
   const now = Date.now()
   const date = utcDateKey()
 
-  // 1) The user's own companies (for name lookup + job scoping).
+  // 1) The user's own companies (for the name lookup).
   const { data: companyData } = await admin
     .from('companies')
     .select('id, name')
     .eq('user_id', userId)
   const companies = (companyData as CompanyRow[] | null) ?? []
   const companyName = new Map<string, string | null>(companies.map((c) => [c.id, c.name]))
-  const companyIds = companies.map((c) => c.id)
 
-  // 2) Top fresh/high-match jobs across the user's tracked companies.
+  // 2) The roles this person most wants, from their own person_roles rows (the
+  //    want and the chance are theirs); the posting is embedded.
   let topJobs: DigestTopJob[] = []
-  if (companyIds.length > 0) {
-    // Ownership via the companies FK join (ownedJobsQuery), not an
-    // .in('company_id', companyIds) array — that breaks past ~600 companies.
-    const { data: jobData } = await openRolesOnly(
-      ownedJobsQuery(
-        admin,
-        userId,
-        'id, title, url, chance, want_p, is_new, company_id, discovered_at, companies!inner(user_id)'
-      )
+  {
+    const on = new OnJobs(
+      admin
+        .from('person_roles')
+        .select('chance, want_p, jobs!inner(id, title, url, is_new, company_id, discovered_at)')
+        .eq('user_id', userId)
+        .is('hidden_reason', null)
     )
+    openRolesOnly(on)
+    const { data: jobData } = await on.query
       .order('want_p', { ascending: false, nullsFirst: false })
-      .order('discovered_at', { ascending: false })
+      .order('jobs(discovered_at)', { ascending: false })
       .limit(TOP_JOBS_LIMIT)
-    const jobs = (jobData as JobRow[] | null) ?? []
-    topJobs = jobs.map((j) => ({
-      jobId: j.id,
-      title: j.title,
-      companyName: companyName.get(j.company_id) ?? null,
-      chance: j.chance,
-      url: j.url,
-    }))
+    const rows = (jobData as unknown as { chance: string | null; want_p: number | null; jobs: JobRow | JobRow[] | null }[] | null) ?? []
+    topJobs = rows.flatMap((r) => {
+      const j = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs
+      if (!j) return []
+      return [{ jobId: j.id, title: j.title, companyName: companyName.get(j.company_id) ?? null, chance: r.chance, url: j.url }]
+    })
   }
 
   // 3) The user's applications (for stale + prep cuts). Join job title.

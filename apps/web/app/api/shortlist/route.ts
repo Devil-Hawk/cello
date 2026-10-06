@@ -3,6 +3,9 @@
 //
 // The list is picked once a day and kept, so opening the page twice never pays
 // for it twice. POST answers with the same shape as GET, plus how the pick went.
+//
+// While the daily picks are off (PICKS_ON in lib/scoring) POST picks nothing, asks no
+// model and spends nothing: it answers with the same view as GET and run.status 'off'.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
@@ -11,7 +14,7 @@ import { loadApiKeys } from '@/lib/harness/keys'
 import { callLlm } from '@/lib/harness/llm'
 import { canRunLlm, missingOpenRouterMessage } from '@/lib/harness/llm-key-message'
 import type { LlmRunner } from '@/lib/harness/types'
-import { runDailyShortlist, readShortlist, todayUtc } from '@/lib/scoring'
+import { PICKS_ON, runDailyShortlist, readShortlist, todayUtc } from '@/lib/scoring'
 import { scoringErrorResponse } from '@/lib/scoring/http'
 import { setTraceOutput, withTrace } from '@/lib/trace/spans'
 
@@ -53,6 +56,13 @@ export async function POST(request: NextRequest) {
   const refresh = body.refresh === true
 
   const admin = createAdminClient()
+  if (!PICKS_ON) {
+    try {
+      return NextResponse.json({ ...(await readShortlist(admin, user.id, forDate)), run: { status: 'off', unfinished: 0 } })
+    } catch (err) {
+      return scoringErrorResponse(err, {})
+    }
+  }
   return withTrace(admin, user.id, { name: 'pick-shortlist' }, async () => {
     // Already picked today: answer from storage and spend nothing.
     if (!refresh) {
