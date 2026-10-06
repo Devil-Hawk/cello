@@ -7,6 +7,11 @@
 // rested on. lib/steps/source.test.ts fails on a raw model call outside the
 // steps, so no value reaches a stored row without that record.
 //
+// Before it runs, a step picks its rung (lib/models/ladder.ts): the first rung in the
+// person's order that is set up, at or under their ceiling and at or above the step's
+// lowest. None left throws BelowRungError with the step's `below` sentence. A call whose
+// keys carry no ceiling (a script, an operator key) runs as it always did.
+//
 // A step with no `prompt` moves a call over unchanged: its caller's own system
 // text goes through byte for byte. A step with a `prompt` gets the central policy
 // (./policy.ts) ahead of it.
@@ -17,7 +22,10 @@ import { rungFor } from '../harness/spend'
 import { resolveProviderId } from '../harness/providers'
 import type { DecryptedApiKeys, Door, LlmResult, LlmRunner, LlmRunOptions } from '../harness/types'
 import { isMeasureId } from '../commands/measures'
+import { takeFreeCap } from '../models/caps'
 import type { Rung } from '../models/doors.types'
+import { availableRungs, BelowRungError, pickRung } from '../models/ladder'
+import type { SlotStore } from '../commands/slots'
 import type { Evidence, Prov } from '../provenance/types'
 import { withPolicy } from './policy'
 
@@ -49,6 +57,8 @@ export interface StepCallContext {
   signal?: AbortSignal
   /** What the value rests on, written into prov. */
   evidence?: Evidence[]
+  /** Replaces the database counter of the free-key caps in tests. */
+  slots?: SlotStore
 }
 
 export type StepResult = LlmResult & { prov: Prov; parsed?: unknown }
@@ -96,10 +106,17 @@ export function defineModelStep(input: ModelStepDef): ModelStep {
   const def = declareStep(input)
 
   const call: ModelStep['call'] = async (keys, opts, ctx = {}) => {
+    const pick = keys.models ? pickRung(def, keys.models, availableRungs(keys), keys) : null
+    if (pick && pick.rung === null) throw new BelowRungError(pick.sentence)
+    if (pick) await takeFreeCap(def.id, pick.rung, keys, ctx.slots)
+
     const runOpts: LlmRunOptions = {
       ...opts,
       ...(def.prompt ? { system: withPolicy(def.prompt, opts.system) } : {}),
       door: ctx.door ?? opts.door,
+      // The rung decides the model and the way in. A caller's own OpenRouter model id stands
+      // only on the person's own paid key, where they chose to pay for it.
+      ...(pick ? { via: pick.via, model: pick.rung === 'R4' && pick.via === 'openrouter' && opts.model ? opts.model : pick.model } : {}),
     }
     // The step id is the generation name in the ledger and in Langfuse.
     const result = await callLlm(keys, { ...runOpts, name: def.id }, ctx.signal)
@@ -118,7 +135,7 @@ export function defineModelStep(input: ModelStepDef): ModelStep {
     const prov: Prov = {
       step: def.id,
       model: result.model,
-      rung: rungFor(resolveProviderId(keys.provider?.active), result.model),
+      rung: pick?.rung ?? rungFor(resolveProviderId(keys.provider?.active), result.model),
       evidence: ctx.evidence ?? [],
       at: new Date().toISOString(),
     }
