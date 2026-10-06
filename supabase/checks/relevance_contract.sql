@@ -397,15 +397,29 @@ begin
   delete from public.companies where id = cr;
   delete from public.company_directory where id = e4;
 
-  -- a shared role holds no one's score: the matcher writes it, the other follower reads nothing of it
-  select id into jh from public.jobs where employer_id = f.emp and external_id = 'held-1';
-  update public.jobs set match_score = 91, match_details = '{"strengths": ["A resume"]}'::jsonb where id = jh;
-  if (select match_score is not null or match_details is not null from public.jobs where id = jh) then raise exception 'a shared role stores no score'; end if;
-  if (select match_score is not null or match_details is not null from public.person_jobs where viewer_id = f.b and id = jh) then raise exception 'B reads nothing of the score written for A'; end if;
-  insert into public.jobs (company_id, title, description, url, external_id) values (f.co_a, 'Own', 'd', 'https://own.example/1', 'own-score');
-  update public.jobs set match_score = 77 where external_id = 'own-score';
-  if (select match_score from public.jobs where external_id = 'own-score') is distinct from 77 then raise exception 'a role with no employer keeps its score'; end if;
-  delete from public.jobs where external_id = 'own-score';
+end $$;
+
+-- 6g'. A stored score survives the employer migrations on a shared role, and scoring keeps writing it there.
+insert into public.jobs (company_id, employer_id, title, description, url, external_id, source, match_score, match_details)
+select co_a, emp, 'Scored role', 'd', 'https://shared.example/jobs/scored-1', 'scored-1', 'greenhouse', 64, '{"score": 64}'::jsonb from fx;
+insert into public.person_roles (user_id, job_id)
+select a, (select id from public.jobs where external_id = 'scored-1') from fx;
+\ir ../migrations/20261008060007_employer_of_a_read.sql
+\ir ../migrations/20261008060008_shared_scores_kept.sql
+do $$
+declare f record; js uuid;
+begin
+  select * into f from fx;
+  select id into js from public.jobs where external_id = 'scored-1';
+  if (select match_score from public.jobs where id = js) is distinct from 64
+     or (select match_details from public.jobs where id = js) is distinct from '{"score": 64}'::jsonb then
+    raise exception 'a stored score on a shared role survives the migrations';
+  end if;
+  update public.jobs set match_score = 70 where id = js;
+  if (select match_score from public.jobs where id = js) is distinct from 70 then raise exception 'scoring keeps writing a shared role'; end if;
+  if pg_temp.as_user(f.a, format('select match_score from public.person_jobs where id = %L', js)) is distinct from 70 then raise exception 'A reads the score through person_jobs'; end if;
+  if exists (select 1 from pg_trigger where tgrelid = 'public.jobs'::regclass and tgname = 'jobs_no_shared_score') then raise exception 'no trigger empties the score of a shared role'; end if;
+  delete from public.jobs where id = js;
 end $$;
 
 -- 6h. The own-role upsert cannot rewrite a shared role: A links, the role is stored shared under A's company, A unlinks,
