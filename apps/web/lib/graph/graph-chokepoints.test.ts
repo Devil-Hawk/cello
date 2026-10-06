@@ -127,6 +127,13 @@ const BANNED_LANGCHAIN_PACKAGES = [
 const BANNED_CHAT_CONSTRUCTOR = /new Chat[A-Z]\w+\(/
 const BANNED_BIND_TOOLS = /\.bindTools\(/
 
+/**
+ * R1 runs a small model inside the person's own browser (ChatWebLLM in a worker the
+ * relay carriers start). It holds no key and spends nothing, and the server only ever
+ * sees its text through the relay, where the step parses it like any other reply.
+ */
+const BROWSER_MODEL_FILES = new Set(['lib/models/webllm.worker.ts'])
+
 function findLangchainBanOffenses(src: string): string[] {
   const stripped = stripComments(src)
   const offenses: string[] = []
@@ -175,6 +182,7 @@ describe('LangChain model abstractions stay banned', () => {
 
     const offenders: string[] = []
     for (const file of files) {
+      if (BROWSER_MODEL_FILES.has(rel(file))) continue
       const offenses = findLangchainBanOffenses(readFileSync(file, 'utf8'))
       if (offenses.length > 0) offenders.push(`${rel(file)}: ${offenses.join(', ')}`)
     }

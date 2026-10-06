@@ -2,7 +2,8 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AdminClient } from '@/lib/harness/types'
-import { ALL_STEPS, entryFrom, measureStep, readRungs, smokeCases, staleSteps, stepHash, type RungsFile, type StepSet } from './rungs'
+import { measureStep } from '../../scripts/rungs-eval'
+import { ALL_STEPS, entryFrom, readRungs, smokeCases, staleSteps, stepHash, type RungsFile, type StepSet } from './rungs'
 
 const cases = Array.from({ length: 25 }, (_, i) => ({ id: `c${i}`, messages: [{ role: 'user' as const, content: `mail ${i}` }], expect: 'yes' }))
 const set = (prompt: string): StepSet => ({
@@ -16,7 +17,9 @@ const fileWith = (steps: RungsFile['steps']): RungsFile => ({ version: 1, steps 
 const unmeasured = { promptHash: null, measuredAt: null, rungs: {}, minRung: null, route: false }
 const everyStep = (over: RungsFile['steps'] = {}): RungsFile['steps'] => ({ ...Object.fromEntries(ALL_STEPS.map((id) => [id, unmeasured])), ...over })
 
-afterEach(() => vi.unstubAllEnvs())
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
 
 describe('rungs.json freshness', () => {
   it('is fresh as committed', () => {
