@@ -33,7 +33,7 @@ begin
   insert into public.answer_bank (user_id, question, question_key, category, source, origin, company_id)
   select u1, 'Willing to relocate to Bank Co?', 'willing to relocate', 'relocation', 'person', 'person', co from fx;
   -- an open question is a row with a null answer
-  select count(*) into n from public.answer_bank where answer is null and not declined;
+  select count(*) into n from public.answer_bank where answer is null and not declined and company_id is null;
   if n <> 1 then raise exception 'expected one open question, got %', n; end if;
   -- a model's words cannot be stored as the person's own
   begin

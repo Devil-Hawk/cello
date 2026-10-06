@@ -179,6 +179,7 @@ const claimBody = (p, id, extra = {}) =>
 
 const drop = (db, p) => db.query('delete from auth.users where id = $1', [p.u])
 
+// The checks below compare created_at with paused_at in SQL: the driver's Date drops microseconds, which made an event inside the same millisecond but before the pause look later.
 const pausedAt = async (db, p) =>
   (await db.query("select (preferences -> 'pipeline' ->> 'paused_at')::timestamptz as t from public.profiles where id = $1", [p.u])).rows[0].t
 
@@ -214,8 +215,8 @@ const pipelineCases = [
       const t = await pausedAt(direct, p)
       if (!t) throw new Error('the pause did not land')
       const { rows } = await direct.query(
-        "select count(*)::int as n from public.pipeline_events where user_id = $1 and kind = 'application.created' and created_at > $2",
-        [p.u, t],
+        "select count(*)::int as n from public.pipeline_events where user_id = $1 and kind = 'application.created' and created_at > (select (preferences -> 'pipeline' ->> 'paused_at')::timestamptz from public.profiles where id = $1)",
+        [p.u],
       )
       same(rows[0].n, 0, 'starts written after paused_at')
       const refused = rs.slice(0, 5).filter((r) => r.refusal === 'paused').length
@@ -291,8 +292,8 @@ const pipelineCases = [
       const t = await pausedAt(direct, p)
       if (!t) throw new Error('the pause did not land')
       const { rows } = await direct.query(
-        "select count(*)::int as n from public.pipeline_events where user_id = $1 and kind in ('fill.auto_started', 'submission.sending') and created_at > $2",
-        [p.u, t],
+        "select count(*)::int as n from public.pipeline_events where user_id = $1 and kind in ('fill.auto_started', 'submission.sending') and created_at > (select (preferences -> 'pipeline' ->> 'paused_at')::timestamptz from public.profiles where id = $1)",
+        [p.u],
       )
       if (rows[0].n !== 0) {
         const late = await direct.query("select kind, created_at, idempotency_key from public.pipeline_events where user_id = $1 order by created_at", [p.u])
