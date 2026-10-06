@@ -125,6 +125,14 @@ describe('the store', () => {
     expect((calls[1].args as { opts: unknown }).opts).toMatchObject({ onConflict: 'company_id,external_id' })
   })
 
+  it('writes through the service client when one is given, never the signed-in one', async () => {
+    const person = client()
+    const service = client()
+    await makeSupabaseAtsStore(person.db, { lockClient: service.db }).upsertJobs([row('e1')])
+    expect(person.calls).toEqual([])
+    expect(service.calls.map((c) => `${c.kind}:${c.name}`)).toEqual(['rpc:upsert_shared_jobs'])
+  })
+
   it('falls back to the company\'s own row before the function exists, and fails on any other error', async () => {
     const before = client({ code: 'PGRST202' })
     await makeSupabaseAtsStore(before.db).upsertJobs([row('e1')])

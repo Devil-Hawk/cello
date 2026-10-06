@@ -21,7 +21,11 @@ const UPDATE_CONCURRENCY = 4
 const LOCK_LEASE_MINUTES = 15
 
 export interface AtsStoreOptions {
-  /** Service-role client used only for the per-company lock (the lock functions are not callable by a signed-in user). */
+  /**
+   * Service-role client. It takes the per-company lock (not callable by a signed-in user) and writes the roles an
+   * employer's followers share: a signed-in client cannot, since one follower would be writing what the others read.
+   * Without it every write goes through `client`, which is right only for the service role itself.
+   */
   lockClient?: Db
   /** Who holds the lock; unique per process so a second process cannot release the first one's lock. */
   holder?: string
@@ -37,6 +41,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
   const holder = opts.holder ?? `ingest-${Math.random().toString(36).slice(2)}`
   const dry = opts.dryRun === true
   const lock = opts.lockClient
+  const writer = lock ?? client
 
   return {
     async listJobs(companyId: string, employerId?: string | null): Promise<ExistingJob[]> {
@@ -105,13 +110,13 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
       const own = rows.filter((r) => !r.employer_id)
       if (shared.length > 0) {
         // One row per (employer, posting): the first follower's company stays, later reads update it.
-        const { error } = await client.rpc('upsert_shared_jobs', { p_rows: shared })
+        const { error } = await writer.rpc('upsert_shared_jobs', { p_rows: shared })
         // Before the contract migration the function does not exist yet: the company's own row is written as it always was.
         if (error?.code === 'PGRST202') own.push(...shared)
         else fail(error)
       }
       if (own.length > 0) {
-        const { error } = await client.from('jobs').upsert(own as never, { onConflict: 'company_id,external_id', ignoreDuplicates: false })
+        const { error } = await writer.from('jobs').upsert(own as never, { onConflict: 'company_id,external_id', ignoreDuplicates: false })
         fail(error)
       }
     },
@@ -138,7 +143,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
     async updateJobs(updates: JobUpdate[]): Promise<number> {
       if (dry) return updates.length
       const changed = await mapWithConcurrency(updates, UPDATE_CONCURRENCY, async (u) => {
-        const { data, error } = await client
+        const { data, error } = await writer
           .from('jobs')
           .update(u.fields as never)
           .eq(u.employerId ? 'employer_id' : 'company_id', u.employerId ?? u.companyId)
