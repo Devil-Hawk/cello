@@ -52,10 +52,11 @@ describe('withAgentPersistence', () => {
     await withAgentPersistence(async (p) => {
       seen = p as unknown as Record<string, unknown>
     })
+    expect(seen.saver).toBeDefined()
+    expect(seen).not.toHaveProperty('store')
     expect(h.poolConfigs).toHaveLength(1)
     expect(h.poolConfigs[0]).toMatchObject({ max: 2 })
     expect(h.saverConfigs[0]).toMatchObject({ schema: AGENT_SCHEMA })
-    expect(Object.keys(seen)).toEqual(['saver'])
   })
 
   it('a streaming request opens the handle and closes it itself', async () => {

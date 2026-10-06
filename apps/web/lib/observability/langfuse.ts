@@ -747,12 +747,12 @@ async function ensureContextManager(): Promise<void> {
 
 /**
  * The callbacks to hand an agent invocation. Empty when Langfuse is off, the trace is sampled out,
- * or this is a demo whose content is not captured: the handler sends prompts and results, so it
- * must not exist when content capture is off.
+ * or the person's content may not be captured (only an allowlisted owner's may): the handler sends
+ * prompts and results, so it must not exist when content capture is off.
  */
 export async function agentCallbacks(input: AgentCallbackInput): Promise<BaseCallbackHandler[]> {
   try {
-    if (!langfuseConfigured() || !traceSampled(input.traceId, input.isDemo) || !contentCaptureFor(input.isDemo)) return []
+    if (!langfuseConfigured() || !traceSampled(input.traceId, input.isDemo) || !contentCaptureFor(input.userId, input.isDemo)) return []
     const lf = await getLangfuse()
     if (!lf) return []
     await ensureContextManager()

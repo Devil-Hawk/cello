@@ -126,7 +126,8 @@ describe('firing a continuation', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1)
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, { body: string; headers: Record<string, string> }]
     expect(url).toBe('http://example.test/api/agent/continue')
-    expect(verifyContinue(init.body, init.headers['x-cello-signature'])).toMatchObject({ ok: true, payload: { reason: 'slice', thread_id: 't1' } })
+    expect(init.headers['x-cello-signature']).toBe(signContinue(init.body))
+    expect(JSON.parse(init.body)).toMatchObject({ reason: 'slice', thread_id: 't1' })
   })
 
   it('uses waitUntil on Vercel so the response is not held', async () => {

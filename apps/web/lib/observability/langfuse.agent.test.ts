@@ -23,6 +23,7 @@ beforeEach(() => {
   __setLangfuseForTest({ exporter })
   configure()
   vi.stubEnv('LANGFUSE_DEMO_SAMPLE_RATE', '1')
+  vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'user-1')
 })
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -37,10 +38,11 @@ describe('agentCallbacks', () => {
     expect(await agentCallbacks(input())).toEqual([])
   })
 
-  it('is empty for a demo whose content is not captured, because the handler sends prompts and results', async () => {
+  it('is empty for a demo and for anyone not on the content allowlist, because the handler sends prompts and results', async () => {
     expect(await agentCallbacks(input({ isDemo: true }))).toEqual([])
-    vi.stubEnv('LANGFUSE_CAPTURE_DEMO_CONTENT', '1')
-    expect(await agentCallbacks(input({ isDemo: true }))).toHaveLength(1)
+    expect(await agentCallbacks(input({ userId: 'someone-else' }))).toEqual([])
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', '')
+    expect(await agentCallbacks(input())).toEqual([])
   })
 
   it('is empty when the content kill switch is off and when the trace is sampled out', async () => {

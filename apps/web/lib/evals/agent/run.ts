@@ -8,7 +8,7 @@
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages'
-import { InMemoryStore, MemorySaver } from '@langchain/langgraph'
+import { MemorySaver } from '@langchain/langgraph'
 import type { AgentContext } from '@/lib/agents/context'
 import { createCelloAgent } from '@/lib/agents/factory'
 import { rootCause } from '@/lib/agents/spend-port'
@@ -58,7 +58,6 @@ function orchestrator(model: FreeChatModel) {
     kind: 'orchestrator',
     ctx,
     saver: new MemorySaver(),
-    store: new InMemoryStore(),
     model,
     fallbacks: [],
     skillsDir: SKILLS_DIR,

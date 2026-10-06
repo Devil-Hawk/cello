@@ -112,6 +112,11 @@ const DIRECT_MODEL_CLIENT_MARKERS = [
 const ALLOWED_DIRECT_USER_KEY: Record<string, string> = {
   'app/api/scraper/trigger/route.ts': "user's own OpenAI/Anthropic key",
   'app/api/resume/upload/route.ts': "user's own Anthropic/OpenAI key",
+  // The agent's chat model door. It makes no call by itself: CelloSpend wraps every call the agent makes,
+  // so each one reserves before and settles after through lib/agents/spend-port.ts (checked below).
+  'lib/agents/model.ts': 'a model built here is only used inside the agent, behind CelloSpend',
+  // Live evals on free models only (assertFree), opt-in, never reached from the product.
+  'lib/evals/agent/free.eval.ts': 'free models only; the harness refuses any id that does not end in :free',
 }
 
 /**
@@ -224,12 +229,15 @@ describe('every path to a model is behind the spend cap', () => {
     expect(offenders, `recordSpend / record_llm_spend must not come back:\n  ${offenders.join('\n  ')}`).toEqual([])
   })
 
-  it('the engine spend middleware, when present, reserves and settles', () => {
+  it('the engine spend middleware, when present, reserves and settles through the one seam', () => {
     const middleware = path.join(process.cwd(), 'lib/agents/middleware.ts')
     if (!existsSync(middleware)) return
+    const seam = readFileSync(path.join(process.cwd(), 'lib/agents/spend-port.ts'), 'utf8')
+    expect(seam).toContain('reserveSpend(')
+    expect(seam).toContain('settleSpend(')
     const src = readFileSync(middleware, 'utf8')
-    expect(src).toContain('reserveSpend(')
-    expect(src).toContain('settleSpend(')
+    expect(src).toContain('reserve(')
+    expect(src).toContain('settle(')
   })
 
   it.each(CALL_LLM_WRAPPERS)(
