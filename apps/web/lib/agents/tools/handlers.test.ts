@@ -502,7 +502,7 @@ describe('request_approval', () => {
 
   it('a scheduled task set to act within its rules approves what the rules allow, through the same code', async () => {
     m.queueApproval.mockResolvedValue(queued())
-    m.autoApprove.mockResolvedValue({ status: 200, approval: { status: 'done' }, copy: 'Sent from dana@example.com at 8:00. Receipt saved.' })
+    m.autoApprove.mockResolvedValue({ status: 200, approval: { status: 'done' }, copy: 'Sent from dana@example.com at 8:00. Saved.' })
     const out = await call('request_approval', { action: 'send_email', artifact_id: 'a1' }, ctxFor(makeFakeAdmin(), { scheduledTaskId: 'task-1', autonomy: 'act', rules: { allow_send_email: true } }))
     expect(out).toMatchObject({ status: 'approved_by_rule' })
     expect(m.autoApprove.mock.calls[0][0]).toEqual({ autonomy: 'act', rules: { allow_send_email: true } })

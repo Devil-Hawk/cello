@@ -119,7 +119,7 @@ describe('Writer: cover letter', () => {
 
   it('a letter that claims what the resume does not is never saved when the tailor refuses twice', async () => {
     const { deps, admin } = setup()
-    mocks.cvTailor.mockRejectedValue(new Error('cv_tailor: refused to return tailored content — the tailored text makes claims your resume does not support (Google)'))
+    mocks.cvTailor.mockRejectedValue(new Error('cv_tailor: refused to return tailored content \u2014 the tailored text makes claims your resume does not support (Google)'))
     const result = await runWriter(deps, { type: 'cover_letter', job_id: 'j1' })
     expect(result.status).toBe('failed')
     expect(result.error).toMatch(/stays inside your resume/)

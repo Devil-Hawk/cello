@@ -306,7 +306,7 @@ export function buildWriterGraph(deps: WriterDeps) {
       // The cover letter tailor refuses a draft that claims what the resume does not.
       const message = e instanceof Error ? e.message : String(e)
       if (/refused to return tailored content/.test(message) && attempts < 2) {
-        return { attempts, draft: null, corrective: message.replace(/^cv_tailor: refused to return tailored content — /, '') }
+        return { attempts, draft: null, corrective: message.replace(/^cv_tailor: refused to return tailored content \u2014 /, '') }
       }
       return {
         attempts,
@@ -316,7 +316,7 @@ export function buildWriterGraph(deps: WriterDeps) {
             ? 'Cello could not write a letter that stays inside your resume.'
             : `The draft could not be written: ${message.slice(0, 200)}`,
           fix: /refused to return tailored content/.test(message)
-            ? `Tell the person what was refused and ask whether the resume needs updating. Reason: ${message.replace(/^cv_tailor: refused to return tailored content — /, '').slice(0, 300)}`
+            ? `Tell the person what was refused and ask whether the resume needs updating. Reason: ${message.replace(/^cv_tailor: refused to return tailored content \u2014 /, '').slice(0, 300)}`
             : 'Try again, or tell the person it did not work.',
         }),
       }

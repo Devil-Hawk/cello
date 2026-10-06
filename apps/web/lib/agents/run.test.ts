@@ -205,7 +205,7 @@ describe('questions', () => {
 describe('approval results', () => {
   it('are told to the conversation at the start of the next turn, marked so they are never the persons words', async () => {
     const w = world()
-    w.admin.tables.approvals.push({ id: 'ap1', user_id: 'u1', thread_id: 't1', action: 'send_email', status: 'done', posted_at: null, receipt: { what: 'Email sent to Dana Lee', when: '2026-10-05T16:41:00Z' }, error: null })
+    w.admin.tables.approvals.push({ id: 'ap1', user_id: 'u1', thread_id: 't1', action: 'send_email', status: 'done', posted_at: null, outcome: { what: 'Email sent to Dana Lee', when: '2026-10-05T16:41:00Z' }, error: null })
     const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('Noted.')] })
     await run(w, model, { mode: { kind: 'input', text: 'what happened to my email?' } })
     const sent = model.calls[0]

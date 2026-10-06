@@ -18,7 +18,7 @@ export interface ApprovalCard {
 }
 
 const APPROVAL_COLUMNS =
-  'id, user_id, conversation_id, thread_id, scheduled_task_id, action, artifact_id, artifact_version, payload_hash, target_table, target_id, status, decided_by, decided_at, executed_at, receipt, error, posted_at, idempotency_key, trace_id, created_at'
+  'id, user_id, conversation_id, thread_id, scheduled_task_id, action, artifact_id, artifact_version, payload_hash, target_table, target_id, status, decided_by, decided_at, executed_at, outcome, error, posted_at, idempotency_key, trace_id, created_at'
 
 /** The person's approvals, newest first, each with a preview of the words it would send. */
 export async function listApprovals(admin: AdminClient, userId: string, status: ApprovalStatus | 'all' = 'pending', limit = 50): Promise<ApprovalCard[]> {

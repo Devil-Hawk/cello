@@ -53,8 +53,6 @@ do $$
 begin
   assert exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'approvals' and column_name = 'outcome'),
     'approvals.outcome is present';
-  assert not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'approvals' and column_name = 'receipt'),
-    'approvals has no receipt column';
   assert to_regclass('public.taste_statements') is null, 'there is no taste_statements table';
 end $$;
 

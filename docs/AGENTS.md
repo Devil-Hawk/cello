@@ -99,7 +99,7 @@ The agent sees a virtual file system: `/memories/taste.md` (read only: the perso
 
 ## Approvals
 
-`request_approval` writes a row in `approvals` with the document version and a hash of exactly what would go out. Nothing is sent. The person approves in Needs you, which calls `POST /api/approvals/[id]`, and that runs the one send path (`lib/outreach/send.ts`) or the one submit path (`lib/apply/approve.ts`) once, stores a receipt, and tells the conversation. A second click returns the same receipt. If the draft changed after it was queued, the approval is refused until the person has seen the new version. A Scheduled task set to "act within my rules" may approve what its stored rules name, through the same code; an application is never auto-approved unless the rule says so.
+`request_approval` writes a row in `approvals` with the document version and a hash of exactly what would go out. Nothing is sent. The person approves in Needs you, which calls `POST /api/approvals/[id]`, and that runs the one send path (`lib/outreach/send.ts`) or the one submit path (`lib/apply/approve.ts`) once, stores a outcome, and tells the conversation. A second click returns the same outcome. If the draft changed after it was queued, the approval is refused until the person has seen the new version. A Scheduled task set to "act within my rules" may approve what its stored rules name, through the same code; an application is never auto-approved unless the rule says so.
 
 ## Scheduled tasks
 
