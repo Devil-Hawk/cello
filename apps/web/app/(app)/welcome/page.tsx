@@ -9,7 +9,7 @@ export const metadata = { title: 'Welcome' }
 
 // First run. Whether this is a demo is read here, on the server, so a demo is
 // never shown a screen that asks for a key, however it got to this address.
-export default async function WelcomePage({ searchParams }: { searchParams: { screen?: string } }) {
+export default async function WelcomePage({ searchParams }: { searchParams: { screen?: string; models?: string } }) {
   const supabase = (await createClient()) as unknown as SupabaseClient
   const {
     data: { user },
@@ -31,6 +31,7 @@ export default async function WelcomePage({ searchParams }: { searchParams: { sc
   }
 
   const asked = searchParams.screen as Screen | undefined
-  const start: Screen = asked && SCREENS.includes(asked) ? asked : 'resume'
+  // Back from OpenRouter with an outcome in the address: pick up on Connect, where the door is.
+  const start: Screen = asked && SCREENS.includes(asked) ? asked : searchParams.models ? 'connect' : 'resume'
   return <WelcomeFlow demo={demo} initialName={name} hasResume={hasResume} start={start} />
 }
