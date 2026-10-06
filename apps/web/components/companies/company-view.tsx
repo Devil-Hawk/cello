@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { Key } from '@/components/ui/key'
 import { search } from '@/lib/routes'
+import { recordHref } from '@/lib/routes/roles'
 import { Disclosure } from '@/components/ui/disclosure'
 import { QuickChatSlot } from '@/components/layout/quick-chat-slot'
 import { LogoTile } from '@/components/roles/role-tile'
@@ -55,6 +56,11 @@ export function CompanyView({ data, query, live, now = Date.now() }: CompanyView
         {open && (
           <>
             <RowActions item={{ id: data.id, companyId: data.companyId, name: data.name, following: data.following, pinned: data.pinned, cannotRead: data.cannotRead }} manage />
+            {data.following && data.kept[0] && (
+              <Key asChild variant="ink">
+                <Link href={recordHref(data.kept[0].id)}>Apply</Link>
+              </Key>
+            )}
             {!data.following && <p className="r-meta">Follow reads its site every 6 hours.</p>}
             {!data.following && (
               <details>

@@ -205,6 +205,16 @@ describe('the first screen', () => {
     expect(followed).toContain('Stop following')
   })
 
+  it('has Apply on the top kept role for a followed employer, and Follow, not Apply, for one that is not followed', () => {
+    const data = fixtureCompany()
+    expect(view(data)).toContain(`href="/roles/${encodeURIComponent(data.kept[0].id)}"`)
+    expect(text(view(data))).toContain('Apply')
+    expect(text(view(fixtureCompany({ following: true, kept: [] })))).not.toMatch(/\bApply\b/)
+    const unfollowed = text(view(fixtureCompany({ following: false, companyId: null, remove: null })))
+    expect(unfollowed).not.toMatch(/\bApply\b/)
+    expect(unfollowed).toContain('Follow')
+  })
+
   it('shows each group only when it has something to say, and no empty heading', () => {
     const t = text(view(fixtureCompany({ field: null, history: [], facts: [], notes: null, check: null, companyId: null, remove: null })))
     for (const h of ['Hiring in your field', 'Your history', 'What Cello knows', 'Your notes', 'Checks', 'People']) expect(t).not.toContain(h)
