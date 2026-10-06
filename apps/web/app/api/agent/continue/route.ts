@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { HANDLERS } from '@/lib/clock/routines/index'
 import { runRoutine } from '@/lib/clock/routines'
+import { advanceOne } from '@/lib/advance'
 import { verifyContinue, type ContinuePayload } from '@/lib/clock/sign'
 
 export const dynamic = 'force-dynamic'
@@ -26,6 +27,10 @@ async function carryOn(payload: ContinuePayload): Promise<void> {
   if (payload.reason === 'routine' || payload.reason === 'slice') {
     if (typeof payload.routine_id !== 'string') return
     await runRoutine(createAdminClient(), payload.routine_id, payload.slice ?? null, { handlers: HANDLERS })
+    return
+  }
+  if (payload.reason === 'advance') {
+    if (typeof payload.application_id === 'string') await advanceOne(createAdminClient(), payload.application_id)
     return
   }
   // stale and due: the engine's. ponytail: nothing to hand them to until the engine's occurrences
