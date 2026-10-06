@@ -53,6 +53,10 @@ select ja, co_a, emp, 'Platform Engineer', 'd', 'https://shared.example/jobs/req
 union all select jb, co_b, emp, 'Platform Engineer', 'd', 'https://shared.example/jobs/req-1', 'req-1', 'engineering', 'senior', 'US', now(), 'greenhouse' from fx;
 insert into public.applications (user_id, job_id) select b, jb from fx;
 
+-- B scored the copy that the fold deletes: the score, details and flag are B's own and go to the survivor with B's row
+update public.person_roles pr set match_score = 55, match_details = '{"b":1}'::jsonb, is_new = false
+  from fx where pr.user_id = fx.b and pr.job_id = fx.jb;
+
 do $$
 declare f record; r jsonb;
 begin
@@ -62,6 +66,8 @@ begin
   if (select count(*) from public.jobs where employer_id = f.emp and posting_key = 'req-1') <> 1 then raise exception 'one row per posting after the fold'; end if;
   if (select count(*) from public.person_roles where job_id = f.ja) <> 2 then raise exception 'both people hold the shared row'; end if;
   if (select job_id from public.applications where user_id = f.b) <> f.ja then raise exception 'the application follows the fold'; end if;
+  if (select (match_score, match_details, is_new) from public.person_roles where user_id = f.b and job_id = f.ja) is distinct from row(55, '{"b":1}'::jsonb, false) then raise exception 'B''s score, details and flag follow B to the survivor'; end if;
+  if (select (match_score, match_details, is_new) from public.person_roles where user_id = f.a and job_id = f.ja) is distinct from row(null::integer, null::jsonb, true) then raise exception 'A holds none of B''s score, details or flag'; end if;
 end $$;
 
 -- 1b. Two people's mail placeholders at one employer, written with the employer set (as a database that ran the old
@@ -113,13 +119,11 @@ begin
             'url', 'https://shared.example/jobs/req-5', 'is_new', true, 'discovered_at', now() + interval '1 day', 'source', 'greenhouse', 'last_seen_at', now()));
   perform public.upsert_shared_jobs(row_a);
   select discovered_at into first_seen from public.jobs where employer_id = f.emp and posting_key = 'req-5';
-  update public.jobs set is_new = false where employer_id = f.emp and posting_key = 'req-5';
   perform public.upsert_shared_jobs(row_b);
   if (select count(*) from public.jobs where employer_id = f.emp and posting_key = 'req-5') <> 1 then raise exception 'one row per posting for two followers'; end if;
   if (select company_id from public.jobs where employer_id = f.emp and posting_key = 'req-5') <> f.co_a then raise exception 'the first follower''s company stays on the row'; end if;
   if (select title from public.jobs where employer_id = f.emp and posting_key = 'req-5') <> 'Staff Engineer II' then raise exception 'the second read updates the row'; end if;
   if (select discovered_at from public.jobs where employer_id = f.emp and posting_key = 'req-5') <> first_seen then raise exception 'discovered_at is not rewritten'; end if;
-  if (select is_new from public.jobs where employer_id = f.emp and posting_key = 'req-5') then raise exception 'is_new is not rewritten'; end if;
 
   -- B's check keeps the shared row; A's is not touched
   if public.sync_person_roles(f.b, f.co_b, array['req-5'], 2, '{}') <> 1 then raise exception 'B must be given the shared role stored under A''s company'; end if;
@@ -274,14 +278,15 @@ begin
                            discovered_at, still_open, legit_label)
   values (ja2, f.co_a, 'Written by A', 'x', 'https://shared.example/jobs/adopt-1', 'adopt-1', 'https://evil.example/apply', 'poison', 'full', md5('poison'),
           '2000-01-01', false, 'agency');
-  update public.jobs set employer_id = null, match_score = 99 where id = ja2; -- the score is planted by the server, as the match route does
+  update public.jobs set employer_id = null where id = ja2;
+  update public.person_roles set match_score = 99 where user_id = f.a and job_id = ja2; -- the score is the server's, as the match route writes it
   perform public.upsert_shared_jobs(jsonb_build_array(jsonb_build_object('company_id', f.co_a, 'employer_id', f.emp, 'external_id', 'adopt-1', 'title', 'Real title', 'description', 'd',
             'url', 'https://shared.example/jobs/adopt-1', 'source', 'greenhouse')));
   if (select employer_id from public.jobs where id = ja2) is distinct from f.emp then raise exception 'the read adopts the role'; end if;
   if (select title from public.jobs where id = ja2) <> 'Real title' then raise exception 'the read writes the title'; end if;
   if (select apply_url is not null or description_md is not null or description_state is not null from public.jobs where id = ja2) then raise exception 'what a person wrote does not carry into the shared row'; end if;
   if (select discovered_at < now() - interval '1 day' or still_open is not true or legit_label is not null from public.jobs where id = ja2) then raise exception 'the age, state and label a person planted do not carry into the shared row'; end if;
-  if (select match_score from public.jobs where id = ja2) is distinct from 99 then raise exception 'the score a role already had survives its adoption'; end if;
+  if (select match_score from public.person_roles where user_id = f.a and job_id = ja2) is distinct from 99 then raise exception 'the score a person already had survives their role''s adoption'; end if;
 end $$;
 
 -- 6d. A company's employer and board are the directory's, never the person's: not by the employer id sent, not by
@@ -400,45 +405,77 @@ begin
 
 end $$;
 
--- 6g'. A stored score survives the employer migrations on a shared role, and scoring keeps writing it there.
-insert into public.jobs (company_id, employer_id, title, description, url, external_id, source, match_score, match_details)
-select co_a, emp, 'Scored role', 'd', 'https://shared.example/jobs/scored-1', 'scored-1', 'greenhouse', 64, '{"score": 64}'::jsonb from fx;
-insert into public.person_roles (user_id, job_id)
-select a, (select id from public.jobs where external_id = 'scored-1') from fx
-on conflict do nothing;
-\ir ../migrations/20261008060007_employer_of_a_read.sql
-\ir ../migrations/20261008060008_shared_scores_kept.sql
+-- 6j. What one person's resume, key or choices produced lives on their own person_roles row: another follower of the
+-- employer never reads it, through person_jobs or jobs, nor the first storer's company text. The migration moves what a
+-- shared row already held to the owner of its company, and is safe to run twice.
+do $$
+declare f record; js uuid := gen_random_uuid();
+begin
+  select * into f from fx;
+  insert into public.jobs (id, company_id, employer_id, title, description, url, external_id, source)
+  values (js, f.co_a, f.emp, 'Scored role', 'd', 'https://shared.example/jobs/scored-1', 'scored-1', 'greenhouse');
+  insert into public.person_roles (user_id, job_id) values (f.a, js), (f.b, js) on conflict do nothing;
+  -- as a database that held A's score on the shared row before the migration
+  alter table public.jobs disable trigger jobs_hold_no_person_values;
+  update public.jobs set match_score = 64, match_details = '{"highlights":["A only"]}'::jsonb, is_new = false where id = js;
+  alter table public.jobs enable trigger jobs_hold_no_person_values;
+end $$;
+
+\ir ../migrations/20261008060013_person_values_on_person_roles.sql
+\ir ../migrations/20261008060013_person_values_on_person_roles.sql
+
 do $$
 declare f record; js uuid;
 begin
   select * into f from fx;
   select id into js from public.jobs where external_id = 'scored-1';
-  if (select match_score from public.jobs where id = js) is distinct from 64
-     or (select match_details from public.jobs where id = js) is distinct from '{"score": 64}'::jsonb then
-    raise exception 'a stored score on a shared role survives the migrations';
-  end if;
-  update public.jobs set match_score = 70 where id = js;
-  if (select match_score from public.jobs where id = js) is distinct from 70 then raise exception 'scoring keeps writing a shared role'; end if;
-  if pg_temp.as_user(f.a, format('select match_score from public.person_jobs where id = %L', js)) is distinct from 70 then raise exception 'A reads the score through person_jobs'; end if;
-  if exists (select 1 from pg_trigger where tgrelid = 'public.jobs'::regclass and tgname = 'jobs_no_shared_score') then raise exception 'no trigger empties the score of a shared role'; end if;
-  delete from public.jobs where id = js;
-end $$;
+  if (select (match_score, match_details, is_new) from public.person_roles where user_id = f.a and job_id = js) is distinct from row(64, '{"highlights":["A only"]}'::jsonb, false) then raise exception 'the migration gives the shared values to the owner of the company'; end if;
+  if (select (match_score, match_details, is_new) from public.person_roles where user_id = f.b and job_id = js) is distinct from row(null::integer, null::jsonb, true) then raise exception 'B holds none of A''s values'; end if;
+  if (select (match_score, match_details, is_new) from public.jobs where id = js) is distinct from row(null::integer, null::jsonb, true) then raise exception 'the shared row holds no person''s value'; end if;
 
--- 6h'. A signed-in person cannot write a score: not on insert, not on update. The server can, and it survives adoption.
-do $$
-declare f record; jp uuid := gen_random_uuid();
-begin
-  select * into f from fx;
-  perform pg_temp.as_user(f.a, format($q$with i as (insert into public.jobs (id, company_id, title, description, url, external_id, match_score, match_details) values (%L, %L, 'Planted', 'x', 'https://shared.example/jobs/plant-1', 'plant-1', 99, '{"x":1}'::jsonb) returning 1) select count(*) from i$q$, jp, f.co_a));
-  if (select match_score is not null or match_details is not null from public.jobs where id = jp) then raise exception 'a person cannot insert a score'; end if;
-  update public.jobs set match_score = 50, match_details = '{"s":50}'::jsonb where id = jp;
-  perform pg_temp.as_user(f.a, format($q$with u as (update public.jobs set match_score = 99, match_details = '{"x":1}'::jsonb where id = %L returning 1) select count(*) from u$q$, jp));
-  if (select match_score is distinct from 50 or match_details is distinct from '{"s":50}'::jsonb from public.jobs where id = jp) then raise exception 'a person cannot update a score'; end if;
-  update public.jobs set match_score = 70 where id = jp;
-  if (select match_score from public.jobs where id = jp) is distinct from 70 then raise exception 'the server writes a score'; end if;
-  perform public.upsert_shared_jobs(jsonb_build_array(jsonb_build_object('company_id', f.co_a, 'employer_id', f.emp, 'external_id', 'plant-1', 'title', 'Real', 'description', 'd',
-            'url', 'https://shared.example/jobs/plant-1', 'source', 'greenhouse')));
-  if (select employer_id from public.jobs where id = jp) is distinct from f.emp or (select match_score from public.jobs where id = jp) is distinct from 70 then raise exception 'the server score survives adoption'; end if;
+  -- B never reads A's score, details or flag, through person_jobs or jobs
+  if pg_temp.as_user(f.b, format('select count(*) from public.person_jobs where id = %L and (match_score is not null or match_details is not null or not is_new)', js)) <> 0 then raise exception 'B reads A''s values through person_jobs'; end if;
+  if pg_temp.as_user(f.b, format('select count(*) from public.jobs where id = %L and (match_score is not null or match_details is not null or not is_new)', js)) <> 0 then raise exception 'B reads A''s values through jobs'; end if;
+  if pg_temp.as_user(f.a, format('select match_score from public.person_jobs where id = %L', js)) is distinct from 64 then raise exception 'A reads their own score through person_jobs'; end if;
+
+  -- the server scores for A: B still reads nothing
+  update public.person_roles set match_score = 70 where user_id = f.a and job_id = js;
+  if pg_temp.as_user(f.b, format('select count(*) from public.person_jobs where id = %L and match_score is not null', js)) <> 0 then raise exception 'B reads the score the server wrote for A'; end if;
+  if pg_temp.as_user(f.a, format('select match_score from public.person_jobs where id = %L', js)) is distinct from 70 then raise exception 'A reads the score the server wrote'; end if;
+
+  -- no writer can put a person's value back on the shared row, the service role included
+  update public.jobs set match_score = 99, match_details = '{}'::jsonb, is_new = false where id = js;
+  if (select (match_score, match_details, is_new) from public.jobs where id = js) is distinct from row(null::integer, null::jsonb, true) then raise exception 'the shared row takes no person''s value'; end if;
+
+  -- a signed-in person cannot write the column: not on their own row, not on another's
+  begin
+    perform pg_temp.as_user(f.a, format('with u as (update public.person_roles set match_score = 1 where job_id = %L returning 1) select count(*) from u', js));
+    raise exception 'a person must not write their own score';
+  exception when insufficient_privilege then reset role;
+  end;
+  begin
+    perform pg_temp.as_user(f.b, format('with u as (update public.person_roles set is_new = false where job_id = %L returning 1) select count(*) from u', js));
+    raise exception 'a person must not write the new flag';
+  exception when insufficient_privilege then reset role;
+  end;
+  if (select (match_score, is_new) from public.person_roles where user_id = f.b and job_id = js) is distinct from row(null::integer, true) then raise exception 'B''s row is unchanged'; end if;
+  if (select match_score from public.person_roles where user_id = f.a and job_id = js) is distinct from 70 then raise exception 'A''s row is unchanged'; end if;
+
+  -- the company fields: the role is stored under A's company, B reads B's own
+  update public.companies set name = 'A private', domain = 'a-private.example', logo_url = 'https://a.example/l.png' where id = f.co_a;
+  if (select viewer_company_name from public.person_jobs where viewer_id = f.b and id = js) is distinct from 'Shared Co' then raise exception 'B reads B''s own company name'; end if;
+  if pg_temp.as_user(f.b, format($q$select count(*) from public.person_jobs where id = %L and 'A private' in (viewer_company_name, coalesce(viewer_company_domain, ''))$q$, js)) <> 0 then raise exception 'B reads A''s company text'; end if;
+  if pg_temp.as_user(f.b, format('select count(*) from public.companies where id = %L', f.co_a)) <> 0 then raise exception 'B reads A''s company row'; end if;
+
+  -- the distillation reads the person's own score: B has applied and been judged, B is unscored, A holds 70
+  insert into public.applications (user_id, job_id, stage) values (f.b, js, 'interview');
+  insert into public.eval_verdicts (user_id, subject_kind, subject_id, judge, verdict) values (f.b, 'match_score', js, 'deterministic', 'pass');
+  if (select count(*) from public.distill_match_score_by_score_band(f.b)) <> 0 then raise exception 'B has no band from A''s score'; end if;
+  update public.person_roles set match_score = 40 where user_id = f.b and job_id = js;
+  if (select string_agg(band, ',') from public.distill_match_score_by_score_band(f.b)) is distinct from '0-49' then raise exception 'B''s band is B''s own score'; end if;
+  delete from public.eval_verdicts where user_id = f.b and subject_id = js;
+  delete from public.applications where user_id = f.b and job_id = js;
+  delete from public.jobs where id = js;
 end $$;
 
 -- 6h. The own-role upsert cannot rewrite a shared role: A links, the role is stored shared under A's company, A unlinks,
