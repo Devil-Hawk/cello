@@ -332,6 +332,24 @@ $$;
 revoke execute on function public.upsert_employer_jobs(uuid, jsonb) from public, anon, authenticated;
 grant execute on function public.upsert_employer_jobs(uuid, jsonb) to service_role;
 
+-- The employer's stored roles by normalised title, or by posting id: what tracing a lead looks for.
+create or replace function public.employer_roles(p_employer uuid, p_title_norm text default null, p_external_ids text[] default null)
+returns table (id uuid, external_id text, location text)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select j.id, j.external_id, j.location from public.jobs j
+   where j.employer_id = p_employer
+     and (p_title_norm is null or j.title_norm = p_title_norm)
+     and (p_external_ids is null or j.external_id = any(p_external_ids))
+   limit 200
+$$;
+
+revoke execute on function public.employer_roles(uuid, text, text[]) from public, anon, authenticated;
+grant execute on function public.employer_roles(uuid, text, text[]) to service_role;
+
 -- What a read of an employer saw: the roles it listed are stamped open and seen, the rest of the employer's roles
 -- from the same sources count a miss and close at the second. record_job_sightings does this by company; a shared role
 -- is the employer's, so this does it by employer. An empty list is never evidence that anything closed.
@@ -440,6 +458,11 @@ $$;
 
 revoke execute on function public.measure_t11(), public.measure_t26() from public, anon, authenticated;
 grant execute on function public.measure_t11(), public.measure_t26() to service_role;
+
+-- Leads take the traced path (lib/sources/trace-leads.ts) only once the directory has filled: off until 20261008060002.
+insert into public.instance_flags (key, "on", note)
+values ('directory_leads', false, 'off: a lead keeps its old path; on: a lead becomes a role only when traced to the employer''s own posting, else a count')
+on conflict (key) do nothing;
 
 -- ---------------------------------------------------------------------------
 -- Routines of the clock, off until the seed load is measured (20261008060002)
