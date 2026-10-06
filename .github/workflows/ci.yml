@@ -127,6 +127,7 @@ jobs:
           name: cello-extension
           path: apps/extension/.output/*-chrome.zip
           if-no-files-found: error
+          include-hidden-files: true
 
   test-scrapers:
     name: Test Scrapers

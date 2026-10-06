@@ -7,6 +7,7 @@ const host = new URL(origin)
 const celloPattern = `${host.protocol}//${host.hostname}/*`
 
 export default defineConfig({
+  zip: { name: 'cello-extension' },
   manifest: {
     name: 'Cello',
     description: "Fills job applications in your own browser. You click the employer's button.",
