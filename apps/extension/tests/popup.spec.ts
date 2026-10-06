@@ -1,5 +1,6 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { connect, expect, localGet, serviceWorker, test } from './harness'
+import { contrastRatio } from '../ui/tokens'
 import { contrastOf, copyProblems, shoot, sizes } from './shots'
 
 // PG10: the popup in every state. Each state has one next step, its numbers are the ones
@@ -97,4 +98,31 @@ test('update needed: the build is older than Cello allows', async ({ context, st
   const p = await openPopup(context)
   await expect(p.getByRole('heading', { name: 'Update the Cello extension' })).toBeVisible()
   await check(p, 'update')
+})
+
+// The options page is where the token goes. Its fields must be drawn: a border you can see
+// (3:1 against the page), text that passes AA, 44 pixel targets, in both appearances.
+test('options page: fields and Save are drawn, readable and 44 pixels', async ({ context }) => {
+  const p = await context.newPage()
+  await p.goto(`chrome-extension://${await extensionId(context)}/options.html`)
+  await expect(p.getByLabel('Token', { exact: true })).toBeVisible()
+  const hex = (c: string): string =>
+    '#' +
+    (c.match(/[\d.]+/g) ?? [])
+      .slice(0, 3)
+      .map((n) => Math.round(Number(n)).toString(16).padStart(2, '0'))
+      .join('')
+  for (const scheme of ['light', 'dark'] as const) {
+    await p.emulateMedia({ colorScheme: scheme })
+    await shoot(p, `options-${scheme}`)
+    for (const loc of [p.locator('h1'), p.locator('label').first(), ...(await p.locator('input, select, button').all())]) {
+      expect(await contrastOf(loc), `text ${scheme}`).toBeGreaterThanOrEqual(4.5)
+    }
+    const page = await p.evaluate(() => getComputedStyle(document.body).backgroundColor)
+    for (const field of await p.locator('input, select').all()) {
+      const border = await field.evaluate((e) => getComputedStyle(e).borderTopColor)
+      expect(contrastRatio(hex(border), hex(page)), `border ${scheme}`).toBeGreaterThanOrEqual(3)
+    }
+  }
+  for (const s of await sizes(p.locator('input, select, button'))) expect(s.height, 'options target').toBeGreaterThanOrEqual(44)
 })

@@ -8,10 +8,9 @@
     <style>
       body { width: auto; max-width: 520px; }
       label { display: block; margin: 12px 0 4px; font-weight: 600; }
-      input { width: 100%; min-height: 44px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); font: inherit; }
-      select { width: 100%; min-height: 44px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); font: inherit; }
+      input, select { width: 100%; min-height: 44px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--ink3); background: var(--raised); color: var(--ink); font: inherit; }
       h2 { font-size: 15px; margin: 24px 0 4px; }
-      input:focus-visible { outline: 2px solid #0f766e; outline-offset: 2px; }
+      input:focus-visible, select:focus-visible { outline: 2px solid var(--petrol-text); outline-offset: 2px; }
       .row { margin-top: 16px; }
       #status { margin-top: 12px; }
     </style>
@@ -32,7 +31,6 @@
       <select id="runtime"><option value="ollama">Ollama</option><option value="lmstudio">LM Studio</option></select>
       <label for="model">Model name</label>
       <input id="model" type="text" autocomplete="off" spellcheck="false" placeholder="llama3.1:8b" />
-      <label style="display:flex;align-items:center;gap:8px;min-height:44px;font-weight:400"><input id="browser-model" type="checkbox" style="width:20px;min-height:20px" /> Run small steps in this browser</label>
       <div class="row"><button id="save" class="primary" type="button">Save</button></div>
       <p id="status" role="status"></p>
     </main>
