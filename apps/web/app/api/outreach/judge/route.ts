@@ -22,6 +22,7 @@ import { meteredJudgeClient, judgeGroundedness, judgeSpecificity, JUDGE_MODEL } 
 import { writeVerdict } from '@/lib/evals/verdicts'
 import { assertWithinBudget, BudgetCapError } from '@/lib/harness/spend'
 import { setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 export const dynamic = 'force-dynamic'
 // Two short classification calls (a few hundred tokens each) — seconds, not
@@ -76,8 +77,7 @@ export async function POST(request: NextRequest) {
     let jobTitle = 'a role'
     let jobDescription: string | null = null
     if (message.job_id) {
-      const { data: job } = await supabase
-        .from('person_jobs')
+      const { data: job } = await personJobs(supabase)
         .select('title, description')
         .eq('id', message.job_id)
         .single()

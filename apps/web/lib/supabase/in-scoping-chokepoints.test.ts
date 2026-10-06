@@ -102,6 +102,16 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       'RATIONALE_SAMPLE_SIZE) — capped at 6 before this call ever runs, regardless of how many verdict ids ' +
       "a candidate's own SQL aggregation carries.",
   },
+  'apps/web/lib/clock/routines/roles-check.ts': {
+    calls: [
+      ".in('job_id', ids)",
+      ".in('job_id', drop)",
+      ".in('job_id', hide)",
+      ".in('job_id', show)",
+      ".in('job_id', left)",
+    ],
+    reason: 'every list is a subset of one REJUDGE_PAGE (100) page of the person\'s own held roles, never an owned-id set.',
+  },
   'apps/web/lib/harness/agents/enricher.ts': {
     calls: [".in('id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",

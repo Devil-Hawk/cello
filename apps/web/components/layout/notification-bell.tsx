@@ -53,6 +53,7 @@ import { createClient } from '@/lib/supabase/client'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import type { ReviewQueueItem } from '@/lib/notifications/queue'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 type NotificationKind = 'queue' | 'outreach' | 'overdue' | 'interview' | 'job'
 
@@ -187,8 +188,7 @@ async function fetchFeed(): Promise<NotificationItem[]> {
       .order('occurred_at', { ascending: false })
       .limit(LIMITS.interview),
     openRolesOnly(
-      supabase
-        .from('person_jobs')
+      personJobs(supabase)
         .select('id, title, match_score, posted_at, discovered_at, viewer_company_name')
         .eq('is_new', true)
         .gte('match_score', 70)

@@ -27,6 +27,7 @@ import {
 } from '@/lib/sources/provenance'
 import type { ApplyProviderId } from '@/lib/ats-apply/types'
 import { openRolesOnly } from '@/lib/jobs/freshness'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 export const dynamic = 'force-dynamic'
 
@@ -142,11 +143,11 @@ export async function GET(request: NextRequest) {
 
   // ---- single job -----------------------------------------------------
   if (jobId) {
-    let { data, error } = await supabase.from('person_jobs').select(FULL_COLUMNS).eq('id', jobId).maybeSingle()
+    let { data, error } = await personJobs(supabase).select(FULL_COLUMNS).eq('id', jobId).maybeSingle()
     let columnsAvailable = true
     if (error && isMissingColumnError(error)) {
       columnsAvailable = false
-      ;({ data, error } = await supabase.from('person_jobs').select(BASE_COLUMNS).eq('id', jobId).maybeSingle())
+      ;({ data, error } = await personJobs(supabase).select(BASE_COLUMNS).eq('id', jobId).maybeSingle())
     }
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     if (!data) return NextResponse.json({ error: 'Job not found' }, { status: 404 })
@@ -180,12 +181,12 @@ export async function GET(request: NextRequest) {
 
     let from = 0
     for (; from < SUMMARY_MAX_ROWS; from += SUMMARY_PAGE) {
-      let { data, error } = await openRolesOnly(supabase.from('person_jobs').select(SUMMARY_COLUMNS))
+      let { data, error } = await openRolesOnly(personJobs(supabase).select(SUMMARY_COLUMNS))
         .order('id', { ascending: true })
         .range(from, from + SUMMARY_PAGE - 1)
       if (error && isMissingColumnError(error)) {
         columnsAvailable = false
-        ;({ data, error } = (await openRolesOnly(supabase.from('person_jobs').select(SUMMARY_COLUMNS_BASE))
+        ;({ data, error } = (await openRolesOnly(personJobs(supabase).select(SUMMARY_COLUMNS_BASE))
           .order('id', { ascending: true })
           .range(from, from + SUMMARY_PAGE - 1)) as unknown as { data: typeof data; error: typeof error })
       }
@@ -216,7 +217,7 @@ export async function GET(request: NextRequest) {
     // trim().length check against this table's full production data (0
     // mismatches across all 21,157 rows) — this is not an approximation.
     const { count: descriptionComplete, error: descCountError } = await openRolesOnly(
-      supabase.from('person_jobs').select('id', { count: 'exact', head: true })
+      personJobs(supabase).select('id', { count: 'exact', head: true })
     ).ilike('description', '_'.repeat(MIN_DESCRIPTION_CHARS) + '%')
     if (descCountError) return NextResponse.json({ error: descCountError.message }, { status: 500 })
     breakdown.descriptionComplete = descriptionComplete ?? 0
@@ -228,13 +229,11 @@ export async function GET(request: NextRequest) {
     const examples: Partial<Record<EmployerClass, JobProvenance & { jobUrl: string | null; companyName: string | null }>> = {}
     const exampleIds = [...exampleJobIds.values()]
     if (exampleIds.length > 0) {
-      let { data: exampleRows, error: exampleError } = await supabase
-        .from('person_jobs')
+      let { data: exampleRows, error: exampleError } = await personJobs(supabase)
         .select(FULL_COLUMNS)
         .in('id', exampleIds)
       if (exampleError && isMissingColumnError(exampleError)) {
-        ;({ data: exampleRows, error: exampleError } = (await supabase
-          .from('person_jobs')
+        ;({ data: exampleRows, error: exampleError } = (await personJobs(supabase)
           .select(BASE_COLUMNS)
           .in('id', exampleIds)) as unknown as { data: typeof exampleRows; error: typeof exampleError })
       }
@@ -254,7 +253,7 @@ export async function GET(request: NextRequest) {
   const offset = Math.max(0, Number(searchParams.get('offset')) || 0)
 
   const build = (columns: string) => {
-    let query = openRolesOnly(supabase.from('person_jobs').select(columns, { count: 'exact' }))
+    let query = openRolesOnly(personJobs(supabase).select(columns, { count: 'exact' }))
       .order('discovered_at', { ascending: false })
       .range(offset, offset + limit - 1)
     if (companyId) query = query.eq('viewer_company_id', companyId)
