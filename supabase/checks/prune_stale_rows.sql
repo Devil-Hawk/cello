@@ -16,6 +16,8 @@ insert into auth.users (id, email) select user_id, 'prune-check@example.invalid'
 insert into public.profiles (id, email) select user_id, 'prune-check@example.invalid' from fx on conflict (id) do nothing;
 insert into public.companies (id, user_id, name, career_url)
 select company_id, user_id, 'Prune Check', 'https://example.invalid/jobs' from fx;
+-- Following has one writer (K13), so the check follows through it.
+select public.companies_follow(array[company_id], true, user_id) from fx;
 -- The prune reads last_seen_at, not discovered_at: "listed_old" was found long
 -- ago but a refresh saw it yesterday, so it stays; "old free" nobody has seen
 -- for 60 days, so it goes.
