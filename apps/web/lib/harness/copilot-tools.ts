@@ -124,12 +124,12 @@ const SOURCE_JOBS_MAX_LIMIT = 40
 const SOURCE_JOBS_TIMEOUT_MS = 25_000
 
 /** score_jobs batch size. Deliberately small: every role assessed is real LLM
- *  spend (judging what the person wants, then checking their chance) —
+ *  spend (judging what the person wants, then checking their chance),
  *  this is the "bound it hard" the copilot's inline scoring tool needs that
  *  trigger_run's own COPILOT_RUN_BUDGET doesn't give per-call granularity for. */
 const SCORE_JOBS_DEFAULT_LIMIT = 10
 const SCORE_JOBS_MAX_LIMIT = 15
-/** Wall-clock ceiling for one score_jobs call — same defense as
+/** Wall-clock ceiling for one score_jobs call, same defense as
  *  SOURCE_JOBS_TIMEOUT_MS, just sized for LLM latency instead of HTTP fan-out. */
 const SCORE_JOBS_TIMEOUT_MS = 70_000
 
@@ -1037,7 +1037,7 @@ interface ScoreJobsReportRow {
  * score_jobs: assess a bounded batch of unassessed roles inline instead of
  * handing the user off to trigger_run. Calls the SAME bulk matcher
  * (lib/harness/agents/bulk_matcher.ts's runBulkMatch, which goes through
- * lib/scoring like every other path in the product) — nothing about matching
+ * lib/scoring like every other path in the product), nothing about matching
  * itself is reimplemented here. HARD BOUNDED:
  * SCORE_JOBS_DEFAULT_LIMIT/MAX_LIMIT keep one call's spend small, because
  * every role assessed is real LLM cost.
@@ -1079,7 +1079,7 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
       scored: 0,
       failed: 0,
       candidatesConsidered: 0,
-      note: 'No unassessed jobs found for your tracked companies — try source_jobs first.',
+      note: 'No unassessed jobs found for your tracked companies, try source_jobs first.',
     }
   }
 
@@ -1160,10 +1160,10 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
     note:
       relevanceInfo?.broadened
         ? `Nothing unassessed matched "${relevanceInfo.query}" in the ${relevanceInfo.poolSize} most recent unassessed ` +
-          'jobs, so this broadened to the newest unassessed jobs instead of assessing nothing — consider source_jobs ' +
+          'jobs, so this broadened to the newest unassessed jobs instead of assessing nothing, consider source_jobs ' +
           'with a matching query first if you want fresher candidates for this ask.'
         : result.scored === 0 && result.candidatesConsidered === 0
-          ? 'Nothing to assess in this batch — try source_jobs first, or widen targeting in Settings.'
+          ? 'Nothing to assess in this batch, try source_jobs first, or widen targeting in Settings.'
           : undefined,
   }
 }

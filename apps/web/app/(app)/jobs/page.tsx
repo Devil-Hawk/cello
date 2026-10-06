@@ -438,7 +438,7 @@ function JobsPageInner() {
   // Show-low-quality is the inverse of the default-on "hide low quality" toggle.
   const hideLowQuality = searchParams.get('showLowQuality') !== '1'
   // Only rows that have not been assessed yet. Exists so the dashboard's
-  // "Not assessed yet 11,603" readout — by far the largest number in the product — can
+  // "Not assessed yet 11,603" readout, by far the largest number in the product, can
   // link somewhere that actually shows those rows. It used to point at bare
   // /jobs, which opens the default recency feed and answers nothing.
   const unscoredOnly = searchParams.get('unscored') === '1'

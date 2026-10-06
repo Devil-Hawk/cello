@@ -93,7 +93,7 @@
 //               like lib/graph/runs.ts's plannerTask.
 //   scoreTask   assesses unassessed candidates via the shared matcher path
 //               (lib/harness/agents/matcher.ts#scoreJobBatch, which goes through
-//               lib/scoring) and makes sure today's shortlist exists — the exact
+//               lib/scoring) and makes sure today's shortlist exists, the exact
 //               code path the cron digest uses, so autopilot can never silently
 //               diverge in how roles are judged.
 //               Module-level, once per tick.

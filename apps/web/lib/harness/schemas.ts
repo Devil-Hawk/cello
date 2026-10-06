@@ -91,7 +91,7 @@ export const SourcerOutput = z.object({
   notes: z.string().optional(),
 })
 
-// matcher — decide which roles to show: filter on stated facts, rank by want, check the chance against the resume.
+// matcher, decide which roles to show: filter on stated facts, rank by want, check the chance against the resume.
 export const MatcherInput = z.object({
   jobIds: z.array(z.string()).optional(),
 })
@@ -463,7 +463,7 @@ export const PlannerInput = z.object({
 // re-declared, so the schema stays byte-identical to the one that file's own
 // AgentFn parses against.
 
-// bulk_matcher — batch assessment (lib/harness/agents/bulk_matcher.ts#runBulkMatch).
+// bulk_matcher, batch assessment (lib/harness/agents/bulk_matcher.ts#runBulkMatch).
 export const BulkMatcherInput = z.object({
   companyIds: z.array(z.string()).optional(),
   jobIds: z.array(z.string()).optional(),

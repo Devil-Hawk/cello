@@ -3,7 +3,7 @@
 // IMPORTANT HONESTY NOTE — read before trusting this file's numbers: this
 // product has NO dedicated compensation or visa-sponsorship targeting field.
 // lib/targeting.ts's Targeting interface has functions/seniority/countries/
-// remoteOnly/languages/excludedCompanies/excludedKeywords — nothing
+// remoteOnly/languages/excludedCompanies/excludedKeywords, nothing
 // for comp or sponsorship specifically. The only way a user could approximate
 // a comp/sponsorship filter today is via excludedKeywords (e.g. adding
 // "unpaid" or "no sponsorship" as a keyword) — see compSponsorshipNote below,

@@ -140,9 +140,9 @@ export const COPILOT_TOOLS: ToolSpec[] = [
       'Assess a SMALL batch of the user\'s unassessed roles: roles that break something they stated are filtered ' +
       'with the reason, the rest are judged on what they want and on their chance against their resume (each ' +
       'requirement checked on a cited resume line), saved on the role, inline in this conversation. ' +
-      'COSTS REAL MONEY PER ROLE — limit defaults to 10 and is capped at 15; do not raise it without the user ' +
+      'COSTS REAL MONEY PER ROLE, limit defaults to 10 and is capped at 15; do not raise it without the user ' +
       'asking, and do not call this repeatedly in one turn to route around the cap. Omit BOTH jobIds and query ' +
-      'ONLY when the ask is genuinely "assess whatever is unassessed" — it then falls back to newest-first. When ' +
+      'ONLY when the ask is genuinely "assess whatever is unassessed", it then falls back to newest-first. When ' +
       'the user names criteria that narrow which roles matter (a role, seniority, company trait), prefer passing ' +
       'the specific jobIds you already identified from list_jobs/source_jobs; if you have not (or the pool is ' +
       'larger than what you listed), pass query (e.g. "AI Engineer") instead and it ranks the user\'s unassessed ' +

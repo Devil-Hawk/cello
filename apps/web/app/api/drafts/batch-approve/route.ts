@@ -190,7 +190,7 @@ function buildReviewItem(draft: DraftRowRaw, decision: BatchDecision): ReviewIte
   }
 }
 
-/** Most wanted first, unassessed last, newest first within a tie — the order
+/** Most wanted first, unassessed last, newest first within a tie, the order
  *  a person reviewing 50 of these actually wants to read them in. */
 function byWorthReadingFirst(a: ReviewItem, b: ReviewItem): number {
   const left = a.want ?? -1

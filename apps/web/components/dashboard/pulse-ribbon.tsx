@@ -13,7 +13,7 @@ import { GradientMesh } from '@/components/ui/gradient-mesh'
 import { cn, formatRelativeTime } from '@/lib/utils'
 
 /**
- * Roles checked per click of the "Check now" trigger — mirrors BATCH_LIMIT in
+ * Roles checked per click of the "Check now" trigger, mirrors BATCH_LIMIT in
  * app/(app)/dashboard/page.tsx and app/(app)/jobs/page.tsx (both currently
  * 25), which is what's actually sent to POST /api/agents/match/batch. Not a
  * prop: this component isn't wired to a shared constant, so this is

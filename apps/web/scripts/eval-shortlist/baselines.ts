@@ -17,7 +17,7 @@ export const OLD_SCORER_SYSTEM_HEAD =
   'You are an expert technical recruiter producing an honest, evidence-based fit assessment ' +
   'between a candidate resume and a job. Be specific and concrete. Never invent candidate ' +
   'experience. Respond with a single JSON object and nothing else.\n\n' +
-  `CANDIDATE RESUME (the only source of truth about the candidate — never credit ` +
+  `CANDIDATE RESUME (the only source of truth about the candidate, never credit ` +
   `experience that is not here):\n`
 
 const DESC_LIMIT = 4000

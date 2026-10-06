@@ -108,8 +108,8 @@ export interface ChanceAccuracyData {
   /** In the order Strong, Possible, Stretch. */
   buckets: ChanceBucket[]
   /**
-   * 'validates' — reply rate falls as the chance call weakens (Strong >= Possible >= Stretch, with Strong above Stretch).
-   * 'refutes' — it does not: flat or inverted.
+   * 'validates', reply rate falls as the chance call weakens (Strong >= Possible >= Stretch, with Strong above Stretch).
+   * 'refutes', it does not: flat or inverted.
    * Only set when at least two chance groups individually cross the per-bucket
    * minimum (see thresholds.ts); otherwise this whole question stays insufficient_data.
    */

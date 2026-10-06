@@ -501,7 +501,7 @@ export function reasonProblems(text: string): string[] {
   if (t.split(/\s+/).length > 40) problems.push('too long')
   if ((t.match(/[.!?](\s|$)/g) ?? []).length > 1) problems.push('more than one sentence')
   if (/\b(score|probability|algorithm|based on your profile|machine learning)\b/i.test(t)) problems.push('talks about how Cello works')
-  if (/[–—]/.test(t)) problems.push('dash')
+  if (/[\u2013\u2014]/.test(t)) problems.push('dash')
   return problems
 }
 

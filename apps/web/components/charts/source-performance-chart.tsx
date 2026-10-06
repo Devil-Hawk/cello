@@ -16,7 +16,7 @@ export interface SourcePerformanceChartProps {
 }
 
 /**
- * Jobs per source, with assessed count as a second series — color encodes the
+ * Jobs per source, with assessed count as a second series, color encodes the
  * SERIES (total intake vs. assessed), not the source identity, so this scales
  * to any number of source rows without needing a wide categorical palette.
  * Source identity is the row label (the y-axis), never a color.

@@ -95,6 +95,6 @@ describe('TriageControl', () => {
     const out = html(createElement(TriageControl, { jobId: 'j1', surface: 'today' })) + html(createElement(FitPanel, { fit: FIT })) + html(createElement(ChanceChip, { fit: FIT }))
     expect(out).not.toMatch(/\b(run|thread|tick|step|graph|agent)\b/i)
     expect(out).not.toContain('!')
-    expect(out).not.toContain('—')
+    expect(out).not.toContain('\u2014')
   })
 })
