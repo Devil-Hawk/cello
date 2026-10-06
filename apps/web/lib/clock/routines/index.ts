@@ -3,7 +3,7 @@
 // Later packages add their handlers here and their rows by insert, never a second sweeper.
 
 import type { RoutineHandler } from '../routines'
-import { demoExpire, harnessDigest, harnessDistill, harnessResume } from './harness'
+import { demoExpire, harnessDigest, harnessLearn, harnessResume } from './harness'
 import { directorySeed } from './directory-seed'
 import { directorySweep } from './directory-sweep'
 import { inboxSync } from './inbox-sync'
@@ -31,5 +31,5 @@ export const HANDLERS: Record<string, RoutineHandler> = {
   'harness.resume': harnessResume,
   'demo.expire': demoExpire,
   'harness.digest': harnessDigest,
-  'harness.learn': harnessDistill,
+  'harness.learn': harnessLearn,
 }

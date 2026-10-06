@@ -425,7 +425,7 @@ export async function runDigestPasses(admin: AdminClient): Promise<DigestPassRes
   return { activeUsers: active.length, processed: batch.length, skippedForCapacity: Math.max(0, active.length - batch.length), results, digest }
 }
 
-export interface DistillPassResult {
+export interface LearnPassResult {
   userId: string
   counted?: number
   read?: string
@@ -437,9 +437,9 @@ export interface DistillPassResult {
  * code over their record and at most one model read stored as a proposal. A failure for one person never
  * blocks another's. The routine keeps its id, harness.learn, so its schedule and its row stay.
  */
-export async function runDistillPass(admin: AdminClient): Promise<DistillPassResult[]> {
+export async function runLearnPass(admin: AdminClient): Promise<LearnPassResult[]> {
   const { batch } = await activeBatch(admin)
-  const out: DistillPassResult[] = []
+  const out: LearnPassResult[] = []
   let next = 0
   const worker = async () => {
     while (true) {
@@ -477,7 +477,7 @@ export async function harnessDigest(ctx: RoutineContext): Promise<RoutineOutcome
   return { ok: true, found: { active_users: r.activeUsers, processed: r.processed, runs_failed: r.results.filter((x) => x.error).length } }
 }
 
-export async function harnessDistill(ctx: RoutineContext): Promise<RoutineOutcome> {
-  const r = await runDistillPass(ctx.admin)
+export async function harnessLearn(ctx: RoutineContext): Promise<RoutineOutcome> {
+  const r = await runLearnPass(ctx.admin)
   return { ok: true, found: { counted: r.reduce((n, x) => n + (x.counted ?? 0), 0), people: r.length, failed: r.filter((x) => x.error).length } }
 }

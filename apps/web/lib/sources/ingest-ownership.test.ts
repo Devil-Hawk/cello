@@ -1,5 +1,5 @@
-// Proves ingestLeads' existing-jobs dedup lookup scopes through the
-// companies FK join (lib/harness/agents/matcher.ts's ownedJobsQuery), not an
+// Proves ingestLeads' existing-jobs dedup lookup scopes through the person's
+// own rows (person_jobs, viewer_id), not an
 // .in('company_id', companyIds) querystring array — the fix in the commit
 // that removed the incident-causing .in() from this file (lib/sources/
 // index.ts:260). Uses an in-memory fake AdminClient (no network, zero DB
@@ -85,18 +85,16 @@ const LEAD: JobLead = {
   postedAt: null,
 }
 
-describe('ingestLeads — existing-jobs dedup lookup is ownership-scoped via the FK join', () => {
-  it('filters the existing-jobs query by companies.user_id, not a company-id array', async () => {
+describe('ingestLeads — existing-jobs dedup lookup is ownership-scoped via person_jobs', () => {
+  it('filters the existing-jobs query by the viewer, not a company-id array', async () => {
     const { admin, eqCalls } = fakeAdmin()
 
     const result = await ingestLeads(admin, USER_ID, [LEAD])
 
     expect(result.errors).toEqual([])
     expect(result.inserted).toBe(1)
-    // The ownership fence: ownedJobsQuery builds this exact filter — proves
-    // the dedup lookup no longer relies on an .in('company_id', companyIds)
-    // array (which breaks past ~600 companies), root-caused instead via the
-    // FK join.
+    // The ownership fence: the lookup reads the person's own rows, so it needs no
+    // .in('company_id', companyIds) array (which breaks past ~600 companies).
     expect(eqCalls).toContainEqual(['person_jobs', 'viewer_id', USER_ID])
   })
 })

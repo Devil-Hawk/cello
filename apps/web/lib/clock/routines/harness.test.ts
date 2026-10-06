@@ -174,7 +174,7 @@ vi.mock('@/lib/learning/learner', () => ({
   runLearner: (...args: unknown[]) => runLearnerMock(...args),
 }))
 
-import { resumeCheckpointedRuns, runDemoPasses, runDigestPasses, runDistillPass } from './harness'
+import { resumeCheckpointedRuns, runDemoPasses, runDigestPasses, runLearnPass } from './harness'
 
 const admin = { from: (table: string) => new FakeQuery(table) } as never
 
@@ -183,7 +183,7 @@ async function POST(_request?: unknown) {
   const resume = await resumeCheckpointedRuns(admin)
   const demo = await runDemoPasses(admin)
   const digest = await runDigestPasses(admin)
-  const distill = await runDistillPass(admin)
+  const distill = await runLearnPass(admin)
   const body = {
     ok: true,
     ...digest,
