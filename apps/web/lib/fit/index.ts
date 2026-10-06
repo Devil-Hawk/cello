@@ -125,7 +125,7 @@ export async function readRoleFit(deps: FitDeps, jobId: string, mode: FitMode = 
   const unsettled = () => role.requirements.filter((r, n) => items[n].origin === 'code' && items[n].verdict === 'unknown' && !role.authorizationIds.has(r.id))
   if (mode !== 'view' && unsettled().length > 0 && deps.keys && (await evidenceLive(admin))) {
     const door = deps.door ?? modelDoor
-    const rung = door.pickRung(EVIDENCE_STEP, { ceiling: 'R4', order: [], creditBought: false }, availableRungs(deps.keys), deps.keys)
+    const rung = door.pickRung(EVIDENCE_STEP, deps.keys.models ?? { ceiling: 'R4', order: [], creditBought: false }, availableRungs(deps.keys), deps.keys)
     const allowed = rung.rung !== null && (mode === 'check' || rung.rung === 'R2')
     if (allowed) {
       const now = (deps.now ?? (() => new Date()))()

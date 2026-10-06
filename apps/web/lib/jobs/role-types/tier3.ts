@@ -97,7 +97,7 @@ export interface TypeRun {
 export async function runTypeStep(args: { userId: string; ids: readonly string[]; titles: readonly TitleToType[]; door?: ModelDoor; keys?: Parameters<typeof availableRungs>[0] }): Promise<TypeRun | null> {
   const door = args.door ?? modelDoor
   const keys = args.keys ?? (await loadApiKeys(createAdminClient(), args.userId))
-  const pick = door.pickRung(TYPE_STEP, { ceiling: 'R4', order: [], creditBought: false }, availableRungs(keys), keys)
+  const pick = door.pickRung(TYPE_STEP, keys.models ?? { ceiling: 'R4', order: [], creditBought: false }, availableRungs(keys), keys)
   if (pick.rung === null) return null
   const out: TypeRun = { answers: [], calls: 0, prov: null }
   for (let i = 0; i < args.titles.length; i += TYPE_BATCH) {

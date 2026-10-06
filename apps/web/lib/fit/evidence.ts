@@ -115,7 +115,7 @@ export async function runEvidenceStep(args: {
   door?: ModelDoor
 }): Promise<EvidenceRun | null> {
   const door = args.door ?? modelDoor
-  const pick = door.pickRung(EVIDENCE_STEP, { ceiling: 'R4', order: [], creditBought: false }, availableRungs(args.keys), args.keys)
+  const pick = door.pickRung(EVIDENCE_STEP, args.keys.models ?? { ceiling: 'R4', order: [], creditBought: false }, availableRungs(args.keys), args.keys)
   if (pick.rung === null) return null
   const out: EvidenceRun = { items: [], calls: 0, refused: 0, prov: null }
   for (let i = 0; i < args.requirements.length; i += EVIDENCE_BATCH) {

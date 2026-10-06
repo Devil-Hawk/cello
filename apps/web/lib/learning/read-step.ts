@@ -93,7 +93,7 @@ export async function runReadStep(
   if (sources.length < MIN_READ_SOURCES) return { ran: false, reason: `needs ${MIN_READ_SOURCES} sources, has ${sources.length}`, proposed: 0, refused: 0 }
   const door = opts.door ?? modelDoor
   const keys = opts.keys ?? (await loadApiKeys(createAdminClient(), userId))
-  const pick = door.pickRung(READ_STEP, { ceiling: 'R4', order: [], creditBought: false }, availableRungs(keys), keys)
+  const pick = door.pickRung(READ_STEP, keys.models ?? { ceiling: 'R4', order: [], creditBought: false }, availableRungs(keys), keys)
   if (pick.rung === null) return { ran: false, reason: pick.sentence, proposed: 0, refused: 0 }
 
   const res = await door.complete(
