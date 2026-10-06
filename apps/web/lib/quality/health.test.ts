@@ -1,8 +1,11 @@
 // runHealthCheck against an in-memory stand-in for the tables. No network, no database.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AdminClient } from '../harness/types'
+import { exportFeedback } from './feedback'
 import { DB_WARN_BYTES, groupChecks, providerStreaks, runHealthCheck } from './health'
+
+vi.mock('./feedback', () => ({ exportFeedback: vi.fn(async () => ({ sent: 0, skipped: 0, failed: 0, deleted: 0 })) }))
 
 type Row = Record<string, unknown>
 const MB = 1024 * 1024
@@ -84,6 +87,17 @@ describe('the report', () => {
     await runHealthCheck(fakeAdmin(w).admin, NOW)
     expect(w.tables.ops_health_checks).toHaveLength(1)
     expect((w.tables.ops_health_checks as Row[])[0].db_bytes).toBe(10 * MB)
+  })
+
+  it('sends the queued feedback after the report is stored, and a failure there does not throw', async () => {
+    const w = world()
+    await runHealthCheck(fakeAdmin(w).admin, NOW)
+    expect(exportFeedback).toHaveBeenCalledTimes(1)
+    vi.mocked(exportFeedback).mockRejectedValueOnce(new Error('langfuse down'))
+    const w2 = world()
+    const report = await runHealthCheck(fakeAdmin(w2).admin, NOW)
+    expect(report.checked_at).toBe(NOW.toISOString())
+    expect(w2.tables.ops_health_checks).toHaveLength(1)
   })
 
   it('a size the function cannot give is null and raises nothing', async () => {

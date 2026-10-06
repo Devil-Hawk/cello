@@ -12,6 +12,7 @@
 // shown as zero and never raises an issue.
 
 import type { AdminClient } from '../harness/types'
+import { exportFeedback } from './feedback'
 
 const HOUR_MS = 60 * 60 * 1000
 const MB = 1024 * 1024
@@ -165,7 +166,8 @@ function newest(values: (string | null)[]): string | null {
 const mbText = (bytes: number) => `${Math.round(bytes / MB)} MB`
 
 /**
- * Read the signals, store the day's report and drop reports older than 90 days.
+ * Read the signals, store the day's report and drop reports older than 90 days,
+ * then send the queued outcome scores to Langfuse (the one place that queue is sent).
  * Never throws for a missing table or function; throws only when the report
  * itself cannot be stored, so the routine that runs it reports the failure.
  */
@@ -240,5 +242,12 @@ export async function runHealthCheck(admin: AdminClient, now: Date = new Date())
   const stored = await admin.from('ops_health_checks').insert({ checked_at: report.checked_at, db_bytes: dbBytes, report })
   if (stored.error) throw new Error(`could not store the health report: ${stored.error.message}`)
   await admin.from('ops_health_checks').delete().lt('checked_at', new Date(now.getTime() - KEEP_CHECKS_DAYS * 24 * HOUR_MS).toISOString())
+  // 5) Send the queued outcome scores. Best effort: a Langfuse failure never loses the report.
+  try {
+    const sent = await exportFeedback(admin, { now })
+    console.info(`[health] feedback scores: ${sent.sent} sent, ${sent.skipped} expired, ${sent.failed} failed, ${sent.deleted} old rows removed`)
+  } catch (err) {
+    console.warn(`[health] feedback scores not sent: ${err instanceof Error ? err.message : String(err)}`)
+  }
   return report
 }
