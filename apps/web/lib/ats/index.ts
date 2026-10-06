@@ -315,7 +315,7 @@ function repairJobText(job: AtsJob): AtsJob {
 }
 
 /** Keep only http(s) jobs with a title and an absolute URL; dedup by URL. */
-function sanitizeJobs(jobs: AtsJob[]): AtsJob[] {
+export function sanitizeJobs(jobs: AtsJob[]): AtsJob[] {
   const seen = new Set<string>()
   const clean: AtsJob[] = []
   for (const job of jobs) {
@@ -334,6 +334,53 @@ function sanitizeJobs(jobs: AtsJob[]): AtsJob[] {
     clean.push(repairJobText(job))
   }
   return clean
+}
+
+const typeFields = (t: ReturnType<typeof typeTitle>) => ({ title_norm: t.title_norm, dept_norm: t.dept_norm, role_type: t.role_type, type_origin: t.type_origin, type_prov: t.type_prov })
+
+/** The row a read stores for one listed posting: its classification, its whole body as Markdown, its requirements and its type. */
+export function jobRow(
+  company: Pick<CompanyInput, 'id' | 'employer_id'>,
+  job: AtsJob,
+  title: string,
+  c: ReturnType<typeof classifyJob>,
+  source: string,
+  now: string
+): JobUpsertRow {
+  const cap = postingCapture(job)
+  return {
+    company_id: company.id,
+    ...(company.employer_id ? { employer_id: company.employer_id } : {}),
+    title,
+    description: (job.description ?? '').slice(0, MAX_DESCRIPTION_CHARS),
+    url: job.url,
+    location: job.location ?? null,
+    salary_range: job.salary ?? null,
+    posted_at: job.postedAt ?? null,
+    external_id: job.externalId,
+    is_new: true,
+    discovered_at: now,
+    job_function: c.jobFunction,
+    seniority: c.seniority,
+    language: c.language,
+    country: c.country,
+    is_remote: c.isRemote,
+    job_type: c.jobType,
+    quality_score: c.qualityScore,
+    source,
+    source_tier: tierOfSource(source),
+    last_seen_at: now,
+    requirements: parseRequirements({
+      title,
+      description: job.description ?? '',
+      descriptionMd: cap.description_md,
+      location: job.location,
+      salaryRange: job.salary,
+    }),
+    requirements_extracted_at: now,
+    ...cap,
+    ...typeFields(typeTitle(title)),
+  }
 }
 
 /** The sources whose rows one refresh of `provider` may count as missed. */
@@ -736,7 +783,6 @@ export async function syncJobs(
       return true
     })
   }
-  const typeFields = (t: ReturnType<typeof typeTitle>) => ({ title_norm: t.title_norm, dept_norm: t.dept_norm, role_type: t.role_type, type_origin: t.type_origin, type_prov: t.type_prov })
   // Closed roles go first, oldest first: the ones nothing points at are deleted, the rest stay and count.
   const closedStoredRows = [...stored.values()].filter((s) => s.open === false)
   if (ranked.length > room && store.evictJobs && closedStoredRows.length > 0) {
@@ -794,44 +840,7 @@ export async function syncJobs(
     }
   }
   excluded.capped = Math.max(0, ranked.length - room)
-  const newRows: JobUpsertRow[] = ranked
-    .slice(0, room)
-    .map(({ job, title, c }) => {
-    const cap = postingCapture(job)
-    return {
-      company_id: company.id,
-      ...(company.employer_id ? { employer_id: company.employer_id } : {}),
-      title,
-      description: (job.description ?? '').slice(0, MAX_DESCRIPTION_CHARS),
-      url: job.url,
-      location: job.location ?? null,
-      salary_range: job.salary ?? null,
-      posted_at: job.postedAt ?? null,
-      external_id: job.externalId,
-      is_new: true,
-      discovered_at: now,
-      job_function: c.jobFunction,
-      seniority: c.seniority,
-      language: c.language,
-      country: c.country,
-      is_remote: c.isRemote,
-      job_type: c.jobType,
-      quality_score: c.qualityScore,
-      source: opts.source,
-      source_tier: tierOfSource(opts.source),
-      last_seen_at: now,
-      requirements: parseRequirements({
-        title,
-        description: job.description ?? '',
-        descriptionMd: cap.description_md,
-        location: job.location,
-        salaryRange: job.salary,
-      }),
-      requirements_extracted_at: now,
-      ...cap,
-      ...typeFields(typedFor(job, title)),
-    }
-  })
+  const newRows: JobUpsertRow[] = ranked.slice(0, room).map(({ job, title, c }) => jobRow(company, job, title, c, opts.source, now))
 
   if (newRows.length > 0) {
     try {
