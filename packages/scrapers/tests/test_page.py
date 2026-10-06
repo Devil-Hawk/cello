@@ -13,7 +13,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src import page  # noqa: E402
 
+from src import polite  # noqa: E402
+
 _real_allowed = page._allowed
+_real_is_public = page._is_public
 
 LISTING = (
     "<html><body>"
@@ -27,6 +30,8 @@ LISTING = (
 @pytest.fixture(autouse=True)
 def _robots_allow(monkeypatch):
     monkeypatch.setattr(page, "_allowed", lambda url, robots=None: True)
+    # acme.example does not resolve offline: the first address counts as public here.
+    monkeypatch.setattr(page, "_is_public", lambda url: True)
 
 
 def _no_escalation(monkeypatch):
@@ -157,7 +162,7 @@ def test_a_redirect_to_an_internal_address_is_refused_and_never_requested(monkey
     _client_over(handler, monkeypatch)
     monkeypatch.setattr(page, "_allowed", lambda url, robots=None: True)
     # acme.example is not resolvable offline: treat it as public, leave the metadata address to the real check.
-    real_public = page._is_public
+    real_public = _real_is_public
     monkeypatch.setattr(page, "_is_public", lambda url: True if "acme.example" in url else real_public(url))
     with pytest.raises(page.UnsafeRedirect):
         page._static_get("https://acme.example/careers")
@@ -192,7 +197,7 @@ def test_an_ordinary_redirect_to_a_public_page_is_followed(monkeypatch):
 
 def test_only_public_http_addresses_are_read():
     for url in ("http://127.0.0.1/", "http://169.254.169.254/latest/", "http://10.0.0.5/", "http://[::1]/", "file:///etc/passwd", "ftp://example.com/"):
-        assert page._is_public(url) is False, url
+        assert _real_is_public(url) is False, url
 
 
 def test_a_forced_render_the_browser_could_not_do_says_so_with_the_class_and_keeps_the_plain_page(monkeypatch):
@@ -211,3 +216,88 @@ def test_a_render_that_worked_carries_no_render_error(monkeypatch):
     monkeypatch.setattr(page, "fetch_with_browser_fallback", lambda url, html: (html, False))
     assert "render_error" not in page.fetch_page("https://acme.example/careers", force_render=True)
     assert "render_error" not in page.fetch_page("https://acme.example/careers")
+
+
+def test_a_redirect_the_plain_fetch_refused_is_never_handed_to_the_browser(monkeypatch):
+    def refused(url):
+        raise page.UnsafeRedirect("redirect refused")
+
+    def never(url, *a, **kw):
+        raise AssertionError("the browser was sent to an address the plain fetch refused")
+
+    monkeypatch.setattr(page, "_static_get", refused)
+    for name in ("fetch_rendered", "fetch_with_render_fallback", "fetch_with_browser_fallback"):
+        monkeypatch.setattr(page, name, never)
+    for force in (True, False):
+        assert page.fetch_page("https://acme.example/careers", force_render=force) == {"ok": False, "error": "UnsafeRedirect"}
+
+
+def test_a_first_address_that_is_internal_is_not_fetched(monkeypatch):
+    monkeypatch.setattr(page, "_is_public", _real_is_public)
+
+    def never(url):
+        raise AssertionError("fetched an internal address")
+
+    monkeypatch.setattr(page, "_static_get", never)
+    assert page.fetch_page("http://169.254.169.254/latest/", force_render=True) == {"ok": False, "error": "UnsafeUrl"}
+
+
+class _Req:
+    def __init__(self, url, navigation):
+        self.url, self._nav = url, navigation
+
+    def is_navigation_request(self):
+        return self._nav
+
+
+class _Route:
+    def __init__(self, url, navigation=False):
+        self.request, self.verdict = _Req(url, navigation), None
+
+    def continue_(self):
+        self.verdict = "continue"
+
+    def abort(self):
+        self.verdict = "abort"
+
+
+def _guard(monkeypatch, public, robots_ok=lambda url, robots=None: True):
+    monkeypatch.setattr(polite, "is_public", public)
+    monkeypatch.setattr(polite, "robots_allowed", robots_ok)
+    routes = {}
+
+    class Context:
+        def route(self, pattern, handler):
+            routes[pattern] = handler
+
+    polite.guard_browser(Context())
+    assert list(routes) == ["**/*"]
+
+    def run(url, navigation=False):
+        route = _Route(url, navigation)
+        routes["**/*"](route)
+        return route.verdict
+
+    return run
+
+
+def test_the_browser_aborts_a_request_to_an_address_that_is_not_public(monkeypatch):
+    run = _guard(monkeypatch, lambda url: "169.254." not in url)
+    assert run("https://acme.example/careers", navigation=True) == "continue"
+    assert run("https://cdn.example/app.js") == "continue"
+    # a redirect hop, a script request and a click all arrive here as requests
+    assert run("http://169.254.169.254/latest/meta-data/", navigation=True) == "abort"
+    assert run("http://169.254.169.254/latest/meta-data/") == "abort"
+
+
+def test_the_browser_aborts_a_page_load_robots_txt_closes_but_not_an_asset(monkeypatch):
+    run = _guard(monkeypatch, lambda url: True, robots_ok=lambda url, robots=None: "/private" not in url)
+    assert run("https://acme.example/private/jobs", navigation=True) == "abort"
+    assert run("https://acme.example/private/logo.png") == "continue"
+
+
+def test_the_browser_aborts_a_request_it_cannot_judge(monkeypatch):
+    def broken(url):
+        raise OSError("dns")
+
+    assert _guard(monkeypatch, broken)("https://acme.example/") == "abort"
