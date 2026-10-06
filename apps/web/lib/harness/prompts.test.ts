@@ -8,13 +8,16 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import {
   PROMPT_DOC_NAMES,
+  applyPolicy,
   assertPromptDocsResolve,
   composeSystemPrompt,
+  getPolicyDoc,
   getSharedDoc,
   getVoiceDoc,
   loadDoc,
   loadModeDoc,
   promptRef,
+  withPolicy,
 } from './prompts'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -27,6 +30,7 @@ describe('assertPromptDocsResolve', () => {
 
   it('covers _shared, _voice, and every migrated agent doc today', () => {
     expect([...PROMPT_DOC_NAMES]).toEqual(expect.arrayContaining([
+      '_policy',
       '_shared',
       '_voice',
       'cv_tailor',
@@ -119,5 +123,50 @@ describe('promptRef (the Langfuse prompt version)', () => {
 
   it('fails loudly for a document that does not exist, like every other loader here', () => {
     expect(() => promptRef('no_such_doc')).toThrow(/could not read prompt document/)
+  })
+})
+
+describe('the prompt policy', () => {
+  it('has the six numbered rules and no em dash', () => {
+    const doc = getPolicyDoc()
+    for (let n = 1; n <= 6; n++) expect(doc).toContain(`\n${n}. `)
+    expect(doc).not.toContain('\u2014')
+  })
+
+  it('composeSystemPrompt starts with the policy', () => {
+    for (const includeVoice of [true, false]) {
+      expect(composeSystemPrompt({ mode: 'MODE', includeVoice }).startsWith(getPolicyDoc())).toBe(true)
+    }
+  })
+
+  it('withPolicy puts it in front once and is idempotent', () => {
+    const once = withPolicy('Do the task.')
+    expect(once.startsWith(getPolicyDoc())).toBe(true)
+    expect(once.endsWith('Do the task.')).toBe(true)
+    expect(withPolicy(once)).toBe(once)
+    expect(withPolicy(composeSystemPrompt({ mode: 'MODE' })).split(getPolicyDoc()).length).toBe(2)
+    expect(withPolicy(undefined)).toBe(getPolicyDoc())
+  })
+
+  it('applyPolicy covers system, a library system message, and a prompt-only call', () => {
+    const a = applyPolicy({ system: 'S', prompt: 'p' })
+    expect(a.policy).toBe('added')
+    expect(a.opts.system).toContain(getPolicyDoc())
+
+    const composed = applyPolicy({ system: composeSystemPrompt({ mode: 'M' }), prompt: 'p' })
+    expect(composed.policy).toBe('composed')
+
+    const msgs = [
+      { role: 'system' as const, content: 'extract facts' },
+      { role: 'user' as const, content: 'hi' },
+    ]
+    const b = applyPolicy({ messages: msgs })
+    expect(b.opts.system).toBeUndefined()
+    expect(b.opts.messages?.[0].content).toContain(getPolicyDoc())
+    expect(b.opts.messages?.[1]).toEqual(msgs[1])
+    expect(msgs[0].content).toBe('extract facts')
+
+    const c = applyPolicy({ prompt: 'only a prompt' })
+    expect(c.opts.system).toBe(getPolicyDoc())
   })
 })

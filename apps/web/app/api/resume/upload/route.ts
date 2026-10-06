@@ -45,6 +45,7 @@ import OpenAI from 'openai'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { BudgetCapError } from '@/lib/harness/spend'
+import { withPolicy } from '@/lib/harness/prompts'
 import { callLlm } from '@/lib/harness/llm'
 import { canRunLlm } from '@/lib/harness/llm-key-message'
 import { createMarkdownVersion, getBaseResume } from '@/lib/resume/store'
@@ -93,6 +94,7 @@ async function readPdfWithClaude(pdfBase64: string, apiKey: string): Promise<str
     // what guards output quality, not the pin.
     model: 'claude-sonnet-5',
     max_tokens: MAX_OUTPUT_TOKENS,
+    system: withPolicy(),
     messages: [
       {
         role: 'user',
@@ -118,7 +120,10 @@ async function completeWithOpenAI(prompt: string, apiKey: string): Promise<strin
     model: 'gpt-4o-mini',
     max_tokens: MAX_OUTPUT_TOKENS,
     temperature: 0,
-    messages: [{ role: 'user', content: prompt }],
+    messages: [
+      { role: 'system', content: withPolicy() },
+      { role: 'user', content: prompt },
+    ],
   })
   return response.choices[0]?.message?.content ?? ''
 }
