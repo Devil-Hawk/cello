@@ -102,3 +102,52 @@ export async function runLocal(cfg: LocalConfig, req: LocalRequest, doFetch: typ
   if (typeof content !== 'string' || content === '') throw new Error('The local model sent no text.')
   return clampText(content)
 }
+
+// ---------------------------------------------------------------------------------
+// R1: a small model in the person's own browser (WebLLM, in a worker).
+// ---------------------------------------------------------------------------------
+
+/** The reference R1 model: small enough for a laptop browser (about 1 GB of weights). */
+export const R1_MODEL = 'Qwen3-1.7B-q4f16_1-MLC'
+
+export const CANNOT_RUN_MODEL = 'This browser cannot run a model.'
+
+/** The parts of `navigator` the device check reads. */
+export interface DeviceNav {
+  gpu?: { requestAdapter(): Promise<{ limits: { maxBufferSize: number } } | null> }
+  deviceMemory?: number
+  connection?: { saveData?: boolean }
+}
+
+/**
+ * Null when this device can run the R1 model, else the sentence to show. Needs a
+ * WebGPU adapter that can hold a 1 GiB buffer and, where the browser says so, 4 GB
+ * of memory, and the person must not have asked this browser to save data.
+ */
+export async function deviceCanRun(nav: DeviceNav): Promise<string | null> {
+  try {
+    if (nav.connection?.saveData) return CANNOT_RUN_MODEL
+    if (nav.deviceMemory !== undefined && nav.deviceMemory < 4) return CANNOT_RUN_MODEL
+    const adapter = nav.gpu ? await nav.gpu.requestAdapter() : null
+    if (!adapter || adapter.limits.maxBufferSize < 1024 ** 3) return CANNOT_RUN_MODEL
+    return null
+  } catch {
+    return CANNOT_RUN_MODEL
+  }
+}
+
+/** Ask the WebLLM worker (lib/models/webllm.worker.ts) one question. Ids keep two calls apart. */
+let nextId = 0
+export function askWorker(worker: Worker, req: LocalRequest): Promise<string> {
+  const id = ++nextId
+  return new Promise((resolve, reject) => {
+    const onMessage = (e: MessageEvent<{ id: number; text?: string; error?: string }>): void => {
+      if (e.data.id !== id || (e.data.text === undefined && e.data.error === undefined)) return
+      worker.removeEventListener('message', onMessage)
+      if (e.data.text !== undefined) resolve(e.data.text)
+      else reject(new Error(e.data.error))
+    }
+    worker.addEventListener('message', onMessage)
+    worker.postMessage({ id, messages: req.messages })
+  })
+}
