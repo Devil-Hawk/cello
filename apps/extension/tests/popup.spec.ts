@@ -106,6 +106,8 @@ test('options page: fields and Save are drawn, readable and 44 pixels', async ({
   const p = await context.newPage()
   await p.goto(`chrome-extension://${await extensionId(context)}/options.html`)
   await expect(p.getByLabel('Token', { exact: true })).toBeVisible()
+  // The popup's 320px body width must not leak onto this page.
+  expect((await p.locator('body').boundingBox())!.width, 'options width').toBeGreaterThan(400)
   const hex = (c: string): string =>
     '#' +
     (c.match(/[\d.]+/g) ?? [])
