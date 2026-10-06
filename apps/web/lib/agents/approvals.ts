@@ -107,7 +107,7 @@ export async function queueApproval(ctx: AgentContext, input: QueueInput): Promi
 
   let target: { table: ApprovalRow['target_table']; id: string; payload: Record<string, unknown> }
   if (input.action === 'send_email') {
-    const queued = await materializeEmail(admin, ctx, artifact, version.content as ArtifactContent<'outreach_email'>, version.version, input)
+    const queued = await materializeEmail(admin, ctx, artifact, version.content as ArtifactContent<'message'>, version.version, input)
     if (!queued.ok) return queued
     target = queued.target
   } else {
@@ -150,12 +150,12 @@ async function materializeEmail(
   admin: AdminClient,
   ctx: AgentContext,
   artifact: { id: string; type: string; contact_id: string | null; job_id: string | null; company_id: string | null },
-  content: ArtifactContent<'outreach_email'>,
+  content: ArtifactContent<'message'>,
   versionNumber: number,
   input: QueueInput
 ): Promise<Materialized> {
-  if (artifact.type !== 'outreach_email') {
-    return { ok: false, error: `A ${artifact.type.replace('_', ' ')} cannot be sent as an email.`, fix: 'Use an outreach_email artifact.' }
+  if (artifact.type !== 'message') {
+    return { ok: false, error: `A ${artifact.type.replace('_', ' ')} cannot be sent as an email.`, fix: 'Use a message artifact.' }
   }
   const contactId = input.contactId ?? artifact.contact_id
   if (!contactId) return { ok: false, error: 'There is no contact to send this to.', fix: 'Pass contact_id, or use an email that was written for a contact.' }

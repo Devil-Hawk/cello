@@ -16,7 +16,7 @@ export const createArtifactTool = defineTool({
     'It is checked against their resume before it is saved and it is never sent. Pass job_id for a role and contact_id for an email; ' +
     'get both from find_roles and people. For several documents call it once for each. To send an email afterwards use request_approval.',
   schema: z.object({
-    type: z.enum(['resume', 'cover_letter', 'outreach_email', 'follow_up']).describe('Which document. follow_up is a single note after an email already sent.'),
+    type: z.enum(['resume', 'cover_letter', 'message', 'follow_up']).describe('Which document. follow_up is a single note after an email already sent.'),
     job_id: z.string().min(1).optional().describe('The role the document is for, from find_roles.'),
     contact_id: z.string().min(1).optional().describe('Who an email is for, from people.'),
     instructions: z.string().max(600).optional().describe('Anything the person asked for, in their words, for example "keep it under 100 words".'),
@@ -48,12 +48,12 @@ export const updateArtifactTool = defineTool({
   async handler(ctx, a, meta) {
     const row = await getArtifactRow(ctx.admin, ctx.userId, a.id)
     if (!row) return toolFix(`No artifact with id ${a.id}.`, 'Use an id returned by create_artifact.')
-    if (!['resume', 'cover_letter', 'outreach_email'].includes(row.type)) {
+    if (!['resume', 'cover_letter', 'message'].includes(row.type)) {
       return toolFix(`A ${row.type.replace('_', ' ')} is revised by writing it again.`, 'Call research for a dossier.')
     }
     const out = await runWriter(
       { ctx },
-      { type: row.type as 'resume' | 'cover_letter' | 'outreach_email', artifact_id: row.id, instructions: a.change, idempotency_key: keyFor(ctx, meta, a.idempotency_key) },
+      { type: row.type as 'resume' | 'cover_letter' | 'message', artifact_id: row.id, instructions: a.change, idempotency_key: keyFor(ctx, meta, a.idempotency_key) },
       meta.config
     )
     return out.status === 'failed' ? toolFix(out.error ?? 'Could not revise it.', out.fix ?? 'Try again.') : out

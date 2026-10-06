@@ -179,7 +179,7 @@ describe('research', () => {
     const out = (await call('research', { subjects: ['Stripe'] }, ctxFor(admin))) as { ok: number; results: Record<string, unknown>[] }
     expect(out.ok).toBe(1)
     expect(out.results[0]).toMatchObject({ subject: 'Stripe', status: 'ok', summary: 'Stripe builds payments.', sponsors_visa: 'likely', sources: 1 })
-    expect(admin.tables.artifacts[0]).toMatchObject({ type: 'dossier', company_id: 'c1', title: 'Research on Stripe' })
+    expect(admin.tables.artifacts[0]).toMatchObject({ type: 'research', company_id: 'c1', title: 'Research on Stripe' })
     expect(m.runResearcher).not.toHaveBeenCalled()
   })
 
@@ -392,7 +392,7 @@ describe('create_artifact and update_artifact', () => {
 
   it('dossier and shortlist cannot be created here', () => {
     const def = toolByName('create_artifact')!
-    expect(def.schema.safeParse({ type: 'dossier' }).success).toBe(false)
+    expect(def.schema.safeParse({ type: 'research' }).success).toBe(false)
     expect(def.schema.safeParse({ type: 'shortlist' }).success).toBe(false)
   })
 
@@ -411,7 +411,7 @@ describe('create_artifact and update_artifact', () => {
     const admin = makeFakeAdmin({
       artifacts: [
         { id: 'a1', user_id: 'u1', type: 'cover_letter', title: 'L', current_version: 1, job_id: 'j1' },
-        { id: 'a2', user_id: 'u1', type: 'dossier', title: 'D', current_version: 1 },
+        { id: 'a2', user_id: 'u1', type: 'research', title: 'D', current_version: 1 },
         { id: 'a3', user_id: 'u2', type: 'cover_letter', title: 'Not mine', current_version: 1 },
       ],
     })
@@ -431,7 +431,7 @@ describe('pipeline', () => {
         interactions: [],
         artifacts: [
           { id: 'a1', user_id: 'u1', type: 'cover_letter', title: 'Letter', current_version: 1 },
-          { id: 'a2', user_id: 'u1', type: 'dossier', title: 'Dossier', current_version: 1 },
+          { id: 'a2', user_id: 'u1', type: 'research', title: 'Dossier', current_version: 1 },
         ],
         artifact_versions: [
           { artifact_id: 'a1', version: 1, content: { text: 'Dear team' }, content_text: 'Dear team' },
