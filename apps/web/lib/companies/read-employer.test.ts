@@ -121,8 +121,6 @@ describe('readEmployer: what a sweep read keeps, counts and records', () => {
     expect(same.result.listed).toBe(4)
     expect(same.directory.verified_at).toBe(new Date(NOW).toISOString())
   })
-    expect(same.directory.verified_at).toBe(new Date(NOW).toISOString())
-  })
 
   it('the check of a row with no domain does not give it the domain its board declares', async () => {
     const r = await run({ jobs: board, row: { domain: null, verified_at: iso(100) }, identity: { name: 'Acme', homeUrls: ['https://victim.com'] } })
