@@ -93,6 +93,14 @@ describe('queueApproval', () => {
     expect(String(row.payload_hash)).toHaveLength(64)
   })
 
+  it('from a tool server call with no conversation, stores no thread, never an empty id', async () => {
+    const { admin, ctx } = world()
+    const a = await email(admin)
+    const r = await queueApproval({ ...ctx, threadId: '', conversationId: null }, { action: 'send_email', artifactId: a.id, idempotencyKey: 'mcp-1' })
+    expect(r).toMatchObject({ ok: true, created: true })
+    expect(admin.tables.approvals[0].thread_id).toBeNull()
+  })
+
   it('is idempotent by key: a second call returns the same row and queues nothing new', async () => {
     const { admin, ctx } = world()
     const a = await email(admin)

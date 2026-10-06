@@ -121,7 +121,7 @@ export async function queueApproval(ctx: AgentContext, input: QueueInput): Promi
     .insert({
       user_id: userId,
       conversation_id: ctx.conversationId,
-      thread_id: ctx.threadId,
+      thread_id: ctx.threadId || null,
       scheduled_task_id: ctx.scheduledTaskId ?? null,
       action: input.action,
       artifact_id: artifact.id,
