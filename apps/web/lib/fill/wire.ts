@@ -172,5 +172,6 @@ export function readScreenshot(data: string | null): { bytes: Buffer | null } | 
   if (!m) return { error: 'The screenshot must be a JPEG.' }
   const bytes = Buffer.from(m[1], 'base64')
   if (bytes.length > 262_144) return { error: 'The screenshot is too large. Keep it under 256 KB.' }
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) return { error: 'The screenshot must be a JPEG.' }
   return { bytes }
 }

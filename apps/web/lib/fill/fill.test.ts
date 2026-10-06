@@ -162,10 +162,11 @@ describe('portals and the wire', () => {
   })
 
   it('refuses a screenshot over 256 KB and one that is not a JPEG', () => {
-    const jpeg = (kb: number) => `data:image/jpeg;base64,${Buffer.alloc(kb * 1024, 1).toString('base64')}`
+    const jpeg = (kb: number) => `data:image/jpeg;base64,${Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(kb * 1024 - 3, 1)]).toString('base64')}`
     expect('bytes' in readScreenshot(jpeg(200))).toBe(true)
     expect('error' in readScreenshot(jpeg(300))).toBe(true)
     expect('error' in readScreenshot('data:image/png;base64,AAAA')).toBe(true)
+    expect('error' in readScreenshot(`data:image/jpeg;base64,${Buffer.alloc(100, 1).toString('base64')}`)).toBe(true)
     expect(readScreenshot(null)).toEqual({ bytes: null })
   })
 })
@@ -314,7 +315,7 @@ describe('POST /api/fill/report', () => {
   const sessionFields = () => {
     db.tables.pipeline_events = [{ user_id: 'u1', application_id: ID, kind: 'fill.reported', payload: { phase: 'session', fields: [{ key: 'first_name', kind: 'text', category: 'other' }, { key: 'gender', kind: 'select', category: 'eeo' }, { key: 'pw', kind: 'password', category: 'other' }, { key: 'cv', kind: 'file', category: 'other' }] } }]
   }
-  const jpeg = (kb: number) => `data:image/jpeg;base64,${Buffer.alloc(kb * 1024, 1).toString('base64')}`
+  const jpeg = (kb: number) => `data:image/jpeg;base64,${Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(kb * 1024 - 3, 1)]).toString('base64')}`
 
   beforeEach(() => {
     db.tables.applications = [app({ state: 'applying' })]
@@ -365,12 +366,41 @@ describe('POST /api/fill/report', () => {
 
   it('refuses an automatic submit Send for me never asked to make, and records one it did as Did you send it?', async () => {
     db.tables.applications = [app({ state: 'applying', auto_attempted_at: '2026-10-14T00:00:00Z' })]
+    db.tables.pipeline_events = [{ user_id: 'u1', application_id: ID, kind: 'fill.started', payload: { auto: true } }]
     expect((await report({ phase: 'submitted', url: URL_OK })).status).toBe(409)
     expect(db.calls).toHaveLength(0)
-    db.tables.pipeline_events = [{ user_id: 'u1', application_id: ID, kind: 'submission.sending', payload: {} }]
+    db.tables.pipeline_events.push({ user_id: 'u1', application_id: ID, kind: 'submission.sending', payload: {} })
     await report({ phase: 'submitted', url: URL_OK })
     expect(db.calls[0]).toMatchObject({ to: 'needs_you', reason: 'check_sent' })
     expect(db.tables.application_attempts[0]).toMatchObject({ sent_by: 'cello' })
+  })
+
+  it('writes the person\'s own send as theirs when they finish by hand after an automatic stop', async () => {
+    sessionFields()
+    db.tables.applications = [app({ state: 'needs_you', needs_reason: 'your_turn', auto_attempted_at: '2026-10-14T00:00:00Z' })]
+    db.tables.pipeline_events.push({ user_id: 'u1', application_id: ID, kind: 'fill.started', payload: { auto: true } })
+    await report({ phase: 'submitted', url: URL_OK })
+    expect(db.calls[0]).toMatchObject({ event: { payload: { auto: false } } })
+    expect(db.calls[0].event.sentence).toBe('You sent it. No confirmation seen yet.')
+    expect(db.tables.application_attempts[0]).toMatchObject({ sent_by: 'person' })
+  })
+
+  it('keeps Did you send it? for a confirmation that carries no job id to match, and says so', async () => {
+    db.tables.applications = [app({ state: 'needs_you', needs_reason: 'check_sent' })]
+    const res = await report({ phase: 'confirmation', text: 'Thank you for applying', url: 'https://acme.wd1.myworkdayjobs.com/en/done' })
+    expect(res.status).toBe(200)
+    expect(db.calls[0]).toMatchObject({ to: 'needs_you', reason: 'check_sent', event: { kind: 'submission.unconfirmed' } })
+    expect(db.calls.map((c) => c.to)).not.toContain('sent')
+  })
+
+  it('reads a read-back against the earlier forms too, so form A after form B keeps its keys', async () => {
+    const f = (key: string) => ({ key, kind: 'text', category: 'other' })
+    db.tables.pipeline_events = [
+      { user_id: 'u1', application_id: ID, kind: 'fill.reported', payload: { phase: 'session', fields: [f('b_only')] } },
+      { user_id: 'u1', application_id: ID, kind: 'fill.reported', payload: { phase: 'session', fields: [f('a_only')] } },
+    ]
+    const { loadSessionFields } = await import('./record')
+    expect((await loadSessionFields(admin as any, 'u1', ID)).map((k) => k.key).sort()).toEqual(['a_only', 'b_only'])
   })
 
   it('answers ready_to_send with go once, and with already_sent the second time', async () => {
@@ -414,6 +444,7 @@ describe('POST /api/fill/report', () => {
     expect(db.calls[0]).toMatchObject({ to: 'ready' })
     db.calls.length = 0
     db.tables.applications = [app({ state: 'applying', auto_attempted_at: '2026-10-14T00:00:00Z' })]
+    db.tables.pipeline_events = [{ user_id: 'u1', application_id: ID, kind: 'fill.started', payload: { auto: true } }]
     await report({ phase: 'abandoned' })
     expect(db.calls[0]).toMatchObject({ to: 'needs_you', reason: 'your_turn', detail: { cause: 'interrupted' } })
   })

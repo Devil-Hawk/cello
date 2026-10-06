@@ -34,7 +34,11 @@ export async function saveSessionFields(admin: SupabaseClient, userId: string, a
   })
 }
 
-/** The fields of the form the last session served, as the server classified them. Empty when none was served. */
+/**
+ * The fields of the forms the last few sessions served, as the server classified them, the latest form
+ * winning a key. Form A, then B, then A again leaves B's list latest, so A's read-back needs the earlier
+ * lists too. Empty when none was served.
+ */
 export async function loadSessionFields(admin: SupabaseClient, userId: string, applicationId: string): Promise<Known[]> {
   const { data } = await admin
     .from('pipeline_events')
@@ -44,10 +48,13 @@ export async function loadSessionFields(admin: SupabaseClient, userId: string, a
     .eq('kind', 'fill.reported')
     .eq('payload->>phase', 'session')
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  const list = (data as { payload?: { fields?: unknown } } | null)?.payload?.fields
-  return Array.isArray(list) ? (list as { key: string; kind: FieldKind; category: FieldCategory }[]) : []
+    .limit(5)
+  const byKey = new Map<string, Known>()
+  for (const row of [...((data as { payload?: { fields?: unknown } }[] | null) ?? [])].reverse()) {
+    const list = row.payload?.fields
+    if (Array.isArray(list)) for (const f of list as Known[]) byKey.set(f.key, f)
+  }
+  return [...byKey.values()]
 }
 
 export interface AttemptInput {

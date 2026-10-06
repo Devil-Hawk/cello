@@ -43,6 +43,18 @@ async function sendingEvent(a: FillAuth, appId: string): Promise<boolean> {
   return Boolean(data)
 }
 
+/**
+ * Whether this send is Cello's own (Send for me) and not the person's. auto_attempted_at only says Cello once
+ * tried and never clears, so after an automatic stop the person's own finish would be written as Cello's.
+ * The live claim, or the Did you send it? that Cello's own click left, says it: the latest line that began
+ * a fill or asked, and whether it was the automatic one.
+ */
+async function isAutomatic(a: FillAuth, app: { id: string; state: string | null; needs_reason: string | null; auto_attempted_at: string | null }): Promise<boolean> {
+  if (app.auto_attempted_at === null || !(app.state === 'applying' || (app.state === 'needs_you' && app.needs_reason === 'check_sent'))) return false
+  const { data } = await a.admin.from('pipeline_events').select('payload').eq('user_id', a.userId).eq('application_id', app.id).in('kind', ['fill.started', 'submission.unconfirmed']).order('created_at', { ascending: false }).limit(1).maybeSingle()
+  return (data as { payload?: { auto?: unknown } } | null)?.payload?.auto === true
+}
+
 /** The files the claim served, which the Send step must repeat exactly. */
 async function servedFiles(a: FillAuth, appId: string): Promise<unknown[]> {
   const { data } = await a.admin.from('pipeline_events').select('payload').eq('user_id', a.userId).eq('application_id', appId).eq('kind', 'fill.started').order('created_at', { ascending: false }).limit(1).maybeSingle()
@@ -73,7 +85,7 @@ export async function POST(request: NextRequest) {
 
   const stamp = app.last_event_at ?? 'none'
   const company = app.jobs!.companies?.name ?? 'the company'
-  const automatic = app.auto_attempted_at !== null
+  const automatic = await isAutomatic(a, app)
   const version = request.headers.get('x-cello-extension-version')
   const sentBy = automatic ? 'cello' : 'person'
   const asked = (kind: 'submission.unconfirmed', key: string, sentence: string) =>
@@ -91,7 +103,7 @@ export async function POST(request: NextRequest) {
       } catch {
         host = null
       }
-      // an automatic claim that stopped before Send is never tried again automatically (auto_attempted_at stays)
+      // an automatic claim that stopped before Send is never tried again automatically (auto_attempted_at stays, and the person's own finish is theirs)
       return answer(
         await transition(a.admin, {
           applicationId: app.id,
@@ -143,6 +155,11 @@ export async function POST(request: NextRequest) {
       const want = detectApplyTarget(app.jobs!.url)?.jobId
       const got = detectApplyTarget(c.url)?.jobId ?? detectApplyTarget(report.final_url)?.jobId
       if (want && got && want !== got) return NextResponse.json({ error: 'That confirmation is not for this posting.' }, { status: 409 })
+      // Sent needs the id on both sides. Without it the page could be any page, so the person's check stands.
+      if (!want || !got) {
+        if (app.state === 'sent') return NextResponse.json({ ok: true })
+        return answer(await asked('submission.unconfirmed', `unconfirmed:${app.id}:${stamp}`, `${company} showed a page Cello could not match to this posting. Check that it sent.`))
+      }
       const confirmed = app.state === 'sent'
       const r = await transition(a.admin, {
         applicationId: app.id,
