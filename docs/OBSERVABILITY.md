@@ -385,7 +385,7 @@ at the small set of catch blocks where it's wired in today (the harness
 run/cron routes, Gmail sync, and the ATS submit-approval route) — `extra`
 is IDs/enums only, by the same rule.
 
-## Outcome scores, the free fallback and the daily health check
+## Outcome scores and the daily health check
 
 ### Outcome scores (Langfuse)
 
@@ -402,34 +402,28 @@ generation that produced it, named after the behaviour:
 | `outreach_replied` | boolean | A contact replied (comment is positive, neutral, negative or bounce) |
 | `interview_scheduled` | boolean | The application reached a screen or interview |
 
-Database triggers queue each event in `feedback_events`; the mail check and the daily
-check send them (`lib/quality/feedback.ts`). Rows that hold model output keep the
-trace and observation id (`trace_id`, `observation_id`) so an outcome that arrives
-days later, such as a reply, still lands on the call that caused it. Events older
+Database triggers queue each event in `feedback_events`; the daily health routine sends
+them (`exportFeedback` in `lib/quality/feedback.ts`). Rows that hold model output keep
+the trace and observation id (`trace_id`, `observation_id`) so an outcome that arrives
+days later, such as a reply, still lands on the call that caused it. A role's trace is
+on the person's own `person_roles` row, because the assessment is theirs. Events older
 than 28 days are dropped, because Langfuse keeps traces for 30.
 
-### Free-model fallback
+### Health check
 
-When a paid call hits the person's monthly cap or OpenRouter answers 402, `callLlm`
-retries once on `LLM_FREE_FALLBACK_MODEL` (default `google/gemma-4-31b-it:free`). The
-call is priced at 0. The generation carries `free_fallback: true`, `fallback_reason`
-and `requested_model`. Demos never fall back. A value that does not end in `:free`
-turns the fallback off.
-
-### Health check and alerts
-
-The daily harness cron records heartbeats (daily check, mail check, autopilot), reads
-the database size, the pg_cron history and the last role checks, and keeps one open
-alert row per problem in `ops_alerts`:
+The daily health routine stores one report in `ops_health_checks` (`lib/quality/health.ts`):
+the database size and its biggest tables, how fresh each routine is from `job_heartbeats`
+(the only heartbeat), and the sources that failed their last three role checks. The
+issues in it are computed in code, each with a next step:
 
 - the database is over 350 MB (the free plan stops at 500 MB)
-- a schedule has not succeeded inside its window (daily check 26 h, mail check 3 h,
-  autopilot 9 h, role check 15 h, cleanup 26 h)
+- a routine was due more than an hour ago and has not succeeded since
 - a source failed its last three role checks in a row
 
-Alerts resolve themselves when a later check no longer sees the problem. The account
-named in `OPS_OWNER_EMAIL` sees them in Needs you and can mark one handled; for anyone
-else nothing renders. Unset, they are still recorded and returned in the cron response.
+Something the check cannot read is reported as not reporting, never as zero. The account
+whose id is `OWNER_USER_ID` sees the latest report on the dashboard beside the AI budget;
+for anyone else nothing renders and `/api/ops/health` answers 404. Reports older than
+90 days are deleted.
 
 ### Two alerts to create in Langfuse
 
@@ -457,5 +451,4 @@ https://langfuse.com/docs/observability/features/alerts
 
 | Variable | What it does |
 |---|---|
-| `OPS_OWNER_EMAIL` | The one account that sees system alerts in Needs you |
-| `LLM_FREE_FALLBACK_MODEL` | The `:free` model a capped or out-of-credit call retries on |
+| `OWNER_USER_ID` | The one account that sees the health report on the dashboard |
