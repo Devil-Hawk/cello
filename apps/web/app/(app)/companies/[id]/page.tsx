@@ -104,7 +104,7 @@ export default function CompanyDetailPage() {
 
       // Open roles only: posted in the last 180 days (or undated) and not closed.
       const [{ data: jobsData }, prefs] = await Promise.all([
-        openRolesOnly(supabase.from('jobs').select('*').eq('company_id', companyId)).order('discovered_at', {
+        openRolesOnly(supabase.from('person_jobs').select('*').eq('viewer_company_id', companyId)).order('discovered_at', {
           ascending: false,
         }),
         fetchClientSafePreferences(supabase as unknown as SupabaseClient),

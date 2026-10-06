@@ -35,7 +35,7 @@ function fakeAdmin(existing: { id: string; external_id: string; url: string; des
           },
         }
       }
-      if (table === 'jobs') {
+      if (table === 'jobs' || table === 'person_jobs') {
         return {
           select() {
             const b = {

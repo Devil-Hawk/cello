@@ -923,7 +923,12 @@ export async function sourceContactsForCompany(params: SourceContactsParams): Pr
   const postingTexts: { jobId: string; text: string; url: string | null }[] = []
   const postingUrls: string[] = []
   if (jobId) {
-    const { data: job } = await client.from('jobs').select('id, description, url, company_id').eq('id', jobId).maybeSingle()
+    const { data: job } = await client
+      .from('person_jobs')
+      .select('id, description, url, company_id:viewer_company_id')
+      .eq('viewer_id', userId)
+      .eq('id', jobId)
+      .maybeSingle()
     const j = job as { id: string; description: string | null; url: string | null; company_id: string } | null
     if (j && j.company_id === companyId) {
       if (j.url) postingUrls.push(j.url)
@@ -931,9 +936,10 @@ export async function sourceContactsForCompany(params: SourceContactsParams): Pr
     }
   } else {
     const { data: jobs } = await client
-      .from('jobs')
+      .from('person_jobs')
       .select('id, description, url')
-      .eq('company_id', companyId)
+      .eq('viewer_id', userId)
+      .eq('viewer_company_id', companyId)
       .order('discovered_at', { ascending: false })
       .limit(JOBS_SCAN_LIMIT)
     for (const j of (jobs as { id: string; description: string | null; url: string | null }[] | null) ?? []) {

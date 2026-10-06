@@ -42,19 +42,6 @@ interface SourceCounts {
   scored: number
 }
 
-interface CompanyEmbed {
-  name: string | null
-  domain: string | null
-}
-
-/** Supabase returns the joined row as an object OR a one-item array depending on
- *  how it infers the relationship direction — normalize once here so the
- *  client-side type is a plain object, not a union it has to defend against. */
-function embeddedCompany(value: CompanyEmbed | CompanyEmbed[] | null): CompanyEmbed | null {
-  if (!value) return null
-  return Array.isArray(value) ? (value[0] ?? null) : value
-}
-
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
   const {
@@ -77,9 +64,9 @@ export async function GET(request: NextRequest) {
 
     let query = openRolesOnly(
       supabase
-        .from('jobs')
+        .from('person_jobs')
         .select(
-          'id, title, url, match_score, match_details, posted_at, companies(name, domain)',
+          'id, title, url, match_score, match_details, posted_at, viewer_company_name, viewer_company_domain',
           { count: 'exact' }
         )
     )
@@ -99,7 +86,8 @@ export async function GET(request: NextRequest) {
       match_score: number | null
       match_details: unknown
       posted_at: string | null
-      companies: CompanyEmbed | CompanyEmbed[] | null
+      viewer_company_name: string | null
+      viewer_company_domain: string | null
     }[]
 
     const jobs = rows.map((row) => ({
@@ -109,7 +97,7 @@ export async function GET(request: NextRequest) {
       matchScore: row.match_score,
       matchDetails: row.match_details,
       postedAt: row.posted_at,
-      company: embeddedCompany(row.companies),
+      company: { name: row.viewer_company_name, domain: row.viewer_company_domain },
     }))
 
     return NextResponse.json({ ok: true, band, jobs, count: count ?? jobs.length })
@@ -128,7 +116,7 @@ export async function GET(request: NextRequest) {
 
   let from = 0
   for (; from < SUMMARY_MAX_ROWS; from += SUMMARY_PAGE) {
-    const { data, error } = await openRolesOnly(supabase.from('jobs').select('source, match_score'))
+    const { data, error } = await openRolesOnly(supabase.from('person_jobs').select('source, match_score'))
       .order('id', { ascending: true })
       .range(from, from + SUMMARY_PAGE - 1)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

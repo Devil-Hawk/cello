@@ -263,7 +263,7 @@ export async function scanMergeCandidates(db: SupabaseClient, userId: string): P
  * company's count, not a duplicate's.
  */
 export async function trackedRoleCount(db: SupabaseClient, companyId: string): Promise<number> {
-  const { count, error } = await db.from('jobs').select('id', { count: 'exact', head: true }).eq('company_id', companyId)
+  const { count, error } = await db.from('person_jobs').select('id', { count: 'exact', head: true }).eq('viewer_company_id', companyId)
   if (error) {
     console.error(`[entities] trackedRoleCount failed for company=${companyId}: ${error.message}`)
     return 0

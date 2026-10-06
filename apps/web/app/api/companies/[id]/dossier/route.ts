@@ -64,9 +64,9 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
   if (!company) return NextResponse.json({ error: 'Company not found' }, { status: 404 })
 
   const { data: jobsData } = await supabase
-    .from('jobs')
+    .from('person_jobs')
     .select('salary_range, title')
-    .eq('company_id', companyId)
+    .eq('viewer_company_id', companyId)
   const jobs = (jobsData as { salary_range: string | null; title: string | null }[]) ?? []
 
   const apiKeys = await loadApiKeys(admin, user.id)
