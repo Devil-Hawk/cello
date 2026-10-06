@@ -25,7 +25,8 @@ import { GET as made } from './made/route'
 
 const UUID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const ctx = (id: string) => ({ params: { id } })
-const req = (url: string, init: RequestInit = {}) => new NextRequest(`http://localhost${url}`, { headers: { 'content-type': 'application/json' }, ...init })
+type Init = NonNullable<ConstructorParameters<typeof NextRequest>[1]>
+const req = (url: string, init: Init = {}) => new NextRequest(`http://localhost${url}`, { headers: { 'content-type': 'application/json' }, ...init })
 const json = (url: string, method: string, body: unknown) => req(url, { method, body: JSON.stringify(body) })
 
 let db: FakeAdmin
