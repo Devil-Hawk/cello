@@ -132,12 +132,14 @@ begin
   if (select auth.uid()) is not null and (select auth.uid()) <> p_user then
     raise exception 'not your roles' using errcode = 'insufficient_privilege';
   end if;
+  -- one row per posting: the company's own copy when a fold has not merged two yet
   insert into public.person_roles (user_id, job_id, targets_version, hidden_reason, checked_at)
-  select p_user, j.id, p_targets_version, case when j.external_id = any (p_hidden) then 'unclassified' end, now()
+  select distinct on (j.external_id) p_user, j.id, p_targets_version, case when j.external_id = any (p_hidden) then 'unclassified' end, now()
     from public.jobs j
     join public.companies c on c.id = p_company and c.user_id = p_user
    where (j.company_id = p_company or (c.employer_id is not null and j.employer_id = c.employer_id))
      and j.external_id = any (p_external_ids)
+   order by j.external_id, (j.company_id = p_company) desc, j.discovered_at nulls last, j.id
   on conflict (user_id, job_id) do update
     set targets_version = excluded.targets_version,
         checked_at = now(),

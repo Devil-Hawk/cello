@@ -33,9 +33,9 @@ export const dynamic = 'force-dynamic'
 
 // Read through person_jobs: company_id is the person's own company (a shared role's own company_id is
 // whoever stored it first) and the company's fields come with the row, so nothing is embedded.
-const COMPANY = 'company_id:viewer_company_id, viewer_company_name, viewer_company_domain, viewer_company_metadata'
-const FULL_COLUMNS = `id, url, source, description, discovered_at, posted_at, ${COMPANY}, last_verified_at, still_open`
-const BASE_COLUMNS = `id, url, source, description, discovered_at, posted_at, ${COMPANY}`
+const COMPANY: string = 'company_id:viewer_company_id, viewer_company_name, viewer_company_domain, viewer_company_metadata'
+const FULL_COLUMNS: string = `id, url, source, description, discovered_at, posted_at, ${COMPANY}, last_verified_at, still_open`
+const BASE_COLUMNS: string = `id, url, source, description, discovered_at, posted_at, ${COMPANY}`
 
 // Summary-mode-only columns: everything FULL_COLUMNS has EXCEPT `description`
 // and the per-row `companies(...)` embed. Measured against this table's real
@@ -50,9 +50,9 @@ const BASE_COLUMNS = `id, url, source, description, discovered_at, posted_at, ${
 // 64-74s response into one dominated by network round-trips, not payload
 // size — matching the lean-aggregate pattern /api/jobs/insights-summary
 // already uses for the sibling score-histogram/source charts.
-const SUMMARY_COLUMNS =
+const SUMMARY_COLUMNS: string =
   'id, url, source, discovered_at, posted_at, company_id:viewer_company_id, last_verified_at, still_open'
-const SUMMARY_COLUMNS_BASE = 'id, url, source, discovered_at, posted_at, company_id:viewer_company_id'
+const SUMMARY_COLUMNS_BASE: string = 'id, url, source, discovered_at, posted_at, company_id:viewer_company_id'
 
 /** Rows read per page when walking the whole table for the summary. */
 const SUMMARY_PAGE = 1000
