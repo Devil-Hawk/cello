@@ -1,8 +1,8 @@
 -- Proves public.evict_company_jobs() (migration 20261007000100): it deletes the
 -- named roles of one company that nothing points at, keeps a role an
 -- application points at, leaves roles that were not named and another company's
--- roles alone, returns the ids it deleted, and refuses a signed-in user who does
--- not own the company. One transaction, rolled back.
+-- roles alone, returns the ids it deleted, never touches a role that has an
+-- employer (a shared role), and refuses every signed-in user. One transaction, rolled back.
 --
 --   psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/checks/evict_company_jobs.sql
 
@@ -42,17 +42,21 @@ begin
   raise notice 'ALL EVICT ASSERTIONS PASSED';
 end $$;
 
--- A signed-in user who does not own the company is refused.
-select set_config('request.jwt.claims', json_build_object('role', 'authenticated', 'sub', other_user)::text, true) from fx;
+-- No signed-in user may call it, the owner of the company included: a shared role keeps the first follower's company,
+-- so the owner of that company could reach roles other people hold. It is the service role's.
+select set_config('request.jwt.claims', json_build_object('role', 'authenticated', 'sub', user_id)::text, true) from fx;
 do $$
 declare f record;
 begin
   select * into f from fx;
+  set local role authenticated;
   begin
     perform public.evict_company_jobs(f.co, array['ev-3']);
+    reset role;
     raise exception 'should have been refused';
   exception when sqlstate '42501' then
-    raise notice 'another user was refused';
+    reset role;
+    raise notice 'a signed-in owner was refused';
   end;
 end $$;
 rollback;
