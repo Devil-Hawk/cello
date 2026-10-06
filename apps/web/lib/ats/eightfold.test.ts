@@ -127,6 +127,31 @@ describe('eightfold adapter', () => {
     expect(jobs).toHaveLength(20)
   })
 
+  it('a host that answers 429 to the first page is asked once more after a polite wait, and the read goes on', async () => {
+    const waits: number[] = []
+    let searches = 0
+    globalThis.fetch = vi.fn(async (input: unknown) => {
+      const url = String(input)
+      if (url.endsWith('/robots.txt')) return new Response('', { status: 404 })
+      if (url.includes('/api/apply/v2/jobs/')) return json('{}')
+      searches++
+      // The host's own retries (3 attempts) all meet the limit; the polite wait is what gets past it.
+      if (searches <= 3) return new Response('slow down', { status: 429 })
+      return json(fixture('netflix-v2.json'))
+    }) as unknown as typeof fetch
+    const jobs = await eightfold.fetch('explore.jobs.netflix.net_netflix.com', { query: ['data'], sleep: async (ms) => void waits.push(ms) })
+    expect(jobs.length).toBe(5)
+    expect(waits.some((ms) => ms >= 3000)).toBe(true)
+  })
+
+  it('a host that keeps answering 429 is reported as an error, never as an empty board', async () => {
+    globalThis.fetch = vi.fn(async (input: unknown) => {
+      if (String(input).endsWith('/robots.txt')) return new Response('', { status: 404 })
+      return new Response('slow down', { status: 429 })
+    }) as unknown as typeof fetch
+    await expect(eightfold.fetch('explore.jobs.netflix.net_netflix.com', { query: ['data'], sleep: async () => {} })).rejects.toBeTruthy()
+  })
+
   it('reads the few bodies it can afford for the roles that match the search words first', async () => {
     const page = JSON.parse(fixture('netflix-v2.json')) as { positions: Record<string, unknown>[] }
     const detailed: string[] = []

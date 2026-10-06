@@ -249,7 +249,9 @@ export async function ingestCompany(store: AtsStore, company: DueCompany, deps: 
         // Whether the person has seen the whole site or part of it, and how big the part is: a partial read must say so.
         state.listed = read.listed
         state.untitled = read.untitled === true ? true : undefined
-        state.window = read.tier === 'site_search' || read.tier === 'listing' ? true : undefined
+        // A board searched with the person's words (Eightfold, a few pages of each word) shows a window too, never the whole board.
+        const searched = read.tier === 'board' && read.board ? providers[read.board.provider].searchesByQuery === true && searchTerms(targets).length > 0 : false
+        state.window = read.tier === 'site_search' || read.tier === 'listing' || searched ? true : undefined
         if (state.listed === undefined) delete state.listed
         if (state.untitled === undefined) delete state.untitled
         if (state.window === undefined) delete state.window

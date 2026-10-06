@@ -13,7 +13,7 @@
 
 import type { AtsJob, AtsProvider, DetectInput, FetchContext } from './types'
 import { isValidToken } from './types'
-import { HttpError, fetchJson } from './http'
+import { CircuitOpenError, HttpError, fetchJson } from './http'
 import { htmlToPlainText } from './html'
 import { mapWithConcurrency } from './concurrency'
 import { isStalePosting } from '../jobs/freshness'
@@ -31,6 +31,12 @@ const PAGE_PAUSE_MS = 400
 /** One read of a board: robots.txt, at most 3 words x 5 pages (or 20 unqueried), 8 bodies, and some room for a retry. */
 const REQUEST_BUDGET = 40
 const MAX_DESCRIPTION_CHARS = 20_000
+
+/** A host that says "slow down" (Microsoft answers 429 to a quick start) is asked once more after this long, or after its own Retry-After. */
+const SLOW_DOWN_WAIT_MS = 3_000
+const MAX_SLOW_DOWN_WAIT_MS = 20_000
+/** Which flavor of the search a host answered, so a later read of it does not start with the one it refuses. */
+const flavorOfHost = new Map<string, Flavor>()
 
 const DOMAIN_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i
 
@@ -138,6 +144,26 @@ async function page(
   return { jobs: positions.map((p) => fromPcsx(host, p)).filter((j): j is AtsJob => !!j), count: Number(data.count) || 0 }
 }
 
+/**
+ * One page of the search, and when the host answers 429 (or its breaker is cooling down from one) one more try after a polite wait,
+ * so a read does not end as "unreachable" on a host that only asked for a moment.
+ */
+async function politePage(run: () => Promise<{ jobs: AtsJob[]; count: number }>, sleep?: (ms: number) => Promise<void>) {
+  try {
+    return await run()
+  } catch (error) {
+    const wait =
+      error instanceof HttpError && error.status === 429
+        ? Math.max(SLOW_DOWN_WAIT_MS, error.retryAfterMs ?? 0)
+        : error instanceof CircuitOpenError
+          ? error.retryAfterMs + 500
+          : null
+    if (wait === null || wait > MAX_SLOW_DOWN_WAIT_MS) throw error
+    await (sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms))))(wait)
+    return run()
+  }
+}
+
 async function description(flavor: Flavor, host: string, domain: string, job: AtsJob, site: SiteFetcher): Promise<string | undefined> {
   const id = job.url.match(/\/careers\/job\/(\d+)/)?.[1]
   if (!id) return undefined
@@ -184,24 +210,25 @@ async function fetchJobs(token: string, ctx?: FetchContext): Promise<AtsJob[]> {
   const maxPages = queries.length ? MAX_PAGES_PER_QUERY : MAX_PAGES_UNQUERIED
   const byId = new Map<string, AtsJob>()
 
-  let flavor: Flavor = 'v2'
+  let flavor: Flavor = flavorOfHost.get(host) ?? 'v2'
   for (const query of terms) {
     for (let p = 0; p < maxPages; p++) {
       let got: { jobs: AtsJob[]; count: number }
       // Pages come one after another, a gap apart; a host that says slow down ends the read with what it gave.
       try {
-        got = await page(flavor, host, domain, query, p * PAGE_SIZE, site, ctx?.sleep)
+        got = await politePage(() => page(flavor, host, domain, query, p * PAGE_SIZE, site, ctx?.sleep), ctx?.sleep)
       } catch (error) {
         // The tenant answers the other flavor of the same search.
         if (error instanceof HttpError && (error.status === 403 || error.status === 404) && flavor === 'v2' && byId.size === 0 && p === 0) {
           flavor = 'pcsx'
-          got = await page(flavor, host, domain, query, 0, site, ctx?.sleep)
+          got = await politePage(() => page(flavor, host, domain, query, 0, site, ctx?.sleep), ctx?.sleep)
         } else if (byId.size > 0 || p > 0) {
           break
         } else {
           throw error
         }
       }
+      flavorOfHost.set(host, flavor)
       for (const job of got.jobs) byId.set(job.externalId, job)
       if (got.jobs.length < PAGE_SIZE || (p + 1) * PAGE_SIZE >= got.count) break
       // Newest first: a whole page past the age limit means the rest is older still.
