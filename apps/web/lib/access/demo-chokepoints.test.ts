@@ -198,6 +198,8 @@ const KNOWN_UNGUARDED_MODEL_ROUTES: string[] = []
  */
 const KEY_TAKING_MODEL_PLUMBING = [
   'lib/harness/llm.ts', // defines callLlm; takes DecryptedApiKeys
+  'lib/steps/define.ts', // defineModelStep: runs callLlm for a caller that hands it DecryptedApiKeys
+  'lib/steps/source.ts', // the steps source test's scanner: holds the raw-call patterns as text and calls no model
   'lib/harness/planner.ts',
   'lib/harness/copilot-tools.ts',
   'lib/harness/agents/company_researcher.ts',

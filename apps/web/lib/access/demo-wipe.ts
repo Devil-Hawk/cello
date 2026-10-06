@@ -111,7 +111,7 @@ export async function wipeExpiredDemoData(
       const { error: delErr, count } = await admin
         .from(table)
         .delete({ count: 'exact' })
-        .in(column ?? 'user_id', chunk)
+        .in('user_id', chunk)
       if (delErr) {
         console.error(`[access:demo-wipe] ${table} delete failed: ${delErr.message}`)
         return [0]
