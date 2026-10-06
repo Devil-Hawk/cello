@@ -1,4 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "crons": [{ "path": "/api/harness/cron", "schedule": "7 13 * * *" }]
+  "crons": [{ "path": "/api/harness/cron", "schedule": "7 13 * * *" }],
+  "build": { "env": { "ONNXRUNTIME_NODE_INSTALL_CUDA": "skip" } }
 }

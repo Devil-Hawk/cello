@@ -110,6 +110,17 @@ const nextConfig = {
     // there's no single fixed route to scope this to. See the top-of-file
     // comment in lib/harness/prompts.ts for the full reasoning and the
     // alternative (build-time codegen) this was weighed against.
+    // onnxruntime-node (the 384-wide embedder behind learning and role types) ships every platform and the GPU
+    // providers: 343 MB for CUDA alone, over Vercel's 250 MB unzipped limit if a function traces it. Functions run
+    // on linux x64 and the embedder runs on the CPU, so the other platforms and the GPU providers are left out.
+    // The install also skips the CUDA download (vercel.json, ONNXRUNTIME_NODE_INSTALL_CUDA). SP3 measures the result.
+    outputFileTracingExcludes: {
+      '**': [
+        '**/onnxruntime-node/bin/napi-v3/{darwin,win32}/**',
+        '**/onnxruntime-node/bin/napi-v3/linux/arm64/**',
+        '**/libonnxruntime_providers_{cuda,tensorrt}.so',
+      ],
+    },
     outputFileTracingIncludes: {
       // skills/ is read at runtime by the agent's skills backend, the same
       // invisible-to-the-tracer pattern as prompts/.
