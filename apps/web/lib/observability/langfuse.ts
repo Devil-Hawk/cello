@@ -91,16 +91,35 @@ export function langfuseCaptureEnabled(): boolean {
   return langfuseConfigured() && flag('LANGFUSE_CAPTURE_CONTENT', true)
 }
 
-/** Demo workspaces (public, strangers' text) send no content unless
- *  LANGFUSE_CAPTURE_DEMO_CONTENT is explicitly on. */
-export function langfuseCaptureDemoEnabled(): boolean {
-  return flag('LANGFUSE_CAPTURE_DEMO_CONTENT', false)
+/** The Cello user ids whose prompt and reply text may be sent: the comma
+ *  separated LANGFUSE_CONTENT_USER_IDS. Empty or unset means nobody. Parsed on
+ *  every call so a changed env takes effect without a restart in tests. */
+export function langfuseContentUserIds(): Set<string> {
+  const raw = env('LANGFUSE_CONTENT_USER_IDS')
+  if (!raw) return new Set()
+  return new Set(
+    raw
+      .split(',')
+      .map((id) => id.trim().toLowerCase())
+      .filter(Boolean)
+  )
 }
 
-/** May prompt text of this trace leave the process? isDemo undefined counts as
- *  demo: the fail-closed side. */
-export function contentCaptureFor(isDemo: boolean | undefined): boolean {
-  return langfuseCaptureEnabled() && (isDemo === false || langfuseCaptureDemoEnabled())
+/**
+ * May prompt and reply text of this user's trace leave the process?
+ *
+ * ONLY FOR AN ALLOWLISTED OWNER. A user's resume, other people's email bodies and
+ * their job-search notes are theirs; sending them to a third-party service just
+ * because capture is switched on would ship every stranger's private text out of
+ * the app. So content goes only for ids named in LANGFUSE_CONTENT_USER_IDS (the
+ * operator's own account), and never for a demo workspace or a trace whose owner
+ * is unknown (isDemo undefined counts as demo: the fail-closed side). Everyone
+ * else still sends metadata: model, token counts, cost, latency, tool names and
+ * scores.
+ */
+export function contentCaptureFor(userId: string | undefined, isDemo: boolean | undefined): boolean {
+  if (!langfuseCaptureEnabled() || isDemo !== false || !userId) return false
+  return langfuseContentUserIds().has(userId.toLowerCase())
 }
 
 function rate(name: string, dflt: number): number {

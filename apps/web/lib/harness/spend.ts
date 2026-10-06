@@ -8,29 +8,57 @@
 // Tokens are also the wrong unit to promise a user in: they budget in money.
 //
 // The cap is a REFUSAL, not a warning. When the month's allowance is spent,
-// callLlm throws BudgetCapError and the feature reports it honestly, exactly
-// like a missing key. Silently continuing to spend would be the worst outcome.
+// the reservation below throws BudgetCapError and the feature reports it
+// honestly, exactly like a missing key.
+//
+// HOW IT IS ENFORCED: RESERVE, THEN SETTLE. This module is the one seam every
+// metered model call goes through (callLlm, callEmbedding, the judge client, the
+// engine's model middleware).
+//   reserveSpend  before the call: the worst case (a conservative prompt estimate
+//                 plus max_tokens at the output price) is reserved in ONE atomic
+//                 Postgres function (reserve_llm_spend). It admits the call only
+//                 if spent + held + estimate <= cap, so N parallel calls cannot
+//                 all pass a check and then all charge.
+//   settleSpend   after the call: the provider-reported cost replaces the
+//                 estimate, exactly once (idempotent by reservation id).
+// A call that dies without settling is charged at its estimate by a pg_cron
+// sweeper after 15 minutes, so a crash can only over-count. The ledger rows
+// (public.llm_spend) are the counter; only the service role writes them.
+//
+// EVERY attempt with a user writes a row, paid or not. Free hosted (R3) and local
+// (R2) calls write a $0 row carrying the rung that ran and the step that asked, so
+// the daily free-request count is read from the ledger. A $0 reservation takes no
+// lock and is never refused.
 
-import type { AdminClient, DecryptedApiKeys } from './types'
+import type { AdminClient, DecryptedApiKeys, Door } from './types'
+
+export type { Door }
 
 /** Conservative default. Deliberately low: a user who never configures this
  *  should not be able to lose real money to a background cron. */
 export const DEFAULT_MONTHLY_USD = 10
 
+/** Which allowance ran out: the user's own monthly cap, or the shared monthly
+ *  allowance of every demo one owner funds. */
+export type BudgetScope = 'user' | 'demo-pool'
+
 export class BudgetCapError extends Error {
   readonly spentUsd: number
   readonly capUsd: number
-  constructor(spentUsd: number, capUsd: number) {
+  readonly scope: BudgetScope
+  constructor(spentUsd: number, capUsd: number, scope: BudgetScope = 'user') {
     super(
-      `Monthly AI spend cap reached: $${spentUsd.toFixed(2)} of $${capUsd.toFixed(2)} used. ` +
-        `Raise the cap in Settings, or wait for the next billing month.`
+      scope === 'demo-pool'
+        ? 'This demo has used its AI allowance for the month. You can keep looking around.'
+        : `Monthly AI spend cap reached: $${spentUsd.toFixed(2)} of $${capUsd.toFixed(2)} used. ` +
+            `Raise the cap in Settings, or wait for the next billing month.`
     )
     this.name = 'BudgetCapError'
     this.spentUsd = spentUsd
     this.capUsd = capUsd
+    this.scope = scope
   }
 }
-
 /**
  * Per-million-token prices, USD, mirroring OpenRouter's published rates for the
  * models in lib/models.ts ALLOWED_MODELS.
@@ -52,7 +80,7 @@ const PRICES: Record<string, { in: number; out: number }> = {
   'google/gemini-2.0-flash-001': { in: 0.1, out: 0.4 },
   'openai/gpt-4o-mini': { in: 0.15, out: 0.6 },
   // Embeddings only ever consume input tokens (out: 0) — callEmbedding
-  // (lib/harness/llm.ts) always passes completionTokens=0 to recordSpend.
+  // (lib/harness/llm.ts) always settles with completionTokens=0.
   // Locked model (2026-08-16 langgraph port spec); OpenAI's published rate.
   'openai/text-embedding-3-small': { in: 0.02, out: 0 },
 }
@@ -89,71 +117,182 @@ export function hasListedPrice(model: string): boolean {
   return model.endsWith(':free') || Object.prototype.hasOwnProperty.call(PRICES, model)
 }
 
-/** Current UTC billing month, e.g. "2026-07". */
-function currentPeriod(): string {
-  const now = new Date()
-  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+/** Ceiling on a completion when the caller sets none. Every metered call carries
+ *  a max_tokens, because the reservation is priced from it. */
+export const DEFAULT_MAX_TOKENS = 2048
+
+/** A conservative prompt-token estimate: about 3 characters per token (real text
+ *  runs nearer 4, so this over-reserves) plus per-message framing. */
+export function estimatePromptTokens(text: string, messages = 1): number {
+  return Math.ceil(text.length / 3) + 8 * messages
+}
+
+/** The most one call can cost: the prompt estimate at the input price plus the
+ *  whole max_tokens ceiling at the output price. Zero for a ':free' model.
+ *  Rounded UP to the ledger's six decimals, so rounding never under-reserves. */
+export function worstCaseUsd(model: string, promptTokens: number, maxTokens: number): number {
+  return Math.ceil(estimateCostUsd(model, promptTokens, maxTokens) * 1e6) / 1e6
+}
+
+/** Which backend ran a call: R0s in-browser, R1 the person's own key or tool on the
+ *  extension, R2 a local model or command-line tool, R3 a free hosted model, R4 a
+ *  paid hosted model. Only R4 ever costs money. */
+export type Rung = 'R0s' | 'R1' | 'R2' | 'R3' | 'R4'
+
+/** The rung is code, read from the backend that ran. R0s and R1 have no backend yet. */
+export function rungFor(provider: 'openrouter' | 'local-cli' | 'local-server', model: string): Rung {
+  if (provider !== 'openrouter') return 'R2'
+  return model.endsWith(':free') ? 'R3' : 'R4'
+}
+
+/** A held slice of a user's allowance. `id` is null only when a $0 reservation could
+ *  not be recorded (the ledger was unreachable): bookkeeping never fails a free call. */
+export interface SpendReservation {
+  id: string | null
+  userId: string
+  model: string
+  rung: Rung
+  estimateUsd: number
+}
+
+export interface ReserveInput {
+  userId: string
+  model: string
+  promptTokens: number
+  maxTokens: number
+  rung: Rung
+  /** The declared step that asked: the code constant the caller gives Langfuse. */
+  step: string
+  /** Null until commands say which door a call came through. */
+  door?: Door
+  traceId?: string
+}
+
+/**
+ * Hold the worst-case cost of a call before making it. Throws BudgetCapError when
+ * the user's cap (or, for a demo, its owner's shared allowance) cannot cover it,
+ * and a plain Error when the ledger is unreachable: an unreadable ledger means no
+ * paid call. A $0 reservation (R0s to R3) is the other way round: an unreadable
+ * ledger is logged and the call goes ahead without a row.
+ */
+export async function reserveSpend(admin: AdminClient, input: ReserveInput): Promise<SpendReservation> {
+  const paid = input.rung === 'R4'
+  const estimateUsd = paid ? worstCaseUsd(input.model, input.promptTokens, input.maxTokens) : 0
+  const held = (id: string | null): SpendReservation => ({
+    id,
+    userId: input.userId,
+    model: input.model,
+    rung: input.rung,
+    estimateUsd,
+  })
+
+  const { data, error } = await admin.rpc('reserve_llm_spend', {
+    p_user_id: input.userId,
+    p_model: input.model,
+    p_estimate: estimateUsd,
+    p_rung: input.rung,
+    p_step: input.step,
+    p_trace_id: input.traceId ?? null,
+    p_door: input.door ?? null,
+  })
+  const row = data as { ok?: boolean; id?: string; scope?: BudgetScope; spent_usd?: number; cap_usd?: number } | null
+  if (!paid) {
+    if (error || !row?.ok || !row.id) {
+      console.error('[spend] could not record a zero-cost call; carrying on without a row', error ?? row)
+      return held(null)
+    }
+    return held(row.id)
+  }
+  if (error || !row) throw new Error('spend ledger unavailable')
+  if (!row.ok || !row.id) {
+    throw new BudgetCapError(Number(row.spent_usd ?? 0), Number(row.cap_usd ?? 0), row.scope === 'demo-pool' ? 'demo-pool' : 'user')
+  }
+  return held(row.id)
+}
+
+export type SpendOutcome =
+  | { model: string; promptTokens: number; completionTokens: number; costUsd?: number }
+  | { failed: unknown }
+
+/** The HTTP status an error carries, when the provider answered at all. */
+function errorStatus(err: unknown): number | undefined {
+  const status = (err as { status?: unknown } | null)?.status
+  return typeof status === 'number' ? status : undefined
+}
+
+/**
+ * Charge what the call really cost, once. Never throws: a bookkeeping failure
+ * must not fail the user's request, and the sweeper still charges the estimate.
+ *   - a result charges the provider-reported cost, else our price estimate; only
+ *     a paid (R4) reservation can cost anything, every other rung settles at 0
+ *   - an error with an HTTP status (the provider answered, nothing was generated)
+ *     charges 0 and stores the status, so a day that hit the limit can be counted
+ *   - any other failure (abort, timeout, dropped connection) is left reserved, so
+ *     the sweeper charges the estimate
+ */
+export async function settleSpend(admin: AdminClient, res: SpendReservation, outcome: SpendOutcome): Promise<void> {
+  if (!res.id) return
+  let actual: number
+  let status: number | null = null
+  if ('failed' in outcome) {
+    status = errorStatus(outcome.failed) ?? null
+    if (status === null) return
+    actual = 0
+  } else {
+    actual =
+      res.rung === 'R4'
+        ? (outcome.costUsd ?? estimateCostUsd(outcome.model, outcome.promptTokens, outcome.completionTokens))
+        : 0
+  }
+  try {
+    const { error } = await admin.rpc('settle_llm_spend', { p_id: res.id, p_actual: actual, p_status: status })
+    if (error) throw error
+  } catch (err) {
+    console.error('[spend] failed to settle LLM spend; the sweeper will charge the estimate', err)
+  }
+}
+
+/** What the provider says a call cost: OpenRouter's usage.cost (USD), plus the
+ *  upstream provider's own charge when the key is bring-your-own. Undefined when
+ *  the response carries no usable figure, so the caller falls back to PRICES. */
+export function actualCostUsd(usage: unknown): number | undefined {
+  const u = usage as { cost?: unknown; is_byok?: unknown; cost_details?: { upstream_inference_cost?: unknown } } | null | undefined
+  if (typeof u?.cost !== 'number' || !Number.isFinite(u.cost) || u.cost < 0) return undefined
+  const upstream = u.cost_details?.upstream_inference_cost
+  return u.is_byok === true && typeof upstream === 'number' && Number.isFinite(upstream) && upstream > 0
+    ? u.cost + upstream
+    : u.cost
 }
 
 export interface SpendState {
   periodStart: string
   spentUsd: number
+  heldUsd: number
   capUsd: number
 }
 
-function readState(preferences: Record<string, unknown> | null | undefined): SpendState {
-  const raw = (preferences?.budget ?? {}) as Record<string, unknown>
-  const period = typeof raw.periodStart === 'string' ? raw.periodStart : ''
-  const cap = typeof raw.monthlyUsd === 'number' && raw.monthlyUsd > 0 ? raw.monthlyUsd : DEFAULT_MONTHLY_USD
-  // A new month resets the counter without needing a scheduled job.
-  if (period !== currentPeriod()) return { periodStart: currentPeriod(), spentUsd: 0, capUsd: cap }
+/** This month's settled spend, what in-flight calls hold, and the user's cap. */
+export async function getSpendState(admin: AdminClient, userId: string): Promise<SpendState> {
+  const { data, error } = await admin.rpc('llm_spend_state', { p_user_id: userId })
+  const row = data as { period?: string; spent_usd?: number; held_usd?: number; cap_usd?: number } | null
+  if (error || !row) throw new Error('spend ledger unavailable')
   return {
-    periodStart: period,
-    spentUsd: typeof raw.spentUsd === 'number' && raw.spentUsd > 0 ? raw.spentUsd : 0,
-    capUsd: cap,
+    periodStart: String(row.period ?? '').slice(0, 7),
+    spentUsd: Number(row.spent_usd ?? 0),
+    heldUsd: Number(row.held_usd ?? 0),
+    capUsd: Number(row.cap_usd ?? DEFAULT_MONTHLY_USD),
   }
 }
 
-export async function getSpendState(admin: AdminClient, userId: string): Promise<SpendState> {
-  const { data } = await admin.from('profiles').select('preferences').eq('id', userId).single()
-  return readState((data as { preferences?: Record<string, unknown> } | null)?.preferences)
-}
-
 /**
- * Throws BudgetCapError when the month's allowance is already spent.
- *
- * Checked BEFORE the call rather than after, because refunding a request that
- * already happened is not possible — the point is to not spend the money.
+ * A read-only early refusal for a route that would rather say "you are out of
+ * allowance" before doing any work. NOT the enforcement: that is reserveSpend,
+ * which is the only thing that holds money.
  */
 export async function assertWithinBudget(admin: AdminClient, userId: string): Promise<void> {
   const state = await getSpendState(admin, userId)
-  if (state.spentUsd >= state.capUsd) throw new BudgetCapError(state.spentUsd, state.capUsd)
-}
-
-/**
- * Record what a completed call cost. Best-effort: a bookkeeping failure must
- * never fail the user's request, but it is logged loudly because silent
- * under-counting is how a cap stops protecting anyone.
- */
-export async function recordSpend(
-  admin: AdminClient,
-  userId: string,
-  model: string,
-  promptTokens: number,
-  completionTokens: number
-): Promise<void> {
-  try {
-    // One atomic UPDATE in Postgres (migration 20261005000005): parallel calls
-    // for the same user serialise on the row lock instead of overwriting each
-    // other's read-modify-write, and only preferences.budget is touched.
-    const { error } = await admin.rpc('record_llm_spend', {
-      p_user_id: userId,
-      p_cost: estimateCostUsd(model, promptTokens, completionTokens),
-    })
-    if (error) throw error
-  } catch (err) {
-    console.error('[spend] failed to record LLM spend — the cap may under-count', err)
-  }
+  const committed = state.spentUsd + state.heldUsd
+  if (committed >= state.capUsd) throw new BudgetCapError(committed, state.capUsd)
 }
 
 /** True when the caller supplied the context needed to meter spend. */

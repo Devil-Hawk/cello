@@ -91,7 +91,7 @@ describe('a failed analysis never becomes renderable advice', () => {
     ['a JSON array, not an analysis', '["not", "an", "analysis"]', 'incomplete_response'],
     [
       'valid JSON with nothing in it',
-      JSON.stringify({ summary: '', talkingPoints: [], companyInsights: [], interviewTips: [] }),
+      JSON.stringify({ summary: '', talkingPoints: [], companyInsights: [] }),
       'incomplete_response',
     ],
     [
@@ -101,12 +101,12 @@ describe('a failed analysis never becomes renderable advice', () => {
     ],
     [
       'a summary with no sections at all',
-      JSON.stringify({ summary: 'A backend role.', talkingPoints: [], companyInsights: [], interviewTips: [] }),
+      JSON.stringify({ summary: 'A backend role.', talkingPoints: [], companyInsights: [] }),
       'incomplete_response',
     ],
     [
       'wrong types throughout',
-      JSON.stringify({ summary: 42, talkingPoints: 'nope', companyInsights: {}, interviewTips: null }),
+      JSON.stringify({ summary: 42, talkingPoints: 'nope', companyInsights: {} }),
       'incomplete_response',
     ],
   ]
@@ -122,18 +122,28 @@ describe('a failed analysis never becomes renderable advice', () => {
     expect((thrown as AnalystError).code).toBe(code)
   })
 
-  it('keeps a partial BUT REAL analysis — only sections the model actually wrote', async () => {
+  it('keeps a partial BUT REAL analysis, only sections the model actually wrote, and nothing else', async () => {
     const response = JSON.stringify({
       summary: 'A backend role that leans on your Node.js work.',
-      talkingPoints: [],
+      talkingPoints: ['Your queue work maps to their stack.'],
       companyInsights: [],
-      interviewTips: ['Review their queueing stack — the posting mentions Kafka twice.'],
     })
     const result = await analyst(ctxWith(stubLlm(response)))
-    const output = result.output as { summary: string; talkingPoints: string[]; interviewTips: string[] }
-    expect(output.summary).toContain('Node.js')
-    expect(output.talkingPoints).toEqual([])
-    expect(output.interviewTips).toHaveLength(1)
+    expect(result.output).toEqual({
+      summary: 'A backend role that leans on your Node.js work.',
+      talkingPoints: ['Your queue work maps to their stack.'],
+      companyInsights: [],
+    })
+  })
+
+  it('ignores a section the analysis no longer has: a reply with only that section is incomplete', async () => {
+    const response = JSON.stringify({
+      summary: 'A backend role.',
+      talkingPoints: [],
+      companyInsights: [],
+      [['interview', 'Tips'].join('')]: ['Review their queueing stack.'],
+    })
+    await expect(analyst(ctxWith(stubLlm(response)))).rejects.toMatchObject({ code: 'incomplete_response' })
   })
 })
 

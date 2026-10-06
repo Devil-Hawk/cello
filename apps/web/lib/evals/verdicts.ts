@@ -9,14 +9,14 @@
 // this migration's CHECK constraints describe.
 //
 // WHY writeVerdict IS BEST-EFFORT (LOGS, NEVER THROWS)
-//   Same contract as spend.ts#recordSpend and lib/trace/spans.ts#SpanBuffer.
+//   Same contract as spend.ts#settleSpend and lib/trace/spans.ts#SpanBuffer.
 //   flush, which this deliberately matches: a bookkeeping failure must never
 //   fail the request that already produced a real judge result the user is
 //   about to see. Silence is still not acceptable — REFUSE-OVER-GUESS
 //   (invariant 7) is about the VERDICT never being silent, not about this
 //   write never failing — so a failed insert is logged loudly via
-//   logApiError, exactly like recordSpend's own "the cap may under-count"
-//   line is loud rather than swallowed.
+//   logApiError, exactly like settleSpend's own "the sweeper will charge the
+//   estimate" line is loud rather than swallowed.
 //
 // WHY span_id ONLY WHEN A BUFFER IS ACTIVE
 //   currentTraceContext() (lib/trace/spans.ts) is only populated inside a

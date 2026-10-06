@@ -25,7 +25,7 @@ import {
 } from '@/lib/harness/providers'
 import { detectAllLocalClis } from '@/lib/harness/providers/local-cli'
 import { detectLocalServer } from '@/lib/harness/providers/local-server'
-import { langfuseCaptureDemoEnabled, langfuseCaptureEnabled, langfuseConfigured } from '@/lib/observability/langfuse'
+import { contentCaptureFor, langfuseConfigured } from '@/lib/observability/langfuse'
 
 export const dynamic = 'force-dynamic'
 
@@ -76,10 +76,9 @@ export async function GET() {
     // never user-editable here: same "boolean only, no key material" posture
     // as hasOpenrouterKey above. See lib/observability/langfuse.ts for the gate.
     tracingExportEnabled: langfuseConfigured(),
-    // Whether prompt and completion text is part of that export.
-    tracingCaptureContent: langfuseCaptureEnabled(),
-    // Whether demo workspaces' prompt and reply text is part of it (off by default).
-    tracingCaptureDemoContent: langfuseCaptureEnabled() && langfuseCaptureDemoEnabled(),
+    // Whether THIS user's prompt and completion text is part of that export. It
+    // is only for ids on the operator's allowlist (LANGFUSE_CONTENT_USER_IDS).
+    tracingCaptureContent: contentCaptureFor(user.id, false),
     providers: {
       openrouter: {
         label: PROVIDER_LABELS.openrouter,

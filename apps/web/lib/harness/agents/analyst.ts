@@ -1,5 +1,5 @@
 // Agent: analyst — deep per-job analysis (summary, talking points, company
-// insights, interview tips) for the job-detail modal's "AI insights" panel.
+// insights) for the job-detail modal's "AI insights" panel.
 //
 // Ported from packages/agents/src/analyst/* (index.ts/analysis.ts/
 // llm-client.ts/errors.ts/prompts.ts) onto ctx.llm, so this call is metered/
@@ -9,7 +9,7 @@
 // Anthropic fetch clients. app/api/agents/analyze/route.ts's consumer
 // (components/jobs/job-detail-modal.tsx) depends on this staying exact in two
 // places: the OUTPUT shape ({summary, talkingPoints, companyInsights,
-// interviewTips} — nothing else) and the PROMPT itself
+// nothing else) and the PROMPT itself
 // (ANALYST_SYSTEM_PROMPT / generateFullAnalysisPrompt below, copied verbatim
 // from packages/agents/src/analyst/prompts.ts) — a differently-worded prompt
 // is a different analysis, which is exactly what "preserve exactly" rules
@@ -134,7 +134,7 @@ function classifyLlmFailure(err: unknown): Error {
 
 // --- prompt (verbatim from packages/agents/src/analyst/prompts.ts) ---------
 
-const ANALYST_SYSTEM_PROMPT = `You are an expert career analyst and interview coach. You use structured reasoning to analyze job opportunities and provide actionable preparation guidance.
+const ANALYST_SYSTEM_PROMPT = `You are an expert career analyst. You use structured reasoning to analyze job opportunities and judge how well a candidate fits them.
 
 ## Your Reasoning Process
 
@@ -164,7 +164,7 @@ interface AnalysisPromptInput {
 }
 
 function generateFullAnalysisPrompt(input: AnalysisPromptInput): string {
-  return `Analyze this job opportunity and provide interview preparation guidance.
+  return `Analyze this job opportunity and judge how well the candidate fits.
 
 ## INPUT DATA
 
@@ -213,15 +213,6 @@ Based on the job description language and any notes:
 - What growth/impact opportunities are mentioned?
 </think>
 
-### Step 4: Interview Strategy Formulation
-<think>
-Given the fit analysis:
-- What stories/examples should the candidate prepare?
-- What technical topics need review?
-- What behavioral questions are likely?
-- What questions should the candidate ask?
-</think>
-
 ---
 
 ## OUTPUT
@@ -242,20 +233,12 @@ Now provide your analysis in this exact JSON format:
     "[Insight about team dynamics or work style]",
     "[Insight about growth/learning opportunities]",
     "[Insight about company values/mission]"
-  ],
-  "interviewTips": [
-    "[Specific technical topic to review with why]",
-    "[Behavioral question to prepare with STAR format example topic]",
-    "[Question to ask the interviewer that shows insight]",
-    "[Preparation activity: research, practice, etc.]",
-    "[Mindset or approach tip for this specific role/company]"
   ]
 }
 
 IMPORTANT:
 - Every talking point must reference SPECIFIC content from both the job description AND resume
 - Company insights should be inferred from the job posting, not generic
-- Interview tips should be tailored to THIS role, not generic interview advice
 - If you cannot find specific evidence, acknowledge uncertainty
 
 Respond with ONLY the JSON object.`
@@ -361,14 +344,13 @@ export const analyst: AgentFn = async (ctx) => {
   const summary = sanitizeString(fields.summary)
   const talkingPoints = sanitizeStringArray(fields.talkingPoints)
   const companyInsights = sanitizeStringArray(fields.companyInsights)
-  const interviewTips = sanitizeStringArray(fields.interviewTips)
 
   // A partial analysis is still honest — every section rendered is real
   // model output, and empty sections just don't render. But a response with
   // no summary, or nothing in ANY section, is a failed generation dressed as
   // a result: refuse it rather than let the modal announce insights and show
   // nothing.
-  const hasAnySection = talkingPoints.length > 0 || companyInsights.length > 0 || interviewTips.length > 0
+  const hasAnySection = talkingPoints.length > 0 || companyInsights.length > 0
   if (!summary || !hasAnySection) {
     throw new AnalystError(
       'incomplete_response',
@@ -377,7 +359,7 @@ export const analyst: AgentFn = async (ctx) => {
   }
 
   return {
-    output: { summary, talkingPoints, companyInsights, interviewTips },
+    output: { summary, talkingPoints, companyInsights },
     // ctx.llm already metered the tokens.
     tokensUsed: 0,
   }

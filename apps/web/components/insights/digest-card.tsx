@@ -98,7 +98,7 @@ export function DigestCard({ initialEnabled, hasContent }: DigestCardProps) {
             <div>
               <CardTitle>Daily digest email</CardTitle>
               <CardDescription className="mt-1">
-                A once-a-day summary of your top matches, interviews to prep for, and follow-ups
+                A once-a-day summary of your top matches, upcoming interviews, and follow-ups
                 due — composed from your own data, sent from your own Gmail.
               </CardDescription>
             </div>

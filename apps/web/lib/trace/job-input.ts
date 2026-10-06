@@ -1,4 +1,4 @@
-// Routes keyed by a job id (analyze, coach) would otherwise show a bare uuid as
+// Routes keyed by a job id (analyze, follow-up) would otherwise show a bare uuid as
 // the Langfuse root input. This reads the title and company so the trace says
 // what it is about, and keeps the id in the trace metadata. The extra query
 // runs only when the trace actually captures content: otherwise the input is

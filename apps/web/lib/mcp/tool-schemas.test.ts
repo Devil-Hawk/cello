@@ -14,7 +14,7 @@ describe('TOOL_SCHEMAS stays in lockstep with COPILOT_TOOLS', () => {
     expect(COPILOT_TOOLS.length).toBeGreaterThan(10)
   })
 
-  it('has exactly the 19 first-party tool names, no more, no fewer', () => {
+  it('has exactly the 18 first-party tool names, no more, no fewer', () => {
     expect(new Set(TOOL_SCHEMA_NAMES)).toEqual(new Set(COPILOT_TOOL_NAMES))
   })
 

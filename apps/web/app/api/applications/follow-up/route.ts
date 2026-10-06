@@ -1,17 +1,12 @@
-// POST /api/agents/coach — a follow-up suggestion (+ drafted message, when one
-// is due) for one application.
+// POST /api/applications/follow-up: a follow-up suggestion (+ drafted message,
+// when one is due) for one application.
 //
-// Everything that used to live here — building a User/Application/Job/
-// Company/Contact[] out of five separate reads and constructing packages/
-// agents' CoachAgent (which reached a model through its own hand-rolled
-// OpenAI/Anthropic fetch client, bypassing the spend cap entirely — this was
-// THE live unmetered model path the langgraph port closes) — is gone.
-// lib/graph/oneshot.ts#runUnitOnce -> lib/graph/unit.ts#runAgentUnit('coach')
-// now does all of that DB work, the metered/demo-gated model call, and the
-// journaling; this route's only job is auth, the 404 existence check (kept
-// here rather than folded into the unit, same pattern app/api/outreach/
-// draft/route.ts uses for its contact lookup), and shaping the response
-// components/pipeline/application-detail-dialog.tsx already reads:
+// lib/graph/oneshot.ts#runUnitOnce -> lib/graph/unit.ts#runAgentUnit does the
+// DB work, the metered/demo-gated model call and the journaling; this route's
+// only job is auth, the 404 existence check (kept here rather than folded into
+// the unit, same pattern app/api/outreach/draft/route.ts uses for its contact
+// lookup), and shaping the response
+// components/pipeline/application-detail-dialog.tsx reads:
 // {suggestion, draftMessage, suggestedContacts}, nothing else.
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -19,12 +14,12 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { runUnitOnce } from '@/lib/graph/oneshot'
 import { BudgetCapError } from '@/lib/harness/spend'
-import { CoachOutput } from '@/lib/harness/schemas'
+import { ApplicationFollowUpOutput } from '@/lib/harness/schemas'
 import type { z } from 'zod'
 import { setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
 import { traceJobInput } from '@/lib/trace/job-input'
 
-type CoachResult = z.infer<typeof CoachOutput>
+type FollowUpResult = z.infer<typeof ApplicationFollowUpOutput>
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -32,7 +27,7 @@ export async function POST(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  return withTrace(createAdminClient(), user.id, { name: 'coach-job-search' }, async () => {
+  return withTrace(createAdminClient(), user.id, { name: 'application-follow-up' }, async () => {
 
     const body = await request.json()
     const { applicationId } = body
@@ -57,13 +52,13 @@ export async function POST(request: NextRequest) {
     if (application.job_id) await traceJobInput(supabase, application.job_id)
 
     try {
-      const result = await runUnitOnce('coach', {
+      const result = await runUnitOnce('application_follow_up', {
         admin,
         userId: user.id,
-        goal: `Coach application ${applicationId}`,
+        goal: `Follow up on application ${applicationId}`,
         input: { applicationId },
       })
-      const output = result.output as CoachResult
+      const output = result.output as FollowUpResult
       setTraceOutput({ suggestion: output.suggestion })
       return NextResponse.json({
         suggestion: output.suggestion,
@@ -77,9 +72,9 @@ export async function POST(request: NextRequest) {
           { status: 429 }
         )
       }
-      console.error('Coach error:', error)
+      console.error('Follow-up error:', error)
       return NextResponse.json(
-        { error: error instanceof Error ? error.message : 'Failed to generate coaching' },
+        { error: error instanceof Error ? error.message : 'Could not draft a follow-up' },
         { status: 500 }
       )
     }

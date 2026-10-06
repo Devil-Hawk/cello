@@ -120,8 +120,8 @@ Optional:
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `LANGFUSE_CAPTURE_CONTENT` | on | The kill switch. Only an unset or blank value or `1`, `true`, `on`, `yes` keeps prompts and replies on. Anything else, a typo included, turns them off. Tokens, cost and timing still go. |
-| `LANGFUSE_CAPTURE_DEMO_CONTENT` | off | Demo workspaces send no prompt or reply text unless this is `1`, `true`, `on` or `yes`. A trace whose owner is unknown counts as a demo. |
+| `LANGFUSE_CAPTURE_CONTENT` | on | The kill switch for prompt and reply text. Only an unset or blank value or `1`, `true`, `on`, `yes` keeps prompts and replies on. Anything else, a typo included, turns them off. Tokens, cost and timing still go. |
+| `LANGFUSE_CONTENT_USER_IDS` | empty | Comma separated Cello user ids whose prompt and reply text may be sent (the operator's own account). Empty or unset sends nobody's: every other user, a demo and a trace whose owner is unknown contribute metadata only (model, tokens, cost, latency, tool names, scores). Needs `LANGFUSE_CAPTURE_CONTENT` on as well. |
 | `LANGFUSE_SAMPLE_RATE` | `1` | A number from 0 to 1. A value that is not a number means 0, so a typo never raises volume. Chosen per trace by a hash of the trace id, so a trace is sent whole or not at all. The SDK itself never reads this variable, so it is not applied twice. |
 | `LANGFUSE_DEMO_SAMPLE_RATE` | `0.25` | The same for demo traces, which use the lower of the two rates. It keeps a burst of demo visitors from eating the free unit budget. |
 
@@ -141,7 +141,7 @@ views. Filter by environment in the Langfuse UI.
 | `refresh-jobs`, `autopilot-tick` | The jobs refresh and the autopilot tick | none |
 | `summarize-conversation` | The rolling Copilot summary | The conversation id |
 | `draft-outreach`, `draft-follow-up`, `judge-outreach` | The outreach routes | none |
-| `match-job`, `match-jobs`, `analyze-pipeline`, `coach-job-search` | The agent routes | none |
+| `match-job`, `match-jobs`, `analyze-pipeline`, `application-follow-up` | The agent routes | none |
 | `import-resume`, `optimize-resume`, `generate-resume-document` | The resume routes | none |
 | `resolve-company`, `verify-careers-page`, `extract-jobs` | Company and scraper routes, only when a model call is made | none |
 | `sync-gmail` | One Gmail sync pass, every `classify-email` call under it | none |

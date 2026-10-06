@@ -124,6 +124,7 @@ export default function DashboardPage() {
   const [gmailMonitor, setGmailMonitor] = useState(false)
   const [gmailBackgroundReady, setGmailBackgroundReady] = useState(false)
   const [budget, setBudget] = useState<BudgetSummary | null>(null)
+  const [budgetError, setBudgetError] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [userName, setUserName] = useState<string | null>(null)
   const [calculatingBatch, setCalculatingBatch] = useState(false)
@@ -281,16 +282,25 @@ export default function DashboardPage() {
       setGmailMonitor(gmailStatus?.permissions?.monitor?.enabled ?? false)
       setGmailBackgroundReady(gmailStatus?.backgroundReady ?? false)
 
-      const rawBudget = safePreferences?.budget
-      setBudget(
-        rawBudget && typeof rawBudget.spentUsd === 'number' && typeof rawBudget.monthlyUsd === 'number'
-          ? {
-              spentUsd: rawBudget.spentUsd,
-              monthlyUsd: rawBudget.monthlyUsd,
-              periodStart: typeof rawBudget.periodStart === 'string' ? rawBudget.periodStart : '',
-            }
-          : null
-      )
+      // Spend lives in the ledger, not on the profile: read it through the budget route.
+      try {
+        const res = await fetch('/api/settings/budget')
+        const data = res.ok ? ((await res.json()) as { budget?: Partial<BudgetSummary> }) : null
+        const b = data?.budget
+        if (b && typeof b.spentUsd === 'number' && typeof b.monthlyUsd === 'number') {
+          setBudget({
+            spentUsd: b.spentUsd,
+            monthlyUsd: b.monthlyUsd,
+            heldUsd: typeof b.heldUsd === 'number' ? b.heldUsd : 0,
+            periodStart: typeof b.periodStart === 'string' ? b.periodStart : '',
+          })
+          setBudgetError(false)
+        } else {
+          setBudgetError(true)
+        }
+      } catch {
+        setBudgetError(true)
+      }
 
       setStats({
         companiesCount: companiesCountRes.count || 0,
@@ -425,6 +435,7 @@ export default function DashboardPage() {
             <AgentActivityCard run={latestRun} />
             <BudgetMeterCard
               budget={budget}
+              loadFailed={budgetError}
               // Patch the cap in place rather than refetching the whole
               // dashboard for one number the card already knows.
               onBudgetChange={(monthlyUsd) =>

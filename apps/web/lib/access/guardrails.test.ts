@@ -50,18 +50,15 @@ import {
   type OutreachMessageRow,
   type OutreachStatus,
 } from '@/lib/outreach/types'
-import {
-  BudgetCapError,
-  assertWithinBudget,
-  estimateCostUsd,
-  getSpendState,
-  recordSpend,
-} from '@/lib/harness/spend'
+import { reserveSpend } from '@/lib/harness/spend'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 
 const HOUR_MS = 60 * 60 * 1000
 const OWNER_ID = 'owner-user-1'
 const DEMO_ID = 'demo-user-1'
+
+/** User ids named by each reserve_llm_spend call the fake admin saw. */
+let reservedFor: string[] = []
 
 const ISSUED_AT = new Date('2026-08-03T09:00:00.000Z')
 const EXPIRES_AT = new Date(ISSUED_AT.getTime() + ACCESS_CODE_TTL_HOURS * HOUR_MS)
@@ -147,26 +144,19 @@ function fakeAdmin(rows: Record<string, Record<string, unknown>>): AdminClient {
         update: (patch: { preferences: Record<string, unknown> }) => updateBuilder(patch),
       }
     },
-    // recordSpend is one atomic rpc now (migration 20261005000005). Same
-    // arithmetic as the SQL: stale period resets, new total rounded to 6dp.
-    async rpc(_fn: string, args: { p_user_id: string; p_cost: number }) {
-      const prefs = rows[args.p_user_id] ?? {}
-      const budget = (prefs.budget ?? {}) as Record<string, unknown>
-      const now = new Date()
-      const period = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
-      const spent = budget.periodStart === period && typeof budget.spentUsd === 'number' && budget.spentUsd > 0 ? budget.spentUsd : 0
-      const cap = typeof budget.monthlyUsd === 'number' && budget.monthlyUsd > 0 ? budget.monthlyUsd : 10
-      rows[args.p_user_id] = {
-        ...prefs,
-        budget: { periodStart: period, spentUsd: Number((spent + args.p_cost).toFixed(6)), monthlyUsd: cap },
-      }
-      return { data: null, error: null }
+    // reserveSpend is one rpc (reserve_llm_spend). The arithmetic is proven
+    // against a real database in lib/harness/spend.db.test.ts; this fake only
+    // records WHOSE ledger a reservation names.
+    async rpc(_fn: string, args: { p_user_id: string }) {
+      reservedFor.push(args.p_user_id)
+      return { data: { ok: true, id: 'reservation-1' }, error: null }
     },
   }
   return admin as unknown as AdminClient
 }
 
 afterEach(() => {
+  reservedFor = []
   vi.restoreAllMocks()
 })
 
@@ -429,7 +419,7 @@ describe('demoProfilePreferences — (1) provisioning a demo that cannot overspe
 
   it('gives the demo its own empty ledger and its own $1 cap — never the owner’s numbers', () => {
     const prefs = demoProfilePreferences(ownerPreferences)
-    expect(prefs.budget).toEqual({ periodStart: '', spentUsd: 0, monthlyUsd: DEMO_MONTHLY_USD })
+    expect(prefs.budget).toEqual({ monthlyUsd: DEMO_MONTHLY_USD })
     expect(prefs.budget).not.toMatchObject({ monthlyUsd: 250 })
   })
 
@@ -468,7 +458,7 @@ describe('demoProfilePreferences — (1) provisioning a demo that cannot overspe
   it('drops openai and anthropic too, so every model call lands on the metered backend', () => {
     // Not paranoia about the key type — see guardrails.ts's DEMO_API_KEY_ALLOWLIST
     // doc: '@cello/agents' createLLMClient (formerly used by app/api/agents/
-    // {analyze,coach}, both gone as of the langgraph port) PREFERS anthropic,
+    // analyze and an old follow-up route, both gone as of the langgraph port) PREFERS anthropic,
     // then openai, over openrouter. Kept as defense-in-depth even though
     // nothing reaches for it any more — a demo profile should never carry a
     // credential the guardrails can't meter.
@@ -561,41 +551,11 @@ describe('demoProfilePreferences — (1) provisioning a demo that cannot overspe
   })
 })
 
-describe('demoBudget composes with the REAL spend.ts', () => {
-  it('reads back as a $1 cap through spend.ts’s own reader', async () => {
-    // Cross-file invariant: this module writes the block, spend.ts interprets
-    // it. If either side renames a field, the cap silently becomes
-    // DEFAULT_MONTHLY_USD ($10) and nothing else would notice.
-    const admin = fakeAdmin({ [DEMO_ID]: demoProfilePreferences(null) })
-    const state = await getSpendState(admin, DEMO_ID)
-    expect(state.capUsd).toBe(DEMO_MONTHLY_USD)
-    expect(state.spentUsd).toBe(0)
-  })
-
-  it('an empty periodStart resets the ledger rather than inheriting one', async () => {
-    const admin = fakeAdmin({ [DEMO_ID]: demoProfilePreferences({ budget: { periodStart: '2026-08', spentUsd: 9.9, monthlyUsd: 10 } }) })
-    const state = await getSpendState(admin, DEMO_ID)
-    expect(state.spentUsd).toBe(0)
-    expect(state.capUsd).toBe(DEMO_MONTHLY_USD)
-  })
-
-  it('refuses the demo at $1 while the owner is nowhere near their own cap', async () => {
-    const ownerBudget = { periodStart: '', spentUsd: 0, monthlyUsd: 10 }
-    const rows: Record<string, Record<string, unknown>> = {
-      [OWNER_ID]: { budget: ownerBudget },
-      [DEMO_ID]: demoProfilePreferences(null),
-    }
-    const admin = fakeAdmin(rows)
-
-    // $1 of opus exactly (200k prompt tokens at $5/M).
-    expect(estimateCostUsd('anthropic/claude-opus-4.8', 200_000, 0)).toBe(1)
-    await recordSpend(admin, DEMO_ID, 'anthropic/claude-opus-4.8', 200_000, 0)
-
-    await expect(assertWithinBudget(admin, DEMO_ID)).rejects.toBeInstanceOf(BudgetCapError)
-    await expect(assertWithinBudget(admin, OWNER_ID)).resolves.toBeUndefined()
-
-    // THE CLAIM, IN ONE ASSERTION: the owner's ledger did not move at all.
-    expect(rows[OWNER_ID].budget).toEqual(ownerBudget)
+describe('demoBudget writes the cap the ledger reads', () => {
+  it('provisions a $1 monthlyUsd and no counters', () => {
+    // reserve_llm_spend reads preferences.budget.monthlyUsd as the cap. If this
+    // field were renamed the cap would silently become the $10 default.
+    expect(demoProfilePreferences(null).budget).toEqual({ monthlyUsd: DEMO_MONTHLY_USD })
   })
 })
 
@@ -620,16 +580,10 @@ describe('demoSafeApiKeys — a demo can never draw on the OWNER’s allowance',
     expect(spy).toHaveBeenCalledTimes(1)
     expect(String(spy.mock.calls[0][0])).toMatch(/re-attributing spend/)
 
-    // End to end through the real spend.ts: the charge lands on the demo.
-    const ownerBudget = { periodStart: '', spentUsd: 0, monthlyUsd: 10 }
-    const rows: Record<string, Record<string, unknown>> = {
-      [OWNER_ID]: { budget: ownerBudget },
-      [DEMO_ID]: demoProfilePreferences(null),
-    }
-    const admin = fakeAdmin(rows)
-    await recordSpend(admin, safe.userId!, 'anthropic/claude-haiku-4.5', 100_000, 10_000)
-    expect(rows[OWNER_ID].budget).toEqual(ownerBudget)
-    expect((rows[DEMO_ID].budget as { spentUsd: number }).spentUsd).toBeGreaterThan(0)
+    // End to end through the real spend.ts: the reservation names the demo.
+    const admin = fakeAdmin({})
+    await reserveSpend(admin, { userId: safe.userId!, model: 'anthropic/claude-haiku-4.5', promptTokens: 1000, maxTokens: 100, rung: 'R4', step: 'test' })
+    expect(reservedFor).toEqual([DEMO_ID])
   })
 
   it('SUPPLIES a missing userId, because an absent one means NO CAP AT ALL', () => {

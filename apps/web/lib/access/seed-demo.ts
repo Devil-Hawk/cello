@@ -45,7 +45,6 @@ import {
   DEMO_DOSSIERS,
   DEMO_DRAFTS,
   DEMO_FOLLOW_UPS,
-  DEMO_INTERVIEW_KITS,
   DEMO_JOBS,
   DEMO_OUTREACH,
   DEMO_PERSONA,
@@ -101,21 +100,15 @@ function hoursFromNow(now: Date, hours: number): string {
 // Preferences (the budget cap lives here)
 // ---------------------------------------------------------------------------
 
-/** Current UTC billing month, mirroring lib/harness/spend.ts's currentPeriod(). */
-function currentPeriod(now: Date): string {
-  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
-}
-
 /**
  * Merge the demo preferences onto whatever the profile already has.
  *
  * TWO THINGS HERE ARE SECURITY DECISIONS, NOT STYLE:
  *
- *   1. `spentUsd` IS PRESERVED, NEVER RESET. Re-running the seeder is the same
- *      event as re-redeeming a code, and a demo user can re-enter their code as
- *      many times as they like. If a re-seed zeroed the spend counter, entering
- *      the code again would be a one-keystroke way to refill the allowance and
- *      the cap would bound nothing at all.
+ *   1. SPEND IS NOT HERE. What a demo has spent lives in the llm_spend ledger,
+ *      which only the service role writes, so a re-seed (the same event as
+ *      re-redeeming a code) can never refill the allowance. This block carries
+ *      the cap only.
  *
  *   2. THE CAP ONLY EVER GOES DOWN. If a profile somehow already carries a
  *      LOWER cap than the demo default, the lower number wins. Seeding must
@@ -128,28 +121,21 @@ function currentPeriod(now: Date): string {
  * untouched here, so no guardrail that module forces can be loosened by a
  * re-seed: `provider`, `gmail_permissions`, `api_keys` and `autopilot` survive
  * verbatim, and the only key this writes on top (`outreach`) keeps
- * autoSend: false. The one behaviour that deliberately differs is the spend
- * ledger: provisioning resets it (correct — the workspace is new), and this
- * never does (correct — re-entering a code must not refill the allowance).
+ * autoSend: false.
  */
 export function buildDemoPreferences(
-  existing: Record<string, unknown> | null | undefined,
-  now: Date = new Date()
+  existing: Record<string, unknown> | null | undefined
 ): Record<string, unknown> {
   const base = existing && typeof existing === 'object' ? existing : {}
   const rawBudget = (base as { budget?: unknown }).budget
   const budget = (rawBudget && typeof rawBudget === 'object' ? rawBudget : {}) as Record<string, unknown>
 
   const existingCap = typeof budget.monthlyUsd === 'number' && budget.monthlyUsd > 0 ? budget.monthlyUsd : null
-  const existingSpent = typeof budget.spentUsd === 'number' && budget.spentUsd > 0 ? budget.spentUsd : 0
-  const existingPeriod = typeof budget.periodStart === 'string' && budget.periodStart ? budget.periodStart : null
 
   return {
     ...base,
     ...DEMO_PREFERENCES,
     budget: {
-      periodStart: existingPeriod ?? currentPeriod(now),
-      spentUsd: existingSpent,
       monthlyUsd: existingCap == null ? DEMO_MONTHLY_USD : Math.min(DEMO_MONTHLY_USD, existingCap),
     },
   }
@@ -166,7 +152,7 @@ export interface DemoBatch {
   /**
    * True when a failure leaves the demo unusable and the seeder should abort.
    * False for the surfaces that merely degrade to an empty state — losing the
-   * interview kits is a worse demo, losing the jobs is no demo at all.
+   * dossiers is a worse demo, losing the jobs is no demo at all.
    */
   required: boolean
   /** Primary-key column the idempotent upsert below conflicts on. Defaults
@@ -502,23 +488,6 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
     },
   ]
 
-  // --- prep artefacts ------------------------------------------------------
-  const interviewKitRows = DEMO_INTERVIEW_KITS.map((kit) => {
-    const job = jobBySlug(kit.jobSlug)
-    return {
-      id: id(`interview_kit:${kit.jobSlug}`),
-      user_id: demoUserId,
-      job_id: jobIdBySlug.get(kit.jobSlug)!,
-      company_id: companyIdBySlug.get(job.companySlug)!,
-      questions: kit.questions,
-      prep_notes: kit.prepNotes,
-      star_stories: kit.starStories,
-      status: 'ready',
-      created_at: daysBefore(now, 3),
-      updated_at: daysBefore(now, 3),
-    }
-  })
-
   const dossierRows = DEMO_DOSSIERS.map((dossier) => ({
     id: id(`company_dossier:${dossier.companySlug}`),
     company_id: companyIdBySlug.get(dossier.companySlug)!,
@@ -555,7 +524,6 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
       { table: 'application_drafts', rows: draftRows, required: false },
       { table: 'outreach_messages', rows: outreachRows, required: false },
       { table: 'resume_documents', rows: resumeRows, required: false },
-      { table: 'interview_kits', rows: interviewKitRows, required: false },
       { table: 'company_dossiers', rows: dossierRows, required: false },
     ],
   }
@@ -658,7 +626,7 @@ export async function seedDemoWorkspace(
   // fabricated job search.
   const profilePatch: Record<string, unknown> = {
     ...workspace.profile,
-    preferences: buildDemoPreferences(profile.preferences, now),
+    preferences: buildDemoPreferences(profile.preferences),
   }
   // The auth trigger copies auth.users.email into profiles.email, and that is
   // the account's real login. Only fill it in if it is somehow missing —

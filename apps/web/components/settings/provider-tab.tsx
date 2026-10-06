@@ -30,7 +30,6 @@ interface ProviderStatus {
   selfHosted: boolean
   tracingExportEnabled: boolean
   tracingCaptureContent: boolean
-  tracingCaptureDemoContent: boolean
   active: ProviderId
   preferences: {
     active: ProviderId
@@ -173,12 +172,8 @@ export function ProviderTab({ onStatus }: ProviderTabProps) {
             receives the model, token counts, estimated cost, timing, error codes, your Cello user id
             (not your email) and, for Copilot, the conversation id.{' '}
             {status.tracingCaptureContent
-              ? 'It also receives the prompts and replies of the operator\u2019s own workspace: resume text, job descriptions and chat messages, with email addresses, tokens and API-key-like strings masked first (other text is not masked). '
-              : 'Prompts and replies are not sent. '}
-            {status.tracingCaptureContent &&
-              (status.tracingCaptureDemoContent
-                ? 'Demo workspaces are included, so do not paste anything private into a demo. '
-                : 'Demo workspaces send no prompt or reply text. ')}
+              ? 'This workspace is on the operator\u2019s own list, so it also receives your prompts and replies: resume text, job descriptions and chat messages, with email addresses, tokens and API-key-like strings masked first (other text is not masked). '
+              : 'Your prompts and replies are not sent: your resume, your emails and your notes stay in Cello. '}
             Your saved API keys are never sent. Ask your operator if you have questions.
           </p>
         </div>

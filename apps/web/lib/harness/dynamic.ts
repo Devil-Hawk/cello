@@ -146,7 +146,6 @@ export const STEP_ID_FIELD: Partial<Record<StepAgentType, 'jobId' | 'companyId' 
   cv_tailor: 'jobId',
   applier: 'jobId',
   verifier: 'draftId',
-  interview_prep: 'jobId',
   company_researcher: 'companyId',
 }
 

@@ -48,9 +48,7 @@ export const CLIENT_SAFE_PREFERENCES_RPC = 'get_client_safe_preferences'
 export const SET_ONBOARDING_PREFERENCES_RPC = 'set_onboarding_preferences'
 
 export interface ClientSafeBudget {
-  spentUsd?: number
   monthlyUsd?: number
-  periodStart?: string
 }
 
 export interface ClientSafeOutreach {

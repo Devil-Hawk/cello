@@ -1,0 +1,14 @@
+{
+  "_note": "Hand-written to the shape documented at openrouter.ai/docs/use-cases/usage-accounting (usage.cost in credits, which are USD, is always present). Not a recording: tests never pay for a model call.",
+  "id": "gen-fixture-1",
+  "model": "anthropic/claude-sonnet-5",
+  "choices": [{ "index": 0, "message": { "role": "assistant", "content": "ok" }, "finish_reason": "stop" }],
+  "usage": {
+    "prompt_tokens": 120,
+    "completion_tokens": 18,
+    "total_tokens": 138,
+    "cost": 0.00042,
+    "is_byok": false,
+    "cost_details": { "upstream_inference_cost": null }
+  }
+}

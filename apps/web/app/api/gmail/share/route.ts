@@ -288,7 +288,7 @@ export async function POST(request: NextRequest) {
       const kind = parsed.status === 'screen' ? 'phone screen' : 'interview'
       const note =
         interviewAt && !isNaN(interviewAt.getTime())
-          ? `Prep for your ${kind} with ${trackedCompany.name} on ${interviewAt.toLocaleString()} (from a shared thread: "${subject}")`
+          ? `Your ${kind} with ${trackedCompany.name} on ${interviewAt.toLocaleString()} (from a shared thread: "${subject}")`
           : `${kind[0].toUpperCase()}${kind.slice(1)} detected with ${trackedCompany.name} — check the thread for the exact time ("${subject}")`
       await supabase.from('follow_ups').insert({ application_id: applicationId, due_date: dueDate.toISOString(), note })
     }

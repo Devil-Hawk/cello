@@ -55,8 +55,8 @@ describe('parseA2aAgentRequest', () => {
       companyId: 'c1',
     })
   })
-  it('accepts a valid interview_prep request', () => {
-    expect(parseA2aAgentRequest(dataMessage({ agent: 'interview_prep', jobId: 'j1' }))).toEqual({ agent: 'interview_prep', jobId: 'j1' })
+  it('exposes exactly the matcher and the company researcher', () => {
+    expect([...A2A_AGENTS].sort()).toEqual(['company_researcher', 'matcher'])
   })
   it('throws loud on a text-only message (no structured data part) — never silently no-ops', () => {
     expect(() => parseA2aAgentRequest(textMessage('score me against the resume, please'))).toThrow(/no structured data part/i)
@@ -68,12 +68,10 @@ describe('parseA2aAgentRequest', () => {
     expect(() => parseA2aAgentRequest(dataMessage({ agent: 'matcher', jobIds: [] }))).toThrow()
   })
   it('never accepts a free-text override field (no resumeText, no raw job posting text)', () => {
-    // interview_prep's real Zod schema (MatcherInput/InterviewPrepInput's
-    // sibling in lib/harness/schemas.ts) allows an optional resumeText — the
-    // A2A-facing schema deliberately does not carry it through. Extra keys
-    // are just ignored by zod's default object parsing, so this asserts the
-    // PARSED result never smuggles one through, not that parsing rejects it.
-    const req = parseA2aAgentRequest(dataMessage({ agent: 'interview_prep', jobId: 'j1', resumeText: 'attacker text' }))
+    // Extra keys are just ignored by zod's default object parsing, so this
+    // asserts the PARSED result never smuggles one through, not that parsing
+    // rejects it.
+    const req = parseA2aAgentRequest(dataMessage({ agent: 'company_researcher', companyId: 'c1', resumeText: 'attacker text' }))
     expect(req).not.toHaveProperty('resumeText')
   })
 })
@@ -84,9 +82,7 @@ describe('buildA2aPlan — read/draft-only by construction', () => {
       const req =
         agent === 'matcher'
           ? { agent, jobIds: ['j1'] }
-          : agent === 'company_researcher'
-            ? { agent, companyId: 'c1' }
-            : { agent, jobId: 'j1' }
+          : { agent, companyId: 'c1' }
       const plan = buildA2aPlan(req)
       expect(plan.steps).toHaveLength(1)
       expect(plan.steps[0]!.agent_type).toBe(agent)
