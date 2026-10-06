@@ -143,7 +143,7 @@ const TITLES: Record<string, string> = {
 }
 
 /** Section order: meta.cello.sectionOrder, then the default order for anything it leaves out. */
-function orderedKeys(resume: Resume): string[] {
+export function orderedKeys(resume: Resume): string[] {
   const requested = resume.meta.cello.sectionOrder ?? []
   const known = new Set<string>(DEFAULT_SECTION_ORDER)
   const keys = [...requested.filter((k) => known.has(k))]
