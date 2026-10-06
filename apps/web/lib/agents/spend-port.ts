@@ -1,19 +1,16 @@
 // The spend seam for agent model calls.
 //
 // CelloSpend (lib/agents/middleware.ts) calls only reserve() before a model call
-// and settle() after it. Everything about how money is counted lives behind
-// these two functions, so the spend package can replace the bodies without
-// touching an agent file. This file adds no budget check of its own: the bodies
-// below call the checks and the ledger that already exist (assertWithinBudget
-// and recordSpend in lib/harness/spend.ts). When the atomic reserve and settle
-// from the security package land, the bodies become calls to them.
+// and settle() after it. Both are thin: the cap, the ledger rows and the sweeper
+// that charges a call nobody settled are reserveSpend and settleSpend in
+// lib/harness/spend.ts, the same two every other model call goes through.
 //
-// A free model (an id ending in ":free") costs nothing, so it reserves and
-// settles nothing. That is also what lets a fallback to a free model succeed
-// after the paid cap has been reached.
+// A free model (an id ending in ":free") is a rung that costs nothing, so it
+// reserves $0. That is also what lets a fallback to a free model succeed after
+// the paid cap has been reached.
 
 import type { AdminClient } from '@/lib/harness/types'
-import { assertWithinBudget, estimateCostUsd, recordSpend } from '@/lib/harness/spend'
+import { reserveSpend, rungFor, settleSpend, type SpendOutcome, type SpendReservation } from '@/lib/harness/spend'
 
 export { BudgetCapError } from '@/lib/harness/spend'
 
@@ -27,21 +24,12 @@ export interface ReserveInput {
 }
 
 export interface Reservation {
-  /** Handle from the ledger, or null when nothing was reserved (a free model). */
-  id: string | null
-  userId: string
+  spend: SpendReservation
   admin: AdminClient
-  /** Worst-case cost that was reserved, USD. */
-  reservedUsd: number
 }
 
-export interface SettleInput {
-  model: string
-  promptTokens: number
-  completionTokens: number
-}
-
-const isFree = (model: string) => model.endsWith(':free')
+/** What the call cost (its tokens), or why it failed. */
+export type SettleInput = SpendOutcome
 
 /**
  * The error underneath any wrappers. langchain wraps an error thrown inside a
@@ -66,22 +54,19 @@ export function isBudgetCapError(err: unknown): boolean {
 
 /** Reserve the worst-case cost of one model call. Throws BudgetCapError when the cap is reached. */
 export async function reserve(input: ReserveInput): Promise<Reservation> {
-  if (isFree(input.model)) return { id: null, userId: input.userId, admin: input.admin, reservedUsd: 0 }
-  await assertWithinBudget(input.admin, input.userId)
-  return {
-    id: null,
+  const spend = await reserveSpend(input.admin, {
     userId: input.userId,
-    admin: input.admin,
-    reservedUsd: estimateCostUsd(input.model, input.promptTokens, input.maxTokens),
-  }
+    model: input.model,
+    promptTokens: input.promptTokens,
+    maxTokens: input.maxTokens,
+    rung: rungFor('openrouter', input.model),
+    step: 'agent-turn',
+    traceId: input.traceId,
+  })
+  return { spend, admin: input.admin }
 }
 
-/**
- * Record what the call actually cost. A call that failed settles with zero
- * tokens, which releases the reservation without a charge.
- */
-export async function settle(reservation: Reservation, usage: SettleInput): Promise<void> {
-  if (isFree(usage.model)) return
-  if (usage.promptTokens === 0 && usage.completionTokens === 0) return
-  await recordSpend(reservation.admin, reservation.userId, usage.model, usage.promptTokens, usage.completionTokens)
+/** Record what the call actually cost, or that it failed. Never throws. */
+export async function settle(reservation: Reservation, outcome: SettleInput): Promise<void> {
+  await settleSpend(reservation.admin, reservation.spend, outcome)
 }
