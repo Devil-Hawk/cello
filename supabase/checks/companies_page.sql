@@ -214,7 +214,7 @@ do $$
 declare want bigint; got jsonb;
 begin
   select count(*) into want from public.company_directory where verified_at is not null;
-  select found into got from public.job_heartbeats where job = 'directory.sweep' and user_id is null;
+  select h.found into got from public.job_heartbeats h where job = 'directory.sweep' and user_id is null;
   if (got ->> 'verified_total')::bigint is distinct from want then raise exception 'verified_total % should be %', got, want; end if;
   if (got ->> 'pending_total')::bigint is distinct from (select count(*) from public.directory_candidates where state = 'pending') then raise exception 'pending_total is the pending count'; end if;
   if (got ->> 'boards')::int <> 3 then raise exception 'the slice''s own numbers stay'; end if;
@@ -223,7 +223,7 @@ end $$;
 select public.finish_heartbeat('directory.sweep', null, false, '{}'::jsonb, 'failed', 10, null);
 do $$
 begin
-  if (select (found ->> 'verified_total') from public.job_heartbeats where job = 'directory.sweep' and user_id is null) is null then raise exception 'a failed slice keeps the last total'; end if;
+  if (select (h.found ->> 'verified_total') from public.job_heartbeats h where job = 'directory.sweep' and user_id is null) is null then raise exception 'a failed slice keeps the last total'; end if;
 end $$;
 
 -- A person can read it (the instance's rows are readable), and nobody else's heartbeat is mixed in.
@@ -231,7 +231,7 @@ select set_config('request.jwt.claims', json_build_object('role', 'authenticated
 set local role authenticated;
 do $$
 begin
-  if (select found ->> 'verified_total' from public.job_heartbeats where job = 'directory.sweep' and user_id is null) is null then
+  if (select h.found ->> 'verified_total' from public.job_heartbeats h where job = 'directory.sweep' and user_id is null) is null then
     raise exception 'a signed-in person reads the sweep total';
   end if;
 end $$;
