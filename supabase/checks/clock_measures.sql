@@ -87,7 +87,10 @@ do $$
 declare n integer; ids text[];
 begin
   select count(*), array_agg(measure_id order by measure_id) into n, ids from public.run_true_measures();
-  if ids <> array['T18', 'T4', 'T5', 'T8'] then raise exception 'run_true_measures ran %', ids; end if;
+  -- K4's measures and every later package's: the ones with a function run, in id order
+  if not (ids @> array['T18', 'T4', 'T5', 'T8']) or exists (select 1 from unnest(ids) i where i not in (select id from public.measures where layer = 'true')) then
+    raise exception 'run_true_measures ran %', ids;
+  end if;
 end $$;
 
 -- A measure with no function cannot be run by name.

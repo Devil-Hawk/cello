@@ -18,7 +18,9 @@
 --   profiles.targets_version, and a trigger that starts a role check when the targets change
 --   fold_shared_postings  merges per-person copies of one posting into one row (called by the
 --                         contract migration, 20261008055000, after the new reads are deployed)
---   prune_stale_rows      stops treating a person_roles row as a reason to keep a role
+--   prune_stale_rows, evict_company_jobs, clear_unverified_board_jobs
+--                         stop treating a person_roles row as a reason to keep a role (a saved one still is)
+--   jobs_default_person_role  every inserted role is its company owner's: a person_roles row beside it
 --
 --   The rows for the commands registry and the provenance tables wait for the files that own them
 --   (K10, K11).
@@ -349,6 +351,30 @@ select c.user_id, j.id, coalesce(j.discovered_at, now()), 0, j.last_seen_at
   join public.companies c on c.id = j.company_id
 on conflict (user_id, job_id) do nothing;
 
+-- Every role a writer inserts is its company owner's: a person_roles row beside it. The reader
+-- then refines it (hidden, the version of the targets); the writers that predate person_roles (the
+-- aggregator leads, a shared mail thread) need no change to stay visible after the contract.
+create or replace function public.jobs_default_person_role()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  insert into public.person_roles (user_id, job_id, visible_since)
+  select c.user_id, new.id, coalesce(new.discovered_at, now())
+    from public.companies c
+   where c.id = new.company_id
+  on conflict (user_id, job_id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists jobs_default_person_role on public.jobs;
+create trigger jobs_default_person_role
+  after insert on public.jobs
+  for each row execute function public.jobs_default_person_role();
+
 -- ---------------------------------------------------------------------------
 -- Writers
 -- ---------------------------------------------------------------------------
@@ -672,6 +698,80 @@ begin
 end;
 $$;
 
+-- evict_company_jobs and clear_unverified_board_jobs delete the roles nothing points at. A
+-- person_roles row points at every role a person can see, so it no longer counts; a role someone
+-- saved still does.
+create or replace function public.evict_company_jobs(p_company_id uuid, p_external_ids text[])
+returns text[]
+language plpgsql security definer set search_path = ''
+as $$
+declare referenced text := 'false'; fk record; gone text[];
+begin
+  if p_company_id is null then
+    raise exception 'company is required' using errcode = '22023';
+  end if;
+  if coalesce(array_length(p_external_ids, 1), 0) = 0 then
+    return '{}';
+  end if;
+  -- The cron (service role, or a direct psql session with no JWT) may evict for any company; a signed-in user only their own.
+  if coalesce(auth.jwt()->>'role', 'service_role') <> 'service_role'
+     and not exists (select 1 from public.companies c where c.id = p_company_id and c.user_id = auth.uid()) then
+    raise exception 'not your company' using errcode = '42501';
+  end if;
+  for fk in
+    select c.conrelid::regclass as tbl, a.attname as col, array_length(c.conkey, 1) as width
+    from pg_catalog.pg_constraint c
+    join pg_catalog.pg_attribute a on a.attrelid = c.conrelid and a.attnum = c.conkey[1]
+    where c.confrelid = 'public.jobs'::regclass and c.contype = 'f'
+      and c.conrelid <> 'public.person_roles'::regclass
+  loop
+    if fk.width <> 1 then raise exception 'multi-column foreign key on jobs from %; refusing', fk.tbl; end if;
+    referenced := referenced || format(' or exists (select 1 from %s r where r.%I = j.id)', fk.tbl, fk.col);
+  end loop;
+  referenced := referenced || ' or exists (select 1 from public.person_roles pr where pr.job_id = j.id and pr.saved_at is not null)';
+  execute 'with d as (delete from public.jobs j where j.company_id = $1 and j.external_id = any($2) and not (' || referenced || ') returning j.external_id) select coalesce(array_agg(external_id), ''{}'') from d'
+    into gone using p_company_id, p_external_ids[1:200];
+  return gone;
+end $$;
+revoke execute on function public.evict_company_jobs(uuid, text[]) from public, anon;
+grant execute on function public.evict_company_jobs(uuid, text[]) to authenticated, service_role;
+
+create or replace function public.clear_unverified_board_jobs(p_company_id uuid, p_source text)
+returns table(deleted integer, closed integer)
+language plpgsql security definer set search_path = ''
+as $$
+declare referenced text := 'false'; fk record; n_closed integer; n_deleted integer;
+begin
+  if p_company_id is null or coalesce(p_source, '') = '' then
+    raise exception 'company and source are required' using errcode = '22023';
+  end if;
+  -- The cron (service role, or a direct psql session with no JWT) may clear any company; a signed-in user only their own.
+  if coalesce(auth.jwt()->>'role', 'service_role') <> 'service_role'
+     and not exists (select 1 from public.companies c where c.id = p_company_id and c.user_id = auth.uid()) then
+    raise exception 'not your company' using errcode = '42501';
+  end if;
+  for fk in
+    select c.conrelid::regclass as tbl, a.attname as col, array_length(c.conkey, 1) as width
+    from pg_catalog.pg_constraint c
+    join pg_catalog.pg_attribute a on a.attrelid = c.conrelid and a.attnum = c.conkey[1]
+    where c.confrelid = 'public.jobs'::regclass and c.contype = 'f'
+      and c.conrelid <> 'public.person_roles'::regclass
+  loop
+    if fk.width <> 1 then raise exception 'multi-column foreign key on jobs from %; refusing', fk.tbl; end if;
+    referenced := referenced || format(' or exists (select 1 from %s r where r.%I = j.id)', fk.tbl, fk.col);
+  end loop;
+  referenced := referenced || ' or exists (select 1 from public.person_roles pr where pr.job_id = j.id and pr.saved_at is not null)';
+  execute 'update public.jobs j set still_open = false, last_verified_at = now() where j.company_id = $1 and j.source = $2 and (' || referenced || ')'
+    using p_company_id, p_source;
+  get diagnostics n_closed = row_count;
+  execute 'delete from public.jobs j where j.company_id = $1 and j.source = $2 and not (' || referenced || ')'
+    using p_company_id, p_source;
+  get diagnostics n_deleted = row_count;
+  return query select n_deleted, n_closed;
+end $$;
+revoke execute on function public.clear_unverified_board_jobs(uuid, text) from public, anon;
+grant execute on function public.clear_unverified_board_jobs(uuid, text) to authenticated, service_role;
+
 -- ---------------------------------------------------------------------------
 -- Measures: T2, T3, T7, T9, T17 (and T18 from visible_since)
 -- ---------------------------------------------------------------------------
@@ -902,6 +1002,7 @@ $$;
 revoke all on function public.companies_derive_watching() from public, anon, authenticated;
 revoke all on function public.companies_link_employer() from public, anon, authenticated;
 revoke all on function public.jobs_set_employer_posting() from public, anon, authenticated;
+revoke all on function public.jobs_default_person_role() from public, anon, authenticated;
 revoke all on function public.profiles_targets_changed() from public, anon, authenticated;
 revoke all on function public.sync_person_roles(uuid, uuid, text[], integer, text[]) from public, anon;
 revoke all on function public.set_person_counts(uuid, jsonb) from public, anon;
