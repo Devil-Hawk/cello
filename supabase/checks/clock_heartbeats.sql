@@ -12,7 +12,6 @@ begin;
 create temp table fx as select gen_random_uuid() as a, gen_random_uuid() as b;
 grant select on fx to public;
 insert into auth.users (id, email) select a, 'hb-a@example.invalid' from fx union all select b, 'hb-b@example.invalid' from fx;
-insert into public.profiles (id, email) select a, 'hb-a@example.invalid' from fx union all select b, 'hb-b@example.invalid' from fx;
 
 delete from public.clock_meter;
 
