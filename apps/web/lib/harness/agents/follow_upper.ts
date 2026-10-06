@@ -15,6 +15,7 @@ import type { AgentFn, AdminClient } from '../types'
 import { FollowUpperInput } from '../schemas'
 import { MissingKeyError } from '../llm'
 import { composeSystemPrompt, loadModeDoc, promptRef } from '../prompts'
+import { viewerRoles, type ViewerRole } from '../../jobs/person-jobs'
 
 const STUCK_DAYS = 10
 const ACTIVE_STAGES = ['applied', 'screen', 'interview']
@@ -29,16 +30,13 @@ interface AppRow {
   job_id: string | null
   jobs?: {
     title: string | null
-    company_id: string | null
-    companies?: { name: string | null } | { name: string | null }[] | null
     employer?: { name: string | null } | null
   } | null
 }
 
-function coName(app: AppRow): string {
-  const c = app.jobs?.companies
-  if (Array.isArray(c)) return c[0]?.name ?? app.jobs?.employer?.name ?? ''
-  return c?.name ?? app.jobs?.employer?.name ?? ''
+// The company is the person's own (their role row), else the directory's: never the one that stored a shared role first.
+function coName(app: AppRow, viewer: ViewerRole | undefined): string {
+  return viewer?.viewer_company_name ?? app.jobs?.employer?.name ?? ''
 }
 
 function lastTouchMs(app: AppRow, lastActivity: number | undefined): number {
@@ -70,7 +68,7 @@ export const follow_upper: AgentFn = async (ctx) => {
   // 1) Resolve candidate applications.
   let query = ctx.admin
     .from('applications')
-    .select('id, stage, applied_at, updated_at, created_at, job_id, jobs(title, company_id, companies(name), employer:company_directory(name))')
+    .select('id, stage, applied_at, updated_at, created_at, job_id, jobs(title, employer:company_directory(name))')
     .eq('user_id', ctx.userId)
 
   if (input.applicationId) {
@@ -85,6 +83,7 @@ export const follow_upper: AgentFn = async (ctx) => {
   }
 
   const appIds = apps.map((a) => a.id)
+  const viewer = await viewerRoles(ctx.admin, ctx.userId, apps.flatMap((a) => (a.job_id ? [a.job_id] : [])))
 
   // 2) Last activity per application (activities link via application_id).
   const lastActivity = new Map<string, number>()
@@ -125,8 +124,9 @@ export const follow_upper: AgentFn = async (ctx) => {
     if (touch === 0 || touch >= cutoff) continue // not stuck (or no reliable timestamp)
 
     const days = Math.floor((Date.now() - touch) / (24 * 60 * 60 * 1000))
-    const company = coName(app) || 'this company'
-    const contactId = await pickContactId(ctx.admin, ctx.userId, app.jobs?.company_id)
+    const role = app.job_id ? viewer.get(app.job_id) : undefined
+    const company = coName(app, role) || 'this company'
+    const contactId = await pickContactId(ctx.admin, ctx.userId, role?.viewer_company_id)
 
     const { error } = await ctx.admin.from('follow_ups').insert({
       application_id: app.id,
