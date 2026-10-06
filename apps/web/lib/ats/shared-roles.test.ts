@@ -2,8 +2,13 @@
 // Rows of a company in the directory are written once per employer; a repost under a new id leaves one
 // open row for the person, because the old id is no longer listed and closes.
 
-import { describe, expect, it } from 'vitest'
-import { emptyResult, syncJobs, type AtsStore, type CompanyInput, type ExistingJob, type JobUpdate, type JobUpsertRow } from './index'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('../security/untrusted', async (orig) => ({
+  ...(await orig<typeof import('../security/untrusted')>()),
+  assertSsrfSafe: async () => {},
+}))
+import { emptyResult, refreshCompany, syncJobs, type AtsStore, type CompanyInput, type ExistingJob, type JobUpdate, type JobUpsertRow } from './index'
 import { makeSupabaseAtsStore } from './store'
 import type { AtsJob } from './types'
 
@@ -68,6 +73,30 @@ describe('rows of a company in the directory', () => {
     expect(m.updated).toMatchObject([{ companyId: 'c1', employerId: 'e1', externalId: 'a', fields: { title: 'Backend Engineer II' } }])
     const plain = await sync(PLAIN, [{ ...listing('a'), title: 'Backend Engineer II' }], [existing('a', 'Backend Engineer')])
     expect('employerId' in plain.updated[0]).toBe(false)
+  })
+})
+
+describe('a company linked to an employer', () => {
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+  })
+
+  it('is read only from its stored board: a failed read is not followed by a detection from what the person typed', async () => {
+    const fetchMock = vi.fn(async () => new Response('nf', { status: 404 }))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const { store, upserted, updated } = memory([existing('a', 'Backend Engineer')])
+    const linked: CompanyInput = { ...DIRECTORY, metadata: { ats: { provider: 'greenhouse', token: 'acme', source: 'known', verified_by: 'manual' } } }
+
+    const result = await refreshCompany(store, linked)
+
+    expect(result.errors.join(' ')).toContain('cached greenhouse board "acme" failed')
+    // only the stored board was asked: no probe of the name, the domain or the careers link
+    const urls = fetchMock.mock.calls.map((c) => String((c as unknown[])[0]))
+    expect(urls.length).toBeGreaterThan(0)
+    expect(urls.every((u) => u.includes('greenhouse') && u.includes('acme'))).toBe(true)
+    expect(upserted).toEqual([])
+    expect(updated).toEqual([])
   })
 })
 
