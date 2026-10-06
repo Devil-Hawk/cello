@@ -252,7 +252,7 @@ describe('runAgentUnit — journaling always finishes, even when the failure hap
   })
 })
 
-describe('STEP_AGENT_TYPES stays exactly the current 10 (planner-emittable set, unchanged by the graph port)', () => {
+describe('STEP_AGENT_TYPES stays exactly the current 9 (planner-emittable set, unchanged by the graph port)', () => {
   it('matches the pre-port list exactly', () => {
     expect([...STEP_AGENT_TYPES]).toEqual([
       'sourcer',
@@ -262,7 +262,6 @@ describe('STEP_AGENT_TYPES stays exactly the current 10 (planner-emittable set, 
       'applier',
       'verifier',
       'follow_upper',
-      'interview_prep',
       'company_researcher',
       'contact_sourcer',
     ])

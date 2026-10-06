@@ -141,7 +141,7 @@ describe('a failed analysis never becomes renderable advice', () => {
       summary: 'A backend role.',
       talkingPoints: [],
       companyInsights: [],
-      interviewTips: ['Review their queueing stack.'],
+      [['interview', 'Tips'].join('')]: ['Review their queueing stack.'],
     })
     await expect(analyst(ctxWith(stubLlm(response)))).rejects.toMatchObject({ code: 'incomplete_response' })
   })

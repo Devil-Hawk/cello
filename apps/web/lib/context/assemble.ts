@@ -41,11 +41,10 @@ import { readStandingPreferences } from '../insights/store'
 import { readGoals, formatActiveGoalBlock } from '../harness/goals'
 import { retrieveKb } from '../kb/retrieve'
 import { formatKbContext } from '../kb/store'
-import { getDossierByCompany, type DossierSignals } from '../dossier/store'
+import { getDossierByCompany } from '../dossier/store'
 import { normalizeCompanyName, trackedRoleCount } from '../entities/companies'
 import { timelineFor, type InteractionRow } from '../interactions/store'
-import { claimsFor, type ResumeClaim } from '../resume/claims'
-import { frameJobText, frameJobTextList } from '@/lib/security/job-text'
+import { frameJobText } from '@/lib/security/job-text'
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -205,124 +204,6 @@ export async function buildOutreachContext(
 
   const block = parts.join('\n\n')
   return block.length > OUTREACH_CONTEXT_MAX_CHARS ? `${block.slice(0, OUTREACH_CONTEXT_MAX_CHARS)}…` : block
-}
-
-// --- buildInterviewContext ----------------------------------------------------
-
-const INTERVIEW_CONTEXT_MAX_CHARS = 4000
-const INTERVIEW_DOSSIER_MAX_CHARS = 1200
-const INTERVIEW_PAGE_MAX_CHARS = 800
-const INTERVIEW_CLAIMS_LIMIT = 15
-
-/** Same three suffixes lib/kb/ingest.ts#ingestCompanyPage stores under —
- *  kept in sync by lib/kb/ingest.test.ts, not re-exported from there because
- *  that file is a STORE (see its own NOT_JOB_TEXT ledger note); this is a
- *  read, so it belongs with the other reads in this file. */
-const STORED_PAGE_KINDS = ['home', 'about', 'careers'] as const
-
-async function storedCompanyPages(admin: AdminClient, userId: string, companyId: string): Promise<{ page: string; text: string }[]> {
-  try {
-    const externalIds = STORED_PAGE_KINDS.map((k) => `${companyId}:${k}`)
-    const { data, error } = await admin
-      .from('kb_documents')
-      .select('external_id, content')
-      .eq('user_id', userId)
-      .eq('company_id', companyId)
-      .in('external_id', externalIds)
-    if (error) throw new Error(error.message)
-    return ((data ?? []) as { external_id: string; content: string }[]).map((row) => ({
-      page: row.external_id.slice(companyId.length + 1),
-      text: row.content,
-    }))
-  } catch (e) {
-    console.error(`[context] assemble: storedCompanyPages failed for company=${companyId}: ${errMsg(e)}`)
-    return []
-  }
-}
-
-/**
- * The structured (non-raw) fields of a dossier's `signals` worth surfacing to
- * interview prep — same employer/third-party-derived provenance as
- * `summary` (LLM synthesis grounded in fetched company text), so this text
- * gets folded into the SAME framed block as summary rather than a second one.
- * Skips `raw` (an unbounded, uncurated fetch dump — not something a prompt
- * budget can afford) and the two status fields (summarySource,
- * summaryUnavailable — metadata for the UI, not prose worth a model's turn).
- */
-function dossierSignalsText(signals: DossierSignals | null | undefined): string {
-  if (!signals) return ''
-  return [
-    signals.funding ? `Funding: ${signals.funding}` : '',
-    signals.headcountTrend ? `Headcount trend: ${signals.headcountTrend}` : '',
-    signals.culture ? `Culture: ${signals.culture}` : '',
-    signals.techStack?.length ? `Tech stack: ${signals.techStack.join(', ')}` : '',
-    signals.whatTheyWant ? `What they likely want: ${signals.whatTheyWant}` : '',
-    signals.uncertainty ? `Uncertain: ${signals.uncertainty}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
-
-function formatClaims(claims: ResumeClaim[]): string {
-  return claims
-    .slice(0, INTERVIEW_CLAIMS_LIMIT)
-    .map((c) => {
-      const cite = c.evidence[0]
-      return `- [${c.claimKind}] ${c.claimText}${cite ? ` (evidence: "${cite.quote.slice(0, 160)}")` : ''}`
-    })
-    .join('\n')
-}
-
-/**
- * Context for one interview-prep generation: stored company pages + dossier +
- * relationship timeline + the candidate's resume claims with their evidence.
- * companyId may be null (a job with no linked company) — degrades to just the
- * claims block. Company page text and the dossier summary are employer-
- * authored, so both are framed; the interaction timeline and the candidate's
- * own resume claims are not (Cello's own records / the candidate's own
- * words), so neither is.
- */
-export async function buildInterviewContext(admin: AdminClient, userId: string, companyId: string | null): Promise<string> {
-  const [dossier, pages, history, claims] = await Promise.all([
-    companyId
-      ? getDossierByCompany(admin, userId, companyId).catch((e: unknown) => {
-          console.error(`[context] assemble: getDossierByCompany failed for company=${companyId}: ${errMsg(e)}`)
-          return null
-        })
-      : Promise.resolve(null),
-    companyId ? storedCompanyPages(admin, userId, companyId) : Promise.resolve([]),
-    companyId
-      ? timelineFor(admin, userId, { companyId }, MATCH_INTERACTIONS_LIMIT).catch((e: unknown) => {
-          console.error(`[context] assemble: timelineFor failed for company=${companyId}: ${errMsg(e)}`)
-          return [] as InteractionRow[]
-        })
-      : Promise.resolve([] as InteractionRow[]),
-    claimsFor(admin, userId).catch((e: unknown) => {
-      console.error(`[context] assemble: claimsFor failed for user=${userId}: ${errMsg(e)}`)
-      return [] as ResumeClaim[]
-    }),
-  ])
-
-  const parts: string[] = []
-  const dossierText = [dossier?.summary ?? '', dossierSignalsText(dossier?.signals)].filter(Boolean).join('\n\n')
-  if (dossierText) {
-    parts.push(
-      `COMPANY RESEARCH ON FILE:\n${frameJobText(dossierText, { label: 'COMPANY DOSSIER', maxChars: INTERVIEW_DOSSIER_MAX_CHARS })}`
-    )
-  }
-  if (pages.length > 0) {
-    parts.push(
-      `COMPANY'S OWN PAGES ON FILE:\n${frameJobTextList(
-        pages.map((p) => ({ id: p.page, text: p.text })),
-        { label: 'COMPANY PAGE', maxChars: INTERVIEW_PAGE_MAX_CHARS }
-      )}`
-    )
-  }
-  if (history.length > 0) parts.push(`Prior history with this company:\n${formatTimeline(history)}`)
-  if (claims.length > 0) parts.push(`CANDIDATE'S RESUME CLAIMS WITH EVIDENCE (the only source for STAR stories):\n${formatClaims(claims)}`)
-
-  const block = parts.join('\n\n')
-  return block.length > INTERVIEW_CONTEXT_MAX_CHARS ? `${block.slice(0, INTERVIEW_CONTEXT_MAX_CHARS)}…` : block
 }
 
 // --- buildTurnContext (copilot) ----------------------------------------------

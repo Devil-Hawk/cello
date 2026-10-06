@@ -3,7 +3,7 @@
 // one is HANDED to it. This module is what actually GETS that vector: embed
 // the query, then search, degrading to FTS-only whenever embedding isn't
 // possible or isn't fast enough. Call this from feature code (copilot tools,
-// resume studio, interview prep); call searchKb() directly only when you
+// resume studio); call searchKb() directly only when you
 // already have a vector or deliberately want FTS-only.
 //
 // DEGRADATION IS THE WHOLE POINT: retrieval must never fail a turn because an

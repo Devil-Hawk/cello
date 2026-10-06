@@ -201,7 +201,6 @@ const KEY_TAKING_MODEL_PLUMBING = [
   'lib/harness/planner.ts',
   'lib/harness/copilot-tools.ts',
   'lib/harness/agents/company_researcher.ts',
-  'lib/harness/agents/interview_prep.ts',
   'lib/harness/agents/resume_optimizer.ts',
   'lib/harness/agents/matcher.ts', // Step 4 verify: builds meteredJudgeClient from ScoreBatchOptions.apiKeys — handed by its two callers (the matcher AgentFn's ctx.apiKeys, autopilot.ts's own loadApiKeys call), never obtained here
   'lib/evals/judge.ts', // defines meteredJudgeClient; takes DecryptedApiKeys (+ admin, userId — both handed, never obtained)

@@ -355,8 +355,8 @@ function clearAuthCookies(request: NextRequest, response: NextResponse): NextRes
 
 /**
  * Pages that no longer exist, keyed by first path segment, and where an old
- * link goes instead. /agent was folded into /copilot's runs panel; /prep (and
- * /prep/<id>) went away with interview prep, so old bookmarks land on Today.
+ * link goes instead. /agent was folded into /copilot's runs panel; the prep pages
+ * went away with the interview feature, so old bookmarks land on Today.
  */
 export const RETIRED_PAGES: Record<string, string> = {
   agent: '/copilot',

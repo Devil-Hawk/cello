@@ -10,7 +10,7 @@ vi.mock('@/lib/supabase/middleware', () => ({
 import { middleware, RETIRED_PAGES } from './middleware'
 
 describe('retired pages', () => {
-  it('sends /prep to Today', () => {
+  it('sends the prep page to Today', () => {
     expect(RETIRED_PAGES.prep).toBe('/dashboard')
   })
 

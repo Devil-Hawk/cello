@@ -15,7 +15,6 @@ import { cv_tailor } from './agents/cv_tailor'
 import { applier } from './agents/applier'
 import { verifier } from './agents/verifier'
 import { follow_upper } from './agents/follow_upper'
-import { interview_prep } from './agents/interview_prep'
 import { company_researcher } from './agents/company_researcher'
 import { contact_sourcer } from './agents/contact_sourcer'
 
@@ -44,7 +43,6 @@ export const registry: Record<StepAgentType, AgentFn> = {
   get applier() { return applier },
   get verifier() { return verifier },
   get follow_upper() { return follow_upper },
-  get interview_prep() { return interview_prep },
   get company_researcher() { return company_researcher },
   get contact_sourcer() { return contact_sourcer },
 }
@@ -150,7 +148,6 @@ export const UNIT_REGISTRY: Record<UnitType, AgentFn> = {
   get applier() { return applier },
   get verifier() { return verifier },
   get follow_upper() { return follow_upper },
-  get interview_prep() { return interview_prep },
   get company_researcher() { return company_researcher },
   get contact_sourcer() { return contact_sourcer },
   get bulk_matcher() { return bulk_matcher },
@@ -181,7 +178,6 @@ export const AGENT_CATALOG: Record<StepAgentType, string> = {
   applier: 'Build an application draft for a job and produce a handoff/submit action via official ATS APIs (human-approve by default).',
   verifier: 'Verify an application draft for completeness and knock-out questions before submission.',
   follow_upper: 'Draft a follow-up or outreach message for an application or contact.',
-  interview_prep: 'Generate an interview prep kit for a job: tailored questions + STAR stories from the user\'s real resume.',
   company_researcher: 'Assemble a public-source company dossier: funding/news/culture/tech, comp range, and a visa-sponsorship signal.',
   contact_sourcer: 'Source plausible people/contacts at a company for a role (free path needs no keys; Hunter/Apollo are optional BYOK) — draft-supporting data only, never sends anything.',
 }

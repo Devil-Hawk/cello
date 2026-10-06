@@ -24,7 +24,6 @@ export const AGENT_TYPES = [
   'applier',
   'verifier',
   'follow_upper',
-  'interview_prep',
   'company_researcher',
   'contact_sourcer',
   'bulk_matcher',
@@ -47,7 +46,6 @@ export const STEP_AGENT_TYPES = [
   'applier',
   'verifier',
   'follow_upper',
-  'interview_prep',
   'company_researcher',
   'contact_sourcer',
 ] as const
@@ -55,7 +53,7 @@ export const STEP_AGENT_TYPES = [
 export const StepAgentTypeSchema = z.enum(STEP_AGENT_TYPES)
 
 /**
- * Every unit type lib/graph/unit.ts#runAgentUnit can run: the ten plannable
+ * Every unit type lib/graph/unit.ts#runAgentUnit can run: the nine plannable
  * STEP_AGENT_TYPES plus the five stragglers that bypassed the executor
  * before the graph port (lib/harness/agents/bulk_matcher.ts, digest.ts,
  * outreach.ts, resume_optimizer.ts, strategist.ts — each still callable
@@ -185,21 +183,6 @@ export const FollowUpperInput = z.object({
 export const FollowUpperOutput = z.object({
   message: z.string(),
   suggestedContacts: z.array(z.string()).default([]),
-})
-
-// interview_prep — build a per-job interview prep kit (questions + STAR stories).
-export const InterviewPrepInput = z.object({
-  jobId: z.string(),
-  resumeText: z.string().optional(),
-})
-export const InterviewPrepOutput = z.object({
-  kitId: z.string().nullable(),
-  jobId: z.string(),
-  questionCount: z.number().int().nonnegative(),
-  starCount: z.number().int().nonnegative(),
-  status: z.enum(['ready', 'practiced']).default('ready'),
-  needsResume: z.boolean().optional(),
-  needsKey: z.boolean().optional(),
 })
 
 // company_researcher — assemble a public-source company dossier + visa + comp.
@@ -770,7 +753,6 @@ export const agentSchemas = {
   applier: { input: ApplierInput, output: ApplierOutput },
   verifier: { input: VerifierInput, output: VerifierOutput },
   follow_upper: { input: FollowUpperInput, output: FollowUpperOutput },
-  interview_prep: { input: InterviewPrepInput, output: InterviewPrepOutput },
   company_researcher: { input: CompanyResearcherInput, output: CompanyResearcherOutput },
   contact_sourcer: { input: ContactSourcerInput, output: ContactSourcerOutput },
   bulk_matcher: { input: BulkMatcherInput, output: BulkMatcherOutput },
