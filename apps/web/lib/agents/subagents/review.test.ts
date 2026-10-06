@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { MissingKeyError } from '@/lib/harness/llm'
 import { BudgetCapError } from '@/lib/harness/spend'
-import { bannedPhrases, codeChecks, countAsks, judgeModelFor, reviewDraft, wordCount } from './review'
+import { bannedPhrases, codeChecks, countAsks, reviewDraft, sourceLinesFor, wordCount } from './review'
 
 const RESUME = 'Dana Lee. Senior engineer at Acme from 2019 to 2024. Built the billing system and cut release time by 40%.'
 const admin = {} as never
@@ -52,18 +52,32 @@ describe('code checks', () => {
 })
 
 describe('the judge', () => {
-  it('is a different model family from the writer', () => {
-    expect(judgeModelFor('anthropic/claude-sonnet-5')).toBe('openai/gpt-4o-mini')
-    expect(judgeModelFor('openai/gpt-5.2')).toBe('anthropic/claude-haiku-4.5')
-    expect(judgeModelFor('qwen/qwen3.8-27b:free')).toBe('anthropic/claude-haiku-4.5')
-  })
-
   const draft = { kind: 'follow_up' as const, text: 'Hi Sam, I built billing at Acme and cut release time by 40%. Could we talk about the open role on your team?', resumeText: RESUME, contactName: 'Sam Rivera' }
 
-  it('a low score fails the review with a plain issue', async () => {
-    const r = await reviewDraft({ ...base, judge: async () => ({ score: 0.2 }) }, draft, 'anthropic/claude-sonnet-5')
+  it('reads the draft against numbered resume lines and the role as numbered job lines', async () => {
+    let seen: { sources: { id: string }[] } | undefined
+    await reviewDraft({ ...base, judge: async (i) => ((seen = i), { verdict: 'pass' as const }) }, { ...draft, job: { title: 'Product Engineer', company: 'Stripe', description: 'Build payments.' } })
+    expect(seen?.sources.some((l) => l.id.startsWith('R'))).toBe(true)
+    expect(seen?.sources.some((l) => l.id.startsWith('J'))).toBe(true)
+    expect(sourceLinesFor({ ...draft }).every((l) => l.id.startsWith('R'))).toBe(true)
+  })
+
+  it('names a judge from another family than the default writer', async () => {
+    const r = await reviewDraft({ ...base, judge: async () => ({ verdict: 'pass' as const }) }, draft)
+    expect(r.judge).toMatchObject({ status: 'passed', model: 'google/gemini-2.5-flash' })
+    const withKey = await reviewDraft({ ...base, apiKeys: { openrouter: 'k', model: 'openai/gpt-5.2' }, judge: async () => ({ verdict: 'pass' as const }) }, draft)
+    expect(withKey.judge.model).toBe('anthropic/claude-haiku-4.5')
+  })
+
+  it('a failed verdict fails the review and names each statement no line backs', async () => {
+    const r = await reviewDraft({ ...base, judge: async () => ({ verdict: 'fail' as const, unsupported: [{ text: 'cut release time by 90%' }] }) }, draft)
     expect(r.passed).toBe(false)
-    expect(r.judge).toMatchObject({ status: 'failed', model: 'openai/gpt-4o-mini' })
+    expect(r.judge).toMatchObject({ status: 'failed' })
+    expect(r.issues.at(-1)).toBe('Remove or rewrite "cut release time by 90%". Nothing in your resume or the role says this.')
+  })
+
+  it('a failed verdict with no statements named still says a second reader objected', async () => {
+    const r = await reviewDraft({ ...base, judge: async () => ({ verdict: 'fail' as const }) }, draft)
     expect(r.issues.at(-1)).toMatch(/second reader/)
   })
 
@@ -75,8 +89,8 @@ describe('the judge', () => {
     expect(noKey.passed && capped.passed).toBe(true)
   })
 
-  it('a judge with no score is skipped', async () => {
-    const r = await reviewDraft({ ...base, judge: async () => ({ score: null }) }, draft)
-    expect(r.judge.status).toBe('skipped')
+  it('an answer the judge could not read is skipped', async () => {
+    const r = await reviewDraft({ ...base, judge: async () => ({ verdict: 'insufficient-data' as const, summary: 'Not checked.' }) }, draft)
+    expect(r.judge).toMatchObject({ status: 'skipped', reason: 'Not checked.' })
   })
 })

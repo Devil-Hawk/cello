@@ -6,14 +6,16 @@
 //   - length fits the kind of document
 //   - an outreach email has exactly one ask
 //   - no banned phrase from the voice guide, and no em dash
-// Then a judge scores groundedness against the resume and the role. The judge is a
-// different model family from the one that wrote the draft, so a model is never
-// grading its own work. A judge that cannot run (no key, over budget) is reported
-// as skipped, never as a pass.
+// Then the claims judge reads every statement against the numbered resume and role
+// lines. The judge is a different model family from the one that wrote the draft, so
+// a model is never grading its own work. A judge that cannot run (no key, over
+// budget, an answer it could not read) is reported as skipped, never as a pass.
 
 import { checkTailoringContainment } from '@/lib/security/job-text'
-import { judgeGroundedness, meteredJudgeClient } from '@/lib/evals/judge'
+import { judgeClaims, judgeModelFor, judgeRunner } from '@/lib/evals/claims-judge'
+import { DEFAULT_MODEL } from '@/lib/harness/providers/openrouter'
 import { MissingKeyError } from '@/lib/harness/llm'
+import { jobLines, resumeLines, type NumberedLine } from '@/lib/resume/lines'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { isBudgetCapError } from '../spend-port'
 
@@ -41,7 +43,7 @@ export interface ReviewResult {
   checks: Check[]
   /** Plain sentences the Writer is told to fix, and the person can read. */
   issues: string[]
-  judge: { status: 'passed' | 'failed' | 'skipped'; score?: number | null; model?: string; reason?: string }
+  judge: { status: 'passed' | 'failed' | 'skipped'; model?: string; reason?: string }
 }
 
 // --- the voice guide, as code -------------------------------------------------------
@@ -132,47 +134,33 @@ export function codeChecks(input: ReviewInput): Check[] {
 
 // --- the judge ----------------------------------------------------------------------
 
-/** A judge from another family than the writer: Anthropic drafts are judged by OpenAI and the reverse. */
-export function judgeModelFor(writerModel: string | undefined): string {
-  return writerModel?.startsWith('anthropic/') ? 'openai/gpt-4o-mini' : 'anthropic/claude-haiku-4.5'
-}
-
 export interface JudgeDeps {
   admin: AdminClient
   userId: string
   apiKeys: DecryptedApiKeys
-  /** Test seam. */
-  judge?: (input: { draft: string; sourceFacts: string; model: string }) => Promise<{ score: number | null }>
+  /** Test seam: the claims judge. */
+  judge?: (input: { text: string; sources: NumberedLine[] }) => Promise<{ verdict: 'pass' | 'fail' | 'insufficient-data'; summary?: string; unsupported?: { text: string }[] }>
 }
 
-const JUDGE_THRESHOLD = 0.5
-
-async function runJudge(deps: JudgeDeps, draft: string, sourceFacts: string, model: string): Promise<{ score: number | null }> {
-  if (deps.judge) return deps.judge({ draft, sourceFacts, model })
-  const client = meteredJudgeClient(deps.admin, deps.userId, deps.apiKeys)
-  const res = await judgeGroundedness(client, { draft, sourceFacts }, { model, userId: deps.userId, threshold: JUDGE_THRESHOLD })
-  return { score: res.score ?? null }
+/** The numbered lines the judge reads the draft against: the resume, and the role as the job lines. */
+export function sourceLinesFor(input: ReviewInput): NumberedLine[] {
+  const role = input.job ? [input.job.title, input.job.company, input.job.description].filter(Boolean).join('\n') : ''
+  return [...resumeLines(input.resumeText), ...jobLines(role)]
 }
 
-export function sourceFactsFor(input: ReviewInput): string {
-  return [
-    `CANDIDATE RESUME:\n${input.resumeText.slice(0, 8000)}`,
-    input.job ? `JOB FACTS:\nTitle: ${input.job.title ?? ''}\nCompany: ${input.job.company ?? ''}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n\n')
-}
-
-export async function reviewDraft(deps: JudgeDeps, input: ReviewInput, writerModel?: string): Promise<ReviewResult> {
+export async function reviewDraft(deps: JudgeDeps, input: ReviewInput): Promise<ReviewResult> {
   const checks = codeChecks(input)
-  const model = judgeModelFor(writerModel ?? deps.apiKeys.model)
+  const model = judgeModelFor(deps.apiKeys.model ?? DEFAULT_MODEL)
+  const run = deps.judge ?? ((i) => judgeClaims(judgeRunner(deps.apiKeys, 'judge-writer-draft'), i))
   let judge: ReviewResult['judge']
+  let unsupported: { text: string }[] = []
   try {
-    const { score } = await runJudge(deps, input.text, sourceFactsFor(input), model)
+    const res = await run({ text: input.text, sources: sourceLinesFor(input) })
+    unsupported = res.unsupported ?? []
     judge =
-      score == null
-        ? { status: 'skipped', model, reason: 'The judge gave no score.' }
-        : { status: score >= JUDGE_THRESHOLD ? 'passed' : 'failed', score, model }
+      res.verdict === 'insufficient-data'
+        ? { status: 'skipped', model, reason: res.summary || 'The second opinion gave no verdict.' }
+        : { status: res.verdict === 'pass' ? 'passed' : 'failed', model }
   } catch (e) {
     judge = {
       status: 'skipped',
@@ -183,6 +171,9 @@ export async function reviewDraft(deps: JudgeDeps, input: ReviewInput, writerMod
   }
 
   const issues = checks.filter((c) => !c.ok).map((c) => c.detail ?? c.name)
-  if (judge.status === 'failed') issues.push('A second reader found statements the resume and the role do not support.')
+  if (judge.status === 'failed') {
+    if (unsupported.length === 0) issues.push('A second reader found statements the resume and the role do not support.')
+    for (const c of unsupported.slice(0, 5)) issues.push(`Remove or rewrite "${c.text}". Nothing in your resume or the role says this.`)
+  }
   return { passed: issues.length === 0, checks, issues, judge }
 }

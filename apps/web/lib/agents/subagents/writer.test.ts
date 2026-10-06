@@ -9,7 +9,26 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/harness/agents/cv_tailor', () => ({ cv_tailor: mocks.cvTailor }))
 vi.mock('@/lib/harness/agents/resume_optimizer', () => ({ optimizeResume: mocks.optimize }))
 vi.mock('@/lib/harness/agents/outreach', () => ({ generateOutreachDraft: mocks.outreach, fallbackOutreachDraft: vi.fn() }))
-vi.mock('@/lib/context/assemble', () => ({ buildOutreachContext: vi.fn(async () => 'RELATIONSHIP HISTORY: none recorded.') }))
+// The sources an email is written from: the role's own evidence, the company research and the history with the contact.
+const sources = vi.hoisted(() => ({
+  loadOutreachSources: vi.fn(async () => ({
+    senderName: 'Dana Lee',
+    companyId: 'c1',
+    hasHistory: false,
+    input: {
+      userEmail: 'dana@example.com',
+      jobTitle: 'Product Engineer',
+      companyName: 'Stripe',
+      resumeText: 'resume',
+      matchHighlights: ['Billing: Built the billing system'],
+      jobDescription: 'Build payments.',
+      facts: [{ id: 'D1', text: 'Stripe processes payments.', url: 'https://stripe.com/about' }],
+      history: [],
+      patterns: [],
+    },
+  })),
+}))
+vi.mock('@/lib/outreach/sources', () => ({ loadOutreachSources: sources.loadOutreachSources }))
 
 import type { AgentContext } from '../context'
 import { buildWriterGraph, runWriter, type WriterDeps } from './writer'
@@ -25,7 +44,7 @@ function setup(over: Partial<AgentContext> = {}) {
     {
       profiles: [{ id: 'u1', resume_text: RESUME, full_name: 'Dana Lee' }],
       companies: [{ id: 'c1', user_id: 'u1', name: 'Stripe', domain: 'stripe.com' }],
-      jobs: [{ id: 'j1', company_id: 'c1', title: 'Product Engineer', description: 'Build payments.', match_details: { highlights: ['Built billing at Acme'] } }],
+      jobs: [{ id: 'j1', company_id: 'c1', title: 'Product Engineer', description: 'Build payments.' }],
       contacts: [{ id: 'k1', user_id: 'u1', name: 'Sam Rivera', title: 'Engineering Manager', email: 'sam@stripe.com' }],
     },
     { artifacts: { unique: [['user_id', 'idempotency_key']], defaults: () => ({ current_version: 1, updated_at: new Date().toISOString() }) } }
@@ -49,7 +68,7 @@ function setup(over: Partial<AgentContext> = {}) {
     deadlineAt: Date.now() + 60_000,
     ...over,
   }
-  const judge = vi.fn(async () => ({ score: 0.9 }))
+  const judge = vi.fn(async () => ({ verdict: 'pass' as 'pass' | 'fail' | 'insufficient-data' }))
   const deps: WriterDeps = { ctx, llm: vi.fn() as never, judge }
   return { admin, ctx, deps, judge }
 }
@@ -129,11 +148,21 @@ describe('Writer: cover letter', () => {
 
   it('a judge that fails the draft sends it back', async () => {
     const { deps } = setup()
-    deps.judge = vi.fn().mockResolvedValueOnce({ score: 0.1 }).mockResolvedValueOnce({ score: 0.8 })
+    deps.judge = vi.fn().mockResolvedValueOnce({ verdict: 'fail', unsupported: [{ text: 'cut release time by 90%' }] }).mockResolvedValueOnce({ verdict: 'pass' })
     mocks.cvTailor.mockResolvedValue(tailorOut(letter(25)))
     const result = await runWriter(deps, { type: 'cover_letter', job_id: 'j1' })
     expect(mocks.cvTailor).toHaveBeenCalledTimes(2)
+    // The second draft is told exactly which statement no line backs.
+    expect(String((mocks.cvTailor.mock.calls[1][0] as { input: { correctiveContext?: string } }).input.correctiveContext)).toContain('cut release time by 90%')
     expect(result.status).toBe('ok')
+  })
+
+  it('a judge that could not read the draft is skipped, not counted as a pass', async () => {
+    const { deps } = setup()
+    deps.judge = vi.fn(async () => ({ verdict: 'insufficient-data' as const, summary: 'The check could not read the model answer, so this was not checked.' }))
+    mocks.cvTailor.mockResolvedValue(tailorOut(letter(25)))
+    const result = await runWriter(deps, { type: 'cover_letter', job_id: 'j1' })
+    expect(result.review?.judge).toMatchObject({ status: 'skipped', reason: expect.stringContaining('not checked') })
   })
 })
 
@@ -207,8 +236,20 @@ describe('Writer: outreach and revision', () => {
     expect(saved?.version.content_text).toContain('To: Sam Rivera <sam@stripe.com>')
     const call = mocks.outreach.mock.calls[0]
     expect(call[1]).toMatchObject({ contactName: 'Sam Rivera', kind: 'initial', userName: 'Dana Lee' })
-    // The posting reaches the drafter framed as data.
-    expect(String(call[1].jobDescription)).toContain('UNTRUSTED')
+    // It is written from the same sources as the draft route: the role's own evidence and the company research.
+    expect(call[1]).toMatchObject({ matchHighlights: ['Billing: Built the billing system'], facts: [{ id: 'D1' }], jobTitle: 'Product Engineer' })
+    expect(sources.loadOutreachSources).toHaveBeenCalledWith(expect.objectContaining({ userId: 'u1', contactId: 'k1', jobId: 'j1', companyId: 'c1' }))
+  })
+
+  it('a follow-up is written against the first email that went out to that contact', async () => {
+    const { deps, admin } = setup()
+    admin.tables.outreach_messages = [
+      { id: 'm1', user_id: 'u1', contact_id: 'k1', kind: 'initial', status: 'sent', subject: 'Billing at Acme', body: 'Hi Sam, first note.', sent_at: new Date(Date.now() - 6 * 86_400_000).toISOString() },
+      { id: 'm2', user_id: 'u1', contact_id: 'k1', kind: 'initial', status: 'pending_review', subject: 'Draft', body: 'not sent', sent_at: null },
+    ]
+    mocks.outreach.mockResolvedValue({ subject: 'Re: Billing at Acme', body: 'Hi Sam, following up on my note about billing at Acme. Could we talk for ten minutes about the Product Engineer role?', tokensUsed: 0 })
+    await runWriter(deps, { type: 'follow_up', job_id: 'j1', contact_id: 'k1' })
+    expect(mocks.outreach.mock.calls[0][1]).toMatchObject({ kind: 'follow_up', previousEmail: { subject: 'Billing at Acme', body: 'Hi Sam, first note.' }, daysSinceSent: 6 })
   })
 
   it('an email with two asks goes back once', async () => {

@@ -17,8 +17,8 @@ import { z } from 'zod'
 import { cv_tailor } from '@/lib/harness/agents/cv_tailor'
 import { optimizeResume } from '@/lib/harness/agents/resume_optimizer'
 import { generateOutreachDraft } from '@/lib/harness/agents/outreach'
-import { highlightsFrom, loadOwnedJob, loadResume, makeRunner } from '@/lib/harness/copilot-tools'
-import { buildOutreachContext } from '@/lib/context/assemble'
+import { loadOwnedJob, loadResume, makeRunner } from '@/lib/harness/copilot-tools'
+import { loadOutreachSources } from '@/lib/outreach/sources'
 import { canRunLlm, missingOpenRouterMessage } from '@/lib/harness/llm-key-message'
 import { frameJobText } from '@/lib/security/job-text'
 import type { LlmRunner, StepContext } from '@/lib/harness/types'
@@ -66,7 +66,7 @@ export interface WriterDeps {
 interface Facts {
   resumeText: string
   userName: string
-  job: { id: string; title: string | null; description: string | null; company: string; companyId: string | null; highlights: string[] } | null
+  job: { id: string; title: string | null; description: string | null; company: string; companyId: string | null } | null
   contact: { id: string; name: string | null; title: string | null; email: string | null } | null
   previous: { text: string; version: number } | null
 }
@@ -94,6 +94,21 @@ const WriterState = Annotation.Root({
 type State = typeof WriterState.State
 
 const artifactTypeOf = (type: WriterBrief['type']): ArtifactType => (type === 'follow_up' ? 'outreach_email' : type)
+
+/** The first email to this contact that went out, which a follow-up answers. */
+async function lastSentEmail(ctx: AgentContext, contactId: string): Promise<{ subject: string; body: string; sentAt: string | null } | null> {
+  const { data } = await ctx.admin
+    .from('outreach_messages')
+    .select('subject, body, sent_at')
+    .eq('user_id', ctx.userId)
+    .eq('contact_id', contactId)
+    .eq('kind', 'initial')
+    .eq('status', 'sent')
+    .order('sent_at', { ascending: false })
+    .limit(1)
+  const row = ((data as { subject: string; body: string; sent_at: string | null }[] | null) ?? [])[0]
+  return row ? { subject: row.subject, body: row.body, sentAt: row.sent_at } : null
+}
 
 function fail(f: Fix): WriterResult {
   return { status: 'failed', error: f.error, fix: f.fix }
@@ -166,7 +181,7 @@ export function buildWriterGraph(deps: WriterDeps) {
 
     let job: Facts['job'] = null
     if (jobId) {
-      const found = await loadOwnedJob(ctx, jobId, 'id, title, description, company_id, match_details')
+      const found = await loadOwnedJob(ctx, jobId, 'id, title, description, company_id')
       if ('error' in found) return { result: fail({ error: found.error, fix: 'Call find_roles and use an id it returned.' }) }
       job = {
         id: found.job.id,
@@ -174,7 +189,6 @@ export function buildWriterGraph(deps: WriterDeps) {
         description: found.job.description ?? null,
         company: found.companyName,
         companyId: found.job.company_id,
-        highlights: highlightsFrom(found.job.match_details),
       }
     }
 
@@ -248,19 +262,28 @@ export function buildWriterGraph(deps: WriterDeps) {
         }
       }
       // outreach_email and follow_up
-      const relationshipContext = await buildOutreachContext(ctx.admin, ctx.userId, facts.contact?.id ?? null, job?.companyId ?? null)
-      const out = await generateOutreachDraft(llm, {
-        userName: facts.userName,
+      // The same sources the draft route loads: the role's own evidence, the company research as numbered
+      // facts and the recorded history with this contact. The service client stands in for the person's, and
+      // the role and the contact were checked as theirs when the facts were gathered.
+      const kind = brief.type === 'follow_up' ? 'follow_up' : 'initial'
+      const sources = await loadOutreachSources({
+        supabase: ctx.admin,
+        admin: ctx.admin,
+        userId: ctx.userId,
         userEmail: ctx.userEmail,
-        jobTitle: job?.title ?? 'a role',
-        companyName: company,
+        contactId: facts.contact?.id ?? null,
+        jobId: job?.id ?? null,
+        companyId: job?.companyId ?? null,
+      })
+      const previous = kind === 'follow_up' && facts.contact ? await lastSentEmail(ctx, facts.contact.id) : null
+      const out = await generateOutreachDraft(llm, {
+        ...sources.input,
+        userName: facts.userName,
         contactName: facts.contact?.name ?? null,
         contactTitle: facts.contact?.title ?? null,
-        resumeText: facts.resumeText,
-        matchHighlights: job?.highlights ?? [],
-        jobDescription: job ? frameJobText(job.description, { maxChars: 1500, emptyPlaceholder: '' }) || null : null,
-        relationshipContext,
-        kind: brief.type === 'follow_up' ? 'follow_up' : 'initial',
+        kind,
+        previousEmail: previous,
+        daysSinceSent: previous?.sentAt ? Math.max(0, Math.floor((Date.now() - Date.parse(previous.sentAt)) / 86_400_000)) : null,
         correctiveContext: instructions,
       })
       return {
