@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
-import { chatOpen } from './shown'
+import { chatOpen, recallInWordsOn } from './shown'
 
 afterEach(() => {
   delete process.env.OWNER_USER_ID
@@ -22,5 +22,12 @@ describe('chatOpen', () => {
 
   it('is off when the flag row is missing', async () => {
     expect(await chatOpen(makeFakeAdmin({ instance_flags: [] }), 'someone')).toBe(false)
+  })
+
+  it('keeps recall in words off until its own switch is on, whoever asks', async () => {
+    process.env.OWNER_USER_ID = 'owner'
+    expect(await recallInWordsOn(makeFakeAdmin({ instance_flags: [{ key: 'chat_recall_words', on: false }] }))).toBe(false)
+    expect(await recallInWordsOn(makeFakeAdmin({ instance_flags: [] }))).toBe(false)
+    expect(await recallInWordsOn(makeFakeAdmin({ instance_flags: [{ key: 'chat_recall_words', on: true }] }))).toBe(true)
   })
 })

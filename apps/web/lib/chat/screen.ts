@@ -10,12 +10,15 @@ import type { AdminClient } from '@/lib/harness/types'
 import { activeTiles } from './attach'
 import { screenMessageHooks } from './extend'
 import { getObject } from './ports/commands.stub'
+import type { RecallHit } from './recall'
 import { refId, type ChatObject, type ObjectReader } from './types'
 
 export const FULL_TILES = 12
 const TITLE_MAX = 80
 const COMPANY_MAX = 60
 const BODY_MAX = 1500
+const RECALLED_MAX = 5
+const RECALL_TEXT_MAX = 400
 
 const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim()
 const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text)
@@ -37,7 +40,7 @@ export async function screenMessage(
   db: AdminClient,
   userId: string,
   chatId: string,
-  opts: { quoted?: { text: string; turn_id: string } | null; get?: ObjectReader } = {}
+  opts: { quoted?: { text: string; turn_id: string } | null; recalled?: RecallHit[]; get?: ObjectReader } = {}
 ): Promise<string | null> {
   const get = opts.get ?? getObject
   const tiles = await activeTiles(db, userId, chatId)
@@ -47,6 +50,14 @@ export async function screenMessage(
     object ? entry(object, i < FULL_TILES) : `- ${tile.kind} ${refId(tile.kind, tile.ref)}: No longer listed`
   )
   for (const hook of screenMessageHooks) lines.push(...(await hook(db, userId, objects)))
+  // Step 3: up to five things recalled from earlier chats, each with its source. Data, like everything here.
+  if (opts.recalled?.length) {
+    lines.push('- From your earlier chats, each with where it came from:')
+    for (const h of opts.recalled.slice(0, RECALLED_MAX)) {
+      const from = h.chat ? `chat "${cut(oneLine(h.chat.title), TITLE_MAX)}"${h.turnId ? `, turn ${h.turnId.slice(0, 64)}` : ''}` : 'an earlier chat'
+      lines.push(`    ${h.kind}: ${cut(oneLine(h.text), RECALL_TEXT_MAX)} (${from})`)
+    }
+  }
   if (opts.quoted) {
     lines.push(`- quoted from your earlier answer (turn ${opts.quoted.turn_id.slice(0, 64)}), Cello's earlier read and not the person's words:`, ...cut(opts.quoted.text, BODY_MAX).split('\n').map((l) => `    > ${l}`))
   }
