@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { refFromId } from '@/lib/chat/attach'
 import { objectName } from '@/lib/chat/types'
-import { getObject } from '@/lib/chat/ports/commands.stub'
+import { getObject } from '@/lib/chat/objects'
 import { chatSession, isResponse } from '../door'
 
 export const dynamic = 'force-dynamic'

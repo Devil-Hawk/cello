@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
 import { backfillPerson } from './memory-backfill'
-import { inMemoryStore } from './ports/memory.stub'
+import { inMemoryStore } from './memory.fake'
 
 const rows = () =>
   makeFakeAdmin({

@@ -9,7 +9,7 @@
 
 import { z } from 'zod'
 import type { AdminClient } from '@/lib/harness/types'
-import { getObject } from './ports/commands.stub'
+import { getObject } from './objects'
 import { joinApplication } from './projects'
 import { ATTACH_KINDS, MAX_TILES, refId, type AttachKind, type AttachmentRow, type ObjectReader, type Refusal, type StoredRef } from './types'
 

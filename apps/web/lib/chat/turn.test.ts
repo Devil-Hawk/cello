@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { makeFakeAdmin, type FakeAdmin } from '@/lib/agents/testing/fake-admin'
 import type { ModelAnswer } from './answer'
-import { inMemoryStore } from './ports/memory.stub'
+import { inMemoryStore } from './memory.fake'
 import { runChatTurn, type AgentInput, type AgentOutput, type TurnDeps } from './turn'
 import { refId, type ObjectReader } from './types'
 
 // The default reader loads the scoring module; every test here passes its own.
-vi.mock('./ports/commands.stub', () => ({ getObject: vi.fn() }))
+vi.mock('./objects', () => ({ getObject: vi.fn() }))
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const ROLES = [

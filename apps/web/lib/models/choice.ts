@@ -7,17 +7,19 @@
 // it is read; a choice that cannot run steps down and says so, so `ran` never claims a model that did not run.
 //
 // Pure functions: the caller supplies which rungs are set up and which model a rung would use, from the
-// ladder (lib/models/ladder.ts once K14 is on main). celloChatModel(choice) builds the model from the result.
+// ladder (lib/models/ladder.ts, through chatLimits). celloChatModel(choice) builds the model from the result.
 
 import { z } from 'zod'
 import { celloChatModel as openRouterModel, type ModelPurpose } from '@/lib/agents/model'
 import { estimateCostUsd, hasListedPrice } from '@/lib/harness/spend'
 import { REASONING_EFFORTS, type DecryptedApiKeys, type ReasoningEffort } from '@/lib/harness/types'
 import { ALLOWED_MODELS } from '@/lib/models'
+import type { Ceiling, Rung } from './doors.types'
+import { availableRungs, routeFor } from './ladder'
 
-// lane-stub: K14 Rung. The rungs a Chat turn can run on: local, free hosted, paid hosted.
+// The rungs a Chat turn can run on: local, free hosted, paid hosted.
 export const CHOICE_RUNGS = ['R2', 'R3', 'R4'] as const
-export type ChoiceRung = (typeof CHOICE_RUNGS)[number]
+export type ChoiceRung = Extract<Rung, 'R2' | 'R3' | 'R4'>
 /** "Highest Cello may use": R0 none, R2 local, R3 free models, R4 paid models. */
 export type ChoiceCeiling = 'R0' | ChoiceRung
 
@@ -65,6 +67,18 @@ export interface ChoiceLimits {
   /** The model a rung would use, from the ladder. */
   route: (rung: ChoiceRung) => string
   effort: ReasoningEffort
+}
+
+/** What the picker may offer this person, from the ladder: the rungs set up, the highest allowed, the model a rung uses. */
+export function chatLimits(keys: DecryptedApiKeys): ChoiceLimits {
+  const ceiling = (keys.models?.ceiling ?? 'R3') as Ceiling
+  const chat = (r: Rung): r is ChoiceRung => r === 'R2' || r === 'R3' || r === 'R4'
+  return {
+    ceiling: ceiling === 'R0' || ceiling === 'R1' ? 'R0' : ceiling,
+    available: availableRungs(keys, ceiling).filter(chat),
+    route: (rung) => routeFor(rung, keys).model,
+    effort: 'low',
+  }
 }
 
 export interface Ran {

@@ -16,6 +16,7 @@ import { MissingKeyError } from '@/lib/harness/providers'
 import { openRouterUserTag } from '@/lib/harness/providers/openrouter'
 import type { DecryptedApiKeys } from '@/lib/harness/types'
 import { resolveModelId } from '@/lib/models'
+import { DEFAULT_FREE_MODELS, freeModels, isFreeModel } from '@/lib/models/free'
 
 export type ModelPurpose = 'orchestrator' | 'researcher' | 'eval'
 
@@ -26,28 +27,9 @@ const MAX_TOKENS: Record<ModelPurpose, number> = {
   eval: 1024,
 }
 
-/** Free models used when the primary cannot be reserved or is rate limited. */
-export const DEFAULT_FREE_MODELS = [
-  'qwen/qwen3.8-27b:free',
-  'poolside/laguna-s-2.1:free',
-  'nvidia/nemotron-3-super-120b-a12b:free',
-] as const
-
-export const isFreeModel = (id: string): boolean => id.endsWith(':free')
-
-/**
- * The fallback list, from AGENT_FREE_MODELS (comma separated) or the default.
- * An id that does not end in ":free" is dropped: a fallback must never be able
- * to spend money the cap did not reserve.
- */
-export function freeFallbackModels(env: string | undefined = process.env.AGENT_FREE_MODELS): string[] {
-  const listed = (env ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-  const source = listed.length > 0 ? listed : [...DEFAULT_FREE_MODELS]
-  return source.filter(isFreeModel)
-}
+/** The free list is one list, in lib/models/free.ts; the fallback is that list. */
+export { DEFAULT_FREE_MODELS, isFreeModel }
+export const freeFallbackModels = freeModels
 
 export interface CelloChatModelOptions {
   apiKeys: DecryptedApiKeys

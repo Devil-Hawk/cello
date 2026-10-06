@@ -3,7 +3,7 @@
 // command, route, screen or answer shows the word. This file exports only the two functions that make and join it.
 
 import type { AdminClient } from '@/lib/harness/types'
-import { getObject } from './ports/commands.stub'
+import { getObject } from './objects'
 import type { ObjectReader } from './types'
 
 /** The application's project row, made if it is not there yet. Null when the application is not this person's. */

@@ -11,8 +11,8 @@ describe('freeFallbackModels', () => {
     expect(freeFallbackModels('a/b:free, anthropic/claude-sonnet-5 ,c/d:free')).toEqual(['a/b:free', 'c/d:free'])
   })
 
-  it('an environment of only paid ids yields no fallback rather than a paid one', () => {
-    expect(freeFallbackModels('anthropic/claude-opus-4.8')).toEqual([])
+  it('an environment of only paid ids yields the free default rather than a paid one', () => {
+    expect(freeFallbackModels('anthropic/claude-opus-4.8')).toEqual([...DEFAULT_FREE_MODELS])
   })
 
   it('every default is free', () => {

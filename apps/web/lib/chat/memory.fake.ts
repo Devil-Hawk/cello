@@ -1,7 +1,7 @@
 // An in-memory MemoryStore for chat's tests, with an `embedderDown` switch the shared fake has no use for.
 
 import { DemoMemoryWriteRefusedError, type MemoryAddInput, type MemoryItem } from '@/lib/memory/types'
-import type { ChatMemoryStore } from '../memory'
+import type { ChatMemoryStore } from './memory'
 
 const words = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9]+/g) ?? [])
 

@@ -5,7 +5,7 @@
 
 import type { AdminClient } from '@/lib/harness/types'
 import { readCard, type Card } from './cards'
-import { getObject } from './ports/commands.stub'
+import { getObject } from './objects'
 import { readStatusLines, type StatusLine } from './status'
 import { getChat, type ChatView } from './store'
 import { objectName, type ObjectReader } from './types'

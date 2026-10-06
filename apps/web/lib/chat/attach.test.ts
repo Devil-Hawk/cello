@@ -4,7 +4,7 @@ import { activeTiles, attach, CELLO_ATTACHES_PER_TURN, detach, ledgerKey, refFro
 import { refId, type ObjectReader } from './types'
 
 // attach's default reader is the stub, which loads the scoring module; every test here passes its own reader.
-vi.mock('./ports/commands.stub', () => ({ getObject: vi.fn() }))
+vi.mock('./objects', () => ({ getObject: vi.fn() }))
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const CHAT = uuid(900)

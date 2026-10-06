@@ -1,12 +1,10 @@
-// lane-stub: K10 runCommand
-// Reads one thing for one person the way its get command will, until the registry is on main.
-// Replaced by runCommand(getCommand(`${kind}.get`)) at integration step 6; the shape it returns does not change.
+// Reads one thing for one person: the body behind a chip, a card or a link, in the same shape for every kind.
 // Every read is scoped to the person's id on the row, so another person's id gives null, never their data.
 
 import { roleView } from '@/lib/agents/scoring-port'
 import { getArtifact } from '@/lib/agents/artifacts'
 import type { AdminClient } from '@/lib/harness/types'
-import type { ChatObject, ObjectReader } from '../types'
+import type { ChatObject, ObjectReader } from './types'
 
 const first = <T>(rel: T | T[] | null | undefined): T | null => (Array.isArray(rel) ? (rel[0] ?? null) : (rel ?? null))
 const day = (iso: string | null | undefined) => (iso ? iso.slice(0, 10) : null)

@@ -1,7 +1,5 @@
-// lane-stub: K10 runCommand
 // The finder behind [Add] and "@": the person's own roles, companies, applications, people, earlier chats and made things whose name
-// holds the words typed. Words only, read under the person's id on every row; it becomes a search command's call when
-// the registry is on main. A match is only a name to pick: attaching it still goes through attach.ts and the thing's own get.
+// holds the words typed. Words only, read under the person's id on every row. A match is only a name to pick: attaching it still goes through attach.ts and the thing's own get.
 
 import type { AdminClient } from '@/lib/harness/types'
 import type { AttachKind } from './types'

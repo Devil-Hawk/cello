@@ -9,7 +9,7 @@ import { quoteUntrusted } from '@/lib/agents/middleware'
 import type { AdminClient } from '@/lib/harness/types'
 import { activeTiles } from './attach'
 import { screenMessageHooks } from './extend'
-import { getObject } from './ports/commands.stub'
+import { getObject } from './objects'
 import type { RecallHit } from './recall'
 import { refId, type ChatObject, type ObjectReader } from './types'
 

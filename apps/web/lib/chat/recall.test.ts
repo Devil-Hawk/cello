@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
 import { writeTurnMemories, type TurnMemories } from './memory'
-import { inMemoryStore } from './ports/memory.stub'
+import { inMemoryStore } from './memory.fake'
 import { recall } from './recall'
 
 const turn = (over: Partial<TurnMemories>): TurnMemories => ({ chatId: 'c1', turnId: 't1', typed: '', attached: [], made: [], decided: [], ...over })

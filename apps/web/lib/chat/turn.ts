@@ -16,7 +16,7 @@ import { settleAnswer, type ModelAnswer, type Settled, type TurnResult } from '.
 import { activeTiles, ledgerKey } from './attach'
 import { buildDisclosure, type Disclosure } from './disclosure'
 import { writeTurnMemories, type ChatMemoryStore, type TurnMemories } from './memory'
-import { getObject } from './ports/commands.stub'
+import { getObject } from './objects'
 import type { RecallHit } from './recall'
 import { screenMessage } from './screen'
 import { refId, type ObjectReader, type Refusal } from './types'

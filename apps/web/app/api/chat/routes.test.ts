@@ -11,10 +11,12 @@ vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => state.
 vi.mock('@/lib/memory/mem0-store', () => ({ getMemoryStore: () => ({ getAll: async () => [], add: async () => undefined, search: async () => [], deleteAll: async () => undefined }) }))
 vi.mock('@/lib/agents/scoring-port', () => ({ roleView: async () => null }))
 // The default reader loads the scoring module; the routes here only need "this person's thing reads, another's does not".
-vi.mock('@/lib/chat/ports/commands.stub', () => ({
+vi.mock('@/lib/chat/objects', () => ({
   getObject: async (_db: unknown, userId: string, kind: string, ref: Record<string, string>) =>
     userId === 'u1' ? { kind, id: ref.id ?? ref.chat_id, title: 'A thing', company: null, facts: [], body: null } : null,
 }))
+
+vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: async () => ({ openrouter: 'k', models: { ceiling: 'R3', order: ['R3'], creditBought: false } }) }))
 
 import { GET as list } from './route'
 import { DELETE as remove, GET as one, PATCH as patch } from './[id]/route'

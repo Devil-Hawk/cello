@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
 import { deleteChat, deleteChatMemories, isChatMemory, renderDecided, renderMade, renderSaid, SAID_MAX, writeTurnMemories, type TurnMemories } from './memory'
-import { inMemoryStore } from './ports/memory.stub'
+import { inMemoryStore } from './memory.fake'
 
 const turn = (over: Partial<TurnMemories> = {}): TurnMemories => ({
   chatId: 'c1',
