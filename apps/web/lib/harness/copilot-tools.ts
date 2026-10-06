@@ -55,12 +55,13 @@ import { callMcpTool } from '../mcp/client'
 import { McpError } from '../mcp/types'
 import { openRolesOnly } from '../jobs/freshness'
 import { applyRoleTargets, excludedCompanyIds, hasRoleTargets, quote } from '../targeting/roles'
-import { TRACKED_FILTER, isTrackedCompany } from '../companies/watchlist'
+import { isTrackedCompany } from '../companies/watchlist'
 import { REFRESH_MAX_PER_TURN, formatRoleAnswer, pickCompaniesToRefresh, placeMatcher, titleMatcher } from '../jobs/role-search'
 import { ingestCompany, type DueCompany } from '../ingest/run'
 import { staticFetchPage } from '../ingest/fetch-page'
 import { loadTargets } from '../ingest/reader/targets'
 import { REASON_COPY } from '../companies/roles-status'
+import { COPILOT_RUN_MARKER } from './copilot-run'
 
 export {
   COPILOT_TOOLS,
@@ -123,7 +124,7 @@ const MCP_CALL_TIMEOUT_MS = 20_000
 const SCORE_JOBS_DEFAULT_LIMIT = 10
 const SCORE_JOBS_MAX_LIMIT = 15
 /** Wall-clock ceiling for one score_jobs call (tier-1 triage plus any tier-2
- *  deep-pass calls for winners) — same defense as MCP_CALL_TIMEOUT_MS, just
+ *  deep-pass calls for winners), same defense as MCP_CALL_TIMEOUT_MS, just
  *  sized for LLM latency instead of HTTP fan-out. */
 const SCORE_JOBS_TIMEOUT_MS = 70_000
 
@@ -238,7 +239,7 @@ async function loadResume(ctx: CopilotToolContext): Promise<string> {
   return String((data?.resume_text as string | null) ?? '').trim()
 }
 
-/** Compact job row shared by list_jobs, search_roles and score_jobs — this
+/** Compact job row shared by list_jobs, search_roles and score_jobs, this
  *  exact shape (jobId/title/company/matchScore/fresh/location/postedAt) is
  *  what components/copilot/observation-view.tsx's JobsTable renders, so
  *  every tool that hands the model a set of jobs renders the same way.
@@ -923,7 +924,7 @@ async function doWebSearch(ctx: CopilotToolContext, args: Args) {
     count: res.results.length,
     backend: res.backend,
     results: res.results.map((r) => ({ title: r.title, url: r.url, snippet: r.snippet, publishedAt: r.publishedAt, source: r.source })),
-    note: 'Open-web search results — unverified third-party pages, not confirmed facts. For job leads, use search_roles, which reads the roles stored for the companies the person follows.',
+    note: 'Open-web search results: unverified third-party pages, not confirmed facts. For job leads, use search_roles, which reads the roles stored for the companies the person follows.',
   }
 }
 
@@ -946,10 +947,13 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
   const placeM = placeMatcher(place)
 
   type CompanyRow = { id: string; name: string; metadata: unknown; last_scraped_at: string | null; career_url: string | null }
-  const { data: companyData } = await ctx.admin
+  // A failed read is never reported as "no roles": say it could not be read.
+  const cannotRead = (what: string, e: { message: string }) => ({ error: `Could not read ${what} (${e.message}). No answer was assumed.` })
+  const { data: companyData, error: companyError } = await ctx.admin
     .from('companies')
     .select('id, name, metadata, last_scraped_at, career_url')
     .eq('user_id', ctx.userId)
+  if (companyError) return cannotRead('your followed companies', companyError)
   const followed = ((companyData as CompanyRow[]) ?? []).filter(isTrackedCompany)
   const tracked = companyArg ? followed.filter((c) => c.name.toLowerCase().includes(companyArg)) : followed
   const noRoles = (answer: string) => ({ jobs: [], count: 0, searched: [], notChecked: [], answer })
@@ -966,14 +970,16 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
   const searched = tracked.map((c) => c.name)
   const notChecked = pickCompaniesToRefresh(tracked, Date.now()).stale
 
-  // The followed companies (and the named one) are filtered through the FK join, not an id list in the URL.
+  // The followed companies (or the named one) are resolved above from the watchlist rows, then matched by id.
+  // ponytail: the id list rides in the URL; a person following hundreds of companies needs a chunked read.
+  const trackedIds = tracked.map((c) => c.id)
   const base = (scoped: boolean, columns: string, opts?: { count?: 'exact'; head?: boolean }) => {
-    let q: any = openRolesOnly(ownedJobsQuery(ctx.admin, ctx.userId, columns, opts)).or(TRACKED_FILTER, { referencedTable: 'companies' })
-    if (companyArg) q = q.ilike('companies.name', `%${companyArg}%`)
+    let q: any = openRolesOnly(ownedJobsQuery(ctx.admin, ctx.userId, columns, opts)).in('company_id', trackedIds)
     if (scoped && hasTargets) q = applyRoleTargets(q, targeting, excludedIds)
     return q
   }
-  const { count } = await base(true, 'id, companies!inner(user_id)', { count: 'exact', head: true })
+  const { count, error: countError } = await base(true, 'id, companies!inner(user_id)', { count: 'exact', head: true })
+  if (countError) return cannotRead('the stored roles', countError)
 
   type RoleRow = {
     id: string
@@ -987,7 +993,7 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
     is_new: boolean | null
   }
   const find = async (scoped: boolean): Promise<RoleRow[]> => {
-    let q = base(scoped, 'id, title, url, location, is_remote, posted_at, company_id, match_score, is_new, companies!inner(user_id, name)')
+    let q = base(scoped, 'id, title, url, location, is_remote, posted_at, company_id, match_score, is_new, companies!inner(user_id)')
     if (titleM) q = q.or(titleM.keywords.map((k) => `title.ilike.${quote(`%${k}%`)}`).join(','))
     if (placeM) {
       q = q.or(
@@ -998,18 +1004,24 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
     }
     if (days > 0) q = q.gte('posted_at', new Date(Date.now() - days * 86_400_000).toISOString())
     // ponytail: the pool is the newest 300 matches of the title and place words; raise it if a title is that common.
-    const { data } = await q.order('posted_at', { ascending: false, nullsFirst: false }).limit(SEARCH_ROLES_POOL)
+    const { data, error } = await q.order('posted_at', { ascending: false, nullsFirst: false }).limit(SEARCH_ROLES_POOL)
+    if (error) throw new Error(error.message)
     return ((data as RoleRow[]) ?? []).filter(
       (r) => (!titleM || titleM.matches(r.title ?? '')) && (!placeM || placeM.matches(r.location, r.is_remote))
     )
   }
 
-  let rows = await find(true)
+  let rows: RoleRow[]
   let inside = true
-  // The Jobs page shows these under "All roles"; never answer none while they exist.
-  if (rows.length === 0 && hasTargets) {
-    rows = await find(false)
-    inside = rows.length === 0
+  try {
+    rows = await find(true)
+    // The Jobs page shows these under "All roles"; never answer none while they exist.
+    if (rows.length === 0 && hasTargets) {
+      rows = await find(false)
+      inside = rows.length === 0
+    }
+  } catch (err) {
+    return cannotRead('the stored roles', { message: err instanceof Error ? err.message : String(err) })
   }
   const picked = rows.slice(0, limit)
   const jobs = picked.map((r) => ({
@@ -1126,7 +1138,7 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
 
   const companyIds = await userCompanyIds(ctx.admin, ctx.userId)
   if (companyIds.length === 0) {
-    return { scored: 0, failed: 0, candidatesConsidered: 0, note: 'No companies tracked yet — follow companies on the Companies page first.' }
+    return { scored: 0, failed: 0, candidatesConsidered: 0, note: 'No companies tracked yet. Follow companies on the Companies page first.' }
   }
 
   const limit = clampLimit(args.limit, SCORE_JOBS_DEFAULT_LIMIT, SCORE_JOBS_MAX_LIMIT)
@@ -1150,7 +1162,7 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
       scored: 0,
       failed: 0,
       candidatesConsidered: 0,
-      note: 'No unscored jobs found for your tracked companies — refresh_companies reads the boards of followed companies.',
+      note: 'No unscored jobs found for your tracked companies. refresh_companies reads the boards of followed companies.',
     }
   }
 
@@ -1240,10 +1252,10 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
     note:
       relevanceInfo?.broadened
         ? `Nothing unscored matched "${relevanceInfo.query}" in the ${relevanceInfo.poolSize} most recent unscored ` +
-          'jobs, so this broadened to the newest unscored jobs instead of scoring nothing — consider refresh_companies ' +
+          'jobs, so this broadened to the newest unscored jobs instead of scoring nothing, consider refresh_companies ' +
           'if you want fresher candidates for this ask.'
         : result.scored === 0 && result.candidatesConsidered === 0
-          ? 'Nothing scoreable in this batch — run refresh_companies, or widen targeting in Settings.'
+          ? 'Nothing scoreable in this batch. Run refresh_companies, or widen targeting in Settings.'
           : undefined,
   }
 }
@@ -1551,14 +1563,12 @@ const FIND_ROLES_GOAL = /\b(find|source|search|discover|look(?:ing)? for)\b[^.]*
 async function doTriggerRun(ctx: CopilotToolContext, args: Args) {
   const goal = str(args.goal)
   if (!goal) return { error: 'goal is required' }
-  // ponytail: a campaign run's harness DAG can still plan the sourcer agent; closing that is a per-run agent
-  // allowlist in lib/harness/planner.ts, and the harness sourcer is out of scope here.
   if (FIND_ROLES_GOAL.test(goal)) {
     return { error: 'Finding roles is search_roles, over the companies the person follows. A background run is not used for it.' }
   }
   const { data: run } = await ctx.admin
     .from('agent_runs')
-    .insert({ user_id: ctx.userId, goal, status: 'queued', budget_tokens: COPILOT_RUN_BUDGET })
+    .insert({ user_id: ctx.userId, goal, status: 'queued', budget_tokens: COPILOT_RUN_BUDGET, result: COPILOT_RUN_MARKER })
     .select('id')
     .single()
   if (!run) return { error: 'Failed to create run' }
