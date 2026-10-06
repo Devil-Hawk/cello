@@ -113,7 +113,7 @@ async function backfillDomains(admin: ReturnType<typeof createAdminClient>, appl
 
     for (const r of rows) {
       if (limit && candidates >= limit) break
-      const { data: jobRows, error: jobsError } = await admin.from('jobs').select('url').eq('company_id', r.id).limit(50)
+      const { data: jobRows, error: jobsError } = await admin.from('person_jobs').select('url').eq('viewer_company_id', r.id).limit(50)
       if (jobsError) throw new Error(`load jobs for ${r.id}: ${jobsError.message}`)
       const urls = ((jobRows ?? []) as { url: string | null }[]).map((j) => j.url)
       const domain = deriveCompanyDomain(urls)
