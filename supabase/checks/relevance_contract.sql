@@ -5,7 +5,9 @@
 -- through the company that stored it); upsert_shared_jobs twice for two followers leaves one row with
 -- the first company; a second follower's check can be given the shared row; prune deletes a role older
 -- than 30 days at an employer nobody follows, keeps a saved one and a 170-day-old one at a followed
--- employer, and deletes a 190-day-old one; every signed-in person reads the employer directory.
+-- employer, and deletes a 190-day-old one; every signed-in person reads the employer directory; a role stored with
+-- no company is read by its holders and cannot be updated by a person; a shared role survives its first follower
+-- removing the company or the account.
 -- Everything rolls back.
 --
 --   bash supabase/checks/run.sh supabase/checks/relevance_contract.sql
@@ -177,6 +179,60 @@ select public.set_employer_open_count((select emp from fx), 636);
 do $$
 begin
   if (select open_count from public.company_directory where id = (select emp from fx)) <> 636 then raise exception 'open_count is the last read''s total'; end if;
+end $$;
+
+-- 6. A role the sweep stored (company_id null, employer_id set) is read by its holders, and a person cannot write it.
+do $$
+declare f record; jn uuid := gen_random_uuid(); e uuid := gen_random_uuid();
+begin
+  select * into f from fx;
+  insert into auth.users (id, email) values (e, 'contract-e@example.invalid');
+  insert into public.jobs (id, company_id, employer_id, title, description, url, external_id) values (jn, null, f.emp, 'Sweep role', 'd', 'https://shared.example/jobs/sweep', 'sweep-1');
+  insert into public.person_roles (user_id, job_id) values (f.a, jn), (e, jn);
+  -- a holder who follows the employer sees it with their own company's name, one who does not sees it without
+  if (select viewer_company_name from public.person_jobs where viewer_id = f.a and id = jn) is distinct from 'Shared Co' then raise exception 'a follower reads the sweep role with their company name'; end if;
+  if pg_temp.as_user(e, format('select count(*) from public.person_jobs where id = %L', jn)) <> 1 then raise exception 'a holder who does not follow the employer still reads the sweep role'; end if;
+  if (select viewer_company_name from public.person_jobs where viewer_id = e and id = jn) is not null then raise exception 'a holder who does not follow has no company name'; end if;
+  -- the employer's name is reachable for everyone through jobs.employer_id
+  if pg_temp.as_user(e, format('select count(*) from public.jobs j join public.company_directory d on d.id = j.employer_id where j.id = %L', jn)) <> 1 then raise exception 'the employer is readable through jobs.employer_id'; end if;
+  -- a signed-in update of a shared role changes nothing: writes go through the service role
+  if pg_temp.as_user(f.a, format('with u as (update public.jobs set match_score = 88 where id = %L returning 1) select count(*) from u', jn)) <> 0 then raise exception 'a person must not update a shared role'; end if;
+  if (select match_score from public.jobs where id = jn) is not null then raise exception 'the shared role is unchanged'; end if;
+end $$;
+
+-- 7. A shared role outlives the follower whose company stored it: removing the company, or the account, keeps it for the others.
+do $$
+declare f record; jd uuid := gen_random_uuid(); jp uuid := gen_random_uuid(); c uuid := gen_random_uuid(); d uuid := gen_random_uuid(); co_c uuid := gen_random_uuid(); co_d uuid := gen_random_uuid();
+begin
+  select * into f from fx;
+  -- A's company goes: B keeps the role, the person_roles row and the application
+  insert into public.jobs (id, company_id, title, description, url, external_id) values (jd, f.co_a, 'Shared one', 'd', 'https://shared.example/jobs/del-1', 'del-1');
+  insert into public.person_roles (user_id, job_id) values (f.b, jd) on conflict do nothing;
+  insert into public.applications (user_id, job_id) values (f.b, jd);
+  delete from public.companies where id = f.co_a;
+  if not exists (select 1 from public.jobs where id = jd) then raise exception 'the shared role survives its first follower removing the company'; end if;
+  if (select company_id from public.jobs where id = jd) is distinct from f.co_b then raise exception 'the role is handed to another holder''s company'; end if;
+  if not exists (select 1 from public.person_roles where job_id = jd and user_id = f.b) then raise exception 'B keeps the person_roles row'; end if;
+  if not exists (select 1 from public.applications where job_id = jd and user_id = f.b) then raise exception 'B keeps the application'; end if;
+  if exists (select 1 from public.person_roles where job_id = jd and user_id = f.a) then raise exception 'A no longer holds a role of the company A removed'; end if;
+
+  -- a role only the leaving person holds still goes with the company
+  insert into public.jobs (id, company_id, title, description, url, external_id) values (jp, f.co_b, 'Only B', 'd', 'https://shared.example/jobs/only-b', 'only-b');
+
+  -- the account goes: the same for another pair
+  insert into auth.users (id, email) values (c, 'contract-c@example.invalid'), (d, 'contract-d@example.invalid');
+  insert into public.companies (id, user_id, name, domain, career_url, metadata) values
+    (co_c, c, 'Shared Co', 'shared.example', 'https://shared.example/careers', '{}'::jsonb),
+    (co_d, d, 'Shared Co', 'shared.example', 'https://shared.example/careers', '{}'::jsonb);
+  insert into public.jobs (id, company_id, title, description, url, external_id) values (gen_random_uuid(), co_c, 'Shared two', 'd', 'https://shared.example/jobs/acct-1', 'acct-1');
+  insert into public.person_roles (user_id, job_id) select d, id from public.jobs where external_id = 'acct-1' on conflict do nothing;
+  insert into public.applications (user_id, job_id) select d, id from public.jobs where external_id = 'acct-1';
+  delete from public.profiles where id = c;
+  if not exists (select 1 from public.jobs where external_id = 'acct-1') then raise exception 'the shared role survives its first follower deleting their account'; end if;
+  if not exists (select 1 from public.person_roles pr join public.jobs j on j.id = pr.job_id where j.external_id = 'acct-1' and pr.user_id = d) then raise exception 'D keeps the person_roles row'; end if;
+  if not exists (select 1 from public.applications a join public.jobs j on j.id = a.job_id where j.external_id = 'acct-1' and a.user_id = d) then raise exception 'D keeps the application'; end if;
+  delete from public.companies where id = f.co_b;
+  if exists (select 1 from public.jobs where id = jp) then raise exception 'a role only the leaving person held goes with the company'; end if;
 end $$;
 
 rollback;
