@@ -336,6 +336,68 @@ describe('amazon fixture sanity', () => {
   })
 })
 
+describe('readSite: a single pasted posting is one role, never the whole site behind it', () => {
+  it('an Amazon posting link (no JobPosting block, a redirect to its own address) is one role with its place', async () => {
+    const pasted = 'https://www.amazon.jobs/en/jobs/10570428/software-development-engineer'
+    const landed = 'https://www.amazon.jobs/en/jobs/10570428/software-development-engineer-ii-aws-proactive-security-aws-piezo-aws-proactive-security-aws-piezo'
+    const f = fakeFetcher({ [pasted]: { location: landed }, [landed]: fixture('amazon-job.html'), 'https://www.amazon.jobs/en/search.json*': fixture('amazon-search.json') })
+    const read = await readSite(company('Amazon', 'amazon.com', pasted), { fetcher: f })
+    expect(read.tier).toBe('listing')
+    expect(read.single).toBe(true)
+    expect(read.jobs).toHaveLength(1)
+    expect(read.jobs[0]).toMatchObject({ title: expect.stringMatching(/^Software Development Engineer II/), location: 'USA, WA, Seattle', url: landed })
+    // The site's search was never asked: Amazon's 192 roles are not this link.
+    expect(f.jsonCalls).toEqual([])
+    expect(f.calls.some((u) => u.includes('search.json'))).toBe(false)
+  })
+
+  it('a Google posting link is one role with its place, and no results list is requested', async () => {
+    const url = 'https://www.google.com/about/careers/applications/jobs/results/131402277670789830-rtl-design-engineer-machine-learning-accelerators'
+    const f = fakeFetcher({ 'https://www.google.com/robots.txt': fixture('google-robots.txt'), [url]: fixture('google-job.html'), 'https://www.google.com/about/careers/applications/jobs/results?q=*': fixture('google-search.html') })
+    const read = await readSite(company('Google', 'google.com', url), { fetcher: f })
+    expect(read.single).toBe(true)
+    expect(read.jobs).toHaveLength(1)
+    expect(read.jobs[0]).toMatchObject({ title: 'RTL Design Engineer, Machine Learning Accelerators', location: 'Sunnyvale, CA, USA' })
+    expect(f.calls.filter((u) => u.includes('results?'))).toEqual([])
+  })
+
+  it("a Microsoft posting link takes its place from the host's detail answer, as its page names none", async () => {
+    const url = 'https://apply.careers.microsoft.com/careers/job/1970393557022797'
+    const f = fakeFetcher({
+      [url]: fixture('ms-job-shell.html'),
+      'https://apply.careers.microsoft.com/api/pcsx/position_details?position_id=1970393557022797&domain=microsoft.com&hl=en': fixture('ms-position-detail.json'),
+    })
+    const read = await readSite(company('Microsoft', 'microsoft.com', url), { fetcher: f })
+    expect(read.single).toBe(true)
+    expect(read.jobs).toHaveLength(1)
+    expect(read.jobs[0]).toMatchObject({ title: 'Software Engineer II', location: 'United States, Washington, Redmond', employer: 'Microsoft' })
+  })
+
+  it('a posting page that names no place is kept, and the person is told the place is missing', async () => {
+    const url = 'https://acme.test/jobs/12345678'
+    const html = '<html><head><title>Data Engineer</title></head><body><h1>Data Engineer</h1><h2>Responsibilities</h2><p>You will build pipelines. You will own them.</p><p>Minimum qualifications: 3 years of experience.</p></body></html>'
+    const read = await readSite(company('Acme', 'acme.test', url), { fetcher: fakeFetcher({ [url]: html }) })
+    expect(read.jobs).toHaveLength(1)
+    expect(read.jobs[0].location).toBeUndefined()
+    expect(read.message).toBe('Found the posting. Its page does not say where the role is.')
+  })
+
+  it('a link that is not a posting stores nothing, says so, and does not read the site around it', async () => {
+    const url = 'https://acme.test/jobs/12345678'
+    const f = fakeFetcher({ [url]: '<html><head><title>Acme</title></head><body><p>Welcome.</p></body></html>', 'https://acme.test/sitemap.xml': '<urlset/>' })
+    const read = await readSite(company('Acme', 'acme.test', url), { fetcher: f })
+    expect(read).toMatchObject({ tier: null, jobs: [], reason: 'no_roles', message: 'That page does not read as a single job posting, so Cello stored nothing from it.' })
+    expect(f.calls).toEqual([url])
+  })
+
+  it('a posting that closed (404) says so', async () => {
+    const url = 'https://acme.test/jobs/12345678'
+    const read = await readSite(company('Acme', 'acme.test', url), { fetcher: fakeFetcher({ [url]: { status: 404, body: 'gone' } }) })
+    expect(read).toMatchObject({ jobs: [], reason: 'no_roles' })
+    expect(read.message).toContain('404')
+  })
+})
+
 describe('readSite: a read that ran out of requests or time did not finish, and never says there are no roles', () => {
   const careers = 'https://acme.test/careers'
   const page = '<html><body><nav><a href="/careers/teams">Teams</a><a href="/careers/jobs">Jobs</a></nav><p>Join us.</p></body></html>'

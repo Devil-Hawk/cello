@@ -167,32 +167,45 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
   if (direct && (await tryBoard({ ...direct, via: 'url' }))) return finish()
   if (direct) tried.push({ tier: 'board', outcome: 'none' })
 
-  // A single posting is one role, unless its page links the board it belongs to.
+  // A single posting is one role, read from its own page: never the whole site behind it (no search, sitemap or listing runs for it).
+  // The one exception is a page that links the board it belongs to, which is then read as that board.
   if (kind === 'posting' && !direct) {
     try {
       const res = await f.get(company.careerUrl)
-      if (res.ok) {
+      if (!res.ok) {
+        out.message = `That link did not open a posting (the site answered ${res.status}). The role may have closed.`
+      } else {
         const detail = readDetail(res.text, res.finalUrl)
         const upgrade = findBoardLinks(res.text, (u) => detectFromUrl({ careerUrl: u, domain: null }))[0]
         if (upgrade && (await tryBoard({ ...upgrade, via: 'posting' }))) return finish()
-        const job = jobFromDetail(res.finalUrl, detail, undefined, { requirePosting: true })
-        if (job) {
+        // A page that declares itself a posting, else one whose title and any sign of a role (a place, a date, a reference, job language) is enough: a person pasted it as one.
+        const job = jobFromDetail(res.finalUrl, detail, undefined, { requirePosting: true, signs: 1 })
+        if (!job) {
+          out.message = 'That page does not read as a single job posting, so Cello stored nothing from it.'
+        } else {
+          // A host that keeps its places out of the page (an Eightfold tenant) names them in its own detail answer.
+          if (!job.location) {
+            const place = await eightfoldPlaceOf(res.text, res.finalUrl, company.domain, f).catch(() => undefined)
+            if (place) job.location = place
+          }
           const label = mislabelledSource(job, company.name)
           if (label) {
             out.message = label
-            out.reason = 'no_roles'
             tried.push({ tier: 'listing', outcome: 'none' })
+          } else {
+            Object.assign(out, { tier: 'listing' as Tier, jobs: [job], single: true, complete: false })
+            if (!job.location) out.message = 'Found the posting. Its page does not say where the role is.'
+            out.checked.push(job.externalId)
+            tried.push({ tier: 'listing', outcome: 'roles' })
             return finish()
           }
-          Object.assign(out, { tier: 'listing' as Tier, jobs: [job], single: true, complete: false })
-          out.checked.push(job.externalId)
-          tried.push({ tier: 'listing', outcome: 'roles' })
-          return finish()
         }
       }
     } catch (error) {
       note(error)
     }
+    tried.push({ tier: 'listing', outcome: 'none' })
+    return conclude()
   }
 
   // The site's own search.
