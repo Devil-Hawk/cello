@@ -185,4 +185,13 @@ describe('sitemap helpers', () => {
     ]
     expect(orderEntries(e, targets).map((x) => x.url)).toEqual(['https://x.test/jobs/4000001-senior-data-engineer', 'https://x.test/jobs/4000003'])
   })
+
+  it('a slug that comes before the ids is read for its words (Kaiser), a bare section word is not', () => {
+    const e = [
+      { url: 'https://x.test/job/oakland/data-analyst/641/101619510336' },
+      { url: 'https://x.test/job/oakland/medical-assistant/641/101619510337' },
+      { url: 'https://x.test/jobs/4000009' },
+    ]
+    expect(orderEntries(e, targets).map((x) => x.url)).toEqual(['https://x.test/job/oakland/data-analyst/641/101619510336', 'https://x.test/jobs/4000009'])
+  })
 })

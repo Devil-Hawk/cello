@@ -56,7 +56,12 @@ const numericId = (url: string): number => {
 
 /** The words in a URL's last path segment ("4721503005-art-director" -> "art director"); empty when it is only an id. */
 const slugWords = (url: string): string => {
-  const last = new URL(url).pathname.split('/').filter(Boolean).pop() ?? ''
+  const parts = new URL(url).pathname.split('/').filter(Boolean)
+  // /job/oakland/medical-assistant/641/101619510336 puts the slug before the ids: skip trailing all-number segments, and take that segment only when it is a slug (has a hyphen), never a bare word like "jobs".
+  let at = parts.length - 1
+  while (at > 0 && /^\d+$/.test(parts[at])) at--
+  const seg = parts[at] ?? ''
+  const last = at === parts.length - 1 || seg.includes('-') ? seg : ''
   return wordsOf(decodeURIComponent(last).replace(/\d+/g, ' ')).join(' ')
 }
 
