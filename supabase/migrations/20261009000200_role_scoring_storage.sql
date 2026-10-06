@@ -13,7 +13,7 @@
 --                                 each as a sentence. Empty means nothing was broken.
 --   person_roles.want_*           how likely the person is to want it, and why.
 --   person_roles.chance*          Strong / Possible / Stretch with the cited evidence.
---   person_roles.checked_at       when Cello last assessed the role for this person.
+--   person_roles.assessed_at       when Cello last assessed the role for this person.
 --
 -- What the posting asks for is not stored here: the reader's own extractor
 -- writes it to jobs.requirements and scoring reads that.
@@ -69,7 +69,7 @@ begin
   end if;
 
   alter table public.person_roles
-    add column if not exists checked_at timestamptz,
+    add column if not exists assessed_at timestamptz,
     add column if not exists blocked_reasons jsonb not null default '[]'::jsonb,
     add column if not exists want_p real,
     add column if not exists want_reason text,
@@ -84,7 +84,7 @@ begin
   alter table public.person_roles drop constraint if exists person_roles_chance_values;
   alter table public.person_roles add constraint person_roles_chance_values check (chance is null or chance in ('strong', 'possible', 'stretch', 'cannot_assess'));
 
-  comment on column public.person_roles.checked_at is
+  comment on column public.person_roles.assessed_at is
     'When Cello last assessed this role for this person. Null means not assessed yet.';
   comment on column public.person_roles.blocked_reasons is
     'Facts this person stated that the role breaks: [{kind, text}]. Empty array means none. Filtering with a reason, never points.';
@@ -99,7 +99,7 @@ begin
   comment on column public.person_roles.chance_detail is
     '{checks:[{requirement, mustHave, status, evidence:{line, quote}|null}], gaps, confirm, note, resumeKey}: each requirement checked against the resume with a cited line.';
 
-  create index if not exists idx_person_roles_unchecked on public.person_roles (user_id) where checked_at is null;
+  create index if not exists idx_person_roles_unchecked on public.person_roles (user_id) where assessed_at is null;
   create index if not exists idx_person_roles_want on public.person_roles (user_id, want_p desc nulls last) where blocked_reasons = '[]'::jsonb;
 end
 $stub$;
@@ -121,7 +121,7 @@ begin
   as $fn$
   begin
     update public.person_roles
-    set chance = null, chance_detail = null, checked_at = null
+    set chance = null, chance_detail = null, assessed_at = null
     where job_id = new.id;
     return null;
   end;
@@ -155,7 +155,7 @@ begin
     select string_agg(quote_ident(column_name), ', ' order by ordinal_position) into writable
     from information_schema.columns
     where table_schema = 'public' and table_name = 'person_roles'
-      and column_name not in ('user_id', 'job_id', 'checked_at', 'blocked_reasons', 'want_p', 'want_reason', 'want_detail', 'chance', 'chance_detail');
+      and column_name not in ('user_id', 'job_id', 'assessed_at', 'blocked_reasons', 'want_p', 'want_reason', 'want_detail', 'chance', 'chance_detail');
     execute format('grant update (%s) on public.person_roles to authenticated', writable);
   end if;
   grant update (hidden_reason) on public.person_roles to authenticated;
@@ -392,7 +392,7 @@ begin
   end if;
   select count(*) into n from information_schema.columns
   where table_schema = 'public' and table_name = 'person_roles'
-    and column_name in ('checked_at', 'blocked_reasons', 'want_p', 'want_reason', 'want_detail', 'chance', 'chance_detail');
+    and column_name in ('assessed_at', 'blocked_reasons', 'want_p', 'want_reason', 'want_detail', 'chance', 'chance_detail');
   if n <> 7 then
     raise exception 'person_roles is missing verdict columns (% of 7)', n;
   end if;

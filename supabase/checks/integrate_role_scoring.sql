@@ -99,7 +99,7 @@ select to_regclass('public.person_roles') is not null as has_person_roles \gset
 \if :has_person_roles
 
 -- Two people share one role and each has a row for it.
-insert into public.person_roles (user_id, job_id, checked_at, blocked_reasons, want_p, want_reason, want_detail, chance, chance_detail)
+insert into public.person_roles (user_id, job_id, assessed_at, blocked_reasons, want_p, want_reason, want_detail, chance, chance_detail)
 select user_a, live_job, now(), '[]'::jsonb, 0.7, 'Because.', '{"judge": 0.8, "embedding": 0.6, "stated": 0.5}'::jsonb, 'strong', '{"checks": []}'::jsonb from fx;
 insert into public.person_roles (user_id, job_id) select user_b, live_job from fx;
 
@@ -135,19 +135,19 @@ end;
 $$;
 reset role;
 
--- A changed posting clears chance and checked_at for both people and keeps want.
+-- A changed posting clears chance and assessed_at for both people and keeps want.
 do $$
 declare f record; a record; b record;
 begin
   select * into f from fx;
-  update public.person_roles set checked_at = now(), chance = 'possible', chance_detail = '{}'::jsonb, want_p = 0.4 where user_id = f.user_b and job_id = f.live_job;
+  update public.person_roles set assessed_at = now(), chance = 'possible', chance_detail = '{}'::jsonb, want_p = 0.4 where user_id = f.user_b and job_id = f.live_job;
   update public.jobs set description = 'live description' where id = f.live_job;
   select * into a from public.person_roles where user_id = f.user_a and job_id = f.live_job;
-  if a.chance is null or a.checked_at is null then raise exception 'an unchanged description reset the verdict'; end if;
+  if a.chance is null or a.assessed_at is null then raise exception 'an unchanged description reset the verdict'; end if;
   update public.jobs set description = 'a different description' where id = f.live_job;
   select * into a from public.person_roles where user_id = f.user_a and job_id = f.live_job;
   select * into b from public.person_roles where user_id = f.user_b and job_id = f.live_job;
-  if a.chance is not null or a.checked_at is not null or b.chance is not null or b.checked_at is not null then
+  if a.chance is not null or a.assessed_at is not null or b.chance is not null or b.assessed_at is not null then
     raise exception 'a changed description kept the old verdict';
   end if;
   if a.want_p is null or b.want_p is null then raise exception 'the want was cleared along with the chance'; end if;

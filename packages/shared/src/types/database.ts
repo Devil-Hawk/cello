@@ -370,7 +370,7 @@ export interface Database {
           user_id: string
           job_id: string
           hidden_reason: string | null
-          checked_at: string | null
+          assessed_at: string | null
           blocked_reasons: Json
           want_p: number | null
           want_reason: string | null
@@ -382,7 +382,7 @@ export interface Database {
           user_id: string
           job_id: string
           hidden_reason?: string | null
-          checked_at?: string | null
+          assessed_at?: string | null
           blocked_reasons?: Json
           want_p?: number | null
           want_reason?: string | null
@@ -394,7 +394,7 @@ export interface Database {
           user_id?: string
           job_id?: string
           hidden_reason?: string | null
-          checked_at?: string | null
+          assessed_at?: string | null
           blocked_reasons?: Json
           want_p?: number | null
           want_reason?: string | null
