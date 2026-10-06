@@ -48,9 +48,9 @@ end $$;
 -- 1. The fold. The unique index would refuse the copies, so it is dropped for the setup and made again after.
 drop index public.jobs_employer_posting_key;
 
-insert into public.jobs (id, company_id, title, description, url, external_id, job_function, seniority, country, discovered_at)
-select ja, co_a, 'Platform Engineer', 'd', 'https://shared.example/jobs/req-1', 'req-1', 'engineering', 'senior', 'US', now() - interval '2 days' from fx
-union all select jb, co_b, 'Platform Engineer', 'd', 'https://shared.example/jobs/req-1', 'req-1', 'engineering', 'senior', 'US', now() from fx;
+insert into public.jobs (id, company_id, title, description, url, external_id, job_function, seniority, country, discovered_at, source)
+select ja, co_a, 'Platform Engineer', 'd', 'https://shared.example/jobs/req-1', 'req-1', 'engineering', 'senior', 'US', now() - interval '2 days', 'greenhouse' from fx
+union all select jb, co_b, 'Platform Engineer', 'd', 'https://shared.example/jobs/req-1', 'req-1', 'engineering', 'senior', 'US', now(), 'greenhouse' from fx;
 insert into public.applications (user_id, job_id) select b, jb from fx;
 
 do $$
@@ -62,6 +62,24 @@ begin
   if (select count(*) from public.jobs where employer_id = f.emp and posting_key = 'req-1') <> 1 then raise exception 'one row per posting after the fold'; end if;
   if (select count(*) from public.person_roles where job_id = f.ja) <> 2 then raise exception 'both people hold the shared row'; end if;
   if (select job_id from public.applications where user_id = f.b) <> f.ja then raise exception 'the application follows the fold'; end if;
+end $$;
+
+-- 1b. Two people's mail placeholders at one employer, written with the employer set (as a database that ran the old
+-- backfill holds them), are not folded into one row: the fold takes the employer off, and each stays its owner's.
+do $$
+declare f record; ga uuid := gen_random_uuid(); gb uuid := gen_random_uuid();
+begin
+  select * into f from fx;
+  insert into public.jobs (id, company_id, employer_id, title, description, url, source, posting_key)
+  values (ga, f.co_a, f.emp, 'Secret role from A mailbox', '[Unverified]', 'https://shared.example', 'gmail_sync', md5('https://shared.example')),
+         (gb, f.co_b, f.emp, 'Placeholder from B mailbox', '[Unverified]', 'https://shared.example', 'gmail_sync', md5('https://shared.example'));
+  insert into public.person_roles (user_id, job_id) values (f.a, ga), (f.b, ga), (f.b, gb) on conflict do nothing;
+  perform public.fold_shared_postings();
+  if (select count(*) from public.jobs where id in (ga, gb)) <> 2 then raise exception 'two placeholders stay two rows'; end if;
+  if exists (select 1 from public.jobs where id in (ga, gb) and employer_id is not null) then raise exception 'a placeholder carries no employer after the fold'; end if;
+  if exists (select 1 from public.person_roles where job_id = ga and user_id = f.b) then raise exception 'B does not hold A''s placeholder'; end if;
+  if (select count(*) from public.person_roles where job_id in (ga, gb)) <> 2 then raise exception 'each placeholder is held only by its owner'; end if;
+  delete from public.jobs where id in (ga, gb);
 end $$;
 
 create unique index jobs_employer_posting_key on public.jobs (employer_id, posting_key);
@@ -223,7 +241,7 @@ declare f record; co_u uuid := gen_random_uuid(); jh uuid; ja2 uuid := gen_rando
 begin
   select * into f from fx;
   begin
-    perform pg_temp.as_user(f.a, format($q$with i as (insert into public.jobs (company_id, title, description, url, external_id) values (%L, 'Attack', 'x', 'https://evil.example/a', 'atk-1') returning 1) select count(*) from i$q$, f.co_a));
+    perform pg_temp.as_user(f.a, format($q$with i as (insert into public.jobs (company_id, title, description, url, external_id, source) values (%L, 'Attack', 'x', 'https://evil.example/a', 'atk-1', 'greenhouse') returning 1) select count(*) from i$q$, f.co_a));
     raise exception 'a person must not insert a role at a company linked to an employer';
   exception when insufficient_privilege then reset role;
   end;
@@ -270,7 +288,7 @@ declare f record; jd uuid := gen_random_uuid(); jp uuid := gen_random_uuid(); c 
 begin
   select * into f from fx;
   -- A's company goes: B keeps the role, the person_roles row and the application
-  insert into public.jobs (id, company_id, title, description, url, external_id) values (jd, f.co_a, 'Shared one', 'd', 'https://shared.example/jobs/del-1', 'del-1');
+  insert into public.jobs (id, company_id, title, description, url, external_id, source) values (jd, f.co_a, 'Shared one', 'd', 'https://shared.example/jobs/del-1', 'del-1', 'greenhouse');
   insert into public.person_roles (user_id, job_id) values (f.b, jd) on conflict do nothing;
   insert into public.applications (user_id, job_id) values (f.b, jd);
   delete from public.companies where id = f.co_a;
@@ -288,7 +306,7 @@ begin
   insert into public.companies (id, user_id, name, domain, career_url, metadata) values
     (co_c, c, 'Shared Co', 'shared.example', 'https://shared.example/careers', '{}'::jsonb),
     (co_d, d, 'Shared Co', 'shared.example', 'https://shared.example/careers', '{}'::jsonb);
-  insert into public.jobs (id, company_id, title, description, url, external_id) values (gen_random_uuid(), co_c, 'Shared two', 'd', 'https://shared.example/jobs/acct-1', 'acct-1');
+  insert into public.jobs (id, company_id, title, description, url, external_id, source) values (gen_random_uuid(), co_c, 'Shared two', 'd', 'https://shared.example/jobs/acct-1', 'acct-1', 'greenhouse');
   insert into public.person_roles (user_id, job_id) select d, id from public.jobs where external_id = 'acct-1' on conflict do nothing;
   insert into public.applications (user_id, job_id) select d, id from public.jobs where external_id = 'acct-1';
   delete from public.profiles where id = c;
