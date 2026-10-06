@@ -51,6 +51,33 @@ export function userIdTables(files: { name: string; sql: string }[]): Set<string
   return tables
 }
 
+/** Table names that carry an `origin` column: created with one, given one by
+ *  add column, or named in the array a looping migration adds it to. */
+export function originTables(files: { name: string; sql: string }[]): Set<string> {
+  const tables = new Set<string>()
+  for (const file of [...files].sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const sql = stripSqlComments(file.sql)
+    for (const m of sql.matchAll(/create\s+table\s+(?:if\s+not\s+exists\s+)?(?:public\.)?"?(\w+)"?\s*\(/gi)) {
+      const body = balanced(sql, (m.index ?? 0) + m[0].length)
+      if (/(^|[\s,(])origin\s+text/i.test(body)) tables.add(m[1])
+    }
+    for (const m of sql.matchAll(/alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(?:public\.)?"?(\w+)"?\s+add\s+column\s+(?:if\s+not\s+exists\s+)?origin\b/gi)) {
+      tables.add(m[1])
+    }
+    // A migration that loops over a list of tables: foreach t in array array['a', 'b'] ... add column ... origin.
+    if (/add column if not exists origin text/i.test(sql)) {
+      const list = sql.match(/foreach\s+\w+\s+in\s+array\s+array\[([^\]]*)\]/i)?.[1] ?? ''
+      for (const m of list.matchAll(/'(\w+)'/g)) tables.add(m[1])
+    }
+    for (const m of sql.matchAll(/drop\s+table\s+(?:if\s+exists\s+)?(?:public\.)?"?(\w+)"?/gi)) tables.delete(m[1])
+  }
+  return tables
+}
+
+export function originTablesInRepo(): Set<string> {
+  return originTables(readMigrations())
+}
+
 export function readMigrations(dir: string = MIGRATIONS_DIR): { name: string; sql: string }[] {
   return readdirSync(dir)
     .filter((f) => /^\d{14}_.+\.sql$/.test(f))
