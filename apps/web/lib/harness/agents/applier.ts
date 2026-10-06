@@ -17,6 +17,7 @@
 import type { AgentFn } from '../types'
 import { ApplierInput } from '../schemas'
 import { traceRefFor } from '@/lib/trace/spans'
+import { saveDraftText } from '@/lib/writing/drafts'
 import {
   submitApplication,
   buildApplyProfile,
@@ -190,6 +191,11 @@ export const applier: AgentFn = async (ctx) => {
     // 'tailor-cv' generation in this trace: tailoring and applying run one job at a time.
     ...tailorRef,
   }
+
+  // The letter and the drafted answers are made things: their versions are written first (K17),
+  // then the draft row, which keeps the status machine, follows.
+  if (content.coverLetter) await saveDraftText(ctx.admin, { userId: ctx.userId, jobId: input.jobId, field: 'cover_letter', text: content.coverLetter })
+  await saveDraftText(ctx.admin, { userId: ctx.userId, jobId: input.jobId, field: 'answers', answers })
 
   const { data: upserted, error: upsertErr } = await ctx.admin
     .from('application_drafts')
