@@ -40,15 +40,11 @@
 //   weekly gate this file needs IS "read agent_runs back", which those
 //   functions already write.
 //
-// CONSUMPTION SIDE (Step 6 item 4 — verified, not assumed)
-//   lib/context/assemble.ts#buildMatchContext, #buildGoalStrategyContext and
-//   #buildOutreachContext all call relevantInsights(..., ['strategy',
-//   'pattern'], ...) — 'pattern' is already in every one of those kinds
-//   filters, and lib/insights/store.ts#searchInsights has zero production
-//   callers today (grep confirms), so there was nothing stage 2 filtered out
-//   to fix: an insight ingested here with kind: 'pattern' is already read by
-//   autopilot/goals (buildGoalStrategyContext) and the matcher
-//   (buildMatchContext) on the very next call, no wiring change needed.
+// CONSUMPTION SIDE
+//   Rows written here have source 'reward_loop'. lib/context/assemble.ts#
+//   relevantInsights and lib/insights/store.ts#readStandingPreferences both
+//   skip that source, so a model-written pattern is stored and shown but never
+//   reaches a prompt until a person has reviewed it (K15 moves this step).
 //
 // INJECTION LEDGER (lib/security/injection-chokepoints.test.ts)
 //   A verdict's `rationale` can quote model output built from framed job

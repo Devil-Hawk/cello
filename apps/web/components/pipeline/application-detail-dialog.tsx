@@ -288,7 +288,7 @@ function DialogBody({ application }: { application: ApplicationWithJob }) {
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <ClipboardCheck className="h-4 w-4 text-muted-foreground" />
-              <span className="text-body font-medium text-foreground">Application receipt</span>
+              <span className="text-body font-medium text-foreground">Application record</span>
             </div>
             <Button size="sm" variant="outline" onClick={() => setLogDialogOpen(true)}>
               {receiptsData && receiptsData.receipts.length > 0 ? 'Add another' : 'I already applied'}

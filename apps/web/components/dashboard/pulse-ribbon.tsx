@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/tooltip'
 import { CountUp } from '@/components/ui/motion'
 import { GradientMesh } from '@/components/ui/gradient-mesh'
-import { formatRelativeTime } from '@/lib/utils'
+import { cn, formatRelativeTime } from '@/lib/utils'
 
 /**
  * Jobs scored per click of the "Score now" trigger — mirrors BATCH_LIMIT in
@@ -120,6 +120,9 @@ export function PulseRibbon({
     { label: 'In pipeline', value: inPipelineCount, href: '/pipeline' },
   ]
 
+  // A tile that reads 0 says nothing a person can act on, so it is not drawn.
+  const shown = vitals.filter((v) => v.value > 0)
+
   return (
     <section className="overflow-hidden rounded-card border bg-card shadow-card">
       {/* Header row: greeting + one status line + live indicator. The mesh
@@ -141,7 +144,7 @@ export function PulseRibbon({
               this class in app/(app)/copilot/page.tsx. */}
           {recentlyScraped && <span className="signal-dot" aria-hidden />}
           <span className="font-readout text-caption tabular-nums text-muted-foreground">
-            {lastScrapedAt ? `swept ${formatRelativeTime(lastScrapedAt)}` : 'awaiting first sweep'}
+            {lastScrapedAt ? `Checked ${formatRelativeTime(lastScrapedAt)}` : 'Not checked yet'}
           </span>
         </div>
       </div>
@@ -150,15 +153,17 @@ export function PulseRibbon({
           4-column width it rules a hairline every 28px — ~34 phantom column
           edges across the strip that make four values read as a broken
           table instead of four gauges. */}
-      <div className="grid grid-cols-2 border-t bg-sunken/40 sm:grid-cols-4">
-        {vitals.map((vital, i) => {
-          // Explicit dividers: 2-up on mobile, 4-up on desktop, no trailing edge.
-          const borders = [
-            'border-r border-b sm:border-b-0',
-            'sm:border-r border-b sm:border-b-0',
-            'border-r',
-            '',
-          ][i]
+      {shown.length > 0 && (
+      <div className="grid grid-cols-2 border-t bg-sunken/40 sm:auto-cols-fr sm:grid-flow-col sm:grid-cols-none">
+        {shown.map((vital, i) => {
+          // Dividers for any number of tiles: 2-up on mobile, one row on
+          // desktop, no trailing edge.
+          const last = i === shown.length - 1
+          const borders = cn(
+            i >= 2 && 'border-t sm:border-t-0',
+            i % 2 === 0 && !last && 'border-r',
+            last ? 'sm:border-r-0' : 'sm:border-r'
+          )
 
           const isUnscoredTile = vital.label === 'Unscored'
 
@@ -287,6 +292,7 @@ export function PulseRibbon({
           )
         })}
       </div>
+      )}
     </section>
   )
 }

@@ -72,6 +72,8 @@ async function relevantInsights(
       .eq('user_id', userId)
       .eq('status', 'active')
       .in('kind', kinds)
+      // Model-written rows stay out of prompts until they are reviewed (K15).
+      .not('source', 'eq', 'reward_loop')
     q = companyId ? q.or(`company_id.eq.${companyId},company_id.is.null`) : q.is('company_id', null)
     const { data, error } = await q.order('updated_at', { ascending: false }).limit(limit)
     if (error) throw new Error(error.message)

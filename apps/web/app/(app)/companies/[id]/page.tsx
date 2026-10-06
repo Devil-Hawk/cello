@@ -26,7 +26,7 @@ import { DossierPanel } from '@/components/companies/dossier-panel'
 import { refreshCompanyJobs } from '@/components/companies/refresh'
 import { ContactNetworkPanel } from '@/components/contacts/contact-network-panel'
 import { TargetScopeSwitch, type TargetScope } from '@/components/jobs/target-scope-switch'
-import { formatShortDate, knownParts, matchTone } from '@/lib/format'
+import { formatShortDate, knownParts, matchTone, postedThisWeek } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { lastCheckedMs, partialReadNote, rolesStatus, rolesStatusLine } from '@/lib/companies/roles-status'
@@ -188,7 +188,7 @@ export default function CompanyDetailPage() {
   const roleTargets = hasRoleTargets(targeting)
   const matchingJobs = jobs.filter((j) => targetVerdict(j, targeting, company.name) === 'inside')
   const shownJobs = roleTargets && scope === 'matching' ? matchingJobs : jobs
-  const newThisWeek = shownJobs.filter((j) => j.is_new).length
+  const postedThisWeekCount = shownJobs.filter((j) => postedThisWeek(j.posted_at)).length
   const status = rolesStatus(company, jobs.length, { checking: isRefreshing })
   const statusLine = rolesStatusLine(status)
   const partial = partialReadNote(company.metadata, jobs.length)
@@ -260,8 +260,7 @@ export default function CompanyDetailPage() {
       <StatRow
         stats={[
           { label: 'Open roles', value: shownJobs.length },
-          { label: 'New this week', value: newThisWeek },
-          { label: 'Check interval', value: company.scrape_frequency, hint: 'min' },
+          { label: 'Posted this week', value: postedThisWeekCount },
           {
             label: 'Last checked',
             value: lastChecked ? formatShortDate(new Date(lastChecked).toISOString()) : 'Not yet',
@@ -362,10 +361,10 @@ export default function CompanyDetailPage() {
                 <div key={job.id} className="flex items-center gap-4 px-5 py-3.5">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      {job.is_new && (
+                      {postedThisWeek(job.posted_at) && (
                         <span
                           className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
-                          title="New"
+                          title="Posted this week"
                         />
                       )}
                       <span className="truncate text-body font-medium text-foreground">

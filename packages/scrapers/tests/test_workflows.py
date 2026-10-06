@@ -34,8 +34,13 @@ def test_scrape_dispatch_input_is_not_interpolated_into_the_shell():
 def test_schedules():
     assert "cron: '41 */6 * * *'" in _read("scrape.yml")
     assert "group: scrape\n" in _read("scrape.yml")
-    assert "cron: '23 */4 * * *'" in _read("autopilot-cron.yml")
     assert "cron: '47 * * * *'" in _read("gmail-cron.yml")
+
+
+def test_autopilot_cron_has_no_schedule():
+    text = _read("autopilot-cron.yml")
+    assert "schedule:" not in text.split("jobs:")[0].replace("# No schedule: paused", "")
+    assert "workflow_dispatch:" in text
 
 
 def test_harness_cron_has_no_schedule_and_waits_for_the_route():
