@@ -31,13 +31,8 @@ interface JobRow {
   url: string | null
   description: string | null
   company_id: string | null
-  companies?: { metadata?: unknown } | { metadata?: unknown }[] | null
-}
-
-function companyMetadata(job: JobRow): unknown {
-  const c = job.companies
-  if (Array.isArray(c)) return c[0]?.metadata
-  return c?.metadata
+  /** The person's own company metadata, never the first storer's (a companies(...) embed follows jobs.company_id). */
+  viewer_company_metadata?: unknown
 }
 
 export async function approveDraft(ctx: CommandContext, input: { draftId: string }): Promise<SendReply> {
@@ -96,7 +91,7 @@ export async function approveDraft(ctx: CommandContext, input: { draftId: string
   // Load job + company + profile.
   const { data: jobData, error: jobErr } = await admin
     .from('person_jobs')
-    .select('id, url, description, company_id:viewer_company_id, companies(metadata)')
+    .select('id, url, description, company_id:viewer_company_id, viewer_company_metadata')
     .eq('viewer_id', user.id)
     .eq('id', draft.job_id)
     .single()
@@ -122,7 +117,7 @@ export async function approveDraft(ctx: CommandContext, input: { draftId: string
     resumeSummary: (draft.resume_summary as string | null) ?? undefined,
     coverLetter: (draft.cover_letter as string | null) ?? undefined,
   }
-  const credentials = resolveApplyCredentials(companyMetadata(job), profile?.preferences)
+  const credentials = resolveApplyCredentials(job.viewer_company_metadata, profile?.preferences)
 
   // Attempt the official submit (credential-gated inside submitApplication).
   const result = await submitApplication({

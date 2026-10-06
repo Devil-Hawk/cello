@@ -122,6 +122,8 @@ interface HeldJob {
   title_norm: string | null
   role_type: string | null
   companies: { name: string | null } | { name: string | null }[] | null
+  /** The employer's directory name: a role the sweep stored has no company_id, so no companies row to name it. */
+  employer: { name: string | null } | { name: string | null }[] | null
 }
 
 /**
@@ -148,7 +150,7 @@ export async function rejudgeHeldRoles(
 
   while (now() < deadlineAt) {
     const { data, error } = await mine()
-      .select('job_id, saved_at, hidden_reason, jobs(title, job_function, seniority, country, language, is_remote, posted_at, employer_id, company_id, title_norm, role_type, companies(name))')
+      .select('job_id, saved_at, hidden_reason, jobs(title, job_function, seniority, country, language, is_remote, posted_at, employer_id, company_id, title_norm, role_type, companies(name), employer:company_directory(name))')
       .eq('user_id', userId)
       .lt('targets_version', version)
       .order('job_id')
@@ -167,10 +169,11 @@ export async function rejudgeHeldRoles(
       const job = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs
       if (!job || !stated) continue
       const company = Array.isArray(job.companies) ? job.companies[0] : job.companies
+      const employer = Array.isArray(job.employer) ? job.employer[0] : job.employer
       const verdict = judgeForPerson(
         { title: job.title, job_function: job.job_function, seniority: job.seniority, country: job.country, language: job.language, is_remote: job.is_remote, postedAt: job.posted_at, title_norm: job.title_norm, role_type: job.role_type },
         person,
-        company?.name ?? null,
+        company?.name ?? employer?.name ?? null,
         prepared
       )
       if (verdict.keep) {

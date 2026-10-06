@@ -115,6 +115,7 @@ const admin = {
       select() {
         const chain = builder(() => {
           if (table === 'profiles') return { data: state.profile, error: null }
+          if (table === 'person_jobs') return { data: [], error: null }
           if (table === 'applications') {
             const jobId = filterValue(chain, 'job_id') as string | undefined
             return { data: jobId ? (state.applications[jobId] ?? null) : null, error: null }
