@@ -18,7 +18,7 @@ create table if not exists public.agent_tasks (
   conversation_id uuid references public.copilot_conversations (id) on delete cascade,
   scheduled_task_id uuid references public.scheduled_tasks (id) on delete set null,
   parent_id uuid references public.agent_tasks (id) on delete cascade,
-  agent text not null check (agent in ('cello', 'scout', 'researcher', 'writer', 'reviewer', 'coach', 'applier')),
+  agent text not null check (agent in ('cello', 'scout', 'researcher', 'writer', 'reviewer', 'applier')),
   title text not null check (char_length(title) <= 160),
   status text not null default 'queued' check (status in ('queued', 'working', 'waiting', 'done', 'partial', 'failed')),
   partial_reason text check (partial_reason in ('budget', 'time', 'steps')),
@@ -77,6 +77,12 @@ begin
     where pubname = 'supabase_realtime' and tablename = 'agent_tasks'
   ) then
     raise exception 'agent_tasks is not in the realtime publication';
+  end if;
+  if exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.agent_tasks'::regclass and contype = 'c' and pg_get_constraintdef(oid) like '%coach%'
+  ) then
+    raise exception 'the retired coach agent must not be allowed';
   end if;
 end
 $$;

@@ -5,7 +5,7 @@
 --   it writes one row here: the exact artifact version, and a hash of the
 --   payload. "Needs you" lists the pending rows. The person's click runs plain
 --   code (lib/agents/approvals.ts decideApproval): the send or the submit,
---   idempotent by approval id, with a receipt. Approvals are rows, not parked
+--   idempotent by approval id, with its outcome. Approvals are rows, not parked
 --   threads, so they never disappear with an old checkpoint.
 --
 --   The domain row (an outreach_messages or application_drafts row in
@@ -35,7 +35,7 @@ create table if not exists public.approvals (
   decided_at timestamptz,
   executed_at timestamptz,
   -- {what, when, artifact_version, approval_id, result}
-  receipt jsonb,
+  outcome jsonb,
   error text check (error is null or char_length(error) <= 500),
   -- Set once the result has been told to the conversation it came from.
   posted_at timestamptz,
@@ -86,6 +86,13 @@ begin
     where pubname = 'supabase_realtime' and tablename = 'approvals'
   ) then
     raise exception 'approvals is not in the realtime publication';
+  end if;
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'approvals' and column_name = 'outcome') then
+    raise exception 'approvals.outcome is missing';
+  end if;
+  -- Taste is read from role_reactions; there is no second store for it.
+  if to_regclass('public.taste_statements') is not null then
+    raise exception 'taste_statements must not exist';
   end if;
 end
 $$;

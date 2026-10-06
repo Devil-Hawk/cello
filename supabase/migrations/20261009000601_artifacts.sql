@@ -1,8 +1,7 @@
 -- Agent engine, part 2: artifacts.
 --
 -- WHY
---   A resume, a cover letter, an outreach email, a dossier, an interview prep
---   kit and a shortlist are things the person keeps, edits and uses, not chat
+--   A resume, a cover letter, an outreach email, a dossier and a shortlist are things the person keeps, edits and uses, not chat
 --   text. Each is one row in `artifacts` with numbered versions in
 --   `artifact_versions` (author 'user' or 'cello', so "You edited" and "Cello
 --   revised" are facts, not guesses). The agent reaches them through the
@@ -16,7 +15,7 @@
 create table if not exists public.artifacts (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users (id) on delete cascade,
-  type text not null check (type in ('resume', 'cover_letter', 'outreach_email', 'dossier', 'interview_prep', 'shortlist')),
+  type text not null check (type in ('resume', 'cover_letter', 'outreach_email', 'dossier', 'shortlist')),
   title text not null check (char_length(title) <= 200),
   job_id uuid references public.jobs (id) on delete set null,
   company_id uuid references public.companies (id) on delete set null,
@@ -82,6 +81,12 @@ begin
   if has_table_privilege('anon', 'public.artifacts', 'select')
      or has_table_privilege('anon', 'public.artifact_versions', 'select') then
     raise exception 'anon must not read artifacts';
+  end if;
+  if exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.artifacts'::regclass and contype = 'c' and pg_get_constraintdef(oid) like '%interview_prep%'
+  ) then
+    raise exception 'the retired interview_prep type must not be allowed';
   end if;
 end
 $$;
