@@ -5,15 +5,16 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push: () => undefined, r
 vi.mock('@/lib/supabase/client', () => ({ createClient: () => ({}) }))
 
 import { RolesView } from './roles-view'
-import { DEFAULT_QUERY, bandOf, groupByCompany, groupCountLine, metaLine, orderItems, outsideLine, parseRolesQuery, postedAgo, rankItems, rolesHref } from './logic'
+import { DEFAULT_QUERY, bandOf, groupByCompany, groupByType, groupCountLine, metaLine, orderItems, outsideLine, parseRolesQuery, postedAgo, rankItems, rolesHref, typeGroupHeader } from './logic'
+import { applyTypeChanges, previousOwn, typeUndoOpen } from './type-change'
 import { NO_REACTIONS, UNDO_MS, reactionReducer, undoOpen, visibleItems } from './reactions'
-import { employerId, fixtureRoles } from './fixtures'
+import { employerId, fixtureRoles, fixtureTypeCounts, fixtureTypeOptions } from './fixtures'
 
 const text = (html: string) => html.replace(/<[^>]*>/g, ' ').replace(/&#x27;/g, "'").replace(/\s+/g, ' ')
 
 const view = (over: Partial<Parameters<typeof RolesView>[0]> = {}) =>
   renderToStaticMarkup(
-    <RolesView query={DEFAULT_QUERY} items={[]} picks={[]} total={0} newToday={0} groupCounts={{}} facts={{}} outside={{}} {...over} />,
+    <RolesView query={DEFAULT_QUERY} items={[]} picks={[]} total={0} newToday={0} groupCounts={{}} typeCounts={{}} typeOptions={fixtureTypeOptions} companyOptions={[]} needsSponsorship={false} untypedTotal={0} facts={{}} outside={{}} {...over} />,
   )
 
 describe('the address', () => {
@@ -186,5 +187,78 @@ describe('the Roles view', () => {
   it('never uses the words the page forbids', () => {
     const html = text(view({ items: fixtureRoles(12, 3), total: 12, newToday: 3 }))
     expect(html).not.toMatch(/receipt|unscored|Not scored|!/i)
+  })
+})
+
+describe('role types', () => {
+  it('keeps the role type filter, the other new filters and the grouping in the address', () => {
+    const q = parseRolesQuery({ group: 'type', type: 'ai-engineer', following: '1', h1b: '1' })
+    expect(q).toMatchObject({ group: 'type', roleType: 'ai-engineer', following: true, h1b: true })
+    expect(parseRolesQuery(Object.fromEntries(new URL(`http://x${rolesHref(q)}`).searchParams))).toEqual(q)
+    expect(parseRolesQuery({ type: 'Not A Type!' }).roleType).toBeNull()
+  })
+
+  it('counts a type group from SQL, and the untyped group says no number', () => {
+    const items = fixtureRoles(7, 2)
+    const groups = groupByType(items, { ...fixtureTypeCounts(items), 'ai-engineer': 31 })
+    expect(groups[0]).toMatchObject({ key: 'ai-engineer', count: 31, more: 30 })
+    expect(typeGroupHeader(groups[0])).toBe('AI Engineer, 31')
+    const none = groupByType([{ ...items[0], type: null }], {})
+    expect(typeGroupHeader(none[0])).toBe('No type yet')
+  })
+
+  it('draws Group by role type with each header equal to the SQL count, and a link to the rest', () => {
+    const items = fixtureRoles(14, 3)
+    const html = view({ query: { ...DEFAULT_QUERY, group: 'type' }, items, total: 14, typeCounts: { ...fixtureTypeCounts(items), 'ai-engineer': 31 } })
+    expect(text(html)).toContain('AI Engineer, 31')
+    expect(text(html)).toContain('29 more of this type')
+    expect(html).toContain('href="/roles?type=ai-engineer"')
+    expect(text(html)).toContain('Grouped by role type.')
+  })
+
+  it('shows type and level on a row, with the read mark only when a model set the type', () => {
+    const [ai, fde] = fixtureRoles(2, 1)
+    expect(text(view({ items: [ai], total: 1 }))).toContain('AI Engineer, Senior')
+    expect(text(view({ items: [ai], total: 1 }))).not.toContain("Cello's read")
+    expect(text(view({ items: [{ ...fde, level: null }], total: 1 }))).toContain('Forward Deployed Engineer')
+    expect(text(view({ items: [{ ...fde, level: null }], total: 1 }))).toContain("Cello's read")
+  })
+
+  it('offers the Role type filter, Company and Following only, and Past H-1B filings only to a person who needs sponsorship', () => {
+    const html = text(view({ items: fixtureRoles(2, 2), total: 2, companyOptions: [{ id: employerId(0), label: 'Fixture Employer 1' }] }))
+    expect(html).toContain('Role type')
+    expect(html).toContain('Any company')
+    expect(html).toContain('Fixture Employer 1')
+    expect(html).toContain('Following only')
+    expect(html).not.toContain('Past H-1B filings')
+    expect(text(view({ needsSponsorship: true }))).toContain('Past H-1B filings')
+  })
+
+  it('moves a row to its new type at once, and Undo puts back what the person had', () => {
+    const [a, b] = fixtureRoles(2, 1)
+    const change = { to: { id: 'data-engineer', label: 'Data Engineer', own: true, origin: null }, prevOwn: previousOwn(a), at: 1000 }
+    expect(change.prevOwn).toBeNull()
+    expect(applyTypeChanges([a, b], { [a.id]: change }).map((i) => i.type?.id)).toEqual(['data-engineer', b.type?.id])
+    expect(previousOwn({ type: { id: 'ml-engineer', label: 'ML Engineer', own: true, origin: null } })).toBe('ml-engineer')
+    expect(typeUndoOpen(change, 1000 + UNDO_MS - 1)).toBe(true)
+    expect(typeUndoOpen(change, 1000 + UNDO_MS)).toBe(false)
+  })
+
+  it('marks a pasted role "You pasted this" and no other', () => {
+    const [a, b] = fixtureRoles(2, 1)
+    const html = text(view({ items: [{ ...a, pasted: true }, b], total: 2 }))
+    expect((html.match(/You pasted this/g) ?? []).length).toBe(1)
+  })
+
+  it('lists the roles Cello could not place on Hidden, each with Set type', () => {
+    const hidden = fixtureRoles(2, 1).map((i) => ({ ...i, type: null, hiddenReason: 'unclassified' as const }))
+    const html = text(view({ query: { ...DEFAULT_QUERY, tab: 'hidden' }, items: hidden, total: 2, untypedTotal: 2 }))
+    expect(html).toContain('Cello could not tell the role type of these, 2')
+    expect((html.match(/Set type/g) ?? []).length).toBe(2)
+  })
+
+  it('says when Cello last checked, in the state line and under an empty For you', () => {
+    expect(text(view({ checkLine: 'Checked 3 hours ago.', items: fixtureRoles(2, 1), total: 2 }))).toContain('Ranked for you. Checked 3 hours ago.')
+    expect(text(view({ checkLine: 'Checked 3 hours ago. Next check at 18:00 UTC.' }))).toContain('Nothing new fits your search yet. Checked 3 hours ago. Next check at 18:00 UTC.')
   })
 })

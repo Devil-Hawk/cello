@@ -15,9 +15,9 @@ export const TABS = ['for-you', 'saved', 'hidden'] as const
 export type Tab = (typeof TABS)[number]
 export const TAB_LABEL: Record<Tab, string> = { 'for-you': 'For you', saved: 'Saved', hidden: 'Hidden' }
 
-export const GROUPS = ['ranked', 'company'] as const
+export const GROUPS = ['ranked', 'company', 'type'] as const
 export type GroupBy = (typeof GROUPS)[number]
-export const GROUP_LABEL: Record<GroupBy, string> = { ranked: 'Ranked', company: 'Company' }
+export const GROUP_LABEL: Record<GroupBy, string> = { ranked: 'Ranked', company: 'Company', type: 'Role type' }
 
 export const POSTED = ['any', '24h', '7d', '30d'] as const
 export type Posted = (typeof POSTED)[number]
@@ -38,6 +38,12 @@ export interface RolesQuery {
   country: string | null
   /** A company id (the shared employer's or the person's own). */
   company: string | null
+  /** A role type id, as the person sees it (their own word over the posting's). */
+  roleType: string | null
+  /** Only roles at employers the person follows. */
+  following: boolean
+  /** Only employers with past H-1B filings, offered to a person who needs sponsorship. */
+  h1b: boolean
   hideAgency: boolean
   /** How many rows are shown: PAGE, then PAGE more at a time. */
   limit: number
@@ -53,10 +59,14 @@ export const DEFAULT_QUERY: RolesQuery = {
   remote: false,
   country: null,
   company: null,
+  roleType: null,
+  following: false,
+  h1b: false,
   hideAgency: false,
   limit: PAGE,
 }
 
+const TYPE_ID = /^[a-z][a-z0-9-]{0,62}$/
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function one(v: string | string[] | undefined): string | undefined {
@@ -71,6 +81,7 @@ function pick<T extends string>(v: string | undefined, allowed: readonly T[], fa
 export function parseRolesQuery(sp: Record<string, string | string[] | undefined>): RolesQuery {
   const country = one(sp.country)?.trim().toUpperCase()
   const company = one(sp.company)
+  const roleType = one(sp.type)
   const limit = Number(one(sp.limit))
   return {
     tab: pick(one(sp.tab), TABS, DEFAULT_QUERY.tab),
@@ -82,6 +93,9 @@ export function parseRolesQuery(sp: Record<string, string | string[] | undefined
     remote: one(sp.remote) === '1',
     country: country && /^[A-Z]{2}$/.test(country) ? country : null,
     company: company && UUID.test(company) ? company : null,
+    roleType: roleType && TYPE_ID.test(roleType) ? roleType : null,
+    following: one(sp.following) === '1',
+    h1b: one(sp.h1b) === '1',
     hideAgency: one(sp.agency) === 'hide',
     limit: Number.isInteger(limit) && limit >= PAGE ? Math.min(limit, 300) : PAGE,
   }
@@ -100,6 +114,9 @@ export function rolesHref(q: RolesQuery, change: Partial<RolesQuery> = {}): stri
   if (n.remote) p.set('remote', '1')
   if (n.country) p.set('country', n.country)
   if (n.company) p.set('company', n.company)
+  if (n.roleType) p.set('type', n.roleType)
+  if (n.following) p.set('following', '1')
+  if (n.h1b) p.set('h1b', '1')
   if (n.hideAgency) p.set('agency', 'hide')
   if (n.limit !== DEFAULT_QUERY.limit) p.set('limit', String(n.limit))
   const s = p.toString()
@@ -108,7 +125,7 @@ export function rolesHref(q: RolesQuery, change: Partial<RolesQuery> = {}): stri
 
 /** How many filters are on, for the Filters button. Tab, grouping and sort are not filters. */
 export function filterCount(q: RolesQuery): number {
-  return [q.level, q.posted !== 'any', q.remote, q.country, q.company, q.hideAgency].filter(Boolean).length
+  return [q.level, q.posted !== 'any', q.remote, q.country, q.company, q.roleType, q.following, q.h1b, q.hideAgency].filter(Boolean).length
 }
 
 // --- order -------------------------------------------------------------------
@@ -206,6 +223,37 @@ export function groupCountLine(g: Pick<RoleGroup, 'count' | 'open' | 'cannotRead
   return g.open === null ? `${g.count} for you` : `${g.count} for you of ${g.open} open`
 }
 
+export interface TypeGroup {
+  /** The role type id, or 'none' for roles no tier could type. */
+  key: string
+  label: string
+  items: RoleItem[]
+  /** The person's roles of this type, from role_counts('role_type'); null when it is not known (the untyped group). */
+  count: number | null
+  more: number | null
+}
+
+/** One group per role type, in the order of each group's best row. Counts come from SQL, never from the rows passed in. */
+export function groupByType(ordered: readonly RoleItem[], counts: Readonly<Record<string, number>>, perGroup = PER_GROUP): TypeGroup[] {
+  const groups = new Map<string, TypeGroup>()
+  for (const item of ordered) {
+    const key = item.type?.id ?? 'none'
+    let g = groups.get(key)
+    if (!g) {
+      g = { key, label: item.type?.label ?? 'No type yet', items: [], count: key === 'none' ? null : (counts[key] ?? null), more: null }
+      groups.set(key, g)
+    }
+    if (g.items.length < perGroup) g.items.push(item)
+  }
+  for (const g of groups.values()) g.more = g.count === null ? null : Math.max(0, g.count - g.items.length)
+  return [...groups.values()]
+}
+
+/** "AI Engineer, 31": a type group's header, never without its honest count (the untyped group says no number). */
+export function typeGroupHeader(g: Pick<TypeGroup, 'label' | 'count'>): string {
+  return g.count === null ? g.label : `${g.label}, ${g.count}`
+}
+
 // --- lines ---------------------------------------------------------------------
 
 /** "Posted 5h ago", "Posted 3 days ago". */
@@ -222,11 +270,17 @@ export function postedAgo(iso: string | null, now = Date.now()): string | null {
 
 const LEVEL_WORD: Record<string, string> = { intern: 'Intern', junior: 'Junior', mid: 'Mid', senior: 'Senior', staff: 'Staff', principal: 'Principal', manager: 'Manager', director: 'Director', exec: 'Executive' }
 
-/** One line of facts under a row: level, place, pay as stated, posted. Plain text. */
+/** "AI Engineer, Senior": the role type then the level, whichever the role has. */
+export function typeLevel(i: Pick<RoleItem, 'type' | 'level'>): string | null {
+  return [i.type?.label, i.level ? LEVEL_WORD[i.level] : null].filter(Boolean).join(', ') || null
+}
+
+/** One line of facts under a row: role type and level, place, pay as stated, posted. Plain text. */
 export function metaLine(i: RoleItem, now = Date.now()): string {
   return [
+    i.pasted ? 'You pasted this' : null,
     i.legit === 'agency' ? 'Agency' : i.legit === 'repost' ? 'Repost' : null,
-    i.level ? LEVEL_WORD[i.level] ?? null : null,
+    typeLevel(i),
     i.location,
     i.pay,
     postedAgo(i.postedAt, now),

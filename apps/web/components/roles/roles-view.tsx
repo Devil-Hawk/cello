@@ -17,17 +17,22 @@ import {
   bandOf,
   filterCount,
   groupByCompany,
+  groupByType,
   groupCountLine,
   metaLine,
   orderItems,
   outsideLine,
   rolesHref,
+  typeGroupHeader,
   type EmployerFacts,
   type RolesQuery,
 } from './logic'
 import { Filters } from './filters'
 import { NOT_FOR_ME_REASONS, deleteReaction, visibleItems } from './reactions'
-import { RoleLine } from './role-line'
+import { ChangeType } from './change-type'
+import { RoleLine, type TypeControls } from './role-line'
+import { applyTypeChanges } from './type-change'
+import { useTypeChanges } from './use-type-changes'
 import { RoleRow } from './role-row'
 import { LogoTile } from './role-tile'
 import type { PickItem, RoleItem } from './types'
@@ -45,6 +50,16 @@ export interface RolesViewProps {
   newToday: number
   /** role_counts('employer'): the person's roles at each employer. */
   groupCounts: Record<string, number>
+  /** role_counts('role_type'): the person's roles of each type, by the type they see. */
+  typeCounts: Record<string, number>
+  /** Every type Change type and the Role type filter offer, by label. */
+  typeOptions: { id: string; label: string }[]
+  /** The employers the Company chooser offers (those with roles for the person), by name. */
+  companyOptions: { id: string; label: string }[]
+  /** The person needs sponsorship, so Past H-1B filings is offered. */
+  needsSponsorship: boolean
+  /** Roles Cello could not place, counted in SQL. */
+  untypedTotal: number
   /** The last read's open total and the reason an employer cannot be read, by employer. */
   facts: Record<string, EmployerFacts>
   /** role_counts('outside_week'): left outside the search this week, by reason. */
@@ -63,13 +78,17 @@ const reasonLabel = (r: string | null | undefined) => NOT_FOR_ME_REASONS.find((x
 // Roles: every role kept for the person, today's picks first, in the order of
 // their address. The reactions live here, above the rows, so a regroup, a filter
 // or a page of more rows never loses an Undo that is still open.
-export function RolesView({ query, items, picks, total, newToday, groupCounts, facts, outside, checkLine, failed }: RolesViewProps) {
+export function RolesView({ query, items: read, picks, total, newToday, groupCounts, typeCounts, typeOptions, companyOptions, needsSponsorship, untypedTotal, facts, outside, checkLine, failed }: RolesViewProps) {
   const router = useRouter()
   const { state, dispatch, now } = useReactionState()
   const [pasting, setPasting] = useState(false)
+  const typed = useTypeChanges()
+  // A role whose type the person changed is drawn under its new type at once; the server has it already.
+  const items = applyTypeChanges(read, typed.changes)
+  const types: TypeControls = { options: typeOptions, now: typed.now, changes: typed.changes, onChange: typed.set, onUndo: typed.clear, onReset: () => router.refresh() }
 
   const line = (item: RoleItem, extra?: { pickKind?: 'top' | 'explore'; sentence?: string }) => (
-    <RoleLine key={item.id} item={item} state={state} dispatch={dispatch} now={now} pickKind={extra?.pickKind} sentence={extra?.sentence} />
+    <RoleLine key={item.id} item={item} state={state} dispatch={dispatch} now={now} pickKind={extra?.pickKind} sentence={extra?.sentence} types={types} />
   )
 
   const visible = visibleItems(items, state, now)
@@ -82,6 +101,7 @@ export function RolesView({ query, items, picks, total, newToday, groupCounts, f
   const rest = ordered.filter((i) => !bandIds.has(i.id)).slice(0, Math.max(0, query.limit - bandIds.size))
   const shown = rest.length + bandIds.size
   const groups = groupByCompany(ordered, groupCounts, facts)
+  const typeGroups = groupByType(ordered, typeCounts)
   const outsideText = query.tab === 'for-you' ? outsideLine(outside) : null
 
   async function removeSaved(id: string) {
@@ -107,7 +127,7 @@ export function RolesView({ query, items, picks, total, newToday, groupCounts, f
 
       {query.tab === 'for-you' && (
         <p className="r-meta">
-          {query.group === 'company' ? 'Grouped by company.' : query.sort === 'newest' ? 'Newest first.' : 'Ranked for you.'}
+          {query.group === 'company' ? 'Grouped by company.' : query.group === 'type' ? 'Grouped by role type.' : query.sort === 'newest' ? 'Newest first.' : 'Ranked for you.'}
           {checkLine ? ` ${checkLine}` : ''}
         </p>
       )}
@@ -138,7 +158,7 @@ export function RolesView({ query, items, picks, total, newToday, groupCounts, f
                 </Key>
               ))}
             </nav>
-            <Filters query={query} />
+            <Filters query={query} typeOptions={typeOptions} companyOptions={companyOptions} needsSponsorship={needsSponsorship} />
           </>
         )}
       </div>
@@ -152,10 +172,11 @@ export function RolesView({ query, items, picks, total, newToday, groupCounts, f
       {!failed && query.tab === 'for-you' && ordered.length === 0 && (
         <div className="space-y-4">
           <p className="r-body">{filtered ? 'No kept role matches these filters.' : 'Nothing new fits your search yet.'}</p>
+          {!filtered && checkLine && <p className="r-meta">{checkLine}</p>}
           <div className="flex flex-wrap gap-3">
             {filtered ? (
               <Key asChild variant="raised">
-                <Link href={rolesHref(query, { level: null, posted: 'any', remote: false, country: null, company: null, hideAgency: false })}>Clear filters</Link>
+                <Link href={rolesHref(query, { level: null, posted: 'any', remote: false, country: null, company: null, roleType: null, following: false, h1b: false, hideAgency: false })}>Clear filters</Link>
               </Key>
             ) : (
               <>
@@ -218,6 +239,24 @@ export function RolesView({ query, items, picks, total, newToday, groupCounts, f
         </div>
       )}
 
+      {!failed && query.tab === 'for-you' && query.group === 'type' && (
+        <div className="space-y-8">
+          {typeGroups.map((g) => (
+            <section key={g.key} aria-label={g.label} className="space-y-1">
+              <h2 className="r-title px-2">{typeGroupHeader(g)}</h2>
+              <div className="r-sheet">{g.items.map((i) => line(i))}</div>
+              {g.more !== null && g.more > 0 && g.key !== 'none' && (
+                <p className="px-2">
+                  <Link href={rolesHref(query, { group: 'ranked', roleType: g.key, limit: PAGE })} className="r-body underline underline-offset-4">
+                    {g.more} more of this type
+                  </Link>
+                </p>
+              )}
+            </section>
+          ))}
+        </div>
+      )}
+
       {query.tab === 'for-you' && query.group === 'ranked' && total > shown && (
         <Key asChild variant="raised">
           <Link href={rolesHref(query, { limit: query.limit + PAGE })}>Show more</Link>
@@ -258,31 +297,52 @@ export function RolesView({ query, items, picks, total, newToday, groupCounts, f
       )}
 
       {query.tab === 'hidden' && (
-        <div className="space-y-3">
+        <div className="space-y-6">
           {ordered.length === 0 ? (
             <p className="r-body">Nothing hidden.</p>
           ) : (
-            <div className="r-sheet">
-              {ordered.map((i) => (
-                <RoleRow
-                  key={i.id}
-                  id={i.id}
-                  title={i.title}
-                  company={i.company}
-                  companyId={i.companyId}
-                  domain={i.domain}
-                  logoUrl={i.logoUrl}
-                  meta={[i.hiddenReason === 'not_for_me' ? `Not for me${reasonLabel(i.reaction?.reason) ? `: ${reasonLabel(i.reaction?.reason)}` : ''}` : null, metaLine(i, now)].filter(Boolean).join(' · ')}
-                  actions={
-                    i.hiddenReason === 'not_for_me' ? (
-                      <Key variant="raised" onClick={() => putBack(i.id)}>
-                        Undo
-                      </Key>
-                    ) : undefined
-                  }
-                />
-              ))}
-            </div>
+            <>
+              {ordered.some((i) => i.hiddenReason !== 'unclassified') && (
+                <div className="r-sheet">
+                  {ordered
+                    .filter((i) => i.hiddenReason !== 'unclassified')
+                    .map((i) => (
+                      <RoleRow
+                        key={i.id}
+                        id={i.id}
+                        title={i.title}
+                        company={i.company}
+                        companyId={i.companyId}
+                        domain={i.domain}
+                        logoUrl={i.logoUrl}
+                        meta={[i.hiddenReason === 'not_for_me' ? `Not for me${reasonLabel(i.reaction?.reason) ? `: ${reasonLabel(i.reaction?.reason)}` : ''}` : null, metaLine(i, now)].filter(Boolean).join(' · ')}
+                        actions={
+                          i.hiddenReason === 'not_for_me' ? (
+                            <Key variant="raised" onClick={() => putBack(i.id)}>
+                              Undo
+                            </Key>
+                          ) : undefined
+                        }
+                      />
+                    ))}
+                </div>
+              )}
+              {ordered.some((i) => i.hiddenReason === 'unclassified') && (
+                <details className="space-y-2">
+                  <summary className="r-title cursor-pointer px-2">Cello could not tell the role type of these, {untypedTotal}</summary>
+                  <div className="r-sheet">
+                    {ordered
+                      .filter((i) => i.hiddenReason === 'unclassified')
+                      .map((i) => (
+                        <div key={i.id}>
+                          <RoleRow id={i.id} title={i.title} company={i.company} companyId={i.companyId} domain={i.domain} logoUrl={i.logoUrl} meta={metaLine(i, now)} />
+                          <ChangeType item={i} options={typeOptions} change={typed.changes[i.id]} now={typed.now} onChange={typed.set} onUndo={typed.clear} onReset={() => router.refresh()} label="Set type" />
+                        </div>
+                      ))}
+                  </div>
+                </details>
+              )}
+            </>
           )}
         </div>
       )}

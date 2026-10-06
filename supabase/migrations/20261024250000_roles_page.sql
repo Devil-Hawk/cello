@@ -13,13 +13,17 @@
 -- as the caller, so the row level security of person_roles and person_counts
 -- is what keeps one person's numbers from another.
 --
--- The role_type grouping joins this function when role types are written on
--- jobs (K5c), as a create or replace in this file before the package ships.
+-- The role_type grouping counts the same rows by the type the person sees: their own
+-- word for the title (person_roles.role_type, Change type) over the posting's type
+-- (jobs.role_type, K5c). A role with no type is not counted under any.
 
 do $$
 begin
   if to_regclass('public.person_roles') is null or to_regclass('public.role_reactions') is null then
     raise exception 'roles_page needs K5a (person_roles) and K8a (role_reactions)';
+  end if;
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'person_roles' and column_name = 'role_type') then
+    raise exception 'roles_page needs K5c (person_roles.role_type)';
   end if;
 end $$;
 
@@ -45,6 +49,17 @@ begin
          and (j.posted_at is null or j.posted_at >= now() - interval '180 days')
          and j.still_open is not false
          and coalesce(j.employer_id, j.company_id) is not null
+       group by 1;
+  elsif p_by = 'role_type' then
+    return query
+      select coalesce(pr.role_type, j.role_type), count(*)::bigint
+        from public.person_roles pr
+        join public.jobs j on j.id = pr.job_id
+       where pr.user_id = (select auth.uid())
+         and pr.hidden_reason is null
+         and (j.posted_at is null or j.posted_at >= now() - interval '180 days')
+         and j.still_open is not false
+         and coalesce(pr.role_type, j.role_type) is not null
        group by 1;
   elsif p_by = 'outside_week' then
     return query

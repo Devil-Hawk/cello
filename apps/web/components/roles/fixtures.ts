@@ -14,6 +14,20 @@ const TITLES = [
   'Staff Software Engineer, Applied AI and Developer Experience for Regulated Industries',
 ]
 
+// The type each title would get, and who typed it: the second is a model's, so it carries the read mark.
+const TYPES: Array<{ id: string; label: string; origin: 'code' | 'model' }> = [
+  { id: 'ai-engineer', label: 'AI Engineer', origin: 'code' },
+  { id: 'forward-deployed-engineer', label: 'Forward Deployed Engineer', origin: 'model' },
+  { id: 'data-engineer', label: 'Data Engineer', origin: 'code' },
+  { id: 'ml-engineer', label: 'ML Engineer', origin: 'code' },
+  { id: 'platform-engineer', label: 'Platform or Infrastructure Engineer', origin: 'code' },
+  { id: 'analytics-engineer', label: 'Analytics Engineer', origin: 'code' },
+  { id: 'software-engineer', label: 'Software Engineer', origin: 'code' },
+]
+
+/** The choices Change type and the Role type filter offer in the fixtures. */
+export const fixtureTypeOptions = TYPES.map(({ id, label }) => ({ id, label }))
+
 /** The employer id of the nth fixture employer. */
 export const employerId = (n: number) => `00000000-0000-4000-8000-${String(n + 1).padStart(12, '0')}`
 
@@ -31,6 +45,8 @@ export function fixtureRoles(count: number, employers: number): RoleItem[] {
       postedAt: new Date(Date.UTC(2026, 9, 5) - i * 3_600_000).toISOString(),
       pay: i % 2 === 0 ? '$187,000 to $240,000 a year' : null,
       level: i % 2 === 0 ? 'senior' : null,
+      type: { ...TYPES[i % TYPES.length], own: false },
+      pasted: false,
       legit: null,
       chance: i % 4 === 0 ? 'strong' : i % 4 === 1 ? 'possible' : null,
       wantP: i % 4 === 3 ? null : 0.9 - (i % 10) / 20,
@@ -41,6 +57,13 @@ export function fixtureRoles(count: number, employers: number): RoleItem[] {
       reaction: null,
     }
   })
+}
+
+/** The count each role type would show: here, exactly the rows given. */
+export function fixtureTypeCounts(items: readonly RoleItem[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const i of items) if (i.type) out[i.type.id] = (out[i.type.id] ?? 0) + 1
+  return out
 }
 
 /** The count each employer would show: here, exactly the rows given. */

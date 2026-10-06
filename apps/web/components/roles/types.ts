@@ -5,6 +5,15 @@
 
 import type { Chance, PassReason, Reaction } from '@/lib/scoring/types'
 
+/** A role's type as a row shows it. `origin` is who typed it; a type a model set carries Cello's read mark. */
+export interface RoleTypeView {
+  id: string
+  label: string
+  /** The person's own correction (Change type), not Cello's typing. */
+  own: boolean
+  origin: 'code' | 'model' | null
+}
+
 export interface RoleItem {
   id: string
   title: string
@@ -19,6 +28,10 @@ export interface RoleItem {
   pay: string | null
   /** The level, as the classifier stored it ("senior"). */
   level: string | null
+  /** The role type the person sees: their own word for the title, else the posting's. Null when nothing could tell it. */
+  type: RoleTypeView | null
+  /** The person pasted the link, so the role is here even when its type is not one of theirs. */
+  pasted: boolean
   legit: 'agency' | 'repost' | null
   /** Cello's band for the person's chance, null until checked. */
   chance: Chance | null

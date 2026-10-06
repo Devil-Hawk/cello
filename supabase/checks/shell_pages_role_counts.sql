@@ -1,7 +1,8 @@
 -- Proves migration 20261024250000: role_counts('employer') equals a hand count of
 -- the person's visible, open roles for each of three employers over 26 roles, never
 -- counts another person's rows, a hidden role or a stale one; role_counts('outside_week')
--- sums seven days of person_counts and not the eighth; anon cannot run it; an unknown
+-- sums seven days of person_counts and not the eighth; role_counts('role_type') counts by the person's
+-- own type over the posting's; anon cannot run it; an unknown
 -- grouping is refused; and the two new reasons are accepted by role_reactions.
 -- One transaction, rolled back.
 --
@@ -47,6 +48,14 @@ update public.person_roles set hidden_reason = 'not_for_me'
  where user_id = (select a from fx)
    and job_id = (select id from public.jobs where external_id = 'c1-1');
 
+-- Role types: Cello's type on the posting, then the person's own word over it for two roles at the second
+-- employer. One of A's roles at the first employer is hidden (above); the stale role and the untyped third
+-- employer do not count.
+update public.jobs set role_type = 'ai-engineer' where external_id like 'c1-%' or external_id like 'b1-%' or external_id = 'c2-old';
+update public.jobs set role_type = 'data-engineer' where external_id like 'c2-%' and external_id <> 'c2-old';
+update public.person_roles set role_type = 'ml-engineer'
+ where user_id = (select a from fx) and job_id in (select id from public.jobs where external_id in ('c2-1', 'c2-2'));
+
 -- What a read found outside the targets: the seventh day counts, the eighth does not, other kinds do not.
 insert into public.person_counts (user_id, day, employer_id, kind, reason, n)
 select a, current_date, e1, 'outside_targets', 'place', 5 from fx
@@ -60,12 +69,14 @@ select set_config('request.jwt.claims', json_build_object('role', 'authenticated
 set local role authenticated;
 select set_config('chk.employer_a', (select jsonb_object_agg(key, n)::text from public.role_counts('employer')), true);
 select set_config('chk.week_a', (select jsonb_object_agg(key, n)::text from public.role_counts('outside_week')), true);
+select set_config('chk.type_a', (select jsonb_object_agg(key, n)::text from public.role_counts('role_type')), true);
 reset role;
 
 select set_config('request.jwt.claims', json_build_object('role', 'authenticated', 'sub', b)::text, true) from fx;
 set local role authenticated;
 select set_config('chk.employer_b', (select jsonb_object_agg(key, n)::text from public.role_counts('employer')), true);
 select set_config('chk.week_b', (select jsonb_object_agg(key, n)::text from public.role_counts('outside_week')), true);
+select set_config('chk.type_b', (select jsonb_object_agg(key, n)::text from public.role_counts('role_type')), true);
 reset role;
 
 do $$
@@ -98,6 +109,15 @@ begin
     raise exception 'B should see only their 4 roles at one employer, saw %', current_setting('chk.employer_b');
   end if;
 
+  -- By type: the person's own word wins over the posting's, a hidden, stale or untyped role does not count,
+  -- and B's four are B's alone.
+  if current_setting('chk.type_a')::jsonb is distinct from jsonb_build_object('ai-engineer', 9, 'data-engineer', 7, 'ml-engineer', 2) then
+    raise exception 'role_type counts for A should be ai-engineer 9, data-engineer 7, ml-engineer 2, saw %', current_setting('chk.type_a');
+  end if;
+  if current_setting('chk.type_b')::jsonb is distinct from jsonb_build_object('ai-engineer', 4) then
+    raise exception 'role_type counts for B should be ai-engineer 4, saw %', current_setting('chk.type_b');
+  end if;
+
   -- Seven days of what was left outside, by reason; the eighth day and other kinds are not in it.
   if (current_setting('chk.week_a')::jsonb ->> 'place')::int <> 7 or (current_setting('chk.week_a')::jsonb ->> 'level')::int <> 3 then
     raise exception 'outside_week for A should be place 7 and level 3, saw %', current_setting('chk.week_a');
@@ -125,7 +145,7 @@ set local role anon;
 do $$
 begin
   begin
-    perform * from public.role_counts('employer');
+    perform * from public.role_counts('role_type');
     raise exception 'anon ran role_counts';
   exception when insufficient_privilege then
     null;
