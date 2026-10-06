@@ -6,7 +6,7 @@
 //
 //   - refuses an address that is not a public https/http one (SSRF guard)
 //   - reads the origin's robots.txt once and obeys it (RFC 9309: 4xx = allowed,
-//     5xx or no answer = disallowed)
+//     5xx or no answer = nothing is fetched, reported as unreachable, not as a rule)
 //   - says who is asking: CELLO_USER_AGENT, which names Cello and the repository
 //   - waits between requests to one host, and stops at a request, byte and time
 //     budget per site
@@ -128,7 +128,8 @@ async function readCapped(res: Response, max: number): Promise<string> {
 
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
-type Robots = ReturnType<typeof robotsParser> | 'allow' | 'deny'
+/** `unreachable`: robots.txt could not be read (no such host, a timeout, a 5xx), so Cello does not read the site, but says that, not that a rule forbids it. */
+type Robots = ReturnType<typeof robotsParser> | 'allow' | 'unreachable'
 
 export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
   const mode = options.mode ?? 'inline'
@@ -186,7 +187,7 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
         if (next.protocol !== 'https:' && next.protocol !== 'http:') break
         res = await plain(next.toString(), 'text/plain')
       }
-      if (res.status >= 500) return 'deny'
+      if (res.status >= 500) return 'unreachable'
       if (res.status >= 400 || res.status >= 300) return 'allow'
       // A redirect that lands on a web page (a site that sends /robots.txt to its home page) means there is no robots file.
       if (/html/i.test(res.headers.get('content-type') ?? '')) return 'allow'
@@ -195,7 +196,7 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
       return robotsParser(url, text)
     } catch (error) {
       if (error instanceof ReaderError && error.reason === 'budget') throw error
-      return 'deny'
+      return 'unreachable'
     }
   }
 
@@ -211,11 +212,21 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
     return entry
   }
 
-  async function allowed(url: string): Promise<boolean> {
+  /** Why this address may not be fetched: a robots.txt rule that disallows it, or robots.txt that could not be read (RFC 9309: then nothing is fetched). Null when allowed. */
+  async function refusal(url: string): Promise<'robots' | 'unreachable' | null> {
     const robots = await robotsFor(url)
-    if (robots === 'allow') return true
-    if (robots === 'deny') return false
-    return robots.isAllowed(url, ROBOTS_TOKEN) !== false
+    if (robots === 'allow') return null
+    if (robots === 'unreachable') return 'unreachable'
+    return robots.isAllowed(url, ROBOTS_TOKEN) === false ? 'robots' : null
+  }
+
+  async function allowed(url: string): Promise<boolean> {
+    return (await refusal(url)) === null
+  }
+
+  async function mustBeAllowed(url: string): Promise<void> {
+    const why = await refusal(url)
+    if (why) throw new ReaderError(why)
   }
 
   function classify(res: { status: number }, body: string, finalUrl: string): void {
@@ -231,14 +242,14 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
 
     async sitemapsOf(origin) {
       const robots = await robotsFor(`${origin}/`)
-      if (robots === 'allow' || robots === 'deny') return []
+      if (robots === 'allow' || robots === 'unreachable') return []
       return robots.getSitemaps()
     },
 
     async get(url, opts = {}) {
       let current = url
       for (let hop = 0; hop <= MAX_HOPS; hop++) {
-        if (!(await allowed(current))) throw new ReaderError('robots')
+        await mustBeAllowed(current)
         spend()
         await politely(new URL(current).host)
         let res: Response
@@ -273,13 +284,13 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
     },
 
     async gate(url) {
-      if (!(await allowed(url))) throw new ReaderError('robots')
+      await mustBeAllowed(url)
       spend()
       await politely(new URL(url).host)
     },
 
     async redirectOf(url) {
-      if (!(await allowed(url))) throw new ReaderError('robots')
+      await mustBeAllowed(url)
       spend()
       await politely(new URL(url).host)
       try {
@@ -297,7 +308,7 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
 
     async json<T>(url: string, opts: { allowedHosts: ReadonlySet<string>; method?: 'GET' | 'POST'; body?: string; headers?: Record<string, string> }) {
       assertAllowedHost(url, opts.allowedHosts)
-      if (!(await allowed(url))) throw new ReaderError('robots')
+      await mustBeAllowed(url)
       spend()
       await politely(new URL(url).host)
       try {

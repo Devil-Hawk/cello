@@ -220,6 +220,27 @@ describe('the page is read as Cello, once, and named by its employer', () => {
     const body = await (await POST(post('https://acme.com/careers'))).json()
     expect(calls.map((c) => c.url)).toEqual(['https://acme.com/robots.txt'])
     expect(body.message).toContain('robots.txt')
+    expect(body.isValid).toBe(false)
+  })
+
+  it('a site whose address does not answer is unreachable: no robots claim and no green tick', async () => {
+    noAi()
+    recordFetch(() => {
+      throw new TypeError('fetch failed')
+    })
+    const body = await (await POST(post('https://careers.deadco-nonexistent-xyz.com/'))).json()
+    expect(body.isValid).toBe(false)
+    expect(body.status).toBe('unreachable')
+    expect(body.message).not.toContain('robots')
+    expect(body.message).toContain('could not reach')
+  })
+
+  it('a robots.txt that answers 503 is unreachable, not a rule', async () => {
+    noAi()
+    recordFetch((url) => (url.endsWith('/robots.txt') ? new Response('down', { status: 503 }) : new Response(PAGE, { status: 200 })))
+    const body = await (await POST(post('https://acme.com/careers'))).json()
+    expect(body.isValid).toBe(false)
+    expect(body.message).not.toContain('robots')
   })
 
   it('a marketing title is not the company name: a page titled "Find your career" at jobs.zalando.com is Zalando', async () => {

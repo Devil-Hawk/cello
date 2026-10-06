@@ -186,6 +186,7 @@ const UNREADABLE: Partial<Record<ReaderReason, string>> = {
   robots: "The site's robots.txt asks automated readers to stay away, so Cello will not read it.",
   bot_check: 'The site answers automated requests with a bot check, so Cello cannot read it.',
   login_required: 'The page needs a login, so Cello cannot read it.',
+  unreachable: "Cello could not reach this site (its address does not answer), so it cannot read it. Check the address and try again.",
 }
 
 export async function POST(request: NextRequest) {
@@ -305,8 +306,10 @@ export async function POST(request: NextRequest) {
 
     if (!fetchSuccess) {
       // Check if URL looks like a career page even without fetching
+      // A site Cello cannot reach, or whose robots.txt asks it to stay away, is not "a career page that will be monitored": no green tick.
+      const cannotRead = unreadable === 'unreachable' || unreadable === 'robots'
       const urlHasJobPattern = JOB_URL_PATTERNS.some(p => normalizedUrl.toLowerCase().includes(p))
-      if (urlHasJobPattern) {
+      if (urlHasJobPattern && !cannotRead) {
         const guessedName = lookupKnownCompanyByDomain(domain)?.name ?? nameFromDomain(domain)
         return NextResponse.json({
           isValid: true,

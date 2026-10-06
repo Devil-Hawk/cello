@@ -47,11 +47,29 @@ describe('site fetcher: robots.txt', () => {
     await expect(fetcher.get('https://acme.test/jobs')).rejects.toMatchObject({ reason: 'robots' })
   })
 
-  it('allows everything when robots.txt is a 404, and disallows everything when it answers 503', async () => {
+  it('allows everything when robots.txt is a 404; when it answers 503 nothing is fetched, and the reason is unreachable, not a rule', async () => {
     const ok = harness({ 'https://acme.test/robots.txt': robots('nf', 404), 'https://acme.test/jobs': html('<p>hi</p>') })
     expect((await ok.fetcher.get('https://acme.test/jobs')).text).toContain('hi')
     const down = harness({ 'https://acme.test/robots.txt': robots('down', 503), 'https://acme.test/jobs': html('<p>hi</p>') })
-    await expect(down.fetcher.get('https://acme.test/jobs')).rejects.toMatchObject({ reason: 'robots' })
+    await expect(down.fetcher.get('https://acme.test/jobs')).rejects.toMatchObject({ reason: 'unreachable' })
+  })
+
+  it('a host that does not resolve is unreachable on every door, never a robots rule', async () => {
+    const dead = (async () => {
+      throw new TypeError('fetch failed')
+    }) as unknown as typeof fetch
+    const f = makeSiteFetcher({ fetchImpl: dead, assertSafe: async () => {}, sleep: async () => {} })
+    const url = 'https://careers.dead-host.test/'
+    await expect(f.get(url)).rejects.toMatchObject({ reason: 'unreachable' })
+    await expect(f.gate(url)).rejects.toMatchObject({ reason: 'unreachable' })
+    await expect(f.redirectOf(url)).rejects.toMatchObject({ reason: 'unreachable' })
+    await expect(f.json(url, { allowedHosts: new Set(['careers.dead-host.test']) })).rejects.toMatchObject({ reason: 'unreachable' })
+    expect(await f.allowed(url)).toBe(false)
+  })
+
+  it('a robots.txt that was read and disallows the path is still robots', async () => {
+    const { fetcher } = harness({ 'https://acme.test/robots.txt': robots('User-agent: *\nDisallow: /\n') })
+    await expect(fetcher.gate('https://acme.test/jobs')).rejects.toMatchObject({ reason: 'robots' })
   })
 
   it('a site that sends /robots.txt to a web page has no robots file, however big that page is', async () => {
