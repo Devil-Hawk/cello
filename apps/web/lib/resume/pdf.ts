@@ -174,6 +174,16 @@ function sanitize(text: string): string {
   return out
 }
 
+/**
+ * A word wider than a whole line (a pasted 400-character address) is cut into line-sized pieces on
+ * their own lines, so nothing runs off the page and no character is lost or added.
+ * ponytail: the piece length assumes an average glyph width of 0.62em; measure with the font's
+ * metrics if an all-capitals word ever overflows.
+ */
+function chunkLong(text: string, max: number): string {
+  return text.replace(/\S+/gu, (word) => (word.length > max ? (word.match(new RegExp(`.{1,${max}}`, 'gu')) ?? [word]).join('\n') : word))
+}
+
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
@@ -248,19 +258,21 @@ function buildDocument(pdf: Pdf, blocks: readonly ResumeBlock[], tpl: TemplateSp
   }
 
   /** One authored line as a block of text. Emphasis, code and links are nested runs. */
-  const line = (runs: ResumeInlineLine, s: Style): ReactElement | null => {
+  const line = (runs: ResumeInlineLine, s: Style, width = column): ReactElement | null => {
     const parts = runs.flatMap((run) => {
-      const text = sanitize(s.casing === 'uppercase' ? run.text.toUpperCase() : run.text)
+      const text = chunkLong(sanitize(s.casing === 'uppercase' ? run.text.toUpperCase() : run.text), Math.max(8, Math.floor(width / (s.size * 0.62))))
       if (!text) return []
       const style = { fontFamily: font(run.code ? tpl.fonts.mono : s.family, s.bold || run.bold === true, s.italic || run.italic === true) } as Sty
-      return [run.href && SAFE_HREF.test(run.href.trim()) ? h(Link, { src: run.href.trim(), style }, text) : h(Text, { style }, text)]
+      // A link keeps the template's colour, with no underline: the address is never printed beside it.
+      const linkStyle = { ...style, color: s.color, textDecoration: 'none' } as Sty
+      return [run.href && SAFE_HREF.test(run.href.trim()) ? h(Link, { src: run.href.trim(), style: linkStyle }, text) : h(Text, { style }, text)]
     })
     if (parts.length === 0) return null
     const style = { fontFamily: font(s.family, s.bold, s.italic), fontSize: s.size, lineHeight: tpl.body.lineHeight, color: s.color, textAlign: s.align } as Sty
     return h(Text, { style }, ...parts)
   }
 
-  const lines = (all: readonly ResumeInlineLine[], s: Style) => all.map((l) => line(l, s)).filter((x): x is ReactElement => x !== null)
+  const lines = (all: readonly ResumeInlineLine[], s: Style, width = column) => all.map((l) => line(l, s, width)).filter((x): x is ReactElement => x !== null)
 
   const rule = (spec: RuleSpec, align: TextAlign) =>
     h(View, {
@@ -273,6 +285,7 @@ function buildDocument(pdf: Pdf, blocks: readonly ResumeBlock[], tpl: TemplateSp
       } as Sty,
     })
 
+  const column = tpl.page.width - tpl.page.margins.left - tpl.page.margins.right
   const body: Style = { family: tpl.fonts.body, bold: false, italic: false, size: tpl.body.size, color: tpl.colors.text, casing: 'none', align: 'left' }
   const bodyLeading = tpl.body.size * tpl.body.lineHeight
   const children: ReactElement[] = []
@@ -318,13 +331,13 @@ function buildDocument(pdf: Pdf, blocks: readonly ResumeBlock[], tpl: TemplateSp
       const b = tpl.bullets
       const items = block.items.map((item, index) => {
         // Clamp so that a pathologically deep list still leaves a readable column.
-        const indent = Math.min(item.depth * b.indent, Math.max(tpl.page.width - tpl.page.margins.left - tpl.page.margins.right - b.hangingIndent - 40, 0))
+        const indent = Math.min(item.depth * b.indent, Math.max(column - b.hangingIndent - 40, 0))
         const glyph = item.ordered ? `${item.marker ?? index + 1}.` : (b.glyphs[Math.min(item.depth, b.glyphs.length - 1)] ?? '•')
         return h(
           View,
           { style: { flexDirection: 'row', marginLeft: indent, marginTop: index > 0 ? b.itemSpacing : 0 } as Sty },
           h(View, { style: { width: b.hangingIndent } as Sty }, line([{ text: glyph }], body)),
-          h(View, { style: { flex: 1 } as Sty }, ...lines(item.lines, body))
+          h(View, { style: { flex: 1 } as Sty }, ...lines(item.lines, body, column - indent - b.hangingIndent))
         )
       })
       children.push(h(View, { style: { marginBottom: tpl.body.paragraphSpacing } as Sty }, ...items))
