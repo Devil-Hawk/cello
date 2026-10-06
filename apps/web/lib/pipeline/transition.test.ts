@@ -11,7 +11,7 @@ import { eventJson } from './transition'
 const ROOT = path.resolve(process.cwd(), '../..')
 const files = execFileSync('git', ['ls-files', 'apps/web', 'scripts'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
   .split('\n')
-  .filter((f) => /\.(ts|tsx|mjs|js)$/.test(f) && !/\.test\.|__fixtures__|\/fixtures\//.test(f))
+  .filter((f) => /\.(ts|tsx|mjs|js)$/.test(f) && !/\.test\.|\.fake\.|__fixtures__|\/fixtures\//.test(f))
 
 // ponytail: single-line patterns, so a write whose payload is a spread or a variable gets past them. The database
 // trigger on applications covers the session; the service role is covered by review. Upgrade: a TypeScript AST scan.
