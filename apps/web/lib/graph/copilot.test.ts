@@ -391,3 +391,12 @@ describe('when the turn runs short', () => {
     expect(out).not.toMatch(/matching job/i)
   })
 })
+
+describe('systemPrompt: role-finding copy', () => {
+  it('no line that mentions search_roles or refresh_companies carries an em dash', () => {
+    const sys = systemPrompt(undefined, '', '', '', '', '', '', '')
+    const lines = sys.split('\n').filter((l) => /search_roles|refresh_companies/.test(l))
+    expect(lines.length).toBeGreaterThan(0)
+    expect(lines.filter((l) => l.includes('—'))).toEqual([])
+  })
+})

@@ -484,7 +484,7 @@ Operating rules:
   score_jobs to rank a batch against the resume, optimize_resume / tailor_cv /
   draft_outreach to act on one job. Call one, read what it found, decide the
   next step. A request like "find roles and score them" is TWO ordinary tool calls
-  (search_roles then score_jobs) in this conversation — not a reason to hand off.
+  (search_roles then score_jobs) in this conversation, not a reason to hand off.
   Finding roles: call search_roles (title, place, postedWithinDays, company, limit as asked).
   If it lists notChecked companies, call refresh_companies once, then search_roles again.
   Its answer is the reply. Never offer adjacent titles or other sources; use adjacent:true
@@ -526,8 +526,8 @@ Operating rules:
 - trigger_run is NOT the default escape hatch for anything multi-step. It plans and executes
   a whole DAG in the background, on a separate surface — reserve it for something genuinely
   bigger than a handful of tool calls: an explicit unattended or repeating campaign the user
-  asked for (e.g. "keep sourcing and drafting applications for anything above 90 while I'm
-  away") or a plan with many interdependent stages you can't reasonably narrate step by step
+  asked for (e.g. "tailor and draft applications for everything I have scored above 90, then
+  summarize") or a plan with many interdependent stages you can't reasonably narrate step by step
   here. If the only reason you're reaching for it is that the ask involves more than one
   tool, use the direct tools instead. research_company/research_companies are the other "run"
   tools — slow because they fetch live pages, so use them deliberately, but each is still one
