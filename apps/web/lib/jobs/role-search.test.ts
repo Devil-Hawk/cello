@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { getToolSpec } from '../harness/copilot-tool-catalog'
 import {
   REFRESH_MAX_PER_TURN,
   formatRoleAnswer,
@@ -165,6 +166,12 @@ describe('formatRoleAnswer', () => {
 
   it('says so when nothing is followed', () => {
     expect(formatRoleAnswer({ ...base, searched: [], roles: [], limit: 5 })).toContain('[Companies](/companies)')
+  })
+
+  it('the new tool descriptions have no em dash, exclamation mark or offer', () => {
+    for (const name of ['search_roles', 'refresh_companies']) {
+      expect(getToolSpec(name)?.desc).not.toMatch(/—|!|want me to|receipt/i)
+    }
   })
 
   it('has no em dash, exclamation mark, offer or the word receipt', () => {

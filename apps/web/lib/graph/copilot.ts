@@ -124,6 +124,7 @@ import {
 } from '../harness/copilot-tools'
 import { isStepAgentType, type StepAgentType } from '../harness/copilot-tool-catalog'
 import type { AdminClient } from '../harness/types'
+import { formatRoleLine } from '../jobs/role-search'
 
 // --- Wire-adjacent types (also imported by app/api/copilot/route.ts's adapter) ---
 
@@ -592,6 +593,27 @@ function buildMessages(convo: ChatMessage[], trace: TraceEntry[], objective: str
   return messages
 }
 
+/** The reply search_roles wrote, from the last of its calls that worked; the model's own prose never stands in for it. */
+export function latestRoleAnswer(trace: TraceEntry[]): string | undefined {
+  for (let i = trace.length - 1; i >= 0; i--) {
+    const t = trace[i]
+    if (t.tool !== 'search_roles' || t.status !== 'ok') continue
+    const answer = (t.observation as { answer?: unknown } | null)?.answer
+    return typeof answer === 'string' && answer ? answer : undefined
+  }
+  return undefined
+}
+
+/**
+ * A turn that ends right after a role search ends with that search's answer:
+ * the model's prose is dropped. ponytail: commentary the model wrote beside a
+ * finding is lost with it; add a one-line suffix if it is asked for.
+ */
+function roleAnswerLast(trace: TraceEntry[]): string | undefined {
+  const last = trace[trace.length - 1]
+  return last?.tool === 'search_roles' ? latestRoleAnswer([last]) : undefined
+}
+
 /** Deterministic recap when no more LLM calls can be afforded — verbatim
  *  from the pre-port route (see its header for the "report what was FOUND,
  *  not what ran" rationale). */
@@ -599,6 +621,9 @@ export function fallbackSummary(trace: TraceEntry[]): string {
   if (trace.length === 0) {
     return "I ran out of time before I could do anything useful. Narrowing the request — one company, one role, or one job at a time — will get further."
   }
+
+  const answer = latestRoleAnswer(trace)
+  if (answer) return `${answer}\n\nI ran out of time for this turn. Ask again to go further.`
 
   const asRecord = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' ? (v as Record<string, unknown>) : null)
 
@@ -612,7 +637,16 @@ export function fallbackSummary(trace: TraceEntry[]): string {
       continue
     }
     if (obs && Array.isArray(obs.jobs)) {
-      lines.push(`- found ${(obs.count as number) ?? obs.jobs.length} matching job(s)`)
+      const roles = (obs.jobs as Record<string, unknown>[]).slice(0, 10).map((j) =>
+        formatRoleLine({
+          title: typeof j.title === 'string' ? j.title : null,
+          company: typeof j.company === 'string' ? j.company : null,
+          url: typeof j.url === 'string' ? j.url : null,
+          location: typeof j.location === 'string' ? j.location : null,
+          postedAt: typeof j.postedAt === 'string' ? j.postedAt : null,
+        })
+      )
+      lines.push(...(roles.length > 0 ? roles : [`- ${t.tool}: no roles`]))
     } else if (obs && typeof obs.runId === 'string') {
       backgroundRuns.push(String(obs.runId))
       lines.push(`- started a full agent run (${String(obs.status ?? 'running')})`)
@@ -955,8 +989,9 @@ async function plan(state: CopilotStateType, config: LangGraphRunnableConfig): P
     // normal dispatch->finalize->loadContext turn boundary — see DEADLINE
     // HANDLING at the top of this file for why this deliberately does not
     // call interrupt() itself.
-    let message: string | undefined
-    if (remaining() > 2_000) {
+    // A role search already holds its answer: no model call to write it again.
+    let message: string | undefined = latestRoleAnswer(state.trace)
+    if (!message && remaining() > 2_000) {
       try {
         const res = await callLlm(
           apiKeys,
@@ -1045,7 +1080,7 @@ async function dispatch(state: CopilotStateType, config: LangGraphRunnableConfig
 
   // --- final --------------------------------------------------------------
   if (action.action === 'final' || (!action.tool && !action.question && typeof action.message === 'string')) {
-    return { finalMessage: scrubJargon(action.message ?? '(no answer)'), trace: state.trace, wireEvents: [] }
+    return { finalMessage: roleAnswerLast(state.trace) ?? scrubJargon(action.message ?? '(no answer)'), trace: state.trace, wireEvents: [] }
   }
 
   // --- structured multi-question ask form ----------------------------------
@@ -1222,7 +1257,7 @@ async function dispatch(state: CopilotStateType, config: LangGraphRunnableConfig
 
   // --- unparseable / empty action ---------------------------------------------
   if (typeof action.message === 'string') {
-    return { finalMessage: scrubJargon(action.message), trace: state.trace, wireEvents: [] }
+    return { finalMessage: roleAnswerLast(state.trace) ?? scrubJargon(action.message), trace: state.trace, wireEvents: [] }
   }
   return {
     trace: [...state.trace, { tool: '(none)', args: {}, observation: { error: 'model returned no valid action' }, ok: false, status: 'error' }],
