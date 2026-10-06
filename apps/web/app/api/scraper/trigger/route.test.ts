@@ -12,6 +12,9 @@ import type { AtsStore, JobUpsertRow } from '@/lib/ats'
 const callLlmMock = vi.fn()
 vi.mock('@/lib/harness/llm', () => ({ callLlm: (...a: unknown[]) => callLlmMock(...a), parseJsonLoose: (s: string) => JSON.parse(s) }))
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({}) }))
+// The clock's record of the next check: the sentence takes its time from here and never guesses one.
+const clock = { nextDueAt: '2026-10-08T18:00:00Z' as string | null }
+vi.mock('@/lib/clock/status', () => ({ checksStatus: async () => ({ rolesCheck: clock.nextDueAt ? { nextDueAt: clock.nextDueAt } : null }) }))
 vi.mock('@/lib/trace/spans', () => ({ withTrace: async (_a: unknown, _u: unknown, _s: unknown, fn: () => unknown) => fn() }))
 
 // No test here touches the network: the plain fetcher resolves hosts through this, so the check is faked.
@@ -87,6 +90,7 @@ let fetchMock: ReturnType<typeof vi.fn<unknown[], Promise<Response>>>
 beforeEach(() => {
   callLlmMock.mockReset()
   pageHtml = LD_PAGE
+  clock.nextDueAt = '2026-10-08T18:00:00Z'
   state.lock = true
   state.upserted = []
   // The careers page answers; every board probe and every other address misses, so the company has no board.
@@ -110,8 +114,15 @@ describe('POST /api/scraper/trigger', () => {
     pageHtml = '<html><body><div id="root"></div><script src="/app.js"></script></body></html>'
     const body = await (await POST(post())).json()
     expect(body).toMatchObject({ success: true, jobsFound: 0, inserted: 0, reading: true })
-    expect(body.message).toMatch(/^Cello is reading this site\. Next check around \d\d:\d\d UTC\.$/)
+    expect(body.message).toBe('Cello is reading this site. Next check around 18:00 UTC.')
     expect(state.upserted).toEqual([])
+  })
+
+  it('leaves the time out of that answer when the clock has not scheduled a check', async () => {
+    pageHtml = '<html><body><div id="root"></div><script src="/app.js"></script></body></html>'
+    clock.nextDueAt = null
+    const body = await (await POST(post())).json()
+    expect(body.message).toBe('Cello is reading this site.')
   })
 
   it('a site that asks for a bot check is not read, and the answer says why', async () => {

@@ -23,7 +23,9 @@ delete from vault.decrypted_secrets where name in ('agent_continue_url', 'agent_
 
 -- A person's routines come from their profile.
 insert into auth.users (id, email) select user_id, 'clock-a@example.invalid' from fx union all select demo_id, 'clock-demo@example.invalid' from fx;
-insert into public.profiles (id, email) select user_id, 'clock-a@example.invalid' from fx;
+-- (a trigger on auth.users has made both profiles, and a routine for each.) A demo's profile is
+-- replaced by one flagged as a demo: it gets none.
+delete from public.profiles where id = (select demo_id from fx);
 insert into public.profiles (id, email, is_demo) select demo_id, 'clock-demo@example.invalid', true from fx;
 
 do $$
