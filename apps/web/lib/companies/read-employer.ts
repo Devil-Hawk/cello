@@ -12,6 +12,10 @@
 //
 // Every 90 days the board is checked again by the verifier before it is read; a board that no longer checks out leaves
 // the rotation with its reason. The row itself is only ever written by verify-directory.ts.
+//
+// ponytail: a different employer name is caught at the 90-day look, not on every read; compare AtsJob.employer per read when
+// the providers that carry it (Workday, SmartRecruiters) matter. Employers read through their own site (no board) are not
+// swept: their followers' checks read them (lib/clock/routines/roles-check.ts).
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isDemoProfile } from '../access/guardrails'
