@@ -1,7 +1,5 @@
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { dueAt, nextCheckAt, partialReadNote, rolesStatus, rolesStatusLine } from './roles-status'
+import { dueAt, partialReadNote, rolesStatus, rolesStatusLine } from './roles-status'
 
 const at = (iso: string) => Date.parse(iso)
 
@@ -17,14 +15,21 @@ describe('rolesStatus', () => {
     expect(rolesStatusLine(rolesStatus({}, 0, { checking: true, now })).text).toBe('Checking now')
   })
 
-  it('says when the next check is for a company never checked', () => {
-    const line = rolesStatusLine(rolesStatus({ last_scraped_at: null }, 0, { now }))
+  it('says when the next check is for a company never checked, as the clock gives it', () => {
+    const line = rolesStatusLine(rolesStatus({ last_scraped_at: null }, 0, { now, nextCheckAt: at('2026-10-05T13:00:00Z') }))
     expect(line.text).toBe('Not checked yet, next check in about 3 h')
+  })
+
+  it('leaves the time out when the clock has not given one, and never guesses', () => {
+    expect(rolesStatusLine(rolesStatus({ last_scraped_at: null }, 0, { now })).text).toBe('Not checked yet')
+    expect(rolesStatusLine(rolesStatus({ last_scraped_at: '2026-10-05T01:41:00Z' }, 0, { now })).text).toBe('No open roles right now')
+    const reading = { metadata: { source_check: { checked_at: '2026-10-05T10:00:00Z', readable: false, reason: 'reading' } }, career_url: 'https://jobs.example/' }
+    expect(rolesStatusLine(rolesStatus(reading, 0, { now })).text).toBe('Cello is reading this site')
   })
 
   it('says a readable company has no open roles, and when it is checked next', () => {
     const company = { last_scraped_at: '2026-10-05T01:41:00Z' }
-    const line = rolesStatusLine(rolesStatus(company, 0, { now }))
+    const line = rolesStatusLine(rolesStatus(company, 0, { now, nextCheckAt: at('2026-10-05T13:00:00Z') }))
     expect(line.text).toMatch(/^No open roles right now, next check in about/)
   })
 
@@ -47,7 +52,7 @@ describe('rolesStatus', () => {
 
   it('says Cello is reading the site, and when the next check is, while only a browser can read it', () => {
     const company = { metadata: { source_check: { checked_at: '2026-10-05T10:00:00Z', readable: false, reason: 'reading' } }, career_url: 'https://jobs.example/' }
-    expect(rolesStatusLine(rolesStatus(company, 0, { now }))).toEqual({ text: 'Cello is reading this site. Next check around 12:41 UTC' })
+    expect(rolesStatusLine(rolesStatus(company, 0, { now, nextCheckAt: at('2026-10-05T12:41:00Z') }))).toEqual({ text: 'Cello is reading this site. Next check around 12:41 UTC' })
   })
 
   it('a page that was reached but not read because no free model was available says it is waiting, never "no open roles"', () => {
@@ -74,24 +79,7 @@ describe('rolesStatus', () => {
   })
 })
 
-describe('next check', () => {
-  it('is the first scheduler tick (xx:41 of 00, 06, 12, 18 UTC) at or after the due time', () => {
-    expect(new Date(nextCheckAt({ last_scraped_at: null }, at('2026-10-05T10:00:00Z'))).toISOString()).toBe('2026-10-05T12:41:00.000Z')
-    expect(new Date(nextCheckAt({ last_scraped_at: null }, at('2026-10-05T12:30:00Z'))).toISOString()).toBe('2026-10-05T12:41:00.000Z')
-    expect(new Date(nextCheckAt({ last_scraped_at: null }, at('2026-10-05T12:42:00Z'))).toISOString()).toBe('2026-10-05T18:41:00.000Z')
-    expect(new Date(nextCheckAt({ last_scraped_at: null }, at('2026-10-05T23:00:00Z'))).toISOString()).toBe('2026-10-06T00:41:00.000Z')
-  })
-
-  it('waits for the tier interval: a dream company checked an hour ago goes at the next tick', () => {
-    const dream = { is_dream_company: true, last_scraped_at: '2026-10-05T11:00:00Z' }
-    expect(new Date(nextCheckAt(dream, at('2026-10-05T11:30:00Z'))).toISOString()).toBe('2026-10-05T12:41:00.000Z')
-  })
-
-  it('waits a day for an ordinary company', () => {
-    const daily = { last_scraped_at: '2026-10-05T09:00:00Z' }
-    expect(new Date(nextCheckAt(daily, at('2026-10-05T10:00:00Z'))).toISOString()).toBe('2026-10-06T12:41:00.000Z')
-  })
-
+describe('when a company is due', () => {
   it('uses the later of the last scrape and the recorded check', () => {
     const c = { last_scraped_at: '2026-10-01T00:00:00Z', metadata: { source_check: { checked_at: '2026-10-05T09:00:00Z', readable: false } } }
     expect(dueAt(c)).toBe(at('2026-10-05T09:00:00Z') + (1440 - 5) * 60_000)
@@ -104,11 +92,6 @@ describe('next check', () => {
 
   it('is due at once when never checked', () => {
     expect(dueAt({})).toBe(0)
-  })
-
-  it('matches the cron in the workflow, so the promised time is real', () => {
-    const yml = readFileSync(path.resolve(__dirname, '../../../../.github/workflows/scrape.yml'), 'utf8')
-    expect(yml).toContain("- cron: '41 */6 * * *'")
   })
 })
 

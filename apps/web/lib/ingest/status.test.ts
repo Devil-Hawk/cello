@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { FAILURE_TEXT, nextCheckAfter, readFindNewRoles } from './status'
+import { FAILURE_TEXT, readFindNewRoles } from './status'
 
 const NOW = new Date('2026-10-06T17:00:00Z')
 
@@ -43,13 +43,11 @@ const run = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
-describe('nextCheckAfter', () => {
-  it('is 18:41 UTC from 17:00 UTC, the same cron as the scheduled workflow', () => {
-    expect(nextCheckAfter(NOW).toISOString()).toBe('2026-10-06T18:41:00.000Z')
-  })
-  it('rolls to the next day after the last check of the day, and past an exact check time', () => {
-    expect(nextCheckAfter(new Date('2026-10-06T19:00:00Z')).toISOString()).toBe('2026-10-07T00:41:00.000Z')
-    expect(nextCheckAfter(new Date('2026-10-06T18:41:00Z')).toISOString()).toBe('2026-10-07T00:41:00.000Z')
+describe('the next check', () => {
+  it('is the one the clock gives, and null when the clock has not scheduled one', async () => {
+    expect((await readFindNewRoles(fakeClient({ run: run() }), NOW, '2026-10-06T18:00:00.000Z')).nextCheckAt).toBe('2026-10-06T18:00:00.000Z')
+    expect((await readFindNewRoles(fakeClient({ run: run() }), NOW)).nextCheckAt).toBeNull()
+    expect((await readFindNewRoles(fakeClient({ run: null }), NOW)).nextCheckAt).toBeNull()
   })
 })
 
@@ -60,7 +58,7 @@ describe('readFindNewRoles', () => {
   })
 
   it('reads a finished check', async () => {
-    expect(await readFindNewRoles(fakeClient({ run: run() }), NOW)).toMatchObject({
+    expect(await readFindNewRoles(fakeClient({ run: run() }), NOW, '2026-10-06T18:41:00.000Z')).toMatchObject({
       state: 'done',
       companiesChecked: 42,
       companiesTotal: 42,

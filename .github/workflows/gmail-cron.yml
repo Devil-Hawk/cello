@@ -7,16 +7,14 @@ name: Gmail Cron - Scheduled Sync
 # (lib/gmail/sync-core.ts — the exact per-user pipeline, reused not forked).
 #
 # Guarded by the CRON_SECRET repo secret (must match the CRON_SECRET env var
-# on the Vercel deployment — the same secret autopilot-cron.yml/
-# harness-cron.yml use). Target URL defaults to prod but can be overridden
+# on the Vercel deployment). Target URL defaults to prod but can be overridden
 # with the GMAIL_CRON_URL repo variable (Settings -> Secrets and variables ->
 # Actions -> Variables).
+#
+# No schedule: the hourly mail read is the inbox.sync routine of the database
+# clock. Run it by hand from the Actions tab.
 
 on:
-  schedule:
-    # Hourly at an odd minute: GitHub drops top-of-hour and round-minute ticks
-    # under load. Doubles as the free Supabase project's keep-alive.
-    - cron: '47 * * * *'
   workflow_dispatch:
 
 # Never let two ticks overlap; a single in-flight tick keeps the per-tick cap

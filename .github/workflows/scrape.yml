@@ -1,15 +1,17 @@
 name: Find new roles
 
+# Reads the sites that only a browser can read. It has no schedule: the database
+# clock (pg_cron, agent_sweep()) dispatches it with the companies that need it,
+# at most 50 at a time, and only while the roles.render routine is on. A person's
+# own check runs on the clock too (roles.check); this is its rendered tier.
+# Run by hand from the Actions tab with a comma list of company ids.
+
 on:
-  schedule:
-    # Every 6 hours at an odd minute (GitHub drops top-of-hour ticks; the
-    # effective rate was already ~5 a day).
-    - cron: '41 */6 * * *'
   workflow_dispatch:
     inputs:
-      company_id:
-        description: 'Specific company ID to check (optional)'
-        required: false
+      company_ids:
+        description: 'Company ids to read, comma separated (at most 50)'
+        required: true
         type: string
 
 # One check at a time. Two overlapping ones would read the same companies twice
@@ -77,11 +79,12 @@ jobs:
           LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL || '' }}
           INGEST_PAGE_FETCHER: python
           # Via env, never interpolated into the script: a dispatch input is
-          # attacker-shaped text. Must be a UUID or empty.
-          COMPANY_ID: ${{ github.event.inputs.company_id || '' }}
+          # attacker-shaped text. Must be a comma list of at most 50 UUIDs.
+          COMPANY_IDS: ${{ github.event.inputs.company_ids || '' }}
         run: |
-          if [ -n "$COMPANY_ID" ] && ! [[ "$COMPANY_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
-            echo "::error::company_id must be a UUID"
+          uuid='[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+          if ! [[ "$COMPANY_IDS" =~ ^${uuid}(,${uuid}){0,49}$ ]]; then
+            echo "::error::company_ids must be a comma list of 1 to 50 UUIDs"
             exit 1
           fi
           cd apps/web
