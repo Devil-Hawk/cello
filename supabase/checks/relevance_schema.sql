@@ -145,6 +145,31 @@ begin
   if pg_temp.as_user(f.c, 'select count(*) from public.person_roles') <> 0 then raise exception 'C reads no person_roles'; end if;
 end $$;
 
+-- person_jobs: each person reads only their own roles, and viewer_company_id is their own company
+-- even for a shared role whose company_id is another person's.
+create function pg_temp.as_user_text(uid uuid, q text) returns text language plpgsql as $$
+declare t text;
+begin
+  perform set_config('request.jwt.claims', json_build_object('sub', uid, 'role', 'authenticated')::text, true);
+  execute 'set local role authenticated';
+  execute q into t;
+  reset role;
+  perform set_config('request.jwt.claims', '', true);
+  return t;
+end $$;
+
+do $$
+declare f record;
+begin
+  select * into f from fx;
+  if pg_temp.as_user(f.b, 'select count(*) from public.person_jobs') <> 1 then raise exception 'B reads only their own roles through person_jobs'; end if;
+  if pg_temp.as_user(f.a, 'select count(*) from public.person_jobs') <> 2 then raise exception 'A reads only their own roles through person_jobs'; end if;
+  if pg_temp.as_user_text(f.b, format('select viewer_company_id::text from public.person_jobs where id = %L', f.ja1)) <> f.co_b::text then
+    raise exception 'viewer_company_id is B''s own company for a row whose company_id is A''s';
+  end if;
+  if (select count(*) from public.person_jobs where viewer_id = f.a) <> 2 then raise exception 'the service role filters on viewer_id'; end if;
+end $$;
+
 -- The directory match: C follows nothing, and gets the roles others' checks stored at verified employers,
 -- judged in code; only the ones C does not hold are offered, and giving them is idempotent.
 do $$
@@ -296,6 +321,7 @@ select pg_temp.must_be_denied('authenticated', 'select public.prune_stale_rows()
 select pg_temp.must_be_denied('authenticated', 'select * from public.directory_roles_for(gen_random_uuid())');
 select pg_temp.must_be_denied('authenticated', $q$select public.add_person_roles(gen_random_uuid(), '{}')$q$);
 select pg_temp.must_be_denied('anon', 'select 1 from public.person_roles');
+select pg_temp.must_be_denied('anon', 'select 1 from public.person_jobs');
 select pg_temp.must_be_denied('anon', 'select 1 from public.company_directory');
 select pg_temp.must_be_denied('authenticated', 'select 1 from public.company_directory');
 select pg_temp.must_be_denied('authenticated', 'select 1 from public.seen_postings');
