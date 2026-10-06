@@ -1,7 +1,7 @@
 // Types for who may see a role and why a role was not kept. Types only: nothing here runs.
 //
 // Pushed first (v4/clock-relevance-k5a-types) so the lanes that render or read these rows can import
-// them before the code that fills them exists. This file grows with K5c (role types and `type_prov`)
+// them before the code that fills them exists. This file grows with K5c (role types and `type_prov`, below)
 // and K5d (the posting's Markdown and requirement items).
 //
 // The tables are in migration 20261008050000: person_roles, person_counts, seen_postings,
@@ -16,6 +16,9 @@ export type SourceTier = 'board' | 'site_search' | 'sitemap' | 'listing' | 'rend
 /** An agency or a repost is stored but never shown as the employer's own (jobs.legit_label). */
 export type LegitLabel = 'agency' | 'repost'
 
+/** How a role came to be the person's: a check read it (check), they pasted a link (link), or they hold it as a followed employer's role (company; K5d). */
+export type RoleVia = 'check' | 'link' | 'company'
+
 /** One row of person_roles: the person's relation to one stored role. Everything per person lives here, never on `jobs`. */
 export interface PersonRole {
   user_id: string
@@ -29,6 +32,10 @@ export interface PersonRole {
   hidden_reason: HiddenReason | null
   /** The last time a check confirmed the role against the employer's listing (ISO). */
   checked_at: string | null
+  /** K5c. How the role became the person's. */
+  via: RoleVia | null
+  /** K5c. The person's own correction of the role's type: null when they made none. By definition the person's, so it carries no origin. */
+  role_type: string | null
 }
 
 /** The stage of the targets code that decided a role is not for a person (lib/jobs/target-relevance.ts). */
@@ -61,4 +68,59 @@ export interface EmployerRef {
   /** The last read's total of open roles ("of 636 open"). */
   open_count: number | null
   open_count_at: string | null
+}
+
+// --- Role types (K5c; taxonomy in lib/jobs/role-types, section 6.1) ------------------------------------
+
+/** The kind of job a posting is, apart from its level. */
+export interface RoleType {
+  id: string
+  label: string
+  /** A `job_function` value. */
+  family: string
+  related: string[]
+  taxonomy_version: number
+  retired_at: string | null
+}
+
+/** Who typed a title or role. Never 'person' on a posting: a person's correction lives on person_roles. */
+export type TypeOrigin = 'code' | 'model'
+
+/** Why a role has its type (3.2). `rule` for code; the embedder and the model step add their own fields in K15b. */
+export interface TypeProv {
+  rule?: 'synonym' | 'pattern' | 'department'
+  pattern?: string
+  taxonomy_version?: number
+  step?: string
+  model?: string
+  rung?: string
+  evidence?: { quote: string }[]
+  similarity?: number
+  margin?: number
+  runner_up?: string
+  at?: string
+  /** 'posting': the answer leaned on one posting's text, so it is kept on that role only, never on title_types. */
+  scope?: 'posting'
+}
+
+/** One judgement per (normalised title, department): shared by every employer and person. */
+export interface TitleType {
+  title_norm: string
+  /** The normalised department or team for a title on the ambiguous list, else the empty string. */
+  dept_norm: string
+  role_type: string | null
+  origin: TypeOrigin
+  prov: TypeProv | null
+  taxonomy_version: number
+  status: 'typed' | 'pending' | 'none'
+  n_seen: number
+  typed_at: string | null
+}
+
+/** The person's own word for a title: a correction, or a title they typed and accepted the type Cello named. */
+export interface RoleTypeSynonym {
+  user_id: string
+  title_norm: string
+  role_type: string
+  source: 'correction' | 'typed'
 }
