@@ -42,7 +42,7 @@ declare f record; row_a jsonb; later jsonb;
 begin
   select * into f from fx;
   row_a := jsonb_build_array(jsonb_build_object(
-    'company_id', f.co_a, 'external_id', 'p-1', 'title', 'Backend Engineer', 'description', 'plain copy', 'url', 'https://posting.example/jobs/1',
+    'company_id', f.co_a, 'employer_id', f.emp, 'external_id', 'p-1', 'title', 'Backend Engineer', 'description', 'plain copy', 'url', 'https://posting.example/jobs/1',
     'source', 'greenhouse', 'last_seen_at', now(), 'description_md', E'## About\n\nWhole body.', 'description_state', 'full',
     'description_source', 'api', 'apply_url', 'https://apply.example/1', 'description_md5', md5(E'## About\n\nWhole body.')));
   perform public.upsert_shared_jobs(row_a);

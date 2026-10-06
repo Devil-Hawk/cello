@@ -84,6 +84,9 @@ function fakeAdmin(jobs: typeof TITLE_ONLY_JOB[]): {
         persisted.set(jobId, { score: patch.match_score, matchDetails: patch.match_details })
         return builder
       },
+      is() {
+        return builder
+      },
       then(resolve: (v: { error: null }) => void) {
         resolve({ error: null })
       },
