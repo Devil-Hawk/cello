@@ -1,29 +1,24 @@
-// In-memory per-user rate limiter for /api/search. Deliberately NOT
-// database-backed — this task is DB-read-only, and a sliding-window Map is
-// good enough to stop one user/loop from hammering Exa (paid, ~$7/1k
-// searches) or DuckDuckGo (a shared free resource we don't want every user
-// getting IP-blocked on). Resets on a cold start / rolls over per serverless
-// instance — a sanity governor, not a hard security boundary.
+// The per-person limit on /api/search: 12 a minute, counted by take_command_slot
+// so it holds across every function instance (the in-memory window it replaces
+// gave each instance its own count). The number lives in lib/commands/limits.ts
+// next to every other limit. DuckDuckGo is free but shared and the other
+// backends are metered, so this must not be callable in an unbounded loop.
 
-const WINDOW_MS = 60_000
-/** Generous for the free DuckDuckGo path, still cheap even if every call
- *  happened to land on the paid Exa backend (worst case ~$0.084/user/min). */
-const MAX_PER_WINDOW = 12
+import { createAdminClient } from '@/lib/harness/supabase-admin'
+import { limitFor } from '@/lib/commands/limits'
+import { rpcSlotStore, type SlotStore } from '@/lib/commands/slots'
 
-const hits = new Map<string, number[]>()
-
-/** True if this request should be allowed; records the attempt either way so
- *  the window keeps sliding even while a user is over the limit. */
-export function allowSearchRequest(userId: string, now: number = Date.now()): boolean {
-  const windowStart = now - WINDOW_MS
-  const recent = (hits.get(userId) ?? []).filter((t) => t > windowStart)
-  const allowed = recent.length < MAX_PER_WINDOW
-  if (allowed) recent.push(now)
-  hits.set(userId, recent)
-  return allowed
-}
-
-/** Test-only: clear all recorded state between test runs. */
-export function _resetSearchRateLimitState(): void {
-  hits.clear()
+/** True if this request should be allowed. The attempt is counted either way, so
+ *  a person over the limit stays over it for the rest of the window. A failure
+ *  to count throws: a limit that cannot be checked is not a limit. */
+export async function allowSearchRequest(userId: string, store?: SlotStore): Promise<boolean> {
+  const limit = limitFor('search', 'session')
+  if (!limit) return true
+  return (store ?? rpcSlotStore(createAdminClient())).take({
+    userId,
+    channel: 'session',
+    bucket: 'search',
+    limit: limit.limit,
+    windowSeconds: limit.windowSeconds,
+  })
 }
