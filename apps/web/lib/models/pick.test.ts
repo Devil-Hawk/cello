@@ -19,9 +19,9 @@ const FREE = 'qwen/qwen3.8-27b:free'
 const chance = defineModelStep({ id: 'chance', kind: 'step', measure: 'S3', minRung: 'R2', below: 'Roles are ordered by title match and date.' })
 const draft = defineModelStep({ id: 'draft-follow-up', kind: 'step', measure: 'S6', minRung: 'R2', below: 'Write my own.' })
 
+// A person (userId) is what the daily caps count; the pick tests without one count nothing.
 const free = (extra: Partial<DecryptedApiKeys> = {}): DecryptedApiKeys => ({
   openrouter: 'k',
-  userId: 'user-1',
   models: { ceiling: 'R3', order: ['R3'], creditBought: false },
   ...extra,
 })
@@ -62,19 +62,19 @@ describe('the pick before a step runs', () => {
 describe('a free key without credit', () => {
   it('stops at 5 drafts a day with the cap sentence', async () => {
     const slots = memorySlotStore()
-    for (let i = 0; i < 5; i++) await draft.call(free(), { prompt: 'hi' }, { slots })
-    const error = await draft.call(free(), { prompt: 'hi' }, { slots }).catch((e) => e)
+    for (let i = 0; i < 5; i++) await draft.call(free({ userId: 'user-1' }), { prompt: 'hi' }, { slots })
+    const error = await draft.call(free({ userId: 'user-1' }), { prompt: 'hi' }, { slots }).catch((e) => e)
     expect(error).toBeInstanceOf(FreeCapError)
     expect(error.message).toBe('Free models allow 5 drafts a day. Add credit or choose another way to run.')
     expect(callLlmMock).toHaveBeenCalledTimes(5)
     // Another person has their own day, and a step with no daily cap is not counted.
     await draft.call(free({ userId: 'user-2' }), { prompt: 'hi' }, { slots })
-    await defineModelStep({ id: 'inbox.classify', kind: 'step', measure: 'S8', minRung: 'R1', below: 'x' }).call(free(), { prompt: 'hi' }, { slots })
+    await defineModelStep({ id: 'inbox.classify', kind: 'step', measure: 'S8', minRung: 'R1', below: 'x' }).call(free({ userId: 'user-1' }), { prompt: 'hi' }, { slots })
   })
 
   it('has no cap once credit was bought, or on a rung that is not free', async () => {
     const slots = memorySlotStore()
-    const credited = free({ models: { ceiling: 'R3', order: ['R3'], creditBought: true } })
+    const credited = free({ userId: 'user-1', models: { ceiling: 'R3', order: ['R3'], creditBought: true } })
     const paid: DecryptedApiKeys = { openrouter: 'k', userId: 'user-1', models: { ceiling: 'R4', order: ['R4'], creditBought: false } }
     for (let i = 0; i < 7; i++) {
       await draft.call(credited, { prompt: 'hi' }, { slots })

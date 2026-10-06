@@ -125,6 +125,10 @@ const BANNED_LANGCHAIN_PACKAGES = [
   '@langchain/google-genai',
 ]
 const BANNED_CHAT_CONSTRUCTOR = /new Chat[A-Z]\w+\(/
+
+/** The only files that may import the model packages: lib/models/factory.ts builds the chat models,
+ *  providers/embeddings.ts the embedders (lib/steps/source.test.ts fences every other raw call). */
+const MODEL_FACTORY_FILES = ['lib/models/factory.ts', 'lib/harness/providers/embeddings.ts']
 const BANNED_BIND_TOOLS = /\.bindTools\(/
 
 function findLangchainBanOffenses(src: string): string[] {
@@ -175,6 +179,9 @@ describe('LangChain model abstractions stay banned', () => {
 
     const offenders: string[] = []
     for (const file of files) {
+      // The ladder's model doors build every chat model and embedder here, and nowhere else:
+      // callLlm and the Chat door call them, so the ceiling and the spend ledger sit in front.
+      if (MODEL_FACTORY_FILES.includes(rel(file))) continue
       const offenses = findLangchainBanOffenses(readFileSync(file, 'utf8'))
       if (offenses.length > 0) offenders.push(`${rel(file)}: ${offenses.join(', ')}`)
     }

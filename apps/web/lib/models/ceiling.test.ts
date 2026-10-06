@@ -43,7 +43,9 @@ beforeEach(() => {
   vi.stubEnv('VERCEL', '')
   vi.stubEnv('CELLO_SELF_HOSTED', '')
 })
-afterEach(() => vi.unstubAllEnvs())
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
 
 describe('both model doors refuse a paid model below R4', () => {
   it('callLlm refuses a paid id before anything is reserved or sent', async () => {
