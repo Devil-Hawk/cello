@@ -8,7 +8,7 @@ name: Autopilot Cron - Continuous Draft
 # given tick to confirm a real, irreversible submission. Actual submission is
 # a separate, explicit, human-confirmed action outside this cron
 # (lib/harness/chains.ts#buildSubmitConfirmedPlan via the apply UI). "Never
-# stops" = this always-on discovery+drafting schedule, not unattended submits;
+# stops" = discovery and drafting only, never unattended submits;
 # each tick is still disciplined by the kill switch, dedupe, quality gate, and
 # official-APIs-only boundary baked into lib/harness/autopilot.ts.
 #
