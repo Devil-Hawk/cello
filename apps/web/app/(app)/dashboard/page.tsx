@@ -260,6 +260,7 @@ export default function DashboardPage() {
             created_at: string
             finished_at: string | null
             error: string | null
+            result?: unknown
           }
         | undefined
       setLatestRun(
@@ -271,6 +272,7 @@ export default function DashboardPage() {
               createdAt: runRow.created_at,
               finishedAt: runRow.finished_at,
               error: runRow.error,
+              result: runRow.result,
             }
           : null
       )
