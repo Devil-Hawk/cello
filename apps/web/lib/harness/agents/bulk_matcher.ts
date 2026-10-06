@@ -403,8 +403,6 @@ async function persistScores(admin: AdminClient, updates: ScoreUpdate[]): Promis
       .from('jobs')
       .update({ match_score: u.score, match_details: u.matchDetails })
       .eq('id', u.jobId)
-      // a shared role holds no one's score
-      .is('employer_id', null)
     if (error) console.error(`[bulk_matcher] persist failed for job ${u.jobId}`, error)
   })
 }

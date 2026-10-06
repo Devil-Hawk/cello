@@ -141,7 +141,7 @@ async function countUnscoredNoFilter(admin: AdminClient, userId: string, company
   // .in('company_id', companyIds) array — that breaks past ~600 companies.
   const { count, error } = await openRolesOnly(
     ownedJobsQuery(admin, userId, 'id', { count: 'exact', head: true })
-  ).is('match_score', null).is('employer_id', null)
+  ).is('match_score', null)
   if (error) {
     console.error('[agents/match/batch] unscored-count query failed', error)
     return 0
@@ -163,7 +163,6 @@ async function countRemainingInTargeting(
     ownedJobsQuery(admin, userId, 'id', { count: 'exact', head: true })
   )
     .is('match_score', null)
-    .is('employer_id', null) // a shared role is never scored (no one's score is stored on it)
     .or(`quality_score.is.null,quality_score.gte.${QUALITY_REJECT_THRESHOLD}`)
 
   if (targeting.functions.length > 0) query = query.or(facetOrFilter('job_function', targeting.functions))
