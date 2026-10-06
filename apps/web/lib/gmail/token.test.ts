@@ -29,7 +29,7 @@ afterEach(() => {
 })
 
 function jsonResponse(ok: boolean, body: unknown, status = ok ? 200 : 400) {
-  return { ok, status, json: async () => body } as Response
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 }
 
 describe('hasStoredGmailRefreshToken', () => {
