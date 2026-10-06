@@ -519,9 +519,15 @@ describe('applyDemoKeyGuards — what the loaders actually enforce', () => {
       model: 'anthropic/claude-sonnet-5',
     }
     const profile = { id: OWNER_ID, is_demo: false, demo_expires_at: null }
-    // Only addition: isDemo:false, which the Langfuse export reads to send the
-    // owner's prompt text (a demo and an unknown flag send none by default).
-    expect(applyDemoKeyGuards({ ...owner }, profile, OWNER_ID)).toEqual({ ...owner, isDemo: false })
+    // Only additions: isDemo:false, which the Langfuse export reads to send the
+    // owner's prompt text (a demo and an unknown flag send none by default), and
+    // models, the highest rung the person allows (lib/models/ladder.ts). The owner
+    // chose a paid model, so their ceiling stays R4: nothing they pay for stops.
+    expect(applyDemoKeyGuards({ ...owner }, profile, OWNER_ID)).toEqual({
+      ...owner,
+      isDemo: false,
+      models: { ceiling: 'R4', order: ['R4', 'R3', 'R2', 'R1'], creditBought: false },
+    })
   })
 
   it('tells the Langfuse export who this is: owner false, demo true, unreadable flag undefined (fails closed)', () => {

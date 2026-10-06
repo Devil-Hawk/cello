@@ -2,7 +2,7 @@
 // first so the lanes that build against the ladder have a shape to import.
 
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
-import type { Door, LlmResult, LlmRunOptions } from '../harness/types'
+import type { DecryptedApiKeys, Door, LlmResult, LlmRunOptions } from '../harness/types'
 import type { Prov } from '../provenance/types'
 
 export type { Door }
@@ -19,6 +19,8 @@ export interface StepRef {
   id: string
   /** The lowest rung at which the step still does its job. */
   minRung: Rung
+  /** What the person gets when no rung at or above minRung can run. */
+  below: string
 }
 
 export interface PersonModels {
@@ -42,7 +44,7 @@ export interface ModelDoorContext {
 }
 
 export interface ModelDoor {
-  pickRung(step: StepRef, person: PersonModels, available: Rung[]): RungPick
+  pickRung(step: StepRef, person: PersonModels, available: Rung[], keys: DecryptedApiKeys): RungPick
   complete(step: StepRef, opts: LlmRunOptions, ctx: ModelDoorContext): Promise<LlmResult & { prov: Prov }>
   chatModel(step: StepRef, ctx: ModelDoorContext): Promise<BaseChatModel>
 }

@@ -74,6 +74,7 @@ import {
   isDemoProfile,
   type DemoProfileFacts,
 } from '@/lib/access/guardrails'
+import { personModels } from '../models/ladder'
 import { resolveProviderPreferences } from './providers'
 import { REASONING_EFFORTS, type AdminClient, type DecryptedApiKeys, type ReasoningEffort } from './types'
 
@@ -239,7 +240,14 @@ export function applyDemoKeyGuards(
   // sampled lower and send no prompt text by default. Fail closed: only a
   // profile that PROVES it is not a demo (is_demo === false) counts as the
   // owner; an unreadable flag stays undefined, which the export treats as demo.
-  return { ...safe, isDemo: isDemoProfile(facts) ? true : facts.is_demo === false ? false : undefined }
+  const demo = isDemoProfile(facts)
+  return {
+    ...safe,
+    isDemo: demo ? true : facts.is_demo === false ? false : undefined,
+    // The highest rung this person allows and their order (lib/models/ladder.ts). All three key
+    // sources end here, so every model call carries it and the ceiling is checked at both doors.
+    models: personModels(safe, profile.preferences as Record<string, unknown> | null | undefined, demo),
+  }
 }
 
 export async function loadApiKeys(admin: AdminClient, userId: string): Promise<DecryptedApiKeys> {
