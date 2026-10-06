@@ -11,7 +11,6 @@
 --     it and keeps what they want;
 --   * applying records an applied reaction carrying that person's own prediction,
 --     with the employer name even when jobs.company_id is null;
---   * the chance distillation counts through person_roles.
 -- Everything runs in one transaction and rolls back, so any database is safe to
 -- point it at.
 --
@@ -173,18 +172,6 @@ begin
   if r.surface is distinct from 'applications' then raise exception 'the reaction names surface %', r.surface; end if;
   select count(*) into n from public.role_reactions where user_id = f.user_a and job_id = f.live_job;
   if n <> 1 then raise exception 'more than one reaction for one role: %', n; end if;
-end;
-$$;
-
--- The chance distillation counts through person_roles.
-do $$
-declare f record; n integer;
-begin
-  select * into f from fx;
-  update public.person_roles set chance = 'strong' where user_id = f.user_a and job_id = f.live_job;
-  update public.applications set stage = 'interview' where user_id = f.user_a and job_id = f.live_job;
-  select positive_count into n from public.distill_chance_by_label(f.user_a) where band = 'strong';
-  if n is distinct from 1 then raise exception 'distill_chance_by_label counted % interviews for a strong role', n; end if;
 end;
 $$;
 

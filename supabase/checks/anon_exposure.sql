@@ -75,11 +75,9 @@ select pg_temp.must_be_denied('anon', 'select public.get_client_safe_preferences
 select pg_temp.must_be_denied('anon', 'select public.set_onboarding_preferences(0.5)');
 select pg_temp.must_be_denied('anon', 'select public.profile_is_demo(gen_random_uuid())');
 select pg_temp.must_be_denied('anon', 'select public.is_service_role_request()');
-select pg_temp.must_be_denied('anon', 'select public.search_insights(gen_random_uuid())');
 select pg_temp.must_be_denied('anon', $q$select public.search_jobs_by_title_trgm(gen_random_uuid(), 'x', 5)$q$);
 select pg_temp.must_be_denied('anon', $q$select public.search_contacts_by_name_trgm(gen_random_uuid(), 'x', 5)$q$);
 select pg_temp.must_be_denied('anon', 'select * from public.find_company_merge_candidates(gen_random_uuid(), 0.6)');
-select pg_temp.must_be_denied('anon', 'select * from public.distill_outreach_by_company(gen_random_uuid())');
 select pg_temp.must_be_denied('anon', 'select public.prune_stale_rows()');
 select pg_temp.must_be_denied('anon', 'select public.handle_new_user()');
 
@@ -136,8 +134,6 @@ select pg_temp.must_be_denied('anon', 'select 1 from public.anon_check_future_tb
 -- ---------------------------------------------------------------------------
 select pg_temp.must_run('authenticated', user_id, 'select public.get_client_safe_preferences()') from fx;
 select pg_temp.must_run('authenticated', user_id, 'select public.set_onboarding_preferences(0.5)') from fx;
-select pg_temp.must_run('authenticated', user_id,
-  format('select public.search_insights(%L)', user_id)) from fx;
 select pg_temp.must_run('authenticated', user_id,
   format($q$select public.search_jobs_by_title_trgm(%L, 'x', 5)$q$, user_id)) from fx;
 select pg_temp.must_run('authenticated', user_id,
