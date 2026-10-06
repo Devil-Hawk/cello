@@ -103,6 +103,16 @@ describe('checkDraft', () => {
     expect(failing({ kind: 'cover_letter', body: letter(30), tier: 'brief', companyName: 'Ramp' })).toEqual(['word_count'])
   })
 
+  it('a reply may run to 160 words and may ask for nothing, but still must be signed and plain', () => {
+    const answer = ['Hi Jane,', '', 'Thursday at 2pm or Friday at 10am both work for me.', '', 'Thanks,', 'Marcus Delgado'].join('\n')
+    const reply = checkDraft({ ...base, kind: 'reply', body: answer })
+    expect(reply.checks.some((c) => c.id === 'one_ask')).toBe(false)
+    expect(reply.checks.find((c) => c.id === 'word_count')?.ok).toBe(true)
+    const long = checkDraft({ ...base, kind: 'reply', body: `Hi Jane,\n\n${'word '.repeat(170)}\n\nThanks,\nMarcus Delgado` })
+    expect(long.checks.find((c) => c.id === 'word_count')?.ok).toBe(false)
+    expect(checkDraft({ ...base, kind: 'reply', body: answer, senderName: 'Someone Else' }).checks.find((c) => c.id === 'signed_by_sender')?.ok).toBe(false)
+  })
+
   it('counts each asking sentence once', () => {
     expect(countAsks('Would you be open to a chat? Could you point me to someone?')).toBe(2)
     expect(countAsks('Could you tell me who is the right person?')).toBe(1)

@@ -7,7 +7,7 @@
 
 import { findBannedPhrases } from './banned'
 
-export type DraftKind = 'outreach' | 'follow_up' | 'cover_letter'
+export type DraftKind = 'outreach' | 'follow_up' | 'reply' | 'cover_letter'
 export type LetterTier = 'full' | 'focused' | 'brief'
 
 export interface DraftCheckInput {
@@ -50,6 +50,8 @@ export interface DraftCheckResult {
 
 export const OUTREACH_MAX_WORDS = 120
 export const FOLLOW_UP_MAX_WORDS = 80
+/** A reply answers what was asked, so it may run longer than a first note. */
+export const REPLY_MAX_WORDS = 160
 /** Words allowed in a cover letter body per evidence tier. */
 export const TIER_WORDS: Record<LetterTier, { min: number; max: number }> = {
   full: { min: 250, max: 350 },
@@ -101,12 +103,12 @@ export function checkDraft(input: DraftCheckInput): DraftCheckResult {
   const { kind, body } = input
   const subject = input.subject ?? ''
   const checks: DraftCheck[] = []
-  const emailLike = kind === 'outreach' || kind === 'follow_up'
+  const emailLike = kind === 'outreach' || kind === 'follow_up' || kind === 'reply'
 
   // Length.
   const words = countWords(body)
-  if (kind === 'outreach' || kind === 'follow_up') {
-    const limit = kind === 'outreach' ? OUTREACH_MAX_WORDS : FOLLOW_UP_MAX_WORDS
+  if (kind === 'outreach' || kind === 'follow_up' || kind === 'reply') {
+    const limit = kind === 'outreach' ? OUTREACH_MAX_WORDS : kind === 'reply' ? REPLY_MAX_WORDS : FOLLOW_UP_MAX_WORDS
     const previous = input.previousBody ? countWords(input.previousBody) : null
     const underLimit = words <= limit
     const shorter = kind === 'follow_up' && previous !== null ? words < previous : true
@@ -148,8 +150,9 @@ export function checkDraft(input: DraftCheckInput): DraftCheckResult {
   })
 
   if (emailLike) {
+    // A reply answers what was asked and may ask for nothing; a first note and a follow-up ask for one thing.
     const asks = countAsks(body)
-    checks.push({
+    if (kind !== 'reply') checks.push({
       id: 'one_ask',
       ok: asks === 1,
       message:
