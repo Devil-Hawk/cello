@@ -263,6 +263,40 @@ export interface CandidateRow {
 
 export type Settled = { state: 'verified'; employerId: string } | { state: 'failed'; reason: FailReason; offers: Offer[] } | { state: 'retry'; reason: 'cannot_read' }
 
+export type Verified = { ok: true; employerId: string } | { ok: false; reason: FailReason }
+
+/**
+ * Tie an employer to a board by evidence and write it (companies.verify). The boards to try are the ones given, else
+ * the boards the employer's own site links to when its domain is known, never a guess by name. The first board that
+ * passes the verifier is the employer's; otherwise the first failure says why.
+ */
+export async function verifyEmployer(
+  db: Db,
+  input: { name: string | null; domain: string | null; boards: BoardRef[]; source: DirectorySource },
+  deps: VerifyDeps = realDeps
+): Promise<Verified> {
+  // The site is read once for the whole check.
+  let page: Promise<BoardRef[]> | null = null
+  const once: VerifyDeps = { ...deps, pageBoards: (i) => (page ??= deps.pageBoards(i)) }
+  let boards = input.boards
+  if (boards.length === 0 && input.domain) boards = await once.pageBoards({ careerUrl: null, domain: input.domain }).catch(() => [] as BoardRef[])
+
+  let failed: Extract<BoardCheck, { ok: false }> | null = null
+  for (const b of boards) {
+    const check = await checkBoard({ name: input.name, domain: input.domain, provider: b.provider, token: b.token }, once)
+    if (check.ok) {
+      const employerId = await writeEmployer(
+        db,
+        { name: check.name, domain: check.domain ?? input.domain, careersUrl: null, provider: b.provider, token: b.token, verifiedBy: check.verifiedBy, source: input.source, openCount: check.jobs.length, readTier: 'board' },
+        deps.now
+      )
+      return { ok: true, employerId }
+    }
+    failed ??= check
+  }
+  return { ok: false, reason: failed?.reason ?? 'no_board' }
+}
+
 /**
  * Check one candidate and settle it: verified (the employer is written and linked), or failed with its reason and
  * the next try in 90 days. A board that did not answer is tried again soon, and fails for good after 3 such reads.
@@ -272,28 +306,13 @@ export async function settleCandidate(db: Db, c: CandidateRow, deps: VerifyDeps 
   const now = deps.now()
   const at = new Date(now).toISOString()
   const later = (days: number) => new Date(now + days * DAY_MS).toISOString()
-  // The site is read once for the whole check.
-  let page: Promise<BoardRef[]> | null = null
-  const once: VerifyDeps = { ...deps, pageBoards: (input) => (page ??= deps.pageBoards(input)) }
 
-  let boards: BoardRef[] = c.ats_provider && c.ats_token ? [{ provider: c.ats_provider, token: c.ats_token }] : []
-  if (boards.length === 0 && c.domain) boards = await once.pageBoards({ careerUrl: null, domain: c.domain }).catch(() => [] as BoardRef[])
-
-  let failed: Extract<BoardCheck, { ok: false }> | null = null
-  for (const b of boards) {
-    const check = await checkBoard({ name: c.name, domain: c.domain, provider: b.provider, token: b.token }, once)
-    if (check.ok) {
-      const employerId = await writeEmployer(
-        db,
-        { name: check.name, domain: check.domain ?? c.domain, careersUrl: null, provider: b.provider, token: b.token, verifiedBy: check.verifiedBy, source: c.source === 'yc' ? 'yc' : 'seed', openCount: check.jobs.length, readTier: 'board' },
-        () => now
-      )
-      await db.from('directory_candidates').update({ state: 'verified', employer_id: employerId, fail_reason: null, failed_reads: 0, checked_at: at, next_check_at: later(RETRY_DAYS) }).eq('id', c.id)
-      return { state: 'verified', employerId }
-    }
-    failed ??= check
+  const v = await verifyEmployer(db, { name: c.name, domain: c.domain, boards: c.ats_provider && c.ats_token ? [{ provider: c.ats_provider, token: c.ats_token }] : [], source: c.source === 'yc' ? 'yc' : 'seed' }, deps)
+  if (v.ok) {
+    await db.from('directory_candidates').update({ state: 'verified', employer_id: v.employerId, fail_reason: null, failed_reads: 0, checked_at: at, next_check_at: later(RETRY_DAYS) }).eq('id', c.id)
+    return { state: 'verified', employerId: v.employerId }
   }
-  const reason: FailReason = failed?.reason ?? 'no_board'
+  const reason = v.reason
   if (reason === 'cannot_read') {
     const reads = c.failed_reads + 1
     const final = reads >= MAX_UNREAD
