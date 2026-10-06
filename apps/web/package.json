@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "clean": "rm -rf .next .turbo node_modules",
     "setup:checkpointer": "npx tsx scripts/setup-checkpointer.ts",
-    "mutation:scans": "npx tsx scripts/mutation-check-scans.ts"
+    "mutation:scans": "npx tsx scripts/mutation-check-scans.ts",
+    "scorecard": "npx tsx scripts/scorecard.ts"
   },
   "dependencies": {
     "@a2a-js/sdk": "1.0.1",
