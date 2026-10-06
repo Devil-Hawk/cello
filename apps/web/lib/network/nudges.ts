@@ -45,16 +45,16 @@ export async function dueNudges(db: SupabaseClient, userId: string, now = new Da
     .neq('waiting_on', 'none')
     .not('last_at', 'is', null)
     .order('last_at', { ascending: false })
-    .limit(500)
+    .limit(150)
   const people = (touch ?? []) as { contact_id: string; name: string; email: string | null; title: string | null; agency_name: string | null; employer_id: string | null }[]
   if (!people.length) return []
   const ids = people.map((p) => p.contact_id)
 
   const [{ data: msgs }, { data: contacts }, { data: drafts }, { data: ties }] = await Promise.all([
-    db.from('messages').select('contact_id, thread_id, application_id, direction, sent_at').eq('user_id', userId).in('contact_id', ids).order('sent_at', { ascending: false }).limit(5000),
-    db.from('contacts').select('id, nudge').eq('user_id', userId).in('id', ids),
-    db.from('outreach_messages').select('id, contact_id').eq('user_id', userId).eq('kind', 'follow_up').eq('status', 'pending_review').in('contact_id', ids),
-    db.from('contact_applications').select('contact_id, application_id, applications(stage, closed_reason, state, job_id, jobs(id, title, companies(name)))').in('contact_id', ids),
+    db.from('messages').select('contact_id, thread_id, application_id, direction, sent_at').eq('user_id', userId).in('contact_id', ids.slice(0, 150)).order('sent_at', { ascending: false }).limit(5000),
+    db.from('contacts').select('id, nudge').eq('user_id', userId).in('id', ids.slice(0, 150)),
+    db.from('outreach_messages').select('id, contact_id').eq('user_id', userId).eq('kind', 'follow_up').eq('status', 'pending_review').in('contact_id', ids.slice(0, 150)),
+    db.from('contact_applications').select('contact_id, application_id, applications(stage, closed_reason, state, job_id, jobs(id, title, companies(name)))').in('contact_id', ids.slice(0, 150)),
   ])
   const rows = (msgs ?? []) as { contact_id: string; thread_id: string | null; application_id: string | null; direction: 'in' | 'out'; sent_at: string }[]
   const personRule = new Map(((contacts ?? []) as { id: string; nudge: PersonRule | null }[]).map((c) => [c.id, c.nudge]))
@@ -68,7 +68,7 @@ export async function dueNudges(db: SupabaseClient, userId: string, now = new Da
   }
   const names = new Map<string, string>()
   const empIds = [...new Set(people.map((p) => p.employer_id).filter((x): x is string => !!x))]
-  if (empIds.length) for (const e of ((await db.from('company_directory').select('id, name').in('id', empIds)).data ?? []) as { id: string; name: string }[]) names.set(e.id, e.name)
+  if (empIds.length) for (const e of ((await db.from('company_directory').select('id, name').in('id', empIds.slice(0, 150))).data ?? []) as { id: string; name: string }[]) names.set(e.id, e.name)
 
   const out: DueNudge[] = []
   for (const p of people) {

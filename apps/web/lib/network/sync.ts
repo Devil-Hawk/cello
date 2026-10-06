@@ -145,7 +145,7 @@ export async function networkSync(
   // what K19 already knows about these threads: the application and the employer the mail is about
   const known = new Map<string, { applicationId: string | null; employerId: string | null }>()
   if (ids.length) {
-    const { data } = await admin.from('messages').select('thread_id, application_id, employer_id').eq('user_id', a.userId).in('thread_id', ids)
+    const { data } = await admin.from('messages').select('thread_id, application_id, employer_id').eq('user_id', a.userId).in('thread_id', ids.slice(0, 50))
     for (const r of (data ?? []) as { thread_id: string; application_id: string | null; employer_id: string | null }[]) {
       const k = known.get(r.thread_id) ?? { applicationId: null, employerId: null }
       known.set(r.thread_id, { applicationId: k.applicationId ?? r.application_id, employerId: k.employerId ?? r.employer_id })
@@ -172,7 +172,7 @@ export async function networkSync(
     for (const p of read.kept) {
       let id = contactIdOf.get(p.email)
       if (!id) {
-        id = await upsertPerson(admin, a.userId, p, t.msgs, { domainEmployerId: directory.get(p.domain) ?? null, threadEmployerId: thread.employerId })
+        id = (await upsertPerson(admin, a.userId, p, t.msgs, { domainEmployerId: directory.get(p.domain) ?? null, threadEmployerId: thread.employerId })) ?? undefined
         if (!id) continue
         contactIdOf.set(p.email, id)
         result.people += 1
@@ -204,7 +204,7 @@ export async function networkSync(
       { onConflict: 'user_id,gmail_message_id', ignoreDuplicates: true },
     )
     for (const [cid, rs] of groupBy(rows.filter((r) => r.contactId), (r) => r.contactId as string)) {
-      await admin.from('messages').update({ contact_id: cid }).eq('user_id', a.userId).in('gmail_message_id', rs.map((r) => r.m.id)).is('contact_id', null)
+      await admin.from('messages').update({ contact_id: cid }).eq('user_id', a.userId).in('gmail_message_id', rs.map((r) => r.m.id).slice(0, 100)).is('contact_id', null)
     }
     if (job) {
       result.jobThreads.push({ threadId: t.id, contactIds: [...new Set(read.kept.map((p) => contactIdOf.get(p.email)).filter((x): x is string => !!x))], applicationId: thread.applicationId, employerId: thread.employerId, messageIds: t.msgs.map((m) => m.id) })

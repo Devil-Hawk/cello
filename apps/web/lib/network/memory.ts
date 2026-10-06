@@ -131,7 +131,7 @@ export async function recall(
   if (by.employerId) filters.employer_id = by.employerId
   const items = (await store.getAll(userId, { filters, limit })).slice(0, limit)
   const ids = items.map((m) => String(m.metadata?.message_id ?? '')).filter(Boolean)
-  const { data } = ids.length ? await admin.from('messages').select('gmail_message_id').eq('user_id', userId).in('gmail_message_id', ids) : { data: [] }
+  const { data } = ids.length ? await admin.from('messages').select('gmail_message_id').eq('user_id', userId).in('gmail_message_id', ids.slice(0, 50)) : { data: [] }
   const present = new Set(((data ?? []) as { gmail_message_id: string }[]).map((r) => r.gmail_message_id))
   return items.map((m: MemoryItem) => ({
     id: m.id,

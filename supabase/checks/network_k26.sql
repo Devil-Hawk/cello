@@ -49,7 +49,7 @@ do $$
 declare u uuid; c uuid; p jsonb;
 begin
   select u1, c1 into u, c from fx;
-  insert into public.profiles (id) values (u) on conflict (id) do nothing;
+  insert into public.profiles (id, email) values (u, 'net-1@example.invalid') on conflict (id) do nothing;
   begin perform public.set_network_rule(u, null, '{"after_yours_bd": 0}'); raise exception 'accepted 0 days'; exception when raise_exception then if sqlerrm like 'accepted%' then raise; end if; end;
   begin perform public.set_network_rule(u, null, '{"after_yours_bd": 31}'); raise exception 'accepted 31 days'; exception when raise_exception then if sqlerrm like 'accepted%' then raise; end if; end;
   begin perform public.set_network_rule(u, c, '{"after_theirs_d": 15}'); raise exception 'accepted 15 days'; exception when raise_exception then if sqlerrm like 'accepted%' then raise; end if; end;

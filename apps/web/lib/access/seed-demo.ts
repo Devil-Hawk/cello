@@ -367,6 +367,7 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
     excerpt: m.excerpt,
   }))
   const tieRows = DEMO_TIES.map((t) => ({
+    id: id(`tie:${t.contactSlug}:${t.applicationJobSlug}`),
     user_id: demoUserId,
     contact_id: contactIdBySlug.get(t.contactSlug)!,
     application_id: applicationIdByJobSlug.get(t.applicationJobSlug)!,

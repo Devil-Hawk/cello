@@ -8,7 +8,8 @@ export const kinds: NeedsYouKindSource[] = [
   {
     kinds: ['nudge'],
     async load({ client, userId, now }) {
-      const due = await dueNudges(client, userId, now)
+      // a failed read leaves Needs you as it was: this list never breaks the page
+      const due = await dueNudges(client, userId, now).catch(() => [])
       return due.map((d) => ({
         id: `follow_up_person:${d.contactId}`,
         kind: 'nudge' as const,

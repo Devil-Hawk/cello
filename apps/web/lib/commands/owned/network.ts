@@ -4,6 +4,7 @@
 import type { OwnedTable } from './types'
 
 export const owned: OwnedTable[] = [
-  { table: 'contact_applications', demoWipe: true },
-  { table: 'contact_profiles', demoWipe: true },
+  // both go with their contact, which the demo sweep deletes (on delete cascade)
+  { table: 'contact_applications', demoWipe: false },
+  { table: 'contact_profiles', demoWipe: false },
 ]

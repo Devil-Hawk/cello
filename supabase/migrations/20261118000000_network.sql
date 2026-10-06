@@ -80,6 +80,7 @@ create unique index if not exists contacts_user_email_key on public.contacts (us
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.contact_applications (
+  id uuid not null unique default gen_random_uuid(),
   user_id uuid not null references public.profiles (id) on delete cascade,
   contact_id uuid not null references public.contacts (id) on delete cascade,
   application_id uuid not null references public.applications (id) on delete cascade,

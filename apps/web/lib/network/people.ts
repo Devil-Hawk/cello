@@ -93,7 +93,7 @@ const SELECT = 'contact_id, name, email, title, kind, address_kind, employer_id,
 async function employerNames(db: SupabaseClient, ids: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>()
   if (!ids.length) return out
-  const { data } = await db.from('company_directory').select('id, name').in('id', ids)
+  const { data } = await db.from('company_directory').select('id, name').in('id', ids.slice(0, 100))
   for (const r of (data ?? []) as { id: string; name: string }[]) out.set(r.id, r.name)
   return out
 }
@@ -104,7 +104,7 @@ async function tiesFor(db: SupabaseClient, ids: string[]): Promise<Map<string, T
   const { data } = await db
     .from('contact_applications')
     .select('contact_id, application_id, applications(id, stage, job_id, jobs(id, title, companies(name)))')
-    .in('contact_id', ids)
+    .in('contact_id', ids.slice(0, 100))
   for (const r of (data ?? []) as unknown as {
     contact_id: string
     application_id: string
