@@ -1,6 +1,6 @@
 // What people do with Cello's output, sent to Langfuse as scores.
 //
-// Database triggers (migration 20261006000401) queue one feedback_events row
+// Database triggers (migration 20261009000401) queue one feedback_events row
 // for each approval, edit, skip, application, reply and interview, carrying the
 // trace and observation of the call that wrote the thing. This module sends the
 // queue: each event becomes a score named after the behaviour, attached to that
