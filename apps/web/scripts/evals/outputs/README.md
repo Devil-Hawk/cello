@@ -13,7 +13,7 @@ Features: `outreach`, `cover-letter`, `dossier`, `gmail`,
 `reply`, `digest`, `judges`, `follow-upper`.
 
 - Writer: `google/gemma-4-31b-it:free`. Production judges in the app run on a
-  different family; here they are `qwen/qwen3.8-27b:free`. The yardstick judge
+  different family; here they are `poolside/laguna-s-2.1:free`. The yardstick judge
   that grades the results is `nvidia/nemotron-3-super-120b-a12b:free`, with
   rubrics in `rubrics/` that are not the production prompts.
 - Only model ids ending in `:free` are accepted. The key is read from
