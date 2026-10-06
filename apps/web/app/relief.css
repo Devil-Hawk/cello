@@ -110,6 +110,11 @@
   }
 }
 
+/* one icon set at one stroke width */
+svg.lucide {
+  stroke-width: 1.75;
+}
+
 /* type steps */
 .r-display {
   font-size: var(--r-t-display);
