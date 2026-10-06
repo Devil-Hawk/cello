@@ -1,8 +1,8 @@
-// Network measures T30, T31 and T32 (K26). Run from apps/web with service-role credentials:
+// Network measures T30, T31 and T32 (K26), and T33 (What is working, PG5). Run from apps/web with service-role credentials:
 //
 //   npx tsx scripts/network-measures.ts sheet <owner user id> > marks.csv    100 kept people and up to 50 left out, to mark
 //   npx tsx scripts/network-measures.ts score marks.csv                       writes the T30 and T31 runs
-//   npx tsx scripts/network-measures.ts fixtures                              writes the T32 run on the scripted threads
+//   npx tsx scripts/network-measures.ts fixtures                              writes the T32 run on the scripted threads and the T33 run on the fixture events
 //
 // Mark the CSV yourself: `real` is yes when you have been in touch with that person about your search; `tie_right`
 // is yes or no for the employer shown, or blank when none is shown. S18, S25 and S26 are marked the same way and
@@ -11,8 +11,9 @@
 import { readFileSync } from 'node:fs'
 import { createAdminClient } from '../lib/harness/supabase-admin'
 import { scoreT30, scoreT31, scoreT32, T32_CASES, type Mark, type Score } from '../lib/network/measures'
+import { t33Cases } from '../lib/strategy/t33'
 
-async function record(id: 'T30' | 'T31' | 'T32', s: Score): Promise<void> {
+async function record(id: 'T30' | 'T31' | 'T32' | 'T33', s: Score): Promise<void> {
   const { error } = await createAdminClient().from('measure_runs').insert({ measure_id: id, value: s.value, passed: s.passed, sample_n: s.sample_n, note: s.note })
   if (error) throw new Error(`could not record ${id}`)
   console.log(`${id}: ${s.value === null ? 'no value' : s.value} (${s.passed ? 'passed' : 'not passed'}) ${s.note}`)
@@ -50,7 +51,12 @@ async function main(): Promise<void> {
     await record('T31', scoreT31(marks))
     return
   }
-  if (cmd === 'fixtures') return record('T32', scoreT32(T32_CASES))
+  if (cmd === 'fixtures') {
+    await record('T32', scoreT32(T32_CASES))
+    const cases = await t33Cases()
+    const wrong = cases.filter((c) => !c.pass).map((c) => c.name)
+    return record('T33', { value: cases.length - wrong.length, passed: wrong.length === 0, sample_n: cases.length, note: wrong.length ? `Wrong: ${wrong.join('; ')}.` : `All ${cases.length} fixture cases equal their hand counts.` })
+  }
   console.error('usage: network-measures.ts sheet <owner id> | score <marks.csv> | fixtures')
   process.exit(1)
 }

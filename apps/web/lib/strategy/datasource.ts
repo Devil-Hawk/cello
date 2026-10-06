@@ -42,6 +42,8 @@ export interface ApplicationRow {
   chance: string | null
   jobFunction: string | null
   seniority: string | null
+  /** applications.closed_reason: rejected, withdrew, no_reply, posting_closed or skipped. Absent in fixtures. */
+  closedReason?: string | null
 }
 
 export interface ActivityRow {
@@ -97,6 +99,7 @@ interface RawApplication {
   applied_at: string | null
   created_at: string
   source: string | null
+  closed_reason?: string | null
 }
 
 interface RawJob {
@@ -128,7 +131,7 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
     async getApplications() {
       const { data: apps, error } = await admin
         .from('applications')
-        .select('id, job_id, stage, applied_at, created_at, source')
+        .select('id, job_id, stage, applied_at, created_at, source, closed_reason')
         .eq('user_id', userId)
         // an application found in email counts once the person confirms it
         .or('found_state.is.null,found_state.neq.to_confirm')
@@ -177,6 +180,7 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
             chance: fitRowOf(job).chance ?? null,
             jobFunction: job.job_function,
             seniority: job.seniority,
+            closedReason: a.closed_reason ?? null,
           }
         })
         .filter((r): r is ApplicationRow => r !== null)
