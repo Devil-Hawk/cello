@@ -5,7 +5,7 @@
 
 import * as cheerio from 'cheerio'
 import type { AtsJob } from '../../ats/types'
-import { descriptionFromPage } from '../details'
+import { bodyFromPage } from '../details'
 import { readJobPostings } from '../jsonld'
 import { normalizeJobUrl } from '../snapshot'
 import { htmlToPlainText } from '../../ats/html'
@@ -18,6 +18,9 @@ export interface RoleDetail {
   employer?: string
   requisitionId?: string
   description?: string
+  /** The employer's HTML for the posting, and which way it was read, for the Markdown copy. */
+  descriptionHtml?: string
+  descriptionSource?: 'jsonld' | 'detail'
   location?: string
   isEvent?: boolean
   /** Job language in the page's text (responsibilities, qualifications, "you will"), whether or not the page names its role. */
@@ -67,6 +70,7 @@ export function readDetail(html: string, url: string): RoleDetail {
     location: d.location ?? emb.location,
     // Structured data beats the text of a rendered region, which may be a menu.
     description: emb.description ?? d.description,
+    ...(emb.descriptionHtml ? { descriptionHtml: emb.descriptionHtml, descriptionSource: 'detail' as const } : {}),
     postedAt: d.postedAt ?? emb.postedAt,
   }
 }
@@ -97,6 +101,8 @@ function readDetailBase(html: string, url: string): RoleDetail {
       employer: declared.employer,
       requisitionId: declared.requisitionId,
       description: declared.description,
+      descriptionHtml: declared.descriptionHtml,
+      ...(declared.descriptionHtml ? { descriptionSource: 'jsonld' as const } : {}),
       location: declared.location,
       isEvent: declared.isEvent,
       declared: true,
@@ -106,6 +112,7 @@ function readDetailBase(html: string, url: string): RoleDetail {
 
   const { terms, place, labelled } = jobTermsAndPlace(html)
   const title = pageTitle($)
+  const body = title ? bodyFromPage(html, url, title) : undefined
   const embedded = EMBEDDED_DATE.exec(html)?.[1]
   const posted = isoOf(embedded) ?? isoOf($('meta[property="article:published_time"]').attr('content')) ?? isoOf($('time[datetime]').first().attr('datetime')) ?? labelled.postedAt
   return {
@@ -114,7 +121,8 @@ function readDetailBase(html: string, url: string): RoleDetail {
     ...(place ?? labelled.place ? { location: place ?? labelled.place } : {}),
     ...(labelled.requisitionId ? { requisitionId: labelled.requisitionId } : {}),
     jobTerms: terms,
-    description: title ? descriptionFromPage(html, url, title) : undefined,
+    description: body?.text,
+    ...(body ? { descriptionHtml: body.html, descriptionSource: body.source } : {}),
     hrefs,
   }
 }
@@ -204,6 +212,7 @@ export function jobFromDetail(
     ...(detail.employer ? { employer: detail.employer } : {}),
     ...(detail.requisitionId ? { requisitionId: detail.requisitionId } : {}),
     ...(detail.description ? { description: detail.description } : {}),
+    ...(detail.descriptionHtml ? { descriptionHtml: detail.descriptionHtml, descriptionSource: detail.descriptionSource ?? 'detail' } : {}),
     ...(detail.isEvent ? { isEvent: true } : {}),
   }
 }

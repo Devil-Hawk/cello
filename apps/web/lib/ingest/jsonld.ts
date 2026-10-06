@@ -82,11 +82,15 @@ function salaryOf(node: Json): string | undefined {
   return `${currency} ${range}${PERIOD[unit] ? ` / ${PERIOD[unit]}` : ''}`
 }
 
-function descriptionOf(raw: unknown): string | undefined {
+/** The description as HTML: what the employer declared, with markup a site escaped once more (&lt;p&gt;) made real again. */
+function descriptionHtmlOf(raw: unknown): string | undefined {
   if (typeof raw !== 'string' || !raw.trim()) return undefined
-  // Some sites escape the markup once more, so the tags arrive as &lt;p&gt;.
-  const html = !raw.includes('<') && /&lt;\w/.test(raw) ? cheerio.load(`<i>${raw}</i>`)('i').text() : raw
-  return htmlToPlainText(html)
+  return !raw.includes('<') && /&lt;\w/.test(raw) ? cheerio.load(`<i>${raw}</i>`)('i').text() : raw
+}
+
+function descriptionOf(raw: unknown): string | undefined {
+  const html = descriptionHtmlOf(raw)
+  return html ? htmlToPlainText(html) : undefined
 }
 
 function slug(s: string): string {
@@ -162,6 +166,7 @@ export function readJobPostings(html: string, pageUrl: string): AtsJob[] {
     seen.add(externalId)
     const location = locationOf(node)
     const description = descriptionOf(node.description)
+    const descriptionHtml = descriptionHtmlOf(node.description)
     const salary = salaryOf(node)
     const postedAt = isoDate(node.datePosted)
     const validThrough = isoDate(node.validThrough)
@@ -173,6 +178,7 @@ export function readJobPostings(html: string, pageUrl: string): AtsJob[] {
       externalId,
       ...(location ? { location } : {}),
       ...(description ? { description } : {}),
+      ...(descriptionHtml ? { descriptionHtml, descriptionSource: 'jsonld' as const } : {}),
       ...(salary ? { salary } : {}),
       ...(postedAt ? { postedAt } : {}),
       ...(validThrough ? { validThrough } : {}),
