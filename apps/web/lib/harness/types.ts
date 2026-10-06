@@ -301,6 +301,14 @@ export interface LlmRunOptions {
   /** Ask the model for a JSON object response. */
   json?: boolean
   /**
+   * Strict structured output: a named JSON Schema (every property required,
+   * closed objects). OpenRouter sends it as response_format json_schema with
+   * strict:true plus the response-healing plugin. Set `json: true` alongside
+   * it: providers that cannot enforce a schema fall back to a JSON object, and
+   * callers still validate the result.
+   */
+  jsonSchema?: { name: string; schema: Record<string, unknown> }
+  /**
    * Turn on extended reasoning. Reasoning tokens are billed as OUTPUT, so
    * enable it where judgement quality matters (scoring, planning) rather than
    * on every call.

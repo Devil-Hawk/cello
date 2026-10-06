@@ -111,12 +111,12 @@ const DIRECT_MODEL_CLIENT_MARKERS = [
  */
 const ALLOWED_DIRECT_USER_KEY: Record<string, string> = {
   'app/api/scraper/trigger/route.ts': "user's own OpenAI/Anthropic key",
-  'app/api/resume/upload/route.ts': "user's own Anthropic/OpenAI key",
   // The agent's chat model door. It makes no call by itself: CelloSpend wraps every call the agent makes,
   // so each one reserves before and settles after through lib/agents/spend-port.ts (checked below).
   'lib/agents/model.ts': 'a model built here is only used inside the agent, behind CelloSpend',
   // Live evals on free models only (assertFree), opt-in, never reached from the product.
   'lib/evals/agent/free.eval.ts': 'free models only; the harness refuses any id that does not end in :free',
+  'lib/resume/import/vision.ts': "user's own OpenRouter or Anthropic key, for reading a photo; a demo is refused before it runs",
 }
 
 /**

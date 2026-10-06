@@ -17,7 +17,7 @@
 //          PDF's content stream carries glyph positions, not headings.
 
 /** The formats an upload may be. Ordered best-fidelity-first. */
-export const RESUME_FORMATS = ['docx', 'md', 'txt', 'pdf'] as const
+export const RESUME_FORMATS = ['docx', 'md', 'txt', 'pdf', 'png', 'jpg', 'webp'] as const
 
 export type ResumeFormat = (typeof RESUME_FORMATS)[number]
 
@@ -37,6 +37,9 @@ const EXTENSIONS: Record<ResumeFormat, readonly string[]> = {
   md: ['.md', '.markdown', '.mdown'],
   txt: ['.txt', '.text'],
   pdf: ['.pdf'],
+  png: ['.png'],
+  jpg: ['.jpg', '.jpeg'],
+  webp: ['.webp'],
 }
 
 /**
@@ -50,6 +53,9 @@ const MIME_TYPES: Record<ResumeFormat, readonly string[]> = {
   md: ['text/markdown', 'text/x-markdown'],
   txt: ['text/plain'],
   pdf: ['application/pdf'],
+  png: ['image/png'],
+  jpg: ['image/jpeg'],
+  webp: ['image/webp'],
 }
 
 /**
@@ -64,7 +70,14 @@ export const RESUME_UPLOAD_ACCEPT: string = [
 
 /** One phrase naming the supported formats, for user-facing copy. */
 export const SUPPORTED_FORMATS_SENTENCE =
-  'PDF, Word (.docx), plain text (.txt) or Markdown (.md)'
+  'PDF, Word (.docx), plain text (.txt), Markdown (.md) or a photo (PNG, JPEG, WebP)'
+
+/** The picture formats: read by a vision model or in-browser OCR, never by text extraction. */
+export const IMAGE_FORMATS: readonly ResumeFormat[] = ['png', 'jpg', 'webp']
+
+export function isImageFormat(format: ResumeFormat | null): boolean {
+  return format !== null && IMAGE_FORMATS.includes(format)
+}
 
 /** Lowercased extension including the dot, or '' when the name has none. */
 export function fileExtension(filename: string | null | undefined): string {
@@ -105,6 +118,20 @@ export function detectResumeFormat(
   return null
 }
 
+/** True for an iPhone HEIC/HEIF photo, which no browser or decoder here reads. */
+export function isHeic(filename: string | null | undefined, mimeType?: string | null): boolean {
+  const mime = (mimeType ?? '').split(';')[0].trim().toLowerCase()
+  const ext = fileExtension(filename)
+  return ext === '.heic' || ext === '.heif' || mime === 'image/heic' || mime === 'image/heif'
+}
+
+export function heicError(): ResumeImportError {
+  return new ResumeImportError(
+    'heic_unsupported',
+    'iPhone HEIC photos are not supported. Export it as a JPEG (or take a screenshot) and upload that.'
+  )
+}
+
 /** True for the legacy binary Word format, which mammoth cannot read. */
 export function isLegacyDoc(filename: string | null | undefined, mimeType?: string | null): boolean {
   const mime = (mimeType ?? '').split(';')[0].trim().toLowerCase()
@@ -122,7 +149,10 @@ export type ResumeImportErrorCode =
   | 'too_large'
   | 'empty_file'
   | 'no_text'
-  | 'pdf_no_text'
+  | 'needs_transcribe'
+  | 'needs_ocr'
+  | 'heic_unsupported'
+  | 'transcribe_failed'
   | 'docx_unreadable'
 
 export class ResumeImportError extends Error {
