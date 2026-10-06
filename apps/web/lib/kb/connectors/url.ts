@@ -9,7 +9,7 @@
 //   - caps the response body it reads (MAX_BODY_BYTES)
 //   - SAME-SITE REDIRECT DISCIPLINE: redirects are followed by hand, at most
 //     MAX_REDIRECTS hops, and every hop must stay on the same registrable host
-//     as the one the user configured — an apex<->www hop is allowed, a hop to
+//     as the one the user configured - an apex<->www hop is allowed, a hop to
 //     an unrelated host is refused rather than silently indexed. Mirrors
 //     lib/dossier/sources.ts's sameSite() discipline for the company-page fetch.
 //

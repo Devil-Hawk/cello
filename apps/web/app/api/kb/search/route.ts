@@ -1,4 +1,4 @@
-// GET /api/kb/search?q=...&limit=...&company=<id> — ranked full-text search over
+// GET /api/kb/search?q=...&limit=...&company=<id> - ranked full-text search over
 // Your material, the signed-in user's own sources that Cello may use (searchKb() ->
 // the search_material() RPC). Pages Cello fetched itself are never returned.
 // `company` keeps one company's documents.

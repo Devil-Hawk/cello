@@ -147,7 +147,7 @@ export async function claimsFor(admin: AdminClient, userId: string): Promise<Res
  * ponytail: fixed cosine-similarity cutoff, not tuned against a labeled eval
  * set. It was set for 1536 dimension OpenAI vectors; the 384 dimension MiniLM
  * vectors sit on a different scale, so set it from S12's run on claims before
- * the 1536 column is dropped. Until then — chosen high enough that a genuine paraphrase of a stored claim
+ * the 1536 column is dropped. Until then - chosen high enough that a genuine paraphrase of a stored claim
  * clears it while two claims that merely share a topic ("led the payments
  * migration" vs. "owns payments billing") do not. Tighten/loosen here, in
  * one place, if a near-miss neighbor starts surfacing as a false match once
