@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { ARTIFACT_TYPES, OLD_NAMES, readType, storedNames } from './types'
 
 describe('the made-thing type set', () => {
-  it('is the eight types, with no interview prep', () => {
+  it('is the eight types', () => {
     expect([...ARTIFACT_TYPES]).toEqual(['resume', 'cover_letter', 'answers', 'message', 'research', 'comparison', 'answer', 'shortlist'])
   })
 
@@ -15,7 +15,7 @@ describe('the made-thing type set', () => {
   })
 
   it('reads nothing else', () => {
-    expect(readType('interview_prep')).toBeNull()
+    expect(readType('a_retired_type')).toBeNull()
     expect(readType('')).toBeNull()
   })
 

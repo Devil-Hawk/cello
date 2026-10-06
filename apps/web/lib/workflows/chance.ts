@@ -2,11 +2,12 @@
 //
 //   checkChance  assesses a person's roles in batches of 12, because the chance check reads the
 //                posting's requirements against the resume for up to 12 roles at a time.
-//   rolesGaps    code over what was stored: which requirements recur among the roles whose chance
-//                is Stretch. No model. "Too few to tell" under five assessed roles.
+//   rolesGaps    code over the fit of the roles whose chance is Stretch: which requirements recur that
+//                nothing the person has answers. No model. "Too few to tell" under five assessed roles.
 //
-// K17b narrows rolesGaps to requirements the record could not find anywhere (Not found items).
+// rolesGaps counts only Not found items (K17b): what the person's resume, answers and material do not answer.
 
+import { readRoleFit } from '@/lib/fit'
 import { assessJobs, type AssessJobsArgs, type AssessJobsResult, type RoleFit } from '@/lib/scoring'
 import type { AdminClient } from '@/lib/harness/types'
 
@@ -47,7 +48,7 @@ export async function checkChance(args: CheckChanceArgs, jobIds: readonly string
 
 export interface GapLine {
   requirement: string
-  /** How many of the Stretch roles name it. */
+  /** How many of the Stretch roles do not find it anywhere in the person's material. */
   roles: number
 }
 
@@ -55,7 +56,7 @@ export interface RolesGaps {
   /** Roles with a settled chance among those asked about. */
   assessed: number
   stretch: number
-  /** The requirements Stretch roles share, most shared first. Empty when there are too few roles to tell. */
+  /** The requirements Stretch roles share that nothing in the person's material answers, most shared first. Empty when there are too few roles to tell. */
   gaps: GapLine[]
   tooFew: boolean
   /** One sentence for the person, built from the counts. */
@@ -64,21 +65,25 @@ export interface RolesGaps {
 
 const norm = (s: string) => s.trim().replace(/\s+/g, ' ')
 
-/** What recurs among the Stretch roles. Counted by code from the verdicts already stored. */
+/**
+ * What recurs among the Stretch roles. Counted by code, and only from Not found items: a requirement code
+ * looked for in the resume, answers and material and found nowhere. A model's reading or the person's own
+ * call is a verdict, not a count, and is left out here.
+ * ponytail: the material is read again for each Stretch role. Share one read across roles if this ever shows up in a trace.
+ */
 export async function rolesGaps(admin: AdminClient, userId: string, jobIds: readonly string[]): Promise<RolesGaps> {
   const ids = [...new Set(jobIds)].slice(0, 200)
   if (ids.length === 0) return { assessed: 0, stretch: 0, gaps: [], tooFew: true, line: 'Too few roles to tell.' }
-  const { data } = await admin.from('person_roles').select('job_id, chance, chance_detail').eq('user_id', userId).in('job_id', [...ids])
-  const rows = ((data as { job_id: string; chance: string | null; chance_detail: { gaps?: unknown } | null }[] | null) ?? []).filter(
-    (r) => r.chance === 'strong' || r.chance === 'possible' || r.chance === 'stretch'
-  )
+  const { data } = await admin.from('person_roles').select('job_id, chance').eq('user_id', userId).in('job_id', [...ids])
+  const rows = ((data as { job_id: string; chance: string | null }[] | null) ?? []).filter((r) => r.chance === 'strong' || r.chance === 'possible' || r.chance === 'stretch')
   const stretch = rows.filter((r) => r.chance === 'stretch')
   if (rows.length < MIN_ROLES_FOR_GAPS) return { assessed: rows.length, stretch: stretch.length, gaps: [], tooFew: true, line: `Too few to tell: ${rows.length} of ${MIN_ROLES_FOR_GAPS} roles checked.` }
 
   const counts = new Map<string, { requirement: string; roles: number }>()
   for (const r of stretch) {
-    const gaps = Array.isArray(r.chance_detail?.gaps) ? (r.chance_detail!.gaps as unknown[]).filter((g): g is string => typeof g === 'string') : []
-    for (const g of new Set(gaps.map(norm).filter(Boolean))) {
+    const fit = await readRoleFit({ admin, userId }, r.job_id, 'view')
+    const missing = fit.items.filter((i) => i.origin === 'code' && i.verdict === 'unknown' && i.notFound === true).map((i) => norm(i.requirement))
+    for (const g of new Set(missing)) {
       const key = g.toLowerCase()
       const cur = counts.get(key) ?? { requirement: g, roles: 0 }
       cur.roles++
@@ -91,7 +96,7 @@ export async function rolesGaps(admin: AdminClient, userId: string, jobIds: read
     stretch.length === 0
       ? `None of your ${rows.length} checked roles is a Stretch.`
       : top
-        ? `${top.roles} of ${stretch.length} Stretch roles name ${top.requirement}.`
+        ? `${top.roles} of ${stretch.length} Stretch roles ask for ${top.requirement}, which is not in your resume, answers or material.`
         : `${stretch.length} of ${rows.length} checked roles are a Stretch, and no one requirement repeats.`
   return { assessed: rows.length, stretch: stretch.length, gaps, tooFew: false, line }
 }

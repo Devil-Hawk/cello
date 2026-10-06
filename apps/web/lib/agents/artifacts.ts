@@ -59,8 +59,8 @@ export const ArtifactContentSchemas = {
     to_name: z.string().nullable().optional(),
     to_email: z.string().nullable().optional(),
     outreach_id: z.string().nullable().optional(),
-    /** A first note or a single follow-up to one already sent. */
-    kind: z.enum(['initial', 'follow_up']).optional(),
+    /** A first note, a single follow-up to one already sent, a reply to a message received, or a note. */
+    kind: z.enum(['initial', 'follow_up', 'reply', 'note']).optional(),
   }),
   research: z.object({
     company: z.string(),
