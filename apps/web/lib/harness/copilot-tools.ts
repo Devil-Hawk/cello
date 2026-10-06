@@ -1397,7 +1397,7 @@ async function researchOneCompany(
   const { company } = owned
   try {
     const { data: jobsData } = await ownedJobsQuery(ctx.admin, ctx.userId, 'salary_range, title').eq('viewer_company_id', companyId)
-    const jobs = (jobsData as { salary_range: string | null; title: string | null }[]) ?? []
+    const jobs = (jobsData as unknown as { salary_range: string | null; title: string | null }[]) ?? []
     const result = await generateDossier({
       company: { id: company.id, name: company.name, domain: company.domain },
       jobs,

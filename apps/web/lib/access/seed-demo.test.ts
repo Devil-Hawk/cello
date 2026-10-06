@@ -391,8 +391,10 @@ describe('buildDemoWorkspace — shape', () => {
 
 describe('buildDemoWorkspace — determinism', () => {
   // Every batch's row identity lives under `id`, except trace_spans (its own
-  // vocabulary is `span_id` — see DemoBatch.conflictColumn's doc).
-  const rowKey = (b: DemoBatch, row: Record<string, unknown>): string => row[b.conflictColumn ?? 'id'] as string
+  // vocabulary is `span_id` — see DemoBatch.conflictColumn's doc) and person_roles
+  // (the demo user's role row is keyed by user and job: the job id tells two demos apart).
+  const rowKey = (b: DemoBatch, row: Record<string, unknown>): string =>
+    row[b.conflictColumn === 'user_id,job_id' ? 'job_id' : (b.conflictColumn ?? 'id')] as string
 
   it('produces byte-identical output for the same user and clock', () => {
     const a = buildDemoWorkspace(DEMO_USER, NOW)
