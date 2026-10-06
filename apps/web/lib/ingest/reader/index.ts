@@ -236,7 +236,7 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
       if (read.listed > 0) listedNoRoles = true
       // Postings the pages declare in their own markup (schema.org JobPosting): the employer's statement, no reading needed.
       const declared = new Map<string, AtsJob>()
-      for (const p of pages) for (const j of readJobPostings(p.html, p.url)) declared.set(j.externalId, j)
+      for (const p of pages) for (const j of readJobPostings(p.html, p.url)) if (ownSite(j.url)) declared.set(j.externalId, j)
       if (declared.size > 0) {
         Object.assign(out, { tier: 'listing' as Tier, jobs: [...declared.values()], complete: declared.size > 1 })
         tried.push({ tier: 'listing', outcome: 'roles' })
@@ -342,10 +342,13 @@ async function readRendered(input: SiteInput, deps: SiteDeps, f: SiteFetcher): P
       { name: company.name, career_url: company.careerUrl },
       { fetchPage: async () => page, model: deps.model ?? null }
     )
-    const jobs = read.jobs.filter((j) => matchesTargets(j.title, targets))
-    if (read.jobs.length > 0) {
+    // A role from a third-party job host reaches storage only through a verified board (above): the model and the page's own
+    // markup can name a link to anyone's board, so only roles on the employer's own site are kept here.
+    const own = read.jobs.filter((j) => onOwnSite(j.url, { company }))
+    const jobs = own.filter((j) => matchesTargets(j.title, targets))
+    if (own.length > 0) {
       tried.push({ tier: read.modelCalls > 0 ? 'model' : 'rendered', outcome: 'roles' })
-      return { result: { tier: read.modelCalls > 0 ? 'model' : 'rendered', jobs, complete: read.complete }, tried, checked: [] }
+      return { result: { tier: read.modelCalls > 0 ? 'model' : 'rendered', jobs, complete: read.complete && own.length === read.jobs.length }, tried, checked: [] }
     }
     tried.push({ tier: 'model', outcome: read.reason === 'model_unavailable' || read.reason === 'model_limit' ? 'skipped' : 'none' })
     return { tried, checked: [] }

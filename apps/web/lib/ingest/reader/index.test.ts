@@ -247,7 +247,7 @@ describe('readSite: could not read, with the reason', () => {
     const rendered = `<html><body><div id="root"><h1>Jobs</h1>${'<p>text</p>'.repeat(60)}<script type="application/ld+json">${JSON.stringify({
       '@type': 'JobPosting',
       title: 'Data Engineer',
-      url: 'https://uber.test/jobs/1',
+      url: 'https://jobs.uber.com/jobs/1',
       datePosted: '2026-10-01',
     })}</script></div></body></html>`
     const fetchPage = vi.fn(async (url: string) => ({ html: rendered, finalUrl: url, rendered: true }))
@@ -270,6 +270,36 @@ describe('the rendered tier meets a bot check', () => {
     const read = await readSite(company('Uber', 'uber.com', careers), { fetcher: fakeFetcher({ [careers]: shell }, 'scheduled'), fetchPage, model: null })
     expect(read.jobs).toEqual([])
     expect(read.reason).toBe('bot_check')
+  })
+})
+
+describe("the rendered tier stores only what is the employer's own", () => {
+  const careers = 'https://acme.example/careers'
+  const shell = '<html><body><div id="root"></div></body></html>'
+  const filler = '<p>We are a team that cares about customers and about each other, and we work in the open.</p>'.repeat(4)
+  const run = (html: string, model: SiteDeps['model']) => {
+    const fetchPage = vi.fn(async (url: string) => ({ html, finalUrl: url, rendered: true }))
+    return readSite(company('Acme', '', careers), { fetcher: fakeFetcher({ [careers]: shell }, 'scheduled'), fetchPage, model, readBoard: async () => null })
+  }
+  const answer = (title: string) => async () => JSON.stringify({ page_kind: 'listing', jobs: [{ title, link: 1 }] })
+
+  it("a link the model names on someone else's lever board is not Acme's role", async () => {
+    const html = `<html><body><h1>Open roles</h1>${filler}<div><a href="https://jobs.lever.co/othercorp/abc-123">Data Analyst</a></div></body></html>`
+    const read = await run(html, answer('Data Analyst'))
+    expect(read.jobs).toEqual([])
+    expect(read.reason).not.toBeNull()
+  })
+
+  it("a posting the page declares with an address on someone else's board is not kept either", async () => {
+    const ld = JSON.stringify({ '@type': 'JobPosting', title: 'Data Engineer', url: 'https://boards.greenhouse.io/othercorp/jobs/1', datePosted: '2026-10-01' })
+    const html = `<html><body><h1>Jobs</h1>${filler}<script type="application/ld+json">${ld}</script></body></html>`
+    expect((await run(html, null)).jobs).toEqual([])
+  })
+
+  it("the same link on Acme's own site is kept", async () => {
+    const html = `<html><body><h1>Open roles</h1>${filler}<div><a href="https://acme.example/careers/data-analyst-1">Data Analyst</a></div></body></html>`
+    const read = await run(html, answer('Data Analyst'))
+    expect(read.jobs.map((j) => j.title)).toEqual(['Data Analyst'])
   })
 })
 
