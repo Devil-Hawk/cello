@@ -1,5 +1,5 @@
 // GET /api/artifacts?type=&job_id=&limit=&offset=: the person's saved documents (resumes, cover
-// letters, emails, dossiers, interview prep, shortlists), newest first. No content here; open one
+// letters, emails, dossiers, shortlists), newest first. No content here; open one
 // with /api/artifacts/[id].
 
 import { NextRequest, NextResponse } from 'next/server'

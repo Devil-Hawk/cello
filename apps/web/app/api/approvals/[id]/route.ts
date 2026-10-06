@@ -1,7 +1,7 @@
 // POST /api/approvals/[id] { decision: 'approve' | 'skip', edits?, acknowledge_version? }
 //
 // The person's click on a queued approval. Approve runs the one send (or submit) path, once, and
-// stores a receipt; calling it again returns that receipt. `edits` are the person's own changes
+// stores its outcome; calling it again returns that outcome. `edits` are the person's own changes
 // to the words, saved as a new version before the send, so what goes out is what they saw.
 // `acknowledge_version` says they have looked at a version newer than the one queued.
 // The answer is { copy, approval, error?, fix? }: `copy` is the line to show.
