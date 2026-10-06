@@ -3,7 +3,7 @@
 // plain z.string() in an output, an actor in an input, a send that a view lists
 // or an unknown measure fails here, not in review.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
@@ -13,6 +13,11 @@ import { allowsNoMeasure } from './no-measure'
 import { isPersonOnly } from './views'
 import { COPILOT_TOOLS } from '@/lib/harness/copilot-tool-catalog'
 import type { AnyCommand } from './define'
+
+// The doors module imports the cookie-backed client; nothing here calls it.
+vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({}) }))
+vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({}) }))
+
 
 const DOORS = ['session', 'routine', 'rule', 'chat', 'assistant', 'agent', 'extension', 'workflow']
 const KINDS = ['code', 'step', 'wf', 'loop']

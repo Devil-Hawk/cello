@@ -5,6 +5,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { sendToSelf, type SendToSelfDeps } from './send-to-self'
 import { chatDoor } from './doors'
 
+// The doors module imports the cookie-backed client; nothing here calls it.
+vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({}) }))
+vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({}) }))
+
+
 function deps(over: Partial<SendToSelfDeps> = {}) {
   const send = vi.fn(async (_input: Parameters<SendToSelfDeps['send']>[0]) => {})
   const d: SendToSelfDeps = {
