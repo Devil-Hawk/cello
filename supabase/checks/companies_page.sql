@@ -44,7 +44,7 @@ values ('Pending Works', 'pending works', 'pending-works.example', 'yc', 'pendin
 -- Roles of A: Alpha 3 (one posted 2 days ago), Beta 3 (all 30 days old), Gamma 1 (yesterday), Delta 2 (3 and 5 days ago),
 -- and one at the unverified employer. B has 2 at Alpha.
 insert into public.jobs (company_id, employer_id, posting_key, title, description, url, external_id, posted_at, role_type, discovered_at)
-select null, e1, 'a-' || g, 'Alpha role ' || g, 'd', 'https://alpha-works.example/jobs/' || g, 'a-' || g, case when g = 1 then now() - interval '2 days' else now() - interval '30 days' end, 'ai-engineer', now() from fx, generate_series(1, 3) g
+select null::uuid, e1, 'a-' || g, 'Alpha role ' || g, 'd', 'https://alpha-works.example/jobs/' || g, 'a-' || g, case when g = 1 then now() - interval '2 days' else now() - interval '30 days' end, 'ai-engineer', now() from fx, generate_series(1, 3) g
 union all select null, e2, 'b-' || g, 'Beta role ' || g, 'd', 'https://beta-works.example/jobs/' || g, 'b-' || g, now() - interval '30 days', 'ml-engineer', now() from fx, generate_series(1, 3) g
 union all select null, e3, 'g-1', 'Gamma role 1', 'd', 'https://gamma-works.example/jobs/1', 'g-1', now() - interval '1 day', 'ai-engineer', now() from fx
 union all select null, e4, 'd-1', 'Delta role 1', 'd', 'https://delta-works.example/jobs/1', 'd-1', now() - interval '3 days', 'ai-engineer', now() from fx

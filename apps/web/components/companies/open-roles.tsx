@@ -6,7 +6,6 @@ import { metaLine, postedAgo } from '@/components/roles/logic'
 import { companyHref } from '@/lib/routes/companies'
 import type { CompanyData, LiveData, LiveItem } from '@/app/(app)/companies/[id]/read'
 import {
-  LIST_FAILED,
   RATE_LINE,
   RENDERED_LINE,
   cannotReadSite,
@@ -106,7 +105,7 @@ export function OpenRoles({ company, query, live, now = Date.now() }: OpenRolesP
   if (live.total === 0)
     return (
       <div className="space-y-3">
-        <p className="r-body">{live.failure ? failureLine(company.name, live.failure) : LIST_FAILED}</p>
+        <p className="r-body">{failureLine(company.name, live.failure)}</p>
         <KeptBefore live={live} now={now} />
         <OpenSite href={site} />
       </div>

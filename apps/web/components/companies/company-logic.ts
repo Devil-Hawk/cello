@@ -115,8 +115,6 @@ export const RENDERED_LINE = 'Cello reads this site in the background, so its ro
 
 export const RATE_LINE = 'You opened many pages just now. Try again in a few minutes.'
 
-export const LIST_FAILED = 'Could not load this list.'
-
 const CLAUSE: Record<string, string> = {
   cannot_read: 'it did not answer three reads',
   no_board: 'its job board is gone',
@@ -203,10 +201,11 @@ export function checksLine(c: { following: boolean; lastReadAt: string | null; c
 /** What Remove company will do, from the counts read first: what stays and what goes. */
 export function removeLines(name: string, n: { applications: number; conversations: number; people: number; notes: boolean }): { stays: string[]; goes: string[] } {
   const plural = (c: number, one: string, many: string) => `${c} ${c === 1 ? one : many}`
+  const stay = (c: number) => (c === 1 ? 'stays' : 'stay')
   const stays = [
-    n.applications > 0 ? `Your ${plural(n.applications, 'application', 'applications')} with ${name} stay.` : null,
-    n.conversations > 0 ? `Your ${plural(n.conversations, 'conversation', 'conversations')} stay.` : null,
-    n.people > 0 ? `The ${plural(n.people, 'person', 'people')} you know there stay.` : null,
+    n.applications > 0 ? `Your ${plural(n.applications, 'application', 'applications')} with ${name} ${stay(n.applications)}.` : null,
+    n.conversations > 0 ? `Your ${plural(n.conversations, 'conversation', 'conversations')} ${stay(n.conversations)}.` : null,
+    n.people > 0 ? `The ${plural(n.people, 'person', 'people')} you know there ${stay(n.people)}.` : null,
   ].filter((x): x is string => x !== null)
   return { stays, goes: [`You stop following ${name}.`, ...(n.notes ? ['Your notes on it are deleted.'] : [])] }
 }
