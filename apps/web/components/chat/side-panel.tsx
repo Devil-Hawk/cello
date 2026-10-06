@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { Markdown } from '@/components/chat/markdown'
 import { CopyButton } from '@/components/chat/parts'
+import { readType } from '@/lib/artifacts/types'
 import { ResumeEditor } from '@/components/resume/editor/resume-editor'
 import type { EditorProps } from '@/components/resume/editor/types'
 import { Button } from '@/components/ui/button'
@@ -31,16 +32,16 @@ export interface PanelThing {
 const TYPE_WORDS: Record<string, string> = {
   resume: 'Resume',
   cover_letter: 'Cover letter',
-  outreach_email: 'Message',
-  dossier: 'Research',
+  message: 'Message',
+  research: 'Research',
   shortlist: 'Shortlist',
   comparison: 'Comparison',
   answer: 'Answer',
 }
-export const typeWord = (type: string) => TYPE_WORDS[type] ?? type.replace(/_/g, ' ')
+export const typeWord = (type: string) => TYPE_WORDS[readType(type) ?? type] ?? type.replace(/_/g, ' ')
 
 /** The one field a person edits in a version, by kind. A kind with no such field is read only here. */
-export const EDITABLE_FIELD: Record<string, 'text' | 'body'> = { resume: 'text', cover_letter: 'text', outreach_email: 'body' }
+export const EDITABLE_FIELD: Record<string, 'text' | 'body'> = { resume: 'text', cover_letter: 'text', message: 'body' }
 
 const author = (a: PanelVersion['author']) => (a === 'user' ? 'You wrote this' : 'Cello wrote this')
 
@@ -66,7 +67,7 @@ export interface PanelViewProps {
 export function PanelView({ thing, versions, selected, onSelect, editing, onEdit, onSave, onCancel, onClose, onAddToChat, onUseInNewChat, error }: PanelViewProps) {
   const current = versions.find((v) => v.version === selected) ?? versions[0]
   const latest = versions[0]?.version ?? 0
-  const field = EDITABLE_FIELD[thing.type]
+  const field = EDITABLE_FIELD[readType(thing.type) ?? thing.type]
   return (
     <aside aria-label={thing.title} className="flex h-full min-h-0 flex-col border-l border-border bg-background">
       <header className="flex items-start gap-2 border-b border-border p-3">
@@ -163,7 +164,7 @@ export function SidePanel({ artifactId, onClose, onAddToChat, onUseInNewChat }: 
 
   if (!thing) return <aside className="p-3 text-caption text-muted-foreground">{error ?? 'Opening…'}</aside>
   const current = versions.find((v) => v.version === selected) ?? versions[0]
-  const field = EDITABLE_FIELD[thing.type]
+  const field = EDITABLE_FIELD[readType(thing.type) ?? thing.type]
 
   return (
     <PanelView

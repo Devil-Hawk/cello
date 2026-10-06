@@ -27,7 +27,7 @@ describe('PanelView', () => {
   it('offers Edit on the newest version of a kind with a text field, and not on an older one or another kind', () => {
     expect(html()).toContain('>Edit<')
     expect(html({ selected: 1 })).not.toContain('>Edit<')
-    expect(html({ thing: { id: 'a2', type: 'dossier', title: 'Research' } })).not.toContain('>Edit<')
+    expect(html({ thing: { id: 'a2', type: 'research', title: 'Research' } })).not.toContain('>Edit<')
   })
 
   it('offers Add to chat and Use in a new chat only when the page gives them', () => {
@@ -47,6 +47,6 @@ describe('PanelView', () => {
     expect(html({ versions: [], selected: 0 })).toContain('This has no versions yet.')
     expect(typeWord('comparison')).toBe('Comparison')
     expect(typeWord('some_new_kind')).toBe('some new kind')
-    expect(Object.keys(EDITABLE_FIELD).sort()).toEqual(['cover_letter', 'outreach_email', 'resume'])
+    expect(Object.keys(EDITABLE_FIELD).sort()).toEqual(['cover_letter', 'message', 'resume'])
   })
 })

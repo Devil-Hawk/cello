@@ -12,14 +12,14 @@ const rows = () =>
       { id: 't4', user_id: 'u1', chat_id: 'c1', kind: 'cello', typed: null, superseded_at: null, created_at: '2026-10-01T10:01:00Z' },
       { id: 'x1', user_id: 'u2', chat_id: 'c9', kind: 'person', typed: 'Someone else', superseded_at: null, created_at: '2026-10-01T10:00:00Z' },
     ],
-    artifacts: [{ id: 'a1', user_id: 'u1', type: 'dossier', title: 'Comparison of 3 roles', created_at: '2026-10-01T10:02:00Z', chat_turn_id: 't1' }],
+    artifacts: [{ id: 'a1', user_id: 'u1', type: 'research', title: 'Comparison of 3 roles', created_at: '2026-10-01T10:02:00Z', chat_turn_id: 't1' }],
   })
 
 describe('backfillPerson', () => {
   it('writes a said memory per person turn and a made memory per made thing, and the counts agree', async () => {
     const store = inMemoryStore()
     expect(await backfillPerson(rows(), store, 'u1')).toEqual({ expected: 3, held: 3, written: 3, failed: 0 })
-    expect(store.items.map((m) => m.memory).sort()).toEqual(['Compare these roles', 'Draft a note', 'Made dossier: Comparison of 3 roles. Oct 1.'])
+    expect(store.items.map((m) => m.memory).sort()).toEqual(['Compare these roles', 'Draft a note', 'Made research: Comparison of 3 roles. Oct 1.'])
     expect(store.items.every((m) => m.userId === 'u1')).toBe(true)
   })
 

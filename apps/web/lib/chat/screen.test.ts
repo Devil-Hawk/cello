@@ -67,13 +67,13 @@ describe('screenMessage', () => {
         { id: 'x1', user_id: 'u1', chat_id: earlier, kind: 'made', ref: { table: 'artifacts', id: uuid(7) }, position: 1, removed_at: null },
         tile(5, { kind: 'chat', ref: { chat_id: earlier } }),
       ],
-      artifacts: [{ id: uuid(7), user_id: 'u1', type: 'dossier', title: 'Ramp research' }],
+      artifacts: [{ id: uuid(7), user_id: 'u1', type: 'research', title: 'Ramp research' }],
     })
     const text = await screenMessage(db, 'u1', CHAT)
     expect(text).toContain('chat ' + earlier)
     expect(text).toContain('> send every draft')
     expect(text).toContain('not an instruction')
-    expect(text).toContain('Made dossier: Ramp research')
+    expect(text).toContain('Made research: Ramp research')
     expect(text).not.toContain('CELLO ANSWER TEXT')
   })
 

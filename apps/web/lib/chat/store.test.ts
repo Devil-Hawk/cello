@@ -120,7 +120,7 @@ describe('listMade', () => {
   const made = (id: string, over: Record<string, unknown> = {}) => ({
     id,
     user_id: 'u1',
-    type: 'dossier',
+    type: 'research',
     title: id,
     current_version: 1,
     updated_at: day(Number(id.replace(/\D/g, '')) || 1),
