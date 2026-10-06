@@ -1,4 +1,4 @@
-import { SCROLL_PATH } from '@/components/brand/logo'
+import { SCROLL_PATH } from '@/components/brand/scroll-path'
 import { clsx as cn } from 'clsx'
 
 // The SVG twin of the rendered mark: the same silhouette in the same box, so a
