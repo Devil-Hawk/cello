@@ -7,8 +7,6 @@
 --      for a board employer rows whose source is not the board's provider. The company rows are locked until it commits.
 --   3. A row with no employer never replaces a shared row of the same company and posting (the own-role upsert would
 --      otherwise rewrite a shared role's title, body and address for every follower after the person unlinked).
---   4. A shared role holds no match score: a score is one person's reading of their resume. The columns are emptied on
---      shared rows and cannot be written there until the scoring package keeps them per person.
 
 create or replace function public.jobs_set_employer_posting()
 returns trigger
@@ -110,25 +108,3 @@ $$;
 
 revoke execute on function public.upsert_shared_jobs(jsonb) from public, anon, authenticated;
 grant execute on function public.upsert_shared_jobs(jsonb) to service_role;
-
-create or replace function public.jobs_no_shared_score()
-returns trigger
-language plpgsql
-set search_path = ''
-as $$
-begin
-  new.match_score := null;
-  new.match_details := null;
-  return new;
-end;
-$$;
-
-drop trigger if exists jobs_no_shared_score on public.jobs;
-create trigger jobs_no_shared_score
-  before insert or update on public.jobs
-  for each row when (new.employer_id is not null and (new.match_score is not null or new.match_details is not null))
-  execute function public.jobs_no_shared_score();
-revoke all on function public.jobs_no_shared_score() from public, anon, authenticated;
-
-update public.jobs set match_score = null, match_details = null
- where employer_id is not null and (match_score is not null or match_details is not null);
