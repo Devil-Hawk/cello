@@ -129,6 +129,14 @@ export function RolesView({ query, items, picks, total, newToday, groupCounts, f
                 </Key>
               ))}
             </nav>
+            <nav aria-label="Sort" className="flex items-center gap-1">
+              <span className="r-meta mr-1">Sort</span>
+              {(['ranked', 'newest'] as const).map((o) => (
+                <Key key={o} asChild variant="ghost" current={query.sort === o}>
+                  <Link href={rolesHref(query, { sort: o, limit: PAGE })}>{o === 'ranked' ? 'Ranked' : 'Newest'}</Link>
+                </Key>
+              ))}
+            </nav>
             <Filters query={query} />
           </>
         )}

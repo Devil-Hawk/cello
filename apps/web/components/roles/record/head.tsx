@@ -80,6 +80,9 @@ export function RecordHead({ role, url, status }: RecordHeadProps) {
           </div>
         )}
         {keys}
+        <Key asChild variant="ghost">
+          <Link href={`/resume/${role.id}`}>Tailor resume</Link>
+        </Key>
       </div>
       {step === 'idle' && url && <p className="r-meta">Cello prepares this from your resume. You send it.</p>}
       {panel}

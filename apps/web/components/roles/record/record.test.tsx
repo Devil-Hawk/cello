@@ -53,6 +53,7 @@ describe('the record', () => {
     expect(html).toContain(`href="/roles/${data.role.id}"`)
     expect(html).toContain(`href="/companies/${data.role.companyId}"`)
     expect(text(html)).toContain("Cello's read Possible. Looks like what you go for.")
+    expect(html).toContain(`href="/resume/${data.role.id}"`)
     expect(html).not.toMatch(/truncate|line-clamp/)
   })
 

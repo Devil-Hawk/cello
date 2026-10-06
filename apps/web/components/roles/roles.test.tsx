@@ -116,6 +116,9 @@ describe('the Roles view', () => {
     expect(html).toContain('Edit your search')
     expect(html).toContain('Follow an employer')
     expect(html).not.toMatch(/\b0 for you\b|Not scored|unscored/i)
+    expect(html).toContain('Group by')
+    expect(html).toContain('Sort')
+    expect(html).toContain('Paste a link')
   })
 
   it('shows one role, and 25 roles without Show more, and 26 with it', () => {
