@@ -54,6 +54,23 @@ describe('trust', () => {
     expect(headerVerdict(headers, 'acme.com')).toEqual({ domain: 'acme.com', dkim: 'pass' })
     expect(headerVerdict([], 'acme.com')).toEqual({ domain: null, dkim: 'none' })
   })
+
+  it('ignores an Authentication-Results header the sender wrote: only Gmail own counts', () => {
+    const forged = { name: 'Authentication-Results', value: 'other.example; dkim=pass header.d=acme.com' }
+    const gmailFail = { name: 'Authentication-Results', value: 'mx.google.com; dkim=fail header.d=acme.com' }
+    expect(headerVerdict([forged], 'acme.com')).toEqual({ domain: null, dkim: 'none' })
+    expect(headerVerdict([gmailFail, forged], 'acme.com')).toEqual({ domain: 'acme.com', dkim: 'fail' })
+    expect(headerVerdict([{ name: 'Authentication-Results', value: 'mx.google.com.evil.example; dkim=pass header.d=acme.com' }], 'acme.com').dkim).toBe('none')
+    expect(trustOf({ fromDomain: 'acme.com', employerDomain: 'acme.com', verdict: headerVerdict([gmailFail, forged], 'acme.com') })).toBe('unconfirmed')
+    expect(trustOf({ fromDomain: 'acme.com', employerDomain: 'acme.com', verdict: headerVerdict([forged], 'acme.com') })).toBe('unconfirmed')
+  })
+
+  it('accepts a signing domain that is the From domain or its parent, not a child of it', () => {
+    expect(headerVerdict(pass('acme.com'), 'mail.acme.com').dkim).toBe('pass')
+    expect(headerVerdict(pass('acme.com'), 'acme.com').dkim).toBe('pass')
+    expect(headerVerdict(pass('mail.acme.com'), 'acme.com')).toEqual({ domain: 'mail.acme.com', dkim: 'pass' })
+    expect(trustOf({ fromDomain: 'acme.com', employerDomain: 'acme.com', verdict: headerVerdict(pass('mail.acme.com'), 'acme.com') })).toBe('unconfirmed')
+  })
 })
 
 describe('contact kind', () => {

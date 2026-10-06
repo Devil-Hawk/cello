@@ -22,15 +22,22 @@ export function isRelay(domain: string | null): boolean {
   return isAtsOrJobBoardDomain(d) || EXTRA_RELAYS.some((r) => d === r || d.endsWith(`.${r}`))
 }
 
-const sameOrg = (a: string, b: string) => a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`)
+// `parent` is the domain itself or a registrable parent of `domain`: DKIM's relaxed alignment, one way only.
+const sameOrg = (parent: string, domain: string) => parent === domain || domain.endsWith(`.${parent}`)
+
+// Gmail's own authserv-id. The sender can write any Authentication-Results header; only the one Gmail
+// added, on top of the others, says what Gmail checked.
+const GMAIL_AUTHSERV = 'mx.google.com'
 
 /**
- * The DKIM verdict from the Authentication-Results header(s): a passing signature whose domain lines
- * up with the From domain wins; otherwise the first result, otherwise "none". Header values from
- * the person's own mail server are the only ones Gmail adds; a mail that carries none is "none".
+ * The DKIM verdict from the topmost Authentication-Results header that Gmail itself added (its
+ * authserv-id is mx.google.com; every other one is the sender's writing and is ignored): a passing
+ * signature whose domain lines up with the From domain wins; otherwise the first result, otherwise
+ * "none". A mail that carries no Gmail header is "none".
  */
 export function headerVerdict(headers: Array<{ name: string; value: string }>, fromDomain: string | null): HeaderVerdict {
-  const results = headers.filter((h) => h.name.toLowerCase() === 'authentication-results').map((h) => h.value)
+  const gmail = headers.find((h) => h.name.toLowerCase() === 'authentication-results' && h.value.split(';')[0].trim().split(/\s+/)[0].toLowerCase() === GMAIL_AUTHSERV)
+  const results = gmail ? [gmail.value] : []
   let first: HeaderVerdict | null = null
   for (const value of results) {
     for (const m of value.matchAll(/dkim=(\w+)([^;]*)/gi)) {
@@ -59,7 +66,7 @@ export function trustOf(args: { fromDomain: string | null; employerDomain: strin
   const { fromDomain, employerDomain, verdict } = args
   if (!fromDomain || verdict.dkim !== 'pass' || !verdict.domain) return 'unconfirmed'
   // the signature must be for the domain the mail says it is from
-  if (!sameOrg(verdict.domain, fromDomain.toLowerCase())) return 'unconfirmed'
+  if (!sameOrg(verdict.domain.toLowerCase(), fromDomain.toLowerCase())) return 'unconfirmed'
   if (isRelay(fromDomain)) return 'proven'
-  return employerDomain && sameOrg(fromDomain.toLowerCase(), employerDomain.toLowerCase()) ? 'proven' : 'unconfirmed'
+  return employerDomain && sameOrg(employerDomain.toLowerCase(), fromDomain.toLowerCase()) ? 'proven' : 'unconfirmed'
 }
