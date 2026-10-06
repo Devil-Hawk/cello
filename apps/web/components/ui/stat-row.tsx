@@ -41,7 +41,9 @@ export function StatRow({ stats, className, ...props }: StatRowProps) {
       )}
       {...props}
     >
-      {shown.map((stat) => {
+      {shown.map((stat, i) => {
+        // An odd last tile spans the phone's two columns so no grey cell shows.
+        const span = shown.length % 2 === 1 && i === shown.length - 1 ? ' col-span-2 sm:col-span-1' : ''
         const content = (
           <>
             <div className="font-readout text-label uppercase tracking-[0.12em] text-muted-foreground">
@@ -63,7 +65,7 @@ export function StatRow({ stats, className, ...props }: StatRowProps) {
             <Link
               key={stat.label}
               href={stat.href}
-              className="block bg-card px-5 py-4 transition-colors hover:bg-sunken/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              className={`block bg-card px-5 py-4${span} transition-colors hover:bg-sunken/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring`}
             >
               {content}
             </Link>
@@ -71,7 +73,7 @@ export function StatRow({ stats, className, ...props }: StatRowProps) {
         }
 
         return (
-          <div key={stat.label} className="bg-card px-5 py-4">
+          <div key={stat.label} className={`bg-card px-5 py-4${span}`}>
             {content}
           </div>
         )

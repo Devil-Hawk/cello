@@ -365,7 +365,7 @@ export default function CompaniesPage() {
         <EmptyState
           icon={Building2}
           title="No companies yet"
-          body="Type a company name — or paste a career page URL — and Cello will check it for new openings automatically."
+          body="Type a company name or paste a career page URL, and Cello will look for open roles there."
           action={
             <Button onClick={() => setShowAddDialog(true)}>
               <Plus className="h-4 w-4" />

@@ -15,4 +15,15 @@ describe('StatRow', () => {
   it('draws nothing when every stat reads 0', () => {
     expect(renderToStaticMarkup(<StatRow stats={[{ label: 'A', value: 0 }, { label: 'B', value: 0 }]} />)).toBe('')
   })
+
+  it('spans the last tile on phones when the count is odd', () => {
+    const three = renderToStaticMarkup(
+      <StatRow stats={[{ label: 'A', value: 1 }, { label: 'B', value: 2 }, { label: 'C', value: 3 }]} />
+    )
+    expect(three.match(/col-span-2 sm:col-span-1/g)).toHaveLength(1)
+    const four = renderToStaticMarkup(
+      <StatRow stats={['A', 'B', 'C', 'D'].map((label) => ({ label, value: 1 }))} />
+    )
+    expect(four).not.toContain('col-span-2')
+  })
 })
