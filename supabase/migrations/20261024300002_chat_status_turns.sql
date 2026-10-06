@@ -7,9 +7,12 @@
 --   so no model's words or email subject can forge one: the turn only names the event, and the sentence shown
 --   is read from the event.
 --
---   pipeline_events belongs to the pipeline package and does not exist until it lands. Until then the trigger is
---   not attached: the function is always defined, and the trigger is attached when the table is there. Apply this
---   file again after the pipeline migration to attach it.
+--   Ordering: pipeline_events belongs to the pipeline package (20261013000001), which sorts before this file, so on
+--   every database that has the pipeline the trigger is attached by this file. On a database without it (a base
+--   from before the pipeline) the function is defined and nothing is attached; there is no later step that attaches it.
+--   The number 300002 is chat's, next to K24d's 300000; 300001 stays free for the contract drop the plan reserved.
+--
+--   A chat failure never blocks a pipeline move: the insert is guarded, and a failure becomes a warning.
 --
 --   expand only.
 
@@ -20,13 +23,17 @@ security definer
 set search_path = ''
 as $$
 begin
-  insert into public.chat_turns (user_id, chat_id, kind, event_id, origin, prov)
-  select new.user_id, a.chat_id, 'status', new.id, 'code', jsonb_build_object('rule', 'pipeline_event')
-    from public.chat_attachments a
-   where a.user_id = new.user_id
-     and a.kind = 'application'
-     and a.removed_at is null
-     and a.ref ->> 'id' = new.application_id::text;
+  begin
+    insert into public.chat_turns (user_id, chat_id, kind, event_id, origin, prov)
+    select new.user_id, a.chat_id, 'status', new.id, 'code', jsonb_build_object('rule', 'pipeline_event')
+      from public.chat_attachments a
+     where a.user_id = new.user_id
+       and a.kind = 'application'
+       and a.removed_at is null
+       and a.ref ->> 'id' = new.application_id::text;
+  exception when others then
+    raise warning 'chat_status_turns: % (%)', sqlerrm, sqlstate;
+  end;
   return new;
 end
 $$;

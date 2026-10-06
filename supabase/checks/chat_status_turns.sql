@@ -2,7 +2,9 @@
 --   * one state change of an application writes one status turn in each chat that holds it as a tile;
 --   * a chat that does not hold it, a chat whose tile was removed, and another person's chat get none;
 --   * an event that moves nothing (same state) writes none.
--- Runs on a probe table with the columns the trigger reads (the pipeline's table has the same ones).
+--   * a chat that cannot take the line never blocks the move: the event row still lands.
+-- Runs on a probe table with the columns the trigger reads (the pipeline's table has the same ones);
+-- chat_status_turns_pipeline.sql proves the attachment to the real table where there is one.
 -- One transaction, rolled back.
 --
 --   psql -X -v ON_ERROR_STOP=1 -f supabase/checks/chat_status_turns.sql \
@@ -71,6 +73,23 @@ begin
   insert into public.chat_status_probe (user_id, application_id, from_state, to_state)
   values ('dddddddd-0000-0000-0000-000000000031', 'dddddddd-9999-0000-0000-000000000031', 'sent', 'sent');
   assert (select count(*) from public.chat_turns where kind = 'status' and chat_id = 'dddddddd-1111-0000-0000-000000000031') = 2, 'no turn when the state did not change';
+end $$;
+
+-- A failing chat write must not abort the move that caused it.
+create function public.chat_check_refuse_turn() returns trigger language plpgsql as $f$
+begin
+  raise exception 'chat is broken';
+end
+$f$;
+create trigger chat_check_refuse_turn before insert on public.chat_turns for each row execute function public.chat_check_refuse_turn();
+
+do $$
+declare
+  ev uuid := gen_random_uuid();
+begin
+  insert into public.chat_status_probe (id, user_id, application_id, from_state, to_state)
+  values (ev, 'dddddddd-0000-0000-0000-000000000031', 'dddddddd-9999-0000-0000-000000000031', 'sent', 'confirmed');
+  assert exists (select 1 from public.chat_status_probe where id = ev), 'the move lands even when the chat line cannot be written';
 end $$;
 
 rollback;
