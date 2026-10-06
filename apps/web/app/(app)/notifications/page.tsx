@@ -3,7 +3,7 @@
 import { LogoMark } from '@/components/brand/logo'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { AlertTriangle, Bell, CalendarClock, FileWarning, Sparkles } from 'lucide-react'
+import { Star, AlertTriangle, Bell, CalendarClock, FileWarning } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -259,7 +259,7 @@ export default function NotificationsPage() {
   if (hotJobs.length > 0) {
     sections.push({
       key: 'hot-jobs',
-      icon: Sparkles,
+      icon: Star,
       title: 'New high-scoring jobs',
       description: 'Unreviewed jobs matching your resume well',
       tone: 'opportunity',

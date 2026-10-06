@@ -1,6 +1,6 @@
 'use client'
 
-import { Building2, Check, Linkedin, Loader2, Mail, Pencil, Trash2 } from 'lucide-react'
+import { Building2, Check, ExternalLink, Loader2, Mail, Pencil, Trash2 } from 'lucide-react'
 import { calculateConnectionStrength, calculateDaysSinceContact } from '@/lib/contacts/network'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -152,7 +152,7 @@ export function ContactRow({
               title="Open LinkedIn profile"
               aria-label={`Open ${contact.name}'s LinkedIn profile`}
             >
-              <Linkedin className="h-4 w-4" aria-hidden />
+              <ExternalLink className="h-4 w-4" aria-hidden />
             </Button>
           )}
           <Button

@@ -4,7 +4,7 @@ import { LogoMark } from '@/components/brand/logo'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Briefcase, Building2, Loader2, Plus, SearchX, Sparkles, Target, X } from 'lucide-react'
+import { Briefcase, Building2, Loader2, Plus, SearchX, Target, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
@@ -1101,7 +1101,7 @@ function JobsPageInner() {
                   </>
                 ) : (
                   <>
-                    <Sparkles className="h-4 w-4" />
+                    <LogoMark className="h-4 w-4" />
                     {allScored ? 'All jobs scored' : 'Score unscored jobs'}
                   </>
                 )}

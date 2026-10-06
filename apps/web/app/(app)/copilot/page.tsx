@@ -43,7 +43,8 @@ import type { FormQuestion } from '@/components/copilot/question-form'
 import { memo, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { Activity, History, Loader2, Pencil, Sparkles, WifiOff, X } from 'lucide-react'
+import { Activity, History, Loader2, Pencil, WifiOff, X } from 'lucide-react'
+import { LogoMark } from '@/components/brand/logo'
 import { toast } from '@/components/ui/use-toast'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -1152,7 +1153,7 @@ export default function CopilotPage() {
           {empty ? (
             <div className="flex h-full flex-col items-center justify-center text-center">
               <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft">
-                <Sparkles className="h-5 w-5 text-accent-deep" />
+                <LogoMark className="h-5 w-5 text-accent-deep" />
               </div>
               <h2 className="font-display text-section text-foreground">How can I help your search?</h2>
               <p className="mt-1.5 max-w-sm text-caption text-muted-foreground">

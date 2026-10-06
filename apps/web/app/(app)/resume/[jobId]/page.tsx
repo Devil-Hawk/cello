@@ -28,7 +28,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { ArrowLeft, FileWarning, Loader2, Save, Sparkles } from 'lucide-react'
+import { ArrowLeft, FileWarning, Loader2, Save } from 'lucide-react'
+import { LogoMark } from '@/components/brand/logo'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -546,7 +547,7 @@ export default function ResumeStudioPage() {
               {generating ? (
                 <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
               ) : (
-                <Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
+                <LogoMark aria-hidden="true" className="h-3.5 w-3.5" />
               )}
               {generating ? `Generating… ${Math.floor(generateElapsedMs / 1000)}s` : 'Regenerate tailored version'}
             </Button>
@@ -573,7 +574,7 @@ export default function ResumeStudioPage() {
       {isFirstRun && (
         <div className="rounded-card border p-5">
           <div className="mb-1 flex items-center gap-2">
-            <Sparkles aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
+            <LogoMark aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-body font-medium text-foreground">Generate a tailored version</h2>
           </div>
           <p className="mb-3 text-caption text-muted-foreground">
@@ -584,7 +585,7 @@ export default function ResumeStudioPage() {
             {generating ? (
               <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
             ) : (
-              <Sparkles aria-hidden="true" className="h-4 w-4" />
+              <LogoMark aria-hidden="true" className="h-4 w-4" />
             )}
             {generating
               ? `Generating… ${Math.floor(generateElapsedMs / 1000)}s elapsed`

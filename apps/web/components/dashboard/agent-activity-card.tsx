@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { AlertTriangle, CheckCircle2, CircleDashed, Clock, Loader2, PauseCircle, Sparkles, XCircle, type LucideIcon } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, CircleDashed, Clock, Loader2, PauseCircle, XCircle, type LucideIcon } from 'lucide-react'
 import { Badge, type BadgeTone } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -69,7 +69,7 @@ export function AgentActivityCard({ run }: AgentActivityCardProps) {
         </CardHeader>
         <CardContent>
           <EmptyState
-            icon={Sparkles}
+            icon={Activity}
             title="Nothing yet"
             body="Ask Cello to find roles or research a company."
             action={
