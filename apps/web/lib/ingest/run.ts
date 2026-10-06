@@ -43,7 +43,7 @@ import { runRequirementsPass, type RequirementsRows } from './requirements-pass'
 
 type Db = SupabaseClient<any, any, any>
 
-export type FailureReason = 'board_error' | ReadReason | Exclude<ReaderReason, 'reading' | 'budget'> | 'time'
+export type FailureReason = 'board_error' | ReadReason | Exclude<ReaderReason, 'reading'> | 'time'
 export type Reader = AtsProviderId | 'page_reader' | Exclude<Tier, 'board' | 'model' | 'rendered'>
 
 export interface DueCompany extends CompanyInput {
@@ -90,7 +90,7 @@ export function isDue(
 ): boolean {
   // A site still to be read in a browser, or whose browser step failed, is tried again at the next scheduled pass.
   const reason = readSourceCheck(company.metadata)?.reason
-  if (reason === 'reading' || reason === 'render_failed' || reason === 'read_failed' || reason === 'model_unavailable' || reason === 'model_limit') return true
+  if (reason === 'reading' || reason === 'budget' || reason === 'render_failed' || reason === 'read_failed' || reason === 'model_unavailable' || reason === 'model_limit') return true
   return now >= dueAt(company)
 }
 
@@ -282,6 +282,8 @@ export async function ingestCompany(store: AtsStore, company: DueCompany, deps: 
       }
 
       board.unreadable = undefined
+      // A pasted posting says what it could not read (no place on its page).
+      if (read.message) outcome.message = read.message
       const judge = { name: company.name, domain: company.domain ?? null, careerUrl }
       if (read.board) {
         const b = read.board

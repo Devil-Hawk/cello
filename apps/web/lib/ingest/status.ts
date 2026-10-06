@@ -48,6 +48,7 @@ export const FAILURE_TEXT: Record<FailureReason, string> = {
   unreachable: 'Its careers site did not answer',
   role_pages: 'Its role pages cannot be read without a browser',
   render_failed: "Cello's browser could not read its careers page",
+  budget: 'Its site is large, and one check reads only part of it. The next check reads more',
   time: 'Not reached this time',
 }
 

@@ -33,6 +33,7 @@ export const REASON_COPY: Record<string, string> = {
   no_roles: 'no open roles were found on it',
   unreachable: 'it did not answer',
   read_failed: 'reading it failed with an error, and the next check tries again',
+  budget: 'its site is large, and one check reads only part of it, so the next check reads more',
   role_pages: 'it lists roles, but their pages cannot be read without a browser',
   render_failed: "Cello's browser could not read it just now, and the next check tries again",
   model_unavailable: 'no free reading slot was available, and the next check tries again',
@@ -106,7 +107,7 @@ export function nextCheckAt(company: StatusCompany, now: number = Date.now()): n
 export type RolesStatus =
   | { kind: 'roles'; count: number }
   | { kind: 'checking' }
-  | { kind: 'reading'; nextCheckAt: number; waiting?: boolean }
+  | { kind: 'reading'; nextCheckAt: number; waiting?: boolean; large?: boolean }
   | { kind: 'not_checked'; nextCheckAt: number; now: number }
   | { kind: 'empty'; nextCheckAt: number; now: number }
   | { kind: 'unreadable'; reason: string; careersUrl: string | null }
@@ -122,6 +123,10 @@ export function rolesStatus(
   const check = readSourceCheck(company.metadata)
   if (check && !check.readable && check.reason === READING_REASON) {
     return { kind: 'reading', nextCheckAt: firstTickAtOrAfter(now) }
+  }
+  // The site is bigger than one check reads: not "no roles", and the next scheduled check goes on.
+  if (check && !check.readable && check.reason === 'budget') {
+    return { kind: 'reading', nextCheckAt: firstTickAtOrAfter(now), large: true }
   }
   if (check && !check.readable && check.reason && WAITING_REASONS.includes(check.reason)) {
     return { kind: 'reading', nextCheckAt: firstTickAtOrAfter(now), waiting: true }
@@ -171,6 +176,7 @@ export function rolesStatusLine(s: RolesStatus): { text: string; href?: string }
       return { text: 'Checking now' }
     case 'reading': {
       const t = new Date(s.nextCheckAt).toISOString().slice(11, 16)
+      if (s.large) return { text: `This site is large and Cello is still reading it. Next check around ${t} UTC` }
       return { text: s.waiting ? `Waiting for a free reading slot. Next check around ${t} UTC` : `Cello is reading this site. Next check around ${t} UTC` }
     }
     case 'not_checked':

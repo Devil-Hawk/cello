@@ -3,6 +3,7 @@ import type { AtsJob } from '../../ats/types'
 import { eightfold } from '../../ats/eightfold'
 import { fakeFetcher, fixture, type Route } from './fake-fetcher'
 import { readSite, type SiteDeps } from './index'
+import { makeSiteFetcher } from './site-fetch'
 import { roleLinks } from './listing'
 import { amazonJobs } from './sites'
 import { NO_TARGETS, type ReaderTargets } from './targets'
@@ -332,5 +333,36 @@ describe("the rendered tier stores only what is the employer's own", () => {
 describe('amazon fixture sanity', () => {
   it('has roles for the site search to return', () => {
     expect(amazonJobs(JSON.parse(fixture('amazon-search.json')))).toHaveLength(5)
+  })
+})
+
+describe('readSite: a read that ran out of requests or time did not finish, and never says there are no roles', () => {
+  const careers = 'https://acme.test/careers'
+  const page = '<html><body><nav><a href="/careers/teams">Teams</a><a href="/careers/jobs">Jobs</a></nav><p>Join us.</p></body></html>'
+  const fetcher = (budget: { requests?: number; ms?: number }) =>
+    makeSiteFetcher({
+      budget,
+      fetchImpl: (async (u: unknown) => (String(u).endsWith('/robots.txt') ? new Response('', { status: 404 }) : new Response(page, { status: 200, headers: { 'content-type': 'text/html' } }))) as typeof fetch,
+      sleep: async () => {},
+      assertSafe: async () => {},
+    })
+
+  it('two requests are not enough to read a site: budget, or reading when a browser pass is to come', async () => {
+    const early = await readSite(company('Acme', 'acme.test', careers), { fetcher: fetcher({ requests: 2 }) })
+    expect(early.tier).toBeNull()
+    expect(early.reason).toBe('budget')
+    const inline = await readSite(company('Acme', 'acme.test', careers), { fetcher: fetcher({ requests: 2 }), renderedLater: true })
+    expect(inline.reason).toBe('reading')
+  })
+
+  it('a spent clock is the same', async () => {
+    const read = await readSite(company('Acme', 'acme.test', careers), { fetcher: fetcher({ ms: 0 }) })
+    expect(read.reason).toBe('budget')
+    expect(read.tried.map((t) => t.outcome)).not.toContain('roles')
+  })
+
+  it('with room to read the same site, a page with no roles is still no roles', async () => {
+    const read = await readSite(company('Acme', 'acme.test', careers), { fetcher: fetcher({ requests: 25 }) })
+    expect(read.reason).toBe('no_roles')
   })
 })
