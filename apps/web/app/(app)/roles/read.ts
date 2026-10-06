@@ -17,7 +17,7 @@ type Db = SupabaseClient<any, any, any>
 
 const JOB_COLUMNS =
   'id, title, location, salary_range, posted_at, seniority, is_remote, country, still_open, legit_label, employer_id, company_id, companies(name, logo_url, domain)'
-const LIST = `job_id, saved_at, hidden_reason, visible_since, ${FIT_COLUMNS}, jobs!inner(${JOB_COLUMNS})`
+export const LIST = `job_id, saved_at, hidden_reason, visible_since, ${FIT_COLUMNS}, jobs!inner(${JOB_COLUMNS})`
 
 /** ponytail: ranking runs over the newest 300 rows the person's order returns; past that, "Show more" ends. SQL-side ranking when anyone keeps more than that open. */
 const WINDOW = 300

@@ -19,8 +19,8 @@ export const PKCE_COOKIE = 'cello_or_pkce'
 export const PKCE_COOKIE_PATH = '/api/auth/openrouter'
 export const PKCE_MAX_AGE_SECONDS = 600
 
-/** Where the round trip may send the person back to: Welcome and Settings, nothing else. */
-const RETURN_PATHS = ['/welcome', '/settings']
+/** Where the round trip may send the person back to: Welcome, Settings and Today, nothing else. */
+const RETURN_PATHS = ['/welcome', '/settings', '/today']
 
 export function safeReturn(value: string | null | undefined): string {
   const path = (value ?? '').split('?')[0]
