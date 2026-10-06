@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { COPILOT_TOOLS } from '@/lib/harness/copilot-tool-catalog'
+import { mcpView, mcpToolName } from '@/lib/commands'
 
 interface State {
   validation: { ok: boolean; userId?: string; scopes?: string[]; reason?: string }
@@ -143,6 +144,16 @@ describe('tools/list parity', () => {
     const body = await res.json()
     const names = (body.result.tools as Array<{ name: string }>).map((t) => t.name)
     expect(new Set(names)).toEqual(new Set(COPILOT_TOOLS.map((t) => t.name)))
+  })
+
+  it('serves exactly mcpView(), the 18 legacy names included, and lists no send command', async () => {
+    const res = await POST(req(TOOLS_LIST))
+    const body = await res.json()
+    const names = (body.result.tools as Array<{ name: string }>).map((t) => t.name)
+    expect(new Set(names)).toEqual(new Set(mcpView().map(mcpToolName)))
+    for (const tool of COPILOT_TOOLS) expect(names).toContain(tool.name)
+    expect(names).not.toContain('conversations_send')
+    expect(names.some((n) => /send/.test(n))).toBe(false)
   })
 })
 
