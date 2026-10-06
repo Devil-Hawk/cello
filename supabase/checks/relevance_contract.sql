@@ -271,10 +271,10 @@ begin
 
   -- a role a person wrote with no employer carries nothing of its body into the shared row the service role adopts it into
   insert into public.jobs (id, company_id, title, description, url, external_id, apply_url, description_md, description_state, description_md5,
-                           discovered_at, still_open, legit_label, match_score)
+                           discovered_at, still_open, legit_label)
   values (ja2, f.co_a, 'Written by A', 'x', 'https://shared.example/jobs/adopt-1', 'adopt-1', 'https://evil.example/apply', 'poison', 'full', md5('poison'),
-          '2000-01-01', false, 'agency', 99);
-  update public.jobs set employer_id = null where id = ja2;
+          '2000-01-01', false, 'agency');
+  update public.jobs set employer_id = null, match_score = 99 where id = ja2; -- the score is planted by the server, as the match route does
   perform public.upsert_shared_jobs(jsonb_build_array(jsonb_build_object('company_id', f.co_a, 'employer_id', f.emp, 'external_id', 'adopt-1', 'title', 'Real title', 'description', 'd',
             'url', 'https://shared.example/jobs/adopt-1', 'source', 'greenhouse')));
   if (select employer_id from public.jobs where id = ja2) is distinct from f.emp then raise exception 'the read adopts the role'; end if;
@@ -422,6 +422,23 @@ begin
   if pg_temp.as_user(f.a, format('select match_score from public.person_jobs where id = %L', js)) is distinct from 70 then raise exception 'A reads the score through person_jobs'; end if;
   if exists (select 1 from pg_trigger where tgrelid = 'public.jobs'::regclass and tgname = 'jobs_no_shared_score') then raise exception 'no trigger empties the score of a shared role'; end if;
   delete from public.jobs where id = js;
+end $$;
+
+-- 6h'. A signed-in person cannot write a score: not on insert, not on update. The server can, and it survives adoption.
+do $$
+declare f record; jp uuid := gen_random_uuid();
+begin
+  select * into f from fx;
+  perform pg_temp.as_user(f.a, format($q$with i as (insert into public.jobs (id, company_id, title, description, url, external_id, match_score, match_details) values (%L, %L, 'Planted', 'x', 'https://shared.example/jobs/plant-1', 'plant-1', 99, '{"x":1}'::jsonb) returning 1) select count(*) from i$q$, jp, f.co_a));
+  if (select match_score is not null or match_details is not null from public.jobs where id = jp) then raise exception 'a person cannot insert a score'; end if;
+  update public.jobs set match_score = 50, match_details = '{"s":50}'::jsonb where id = jp;
+  perform pg_temp.as_user(f.a, format($q$with u as (update public.jobs set match_score = 99, match_details = '{"x":1}'::jsonb where id = %L returning 1) select count(*) from u$q$, jp));
+  if (select match_score is distinct from 50 or match_details is distinct from '{"s":50}'::jsonb from public.jobs where id = jp) then raise exception 'a person cannot update a score'; end if;
+  update public.jobs set match_score = 70 where id = jp;
+  if (select match_score from public.jobs where id = jp) is distinct from 70 then raise exception 'the server writes a score'; end if;
+  perform public.upsert_shared_jobs(jsonb_build_array(jsonb_build_object('company_id', f.co_a, 'employer_id', f.emp, 'external_id', 'plant-1', 'title', 'Real', 'description', 'd',
+            'url', 'https://shared.example/jobs/plant-1', 'source', 'greenhouse')));
+  if (select employer_id from public.jobs where id = jp) is distinct from f.emp or (select match_score from public.jobs where id = jp) is distinct from 70 then raise exception 'the server score survives adoption'; end if;
 end $$;
 
 -- 6h. The own-role upsert cannot rewrite a shared role: A links, the role is stored shared under A's company, A unlinks,
