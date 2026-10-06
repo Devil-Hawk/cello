@@ -304,7 +304,7 @@ describe('applications', () => {
     mocks.approveDraft.mockResolvedValue({ status: 200, body: { ok: true, status: 'submitted', provider: 'greenhouse', submissionRef: 'ref-1', handoffUrl: null } })
     const r = await decide(w, q.approval.id)
     expect(mocks.approveDraft).toHaveBeenCalledTimes(1)
-    expect(mocks.approveDraft).toHaveBeenCalledWith({ admin: w.admin, userId: 'u1', draftId: q.approval.target_id })
+    expect(mocks.approveDraft).toHaveBeenCalledWith(expect.objectContaining({ door: 'session', userId: 'u1' }), { draftId: q.approval.target_id })
     expect(r.approval?.outcome).toMatchObject({ what: 'Application submitted', result: { provider: 'greenhouse', submission_ref: 'ref-1' } })
   })
 

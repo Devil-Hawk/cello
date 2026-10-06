@@ -98,14 +98,16 @@ begin
   if current_setting('chk.employer_a')::jsonb is distinct from hand::jsonb then
     raise exception 'employer counts for A are %, a hand count says %', current_setting('chk.employer_a'), hand;
   end if;
-  if (current_setting('chk.employer_a')::jsonb ->> f.e1::text)::int <> 9
-     or (current_setting('chk.employer_a')::jsonb ->> f.e2::text)::int <> 9
-     or (current_setting('chk.employer_a')::jsonb ->> f.e3::text)::int <> 7 then
+  -- These roles carry no source, so no employer's board wrote them: they are unshared and count under the
+  -- person's own company (the key is coalesce(employer_id, company_id)).
+  if (current_setting('chk.employer_a')::jsonb ->> f.ca1::text)::int is distinct from 9
+     or (current_setting('chk.employer_a')::jsonb ->> f.ca2::text)::int is distinct from 9
+     or (current_setting('chk.employer_a')::jsonb ->> f.ca3::text)::int is distinct from 7 then
     raise exception 'A should see 9, 9 and 7 (a hidden role and a stale role do not count): %', current_setting('chk.employer_a');
   end if;
 
   -- B counts only B's own four, never A's rows at the same employer.
-  if current_setting('chk.employer_b')::jsonb is distinct from jsonb_build_object(f.e1::text, 4) then
+  if current_setting('chk.employer_b')::jsonb is distinct from jsonb_build_object(f.cb1::text, 4) then
     raise exception 'B should see only their 4 roles at one employer, saw %', current_setting('chk.employer_b');
   end if;
 
