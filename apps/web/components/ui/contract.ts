@@ -6,8 +6,8 @@ export const COPY_CAPS = {
   phone: { words: 45, groups: 3 },
 } as const
 
-/** The still objects: Today's quiet state and Roles' empty For you. */
-export const STILLS = ['quiet', 'empty'] as const
+/** The still objects: Today's quiet state, Roles' empty For you, and the resting mark. */
+export const STILLS = ['quiet', 'empty', 'mark'] as const
 export type StillName = (typeof STILLS)[number]
 
 /** Hex per role, light and dark. app/relief.css must carry the same values. */

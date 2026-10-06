@@ -11,8 +11,8 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// The same two names as STILLS in components/ui/contract.ts.
-const STILLS = ['quiet', 'empty']
+// The same names as STILLS in components/ui/contract.ts.
+const STILLS = ['quiet', 'empty', 'mark']
 
 const base = process.argv[2]
 if (!base) {
