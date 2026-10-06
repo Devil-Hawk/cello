@@ -4,10 +4,12 @@
 -- relay_complete refuses the wrong person, the wrong claim, an unclaimed job and a
 -- second answer.
 --
--- The queue half (relay_enqueue and relay_claim read pgmq) runs only where pgmq is
--- installed. The checks harness image has no pgmq yet: there the queue assertions
--- are skipped and the check says so. They are not faked; K12's harness stub, or a
--- run against a Supabase database, runs them.
+-- The queue half (relay_enqueue and relay_claim use pgmq) runs against real pgmq where
+-- it is installed. The checks harness image has none, so there the check makes a small
+-- stand-in for the three pgmq calls the functions use (send, read with a conditional,
+-- delete) on the same table name pgmq uses, inside the transaction, and says so. The
+-- stand-in proves our SQL; it does not prove pgmq. Run this file against a Supabase
+-- database to prove the real thing.
 --
 --   psql -X -v ON_ERROR_STOP=1 -f supabase/checks/extension-models_relay.sql \
 --        "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
@@ -136,17 +138,45 @@ exception when unique_violation then null;
 end $$;
 
 -- ===========================================================================
--- The queue half, where pgmq is installed.
+-- The queue half.
 -- ===========================================================================
 do $$
-declare
-  a record; b record; again record; got record; n integer; ok boolean;
 begin
-  if to_regnamespace('pgmq') is null then
-    raise notice 'pgmq is not installed here: the relay_enqueue and relay_claim assertions were skipped, not run';
+  if to_regnamespace('pgmq') is not null then
+    raise notice 'pgmq is installed: the queue assertions run against it';
     return;
   end if;
+  raise notice 'pgmq is not installed here: the queue assertions run against this check''s own stand-in for send, read and delete';
+  create schema pgmq;
+  create table pgmq.q_model_jobs (
+    msg_id bigserial primary key,
+    read_ct integer not null default 0,
+    enqueued_at timestamptz not null default now(),
+    vt timestamptz not null default now(),
+    message jsonb not null,
+    headers jsonb
+  );
+  create function pgmq.send(queue_name text, msg jsonb, delay integer default 0) returns bigint
+  language sql as 'insert into pgmq.q_model_jobs (message) values (msg) returning msg_id';
+  create function pgmq.delete(queue_name text, msg_id bigint) returns boolean
+  language sql as 'with d as (delete from pgmq.q_model_jobs where pgmq.q_model_jobs.msg_id = $2 returning 1) select exists (select 1 from d)';
+  create function pgmq.read(queue_name text, vt_secs integer, qty integer, conditional jsonb default '{}'::jsonb)
+  returns table (msg_id bigint, read_ct integer, enqueued_at timestamptz, vt timestamptz, message jsonb, headers jsonb)
+  language sql as $f$
+    update pgmq.q_model_jobs q
+       set read_ct = q.read_ct + 1, vt = now() + make_interval(secs => vt_secs)
+     where q.msg_id in (
+       select i.msg_id from pgmq.q_model_jobs i
+        where i.vt <= now() and i.message @> conditional
+        order by i.msg_id limit qty for update skip locked)
+    returning q.msg_id, q.read_ct, q.enqueued_at, q.vt, q.message, q.headers
+  $f$;
+end $$;
 
+do $$
+declare
+  a record; b record; again record; got record; later record; n integer; ok boolean; first_claim uuid;
+begin
   select * into a from public.relay_enqueue('cccccccc-0000-0000-0000-000000000001', 'chance', 'R2', 'hq', '{"messages":[]}');
   select * into b from public.relay_enqueue('cccccccc-0000-0000-0000-000000000002', 'chance', 'R2', 'hq', '{"messages":[]}');
   assert a.created and b.created, 'both people should get a new job';
@@ -158,17 +188,36 @@ begin
   assert n = 0, 'a claim at another rung returned a job';
   select * into got from public.relay_claim('cccccccc-0000-0000-0000-000000000001', 'R2');
   assert got.job_id = a.job_id, 'person A did not get their own job';
+  first_claim := got.claim_id;
   select * into got from public.relay_claim('cccccccc-0000-0000-0000-000000000002', 'R2');
   assert got.job_id = b.job_id, 'person B did not get their own job';
   select count(*) into n from public.relay_claim('cccccccc-0000-0000-0000-000000000001', 'R2');
   assert n = 0, 'a leased job was handed out again';
 
+  -- A lease that runs out: the next claim gets the job again with a new claim id, and the
+  -- carrier that went quiet can no longer answer it.
+  update pgmq.q_model_jobs set vt = now() - interval '1 second';
+  select * into later from public.relay_claim('cccccccc-0000-0000-0000-000000000001', 'R2');
+  assert later.job_id = a.job_id and later.claim_id <> first_claim, 'an expired lease did not give a new claim id';
+  ok := public.relay_complete('cccccccc-0000-0000-0000-000000000001', a.job_id, first_claim, '{"text":"late"}', null);
+  assert not ok, 'the old carrier answered after its lease ran out';
+
   -- Finished once, then handed back with its result instead of asked again.
-  ok := public.relay_complete('cccccccc-0000-0000-0000-000000000001', a.job_id,
-    (select claim_id from public.model_jobs where id = a.job_id), '{"text":"done"}', null);
+  ok := public.relay_complete('cccccccc-0000-0000-0000-000000000001', a.job_id, later.claim_id, '{"text":"done"}', null);
   assert ok, 'the claimed job could not be finished';
   select * into again from public.relay_enqueue('cccccccc-0000-0000-0000-000000000001', 'chance', 'R2', 'hq', '{"messages":[]}');
   assert not again.created and again.status = 'done' and again.result ->> 'text' = 'done', 'a finished job was asked again';
+
+  -- A job nobody finishes after three reads is failed, not read forever.
+  select * into a from public.relay_enqueue('cccccccc-0000-0000-0000-000000000001', 'forever', 'R2', 'hf', '{"messages":[]}');
+  for i in 1..3 loop
+    select count(*) into n from public.relay_claim('cccccccc-0000-0000-0000-000000000001', 'R2');
+    assert n = 1, 'read ' || i || ' did not hand the job out';
+    update pgmq.q_model_jobs set vt = now() - interval '1 second';
+  end loop;
+  select count(*) into n from public.relay_claim('cccccccc-0000-0000-0000-000000000001', 'R2');
+  assert n = 0, 'a job read three times was handed out a fourth time';
+  assert (select status from public.model_jobs where id = a.job_id) = 'failed', 'a job nobody finished did not fail';
 end $$;
 
 rollback;
