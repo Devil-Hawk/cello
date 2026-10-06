@@ -6,7 +6,7 @@
 -- all of them, including screens nobody has built yet. Langfuse cannot be
 -- called from SQL, so each event is queued here and lib/quality/feedback.ts
 -- sends it as a score on the trace and generation named in the row
--- (migration 20261006000400).
+-- (migration 20261009000400).
 --
 -- Signals are named after the behaviour: draft_approved, draft_edited,
 -- draft_skipped, job_applied, job_dismissed (migration 402), outreach_replied,
@@ -190,11 +190,15 @@ declare
   m record;
 begin
   if new.stage = 'applied' and (tg_op = 'INSERT' or old.stage is distinct from 'applied') and new.job_id is not null then
-    select trace_id, observation_id, coalesce(fit_assessed_at, discovered_at) as traced_at
-      into j from public.jobs where id = new.job_id;
-    if found then
-      perform public.enqueue_feedback(new.user_id, 'job_applied', 'jobs', new.job_id,
-        j.trace_id, j.observation_id, j.traced_at, null);
+    -- The assessment that put the role in front of this person is on their own row.
+    -- lane-stub: K5a person_roles
+    if to_regclass('public.person_roles') is not null then
+      select pr.trace_id, pr.observation_id, coalesce(pr.assessed_at, pr.visible_since) as traced_at
+        into j from public.person_roles pr where pr.user_id = new.user_id and pr.job_id = new.job_id;
+      if found then
+        perform public.enqueue_feedback(new.user_id, 'job_applied', 'jobs', new.job_id,
+          j.trace_id, j.observation_id, j.traced_at, null);
+      end if;
     end if;
   end if;
 

@@ -1,8 +1,9 @@
 -- "Not for me" on a role is feedback on the call that assessed it.
 --
--- The role reactions table comes from the scoring work (migration 200 range).
--- When it exists, a reaction of not_for_me queues a job_dismissed event on the
--- job, with the reason as its comment. When it does not exist yet this
+-- The role reactions table comes from the scoring work (migration 200 range) and
+-- the assessment's trace is on the person's own person_roles row. When the
+-- reactions table exists, a reaction of not_for_me queues a job_dismissed event on
+-- the job, with the reason as its comment. When it does not exist yet this
 -- migration does nothing and says so; run it again after the scoring
 -- migrations land and the trigger is created.
 
@@ -15,9 +16,11 @@ as $$
 declare
   j record;
 begin
-  if new.reaction = 'not_for_me' and (tg_op = 'INSERT' or old.reaction is distinct from 'not_for_me') then
-    select trace_id, observation_id, coalesce(fit_assessed_at, discovered_at) as traced_at
-      into j from public.jobs where id = new.job_id;
+  -- lane-stub: K5a person_roles
+  if to_regclass('public.person_roles') is not null
+     and new.reaction = 'not_for_me' and (tg_op = 'INSERT' or old.reaction is distinct from 'not_for_me') then
+    select pr.trace_id, pr.observation_id, coalesce(pr.assessed_at, pr.visible_since) as traced_at
+      into j from public.person_roles pr where pr.user_id = new.user_id and pr.job_id = new.job_id;
     if found then
       perform public.enqueue_feedback(new.user_id, 'job_dismissed', 'jobs', new.job_id,
         j.trace_id, j.observation_id, j.traced_at, new.reason);
