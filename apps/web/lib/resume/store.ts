@@ -287,3 +287,52 @@ export async function deleteVersion(client: SupabaseClient, userId: string, id: 
   const { error } = await client.from('artifact_versions').delete().eq('id', id)
   if (error) throw new Error(`deleteVersion failed: ${error.message}`)
 }
+
+type Named = { name?: string | null } | { name?: string | null }[] | null | undefined
+const one = <T>(x: T | T[] | null | undefined): T | null => (Array.isArray(x) ? (x[0] ?? null) : (x ?? null))
+const companyOf = (job: { companies?: Named } | null): string | null => one(job?.companies)?.name ?? null
+
+/**
+ * Every resume version the person has, newest first, for Profile: each with the role it was made
+ * for and the application that sent it. Reads go through the person's own client.
+ */
+export async function listAllResumeVersions(client: SupabaseClient, userId: string) {
+  const buckets = await client
+    .from('artifacts')
+    .select(`${ARTIFACT_COLUMNS}, jobs(title, companies(name))`)
+    .eq('user_id', userId)
+    .eq('type', 'resume')
+  if (buckets.error) throw new Error(`listAllResumeVersions failed: ${buckets.error.message}`)
+  type Bucket = BucketRow & { jobs?: { title: string; companies?: Named } | { title: string; companies?: Named }[] | null }
+  const byId = new Map(((buckets.data ?? []) as unknown as Bucket[]).map((b) => [b.id, b]))
+  if (byId.size === 0) return []
+
+  const [versions, drafts] = await Promise.all([
+    client.from('artifact_versions').select(VERSION_COLUMNS).in('artifact_id', [...byId.keys()]).order('created_at', { ascending: false }).limit(MAX_LIST_LIMIT * 5),
+    client
+      .from('application_drafts')
+      .select('resume_document_id, submitted_at, updated_at, jobs(companies(name))')
+      .eq('user_id', userId)
+      .eq('status', 'submitted')
+      .not('resume_document_id', 'is', null),
+  ])
+  if (versions.error) throw new Error(`listAllResumeVersions failed: ${versions.error.message}`)
+
+  const sent = new Map<string, { at: string; company: string | null }>()
+  for (const d of (drafts.data ?? []) as unknown as {
+    resume_document_id: string
+    submitted_at: string | null
+    updated_at: string
+    jobs: { companies?: Named } | { companies?: Named }[] | null
+  }[]) {
+    sent.set(d.resume_document_id, { at: d.submitted_at ?? d.updated_at, company: companyOf(one(d.jobs)) })
+  }
+
+  return ((versions.data ?? []) as VersionRow[]).flatMap((v) => {
+    const bucket = byId.get(v.artifact_id)
+    if (!bucket) return []
+    const doc = toDocument(bucket, v)
+    const job = one(bucket.jobs)
+    return [{ ...doc, role: job ? { title: job.title, company: companyOf(job) } : null, sent: sent.get(doc.id) ?? null }]
+  })
+}

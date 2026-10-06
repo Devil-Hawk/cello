@@ -7,12 +7,12 @@ import { redirect } from 'next/navigation'
 import { buildFacts } from '@/components/profile/facts'
 import { ProfileScreen } from '@/components/profile/profile-screen'
 import { tailorTargets, versionLabel, type AppRole } from '@/components/profile/versions'
-import { listAllVersions } from '@/components/resume/versions.stub'
 import { getDecryptedApiKeys } from '@/lib/apikeys'
 import { canRunLlm } from '@/lib/harness/llm-key-message'
 import { hasStoredGmailRefreshToken } from '@/lib/gmail/token'
 import { isAllowedModel } from '@/lib/models'
 import { resolveResume } from '@/lib/resume/resolve'
+import { listAllResumeVersions } from '@/lib/resume/store'
 import { createClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
@@ -30,7 +30,7 @@ export default async function ProfilePage({ searchParams }: { searchParams: { ta
 
   const [profile, versions, apps, keys] = await Promise.all([
     supabase.from('profiles').select('full_name, resume_text, preferences').eq('id', user.id).maybeSingle(),
-    listAllVersions(supabase as unknown as SupabaseClient, user.id),
+    listAllResumeVersions(supabase as unknown as SupabaseClient, user.id),
     supabase.from('applications').select('job_id, jobs(id, title, companies(name))').eq('user_id', user.id).order('updated_at', { ascending: false }).limit(20),
     getDecryptedApiKeys(user.id).catch(() => ({})),
   ])
