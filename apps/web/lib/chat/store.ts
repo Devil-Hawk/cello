@@ -76,6 +76,62 @@ export async function archiveChat(db: AdminClient, userId: string, chatId: strin
   return ((data as unknown[] | null) ?? []).length === 1
 }
 
+/** chat.pin: a pinned chat goes first in Recents. */
+export async function pinChat(db: AdminClient, userId: string, chatId: string, pinned = true): Promise<boolean> {
+  const { data } = await db.from('chats').update({ pinned_at: pinned ? new Date().toISOString() : null }).eq('id', chatId).eq('user_id', userId).select('id')
+  return ((data as unknown[] | null) ?? []).length === 1
+}
+
+/** chat.rename: the person's own title, trimmed to 80 characters. An empty title is refused. */
+export async function renameChat(db: AdminClient, userId: string, chatId: string, title: string): Promise<boolean> {
+  const next = title.replace(/\s+/g, ' ').trim().slice(0, 80)
+  if (!next) return false
+  const { data } = await db.from('chats').update({ title: next }).eq('id', chatId).eq('user_id', userId).select('id')
+  return ((data as unknown[] | null) ?? []).length === 1
+}
+
+export interface MadeRow {
+  id: string
+  type: string
+  title: string
+  current_version: number
+  updated_at: string
+  chat_turn_id: string | null
+}
+
+const MADE_COLUMNS = 'id, type, title, current_version, updated_at, chat_turn_id'
+
+/**
+ * chat.made: what Cello made for the person, whichever door made it, newest first. For the side panel and for an
+ * application's record. `applicationId` narrows it to that application's (its project, or its role); `chatId` to
+ * what that chat's turns made. A page of up to 100; `before` is the updated_at of the last row of the page before.
+ */
+export async function listMade(
+  db: AdminClient,
+  userId: string,
+  opts: { applicationId?: string; chatId?: string; limit?: number; before?: string } = {}
+): Promise<MadeRow[]> {
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100)
+  let q = db.from('artifacts').select(MADE_COLUMNS).eq('user_id', userId)
+  if (opts.applicationId) {
+    const { data: app } = await db.from('applications').select('job_id').eq('id', opts.applicationId).eq('user_id', userId).maybeSingle()
+    if (!app) return []
+    const { data: project } = await db.from('projects').select('id').eq('application_id', opts.applicationId).eq('user_id', userId).maybeSingle()
+    const jobId = (app as { job_id: string }).job_id
+    q = q.or(project ? `project_id.eq.${(project as { id: string }).id},job_id.eq.${jobId}` : `job_id.eq.${jobId}`)
+  }
+  if (opts.chatId) {
+    const { data: turns } = await db.from('chat_turns').select('id').eq('chat_id', opts.chatId).eq('user_id', userId).eq('kind', 'person')
+    const ids = ((turns as { id: string }[] | null) ?? []).map((t) => t.id)
+    if (ids.length === 0) return []
+    // A chat's turns are bounded by what a person types; the cap keeps the filter short.
+    q = q.in('chat_turn_id', ids.slice(0, 200))
+  }
+  if (opts.before) q = q.lt('updated_at', opts.before)
+  const { data } = await q.order('updated_at', { ascending: false }).limit(limit)
+  return (data as MadeRow[] | null) ?? []
+}
+
 /**
  * Earlier: the person's old Copilot conversations, newest first. Read only: this module has no write to them.
  * ponytail: the latest 30, which is all the old page ever listed; page it if anyone has more worth finding.

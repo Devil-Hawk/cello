@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
-import { archiveChat, earlier, getChat, listChats } from './store'
+import { archiveChat, earlier, getChat, listChats, listMade, pinChat, renameChat } from './store'
 
 const day = (n: number) => new Date(Date.UTC(2026, 9, n)).toISOString()
 const chat = (id: string, user: string, over: Record<string, unknown> = {}) => ({
@@ -92,5 +92,67 @@ describe('earlier', () => {
     const rows = await earlier(db, 'u1')
     expect(rows.map((r) => r.id)).toEqual(['k1'])
     expect(db.log.filter((l) => !l.startsWith('select '))).toEqual([])
+  })
+})
+
+describe('pin and rename', () => {
+  it('puts a pinned chat first in Recents and brings it back', async () => {
+    const db = makeFakeAdmin({ chats: [chat('a', 'u1', { last_turn_at: day(5) }), chat('b', 'u1', { last_turn_at: day(2) })] })
+    expect((await listChats(db, 'u1')).map((c) => c.id)).toEqual(['a', 'b'])
+    expect(await pinChat(db, 'u1', 'b')).toBe(true)
+    expect((await listChats(db, 'u1')).map((c) => c.id)).toEqual(['b', 'a'])
+    expect(await pinChat(db, 'u1', 'b', false)).toBe(true)
+    expect((await listChats(db, 'u1')).map((c) => c.id)).toEqual(['a', 'b'])
+    expect(await pinChat(db, 'u2', 'a')).toBe(false)
+  })
+
+  it('renames to the person\'s words, cut at 80 characters, and refuses an empty title or another person\'s chat', async () => {
+    const db = makeFakeAdmin({ chats: [chat('a', 'u1')] })
+    expect(await renameChat(db, 'u1', 'a', `  My   ${'x'.repeat(100)} `)).toBe(true)
+    expect(String(db.tables.chats[0].title)).toHaveLength(80)
+    expect(String(db.tables.chats[0].title).startsWith('My x')).toBe(true)
+    expect(await renameChat(db, 'u1', 'a', '   ')).toBe(false)
+    expect(await renameChat(db, 'u2', 'a', 'Mine now')).toBe(false)
+  })
+})
+
+describe('listMade', () => {
+  const made = (id: string, over: Record<string, unknown> = {}) => ({
+    id,
+    user_id: 'u1',
+    type: 'dossier',
+    title: id,
+    current_version: 1,
+    updated_at: day(Number(id.replace(/\D/g, '')) || 1),
+    chat_turn_id: null,
+    project_id: null,
+    job_id: null,
+    ...over,
+  })
+  const seed = () =>
+    makeFakeAdmin({
+      artifacts: [made('m1', { job_id: 'j1' }), made('m2', { project_id: 'p1' }), made('m3', { chat_turn_id: 't1' }), made('m4', { user_id: 'u2', job_id: 'j1' }), made('m5')],
+      applications: [{ id: 'app1', user_id: 'u1', job_id: 'j1' }],
+      projects: [{ id: 'p1', user_id: 'u1', application_id: 'app1' }],
+      chat_turns: [{ id: 't1', user_id: 'u1', chat_id: 'c1', kind: 'person' }],
+    })
+
+  it('lists everything the person has made, newest first, and none of another person\'s', async () => {
+    expect((await listMade(seed(), 'u1')).map((r) => r.id)).toEqual(['m5', 'm3', 'm2', 'm1'])
+  })
+
+  it('narrows to an application\'s own things, by its project or its role, and to a chat\'s turns', async () => {
+    expect((await listMade(seed(), 'u1', { applicationId: 'app1' })).map((r) => r.id).sort()).toEqual(['m1', 'm2'])
+    expect((await listMade(seed(), 'u1', { chatId: 'c1' })).map((r) => r.id)).toEqual(['m3'])
+    expect(await listMade(seed(), 'u2', { applicationId: 'app1' })).toEqual([])
+  })
+
+  it('pages: 500 made things never come back at once', async () => {
+    const db = makeFakeAdmin({ artifacts: Array.from({ length: 500 }, (_, i) => made(`m${i + 1}`, { updated_at: new Date(Date.UTC(2026, 0, 1) + i * 60_000).toISOString() })) })
+    const first = await listMade(db, 'u1', { limit: 500 })
+    expect(first).toHaveLength(100)
+    const next = await listMade(db, 'u1', { limit: 100, before: first[first.length - 1].updated_at })
+    expect(next).toHaveLength(100)
+    expect(next[0].id).not.toBe(first[0].id)
   })
 })
