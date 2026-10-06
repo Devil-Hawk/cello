@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { continueBody, MAX_EXP_AHEAD_S, signContinue, verifyContinue } from './sign'
+import { continueBody, MAX_EXP_AHEAD_S, pgJsonbText, signContinue, verifyContinue } from './sign'
 
 const KEY = 'k'.repeat(32)
 const NOW = Date.parse('2026-10-08T12:00:00Z')
@@ -32,6 +32,18 @@ describe('verifyContinue', () => {
     expect(verifyContinue('not json', signContinue('not json', KEY), NOW, KEY)).toEqual({ ok: false, reason: 'bad_body' })
     const odd = JSON.stringify({ reason: 'delete_everything', exp: Math.floor(NOW / 1000) + 60 })
     expect(verifyContinue(odd, signContinue(odd, KEY), NOW, KEY)).toEqual({ ok: false, reason: 'bad_body' })
+  })
+
+  it('accepts compact JSON signed over the same body as Postgres writes it', () => {
+    const exp = Math.floor(NOW / 1000) + 300
+    // what the sweeper signs: body::text of {"reason": "routine", "routine_id": "r1", "exp": ...}
+    const pgText = `{"exp": ${exp}, "reason": "routine", "routine_id": "r1"}`
+    const compact = JSON.stringify({ reason: 'routine', routine_id: 'r1', exp })
+    expect(pgJsonbText({ reason: 'routine', routine_id: 'r1', exp })).toBe(pgText)
+    expect(verifyContinue(compact, signContinue(pgText, KEY), NOW, KEY).ok).toBe(true)
+    // a different body under that signature is still refused
+    const other = JSON.stringify({ reason: 'routine', routine_id: 'r2', exp })
+    expect(verifyContinue(other, signContinue(pgText, KEY), NOW, KEY)).toEqual({ ok: false, reason: 'bad_signature' })
   })
 
   it('throws when no secret is set, so the route can say not configured', () => {
