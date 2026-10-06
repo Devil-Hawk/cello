@@ -6,7 +6,7 @@ import { makeSupabaseAtsStore } from '@/lib/ats/store'
 import { staticFetchPage } from '@/lib/ingest/fetch-page'
 import { ingestCompany, type DueCompany, type FailureReason } from '@/lib/ingest/run'
 import { loadTargets } from '@/lib/ingest/reader/targets'
-import { firstTickAtOrAfter } from '@/lib/companies/roles-status'
+import { checksStatus } from '@/lib/clock/status'
 
 // The in-app twin of the scheduled check, for one company: the job board when it
 // has one, else the one reader (lib/ingest/reader). It is the same code the
@@ -96,11 +96,18 @@ export async function POST(request: NextRequest) {
     rendered: 'its careers page',
     model: 'its careers page',
   }
-  const nextTick = new Date(firstTickAtOrAfter(Date.now())).toISOString().slice(11, 16)
+  // The next check is the clock's own record, never a guess; without one the sentence leaves the time out.
+  let nextCheck: string | null = null
+  if (outcome.reading) {
+    const checks = await checksStatus(supabase, admin).catch(() => null)
+    nextCheck = checks?.rolesCheck?.nextDueAt ? new Date(checks.rolesCheck.nextDueAt).toISOString().slice(11, 16) : null
+  }
   const message = outcome.message
     ? outcome.message
     : outcome.reading
-      ? `Cello is reading this site. Next check around ${nextTick} UTC.`
+      ? nextCheck
+        ? `Cello is reading this site. Next check around ${nextCheck} UTC.`
+        : 'Cello is reading this site.'
       : failure
         ? REASON_MESSAGE[failure]
         : result.found > 0
