@@ -5,7 +5,11 @@ import { KALIL_PROVIDERS, parseKalil, seedWith, ycRows, type SeedDeps } from './
 
 const NOW = Date.parse('2026-10-06T04:00:00Z')
 
-const csv = (provider: string) => `name,slug,url\nAcme ${provider},acme-${provider},https://x.example/acme\n"Foo, Bar Inc",foo-bar,https://x.example/foo\nBad Slug,not/a/token,https://x.example/bad\n`
+const addressed: Record<string, string> = {
+  workday: 'name,slug,url\nAcme workday,acme/ext,https://acme.wd1.myworkdayjobs.com/ext\n',
+  eightfold: 'name,slug,url,domain\nAcme eightfold,acme,https://acme.eightfold.ai/careers,acme.com\n',
+}
+const csv = (provider: string) => addressed[provider] ?? `name,slug,url\nAcme ${provider},acme-${provider},https://x.example/acme\n"Foo, Bar Inc",foo-bar,https://x.example/foo\nBad Slug,not/a/token,https://x.example/bad\n`
 
 const routine = (args: Record<string, unknown> = {}): RoutineRow => ({ id: 'r1', user_id: null, command: 'directory.seed', args, local_time: '04:00', every: null, timezone: 'UTC', next_due_at: null, enabled: true, slice: null })
 
@@ -30,6 +34,14 @@ describe('parseKalil', () => {
 
   it('reads the older two-column files, where the second column is the bare slug', () => {
     expect(parseKalil('name,url\nAcme,acme\n', 'lever').map((r) => r.ats_token)).toEqual(['acme'])
+  })
+
+  it('reads a Workday board from its address, and an Eightfold board from its address and domain', () => {
+    const workday = 'name,slug,url\n3M,3m/search,https://3m.wd1.myworkdayjobs.com/search\nBad,x/y,https://example.com/jobs\n'
+    expect(parseKalil(workday, 'workday').map((r) => [r.name, r.ats_token])).toEqual([['3M', '3m.wd1.search']])
+    const eightfold = 'name,slug,url,domain\nAlbemarle,albemarle,https://albemarle.eightfold.ai/careers,albemarle.com\n10x Genomics,10xgenomics,https://10xgenomics.eightfold.ai/careers,\n'
+    expect(parseKalil(eightfold, 'eightfold').map((r) => [r.name, r.ats_token, r.ats_provider])).toEqual([['Albemarle', 'albemarle.eightfold.ai_albemarle.com', 'eightfold']])
+    expect(() => parseKalil('name,slug\n3M,3m/search\n', 'workday')).toThrow(/unexpected header/)
   })
 
   it('refuses a list whose header changed, and drops a repeated slug', () => {
