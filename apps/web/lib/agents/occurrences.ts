@@ -240,13 +240,12 @@ async function leaveResult(admin: AdminClient, task: ScheduledTaskRow, text: str
   // The person may be talking in this conversation right now; their message wins and the card still has the result.
   const lease = await claimLease(admin, threadId)
   if (!lease) return
-  const persistence = deps.turn?.persistence ?? openAgentPersistence(ctx.apiKeys)
+  const persistence = deps.turn?.persistence ?? openAgentPersistence()
   try {
     const agent = (deps.turn?.buildAgent ?? ((i) => createCelloAgent(i) as unknown as RunnableAgent))({
       kind: 'orchestrator',
       ctx: { ...ctx, threadId, conversationId: task.conversation_id },
       saver: persistence.saver,
-      store: persistence.store,
     })
     const when = (deps.now ?? (() => new Date()))().toISOString()
     await agent.updateState({ configurable: { thread_id: threadId } }, { messages: [new AIMessage({ content: text, additional_kwargs: { cello_occurrence: true, scheduled_task_id: task.id, occurred_at: when } })] }, '__start__')

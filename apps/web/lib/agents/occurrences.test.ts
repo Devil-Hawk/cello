@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { InMemoryStore, MemorySaver } from '@langchain/langgraph'
+import { MemorySaver } from '@langchain/langgraph'
 import { DemoAccessError, demoSessionGate } from '@/lib/access/guardrails'
 import { AGENT_COPY } from './copy'
 import { createCelloAgent } from './factory'
@@ -51,7 +51,7 @@ function world(task: Record<string, unknown> = {}) {
       approvals: { defaults: () => ({ posted_at: null }) },
     }
   )
-  return { admin, saver: new MemorySaver(), store: new InMemoryStore(), skillsDir: mkdtempSync(path.join(tmpdir(), 'cello-occ-')) }
+  return { admin, saver: new MemorySaver(), skillsDir: mkdtempSync(path.join(tmpdir(), 'cello-occ-')) }
 }
 
 type W = ReturnType<typeof world>
@@ -63,7 +63,7 @@ function deps(w: W, model: ScriptedChatModel, extra: Record<string, unknown> = {
     deps: {
       loadKeys: async () => ({ openrouter: 'k', userId: 'u1', isDemo: false }) as never,
       turn: {
-        persistence: { saver: w.saver, store: w.store, close: async () => undefined } as never,
+        persistence: { saver: w.saver, close: async () => undefined } as never,
         mcp: { tools: [], skipped: [], close: async () => undefined },
         fire,
         card: '',
@@ -79,7 +79,7 @@ const task = (w: W) => w.admin.tables.scheduled_tasks[0]
 const roots = (w: W) => w.admin.tables.agent_tasks.filter((t) => t.parent_id === null)
 
 async function savedMessages(w: W, threadId: string, m: ScriptedChatModel) {
-  const agent = createCelloAgent({ kind: 'orchestrator', ctx: { admin: w.admin, userId: 'u1', userEmail: '', apiKeys: { openrouter: 'k' }, isDemo: false, threadId, conversationId: null, autonomy: 'ask', traceId: 't', deadlineAt: Date.now() + 1e6 }, saver: w.saver, store: w.store, model: m, fallbacks: [], skillsDir: w.skillsDir } as never) as unknown as RunnableAgent
+  const agent = createCelloAgent({ kind: 'orchestrator', ctx: { admin: w.admin, userId: 'u1', userEmail: '', apiKeys: { openrouter: 'k' }, isDemo: false, threadId, conversationId: null, autonomy: 'ask', traceId: 't', deadlineAt: Date.now() + 1e6 }, saver: w.saver, model: m, fallbacks: [], skillsDir: w.skillsDir } as never) as unknown as RunnableAgent
   return ((await agent.getState({ configurable: { thread_id: threadId } })).values?.messages ?? []).map((x) => String(x.content))
 }
 
@@ -118,7 +118,7 @@ describe('a due scheduled task', () => {
 
     // The next thing the person says is read with that result before it.
     const follow = model('The first one is the best fit.')
-    const agent = createCelloAgent({ kind: 'orchestrator', ctx: { admin: w.admin, userId: 'u1', userEmail: '', apiKeys: { openrouter: 'k' }, isDemo: false, threadId: convo.thread_id, conversationId: 'conv1', autonomy: 'ask', traceId: 't', deadlineAt: Date.now() + 1e6 }, saver: w.saver, store: w.store, model: follow, fallbacks: [], skillsDir: w.skillsDir } as never) as unknown as { invoke: (i: unknown, c: unknown) => Promise<unknown> }
+    const agent = createCelloAgent({ kind: 'orchestrator', ctx: { admin: w.admin, userId: 'u1', userEmail: '', apiKeys: { openrouter: 'k' }, isDemo: false, threadId: convo.thread_id, conversationId: 'conv1', autonomy: 'ask', traceId: 't', deadlineAt: Date.now() + 1e6 }, saver: w.saver, model: follow, fallbacks: [], skillsDir: w.skillsDir } as never) as unknown as { invoke: (i: unknown, c: unknown) => Promise<unknown> }
     const { HumanMessage } = await import('@langchain/core/messages')
     await agent.invoke({ messages: [new HumanMessage('which one is best?')] }, { configurable: { thread_id: convo.thread_id } })
     const seen = follow.calls[0].map((x) => String(x.content))
