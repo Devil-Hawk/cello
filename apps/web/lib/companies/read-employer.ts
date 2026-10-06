@@ -10,17 +10,17 @@
 // targets (target-relevance.ts). An employer nobody follows keeps only roles from the last 30 days; one somebody
 // follows keeps up to 180 (freshness.ts).
 //
-// Every 90 days the board is checked again by the verifier before it is read; a board that no longer checks out leaves
-// the rotation with its reason. The row itself is only ever written by verify-directory.ts.
+// Every 90 days, and at once when a read's jobs name another employer, the board is checked again by the verifier before
+// anything is stored; a board that no longer checks out leaves the rotation with its reason. The row itself is only ever written by verify-directory.ts.
 //
-// ponytail: a different employer name is caught at the 90-day look, not on every read; compare AtsJob.employer per read when
-// the providers that carry it (Workday, SmartRecruiters) matter. Employers read through their own site (no board) are not
-// swept: their followers' checks read them (lib/clock/routines/roles-check.ts).
+// Employers read through their own site (no board) are not swept: their followers' checks read them
+// (lib/clock/routines/roles-check.ts).
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isDemoProfile } from '../access/guardrails'
 import { jobRow, providers, sanitizeJobs, sourcesFor, type ExistingJob } from '../ats/index'
 import { HttpError } from '../ats/http'
+import { sameEmployerName } from '../ats/verify'
 import { makeSupabaseAtsStore } from '../ats/store'
 import type { AtsJob, AtsProviderId } from '../ats/types'
 import { loadTargets } from '../ingest/reader/targets'
@@ -104,21 +104,26 @@ export async function readEmployer(db: Db, employer: DirectoryRow, people: Perso
   const now = deps.verify.now()
   const stored = new Map((await deps.listStored(employer.id)).map((s) => [s.externalId, s]))
 
-  let jobs: AtsJob[]
-  const due = !employer.verified_at || now - Date.parse(employer.verified_at) > REVERIFY_DAYS * DAY_MS
-  if (due) {
-    // The 90-day look: still the same employer's board, and still alive.
+  // The look at the board itself: still this employer's, still alive. Before anything is stored, counted or recorded.
+  const recheck = async (): Promise<AtsJob[] | FailReason> => {
     const check = await checkBoard({ name: employer.name, domain: employer.domain, careerUrl: employer.careers_url, provider, token }, deps.verify)
     if (!check.ok) {
       await recordRead(db, employer, { ok: false, reason: check.reason, permanent: check.reason !== 'cannot_read' }, deps.verify.now)
-      return { ...out, failure: check.reason }
+      return check.reason
     }
     await writeEmployer(
       db,
       { name: check.name, domain: check.domain ?? employer.domain, careersUrl: employer.careers_url, provider, token, verifiedBy: check.verifiedBy, source: employer.source as DirectorySource, openCount: employer.open_count, readTier: employer.read_tier },
       deps.verify.now
     )
-    jobs = check.jobs
+    return check.jobs
+  }
+
+  let jobs: AtsJob[]
+  if (!employer.verified_at || now - Date.parse(employer.verified_at) > REVERIFY_DAYS * DAY_MS) {
+    const r = await recheck()
+    if (typeof r === 'string') return { ...out, failure: r }
+    jobs = r
   } else {
     try {
       jobs = await deps.verify.fetchBoard(provider, token, { hasDescription: (id) => stored.get(id)?.descriptionMd5 != null })
@@ -127,6 +132,13 @@ export async function readEmployer(db: Db, employer: DirectoryRow, people: Perso
       const reason: FailReason = gone ? 'no_board' : 'cannot_read'
       await recordRead(db, employer, { ok: false, reason, permanent: gone }, deps.verify.now)
       return { ...out, failure: reason }
+    }
+    // A board that changed hands: the jobs name an employer and none of them is this one (part 6, re-verification).
+    const named = jobs.map((j) => j.employer).filter((n): n is string => !!n)
+    if (named.length > 0 && !named.some((n) => sameEmployerName(n, employer.name))) {
+      const r = await recheck()
+      if (typeof r === 'string') return { ...out, failure: r }
+      jobs = r
     }
   }
 
