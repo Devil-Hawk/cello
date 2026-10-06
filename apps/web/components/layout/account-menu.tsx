@@ -1,16 +1,7 @@
 'use client'
 
-import Link from 'next/link'
-import { LogOut, User } from 'lucide-react'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { accountRoutes, older } from '@/lib/routes'
+import { forwardRef, useState, type ButtonHTMLAttributes, type ComponentType } from 'react'
+import { User } from 'lucide-react'
 
 export interface ShellUser {
   email: string
@@ -18,47 +9,39 @@ export interface ShellUser {
   avatarUrl: string | null
 }
 
-// The avatar sphere is the only sphere in the product. It opens everything that
-// is not a key in the bar: Profile, Network, Chat, Settings, and the old pages
-// that have no new home yet, then Sign out.
-export function AccountMenu({ user, onSignOut }: { user: ShellUser; onSignOut: () => void }) {
+export interface AvatarKeyProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  user: ShellUser
+  expanded?: boolean
+}
+
+/** The avatar sphere as a key: the only sphere in the product. */
+export const AvatarKey = forwardRef<HTMLButtonElement, AvatarKeyProps>(function AvatarKey({ user, expanded = false, ...props }, ref) {
   const who = user.fullName || user.email
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label={`Account menu for ${who}`}
-          className="r-key r-key-ghost r-key-bare min-h-11 min-w-11"
-        >
-          <span className="r-sphere grid h-8 w-8 place-items-center rounded-full">
-            <User className="h-4 w-4" aria-hidden />
-          </span>
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-60" align="end" sideOffset={8}>
-        <DropdownMenuLabel className="font-normal">
-          <p className="text-body font-medium text-foreground">{user.fullName || 'You'}</p>
-          <p className="text-caption text-muted-foreground">{user.email}</p>
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {accountRoutes().map((r) => (
-          <DropdownMenuItem key={r.href + r.label} asChild className="min-h-11 cursor-pointer">
-            <Link href={r.href}>{r.label}</Link>
-          </DropdownMenuItem>
-        ))}
-        {older.length > 0 && <DropdownMenuSeparator />}
-        {older.map((r) => (
-          <DropdownMenuItem key={r.href} asChild className="min-h-11 cursor-pointer text-muted-foreground">
-            <Link href={r.href}>{r.label}</Link>
-          </DropdownMenuItem>
-        ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="min-h-11 cursor-pointer" onClick={onSignOut}>
-          <LogOut className="mr-2 h-4 w-4" aria-hidden />
-          Sign out
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <button
+      ref={ref}
+      type="button"
+      aria-label={`Account menu for ${who}`}
+      aria-haspopup="menu"
+      aria-expanded={expanded}
+      className="r-key r-key-ghost r-key-bare min-h-11 min-w-11"
+      {...props}
+    >
+      <span className="r-sphere grid h-8 w-8 place-items-center rounded-full">
+        <User className="h-4 w-4" aria-hidden />
+      </span>
+    </button>
   )
+})
+
+type PopupProps = { user: ShellUser; onSignOut: () => void }
+
+// It opens everything that is not a key in the bar: Profile, Network, Chat,
+// Settings, the old pages that have no new home yet, then Sign out. The menu's
+// code (Radix) loads the first time the avatar is pressed, so no page carries it
+// in its first load; the key stays where it is until the menu takes its place.
+export function AccountMenu({ user, onSignOut }: PopupProps) {
+  const [Popup, setPopup] = useState<ComponentType<PopupProps> | null>(null)
+  if (Popup) return <Popup user={user} onSignOut={onSignOut} />
+  return <AvatarKey user={user} onClick={() => void import('./account-menu-popup').then((m) => setPopup(() => m.default))} />
 }

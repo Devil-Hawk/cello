@@ -1,12 +1,11 @@
 'use client'
 
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import { useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { useRouter } from 'next/navigation'
-import { AddCompanyDialog } from '@/components/companies/add-company-dialog'
 import { Key } from '@/components/ui/key'
-import { createClient } from '@/lib/supabase/client'
 import { companyHref } from '@/lib/routes/companies'
 import { companies, search } from '@/lib/routes'
 import {
@@ -56,6 +55,9 @@ export interface RolesViewProps {
   failed?: boolean
 }
 
+// The add dialog and the browser client load when they are used, not with the page.
+const AddCompanyDialog = dynamic(() => import('@/components/companies/add-company-dialog').then((m) => m.AddCompanyDialog), { ssr: false })
+
 const reasonLabel = (r: string | null | undefined) => NOT_FOR_ME_REASONS.find((x) => x.reason === r)?.label ?? null
 
 // Roles: every role kept for the person, today's picks first, in the order of
@@ -83,6 +85,7 @@ export function RolesView({ query, items, picks, total, newToday, groupCounts, f
 
   async function removeSaved(id: string) {
     // The generated types predate person_roles.saved_at.
+    const { createClient } = await import('@/lib/supabase/client')
     await (createClient() as unknown as SupabaseClient).from('person_roles').update({ saved_at: null }).eq('job_id', id)
     router.refresh()
   }
@@ -99,7 +102,7 @@ export function RolesView({ query, items, picks, total, newToday, groupCounts, f
           Paste a link
         </Key>
       </header>
-      <AddCompanyDialog open={pasting} onOpenChange={setPasting} onAdded={() => router.refresh()} />
+      {pasting && <AddCompanyDialog open onOpenChange={setPasting} onAdded={() => router.refresh()} />}
 
       {query.tab === 'for-you' && (
         <p className="r-meta">

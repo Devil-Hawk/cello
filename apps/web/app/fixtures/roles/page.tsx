@@ -1,9 +1,7 @@
-'use client'
-
-import { Shell } from '@/components/layout/shell'
 import { fixtureCounts, fixtureRoles, employerId } from '@/components/roles/fixtures'
 import { parseRolesQuery } from '@/components/roles/logic'
 import { RolesView } from '@/components/roles/roles-view'
+import { FixtureShell } from '../_shell'
 
 // Roles on made-up roles, in the shell. ?n=26&e=40 sets how many roles and
 // employers; the rest of the address is Roles' own (?group=company, ?tab=saved).
@@ -18,7 +16,7 @@ export default function RolesFixture({ searchParams }: { searchParams: Record<st
     hiddenReason: query.tab === 'hidden' ? ('not_for_me' as const) : null,
   }))
   return (
-    <Shell pathname="/roles" user={{ email: 'sam@example.com', fullName: 'Sam Rivera', avatarUrl: null }} onSignOut={() => undefined}>
+    <FixtureShell pathname="/roles">
       <RolesView
         query={query}
         items={items}
@@ -30,6 +28,6 @@ export default function RolesFixture({ searchParams }: { searchParams: Record<st
         outside={{ place: 120, title: 80, level: 14 }}
         checkLine="Checked 3 hours ago."
       />
-    </Shell>
+    </FixtureShell>
   )
 }

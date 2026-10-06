@@ -1,9 +1,7 @@
-'use client'
-
-import { Shell } from '@/components/layout/shell'
 import { fixtureRoles } from '@/components/roles/fixtures'
 import { fixtureSent, fixtureToday } from '@/components/today/fixtures'
 import { TodayView } from '@/components/today/today-view'
+import { FixtureShell } from '../_shell'
 
 // Today on made-up data, in the shell. ?state=first|failed|quiet|model, ?working=1 shows Working now,
 // ?sent=8 sets how many applications were sent, ?gmail=0 takes Gmail read access away.
@@ -22,8 +20,8 @@ export default function TodayFixture({ searchParams }: { searchParams: Record<st
     hasModel: state !== 'model',
   })
   return (
-    <Shell pathname="/today" user={{ email: 'sam@example.com', fullName: 'Sam Rivera', avatarUrl: null }} onSignOut={() => undefined}>
+    <FixtureShell pathname="/today">
       <TodayView data={data} />
-    </Shell>
+    </FixtureShell>
   )
 }
