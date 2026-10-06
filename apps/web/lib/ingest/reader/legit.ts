@@ -104,9 +104,11 @@ export interface JudgeContext {
 export function employerAgrees(employer: string, companyName: string): boolean {
   const e = cleanEmployer(employer)
   if (sameEmployerName(e, companyName)) return true
-  const ne = normalizeEmployerName(e)
-  const nc = normalizeEmployerName(companyName)
-  return nc.length >= 3 && ne.startsWith(nc)
+  // Whole words only: "Metadata Inc" is not Meta, "Uberall GmbH" is not Uber, "Amazon Data Services" is Amazon.
+  const words = (name: string) => name.replace(/\.(com|io|ai|co|dev|app|net|org|so|xyz|tech)\s*$/i, '').normalize('NFKD').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim()
+  const we = words(e)
+  const wc = words(companyName)
+  return normalizeEmployerName(companyName).length >= 3 && (we === wc || we.startsWith(`${wc} `))
 }
 
 /** Is the role's address on the employer's own site: its domain, or the host of its careers page? */
@@ -128,7 +130,8 @@ export function judgeRole(job: AtsJob, ctx: JudgeContext): Verdict {
     if (!Number.isNaN(t) && t < now) return { keep: false, why: 'expired' }
   }
   if (isStalePosting(job.postedAt, now)) return { keep: false, why: 'stale' }
-  if (agencyOf(job.employer)) return { keep: false, why: 'agency' }
+  // A tracked staffing firm's own roles are its own: the rule is for another employer's roles posted by an agency.
+  if (agencyOf(job.employer) && !employerAgrees(job.employer!, ctx.company.name)) return { keep: false, why: 'agency' }
   if (repostHostOf(job.url) && !onOwnSite(job.url, ctx)) return { keep: false, why: 'reposting' }
   if (job.employer && !employerAgrees(job.employer, ctx.company.name) && !onOwnSite(job.url, ctx)) {
     return { keep: false, why: 'other_employer' }
@@ -141,7 +144,7 @@ export function judgeRole(job: AtsJob, ctx: JudgeContext): Verdict {
  * words, or null when the role is not one of those.
  */
 export function mislabelledSource(job: AtsJob, companyName: string): string | null {
-  const agency = agencyOf(job.employer)
+  const agency = employerAgrees(job.employer ?? '', companyName) ? null : agencyOf(job.employer)
   if (agency) return `This posting is from ${job.employer}, a staffing agency, not ${companyName}.`
   const repost = repostHostOf(job.url)
   if (repost) return repostMessage(repost, companyName, 'posting')
