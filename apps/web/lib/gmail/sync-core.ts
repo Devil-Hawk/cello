@@ -39,6 +39,9 @@ import { DOORS } from '@/lib/pipeline/actors'
 import { note, transition } from '@/lib/pipeline/transition'
 import { contactKind, linkContact } from '@/lib/contacts/kind'
 import { kindOfStatus, saveMessage, verifiedEmployer } from './messages'
+import { sendAlert } from '@/lib/notifications/deliver'
+import { selfMailer } from '@/lib/notifications/mail'
+import { mailAlert } from '@/lib/notifications/quiet'
 import { headerVerdict, senderEmployerDomain, trustOf } from './trust'
 
 interface CompanyRecord {
@@ -399,6 +402,11 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
     })
     const line = `Mail from ${matchedCompany.name}: ${subject}`.slice(0, 280)
     await note(admin, userId, applicationId, { kind: 'message.received', actor: DOORS.inbox.actor, channel: DOORS.inbox.channel, sentence: line, idempotencyKey: `msg:${msg.id}`, trust, origin, prov, headerVerdict: verdict }).catch(() => undefined)
+    // A mail the sender's own domain vouches for that is an offer, an invitation or a reply tells the person, once.
+    const alert = trust === 'proven' ? mailAlert(parsed.status, ck.kind === 'recruiter' || ck.kind === 'agency_recruiter') : null
+    if (alert) {
+      await sendAlert({ admin, sendToSelf: selfMailer(admin), now: new Date() }, userId, { kind: alert, subjectId: msg.id, company: matchedCompany.name, role: jobMatch?.title ?? parsed.jobTitle ?? null, url: '/notifications' }).catch(() => undefined)
+    }
     if (trust !== 'proven' && parsed.status !== 'unknown') {
       await note(admin, userId, applicationId, { kind: 'stage.suggested', actor: DOORS.inbox.actor, channel: DOORS.inbox.channel, sentence: `A mail says ${parsed.status}. Cello could not verify the sender, so the stage stays.`, idempotencyKey: `suggest:${msg.id}`, trust: 'unconfirmed', origin, prov, headerVerdict: verdict }).catch(() => undefined)
     }

@@ -28,3 +28,10 @@ export function isQuiet(now: Date, zone: string, from: string, to: string): bool
 
 /** What may be told during quiet hours. */
 export const BREAKS_QUIET: readonly string[] = ['offer_due', 'interview']
+
+/** The alert a verified mail earns: an offer, an invitation to talk, or a reply (a no, or a recruiter writing). Null for anything else. */
+export function mailAlert(status: string, fromRecruiter: boolean): 'offer_due' | 'interview' | 'reply' | null {
+  if (status === 'offer') return 'offer_due'
+  if (status === 'interview' || status === 'screen') return 'interview'
+  return status === 'rejected' || fromRecruiter ? 'reply' : null
+}
