@@ -1,54 +1,23 @@
-// POST|GET /api/harness/cron — the harness's one scheduled tick: resume every
-// checkpointed run that stalled, wipe ruling-5 user-data rows past their
-// demo's expiry, create + run a daily-digest agent_run for each active user,
-// then run lib/graph/distill.ts#distillInsights per active user (its own
-// internal weekly gate makes this a cheap no-op on six of every seven ticks)
-// (docs/superpowers/specs/2026-08-16-langgraph-port-design.md).
+// The harness's old daily tick, now four routines of the clock (lib/clock): harness.resume (stalled
+// checkpointed runs, every 5 minutes), demo.expire (demo wipe at expiry and the trace span
+// retention, hourly), harness.digest (a daily-digest agent run and the composed digest per active
+// user, daily) and harness.distill (the weekly insight distillation, whose own gate makes most days
+// a cheap no-op). They moved out of app/api/harness/cron, which a route file cannot export from, and
+// the Vercel cron that called it is gone.
 //
-// Guarded by the CRON_SECRET env var: the caller must present it as either
-// `Authorization: Bearer <secret>` or `X-Cron-Secret: <secret>`. Invoked daily
-// by Vercel Cron (GET, see apps/web/vercel.json) and by
-// .github/workflows/harness-cron.yml (POST).
+// Each pass is independent of the others, as before: a failure in one never blocks another.
 //
-// maxDuration = 300 mirrors app/api/harness/run/route.ts — lib/graph/runs.ts's
-// own MAX_RUN_MS is 240s per run, so CRON_MAX_USERS/CRON_CONCURRENCY batches of
-// MULTIPLE runs, plus the resume pass below, can still exceed even a 300s route
-// budget in the worst case (e.g. every run in a wave using its full deadline).
-// That worst case already existed before this file's graph port — raising both
-// ceilings together does not make it worse, it just matches the platform
-// allowance. A run killed mid-request by a platform-level timeout (rather than
-// its own internal deadline) is recovered by the RESUME PASS below on the next
-// tick, exactly like a clean deadline pause — see that pass's own doc for why
-// neither this route nor harnessRunGraph itself needs to tell the two apart.
+// RESUME PASS replaces the pre-port continueIncompleteRuns() + reapStuckRuns(): the graph port's
+// checkpoint IS the durable state, so this pass re-enters the thread (resumeCheckpointedRuns below).
+// It carries two backstops, because a thread can fail to make progress in two different ways:
+// CHECKPOINT_CEILING bounds a thread that keeps landing back on its own deadline interrupt, and
+// RESUME_ATTEMPT_CEILING bounds a thread whose resume attempt fails before it writes a checkpoint.
 //
-// RESUME PASS replaces the pre-port continueIncompleteRuns() + reapStuckRuns():
-// both of those existed to recover a run the bespoke executor couldn't recover
-// on its own (a continuation counter plus a stuck-run reaper standing in for a
-// durable checkpoint). The graph port's checkpoint IS that durable state, so
-// this route's main job is re-entering the thread — see
-// resumeCheckpointedRuns() below. That function still carries TWO backstops,
-// because a thread can fail to make progress in two structurally different
-// ways: CHECKPOINT_CEILING bounds a thread that keeps landing back on its OWN
-// deadline interrupt() (real work happens, a checkpoint is written every
-// time, it just never reaches a terminal state); RESUME_ATTEMPT_CEILING
-// bounds a thread whose resume attempt fails BEFORE invokeGraphForUser ever
-// gets far enough to produce a new checkpoint at all (a thread-ownership
-// refusal, an expired demo thread, a checkpointer connectivity failure) —
-// CHECKPOINT_CEILING structurally cannot see that case, since the checkpoint
-// count never moves on it.
-//
-// DIGEST PASSES (unchanged shape, now graph-backed): for each active user (has
-// a resume and/or an OpenRouter key) we create a "daily digest" agent_runs row
-// and drive it through harnessRunGraph, THEN separately compose-and-store the
-// preferences.digest.latest summary composeAndStoreDigest already produced
-// before this port — that second pass has no LLM/agent-run in it and is
-// untouched by the graph port. To stay within the serverless timeout both
-// passes process a bounded batch with small concurrency; at scale this should
-// enqueue runs (status 'queued') and drain them from a dedicated worker rather
-// than executing inline.
+// DIGEST PASSES: for each active user (a resume and/or an OpenRouter key) a "daily digest" agent_runs
+// row is driven through harnessRunGraph, then the digest is composed and stored under
+// preferences.digest.latest. At scale this should enqueue runs and drain them from a worker rather
+// than run inline.
 
-import { NextRequest, NextResponse } from 'next/server'
-import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { invokeGraphForUser, type CompiledGraphLike } from '@/lib/graph/invoke'
 import { harnessRunGraph, markRunPausedOnInterrupt, type RunOutcome } from '@/lib/graph/runs'
 import { summarizeRunOutcome } from '@/lib/graph/run-summary'
@@ -61,10 +30,7 @@ import type { AdminClient } from '@/lib/harness/types'
 import { logApiError } from '@/lib/observability/log'
 import { chunkedIn } from '@/lib/supabase/chunked-in'
 import { isDemoProfile } from '@/lib/access/guardrails'
-import { isCronAuthorized } from '@/lib/security/shared-secret'
-
-export const dynamic = 'force-dynamic'
-export const maxDuration = 300
+import type { RoutineContext, RoutineOutcome } from '../routines'
 
 // harnessRunGraph (a real compiled LangGraph Pregel graph) has a NARROWER
 // `invoke` input type than CompiledGraphLike's own `unknown` — the same
@@ -198,7 +164,7 @@ interface ResumeResult {
   error?: string
 }
 
-interface ResumeBatch {
+export interface ResumeBatch {
   /** Runs actually attempted this tick, in order. */
   resumed: ResumeResult[]
   /** Eligible runs left for a later tick — see CRON_MAX_CONTINUATIONS. */
@@ -285,7 +251,7 @@ async function collectResumeCandidates(admin: AdminClient): Promise<ResumeCandid
  * it resumes; RESUME_ATTEMPT_CEILING only tracks whether recent attempts got
  * far enough to produce a checkpoint at all, which is orthogonal.
  */
-async function resumeCheckpointedRuns(admin: AdminClient): Promise<ResumeBatch> {
+export async function resumeCheckpointedRuns(admin: AdminClient): Promise<ResumeBatch> {
   const eligible = await collectResumeCandidates(admin)
   const exhausted = eligible.filter((r) => r.continuation_count >= RESUME_ATTEMPT_CEILING)
   const runnable = eligible.filter((r) => r.continuation_count < RESUME_ATTEMPT_CEILING)
@@ -362,65 +328,48 @@ async function resumeCheckpointedRuns(admin: AdminClient): Promise<ResumeBatch> 
   return { resumed, deferred: runnable.length - batch.length }
 }
 
-export async function POST(request: NextRequest) {
-  if (!isCronAuthorized(request)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+// --- demo wipe and trace retention --------------------------------------------------
 
-  const admin = createAdminClient()
-
-  // Resume pass first, independent of the digest passes below — a resume
-  // failure must never block new digest runs from starting.
-  const resume = await resumeCheckpointedRuns(admin).catch((e) => {
-    logApiError('harness/cron:resume', e)
-    return { resumed: [], deferred: 0 } as ResumeBatch
-  })
-
-  // Ruling 5 wipe-at-expiry pass — see lib/access/demo-wipe.ts's header for
-  // why this rides the existing tick instead of its own scheduled path.
-  // Independent of every other pass for the same reason resume is: a wipe
-  // failure must never block digests, and a digest failure must never block
-  // the wipe.
+/** Ruling 5's wipe-at-expiry pass (lib/access/demo-wipe.ts) and the trace_spans retention. */
+export async function runDemoPasses(admin: AdminClient): Promise<{ demoWipe: DemoWipeResult[]; traceSpansPruned: number }> {
   const demoWipe = await wipeExpiredDemoData(admin).catch((e) => {
-    logApiError('harness/cron:demo-wipe', e)
+    logApiError('harness:demo-wipe', e)
     return [] as DemoWipeResult[]
   })
-
-  // trace_spans retention — rides the same tick as the demo wipe just above,
-  // for the same reason (see lib/trace/spans.ts#pruneOldTraceSpans and the
-  // trace_spans migration's own header): independent of every other pass, a
-  // prune failure must never block resume/digest/distill and vice versa.
   const traceSpansPruned = await pruneOldTraceSpans(admin).catch((e) => {
-    logApiError('harness/cron:trace-prune', e)
+    logApiError('harness:trace-prune', e)
     return 0
   })
+  return { demoWipe, traceSpansPruned }
+}
 
-  const { data: profiles, error } = await admin
-    .from('profiles')
-    .select('id, resume_text, preferences, is_demo, demo_expires_at')
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+// --- the people the digest and distill passes run for -------------------------------
 
-  // Demo profiles are never part of the per-user digest/distill batch: they
-  // would crowd the owner out of CRON_MAX_USERS and burn LLM spend. The demo
-  // wipe above has already run for them.
+/** Demo profiles are never part of the per-user batch: they would crowd the owner out of CRON_MAX_USERS and burn LLM spend. */
+async function activeBatch(admin: AdminClient): Promise<{ active: ActiveProfile[]; batch: ActiveProfile[] }> {
+  const { data: profiles, error } = await admin.from('profiles').select('id, resume_text, preferences, is_demo, demo_expires_at')
+  if (error) throw new Error('profiles')
   const active = ((profiles ?? []) as ActiveProfile[]).filter(
     (p) =>
       !isDemoProfile({ is_demo: p.is_demo ?? null, demo_expires_at: p.demo_expires_at ?? null }) &&
       ((p.resume_text && p.resume_text.trim().length > 0) || hasOpenrouter(p))
   )
-  const batch = active.slice(0, CRON_MAX_USERS)
+  return { active, batch: active.slice(0, CRON_MAX_USERS) }
+}
 
-  const results: {
-    userId: string
-    runId?: string
-    status?: string
-    error?: string
-    matcher?: MatcherRunSummary
-  }[] = []
+export interface DigestPassResult {
+  activeUsers: number
+  processed: number
+  skippedForCapacity: number
+  results: { userId: string; runId?: string; status?: string; error?: string; matcher?: MatcherRunSummary }[]
+  digest: { userId: string; outcome: DigestOutcome; reason?: string }[]
+}
 
-  // Bounded-concurrency execution over the batch: one fresh agent_runs row
-  // (and therefore one fresh graph thread — invokeGraphForUser mints a new
-  // one whenever no threadId is passed) per active user.
+export async function runDigestPasses(admin: AdminClient): Promise<DigestPassResult> {
+  const { active, batch } = await activeBatch(admin)
+  const results: DigestPassResult['results'] = []
+
+  // One fresh agent_runs row (and so one fresh graph thread) per active user, bounded concurrency.
   let next = 0
   const worker = async () => {
     while (true) {
@@ -444,103 +393,93 @@ export async function POST(request: NextRequest) {
           trace: { name: 'send-digest', type: 'chain', input: { goal: DIGEST_GOAL }, outputOf: summarizeRunOutcome, metadata: { source: 'cron', run_id: runId } },
         })
         if (await markRunPausedOnInterrupt(admin, runId, result)) {
-          // A digest run that hits its own deadline is not lost — it now sits
-          // 'paused' with a thread_id, so the RESUME PASS above picks it up
-          // on a later tick exactly like any other stalled run.
+          // A digest run that hits its own deadline is not lost: it sits 'paused' with a thread_id,
+          // so the harness.resume routine picks it up like any other stalled run.
           results.push({ userId: profile.id, runId, status: 'paused' })
         } else {
           const outcome = result as RunOutcome
-          results.push({
-            userId: profile.id,
-            runId,
-            status: outcome.status,
-            matcher: extractMatcherSummary(outcome),
-          })
+          results.push({ userId: profile.id, runId, status: outcome.status, matcher: extractMatcherSummary(outcome) })
         }
       } catch (e) {
-        logApiError('harness/cron:digest', e, { userId: profile.id })
+        logApiError('harness:digest', e, { userId: profile.id })
         results.push({ userId: profile.id, error: e instanceof Error ? e.message : String(e) })
       }
     }
   }
-  await Promise.all(
-    Array.from({ length: Math.max(1, Math.min(CRON_CONCURRENCY, batch.length)) }, worker)
-  )
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(CRON_CONCURRENCY, batch.length)) }, worker))
 
-  // --- Daily digest pass -----------------------------------------------------
-  // For each active user, compose their digest and store it under
-  // preferences.digest.latest. composeAndStoreDigest enforces the opt-in flag
-  // (default OFF) and once-per-day (lastSentDate), so non-opted-in users are
-  // skipped cleanly. Cron has NO session.provider_token, so we do NOT attempt a
-  // real Gmail send here — the digest is composed-and-stored, and an actual send
-  // happens later via /api/digest/send (request context). This degradation is
-  // intentional and must not block the feature. Unrelated to the graph port —
-  // no LLM call, no agent_run — untouched by it.
-  const digestResults: { userId: string; outcome: DigestOutcome; reason?: string }[] = []
+  // Compose and store the digest. composeAndStoreDigest enforces the opt-in flag (default off) and
+  // once a day. There is no Gmail session here, so nothing is sent: the digest is composed and
+  // stored, and an actual send happens in /api/digest/send, in a request.
+  const digest: DigestPassResult['digest'] = []
   let dNext = 0
   const digestWorker = async () => {
     while (true) {
       const i = dNext++
       if (i >= batch.length) return
-      const profile = batch[i]
-      const r = await composeAndStoreDigest(admin, profile.id)
-      digestResults.push({ userId: r.userId, outcome: r.outcome, reason: r.reason })
+      const r = await composeAndStoreDigest(admin, batch[i].id)
+      digest.push({ userId: r.userId, outcome: r.outcome, reason: r.reason })
     }
   }
-  await Promise.all(
-    Array.from({ length: Math.max(1, Math.min(CRON_CONCURRENCY, batch.length)) }, digestWorker)
-  )
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(CRON_CONCURRENCY, batch.length)) }, digestWorker))
 
-  // --- Weekly insight distillation pass (Step 6) ------------------------------
-  // distillInsights carries its OWN weekly gate (agent_runs.created_at for
-  // goal=DISTILL_GOAL) — most ticks this is one cheap SELECT per user that
-  // returns { ran: false } immediately, so riding the existing per-user batch
-  // here (same active-user set, same bounded concurrency) costs nothing extra
-  // on the six days out of seven it does not actually distill. A failure for
-  // one user must never block another's digest/resume/distillation, same
-  // independence discipline as every other pass in this route.
-  const distillResults: { userId: string; ran: boolean; reason?: string; insightsWritten?: number; refusals?: number }[] = []
-  let xNext = 0
-  const distillWorker = async () => {
+  return { activeUsers: active.length, processed: batch.length, skippedForCapacity: Math.max(0, active.length - batch.length), results, digest }
+}
+
+export interface DistillPassResult {
+  userId: string
+  ran: boolean
+  reason?: string
+  insightsWritten?: number
+  refusals?: number
+}
+
+/**
+ * The weekly insight distillation. distillInsights carries its own weekly gate, so most days this is
+ * one cheap select per person that returns { ran: false }.
+ * ponytail: until the learning package (K15) replaces distillInsights.
+ */
+export async function runDistillPass(admin: AdminClient): Promise<DistillPassResult[]> {
+  const { batch } = await activeBatch(admin)
+  const out: DistillPassResult[] = []
+  let next = 0
+  const worker = async () => {
     while (true) {
-      const i = xNext++
+      const i = next++
       if (i >= batch.length) return
       const profile = batch[i]
       try {
         const r = await distillInsights(admin, profile.id)
-        distillResults.push({ userId: profile.id, ran: r.ran, reason: r.reason, insightsWritten: r.insightsWritten, refusals: r.refusals })
+        out.push({ userId: profile.id, ran: r.ran, reason: r.reason, insightsWritten: r.insightsWritten, refusals: r.refusals })
       } catch (e) {
-        logApiError('harness/cron:distill', e, { userId: profile.id })
-        distillResults.push({ userId: profile.id, ran: false, reason: e instanceof Error ? e.message : String(e) })
+        logApiError('harness:distill', e, { userId: profile.id })
+        out.push({ userId: profile.id, ran: false, reason: e instanceof Error ? e.message : String(e) })
       }
     }
   }
-  await Promise.all(
-    Array.from({ length: Math.max(1, Math.min(CRON_CONCURRENCY, batch.length)) }, distillWorker)
-  )
-
-  return NextResponse.json({
-    ok: true,
-    activeUsers: active.length,
-    processed: batch.length,
-    skippedForCapacity: Math.max(0, active.length - batch.length),
-    results,
-    digest: digestResults,
-    distill: distillResults,
-    demoWipe,
-    traceSpansPruned,
-    resumed: {
-      count: resume.resumed.length,
-      deferredToNextTick: resume.deferred,
-      runs: resume.resumed,
-    },
-  })
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(CRON_CONCURRENCY, batch.length)) }, worker))
+  return out
 }
 
-// Vercel Cron invokes scheduled paths with GET and sends
-// `Authorization: Bearer $CRON_SECRET` itself (see vercel.json). Same handler,
-// same auth. `dynamic = 'force-dynamic'` above keeps this out of the build-time
-// static optimisation Next 14 applies to GET route handlers.
-export async function GET(request: NextRequest) {
-  return POST(request)
+// --- the four routines -------------------------------------------------------------------
+
+export async function harnessResume(ctx: RoutineContext): Promise<RoutineOutcome> {
+  const resume = await resumeCheckpointedRuns(ctx.admin)
+  const errors = resume.resumed.filter((r) => r.outcome === 'error').length
+  return { ok: true, found: { resumed: resume.resumed.length, deferred: resume.deferred, errors } }
+}
+
+export async function demoExpire(ctx: RoutineContext): Promise<RoutineOutcome> {
+  const r = await runDemoPasses(ctx.admin)
+  return { ok: true, found: { demos_wiped: r.demoWipe.length, trace_spans_pruned: r.traceSpansPruned } }
+}
+
+export async function harnessDigest(ctx: RoutineContext): Promise<RoutineOutcome> {
+  const r = await runDigestPasses(ctx.admin)
+  return { ok: true, found: { active_users: r.activeUsers, processed: r.processed, runs_failed: r.results.filter((x) => x.error).length } }
+}
+
+export async function harnessDistill(ctx: RoutineContext): Promise<RoutineOutcome> {
+  const r = await runDistillPass(ctx.admin)
+  return { ok: true, found: { distilled: r.filter((x) => x.ran).length, people: r.length } }
 }
