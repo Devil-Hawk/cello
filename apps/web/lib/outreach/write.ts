@@ -48,7 +48,7 @@ export function asOutreachReview(out: WriterResult, subject: string, body: strin
 export async function writeMessage(
   admin: AdminClient,
   user: { id: string; email: string },
-  brief: Pick<WriterBrief, 'type' | 'job_id' | 'contact_id'>
+  brief: Pick<WriterBrief, 'type' | 'job_id' | 'contact_id' | 'instructions'>
 ): Promise<WriteMessageResult> {
   const apiKeys = await loadApiKeys(admin, user.id)
   const ctx: AgentContext = {
