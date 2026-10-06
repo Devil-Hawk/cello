@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "clean": "rm -rf .next .turbo node_modules",
     "setup:checkpointer": "npx tsx scripts/setup-checkpointer.ts",
-    "mutation:scans": "npx tsx scripts/mutation-check-scans.ts"
+    "mutation:scans": "npx tsx scripts/mutation-check-scans.ts",
+    "depth:stills": "node scripts/depth-stills.mjs"
   },
   "dependencies": {
     "@a2a-js/sdk": "1.0.1",
@@ -40,6 +41,7 @@
     "@radix-ui/react-slot": "^1.0.2",
     "@radix-ui/react-toast": "^1.1.5",
     "@radix-ui/react-tooltip": "^1.0.7",
+    "@react-three/fiber": "8.18.0",
     "@sentry/nextjs": "^10.68.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.93.3",
@@ -71,6 +73,7 @@
     "rss-parser": "^3.13.0",
     "tailwind-merge": "^2.2.0",
     "tailwindcss-animate": "^1.0.7",
+    "three": "0.186.1",
     "turndown": "^7.2.0",
     "unified": "^11.0.5",
     "unpdf": "^1.4.0",
@@ -84,6 +87,7 @@
     "@types/react": "^18.2.47",
     "@types/react-dom": "^18.2.18",
     "@types/react-syntax-highlighter": "^15.5.13",
+    "@types/three": "0.186.0",
     "@types/turndown": "^5.0.6",
     "autoevals": "^0.3.0",
     "autoprefixer": "^10.4.16",

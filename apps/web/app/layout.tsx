@@ -1,12 +1,14 @@
 import type { Metadata, Viewport } from 'next'
-import { Space_Grotesk, Space_Mono, DM_Sans } from 'next/font/google'
+import { Space_Grotesk, Space_Mono, DM_Sans, Figtree } from 'next/font/google'
 import './globals.css'
+import './relief.css'
 import { ThemeProvider } from '@/components/providers/theme-provider'
-import { Toaster } from '@/components/ui/toaster'
+import { Toaster } from '@/components/providers/lazy-toaster'
 
 // Display face — an engineered grotesque with real character, tuned for the
 // instrument-panel headings and the wordmark.
 const spaceGrotesk = Space_Grotesk({
+  preload: false,
   subsets: ['latin'],
   variable: '--font-display',
   display: 'swap',
@@ -15,6 +17,7 @@ const spaceGrotesk = Space_Grotesk({
 // Readout face — the monospace sibling of the display family. Carries the
 // numeric vitals, eyebrow labels, and anything that should read like a gauge.
 const spaceMono = Space_Mono({
+  preload: false,
   subsets: ['latin'],
   weight: ['400', '700'],
   variable: '--font-readout',
@@ -23,15 +26,25 @@ const spaceMono = Space_Mono({
 
 // Body face — refined, highly readable prose.
 const dmSans = DM_Sans({
+  preload: false,
   subsets: ['latin'],
   variable: '--font-sans',
   display: 'swap',
 })
 
+// Relief's face. Pages built on the contract set `font-r`; the three faces
+// above stay for the pages not yet moved over.
+const figtree = Figtree({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  variable: '--font-figtree',
+  display: 'swap',
+})
+
 export const metadata: Metadata = {
-  title: 'Cello - Career Engine for Leads & Opportunities',
-  description: 'AI-powered job hunting tool that helps you catch opportunities within minutes of posting',
-  keywords: ['job search', 'career', 'AI', 'job tracking', 'applications'],
+  title: 'Cello',
+  description: 'Cello finds roles that fit you and keeps track of your search. Nothing is sent without your click.',
+  keywords: ['job search', 'roles', 'applications', 'career'],
   authors: [{ name: 'Ankit Punjabi' }],
   manifest: '/manifest.json',
 }
@@ -49,8 +62,8 @@ export const viewport: Viewport = {
   // components/layout/mobile-nav.tsx) to resolve to anything but 0.
   viewportFit: 'cover',
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#F4F2EC' },
-    { media: '(prefers-color-scheme: dark)', color: '#0D0F14' },
+    { media: '(prefers-color-scheme: light)', color: '#ECEBE7' },
+    { media: '(prefers-color-scheme: dark)', color: '#17181C' },
   ],
 }
 
@@ -62,7 +75,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${spaceGrotesk.variable} ${spaceMono.variable} ${dmSans.variable} font-sans antialiased`}
+        className={`${spaceGrotesk.variable} ${spaceMono.variable} ${dmSans.variable} ${figtree.variable} font-sans antialiased`}
       >
         <ThemeProvider
           attribute="class"

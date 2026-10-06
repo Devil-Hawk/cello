@@ -82,6 +82,23 @@ const config: Config = {
           900: '#7C2D12',
           950: '#431407',
         },
+        // Relief (components/ui/relief.md). Hex custom properties, so no opacity modifier.
+        r: {
+          ground: 'var(--r-ground)',
+          surface: 'var(--r-surface)',
+          raised: 'var(--r-raised)',
+          ink: 'var(--r-ink)',
+          'ink-2': 'var(--r-ink-2)',
+          'ink-3': 'var(--r-ink-3)',
+          line: 'var(--r-line)',
+          'line-2': 'var(--r-line-2)',
+          copper: 'var(--r-copper)',
+          'copper-text': 'var(--r-copper-text)',
+          petrol: 'var(--r-petrol)',
+          'petrol-text': 'var(--r-petrol-text)',
+          ok: 'var(--r-ok)',
+          stop: 'var(--r-stop)',
+        },
         // Pipeline stage palette — desaturated to instrument tones so the
         // board reads as calibrated gauges, never candy. Fixed across themes.
         pipeline: {
@@ -101,15 +118,25 @@ const config: Config = {
         lg: '12px',
         md: '8px',
         sm: '6px',
+        'r-sheet': 'var(--r-radius-sheet)',
+        'r-key': '12px',
       },
       boxShadow: {
-        card: '0 1px 2px 0 rgb(16 18 23 / 0.04), 0 2px 6px -1px rgb(16 18 23 / 0.05)',
-        pop: '0 2px 8px -2px rgb(16 18 23 / 0.08), 0 8px 24px -4px rgb(16 18 23 / 0.16)',
+        // The legacy values live in app/relief.css so this file holds no raw shadow.
+        card: 'var(--legacy-shadow-card)',
+        pop: 'var(--legacy-shadow-pop)',
         // Raised readout housings sit proud of the panel.
-        raised:
-          '0 1px 0 0 rgb(255 255 255 / 0.6) inset, 0 1px 2px 0 rgb(16 18 23 / 0.05), 0 6px 16px -6px rgb(16 18 23 / 0.14)',
+        raised: 'var(--legacy-shadow-raised)',
         // Recessed wells (kanban tracks, input grooves).
-        well: 'inset 0 1px 2px 0 rgb(16 18 23 / 0.06)',
+        well: 'var(--legacy-shadow-well)',
+        // Relief: the elevation scale. No other shadow exists.
+        'r-contact': 'var(--r-contact)',
+        'r-1': 'var(--r-s1)',
+        'r-2': 'var(--r-s2)',
+        'r-bar': 'var(--r-s3)',
+        'r-lit': 'var(--r-lit)',
+        'r-key': 'var(--r-key-on)',
+        'r-ring': 'var(--r-ring)',
       },
       fontSize: {
         display: ['2.125rem', { lineHeight: '1.15', letterSpacing: '-0.025em', fontWeight: '600' }],
@@ -125,6 +152,7 @@ const config: Config = {
       },
       fontFamily: {
         sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
+        r: ['var(--font-figtree)', 'system-ui', 'sans-serif'],
         display: ['var(--font-display)', 'system-ui', 'sans-serif'],
         readout: ['var(--font-readout)', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },

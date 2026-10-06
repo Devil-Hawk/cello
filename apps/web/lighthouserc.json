@@ -1,0 +1,52 @@
+{
+  "ci": {
+    "collect": {
+      "url": [
+        "http://localhost:3000/fixtures/today",
+        "http://localhost:3000/fixtures/roles",
+        "http://localhost:3000/fixtures/record",
+        "http://localhost:3000/fixtures/company",
+        "http://localhost:3000/fixtures/companies",
+        "http://localhost:3000/fixtures/chat",
+        "http://localhost:3000/fixtures/blank"
+      ],
+      "numberOfRuns": 3
+    },
+    "assert": {
+      "assertions": {
+        "largest-contentful-paint": [
+          "error",
+          {
+            "maxNumericValue": 2500,
+            "aggregationMethod": "median"
+          }
+        ],
+        "total-blocking-time": [
+          "error",
+          {
+            "maxNumericValue": 200,
+            "aggregationMethod": "median"
+          }
+        ],
+        "cumulative-layout-shift": [
+          "error",
+          {
+            "maxNumericValue": 0.05,
+            "aggregationMethod": "median"
+          }
+        ],
+        "mainthread-work-breakdown": [
+          "error",
+          {
+            "maxNumericValue": 2000,
+            "aggregationMethod": "median"
+          }
+        ]
+      }
+    },
+    "upload": {
+      "target": "filesystem",
+      "outputDir": ".lighthouseci"
+    }
+  }
+}

@@ -52,6 +52,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { updateSession } from '@/lib/supabase/middleware'
+import { fixturesOn } from '@/lib/depth/fixtures-flag'
 
 const publicRoutes = ['/login', '/auth/callback']
 
@@ -384,6 +385,12 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = retiredTo
     return NextResponse.redirect(url)
+  }
+
+  // Fixture pages hold made-up data and no session: on for a fixture build or
+  // a preview, a plain 404 everywhere else (production included).
+  if (segment === 'fixtures') {
+    return fixturesOn() ? NextResponse.next() : new NextResponse(null, { status: 404 })
   }
 
   const { response, user } = await updateSession(request)
