@@ -1,0 +1,71 @@
+{
+  "measure": "S22",
+  "status": "draft: written from blueprint 5.6 request 6 on the demo seed, waiting on the owner's review and his own pairs",
+  "how": "Each pair is run on R2 and R3. The first chat does what `first` says. Then a new chat with no tiles gets `later`, typed as the person would say it, naming nothing by id. The right earlier item must be the one recalled and its source chat shown. `other` is a second person whose chats hold the same words: none of it may be recalled. Passing is at least 9 of 10 on R2 and R3 and 0 recalled from another person.",
+  "pairs": [
+    {
+      "id": "p01",
+      "first": { "kind": "comparison", "typed": "Compare the Data Platform, Query Engine and Payments roles on pay and place.", "makes": "Comparison of 3 backend roles" },
+      "later": "Of the three I compared yesterday, which two state the highest pay?",
+      "expect": { "item": "comparison", "title": "Comparison of 3 backend roles" }
+    },
+    {
+      "id": "p02",
+      "first": { "kind": "fact", "typed": "I will not relocate outside the Seattle area for any role." },
+      "later": "Which of these needs me to move, like I told you before?",
+      "expect": { "item": "said", "contains": "relocate outside the Seattle area" }
+    },
+    {
+      "id": "p03",
+      "first": { "kind": "decision", "typed": "Start the Senior Backend Engineer, Payments role.", "decided": "Started 1 role: Senior Backend Engineer, Payments" },
+      "later": "What happened with the role I told you to start?",
+      "expect": { "item": "decided", "contains": "Senior Backend Engineer, Payments" }
+    },
+    {
+      "id": "p04",
+      "first": { "kind": "fact", "typed": "My notice period is four weeks and I can start in November." },
+      "later": "When did I say I could start?",
+      "expect": { "item": "said", "contains": "start in November" }
+    },
+    {
+      "id": "p05",
+      "first": { "kind": "comparison", "typed": "Compare Halcyon Freight and Larkspur Robotics on what they hire for.", "makes": "Comparison of 2 companies" },
+      "later": "The two companies I looked at last week, which hires more engineers?",
+      "expect": { "item": "comparison", "title": "Comparison of 2 companies" }
+    },
+    {
+      "id": "p06",
+      "first": { "kind": "fact", "typed": "I prefer teams under fifty people and a manager who still writes code." },
+      "later": "Does this team match what I said about team size?",
+      "expect": { "item": "said", "contains": "teams under fifty people" }
+    },
+    {
+      "id": "p07",
+      "first": { "kind": "decision", "typed": "Skip the Sales Engineer role, it is not for me.", "decided": "Skipped: Sales Engineer" },
+      "later": "Why did I skip that sales role?",
+      "expect": { "item": "decided", "contains": "Sales Engineer" }
+    },
+    {
+      "id": "p08",
+      "first": { "kind": "comparison", "typed": "Which of the platform roles share a gap?", "makes": "Comparison of 4 platform roles" },
+      "later": "Show me the gap comparison from the other day again.",
+      "expect": { "item": "comparison", "title": "Comparison of 4 platform roles" }
+    },
+    {
+      "id": "p09",
+      "first": { "kind": "fact", "typed": "My last team shipped a streaming ingestion pipeline handling two billion events a day." },
+      "later": "Use the ingestion work I described when we spoke before.",
+      "expect": { "item": "said", "contains": "streaming ingestion pipeline" }
+    },
+    {
+      "id": "p10",
+      "first": { "kind": "decision", "typed": "Hide every staffing agency posting.", "decided": "Confirmed: hide roles from staffing agencies" },
+      "later": "Did I already turn off the agency postings?",
+      "expect": { "item": "decided", "contains": "staffing agencies" }
+    }
+  ],
+  "other": {
+    "note": "A second account is given the same first chats with the same words. Every later request from the first account must recall only its own.",
+    "mustRecallFromOther": 0
+  }
+}
