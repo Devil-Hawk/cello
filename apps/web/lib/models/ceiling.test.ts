@@ -131,6 +131,14 @@ describe('the default ceiling', () => {
     expect(personModels({ openrouter: 'k', provider: LOCAL }, {}).ceiling).toBe('R3')
   })
 
+  it('puts a local server first when no order is saved, so OpenRouter is not called', () => {
+    vi.stubEnv('CELLO_SELF_HOSTED', '1')
+    const keys: DecryptedApiKeys = { openrouter: 'k', model: PAID, provider: LOCAL }
+    const models = personModels(keys, {})
+    expect(models.ceiling).toBe('R4')
+    expect(pickRung(step('R2'), models, availableRungs(keys, models.ceiling), keys)).toMatchObject({ rung: 'R2', via: 'local-server' })
+  })
+
   it('stays R4 for a person who already chose to pay, so nothing they pay for stops', () => {
     expect(personModels({ openrouter: 'k', model: PAID }, {}).ceiling).toBe('R4')
     expect(personModels({ anthropic: 'k' }, {}).ceiling).toBe('R4')

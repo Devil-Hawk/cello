@@ -23,6 +23,7 @@ export const CALLABLE = new Set<Rung>(['R2', 'R3', 'R4'])
 
 /** Highest first: a step steps down from the ceiling when a rung is not set up. */
 const DEFAULT_ORDER: Rung[] = ['R4', 'R3', 'R2', 'R1']
+const LOCAL_FIRST: Rung[] = ['R2', 'R4', 'R3', 'R1']
 
 export const isRung = (v: unknown): v is Rung => typeof v === 'string' && (RUNGS as string[]).includes(v)
 export const isCeiling = (v: unknown): v is Ceiling => typeof v === 'string' && (CEILINGS as string[]).includes(v)
@@ -69,7 +70,8 @@ export function personModels(keys: DecryptedApiKeys, preferences: Record<string,
   const order = Array.isArray(saved.order) ? saved.order.filter(isRung) : []
   return {
     ceiling: isCeiling(saved.ceiling) ? saved.ceiling : defaultCeiling(keys),
-    order: order.length > 0 ? order : DEFAULT_ORDER,
+    // A person running their own local model gets it first: it costs nothing and has no daily limit.
+    order: order.length > 0 ? order : hasLocal(keys) ? LOCAL_FIRST : DEFAULT_ORDER,
     creditBought: pipeline.credit_bought === true,
   }
 }
