@@ -103,6 +103,16 @@ describe('companies.add by link', () => {
     expect(tables.company_directory ?? []).toHaveLength(0)
   })
 
+  it('a pasted Workable board named like a verified employer is other_owner, offers that employer, and writes nothing', async () => {
+    const real = { id: 'e1', name: 'Retell AI', name_norm: 'retell ai', domain: 'retellai.com', logo_url: null, careers_url: 'https://retellai.com/careers', ats_provider: 'ashby', ats_token: 'retell-ai', verified_by: 'careers_page_link', verified_at: '2026-10-01T00:00:00Z', open_count: 12, source: 'person' }
+    const { client, tables } = world({ company_directory: [{ ...real }] })
+    const d = deps({ boards: [{ provider: 'workable', token: 'squat', via: 'url' }], identity: { name: 'Retell AI', homeUrls: [] } })
+    const r = await addCompany(client, 'u1', { link: 'https://apply.workable.com/squat' }, d.value)
+    expect(r).toMatchObject({ ok: false, reason: 'other_owner', offers: [{ kind: 'employer', name: 'Retell AI', employerId: 'e1' }] })
+    expect(tables.company_directory).toEqual([real])
+    expect(tables.companies).toHaveLength(0)
+  })
+
   it('a pasted board no one big has the name of is taken on the person say-so while it is alive', async () => {
     const { client, tables } = world()
     const d = deps({ boards: [{ provider: 'personio', token: 'tiny-co', via: 'url' }], identity: null })
