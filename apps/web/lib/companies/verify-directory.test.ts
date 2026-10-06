@@ -83,6 +83,22 @@ describe('checkBoard: the employer a board belongs to', () => {
     expect(r).toMatchObject({ ok: false, reason: 'other_owner' })
   })
 
+  it.each(['Amazon', 'Mercury', 'Ramp', 'Notion', 'Linear', 'Scale', 'Square', 'Block', 'Unity'])('%s: a namesake board with the same name and another home is refused', async (name) => {
+    const r = await checkBoard(
+      { name, domain: `${name.toLowerCase()}.com`, provider: 'greenhouse', token: name.toLowerCase() },
+      world({ identity: { name, homeUrls: ['https://namesake.example'] } })
+    )
+    expect(r).toMatchObject({ ok: false, reason: 'other_owner' })
+  })
+
+  it('a board page that names the employer only in its title is not theirs: the name alone never ties a board', async () => {
+    const r = await checkBoard(
+      { name: 'Acme', domain: 'acme.com', provider: 'lever', token: 'acme-staffing' },
+      world({ identity: { name: 'Acme', homeUrls: [] } })
+    )
+    expect(r).toMatchObject({ ok: false, reason: 'not_linked' })
+  })
+
   it('a look-alike domain does not take the real employer board: the board declares its own home', async () => {
     const r = await checkBoard(
       { name: 'Amazon', domain: 'xn--mazon-3ve.com', provider: 'ashby', token: 'amazon' },
