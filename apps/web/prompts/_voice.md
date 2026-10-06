@@ -7,9 +7,9 @@
      to Cello's actual surfaces. This document supersedes — and should
      replace, as each agent migrates — the buzzword/filler bans that were
      independently hand-duplicated inside cv_tailor.ts, outreach.ts,
-     interview_prep.ts, resume_optimizer.ts, and follow_upper.ts. Keeping one
+     resume_optimizer.ts, and follow_upper.ts. Keeping one
      copy means a ban added here reaches every surface at once, instead of
-     five copies quietly drifting apart.
+     four copies quietly drifting apart.
      ============================================================ -->
 
 **Style only. Never a fact.** This document shapes wording. It never adds,
@@ -20,8 +20,8 @@ fabrication, not a style problem.
 ## Scope
 
 Applies to any string a Cello prompt writes for a HUMAN to read: cover
-letters, resume summaries, outreach emails and follow-ups, interview-prep
-guidance and sample answers, company dossier summaries, digest/status lines.
+letters, resume summaries, outreach emails and follow-ups, company dossier
+summaries, digest/status lines.
 
 Does NOT apply to machine-read fields with no prose intent — a `matchedSkills`
 array, a `dossierId`, a `sponsorsVisa` enum. Applying voice rules to a
@@ -81,10 +81,6 @@ prose.
 - **Resume summary** (resume_optimizer, cv_tailor): 2-4 sentences,
   ATS-dense, formal register. Tier 2 conversational looseness does NOT apply
   here.
-- **Interview prep guidance / sampleAnswer** (interview_prep): specific to
-  THIS candidate and role. Banned: generic interview-coaching filler ("be
-  confident", "make eye contact", "show enthusiasm") — the tell that a line
-  isn't grounded is that it would fit any candidate for any job.
 - **Digest / status lines** (follow_upper, autopilot summaries): 1-2
   sentences, no greeting, no encouragement filler, name the specific
   number/company/day-count that makes the line true.
