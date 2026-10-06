@@ -139,6 +139,17 @@ describe('writeEmployer: the one writer of company_directory', () => {
     await writeEmployer(client, { ...base, domain: 'retellai.com', source: 'seed' }, () => NOW)
     expect(tables.company_directory[0].source).toBe('person')
   })
+
+  it('a board whose declared home is a verified employer\'s domain leaves that row\'s board, owner and address alone', async () => {
+    const real = { id: 'e1', source: 'person', domain: 'retellai.com', ats_provider: 'greenhouse', ats_token: 'real', verified_by: 'careers_page_link', careers_url: 'https://retellai.com/jobs' }
+    const { client, tables } = fakeDb({ company_directory: [{ ...real }] })
+    const id = await writeEmployer(client, { ...base, domain: 'retellai.com', careersUrl: 'https://evil.example/jobs', verifiedBy: 'careers_url' }, () => NOW)
+    expect(id).toBe('e1')
+    expect(tables.company_directory).toEqual([real])
+    // a site-only check never nulls the board either
+    await writeEmployer(client, { ...base, domain: 'retellai.com', provider: null, token: null, careersUrl: 'https://evil.example/jobs' }, () => NOW)
+    expect(tables.company_directory).toEqual([real])
+  })
 })
 
 describe('settleCandidate', () => {
