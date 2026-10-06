@@ -144,8 +144,20 @@ describe('smartrecruiters.fetch', () => {
     expect(listUrls[0]).toBe('https://api.smartrecruiters.com/v1/companies/Sodexo/postings?limit=100&offset=0')
     expect(listUrls[1]).toContain('offset=100')
     // Detail calls are capped at the budget, not one per posting.
-    expect(urls.filter((u) => !u.includes('offset=')).length).toBe(25)
-    expect(jobs.filter((j) => j.description).length).toBe(25)
+    expect(urls.filter((u) => !u.includes('offset=')).length).toBe(40)
+    expect(jobs.filter((j) => j.description).length).toBe(40)
+  })
+
+  it('spends the budget on postings that have no stored description', async () => {
+    const full = Array.from({ length: 100 }, (_, i) => ({ ...REAL_LIST_POSTING, id: `id-${i}` }))
+    const urls = mockBoard([full])
+    const have = new Set(Array.from({ length: 70 }, (_, i) => `https://jobs.smartrecruiters.com/Sodexo/id-${i}`))
+
+    const jobs = await smartrecruiters.fetch('Sodexo', { hasDescription: (id) => have.has(id) })
+
+    // 30 postings lack a body, which is under the budget: exactly those 30 are read.
+    expect(urls.filter((u) => !u.includes('offset=')).length).toBe(30)
+    expect(jobs.slice(70).every((j) => j.description)).toBe(true)
   })
 
   it('treats an unknown company (200 with an empty page) as an empty board, not an error', async () => {

@@ -46,7 +46,7 @@ vi.mock('@/lib/apikeys', () => ({
   getDecryptedApiKeys: (...args: unknown[]) => getDecryptedApiKeysMock(...args),
 }))
 
-vi.mock('@/lib/security/untrusted', () => ({ assertSsrfSafe: async () => undefined }))
+vi.mock('@/lib/security/untrusted', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/lib/security/untrusted')>()), assertSsrfSafe: async () => undefined }))
 
 import { POST } from './route'
 import { BudgetCapError } from '@/lib/harness/spend'
@@ -67,11 +67,11 @@ function llmResult(content: string) {
   return { content, tokensUsed: 4500, promptTokens: 4000, completionTokens: 500, model: 'openai/gpt-4o-mini' }
 }
 
-function post() {
+function post(url = 'https://acme.com/careers') {
   return new NextRequest('http://localhost/api/companies/verify', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ url: 'https://acme.com/careers' }),
+    body: JSON.stringify({ url }),
   })
 }
 
@@ -114,6 +114,17 @@ describe('AI verification (the path that never ran)', () => {
       status: 'ok',
       attributes: { model: 'openai/gpt-4o-mini', metered: true, userId: 'user-1' },
     })
+  })
+})
+
+describe('a link on a reposting site is not an employer careers page', () => {
+  it.each(['https://builtin.com/company/acme/jobs', 'https://www.linkedin.com/company/acme/jobs/'])('%s is refused in words, and nothing is fetched', async (url) => {
+    const res = await POST(post(url))
+    const body = await res.json()
+    expect(body).toMatchObject({ isValid: false, status: 'reposting' })
+    expect(body.message).toContain('a reposting site')
+    expect(body.message).toContain('own careers site')
+    expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 })
 
@@ -168,5 +179,85 @@ describe('every fallback is still the heuristic verifier, never a 500', () => {
     callOpenRouterMock.mockResolvedValue(llmResult('{"isCareerPage": "maybe"}'))
     await expectHeuristic()
     expect(fallbackLines(warn)).toHaveLength(1)
+  })
+})
+
+describe('the page is read as Cello, once, and named by its employer', () => {
+  type Call = { url: string; ua: string }
+  function recordFetch(answer: (url: string) => Response): Call[] {
+    const calls: Call[] = []
+    globalThis.fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({ url, ua: String((init?.headers as Record<string, string>)?.['user-agent'] ?? '') })
+      return answer(url)
+    }) as unknown as typeof fetch
+    return calls
+  }
+  const noAi = () => getDecryptedApiKeysMock.mockResolvedValue({ userId: 'user-1' })
+
+  it('every request names Cello and none claims to be a browser', async () => {
+    noAi()
+    const calls = recordFetch((url) => (url.endsWith('/robots.txt') ? new Response('', { status: 404 }) : new Response(PAGE, { status: 200, headers: { 'content-type': 'text/html' } })))
+    await POST(post())
+    expect(calls.length).toBeGreaterThan(0)
+    for (const c of calls) {
+      expect(c.ua).toContain('cello-job-tracker')
+      expect(c.ua).not.toMatch(/Mozilla|Chrome|Safari/)
+    }
+  })
+
+  it('a site that refuses is asked once and never again under another identity, and the answer says why', async () => {
+    noAi()
+    const calls = recordFetch((url) => (url.endsWith('/robots.txt') ? new Response('', { status: 404 }) : new Response('Forbidden', { status: 403 })))
+    const body = await (await POST(post('https://acme.com/careers'))).json()
+    expect(calls.filter((c) => !c.url.endsWith('/robots.txt'))).toHaveLength(1)
+    expect(body.message).toContain('bot check')
+  })
+
+  it('a site whose robots.txt disallows the page is not read at all', async () => {
+    noAi()
+    const calls = recordFetch((url) => (url.endsWith('/robots.txt') ? new Response('User-agent: *\nDisallow: /careers\n', { status: 200 }) : new Response(PAGE, { status: 200 })))
+    const body = await (await POST(post('https://acme.com/careers'))).json()
+    expect(calls.map((c) => c.url)).toEqual(['https://acme.com/robots.txt'])
+    expect(body.message).toContain('robots.txt')
+    expect(body.isValid).toBe(false)
+  })
+
+  it('a site whose address does not answer is unreachable: no robots claim and no green tick', async () => {
+    noAi()
+    recordFetch(() => {
+      throw new TypeError('fetch failed')
+    })
+    const body = await (await POST(post('https://careers.deadco-nonexistent-xyz.com/'))).json()
+    expect(body.isValid).toBe(false)
+    expect(body.status).toBe('unreachable')
+    expect(body.message).not.toContain('robots')
+    expect(body.message).toContain('could not reach')
+  })
+
+  it('a robots.txt that answers 503 is unreachable, not a rule', async () => {
+    noAi()
+    recordFetch((url) => (url.endsWith('/robots.txt') ? new Response('down', { status: 503 }) : new Response(PAGE, { status: 200 })))
+    const body = await (await POST(post('https://acme.com/careers'))).json()
+    expect(body.isValid).toBe(false)
+    expect(body.message).not.toContain('robots')
+  })
+
+  it('a marketing title is not the company name: a page titled "Find your career" at jobs.zalando.com is Zalando', async () => {
+    noAi()
+    recordFetch((url) =>
+      url.endsWith('/robots.txt')
+        ? new Response('', { status: 404 })
+        : new Response('<html><head><title>Find your career</title></head><body><a href="/en/jobs/1">Role</a> careers jobs hiring apply</body></html>', { status: 200, headers: { 'content-type': 'text/html' } })
+    )
+    const body = await (await POST(post('https://jobs.zalando.com/en/jobs/'))).json()
+    expect(body.companyName).toBe('Zalando')
+  })
+
+  it('a model that answers with the slogan does not name the company either', async () => {
+    callOpenRouterMock.mockResolvedValue(llmResult(JSON.stringify({ isCareerPage: true, isOfficialPage: true, companyName: 'Find your career', estimatedJobCount: 3, confidence: 0.9, reasoning: 'ok' })))
+    recordFetch((url) => (url.endsWith('/robots.txt') ? new Response('', { status: 404 }) : new Response('<html><head><title>Find your career</title></head><body>careers</body></html>', { status: 200, headers: { 'content-type': 'text/html' } })))
+    const body = await (await POST(post('https://jobs.zalando.com/en/jobs/'))).json()
+    expect(body.companyName).toBe('Zalando')
   })
 })

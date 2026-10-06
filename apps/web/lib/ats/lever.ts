@@ -4,8 +4,8 @@
 
 import type { AtsJob, AtsProvider, DetectInput } from './types'
 import { isValidToken } from './types'
-import { linkHostsOf } from './html'
 import { HttpError, assertAllowedHost, fetchJson } from './http'
+import { htmlToPlainText, linkHostsOf } from './html'
 
 const API_HOSTS = new Set(['api.lever.co', 'api.eu.lever.co'])
 
@@ -17,6 +17,10 @@ interface LeverPosting {
   text?: string
   hostedUrl?: string
   descriptionPlain?: string
+  /** Everything after the opening paragraph: [{ text: "What We Require", content: "<li>..</li>" }]. */
+  lists?: { text?: string; content?: string }[]
+  /** The closing text (benefits, equal opportunity, visa notes). */
+  additionalPlain?: string
   /** The same body as HTML; kept only for the hosts it links to. */
   description?: string
   createdAt?: number
@@ -70,6 +74,29 @@ function formatSalary(j: LeverPosting): string | undefined {
   return `${currency ? `${currency} ` : ''}${span}${interval}`.trim()
 }
 
+/**
+ * The whole posting: the opening paragraph, then each titled list, then the
+ * closing text.
+ *
+ * `descriptionPlain` alone is only the opening paragraph. Lever puts the part a
+ * candidate is judged on, "What you'll do" and "What we require", in `lists`,
+ * and the visa and pay notes in `additionalPlain`. Reading just the first field
+ * is why a stored Lever job looked complete and matched on nothing.
+ */
+function fullDescription(j: LeverPosting): string | undefined {
+  const parts: string[] = []
+  if (typeof j.descriptionPlain === 'string' && j.descriptionPlain.trim()) parts.push(j.descriptionPlain.trim())
+  for (const list of Array.isArray(j.lists) ? j.lists : []) {
+    if (!list || typeof list !== 'object') continue
+    const heading = typeof list.text === 'string' ? list.text.trim() : ''
+    const body = htmlToPlainText(list.content, MAX_DESCRIPTION_CHARS)
+    if (!body) continue
+    parts.push(heading ? `${heading}\n${body}` : body)
+  }
+  if (typeof j.additionalPlain === 'string' && j.additionalPlain.trim()) parts.push(j.additionalPlain.trim())
+  return parts.length > 0 ? parts.join('\n\n').slice(0, MAX_DESCRIPTION_CHARS) : undefined
+}
+
 function detect(input: DetectInput): { token: string } | null {
   if (!input.careerUrl) return null
   let url: URL
@@ -96,10 +123,7 @@ async function fetchBoard(host: string, token: string): Promise<AtsJob[]> {
       url: j.hostedUrl,
       externalId: j.hostedUrl,
       location: formatLocation(j),
-      description:
-        typeof j.descriptionPlain === 'string' && j.descriptionPlain
-          ? j.descriptionPlain.slice(0, MAX_DESCRIPTION_CHARS)
-          : undefined,
+      description: fullDescription(j),
       linkHosts: typeof j.description === 'string' && j.description ? linkHostsOf(j.description) : undefined,
       postedAt: toIsoFromEpochMs(j.createdAt),
       salary: formatSalary(j),

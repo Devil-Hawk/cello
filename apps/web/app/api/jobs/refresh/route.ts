@@ -165,7 +165,7 @@ export async function POST(request: NextRequest) {
         ok: true,
         threadId: tid,
         results: [],
-        totals: { found: 0, inserted: 0, companiesWithAts: 0 },
+        totals: { found: 0, inserted: 0, updated: 0, closed: 0, busy: 0, companiesWithAts: 0 },
         cursor: interrupted.processed,
         total: interrupted.total,
         done: false,

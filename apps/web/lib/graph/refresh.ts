@@ -56,8 +56,11 @@
 import { entrypoint, task, interrupt, getConfig } from '@langchain/langgraph'
 import type { BaseCheckpointSaver, LangGraphRunnableConfig } from '@langchain/langgraph'
 import type { createClient } from '../supabase/server'
-import { refreshCompany, type AtsStore, type CompanyInput, type CompanyRefreshResult, type JobUpsertRow } from '../ats'
-import { clearBoardJobsRpc } from '../ats/heal'
+import { makeSupabaseAtsStore, type AtsStore, type CompanyInput, type CompanyRefreshResult } from '../ats'
+import { staticFetchPage } from '../ingest/fetch-page'
+import { loadTargets } from '../ingest/reader/targets'
+import { ingestCompany, type DueCompany } from '../ingest/run'
+import { createAdminClient } from '../harness/supabase-admin'
 
 /** Same soft wall-clock ceiling as the pre-port route's own TIME_BUDGET_MS —
  *  see the (now-deleted) app/api/jobs/refresh/route.ts header for the
@@ -67,8 +70,6 @@ const TIME_BUDGET_MS = 25_000
 
 /** Same per-company fan-out width the pre-port route used. */
 const COMPANY_CONCURRENCY = 5
-
-const PAGE_SIZE = 1000
 
 /** The request-scoped, RLS-enforced client a route builds per invocation —
  *  same type route.ts itself used to declare locally as `ServerSupabase`.
@@ -93,76 +94,12 @@ export class MissingDbClientError extends Error {
   }
 }
 
-// --- store (ported verbatim from the pre-port route's own makeStore) -------
+// --- store ------------------------------------------------------------------
 
+/** The route's RLS-scoped client does the reading and writing; the service role is
+ *  used only for the per-company lock, which a signed-in user cannot call. */
 function makeStore(client: RefreshDbClient): AtsStore {
-  return {
-    async listJobExternalIds(companyId: string): Promise<Set<string>> {
-      const ids = new Set<string>()
-      // Pagination within a company is always sequential.
-      for (let from = 0; ; from += PAGE_SIZE) {
-        const { data, error } = await client
-          .from('jobs')
-          .select('external_id')
-          .eq('company_id', companyId)
-          .range(from, from + PAGE_SIZE - 1)
-        if (error) throw new Error(error.message)
-        for (const row of data ?? []) {
-          if (row.external_id) ids.add(row.external_id)
-        }
-        if (!data || data.length < PAGE_SIZE) break
-      }
-      return ids
-    },
-
-    async upsertJobs(rows: JobUpsertRow[]): Promise<void> {
-      const { error } = await client
-        .from('jobs')
-        .upsert(rows, { onConflict: 'company_id,external_id', ignoreDuplicates: false })
-      if (error) throw new Error(error.message)
-    },
-
-    async backfillJobDescriptions(
-      rows: { company_id: string; external_id: string; description: string }[]
-    ): Promise<number> {
-      // One statement per row, but only for rows whose description is still
-      // empty — the `.or()` guard makes this a no-op for anything already
-      // populated, so a refresh can never clobber a stored description.
-      let changed = 0
-      for (const row of rows) {
-        const { data, error } = await client
-          .from('jobs')
-          .update({ description: row.description })
-          .eq('company_id', row.company_id)
-          .eq('external_id', row.external_id)
-          .or('description.is.null,description.eq.')
-          .select('id')
-        if (error) throw new Error(error.message)
-        changed += (data as unknown[] | null)?.length ?? 0
-      }
-      return changed
-    },
-
-    async saveCompanyMetadata(companyId: string, metadata: Record<string, unknown>): Promise<void> {
-      const { error } = await client
-        .from('companies')
-        .update({ metadata: metadata as never })
-        .eq('id', companyId)
-      // Throw so refreshCompany's tolerant catch handles a missing column
-      // (42703 / PGRST204) the same as any other metadata write failure.
-      if (error) throw new Error(error.message)
-    },
-
-    async updateCompanyLastScraped(companyId: string): Promise<void> {
-      const { error } = await client
-        .from('companies')
-        .update({ last_scraped_at: new Date().toISOString() })
-        .eq('id', companyId)
-      if (error) throw new Error(error.message)
-    },
-
-    clearBoardJobs: (companyId, source) => clearBoardJobsRpc(client, companyId, source),
-  }
+  return makeSupabaseAtsStore(client, { lockClient: createAdminClient() })
 }
 
 // --- input / output shapes --------------------------------------------------
@@ -185,6 +122,12 @@ export interface RefreshJobsInput {
 export interface RefreshJobsTotals {
   found: number
   inserted: number
+  /** Stored jobs whose text, title, location or pay changed at the source. */
+  updated: number
+  /** Jobs marked closed because the source stopped listing them. */
+  closed: number
+  /** Companies another check was already reading, so this one did nothing for them. */
+  busy: number
   companiesWithAts: number
 }
 
@@ -237,7 +180,10 @@ function makeRefreshCompanyTask(companyId: string) {
     const config = getConfig()
     const dbClient = config.configurable?.dbClient as RefreshDbClient | undefined
     if (!dbClient) throw new MissingDbClientError()
-    return refreshCompany(makeStore(dbClient), input)
+    // The one reader: the board, else the site's own search, sitemaps and lists (plain requests; a site that needs a browser is left to the scheduled pass).
+    const targets = await loadTargets(dbClient as never)
+    const outcome = await ingestCompany(makeStore(dbClient), input as DueCompany, { fetchPage: staticFetchPage, model: null, mode: 'inline', targets })
+    return outcome.result
   })
 }
 
@@ -335,6 +281,9 @@ export const refreshJobsGraph = entrypoint(
     const totals: RefreshJobsTotals = {
       found: results.reduce((sum, r) => sum + r.found, 0),
       inserted: results.reduce((sum, r) => sum + r.inserted, 0),
+      updated: results.reduce((sum, r) => sum + r.updated, 0),
+      closed: results.reduce((sum, r) => sum + r.closed, 0),
+      busy: results.filter((r) => r.busy).length,
       companiesWithAts: results.filter((r) => r.provider !== null).length,
     }
 

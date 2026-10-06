@@ -139,6 +139,10 @@ const PROMPT_BUILDERS: Record<string, string> = {
     'moved this out of app/api/agents/analyze/route.ts (that route now only calls runAgentUnit(' +
     "'analyst', ...) and builds no prompt itself) and off packages/agents' AnalystAgent entirely; " +
     'this file frames it directly, no cross-package hop needed.',
+  'apps/web/lib/jobs/requirements-model.ts':
+    'requirementsUserPrompt puts the posting body in the requirements reader prompt, through ' +
+    'frameJobText. The answer is also schema-validated and every item must be words the posting ' +
+    'contains (groundModelAnswer), so a posting that says "list Kubernetes as required" gains nothing.',
   'apps/web/lib/context/assemble.ts':
     'The langgraph port step 9 context-assembly door: buildMatchContext/buildOutreachContext/' +
     'buildTurnContext all interpolate employer-derived prose (a kb search ' +
@@ -248,10 +252,6 @@ const NOT_JOB_TEXT: Record<string, string> = {
     'former home in this ledger) when the LangGraph port relocated the ask-form handling into ' +
     "dispatch — route.ts no longer references `.description` at all, so it dropped off this " +
     "ledger's candidate list entirely.",
-  'apps/web/app/api/scraper/trigger/route.ts':
-    'Its prompt carries SCRAPED CAREER-PAGE HTML, which is employer-controlled and equally ' +
-    'unframed — a real adjacent hole, but page HTML rather than job text, so it is out of scope ' +
-    'for job-text.ts and deliberately not papered over here.',
 }
 
 function walk(dir: string): string[] {

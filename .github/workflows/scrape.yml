@@ -1,4 +1,4 @@
-name: Scout Agent - Job Scraping
+name: Find new roles
 
 on:
   schedule:
@@ -8,108 +8,26 @@ on:
   workflow_dispatch:
     inputs:
       company_id:
-        description: 'Specific company ID to scrape (optional)'
+        description: 'Specific company ID to check (optional)'
         required: false
         type: string
 
-# Two overlapping scrapes would fetch the same due companies twice.
+# One check at a time. Two overlapping ones would read the same companies twice
+# (the database lock per company covers the in-app button and the autopilot).
 concurrency:
   group: scrape
   cancel-in-progress: false
 
-env:
-  PYTHON_VERSION: '3.11'
-
 jobs:
-  scrape:
-    name: Scrape Career Pages
+  find-new-roles:
+    name: Find new roles
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: |
-          cd packages/scrapers
-          pip install -e ".[dev,render,browser]"
-
-      # Career pages that render their listings client-side return an empty
-      # shell to httpx, so the extractors find nothing and the company is
-      # recorded as having no openings. src/render.py escalates those to a real
-      # browser, which needs Chromium present. Non-fatal: render.py degrades to
-      # the httpx-only path if this step fails, so a browser-install hiccup
-      # must not take down the scheduled run for every company.
-      - name: Install Scrapling browser
-        continue-on-error: true
-        run: |
-          cd packages/scrapers
-          scrapling install
-
-      # src/browser_tier.py's deterministic click-through rung drives
-      # Playwright directly (not through Scrapling), so it needs its own
-      # Chromium present too — same cache dir `scrapling install` just
-      # populated, so this is usually a fast no-op. Also non-fatal: the tier
-      # degrades to whatever the render tier produced if this step fails.
-      - name: Install browser tier's Chromium
-        continue-on-error: true
-        run: |
-          cd packages/scrapers
-          playwright install --with-deps chromium
-
-      - name: Run intelligent scraper
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          # Opt-in, per the deterministic-first mandate in src/browser_tier.py:
-          # the LLM navigation rung only runs when this is set, and only after
-          # the deterministic click-through rung still finds a shell.
-          SCRAPER_BROWSER_USE_AGENT: ${{ vars.SCRAPER_BROWSER_USE_AGENT || '' }}
-          # Via env, never interpolated into the script: a dispatch input is
-          # attacker-shaped text. Must be a UUID or empty.
-          COMPANY_ID: ${{ github.event.inputs.company_id || '' }}
-        run: |
-          if [ -n "$COMPANY_ID" ] && ! [[ "$COMPANY_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
-            echo "::error::company_id must be a UUID"
-            exit 1
-          fi
-          cd packages/scrapers
-          python -m src.runner "$COMPANY_ID"
-
-      - name: Report results
-        if: always()
-        run: |
-          echo "Scraping completed at $(date)"
-
-  # ATS refresh — structured job boards (Greenhouse / Lever / Ashby) via their
-  # public JSON APIs. Runs alongside the Python scraper on the same schedule.
-  # Uses only the existing SUPABASE_URL / SUPABASE_SERVICE_KEY repo secrets —
-  # no new secrets are required.
-  ats-refresh:
-    name: ATS Refresh (Greenhouse/Lever/Ashby)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # This job had no dependency-install step, so `npx tsx` below ran against
-      # a bare checkout: tsx was not present and the script's workspace import
-      # (`../apps/web/lib/ats/index`) could not resolve. It failed in ~9s on
-      # every scheduled run — silently, because the sibling Python job in this
-      # same workflow succeeds and the workflow's overall red was easy to read
-      # as "the scraper is flaky". Uses the same pnpm setup as ci.yml rather
-      # than a second convention.
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
         with:
@@ -118,8 +36,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          # 20 for the same reason ci.yml pins it: this script imports
-          # apps/web/lib/ats, which pulls in the Supabase client and therefore
+          # 20 for the same reason ci.yml pins it: the Supabase client pulls in
           # undici, which needs the `File` global that Node 18 lacks.
           node-version: '20'
           cache: 'pnpm'
@@ -127,12 +44,46 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run ATS refresh
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Python only fetches careers pages that need a browser (src/page.py).
+      - name: Install page fetcher
+        run: |
+          cd packages/scrapers
+          pip install -e ".[render,browser]"
+
+      # Pages that build their job list with script need a browser (src/render.py,
+      # src/browser_tier.py). It says who it is (Cello and the repository) and does
+      # nothing to look like a person. Non-fatal: the fetcher degrades to the plain
+      # request if a browser is missing, so an install hiccup must not stop the
+      # check for every company.
+      - name: Install browser
+        continue-on-error: true
+        run: |
+          cd packages/scrapers
+          playwright install --with-deps chromium
+
+      - name: Find new roles
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        # npx, not `pnpm tsx`: tsx is not a declared dependency of this repo, so
-        # it has to be fetched on demand. The install step above is what this
-        # job was actually missing — it provides the workspace packages the
-        # script imports, which npx alone never did.
-        run: npx tsx scripts/ats-refresh.ts
+          # Free models only; each call is metered to the user whose company it is.
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY || '' }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY || '' }}
+          LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL || '' }}
+          INGEST_PAGE_FETCHER: python
+          # Via env, never interpolated into the script: a dispatch input is
+          # attacker-shaped text. Must be a UUID or empty.
+          COMPANY_ID: ${{ github.event.inputs.company_id || '' }}
+        run: |
+          if [ -n "$COMPANY_ID" ] && ! [[ "$COMPANY_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+            echo "::error::company_id must be a UUID"
+            exit 1
+          fi
+          cd apps/web
+          # npx, not `pnpm tsx`: tsx is not a declared dependency of this repo.
+          npx tsx scripts/ingest.ts

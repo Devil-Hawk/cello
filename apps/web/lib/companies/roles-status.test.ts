@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { dueAt, nextCheckAt, rolesStatus, rolesStatusLine } from './roles-status'
+import { dueAt, nextCheckAt, partialReadNote, rolesStatus, rolesStatusLine } from './roles-status'
 
 const at = (iso: string) => Date.parse(iso)
 
@@ -45,6 +45,37 @@ describe('rolesStatus', () => {
     expect(line.href).toBeUndefined()
   })
 
+  it('says Cello is reading the site, and when the next check is, while only a browser can read it', () => {
+    const company = { metadata: { source_check: { checked_at: '2026-10-05T10:00:00Z', readable: false, reason: 'reading' } }, career_url: 'https://jobs.example/' }
+    expect(rolesStatusLine(rolesStatus(company, 0, { now }))).toEqual({ text: 'Cello is reading this site. Next check around 12:41 UTC' })
+  })
+
+  it('a site larger than one check reads says Cello is still reading it, never "no open roles"', () => {
+    const company = { metadata: { source_check: { checked_at: '2026-10-05T10:00:00Z', readable: false, reason: 'budget' } }, career_url: 'https://jobs.example/' }
+    const line = rolesStatusLine(rolesStatus(company, 0, { now }))
+    expect(line.text).toBe('This site is large and Cello is still reading it. Next check around 12:41 UTC')
+    expect(line.text).not.toContain('no open roles')
+  })
+
+  it('a page that was reached but not read because no free model was available says it is waiting, never "no open roles"', () => {
+    for (const reason of ['model_unavailable', 'model_limit']) {
+      const company = { metadata: { source_check: { checked_at: '2026-10-05T10:00:00Z', readable: false, reason } }, career_url: 'https://jobs.example/' }
+      const line = rolesStatusLine(rolesStatus(company, 0, { now }))
+      expect(line.text).toBe('Waiting for a free reading slot. Next check around 12:41 UTC')
+      expect(line.text).not.toContain('no open roles')
+    }
+  })
+
+  it('names why a site was not read: a bot check, a login, robots.txt, no roles, no answer', () => {
+    const line = (reason: string) =>
+      rolesStatusLine(rolesStatus({ metadata: { source_check: { checked_at: '2026-10-05T10:00:00Z', readable: false, reason } }, career_url: 'https://x.test/' }, 0, { now })).text
+    expect(line('bot_check')).toContain('bot check')
+    expect(line('login_required')).toContain('needs a login')
+    expect(line('robots')).toContain('robots.txt')
+    expect(line('no_roles')).toContain('no open roles were found')
+    expect(line('unreachable')).toContain('did not answer')
+  })
+
   it('ignores a malformed source_check', () => {
     expect(rolesStatus({ metadata: { source_check: 'x' } }, 0, { now }).kind).toBe('not_checked')
   })
@@ -85,5 +116,34 @@ describe('next check', () => {
   it('matches the cron in the workflow, so the promised time is real', () => {
     const yml = readFileSync(path.resolve(__dirname, '../../../../.github/workflows/scrape.yml'), 'utf8')
     expect(yml).toContain("- cron: '41 */6 * * *'")
+  })
+})
+
+describe('partialReadNote: a part of a big site never looks like the whole', () => {
+  const reader = (r: Record<string, unknown>) => ({ reader: r })
+
+  it('says how much was read of how much the site lists', () => {
+    expect(partialReadNote(reader({ listed: 1075, read: 19 }), 19)).toBe('Read 19 of about 1,075 roles so far. More each check.')
+  })
+
+  it('says so when the list names no titles', () => {
+    expect(partialReadNote(reader({ listed: 15989, read: 60, untitled: true }), 3)).toBe(
+      'Read 60 of about 15,989 roles so far. Its list names no titles, so Cello reads the roles in turn, more each check.'
+    )
+  })
+
+  it('says nothing once the whole list is read, and nothing for a company with no roles shown', () => {
+    expect(partialReadNote(reader({ listed: 40, read: 40 }), 12)).toBeNull()
+    expect(partialReadNote(reader({ listed: 1075, read: 19 }), 0)).toBeNull()
+  })
+
+  it('a window onto a site (its search or a few pages) says it is a window', () => {
+    expect(partialReadNote(reader({ window: true }), 10)).toBe('Showing the newest roles Cello matched on this site, not every role it lists.')
+  })
+
+  it('says nothing about a whole board, or when nothing is recorded', () => {
+    expect(partialReadNote(reader({ tier: 'board' }), 10)).toBeNull()
+    expect(partialReadNote({}, 10)).toBeNull()
+    expect(partialReadNote(null, 10)).toBeNull()
   })
 })

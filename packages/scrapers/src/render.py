@@ -13,10 +13,10 @@ WHY THIS EXISTS
     of stored jobs, exactly 3 carried source="scraper". The generic path is
     effectively not producing.
 
-    Scrapling (https://github.com/D4Vinci/Scrapling, BSD-3-Clause) closes that
-    gap: DynamicFetcher drives a real Chromium via Playwright, so a rendered
-    SPA yields the same HTML a human would see, and the existing parsers work
-    on it unchanged.
+    Playwright closes that gap: it drives Chromium, so a rendered SPA yields the
+    page the site builds in a browser, and the existing parsers work on it
+    unchanged. It identifies itself as Cello (polite.USER_AGENT) and does
+    nothing to look like a person.
 
 WHY ESCALATION RATHER THAN REPLACEMENT
     A headless browser costs roughly two orders of magnitude more time and
@@ -27,13 +27,14 @@ WHY ESCALATION RATHER THAN REPLACEMENT
 
 SCOPE
     Public career pages only. This module must never be pointed at login-walled
-    or paid vendors — the same rule the TypeScript side states in
-    apps/web/lib/dossier/comp.ts. Scrapling's own README says the same: respect
-    robots.txt and site terms.
+    or paid vendors, the same rule the TypeScript side states in
+    apps/web/lib/dossier/comp.ts. robots.txt is checked by page.py before this
+    is called.
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 from dataclasses import dataclass
@@ -122,49 +123,75 @@ def looks_like_unrendered_shell(html: str | None) -> ShellVerdict:
     return ShellVerdict(False, f"{links} job-shaped links, {text} chars of text", links, text)
 
 
-def scrapling_available() -> bool:
-    """True when Scrapling and its browser are importable in this environment.
+def playwright_available() -> bool:
+    """True when Playwright is importable in this environment.
 
     Checked at call time, never at import time: this package must keep working
-    on the httpx-only path anywhere Scrapling is not provisioned (CI, a plain
+    on the httpx-only path anywhere a browser is not provisioned (CI, a plain
     `pip install -e .`, a developer machine without browsers).
     """
     try:
-        import scrapling.fetchers  # noqa: F401
+        import playwright.sync_api  # noqa: F401
     except Exception:  # ImportError, or a broken/partial install
         return False
     return True
 
 
-def fetch_rendered(url: str, timeout_ms: int = 30_000) -> str | None:
-    """Fetch `url` through a real browser and return its rendered HTML.
+# Why the last fetch_rendered returned None: an exception class name, never a url
+# or page text. page.py reports it so a browser that could not run is never read
+# as a site with no roles.
+last_error: str | None = None
 
-    Returns None — never raises — when Scrapling is unavailable or the render
+
+def fetch_rendered(url: str, timeout_ms: int = 30_000) -> str | None:
+    """Fetch `url` through a browser and return its rendered HTML.
+
+    The browser says who it is: the same Cello user agent as every other
+    request, with no fingerprint tricks and no stealth options. A site that
+    answers it with a bot check is not read.
+
+    Returns None, never raises, when Playwright is unavailable or the render
     fails. A rendering failure must degrade to "this company yielded nothing
-    this run", exactly as a fetch failure already does; it must never abort the
-    hourly run for every other company.
+    this run", exactly as a fetch failure already does.
     """
-    if not scrapling_available():
-        logger.info("scrapling not installed; skipping rendered fetch of %s", url)
+    global last_error
+    last_error = None
+    if not playwright_available():
+        logger.info("playwright not installed; skipping rendered fetch")
+        last_error = "PlaywrightMissing"
         return None
 
     try:
-        from scrapling.fetchers import DynamicFetcher
+        from playwright.sync_api import sync_playwright
 
-        page = DynamicFetcher.fetch(
-            url,
-            headless=True,
-            # Career pages commonly fill the list after their first XHR settles,
-            # so waiting for network idle rather than DOMContentLoaded is what
-            # actually distinguishes a rendered board from the shell we started
-            # with.
-            network_idle=True,
-            timeout=timeout_ms,
-        )
-        html = getattr(page, "html_content", None) or str(page)
-        return html or None
-    except Exception as exc:  # noqa: BLE001 — any failure degrades to "no result"
-        logger.warning("rendered fetch failed for %s: %s", url, exc)
+        from .polite import USER_AGENT, guard_browser
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                context = browser.new_context(user_agent=USER_AGENT)
+                guard_browser(context)
+                page = context.new_page()
+                # Career pages commonly fill the list after their first XHR
+                # settles, so waiting for network idle rather than DOMContentLoaded
+                # is what distinguishes a rendered board from the shell we started with.
+                page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
+                # A page that never goes quiet is still read as it stands.
+                with contextlib.suppress(Exception):
+                    page.wait_for_load_state("networkidle", timeout=15_000)
+                # Lists below the fold often load as the page scrolls, as for a visitor.
+                for _ in range(5):
+                    page.mouse.wheel(0, 3000)
+                    page.wait_for_timeout(800)
+                content = page.content() or None
+                if content is None:
+                    last_error = "EmptyPage"
+                return content
+            finally:
+                browser.close()
+    except Exception as exc:  # noqa: BLE001 - any failure degrades to "no result"
+        logger.warning("rendered fetch failed: %s", type(exc).__name__)
+        last_error = type(exc).__name__
         return None
 
 

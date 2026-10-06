@@ -190,7 +190,7 @@ const KNOWN_UNGUARDED_MODEL_ROUTES: string[] = []
  * both slower and a second policy.
  *
  * THE LIST IS SAFE BECAUSE OF THE TEST DIRECTLY BELOW IT, not because these
- * eleven files were once read carefully. An exemption is only honest while the
+ * files were once read carefully. An exemption is only honest while the
  * file genuinely cannot get hold of key material on its own, so the test
  * asserts exactly that: no exempt file may mention profiles' `api_keys` blob or
  * read a key out of the environment. The moment one learns to, it stops being
@@ -208,6 +208,7 @@ const KEY_TAKING_MODEL_PLUMBING = [
   'lib/harness/providers/local-server.ts',
   'lib/harness/providers/openrouter.ts',
   'lib/harness/providers/embeddings.ts', // defines callEmbedding's backends; takes DecryptedApiKeys
+  'lib/ingest/model.ts', // free-model calls for ingestion; takes DecryptedApiKeys built by freeModelKeys() from a guarded loader's result (loadApiKeys in scripts/ingest.ts, getDecryptedApiKeys in the scraper trigger route), never obtains one
 ]
 
 /** Anything an exempt file could use to obtain key material by itself. */

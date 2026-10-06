@@ -102,6 +102,8 @@ export const KNOWN_COMPANIES: Record<string, KnownCompany> = {
   'cloudflare.com': { name: 'Cloudflare', board: { provider: 'greenhouse', token: 'cloudflare' } },
   'datadog.com': { name: 'Datadog', board: { provider: 'greenhouse', token: 'datadog' } },
   'datadoghq.com': { name: 'Datadog', board: { provider: 'greenhouse', token: 'datadog' } },
+  // Greenhouse's own name for the board is digitalocean98; every posting link is on digitalocean.com (checked 2026-10-05).
+  'digitalocean.com': { name: 'DigitalOcean', board: { provider: 'greenhouse', token: 'digitalocean98' } },
   'elastic.co': { name: 'Elastic', board: { provider: 'greenhouse', token: 'elastic' } },
   'mongodb.com': { name: 'MongoDB', board: { provider: 'greenhouse', token: 'mongodb' } },
   'hashicorp.com': { name: 'HashiCorp' },

@@ -19,7 +19,7 @@
  *
  * Connection: POSTGRES_URL_NON_POOLING (preferred), else POSTGRES_URL,
  * DATABASE_URL or SUPABASE_DB_URL. All DB work goes through the `psql` binary so
- * the script needs zero npm dependencies (same constraint as scripts/ats-refresh.ts).
+ * the script needs zero npm dependencies (a standalone owner-run script).
  *
  * Idempotency: every UPDATE carries an `IS DISTINCT FROM` guard, so a second run
  * reports "0 rows changed" instead of rewriting identical values.

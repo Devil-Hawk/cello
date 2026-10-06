@@ -8,7 +8,7 @@
 // bounded — a 436-company scheduled refresh cannot afford one request per
 // posting for every board.
 
-import type { AtsJob, AtsProvider, DetectInput } from './types'
+import type { AtsJob, AtsProvider, DetectInput, FetchContext } from './types'
 import { isValidToken } from './types'
 import { assertAllowedHost, fetchJson } from './http'
 import { htmlSectionsToPlainText } from './html'
@@ -28,15 +28,16 @@ const MAX_PAGES = 5
 /**
  * How many postings get their body fetched per refresh.
  *
- * The list is ordered newest-first (verified against Sodexo: releasedDate
- * descending), and the newest postings are exactly the ones a refresh is
- * likely to be INSERTING — an already-stored row keeps the description it was
- * inserted with. So spending the budget on the head of the list is spending it
- * where it changes what gets written. Anything past the budget is still
- * returned, just without a body; lib/jobs/classify.ts scores those on title
- * and location (base 55 vs a 30 reject threshold), so they are kept, not lost.
+ * The list response carries no body at all; only a per-posting detail call
+ * does. The budget is spent on postings that have no stored body yet (see
+ * FetchContext.hasDescription), newest first, so a large board is filled in
+ * over a few refreshes and a posting that already has its text is never read
+ * twice. Anything past the budget is still returned, just without a body;
+ * lib/jobs/classify.ts scores those on title and location (base 55 vs a 30
+ * reject threshold), so they are kept, not lost, and the next refresh reads
+ * the next batch.
  */
-const DESCRIPTION_BUDGET = 25
+const DESCRIPTION_BUDGET = 40
 const DESCRIPTION_CONCURRENCY = 4
 
 interface SmartRecruitersLocation {
@@ -156,7 +157,7 @@ async function fetchDescription(token: string, id: string): Promise<string | und
   }
 }
 
-async function fetchJobs(token: string): Promise<AtsJob[]> {
+async function fetchJobs(token: string, ctx?: FetchContext): Promise<AtsJob[]> {
   if (!isValidToken(token)) throw new Error(`smartrecruiters: invalid company id`)
 
   const postings: SmartRecruitersPosting[] = []
@@ -185,7 +186,10 @@ async function fetchJobs(token: string): Promise<AtsJob[]> {
 
   // Map iteration order is insertion order, so this is the head of the
   // newest-first list — see DESCRIPTION_BUDGET.
-  const ids = [...byId.keys()].slice(0, DESCRIPTION_BUDGET)
+  // Postings with no stored body first (see FetchContext.hasDescription).
+  const ids = [...byId.keys()]
+    .filter((id) => !ctx?.hasDescription?.(byId.get(id)?.externalId ?? ''))
+    .slice(0, DESCRIPTION_BUDGET)
   const descriptions = await mapWithConcurrency(ids, DESCRIPTION_CONCURRENCY, (id) => fetchDescription(token, id))
   ids.forEach((id, i) => {
     const description = descriptions[i]
@@ -200,4 +204,5 @@ export const smartrecruiters: AtsProvider = {
   id: 'smartrecruiters',
   detect,
   fetch: fetchJobs,
+  maxJobs: MAX_PAGES * PAGE_SIZE,
 }

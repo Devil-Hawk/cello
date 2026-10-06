@@ -1,0 +1,343 @@
+[
+ {
+  "id": "gh-assemblyai",
+  "kind": "hosted",
+  "url": "https://job-boards.greenhouse.io/assemblyai",
+  "truth": [
+   "Commercial Counsel",
+   "Enterprise Account Executive",
+   "Finance Engineer",
+   "Head of Sales, Digital Native",
+   "Security Operations Engineer",
+   "Senior Design Engineer ",
+   "Senior GTM AI Engineer",
+   "Senior Research Engineer",
+   "Senior Software Engineer, Inference",
+   "Senior Software Engineer, Inference"
+  ],
+  "pageKinds": [
+   "listing"
+  ],
+  "note": "Greenhouse hosted board; truth from boards-api at save time",
+  "file": "gh-assemblyai.html"
+ },
+ {
+  "id": "gh-hackerrank",
+  "kind": "hosted",
+  "url": "https://job-boards.greenhouse.io/hackerrank",
+  "truth": [
+   "Account Executive - Strategic",
+   "Campus Crew Ambassador (Student Program)",
+   "Creative Content Lead",
+   "Customer Account Manager - Mid Market",
+   "Customer Account Manager - SMB",
+   " Customer Account Manager - Strategic - West",
+   "Customer Experience Engineer, L2",
+   "Customer Experience Engineer, L2",
+   "Data Engineer II",
+   "DevOps Engineer II",
+   "DevRel Engineer II ",
+   "Director, Forward Deployed Engineering",
+   "Engineering Manager - Data",
+   "Forward Deployed Engineer",
+   "HackerRank Creator Program",
+   "Head of Design",
+   "Lead Data Engineer",
+   "Product Analyst II ",
+   "Senior AI Data Operations Manager",
+   "Senior Backend Engineer",
+   "Senior Backend Engineer",
+   "Senior Brand Designer",
+   "Senior DevRel Engineer  ",
+   "Senior IT Systems Administrator",
+   "Senior Machine Learning Engineer ",
+   "Software Development Engineer Intern",
+   "Software Development Engineer in Test II",
+   "Talent Acquisition Partner"
+  ],
+  "pageKinds": [
+   "listing"
+  ],
+  "note": "Greenhouse hosted board; truth from boards-api at save time",
+  "file": "gh-hackerrank.html"
+ },
+ {
+  "id": "gh-jumio",
+  "kind": "hosted",
+  "url": "https://job-boards.greenhouse.io/jumio",
+  "truth": [
+   "Account Executive, APAC",
+   "Account Executive, EMEA",
+   "Account Executive, EMEA",
+   "Account Executive, EMEA",
+   "Account Executive - LATAM",
+   "Business Development Representative, EMEA",
+   "Customer Success Manager, APAC",
+   "Data Engineer - II (Biometrics)",
+   "Director, Strategic Alliances & Partnerships - APAC",
+   "Identity Strategist",
+   "Identity Strategist, EMEA",
+   "Machine Learning Engineer",
+   "Machine Learning Engineer - (Computer Vision)",
+   "Machine Learning Engineer III - MLOps",
+   "Machine Learning Engineer - IV (Biometrics)",
+   "Machine Learning Engineer - IV (Computer Vision)",
+   "Machine Learning Engineer - IV (Fraud)",
+   "Principal Enterprise Architect",
+   "Principal Enterprise Architect",
+   "Principal iOS Engineer",
+   "Research Engineer – Machine Learning & Robotics",
+   "Sales Development Representative",
+   "Sales Solutions Engineer",
+   "SDE II - QA, (Fixed term Contract)",
+   "Senior Anayst - Sales Operations",
+   "Senior Customer Marketing manager",
+   "Senior Machine Learning Engineer",
+   "Senior Machine Learning Engineer - (Biometrics)",
+   "Software Development Engineer IV - (Biometrics)",
+   "Software Development Engineer IV - QA"
+  ],
+  "pageKinds": [
+   "listing"
+  ],
+  "note": "Greenhouse hosted board; truth from boards-api at save time",
+  "file": "gh-jumio.html"
+ },
+ {
+  "id": "lever-outreach",
+  "kind": "hosted",
+  "url": "https://jobs.lever.co/outreach",
+  "truth": [
+   "Customer Advocacy Manager",
+   "Director of Applied Science and Engineering - Knowledge Graphs & AI",
+   "Director, Customer Advocacy",
+   "Director, Product Management – Conversational Intelligence",
+   "Forward Deployed Engineer, Managed Services",
+   "Lead Solutions Consultant, EMEA",
+   "Principal Product Marketing Manager, Competitive",
+   "Renewals Specialist",
+   "Senior Account Executive, Enterprise",
+   "Senior Applied Scientist",
+   "Senior Applied Scientist - Knowledge Graphs & AI",
+   "Senior Contracts and Legal Operations Manager",
+   "Senior Financial Analyst",
+   "Senior Global Partner Marketing Manager",
+   "Senior Global Rewards Analyst",
+   "Senior Growth Marketing Manager, Commercial/Mid-Market",
+   "Senior GTM AI Advisor",
+   "Senior GTM AI Advisor (Customer Success Manager)",
+   "Senior GTM Enablement Manager",
+   "Senior Manager, People Business Partners (PDESS)",
+   "Senior Performance Marketing Manager",
+   "Senior Professional Services Consultant",
+   "Senior Technical Consultant",
+   "Staff Applied Scientist - Knowledge Graphs & AI",
+   "Staff Software Engineer, Identity and Access Platform",
+   "Staff Technical Escalations Manager"
+  ],
+  "pageKinds": [
+   "listing"
+  ],
+  "note": "Lever hosted board; truth from the postings API at save time",
+  "file": "lever-outreach.html"
+ },
+ {
+  "id": "lever-greenlight",
+  "kind": "hosted",
+  "url": "https://jobs.lever.co/greenlight",
+  "truth": [
+   "Account Executive, Financial Institutions",
+   "Brand Designer",
+   "Business Development Representative",
+   "Business Systems Analyst II",
+   "Director, Growth Marketing",
+   "Enterprise Account Executive, Financial Institutions",
+   "Legal & Compliance Intern",
+   "Senior Business Systems Analyst",
+   "Senior Content Creator",
+   "Senior Director, Strategic Finance",
+   "Senior Product Designer",
+   "Senior Product Manager",
+   "Senior Security Engineer",
+   "Senior Software Engineer, Full-Stack (Web Core)",
+   "Software Development Engineer In Test II",
+   "Staff Offensive Security Engineer",
+   "Staff Product Security Engineer",
+   "Supply Chain Manager, Planning & Fulfillment"
+  ],
+  "pageKinds": [
+   "listing"
+  ],
+  "note": "Lever hosted board; truth from the postings API at save time",
+  "file": "lever-greenlight.html"
+ },
+ {
+  "id": "lever-weride",
+  "kind": "hosted",
+  "url": "https://jobs.lever.co/weride",
+  "truth": [
+   "Application Engineer",
+   "Data Annotation QA",
+   "Data Annotation Team Leader",
+   "Data Annotator",
+   "Forward Deployed Engineer",
+   "General Software Engineer",
+   "Global Technical Project Manager",
+   "Motion Planning Engineer",
+   "New Grads 2026 - Algorithm Software Engineer (Beijing/Guangzhou/Shanghai, China)",
+   "New Grads 2026 - General Software Engineer (Beijing/Guangzhou/Shanghai, China)",
+   "New Grads 2027 - Software Engineer - Perception/Computer Vision",
+   "New Grads 2027 - Software Engineer, Algorithm",
+   "Office Administrator (Singapore)",
+   "Perception Engineer – ML/CV and Algorithms",
+   "Senior Software Engineer - Cloud Infrastructure",
+   "Software Engineer - Backend / Infrastructure",
+   "Talent Acquisition Specialist (Contractor)"
+  ],
+  "pageKinds": [
+   "listing"
+  ],
+  "note": "Lever hosted board; truth from the postings API at save time",
+  "file": "lever-weride.html"
+ },
+ {
+  "id": "bespoke-zed",
+  "kind": "bespoke",
+  "url": "https://zed.dev/jobs",
+  "truth": [
+   "Open Source Engineer",
+   "Product Design Engineer"
+  ],
+  "pageKinds": [
+   "listing"
+  ],
+  "note": "two roles, title is the link text",
+  "file": "bespoke-zed.html"
+ },
+ {
+  "id": "bespoke-linear",
+  "kind": "bespoke",
+  "url": "https://linear.app/careers",
+  "truth": [
+   "Account Executive, Startups",
+   "Customer Success Manager, Enterprise",
+   "Implementation Manager",
+   "Solutions Engineer, Europe",
+   "Analytics Engineer",
+   "Customer Success Manager, Growth",
+   "Deal Desk",
+   "Design Engineer (Web & Brand)",
+   "Production Designer",
+   "Developer Relations",
+   "Mobile Product Designer",
+   "Principal Product Designer",
+   "Senior / Staff Product Designer",
+   "Product Engineer",
+   "Senior / Staff Fullstack Engineer",
+   "Senior / Staff Product Engineer",
+   "Senior / Staff Product Engineer, AI",
+   "Product Manager",
+   "Product Marketing Manager",
+   "Product Support Specialist, Europe",
+   "Product Support Specialist, Pacific/Mountain Time",
+   "Recruiting & HR Operations Specialist",
+   "Technical Recruiter"
+  ],
+  "pageKinds": [
+   "listing"
+  ],
+  "note": "cards whose link says Learn more; titles read from each card",
+  "file": "bespoke-linear.html"
+ },
+ {
+  "id": "bespoke-wikimedia",
+  "kind": "bespoke",
+  "url": "https://wikimediafoundation.org/jobs/",
+  "truth": [
+   "Lead Learning Experience Designer",
+   "Fundraising Support Specialist (Contract)",
+   "Senior Site Reliability Engineer, Wikimedia Enterprise",
+   "Senior Social Media Project Manager (Contractor)",
+   "Principal, Executive Communications",
+   "Head of Marketing",
+   "Senior Procurement Specialist",
+   "Legal Fellow (Spring 2027)",
+   "Senior Software Engineer, iOS (Contract)",
+   "Senior Software Engineer, Core Experiences (Contract)",
+   "Senior Data Scientist, Safety & Security",
+   "Software Quality Manager",
+   "Senior Software Engineer, MediaWiki Content Platform Team",
+   "Lead Product Manager, Security"
+  ],
+  "pageKinds": [
+   "listing"
+  ],
+  "note": "roles linked through grnh.se short links",
+  "file": "bespoke-wikimedia.html"
+ },
+ {
+  "id": "ashby-shell",
+  "kind": "shell",
+  "url": "https://jobs.ashbyhq.com/linear",
+  "truth": null,
+  "pageKinds": [
+   "no_postings",
+   "not_a_jobs_page"
+  ],
+  "note": "an Ashby board before script runs: no postings in the HTML",
+  "file": "ashby-shell.html"
+ },
+ {
+  "id": "neg-no-roles",
+  "kind": "negative",
+  "url": "https://37signals.com/jobs",
+  "truth": null,
+  "pageKinds": [
+   "no_postings"
+  ],
+  "note": "a careers page that says there are no openings right now",
+  "file": "neg-no-roles.html"
+ },
+ {
+  "id": "neg-about",
+  "kind": "negative",
+  "url": "https://duckduckgo.com/about",
+  "truth": null,
+  "pageKinds": [
+   "not_a_jobs_page",
+   "no_postings"
+  ],
+  "note": "a company about page",
+  "file": "neg-about.html"
+ },
+ {
+  "id": "injection",
+  "kind": "injection",
+  "url": "https://fernhill.example/careers",
+  "truth": [
+   "Backend Engineer",
+   "Customer Support Lead"
+  ],
+  "pageKinds": [
+   "listing"
+  ],
+  "forbidden": [
+   "Senior Wizard"
+  ],
+  "note": "synthetic: an instruction inside the page naming a role that is not there",
+  "file": "injection.html"
+ },
+ {
+  "id": "single-posting",
+  "kind": "single",
+  "url": "https://jobs.lever.co/greenlight/f90ad92a-f882-4bec-8a27-cc22d7da843b",
+  "truth": [
+   "Account Executive, Financial Institutions"
+  ],
+  "pageKinds": [
+   "single_posting"
+  ],
+  "note": "one Lever posting page",
+  "file": "single-posting.html"
+ }
+]

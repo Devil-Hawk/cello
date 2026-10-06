@@ -17,6 +17,8 @@ from typing import Any
 import httpx
 from bs4 import BeautifulSoup
 
+from .polite import USER_AGENT
+
 
 class VerificationStatus(str, Enum):
     VERIFIED = "verified"
@@ -114,12 +116,7 @@ async def verify_company(
             timeout=timeout,
             follow_redirects=True,
             max_redirects=5,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
-                ),
-            },
+            headers={"User-Agent": USER_AGENT},
         ) as client:
             # Step 1: Check URL is reachable
             try:

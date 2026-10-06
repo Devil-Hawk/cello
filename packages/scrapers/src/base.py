@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 
+from .polite import USER_AGENT
 from .types import ScrapedJob, ScrapeResult
 
 
@@ -32,13 +33,7 @@ class BaseScraper(ABC):
         self._client = httpx.AsyncClient(
             timeout=self.timeout,
             follow_redirects=True,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                )
-            },
+            headers={"User-Agent": USER_AGENT},
         )
         return self
 

@@ -71,7 +71,7 @@ const DEFAULT_TIMEOUT_MS = 10_000
  * matching this string — that is the deal that keeps us welcome. It is also the
  * only reason a 403 in a log is ever attributable to us.
  */
-export const CELLO_USER_AGENT = 'cello-job-tracker/1.0 (+https://cello-two.vercel.app)'
+export const CELLO_USER_AGENT = 'cello-job-tracker/1.0 (+https://github.com/Devil-Hawk/cello)'
 
 // ---------------------------------------------------------------------------
 // Errors

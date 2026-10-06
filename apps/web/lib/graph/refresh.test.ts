@@ -21,7 +21,16 @@ const refreshCompanyMock = vi.fn(async (_store: unknown, _company: CompanyInput)
 })
 vi.mock('../ats', () => ({
   refreshCompany: (store: unknown, company: CompanyInput) => refreshCompanyMock(store, company),
+  // The real store wraps the client in an AtsStore; here it only has to look like one.
+  makeSupabaseAtsStore: (client: unknown) => ({ listJobs: async () => [], client }),
 }))
+vi.mock('../harness/supabase-admin', () => ({ createAdminClient: () => ({ fake: 'admin' }) }))
+// The refresh runs each company through the one reader (ingestCompany); this file is about the graph, so the reader is faked.
+vi.mock('../ingest/run', () => ({
+  ingestCompany: async (store: unknown, company: CompanyInput) => ({ result: await refreshCompanyMock(store, company) }),
+}))
+vi.mock('../ingest/reader/targets', () => ({ loadTargets: async () => ({ targeting: {}, titles: [] }) }))
+vi.mock('../ingest/fetch-page', () => ({ staticFetchPage: async () => ({ html: '', finalUrl: '', rendered: false }) }))
 
 // Same literal @langchain/langgraph's Pregel runtime reads a per-call
 // checkpointer override off — see lib/graph/invoke.ts's PREGEL_CHECKPOINTER_KEY
@@ -47,6 +56,9 @@ function fakeResult(companyId: string, overrides: Partial<CompanyRefreshResult> 
     provider: 'greenhouse',
     found: 1,
     inserted: 1,
+    updated: 0,
+    closed: 0,
+    reopened: 0,
     errors: [],
     ...overrides,
   }
@@ -93,10 +105,10 @@ describe('refreshJobsGraph — happy path', () => {
     expect((outcome as { total: number }).total).toBe(3)
     const o = outcome as {
       results: CompanyRefreshResult[]
-      totals: { found: number; inserted: number; companiesWithAts: number }
+      totals: { found: number; inserted: number; updated: number; closed: number; busy: number; companiesWithAts: number }
     }
     expect(o.results.map((r) => r.companyId)).toEqual(['c1', 'c2', 'c3'])
-    expect(o.totals).toEqual({ found: 6, inserted: 3, companiesWithAts: 3 })
+    expect(o.totals).toEqual({ found: 6, inserted: 3, updated: 0, closed: 0, busy: 0, companiesWithAts: 3 })
 
     // RULING 9: every per-company task built its store from
     // config.configurable.dbClient, not from anywhere else — proves getConfig()
@@ -105,8 +117,19 @@ describe('refreshJobsGraph — happy path', () => {
     expect(seenStores).toHaveLength(3)
     for (const store of seenStores) {
       expect(store).not.toBe(dbClient) // makeStore() wraps it into an AtsStore
-      expect(store).toHaveProperty('listJobExternalIds')
+      expect(store).toHaveProperty('listJobs')
     }
+  })
+
+  it('totals what changed: updated, closed, and the companies another check was already reading', async () => {
+    refreshCompanyMock.mockImplementation(async (_store, company) => {
+      if (company.id === 'c3') return fakeResult('c3', { provider: null, found: 0, inserted: 0, busy: true })
+      return fakeResult(company.id, { inserted: 0, updated: 2, closed: company.id === 'c1' ? 3 : 0 })
+    })
+    const outcome = (await refreshJobsGraph.invoke(inputFor(['c1', 'c2', 'c3']), makeConfig('t-changed', new MemorySaver()))) as {
+      totals: { updated: number; closed: number; busy: number }
+    }
+    expect(outcome.totals).toMatchObject({ updated: 4, closed: 3, busy: 1 })
   })
 
   it('refuses up front when config.configurable.dbClient is absent', async () => {

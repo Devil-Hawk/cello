@@ -9,14 +9,8 @@
 // language — otherwise it is skipped entirely (not even fetched).
 
 import type { JobLead, SourceAdapter, SourceQuery } from './types'
-import {
-  employerDomainFromUrl,
-  getJson,
-  rankAndLimit,
-  sanitizeLeads,
-  stripHtml,
-  truncate,
-} from './util'
+import { employerDomainFromUrl, getJson, rankAndLimit, sanitizeLeads } from './util'
+import { htmlToPlainText } from '../ats/html'
 
 const HOSTS = new Set(['www.arbeitnow.com'])
 const MAX_PAGES = 2
@@ -62,7 +56,7 @@ function toLead(job: ArbeitnowJob): JobLead | null {
     url,
     location: location || null,
     salary: null,
-    description: truncate(stripHtml(job.description)),
+    description: htmlToPlainText(job.description) ?? '',
     source: 'arbeitnow',
     externalId: url,
     companyDomain: employerDomainFromUrl(url),

@@ -108,9 +108,9 @@ class TestFetchWithRenderFallback:
         assert rendered is False
         assert html == STATIC_BOARD
 
-    def test_shell_without_scrapling_degrades_to_static(self, monkeypatch):
-        # Scrapling absent must NEVER raise: the run continues on the httpx path.
-        monkeypatch.setattr("src.render.scrapling_available", lambda: False)
+    def test_shell_without_playwright_degrades_to_static(self, monkeypatch):
+        # Playwright absent must NEVER raise: the run continues on the httpx path.
+        monkeypatch.setattr("src.render.playwright_available", lambda: False)
         html, rendered = fetch_with_render_fallback("https://example.com/careers", SPA_SHELL)
         assert rendered is False
         assert html == SPA_SHELL

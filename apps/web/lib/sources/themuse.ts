@@ -6,7 +6,8 @@
 // keyword-filter client side on top of that. No HTML scraping.
 
 import type { JobLead, SourceAdapter, SourceQuery } from './types'
-import { getJson, rankAndLimit, sanitizeLeads, stripHtml, truncate } from './util'
+import { getJson, rankAndLimit, sanitizeLeads } from './util'
+import { htmlToPlainText } from '../ats/html'
 import type { JobFunction } from '../jobs/classify'
 
 const HOSTS = new Set(['www.themuse.com'])
@@ -64,7 +65,7 @@ function toLead(job: MuseJob): JobLead | null {
     url,
     location: location || null,
     salary: null, // TheMuse does not expose compensation
-    description: truncate(stripHtml(job.contents)),
+    description: htmlToPlainText(job.contents) ?? '',
     source: 'themuse',
     externalId: url,
     companyDomain: null, // employer domain not provided

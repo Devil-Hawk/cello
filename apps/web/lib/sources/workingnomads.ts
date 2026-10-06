@@ -7,7 +7,8 @@
 // companyDomain is left null — same reasoning as remotive.ts.
 
 import type { JobLead, SourceAdapter, SourceQuery } from './types'
-import { getJson, rankAndLimit, sanitizeLeads, stripHtml, truncate } from './util'
+import { getJson, rankAndLimit, sanitizeLeads } from './util'
+import { htmlToPlainText } from '../ats/html'
 
 const HOSTS = new Set(['www.workingnomads.com'])
 const FEED_URL = 'https://www.workingnomads.com/api/exposed_jobs/'
@@ -34,7 +35,7 @@ function toLead(job: WorkingNomadsJob): JobLead | null {
     url: rawUrl,
     location: job.location?.trim() || null,
     salary: null,
-    description: truncate(stripHtml(job.description)),
+    description: htmlToPlainText(job.description) ?? '',
     source: 'workingnomads',
     externalId: rawUrl,
     companyDomain: null, // url is a workingnomads.com/job/go/ redirect, not a direct employer link

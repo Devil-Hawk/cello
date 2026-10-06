@@ -1,0 +1,223 @@
+// What a site declares for search engines: the Sitemap lines of its robots.txt,
+// the job URLs those list (with lastmod when they carry it), and each job
+// page's own JobPosting data. Meta is read this way: 1,075 job URLs, and every
+// page says who posted it and when.
+//
+// Bounded and polite: at most three child sitemaps, only job-looking URLs,
+// matched against the person's targets by their slug words BEFORE any page is
+// fetched, newest lastmod first (a sitemap with one lastmod for everything is
+// ordered by the largest numeric id, which is the newest posting on every site
+// seen), and only a few pages per refresh. Pages already read are remembered
+// (`checked`), so the next pass reads only what is new.
+
+import type { AtsJob } from '../../ats/types'
+import { mapWithConcurrency } from '../../ats/concurrency'
+import { normalizeJobUrl } from '../snapshot'
+import { findBoardLinks } from '../../ats/careers-page'
+import { detectFromUrl } from '../../ats/detect'
+import type { BoardRef } from '../../ats/verify'
+import { jobFromDetail, readDetail } from './detail'
+import { classifyLink } from './discover'
+import { allowedOnly, ReaderError, type SiteFetcher } from './site-fetch'
+import { matchesTargets, wordsOf, type ReaderTargets } from './targets'
+
+export interface SitemapEntry {
+  url: string
+  lastmod?: string
+}
+
+const MAX_SITEMAPS = 3
+const MAX_ENTRIES = 60_000
+const SITEMAP_WORDS = /job|career|position|opening|vacanc/i
+/** Pages fetched per refresh: the budget decides how fast a big site is covered. */
+export const DETAIL_PER_READ = { inline: 10, scheduled: 60 } as const
+
+function locs(xml: string, tag: 'url' | 'sitemap'): SitemapEntry[] {
+  const out: SitemapEntry[] = []
+  for (const m of xml.matchAll(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'g'))) {
+    const url = /<loc>\s*([^<\s]+)\s*<\/loc>/.exec(m[1])?.[1]?.replace(/&amp;/g, '&')
+    if (!url) continue
+    const lastmod = /<lastmod>\s*([^<\s]+)\s*<\/lastmod>/.exec(m[1])?.[1]
+    out.push({ url, ...(lastmod ? { lastmod } : {}) })
+    if (out.length >= MAX_ENTRIES) break
+  }
+  return out
+}
+
+/** Does this URL look like one role's page (and not a department, a search or a policy page)? */
+export function isPostingUrl(url: string): boolean {
+  return classifyLink(url) === 'posting'
+}
+
+const numericId = (url: string): number => {
+  const m = [...new URL(url).pathname.matchAll(/\d{4,}/g)].pop()
+  return m ? Number(m[0]) : 0
+}
+
+/** The words in a URL's last path segment ("4721503005-art-director" -> "art director"); empty when it is only an id. */
+const slugWords = (url: string): string => {
+  const parts = new URL(url).pathname.split('/').filter(Boolean)
+  // /job/oakland/medical-assistant/641/101619510336 puts the slug before the ids: skip trailing all-number segments, and take that segment only when it is a slug (has a hyphen), never a bare word like "jobs".
+  let at = parts.length - 1
+  while (at > 0 && /^\d+$/.test(parts[at])) at--
+  const seg = parts[at] ?? ''
+  const last = at === parts.length - 1 || seg.includes('-') ? seg : ''
+  return wordsOf(decodeURIComponent(last).replace(/\d+/g, ' ')).join(' ')
+}
+
+/**
+ * Newest first: by lastmod; when lastmod is absent or the same everywhere, by
+ * the largest numeric id. Entries whose slug names the person's targets come
+ * before the rest, and with targets set an entry whose slug names a different
+ * role is dropped (an entry with no slug words cannot be judged and stays).
+ */
+export function orderEntries(entries: SitemapEntry[], targets: ReaderTargets, now = Date.now()): SitemapEntry[] {
+  const uniform = !lastmodsMeanSomething(entries, now)
+  const time = (e: SitemapEntry) => (e.lastmod ? Date.parse(e.lastmod) || 0 : 0)
+  const rank = (e: SitemapEntry) => {
+    const words = slugWords(e.url)
+    if (!words) return 1
+    return matchesTargets(words, targets) ? 0 : 2
+  }
+  return entries
+    .filter((e) => rank(e) < 2 || matchesTargets('', targets))
+    .map((e, i) => ({ e, i, r: rank(e) }))
+    .sort((a, b) => a.r - b.r || (uniform ? numericId(b.e.url) - numericId(a.e.url) : time(b.e) - time(a.e)) || a.i - b.i)
+    .map((x) => x.e)
+}
+
+/** All of a site's job URLs from the sitemaps its robots.txt names. */
+export async function readSitemapEntries(origin: string, f: SiteFetcher): Promise<{ entries: SitemapEntry[]; complete: boolean }> {
+  const all = await f.sitemapsOf(origin)
+  const named = all.filter((u) => !/\.gz($|\?)/i.test(u))
+  // ponytail: .gz sitemaps are skipped (no gunzip here); the plain job sitemap is listed beside them on every site seen.
+  const jobby = named.filter((u) => SITEMAP_WORDS.test(u))
+  // On a careers host (careers.walmart.com) every sitemap is about jobs; on a company's main site only the job ones are.
+  const careersHost = /career|(^|\.)jobs?\./i.test(new URL(origin).hostname)
+  // A lone /sitemap.xml that robots.txt did not name (the standard address, offered when it names none) is the whole site's list: job words in its file name cannot be asked of it, isPostingUrl picks out the roles.
+  const standardOnly = all.length === 1 && all[0] === `${new URL(origin).origin}/sitemap.xml`
+  const wanted = (careersHost || standardOnly) && !jobby.length ? named : jobby
+  const queue = wanted.slice(0, MAX_SITEMAPS)
+  const entries: SitemapEntry[] = []
+  // Anything left unread (a sitemap past the limit, a gzipped one, entries past the cap) means the list is not the whole list.
+  let complete = queue.length > 0 && wanted.length <= MAX_SITEMAPS && !all.some((u) => /\.gz($|\?)/i.test(u) && /job|position|opening|vacanc/i.test(new URL(u).pathname))
+  for (let i = 0; i < queue.length && i < MAX_SITEMAPS + 3; i++) {
+    let text: string
+    try {
+      const res = await f.get(queue[i], { accept: 'application/xml,text/xml,*/*' })
+      if (!res.ok) {
+        complete = false
+        continue
+      }
+      text = res.text
+    } catch (error) {
+      if (error instanceof ReaderError && error.reason === 'budget') {
+        complete = false
+        break
+      }
+      throw error
+    }
+    const children = locs(text, 'sitemap')
+    if (children.length) {
+      // An index: follow only the children that look like job sitemaps, never past the limit.
+      for (const c of children) {
+        if (!SITEMAP_WORDS.test(c.url) || queue.includes(c.url)) continue
+        if (/\.gz($|\?)/i.test(c.url) || queue.length >= MAX_SITEMAPS + 3) complete = false
+        else queue.push(c.url)
+      }
+      if (children.length >= MAX_ENTRIES) complete = false
+      continue
+    }
+    const urls = locs(text, 'url')
+    if (urls.length >= MAX_ENTRIES) complete = false
+    for (const e of urls) if (isPostingUrl(e.url)) entries.push(e)
+  }
+  return { entries, complete: complete && entries.length > 0 }
+}
+
+export interface SitemapRead {
+  jobs: AtsJob[]
+  /** Every role the sitemap lists (normalised addresses), so a stored role missing from it can be counted as gone. */
+  listedIds: string[]
+  complete: boolean
+  /** Addresses read or rejected this time, to remember so the next pass skips them. */
+  checked: string[]
+  /** Posting URLs the sitemap named that could be the person's roles (their words in the address, or no words to judge by): the part of the site that is theirs to read. */
+  listed: number
+  /** Roles confirmed on their own pages this time, plus listed ones already stored: what the person can actually be shown. Zero means the roles could not be read. */
+  confirmed: number
+  /** The sitemap's addresses carry no words (only ids), so the roles' titles are known only once their pages are read. */
+  untitled: boolean
+  /** An applicant system a role page links to: the caller may upgrade the read to it. */
+  board?: BoardRef
+}
+
+export async function readSitemapRoles(
+  origin: string,
+  f: SiteFetcher,
+  opts: { targets: ReaderTargets; skip: ReadonlySet<string>; stored?: ReadonlySet<string>; max?: number; ownSite?: (url: string) => boolean }
+): Promise<SitemapRead> {
+  const all = await readSitemapEntries(origin, f)
+  // Only the employer's own pages are fetched: a sitemap may name addresses anywhere.
+  const own = opts.ownSite ? all.entries.filter((e) => opts.ownSite!(e.url)) : all.entries
+  // One address robots.txt disallows is dropped; the site is "robots" only when it disallows every role page it lists.
+  const entries = await allowedOnly(f, own, (e) => e.url)
+  if (own.length > 0 && entries.length === 0) throw new ReaderError('robots')
+  const complete = all.complete && entries.length === own.length
+  const listedIds = entries.map((e) => normalizeJobUrl(e.url))
+  const ordered = orderEntries(entries, opts.targets)
+  const todo = ordered
+    .filter((e) => !opts.skip.has(normalizeJobUrl(e.url)))
+    .slice(0, opts.max ?? DETAIL_PER_READ[f.mode])
+
+  const stampsMean = lastmodsMeanSomething(entries)
+  const checked: string[] = []
+  const jobs: AtsJob[] = []
+  let board: BoardRef | undefined
+  let stopped: ReaderError | null = null
+  await mapWithConcurrency(todo, 2, async (e) => {
+    // A page that names the applicant system behind the site ends the read: the board is the better source.
+    if (stopped || board) return
+    const id = normalizeJobUrl(e.url)
+    try {
+      const res = await f.get(e.url)
+      if (res.status === 404 || res.status === 410) {
+        checked.push(id)
+        return
+      }
+      if (!res.ok) return
+      const job = jobFromDetail(res.finalUrl, readDetail(res.text, res.finalUrl), { postedAt: e.lastmod && stampsMean ? e.lastmod : undefined }, { requirePosting: true })
+      checked.push(id)
+      // A page that names no role is remembered as read and not kept. A role outside the person's targets is kept
+      // (it cost a request already, and "All roles" shows it); the cap stores the ones inside the targets first.
+      // The listed address is the role's id, so a page that redirects (http to https, a locale, a canonical slug) is still the listed role.
+      if (job) jobs.push({ ...job, externalId: id })
+      board ??= findBoardLinks(res.text, (u) => detectFromUrl({ careerUrl: u, domain: null }))[0]
+    } catch (error) {
+      // A role page that robots.txt disallows (through a redirect) is skipped, not a verdict on the site.
+      if (error instanceof ReaderError && error.reason !== 'robots') stopped = error
+    }
+  })
+  // A bot check on a role page ends the read; a spent budget just ends it early.
+  if (stopped && (stopped as ReaderError).reason !== 'budget' && jobs.length === 0) throw stopped
+  const confirmed = jobs.length + (opts.stored ? listedIds.filter((id) => opts.stored!.has(id)).length : 0)
+  const untitled = entries.length > 0 && entries.every((e) => !slugWords(e.url))
+  return { jobs, listedIds, complete, checked, listed: ordered.length, confirmed, untitled, board }
+}
+
+const DAY = 86_400_000
+
+/**
+ * Do the sitemap's lastmod stamps say anything about the roles? Not when they are
+ * one time (or milliseconds apart), spread over less than a day, or mostly within
+ * ten minutes of now: that is the moment the sitemap was generated (Zalando stamps
+ * 179 roles within 1 ms of the fetch). Then a stamp is not a posting date, and
+ * order falls to the numeric id.
+ */
+export function lastmodsMeanSomething(entries: SitemapEntry[], now = Date.now()): boolean {
+  const times = entries.map((e) => (e.lastmod ? Date.parse(e.lastmod) : NaN)).filter((t) => !Number.isNaN(t))
+  if (times.length < 2) return false
+  if (Math.max(...times) - Math.min(...times) < DAY) return false
+  const recent = times.filter((t) => Math.abs(now - t) < 10 * 60_000).length
+  return recent / times.length < 0.9
+}

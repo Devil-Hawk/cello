@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { compileKeyword, employerDomainFromUrl, relevanceScore } from './util'
+import { remoteok } from './remoteok'
+import { himalayas } from './himalayas'
 import type { JobLead } from './types'
 
 function lead(overrides: Partial<JobLead> = {}): JobLead {
@@ -150,5 +152,42 @@ describe('every source adapter host is treated as a non-employer host', () => {
   it('still returns a real employer domain', () => {
     expect(employerDomainFromUrl('https://careers.stripe.com/jobs/123')).toBe('careers.stripe.com')
     expect(employerDomainFromUrl('https://www.loom.com/careers')).toBe('loom.com')
+  })
+})
+
+describe('aggregator descriptions keep their length and their line breaks', () => {
+  const html =
+    '<h3>Requirements</h3><ul>' +
+    Array.from({ length: 300 }, (_, i) => `<li>Requirement number ${i} of the role, stated plainly</li>`).join('') +
+    '</ul><p>Pay is competitive.</p>'
+
+  function withFeed(feed: unknown, run: () => Promise<{ description: string }[]>) {
+    const real = globalThis.fetch
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify(feed), { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch
+    return run().finally(() => {
+      globalThis.fetch = real
+    })
+  }
+
+  it('remoteok: a 6,000+ character body is not cut and the list items stay on their own lines', async () => {
+    expect(html.length).toBeGreaterThan(6000)
+    const feed = [
+      { legal: 'notice' },
+      { id: '1', slug: 'r-1', company: 'Acme', position: 'Backend Engineer', description: html, tags: ['go'], url: 'https://remoteok.com/remote-jobs/1', epoch: 1 },
+    ]
+    const leads = await withFeed(feed, () => remoteok.fetchLeads({ keywords: ['backend'], limit: 10 } as never))
+    const d = leads[0].description
+    expect(d.length).toBeGreaterThan(5000)
+    expect(d).toContain('Requirement number 299')
+    expect(d.split('\n').length).toBeGreaterThan(300)
+  })
+
+  it('himalayas: the same', async () => {
+    const feed = { jobs: [{ title: 'Backend Engineer', companyName: 'Acme', description: html, applicationLink: 'https://himalayas.app/jobs/1', guid: 'h-1', pubDate: 1 }] }
+    const leads = await withFeed(feed, () => himalayas.fetchLeads({ keywords: ['backend'], limit: 10 } as never))
+    expect(leads.length).toBeGreaterThan(0)
+    expect(leads[0].description.length).toBeGreaterThan(5000)
+    expect(leads[0].description.split('\n').length).toBeGreaterThan(300)
   })
 })

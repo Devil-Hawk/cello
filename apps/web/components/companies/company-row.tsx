@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CompanyLogo, getCompanyLogoSrc } from '@/components/companies/company-logo'
 import { formatShortDate, matchTone } from '@/lib/format'
-import { rolesStatus, rolesStatusLine } from '@/lib/companies/roles-status'
+import { partialReadNote, rolesStatus, rolesStatusLine } from '@/lib/companies/roles-status'
 
 export interface CompanySummary {
   id: string
@@ -45,6 +45,8 @@ export function CompanyRow({
   // line says what is true (checking now, next check, or can't read the site).
   const status = rolesStatus(company, company.jobs_count ?? 0, { checking: isRefreshing })
   const statusLine = rolesStatusLine(status)
+  // Part of a big site read so far: say so, so a handful of roles is never taken for all of them.
+  const partial = partialReadNote(company.metadata, company.jobs_count ?? 0)
   const meta: string[] = []
   if (company.domain) meta.push(company.domain)
   meta.push(statusLine.text)
@@ -136,6 +138,7 @@ export function CompanyRow({
               </>
             )}
           </p>
+          {partial && <p className="text-caption text-muted-foreground">{partial}</p>}
         </div>
       </Link>
 

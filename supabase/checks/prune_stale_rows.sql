@@ -16,10 +16,15 @@ insert into auth.users (id, email) select user_id, 'prune-check@example.invalid'
 insert into public.profiles (id, email) select user_id, 'prune-check@example.invalid' from fx on conflict (id) do nothing;
 insert into public.companies (id, user_id, name, career_url)
 select company_id, user_id, 'Prune Check', 'https://example.invalid/jobs' from fx;
-insert into public.jobs (id, company_id, title, description, url, external_id, discovered_at)
-select old_free,    company_id, 'old free',    'd', 'https://x/1', 'prune-1', now() - interval '60 days' from fx union all
-select old_applied, company_id, 'old applied', 'd', 'https://x/2', 'prune-2', now() - interval '60 days' from fx union all
-select fresh_free,  company_id, 'fresh free',  'd', 'https://x/3', 'prune-3', now() - interval '5 days'  from fx;
+-- The prune reads last_seen_at, not discovered_at: "listed_old" was found long
+-- ago but a refresh saw it yesterday, so it stays; "old free" nobody has seen
+-- for 60 days, so it goes.
+insert into public.jobs (id, company_id, title, description, url, external_id, discovered_at, last_seen_at)
+select old_free,    company_id, 'old free',    'd', 'https://x/1', 'prune-1', now() - interval '60 days', now() - interval '60 days' from fx union all
+select old_applied, company_id, 'old applied', 'd', 'https://x/2', 'prune-2', now() - interval '60 days', now() - interval '60 days' from fx union all
+select fresh_free,  company_id, 'fresh free',  'd', 'https://x/3', 'prune-3', now() - interval '5 days',  now() - interval '5 days'  from fx;
+insert into public.jobs (company_id, title, description, url, external_id, discovered_at, last_seen_at)
+select company_id, 'listed old', 'd', 'https://x/4', 'prune-4', now() - interval '90 days', now() - interval '1 day' from fx;
 insert into public.applications (user_id, job_id) select user_id, old_applied from fx;
 insert into public.graph_threads (thread_id, user_id, surface, created_at, last_invoked_at)
 select stale_thread, user_id, 'copilot', now() - interval '40 days', now() - interval '40 days' from fx union all
@@ -42,6 +47,8 @@ begin
   assert     exists (select 1 from public.jobs where id = f.old_applied), 'old job with an application must stay';
   assert     exists (select 1 from public.applications where job_id = f.old_applied), 'application must survive';
   assert     exists (select 1 from public.jobs where id = f.fresh_free),  'fresh job must stay';
+  assert     exists (select 1 from public.jobs where external_id = 'prune-4' and company_id = f.company_id),
+    'a job found long ago but seen yesterday must stay';
   assert not exists (select 1 from langgraph.checkpoints where thread_id = f.stale_thread::text), 'stale checkpoint should be gone';
   assert     exists (select 1 from langgraph.checkpoints where thread_id = f.live_thread::text),  'live checkpoint must stay';
   assert not exists (select 1 from public.trace_spans where name = 'old' and start_time < now() - interval '30 days'), 'old span should be gone';

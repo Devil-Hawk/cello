@@ -1,0 +1,113 @@
+{
+ "status": 200,
+ "data": {
+  "count": 865,
+  "positions": [
+   {
+    "id": 1970393556997347,
+    "displayJobId": "200055573",
+    "name": "Cloud & AI Solution Engineer",
+    "locations": [
+     "Nigeria, Multiple Locations, Multiple Locations"
+    ],
+    "standardizedLocations": [
+     "NG"
+    ],
+    "postedTs": 1791211268,
+    "solrScore": null,
+    "stars": 0,
+    "department": "Solution Engineering",
+    "creationTs": 1789290487,
+    "isHot": 0,
+    "workLocationOption": "onsite",
+    "locationFlexibility": null,
+    "atsJobId": "200055573",
+    "positionUrl": "/careers/job/1970393556997347"
+   },
+   {
+    "id": 1970393556971563,
+    "displayJobId": "200049332",
+    "name": "Customer Experience Engineer",
+    "locations": [
+     "United Kingdom, London, London"
+    ],
+    "standardizedLocations": [
+     "London, England, GB"
+    ],
+    "postedTs": 1791207942,
+    "solrScore": null,
+    "stars": 0,
+    "department": "Customer Experience Engineering",
+    "creationTs": 1786746215,
+    "isHot": 0,
+    "workLocationOption": "onsite",
+    "locationFlexibility": null,
+    "atsJobId": "200049332",
+    "positionUrl": "/careers/job/1970393556971563"
+   },
+   {
+    "id": 1970393556940399,
+    "displayJobId": "200044422",
+    "name": "Principal Forward Deployed Engineer - Technical Program Management",
+    "locations": [
+     "United States, Multiple Locations, Multiple Locations"
+    ],
+    "standardizedLocations": [
+     "US"
+    ],
+    "postedTs": 1791207541,
+    "solrScore": null,
+    "stars": 0,
+    "department": "Technical Program Management",
+    "creationTs": 1784311642,
+    "isHot": 0,
+    "workLocationOption": "onsite",
+    "locationFlexibility": null,
+    "atsJobId": "200044422",
+    "positionUrl": "/careers/job/1970393556940399"
+   },
+   {
+    "id": 1970393556940405,
+    "displayJobId": "200044424",
+    "name": "Principal Forward Deployed Engineer - Data Science",
+    "locations": [
+     "United States, Multiple Locations, Multiple Locations"
+    ],
+    "standardizedLocations": [
+     "US"
+    ],
+    "postedTs": 1791207577,
+    "solrScore": null,
+    "stars": 0,
+    "department": "Data Science",
+    "creationTs": 1784311929,
+    "isHot": 0,
+    "workLocationOption": "onsite",
+    "locationFlexibility": null,
+    "atsJobId": "200044424",
+    "positionUrl": "/careers/job/1970393556940405"
+   },
+   {
+    "id": 1970393556959678,
+    "displayJobId": "200047803",
+    "name": "Senior Software Engineer",
+    "locations": [
+     "United States, Washington, Redmond"
+    ],
+    "standardizedLocations": [
+     "Redmond, WA, US"
+    ],
+    "postedTs": 1791207047,
+    "solrScore": null,
+    "stars": 0,
+    "department": "Software Engineering",
+    "creationTs": 1786376362,
+    "isHot": 0,
+    "workLocationOption": "onsite",
+    "locationFlexibility": null,
+    "atsJobId": "200047803",
+    "positionUrl": "/careers/job/1970393556959678"
+   }
+  ]
+ }
+}
