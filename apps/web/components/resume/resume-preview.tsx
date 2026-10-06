@@ -215,7 +215,7 @@ export function ResumePreview({
       >
         {isEmpty ? (
           <p style={{ color: styles.page.color, opacity: 0.6 }}>
-            Nothing to preview yet — type on the Edit tab.
+            Nothing to preview yet. Type on the Edit tab.
           </p>
         ) : (
           <>
