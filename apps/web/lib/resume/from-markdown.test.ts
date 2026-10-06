@@ -102,6 +102,14 @@ describe('markdownToResume', () => {
     expect(r.work[0].position).not.toMatch(/2021/)
   })
 
+  it('takes a location on its own line under the title and date as the location, not a summary', () => {
+    const r = markdownToResume(
+      '# Ada\n\n## Experience\n\n**Engineer, Acme Mar 2021 - Present**\n\nSeattle, WA\n\n- shipped it'
+    )
+    expect(r.work[0]).toMatchObject({ location: 'Seattle, WA', startDate: '2021-03', current: true })
+    expect(r.work[0].summary).toBeUndefined()
+  })
+
   it('sets current only when the source says so', () => {
     const md = (dates: string) => `# Ada\n\n## Experience\n\n### Dev, Acme\n\n*${dates}*\n\n- did things`
     expect(markdownToResume(md('Mar 2021 - Current')).work[0].current).toBe(true)

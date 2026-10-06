@@ -243,6 +243,11 @@ const NOT_JOB_TEXT: Record<string, string> = {
     'this entry stays in NOT_JOB_TEXT rather than moving to PROMPT_BUILDERS because the ledger ' +
     'above is specifically about job POSTINGS, and conflating the two would blur why each one is ' +
     'unframed-or-not.',
+  'apps/web/lib/resume/schema.ts':
+    'The structured resume schema. `.description` is a PROJECT description from the candidate\'s own ' +
+    'resume (the JSON Resume projects field), not employer text, and the file builds no prompt: the ' +
+    'word "prompt" appears only in a comment. The resume-structuring prompt lives in ' +
+    'lib/resume/import/structure.ts and carries the user\'s own resume text.',
   'apps/web/lib/graph/copilot.ts':
     'Observation descriptions, produced by Cello itself, not by an employer — the structured ' +
     "ask-user form's own option.description (lib/harness/ask-user.ts's AskOption), scrubbed and " +

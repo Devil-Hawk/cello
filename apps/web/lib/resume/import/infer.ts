@@ -64,8 +64,8 @@ const SECTION_TITLES: ReadonlySet<string> = new Set([
   'CONTACT', 'CONTACT INFORMATION', 'ADDITIONAL INFORMATION',
 ])
 
-/** Bullet glyphs seen in the wild, plus ASCII `-`/`*`/`+` and the dashes. */
-const BULLET_PREFIX = /^([\u2022\u00b7\u25aa\u25cf\u25cb\u2023\u2219\u25e6\u25a0\u25b8\u2043\u2013\u2014*+-])[ \t]+(.*)$/
+/** Bullet glyphs seen in the wild (including what OCR makes of a bullet: « » °), plus ASCII `-`/`*`/`+` and the dashes. */
+const BULLET_PREFIX = /^([\u2022\u00b7\u00ab\u00bb\u00b0\u25aa\u25cf\u25cb\u2023\u2219\u25e6\u25a0\u25b8\u2043\u2013\u2014*+-])[ \t]+(.*)$/
 /** `1.` / `1)` / `(1)` ordered markers. */
 const ORDERED_PREFIX = /^\(?(\d{1,2})[.)][ \t]+(.*)$/
 /** A line of only dashes/underscores/equals — a typed-out horizontal rule. */

@@ -86,9 +86,13 @@ function sectionBlocks(resume: Resume): Record<string, Block[]> {
 
   if (resume.skills.length) {
     out.skills = [
-      resume.skills.map((s) => {
+      // One group per line. A bare newline is a soft break that the HTML preview
+      // folds into a space, so each line but the last ends in a hard break (two trailing spaces,
+      // which the editor does not show).
+      resume.skills.map((s, i, all) => {
         const kw = esc(s.keywords.join(', '))
-        return s.name.trim() ? `**${esc(s.name.trim())}:** ${kw}` : kw
+        const line = s.name.trim() ? `**${esc(s.name.trim())}:** ${kw}` : kw
+        return i < all.length - 1 ? `${line}  ` : line
       }),
     ]
   }

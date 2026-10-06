@@ -77,6 +77,17 @@ describe('resumeToMarkdown', () => {
   })
 })
 
+describe('skills', () => {
+  it('keeps each group on its own line, even where soft breaks fold into spaces', () => {
+    const md = resumeToMarkdown(CANONICAL_RESUME)
+    const para = parseResumeMarkdown(md).find(
+      (b) => b.type === 'paragraph' && b.lines[0]?.[0]?.text.startsWith('Languages')
+    )
+    expect(para?.type === 'paragraph' && para.lines).toHaveLength(2)
+    expect(md).toContain('**Languages:** Go, TypeScript, SQL  \n**Platforms:**')
+  })
+})
+
 describe('plain text and fact text', () => {
   it('plain text is the Markdown without markup', () => {
     const text = resumeToPlainText(CANONICAL_RESUME)

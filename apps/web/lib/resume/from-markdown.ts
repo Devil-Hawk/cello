@@ -525,6 +525,15 @@ export function markdownToResume(markdown: string, ctx: MarkdownToResumeContext 
         (lastLine && next?.type === 'list' && entryHasContent(entry))
       if (!startsEntry) {
         if (entry && !hasDates(entry) && meta) return applyMeta(t)
+        // PDF text puts the location on its own line under the title and date.
+        const loc = entry as { location?: string } | null
+        if (
+          loc && kind !== 'projects' && !loc.location && !entryHasContent(entry!) &&
+          t.length <= 50 && !/[.!?:]$/.test(t) && t.split(/\s+/).length <= 6
+        ) {
+          loc.location = t
+          return
+        }
         return addEntryText(t)
       }
       startedHere = true
