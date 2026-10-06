@@ -11,6 +11,8 @@ import { fieldsSignature } from '../fill/read-fields'
 
 export const STUB_PORT = 4599
 export const TOKEN = 'test-token'
+/** The relay credential: a different token with a different scope. The fill routes refuse it. */
+export const RELAY_TOKEN = 'relay-token'
 export const RESUME_BYTES = Buffer.from('%PDF-1.4 fixture resume for Ada Lovelace\n', 'utf8')
 export const RESUME_SHA = createHash('sha256').update(RESUME_BYTES).digest('hex')
 
@@ -54,6 +56,8 @@ export interface StubConfig {
   profile: Record<string, string>
   /** The next ready application, for Send next. */
   nextReady: { application: string; url: string; company: string } | null
+  /** The model job handed out once by /api/model-jobs/claim. */
+  relayJob: { job_id: string; claim_id: string; request: unknown } | null
 }
 
 const defaults = (): StubConfig => ({
@@ -67,6 +71,7 @@ const defaults = (): StubConfig => ({
   file: true,
   profile: {},
   nextReady: null,
+  relayJob: null,
 })
 
 export class Stub {
@@ -141,6 +146,17 @@ export class Stub {
     if (req.method === 'OPTIONS') return send(204, '')
     // A page on the Cello origin, for the specs that hand the extension its token the way Cello does.
     if (url.pathname === '/__page/connect') return send(200, '<!doctype html><title>Cello</title><p>Cello</p>', 'text/html')
+    // The model job routes take the relay token only; the fill routes below take the fill token only.
+    if (url.pathname.startsWith('/api/model-jobs/')) {
+      if (req.headers.authorization !== `Bearer ${RELAY_TOKEN}`) return send(401, { error: 'unauthorized' })
+      this.requests.push({ method: req.method ?? 'GET', path: url.pathname, headers: req.headers, body })
+      if (url.pathname.endsWith('/claim')) {
+        const job = this.cfg.relayJob
+        this.cfg.relayJob = null
+        return send(200, { job })
+      }
+      return send(200, { ok: true })
+    }
     if (req.headers.authorization !== `Bearer ${TOKEN}`) return send(401, { error: 'unauthorized' })
     this.requests.push({ method: req.method ?? 'GET', path: url.pathname, headers: req.headers, body })
 

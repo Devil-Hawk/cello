@@ -85,7 +85,7 @@ test('the options page saves the token the way a person pastes it', async ({ con
   const id = new URL((await serviceWorker(context)).url()).host
   const p = await context.newPage()
   await p.goto(`chrome-extension://${id}/options.html`)
-  await p.getByLabel('Token').fill('pasted-token')
+  await p.getByLabel('Token', { exact: true }).fill('pasted-token')
   await p.getByRole('button', { name: 'Save' }).click()
   await expect(p.getByRole('status')).toContainText('Saved')
   expect(await localGet(context, 'token')).toBe('pasted-token')
