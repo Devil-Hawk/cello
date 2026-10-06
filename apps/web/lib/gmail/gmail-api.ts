@@ -169,6 +169,50 @@ export async function fetchGmailThread(accessToken: string, threadId: string): P
   }
 }
 
+const THREAD_HEADERS = ['From', 'To', 'Cc', 'Reply-To', 'Date', 'Subject', 'List-Id', 'List-Unsubscribe', 'Precedence', 'Auto-Submitted']
+/** ponytail: the newest 100 messages of a thread; a 300-message thread is read as one capped page. */
+const THREAD_MESSAGE_CAP = 100
+
+export interface ThreadHeaders {
+  id: string
+  messages: { id: string; internalDate: string; headers: Array<{ name: string; value: string }> }[]
+}
+
+/** One thread's headers only (format=metadata): no body is read. Null when it cannot be read. */
+export async function fetchThreadHeaders(accessToken: string, threadId: string): Promise<ThreadHeaders | null> {
+  try {
+    const { data } = await gmailFor(accessToken).users.threads.get({ userId: 'me', id: threadId, format: 'metadata', metadataHeaders: THREAD_HEADERS })
+    const messages = (data.messages ?? []).slice(-THREAD_MESSAGE_CAP).map((m) => ({
+      id: m.id ?? '',
+      internalDate: m.internalDate ?? '',
+      headers: (m.payload?.headers ?? []).map((h) => ({ name: h.name ?? '', value: h.value ?? '' })),
+    }))
+    return { id: threadId, messages: messages.filter((m) => m.id) }
+  } catch {
+    return null
+  }
+}
+
+/** Thread ids of a search, newest first, at most `max`. */
+export async function listThreadIds(accessToken: string, query: string, max: number): Promise<string[]> {
+  try {
+    const { data } = await gmailFor(accessToken).users.threads.list({ userId: 'me', q: query, maxResults: Math.min(max, 100) })
+    return (data.threads ?? []).map((t) => t.id ?? '').filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+/** Every address the mailbox sends as (gmail.readonly reads it), so an alias counts as "you". */
+export async function fetchSendAs(accessToken: string): Promise<string[]> {
+  try {
+    const { data } = await gmailFor(accessToken).users.settings.sendAs.list({ userId: 'me' })
+    return (data.sendAs ?? []).map((s) => (s.sendAsEmail ?? '').toLowerCase()).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 /** The mailbox's own address (needs gmail.readonly, which the sync already holds), or null. */
 export async function fetchGmailAddress(accessToken: string): Promise<string | null> {
   try {
