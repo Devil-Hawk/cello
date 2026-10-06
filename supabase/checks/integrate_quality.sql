@@ -1,20 +1,21 @@
--- Proves migrations 20261006000400-403 (feedback ids, feedback events, job
--- dismissed feedback, ops health). It applies all four TWICE inside the
--- transaction (so idempotency is exercised and an unmigrated database can be
--- checked), runs the assertions as the real client roles, and rolls back.
+-- Proves migrations 20261009000400-403 (feedback ids, feedback events, job
+-- dismissed feedback, ops health). It applies them TWICE inside the
+-- transaction (so idempotency is exercised), runs the assertions as the real
+-- client roles, and rolls back. The parts that read a role's trace from
+-- public.person_roles (the employer and role work, K5a) run once that table exists.
 --
---   psql -X -v ON_ERROR_STOP=1 -f supabase/checks/quality.sql \
+--   psql -X -v ON_ERROR_STOP=1 -f supabase/checks/integrate_quality.sql \
 --        "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 
 begin;
 
-\ir ../migrations/20261006000400_feedback_ids.sql
-\ir ../migrations/20261006000400_feedback_ids.sql
-\ir ../migrations/20261006000401_feedback_events.sql
-\ir ../migrations/20261006000401_feedback_events.sql
-\ir ../migrations/20261006000402_job_dismissed_feedback.sql
-\ir ../migrations/20261006000403_ops_health.sql
-\ir ../migrations/20261006000403_ops_health.sql
+\ir ../migrations/20261009000400_feedback_ids.sql
+\ir ../migrations/20261009000400_feedback_ids.sql
+\ir ../migrations/20261009000401_feedback_events.sql
+\ir ../migrations/20261009000401_feedback_events.sql
+\ir ../migrations/20261009000402_job_dismissed_feedback.sql
+\ir ../migrations/20261009000403_ops_health.sql
+\ir ../migrations/20261009000403_ops_health.sql
 
 -- Fixed ids: client roles cannot read a postgres-owned temp table.
 --   owner  bbbbbbbb-0000-0000-0000-000000000001
@@ -29,11 +30,20 @@ on conflict (id) do nothing;
 
 insert into public.companies (id, user_id, name, career_url) values
   ('bbbbbbbb-1111-0000-0000-000000000001', 'bbbbbbbb-0000-0000-0000-000000000001', 'Quality Check Co', 'https://example.invalid/careers');
-insert into public.jobs (id, company_id, title, description, url, trace_id, observation_id, discovered_at) values
-  ('bbbbbbbb-2222-0000-0000-000000000001', 'bbbbbbbb-1111-0000-0000-000000000001', 'Role with a trace', 'd', 'https://example.invalid/j1',
-   repeat('a', 32), repeat('b', 16), now()),
-  ('bbbbbbbb-2222-0000-0000-000000000002', 'bbbbbbbb-1111-0000-0000-000000000001', 'Role without a trace', 'd', 'https://example.invalid/j2',
-   null, null, now());
+insert into public.jobs (id, company_id, title, description, url, discovered_at) values
+  ('bbbbbbbb-2222-0000-0000-000000000001', 'bbbbbbbb-1111-0000-0000-000000000001', 'Role with a trace', 'd', 'https://example.invalid/j1', now()),
+  ('bbbbbbbb-2222-0000-0000-000000000002', 'bbbbbbbb-1111-0000-0000-000000000001', 'Role without a trace', 'd', 'https://example.invalid/j2', now());
+
+-- The assessment's trace lives on the person's own row. lane-stub: K5a person_roles
+do $$
+begin
+  if to_regclass('public.person_roles') is null then
+    raise notice 'lane-stub: K5a person_roles absent, role trace rows not created';
+    return;
+  end if;
+  insert into public.person_roles (user_id, job_id, trace_id, observation_id)
+  values ('bbbbbbbb-0000-0000-0000-000000000001', 'bbbbbbbb-2222-0000-0000-000000000001', repeat('a', 32), repeat('b', 16));
+end $$;
 
 -- ===========================================================================
 -- Part 1: nothing for anon, nothing new for authenticated beyond own events
@@ -42,13 +52,12 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['feedback_events', 'cron_heartbeats', 'ops_health_checks', 'ops_alerts'] loop
+  foreach t in array array['feedback_events', 'ops_health_checks'] loop
     assert not has_table_privilege('anon', 'public.' || t, 'select'), t || ': anon must not read';
     assert not has_table_privilege('anon', 'public.' || t, 'insert'), t || ': anon must not write';
   end loop;
-  foreach t in array array['cron_heartbeats', 'ops_health_checks', 'ops_alerts'] loop
-    assert not has_table_privilege('authenticated', 'public.' || t, 'select'), t || ': authenticated must not read';
-  end loop;
+  assert not has_table_privilege('authenticated', 'public.ops_health_checks', 'select'), 'ops_health_checks: authenticated must not read';
+  assert to_regclass('public.cron_heartbeats') is null and to_regclass('public.ops_alerts') is null, 'the second heartbeat table and the alerts table are not kept';
   assert not has_table_privilege('authenticated', 'public.feedback_events', 'insert'), 'authenticated must not insert events';
   assert not has_table_privilege('authenticated', 'public.feedback_events', 'update'), 'authenticated must not update events';
   assert not has_table_privilege('authenticated', 'public.feedback_events', 'delete'), 'authenticated must not delete events';
@@ -60,14 +69,13 @@ begin
   assert has_function_privilege('service_role', 'public.ops_db_stats()', 'execute'), 'ops_db_stats: service_role';
 end $$;
 
--- The stats function reports a size and the cron schedules when pg_cron exists.
+-- The stats function reports a size and the biggest tables.
 do $$
 declare s jsonb;
 begin
   s := public.ops_db_stats();
   assert (s ->> 'db_bytes')::bigint > 0, 'db_bytes is reported';
   assert jsonb_typeof(s -> 'tables') = 'array', 'tables is an array';
-  assert jsonb_typeof(s -> 'schedules') = 'array', 'schedules is an array';
 end $$;
 
 -- ===========================================================================
@@ -164,7 +172,9 @@ declare n int;
 begin
   select count(*) into n from public.feedback_events;
   assert n >= 8, 'the owner reads their own events, got ' || n;
-  assert (select count(*) from public.feedback_events where signal = 'job_applied') = 1, 'one job_applied event';
+  -- lane-stub: K5a person_roles
+  assert (select count(*) from public.feedback_events where signal = 'job_applied') = case when to_regclass('public.person_roles') is null then 0 else 1 end,
+    'applying queues one job_applied event carrying the person''s own trace';
   assert (select count(*) from public.feedback_events where signal = 'interview_scheduled') = 1,
     'the interview is credited to the draft for that job';
   begin
@@ -175,8 +185,8 @@ begin
     null;
   end;
   begin
-    perform 1 from public.ops_alerts;
-    raise exception 'authenticated read of ops_alerts should have been refused';
+    perform 1 from public.ops_health_checks;
+    raise exception 'authenticated read of ops_health_checks should have been refused';
   exception when insufficient_privilege then
     null;
   end;
@@ -197,7 +207,8 @@ begin
   assert exists (select 1 from public.feedback_events
                  where signal = 'interview_scheduled' and subject_table = 'application_drafts'
                    and subject_id = 'bbbbbbbb-4444-0000-0000-000000000001');
-  assert exists (select 1 from public.feedback_events
+  -- lane-stub: K5a person_roles
+  assert to_regclass('public.person_roles') is null or exists (select 1 from public.feedback_events
                  where signal = 'job_applied' and subject_table = 'jobs'
                    and subject_id = 'bbbbbbbb-2222-0000-0000-000000000001' and trace_id = repeat('a', 32));
 end $$;
@@ -205,28 +216,14 @@ end $$;
 -- Passing on a role is feedback when role reactions exist.
 do $$
 begin
-  if to_regclass('public.role_reactions') is null then
-    raise notice 'role_reactions not present: job_dismissed trigger not exercised';
+  if to_regclass('public.role_reactions') is null or to_regclass('public.person_roles') is null then
+    raise notice 'lane-stub: K5a person_roles or role_reactions absent, job_dismissed trigger not exercised';
   else
     insert into public.role_reactions (user_id, job_id, reaction, reason, surface, job_title, company_name)
     values ('bbbbbbbb-0000-0000-0000-000000000001', 'bbbbbbbb-2222-0000-0000-000000000001', 'not_for_me', 'pay', 'today', 'Role with a trace', 'Quality Check Co')
     on conflict (user_id, job_id) do update set reaction = 'not_for_me', reason = 'pay';
     assert (select comment from public.feedback_events where signal = 'job_dismissed' and subject_id = 'bbbbbbbb-2222-0000-0000-000000000001') = 'pay';
   end if;
-end $$;
-
--- Only one open alert per kind and subject.
-insert into public.ops_alerts (kind, subject, message) values ('db_size', 'database', 'Database is at 362 MB of 500 MB');
-do $$
-begin
-  begin
-    insert into public.ops_alerts (kind, subject, message) values ('db_size', 'database', 'again');
-    raise exception 'a second open alert should have been refused';
-  exception when unique_violation then
-    null;
-  end;
-  update public.ops_alerts set resolved_at = now() where kind = 'db_size';
-  insert into public.ops_alerts (kind, subject, message) values ('db_size', 'database', 'a new one after resolving');
 end $$;
 
 rollback;
