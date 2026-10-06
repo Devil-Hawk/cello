@@ -20,7 +20,20 @@
 --   - the private bucket `attempts` for screenshots, readable by their owner
 --   - interactions.ref_table renamed with it
 
-alter table public.application_receipts rename to application_attempts;
+-- Run twice, this file changes nothing the second time: the rename waits for a table of the old name, and the
+-- one-off sort of old rows runs only when the outcome column is new.
+do $$
+begin
+  if to_regclass('public.application_attempts') is null
+     and (select c.relkind from pg_catalog.pg_class c where c.oid = to_regclass('public.application_receipts')) = 'r' then
+    alter table public.application_receipts rename to application_attempts;
+  end if;
+  perform set_config('cello.attempts_fresh', (not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'application_attempts' and column_name = 'attempt_outcome'
+  ))::text, false);
+end
+$$;
 
 do $$
 declare
@@ -83,9 +96,15 @@ alter table public.application_attempts
   add column if not exists cost_usd numeric(10, 4);
 
 -- Rows written before this migration: a witnessed one was sent, an asserted one was marked.
-update public.application_attempts
-   set attempt_outcome = case when verification_state = 'system_confirmed' then 'sent' else 'marked' end,
-       sent_by = case when provenance = 'ats_direct' then 'cello' else 'person' end;
+do $$
+begin
+  if current_setting('cello.attempts_fresh', true) = 'true' then
+    update public.application_attempts
+       set attempt_outcome = case when verification_state = 'system_confirmed' then 'sent' else 'marked' end,
+           sent_by = case when provenance = 'ats_direct' then 'cello' else 'person' end;
+  end if;
+end
+$$;
 
 comment on table public.application_attempts is
   'One row per try at sending an application: sent, not confirmed, not sent, marked by the person, blocked or taken back. Written by the person (manual, user_confirmed) or by the server for the extension. Survives the deletion of its application.';
@@ -97,20 +116,24 @@ drop policy if exists "own receipts insert" on public.application_attempts;
 drop policy if exists "own receipts update" on public.application_attempts;
 drop policy if exists "own receipts delete" on public.application_attempts;
 
+drop policy if exists attempts_select on public.application_attempts;
 create policy attempts_select on public.application_attempts for select to authenticated
   using ((select auth.uid()) = user_id);
+drop policy if exists attempts_insert on public.application_attempts;
 create policy attempts_insert on public.application_attempts for insert to authenticated
   with check ((select auth.uid()) = user_id and provenance = 'manual' and verification_state = 'user_confirmed');
+drop policy if exists attempts_update on public.application_attempts;
 create policy attempts_update on public.application_attempts for update to authenticated
   using ((select auth.uid()) = user_id and provenance = 'manual' and verification_state = 'user_confirmed')
   with check ((select auth.uid()) = user_id and provenance = 'manual' and verification_state = 'user_confirmed');
+drop policy if exists attempts_delete on public.application_attempts;
 create policy attempts_delete on public.application_attempts for delete to authenticated
   using ((select auth.uid()) = user_id and provenance = 'manual' and verification_state = 'user_confirmed');
 
 revoke all on public.application_attempts from anon;
 
 -- The old name, for code that has not been redeployed. Dropped by K20.
-create view public.application_receipts with (security_invoker = true) as
+create or replace view public.application_receipts with (security_invoker = true) as
   select * from public.application_attempts;
 
 revoke all on public.application_receipts from anon;
