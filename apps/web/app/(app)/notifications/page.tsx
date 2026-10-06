@@ -21,7 +21,7 @@ interface HotJob {
   match_score: number | null
   posted_at: string | null
   discovered_at: string
-  companies: { name: string | null } | null
+  viewer_company_name: string | null
 }
 
 interface InterviewActivity {
@@ -126,8 +126,8 @@ export default function NotificationsPage() {
         // this user's tracked companies.
         openRolesOnly(
           supabase
-            .from('jobs')
-            .select('id, title, match_score, posted_at, discovered_at, companies(name)')
+            .from('person_jobs')
+            .select('id, title, match_score, posted_at, discovered_at, viewer_company_name')
             .eq('is_new', true)
             .gte('match_score', 70)
         )
@@ -268,7 +268,7 @@ export default function NotificationsPage() {
           key={job.id}
           tone="opportunity"
           title={job.title}
-          subtitle={[job.companies?.name ?? 'Unknown company', formatRelativeTime(job.posted_at ?? job.discovered_at)].join(
+          subtitle={[job.viewer_company_name ?? 'Unknown company', formatRelativeTime(job.posted_at ?? job.discovered_at)].join(
             ' · '
           )}
           // Opens THIS job, not the list. This row names a specific role and

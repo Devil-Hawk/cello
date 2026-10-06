@@ -188,8 +188,8 @@ async function fetchFeed(): Promise<NotificationItem[]> {
       .limit(LIMITS.interview),
     openRolesOnly(
       supabase
-        .from('jobs')
-        .select('id, title, match_score, posted_at, discovered_at, companies(name)')
+        .from('person_jobs')
+        .select('id, title, match_score, posted_at, discovered_at, viewer_company_name')
         .eq('is_new', true)
         .gte('match_score', 70)
     )
@@ -247,14 +247,14 @@ async function fetchFeed(): Promise<NotificationItem[]> {
     match_score: number | null
     posted_at: string | null
     discovered_at: string
-    companies: { name: string | null } | { name: string | null }[] | null
+    viewer_company_name: string | null
   }[]) {
     items.push({
       id: `job:${row.id}`,
       kind: 'job',
       title: row.title,
       subtitle: [
-        relatedName(row.companies) ?? 'Unknown company',
+        row.viewer_company_name ?? 'Unknown company',
         formatRelativeTime(row.posted_at ?? row.discovered_at),
       ].join(' · '),
       // The specific job, not the list — same reason the page's row does it:

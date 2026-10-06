@@ -107,12 +107,11 @@ interface RawJob {
   match_score: number | null
   job_function: string | null
   seniority: string | null
-  companies?: { name: string | null } | { name: string | null }[] | null
+  viewer_company_name?: string | null
 }
 
 function rawJobCompanyName(job: RawJob): string {
-  const c = job.companies
-  return (Array.isArray(c) ? c[0]?.name : c?.name) ?? 'Unknown company'
+  return job.viewer_company_name ?? 'Unknown company'
 }
 
 // NOTE ON "unclassified passes through": the count queries below express this
@@ -145,8 +144,9 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
       const jobIds = [...new Set(rawApps.map((a) => a.job_id))]
       const jobs = await chunkedIn(jobIds, async (chunk) => {
         const { data, error } = await admin
-          .from('jobs')
-          .select('id, company_id, source, posted_at, match_score, job_function, seniority, companies(name)')
+          .from('person_jobs')
+          .select('id, company_id:viewer_company_id, source, posted_at, match_score, job_function, seniority, viewer_company_name')
+          .eq('viewer_id', userId)
           .in('id', chunk)
         if (error) console.error('[strategy] getApplications: jobs query failed', error)
         return (data as RawJob[] | null) ?? []
