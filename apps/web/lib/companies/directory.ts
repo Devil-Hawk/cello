@@ -59,7 +59,8 @@ export async function searchCompanies(db: Db, query: string, opts: { limit?: num
   if (norm.length >= 2) {
     const { data: pending } = await db.from('directory_candidates').select('id, name, domain').eq('state', 'pending').like('name_norm', `${norm.replace(/[%_]/g, '')}%`).limit(5)
     const have = new Set(employers.map((e) => e.name_norm))
-    notChecked = ((pending ?? []) as NotChecked[]).filter((p) => !have.has(normalizeCompanyName(p.name)))
+    // Only what a person may see of a candidate: its name and website, never a count.
+    notChecked = ((pending ?? []) as NotChecked[]).filter((p) => !have.has(normalizeCompanyName(p.name))).map((p) => ({ id: p.id, name: p.name, domain: p.domain }))
   }
   return { employers, notChecked }
 }
