@@ -13,6 +13,8 @@ export interface ReaderTargets {
   targeting: Targeting
   /** The role titles the person typed (Settings -> Targeting), most specific first. */
   titles: string[]
+  /** profiles.targets_version when the targets were read: roles are kept under it. 0 when none were set. */
+  version?: number
 }
 
 export const NO_TARGETS: ReaderTargets = { targeting: EMPTY_TARGETING, titles: [] }
@@ -74,10 +76,10 @@ type Db = SupabaseClient<any, any, any>
 /** `userId` may be left out with a client that is already the user's (row level security returns only their own profile). */
 export async function loadTargets(client: Db, userId?: string): Promise<ReaderTargets> {
   try {
-    const query = client.from('profiles').select('preferences')
+    const query = client.from('profiles').select('preferences, targets_version')
     const { data } = await (userId ? query.eq('id', userId) : query).maybeSingle()
-    const preferences = (data as { preferences?: unknown } | null)?.preferences
-    return { targeting: resolveTargeting(preferences), titles: resolveTargetTitles(preferences) }
+    const row = data as { preferences?: unknown; targets_version?: number | null } | null
+    return { targeting: resolveTargeting(row?.preferences), titles: resolveTargetTitles(row?.preferences), version: row?.targets_version ?? 0 }
   } catch {
     return NO_TARGETS
   }
