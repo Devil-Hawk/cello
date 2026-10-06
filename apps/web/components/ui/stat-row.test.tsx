@@ -12,6 +12,14 @@ describe('StatRow', () => {
     expect(html).toContain('sm:grid-cols-1')
   })
 
+  it('leaves out rates that read 0%', () => {
+    const html = renderToStaticMarkup(
+      <StatRow stats={[{ label: 'Offer rate', value: '0%' }, { label: 'Response rate', value: '50%' }]} />
+    )
+    expect(html).toContain('Response rate')
+    expect(html).not.toContain('Offer rate')
+  })
+
   it('draws nothing when every stat reads 0', () => {
     expect(renderToStaticMarkup(<StatRow stats={[{ label: 'A', value: 0 }, { label: 'B', value: 0 }]} />)).toBe('')
   })

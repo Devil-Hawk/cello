@@ -26,11 +26,11 @@ const COLS: Record<number, string> = {
 
 /**
  * One card, N stats separated by hairline rules, display-font tabular numerals.
- * A stat whose value is the number 0 is not drawn (a bare zero gives a person
+ * A stat whose value is the number 0 or the rate 0% is not drawn (a bare zero gives a person
  * nothing to act on); with none left the row is not drawn at all.
  */
 export function StatRow({ stats, className, ...props }: StatRowProps) {
-  const shown = stats.filter((s) => s.value !== 0)
+  const shown = stats.filter((s) => s.value !== 0 && s.value !== '0%')
   if (shown.length === 0) return null
   return (
     <div
