@@ -850,7 +850,7 @@ async function beginTurn(
   const { error: clearClaimError } = await admin.from('graph_threads').update({ pending_dispatch: null }).eq('thread_id', cfg.threadId)
   if (clearClaimError) console.error(`[graph] copilot: failed to clear pending_dispatch for thread ${cfg.threadId}: ${clearClaimError.message}`)
   // lib/context/assemble.ts: mcpBlock + standingBlock + goalsBlock (the old
-  // ad-hoc mcpToolsPromptBlock/readStandingPreferences/formatActiveGoalBlock(
+  // ad-hoc mcpToolsPromptBlock/keptLearningsBlock/formatActiveGoalBlock(
   // readGoals(...)) trio, now behind one door) + kbBlock/entityBlock (new —
   // see that file's buildTurnContext doc for why memories stay out of this
   // call and come from assembleTurnContext below instead).

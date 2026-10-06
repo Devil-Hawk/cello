@@ -2,7 +2,7 @@
 // port design doc, step 9).
 //
 // A generic in-memory fake AdminClient stands in for Postgres (same idiom as
-// lib/insights/store.test.ts and lib/graph/autopilot.test.ts's FakeAdmin):
+// lib/graph/autopilot.test.ts's FakeAdmin):
 // seeded per table, real eq/in/is/or/not filtering so a test can trust that
 // what it seeds is what a builder actually reads back — this is not a
 // reimplementation of PostgREST, just enough of it for these compositions.
