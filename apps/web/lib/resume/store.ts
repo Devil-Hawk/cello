@@ -148,24 +148,25 @@ export function deriveResumeColumns(resume: Resume): { content: string; content_
 }
 
 /** The bucket's artifact, created when it is not there. Two writers racing on the same bucket end up on one artifact. */
-async function ensureBucket(client: SupabaseClient, userId: string, jobId: string | null): Promise<BucketRow> {
+async function ensureBucket(client: SupabaseClient, userId: string, jobId: string | null): Promise<{ bucket: BucketRow; created: boolean }> {
   const found = await findBucket(client, userId, jobId)
-  if (found) return found
+  if (found) return { bucket: found, created: false }
   let title = 'Base resume'
   if (jobId) {
     const { data } = await client.from('jobs').select('title').eq('id', jobId).maybeSingle()
     title = `Resume for ${(data as { title?: string } | null)?.title ?? 'a role'}`.slice(0, 200)
   }
+  // A new artifact starts at version 1 (its check says so); its first version is written below.
   const { data, error } = await client
     .from('artifacts')
-    .insert({ user_id: userId, type: 'resume', title, job_id: jobId, is_base: jobId === null, current_version: 0, idempotency_key: bucketKey(userId, jobId) })
+    .insert({ user_id: userId, type: 'resume', title, job_id: jobId, is_base: jobId === null, idempotency_key: bucketKey(userId, jobId) })
     .select(ARTIFACT_COLUMNS)
     .single()
-  if (!error) return data as BucketRow
+  if (!error) return { bucket: data as BucketRow, created: true }
   if ((error as { code?: string }).code !== UNIQUE_VIOLATION) throw new Error(`createResumeVersion failed: ${error.message}`)
   const raced = await findBucket(client, userId, jobId)
   if (!raced) throw new Error(`createResumeVersion failed: ${error.message}`)
-  return raced
+  return { bucket: raced, created: false }
 }
 
 interface InsertRow {
@@ -187,20 +188,30 @@ async function insertVersionRow(client: SupabaseClient, input: InsertRow): Promi
 
   const jobId = input.jobId ?? null
   const source: ResumeSource = input.source ?? (jobId ? 'tailored' : 'base')
-  const bucket = await ensureBucket(client, input.userId, jobId)
-  const { data: version, error } = await client.rpc('artifact_add_version', {
-    p_user_id: input.userId,
-    p_artifact_id: bucket.id,
-    p_author: source === 'tailored' ? 'cello' : 'user',
-    p_content: { text: content, content_json: input.contentJson, title: input.title ?? null, ats_score: input.atsScore ?? null, source, draft_id: input.draftId ?? null },
-    p_content_text: content,
-    p_note: null,
-    p_review: null,
-    p_trace_id: null,
-    p_idempotency_key: null,
-  })
-  if (error) throw new Error(`createResumeVersion failed: ${error.message}`)
-  const { data: row, error: readError } = await client.from('artifact_versions').select(VERSION_COLUMNS).eq('artifact_id', bucket.id).eq('version', version as number).single()
+  const author = source === 'tailored' ? 'cello' : 'user'
+  const stored = { text: content, content_json: input.contentJson, title: input.title ?? null, ats_score: input.atsScore ?? null, source, draft_id: input.draftId ?? null }
+  const { bucket, created } = await ensureBucket(client, input.userId, jobId)
+
+  let versionNumber = 1
+  if (created) {
+    const { error } = await client.from('artifact_versions').insert({ artifact_id: bucket.id, version: 1, author, content: stored, content_text: content })
+    if (error) throw new Error(`createResumeVersion failed: ${error.message}`)
+  } else {
+    const { data, error } = await client.rpc('artifact_add_version', {
+      p_user_id: input.userId,
+      p_artifact_id: bucket.id,
+      p_author: author,
+      p_content: stored,
+      p_content_text: content,
+      p_note: null,
+      p_review: null,
+      p_trace_id: null,
+      p_idempotency_key: null,
+    })
+    if (error) throw new Error(`createResumeVersion failed: ${error.message}`)
+    versionNumber = data as number
+  }
+  const { data: row, error: readError } = await client.from('artifact_versions').select(VERSION_COLUMNS).eq('artifact_id', bucket.id).eq('version', versionNumber).single()
   if (readError || !row) throw new Error(`createResumeVersion failed: ${readError?.message ?? 'the new version was not found'}`)
   return toDocument(bucket, row as VersionRow)
 }

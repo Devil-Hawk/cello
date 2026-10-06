@@ -1,15 +1,13 @@
-// resume_documents has exactly one writer: lib/resume/store.ts. A second path
-// that inserts a row can store a version whose plain text, Markdown and
-// structure disagree, or skip the structure entirely, which is how a resume
-// ended up with "no format". This scans the source so a new writer fails here
-// instead of in production.
+// Resumes are made things (K17): the base resume and each tailored resume are `artifacts`
+// with numbered versions, and lib/resume/store.ts is the one writer. `resume_documents` is
+// read-only history, so nothing in the app may write it. This scans the source so a new writer
+// fails here instead of in production.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const ROOT = path.resolve(__dirname, '../..')
-const ALLOWED = new Set(['lib/resume/store.ts', 'lib/access/seed-demo.ts'])
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -21,23 +19,25 @@ function walk(dir: string, out: string[] = []): string[] {
   return out
 }
 
-describe('resume_documents writers', () => {
-  it('only store.ts and the demo seeder write rows', () => {
-    const offenders: string[] = []
-    for (const dir of ['app', 'lib', 'scripts']) {
-      let files: string[] = []
-      try {
-        files = walk(path.join(ROOT, dir))
-      } catch {
-        continue
-      }
-      for (const file of files) {
-        const rel = path.relative(ROOT, file).split(path.sep).join('/')
-        if (ALLOWED.has(rel)) continue
-        const src = readFileSync(file, 'utf8')
-        if (/resume_documents['"`]\s*\)\s*\.(insert|upsert|update)\(/.test(src)) offenders.push(rel)
-      }
+function sources(): { rel: string; src: string }[] {
+  const out: { rel: string; src: string }[] = []
+  for (const dir of ['app', 'lib', 'scripts']) {
+    let files: string[] = []
+    try {
+      files = walk(path.join(ROOT, dir))
+    } catch {
+      continue
     }
+    for (const file of files) out.push({ rel: path.relative(ROOT, file).split(path.sep).join('/'), src: readFileSync(file, 'utf8') })
+  }
+  return out
+}
+
+describe('resume writers', () => {
+  it('nothing writes resume_documents: it is read-only history', () => {
+    const offenders = sources()
+      .filter(({ src }) => /resume_documents['"`]\s*\)\s*\.(insert|upsert|update|delete)\(/.test(src) || /table:\s*['"]resume_documents['"]/.test(src))
+      .map(({ rel }) => rel)
     expect(offenders).toEqual([])
   })
 

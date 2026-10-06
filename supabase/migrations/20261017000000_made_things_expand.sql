@@ -47,6 +47,19 @@ $$;
 alter table public.outreach_messages add column if not exists artifact_id uuid references public.artifacts (id) on delete set null;
 alter table public.outreach_messages add column if not exists artifact_version int;
 
+-- Two older columns point at resume_documents ids (resume_claims.resume_document_id,
+-- application_drafts.resume_document_id). A version written from now on lives on artifact_versions
+-- and carries a new id, so those pointers can no longer be foreign keys. The ids of copied versions
+-- are unchanged, so every existing pointer still names the same version.
+do $$
+declare c record;
+begin
+  for c in select conrelid::regclass as tbl, conname from pg_constraint where contype = 'f' and confrelid = 'public.resume_documents'::regclass loop
+    execute format('alter table %s drop constraint %I', c.tbl, c.conname);
+  end loop;
+end
+$$;
+
 -- ---------------------------------------------------------------------------
 -- 2. The profiles.resume_text mirror follows the base resume artifact.
 --    (The resume_documents trigger stays until the contract.)
