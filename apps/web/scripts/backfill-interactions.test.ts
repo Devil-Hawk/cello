@@ -116,7 +116,7 @@ describe('backfillActivities idempotency and gating', () => {
         { id: 'act-3', application_id: 'app-1', type: 'email_received', title: 'FYI', description: null, occurred_at: '2026-08-03T00:00:00Z', metadata: { stage_decision: { action: 'ignored_regression' } } },
       ],
       applications: [{ id: 'app-1', user_id: 'u1', job_id: 'job-1' }],
-      jobs: [{ id: 'job-1', company_id: 'co-1' }],
+      person_jobs: [{ id: 'job-1', viewer_id: 'u1', company_id: 'co-1' }],
       companies: [],
       interactions: [],
     }
