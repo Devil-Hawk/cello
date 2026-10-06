@@ -78,7 +78,8 @@ export function RolesView({ query, items, picks, total, newToday, groupCounts, f
   const band = bandOf(visible, picks)
   const showBand = query.tab === 'for-you' && query.group === 'ranked' && query.sort === 'ranked' && !filtered && band.items.length > 0 && (band.kind === 'picks' || newToday > 0)
   const bandIds = new Set(showBand ? band.items.map((i) => i.id) : [])
-  const rest = ordered.filter((i) => !bandIds.has(i.id)).slice(0, query.limit)
+  // The page holds `limit` rows in all: the band counts toward them, so 26 roles show 25 and Show more.
+  const rest = ordered.filter((i) => !bandIds.has(i.id)).slice(0, Math.max(0, query.limit - bandIds.size))
   const shown = rest.length + bandIds.size
   const groups = groupByCompany(ordered, groupCounts, facts)
   const outsideText = query.tab === 'for-you' ? outsideLine(outside) : null

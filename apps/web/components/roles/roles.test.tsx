@@ -131,6 +131,13 @@ describe('the Roles view', () => {
     expect((more.match(/class="r-row/g) ?? []).length).toBe(25)
   })
 
+  it('counts the picks band toward the 25 rows, so the 26 role fixture shows Show more', () => {
+    const withBand = view({ items: fixtureRoles(26, 5), total: 26, newToday: 41 })
+    expect(text(withBand)).toContain('Show more')
+    expect((withBand.match(/class="r-row/g) ?? []).length).toBe(25)
+    expect(text(view({ items: fixtureRoles(25, 5), total: 25, newToday: 41 }))).not.toContain('Show more')
+  })
+
   it('draws the title at the company name weight, whole, and opens the record and Company', () => {
     const items = fixtureRoles(8, 2).map((i) => ({ ...i, title: 'Staff Software Engineer, Applied AI and Developer Experience for Regulated Industries' }))
     const html = view({ items, total: 8 })
