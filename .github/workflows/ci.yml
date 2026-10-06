@@ -121,13 +121,21 @@ jobs:
       - name: Build the store package
         run: pnpm --filter @cello/extension zip
 
-      - name: Upload the extension zip
+      # The folder itself, so one unzip of the download is the folder to Load unpacked.
+      - name: Upload the unpacked extension
         uses: actions/upload-artifact@v4
         with:
           name: cello-extension
-          path: apps/extension/.output/*-chrome.zip
+          path: apps/extension/.output/chrome-mv3
           if-no-files-found: error
           include-hidden-files: true
+
+      - name: Upload the store zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: cello-extension-store-zip
+          path: apps/extension/.output/*-chrome.zip
+          if-no-files-found: error
 
   test-scrapers:
     name: Test Scrapers

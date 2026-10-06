@@ -2,7 +2,7 @@
 
 Until the extension is in the Chrome Web Store, you load it yourself. It takes four steps and works in Chrome, Edge, Brave and other Chromium browsers.
 
-1. Download the zip. Open the latest run of CI on GitHub, then Artifacts, then `cello-extension`, and unzip it somewhere you will keep it, for example `~/cello-extension`. Do not delete the folder: the browser reads the extension from it.
+1. Download the build. Open the latest run of CI on GitHub (you need to be signed in to GitHub to download), then Artifacts, then `cello-extension`, and unzip it once into a folder you will keep, for example `~/cello-extension`. That folder holds `manifest.json`. Do not delete it: the browser reads the extension from it. GitHub keeps artifacts for 90 days, so download again from a newer run if the link has gone.
 2. Open `chrome://extensions` (or `edge://extensions`).
 3. Turn on Developer mode, the switch at the top right.
 4. Choose Load unpacked and pick the unzipped folder. The Cello icon appears in the toolbar.
