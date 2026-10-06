@@ -202,6 +202,47 @@ class TestParseRobots:
         assert rules.allows("/Admin") is False
 
 
+class TestRobotsFetchStaysPublic:
+    """robots.txt is fetched for a host the person typed: a redirect to an internal address is never requested."""
+
+    @staticmethod
+    def _run(monkeypatch, handler, url="https://careers.example.test/robots.txt"):
+        import httpx
+
+        import src.polite as polite
+
+        real = httpx.Client
+        monkeypatch.setattr(httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+        monkeypatch.setattr(polite, "is_public", lambda u: "127.0.0.1" not in u and "169.254." not in u)
+        return polite._default_fetcher(url)
+
+    def test_a_redirect_to_an_internal_address_is_not_requested(self, monkeypatch):
+        seen = []
+
+        def handler(request):
+            seen.append(str(request.url))
+            return __import__("httpx").Response(302, headers={"location": "http://127.0.0.1:8080/robots.txt"})
+
+        assert self._run(monkeypatch, handler) == (0, "")
+        assert seen == ["https://careers.example.test/robots.txt"]
+
+    def test_a_public_redirect_is_followed(self, monkeypatch):
+        import httpx
+
+        def handler(request):
+            if request.url.host == "careers.example.test":
+                return httpx.Response(301, headers={"location": "https://cdn.example.test/robots.txt"})
+            return httpx.Response(200, text="User-agent: *\nDisallow: /x\n")
+
+        assert self._run(monkeypatch, handler) == (200, "User-agent: *\nDisallow: /x\n")
+
+    def test_the_body_is_capped(self, monkeypatch):
+        import httpx
+
+        status, body = self._run(monkeypatch, lambda r: httpx.Response(200, text="a" * 900_000))
+        assert status == 200 and len(body) == 500_000
+
+
 class TestRobotsCache:
     def test_fetches_once_per_origin_and_caches(self):
         clock = FakeClock()
