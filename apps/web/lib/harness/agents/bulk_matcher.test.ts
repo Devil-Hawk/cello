@@ -37,7 +37,7 @@ const TITLE_ONLY_JOB = {
   country: 'US',
   is_remote: true,
   quality_score: 82,
-  companies: { name: 'Real Test Co' },
+  viewer_company_name: 'Real Test Co',
 }
 
 /** Minimal in-memory fake of the exact PostgREST chain shapes bulk_matcher's

@@ -34,12 +34,17 @@ export const REASON_COPY: Record<string, string> = {
   no_roles: 'no open roles were found on it',
   unreachable: 'it did not answer',
   read_failed: 'reading it failed with an error, and the next check tries again',
+  budget: 'its site is large, and one check reads only part of it, so the next check reads more',
   role_pages: 'it lists roles, but their pages cannot be read without a browser',
   render_failed: "Cello's browser could not read it just now, and the next check tries again",
+  model_unavailable: 'no free reading slot was available, and the next check tries again',
+  model_limit: "today's free reading limit was reached, and the next check tries again",
 }
 
 /** The check recorded while only a browser could read the site: the scheduled pass is next. */
 export const READING_REASON = 'reading'
+/** The page was reached and only the free reading step could not run: a wait for a slot, not a verdict on the site. */
+export const WAITING_REASONS = ['model_unavailable', 'model_limit']
 
 // The reader uses these: dream companies hourly, others daily.
 const DREAM_INTERVAL_MINUTES = 60
@@ -82,7 +87,7 @@ export function dueAt(company: StatusCompany): number {
 export type RolesStatus =
   | { kind: 'roles'; count: number }
   | { kind: 'checking' }
-  | { kind: 'reading'; nextCheckAt: number | null }
+  | { kind: 'reading'; nextCheckAt: number | null; waiting?: boolean; large?: boolean }
   | { kind: 'not_checked'; nextCheckAt: number | null; now: number }
   | { kind: 'empty'; nextCheckAt: number | null; now: number }
   | { kind: 'unreadable'; reason: string; careersUrl: string | null }
@@ -100,6 +105,13 @@ export function rolesStatus(
   const check = readSourceCheck(company.metadata)
   if (check && !check.readable && check.reason === READING_REASON) {
     return { kind: 'reading', nextCheckAt }
+  }
+  // The site is bigger than one check reads: not "no roles", and the next scheduled check goes on.
+  if (check && !check.readable && check.reason === 'budget') {
+    return { kind: 'reading', nextCheckAt, large: true }
+  }
+  if (check && !check.readable && check.reason && WAITING_REASONS.includes(check.reason)) {
+    return { kind: 'reading', nextCheckAt, waiting: true }
   }
   if (check && !check.readable) {
     const reason = (check.reason && REASON_COPY[check.reason]) || 'it could not be read'
@@ -144,9 +156,9 @@ export function rolesStatusLine(s: RolesStatus): { text: string; href?: string }
     case 'checking':
       return { text: 'Checking now' }
     case 'reading': {
-      if (s.nextCheckAt === null) return { text: 'Cello is reading this site' }
-      const t = new Date(s.nextCheckAt).toISOString().slice(11, 16)
-      return { text: `Cello is reading this site. Next check around ${t} UTC` }
+      const t = s.nextCheckAt === null ? '' : `. Next check around ${new Date(s.nextCheckAt).toISOString().slice(11, 16)} UTC`
+      if (s.large) return { text: `This site is large and Cello is still reading it${t}` }
+      return { text: `${s.waiting ? 'Waiting for a free reading slot' : 'Cello is reading this site'}${t}` }
     }
     case 'not_checked':
       return { text: s.nextCheckAt === null ? 'Not checked yet' : `Not checked yet, next check ${inAbout(s.nextCheckAt - s.now)}` }

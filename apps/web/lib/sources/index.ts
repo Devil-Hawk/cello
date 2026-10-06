@@ -289,7 +289,7 @@ export async function ingestLeads(
     const { data, error } = await ownedJobsQuery(
       admin,
       userId,
-      'id, external_id, url, description_md5, companies!inner(user_id)'
+      'id, external_id, url, description_md5'
     )
     if (error) {
       result.errors.push(`load jobs: ${error.message}`)
