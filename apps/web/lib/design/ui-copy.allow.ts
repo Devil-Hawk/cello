@@ -13,7 +13,6 @@ export const UI_COPY_BASELINE: Record<string, number> = {
   'app/(app)/error.tsx': 1,
   'app/(app)/jobs/page.tsx': 4,
   'app/(app)/notifications/page.tsx': 1,
-  'app/(app)/queue/page.tsx': 2,
   'app/(app)/resume/[jobId]/page.tsx': 5,
   'app/(app)/resume/page.tsx': 6,
   'app/(app)/settings/access/page.tsx': 1,

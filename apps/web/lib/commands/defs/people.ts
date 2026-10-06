@@ -444,6 +444,29 @@ export const learnedDelete = personCommand({
 
 export const learnedCommands: AnyCommand[] = [learnedList, learnedSearch, learnedKeep, learnedNotRight, learnedOff, learnedOn, learnedEdit, learnedDelete]
 
+// ---------------------------------------------------------------------------
+// conversations.handled: "I have handled this". The person's own mark on a reply; the mail itself is untouched.
+// ---------------------------------------------------------------------------
+
+export const conversationsHandled = personCommand({
+  id: 'conversations.handled',
+  label: 'I have handled this',
+  input: z.strictObject({ message_id: id }),
+  measure: 'S8',
+  async run(ctx, i) {
+    const { data } = await db(ctx).from('messages').select('thread_id').eq('id', i.message_id).eq('user_id', ctx.userId).maybeSingle()
+    const row = data as { thread_id: string | null } | null
+    if (!row) throw new CommandRefusal(404, 'That message is gone.', 'not_found')
+    // the whole thread's mail from them, so the thread clears and a new reply brings it back
+    const q = ctx.admin().from('messages').update({ handled_at: new Date().toISOString() }).eq('user_id', ctx.userId).eq('direction', 'in').is('handled_at', null)
+    const { error } = await (row.thread_id ? q.eq('thread_id', row.thread_id) : q.eq('id', i.message_id))
+    if (error) throw new Error('Could not save that.')
+    return { ok: true }
+  },
+})
+
+export const conversationsCommands: AnyCommand[] = [conversationsHandled]
+
 export const peopleCommands: AnyCommand[] = [
   peopleList,
   peopleGet,
@@ -462,4 +485,5 @@ export const peopleCommands: AnyCommand[] = [
   networkNudges,
   networkSetRule,
   ...learnedCommands,
+  ...conversationsCommands,
 ]
