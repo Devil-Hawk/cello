@@ -328,6 +328,13 @@ create table if not exists public.person_roles (
   primary key (user_id, job_id)
 );
 
+-- A person's own score, its details and the new flag: derived from their resume and key, so never shared.
+-- Only the service role writes them (the grants below keep a signed-in person to saved_at and hidden_reason).
+alter table public.person_roles
+  add column if not exists match_score integer,
+  add column if not exists match_details jsonb,
+  add column if not exists is_new boolean not null default true;
+
 create index if not exists person_roles_job_idx on public.person_roles (job_id);
 create index if not exists person_roles_saved_idx on public.person_roles (job_id) where saved_at is not null;
 
@@ -383,8 +390,8 @@ create policy "jobs via person_roles" on public.jobs for select to authenticated
   using (exists (select 1 from public.person_roles pr where pr.job_id = jobs.id and pr.user_id = (select auth.uid())));
 
 -- One person_roles row for every role a person already has, beside the old reads.
-insert into public.person_roles (user_id, job_id, visible_since, targets_version, checked_at)
-select c.user_id, j.id, coalesce(j.discovered_at, now()), 0, j.last_seen_at
+insert into public.person_roles (user_id, job_id, visible_since, targets_version, checked_at, match_score, match_details, is_new)
+select c.user_id, j.id, coalesce(j.discovered_at, now()), 0, j.last_seen_at, j.match_score, j.match_details, j.is_new
   from public.jobs j
   join public.companies c on c.id = j.company_id
 on conflict (user_id, job_id) do nothing;
@@ -627,12 +634,15 @@ begin
     groups := groups + 1;
     foreach loser in array g.ids[2:array_length(g.ids, 1)] loop
       -- every owner of a copy gets the survivor, with what was theirs
-      insert into public.person_roles (user_id, job_id, visible_since, targets_version, saved_at, hidden_reason, checked_at)
-      select pr.user_id, g.winner, pr.visible_since, pr.targets_version, pr.saved_at, pr.hidden_reason, pr.checked_at
+      insert into public.person_roles (user_id, job_id, visible_since, targets_version, saved_at, hidden_reason, checked_at, match_score, match_details, is_new)
+      select pr.user_id, g.winner, pr.visible_since, pr.targets_version, pr.saved_at, pr.hidden_reason, pr.checked_at, pr.match_score, pr.match_details, pr.is_new
         from public.person_roles pr
        where pr.job_id = loser
       on conflict (user_id, job_id) do update
         set saved_at = coalesce(public.person_roles.saved_at, excluded.saved_at),
+            match_details = case when public.person_roles.match_score is null then excluded.match_details else public.person_roles.match_details end,
+            match_score = coalesce(public.person_roles.match_score, excluded.match_score),
+            is_new = public.person_roles.is_new and excluded.is_new,
             visible_since = least(public.person_roles.visible_since, excluded.visible_since);
       insert into public.person_roles (user_id, job_id, visible_since)
       select c.user_id, g.winner, coalesce(j.discovered_at, now())
