@@ -148,7 +148,7 @@ export function RolesView({ query, items: read, picks, total, newToday, groupCou
         </p>
       )}
 
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+      <div className="relative flex flex-wrap items-center gap-x-6 gap-y-3">
         <nav aria-label="Roles" className="flex gap-1">
           {TABS.map((t) => (
             <Key key={t} asChild variant="ghost" current={query.tab === t}>
