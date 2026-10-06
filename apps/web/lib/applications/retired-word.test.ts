@@ -25,6 +25,19 @@ const ALLOWED = [
   'apps/web/lib/applications/types.ts',
   'apps/web/app/api/applications/receipts/route.ts',
   'apps/web/app/api/applications/receipts/[id]/route.ts',
+  // preint files that name the word in a test or a script, and the two lists that carry the table until its rename lands;
+  // the integrator empties these when the pipeline lane merges
+  'apps/extension/scripts/lint-store.mjs',
+  'apps/extension/scripts/lint-store.test.ts',
+  'apps/extension/tests/shots.ts',
+  'apps/web/components/brand/landing/landing.test.tsx',
+  'apps/web/components/roles/record/record.test.tsx',
+  'apps/web/components/roles/roles.test.tsx',
+  'apps/web/components/today/today.test.tsx',
+  'apps/web/lib/commands/owned/pipeline.ts',
+  'apps/web/lib/design/ui-copy.test.ts',
+  'apps/web/lib/provenance/tables/pipeline.ts',
+  'apps/web/scripts/evals/outputs/data/dossier/bundles.json',
   // this test
   'apps/web/lib/applications/retired-word.test.ts',
 ]

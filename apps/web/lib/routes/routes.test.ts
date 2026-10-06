@@ -88,7 +88,9 @@ describe('the bar', () => {
     expect(new Set(menu.map((r) => r.href)).size).toBe(menu.length)
     for (const r of menu) expect(r.bar).toBe(false)
     expect(menu).toContain(profile)
-    expect(search.href === settings.href ? menu.includes(search) : true).toBe(false)
+    // one entry per address: while Your search shares Settings' page only Settings shows; once it has its own, both do
+    if (search.href === settings.href) expect(menu.includes(search)).toBe(false)
+    else expect(menu).toContain(search)
   })
 
   it('knows the current page from the address', () => {

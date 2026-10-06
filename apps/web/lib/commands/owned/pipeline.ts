@@ -5,6 +5,7 @@ import type { OwnedTable } from './types'
 
 export const owned: OwnedTable[] = [
   // The tables K13, K16, K19 and the delivery migration create, listed when the pipeline lane merged with the registry.
+  { table: 'application_receipts', demoWipe: false },
   { table: 'pipeline_events', demoWipe: false },
   { table: 'answer_bank', demoWipe: false },
   { table: 'messages', demoWipe: false },

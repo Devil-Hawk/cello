@@ -204,7 +204,8 @@ export async function networkSync(
       { onConflict: 'user_id,gmail_message_id', ignoreDuplicates: true },
     )
     for (const [cid, rs] of groupBy(rows.filter((r) => r.contactId), (r) => r.contactId as string)) {
-      await admin.from('messages').update({ contact_id: cid }).eq('user_id', a.userId).in('gmail_message_id', rs.map((r) => r.m.id).slice(0, 100)).is('contact_id', null)
+      const mids = rs.map((r) => r.m.id)
+      await admin.from('messages').update({ contact_id: cid }).eq('user_id', a.userId).in('gmail_message_id', mids.slice(0, 100)).is('contact_id', null)
     }
     if (job) {
       result.jobThreads.push({ threadId: t.id, contactIds: [...new Set(read.kept.map((p) => contactIdOf.get(p.email)).filter((x): x is string => !!x))], applicationId: thread.applicationId, employerId: thread.employerId, messageIds: t.msgs.map((m) => m.id) })
