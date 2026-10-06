@@ -126,6 +126,14 @@ export const COPILOT_TOOLS: ToolSpec[] = [
       'last 6 hours under notChecked.',
   },
   {
+    name: 'refresh_companies',
+    kind: 'run',
+    signature: 'refresh_companies {}',
+    desc:
+      'Read the job boards and careers sites of followed companies not checked in the last 6 hours, at most 5 per ' +
+      'call, and report what was read. Call it before search_roles when search_roles lists companies under notChecked.',
+  },
+  {
     name: 'source_jobs',
     kind: 'act',
     signature: 'source_jobs {"query"?:string,"limit"?:number}',

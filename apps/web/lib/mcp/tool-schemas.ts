@@ -57,6 +57,7 @@ export const TOOL_SCHEMAS: Record<string, ZodRawShape> = {
     companyName: z.string().optional().describe('A single company name — shorthand for companyNames.'),
   },
   web_search: { query: requiredQuery, limit },
+  refresh_companies: {},
   source_jobs: { query, limit },
   search_roles: {
     title: z.string().optional().describe('A role or its short form, such as FDE or ML engineer.'),

@@ -29,7 +29,7 @@ import { ingestInsight, MAX_PREFERENCE_LENGTH } from '../insights/store'
 // byte-identical; this file adds no third one). autopilot.ts already imports
 // this exact same helper from this exact same module for the same reason —
 // fanning out bounded, per-item-isolated async work.
-import { mapWithConcurrency } from '@/lib/ats'
+import { mapWithConcurrency, makeSupabaseAtsStore } from '@/lib/ats'
 import { optimizeResume } from './agents/resume_optimizer'
 import { generateOutreachDraft, fallbackOutreachDraft, type OutreachDraftInput } from './agents/outreach'
 import { generateDossier, type CompanyResearcherResult } from './agents/company_researcher'
@@ -57,7 +57,11 @@ import { McpError } from '../mcp/types'
 import { openRolesOnly } from '../jobs/freshness'
 import { applyRoleTargets, excludedCompanyIds, hasRoleTargets, quote } from '../targeting/roles'
 import { isTrackedCompany } from '../companies/watchlist'
-import { formatRoleAnswer, pickCompaniesToRefresh, placeMatcher, titleMatcher } from '../jobs/role-search'
+import { REFRESH_MAX_PER_TURN, formatRoleAnswer, pickCompaniesToRefresh, placeMatcher, titleMatcher } from '../jobs/role-search'
+import { ingestCompany, type DueCompany } from '../ingest/run'
+import { staticFetchPage } from '../ingest/fetch-page'
+import { loadTargets } from '../ingest/reader/targets'
+import { REASON_COPY } from '../companies/roles-status'
 
 export {
   COPILOT_TOOLS,
@@ -527,6 +531,8 @@ async function dispatchToolInner(ctx: CopilotToolContext, tool: string, args: Ar
         return await getDossier(ctx, args)
       case 'check_sponsorship':
         return await checkSponsorship(args)
+      case 'refresh_companies':
+        return await doRefreshCompanies(ctx)
       case 'search_roles':
         return await doSearchRoles(ctx, args)
       case 'source_jobs':
@@ -1048,6 +1054,53 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
       notChecked,
     }),
   }
+}
+
+/** One company's read, or the clock, whichever comes first. */
+const REFRESH_COMPANY_TIMEOUT_MS = 45_000
+
+/**
+ * refresh_companies: the reader (the same call the Companies page makes for one
+ * company) over the followed companies not checked in the last 6 hours, at most
+ * 5 a turn. Plain requests only: no model, no browser.
+ */
+async function doRefreshCompanies(ctx: CopilotToolContext) {
+  const { data } = await ctx.admin.from('companies').select('*').eq('user_id', ctx.userId)
+  const { pick, fresh, noSource } = pickCompaniesToRefresh((data as DueCompany[]) ?? [], Date.now())
+  if (pick.length === 0) {
+    return {
+      companies: [],
+      skippedFresh: fresh,
+      noCareersPage: noSource,
+      note: 'Every followed company with something to read was checked in the last 6 hours.',
+    }
+  }
+  const targets = await loadTargets(ctx.admin, ctx.userId)
+  const store = makeSupabaseAtsStore(ctx.admin, { lockClient: ctx.admin })
+  const companies = await mapWithConcurrency(pick, REFRESH_MAX_PER_TURN, async (c) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const outcome = await Promise.race([
+      ingestCompany(store, c, { fetchPage: staticFetchPage, model: null, mode: 'inline', targets }),
+      new Promise<'time'>((resolve) => {
+        timer = setTimeout(() => resolve('time'), REFRESH_COMPANY_TIMEOUT_MS)
+      }),
+    ]).catch((e) => ({ error: errMsg(e) }))
+    clearTimeout(timer)
+    if (outcome === 'time') return { name: c.name, roles: 0, newRoles: 0, note: 'still reading' }
+    if ('error' in outcome) return { name: c.name, roles: 0, newRoles: 0, note: outcome.error }
+    const { result, failure } = outcome
+    const note = result.busy
+      ? 'already being checked'
+      : outcome.reading
+        ? 'needs a browser, the scheduled check reads it'
+        : failure
+          ? REASON_COPY[failure === 'board_error' ? 'board_unreachable' : failure] ?? 'it could not be read'
+          : outcome.skipped
+            ? REASON_COPY.no_careers_url
+            : undefined
+    return { name: c.name, roles: result.found, newRoles: result.inserted, note }
+  })
+  return { companies, skippedFresh: fresh, noCareersPage: noSource }
 }
 
 /**
