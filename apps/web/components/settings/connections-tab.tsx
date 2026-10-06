@@ -1,6 +1,5 @@
 'use client'
 
-import { OutreachPrefsCard } from '@/components/settings/outreach-prefs-card'
 import { useEffect, useState } from 'react'
 import {
   AlertCircle,
@@ -357,7 +356,6 @@ export function ConnectionsTab({ onStatus }: ConnectionsTabProps) {
         </div>
       )}
 
-      <OutreachPrefsCard onStatus={onStatus} />
 
       <Panel tone="sunken" className="space-y-1.5">
         <p className="text-caption text-muted-foreground">

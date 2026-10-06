@@ -325,6 +325,125 @@ export const networkSetRule = personCommand({
   },
 })
 
+// ---------------------------------------------------------------------------
+// What Cello learned (section 9): Keep, Not right, Off, On, Edit, Delete. The statement is code's or the
+// person's own; a model's read carries its quote. A kept follow-up timing changes only the global rule.
+// ---------------------------------------------------------------------------
+
+const statusOf = z.enum(['any', 'proposed', 'active', 'off'])
+
+export const learnedList = personCommand({
+  id: 'learned.list',
+  label: 'What Cello learned',
+  input: z.strictObject({ status: statusOf.optional() }),
+  measure: 'S16',
+  async run(ctx, i) {
+    const { readLearnings } = await import('@/lib/learning/read')
+    const r = await readLearnings(ctx.userId, i.status ?? 'any')
+    return r.ok ? { ok: true, items: r.items } : { ok: false, sentence: r.sentence }
+  },
+})
+
+export const learnedSearch = personCommand({
+  id: 'learned.search',
+  label: 'Search what Cello learned',
+  input: z.strictObject({ q: text(100).min(1) }),
+  measure: 'S16',
+  async run(ctx, i) {
+    const { readLearnings } = await import('@/lib/learning/read')
+    const r = await readLearnings(ctx.userId, 'any')
+    if (!r.ok) return { ok: false, sentence: r.sentence }
+    const q = i.q.toLowerCase()
+    return { ok: true, items: r.items.filter((l) => l.statement.toLowerCase().includes(q)) }
+  },
+})
+
+const learning = z.strictObject({ id })
+
+export const learnedKeep = personCommand({
+  id: 'learned.keep',
+  label: 'Keep',
+  input: learning,
+  measure: 'none',
+  async run(ctx, i) {
+    const { allLearnings, setLearningStatus } = await import('@/lib/learning/store')
+    const l = (await allLearnings(ctx.userId)).find((x) => x.id === i.id)
+    if (!l) throw new CommandRefusal(404, 'That is gone.', 'not_found')
+    // a follow-up timing acts on the global rule only, and only through this Keep
+    if (l.effect === 'nudge.rule' && l.status === 'proposed') {
+      const rule: Record<string, number> = {}
+      if (typeof l.params.after_yours_bd === 'number') rule.after_yours_bd = l.params.after_yours_bd
+      if (typeof l.params.after_theirs_d === 'number') rule.after_theirs_d = l.params.after_theirs_d
+      const { error } = await ctx.admin().rpc('set_network_rule', { p_user: ctx.userId, p_contact: null, p_rule: rule })
+      if (error) throw new CommandRefusal(400, 'That timing is out of range.', 'input')
+    }
+    await setLearningStatus(ctx.userId, i.id, 'active')
+    return { id: i.id, status: 'active' }
+  },
+})
+
+export const learnedNotRight = personCommand({
+  id: 'learned.not_right',
+  label: 'Not right',
+  input: learning,
+  measure: 'none',
+  async run(ctx, i) {
+    const { deleteLearning } = await import('@/lib/learning/store')
+    await deleteLearning(ctx.userId, i.id).catch(() => {
+      throw new CommandRefusal(404, 'That is gone.', 'not_found')
+    })
+    return { id: i.id, deleted: true }
+  },
+})
+
+const toggle = (commandId: string, label: string, status: 'off' | 'active') =>
+  personCommand({
+    id: commandId,
+    label,
+    input: learning,
+    measure: 'none',
+    async run(ctx, i) {
+      const { setLearningStatus } = await import('@/lib/learning/store')
+      await setLearningStatus(ctx.userId, i.id, status).catch(() => {
+        throw new CommandRefusal(404, 'That is gone.', 'not_found')
+      })
+      return { id: i.id, status }
+    },
+  })
+
+export const learnedOff = toggle('learned.off', 'Turn off', 'off')
+export const learnedOn = toggle('learned.on', 'Turn on', 'active')
+
+export const learnedEdit = personCommand({
+  id: 'learned.edit',
+  label: 'Edit',
+  input: z.strictObject({ id, statement: text(200).min(1) }),
+  measure: 'none',
+  async run(ctx, i) {
+    const { editLearning } = await import('@/lib/learning/store')
+    await editLearning(ctx.userId, i.id, i.statement).catch((e: Error) => {
+      throw new CommandRefusal(400, e.message.slice(0, 200), 'input')
+    })
+    return { id: i.id }
+  },
+})
+
+export const learnedDelete = personCommand({
+  id: 'learned.delete',
+  label: 'Delete',
+  input: learning,
+  measure: 'none',
+  async run(ctx, i) {
+    const { deleteLearning } = await import('@/lib/learning/store')
+    await deleteLearning(ctx.userId, i.id).catch(() => {
+      throw new CommandRefusal(404, 'That is gone.', 'not_found')
+    })
+    return { id: i.id, deleted: true }
+  },
+})
+
+export const learnedCommands: AnyCommand[] = [learnedList, learnedSearch, learnedKeep, learnedNotRight, learnedOff, learnedOn, learnedEdit, learnedDelete]
+
 export const peopleCommands: AnyCommand[] = [
   peopleList,
   peopleGet,
@@ -342,4 +461,5 @@ export const peopleCommands: AnyCommand[] = [
   peopleEditMemory,
   networkNudges,
   networkSetRule,
+  ...learnedCommands,
 ]

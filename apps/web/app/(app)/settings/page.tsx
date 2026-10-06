@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
-import { AlertCircle, CheckCircle, ChevronRight, Cpu, Database, FileWarning, Key, KeyRound, Network, Plug, Search, Server, Target, Terminal } from 'lucide-react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { AlertCircle, CheckCircle, ChevronRight, Cpu, Database, FileWarning, Key, KeyRound, Network, Plug, Search, Server, Terminal } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
@@ -14,29 +14,26 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ApiKeysTab } from '@/components/settings/api-keys-tab'
 import { ModelTab } from '@/components/settings/model-tab'
 import { ProviderTab } from '@/components/settings/provider-tab'
-import { TargetingTab } from '@/components/settings/targeting-tab'
 import { ConnectionsTab } from '@/components/settings/connections-tab'
 import { SourcesTab } from '@/components/settings/sources-tab'
 import { SearchTab } from '@/components/settings/search-tab'
 import { McpTab } from '@/components/settings/mcp-tab'
 import { TokensTab } from '@/components/settings/tokens-tab'
-import { EMPTY_TARGETING, type Targeting } from '@/lib/targeting'
 
 // Loaded after the page: the cards carry the meter, the toast and the sync motion, which the tabs do not need first.
 const AccountStatus = dynamic(() => import('@/components/settings/account-status').then((m) => m.AccountStatus), { ssr: false })
 
-type TabId = 'connections' | 'sources' | 'search' | 'mcp' | 'tokens' | 'api-keys' | 'provider' | 'model' | 'targeting'
+type TabId = 'connections' | 'sources' | 'search' | 'mcp' | 'tokens' | 'api-keys' | 'provider' | 'model'
 
 const TABS: Array<{ id: TabId; label: string; icon: typeof Plug }> = [
   { id: 'connections', label: 'Connections', icon: Plug },
   { id: 'sources', label: 'Sources', icon: Database },
-  { id: 'search', label: 'Search', icon: Search },
-  { id: 'mcp', label: 'MCP', icon: Network },
+  { id: 'search', label: 'Web search keys', icon: Search },
+  { id: 'mcp', label: 'Use Cello from your assistant', icon: Network },
   { id: 'tokens', label: 'Access tokens', icon: Terminal },
   { id: 'api-keys', label: 'API keys', icon: Key },
   { id: 'provider', label: 'Provider', icon: Server },
-  { id: 'model', label: 'Model', icon: Cpu },
-  { id: 'targeting', label: 'Job targeting', icon: Target },
+  { id: 'model', label: 'Models', icon: Cpu },
 ]
 
 function isTabId(value: string | null): value is TabId {
@@ -48,6 +45,11 @@ export default function SettingsPage() {
   // ?tab=connections lets the Gmail sync card deep-link straight to the fix.
   const searchParams = useSearchParams()
   const requestedTab = searchParams.get('tab')
+  const router = useRouter()
+  // The targeting tab moved to Your search.
+  useEffect(() => {
+    if (requestedTab === 'targeting') router.replace('/search')
+  }, [requestedTab, router])
   const [activeTab, setActiveTab] = useState<TabId>(isTabId(requestedTab) ? requestedTab : 'connections')
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -59,7 +61,6 @@ export default function SettingsPage() {
   const [hasHunterKey, setHasHunterKey] = useState(false)
   const [hasApolloKey, setHasApolloKey] = useState(false)
   const [currentModel, setCurrentModel] = useState<string | null>(null)
-  const [targeting, setTargeting] = useState<Targeting>(EMPTY_TARGETING)
 
   // Status banner
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle')
@@ -108,17 +109,6 @@ export default function SettingsPage() {
         }
       } catch {
         // Ignore errors loading status
-      }
-
-      // Load targeting preferences
-      try {
-        const targetingResponse = await fetch('/api/settings/targeting')
-        if (targetingResponse.ok) {
-          const targetingData = await targetingResponse.json()
-          if (targetingData.targeting) setTargeting(targetingData.targeting)
-        }
-      } catch {
-        // Ignore errors loading targeting
       }
     } catch {
       // A thrown failure never produces a Supabase `{ error }` object, so
@@ -247,10 +237,8 @@ export default function SettingsPage() {
             />
           ) : activeTab === 'provider' ? (
             <ProviderTab onStatus={reportStatus} />
-          ) : activeTab === 'model' ? (
-            <ModelTab initialModel={currentModel} onStatus={reportStatus} />
           ) : (
-            <TargetingTab initialTargeting={targeting} onStatus={reportStatus} />
+            <ModelTab initialModel={currentModel} onStatus={reportStatus} />
           )}
         </Card>
       </div>
