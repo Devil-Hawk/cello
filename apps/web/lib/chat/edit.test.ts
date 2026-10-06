@@ -46,4 +46,13 @@ describe('forkFromTurn', () => {
     expect(await forkFromTurn(db, 'u1', 'c1', 't3', 'Again')).toMatchObject({ ok: false })
     expect(db.tables.chat_turns.filter((r) => r.branch_of)).toHaveLength(1)
   })
+
+  it('leaves the turn editable when the new turn cannot be saved', async () => {
+    const db = seed()
+    const real = db.from.bind(db)
+    const failing = { ...db, from: (t: string) => { const q = real(t) as unknown as Record<string, unknown>; if (t === 'chat_turns') q.insert = () => ({ select: () => ({ single: async () => ({ data: null, error: { message: 'down' } }) }) }); return q } }
+    expect(await forkFromTurn(failing as unknown as typeof db, 'u1', 'c1', 't3', 'New words')).toMatchObject({ ok: false, error: 'Could not start the edited turn.' })
+    expect(db.tables.chat_turns.filter((r) => r.superseded_at)).toHaveLength(0)
+    expect(await forkFromTurn(db, 'u1', 'c1', 't3', 'New words')).toMatchObject({ ok: true })
+  })
 })

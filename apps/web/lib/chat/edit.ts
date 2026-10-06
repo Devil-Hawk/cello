@@ -19,9 +19,14 @@ export async function forkFromTurn(db: AdminClient, userId: string, chatId: stri
   const turn = data as { id: string; kind: string; created_at: string; superseded_at: string | null; ran: { checkpoint_id?: string } | null } | null
   if (!turn || turn.kind !== 'person' || turn.superseded_at) return { ok: false, error: 'That turn cannot be edited.', fix: 'Edit one of your own earlier messages.' }
 
-  const now = new Date().toISOString()
-  await db.from('chat_turns').update({ superseded_at: now }).eq('chat_id', chatId).eq('user_id', userId).gte('created_at', turn.created_at).is('superseded_at', null)
+  // The new turn goes in first: if it fails, the old turn is untouched and can be edited again.
   const { data: made, error } = await db.from('chat_turns').insert({ user_id: userId, chat_id: chatId, kind: 'person', typed: words, origin: 'person', branch_of: turn.id }).select('id').single()
   if (error || !made) return { ok: false, error: 'Could not start the edited turn.', fix: 'Try again.' }
-  return { ok: true, id: (made as { id: string }).id, checkpointId: turn.ran?.checkpoint_id ?? null }
+  const id = (made as { id: string }).id
+  const { error: hid } = await db.from('chat_turns').update({ superseded_at: new Date().toISOString() }).eq('chat_id', chatId).eq('user_id', userId).gte('created_at', turn.created_at).neq('id', id).is('superseded_at', null)
+  if (hid) {
+    await db.from('chat_turns').delete().eq('id', id).eq('user_id', userId)
+    return { ok: false, error: 'Could not start the edited turn.', fix: 'Try again.' }
+  }
+  return { ok: true, id, checkpointId: turn.ran?.checkpoint_id ?? null }
 }
