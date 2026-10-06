@@ -2,7 +2,8 @@
 
 import { trackedOnly } from '@/lib/companies/watchlist'
 import { useEffect, useState } from 'react'
-import { Building2, FileWarning, Plus, RefreshCw, Search, Sparkles, Star } from 'lucide-react'
+import { Building2, FileWarning, Plus, RefreshCw, Search, Star } from 'lucide-react'
+import { LogoMark } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -288,7 +289,7 @@ export default function CompaniesPage() {
                 title="Fix company names using known directory"
                 aria-label={isFixingNames ? 'Fixing company names…' : 'Fix company names using known directory'}
               >
-                <Sparkles className={`h-4 w-4 ${isFixingNames ? 'animate-spin' : ''}`} aria-hidden />
+                <LogoMark className="h-4 w-4" loading={isFixingNames} />
               </Button>
             </>
           )}

@@ -7,9 +7,9 @@ import {
   FileEdit,
   Loader2,
   MessageSquare,
-  RefreshCw,
-  Sparkles,
+  RefreshCw
 } from 'lucide-react'
+import { LogoMark } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -367,7 +367,7 @@ export function JobDetailModal({
           <div className="border-t px-5 py-4 first:border-t-0">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="flex items-center gap-2 text-body font-medium text-foreground">
-                <Sparkles className="h-4 w-4 text-muted-foreground" />
+                <LogoMark className="h-4 w-4 text-muted-foreground" />
                 AI insights
               </h3>
               {/* Hidden while a failure is on screen: that state carries its

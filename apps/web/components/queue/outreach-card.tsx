@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { AlertTriangle, Check, CornerDownRight, Loader2, Mail, Pencil, RotateCcw, Send, ShieldAlert, Sparkles, User, X } from 'lucide-react'
+import { AlertTriangle, Check, CornerDownRight, Loader2, Mail, Pencil, RotateCcw, Send, ShieldAlert, User, X } from 'lucide-react'
+import { LogoMark } from '@/components/brand/logo'
 import { Badge, type BadgeTone } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -412,7 +413,7 @@ export function OutreachCard({
               )}
               {!judgeResult && (
                 <Button size="sm" variant="ghost" onClick={checkDraft} disabled={judging || busy !== null}>
-                  {judging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  {judging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogoMark className="h-3.5 w-3.5" />}
                   {judging ? 'Checking…' : 'Check again (two paid AI calls)'}
                 </Button>
               )}
@@ -430,7 +431,7 @@ export function OutreachCard({
                     {judging ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
-                      <Sparkles className="h-3.5 w-3.5" />
+                      <LogoMark className="h-3.5 w-3.5" />
                     )}
                     {judging ? 'Checking…' : 'Check this draft'}
                   </Button>
