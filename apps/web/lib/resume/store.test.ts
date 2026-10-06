@@ -40,7 +40,7 @@ describe('createResumeVersion', () => {
   })
 
   it('a tailored version has its own bucket, written by Cello, and the base is untouched', async () => {
-    const { admin, client } = world({ jobs: [{ id: 'j1', title: 'Backend Engineer' }] })
+    const { admin, client } = world({ person_jobs: [{ id: 'j1', viewer_id: 'u', title: 'Backend Engineer' }] })
     await createResumeVersion(client, { userId: 'u', jobId: null, resume: CANONICAL_RESUME, source: 'base' })
     const tailored = await createResumeVersion(client, { userId: 'u', jobId: 'j1', resume: resume('Tailored'), source: 'tailored', atsScore: 88 })
     expect(tailored).toMatchObject({ job_id: 'j1', version: 1, source: 'tailored', ats_score: 88 })

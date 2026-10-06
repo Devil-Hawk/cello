@@ -39,7 +39,7 @@ describe('the clock is the only schedule', () => {
       'trace prune': 'demo.expire',
       'digest runs': 'harness.digest',
       'digest compose': 'harness.digest',
-      'distill insights': 'harness.distill',
+      'learn from your record': 'harness.learn',
     }
     for (const [job, command] of Object.entries(jobs)) {
       expect(migration, `${job} needs the ${command} routine`).toContain(`'${command}'`)

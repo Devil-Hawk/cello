@@ -15,7 +15,6 @@ export const tables: ProvenanceTable[] = [
   { table: 'user_mcp_servers', provenance: 'person' },
   { table: 'copilot_conversations', provenance: 'person' },
   { table: 'interactions', provenance: 'person' },
-  { table: 'strategy_proposal_outcomes', provenance: 'person' },
   { table: 'agent_runs', provenance: 'code' },
   { table: 'api_tokens', provenance: 'code' },
   { table: 'apply_phase_tokens', provenance: 'code' },

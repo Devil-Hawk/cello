@@ -24,6 +24,15 @@ union all select job_reacted, company_id, 'reacted', 'd', 'https://x/b2', 'k17b-
 union all select job_young, company_id, 'young', 'd', 'https://x/b3', 'k17b-3' from fx
 union all select job_gone, company_id, 'gone', 'd', 'https://x/b4', 'k17b-4' from fx;
 
+-- A person holds a role through a person_roles row, and role_evidence is keyed to it.
+insert into public.person_roles (user_id, job_id)
+select user_a, job_old from fx
+union all select user_a, job_reacted from fx
+union all select user_a, job_young from fx
+union all select user_a, job_gone from fx
+union all select user_b, job_young from fx
+on conflict do nothing;
+
 insert into public.role_evidence (user_id, job_id, items, origin, material_key, computed_at)
 select user_a, job_old, '[{"requirementId":"r1","verdict":"gap"}]'::jsonb, 'model', 'k1', now() - interval '31 days' from fx
 union all select user_a, job_reacted, '[]'::jsonb, 'model', 'k1', now() - interval '31 days' from fx

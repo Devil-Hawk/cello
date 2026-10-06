@@ -47,7 +47,7 @@ function fakeAdmin(): { admin: AdminClient; eqCalls: [string, string, unknown][]
           },
         }
       }
-      if (table === 'jobs') {
+      if (table === 'person_jobs' || table === 'jobs') {
         return {
           select() {
             const builder = {
@@ -97,6 +97,6 @@ describe('ingestLeads — existing-jobs dedup lookup is ownership-scoped via the
     // the dedup lookup no longer relies on an .in('company_id', companyIds)
     // array (which breaks past ~600 companies), root-caused instead via the
     // FK join.
-    expect(eqCalls).toContainEqual(['jobs', 'companies.user_id', USER_ID])
+    expect(eqCalls).toContainEqual(['person_jobs', 'viewer_id', USER_ID])
   })
 })

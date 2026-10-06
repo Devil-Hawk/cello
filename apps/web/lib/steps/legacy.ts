@@ -19,7 +19,6 @@ export const LEGACY_STEPS: Record<string, ModelStep> = Object.fromEntries(
     legacy('write-final-answer', 'S14', 'K24a'),
     legacy('write-summary', 'S14', 'K24a'),
     // Memory: replaced by the Learner.
-    legacy('distill-insight', 'S16', 'K15'),
     legacy('plan-strategy', 'S16', 'K15'),
     legacy('analyze-pipeline', 'S16', 'K15'),
     // Scoring and goal fit: replaced by chance.

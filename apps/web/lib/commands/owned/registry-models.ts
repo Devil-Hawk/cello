@@ -30,7 +30,6 @@ const kept = [
   'llm_spend',
   'outreach_messages',
   'resume_documents',
-  'strategy_proposal_outcomes',
   'user_mcp_servers',
 ]
 

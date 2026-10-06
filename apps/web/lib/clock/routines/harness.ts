@@ -1,7 +1,7 @@
 // The harness's old daily tick, now four routines of the clock (lib/clock): harness.resume (stalled
 // checkpointed runs, every 5 minutes), demo.expire (demo wipe at expiry and the trace span
 // retention, hourly), harness.digest (a daily-digest agent run and the composed digest per active
-// user, daily) and harness.distill (the nightly learning pass: counts in code, at most one model read). They moved out of app/api/harness/cron, which a route file cannot export from, and
+// user, daily) and harness.learn (the nightly learning pass: counts in code, at most one model read). They moved out of app/api/harness/cron, which a route file cannot export from, and
 // the Vercel cron that called it is gone.
 //
 // Each pass is independent of the others, as before: a failure in one never blocks another.
@@ -435,7 +435,7 @@ export interface DistillPassResult {
 /**
  * The learning pass (K15): runLearner recounts what Cello learned for each active person, counts from
  * code over their record and at most one model read stored as a proposal. A failure for one person never
- * blocks another's. The routine keeps its id, harness.distill, so its schedule and its row stay.
+ * blocks another's. The routine keeps its id, harness.learn, so its schedule and its row stay.
  */
 export async function runDistillPass(admin: AdminClient): Promise<DistillPassResult[]> {
   const { batch } = await activeBatch(admin)

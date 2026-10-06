@@ -18,6 +18,9 @@ on conflict (id) do nothing;
 
 \ir ../migrations/20261123500000_extension_status.sql
 
+-- preferences.pipeline is written only by set_autonomy(); this check writes it directly, as its writer.
+select set_config('cello.autonomy_writer', 'on', true);
+
 do $$
 declare
   a constant uuid := 'aaaaaaaa-6666-0000-0000-000000000001';

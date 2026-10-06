@@ -256,7 +256,7 @@ insert into public.routines (user_id, command, every, local_time, timezone, next
   (null, 'harness.resume', interval '5 minutes', null,    'UTC', now() + interval '1 minute',  true,  'default'),
   (null, 'demo.expire',    interval '1 hour',    null,    'UTC', now() + interval '3 minutes', true,  'default'),
   (null, 'harness.digest', null,                 '13:07', 'UTC', date_trunc('day', now()) + interval '13 hours 7 minutes' + case when now() >= date_trunc('day', now()) + interval '13 hours 7 minutes' then interval '1 day' else interval '0' end, true, 'default'),
-  (null, 'harness.distill', null,                '14:00', 'UTC', date_trunc('day', now()) + interval '14 hours' + case when now() >= date_trunc('day', now()) + interval '14 hours' then interval '1 day' else interval '0' end, true, 'default'),
+  (null, 'harness.learn', null,                '14:00', 'UTC', date_trunc('day', now()) + interval '14 hours' + case when now() >= date_trunc('day', now()) + interval '14 hours' then interval '1 day' else interval '0' end, true, 'default'),
   -- The rendered tier's dispatch has no handler: this row is the switch. It ships off until S11 passes.
   (null, 'roles.render',   null,                 null,    'UTC', null,                         false, 'default')
 on conflict (command, coalesce(user_id, '00000000-0000-0000-0000-000000000000'::uuid)) do nothing;
@@ -449,9 +449,9 @@ begin
   delete from public.measure_runs where ran_at < now() - interval '400 days';
   get diagnostics measures_deleted = row_count;
 
-  -- Chat's command slots arrive with K10; until then there is nothing to clean.
+  -- Command slots (K10): a window older than two days is never read again.
   if to_regclass('public.command_slots') is not null then
-    execute 'delete from public.command_slots where created_at < now() - interval ''1 day''';
+    execute 'delete from public.command_slots where window_start < now() - interval ''2 days''';
     get diagnostics slots_deleted = row_count;
   end if;
 

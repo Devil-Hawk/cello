@@ -111,7 +111,7 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     reason: 'retired is the ids of role types the module no longer has: a handful, never user data.',
   },
   'apps/web/lib/harness/agents/enricher.ts': {
-    calls: [".in('id', chunk)"],
+    calls: [".in('id', chunk)", ".in('job_id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",
   },
   'apps/web/lib/harness/agents/follow_upper.ts': {
@@ -139,15 +139,15 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     reason: 'knockouts can never exceed the MAX_JOBS (30) batch it was collected from in the same run.',
   },
   'apps/web/lib/harness/copilot-tools.ts': {
-    calls: [".in('id', jobIds)", ".in('job_id', jobIds)", ".in('id', companyIds)", ".in('id', trgmIds)", ".in('id', contactIds)"],
+    calls: [".in('id', jobIds)", ".in('job_id', jobIds)", ".in('id', trgmIds)", ".in('id', contactIds)"],
     reason:
-      "loadJobBriefs: jobIds is always ≤20 ids (every caller slices/caps before calling), for the jobs and for the person's own person_roles rows; companyIds is the " +
-      'deduped company_id set of those ≤20 job rows. listJobs\' trgmIds and listContacts\' contactIds are both ' +
+      "loadJobBriefs: jobIds is always ≤20 ids (every caller slices/caps before calling), for the roles and for the person's own person_roles rows. " +
+      'listJobs\' trgmIds and listContacts\' contactIds are both ' +
       "search_*_by_*_trgm()'s p_limit-bounded RPC result (clampLimit'd to ≤15/≤25, hard RPC ceiling 50 — see " +
       '20260816000009_job_search.sql), never an owned-id set.',
   },
   'apps/web/lib/strategy/datasource.ts': {
-    calls: [".in('id', chunk)"],
+    calls: [".in('id', chunk)", ".in('job_id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",
   },
 }

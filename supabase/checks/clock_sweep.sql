@@ -38,7 +38,7 @@ begin
   if r.next_due_at > now() + interval '11 minutes' then raise exception 'the first check should be within ten minutes'; end if;
   if exists (select 1 from public.routines where user_id = f.demo_id) then raise exception 'a demo must get no routines'; end if;
   if (select count(*) from public.routines where user_id is null and command in
-      ('inbox.sync', 'owner.health', 'clock.meter', 'clock.prune', 'harness.resume', 'demo.expire', 'harness.digest', 'harness.distill', 'roles.render')) <> 9 then
+      ('inbox.sync', 'owner.health', 'clock.meter', 'clock.prune', 'harness.resume', 'demo.expire', 'harness.digest', 'harness.learn', 'roles.render')) <> 9 then
     raise exception 'an instance routine is missing';
   end if;
   if (select enabled from public.routines where command = 'roles.render' and user_id is null) then

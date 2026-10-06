@@ -31,5 +31,5 @@ export const HANDLERS: Record<string, RoutineHandler> = {
   'harness.resume': harnessResume,
   'demo.expire': demoExpire,
   'harness.digest': harnessDigest,
-  'harness.distill': harnessDistill,
+  'harness.learn': harnessDistill,
 }

@@ -72,7 +72,7 @@ export const ROUTINE_LABELS: Record<string, string> = {
   'harness.resume': 'Resume paused work',
   'demo.expire': 'Demo cleanup',
   'harness.digest': 'Daily digest',
-  'harness.distill': 'Weekly learning',
+  'harness.learn': 'Weekly learning',
   'roles.render': 'Pages that need a browser',
 }
 
