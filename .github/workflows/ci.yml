@@ -73,6 +73,61 @@ jobs:
       - name: Run tests
         run: pnpm test
 
+  test-extension:
+    name: Test Extension
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # The test build talks to the stub server on loopback, and waits 4 s, not 30 s,
+      # for a confirmation that never comes.
+      - name: Build the extension for the fixtures
+        run: pnpm --filter @cello/extension build
+        env:
+          WXT_CELLO_ORIGIN: http://127.0.0.1:4599
+          WXT_CELLO_CONFIRM_MS: '4000'
+
+      - name: Install Chromium
+        run: pnpm --filter @cello/extension exec playwright install --with-deps chromium
+
+      - name: Run the fixtures
+        run: pnpm --filter @cello/extension test:e2e
+
+      - name: Upload the fixture report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-e2e-report
+          path: apps/extension/test-results/
+          if-no-files-found: ignore
+
+      # The package for the store and for loading by hand is built with the real origin.
+      - name: Build the store package
+        run: pnpm --filter @cello/extension zip
+
+      - name: Upload the extension zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: cello-extension
+          path: apps/extension/.output/*-chrome.zip
+          if-no-files-found: error
+
   test-scrapers:
     name: Test Scrapers
     runs-on: ubuntu-latest
