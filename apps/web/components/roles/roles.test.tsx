@@ -256,7 +256,7 @@ describe('role types', () => {
     const html = view({ items: fixtureRoles(2, 2), total: 2 })
     expect(html).toContain('fixed inset-x-4')
     expect(html).toContain('sm:absolute')
-    expect(html).not.toContain('w-[min(92vw')
+    expect(html).toContain('sm:w-[360px]')
   })
 
   it('says how many roles are being checked, from the count it is given, and nothing when none are', () => {
