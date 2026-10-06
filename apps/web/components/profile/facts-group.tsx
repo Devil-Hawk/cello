@@ -3,7 +3,7 @@
 // What Cello knows about you: one row per fact with its source and a Correct key.
 // Correct saves the value as yours; the page decides where it is written.
 
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { Fact } from './facts'
@@ -21,7 +21,7 @@ function FactRow({ fact, onCorrect }: { fact: Fact; onCorrect: FactsGroupProps['
   const [saving, setSaving] = useState(false)
   const id = `fact-${fact.key}`
 
-  async function save(e: React.FormEvent) {
+  async function save(e: FormEvent) {
     e.preventDefault()
     setSaving(true)
     const problem = await onCorrect(fact, raw)
