@@ -60,8 +60,8 @@ import {
   type ResumeHeadingLevel,
   type ResumeInlineLine,
   type ResumeListBlock,
+  splitResumeHeader,
 } from './markdown'
-import { splitResumeHeader } from './pdf'
 import {
   getTemplate,
   type HeadingStyle,
@@ -347,9 +347,8 @@ export async function renderResumeBlocksDocx(
   }
 
   // --- name / contact header -----------------------------------------------
-  // `splitResumeHeader` is imported from the PDF renderer rather than
-  // reimplemented, so the two exports can never disagree about which line is
-  // the candidate's name — see its doc comment.
+  // `splitResumeHeader` lives with the block model, so the two exports can never
+  // disagree about which line is the candidate's name. See its doc comment.
   const header = splitResumeHeader(list)
   if (header.name) {
     push({ style: NAME_STYLE_ID, children: linesToChildren([header.name], nb.nameCasing) })
