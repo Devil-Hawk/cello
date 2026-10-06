@@ -8,13 +8,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { createClient } from '@/lib/supabase/server'
 import { cardLines, deleteScheduledTask, ScheduleError, updateScheduledTask } from '@/lib/agents/schedules'
-import { PatchTaskBody } from '@/lib/agents/schedule-schemas'
+import { PatchTaskBody, SCHEDULED_TASKS_ON } from '@/lib/agents/schedule-schemas'
 
 export const dynamic = 'force-dynamic'
 
 const NOT_FOUND = { error: 'Not found', fix: 'Open Scheduled tasks and choose one from the list.' }
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+  if (!SCHEDULED_TASKS_ON) return new NextResponse(null, { status: 404 })
   const supabase = await createClient()
   const {
     data: { user },
@@ -35,6 +36,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 }
 
 export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
+  if (!SCHEDULED_TASKS_ON) return new NextResponse(null, { status: 404 })
   const supabase = await createClient()
   const {
     data: { user },

@@ -49,6 +49,7 @@ import { BudgetCapError } from '../spend-port'
 import { makeFakeAdmin, type FakeAdmin } from '../testing/fake-admin'
 import { isToolFix, type ToolMeta } from './common'
 import { toAgentTools } from './langchain'
+import { scheduleTask } from './actions'
 import { toolByName } from './registry'
 import { quoteIsTheirs } from './memory'
 
@@ -71,7 +72,8 @@ function ctxFor(admin: FakeAdmin = makeFakeAdmin(), over: Partial<AgentContext> 
 const meta = (over: Partial<ToolMeta> = {}): ToolMeta => ({ toolCallId: 'call-1', channel: 'agent', messages: [], ...over })
 
 async function call(name: string, args: Record<string, unknown>, ctx: AgentContext, metaOver: Partial<ToolMeta> = {}) {
-  const def = toolByName(name)!
+  // The scheduling tool is not offered while scheduled tasks are closed, but it is kept working.
+  const def = name === 'schedule_task' ? scheduleTask : toolByName(name)!
   return def.handler(ctx, def.schema.parse(args) as never, meta(metaOver))
 }
 

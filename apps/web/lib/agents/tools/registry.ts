@@ -10,6 +10,7 @@
 // item, a document written and a document revised.
 
 import { CELLO_TOOL_NAMES, UNTRUSTED_TOOL_NAMES } from '../tool-names'
+import { SCHEDULED_TASKS_ON } from '../schedule-schemas'
 import type { CelloTool } from './common'
 import { createArtifactTool, updateArtifactTool } from './artifacts'
 import { pipeline, requestApproval, scheduleTask } from './actions'
@@ -31,7 +32,8 @@ export const CELLO_TOOLS: readonly CelloTool<any>[] = [
   updateArtifactTool,
   pipeline,
   requestApproval,
-  scheduleTask,
+  // Scheduling is closed until the instructions that say what a task may do ship (SCHEDULED_TASKS_ON).
+  ...(SCHEDULED_TASKS_ON ? [scheduleTask] : []),
   searchKnowledge,
 ]
 

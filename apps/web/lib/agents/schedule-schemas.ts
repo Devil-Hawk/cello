@@ -4,6 +4,12 @@
 import { z } from 'zod'
 import { EVERY, WEEKDAYS } from './schedules'
 
+/**
+ * Scheduled tasks are built but closed: every route under /api/scheduled-tasks answers 404 and the
+ * schedule_task tool is not offered, until the instructions that say what a task may do ship.
+ */
+export const SCHEDULED_TASKS_ON = false // K27 turns this on
+
 export const ScheduleSchema = z.object({
   every: z.enum(EVERY),
   at: z.string().max(5).optional(),

@@ -12,6 +12,7 @@ const approvals = vi.hoisted(() => ({ queueApproval: vi.fn(), autoApprove: vi.fn
 vi.mock('../approvals', async (orig) => ({ ...(await orig<typeof import('../approvals')>()), queueApproval: approvals.queueApproval, autoApprove: approvals.autoApprove }))
 
 import { CELLO_TOOL_NAMES, UNTRUSTED_TOOL_NAMES } from '../tool-names'
+import { SCHEDULED_TASKS_ON } from '../schedule-schemas'
 import type { AgentContext } from '../context'
 import { makeFakeAdmin } from '../testing/fake-admin'
 import { CELLO_TOOLS, MCP_TOOLS, toolByName } from './registry'
@@ -33,9 +34,11 @@ const ctx = (over: Partial<AgentContext> = {}): AgentContext => ({
 })
 
 describe('the twelve tools', () => {
-  it('are exactly these thirteen names (create and update are one item)', () => {
-    expect(CELLO_TOOLS.map((t) => t.name).sort()).toEqual([...CELLO_TOOL_NAMES].sort())
-    expect(CELLO_TOOLS).toHaveLength(13)
+  it('are the named tools, with scheduling held back while scheduled tasks are closed', () => {
+    const offered = CELLO_TOOL_NAMES.filter((n) => SCHEDULED_TASKS_ON || n !== 'schedule_task')
+    expect(CELLO_TOOLS.map((t) => t.name).sort()).toEqual([...offered].sort())
+    expect(CELLO_TOOLS).toHaveLength(12)
+    expect(SCHEDULED_TASKS_ON).toBe(false)
   })
 
   it('no name contains run or thread', () => {

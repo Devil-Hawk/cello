@@ -1,13 +1,19 @@
-// /api/scheduled-tasks, its [id] route and Run now: who may call them, what they refuse, and
-// that the person (not a model) is the only one who can set "act within my rules".
+// /api/scheduled-tasks, its [id] route and Run now: closed (404) while SCHEDULED_TASKS_ON is false, and
+// once open, who may call them, what they refuse, and that the person (not a model) is the only one
+// who can set "act within my rules".
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { makeFakeAdmin, type FakeAdmin } from '@/lib/agents/testing/fake-admin'
 
+const flag = vi.hoisted(() => ({ on: true }))
 const state = vi.hoisted(() => ({ user: { id: 'u1' } as { id: string } | null, admin: null as unknown, fire: vi.fn(async () => undefined) }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: async () => ({ data: { user: state.user } }) } }) }))
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => state.admin }))
+vi.mock('@/lib/agents/schedule-schemas', async (orig) => {
+  const real = await orig<typeof import('@/lib/agents/schedule-schemas')>()
+  return { ...real, get SCHEDULED_TASKS_ON() { return flag.on } }
+})
 vi.mock('@/lib/agents/scheduler', async (orig) => ({ ...(await orig<typeof import('@/lib/agents/scheduler')>()), fireContinue: state.fire }))
 
 import { GET, POST } from './route'
@@ -17,6 +23,7 @@ import { POST as run } from './[id]/run/route'
 let admin: FakeAdmin
 beforeEach(() => {
   vi.clearAllMocks()
+  flag.on = true
   state.user = { id: 'u1' }
   admin = makeFakeAdmin(
     { profiles: [{ id: 'u1', is_demo: false, demo_expires_at: null }, { id: 'u2', is_demo: true, demo_expires_at: '2099-01-01T00:00:00Z' }] },
@@ -128,5 +135,28 @@ describe('POST /api/scheduled-tasks/[id]/run', () => {
     state.user = { id: 'u2' }
     expect((await run(req('POST'), at('demo-task'))).status).toBe(403)
     expect(state.fire).not.toHaveBeenCalled()
+  })
+})
+
+describe('while scheduled tasks are closed', () => {
+  const at = (id: string) => ({ params: { id } })
+
+  it('every method answers 404 and touches nothing', async () => {
+    flag.on = false
+    const answers = [
+      await GET(),
+      await POST(req('POST', valid)),
+      await PATCH(req('PATCH', { status: 'paused' }), at('t1')),
+      await DELETE(req('DELETE'), at('t1')),
+      await run(req('POST'), at('t1')),
+    ]
+    expect(answers.map((r) => r.status)).toEqual([404, 404, 404, 404, 404])
+    expect(admin.log).toEqual([])
+    expect(state.fire).not.toHaveBeenCalled()
+  })
+
+  it('stay closed until the flag is turned on in code', async () => {
+    const real = await vi.importActual<typeof import('@/lib/agents/schedule-schemas')>('@/lib/agents/schedule-schemas')
+    expect(real.SCHEDULED_TASKS_ON).toBe(false)
   })
 })

@@ -13,11 +13,12 @@ import { isDemoUser } from '@/lib/agents/api'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { createClient } from '@/lib/supabase/server'
 import { cardLines, createScheduledTask, listScheduledTasks, ScheduleError } from '@/lib/agents/schedules'
-import { CreateTaskBody } from '@/lib/agents/schedule-schemas'
+import { CreateTaskBody, SCHEDULED_TASKS_ON } from '@/lib/agents/schedule-schemas'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
+  if (!SCHEDULED_TASKS_ON) return new NextResponse(null, { status: 404 })
   const supabase = await createClient()
   const {
     data: { user },
@@ -28,6 +29,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  if (!SCHEDULED_TASKS_ON) return new NextResponse(null, { status: 404 })
   const supabase = await createClient()
   const {
     data: { user },

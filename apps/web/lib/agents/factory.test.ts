@@ -18,7 +18,7 @@ import { createCelloAgent, researcherSpec, specialists } from './factory'
 import { GUARD_ORDER } from './middleware'
 import { ScriptedChatModel, callTools, say } from './testing/scripted-model'
 import { makeFakeAdmin } from './testing/fake-admin'
-import { CELLO_TOOL_NAMES } from './tool-names'
+import { CELLO_TOOLS } from './tools/registry'
 
 function skills() {
   const dir = mkdtempSync(path.join(tmpdir(), 'cello-skills-'))
@@ -63,9 +63,10 @@ describe('createCelloAgent', () => {
     expect(names.indexOf('CelloDemoRules')).toBeGreaterThan(names.indexOf('SummarizationMiddleware'))
   })
 
-  it('holds the thirteen Cello tools, none named run or thread, and the file tools Deep Agents adds', () => {
+  it('holds the registered Cello tools, none named run or thread, and the file tools Deep Agents adds', () => {
     const names = build().agent.options.tools.map((t) => t.name)
-    for (const n of CELLO_TOOL_NAMES) expect(names).toContain(n)
+    for (const n of CELLO_TOOLS.map((t) => t.name)) expect(names).toContain(n)
+    expect(names).not.toContain('schedule_task')
     for (const n of names) expect(n).not.toMatch(/run|thread/i)
   })
 
