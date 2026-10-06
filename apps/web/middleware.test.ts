@@ -27,3 +27,22 @@ describe('retired pages', () => {
     await expect(middleware(new NextRequest(`http://localhost/${name}`))).rejects.toThrow('a retired page must redirect')
   })
 })
+
+describe('fixture pages', () => {
+  it('answers 404 without the flag, before the session is read', async () => {
+    vi.stubEnv('CELLO_FIXTURES', '')
+    vi.stubEnv('VERCEL_ENV', 'production')
+    const res = await middleware(new NextRequest('http://localhost/fixtures/today'))
+    expect(res.status).toBe(404)
+    vi.unstubAllEnvs()
+  })
+
+  it('lets them through on a fixture build and on a preview, with no session', async () => {
+    vi.stubEnv('CELLO_FIXTURES', '1')
+    expect((await middleware(new NextRequest('http://localhost/fixtures/today'))).status).toBe(200)
+    vi.stubEnv('CELLO_FIXTURES', '')
+    vi.stubEnv('VERCEL_ENV', 'preview')
+    expect((await middleware(new NextRequest('http://localhost/fixtures/roles'))).status).toBe(200)
+    vi.unstubAllEnvs()
+  })
+})
