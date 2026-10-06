@@ -95,13 +95,15 @@ end;
 $$;
 reset role;
 
+grant select on fx to authenticated;
 select to_regclass('public.person_roles') is not null as has_person_roles \gset
 \if :has_person_roles
 
 -- Two people share one role and each has a row for it.
 insert into public.person_roles (user_id, job_id, assessed_at, blocked_reasons, want_p, want_reason, want_detail, chance, chance_detail)
-select user_a, live_job, now(), '[]'::jsonb, 0.7, 'Because.', '{"judge": 0.8, "embedding": 0.6, "stated": 0.5}'::jsonb, 'strong', '{"checks": []}'::jsonb from fx;
-insert into public.person_roles (user_id, job_id) select user_b, live_job from fx;
+select user_a, live_job, now(), '[]'::jsonb, 0.7, 'Because.', '{"judge": 0.8, "embedding": 0.6, "stated": 0.5}'::jsonb, 'strong', '{"checks": []}'::jsonb from fx
+on conflict (user_id, job_id) do update set assessed_at=excluded.assessed_at, blocked_reasons=excluded.blocked_reasons, want_p=excluded.want_p, want_reason=excluded.want_reason, want_detail=excluded.want_detail, chance=excluded.chance, chance_detail=excluded.chance_detail;
+insert into public.person_roles (user_id, job_id) select user_b, live_job from fx on conflict do nothing;
 
 -- Person B sees their own row and not A's verdict.
 set local role authenticated;

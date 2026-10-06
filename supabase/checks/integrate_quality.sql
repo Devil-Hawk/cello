@@ -42,7 +42,7 @@ begin
     return;
   end if;
   insert into public.person_roles (user_id, job_id, trace_id, observation_id)
-  values ('bbbbbbbb-0000-0000-0000-000000000001', 'bbbbbbbb-2222-0000-0000-000000000001', repeat('a', 32), repeat('b', 16));
+  values ('bbbbbbbb-0000-0000-0000-000000000001', 'bbbbbbbb-2222-0000-0000-000000000001', repeat('a', 32), repeat('b', 16)) on conflict (user_id, job_id) do update set trace_id=excluded.trace_id, observation_id=excluded.observation_id;
 end $$;
 
 -- ===========================================================================
