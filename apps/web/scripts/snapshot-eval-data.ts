@@ -43,42 +43,45 @@ async function rest<T>(query: string): Promise<T> {
   return (await res.json()) as T
 }
 
+// A score is the person's own (person_roles), never the shared role's: read the applicant's.
 interface AppRow {
   job_id: string
+  user_id: string
   notes: string | null
   stage: string
-  jobs: { match_score: number | null; title: string } | null
+  jobs: { title: string; person_roles: { user_id: string; match_score: number | null }[] } | null
 }
-interface JobRow {
-  id: string
-  title: string
+interface RoleRow {
+  job_id: string
   match_score: number | null
+  jobs: { title: string } | null
 }
 
 async function main() {
   const apps = await rest<AppRow[]>(
-    'applications?select=job_id,notes,stage,jobs(match_score,title)&limit=500'
+    'applications?select=job_id,user_id,notes,stage,jobs(title,person_roles(user_id,match_score))&limit=500'
   )
 
   // Positives: jobs the human actually applied to, EXCLUDING seeded demo rows.
   const genuine = apps.filter((a) => !(a.notes ?? '').includes(DEMO_MARKER))
+  const scoreOf = (a: AppRow) => a.jobs?.person_roles.find((r) => r.user_id === a.user_id)?.match_score ?? null
   const positives = genuine
-    .filter((a) => a.jobs?.match_score != null)
+    .filter((a) => scoreOf(a) != null)
     .map((a) => ({
       id: a.job_id,
-      score: a.jobs!.match_score as number,
+      score: scoreOf(a) as number,
       positive: true,
       label: `${a.jobs!.title} (${a.stage})`,
     }))
 
   // Negatives: scored jobs the human never applied to.
   const appliedIds = new Set(apps.map((a) => a.job_id))
-  const sampled = await rest<JobRow[]>(
-    `jobs?select=id,title,match_score&match_score=not.is.null&order=match_score.desc&limit=${NEGATIVE_SAMPLE}`
+  const sampled = await rest<RoleRow[]>(
+    `person_roles?select=job_id,match_score,jobs(title)&match_score=not.is.null&order=match_score.desc&limit=${NEGATIVE_SAMPLE}`
   )
   const negatives = sampled
-    .filter((j) => !appliedIds.has(j.id) && j.match_score != null)
-    .map((j) => ({ id: j.id, score: j.match_score as number, positive: false, label: j.title }))
+    .filter((j) => !appliedIds.has(j.job_id) && j.match_score != null)
+    .map((j) => ({ id: j.job_id, score: j.match_score as number, positive: false, label: j.jobs?.title ?? '' }))
 
   const fixture = {
     // No generatedAt timestamp: it would make every regeneration a diff even

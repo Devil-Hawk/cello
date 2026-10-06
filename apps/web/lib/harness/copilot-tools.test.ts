@@ -72,12 +72,6 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
     return this
   }
   eq(col: string, val: unknown) {
-    // person_jobs.viewer_id: the person whose company stored the (unshared) fixture role.
-    if (col === 'viewer_id') {
-      const byId = new Map((this.allTables.companies ?? []).map((c) => [c.id, c]))
-      this.rows = this.rows.filter((r) => byId.get(r.company_id as string)?.user_id === val)
-      return this
-    }
     if (col.startsWith('companies.')) {
       const field = col.slice('companies.'.length)
       const byId = new Map((this.allTables.companies ?? []).map((c) => [c.id, c]))
@@ -151,8 +145,16 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
 function fakeAdmin(tables: Record<string, Row[]>, rpc: Record<string, Row[]> = {}): AdminClient {
   const admin = {
     from(table: string) {
-      // person_jobs is the view over jobs
-      return new FakeQuery([...(tables[table === 'person_jobs' ? 'jobs' : table] ?? [])], tables)
+      // person_jobs: rows given as such, else the view over jobs where the role's company is the viewer's own
+      if (table === 'person_jobs' && !tables.person_jobs) {
+        const owner = new Map((tables.companies ?? []).map((c) => [c.id, c]))
+        const view = (tables.jobs ?? []).map((j) => {
+          const c = owner.get(j.company_id as string)
+          return { ...j, viewer_id: c?.user_id, viewer_company_id: c?.id ?? null, viewer_company_name: c?.name ?? null }
+        })
+        return new FakeQuery(view, tables)
+      }
+      return new FakeQuery([...(tables[table] ?? [])], tables)
     },
     async rpc(fn: string) {
       return { data: rpc[fn] ?? [], error: null }
@@ -309,6 +311,25 @@ describe('dispatchTool — job ownership enforced transitively via companies.use
     expect(JSON.stringify(result)).not.toContain('secret')
   })
 
+  it("a second follower of a shared role reads their own company and score, not the first storer's", async () => {
+    const admin = fakeAdmin({
+      // the role is stored under the other person's company, but 'me' holds it too
+      jobs: [{ id: 'job-1', title: 'Shared Role', company_id: 'co-theirs' }],
+      companies: [
+        { id: 'co-theirs', name: 'Theirs', user_id: 'someone-else' },
+        { id: 'co-mine', name: 'Mine', user_id: 'me' },
+      ],
+      person_jobs: [
+        { id: 'job-1', viewer_id: 'someone-else', title: 'Shared Role', company_id: 'co-theirs', viewer_company_id: 'co-theirs', viewer_company_name: 'Theirs', match_score: 91, match_details: { highlights: ['Theirs only'] } },
+        { id: 'job-1', viewer_id: 'me', title: 'Shared Role', company_id: 'co-theirs', viewer_company_id: 'co-mine', viewer_company_name: 'Mine', match_score: 42, match_details: { highlights: ['Mine'] } },
+      ],
+    })
+    const result = await dispatchTool(baseCtx(admin), 'explain_match', { jobId: 'job-1' })
+    expect(result).toMatchObject({ matched: true, score: 42, company: 'Mine', companyId: 'co-mine' })
+    expect(JSON.stringify(result)).not.toContain('Theirs')
+    expect(JSON.stringify(result)).not.toContain('91')
+  })
+
   it('the identical job IS reachable once it belongs to the caller', async () => {
     const admin = fakeAdmin({
       jobs: [{ id: 'job-1', title: 'My Role', company_id: 'co-1', match_score: 77, match_details: { fit: 'good' } }],
@@ -333,7 +354,7 @@ describe('dispatchTool — job ownership enforced transitively via companies.use
     expect(result).toMatchObject({ error: expect.stringContaining('list_jobs') })
   })
 
-  it('a job with no company_id at all is rejected rather than treated as ownerless/public', async () => {
+  it('a role nobody holds (no company, no role row) is rejected rather than treated as ownerless/public', async () => {
     const admin = fakeAdmin({
       jobs: [{ id: 'job-3', title: 'Orphan Role', company_id: null, match_score: 50 }],
       companies: [],
@@ -341,7 +362,7 @@ describe('dispatchTool — job ownership enforced transitively via companies.use
     const ctx = baseCtx(admin)
 
     const result = await dispatchTool(ctx, 'explain_match', { jobId: 'job-3' })
-    expect(result).toEqual({ error: 'Job has no company' })
+    expect(result).toMatchObject({ error: expect.stringContaining('job-3') })
   })
 
   it('get_dossier (agent: company_researcher) enforces ownership too, and does not leak whether a dossier exists for a company that is not the caller\'s', async () => {
