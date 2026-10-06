@@ -91,14 +91,17 @@ export function orderEntries(entries: SitemapEntry[], targets: ReaderTargets, no
 
 /** All of a site's job URLs from the sitemaps its robots.txt names. */
 export async function readSitemapEntries(origin: string, f: SiteFetcher): Promise<{ entries: SitemapEntry[]; complete: boolean }> {
-  const named = (await f.sitemapsOf(origin)).filter((u) => !/\.gz($|\?)/i.test(u))
+  const all = await f.sitemapsOf(origin)
+  const named = all.filter((u) => !/\.gz($|\?)/i.test(u))
   // ponytail: .gz sitemaps are skipped (no gunzip here); the plain job sitemap is listed beside them on every site seen.
   const jobby = named.filter((u) => SITEMAP_WORDS.test(u))
   // On a careers host (careers.walmart.com) every sitemap is about jobs; on a company's main site only the job ones are.
   const careersHost = /career|(^|\.)jobs?\./i.test(new URL(origin).hostname)
-  const queue = (careersHost && !jobby.length ? named : jobby).slice(0, MAX_SITEMAPS)
+  const wanted = careersHost && !jobby.length ? named : jobby
+  const queue = wanted.slice(0, MAX_SITEMAPS)
   const entries: SitemapEntry[] = []
-  let complete = queue.length > 0
+  // Anything left unread (a sitemap past the limit, a gzipped one, entries past the cap) means the list is not the whole list.
+  let complete = queue.length > 0 && wanted.length <= MAX_SITEMAPS && !all.some((u) => /\.gz($|\?)/i.test(u) && /job|position|opening|vacanc/i.test(new URL(u).pathname))
   for (let i = 0; i < queue.length && i < MAX_SITEMAPS + 3; i++) {
     let text: string
     try {
@@ -118,10 +121,17 @@ export async function readSitemapEntries(origin: string, f: SiteFetcher): Promis
     const children = locs(text, 'sitemap')
     if (children.length) {
       // An index: follow only the children that look like job sitemaps, never past the limit.
-      for (const c of children) if (SITEMAP_WORDS.test(c.url) && !/\.gz($|\?)/i.test(c.url) && queue.length < MAX_SITEMAPS + 3 && !queue.includes(c.url)) queue.push(c.url)
+      for (const c of children) {
+        if (!SITEMAP_WORDS.test(c.url) || queue.includes(c.url)) continue
+        if (/\.gz($|\?)/i.test(c.url) || queue.length >= MAX_SITEMAPS + 3) complete = false
+        else queue.push(c.url)
+      }
+      if (children.length >= MAX_ENTRIES) complete = false
       continue
     }
-    for (const e of locs(text, 'url')) if (isPostingUrl(e.url)) entries.push(e)
+    const urls = locs(text, 'url')
+    if (urls.length >= MAX_ENTRIES) complete = false
+    for (const e of urls) if (isPostingUrl(e.url)) entries.push(e)
   }
   return { entries, complete: complete && entries.length > 0 }
 }
