@@ -194,7 +194,7 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
             tried.push({ tier: 'listing', outcome: 'none' })
           } else {
             Object.assign(out, { tier: 'listing' as Tier, jobs: [job], single: true, complete: false })
-            if (!job.location) out.message = 'Found the posting. Its page does not say where the role is.'
+            if (!job.location) out.message = 'Found the posting. Cello could not read where the role is from its page.'
             out.checked.push(job.externalId)
             tried.push({ tier: 'listing', outcome: 'roles' })
             return finish()
