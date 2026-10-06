@@ -13,13 +13,15 @@ const md5 = (s: string) => createHash('md5').update(s).digest('hex')
 const HTML = '<h2>About the role</h2><p>Build the ledger.</p><h3>Requirements</h3><ul><li>5+ years of Go</li><li>Strong SQL</li></ul>'
 const MD = '## About the role\n\nBuild the ledger.\n\n### Requirements\n\n-   5+ years of Go\n-   Strong SQL'
 
+// One instant for every posting, so the order a read stores them in does not depend on the millisecond each was made.
+const POSTED = new Date(Date.now() - 86_400_000).toISOString()
 const job = (over: Partial<AtsJob> = {}): AtsJob => ({
   title: 'Backend Engineer',
   url: 'https://acme.com/jobs/1',
   externalId: 'https://acme.com/jobs/1',
   description: 'About the role\nBuild the ledger.\nRequirements\n5+ years of Go\nStrong SQL',
   descriptionHtml: HTML,
-  postedAt: new Date(Date.now() - 86_400_000).toISOString(),
+  postedAt: POSTED,
   ...over,
 })
 
