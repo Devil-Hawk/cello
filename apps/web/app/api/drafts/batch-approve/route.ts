@@ -58,7 +58,7 @@ import {
   AUTHORIZATION_MAX_AGE_MS,
   type SubmitAuthorization,
 } from '@/lib/ats-apply'
-import { FIT_COLUMNS, parseFit } from '@/lib/scoring/read'
+import { FIT_COLUMNS, parseFit, type FitRow } from '@/lib/scoring/read'
 import type { RoleFit } from '@/lib/scoring/types'
 import { logApiError } from '@/lib/observability/log'
 import { unjudgedCvTailorDraftIds } from '@/lib/evals/verdicts'
@@ -87,13 +87,8 @@ interface JobRel {
   url: string | null
   description: string | null
   location: string | null
-  fit_assessed_at: string | null
-  blocked_reasons: unknown
-  want_p: number | null
-  want_reason: string | null
-  want_detail: unknown
-  chance: string | null
-  chance_detail: unknown
+  /** The person's own verdict on the role: their person_roles row, embedded. */
+  person_roles?: FitRow | FitRow[] | null
   companies?: CompanyRel | CompanyRel[] | null
 }
 
@@ -115,7 +110,7 @@ function one<T>(value: T | T[] | null | undefined): T | null {
 
 const DRAFT_SELECT =
   'id, job_id, status, resume_summary, cover_letter, answers, created_at, ' +
-  `jobs(id, title, url, description, location, ${FIT_COLUMNS}, companies(name, metadata))`
+  'jobs(id, title, url, description, location, person_roles(' + FIT_COLUMNS + '), companies(name, metadata))'
 
 /** answers.deferredToHuman, defensively — the column is free-form jsonb. */
 function storedDeferred(answers: unknown): string[] {
@@ -227,6 +222,7 @@ export async function GET() {
     .from('application_drafts')
     .select(DRAFT_SELECT)
     .eq('user_id', user.id)
+    .eq('jobs.person_roles.user_id', user.id)
     .eq('status', 'pending_review')
     .order('created_at', { ascending: false })
     .limit(200)
@@ -555,6 +551,7 @@ async function approveOne(params: ApproveOneParams): Promise<ItemResult> {
       .select(DRAFT_SELECT)
       .eq('id', draftId)
       .eq('user_id', userId)
+      .eq('jobs.person_roles.user_id', userId)
       .maybeSingle()
     if (error) return { ...base, outcome: 'failed', reason: error.message }
     if (!data) return { ...base, reason: 'No such application in your queue.' }

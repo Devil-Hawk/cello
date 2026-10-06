@@ -37,9 +37,7 @@ interface DraftFixture {
     url: string | null
     description: string | null
     location: string | null
-    chance: string | null
-    want_p: number | null
-    want_reason: string | null
+    person_roles: { chance: string | null; want_p: number | null; want_reason: string | null }[]
     companies: { name: string; metadata: unknown }
   }
 }
@@ -68,9 +66,7 @@ function draft(over: Partial<DraftFixture> & { id: string; job_id: string }): Dr
       url: GREENHOUSE_URL,
       description: 'Build services. Ship them.',
       location: 'Remote',
-      chance: 'strong',
-      want_p: 0.88,
-      want_reason: 'Strong Go overlap.',
+      person_roles: [{ chance: 'strong', want_p: 0.88, want_reason: 'Strong Go overlap.' }],
       companies: { name: 'Acme', metadata: {} },
       ...(over.jobs ?? {}),
     },
@@ -302,9 +298,7 @@ describe('POST — every item is re-validated from the database, not from the pa
           url: GREENHOUSE_URL,
           description: 'Will you now or in the future require visa sponsorship?',
           location: 'Remote',
-          chance: 'strong',
-          want_p: 0.88,
-          want_reason: null,
+          person_roles: [{ chance: 'strong', want_p: 0.88, want_reason: null }],
           companies: { name: 'Acme', metadata: {} },
         },
       }),
@@ -430,9 +424,7 @@ describe('GET — the manifest splits what may be batched from what may not', ()
           url: 'https://jobs.lever.co/acme/2222-3333-4444',
           description: 'Requires an active security clearance.',
           location: 'DC',
-          chance: 'possible',
-          want_p: 0.7,
-          want_reason: null,
+          person_roles: [{ chance: 'possible', want_p: 0.7, want_reason: null }],
           companies: { name: 'Beta', metadata: {} },
         },
       }),

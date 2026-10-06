@@ -1,8 +1,8 @@
 // GET /api/jobs/insights-summary — aggregates for the /insights charts
 // (how roles break down by chance + source performance). Read-only, RLS-scoped: the
 // request-context client (not the admin client) does the query, so — exactly
-// like /api/jobs/provenance — "Users can view jobs for own companies" already
-// restricts every row to the caller's own jobs with no manual user_id filter.
+// like /api/jobs/provenance, the row level policy on person_roles already
+// restricts every row to the caller's own person_roles rows with no manual user_id filter.
 //
 // Two modes:
 //   (default)          -> { ok, totalJobs, chanceHistogram, bySource }
@@ -24,7 +24,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { CHANCE_BANDS, chanceBandFor, type ChanceBand } from '@/lib/jobs/chance-bands'
-import { FIT_COLUMNS } from '@/lib/scoring/read'
+import { FIT_COLUMNS, type FitRow } from '@/lib/scoring/read'
+import { OnJobs } from '@/lib/scoring/person-roles-query'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 
 export const dynamic = 'force-dynamic'
@@ -46,6 +47,14 @@ interface SourceCounts {
 interface CompanyEmbed {
   name: string | null
   domain: string | null
+}
+
+interface DrilldownJob {
+  id: string
+  title: string
+  url: string | null
+  posted_at: string | null
+  companies: CompanyEmbed | CompanyEmbed[] | null
 }
 
 /** Supabase returns the joined row as an object OR a one-item array depending on
@@ -76,52 +85,50 @@ export async function GET(request: NextRequest) {
       Math.max(1, Number(searchParams.get('limit')) || DEFAULT_DRILLDOWN_LIMIT)
     )
 
-    let query = openRolesOnly(
+    // Starts at the person's own rows (their verdict is on them) and embeds the posting.
+    // A role they hid stays out, as on the Jobs list.
+    const on = new OnJobs(
       supabase
-        .from('jobs')
-        .select(`id, title, url, posted_at, ${FIT_COLUMNS}, companies(name, domain)`, { count: 'exact' })
+        .from('person_roles')
+        .select(FIT_COLUMNS + ', jobs!inner(id, title, url, posted_at, companies(name, domain))', { count: 'exact' })
+        .is('hidden_reason', null)
     )
-      .order('want_p', { ascending: false, nullsFirst: false })
-      .limit(limit)
+    openRolesOnly(on)
+    let query = on.query.order('want_p', { ascending: false, nullsFirst: false }).limit(limit)
 
     // A role a stated fact filtered has no chance; a role not yet assessed has neither.
     if (band === 'filtered') query = query.neq('blocked_reasons', '[]')
-    else if (band === 'unassessed') query = query.is('fit_assessed_at', null)
+    else if (band === 'unassessed') query = query.is('checked_at', null)
     else query = query.eq('chance', band).eq('blocked_reasons', '[]')
 
     const { data, error, count } = await query
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    const rows = (data ?? []) as unknown as {
-      id: string
-      title: string
-      url: string | null
-      posted_at: string | null
-      fit_assessed_at: string | null
-      blocked_reasons: unknown
-      want_p: number | null
-      want_reason: string | null
-      want_detail: unknown
-      chance: string | null
-      chance_detail: unknown
-      companies: CompanyEmbed | CompanyEmbed[] | null
-    }[]
+    const rows = (data ?? []) as unknown as (FitRow & {
+      jobs: DrilldownJob | DrilldownJob[] | null
+    })[]
 
-    const jobs = rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      url: row.url,
-      postedAt: row.posted_at,
-      company: embeddedCompany(row.companies),
-      // The verdict columns, which the client reads with parseFit.
-      fit_assessed_at: row.fit_assessed_at,
-      blocked_reasons: row.blocked_reasons,
-      want_p: row.want_p,
-      want_reason: row.want_reason,
-      want_detail: row.want_detail,
-      chance: row.chance,
-      chance_detail: row.chance_detail,
-    }))
+    const jobs = rows.flatMap((row) => {
+      const job = Array.isArray(row.jobs) ? row.jobs[0] : row.jobs
+      if (!job) return []
+      return [
+        {
+          id: job.id,
+          title: job.title,
+          url: job.url,
+          postedAt: job.posted_at,
+          company: embeddedCompany(job.companies),
+          // The verdict columns, which the client reads with parseFit.
+          checked_at: row.checked_at,
+          blocked_reasons: row.blocked_reasons,
+          want_p: row.want_p,
+          want_reason: row.want_reason,
+          want_detail: row.want_detail,
+          chance: row.chance,
+          chance_detail: row.chance_detail,
+        },
+      ]
+    })
 
     return NextResponse.json({ ok: true, band, jobs, count: count ?? jobs.length })
   }
@@ -139,26 +146,25 @@ export async function GET(request: NextRequest) {
 
   let from = 0
   for (; from < SUMMARY_MAX_ROWS; from += SUMMARY_PAGE) {
-    const { data, error } = await openRolesOnly(
-      supabase.from('jobs').select('source, chance, blocked_reasons, fit_assessed_at')
-    )
-      .order('id', { ascending: true })
-      .range(from, from + SUMMARY_PAGE - 1)
+    const on = new OnJobs(supabase.from('person_roles').select('chance, blocked_reasons, checked_at, jobs!inner(source)').is('hidden_reason', null))
+    openRolesOnly(on)
+    const { data, error } = await on.query.order('job_id', { ascending: true }).range(from, from + SUMMARY_PAGE - 1)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     // The generated Database type (packages/shared/src/types/database.ts) predates
-    // jobs.source — same stale-schema situation /api/jobs/provenance's module doc
-    // explains — so supabase-js's typed generic can't confirm the select string
+    // jobs.source, the same stale-schema situation /api/jobs/provenance's module doc
+    // explains, so supabase-js's typed generic can't confirm the select string
     // client-side; cast through `unknown` like that route does.
-    const rows = (data ?? []) as unknown as { source: string | null; chance: string | null; blocked_reasons: unknown; fit_assessed_at: string | null }[]
+    const rows = (data ?? []) as unknown as { chance: string | null; blocked_reasons: unknown; checked_at: string | null; jobs: { source: string | null } | { source: string | null }[] | null }[]
     for (const row of rows) {
       totalJobs += 1
       chanceHistogram[chanceBandFor(row.chance, row.blocked_reasons)] += 1
 
-      const key = row.source?.trim() || '(untagged)'
+      const job = Array.isArray(row.jobs) ? row.jobs[0] : row.jobs
+      const key = job?.source?.trim() || '(untagged)'
       const counts = bySource.get(key) ?? { total: 0, scored: 0 }
       counts.total += 1
-      if (row.fit_assessed_at != null) counts.scored += 1
+      if (row.checked_at != null) counts.scored += 1
       bySource.set(key, counts)
     }
     if (rows.length < SUMMARY_PAGE) break

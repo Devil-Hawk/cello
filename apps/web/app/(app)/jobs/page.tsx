@@ -40,7 +40,8 @@ import {
 import { JobRow, type JobRowJob } from '@/components/jobs/job-row'
 import { RefreshJobsButton } from '@/components/jobs/refresh-button'
 import { JobDetailModal } from '@/components/jobs/job-detail-modal'
-import { FIT_COLUMNS, chanceLabel, fitToColumns } from '@/lib/scoring/read'
+import { FIT_COLUMNS, FIT_EMBED, chanceLabel, fitToColumns, type FitRow } from '@/lib/scoring/read'
+import { OnJobs } from '@/lib/scoring/person-roles-query'
 import type { RoleFit } from '@/lib/scoring/types'
 import { ProvenanceSummaryBar } from '@/components/jobs/provenance-summary-bar'
 import { JOB_FUNCTIONS, QUALITY_REJECT_THRESHOLD, SENIORITY_LEVELS } from '@/lib/jobs/classify'
@@ -124,10 +125,26 @@ const BATCH_LIMIT = 200
  *  still covers 4,000 jobs, far past any real in-targeting backlog. */
 const MAX_BATCH_ROUNDS = 20
 
-const JOB_SELECT_COLUMNS =
+// The posting's own columns. The person's verdict on it is not one of them: it lives
+// on their person_roles row. A list starts at that row (so it can be ordered by what
+// the person wants) and embeds the posting; a single role starts at the posting and
+// embeds the row.
+const JOB_COLUMNS =
   'id, company_id, title, url, location, salary_range, posted_at, discovered_at, ' +
-  `${FIT_COLUMNS}, is_new, job_function, seniority, language, country, ` +
+  'is_new, job_function, seniority, language, country, ' +
   'is_remote, quality_score, description, job_type, companies(name, logo_url, domain)'
+const JOB_SELECT_COLUMNS = JOB_COLUMNS + ', ' + FIT_EMBED
+const LIST_SELECT_COLUMNS = FIT_COLUMNS + ', jobs!inner(' + JOB_COLUMNS + ')'
+
+/** A person_roles list row, as LIST_SELECT_COLUMNS returns it: the verdict columns beside the embedded posting. */
+type ListRow = { jobs: Job | Job[] | null } & Record<string, unknown>
+
+/** The posting with the person's verdict embedded, the shape every job component reads. */
+function toJob(row: ListRow): Job | null {
+  const { jobs, ...verdict } = row
+  const job = Array.isArray(jobs) ? jobs[0] : jobs
+  return job ? { ...job, person_roles: verdict as FitRow } : null
+}
 
 /**
  * Plain-language "$X of your $Y monthly AI budget left", from the same route the
@@ -641,46 +658,49 @@ function JobsPageInner() {
     // the other side of the switch, so both counts follow the same facets.
     // Open roles only: posted in the last 180 days (or undated) and not closed.
     const excludedIds = targeting ? excludedCompanyIds(companies, targeting) : []
+    // The list starts at the person's own rows (person_roles) so it can be ordered by
+    // what they want; the posting's columns are filtered through the embed (OnJobs).
+    // A role they said is not for them stays out of the list.
     const withFacets = (start: JobsQuery, side: TargetScope): JobsQuery => {
-      let q = openRolesOnly(start)
+      start.is('hidden_reason', null)
+      const on = new OnJobs(start)
+      openRolesOnly(on)
 
       if (selectedCompany !== 'all') {
-        q = q.eq('company_id', selectedCompany)
+        on.eq('company_id', selectedCompany)
       }
-      // No 'all companies' filter: jobs RLS already scopes every row to the
-      // user's own companies (EXISTS companies.id = jobs.company_id AND
-      // companies.user_id = auth.uid()). The old .in('company_id', companyIds)
-      // here re-sent every company id in the querystring, which passed the
-      // gateway's URL limit until the account grew past ~600 companies and then
-      // failed every load with a bare 400. The empty-companies early return
-      // above keeps the zero-companies UX identical.
+      // No 'all companies' filter: RLS already scopes every row to the person's own
+      // person_roles rows. The old .in('company_id', companyIds) re-sent every
+      // company id in the querystring, which passed the gateway's URL limit until
+      // the account grew past ~600 companies and then failed every load with a bare
+      // 400. The empty-companies early return above keeps the zero-companies UX
+      // identical.
 
       if (freshness !== 'all') {
         const cutoffIso = new Date(Date.now() - FRESHNESS_HOURS[freshness] * 60 * 60 * 1000).toISOString()
-        q = includeUndated
-          ? q.or(`posted_at.gte.${cutoffIso},posted_at.is.null`)
-          : q.gte('posted_at', cutoffIso)
+        if (includeUndated) on.or('posted_at.gte.' + cutoffIso + ',posted_at.is.null')
+        else on.gte('posted_at', cutoffIso)
       }
 
-      if (jobFunction !== 'all') q = q.eq('job_function', jobFunction)
-      if (seniority !== 'all') q = q.eq('seniority', seniority)
-      if (remoteOnly) q = q.eq('is_remote', true)
-      if (country.trim().length === 2) q = q.eq('country', country.trim().toUpperCase())
-      if (language !== 'all') q = q.eq('language', language)
+      if (jobFunction !== 'all') on.eq('job_function', jobFunction)
+      if (seniority !== 'all') on.eq('seniority', seniority)
+      if (remoteOnly) on.eq('is_remote', true)
+      if (country.trim().length === 2) on.eq('country', country.trim().toUpperCase())
+      if (language !== 'all') on.eq('language', language)
       if (hideLowQuality) {
         // NULL quality_score means "not classified yet" — never hide those,
         // only rows the classifier has actually scored below the threshold.
-        q = q.or(`quality_score.gte.${QUALITY_REJECT_THRESHOLD},quality_score.is.null`)
+        on.or('quality_score.gte.' + QUALITY_REJECT_THRESHOLD + ',quality_score.is.null')
       }
       if (debouncedLocationQuery.trim()) {
-        q = q.ilike('location', `%${debouncedLocationQuery.trim()}%`)
+        on.ilike('location', '%' + debouncedLocationQuery.trim() + '%')
       }
-      if (unscoredOnly) q = q.is('fit_assessed_at', null)
-      if (side === 'matching' && targeting) q = applyRoleTargets(q, targeting, excludedIds)
-      return q
+      if (unscoredOnly) start.is('checked_at', null)
+      if (side === 'matching' && targeting) applyRoleTargets(on, targeting, excludedIds)
+      return on.query
     }
 
-    let query = withFacets(untyped.from('jobs').select(JOB_SELECT_COLUMNS, { count: 'exact' }), scope)
+    let query = withFacets(untyped.from('person_roles').select(LIST_SELECT_COLUMNS, { count: 'exact' }), scope)
 
     // Sort on posted_at (never discovered_at, a single per-batch timestamp).
     // best_match puts the roles the person is likely to want above unassessed ones via
@@ -688,12 +708,12 @@ function JobsPageInner() {
     if (sortBy === 'best_match') {
       query = query
         .order('want_p', { ascending: false, nullsFirst: false })
-        .order('posted_at', { ascending: false, nullsFirst: false })
+        .order('jobs(posted_at)', { ascending: false, nullsFirst: false })
     } else {
-      query = query.order('posted_at', { ascending: false, nullsFirst: false })
+      query = query.order('jobs(posted_at)', { ascending: false, nullsFirst: false })
     }
     // Deterministic tiebreaker so range() pagination never skips/repeats rows.
-    query = query.order('id', { ascending: true })
+    query = query.order('job_id', { ascending: true })
 
     const from = pageIndex * PAGE_SIZE
     const to = from + PAGE_SIZE - 1
@@ -703,7 +723,7 @@ function JobsPageInner() {
     const [{ data, count, error }, other] = await Promise.all([
       query.range(from, to),
       roleTargets
-        ? withFacets(untyped.from('jobs').select('id', { count: 'exact', head: true }), otherSide)
+        ? withFacets(untyped.from('person_roles').select('job_id, jobs!inner(id)', { count: 'exact', head: true }), otherSide)
         : Promise.resolve(null),
     ])
 
@@ -718,7 +738,7 @@ function JobsPageInner() {
       // clearing them — a failed refetch shouldn't blank out a list the user
       // was already looking at.
     } else if (data) {
-      const rows = data as unknown as Job[]
+      const rows = (data as unknown as ListRow[]).map(toJob).filter((j): j is Job => j !== null)
       setJobs((prev) => (append ? [...prev, ...rows] : rows))
       setTotalCount(count ?? 0)
       const here = count ?? 0
@@ -815,7 +835,7 @@ function JobsPageInner() {
         })
       } else {
         const fit = result
-        setJobs((prevJobs) => prevJobs.map((j) => (j.id === jobId ? { ...j, ...fitToColumns(fit) } : j)))
+        setJobs((prevJobs) => prevJobs.map((j) => (j.id === jobId ? { ...j, person_roles: fitToColumns(fit) } : j)))
         toast({
           title: fit.blocked.length > 0 ? 'Filtered out' : `Your chances: ${chanceLabel(fit.chance)}`,
           description: fit.blocked[0]?.text ?? fit.want?.reason ?? undefined,

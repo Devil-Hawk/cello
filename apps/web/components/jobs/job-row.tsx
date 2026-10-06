@@ -14,7 +14,7 @@ import { knownParts, postedThisWeek } from '@/lib/format'
 import Link from 'next/link'
 import { ChanceChip } from '@/components/fit/chance-chip'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { parseFit } from '@/lib/scoring/read'
+import { parseFit, type FitRow } from '@/lib/scoring/read'
 import { VisaBadge } from './visa-badge'
 import type { VisaSignal } from '@/lib/dossier/store'
 
@@ -27,14 +27,8 @@ export interface JobRowJob {
   salary_range: string | null
   posted_at: string | null
   discovered_at: string
-  // The verdict on the role (lib/scoring/read.ts FIT_COLUMNS). Null columns mean it has not been assessed yet.
-  fit_assessed_at: string | null
-  blocked_reasons: unknown
-  want_p: number | null
-  want_reason: string | null
-  want_detail: unknown
-  chance: string | null
-  chance_detail: unknown
+  // The person's own verdict on the role, embedded from person_roles (lib/scoring/read.ts FIT_EMBED). Absent or empty means it has not been assessed yet.
+  person_roles?: FitRow | FitRow[] | null
   is_new: boolean
   companies: {
     name: string

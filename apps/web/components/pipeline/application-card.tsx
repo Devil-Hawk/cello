@@ -7,7 +7,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { cn } from '@/lib/utils'
 import { formatShortDate, STAGE_META, type PipelineStage } from '@/lib/format'
 import { ChanceChip } from '@/components/fit/chance-chip'
-import { fitFromLabel } from '@/lib/scoring/read'
+import { fitFromLabel, fitRowOf } from '@/lib/scoring/read'
 import { Badge } from '@/components/ui/badge'
 import {
   DropdownMenu,
@@ -49,6 +49,7 @@ export function ApplicationCardContent({
 }) {
   const job = application.jobs
   const company = job?.companies
+  const chance = fitRowOf(job).chance
   const daysSinceUpdate = getDaysSinceUpdate(application.updated_at)
   const alert = getPipelineAlert(application)
   const gmailUrl = getGmailUrl(application)
@@ -124,7 +125,7 @@ export function ApplicationCardContent({
             </span>
           ) : null}
 
-          {job?.chance && job.chance !== 'cannot_assess' && <ChanceChip fit={fitFromLabel(job.chance)} className="px-1.5" />}
+          {chance && chance !== 'cannot_assess' && <ChanceChip fit={fitFromLabel(chance)} className="px-1.5" />}
 
           {alert && (
             <Badge tone={alert.kind === 'ghosted' ? 'bad' : 'warn'} title={alert.title}>

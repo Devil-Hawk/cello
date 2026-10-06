@@ -23,7 +23,7 @@ import { knownParts } from '@/lib/format'
 import { ChanceChip } from '@/components/fit/chance-chip'
 import { FitPanel } from '@/components/fit/fit-panel'
 import { TriageControl } from '@/components/fit/triage-control'
-import { parseFit } from '@/lib/scoring/read'
+import { parseFit, type FitRow } from '@/lib/scoring/read'
 import { ResumeOptimizerPanel } from '@/components/resume/resume-optimizer-panel'
 import { JobProvenancePanel } from './job-provenance-panel'
 import { ContactNetworkPanel } from '@/components/contacts/contact-network-panel'
@@ -37,14 +37,8 @@ interface JobWithCompany {
   salary_range: string | null
   job_type: string | null
   posted_at: string | null
-  // The verdict on the role (lib/scoring/read.ts FIT_COLUMNS). Null columns mean it has not been assessed yet.
-  fit_assessed_at: string | null
-  blocked_reasons: unknown
-  want_p: number | null
-  want_reason: string | null
-  want_detail: unknown
-  chance: string | null
-  chance_detail: unknown
+  // The person's own verdict on the role, embedded from person_roles (lib/scoring/read.ts FIT_EMBED). Absent or empty means it has not been assessed yet.
+  person_roles?: FitRow | FitRow[] | null
   /** Present at runtime (jobs/page.tsx passes the full row); enables company research link. */
   company_id?: string | null
   companies: {
@@ -330,7 +324,7 @@ export function JobDetailModal({
               <ChanceChip fit={fit.chance ? fit : null} />
             </div>
             <FitPanel fit={fit} onAssess={onAssess} assessing={assessing} assessDisabledReason={assessDisabledReason} />
-            <TriageControl jobId={job.id} surface="opportunities" className="mt-4" />
+            <TriageControl jobId={job.id} surface="roles" className="mt-4" />
           </div>
 
           {/* Resume ATS optimizer */}

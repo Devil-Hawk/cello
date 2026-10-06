@@ -13,7 +13,7 @@ const state = {
   readError: false,
   writeError: false,
 }
-const adminUpdates: { table: string; patch: unknown; col: string; ids: unknown }[] = []
+const adminUpdates: { table: string; patch: unknown; col: string; value: unknown }[] = []
 
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
@@ -35,15 +35,14 @@ vi.mock('@/lib/harness/supabase-admin', () => ({
   createAdminClient: () => ({
     from: (table: string) => ({
       update: (patch: unknown) => ({
-        in: async (col: string, ids: unknown) => {
-          adminUpdates.push({ table, patch, col, ids })
+        eq: async (col: string, value: unknown) => {
+          adminUpdates.push({ table, patch, col, value })
           return { error: null }
         },
       }),
     }),
   }),
 }))
-vi.mock('@/lib/jobs/owned-query', () => ({ userCompanyIds: async () => ['co-1', 'co-2'] }))
 
 import { GET, PUT } from './route'
 
@@ -107,7 +106,7 @@ describe('PUT /api/settings/constraints', () => {
 
   it('marks the person\'s roles for another look so the new facts apply', async () => {
     await put(BODY)
-    expect(adminUpdates).toEqual([{ table: 'jobs', patch: { fit_assessed_at: null }, col: 'company_id', ids: ['co-1', 'co-2'] }])
+    expect(adminUpdates).toEqual([{ table: 'person_roles', patch: { checked_at: null }, col: 'user_id', value: 'u1' }])
   })
 
   it('refuses a body that is not a set of dealbreakers, and writes nothing', async () => {

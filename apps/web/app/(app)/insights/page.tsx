@@ -18,6 +18,7 @@ import { ChanceBreakdownCard } from '@/components/insights/chance-breakdown-card
 import { SourcePerformanceCard } from '@/components/insights/source-performance-card'
 import { ProvenanceMixCard } from '@/components/insights/provenance-mix-card'
 import { useInsightsSummary } from '@/components/insights/use-insights-summary'
+import { fitRowOf, type FitRow } from '@/lib/scoring/read'
 import {
   computeInsights,
   type AppInput,
@@ -55,7 +56,7 @@ export default function InsightsPage() {
     const [appsRes, activitiesRes, outreachJson, followUpsRes, digestRes] = await Promise.all([
       supabase
         .from('applications')
-        .select('id, job_id, stage, applied_at, source, created_at, updated_at, jobs(chance, blocked_reasons)')
+        .select('id, job_id, stage, applied_at, source, created_at, updated_at, jobs(person_roles(chance, blocked_reasons))')
         .eq('user_id', user.id),
       supabase.from('activities').select('application_id, type, occurred_at'),
       // outreach_messages is not in the generated Database type — read it through
@@ -66,7 +67,7 @@ export default function InsightsPage() {
     ])
 
     const apps: AppInput[] = ((appsRes.data as unknown as (Omit<AppInput, 'chance' | 'blocked_reasons'> & {
-      jobs: { chance: string | null; blocked_reasons: unknown } | null
+      jobs: { person_roles: FitRow | FitRow[] | null } | null
     })[]) ?? []).map((row) => ({
       id: row.id,
       job_id: row.job_id,
@@ -75,8 +76,8 @@ export default function InsightsPage() {
       source: row.source,
       created_at: row.created_at,
       updated_at: row.updated_at,
-      chance: row.jobs?.chance ?? null,
-      blocked_reasons: row.jobs?.blocked_reasons,
+      chance: fitRowOf(row.jobs).chance ?? null,
+      blocked_reasons: fitRowOf(row.jobs).blocked_reasons,
     }))
 
     const activities = (activitiesRes.data as ActivityInput[] | null) ?? []

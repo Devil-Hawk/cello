@@ -19,7 +19,7 @@ const supabase = {
     const chain = {
       select: () => chain,
       eq: () => chain,
-      single: async () => ({ data: { preferences: {}, full_name: 'Alex', resume_text: 'r', title: 'Staff', chance_detail: null, name: 'Acme' } }),
+      single: async () => ({ data: { preferences: {}, full_name: 'Alex', resume_text: 'r', title: 'Staff', person_roles: [{ chance_detail: null }], name: 'Acme' } }),
     }
     return chain
   },

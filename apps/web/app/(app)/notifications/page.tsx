@@ -12,19 +12,13 @@ import { StaggerGroup, StaggerItem } from '@/components/ui/motion'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { createClient } from '@/lib/supabase/client'
-import { openRolesOnly } from '@/lib/jobs/freshness'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { hotRolesQuery, toHotRoles, type HotRole } from '@/lib/scoring/hot-roles'
 import { ChanceChip } from '@/components/fit/chance-chip'
 import { fitFromLabel } from '@/lib/scoring/read'
 import { cn, formatRelativeTime } from '@/lib/utils'
 
-interface HotJob {
-  id: string
-  title: string
-  chance: string | null
-  posted_at: string | null
-  discovered_at: string
-  companies: { name: string | null } | null
-}
+type HotJob = HotRole
 
 interface InterviewActivity {
   id: string
@@ -124,17 +118,9 @@ export default function NotificationsPage() {
       const now = new Date().toISOString()
 
       const [hotJobsRes, interviewsRes, followUpsRes] = await Promise.all([
-        // New, unreviewed roles with a real chance (a role a stated fact rules out has no
-        // chance), most wanted first. RLS already scopes jobs to this user's tracked companies.
-        openRolesOnly(
-          supabase
-            .from('jobs')
-            .select('id, title, chance, posted_at, discovered_at, companies(name)')
-            .eq('is_new', true)
-            .in('chance', ['strong', 'possible'])
-        )
-          .order('want_p', { ascending: false, nullsFirst: false })
-          .limit(8),
+        // New, open roles with a real chance for this person (a role a stated fact rules out has
+        // no chance), most wanted first. Their own person_roles rows are all their session can read.
+        hotRolesQuery(supabase as unknown as SupabaseClient, 8),
         // Interview-stage signal picked up from Gmail sync (or manual notes).
         supabase
           .from('activities')
@@ -162,7 +148,7 @@ export default function NotificationsPage() {
         return
       }
 
-      setHotJobs((hotJobsRes.data as unknown as HotJob[]) || [])
+      setHotJobs(toHotRoles(hotJobsRes.data))
       setInterviews((interviewsRes.data as unknown as InterviewActivity[]) || [])
       setOverdueFollowUps((followUpsRes.data as OverdueFollowUp[]) || [])
     } catch {

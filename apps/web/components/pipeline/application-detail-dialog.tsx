@@ -16,7 +16,7 @@ import { toast } from '@/components/ui/use-toast'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { formatShortDate, STAGE_META, type PipelineStage } from '@/lib/format'
 import { ChanceChip } from '@/components/fit/chance-chip'
-import { fitFromLabel } from '@/lib/scoring/read'
+import { fitFromLabel, fitRowOf } from '@/lib/scoring/read'
 import { CompanyLogo } from '@/components/companies/company-logo'
 import { LogApplicationDialog } from '@/components/pipeline/log-application-dialog'
 import { PROVENANCE_LABELS } from '@/lib/applications/receipts'
@@ -149,6 +149,7 @@ function DialogBody({ application }: { application: ApplicationWithJob }) {
   }, [application.id])
 
   const job = application.jobs
+  const chance = fitRowOf(job).chance
   const company = job?.companies
   const daysSinceUpdate = getDaysSinceUpdate(application.updated_at)
   const alert = getPipelineAlert(application)
@@ -230,9 +231,9 @@ function DialogBody({ application }: { application: ApplicationWithJob }) {
           </span>
         </DetailRow>
 
-        {job?.chance && job.chance !== 'cannot_assess' && (
+        {chance && chance !== 'cannot_assess' && (
           <DetailRow label="Your chance">
-            <ChanceChip fit={fitFromLabel(job.chance)} />
+            <ChanceChip fit={fitFromLabel(chance)} />
           </DetailRow>
         )}
 

@@ -13,7 +13,7 @@ import { verifyOutreachDraft } from '@/lib/graph/verify/outreach'
 import { writeVerdict } from '@/lib/evals/verdicts'
 import { recordDemoEvent } from '@/lib/access/session'
 import { buildOutreachContext } from '@/lib/context/assemble'
-import { fitHighlights } from '@/lib/scoring/read'
+import { fitHighlights, fitRowOf } from '@/lib/scoring/read'
 import { setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
 
 export const dynamic = 'force-dynamic'
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
     if (jobId) {
       const { data: job } = await supabase
         .from('jobs')
-        .select('id, title, description, company_id, chance_detail')
+        .select('id, title, description, company_id, person_roles(chance_detail)')
         .eq('id', jobId)
         .single()
       if (job) {
@@ -121,7 +121,7 @@ export async function POST(request: NextRequest) {
         jobDescription = job.description ?? null
         companyId = job.company_id ?? companyId
         // Only what the resume really shows, each with the line that shows it: nothing the model could invent.
-        matchHighlights = fitHighlights(job.chance_detail)
+        matchHighlights = fitHighlights(fitRowOf(job).chance_detail)
       }
     }
 

@@ -15,7 +15,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
-import { userCompanyIds } from '@/lib/jobs/owned-query'
 import { resolveConstraints } from '@/lib/scoring/constraints'
 
 export const dynamic = 'force-dynamic'
@@ -84,11 +83,9 @@ export async function PUT(request: NextRequest) {
 
   // Roles assessed under the old facts get another look.
   try {
+    // The person's own rows: the check date is theirs, so nobody else's roles are touched.
     const admin = createAdminClient()
-    const ids = await userCompanyIds(admin, user.id)
-    for (let i = 0; i < ids.length; i += 200) {
-      await admin.from('jobs').update({ fit_assessed_at: null }).in('company_id', ids.slice(i, i + 200))
-    }
+    await admin.from('person_roles').update({ checked_at: null }).eq('user_id', user.id)
   } catch (err) {
     console.error('[settings/constraints] could not mark roles for another look', err)
   }

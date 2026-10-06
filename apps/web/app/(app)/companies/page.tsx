@@ -19,6 +19,7 @@ import {
 import { formatShortDate } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
 import { openRolesOnly } from '@/lib/jobs/freshness'
+import { fitRowOf } from '@/lib/scoring/read'
 
 /**
  * Most strong roles first, companies with nothing assessed last (never coerced
@@ -87,7 +88,7 @@ export default function CompaniesPage() {
             .select(
               `
         *,
-        jobs:jobs(chance, blocked_reasons)
+        jobs:jobs(person_roles(chance, blocked_reasons))
       `
             )
             .eq('user_id', user.id)
@@ -104,8 +105,10 @@ export default function CompaniesPage() {
         (data ?? [])
           .map((company) => {
             const jobs = company.jobs ?? []
-            const assessed = jobs.filter((j) => typeof j.chance === 'string')
-            const strong = assessed.filter((j) => j.chance === 'strong' && !(Array.isArray(j.blocked_reasons) && j.blocked_reasons.length > 0))
+            // The person's own verdict on each role: their person_roles row, embedded.
+            const verdicts = jobs.map((j) => fitRowOf(j))
+            const assessed = verdicts.filter((v) => typeof v.chance === 'string')
+            const strong = assessed.filter((v) => v.chance === 'strong' && !(Array.isArray(v.blocked_reasons) && v.blocked_reasons.length > 0))
             return {
               ...company,
               jobs_count: jobs.length,
