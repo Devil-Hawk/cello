@@ -10,6 +10,7 @@
 import { z } from 'zod'
 import type { AdminClient } from '@/lib/harness/types'
 import { getObject } from './ports/commands.stub'
+import { joinApplication } from './projects'
 import { ATTACH_KINDS, MAX_TILES, refId, type AttachKind, type AttachmentRow, type ObjectReader, type Refusal, type StoredRef } from './types'
 
 const id = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
@@ -97,6 +98,12 @@ export async function attach(
   // 23514 is the database's own 25 limit, reached by two attaches racing each other.
   if (error?.code === '23514') return FULL
   if (error || !data) return refuse('Could not add that to the chat.', 'Try again.')
+  if (kind === 'application') {
+    // A chat about one application belongs to that application's group (code's link, never shown); a chat about
+    // several belongs to none (3.3).
+    if ((held ?? []).some((r) => r.kind === 'application')) await db.from('chats').update({ project_id: null }).eq('id', chatId).eq('user_id', userId)
+    else await joinApplication(db, userId, chatId, (ref.data as { id: string }).id, get)
+  }
   return { ok: true, attachment: data as AttachmentRow, already: false }
 }
 

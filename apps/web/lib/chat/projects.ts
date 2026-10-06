@@ -4,10 +4,11 @@
 
 import type { AdminClient } from '@/lib/harness/types'
 import { getObject } from './ports/commands.stub'
+import type { ObjectReader } from './types'
 
 /** The application's project row, made if it is not there yet. Null when the application is not this person's. */
-export async function ensureProject(db: AdminClient, userId: string, applicationId: string): Promise<string | null> {
-  const app = await getObject(db, userId, 'application', { id: applicationId })
+export async function ensureProject(db: AdminClient, userId: string, applicationId: string, get: ObjectReader = getObject): Promise<string | null> {
+  const app = await get(db, userId, 'application', { id: applicationId })
   if (!app) return null
   const title = [app.company, app.title].filter(Boolean).join(': ').slice(0, 80)
   // The unique application_id makes a second call return the first row, so two chats started together share one.
@@ -17,8 +18,8 @@ export async function ensureProject(db: AdminClient, userId: string, application
 }
 
 /** A chat started from an application joins that application's group, unless it already belongs to one. */
-export async function joinApplication(db: AdminClient, userId: string, chatId: string, applicationId: string): Promise<boolean> {
-  const id = await ensureProject(db, userId, applicationId)
+export async function joinApplication(db: AdminClient, userId: string, chatId: string, applicationId: string, get: ObjectReader = getObject): Promise<boolean> {
+  const id = await ensureProject(db, userId, applicationId, get)
   if (!id) return false
   const { data } = await db.from('chats').update({ project_id: id }).eq('id', chatId).eq('user_id', userId).is('project_id', null).select('id')
   return ((data as unknown[] | null) ?? []).length === 1

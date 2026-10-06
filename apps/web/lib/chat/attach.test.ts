@@ -27,6 +27,21 @@ const setup = (extra: Record<string, unknown>[] = []) =>
     chat_attachments: extra,
   })
 
+describe('an application tile and its group', () => {
+  const app = (n: number) => ({ id: uuid(n), user_id: 'u1', stage: 'applied', applied_at: null, jobs: { title: `Role ${n}`, companies: { name: 'Co' } } })
+  const seed = () => makeFakeAdmin({ chats: [{ id: CHAT, user_id: 'u1', project_id: null }], chat_attachments: [], applications: [app(1), app(2)], projects: [] }, { projects: { unique: [['application_id']] } })
+  const read: ObjectReader = async (_db, _u, kind, ref) => ({ kind, id: refId(kind, ref), title: 'Role', company: 'Co', facts: [], body: null })
+
+  it('puts a chat about one application in that application\'s group, and takes it out when a second is added', async () => {
+    const db = seed()
+    expect(await attach(db, 'u1', CHAT, { kind: 'application', ref: { id: uuid(1) } }, person, read)).toMatchObject({ ok: true })
+    expect(db.tables.projects).toHaveLength(1)
+    expect(db.tables.chats[0].project_id).toBe(db.tables.projects[0].id)
+    expect(await attach(db, 'u1', CHAT, { kind: 'application', ref: { id: uuid(2) } }, person, read)).toMatchObject({ ok: true })
+    expect(db.tables.chats[0].project_id).toBeNull()
+  })
+})
+
 describe('attach', () => {
   it('holds the person\'s own thing and records the door', async () => {
     const db = setup()
