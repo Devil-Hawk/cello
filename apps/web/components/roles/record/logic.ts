@@ -52,6 +52,9 @@ export function whyKept(job: WhyFacts, t: WhyTargets): string | null {
   return `Kept: ${parts.length ? `${parts.join(', ')}, and ${last}` : last}.`
 }
 
+/** An address from the posting's data as a link: only http and https, so a stored `javascript:` address never reaches an href. */
+export const webUrl = (u: string | null | undefined): string | null => (u && /^https?:\/\//i.test(u.trim()) ? u.trim() : null)
+
 /**
  * What the posting says about sponsorship, for a person who needs it. Past H-1B
  * filings come from the public list and are only ever a track record; nothing

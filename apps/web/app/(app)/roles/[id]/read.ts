@@ -14,7 +14,7 @@ import { parseFit } from '@/lib/scoring/read'
 import { resolveTargeting } from '@/lib/targeting'
 import { NOT_FOR_ME_REASONS } from '@/components/roles/reactions'
 import { toItem, typeOptionsFor, type ListRow } from '../read'
-import { pastedLine, sponsorshipLines, statusSentence, whyKept, whyType } from '@/components/roles/record/logic'
+import { pastedLine, sponsorshipLines, statusSentence, webUrl, whyKept, whyType } from '@/components/roles/record/logic'
 import type { RecordData, RecordHistoryItem, RecordPerson } from '@/components/roles/record/record-view'
 import type { PassReason, Reaction } from '@/lib/scoring/types'
 
@@ -93,7 +93,7 @@ export async function readRecord(db: Db, userId: string, id: string): Promise<Re
 
   return {
     role: { ...role, reaction: r ? { reaction: r.reaction, reason: r.reason } : null },
-    url: job.apply_url ?? job.url ?? null,
+    url: webUrl(job.apply_url) ?? webUrl(job.url),
     description,
     partial: job.description_md != null ? job.description_state === 'partial' || job.description_state === 'none' : undefined,
     tier: job.source_tier ?? null,
