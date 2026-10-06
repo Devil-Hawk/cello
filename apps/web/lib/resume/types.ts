@@ -118,3 +118,7 @@ export interface ResumeVersionPatch {
   title?: string | null
   atsScore?: number | null
 }
+
+// The resume pages that predate the structured resume read a version through this name. The one
+// reader lives in ./resolve; it imports the helpers above, which are functions, so the cycle is safe.
+export { resolveResumeMarkdown } from './resolve'
