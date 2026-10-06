@@ -1,5 +1,7 @@
-// GET /api/kb/search?q=...&limit=... — ranked full-text search over the
-// signed-in user's knowledge base (searchKb() -> the search_kb_chunks() RPC).
+// GET /api/kb/search?q=...&limit=...&company=<id> — ranked full-text search over
+// Your material, the signed-in user's own sources that Cello may use (searchKb() ->
+// the search_material() RPC). Pages Cello fetched itself are never returned.
+// `company` keeps one company's documents.
 //
 // The copilot's search_kb tool (lib/harness/copilot-tools.ts) calls searchKb()
 // directly rather than hitting this HTTP route — this endpoint is for the
@@ -22,12 +24,14 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const query = (searchParams.get('q') || '').trim()
   const limitParam = searchParams.get('limit')
+  const company = searchParams.get('company')
+  const companyId = company && /^[0-9a-f-]{36}$/i.test(company) ? company : undefined
   const limit = limitParam ? Math.min(100, Math.max(1, parseInt(limitParam, 10) || 12)) : undefined
   if (!query) return NextResponse.json({ error: 'Query parameter "q" is required' }, { status: 400 })
 
   const admin = createAdminClient()
   try {
-    const hits = await searchKb(admin, user.id, query, { limit })
+    const hits = await searchKb(admin, user.id, query, { limit, companyId })
     return NextResponse.json({
       ok: true,
       count: hits.length,
