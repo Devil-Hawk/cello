@@ -89,6 +89,8 @@ interface JobRel {
   match_score: number | null
   match_details: unknown
   companies?: CompanyRel | CompanyRel[] | null
+  /** The employer's directory row: names a role this person holds without a company of their own. */
+  employer?: CompanyRel | CompanyRel[] | null
 }
 
 interface DraftRowRaw {
@@ -109,7 +111,7 @@ function one<T>(value: T | T[] | null | undefined): T | null {
 
 const DRAFT_SELECT =
   'id, job_id, status, resume_summary, cover_letter, answers, created_at, ' +
-  'jobs(id, title, url, description, location, match_score, match_details, companies(name, metadata))'
+  'jobs(id, title, url, description, location, match_score, match_details, companies(name, metadata), employer:company_directory(name))'
 
 /** answers.deferredToHuman, defensively — the column is free-form jsonb. */
 function storedDeferred(answers: unknown): string[] {
@@ -167,7 +169,7 @@ function clip(text: string | null | undefined, max: number): string | null {
 
 function buildReviewItem(draft: DraftRowRaw, decision: BatchDecision): ReviewItem {
   const job = one(draft.jobs)
-  const company = one(job?.companies)
+  const company = one(job?.companies) ?? one(job?.employer)
   const details = parseMatchDetails(job?.match_details as MatchDetails | string | null)
   return {
     draftId: draft.id,
@@ -232,7 +234,7 @@ export async function GET() {
   const unjudged = await unjudgedCvTailorDraftIds(admin, user.id, drafts.map((d) => d.id))
   const items = drafts.map((draft) => {
     const job = one(draft.jobs)
-    const company = one(job?.companies)
+    const company = one(job?.companies) ?? one(job?.employer)
     const credentials = resolveApplyCredentials(company?.metadata, profile?.preferences)
     const decision = decideBatchEligibility({
       jobUrl: job?.url ?? null,
@@ -557,7 +559,7 @@ async function approveOne(params: ApproveOneParams): Promise<ItemResult> {
 
     const draft = data as unknown as DraftRowRaw
     const job = one(draft.jobs)
-    const company = one(job?.companies)
+    const company = one(job?.companies) ?? one(job?.employer)
     const companyName = company?.name?.trim() || null
     const jobTitle = job?.title?.trim() || null
     const named: ItemResult = { ...base, companyName, jobTitle }

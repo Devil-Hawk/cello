@@ -7,7 +7,9 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({ auth: { getUser: async () => ({ data: { user: { id: 'u1' } } }) } }),
 }))
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({}) }))
-vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: async () => ({}) }))
+const llm = vi.hoisted(() => ({ keys: {} as Record<string, string>, answer: '' }))
+vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: async () => llm.keys }))
+vi.mock('@/lib/harness/llm', async (orig) => ({ ...(await orig<object>()), callLlm: async () => ({ content: llm.answer }) }))
 vi.mock('@/lib/trace/spans', () => ({ withTrace: async (_a: unknown, _b: unknown, _c: unknown, fn: () => unknown) => fn() }))
 
 import { POST } from './route'
@@ -45,5 +47,19 @@ describe('POST /api/companies/resolve', () => {
     globalThis.fetch = vi.fn(async () => new Response('<html></html>', { status: 200 })) as unknown as typeof fetch
     const body = await (await post('Zzyzx')).json()
     expect(body.candidates).toEqual([])
+  })
+
+  it('never fetches an internal address a model suggests as a careers page', async () => {
+    llm.keys = { openrouter: 'k' }
+    llm.answer = JSON.stringify({ officialDomain: 'zzyzx.example', careerUrl: 'http://169.254.169.254/latest/meta-data/jobs' })
+    const fetched: string[] = []
+    globalThis.fetch = vi.fn(async (input: unknown) => {
+      fetched.push(String(input))
+      return new Response('<html></html>', { status: 200 })
+    }) as unknown as typeof fetch
+    const body = await (await post('Zzyzx')).json()
+    llm.keys = {}
+    expect(body.candidates).toEqual([])
+    expect(fetched.some((u) => u.includes('169.254.169.254'))).toBe(false)
   })
 })

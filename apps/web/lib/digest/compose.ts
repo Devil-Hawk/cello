@@ -39,7 +39,8 @@ interface JobRow {
   url: string | null
   match_score: number | null
   is_new: boolean | null
-  company_id: string
+  company_id: string | null
+  viewer_company_name: string | null
   discovered_at: string | null
 }
 
@@ -97,7 +98,7 @@ export async function composeDigest(
       ownedJobsQuery(
         admin,
         userId,
-        'id, title, url, match_score, is_new, company_id, discovered_at, companies!inner(user_id)'
+        'id, title, url, match_score, is_new, company_id, discovered_at, viewer_company_name'
       )
     )
       .order('match_score', { ascending: false, nullsFirst: false })
@@ -107,7 +108,7 @@ export async function composeDigest(
     topJobs = jobs.map((j) => ({
       jobId: j.id,
       title: j.title,
-      companyName: companyName.get(j.company_id) ?? null,
+      companyName: j.viewer_company_name ?? (j.company_id ? companyName.get(j.company_id) : null) ?? null,
       matchScore: j.match_score,
       url: j.url,
     }))
@@ -116,17 +117,17 @@ export async function composeDigest(
   // 3) The user's applications (for stale + prep cuts). Join job title.
   const { data: appData } = await admin
     .from('applications')
-    .select('id, job_id, stage, updated_at, applied_at, jobs(id, title, company_id)')
+    .select('id, job_id, stage, updated_at, applied_at, jobs(id, title, company_id, employer:company_directory(name))')
     .eq('user_id', userId)
   const apps = (appData as unknown as (AppRow & {
-    jobs: { id: string; title: string; company_id: string } | null
+    jobs: { id: string; title: string; company_id: string | null; employer: { name: string | null } | null } | null
   })[] | null) ?? []
 
   const staleApps: DigestStaleApp[] = []
   const prepReady: DigestPrepReady[] = []
   for (const app of apps) {
     const jobTitle = app.jobs?.title ?? 'Untitled role'
-    const cName = app.jobs?.company_id ? companyName.get(app.jobs.company_id) ?? null : null
+    const cName = (app.jobs?.company_id ? companyName.get(app.jobs.company_id) : null) ?? app.jobs?.employer?.name ?? null
     if (PREP_STAGES.includes(app.stage as PipelineStage)) {
       prepReady.push({
         jobId: app.job_id,
