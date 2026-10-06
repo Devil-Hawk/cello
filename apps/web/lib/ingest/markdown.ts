@@ -15,8 +15,11 @@
 //
 // Pure: no I/O.
 
+import { createHash } from 'node:crypto'
 import * as cheerio from 'cheerio'
 import TurndownService from 'turndown'
+import type { AtsJob } from '../ats/types'
+import type { PostingCapture } from '../jobs/relevance-types'
 
 /** A body longer than this is marked partial (the guard), and kept whole up to HARD_LIMIT. */
 export const MAX_MARKDOWN_CHARS = 200_000
@@ -59,12 +62,19 @@ function turndown(): TurndownService {
   return td
 }
 
+/** A body with no tags at all is text: blank lines separate paragraphs and a newline is a line break. */
+function textToHtml(text: string): string {
+  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return `<p>${escaped.split(/\n\s*\n/).map((p) => p.replace(/\n/g, '<br>')).join('</p><p>')}</p>`
+}
+
 /** Clean one posting's HTML to Markdown. Never throws: an HTML that cannot be parsed gives an empty body. */
 export function postingMarkdown(html: string): PostingMarkdown {
   if (typeof html !== 'string' || !html.trim()) return { md: '', state: 'full' }
+  const source = /<\/?[a-z][a-z0-9-]*(?:\s[^>]*)?\/?>/i.test(html) ? html : textToHtml(html)
   let $: cheerio.CheerioAPI
   try {
-    $ = cheerio.load(html.slice(0, HARD_LIMIT * 2), null, false)
+    $ = cheerio.load(source.slice(0, HARD_LIMIT * 2), null, false)
   } catch {
     return { md: '', state: 'full' }
   }
@@ -90,7 +100,27 @@ export function postingMarkdown(html: string): PostingMarkdown {
   } catch {
     return { md: '', state: 'full' }
   }
-  md = md.replace(BULLET_LINE, '$1- ').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim()
+  // two trailing spaces are Markdown's hard line break and stay; longer runs are noise
+  md = md.replace(BULLET_LINE, '$1- ').replace(/[ \t]{3,}$/gm, '').replace(/\n{3,}/g, '\n\n').trim()
   if (md.length > HARD_LIMIT) return { md: md.slice(0, HARD_LIMIT), state: 'partial' }
   return { md, state: md.length > MAX_MARKDOWN_CHARS ? 'partial' : 'full' }
+}
+
+const md5 = (text: string) => createHash('md5').update(text).digest('hex')
+
+/**
+ * What the reader stores of one posting's body. The employer's HTML becomes Markdown, whole (full, or partial past
+ * the guard). A source that listed only a snippet keeps the snippet, marked partial. No body at all is `none`, with
+ * no hash, so the next read of the employer captures it. The hash is the md5 of the Markdown, so an unchanged
+ * posting hashes the same and is not re-extracted.
+ */
+export function postingCapture(job: Pick<AtsJob, 'url' | 'description' | 'descriptionHtml' | 'descriptionSource' | 'applyUrl'>): PostingCapture {
+  const apply_url = job.applyUrl && job.applyUrl !== job.url ? job.applyUrl : null
+  if (job.descriptionHtml) {
+    const { md, state } = postingMarkdown(job.descriptionHtml)
+    if (md) return { description_md: md, description_state: state, description_source: job.descriptionSource ?? 'api', apply_url, description_md5: md5(md) }
+  }
+  const snippet = job.description?.trim()
+  if (snippet) return { description_md: snippet, description_state: 'partial', description_source: 'listing', apply_url, description_md5: md5(snippet) }
+  return { description_md: null, description_state: 'none', description_source: null, apply_url, description_md5: null }
 }

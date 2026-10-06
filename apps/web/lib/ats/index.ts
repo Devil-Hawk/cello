@@ -5,7 +5,6 @@
 // the Next.js route (user-scoped supabase-js client, RLS enforced) and in the
 // scheduled script (scripts/ingest.ts, service-role client).
 
-import { createHash } from 'node:crypto'
 import type { AtsJob, AtsMetadata, AtsProvider, AtsProviderId, FetchContext } from './types'
 import { isValidToken } from './types'
 import { greenhouse } from './greenhouse'
@@ -33,7 +32,7 @@ import {
 import { searchTerms, type ReaderTargets } from '../ingest/reader/targets'
 import { targetVerdict, type TargetVerdict } from '../targeting/roles'
 import { hasPersonTargets, judgeForPerson, prepareTargets, type OutsideReason, type TypeStep } from '../jobs/target-relevance'
-import type { SourceTier, TypeProv } from '../jobs/relevance-types'
+import type { PostingCapture, SourceTier, TypeProv } from '../jobs/relevance-types'
 import { typeTitle } from '../jobs/role-types'
 import { EMPTY_TARGETING, type Targeting } from '../targeting'
 // Relative import (not `@/...`): lib/ats/* stays framework-free, and
@@ -46,6 +45,7 @@ import { repairMojibake } from '../jobs/mojibake'
 // Pure and import-light too (zod + the classifier): the requirements read at
 // ingest, so a row is stored with what it asks for.
 import { parseRequirements, type Requirements } from '../jobs/requirements'
+import { postingCapture } from '../ingest/markdown'
 
 export type {
   AtsJob,
@@ -95,7 +95,7 @@ export interface CompanyInput {
 }
 
 /** Row shape upserted into jobs (onConflict company_id,external_id). */
-export interface JobUpsertRow {
+export interface JobUpsertRow extends Partial<PostingCapture> {
   company_id: string
   /** Set only for a company in the directory: its rows are written once per employer, whoever reads first. */
   employer_id?: string
@@ -139,7 +139,7 @@ export interface ExistingJob {
   title: string
   location: string | null
   salaryRange: string | null
-  /** md5 of the stored description (jobs.description_md5); null when it is empty. */
+  /** md5 of the stored Markdown (jobs.description_md5); null when there is no body yet. */
   descriptionMd5: string | null
   /** jobs.source of the stored row. */
   source?: string | null
@@ -334,10 +334,6 @@ function sanitizeJobs(jobs: AtsJob[]): AtsJob[] {
     clean.push(repairJobText(job))
   }
   return clean
-}
-
-function md5(text: string): string {
-  return createHash('md5').update(text).digest('hex')
 }
 
 /** The sources whose rows one refresh of `provider` may count as missed. */
@@ -800,7 +796,9 @@ export async function syncJobs(
   excluded.capped = Math.max(0, ranked.length - room)
   const newRows: JobUpsertRow[] = ranked
     .slice(0, room)
-    .map(({ job, title, c }) => ({
+    .map(({ job, title, c }) => {
+    const cap = postingCapture(job)
+    return {
       company_id: company.id,
       ...(company.employer_id ? { employer_id: company.employer_id } : {}),
       title,
@@ -825,12 +823,15 @@ export async function syncJobs(
       requirements: parseRequirements({
         title,
         description: job.description ?? '',
+        descriptionMd: cap.description_md,
         location: job.location,
         salaryRange: job.salary,
       }),
       requirements_extracted_at: now,
+      ...cap,
       ...typeFields(typedFor(job, title)),
-    }))
+    }
+  })
 
   if (newRows.length > 0) {
     try {
@@ -909,12 +910,18 @@ export async function syncJobs(
       if (country) fields.country = country
     }
     if (job.salary && job.salary !== have.salaryRange) fields.salary_range = job.salary
+    // The body is re-read only when its hash changes. A snippet never replaces a body already stored, and a read that
+    // found no body (a provider that did not send one this time) leaves the stored one alone.
+    const cap = postingCapture(job)
     const description = (job.description ?? '').trim().slice(0, MAX_DESCRIPTION_CHARS)
-    if (description && md5(description) !== have.descriptionMd5) {
-      fields.description = description
+    const changed = cap.description_md !== null && cap.description_md5 !== have.descriptionMd5
+    if (changed && !(cap.description_state === 'partial' && have.descriptionMd5 !== null)) {
+      if (description) fields.description = description
+      Object.assign(fields, cap)
       fields.requirements = parseRequirements({
         title: title || have.title,
-        description,
+        description: description || '',
+        descriptionMd: cap.description_md,
         location: job.location ?? have.location,
         salaryRange: job.salary ?? have.salaryRange,
       })

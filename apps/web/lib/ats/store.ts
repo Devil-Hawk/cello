@@ -17,8 +17,6 @@ type Db = SupabaseClient<any, any, any>
 
 const PAGE_SIZE = 1000
 const UPDATE_CONCURRENCY = 4
-/** md5('') : jobs.description_md5 of a row with no description. */
-const EMPTY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e'
 /** Longer than any refresh of one company takes; a crashed holder frees itself. */
 const LOCK_LEASE_MINUTES = 15
 
@@ -76,7 +74,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
             title: row.title,
             location: row.location,
             salaryRange: row.salary_range,
-            descriptionMd5: !row.description_md5 || row.description_md5 === EMPTY_MD5 ? null : row.description_md5,
+            descriptionMd5: row.description_md5 || null,
             source: row.source,
             open: row.still_open !== false,
             url: row.url,
