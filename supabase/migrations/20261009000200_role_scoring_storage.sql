@@ -297,7 +297,7 @@ drop policy if exists "own taste_models select" on public.taste_models;
 create policy "own taste_models select" on public.taste_models
   for select to authenticated using ((select auth.uid()) = user_id);
 
-revoke all on public.role_reactions, public.shortlist_items, public.taste_models from public, anon;
+revoke all on public.role_reactions, public.shortlist_items, public.taste_models from public, anon, authenticated;
 grant select, insert, update, delete on public.role_reactions to authenticated;
 grant select on public.shortlist_items, public.taste_models to authenticated;
 grant select, insert, update, delete on public.role_reactions, public.shortlist_items, public.taste_models to service_role;

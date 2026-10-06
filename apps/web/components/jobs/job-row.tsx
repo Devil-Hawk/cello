@@ -231,6 +231,7 @@ export function JobRow({
             {job.title}
             <span className="sr-only"> at {job.companies?.name ?? 'unknown company'} — open details</span>
           </button>
+          </div>
           {/* The chip is a control in its own right (hover or focus for the reason), so it must not
               also fire the row's open-the-job click. Guarded, not blanket: only clicks that landed
               on a control are swallowed, so the plain chip still counts as row whitespace. */}
