@@ -76,8 +76,17 @@ export async function readSettings(db: AdminClient, userId: string, chatId: stri
   }
 }
 
-/** Writes what the person changed. A choice above their highest is refused and nothing is stored. */
-export async function writeSettings(db: AdminClient, userId: string, chatId: string, body: unknown, limits: ChoiceLimits = chatLimits()): Promise<{ ok: true } | Refusal | { ok: false; notFound: true }> {
+async function saveDefault(db: AdminClient, userId: string, choice: ModelChoice) {
+  // ponytail: read, merge, write like Settings > Models does; two saves at the same instant keep the last.
+  const prefs = await readPrefs(db, userId)
+  await db.from('profiles').update({ preferences: { ...prefs, chat_choice: choice } }).eq('id', userId)
+}
+
+/**
+ * Writes what the person changed. A choice above their highest is refused and nothing is stored.
+ * With no chat (`chatId` null) the only thing that can be written is the choice for new chats.
+ */
+export async function writeSettings(db: AdminClient, userId: string, chatId: string | null, body: unknown, limits: ChoiceLimits = chatLimits()): Promise<{ ok: true } | Refusal | { ok: false; notFound: true }> {
   const parsed = Body.safeParse(body)
   if (!parsed.success) return { ok: false, error: 'That is not a setting.', fix: 'Send a model choice, Ask before each change, or tool groups.' }
   const { choice, review, tools_off, as_default } = parsed.data
@@ -87,16 +96,17 @@ export async function writeSettings(db: AdminClient, userId: string, chatId: str
     if (!v.ok) return v
     checked = v.choice
   }
+  if (!chatId) {
+    if (!checked || !as_default) return { ok: false, error: 'Say which chat.', fix: 'Without a chat, only a choice for new chats can be saved.' }
+    await saveDefault(db, userId, checked)
+    return { ok: true }
+  }
   const { data: chat } = await db.from('chats').select('settings').eq('id', chatId).eq('user_id', userId).maybeSingle()
   if (!chat) return { ok: false, notFound: true }
   const settings = { ...(((chat as { settings: ChatSettings | null }).settings ?? {}) as ChatSettings) }
   if (review !== undefined) settings.review = review
   if (tools_off !== undefined) settings.tools_off = [...new Set(tools_off)]
   await db.from('chats').update({ ...(checked ? { model_choice: checked } : {}), settings }).eq('id', chatId).eq('user_id', userId)
-  if (checked && as_default) {
-    // ponytail: read, merge, write like Settings > Models does; two saves at the same instant keep the last.
-    const prefs = await readPrefs(db, userId)
-    await db.from('profiles').update({ preferences: { ...prefs, chat_choice: checked } }).eq('id', userId)
-  }
+  if (checked && as_default) await saveDefault(db, userId, checked)
   return { ok: true }
 }

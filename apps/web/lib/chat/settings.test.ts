@@ -38,6 +38,17 @@ describe('writeSettings', () => {
     expect(db.tables.profiles[0].preferences).toEqual({ api_keys: { x: 'kept' }, chat_choice: choice })
   })
 
+  it('stores a default with no chat, keeps other preferences, and refuses one above the highest', async () => {
+    const db = seed()
+    const choice = { rung: 'R3', model: FREE, effort: 'low' }
+    expect(await writeSettings(db, 'u1', null, { choice, as_default: true }, limits())).toEqual({ ok: true })
+    expect(db.tables.profiles[0].preferences).toEqual({ api_keys: { x: 'kept' }, chat_choice: choice })
+    const above = { rung: 'R4', model: 'anthropic/claude-sonnet-5', effort: 'medium' }
+    expect(await writeSettings(db, 'u1', null, { choice: above, as_default: true }, limits())).toMatchObject({ ok: false })
+    expect(db.tables.profiles[0].preferences).toEqual({ api_keys: { x: 'kept' }, chat_choice: choice })
+    expect(await writeSettings(db, 'u1', null, { review: true }, limits())).toMatchObject({ ok: false })
+  })
+
   it('refuses an unknown tool group and another person\'s chat', async () => {
     const db = seed()
     expect(await writeSettings(db, 'u1', 'c1', { tools_off: ['send_everything'] }, limits())).toMatchObject({ ok: false })
