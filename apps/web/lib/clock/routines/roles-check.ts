@@ -18,6 +18,7 @@ import { hasSource, ingestUser, isDue, makeSupabaseRunsStore, type DueCompany, t
 import type { RoutineContext, RoutineOutcome } from '../routines'
 
 const PAGE_SIZE = 1000
+const REJUDGE_PAGE = 500
 /** The state a slice hands the next: the employers already read in this check. */
 const MAX_DONE = 1500
 
@@ -99,6 +100,105 @@ export async function matchDirectoryRoles(admin: RoutineContext['admin'], userId
   return { offered: rows.length, kept: keep.length, hidden: hidden.length }
 }
 
+interface HeldRole {
+  job_id: string
+  saved_at: string | null
+  hidden_reason: string | null
+  jobs: HeldJob | HeldJob[] | null
+}
+interface HeldJob {
+  title: string
+  job_function: string | null
+  seniority: string | null
+  country: string | null
+  language: string | null
+  is_remote: boolean | null
+  posted_at: string | null
+  employer_id: string | null
+  company_id: string | null
+  companies: { name: string | null } | { name: string | null }[] | null
+}
+
+/**
+ * After the person changes their targets, every role they hold under older targets is judged again, by
+ * the same code that stored it. An outside role with no save, no application and no "not for me" is
+ * removed and counted by its reason; any other keeps its row under the new version. Roles already under
+ * the current version are not touched, so a check with nothing changed costs one query.
+ */
+export async function rejudgeHeldRoles(
+  admin: RoutineContext['admin'],
+  userId: string,
+  targets: ReaderTargets,
+  now: () => number,
+  deadlineAt: number
+): Promise<{ checked: number; removed: number }> {
+  const version = targets.version ?? 0
+  const done = { checked: 0, removed: 0 }
+  if (version <= 0) return done
+  const person = { targeting: targets.targeting, titles: targets.titles }
+  const stated = hasPersonTargets(person)
+  const prepared = prepareTargets(person.titles)
+  const counts = new Map<string, { employer_id: string | null; company_id: string | null; kind: 'outside_targets'; reason: string; n: number }>()
+  const mine = () => admin.from('person_roles')
+
+  while (now() < deadlineAt) {
+    const { data, error } = await mine()
+      .select('job_id, saved_at, hidden_reason, jobs(title, job_function, seniority, country, language, is_remote, posted_at, employer_id, company_id, companies(name))')
+      .eq('user_id', userId)
+      .lt('targets_version', version)
+      .order('job_id')
+      .limit(REJUDGE_PAGE)
+    if (error) throw new Error('list_held_roles')
+    const rows = (data ?? []) as unknown as HeldRole[]
+    if (rows.length === 0) break
+    const ids = rows.map((r) => r.job_id)
+    const { data: apps } = await admin.from('applications').select('job_id').eq('user_id', userId).in('job_id', ids)
+    const applied = new Set(((apps ?? []) as { job_id: string }[]).map((a) => a.job_id))
+
+    const drop: string[] = []
+    const hide: string[] = []
+    const show: string[] = []
+    for (const r of rows) {
+      const job = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs
+      if (!job || !stated) continue
+      const company = Array.isArray(job.companies) ? job.companies[0] : job.companies
+      const verdict = judgeForPerson(
+        { title: job.title, job_function: job.job_function, seniority: job.seniority, country: job.country, language: job.language, is_remote: job.is_remote, postedAt: job.posted_at },
+        person,
+        company?.name ?? null,
+        prepared
+      )
+      if (verdict.keep) {
+        if (verdict.hidden && r.hidden_reason === null) hide.push(r.job_id)
+        if (!verdict.hidden && r.hidden_reason === 'unclassified') show.push(r.job_id)
+      } else if (!r.saved_at && r.hidden_reason !== 'not_for_me' && !applied.has(r.job_id)) {
+        drop.push(r.job_id)
+        const key = `${job.employer_id ?? job.company_id}|${verdict.reason}`
+        const c = counts.get(key) ?? { employer_id: job.employer_id, company_id: job.employer_id ? null : job.company_id, kind: 'outside_targets' as const, reason: verdict.reason, n: 0 }
+        c.n += 1
+        counts.set(key, c)
+      }
+    }
+
+    const step = async (q: PromiseLike<{ error: { message: string } | null }>) => {
+      const { error: e } = await q
+      if (e) throw new Error('rejudge_write')
+    }
+    if (drop.length > 0) await step(mine().delete().eq('user_id', userId).in('job_id', drop))
+    if (hide.length > 0) await step(mine().update({ hidden_reason: 'unclassified' }).eq('user_id', userId).in('job_id', hide))
+    if (show.length > 0) await step(mine().update({ hidden_reason: null }).eq('user_id', userId).in('job_id', show))
+    const left = ids.filter((id) => !drop.includes(id))
+    if (left.length > 0) await step(mine().update({ targets_version: version }).eq('user_id', userId).in('job_id', left))
+    done.checked += rows.length
+    done.removed += drop.length
+  }
+  if (counts.size > 0) {
+    const { error } = await admin.rpc('set_person_counts', { p_user: userId, p_rows: [...counts.values()] })
+    if (error) throw new Error('set_person_counts')
+  }
+  return done
+}
+
 export async function rolesCheck(ctx: RoutineContext, injected: RolesCheckDeps = {}): Promise<RoutineOutcome> {
   const { admin, userId } = ctx
   if (!userId) return { ok: false, failure: 'no_user' }
@@ -118,12 +218,21 @@ export async function rolesCheck(ctx: RoutineContext, injected: RolesCheckDeps =
   // A site only a browser can read belongs to the dispatched run, once that is on.
   const browserRunOn = await renderIsOn(admin)
   const now = ctx.now()
+  const targets = await loadTargets(admin, userId)
+  // Roles held under older targets first, so the reads below start from what the person holds now.
+  let rejudged: Record<string, unknown> = {}
+  try {
+    const r = await rejudgeHeldRoles(admin, userId, targets, ctx.now, ctx.deadlineAt)
+    if (r.checked > 0) rejudged = { rejudged: r.checked, removed: r.removed }
+  } catch {
+    rejudged = { rejudge_failed: true }
+  }
   const finish = async (found: Record<string, unknown>): Promise<Record<string, unknown>> => {
     try {
-      const m = await matchDirectoryRoles(admin, userId, await loadTargets(admin, userId))
-      return { ...found, matched: m.kept, offered: m.offered }
+      const m = await matchDirectoryRoles(admin, userId, targets)
+      return { ...found, ...rejudged, matched: m.kept, offered: m.offered }
     } catch {
-      return { ...found, match_failed: true }
+      return { ...found, ...rejudged, match_failed: true }
     }
   }
   const due = all.filter((c) => {
@@ -134,7 +243,6 @@ export async function rolesCheck(ctx: RoutineContext, injected: RolesCheckDeps =
     return { ok: true, found: await finish({ employers: all.length, read: Number(totals.read ?? 0), roles: Number(totals.roles ?? 0), new: Number(totals.new ?? 0), cannot_read: Number(totals.cannot_read ?? 0) }) }
   }
 
-  const targets = await loadTargets(admin, userId)
   const batchId = randomUUID()
   const ingest = injected.ingest ?? ingestUser
   const summary = await ingest(
