@@ -228,7 +228,7 @@ export async function loadOwnedJob(
   const { viewer_company_name: viewerName, ...rest } = data as unknown as OwnedJob & { viewer_company_name: string | null; person_roles?: FitRow | FitRow[] | null }
   const { person_roles: _embedded, ...posting } = rest
   const job: OwnedJob = opts.fit ? { ...posting, ...fitRowOf(rest) } : posting
-  if (!job.company_id) return { error: 'Job has no company' }
+  // A role held through the directory employer alone has no company of the person's own: that is legal, so it is not an error.
   return { job, companyName: viewerName ?? 'Unknown company' }
 }
 
@@ -628,8 +628,12 @@ export async function listJobs(ctx: CopilotToolContext, args: Args) {
   const baseQuery = () => {
     const on = new OnJobs(ctx.admin.from('person_roles').select(SELECT).eq('user_id', ctx.userId).is('hidden_reason', null))
     openRolesOnly(on)
-    // ponytail: the first 200 dream companies; a person with more would need chunkedIn.
-    if (dreamOnly) on.in('company_id', ids.slice(0, 200))
+    // A role counts for a dream company when it is stored under it or under another follower's company at the same employer.
+    // ponytail: the first 200 of each (the request URL has a length limit); a person with more would need chunkedIn.
+    if (dreamOnly) {
+      const employers = companyRows.filter((c) => c.is_dream_company && c.employer_id).map((c) => c.employer_id as string)
+      on.or([`company_id.in.(${ids.slice(0, 200).join(',')})`, ...(employers.length ? [`employer_id.in.(${employers.slice(0, 200).join(',')})`] : [])].join(','))
+    }
     if (fresh) on.eq('is_new', true)
     return on
   }
