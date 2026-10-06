@@ -69,7 +69,7 @@ describe('buildFacts', () => {
   })
 
   it('shows sponsorship as not set until it is stated', () => {
-    expect(by(buildFacts(input()), 'sponsorship')).toMatchObject({ value: 'No', source: 'Not set yet' })
+    expect(by(buildFacts(input()), 'sponsorship')).toMatchObject({ value: 'Not set', source: 'Not set yet' })
     expect(by(buildFacts(input({ preferences: { constraints: { needsSponsorship: true } } })), 'sponsorship')).toMatchObject({ value: 'Yes', source: 'You set this' })
   })
 })
