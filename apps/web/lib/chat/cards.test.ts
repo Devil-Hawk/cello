@@ -35,10 +35,10 @@ const seed = (job: Record<string, unknown> = {}) =>
     person_roles: [personRole({}, job)],
     companies: [{ id: 'c1', user_id: 'u1', name: 'Ramp', logo_url: 'https://ramp.test/logo.png', domain: 'ramp.test', watching: true }],
     applications: [{ id: 'a1', user_id: 'u1', job_id: 'j1', stage: 'applied', jobs: { company_id: 'c1' } }],
-    jobs: [
-      { id: 'j1', company_id: 'c1', still_open: true },
-      { id: 'j2', company_id: 'c1', still_open: true },
-      { id: 'j3', company_id: 'c1', still_open: false },
+    person_jobs: [
+      { id: 'j1', viewer_id: 'u1', viewer_company_id: 'c1', still_open: true },
+      { id: 'j2', viewer_id: 'u1', viewer_company_id: 'c1', still_open: true },
+      { id: 'j3', viewer_id: 'u1', viewer_company_id: 'c1', still_open: false },
     ],
   })
 

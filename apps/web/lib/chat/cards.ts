@@ -4,6 +4,7 @@
 
 import { roleView, type Chance } from '@/lib/agents/scoring-port'
 import type { AdminClient } from '@/lib/harness/types'
+import { personJobs } from '@/lib/jobs/person-jobs'
 import type { ObjectRef } from './types'
 
 export interface RoleCard {
@@ -61,7 +62,7 @@ async function companyCard(db: AdminClient, userId: string, id: string): Promise
   if (!data) return null
   const row = data as { name: string; logo_url?: string | null; domain?: string | null; watching?: boolean }
   const [open, kept] = await Promise.all([
-    db.from('jobs').select('id', { count: 'exact', head: true }).eq('company_id', id).eq('still_open', true),
+    personJobs(db).select('id', { count: 'exact', head: true }).eq('viewer_id', userId).eq('viewer_company_id', id).eq('still_open', true),
     db.from('applications').select('id, jobs!inner(company_id)', { count: 'exact', head: true }).eq('user_id', userId).eq('jobs.company_id', id),
   ])
   return {
