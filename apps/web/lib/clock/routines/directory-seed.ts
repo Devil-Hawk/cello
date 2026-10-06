@@ -9,10 +9,11 @@
 // Only new or changed entries are written (upsert_directory_candidates). Both lists are fetched with Cello's own
 // guarded helpers; a list whose shape changed makes the routine fail loudly, which the scorecard shows as T26.
 //
-// ponytail: Workday and Eightfold are left out: their tenant is a host and a site, not a slug a board token can hold.
-// Add them with their own parser when the verifier reads those boards by token.
+// Workday and Eightfold rows carry their board's address instead of a slug: the token is read from it by the provider's
+// own detector (tenant.datacenter.site, host_domain). An Eightfold row with no domain has no token and is left out.
 
 import { assertAllowedHost, fetchText } from '../../ats/http'
+import { providers } from '../../ats/index'
 import { isValidToken, type AtsProviderId } from '../../ats/types'
 import { normalizeCompanyName } from '../../entities/companies'
 import { fetchYcHiringCompanies, type YcCompany } from '../../sources/ycombinator'
@@ -20,7 +21,7 @@ import type { RoutineContext, RoutineOutcome } from '../routines'
 
 const KALIL_BASE = 'https://raw.githubusercontent.com/kalil0321/ats-scrapers/main/ats-companies'
 const KALIL_HOSTS = new Set(['raw.githubusercontent.com'])
-export const KALIL_PROVIDERS: readonly AtsProviderId[] = ['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'workable', 'recruitee', 'personio']
+export const KALIL_PROVIDERS: readonly AtsProviderId[] = ['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'workable', 'recruitee', 'personio', 'workday', 'eightfold']
 
 const DAY_MS = 86_400_000
 export const YC_EVERY_DAYS = 7
@@ -70,7 +71,8 @@ function csvFields(line: string): string[] {
 
 /**
  * A provider's tenant list as candidates. The canonical shape is `name,slug,url`; a few files still carry the old
- * `name,url` where the second column is the bare slug. A header that is neither throws: the list changed shape.
+ * `name,url` where the second column is the bare slug. Workday and Eightfold take their token from the board's `url`
+ * (Eightfold also from its `domain` column). A header that is neither throws: the list changed shape.
  */
 export function parseKalil(csv: string, provider: AtsProviderId): SeedRow[] {
   const lines = csv.split(/\r?\n/).filter((l) => l.trim() !== '')
@@ -78,12 +80,22 @@ export function parseKalil(csv: string, provider: AtsProviderId): SeedRow[] {
   const nameAt = header.indexOf('name')
   const slugAt = header.indexOf('slug') >= 0 ? header.indexOf('slug') : header.indexOf('url')
   if (nameAt < 0 || slugAt < 0) throw new Error(`ats-scrapers ${provider}: unexpected header`)
+  const addressed = provider === 'workday' || provider === 'eightfold'
+  const urlAt = header.indexOf('url')
+  const domainAt = header.indexOf('domain')
+  if (addressed && urlAt < 0) throw new Error(`ats-scrapers ${provider}: unexpected header`)
   const seen = new Set<string>()
   const rows: SeedRow[] = []
   for (const line of lines.slice(1)) {
     const f = csvFields(line)
     const name = (f[nameAt] ?? '').trim().slice(0, 200)
-    const token = (f[slugAt] ?? '').trim()
+    let token = (f[slugAt] ?? '').trim()
+    if (addressed) {
+      const url = (f[urlAt] ?? '').trim()
+      const domain = (f[domainAt] ?? '').trim()
+      const careerUrl = provider === 'eightfold' && domain ? `${url}${url.includes('?') ? '&' : '?'}domain=${encodeURIComponent(domain)}` : url
+      token = providers[provider].detect({ careerUrl, domain: null })?.token ?? ''
+    }
     // A slug that cannot be a board token (a path, a symbol) is not seeded; a name that is empty has nothing to check.
     if (!name || !isValidToken(token) || seen.has(token.toLowerCase())) continue
     seen.add(token.toLowerCase())
