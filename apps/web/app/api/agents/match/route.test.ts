@@ -27,7 +27,7 @@ vi.mock('@/lib/harness/llm', () => ({ callLlm: vi.fn(), MissingKeyError: class e
 vi.mock('@/lib/harness/llm-key-message', () => ({ canRunLlm: () => true, missingOpenRouterMessage: () => 'no key' }))
 // Who wrote the score: a person cannot update a shared role (migration 20261008055000), so only the service role may.
 const writes: { by: 'admin' | 'user'; table: string; values: unknown }[] = []
-const admin = { from: (table: string) => ({ update: (values: unknown) => (writes.push({ by: 'admin', table, values }), { eq: async () => ({ error: null }) }) }) }
+const admin = { from: (table: string) => ({ update: (values: unknown) => (writes.push({ by: 'admin', table, values }), { eq: () => ({ is: async () => ({ error: null }) }) }) }) }
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => admin }))
 
 const rows: Record<string, unknown> = {

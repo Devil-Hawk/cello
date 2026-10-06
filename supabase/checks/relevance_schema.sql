@@ -45,18 +45,18 @@ begin
   end if;
 end $$;
 
--- Roles: both people hold the same posting; A also holds one B does not.
-insert into public.jobs (id, company_id, title, description, url, external_id, job_function, seniority, country, discovered_at, source)
-select ja1, co_a, 'Platform Engineer', 'd', 'https://overlap.example/jobs/req-1', 'req-1', 'engineering', 'senior', 'US', now() - interval '2 days', 'greenhouse' from fx
-union all select ja2, co_a, 'Staff Engineer', 'd', 'https://overlap.example/jobs/req-2', 'req-2', 'engineering', 'staff', 'US', now() - interval '2 days', 'greenhouse' from fx
-union all select jb1, co_b, 'Platform Engineer', 'd', 'https://overlap.example/jobs/req-1', 'req-1', 'engineering', 'senior', 'US', now(), 'greenhouse' from fx;
+-- Roles (stored shared, as upsert_shared_jobs does): both people hold the same posting; A also holds one B does not.
+insert into public.jobs (id, company_id, employer_id, title, description, url, external_id, job_function, seniority, country, discovered_at, source)
+select ja1, co_a, emp, 'Platform Engineer', 'd', 'https://overlap.example/jobs/req-1', 'req-1', 'engineering', 'senior', 'US', now() - interval '2 days', 'greenhouse' from fx
+union all select ja2, co_a, emp, 'Staff Engineer', 'd', 'https://overlap.example/jobs/req-2', 'req-2', 'engineering', 'staff', 'US', now() - interval '2 days', 'greenhouse' from fx
+union all select jb1, co_b, emp, 'Platform Engineer', 'd', 'https://overlap.example/jobs/req-1', 'req-1', 'engineering', 'senior', 'US', now(), 'greenhouse' from fx;
 
 do $$
 declare f record;
 begin
   select * into f from fx;
   if (select posting_key from public.jobs where id = f.ja1) <> 'req-1' or (select employer_id from public.jobs where id = f.jb1) is distinct from f.emp then
-    raise exception 'a new job must get its employer and posting key';
+    raise exception 'a new job must get its posting key';
   end if;
 end $$;
 

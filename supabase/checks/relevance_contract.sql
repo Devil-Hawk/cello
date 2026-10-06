@@ -240,11 +240,9 @@ do $$
 declare f record; co_u uuid := gen_random_uuid(); jh uuid; ja2 uuid := gen_random_uuid();
 begin
   select * into f from fx;
-  begin
-    perform pg_temp.as_user(f.a, format($q$with i as (insert into public.jobs (company_id, title, description, url, external_id, source) values (%L, 'Attack', 'x', 'https://evil.example/a', 'atk-1', 'greenhouse') returning 1) select count(*) from i$q$, f.co_a));
-    raise exception 'a person must not insert a role at a company linked to an employer';
-  exception when insufficient_privilege then reset role;
-  end;
+  -- a role the person inserts at a company linked to an employer stays their own: it carries no employer
+  perform pg_temp.as_user(f.a, format($q$with i as (insert into public.jobs (company_id, title, description, url, external_id, source) values (%L, 'Attack', 'x', 'https://evil.example/a', 'atk-1', 'greenhouse') returning 1) select count(*) from i$q$, f.co_a));
+  if (select employer_id from public.jobs where external_id = 'atk-1') is not null then raise exception 'a role a person inserts is not shared'; end if;
   insert into public.companies (id, user_id, name, domain, career_url, metadata) values (co_u, f.a, 'Unlinked Co', 'unlinked.example', 'https://unlinked.example/careers', '{}'::jsonb);
   if (select employer_id from public.companies where id = co_u) is not null then raise exception 'the setup company has no employer'; end if;
   begin
@@ -252,7 +250,7 @@ begin
     raise exception 'a person must not insert a role with another employer''s id';
   exception when insufficient_privilege then reset role;
   end;
-  if exists (select 1 from public.jobs where url like 'https://evil.example/%') then raise exception 'no attacker role is stored'; end if;
+  if exists (select 1 from public.jobs where url like 'https://evil.example/%' and employer_id is not null) then raise exception 'no attacker role is shared'; end if;
   if exists (select 1 from public.directory_roles_for(f.b, null, 1000) where title = 'Attack') then raise exception 'an attacker role is offered to another person'; end if;
 
   -- placeholders: two at one linked company with one address both insert, carry no employer, and are offered to no one else
