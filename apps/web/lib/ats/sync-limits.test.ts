@@ -222,6 +222,67 @@ describe('syncJobs: only the employer own, open, unique and real roles', () => {
   })
 })
 
+describe('syncJobs: a role that is no longer open or no longer the employer\'s is not sighted, so it closes', () => {
+  const storedOpen = (n: number): ExistingJob => ({
+    externalId: `https://acme.com/jobs/${n}`,
+    title: `Software Engineer ${n}`,
+    location: `City ${n}`,
+    salaryRange: null,
+    descriptionMd5: null,
+    source: 'sitemap',
+    open: true,
+  })
+
+  it('a stored open role relisted with validThrough in the past is left out of the sightings', async () => {
+    const { sightings, upserted } = await run([role(1, { validThrough: ago(1) }), role(2)], [storedOpen(1)])
+    expect(upserted.map((r) => r.external_id)).toEqual(['https://acme.com/jobs/2'])
+    expect(sightings[0].ids).toEqual(['https://acme.com/jobs/2'])
+  })
+
+  it('the same holds when the source gives its own listed ids, and for an agency or a reposting site', async () => {
+    const repost = 'https://www.linkedin.com/jobs/view/3'
+    const listed = [role(1, { validThrough: ago(1) }), role(2, { employer: 'Robert Half' }), role(3, { url: repost, externalId: repost }), role(4)]
+    const ids = listed.map((j) => j.externalId).concat('https://acme.com/jobs/unread')
+    const { sightings } = await run(listed, [storedOpen(1), storedOpen(2)], { listedIds: ids })
+    expect(sightings[0].ids).toEqual(['https://acme.com/jobs/4', 'https://acme.com/jobs/unread'])
+  })
+
+  it('when every listed role is expired the answer is still recorded, so the stored one can close', async () => {
+    const { sightings } = await run([role(1, { validThrough: ago(1) })], [storedOpen(1)])
+    expect(sightings[0].ids).toEqual([])
+  })
+
+  it('an expired role is not updated either', async () => {
+    const m = memory([storedOpen(1)])
+    const updates: unknown[] = []
+    m.store.updateJobs = async (rows) => {
+      updates.push(...rows)
+      return rows.length
+    }
+    const result = emptyResult(COMPANY)
+    await syncJobs(m.store, COMPANY, [role(1, { validThrough: ago(1), title: 'Staff Software Engineer 1' }), role(2)], { source: 'sitemap', sightingSources: ['sitemap'], stored: new Map([[ 'https://acme.com/jobs/1', storedOpen(1)]]), judge }, result)
+    expect(updates).toEqual([])
+  })
+})
+
+describe('syncJobs: a reposting site is never the employer\'s own, even when the careers link is on it', () => {
+  const builtin = { name: 'Acme', domain: 'acme.com', careerUrl: 'https://builtin.com/company/acme/jobs' }
+  const onBuiltin = (n: number) => role(n, { url: `https://builtin.com/job/${n}`, externalId: `https://builtin.com/job/${n}` })
+
+  it('roles on builtin.com are not stored when the careers URL is builtin.com', async () => {
+    const { upserted, result } = await run([onBuiltin(1), onBuiltin(2)], [], { judge: builtin })
+    expect(upserted).toEqual([])
+    expect(result.excluded?.reposting).toBe(2)
+  })
+
+  it('and a linkedin.com careers link keeps no linkedin.com role', async () => {
+    const li = { name: 'Acme', domain: 'acme.com', careerUrl: 'https://www.linkedin.com/jobs/search/?keywords=acme' }
+    const job = role(1, { url: 'https://www.linkedin.com/jobs/view/123456', externalId: 'https://www.linkedin.com/jobs/view/123456' })
+    const { upserted } = await run([job], [], { judge: li })
+    expect(upserted).toEqual([])
+  })
+})
+
 describe('syncJobs: a windowed read closes nothing', () => {
   it('a search that lists only what matched records no misses', async () => {
     const { sightings } = await run([role(1)], [], { windowed: true })

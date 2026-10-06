@@ -578,11 +578,18 @@ export async function syncJobs(
   const { stored } = opts
   // Dedup intra-run and count.
   // A posting dated more than ROLE_MAX_AGE_DAYS ago is not an open role.
-  const clean = sanitizeJobs(listed).filter((job) => !isStalePosting(job.postedAt))
+  // Roles the source lists that are not open roles of this employer (stale, expired, agency, repost, other employer, non-role)
+  // are not sighted either, so a stored one of them misses and closes instead of being kept open by the listing.
+  const notOpen = new Set<string>()
+  const clean = sanitizeJobs(listed).filter((job) => {
+    if (!isStalePosting(job.postedAt)) return true
+    notOpen.add(job.externalId)
+    return false
+  })
   result.found = clean.length
   const excluded = { ...emptyExcluded(), capped: 0 }
   if (opts.judge) result.excluded = excluded
-  if (clean.length === 0) {
+  if (clean.length === 0 && notOpen.size === 0) {
     // Nothing listed is not evidence that anything closed: an empty answer looks
     // the same as a board that failed to load, so no sighting is recorded.
     try {
@@ -612,7 +619,10 @@ export async function syncJobs(
     const ctx: JudgeContext = { company: opts.judge }
     candidates = candidates.filter((job) => {
       const verdict = judgeRole(job, ctx)
-      if (!verdict.keep) excluded[verdict.why]++
+      if (!verdict.keep) {
+        excluded[verdict.why]++
+        notOpen.add(job.externalId)
+      }
       return verdict.keep
     })
     const storedRoles = [...stored.values()].map((s) => ({ title: s.title, location: s.location, source: s.source, open: s.open, externalId: s.externalId }))
@@ -739,6 +749,7 @@ export async function syncJobs(
   //    left alone rather than blanked.
   const updates: JobUpdate[] = []
   for (const job of clean) {
+    if (notOpen.has(job.externalId)) continue
     const have = stored.get(job.externalId)
     if (!have) continue
     const fields: Record<string, unknown> = {}
@@ -775,7 +786,7 @@ export async function syncJobs(
     try {
       const sighted = await store.recordSightings(
         company.id,
-        opts.listedIds ?? clean.map((j) => j.externalId),
+        (opts.listedIds ?? clean.map((j) => j.externalId)).filter((id) => !notOpen.has(id)),
         windowed ? [] : opts.sightingSources
       )
       result.closed = sighted.closed
