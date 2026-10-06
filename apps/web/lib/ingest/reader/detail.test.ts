@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { jobFromDetail, readDetail } from './detail'
+import { isPostingPage, jobFromDetail, readDetail } from './detail'
 import { fixture } from './fake-fetcher'
 
 describe('readDetail: what a role page says about itself', () => {
@@ -83,5 +83,24 @@ describe('jobFromDetail', () => {
     const url = 'https://www.google.com/about/careers/applications/jobs/results/1-x'
     const d = readDetail('<html><head><title>Careers</title></head><body><h1>Welcome</h1></body></html>', url)
     expect(jobFromDetail(url, d, { title: 'Senior Data Engineer' })).toBeNull()
+  })
+
+  it("UMich: a role page's fact panel in its sidebar gives the reference, the place and the posting window", () => {
+    const d = readDetail(fixture('umich-job.html'), 'https://careers.umich.edu/job_detail/282948/atlas-platform-developer')
+    expect(d.title).toBe('Atlas Platform Developer')
+    expect(d.requisitionId).toBe('282948')
+    expect(d.location).toBe('Ann Arbor Campus / Ann Arbor, MI')
+    expect(d.postedAt?.slice(0, 10)).toBe('2026-09-13')
+    expect(d.validThrough?.slice(0, 10)).toBe('2026-10-13')
+    expect(isPostingPage(d)).toBe(true)
+  })
+
+  it("Google: a pasted role page's place beside its place icon", () => {
+    const d = readDetail(fixture('google-role.html'), 'https://www.google.com/about/careers/applications/jobs/results/94350111848440518-senior-software-engineer-infrastructure-platforms-infrastructure-engineering')
+    expect(d.location).toBe('Sunnyvale, CA, USA')
+  })
+
+  it('a department page is still not a posting', () => {
+    expect(isPostingPage(readDetail(fixture('oracle-hcm-department.html'), 'https://acme.test/careers/department'))).toBe(false)
   })
 })

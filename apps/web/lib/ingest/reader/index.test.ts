@@ -361,6 +361,15 @@ describe('readSite: a single pasted posting is one role, never the whole site be
     expect(f.calls.filter((u) => u.includes('results?'))).toEqual([])
   })
 
+  it('a pasted Google posting keeps its place, and the person is not told the page names none', async () => {
+    const url = 'https://www.google.com/about/careers/applications/jobs/results/94350111848440518-senior-software-engineer-infrastructure-platforms-infrastructure-engineering'
+    const f = fakeFetcher({ 'https://www.google.com/robots.txt': fixture('google-robots.txt'), [url]: fixture('google-role.html') })
+    const read = await readSite(company('Google', 'google.com', url), { fetcher: f })
+    expect(read.single).toBe(true)
+    expect(read.jobs[0]).toMatchObject({ title: 'Senior Software Engineer, Infrastructure, Platforms Infrastructure Engineering', location: 'Sunnyvale, CA, USA' })
+    expect(read.message).toBeUndefined()
+  })
+
   it("a Microsoft posting link takes its place from the host's detail answer, as its page names none", async () => {
     const url = 'https://apply.careers.microsoft.com/careers/job/1970393557022797'
     const f = fakeFetcher({
@@ -384,7 +393,7 @@ describe('readSite: a single pasted posting is one role, never the whole site be
     const read = await readSite(company('Acme', 'acme.test', url), { fetcher: fakeFetcher({ [url]: html }) })
     expect(read.jobs).toHaveLength(1)
     expect(read.jobs[0].location).toBeUndefined()
-    expect(read.message).toBe('Found the posting. Its page does not say where the role is.')
+    expect(read.message).toBe('Found the posting. Cello could not read where the role is from its page.')
   })
 
   it('a link that is not a posting stores nothing, says so, and does not read the site around it', async () => {
@@ -554,5 +563,36 @@ describe('a pasted search page, and a landing page with a search form', () => {
     expect(read.jobs).toEqual([])
     expect(read.reason).toBe('no_roles')
     expect(f.calls.some((c) => c.includes('keyword='))).toBe(false)
+  })
+})
+
+describe('a plain server-rendered university careers site (University of Michigan)', () => {
+  const origin = 'https://careers.umich.edu'
+  const jobUrl = `${origin}/job_detail/282948/atlas-platform-developer`
+  const landing = '<html><body><form action="/search-jobs" method="get"><input type="text" name="keyword"><input type="submit"></form></body></html>'
+
+  it('is read by the listing tier with no browser and no model, each role with its place and date', async () => {
+    // The page's posting window ends 2026-10-13: read as it was recorded.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-06T12:00:00Z'))
+    try {
+      const f = fakeFetcher({
+        [`${origin}/robots.txt`]: 'User-agent: *\nAllow: /',
+        [`${origin}/`]: landing,
+        [`${origin}/search-jobs?keyword=software+engineer`]: fixture('umich-search.html'),
+        [jobUrl]: fixture('umich-job.html'),
+      })
+      const fetchPage = notCalled('the rendered fetch')
+      const model = notCalled('the model')
+      const read = await readSite({ company: { name: 'University of Michigan', domain: 'umich.edu', careerUrl: `${origin}/` }, targets }, { fetcher: f, fetchPage, model })
+      expect(read.tier).toBe('listing')
+      expect(read.jobs).toHaveLength(1)
+      expect(read.jobs[0]).toMatchObject({ title: 'Atlas Platform Developer', location: 'Ann Arbor Campus / Ann Arbor, MI', requisitionId: '282948' })
+      expect(read.jobs[0].postedAt?.slice(0, 10)).toBe('2026-09-13')
+      expect(fetchPage).not.toHaveBeenCalled()
+      expect(model).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
