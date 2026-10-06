@@ -42,7 +42,7 @@ describe('postingMarkdown', () => {
 
   it('turns paragraphs that start with a bullet character into list items', () => {
     expect(postingMarkdown('<p>• Build things</p><p>• Ship them</p>').md).toBe('- Build things\n\n- Ship them')
-    expect(postingMarkdown('<p>You will:<br>● Own the API<br>● Run it</p>').md).toBe('You will:\n- Own the API\n- Run it')
+    expect(postingMarkdown('<p>You will:<br>● Own the API<br>● Run it</p>').md).toBe('You will:  \n- Own the API  \n- Run it')
   })
 
   it('keeps pay and place in the employer\'s words', () => {

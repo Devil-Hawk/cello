@@ -12,16 +12,34 @@
 // Framework-free and import-light on purpose: lib/ats/index.ts stores the
 // result on every new row, from both the app route and the scheduled script.
 
+import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { classifyJob } from './classify'
+import type { RequirementItem } from './relevance-types'
 import { findSkills } from './skill-vocabulary'
 
-export const REQUIREMENTS_VERSION = 1
+/** 2: `items` beside version 1's keys, which keep their meaning. A stored version 1 record stays valid. */
+export const REQUIREMENTS_VERSION = 2
+
+const ItemSchema = z.object({
+  id: z.string().min(1).max(40),
+  text: z.string().min(1).max(500),
+  kind: z.enum(['must', 'nice', 'other']),
+  heading: z.string().max(160),
+  quote: z.string().min(1).max(600),
+  skills: z.array(z.string().max(80)).max(20),
+  years: z.object({ min: z.number().int().min(0).max(40).nullable(), max: z.number().int().min(0).max(40).nullable() }).nullable(),
+  degree: z.string().max(80).nullable(),
+  visa: z.enum(['offered', 'not_offered']).nullable(),
+  clearance: z.string().max(80).nullable(),
+  origin: z.enum(['code', 'model']),
+  prov: z.object({ rule: z.string().optional(), step: z.string().optional(), model: z.string().optional(), at: z.string().optional() }),
+})
 
 const SENIORITIES = ['intern', 'junior', 'mid', 'senior', 'staff', 'principal', 'manager', 'director', 'exec'] as const
 
 export const RequirementsSchema = z.object({
-  version: z.literal(REQUIREMENTS_VERSION),
+  version: z.union([z.literal(1), z.literal(2)]),
   /** 'deterministic' read only the text; 'mixed' also used a model for the skill lists. */
   source: z.enum(['deterministic', 'mixed']),
   /** True when the posting had a requirements section, or a model read it. False means the lists are empty because nothing could be split, not because nothing is required. */
@@ -50,6 +68,8 @@ export const RequirementsSchema = z.object({
       period: z.enum(['year', 'month', 'hour']).nullable(),
     })
     .nullable(),
+  /** Version 2: each requirement on its own, with the posting's own words for it. */
+  items: z.array(ItemSchema).max(60).optional(),
   /** When a model last read this posting for its skill lists, even if it found none. Not set by the parser, so a posting is not asked twice until its description changes (which rewrites this record). */
   model_checked_at: z.string().nullable().optional(),
 })
@@ -58,6 +78,8 @@ export type Requirements = z.infer<typeof RequirementsSchema>
 export interface RequirementsInput {
   title: string
   description: string
+  /** The posting as Markdown (jobs.description_md): every item's quote is a substring of it. Without it the plain description is read. */
+  descriptionMd?: string | null
   location?: string | null
   /** jobs.salary_range as the provider supplied it, e.g. "USD 120,000–160,000 / yr". */
   salaryRange?: string | null
@@ -258,6 +280,92 @@ function bulletList(text: string): string[] {
 
 // --- the parse ------------------------------------------------------------
 
+// --- the items ------------------------------------------------------------
+
+const BULLET = /^\s*(?:[-*+\u2022\u00b7\u25aa\u25e6\u2013]|\d{1,2}[.)])\s+/
+const MAX_ITEMS = 60
+const DEGREE = /\b(?:bachelor(?:['\u2019]s)?|master(?:['\u2019]s)?|ph\.?d\.?|doctorate|b\.?sc\.?|m\.?sc\.?|degree)\b/i
+const CLEARANCE = /\b(?:top secret|ts\/sci|security clearance|public trust|secret clearance)\b/i
+
+/** A heading line of Markdown or of plain text, without its markers; null for anything else. */
+function headingOf(line: string, markdown: boolean): string | null {
+  const t = line.trim()
+  const hashes = /^#{1,6}\s+(.+?)\s*#*$/.exec(t)
+  if (hashes) return hashes[1].replace(/[*_]/g, '').replace(/[:\uff1a]\s*$/, '').trim()
+  const bold = /^(?:\*\*|__)(.+?)(?:\*\*|__)\s*[:\uff1a]?$/.exec(t)
+  if (bold) return bold[1].replace(/[:\uff1a]\s*$/, '').trim()
+  // A posting written with # headings has them all marked: a short unmarked line is a sentence, not a heading.
+  if (!markdown && (looksLikeHeading(t) || (/[:\uff1a]$/.test(t) && t.length < 70))) return t.replace(/[:\uff1a]\s*$/, '').trim()
+  return null
+}
+
+const plainText = (s: string) => s.replace(/\\([\\`*_{}[\]()#+\-.!<>~|])/g, '$1').replace(/(\*\*|__|\*|_)(.+?)\1/g, '$2').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/\s+/g, ' ').trim()
+const itemId = (text: string) => createHash('sha1').update(text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()).digest('hex').slice(0, 12)
+
+function itemOf(quote: string, kind: 'must' | 'nice', heading: string): RequirementItem | null {
+  const text = plainText(quote)
+  if (text.length < 3) return null
+  const years = parseYears(text)
+  const visa = parseVisa(text).sponsorship
+  return {
+    id: itemId(text),
+    text: text.slice(0, 500),
+    kind,
+    heading: heading.slice(0, 160),
+    quote: quote.slice(0, 600),
+    skills: findSkills(text).slice(0, 20),
+    years: years.min === null ? null : years,
+    degree: DEGREE.exec(text)?.[0] ?? null,
+    visa: visa === 'not_stated' ? null : visa,
+    clearance: CLEARANCE.exec(text)?.[0] ?? null,
+    origin: 'code',
+    prov: { rule: kind === 'must' ? 'requirements heading' : 'preferred heading' },
+  }
+}
+
+/**
+ * One item for each bullet, or each sentence of a paragraph, under a requirements heading (what you need) or a
+ * preferred one (nice to have). The quote is the posting's own words, so it is always a substring of `md`.
+ */
+export function extractItems(md: string): RequirementItem[] {
+  const items: RequirementItem[] = []
+  const seen = new Set<string>()
+  let mode: 'must' | 'nice' | null = null
+  let heading = ''
+  const markdown = /^#{1,6}\s/m.test(md)
+  const add = (quote: string) => {
+    if (!mode || items.length >= MAX_ITEMS || !md.includes(quote)) return
+    const item = itemOf(quote, mode, heading)
+    if (item && !seen.has(item.id)) {
+      seen.add(item.id)
+      items.push(item)
+    }
+  }
+  for (const raw of md.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line) continue
+    const h = BULLET.test(line) ? null : headingOf(line, markdown)
+    if (h !== null) {
+      heading = h
+      mode = NICE_HEADING.test(h) ? 'nice' : MUST_HEADING.test(h) ? 'must' : null
+      continue
+    }
+    if (!mode) continue
+    if (BULLET.test(line)) {
+      const body = line.replace(BULLET, '')
+      // "Nice to have: Rust" inside a requirements list belongs to its own label
+      const inlineNice = NICE_HEADING.test(body) && /[:\uff1a]/.test(body)
+      const was = mode
+      if (inlineNice) mode = 'nice'
+      add(body)
+      mode = was
+    } else {
+      for (const sentence of line.split(/(?<=[.!?])\s+/)) add(sentence.trim())
+    }
+  }
+  return items
+}
+
 export function parseRequirements(input: RequirementsInput): Requirements {
   const description = (input.description ?? '').trim()
   const sections = splitSections(description)
@@ -277,6 +385,8 @@ export function parseRequirements(input: RequirementsInput): Requirements {
     location: parseLocation(input.location, input.title, description),
     visa: parseVisa(description),
     salary: parseSalary(input.salaryRange, description),
+    // The keys above are read from the plain text exactly as version 1 read them; the items come from the Markdown.
+    items: extractItems((input.descriptionMd ?? description).trim()),
   }
 }
 
@@ -301,7 +411,12 @@ const norm = (s: string) => s.toLowerCase().replace(/[\s ]+/g, ' ').trim()
  * case aside. A model that "knows" a role at that company needs Kubernetes does
  * not get to put Kubernetes on the job.
  */
-export function groundModelAnswer(base: Requirements, description: string, answer: ModelAnswer): Requirements {
+export function groundModelAnswer(
+  base: Requirements,
+  description: string,
+  answer: ModelAnswer,
+  opts: { descriptionMd?: string | null; at?: string } = {}
+): Requirements {
   const hay = norm(description)
   const grounded = (items: string[]): string[] => {
     const out: string[] = []
@@ -323,5 +438,17 @@ export function groundModelAnswer(base: Requirements, description: string, answe
     }
   }
   if (must.length === 0 && nice.length === 0) return base
-  return { ...base, source: 'mixed', skills_resolved: true, must_have: must, nice_to_have: nice, years_experience: years }
+  // A model's item is kept only with the posting's own words for it: the line that says it, verbatim in the Markdown.
+  const source = (opts.descriptionMd ?? description).trim()
+  const lines = source.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  const modelItems: RequirementItem[] = []
+  for (const [skill, kind] of [...must.map((s) => [s, 'must'] as const), ...nice.map((s) => [s, 'nice'] as const)]) {
+    const quote = lines.find((l) => l.toLowerCase().includes(skill.toLowerCase()))?.slice(0, 600)
+    if (!quote || !source.includes(quote)) continue
+    const id = itemId(skill)
+    if ([...(base.items ?? []), ...modelItems].some((i) => i.id === id)) continue
+    modelItems.push({ id, text: skill, kind, heading: '', quote, skills: [skill], years: null, degree: null, visa: null, clearance: null, origin: 'model', prov: { step: 'read-job-requirements', ...(opts.at ? { at: opts.at } : {}) } })
+  }
+  const items = [...(base.items ?? []), ...modelItems].slice(0, MAX_ITEMS)
+  return { ...base, source: 'mixed', skills_resolved: true, must_have: must, nice_to_have: nice, years_experience: years, ...(items.length > 0 ? { items } : {}) }
 }
