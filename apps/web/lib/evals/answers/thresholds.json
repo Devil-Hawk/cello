@@ -1,0 +1,8 @@
+{
+  "modelAnswers": 0,
+  "nearPairsMatched": 0,
+  "wrongWorkAuth": 0,
+  "sensitiveRecallMin": 0.95,
+  "categoryAccuracyReport": 0.9,
+  "maxRequests": 150
+}

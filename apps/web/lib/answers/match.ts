@@ -3,8 +3,8 @@
 // place, a company, a number of days, a date or an amount, or is shaped differently, so "willing to
 // relocate to Austin" never takes the answer for London and "onsite 3 days" never takes 5.
 
-import type { Category, FieldKind } from './categories'
-import { similarity } from './normalize'
+import { categorize, isSensitive, isSpecific, type Category, type FieldKind } from './categories'
+import { normalizeQuestion, similarity } from './normalize'
 
 export const SIMILARITY_MIN = 0.8
 
@@ -76,4 +76,26 @@ export function findAnswer(rows: readonly BankRow[], asked: Asked, scope: Scope)
     if (score >= SIMILARITY_MIN && (!best || score > best.score)) best = { row: r, via: 'similar', score }
   }
   return best
+}
+
+export interface FormField {
+  id: string
+  label: string
+  kind?: FieldKind
+  options?: string[]
+  required?: boolean
+}
+
+export function classify(field: FormField, companyName: string | null = null): Asked & { category: Category } {
+  const category = categorize(field.label)
+  const mentionsCompany = Boolean(companyName && field.label.toLowerCase().includes(companyName.toLowerCase()))
+  return {
+    key: normalizeQuestion(field.label),
+    category,
+    sensitive: isSensitive(category),
+    // a question that names the employer is specific to it
+    specific: isSpecific(field.label) || mentionsCompany,
+    kind: field.kind ?? (field.options?.length ? 'select' : 'text'),
+    options: field.options?.length ? field.options : null,
+  }
 }

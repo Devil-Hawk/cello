@@ -17,7 +17,7 @@ const PATTERNS: [Category, RegExp][] = [
   ['consent', /\b(i agree|i consent|consent to|i acknowledge|acknowledge that|i certify|certify that|i understand that|privacy (policy|notice)|terms (of|and)|data processing|gdpr|attest|opt[- ]in)\b/i],
   ['sponsorship', /\bsponsor\w*|\bvisa\b/i],
   ['work_auth', /\b(authori[sz]ed|authori[sz]ation|legally (entitled|allowed|eligible)|right to work|eligible to work|work permit|work eligibility)\b/i],
-  ['salary', /\b(salary|compensation|pay (expectation|range)|expected pay|desired pay|hourly rate|rate expectation|ote)\b/i],
+  ['salary', /\b(salary|compensation|pay (expectation|range)\w*|expected pay|desired pay|hourly rate|rate expectation|ote)\b/i],
   ['relocation', /\brelocat\w*/i],
   ['notice', /\bnotice period\b/i],
   ['start_date', /\b(start date|available to start|earliest (start|date)|when can you start|date available|availability date)\b/i],
@@ -78,7 +78,7 @@ export function workAuthAnswer(question: string, facts: WorkFacts): boolean | nu
   const without = /\b(without|not (need|require)|no) (any )?(visa )?(sponsorship|sponsor)/.test(q)
   const authorized = /\b(authori[sz]ed|legally (entitled|allowed|eligible)|right to work|eligible to work|work permit)\b/.test(q)
   const requires = /\b(require|need)\b/.test(q)
-  if (authorized && without) {
+  if (without && (authorized || /\bwork\b/.test(q))) {
     if (facts.authorized === null || facts.needsSponsorship === null) return null
     return facts.authorized && !facts.needsSponsorship
   }

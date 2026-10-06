@@ -9,25 +9,19 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { buildApplyProfile, type ApplyProfile } from '@/lib/ats-apply'
 import { DOORS } from '@/lib/pipeline/actors'
 import { note, transition } from '@/lib/pipeline/transition'
-import { categorize, isSensitive, isSpecific, workAuthAnswer, type Category, type FieldKind, type WorkFacts } from './categories'
-import { findAnswer, type Asked, type BankRow, type Scope } from './match'
+import { isSensitive, workAuthAnswer, type Category, type FieldKind, type WorkFacts } from './categories'
+import { classify, findAnswer, type Asked, type BankRow, type FormField, type Scope } from './match'
 import { neverFilled, personOnly } from './never'
 import { normalizeQuestion } from './normalize'
 
 export { normalizeQuestion } from './normalize'
+export { classify } from './match'
+export type { FormField } from './match'
 
 const COLUMNS = 'id, question, question_key, category, sensitive, specific, kind, options, answer, declined, company_id, source, source_ref, origin, confirmed_at, updated_at'
 
 /** The map of a bank row's source to its one-word origin (blueprint 3.2). Confirm never changes it. */
 export const ORIGIN_OF = { person: 'person', profile: 'person', resume: 'code', approved_draft: 'model', chat: 'model' } as const
-
-export interface FormField {
-  id: string
-  label: string
-  kind?: FieldKind
-  options?: string[]
-  required?: boolean
-}
 
 export interface Resolved {
   value: unknown
@@ -59,20 +53,6 @@ export interface JobScope extends Scope {
 
 const FACT_AUTH = 'fact:work_authorized'
 const FACT_SPONSOR = 'fact:needs_sponsorship'
-
-export function classify(field: FormField, companyName: string | null = null): Asked & { category: Category } {
-  const category = categorize(field.label)
-  const mentionsCompany = Boolean(companyName && field.label.toLowerCase().includes(companyName.toLowerCase()))
-  return {
-    key: normalizeQuestion(field.label),
-    category,
-    sensitive: isSensitive(category),
-    // a question that names the employer is specific to it
-    specific: isSpecific(field.label) || mentionsCompany,
-    kind: field.kind ?? (field.options?.length ? 'select' : 'text'),
-    options: field.options?.length ? field.options : null,
-  }
-}
 
 async function rowsOf(admin: SupabaseClient, userId: string): Promise<BankRow[]> {
   const { data, error } = await admin.from('answer_bank').select(COLUMNS).eq('user_id', userId).limit(2000)

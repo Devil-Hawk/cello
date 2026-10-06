@@ -1,0 +1,753 @@
+{
+ "note": "Screening questions as they appear on public Greenhouse forms, labelled by hand with the category a reader would give them. Near pairs must never match each other. Work-authorization wordings carry the two facts and the right answer (null: Cello must leave it open).",
+ "questions": [
+  {
+   "id": "q001",
+   "text": "First Name",
+   "category": "contact"
+  },
+  {
+   "id": "q002",
+   "text": "Last Name",
+   "category": "contact"
+  },
+  {
+   "id": "q003",
+   "text": "Email",
+   "category": "contact"
+  },
+  {
+   "id": "q004",
+   "text": "Phone",
+   "category": "contact"
+  },
+  {
+   "id": "q005",
+   "text": "Preferred First Name",
+   "category": "contact"
+  },
+  {
+   "id": "q006",
+   "text": "Legal full name",
+   "category": "contact"
+  },
+  {
+   "id": "q007",
+   "text": "Mobile phone number",
+   "category": "contact"
+  },
+  {
+   "id": "q008",
+   "text": "Email address",
+   "category": "contact"
+  },
+  {
+   "id": "q009",
+   "text": "Last name (family name)",
+   "category": "contact"
+  },
+  {
+   "id": "q010",
+   "text": "What is your preferred name?",
+   "category": "contact"
+  },
+  {
+   "id": "q011",
+   "text": "LinkedIn Profile",
+   "category": "links"
+  },
+  {
+   "id": "q012",
+   "text": "Website",
+   "category": "links"
+  },
+  {
+   "id": "q013",
+   "text": "GitHub",
+   "category": "links"
+  },
+  {
+   "id": "q014",
+   "text": "Portfolio URL",
+   "category": "links"
+  },
+  {
+   "id": "q015",
+   "text": "Personal website or blog",
+   "category": "links"
+  },
+  {
+   "id": "q016",
+   "text": "Link to your GitHub profile",
+   "category": "links"
+  },
+  {
+   "id": "q017",
+   "text": "Twitter or X handle",
+   "category": "links"
+  },
+  {
+   "id": "q018",
+   "text": "Please share a link to your work",
+   "category": "links"
+  },
+  {
+   "id": "q019",
+   "text": "Do you have a LinkedIn profile URL?",
+   "category": "links"
+  },
+  {
+   "id": "q020",
+   "text": "Are you legally authorized to work in the United States?",
+   "category": "work_auth"
+  },
+  {
+   "id": "q021",
+   "text": "Are you authorized to work in the country where this role is located?",
+   "category": "work_auth"
+  },
+  {
+   "id": "q022",
+   "text": "Do you have the legal right to work in Canada?",
+   "category": "work_auth"
+  },
+  {
+   "id": "q023",
+   "text": "Are you eligible to work in the UK?",
+   "category": "work_auth"
+  },
+  {
+   "id": "q024",
+   "text": "Are you currently authorized to work in the U.S. for any employer?",
+   "category": "work_auth"
+  },
+  {
+   "id": "q025",
+   "text": "Do you have a valid work permit for the country of this role?",
+   "category": "work_auth"
+  },
+  {
+   "id": "q026",
+   "text": "Are you legally entitled to work in Germany?",
+   "category": "work_auth"
+  },
+  {
+   "id": "q027",
+   "text": "Do you have the right to work in Ireland?",
+   "category": "work_auth"
+  },
+  {
+   "id": "q028",
+   "text": "Will you now or in the future require sponsorship for employment visa status?",
+   "category": "sponsorship"
+  },
+  {
+   "id": "q029",
+   "text": "Do you require visa sponsorship to work in the United States?",
+   "category": "sponsorship"
+  },
+  {
+   "id": "q030",
+   "text": "Will you require sponsorship to work in this country?",
+   "category": "sponsorship"
+  },
+  {
+   "id": "q031",
+   "text": "Are you authorized to work without sponsorship?",
+   "category": "sponsorship"
+  },
+  {
+   "id": "q032",
+   "text": "Do you need immigration sponsorship now or in the future?",
+   "category": "sponsorship"
+  },
+  {
+   "id": "q033",
+   "text": "Will you need Stripe to sponsor a visa for you?",
+   "category": "sponsorship"
+  },
+  {
+   "id": "q034",
+   "text": "Are you able to work here without visa sponsorship?",
+   "category": "sponsorship"
+  },
+  {
+   "id": "q035",
+   "text": "What are your salary expectations?",
+   "category": "salary"
+  },
+  {
+   "id": "q036",
+   "text": "Desired compensation",
+   "category": "salary"
+  },
+  {
+   "id": "q037",
+   "text": "What is your expected base salary in USD?",
+   "category": "salary"
+  },
+  {
+   "id": "q038",
+   "text": "Please share your total compensation expectations",
+   "category": "salary"
+  },
+  {
+   "id": "q039",
+   "text": "What is your desired hourly rate?",
+   "category": "salary"
+  },
+  {
+   "id": "q040",
+   "text": "Pay expectations (annual, USD)",
+   "category": "salary"
+  },
+  {
+   "id": "q041",
+   "text": "What salary range are you looking for?",
+   "category": "salary"
+  },
+  {
+   "id": "q042",
+   "text": "Current compensation",
+   "category": "salary"
+  },
+  {
+   "id": "q043",
+   "text": "Are you willing to relocate?",
+   "category": "relocation"
+  },
+  {
+   "id": "q044",
+   "text": "Are you open to relocating to San Francisco?",
+   "category": "relocation"
+  },
+  {
+   "id": "q045",
+   "text": "Would you be willing to relocate to London?",
+   "category": "relocation"
+  },
+  {
+   "id": "q046",
+   "text": "Are you willing to relocate for this role?",
+   "category": "relocation"
+  },
+  {
+   "id": "q047",
+   "text": "If not based near our office, are you open to relocation?",
+   "category": "relocation"
+  },
+  {
+   "id": "q048",
+   "text": "Where are you currently located?",
+   "category": "location"
+  },
+  {
+   "id": "q049",
+   "text": "What city do you live in?",
+   "category": "location"
+  },
+  {
+   "id": "q050",
+   "text": "Which country do you currently reside in?",
+   "category": "location"
+  },
+  {
+   "id": "q051",
+   "text": "Are you able to work onsite 3 days a week?",
+   "category": "location"
+  },
+  {
+   "id": "q052",
+   "text": "Are you comfortable working in a hybrid environment?",
+   "category": "location"
+  },
+  {
+   "id": "q053",
+   "text": "Are you able to commute to our New York office?",
+   "category": "location"
+  },
+  {
+   "id": "q054",
+   "text": "What time zone are you in?",
+   "category": "location"
+  },
+  {
+   "id": "q055",
+   "text": "Are you open to remote work?",
+   "category": "location"
+  },
+  {
+   "id": "q056",
+   "text": "Are you comfortable working in an on-site role?",
+   "category": "location"
+  },
+  {
+   "id": "q057",
+   "text": "Which city would you prefer to work from?",
+   "category": "location"
+  },
+  {
+   "id": "q058",
+   "text": "When can you start?",
+   "category": "start_date"
+  },
+  {
+   "id": "q059",
+   "text": "What is your earliest start date?",
+   "category": "start_date"
+  },
+  {
+   "id": "q060",
+   "text": "Are you available to start by June 1?",
+   "category": "start_date"
+  },
+  {
+   "id": "q061",
+   "text": "Date available",
+   "category": "start_date"
+  },
+  {
+   "id": "q062",
+   "text": "Can you start within 30 days?",
+   "category": "start_date"
+  },
+  {
+   "id": "q063",
+   "text": "What is your notice period?",
+   "category": "notice"
+  },
+  {
+   "id": "q064",
+   "text": "How much notice do you need to give your current employer?",
+   "category": "notice"
+  },
+  {
+   "id": "q065",
+   "text": "What is your current notice period?",
+   "category": "notice"
+  },
+  {
+   "id": "q066",
+   "text": "What is your highest level of education?",
+   "category": "education"
+  },
+  {
+   "id": "q067",
+   "text": "School",
+   "category": "education"
+  },
+  {
+   "id": "q068",
+   "text": "Degree",
+   "category": "education"
+  },
+  {
+   "id": "q069",
+   "text": "Which university did you attend?",
+   "category": "education"
+  },
+  {
+   "id": "q070",
+   "text": "What was your major or field of study?",
+   "category": "education"
+  },
+  {
+   "id": "q071",
+   "text": "Graduation year",
+   "category": "education"
+  },
+  {
+   "id": "q072",
+   "text": "Do you have a bachelor's degree?",
+   "category": "education"
+  },
+  {
+   "id": "q073",
+   "text": "What school did you graduate from?",
+   "category": "education"
+  },
+  {
+   "id": "q074",
+   "text": "GPA",
+   "category": "education"
+  },
+  {
+   "id": "q075",
+   "text": "How many years of experience do you have with Python?",
+   "category": "experience"
+  },
+  {
+   "id": "q076",
+   "text": "Years of professional experience",
+   "category": "experience"
+  },
+  {
+   "id": "q077",
+   "text": "How many years of experience do you have in backend engineering?",
+   "category": "experience"
+  },
+  {
+   "id": "q078",
+   "text": "Do you have experience with Kubernetes?",
+   "category": "experience"
+  },
+  {
+   "id": "q079",
+   "text": "How many years have you managed engineers?",
+   "category": "experience"
+  },
+  {
+   "id": "q080",
+   "text": "Experience with distributed systems",
+   "category": "experience"
+  },
+  {
+   "id": "q081",
+   "text": "Proficiency in SQL",
+   "category": "experience"
+  },
+  {
+   "id": "q082",
+   "text": "How many years of experience do you have with React?",
+   "category": "experience"
+  },
+  {
+   "id": "q083",
+   "text": "Do you have experience with AWS?",
+   "category": "experience"
+  },
+  {
+   "id": "q084",
+   "text": "Gender",
+   "category": "eeo"
+  },
+  {
+   "id": "q085",
+   "text": "Are you Hispanic/Latino?",
+   "category": "eeo"
+  },
+  {
+   "id": "q086",
+   "text": "Race",
+   "category": "eeo"
+  },
+  {
+   "id": "q087",
+   "text": "Veteran status",
+   "category": "eeo"
+  },
+  {
+   "id": "q088",
+   "text": "Disability status",
+   "category": "eeo"
+  },
+  {
+   "id": "q089",
+   "text": "What is your ethnicity?",
+   "category": "eeo"
+  },
+  {
+   "id": "q090",
+   "text": "Do you identify as transgender?",
+   "category": "eeo"
+  },
+  {
+   "id": "q091",
+   "text": "Sexual orientation",
+   "category": "eeo"
+  },
+  {
+   "id": "q092",
+   "text": "What are your pronouns?",
+   "category": "eeo"
+  },
+  {
+   "id": "q093",
+   "text": "Please self-identify your protected veteran status",
+   "category": "eeo"
+  },
+  {
+   "id": "q094",
+   "text": "I agree to the privacy policy",
+   "category": "consent"
+  },
+  {
+   "id": "q095",
+   "text": "I consent to the processing of my personal data",
+   "category": "consent"
+  },
+  {
+   "id": "q096",
+   "text": "I acknowledge that I have read the terms of use",
+   "category": "consent"
+  },
+  {
+   "id": "q097",
+   "text": "I certify that the information provided is true",
+   "category": "consent"
+  },
+  {
+   "id": "q098",
+   "text": "By submitting, I agree to receive updates about my application",
+   "category": "consent"
+  },
+  {
+   "id": "q099",
+   "text": "I understand that this is an at-will position",
+   "category": "consent"
+  },
+  {
+   "id": "q100",
+   "text": "I consent to a background check",
+   "category": "consent"
+  },
+  {
+   "id": "q101",
+   "text": "Do you agree to the data processing terms?",
+   "category": "consent"
+  },
+  {
+   "id": "q102",
+   "text": "Why do you want to work at Stripe?",
+   "category": "motivation"
+  },
+  {
+   "id": "q103",
+   "text": "Why are you interested in this role?",
+   "category": "motivation"
+  },
+  {
+   "id": "q104",
+   "text": "What excites you about this opportunity?",
+   "category": "motivation"
+  },
+  {
+   "id": "q105",
+   "text": "Tell us about a project you are proud of",
+   "category": "motivation"
+  },
+  {
+   "id": "q106",
+   "text": "Please attach a cover letter or tell us why you are a fit",
+   "category": "motivation"
+  },
+  {
+   "id": "q107",
+   "text": "Describe a time you disagreed with a teammate",
+   "category": "motivation"
+  },
+  {
+   "id": "q108",
+   "text": "What makes you a great fit for this position?",
+   "category": "motivation"
+  },
+  {
+   "id": "q109",
+   "text": "Why are you leaving your current role?",
+   "category": "motivation"
+  },
+  {
+   "id": "q110",
+   "text": "In your own words, what does this team do?",
+   "category": "motivation"
+  },
+  {
+   "id": "q111",
+   "text": "Tell us why you are excited about our mission",
+   "category": "motivation"
+  },
+  {
+   "id": "q112",
+   "text": "What excites you most about working here?",
+   "category": "motivation"
+  },
+  {
+   "id": "q113",
+   "text": "How did you hear about this job?",
+   "category": "other"
+  },
+  {
+   "id": "q114",
+   "text": "Have you previously worked at this company?",
+   "category": "other"
+  },
+  {
+   "id": "q115",
+   "text": "Do you have any relatives who work here?",
+   "category": "other"
+  },
+  {
+   "id": "q116",
+   "text": "Are you at least 18 years of age?",
+   "category": "other"
+  },
+  {
+   "id": "q117",
+   "text": "Do you have a driver's license?",
+   "category": "other"
+  },
+  {
+   "id": "q118",
+   "text": "Please list two references",
+   "category": "other"
+  },
+  {
+   "id": "q119",
+   "text": "Is there anything else you would like us to know?",
+   "category": "other"
+  },
+  {
+   "id": "q120",
+   "text": "Referred by",
+   "category": "other"
+  }
+ ],
+ "nearPairs": [
+  [
+   "Are you willing to relocate to Austin?",
+   "Are you willing to relocate to London?"
+  ],
+  [
+   "Are you willing to relocate to Seattle?",
+   "Are you willing to relocate to Toronto?"
+  ],
+  [
+   "Can you work onsite 3 days a week?",
+   "Can you work onsite 5 days a week?"
+  ],
+  [
+   "Are you able to be in the office 2 days a week?",
+   "Are you able to be in the office 4 days a week?"
+  ],
+  [
+   "Can you start by June 1?",
+   "Can you start by July 1?"
+  ],
+  [
+   "Are you available to start on March 3?",
+   "Are you available to start on April 7?"
+  ],
+  [
+   "What is your expected salary in USD?",
+   "What is your expected salary in GBP?"
+  ],
+  [
+   "What are your salary expectations in EUR?",
+   "What are your salary expectations in CAD?"
+  ],
+  [
+   "Why do you want to work at Stripe?",
+   "Why do you want to work at Ramp?"
+  ],
+  [
+   "Are you open to working in our Dublin office?",
+   "Are you open to working in our Berlin office?"
+  ],
+  [
+   "How many years of experience do you have with Python?",
+   "How many years of experience do you have with Go?"
+  ],
+  [
+   "Do you have 5 years of experience in backend engineering?",
+   "Do you have 8 years of experience in backend engineering?"
+  ]
+ ],
+ "workAuth": [
+  {
+   "text": "Will you now or in the future require sponsorship for employment visa status?",
+   "authorized": true,
+   "needsSponsorship": false,
+   "expect": false
+  },
+  {
+   "text": "Will you now or in the future require sponsorship for employment visa status?",
+   "authorized": true,
+   "needsSponsorship": true,
+   "expect": true
+  },
+  {
+   "text": "Do you require visa sponsorship to work in the United States?",
+   "authorized": true,
+   "needsSponsorship": false,
+   "expect": false
+  },
+  {
+   "text": "Do you require visa sponsorship to work in the United States?",
+   "authorized": false,
+   "needsSponsorship": true,
+   "expect": true
+  },
+  {
+   "text": "Are you authorized to work without sponsorship?",
+   "authorized": true,
+   "needsSponsorship": false,
+   "expect": true
+  },
+  {
+   "text": "Are you authorized to work without sponsorship?",
+   "authorized": true,
+   "needsSponsorship": true,
+   "expect": false
+  },
+  {
+   "text": "Are you able to work here without visa sponsorship?",
+   "authorized": true,
+   "needsSponsorship": false,
+   "expect": true
+  },
+  {
+   "text": "Are you legally authorized to work in the United States?",
+   "authorized": true,
+   "needsSponsorship": false,
+   "expect": true
+  },
+  {
+   "text": "Are you legally authorized to work in the United States?",
+   "authorized": false,
+   "needsSponsorship": true,
+   "expect": false
+  },
+  {
+   "text": "Do you have the legal right to work in Canada?",
+   "authorized": true,
+   "needsSponsorship": false,
+   "expect": true
+  },
+  {
+   "text": "Will you need immigration sponsorship now or in the future?",
+   "authorized": true,
+   "needsSponsorship": false,
+   "expect": false
+  },
+  {
+   "text": "Will you need immigration sponsorship now or in the future?",
+   "authorized": true,
+   "needsSponsorship": true,
+   "expect": true
+  },
+  {
+   "text": "Do you hold a valid work status in your country of residence?",
+   "authorized": true,
+   "needsSponsorship": false,
+   "expect": null
+  },
+  {
+   "text": "Are you a citizen or permanent resident of the United States?",
+   "authorized": true,
+   "needsSponsorship": false,
+   "expect": null
+  },
+  {
+   "text": "Will you require sponsorship for a work permit?",
+   "authorized": null,
+   "needsSponsorship": null,
+   "expect": null
+  },
+  {
+   "text": "Are you authorized to work without sponsorship?",
+   "authorized": null,
+   "needsSponsorship": null,
+   "expect": null
+  }
+ ]
+}
