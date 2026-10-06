@@ -2,7 +2,7 @@
 -- matcher and the company researcher, and no interview table is left. Runs in
 -- one transaction and rolls back, so any database is safe to point it at.
 --
---   psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/checks/remove_interview_prep.sql
+--   psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/checks/narrow_a2a_agents.sql
 
 \set ON_ERROR_STOP 1
 begin;
@@ -49,5 +49,5 @@ begin
   end;
 end $$;
 
-\echo remove_interview_prep: ok
+\echo narrow_a2a_agents: ok
 rollback;
