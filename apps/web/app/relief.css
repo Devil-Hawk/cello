@@ -233,6 +233,10 @@ svg.lucide {
   opacity: 0.5;
   pointer-events: none;
 }
+/* a key with no padding, for an icon or the avatar */
+.r-key.r-key-bare {
+  padding: 0;
+}
 .r-key-ink {
   background: var(--r-ink);
   color: var(--r-btn-fg);
@@ -278,6 +282,26 @@ svg.lucide {
   .r-key:active,
   .r-key[aria-current='page'],
   .r-tile {
+    transform: none;
+    transition: none;
+  }
+}
+
+/* a tab on the phone's bottom plinth; the current one is a key standing proud */
+.r-tabkey {
+  border-radius: 12px;
+  color: var(--r-ink-3);
+  transition: background-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.r-tabkey[aria-current='page'] {
+  background: var(--r-raised);
+  color: var(--r-ink);
+  box-shadow: var(--r-key-on);
+  transform: translateY(-1px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .r-tabkey,
+  .r-tabkey[aria-current='page'] {
     transform: none;
     transition: none;
   }
