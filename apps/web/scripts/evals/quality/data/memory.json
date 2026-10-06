@@ -1,0 +1,17 @@
+{
+  "comment": "Twelve exchanges between a person and Cello. expected: each inner list is alternatives, and a stored memory must mention one of them. forbidden: no stored memory may contain any of these ('*' means no memory at all). Forbidden facts are things only Cello said.",
+  "cases": [
+    { "id": "stated-facts", "user": "I'm in Seattle and only want remote roles. I'll need visa sponsorship from 2027.", "assistant": "Sounds good. Acme is hiring a remote Staff Engineer at $210k, and Globex has a hybrid role in Austin.", "expected": [["seattle"], ["remote"], ["sponsor", "visa"]], "forbidden": ["acme", "globex", "210", "austin"], "quick": true },
+    { "id": "question-only", "user": "Can you find me roles in climate tech?", "assistant": "Sure. ClimateCo is hiring in Denver and GreenGrid has openings in Boston.", "expected": [], "forbidden": ["climateco", "greengrid", "denver", "boston"] },
+    { "id": "ic-track", "user": "I've got 8 years in Go and I'm done with management, IC track only.", "assistant": "Noted. Great IC roles are at Stripe and Cloudflare right now.", "expected": [["go"], ["ic", "individual contributor", "management"]], "forbidden": ["stripe", "cloudflare"] },
+    { "id": "small-talk", "user": "ok thanks, that looks fine", "assistant": "Anything else I can look up?", "expected": [], "forbidden": ["*"], "quick": true },
+    { "id": "ruled-out", "user": "The Datadog one is too junior, skip it.", "assistant": "Datadog's Associate role pays $120k and is remote.", "expected": [["datadog"]], "forbidden": ["120", "remote"] },
+    { "id": "limits", "user": "My notice period is 4 weeks and I can't relocate.", "assistant": "Many Bay Area roles require relocation within 60 days.", "expected": [["4 weeks", "four weeks", "notice"], ["relocat"]], "forbidden": ["60 days", "bay area"] },
+    { "id": "posting-quoted", "user": "Tell me about the Brightpay role.", "assistant": "Brightpay is hiring a Senior Backend Engineer, remote US, $180k to $220k, Go and Kafka required.", "expected": [], "forbidden": ["brightpay", "180", "220", "kafka", "remote"] },
+    { "id": "pay-and-exclusion", "user": "I want salary of at least 190k, and nothing in crypto.", "assistant": "Understood. I'll filter for 190k+ and exclude Coinbase.", "expected": [["190"], ["crypto"]], "forbidden": ["coinbase"] },
+    { "id": "design-move", "user": "I'm a product designer moving from agency work to in-house at a B2B company.", "assistant": "Great, Figma and Notion both hire in-house B2B designers.", "expected": [["designer"], ["in-house", "b2b"]], "forbidden": ["figma", "notion"] },
+    { "id": "cello-summary", "user": "Thanks!", "assistant": "To summarize: you prefer remote, senior roles in fintech.", "expected": [], "forbidden": ["remote", "fintech", "senior"] },
+    { "id": "size-floor", "user": "I don't want to work with companies under 50 people.", "assistant": "Got it, I'll skip startups. Some I found: Linear (30 people) and Ramp (800 people).", "expected": [["50"], ["people", "employees", "company size", "small"]], "forbidden": ["linear", "ramp", "30 people", "800"] },
+    { "id": "part-time", "user": "I'm looking for part-time roles, 20 hours a week.", "assistant": "Understood about part-time. Most listings I found are full-time, though.", "expected": [["part-time", "part time", "20 hours"]], "forbidden": ["full-time", "full time"] }
+  ]
+}
