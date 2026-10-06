@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Key } from '@/components/ui/key'
-import { COUNTRIES, LEVELS, roleTypeOptions, type WelcomeTargets } from '@/lib/welcome/commands.stub'
+import { COUNTRIES, LEVELS, roleTypeOptions, type WelcomeTargets } from '@/lib/welcome/commands'
 import { fitLine, typedTitle } from './logic'
 
 function toggle(list: string[], id: string): string[] {

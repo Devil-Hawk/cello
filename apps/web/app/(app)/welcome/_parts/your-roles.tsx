@@ -6,7 +6,7 @@ import { TriageControl } from '@/components/fit/triage-control'
 import { OpenRouterDoor } from '@/components/settings/openrouter-door'
 import { RoleRow } from '@/components/roles/role-row'
 import { companies } from '@/lib/routes'
-import type { WelcomeRole } from '@/lib/welcome/commands.stub'
+import type { WelcomeRole } from '@/lib/welcome/commands'
 import { FOLLOW_LINE, LISTED_LINE, NO_FITS } from './logic'
 
 function posted(iso: string | null): string {

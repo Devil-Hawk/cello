@@ -1,14 +1,11 @@
-// lane-stub: PG1 welcome-commands
-//
-// Welcome's calls, written against the routes and tables main has today, until
-// K10's commands (search.update, onboarding.finish, role_types.list, roles.find)
-// are on main. When PG1 rebases after K10, Welcome calls those through K10's
-// session door and this file is deleted.
+// Welcome's calls, over the routes and tables the app has. The registry holds onboarding.finish
+// only (lib/commands/defs/core.ts); search.update, roles.find, role_types.list and
+// profile.set_facts are not commands yet, so Welcome reaches them through the settings routes.
 //
 // The facts (pay floor, work authorization, sponsorship) are saved through
 // /api/settings/constraints, the same store Settings' dealbreakers edits. They
-// move to K10's profile.set_facts, and the roles' reactions to roles.react
-// (Welcome's roles use the Interested and Not for me control of components/fit).
+// move to a profile.set_facts command, and the roles' reactions to roles.react
+// (Welcome's roles use the Interested and Not for me control of components/fit), when those exist.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ROLE_TAXONOMY } from '@/lib/jobs/role-taxonomy'

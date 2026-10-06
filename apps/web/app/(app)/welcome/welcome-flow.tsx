@@ -15,7 +15,7 @@ import {
   toTargeting,
   type WelcomeRole,
   type WelcomeTargets,
-} from '@/lib/welcome/commands.stub'
+} from '@/lib/welcome/commands'
 import { DemoScreen } from './_parts/demo-tour'
 import { nextScreen, type Screen } from './_parts/logic'
 import { Progress } from './_parts/progress'

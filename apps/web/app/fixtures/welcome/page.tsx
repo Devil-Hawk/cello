@@ -8,7 +8,7 @@ import { ResumeScreen } from '@/app/(app)/welcome/_parts/resume'
 import { WantScreen } from '@/app/(app)/welcome/_parts/want'
 import { YourRolesScreen } from '@/app/(app)/welcome/_parts/your-roles'
 import type { Screen } from '@/app/(app)/welcome/_parts/logic'
-import type { WelcomeRole, WelcomeTargets } from '@/lib/welcome/commands.stub'
+import type { WelcomeRole, WelcomeTargets } from '@/lib/welcome/commands'
 import { COMPANIES } from '../_data'
 
 // Every Welcome screen on made-up data. ?screen=resume | want | connect | roles | roles-empty | demo

@@ -20,7 +20,7 @@ import {
   tourStops,
   typedTitle,
 } from './logic'
-import { toTargeting, setFacts, EMPTY_WELCOME_TARGETS } from '@/lib/welcome/commands.stub'
+import { toTargeting, setFacts, EMPTY_WELCOME_TARGETS } from '@/lib/welcome/commands'
 
 const text = (html: string) => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ')
 
