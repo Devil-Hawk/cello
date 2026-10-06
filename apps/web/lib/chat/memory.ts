@@ -11,8 +11,7 @@
 import type { AdminClient } from '@/lib/harness/types'
 import type { MemoryStore } from '@/lib/memory/types'
 
-/** The store type main has, plus the per-item delete K15 adds (absent until then). ponytail: K15 may take the person's id too. */
-export type ChatMemoryStore = MemoryStore & { delete?(id: string): Promise<void> }
+export type ChatMemoryStore = MemoryStore
 
 export const SAID_MAX = 400
 export const CHAT_SCOPES = ['chat.said', 'chat.made', 'chat.decided'] as const
@@ -61,12 +60,8 @@ export async function writeTurnMemories(store: ChatMemoryStore, userId: string, 
 
 /** Deletes every chat memory of one chat. What the chat made stays on its own row. */
 export async function deleteChatMemories(store: ChatMemoryStore, userId: string, chatId: string): Promise<number> {
-  // Until the store can delete one memory, they stay; recall reads the rows and drops a deleted chat's hits.
-  const remove = store.delete?.bind(store)
-  if (!remove) return 0
-  // ponytail: reads the person's memories and filters; use the store's metadata filter when K15 adds it.
-  const mine = (await store.getAll(userId)).filter((m) => isChatMemory(m) && m.metadata?.chat_id === chatId)
-  await Promise.all(mine.map((m) => remove(m.id)))
+  const mine = (await store.getAll(userId, { filters: { chat_id: chatId } })).filter(isChatMemory)
+  await Promise.all(mine.map((m) => store.delete(userId, m.id)))
   return mine.length
 }
 

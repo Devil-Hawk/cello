@@ -1,7 +1,4 @@
-// lane-stub: K15 store
-// An in-memory stand-in for the memory store, until the learning lane's mem0 store carries `infer: false`
-// and per-item delete. It implements the type main already has (lib/memory/types.ts) plus the one method
-// chat needs from K15, delete(id). Deleted at integration step 18; callers pass the store in, so nothing else changes.
+// An in-memory MemoryStore for chat's tests, with an `embedderDown` switch the shared fake has no use for.
 
 import { DemoMemoryWriteRefusedError, type MemoryAddInput, type MemoryItem } from '@/lib/memory/types'
 import type { ChatMemoryStore } from '../memory'
@@ -16,13 +13,24 @@ export function inMemoryStore(opts: { embedderDown?: boolean } = {}): ChatMemory
     items,
     async add(userId: string, input: MemoryAddInput) {
       if (input.isDemo) throw new DemoMemoryWriteRefusedError(userId)
-      items.unshift({
+      const item = {
         id: `m${++n}`,
         userId,
         memory: input.fact ?? '',
         createdAt: new Date().toISOString(),
         metadata: { scope: input.scope, ...(input.refs ?? {}) },
-      })
+      }
+      items.unshift(item)
+      return item
+    },
+    async get(userId, id) {
+      return mine(userId).find((m) => m.id === id) ?? null
+    },
+    async update(userId, id, patch) {
+      const m = mine(userId).find((x) => x.id === id)
+      if (!m) throw new Error(`memory ${id} is not ${userId}'s to change`)
+      if (patch.text !== undefined) m.memory = patch.text
+      if (patch.metadata) m.metadata = { ...m.metadata, ...patch.metadata }
     },
     async search(userId, query, o = {}) {
       if (opts.embedderDown) throw new Error('no embedder')
@@ -33,14 +41,15 @@ export function inMemoryStore(opts: { embedderDown?: boolean } = {}): ChatMemory
         .sort((a, b) => b.score - a.score)
         .slice(0, o.limit ?? 6)
     },
-    async getAll(userId) {
-      return mine(userId)
+    async getAll(userId, o = {}) {
+      const filters = Object.entries(o.filters ?? {})
+      return mine(userId).filter((m) => filters.every(([k, v]) => m.metadata?.[k] === v))
     },
     async deleteAll(userId) {
       for (let i = items.length - 1; i >= 0; i--) if (items[i].userId === userId) items.splice(i, 1)
     },
-    async delete(id) {
-      const at = items.findIndex((m) => m.id === id)
+    async delete(userId, id) {
+      const at = items.findIndex((m) => m.id === id && m.userId === userId)
       if (at >= 0) items.splice(at, 1)
     },
   }

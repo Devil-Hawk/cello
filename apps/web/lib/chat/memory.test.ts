@@ -31,7 +31,7 @@ describe('writeTurnMemories', () => {
     await writeTurnMemories(store, 'u1', turn())
     for (const [, input] of add.mock.calls) {
       expect(typeof input.fact).toBe('string')
-      expect(input.messages).toBeUndefined()
+      expect(input).not.toHaveProperty('messages')
       expect(input.refs).not.toHaveProperty('params')
       expect(input.isDemo).toBe(false)
     }
