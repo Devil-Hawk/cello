@@ -49,8 +49,16 @@ export async function handle(msg: ToWorker, sender: Browser.runtime.MessageSende
       await setLocal({ paused: false })
       return callApi(ROUTES.pause, { paused: false })
     }
-    case 'clicked':
-      return recordClick(msg.application)
+    case 'clicked': {
+      const first = await recordClick(msg.application)
+      // The page may navigate the moment it is clicked: the next page finds this and keeps watching.
+      if (first && tabId !== undefined) {
+        const pending = await getSession('pending')
+        pending[String(tabId)] = { application: msg.application, auto: true, since: Date.now() }
+        await setSession('pending', pending)
+      }
+      return first
+    }
     case 'pending': {
       if (tabId === undefined) return false
       const pending = await getSession('pending')

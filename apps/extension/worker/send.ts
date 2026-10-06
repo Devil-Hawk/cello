@@ -56,8 +56,8 @@ export async function runAutoSend(claim: Claim): Promise<void> {
       limit = setTimeout(() => resolve({ outcome: 'blocked', keepOpen: false, timedOut: true }), RUN_LIMIT_MS)
     })
     const win = await browser.windows.create({ url: 'about:blank', focused: false, type: 'normal' })
-    windowId = win.id
-    tabId = win.tabs?.[0]?.id
+    windowId = win?.id
+    tabId = win?.tabs?.[0]?.id
     if (tabId === undefined) throw new Error('no tab')
     const jobs = await getSession('jobs')
     jobs[String(tabId)] = { claim, startedAt: Date.now() }

@@ -120,7 +120,6 @@ export async function runAuto(job: Job): Promise<void> {
     release = null
     found.control.click()
     await report({ phase: 'submitted', application: app, auto: true, values, url: location.href })
-    void send({ type: 'pending', pending: { application: app, auto: true, since: Date.now() } })
 
     await conclude(claim, host, await watchAfter(host, found.control, baseline, CONFIRM_MS), finish, bar)
   } catch {
