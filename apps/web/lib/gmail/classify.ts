@@ -211,7 +211,7 @@ function detectStatusFromPatterns(subject: string, body: string): { status: Pars
 }
 
 /** Deterministic classifier used when no LLM key is configured. */
-export function classifyWithPatterns(from: string, subject: string, body: string, referenceDate: Date): ParsedEmail {
+export function classifyWithPatterns(from: string, subject: string, body: string, referenceDate: Date, calendar?: string): ParsedEmail {
   const { status, confidence } = detectStatusFromPatterns(subject, body)
   const employer = extractEmployerFromContent(from, subject, body)
 
@@ -226,7 +226,7 @@ export function classifyWithPatterns(from: string, subject: string, body: string
     reasoning: null,
     interviewDateTime:
       status === 'interview' || status === 'screen'
-        ? extractInterviewDateTime(`${subject}\n${body}`, referenceDate).iso
+        ? extractInterviewDateTime(`${subject}\n${body}`, referenceDate, calendar).iso
         : null,
   }
 }

@@ -182,7 +182,7 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
     if (apiKeys.openrouter) {
       parsed = await parseEmailWithAI(from, subject, body, apiKeys, receivedAt)
     } else {
-      parsed = classifyWithPatterns(from, subject, body, receivedAt)
+      parsed = classifyWithPatterns(from, subject, body, receivedAt, msg.payload.calendar)
     }
 
     if (!parsed.isJobRelated) continue

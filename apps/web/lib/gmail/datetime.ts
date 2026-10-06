@@ -1,102 +1,59 @@
 // Best-effort extraction of an interview date/time mentioned in an email
 // body/subject. Used as a fallback when no LLM key is configured, and to
-// validate/repair whatever the LLM classifier returned.
+// validate/repair whatever the LLM classifier returned. An invite (.ics) is read
+// with ical.js and wins over the prose, which chrono-node reads.
 
-const MONTHS: Record<string, number> = {
-  jan: 0, january: 0,
-  feb: 1, february: 1,
-  mar: 2, march: 2,
-  apr: 3, april: 3,
-  may: 4,
-  jun: 5, june: 5,
-  jul: 6, july: 6,
-  aug: 7, august: 7,
-  sep: 8, sept: 8, september: 8,
-  oct: 9, october: 9,
-  nov: 10, november: 10,
-  dec: 11, december: 11,
-}
-
-function to24Hour(hour: number, meridiem: string | undefined): number {
-  if (!meridiem) return hour
-  const m = meridiem.toLowerCase().replace(/\./g, '')
-  if (m === 'pm' && hour < 12) return hour + 12
-  if (m === 'am' && hour === 12) return 0
-  return hour
-}
-
-const MONTH_NAME_RE =
-  /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?(?:\s*(?:at|@|,)?\s*(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?))?/i
-
-const NUMERIC_DATE_RE =
-  /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b(?:\s*(?:at|@)?\s*(\d{1,2}):(\d{2})\s*([ap]\.?m\.?)?)?/i
-
-const ISO_DATE_RE = /\b(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/
+import ICAL from 'ical.js'
+import * as chrono from 'chrono-node'
 
 export interface ExtractedDateTime {
   iso: string | null
   rawText: string | null
 }
 
+/** The instant a wall-clock time has in an IANA zone. Throws RangeError for a name Intl does not know. */
+function zonedInstant(t: ICAL.Time, timeZone: string): Date {
+  const guess = Date.UTC(t.year, t.month - 1, t.day, t.hour, t.minute)
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' })
+      .formatToParts(new Date(guess))
+      .map((p) => [p.type, Number(p.value)])
+  )
+  // ponytail: one pass, so a time inside a DST gap lands an hour off. Fine for an invite; loop if it ever matters.
+  return new Date(guess - (Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute) - guess))
+}
+
+/** The start of the first event in an .ics invite, with its own zone, or null when it has none we can place. */
+function inviteStart(invite: string): Date | null {
+  try {
+    const start = ICAL.Component.fromString(invite).getFirstSubcomponent('vevent')?.getFirstProperty('dtstart')
+    const t = start?.getFirstValue() as ICAL.Time | undefined
+    if (!start || !t || t.isDate) return null
+    if (t.zone === ICAL.Timezone.utcTimezone) return t.toJSDate()
+    const tzid = start.getParameter('tzid')
+    return typeof tzid === 'string' ? zonedInstant(t, tzid) : t.toJSDate()
+  } catch {
+    // An unreadable invite or a zone name Intl does not know (Outlook's "Eastern Standard Time"): the prose gets its turn.
+    return null
+  }
+}
+
 /**
- * Scan `text` for a date/time mention and return it as an ISO string,
- * anchored to `referenceYear` when the year is omitted. Returns
- * { iso: null, rawText: null } when nothing parses to a sane date.
+ * Find the interview date/time. An invite's DTSTART wins; otherwise chrono-node
+ * reads the first date in `text` ("October 20 at 2pm", "next Tuesday at 2pm",
+ * "3/12/2026 10:00"), forward from `referenceDate`. A date with no time is 9:00.
+ * Returns { iso: null, rawText: null } when nothing parses to a sane date.
  */
-export function extractInterviewDateTime(text: string, referenceDate: Date): ExtractedDateTime {
-  const referenceYear = referenceDate.getFullYear()
+export function extractInterviewDateTime(text: string, referenceDate: Date, invite?: string): ExtractedDateTime {
+  const fromInvite = invite ? inviteStart(invite) : null
+  if (fromInvite && isPlausible(fromInvite, referenceDate)) return { iso: fromInvite.toISOString(), rawText: 'calendar invite' }
 
-  const monthMatch = text.match(MONTH_NAME_RE)
-  if (monthMatch) {
-    const monthKey = monthMatch[1].toLowerCase().replace(/\.$/, '')
-    const month = MONTHS[monthKey]
-    const day = parseInt(monthMatch[2], 10)
-    const year = monthMatch[3] ? parseInt(monthMatch[3], 10) : referenceYear
-    const hasTime = monthMatch[4] !== undefined
-    const hour = hasTime ? to24Hour(parseInt(monthMatch[4], 10), monthMatch[6]) : 9
-    const minute = hasTime && monthMatch[5] ? parseInt(monthMatch[5], 10) : 0
-
-    if (month !== undefined && day >= 1 && day <= 31) {
-      const date = new Date(year, month, day, hour, minute, 0)
-      if (!isNaN(date.getTime()) && isPlausible(date, referenceDate)) {
-        return { iso: date.toISOString(), rawText: monthMatch[0].trim() }
-      }
-    }
-  }
-
-  const numericMatch = text.match(NUMERIC_DATE_RE)
-  if (numericMatch) {
-    // Assume US-style MM/DD/YYYY (the codebase targets US job listings).
-    const month = parseInt(numericMatch[1], 10) - 1
-    const day = parseInt(numericMatch[2], 10)
-    let year = parseInt(numericMatch[3], 10)
-    if (year < 100) year += 2000
-    const hasTime = numericMatch[4] !== undefined
-    const hour = hasTime ? to24Hour(parseInt(numericMatch[4], 10), numericMatch[6]) : 9
-    const minute = hasTime && numericMatch[5] ? parseInt(numericMatch[5], 10) : 0
-
-    if (month >= 0 && month <= 11 && day >= 1 && day <= 31) {
-      const date = new Date(year, month, day, hour, minute, 0)
-      if (!isNaN(date.getTime()) && isPlausible(date, referenceDate)) {
-        return { iso: date.toISOString(), rawText: numericMatch[0].trim() }
-      }
-    }
-  }
-
-  const isoMatch = text.match(ISO_DATE_RE)
-  if (isoMatch) {
-    const year = parseInt(isoMatch[1], 10)
-    const month = parseInt(isoMatch[2], 10) - 1
-    const day = parseInt(isoMatch[3], 10)
-    const hour = isoMatch[4] ? parseInt(isoMatch[4], 10) : 9
-    const minute = isoMatch[5] ? parseInt(isoMatch[5], 10) : 0
-    const date = new Date(year, month, day, hour, minute, 0)
-    if (!isNaN(date.getTime()) && isPlausible(date, referenceDate)) {
-      return { iso: date.toISOString(), rawText: isoMatch[0].trim() }
-    }
-  }
-
-  return { iso: null, rawText: null }
+  // A bare "3/4" is a fraction in a sentence far more often than a date.
+  const hit = chrono.parse(text, referenceDate, { forwardDate: true }).find((r) => !/^\d{1,2}\/\d{1,2}$/.test(r.text))
+  if (!hit) return { iso: null, rawText: null }
+  const date = hit.start.date()
+  if (!hit.start.isCertain('hour')) date.setHours(9, 0, 0, 0)
+  return isPlausible(date, referenceDate) ? { iso: date.toISOString(), rawText: hit.text } : { iso: null, rawText: null }
 }
 
 /** Reject obviously-wrong parses (typo years, stray "3/4" fractions read as dates, etc). */
