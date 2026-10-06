@@ -77,7 +77,7 @@ describe('caps and stills', () => {
     expect(COPY_CAPS.laptop).toEqual({ words: 90, groups: 5 })
     expect(COPY_CAPS.phone).toEqual({ words: 45, groups: 3 })
   })
-  it('names the two stills', () => {
-    expect([...STILLS]).toEqual(['quiet', 'empty'])
+  it('names the stills', () => {
+    expect([...STILLS]).toEqual(['quiet', 'empty', 'mark'])
   })
 })
