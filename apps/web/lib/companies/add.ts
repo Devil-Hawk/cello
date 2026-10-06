@@ -1,7 +1,8 @@
 // Saving a company the person picked in the Add company dialog. A name or domain
 // can already belong to a hidden suggested lead (the sourcer or an old Gmail sync
 // wrote it), and that row still owns the unique keys, so a plain insert fails.
-// Adding it promotes the lead to a tracked row instead.
+// Adding it promotes the lead to a tracked row instead. Either way the row is followed through the
+// one writer of that flag (companies_follow, K13), never by a write to the column.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeCompanyName } from '@/lib/entities/companies'
@@ -22,6 +23,11 @@ interface ExistingRow {
   name: string
   domain: string | null
   metadata: Record<string, unknown> | null
+}
+
+async function follow(db: SupabaseClient, userId: string, id: string): Promise<string | null> {
+  const { error } = await db.rpc('companies_follow', { p_ids: [id], p_on: true, p_user: userId })
+  return error ? error.message : null
 }
 
 export async function saveCompany(db: SupabaseClient, userId: string, c: CompanyToAdd): Promise<AddCompanyResult> {
@@ -58,7 +64,9 @@ export async function saveCompany(db: SupabaseClient, userId: string, c: Company
       .update({ ...fields, domain: domain ?? existing.domain, name_key: nameKey || null, metadata })
       .eq('id', existing.id)
       .eq('user_id', userId)
-    return error ? { error: `Could not add ${c.name}: ${error.message}` } : { id: existing.id }
+    if (error) return { error: `Could not add ${c.name}: ${error.message}` }
+    const failed = await follow(db, userId, existing.id)
+    return failed ? { error: `Could not add ${c.name}: ${failed}` } : { id: existing.id }
   }
 
   const { data, error } = await db
@@ -67,5 +75,7 @@ export async function saveCompany(db: SupabaseClient, userId: string, c: Company
     .select('id')
     .single()
   if (error || !data) return { error: `Could not add ${c.name}: ${error?.message ?? 'no row came back'}` }
-  return { id: (data as { id: string }).id }
+  const id = (data as { id: string }).id
+  const failed = await follow(db, userId, id)
+  return failed ? { error: `Could not add ${c.name}: ${failed}` } : { id }
 }
