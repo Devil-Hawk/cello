@@ -62,7 +62,7 @@ set search_path = ''
 as $$
   select case when nullif(btrim(p_url), '') is null then null else
     encode(extensions.digest(convert_to(
-      lower(regexp_replace(regexp_replace(regexp_replace(btrim(p_url), '[?#].*$', ''), '^[a-zA-Z]+://(www\.)?', ''), '/+$', ''))
+      lower(regexp_replace(regexp_replace(regexp_replace(btrim(p_url), '[?#].*$', ''), '^[a-zA-Z]+://(www\.)?', '', 'i'), '/+$', ''))
         || coalesce('?gh_jid=' || (regexp_match(p_url, '[?&]gh_jid=([0-9]+)'))[1], ''),
       'utf8'), 'sha256'), 'hex')
   end
