@@ -273,7 +273,8 @@ async function verifyLink(db: Db, url: URL, domain: string | null, directToken: 
     if (ok) {
       const employerId = await writeEmployer(db, {
         name: ok.name,
-        domain: ok.domain ?? domain,
+        // the host of the pasted link, never the board's own declared home (whoever owns a board can edit that)
+        domain,
         careersUrl: directToken ? null : url.href,
         provider: read.board.provider,
         token: read.board.token,

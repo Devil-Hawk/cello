@@ -178,15 +178,22 @@ export async function writeEmployer(db: Db, w: EmployerWrite, now: () => number 
     open_count_at: w.openCount === null ? null : at,
     updated_at: at,
   }
-  let existing: { id: string; source: string } | null = null
+  type Row = { id: string; source: string; ats_provider: string | null; ats_token: string | null }
+  let existing: Row | null = null
   if (w.provider && w.token) {
-    const { data } = await db.from('company_directory').select('id, source').eq('ats_provider', w.provider).eq('ats_token', w.token).maybeSingle()
-    existing = (data as { id: string; source: string } | null) ?? null
+    const { data } = await db.from('company_directory').select('id, source, ats_provider, ats_token').eq('ats_provider', w.provider).eq('ats_token', w.token).maybeSingle()
+    existing = (data as Row | null) ?? null
   }
+  let byDomain = false
   if (!existing && w.domain) {
-    const { data } = await db.from('company_directory').select('id, source').eq('domain', w.domain).maybeSingle()
-    existing = (data as { id: string; source: string } | null) ?? null
+    const { data } = await db.from('company_directory').select('id, source, ats_provider, ats_token').eq('domain', w.domain).maybeSingle()
+    existing = (data as Row | null) ?? null
+    byDomain = existing !== null
   }
+  // A row found by its domain alone, with a board of its own, keeps it: a domain is claimed by anyone whose board declares it
+  // (or whose lead names it), so a board that is not the row's is never written over the row's board, owner or careers address.
+  // ponytail: an employer that moves to another provider keeps its old board here until the row is changed by hand.
+  if (existing && byDomain && existing.ats_provider) return existing.id
   if (existing) {
     // a person's own add or a traced lead outranks the seed's label for how the employer came
     const source = existing.source === 'seed' || existing.source === 'yc' ? w.source : existing.source
