@@ -44,7 +44,7 @@ create table if not exists public.feedback_events (
 create index if not exists feedback_events_status_occurred_idx on public.feedback_events (status, occurred_at);
 
 alter table public.feedback_events enable row level security;
-revoke all on public.feedback_events from public, anon;
+revoke all on public.feedback_events from public, anon, authenticated;
 grant select on public.feedback_events to authenticated;
 grant all on public.feedback_events to service_role;
 
