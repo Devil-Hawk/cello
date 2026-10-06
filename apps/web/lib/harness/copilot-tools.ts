@@ -317,7 +317,6 @@ async function loadJobBriefs(ctx: CopilotToolContext, jobIds: string[]): Promise
 async function pickUnscoredJobIds(ctx: CopilotToolContext, limit: number): Promise<string[]> {
   const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, 'id')
     .is('match_score', null)
-    .is('employer_id', null)
     .order('posted_at', { ascending: false, nullsFirst: false })
     .limit(limit)
   return ((data as { id: string }[] | null) ?? []).map((r) => r.id)
@@ -369,7 +368,6 @@ async function pickScoringCandidateIds(
   const poolSize = Math.min(RELEVANCE_POOL_MAX, Math.max(limit * RELEVANCE_POOL_MULTIPLIER, 100))
   const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, 'id, title, description')
     .is('match_score', null)
-    .is('employer_id', null)
     .order('posted_at', { ascending: false, nullsFirst: false })
     .limit(poolSize)
   const rows = (data as unknown as { id: string; title: string | null; description: string | null }[] | null) ?? []

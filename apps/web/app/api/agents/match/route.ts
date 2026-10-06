@@ -118,12 +118,11 @@ export async function POST(request: NextRequest) {
       )
       const matchDetails = buildMatchDetails(verdict)
 
-      // Written by the service role (a person cannot update a role), and only for a role with no employer: a shared role holds no one's score.
+      // The score is written by the service role: a role is a shared row, and a person cannot update it (migration 20261008055000).
       await admin
         .from('jobs')
         .update({ match_score: verdict.score, match_details: matchDetails as unknown as Json })
         .eq('id', jobId)
-        .is('employer_id', null)
 
       setTraceOutput({ score: verdict.score, seniorityFit: verdict.seniorityFit })
       return NextResponse.json(matchDetails)

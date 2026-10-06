@@ -550,7 +550,6 @@ async function fetchDefaultCandidatePool(
 ): Promise<JobRow[]> {
   let query = openRolesOnly(ownedJobsQuery(admin, userId, SELECT_COLUMNS))
     .is('match_score', null)
-    .is('employer_id', null) // a shared role is never scored (no one's score is stored on it)
     // Never spend an LLM call on confirmed junk. Was JS-only; pushed into SQL
     // so it no longer eats into LIMIT before targeting gets a say.
     .or(`quality_score.is.null,quality_score.gte.${QUALITY_REJECT_THRESHOLD}`)
@@ -585,7 +584,7 @@ async function fetchDefaultCandidatePool(
 async function countUnscoredJobs(admin: AdminClient, userId: string): Promise<number | null> {
   const { count, error } = await openRolesOnly(
     ownedJobsQuery(admin, userId, 'id', { count: 'exact', head: true })
-  ).is('match_score', null).is('employer_id', null)
+  ).is('match_score', null)
   if (error) {
     console.error('[harness] matcher: unscored-count query failed', error)
     return null
@@ -845,8 +844,6 @@ export async function scoreJobBatch(opts: ScoreBatchOptions): Promise<ScoreBatch
         .from('jobs')
         .update({ match_score: verdict.score, match_details: matchDetails })
         .eq('id', job.id)
-        // a shared role holds no one's score
-        .is('employer_id', null)
       scored.push({
         jobId: job.id,
         isNew: job.is_new,
