@@ -20,6 +20,7 @@ import {
   type RecentCompany,
 } from '@/components/dashboard/recent-companies-list'
 import { BudgetMeterCard, type BudgetSummary } from '@/components/dashboard/budget-meter-card'
+import { OwnerHealthCard } from '@/components/dashboard/health-card'
 import type { PipelineStage } from '@/lib/format'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { unassessedCountQuery } from '@/lib/scoring/role-counts'
@@ -445,6 +446,8 @@ export default function DashboardPage() {
                 setBudget((b) => (b ? { ...b, monthlyUsd } : b))
               }
             />
+            {/* Only the person who runs the deployment gets this; it renders nothing for anyone else. */}
+            <OwnerHealthCard />
           </div>
         </div>
         <div className="space-y-6">
