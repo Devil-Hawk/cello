@@ -13,7 +13,9 @@ const files = execFileSync('git', ['ls-files', 'apps/web', 'scripts'], { cwd: RO
   .split('\n')
   .filter((f) => /\.(ts|tsx|mjs|js)$/.test(f) && !/\.test\.|__fixtures__|\/fixtures\//.test(f))
 
-const EVENT_WRITE = /from\(\s*['"]pipeline_events['"]\s*\)\s*\.\s*(insert|upsert|update|delete)\b/
+// ponytail: single-line patterns, so a write whose payload is a spread or a variable gets past them. The database
+// trigger on applications covers the session; the service role is covered by review. Upgrade: a TypeScript AST scan.
+const EVENT_WRITE =/from\(\s*['"]pipeline_events['"]\s*\)\s*\.\s*(insert|upsert|update|delete)\b/
 const STATE_WRITE = /from\(\s*['"]applications['"]\s*\)\s*\.\s*(insert|upsert|update)\(\s*\{[^}]*\bstate\s*:/
 
 describe('the pipeline chokepoint', () => {

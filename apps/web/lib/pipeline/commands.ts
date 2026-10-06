@@ -142,7 +142,7 @@ export async function resumeOne(c: Ctx, id: string): Promise<MoveResult> {
 /** Run again, from Not sent only. */
 export const runAgain = (c: Ctx, id: string) => move(c, id, 'preparing', 'step.started', 'Cello started this again.', { from: ['not_sent'], step: 'Starting again' })
 
-/** Approve the tailored resume (person only, in SQL). A stale hash is refused. */
+/** Approve the tailored resume (person only, in SQL). The hash of the version the person saw is kept on the event; ponytail: nothing compares it with the current version until K17's artifacts serve the document, then a stale hash is refused. */
 export async function approveDocument(c: Ctx, id: string, hash: string): Promise<MoveResult> {
   return move(c, id, 'preparing', 'approval.decided', 'You approved the resume.', { from: ['needs_you'], step: 'Continuing', payload: { decision: 'approved', hash } })
 }
