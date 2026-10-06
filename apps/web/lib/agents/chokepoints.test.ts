@@ -7,8 +7,9 @@
 //   createSubAgent(       only lib/agents/factory.ts
 //   createAgent(          nowhere (createDeepAgent and createSubAgent cover every loop)
 //   MultiServerMCPClient( only lib/agents/user-mcp.ts (SSRF and DNS checks come first)
-//   PostgresSaver / PostgresStore constructed only in lib/agents/persistence.ts (and lib/graph/pg.ts, the
+//   PostgresSaver         constructed only in lib/agents/persistence.ts (and lib/graph/pg.ts, the
 //                         old graph's pool, until it is removed)
+//   PostgresStore         nowhere: mem0 is the only memory store
 //
 // Comments are stripped first, and test files are skipped, so a file cannot trip or dodge a rule by
 // talking about it. scripts/mutation-check-scans.ts proves each pattern fires on a mutated fixture.
@@ -57,7 +58,8 @@ const RULES: Rule[] = [
   { name: 'createSubAgent(', pattern: /\bcreateSubAgent\s*\(/, allowed: ['lib/agents/factory.ts'] },
   { name: 'createAgent(', pattern: /\bcreateAgent\s*\(/, allowed: [] },
   { name: 'new MultiServerMCPClient(', pattern: /\bnew\s+MultiServerMCPClient\s*\(/, allowed: ['lib/agents/user-mcp.ts'] },
-  { name: 'PostgresSaver / PostgresStore constructed', pattern: /\b(?:new\s+PostgresSaver\s*\(|PostgresSaver\.fromConnString\s*\(|new\s+PostgresStore\s*\(|PostgresStore\.fromConnString\s*\()/, allowed: ['lib/agents/persistence.ts', 'lib/graph/pg.ts'] },
+  { name: 'PostgresSaver constructed', pattern: /\b(?:new\s+PostgresSaver\s*\(|PostgresSaver\.fromConnString\s*\()/, allowed: ['lib/agents/persistence.ts', 'lib/graph/pg.ts'] },
+  { name: 'PostgresStore constructed (a second memory store)', pattern: /\b(?:new\s+PostgresStore\s*\(|PostgresStore\.fromConnString\s*\()/, allowed: [] },
 ]
 
 /** The files in `files` (path to source) that break `rule`. */
@@ -92,8 +94,11 @@ describe('the scan catches an offender', () => {
   const clean = { 'lib/agents/ok.ts': 'export const x = 1' }
   for (const rule of RULES) {
     it(`${rule.name} in a new file is reported, and in a comment is not`, () => {
-      const sample = rule.name.replace(/ \/ .*$/, '').replace(/ constructed$/, '')
-      const code = rule.name.startsWith('PostgresSaver') ? 'const s = new PostgresSaver(pool)' : `const m = ${sample}{})`
+      const code = rule.name.startsWith('PostgresSaver')
+        ? 'const s = new PostgresSaver(pool)'
+        : rule.name.startsWith('PostgresStore')
+          ? 'const s = new PostgresStore({})'
+          : `const m = ${rule.name}{})`
       expect(offenders(rule, clean)).toEqual([])
       expect(offenders(rule, { ...clean, 'lib/rogue.ts': code })).toEqual(['lib/rogue.ts'])
       expect(offenders(rule, { ...clean, 'lib/rogue.ts': `// ${code}\n/* ${code} */\n * ${code}` })).toEqual([])
