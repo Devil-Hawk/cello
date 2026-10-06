@@ -55,7 +55,7 @@ export default function InsightsPage() {
     const [appsRes, activitiesRes, outreachJson, followUpsRes, digestRes] = await Promise.all([
       supabase
         .from('applications')
-        .select('id, job_id, stage, applied_at, source, created_at, updated_at, jobs(match_score)')
+        .select('id, job_id, stage, applied_at, source, created_at, updated_at, jobs(person_roles(match_score))')
         .eq('user_id', user.id),
       supabase.from('activities').select('application_id, type, occurred_at'),
       // outreach_messages is not in the generated Database type — read it through
@@ -66,7 +66,7 @@ export default function InsightsPage() {
     ])
 
     const apps: AppInput[] = ((appsRes.data as unknown as (Omit<AppInput, 'match_score'> & {
-      jobs: { match_score: number | null } | null
+      jobs: { person_roles: { match_score: number | null }[] | null } | null
     })[]) ?? []).map((row) => ({
       id: row.id,
       job_id: row.job_id,
@@ -75,7 +75,8 @@ export default function InsightsPage() {
       source: row.source,
       created_at: row.created_at,
       updated_at: row.updated_at,
-      match_score: row.jobs?.match_score ?? null,
+      // the person's own score: their person_roles row is the only one row level security returns
+      match_score: row.jobs?.person_roles?.[0]?.match_score ?? null,
     }))
 
     const activities = (activitiesRes.data as ActivityInput[] | null) ?? []
