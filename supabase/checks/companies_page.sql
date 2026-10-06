@@ -63,10 +63,6 @@ union all select ca3, a, 'Gamma Works', null, 'https://gamma-works.example/caree
 union all select ca_solo, a, 'Solo Person', null, '', null, true, false, '{}'::jsonb from fx
 union all select ca_mail, a, 'Mail Only', null, '', null, false, false, '{}'::jsonb from fx;
 
-create or replace function pg_temp.as_user(u uuid) returns void language sql as $$
-  select set_config('request.jwt.claims', json_build_object('role', 'authenticated', 'sub', u)::text, true)
-$$;
-
 -- 1. Hiring, as A: four employers in order, none unverified.
 select set_config('request.jwt.claims', json_build_object('role', 'authenticated', 'sub', a)::text, true) from fx;
 set local role authenticated;
