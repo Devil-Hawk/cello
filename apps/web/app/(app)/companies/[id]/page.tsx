@@ -36,7 +36,6 @@ import { openRolesOnly } from '@/lib/jobs/freshness'
 import { fetchClientSafePreferences } from '@/lib/preferences/client-safe'
 import { EMPTY_TARGETING, resolveTargeting, type Targeting } from '@/lib/targeting'
 import { hasRoleTargets, targetVerdict } from '@/lib/targeting/roles'
-import { personJobs } from '@/lib/jobs/person-jobs'
 
 interface Company {
   id: string

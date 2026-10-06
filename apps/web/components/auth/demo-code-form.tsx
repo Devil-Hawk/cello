@@ -39,8 +39,8 @@ function strippedLength(input: string): number {
   return input.replace(/[^A-Za-z0-9]/g, '').length
 }
 
-export function DemoCodeForm() {
-  const [open, setOpen] = useState(false)
+export function DemoCodeForm({ defaultOpen = false }: { defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
   const [code, setCode] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -73,7 +73,10 @@ export function DemoCodeForm() {
       const result = await response.json().catch(() => null)
 
       if (!response.ok || !result?.ok) {
-        setError(result?.error ?? "That code isn't valid. Ask whoever shared it for a new one.")
+        setError(
+          result?.error ??
+            'That code is not valid or has expired. Ask whoever gave it to you for a new one, or sign in to use Cello with your own account.'
+        )
         setLoading(false)
         return
       }

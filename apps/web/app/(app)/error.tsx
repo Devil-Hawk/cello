@@ -40,7 +40,7 @@ export default function AppError({
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Button onClick={() => reset()}>Try again</Button>
             <Button variant="outline" asChild>
-              <Link href="/dashboard">Back to Today</Link>
+              <Link href="/today">Back to Today</Link>
             </Button>
           </div>
         }

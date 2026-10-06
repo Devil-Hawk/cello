@@ -270,8 +270,8 @@ describe('every .in() filter is either bounded inline or on the ownership-scopin
     expect(stale, `Allowlist entries whose call text no longer appears in the file:\n  ${stale.join('\n  ')}`).toEqual([])
   })
 
-  it('the jobs page has no unbounded company-id filter (the incident this commit fixes)', () => {
-    const findings = scanFile('apps/web/app/(app)/jobs/page.tsx')
+  it('the Roles pages have no unbounded company-id filter (the incident this commit fixes)', () => {
+    const findings = [...scanFile('apps/web/app/(app)/roles/read.ts'), ...scanFile('apps/web/app/(app)/roles/[id]/read.ts')]
     expect(findings.filter((f) => f.callText.includes("'company_id'"))).toEqual([])
   })
 })

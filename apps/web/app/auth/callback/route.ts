@@ -87,6 +87,12 @@ export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url)
   const code = requestUrl.searchParams.get('code')
 
+  // Google sent the person back with an error and no code: they backed out.
+  // Say so on the sign-in page instead of dropping them on a page that bounces.
+  if (!code && requestUrl.searchParams.get('error')) {
+    return NextResponse.redirect(new URL('/login?error=cancelled', request.url))
+  }
+
   if (code) {
     const cookieStore = await cookies()
     const supabase = createServerClient<Database>(

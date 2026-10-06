@@ -47,6 +47,7 @@ $$;
 create temp table fx as
 select gen_random_uuid() as user_a, gen_random_uuid() as user_b, gen_random_uuid() as company_a,
        gen_random_uuid() as live_job;
+grant select on fx to public;
 insert into auth.users (id, email) select user_a, 'scoring-a@example.invalid' from fx union all select user_b, 'scoring-b@example.invalid' from fx;
 insert into public.profiles (id, email) select user_a, 'scoring-a@example.invalid' from fx union all select user_b, 'scoring-b@example.invalid' from fx on conflict (id) do nothing;
 insert into public.companies (id, user_id, name, career_url) select company_a, user_a, 'Scoring Check', 'https://example.invalid/jobs' from fx;

@@ -2,14 +2,13 @@
 
 import { trackedOnly } from '@/lib/companies/watchlist'
 import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchClientSafePreferences } from '@/lib/preferences/client-safe'
-import { Sidebar } from '@/components/layout/sidebar'
-import { Header } from '@/components/layout/header'
-import { MobileNav } from '@/components/layout/mobile-nav'
+import { Shell } from '@/components/layout/shell'
+import { welcome } from '@/lib/routes'
 import { AppMotionConfig, motion, transitionFast } from '@/components/ui/motion'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -30,27 +29,6 @@ export default function DashboardLayout({
   // Bumping retryToken re-runs the effect below without a full page reload.
   const [authError, setAuthError] = useState<string | null>(null)
   const [retryToken, setRetryToken] = useState(0)
-  // Below `md` the sidebar is an off-canvas drawer instead of the always-on
-  // rail (see sidebar.tsx) — this is the one piece of state both Header (the
-  // hamburger that opens it) and Sidebar (the drawer + its own close
-  // affordances) need to share, so it lives here, their common parent.
-  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false)
-  // The hamburger button in Header — focus returns here when the drawer
-  // closes (Escape, backdrop click, or picking a nav link), matching how
-  // job-detail-modal.tsx restores focus to whatever opened it.
-  const menuButtonRef = useRef<HTMLButtonElement>(null)
-
-  // A route change is itself a form of "navigation happened" — never leave
-  // the drawer open over the newly-loaded page.
-  useEffect(() => {
-    setIsMobileNavOpen(false)
-  }, [pathname])
-
-  function closeMobileNav() {
-    setIsMobileNavOpen(false)
-    menuButtonRef.current?.focus()
-  }
-
   useEffect(() => {
     async function getUser() {
       try {
@@ -63,8 +41,8 @@ export default function DashboardLayout({
         setAuthError(null)
 
         // First-login flow: brand-new users (never onboarded, no companies yet)
-        // land on the onboarding wizard. Best-effort — never blocks rendering.
-        if (pathname !== '/onboarding') {
+        // land on Welcome. Best-effort — never blocks rendering.
+        if (pathname !== welcome.href) {
           try {
             // NEVER supabase.from('profiles').select('preferences') here.
             //
@@ -89,7 +67,7 @@ export default function DashboardLayout({
               const { count } = await trackedOnly(
                 supabase.from('companies').select('id', { count: 'exact', head: true }).eq('user_id', user.id)
               )
-              if (!count) router.push('/onboarding')
+              if (!count) router.push(welcome.href)
             }
           } catch {
             /* onboarding redirect is best-effort */
@@ -171,64 +149,19 @@ export default function DashboardLayout({
 
   return (
     <AppMotionConfig>
-      {/* Keyboard-only skip link: invisible until focused, jumps straight past
-          the sidebar + header nav to the page content. First tab stop in the
-          whole shell. */}
-      <a
-        href="#main-content"
-        className="sr-only focus-visible:not-sr-only focus-visible:fixed focus-visible:left-4 focus-visible:top-4 focus-visible:z-[200] focus-visible:rounded-control focus-visible:bg-accent focus-visible:px-4 focus-visible:py-2 focus-visible:text-accent-foreground focus-visible:shadow-pop focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        Skip to main content
-      </a>
-      <div className="flex h-screen overflow-hidden bg-background">
-        <Sidebar
-          user={userInfo}
-          onSignOut={handleSignOut}
-          isMobileOpen={isMobileNavOpen}
-          onCloseMobile={closeMobileNav}
-        />
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* md:hidden inside Header itself — at md+ the sidebar rail is the
-              entire desktop shell's chrome, so there is no horizontal band
-              here at all above `<main>`, just the hamburger-only bar below
-              md (see header.tsx). Nothing here needs to change to make room
-              for that: Header still renders its own height (0 at md+, since
-              the element itself is display:none) as a normal flex child, so
-              <main> below simply gets the rest of this column either way. */}
-          <Header
-            menuButtonRef={menuButtonRef}
-            onOpenNav={() => setIsMobileNavOpen(true)}
-          />
-          <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto focus:outline-none focus-visible:ring-0">
-            {/* Padding scales down at small widths — a flat px-8 py-8 left
-                a 390px-wide screen with almost no room for content.
-                No max-width here on purpose — width is the content's
-                decision, not the shell's. The kanban board, jobs table, and
-                insights grid all want the full rail-to-edge space; a surface
-                that wants a prose measure caps itself (see the copilot
-                transcript's own max-w-[75ch]) instead of the shell clamping
-                every page to a long-form-reading width. */}
-            <div className="mx-auto w-full px-4 py-5 sm:px-6 sm:py-6 md:px-8 md:py-8">
-              {/* Keyed by pathname: a short, non-blocking enter on every
-                  route change. No exit animation (no AnimatePresence) so a
-                  slow page can never leave the previous one half-faded. */}
-              <motion.div
-                key={pathname}
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={transitionFast}
-              >
-                {children}
-              </motion.div>
-            </div>
-          </main>
-          {/* Bottom tab bar, small screens only (see mobile-nav.tsx) — a
-              normal flex child (not fixed/overlay), so it takes real space
-              out of this column and `<main>` above never renders content
-              underneath it. */}
-          <MobileNav />
-        </div>
-      </div>
+      <Shell pathname={pathname} user={userInfo} onSignOut={handleSignOut}>
+        {/* Keyed by pathname: a short, non-blocking enter on every route change.
+            No exit animation (no AnimatePresence) so a slow page can never leave
+            the previous one half-faded. */}
+        <motion.div
+          key={pathname}
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={transitionFast}
+        >
+          {children}
+        </motion.div>
+      </Shell>
     </AppMotionConfig>
   )
 }

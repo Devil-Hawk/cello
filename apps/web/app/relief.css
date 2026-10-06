@@ -1,0 +1,657 @@
+/*
+  Relief tokens and the dimensional layer. The one file where a shadow, a
+  gradient or a blur may be written (lib/depth/rules.ts fails the build
+  anywhere else). The contract is components/ui/relief.md.
+
+  One light, upper left. Shadows fall straight down. Dark is the same system
+  with its own tokens: it hangs on next-themes' `.dark` class, which is set
+  before first paint from the system setting or the remembered choice.
+*/
+
+:root {
+  /* colour */
+  --r-ground: #ecebe7;
+  --r-surface: #fafaf8;
+  --r-raised: #fefefd;
+  --r-ink: #1a1b1f;
+  --r-ink-2: #5a5d65;
+  --r-ink-3: #666971; /* 4.6 to 1 on the ground; the mocks' #8b8e96 failed AA */
+  --r-line: rgba(26, 27, 31, 0.08);
+  --r-line-2: rgba(26, 27, 31, 0.14);
+  --r-copper: #c2641a; /* the bead and the ring */
+  --r-copper-text: #a9500f; /* words and numerals, 4.6 to 1 on the ground */
+  --r-petrol: #3a8686; /* the mark and the spiral */
+  --r-petrol-text: #2e7373;
+  --r-ok: #2f7a4d;
+  --r-stop: #b4402d;
+  --r-mark: #1a1b1f;
+  --r-mark-stroke: #6fc2c2;
+  --r-btn-fg: #ffffff;
+  --r-btn-hover: #2a2b30;
+  --r-scrim: rgba(26, 27, 31, 0.28);
+
+  /* light: the lit top edge, the shadow colour and its strength */
+  --r-hi: rgba(255, 255, 255, 0.85);
+  --r-hi2: #ffffff;
+  --r-sh: 26, 27, 31;
+  --r-shk: 1;
+  --r-tint: 26, 27, 31;
+
+  /* elevation scale: contact, level 1, level 2, bar, and the ring */
+  --r-contact: 0 1px 1.5px rgba(var(--r-sh), calc(0.14 * var(--r-shk)));
+  --r-amb: 0 6px 14px -6px rgba(var(--r-sh), calc(0.26 * var(--r-shk)));
+  --r-amb2: 0 14px 28px -10px rgba(var(--r-sh), calc(0.34 * var(--r-shk)));
+  --r-s1: inset 0 1px 0 var(--r-hi), 0 1px 2px rgba(var(--r-sh), calc(0.04 * var(--r-shk))),
+    0 4px 12px -4px rgba(var(--r-sh), calc(0.06 * var(--r-shk)));
+  --r-s2: inset 0 1px 0 var(--r-hi2), 0 2px 4px rgba(var(--r-sh), calc(0.06 * var(--r-shk))),
+    0 18px 40px -10px rgba(var(--r-sh), calc(0.22 * var(--r-shk))),
+    0 40px 80px -32px rgba(var(--r-sh), calc(0.18 * var(--r-shk)));
+  --r-s3: inset 0 1px 0 var(--r-hi), 0 1px 2px rgba(var(--r-sh), calc(0.05 * var(--r-shk))),
+    0 10px 28px -10px rgba(var(--r-sh), calc(0.16 * var(--r-shk)));
+  --r-lit: inset 0 1px 0 var(--r-hi);
+  --r-key-on: inset 0 1px 0 var(--r-hi2), var(--r-contact),
+    0 4px 10px -5px rgba(var(--r-sh), calc(0.28 * var(--r-shk)));
+  --r-key-ink: inset 0 1px 0 rgba(255, 255, 255, 0.14), var(--r-contact),
+    0 5px 12px -5px rgba(var(--r-sh), calc(0.45 * var(--r-shk)));
+  --r-key-ink-hover: inset 0 1px 0 rgba(255, 255, 255, 0.14), var(--r-contact),
+    0 8px 16px -6px rgba(var(--r-sh), calc(0.5 * var(--r-shk)));
+  --r-key-down: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 1px 1px rgba(var(--r-sh), calc(0.2 * var(--r-shk)));
+  --r-ring: 0 0 0 3px var(--r-raised), 0 0 0 5px var(--r-copper);
+  --r-ring-el: 0 2px 3px 5px rgba(var(--r-sh), calc(0.05 * var(--r-shk))),
+    0 14px 28px -8px rgba(var(--r-sh), calc(0.32 * var(--r-shk)));
+
+  /* type */
+  --r-t-meta: 13px;
+  --r-t-body: 15px;
+  --r-t-title: 18px;
+  --r-t-section: 28px;
+  --r-t-display: 48px;
+  --r-radius-sheet: 20px;
+
+  /* the shadows the old pages used before Relief, kept byte for byte */
+  --legacy-shadow-card: 0 1px 2px 0 rgb(16 18 23 / 0.04), 0 2px 6px -1px rgb(16 18 23 / 0.05);
+  --legacy-shadow-pop: 0 2px 8px -2px rgb(16 18 23 / 0.08), 0 8px 24px -4px rgb(16 18 23 / 0.16);
+  --legacy-shadow-raised: 0 1px 0 0 rgb(255 255 255 / 0.6) inset, 0 1px 2px 0 rgb(16 18 23 / 0.05),
+    0 6px 16px -6px rgb(16 18 23 / 0.14);
+  --legacy-shadow-well: inset 0 1px 2px 0 rgb(16 18 23 / 0.06);
+}
+
+.dark {
+  --r-ground: #17181c;
+  --r-surface: #202126;
+  --r-raised: #292a30;
+  --r-ink: #ecebe7;
+  --r-ink-2: #b4b7bf;
+  --r-ink-3: #94979f;
+  --r-line: rgba(236, 235, 231, 0.09);
+  --r-line-2: rgba(236, 235, 231, 0.16);
+  --r-copper: #e0905a;
+  --r-copper-text: #e0905a;
+  --r-petrol: #5fb3b3;
+  --r-petrol-text: #5fb3b3;
+  --r-ok: #5cb57e;
+  --r-stop: #e07a66;
+  --r-mark: #0e0f12;
+  --r-btn-fg: #17181c;
+  --r-btn-hover: #ffffff;
+  --r-scrim: rgba(0, 0, 0, 0.5);
+  --r-hi: rgba(255, 255, 255, 0.07);
+  --r-hi2: rgba(255, 255, 255, 0.1);
+  --r-sh: 0, 0, 0;
+  --r-shk: 2.4;
+  --r-tint: 255, 255, 255;
+}
+
+@media (max-width: 760px) {
+  :root {
+    --r-t-display: 36px;
+    --r-t-section: 26px;
+    --r-radius-sheet: 18px;
+  }
+}
+
+/* one icon set at one stroke width */
+svg.lucide {
+  stroke-width: 1.75;
+}
+
+/* type steps */
+.r-display {
+  font-size: var(--r-t-display);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  text-wrap: balance;
+}
+.r-section {
+  font-size: var(--r-t-section);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  text-wrap: balance;
+}
+.r-title {
+  font-size: var(--r-t-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+.r-body {
+  font-size: var(--r-t-body);
+  line-height: 1.45;
+}
+.r-meta {
+  font-size: var(--r-t-meta);
+  line-height: 1.4;
+  color: var(--r-ink-3);
+}
+
+/* The role title rule. A role's title and its employer's name share this one
+   class, so size, weight and colour cannot drift apart. Both wrap, neither
+   truncates, and each keeps at least 40 percent of the line. */
+.r-name {
+  font-size: var(--r-t-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--r-ink);
+  min-width: 40%;
+  overflow-wrap: anywhere;
+}
+
+/* sheets: level 1 holds, level 2 lifts, both catch the light on their top edge */
+.r-sheet {
+  background: var(--r-surface);
+  border-radius: var(--r-radius-sheet);
+  box-shadow: var(--r-s1);
+  padding: 24px;
+}
+.r-sheet-lead {
+  background: var(--r-raised);
+  border-radius: var(--r-radius-sheet);
+  box-shadow: var(--r-s2);
+  padding: 28px;
+}
+@media (max-width: 760px) {
+  .r-sheet,
+  .r-sheet-lead {
+    padding: 20px;
+  }
+}
+
+/* the bar: a raised plinth on the ground */
+.r-plinth {
+  background: var(--r-surface);
+  border-radius: 18px;
+  box-shadow: var(--r-s3);
+}
+.r-plinth-tabs {
+  background: var(--r-surface);
+  box-shadow: inset 0 1px 0 var(--r-hi), 0 -1px 0 var(--r-line),
+    0 -14px 36px -14px rgba(var(--r-sh), calc(0.22 * var(--r-shk)));
+}
+/* glass only on what floats over moving content, and only where it is wanted */
+.r-glass {
+  background: color-mix(in srgb, var(--r-ground) 88%, transparent);
+}
+@supports (backdrop-filter: blur(1px)) {
+  @media (prefers-reduced-transparency: no-preference) {
+    .r-glass {
+      backdrop-filter: blur(10px);
+    }
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .r-glass {
+    background: var(--r-ground);
+  }
+}
+
+/* keys: lit on top, resting on a contact shadow; pressed, they sit down */
+.r-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 18px;
+  border-radius: 12px;
+  font-size: var(--r-t-body);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.12s ease, background-color 0.15s, box-shadow 0.12s;
+}
+.r-key:focus-visible,
+.r-tabkey:focus-visible {
+  outline: 2px solid var(--r-ink);
+  outline-offset: 2px;
+}
+.r-key:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+/* a key with no padding, for an icon or the avatar */
+.r-key.r-key-bare {
+  padding: 0;
+}
+.r-key-ink {
+  background: var(--r-ink);
+  color: var(--r-btn-fg);
+  box-shadow: var(--r-key-ink);
+}
+.r-key-ink:hover {
+  background: var(--r-btn-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--r-key-ink-hover);
+}
+.r-key-raised {
+  background: var(--r-raised);
+  color: var(--r-ink);
+  box-shadow: var(--r-key-on);
+}
+.r-key-raised:hover {
+  transform: translateY(-1px);
+}
+.r-key-ghost {
+  background: transparent;
+  color: var(--r-ink-2);
+  padding: 0 12px;
+}
+.r-key-ghost:hover {
+  background: rgba(var(--r-tint), 0.06);
+}
+.r-key:active {
+  transform: translateY(0) scale(0.99);
+}
+.r-key-ink:active {
+  box-shadow: var(--r-key-down);
+}
+/* the current page, standing 1px proud of the bar */
+.r-key[aria-current='page'] {
+  background: var(--r-raised);
+  color: var(--r-ink);
+  box-shadow: var(--r-key-on);
+  transform: translateY(-1px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .r-key,
+  .r-key:hover,
+  .r-key:active,
+  .r-key[aria-current='page'],
+  .r-tile {
+    transform: none;
+    transition: none;
+  }
+}
+
+/* a text field: set into the sheet, one hairline, a visible focus ring */
+.r-field {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--r-raised);
+  color: var(--r-ink);
+  font-size: var(--r-t-body);
+  box-shadow: inset 0 0 0 1px var(--r-line-2);
+}
+textarea.r-field {
+  padding: 12px 14px;
+  min-height: 120px;
+  line-height: 1.45;
+}
+.r-field::placeholder {
+  color: var(--r-ink-3);
+}
+.r-field:focus-visible {
+  outline: 2px solid var(--r-ink);
+  outline-offset: 2px;
+}
+.r-field[aria-invalid='true'] {
+  box-shadow: inset 0 0 0 1.5px var(--r-stop);
+}
+
+/* a tab on the phone's bottom plinth; the current one is a key standing proud */
+.r-tabkey {
+  border-radius: 12px;
+  color: var(--r-ink-3);
+  transition: background-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.r-tabkey[aria-current='page'] {
+  background: var(--r-raised);
+  color: var(--r-ink);
+  box-shadow: var(--r-key-on);
+  transform: translateY(-1px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .r-tabkey,
+  .r-tabkey[aria-current='page'] {
+    transform: none;
+    transition: none;
+  }
+}
+
+/* beads: a live state is a small lit object; done states carry a check instead */
+.r-bead {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.95) 0, rgba(255, 255, 255, 0.4) 20%, rgba(255, 255, 255, 0) 50%),
+    var(--r-bead-color, var(--r-copper));
+  box-shadow: inset -1px -1px 1px rgba(0, 0, 0, 0.22), 0 1px 1px rgba(var(--r-sh), calc(0.28 * var(--r-shk)));
+}
+.r-bead-ink {
+  --r-bead-color: var(--r-ink);
+}
+.r-bead-blocked {
+  --r-bead-color: var(--r-stop);
+}
+
+/* logo tiles: app icons with a lit edge, a shaded foot, a sheen and a contact shadow.
+   Three layers, each its own variable: how the tile is made (bevel), whether it needs
+   the person (ring), and where it sits (el). */
+.r-tile {
+  --bevel: inset 0 0 0 1px rgba(26, 27, 31, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    inset 0 -1px 0 rgba(26, 27, 31, 0.07);
+  --ring: 0 0 0 0 transparent;
+  --el: 0 1px 2px rgba(var(--r-sh), calc(0.16 * var(--r-shk))),
+    0 3px 6px -2px rgba(var(--r-sh), calc(0.14 * var(--r-shk)));
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  isolation: isolate;
+  background: #ffffff;
+  color: var(--r-ink-2);
+  font-weight: 600;
+  box-shadow: var(--bevel), var(--ring), var(--el);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.r-tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(170deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0) 48%, rgba(26, 27, 31, 0) 72%, rgba(26, 27, 31, 0.05) 100%);
+}
+.r-tile img {
+  width: var(--g, 60%);
+  height: var(--g, 60%);
+  object-fit: contain;
+}
+.r-tile-fill {
+  --bevel: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 0 rgba(0, 0, 0, 0.16);
+}
+.r-tile-fill::after {
+  background: linear-gradient(170deg, rgba(255, 255, 255, 0.26) 0%, rgba(255, 255, 255, 0.04) 46%, rgba(0, 0, 0, 0) 70%, rgba(0, 0, 0, 0.1) 100%);
+}
+.r-tile-fill img {
+  width: var(--g, 100%);
+  height: var(--g, 100%);
+  object-fit: cover;
+  max-width: none;
+}
+.r-tile-dark {
+  --bevel: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+  background: #02112e;
+}
+/* 48 and above: the relief is raised so the tile reads as an object at 1x */
+.r-tile-lg {
+  --bevel: inset 0 0 0 1px rgba(26, 27, 31, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1px 0 rgba(26, 27, 31, 0.1);
+  --el: 0 1px 2px rgba(var(--r-sh), calc(0.18 * var(--r-shk))),
+    0 4px 8px -3px rgba(var(--r-sh), calc(0.24 * var(--r-shk)));
+}
+.r-tile-lg::after {
+  background: linear-gradient(172deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 40%, rgba(26, 27, 31, 0) 60%, rgba(26, 27, 31, 0.07) 100%);
+}
+.r-tile-lg.r-tile-fill {
+  --bevel: inset 0 1px 0 rgba(255, 255, 255, 0.38), inset 0 -1px 0 rgba(0, 0, 0, 0.22);
+}
+.r-tile-lg.r-tile-fill::after {
+  background: linear-gradient(172deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.05) 44%, rgba(0, 0, 0, 0) 64%, rgba(0, 0, 0, 0.14) 100%);
+}
+.r-tile-lg.r-tile-dark {
+  --bevel: inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+}
+/* 56 and above: the ambient layer, wherever the tile sits */
+.r-tile-xl {
+  --el: 0 1px 2px rgba(var(--r-sh), calc(0.18 * var(--r-shk))),
+    0 4px 8px -2px rgba(var(--r-sh), calc(0.18 * var(--r-shk))), var(--r-amb);
+}
+/* the tile at the head of a lifted sheet takes the same ambient layer */
+.r-tile-lift {
+  --el: 0 1px 2px rgba(var(--r-sh), calc(0.16 * var(--r-shk))),
+    0 4px 8px -2px rgba(var(--r-sh), calc(0.16 * var(--r-shk))), var(--r-amb);
+}
+/* the one tile that needs the person */
+.r-tile-ring {
+  --ring: var(--r-ring);
+  --el: var(--r-ring-el);
+}
+/* finished things lie flat: no shadow, no sheen, desaturated */
+.r-tile-flat {
+  --bevel: inset 0 0 0 1px rgba(26, 27, 31, 0.08);
+  --el: 0 0 0 0 transparent;
+  filter: grayscale(0.55);
+}
+.r-tile-flat::after {
+  display: none;
+}
+.r-tile-init,
+.r-tile-more {
+  --bevel: inset 0 0 0 1px rgba(26, 27, 31, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+.r-tile-more {
+  background: var(--r-surface);
+  color: var(--r-ink-3);
+  font-weight: 500;
+}
+.r-tile-more::after {
+  display: none;
+}
+/* an interactive tile lifts toward the hand */
+a:hover > .r-tile,
+.r-row:hover .r-tile {
+  transform: translateY(-1px);
+}
+.r-tile-flat,
+a:hover > .r-tile-flat,
+.r-row:hover .r-tile-flat {
+  transform: none;
+}
+
+/* rows on the ground lift on hover: ground plus one tone, the row's own radius, level 1 */
+.r-row {
+  border-radius: 12px;
+  transition: background-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.r-row:hover {
+  background: var(--r-surface);
+  box-shadow: var(--r-s1);
+  transform: translateY(-1px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .r-row:hover {
+    transform: none;
+  }
+}
+
+/* disclosure group: a hairline, a heading at Title size, a count or one token, a chevron.
+   Native details and summary, so it works with no script. The opened body rises 250ms. */
+.r-dg {
+  border-top: 1px solid var(--r-line);
+  perspective: 800px;
+}
+.r-dg > summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 12px 0;
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--r-t-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.r-dg > summary::-webkit-details-marker {
+  display: none;
+}
+.r-dg > summary:focus-visible {
+  outline: 2px solid var(--r-ink);
+  outline-offset: 2px;
+}
+.r-dg-count {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--r-ink-2);
+}
+.r-dg-chevron {
+  margin-left: auto;
+  color: var(--r-ink-3);
+  transition: transform 0.2s;
+}
+.r-dg[open] > summary .r-dg-chevron {
+  transform: rotate(180deg);
+}
+.r-dg[open] > .r-dg-body {
+  animation: r-rise 250ms ease both;
+}
+@keyframes r-rise {
+  from {
+    opacity: 0;
+    transform: translateZ(-14px) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .r-dg[open] > .r-dg-body {
+    animation: none;
+  }
+  .r-dg-chevron {
+    transition: none;
+  }
+}
+
+/* the fade where folded text ends */
+.r-fold-fade {
+  background: linear-gradient(to bottom, transparent, var(--r-surface));
+}
+
+/* a posting folded after 12 lines: the checkbox opens it, with no script */
+.r-fold-body {
+  position: relative;
+  max-height: calc(12 * 1.45 * var(--r-t-body));
+  overflow: hidden;
+}
+.r-fold-body .r-fold-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4em;
+  pointer-events: none;
+}
+.r-fold-input:checked ~ .r-fold-body {
+  max-height: none;
+}
+.r-fold-input:checked ~ .r-fold-body .r-fold-fade,
+.r-fold-input:checked ~ .r-fold-label {
+  display: none;
+}
+.r-fold-input:focus-visible ~ .r-fold-label {
+  outline: 2px solid var(--r-petrol);
+  outline-offset: 2px;
+}
+
+/* a posting or other written text: headings, lists and tables as the employer set them */
+.r-prose > * + * {
+  margin-top: 0.75em;
+}
+.r-prose h1,
+.r-prose h2,
+.r-prose h3,
+.r-prose h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 1.25em;
+}
+.r-prose ul,
+.r-prose ol {
+  padding-left: 1.4em;
+}
+.r-prose ul {
+  list-style: disc;
+}
+.r-prose ol {
+  list-style: decimal;
+}
+.r-prose a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.r-prose table {
+  display: block;
+  overflow-x: auto;
+}
+.r-prose code {
+  font-size: 0.92em;
+}
+
+/* the avatar is the only sphere in the product */
+.r-sphere {
+  background: radial-gradient(circle at 35% 28%, #4a4c55 0, #1a1b1f 58%, #0e0f12 100%);
+  color: #ffffff;
+  box-shadow: var(--r-contact), 0 4px 8px -4px rgba(var(--r-sh), calc(0.5 * var(--r-shk))),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+/* the fit strip: a pill per requirement; a plus stands up, a minus lies flat */
+.r-pill-met {
+  background: var(--r-ink);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 1px 1px rgba(var(--r-sh), calc(0.18 * var(--r-shk)));
+}
+.r-pill-partly {
+  background: var(--r-ink-3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.r-pill-missing {
+  background: var(--r-line-2);
+}
+
+/* the SVG twin of the rendered mark keeps a two layer drop shadow */
+.r-mark-svg {
+  filter: drop-shadow(0 1px 1px rgba(var(--r-sh), calc(0.25 * var(--r-shk))))
+    drop-shadow(0 4px 8px rgba(var(--r-sh), calc(0.18 * var(--r-shk))));
+}
+
+/* working: the spiral breathes at 1.6s, and only while work runs */
+@keyframes r-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+.r-live {
+  animation: r-breathe 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .r-live {
+    animation: none;
+  }
+}

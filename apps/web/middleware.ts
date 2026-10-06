@@ -52,6 +52,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { updateSession } from '@/lib/supabase/middleware'
+import { fixturesOn } from '@/lib/depth/fixtures-flag'
 
 const publicRoutes = ['/login', '/auth/callback']
 
@@ -367,7 +368,10 @@ function clearAuthCookies(request: NextRequest, response: NextResponse): NextRes
  */
 export const RETIRED_PAGES: Record<string, string> = {
   agent: '/copilot',
-  prep: '/dashboard',
+  dashboard: '/today',
+  notifications: '/today',
+  prep: '/today',
+  onboarding: '/welcome',
 }
 
 export async function middleware(request: NextRequest) {
@@ -386,10 +390,17 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  // Fixture pages hold made-up data and no session: on for a fixture build or
+  // a preview, a plain 404 everywhere else (production included).
+  if (segment === 'fixtures') {
+    return fixturesOn() ? NextResponse.next() : new NextResponse(null, { status: 404 })
+  }
+
   const { response, user } = await updateSession(request)
 
   const isApi = pathname.startsWith('/api')
-  const isPublic = publicRoutes.some(route => pathname.startsWith(route))
+  // Landing is public by exact match: a startsWith('/') would make every page public.
+  const isPublic = pathname === '/' || publicRoutes.some(route => pathname.startsWith(route))
 
   if (!user) {
     // Allow public routes; API routes return their own 401s

@@ -47,7 +47,7 @@ function fakeAdmin(): { admin: AdminClient; eqCalls: [string, string, unknown][]
           },
         }
       }
-      if (table === 'jobs' || table === 'person_jobs') {
+      if (table === 'jobs') {
         return {
           select() {
             const builder = {
@@ -85,8 +85,8 @@ const LEAD: JobLead = {
   postedAt: null,
 }
 
-describe('ingestLeads — existing-jobs dedup lookup is ownership-scoped through person_roles', () => {
-  it("filters the existing-jobs query by the person's roles, not a company-id array", async () => {
+describe('ingestLeads — existing-jobs dedup lookup is ownership-scoped via the FK join', () => {
+  it('filters the existing-jobs query by companies.user_id, not a company-id array', async () => {
     const { admin, eqCalls } = fakeAdmin()
 
     const result = await ingestLeads(admin, USER_ID, [LEAD])
@@ -95,7 +95,8 @@ describe('ingestLeads — existing-jobs dedup lookup is ownership-scoped through
     expect(result.inserted).toBe(1)
     // The ownership fence: ownedJobsQuery builds this exact filter — proves
     // the dedup lookup no longer relies on an .in('company_id', companyIds)
-    // array (which breaks past ~600 companies).
-    expect(eqCalls).toContainEqual(['person_jobs', 'viewer_id', USER_ID])
+    // array (which breaks past ~600 companies), root-caused instead via the
+    // FK join.
+    expect(eqCalls).toContainEqual(['jobs', 'companies.user_id', USER_ID])
   })
 })
