@@ -329,7 +329,7 @@ export function StepCard({ step, live, onApprove, onContinue, onConfirm, onDecli
       {isGuarded && (
         <div className="space-y-2 border-t border-destructive/20 px-2.5 py-2.5">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            This is irreversible — it never runs without your explicit confirmation, bypass mode or not
+            This is irreversible — it never runs without your explicit confirmation
           </p>
           <Textarea
             value={declineNote}

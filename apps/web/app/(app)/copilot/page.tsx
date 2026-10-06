@@ -549,7 +549,7 @@ export default function CopilotPage() {
       }
       const data = await res.json()
       const conv = data.conversation as
-        | { id: string; title: string; model: string | null; enabled_agents: unknown; bypass_mode?: boolean }
+        | { id: string; title: string; model: string | null; enabled_agents: unknown }
         | undefined
       const rawMessages = Array.isArray(data.messages) ? data.messages : []
       const loaded: ChatMessage[] = rawMessages.map(
@@ -583,7 +583,7 @@ export default function CopilotPage() {
         enabledAgents: agents.length ? agents : [...STEP_AGENT_TYPES],
         model: conv?.model && isAllowedModel(conv.model) ? conv.model : DEFAULT_MODEL_SENTINEL,
         thinkingMode: 'auto',
-        bypassMode: Boolean(conv?.bypass_mode),
+        bypassMode: false,
       })
     } catch {
       toast({ title: 'Could not load conversation', variant: 'destructive' })
@@ -1197,8 +1197,6 @@ export default function CopilotPage() {
           defaultModelLabel={defaultModelLabel}
           thinkingMode={composerSettings.thinkingMode}
           onThinkingModeChange={(mode) => setComposerSettings((s) => ({ ...s, thinkingMode: mode }))}
-          bypassMode={composerSettings.bypassMode}
-          onBypassModeChange={(on) => setComposerSettings((s) => ({ ...s, bypassMode: on }))}
           onSend={handleSend}
           onStop={handleStop}
           streaming={streaming}
