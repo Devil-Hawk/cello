@@ -10,8 +10,9 @@
 // ladder (lib/models/ladder.ts once K14 is on main). celloChatModel(choice) builds the model from the result.
 
 import { z } from 'zod'
+import { celloChatModel as openRouterModel, type ModelPurpose } from '@/lib/agents/model'
 import { estimateCostUsd, hasListedPrice } from '@/lib/harness/spend'
-import { REASONING_EFFORTS, type ReasoningEffort } from '@/lib/harness/types'
+import { REASONING_EFFORTS, type DecryptedApiKeys, type ReasoningEffort } from '@/lib/harness/types'
 import { ALLOWED_MODELS } from '@/lib/models'
 
 // lane-stub: K14 Rung. The rungs a Chat turn can run on: local, free hosted, paid hosted.
@@ -105,4 +106,16 @@ export function estimateChoice(choice: Pick<ModelChoice, 'rung' | 'model'>, toke
   if (!hasListedPrice(choice.model)) return { known: false, usd: null, text: 'Cost not known before sending' }
   const usd = estimateCostUsd(choice.model, tokens.prompt, tokens.completion)
   return { known: true, usd, text: usd < 0.01 ? 'Under $0.01' : `About $${usd.toFixed(2)}` }
+}
+
+/**
+ * The one constructor for the model a resolved choice runs on (Chat, the Researcher and the declared steps share it).
+ * A free rung only ever gets a free id, so a forged paid id cannot spend; the local rung has no LangChain door yet.
+ * ponytail: OpenRouter is the only door built; the effort is passed to the call by the loop, not here. R2 and the other
+ * providers join this switch with the ladder (K14).
+ */
+export function celloChatModel(ran: Pick<ModelChoice, 'rung' | 'model'>, apiKeys: DecryptedApiKeys, purpose: ModelPurpose = 'orchestrator') {
+  if (ran.rung === 'R2') throw new Error('This computer cannot run Chat yet. Pick Free models or Your own key.')
+  if (ran.rung === 'R3' && !isFree(ran.model)) throw new Error('A free choice was given a model that is not free.')
+  return openRouterModel({ apiKeys, model: ran.model, purpose, serverFallback: ran.rung === 'R4' })
 }

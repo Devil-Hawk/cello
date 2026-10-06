@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { estimateChoice, parseChoice, resolveChoice, validateChoice, type ChoiceLimits, type ModelChoice } from './choice'
+import { celloChatModel, estimateChoice, parseChoice, resolveChoice, validateChoice, type ChoiceLimits, type ModelChoice } from './choice'
 
 const FREE = 'qwen/qwen3.8-27b:free'
 const paid = (over: Partial<ModelChoice> = {}): ModelChoice => ({ rung: 'R4', model: 'anthropic/claude-sonnet-5', effort: 'medium', ...over })
@@ -86,5 +86,19 @@ describe('estimateChoice', () => {
     expect(listed.text).toBe('About $0.06')
     expect(estimateChoice(paid({ model: 'someone/unlisted-model' }), tokens)).toEqual({ known: false, usd: null, text: 'Cost not known before sending' })
     expect(estimateChoice(paid(), { prompt: 100, completion: 10 }).text).toBe('Under $0.01')
+  })
+})
+
+describe('celloChatModel', () => {
+  const keys = { openrouter: 'sk-test' }
+  it('builds the model the choice names, and refuses a paid id on the free rung and the local rung', () => {
+    expect((celloChatModel(free(), keys) as unknown as { model: string }).model).toBe(FREE)
+    expect((celloChatModel(paid(), keys) as unknown as { model: string }).model).toBe('anthropic/claude-sonnet-5')
+    expect(() => celloChatModel(free({ model: 'anthropic/claude-sonnet-5' }), keys)).toThrow('not free')
+    expect(() => celloChatModel({ rung: 'R2', model: 'local/model' }, keys)).toThrow('This computer')
+  })
+
+  it('needs a key, like every other door', () => {
+    expect(() => celloChatModel(paid(), {})).toThrow('No OpenRouter API key')
   })
 })
