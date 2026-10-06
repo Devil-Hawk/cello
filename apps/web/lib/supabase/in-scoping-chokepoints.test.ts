@@ -112,6 +112,10 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     ],
     reason: 'every list is a subset of one REJUDGE_PAGE (100) page of the person\'s own held roles, never an owned-id set.',
   },
+  'apps/web/lib/jobs/role-types/sync.ts': {
+    calls: [".in('id', retired)"],
+    reason: 'retired is the ids of role types the module no longer has: a handful, never user data.',
+  },
   'apps/web/lib/harness/agents/enricher.ts': {
     calls: [".in('id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",
