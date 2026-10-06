@@ -50,8 +50,10 @@ export async function listFound(admin: SupabaseClient, userId: string): Promise<
 export type ConfirmResult = { ok: true; applicationId: string } | { ok: false; sentence: string }
 
 /**
- * "applied" in the person's own taste history. The table belongs to the scoring package (K8a); where it is
- * not deployed yet this does nothing and Confirm still succeeds.
+ * "applied" in the person's own taste history. The table belongs to the scoring package (K8a) and is not on
+ * this branch's base: until it is deployed the write fails, Confirm still succeeds, and the failure is
+ * logged so a missing history is visible and not silent. The test that history changes the order of roles
+ * waits for K15's blend and K8a's reaction writer.
  * ponytail: history as applied reactions; a separate history input if K15's blend needs counts apart.
  */
 async function appliedReaction(admin: SupabaseClient, userId: string, applicationId: string): Promise<void> {
@@ -59,12 +61,13 @@ async function appliedReaction(admin: SupabaseClient, userId: string, applicatio
     const { data } = await admin.from('applications').select('job_id, jobs(title, location, companies(name))').eq('id', applicationId).eq('user_id', userId).maybeSingle()
     const a = data as unknown as { job_id: string; jobs: { title: string; location: string | null; companies: { name: string } | null } | null } | null
     if (!a) return
-    await admin.from('role_reactions').upsert(
+    const { error } = await admin.from('role_reactions').upsert(
       { user_id: userId, job_id: a.job_id, reaction: 'applied', reason: null, surface: 'applications', job_title: a.jobs?.title ?? '', company_name: a.jobs?.companies?.name ?? '', job_location: a.jobs?.location ?? null, updated_at: new Date().toISOString() },
       { onConflict: 'user_id,job_id' },
     )
-  } catch {
-    // role_reactions is not there yet
+    if (error) console.warn('could not write the applied reaction:', error.message)
+  } catch (e) {
+    console.warn('could not write the applied reaction:', e instanceof Error ? e.message : e)
   }
 }
 
