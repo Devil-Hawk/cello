@@ -109,7 +109,7 @@ describe('readFindNewRoles', () => {
       expect(text).not.toContain('—')
     }
     expect(Object.keys(FAILURE_TEXT).sort()).toEqual(
-      ['board_error', 'bot_check', 'fetch_failed', 'login_required', 'model_limit', 'model_unavailable', 'no_roles', 'page_unconfirmed', 'render_failed', 'robots', 'role_pages', 'time', 'unreachable'].sort()
+      ['board_error', 'bot_check', 'budget', 'fetch_failed', 'login_required', 'model_limit', 'model_unavailable', 'no_roles', 'page_unconfirmed', 'render_failed', 'robots', 'role_pages', 'time', 'unreachable'].sort()
     )
   })
 })
