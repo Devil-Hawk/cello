@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { Key } from '@/components/ui/key'
+import { TriageControl } from '@/components/fit/triage-control'
 import { OpenRouterDoor } from '@/components/settings/openrouter-door'
 import { RoleRow } from '@/components/roles/role-row'
 import { companies } from '@/lib/routes'
@@ -73,6 +74,7 @@ export function YourRolesScreen({
                 domain={r.domain}
                 logoUrl={r.logoUrl}
                 meta={[r.location, posted(r.postedAt)].filter(Boolean).join(' · ')}
+                actions={<TriageControl jobId={r.id} surface="roles" />}
               />
             ))}
           </div>
