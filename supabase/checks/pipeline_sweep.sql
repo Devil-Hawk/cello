@@ -215,10 +215,10 @@ begin
   if (select succeeded_at from public.job_heartbeats where job = 'pipeline.prune' and user_id is null) is null then raise exception 'the trim records its heartbeat'; end if;
   update public.job_heartbeats set succeeded_at = now() - interval '1 hour', found = '{"deleted": -1}' where job = 'pipeline.prune' and user_id is null;
   perform public.agent_sweep();
-  if (select found ->> 'deleted' from public.job_heartbeats where job = 'pipeline.prune' and user_id is null) <> '-1' then raise exception 'the trim runs once a day, not every minute'; end if;
+  if (select h.found ->> 'deleted' from public.job_heartbeats h where h.job = 'pipeline.prune' and h.user_id is null) <> '-1' then raise exception 'the trim runs once a day, not every minute'; end if;
   update public.job_heartbeats set succeeded_at = now() - interval '25 hours' where job = 'pipeline.prune' and user_id is null;
   perform public.agent_sweep();
-  if (select found ->> 'deleted' from public.job_heartbeats where job = 'pipeline.prune' and user_id is null) = '-1' then raise exception 'the trim runs again after a day'; end if;
+  if (select h.found ->> 'deleted' from public.job_heartbeats h where h.job = 'pipeline.prune' and h.user_id is null) = '-1' then raise exception 'the trim runs again after a day'; end if;
 end $$;
 
 rollback;

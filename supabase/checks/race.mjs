@@ -128,7 +128,7 @@ async function move(c, app, from, to, e, cap = null, reason = null, detail = nul
   return rows[0].r
 }
 
-async function mkPerson(db, { send = false } = {}) {
+async function mkPerson(db, { send = false, maxPerDay = 3 } = {}) {
   const u = randomUUID()
   const co = randomUUID()
   const tok = randomUUID()
@@ -141,8 +141,8 @@ async function mkPerson(db, { send = false } = {}) {
       [tok, u, `hash-${tok}`],
     )
     await db.query(
-      "update public.profiles set preferences = coalesce(preferences, '{}'::jsonb) || jsonb_build_object('pipeline', jsonb_build_object('send', jsonb_build_object('mode', 'auto', 'maxPerDay', 3, 'tokenId', $2::text))) where id = $1",
-      [u, tok],
+      "update public.profiles set preferences = coalesce(preferences, '{}'::jsonb) || jsonb_build_object('pipeline', jsonb_build_object('send', jsonb_build_object('mode', 'auto', 'maxPerDay', $3::int, 'tokenId', $2::text))) where id = $1",
+      [u, tok, maxPerDay],
     )
   }
   return { u, co, tok }
@@ -280,7 +280,7 @@ const pipelineCases = [
   {
     name: 'Pause racing five claims leaves no claim after paused_at',
     run: async ({ direct }) => {
-      const p = await mkPerson(direct, { send: true })
+      const p = await mkPerson(direct, { send: true, maxPerDay: 10 })
       const ids = []
       for (let i = 0; i < 5; i++) ids.push(await mkAllowed(direct, p, i))
       const cs = await connect(POOLER, 6)
