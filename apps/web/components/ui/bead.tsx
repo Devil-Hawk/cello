@@ -1,4 +1,4 @@
-import { cn } from '@/lib/utils'
+import { clsx as cn } from 'clsx'
 
 // A bead marks a live state only: copper when the person is needed, ink when
 // ready, blocked when a step stopped. Done states carry a check instead.

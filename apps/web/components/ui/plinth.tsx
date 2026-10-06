@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { cn } from '@/lib/utils'
+import { clsx as cn } from 'clsx'
 
 // The navigation bar's body: a raised plinth resting on the ground. `tabs` is
 // the phone's bottom plinth, square at the screen edge.

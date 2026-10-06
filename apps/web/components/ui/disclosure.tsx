@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { ChevronDown } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { clsx as cn } from 'clsx'
 
 // A disclosure group: a hairline, a heading at Title size with a count or one
 // token of what is inside, a chevron, and a body that opens in place. Native
