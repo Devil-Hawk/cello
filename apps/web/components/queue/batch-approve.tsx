@@ -3,7 +3,7 @@
 // The morning review: approve many prepared applications in one pass.
 //
 // WHY THIS IS THE FEATURE AND NOT A CONVENIENCE
-//   Autopilot runs overnight and leaves a pile of complete, tailored
+//   Autopilot leaves a pile of complete, tailored
 //   pending_review drafts. Clicking through fifty of them one at a time is the
 //   same drudgery Cello exists to remove — so the batch review is the product,
 //   not a shortcut around it.
@@ -638,7 +638,7 @@ export function BatchApprove({ onChanged }: { onChanged?: () => void }) {
       <EmptyState
         icon={Inbox}
         title="Nothing waiting for review"
-        body="When autopilot prepares tailored applications overnight, they collect here so you can approve them in one pass instead of fifty."
+        body="When Cello prepares tailored applications, they collect here so you can approve them in one pass."
       />
     )
   }
