@@ -15,7 +15,6 @@
         "prompts/planner.md",
         "prompts/analyst.md",
         "prompts/distill.md",
-        "prompts/memory_extract.md",
         "prompts/company_verify.md",
         "prompts/goal_judge.md",
         "lib/harness/planner.ts",

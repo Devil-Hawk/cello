@@ -26,22 +26,31 @@
 // ruling, user-confirmed 2026-08-16).
 
 export interface MemoryAddInput {
-  /** A user/assistant turn pair — mem0 runs its own fact-extraction LLM call
-   *  over these and resolves ADD/UPDATE/DELETE against what it already knows
-   *  (mem0's `infer: true` path). */
-  messages?: { role: 'user' | 'assistant'; content: string }[]
-  /** An already-distilled fact string — stored as-is (`infer: false`), no
-   *  extraction LLM call. Alternative to `messages`; exactly one is set. */
-  fact?: string
+  /** The text to keep, stored as given (mem0 `infer: false`, no extraction
+   *  call). Cello never lets mem0 decide what a conversation meant. */
+  fact: string
   /** Free-text namespace tag (e.g. 'copilot', 'outreach') carried in mem0's
-   *  metadata — informational grouping only, search() does not filter by it. */
+   *  metadata, informational grouping only. */
   scope: string
-  /** Arbitrary caller-supplied refs (companyId, jobId, ...) merged into the
-   *  stored memory's metadata alongside `scope`. */
+  /** Caller-supplied fields (key, status, kind, ...) merged into the stored
+   *  memory's metadata alongside `scope`. Filterable in getAll. */
   refs?: Record<string, unknown>
   /** The caller's own already-computed demo-session verdict. true refuses
-   *  the write outright — see this file's header. */
+   *  the write outright, see this file's header. */
   isDemo: boolean
+}
+
+export interface MemoryPatch {
+  /** New text. Omit to change only the metadata. */
+  text?: string
+  /** Merged into the stored metadata. */
+  metadata?: Record<string, unknown>
+}
+
+export interface MemoryListOptions {
+  /** Metadata equality filters, e.g. { status: 'active' }. user_id is always added. */
+  filters?: Record<string, unknown>
+  limit?: number
 }
 
 export interface MemoryItem {
@@ -75,15 +84,19 @@ export class MemoryPersistError extends Error {
 }
 
 export interface MemoryStore {
-  /** Throws DemoMemoryWriteRefusedError when `input.isDemo`. Metered — reads
-   *  the caller's own apiKeys via loadApiKeys, so it is subject to the same
-   *  demo spend/expiry guard and monthly cap every other callLlm caller is. */
-  add(userId: string, input: MemoryAddInput): Promise<void>
-  /** Semantic search over `userId`'s memories, most relevant first. */
+  /** Throws DemoMemoryWriteRefusedError when `input.isDemo`. Returns the stored memory. */
+  add(userId: string, input: MemoryAddInput): Promise<MemoryItem>
+  /** One memory, or null when it does not exist or belongs to someone else. */
+  get(userId: string, id: string): Promise<MemoryItem | null>
+  /** Changes text and/or metadata. Throws when the memory is not `userId`'s. */
+  update(userId: string, id: string, patch: MemoryPatch): Promise<void>
+  /** Deletes one memory. Throws when the memory is not `userId`'s. */
+  delete(userId: string, id: string): Promise<void>
+  /** Words-and-vectors search over `userId`'s memories, most relevant first. */
   search(userId: string, query: string, opts?: { limit?: number }): Promise<MemoryItem[]>
-  /** Every memory `userId` owns, newest first. */
-  getAll(userId: string): Promise<MemoryItem[]>
-  /** Deletes every memory `userId` owns. Not demo-guarded — this is what the
+  /** `userId`'s memories, newest first, optionally narrowed by metadata equality. */
+  getAll(userId: string, opts?: MemoryListOptions): Promise<MemoryItem[]>
+  /** Deletes every memory `userId` owns. Not demo-guarded: this is what the
    *  demo wipe (lib/access/demo-wipe.ts) calls to actually clear them. */
   deleteAll(userId: string): Promise<void>
 }

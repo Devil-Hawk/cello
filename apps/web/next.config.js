@@ -81,6 +81,10 @@ const nextConfig = {
       'undici',
       'mammoth',
       'mem0ai',
+      // The server embedder (lib/memory/embedder.ts): onnxruntime's native
+      // binaries cannot go through webpack.
+      '@huggingface/transformers',
+      'onnxruntime-node',
       '@langfuse/tracing',
       '@langfuse/otel',
       '@langfuse/client',

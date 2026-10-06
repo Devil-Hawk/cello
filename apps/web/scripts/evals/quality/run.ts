@@ -1,5 +1,5 @@
 // Free-model evals for the prompts the quality package owns: planner,
-// analyst, distill, memory extraction, company verify and the goal judge.
+// analyst, distill, company verify and the goal judge.
 //
 //   cd apps/web
 //   npx tsx scripts/evals/quality/run.ts --label before            every prompt, Release 1 text
@@ -18,7 +18,7 @@
 import { FreeClient, GENERATOR, JUDGE, BudgetStop, QuotaError } from './lib/free'
 import { loadThresholds, misses, readReport, writeReport, type SuiteCtx, type SuiteResult, type Variant } from './lib/report'
 
-const SUITES = ['planner', 'analyst', 'distill', 'memory_extract', 'company_verify', 'goal_judge'] as const
+const SUITES = ['planner', 'analyst', 'distill', 'company_verify', 'goal_judge'] as const
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name)
