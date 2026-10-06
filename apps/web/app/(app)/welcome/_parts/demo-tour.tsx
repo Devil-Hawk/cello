@@ -4,7 +4,9 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { Key } from '@/components/ui/key'
 import { REFUSALS } from '@/components/brand/landing/content'
+import { createClient } from '@/lib/supabase/client'
 import { today } from '@/lib/routes'
+import { recordHref } from '@/lib/routes/roles'
 import { DEMO_LINE, dismissTour, tourDismissed, tourStops, type TourStop } from './logic'
 
 // A demo is one screen: what Cello will not do and what this workspace is, then
@@ -12,10 +14,23 @@ import { DEMO_LINE, dismissTour, tourDismissed, tourStops, type TourStop } from 
 // dismissible and never returns once dismissed. A demo is never asked for a key.
 export function DemoScreen({ onFinish, finishing }: { onFinish: () => void; finishing: boolean }) {
   const [stops, setStops] = useState<TourStop[]>([])
+  const [firstRole, setFirstRole] = useState<string | null>(null)
 
   useEffect(() => {
     // Read after mount: storage does not exist on the server.
     setStops(tourDismissed() ? [] : tourStops())
+  }, [])
+
+  // The role stop opens a real record: the newest role the demo holds. Until it is known, the stop opens Roles.
+  useEffect(() => {
+    void createClient()
+      .from('person_roles')
+      .select('job_id')
+      .is('hidden_reason', null)
+      .order('visible_since', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => setFirstRole((data as { job_id?: string } | null)?.job_id ?? null))
   }, [])
 
   return (
@@ -41,7 +56,7 @@ export function DemoScreen({ onFinish, finishing }: { onFinish: () => void; fini
           <ol className="space-y-2">
             {stops.map((s) => (
               <li key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <Link href={s.route.href} className="r-name underline underline-offset-4">
+                <Link href={s.id === 'record' && firstRole ? recordHref(firstRole) : s.route.href} className="r-name underline underline-offset-4">
                   {s.label}
                 </Link>
                 <span className="r-body text-r-ink-2">{s.says}</span>

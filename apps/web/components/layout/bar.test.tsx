@@ -16,7 +16,7 @@ const textOf = (html: string) => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, '
 
 describe('the bar', () => {
   it('marks only the current page with aria-current', () => {
-    const html = render('/jobs')
+    const html = render('/roles')
     const bar = html.slice(html.indexOf('aria-label="Primary"'), html.indexOf('</nav>', html.indexOf('aria-label="Primary"')))
     expect(bar.match(/aria-current="page"/g)).toHaveLength(1)
     expect(bar).toMatch(/aria-current="page"[^>]*>Roles|>Roles<\/a>/)
@@ -37,18 +37,18 @@ describe('the bar', () => {
   })
 
   it('has five phone tabs', () => {
-    const html = render('/jobs')
+    const html = render('/roles')
     const tabs = html.slice(html.indexOf('aria-label="Bottom navigation"'))
     expect(tabs.match(/<a /g)).toHaveLength(5)
   })
 
   it('names no retired page', () => {
-    const text = textOf(render('/jobs'))
+    const text = textOf(render('/roles'))
     for (const word of ['Copilot', 'Opportunities', 'dashboard', 'Dashboard']) expect(text).not.toContain(word)
   })
 
   it('has a skip link to the main content, and a main landmark', () => {
-    const html = render('/jobs')
+    const html = render('/roles')
     expect(html).toContain('href="#main-content"')
     expect(html).toContain('id="main-content"')
   })

@@ -10,7 +10,7 @@ describe('RoleTitle', () => {
     const html = renderToStaticMarkup(<RoleTitle id="r1" title="AI Engineer" company="Vantage Loom" companyId="c1" />)
     const names = html.match(/class="r-name[^"]*"/g) ?? []
     expect(names).toHaveLength(2)
-    expect(html).toMatch(/<a [^>]*href="\/jobs\?job=r1"[^>]*>AI Engineer<\/a>/)
+    expect(html).toMatch(/<a [^>]*href="\/roles\/r1"[^>]*>AI Engineer<\/a>/)
     expect(html).toMatch(/<a [^>]*href="\/companies\/c1"[^>]*>Vantage Loom<\/a>/)
     expect(html.match(/<a [^>]*class="r-name[^"]*"[^>]*>/g)).toHaveLength(2)
   })

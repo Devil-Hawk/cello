@@ -11,7 +11,7 @@ export default function ShellFixture({ searchParams }: { searchParams: { at?: st
   const needs = searchParams.needs ? Number(searchParams.needs) : undefined
   return (
     <Shell
-      pathname={searchParams.at ?? '/jobs'}
+      pathname={searchParams.at ?? '/roles'}
       user={{ email: 'sam@example.com', fullName: 'Sam Rivera', avatarUrl: null }}
       onSignOut={() => undefined}
       needsYou={needs}
