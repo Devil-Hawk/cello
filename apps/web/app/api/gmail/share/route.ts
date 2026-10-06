@@ -139,9 +139,9 @@ export async function POST(request: NextRequest) {
     }
 
     const { data: companyJobs } = await supabase
-      .from('jobs')
+      .from('person_jobs')
       .select('id, title')
-      .eq('company_id', trackedCompany.id)
+      .eq('viewer_company_id', trackedCompany.id)
       .limit(500)
 
     const jobMatch = findBestJobMatch(parsed.jobTitle, companyJobs || [])

@@ -164,17 +164,17 @@ async function loadTailorTargets(
 
   const missing = [...tailored.keys()].filter((id) => !targets.has(id)).slice(0, TAILOR_LIMIT)
   if (missing.length > 0) {
-    const { data } = await supabase.from('jobs').select('id, title, companies(name)').in('id', missing)
+    const { data } = await supabase.from('person_jobs').select('id, title, viewer_company_name').in('id', missing)
     for (const job of (data ?? []) as unknown as {
       id: string
       title: string
-      companies: { name: string | null } | null
+      viewer_company_name: string | null
     }[]) {
       if (targets.has(job.id)) continue
       targets.set(job.id, {
         jobId: job.id,
         title: job.title,
-        company: relatedName(job.companies),
+        company: job.viewer_company_name,
         tailoredVersion: tailored.get(job.id) ?? null,
       })
     }
