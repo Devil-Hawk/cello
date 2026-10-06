@@ -15,7 +15,13 @@ const REPO_ROOT = path.resolve(process.cwd(), '../..')
 const RETIRED =
   'interview_prep|interview_kits|interview ?kit|prep_interview|interviewTips|interview prep|interview tips|/prep\\b|coach([^i]|$)|prep ?kit|star stor|kitId|questionCount|prep/\\[id\\]'
 
-const ALLOWED = [/^apps\/web\/lib\/jobs\/classify\.ts:\d+:\s+'professor', 'tutor', 'coach',/]
+// Recorded third-party pages and postings (the reader's fixtures and the ingest eval) say "coach" and "interview" in their own words.
+const ALLOWED = [
+  /^apps\/web\/lib\/jobs\/classify\.ts:\d+:\s+'professor', 'tutor', 'coach',/,
+  /^apps\/web\/lib\/ingest\/reader\/__fixtures__\//,
+  /^apps\/web\/lib\/ingest\/reader\/detail\.test\.ts:/,
+  /^apps\/web\/scripts\/eval-ingest\/(pages|postings)/,
+]
 
 function hits(): string[] {
   try {
