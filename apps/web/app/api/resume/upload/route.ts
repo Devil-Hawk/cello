@@ -243,7 +243,7 @@ async function importResume(request: NextRequest, user: { id: string; email?: st
       // The harness runner: honours the account's provider choice, enforces the
       // monthly spend cap and retries transient failures. No key, no LLM leg:
       // the deterministic structure is used and still valid.
-      run: canRunLlm(apiKeys) ? (opts) => callLlm(apiKeys, opts) : null,
+      run: canRunLlm(apiKeys) ? (opts) => callLlm(apiKeys, { ...opts, name: opts.name ?? 'import-resume' }) : null,
       nameCtx: {
         fullName: (profile as { full_name?: string | null } | null)?.full_name ?? null,
         email: (profile as { email?: string | null } | null)?.email ?? user.email ?? null,
