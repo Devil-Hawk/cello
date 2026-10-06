@@ -184,6 +184,13 @@ export function makeFakeAdmin(seed: Record<string, Row[]> = {}, config: Record<s
         if (operator === 'is') filters.push((r) => (v === null ? r[col] != null : r[col] !== v))
         return api
       },
+      /** Case-insensitive LIKE: % and _ are wildcards, a backslash escapes the next character. */
+      ilike(col: string, pattern: string) {
+        const source = pattern.replace(/\\(.)|([%_])|([.*+?^${}()|[\]])/g, (_m, esc, wild, special) => (esc ? esc.replace(/[.*+?^${}()|[\]]/g, '\\$&') : wild ? (wild === '%' ? '.*' : '.') : `\\${special}`))
+        const re = new RegExp(`^${source}$`, 'i')
+        filters.push((r) => re.test(String(cell(r, col) ?? '')))
+        return api
+      },
       lt(col: string, v: string | number) {
         filters.push((r) => r[col] != null && (r[col] as string | number) < v)
         return api

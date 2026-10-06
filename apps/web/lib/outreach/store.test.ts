@@ -12,6 +12,12 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ACTIVE_INITIAL_STATUSES, findDuplicateInitial, insertOutreach, isDuplicateOutreachError, updateOutreach, recordOutreachReply } from './store'
 
+// The artifact half is covered in store.artifacts.test.ts against a fake store that keeps artifacts.
+vi.mock('../agents/artifacts', () => ({
+  createArtifact: async () => ({ id: 'art-1', version: 1, created: true }),
+  addVersion: async () => 2,
+}))
+
 const recordInteraction = vi.fn()
 vi.mock('../interactions/store', () => ({
   recordInteraction: (...args: unknown[]) => recordInteraction(...args),
@@ -321,17 +327,20 @@ describe('insertOutreach stamps the call that wrote the draft', () => {
       currentTraceContext()!.buffer.noteGeneration('draft-outreach-message', '0f7b5d5a-1d75-4c5b-9d31-e984c3b9e5b6')
       await insertOutreach(a.db, { ...row, used_llm: false })
     })
-    expect(a.sent[0]).toEqual({ ...row, used_llm: false })
+    expect(a.sent[0]).toMatchObject({ ...row, used_llm: false })
+    expect(a.sent[0]).not.toHaveProperty('trace_id')
 
     const b = capture()
     await insertOutreach(b.db, row)
-    expect(b.sent[0]).toEqual(row)
+    expect(b.sent[0]).toMatchObject(row)
+    expect(b.sent[0]).not.toHaveProperty('trace_id')
     vi.unstubAllEnvs()
 
     const c = capture()
     await inTrace(async () => {
       await insertOutreach(c.db, row)
     })
-    expect(c.sent[0]).toEqual(row)
+    expect(c.sent[0]).toMatchObject(row)
+    expect(c.sent[0]).not.toHaveProperty('trace_id')
   })
 })

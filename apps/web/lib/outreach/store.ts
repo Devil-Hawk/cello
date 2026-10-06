@@ -3,8 +3,18 @@
 // The table is not in @cello/shared's generated Database type, so this uses an
 // untyped client (server client for RLS-scoped reads, or the service-role admin
 // client for writes) with the row shape declared in ./types.
+//
+// THE TEXT LIVES ON AN ARTIFACT VERSION (K17). A message is an `artifacts` row of type
+// `message`; insertOutreach writes that first and links the row to it (artifact_id,
+// artifact_version), and a change to the subject or body adds a version before the row
+// changes. The row keeps who, approval, sending and reply, and still mirrors the text in
+// its own columns: the send route and the readers that list messages use them.
+// ponytail: dual write. Drop the columns when those readers read the version.
 
+import { randomUUID } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { addVersion, createArtifact } from '../agents/artifacts'
+import type { AdminClient } from '../harness/types'
 import type { OutreachMessageRow, OutreachStatus, ReplyClassification, TemplateReason } from './types'
 import { recordInteraction } from '../interactions/store'
 import { traceRefFor } from '../trace/spans'
@@ -28,22 +38,69 @@ export interface NewOutreach {
   used_llm?: boolean
   /** Why the text is the template. Set only when used_llm is false. */
   template_reason?: TemplateReason | null
+  /** The artifact version that already holds this text (a draft queued from an artifact). Absent: one is made. */
+  artifact_id?: string | null
+  artifact_version?: number | null
+}
+
+const asAdmin = (client: SupabaseClient) => client as unknown as AdminClient
+
+function messageContent(m: { subject: string; body: string; to_name?: string | null; to_email?: string | null; kind?: string | null }, outreachId: string) {
+  return { subject: m.subject, body: m.body, to_name: m.to_name ?? null, to_email: m.to_email ?? null, outreach_id: outreachId, kind: m.kind === 'follow_up' ? 'follow_up' : 'initial' }
+}
+
+/**
+ * True when no message to this address has gone out yet: the person is writing to someone
+ * new. The approval shows it beside the address, because a first message to a stranger is
+ * the one worth a second look.
+ */
+export async function isNewRecipient(client: SupabaseClient, userId: string, toEmail: string): Promise<boolean> {
+  const { data } = await client.from(TABLE).select('id').eq('user_id', userId).eq('status', 'sent').ilike('to_email', toEmail.trim().replace(/[\\%_]/g, (c) => `\\${c}`)).limit(1)
+  return ((data as unknown[] | null) ?? []).length === 0
 }
 
 export async function insertOutreach(
   client: SupabaseClient,
   row: NewOutreach
 ): Promise<OutreachMessageRow> {
+  // The artifact first: the text is made once, on its version, and the row points at it.
+  const id = randomUUID()
+  let madeArtifact: string | null = null
+  if (!row.artifact_id) {
+    const ref = await createArtifact(asAdmin(client), {
+      userId: row.user_id,
+      type: 'message',
+      title: `${row.kind === 'follow_up' ? 'Follow-up' : 'Email'} to ${row.to_name ?? row.to_email}`,
+      content: messageContent(row, id),
+      author: 'cello',
+      jobId: row.job_id ?? null,
+      companyId: row.company_id ?? null,
+      contactId: row.contact_id ?? null,
+      idempotencyKey: `outreach:${id}`,
+    })
+    madeArtifact = ref.id
+    row = { ...row, artifact_id: ref.id, artifact_version: ref.version }
+  }
   // A model draft remembers the call that wrote it and what it first said, so
   // an approval, an edit or a reply later can be scored on that call. A
   // template, or a trace that was not exported, stamps nothing.
   const fromModel = row.used_llm !== false
   const ref = fromModel ? traceRefFor(row.kind === 'follow_up' ? 'draft-follow-up' : 'draft-outreach-message') : null
   const stamped = ref ? { ...row, ...ref, generated_subject: row.subject, generated_body: row.body } : row
-  const { data, error } = await client.from(TABLE).insert(stamped).select('*').single()
-  // The Postgres code rides along so a caller can tell the unique-index race
-  // (23505) from a real fault without parsing the message.
-  if (error) throw Object.assign(new Error(`insertOutreach failed: ${error.message}`), { code: error.code })
+  const { data, error } = await client.from(TABLE).insert({ id, ...stamped }).select('*').single()
+  if (error) {
+    // The row did not land: the artifact made for it would be an orphan.
+    if (madeArtifact) {
+      try {
+        await client.from('artifacts').delete().eq('id', madeArtifact).eq('user_id', row.user_id)
+      } catch {
+        // An orphan artifact is harmless, and the original error is the one worth raising.
+      }
+    }
+    // The Postgres code rides along so a caller can tell the unique-index race
+    // (23505) from a real fault without parsing the message.
+    throw Object.assign(new Error(`insertOutreach failed: ${error.message}`), { code: error.code })
+  }
   return data as OutreachMessageRow
 }
 
@@ -53,7 +110,17 @@ export async function getOutreach(
   id: string
 ): Promise<OutreachMessageRow | null> {
   const { data } = await client.from(TABLE).select('*').eq('id', id).eq('user_id', userId).single()
-  return (data as OutreachMessageRow | null) ?? null
+  const row = (data as OutreachMessageRow | null) ?? null
+  if (!row?.artifact_id || !row.artifact_version) return row // a row from before the copy: its own columns are the text
+  // The text is read from its artifact version; the row's columns are the fallback.
+  const { data: version } = await client
+    .from('artifact_versions')
+    .select('content')
+    .eq('artifact_id', row.artifact_id)
+    .eq('version', row.artifact_version)
+    .maybeSingle()
+  const c = (version as { content?: { subject?: string; body?: string } } | null)?.content
+  return c && typeof c.subject === 'string' && typeof c.body === 'string' ? { ...row, subject: c.subject, body: c.body } : row
 }
 
 export async function listOutreach(
@@ -75,9 +142,37 @@ export async function updateOutreach(
   id: string,
   fields: Partial<OutreachMessageRow>
 ): Promise<OutreachMessageRow> {
+  // A change to the text is a new version of the message first, then the row follows it.
+  let versioned: Partial<OutreachMessageRow> = {}
+  if (fields.subject !== undefined || fields.body !== undefined) {
+    const { data: cur } = await client.from(TABLE).select('artifact_id, subject, body, to_name, to_email, kind, job_id, company_id, contact_id').eq('id', id).eq('user_id', userId).maybeSingle()
+    const current = cur as Pick<OutreachMessageRow, 'artifact_id' | 'subject' | 'body' | 'to_name' | 'to_email' | 'kind' | 'job_id' | 'company_id' | 'contact_id'> | null
+    if (current) {
+      const next = { ...current, subject: fields.subject ?? current.subject, body: fields.body ?? current.body }
+      const content = messageContent(next, id)
+      if (current.artifact_id) {
+        const version = await addVersion(asAdmin(client), { userId, artifactId: current.artifact_id, author: 'user', content, note: 'Edited' })
+        versioned = { artifact_version: version }
+      } else {
+        // A row made before the copy and never linked: make its artifact now.
+        const ref = await createArtifact(asAdmin(client), {
+          userId,
+          type: 'message',
+          title: `${next.kind === 'follow_up' ? 'Follow-up' : 'Email'} to ${next.to_name ?? next.to_email}`,
+          content,
+          author: 'user',
+          jobId: next.job_id,
+          companyId: next.company_id,
+          contactId: next.contact_id,
+          idempotencyKey: `outreach:${id}`,
+        })
+        versioned = { artifact_id: ref.id, artifact_version: ref.version }
+      }
+    }
+  }
   const { data, error } = await client
     .from(TABLE)
-    .update({ ...fields, updated_at: new Date().toISOString() })
+    .update({ ...fields, ...versioned, updated_at: new Date().toISOString() })
     .eq('id', id)
     .eq('user_id', userId)
     .select('*')

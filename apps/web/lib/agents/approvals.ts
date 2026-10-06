@@ -16,7 +16,7 @@
 import { createHash } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { approveDraft, sendOutreach } from './send.stub'
-import { findDuplicateInitial, findFollowUp, insertOutreach, isDuplicateOutreachError, updateOutreach } from '@/lib/outreach/store'
+import { findDuplicateInitial, findFollowUp, insertOutreach, isDuplicateOutreachError, isNewRecipient, updateOutreach } from '@/lib/outreach/store'
 import type { AdminClient } from '@/lib/harness/types'
 import { scoreTrace } from '@/lib/observability/langfuse'
 import { addVersion, getArtifact, type ArtifactContent } from './artifacts'
@@ -201,8 +201,12 @@ async function materializeEmail(
       kind,
       parent_id: parentId,
       used_llm: true,
+      artifact_id: artifact.id,
+      artifact_version: versionNumber,
     })
-    return { ok: true, target: { table: 'outreach_messages', id: row.id, payload: { subject: content.subject, body: content.body, to_email: c.email, kind } } }
+    // The approval shows the address and whether it is someone Cello has not written to before.
+    const newRecipient = await isNewRecipient(admin as unknown as SupabaseClient, ctx.userId, c.email)
+    return { ok: true, target: { table: 'outreach_messages', id: row.id, payload: { subject: content.subject, body: content.body, to_email: c.email, new_recipient: newRecipient, kind } } }
   } catch (e) {
     if (isDuplicateOutreachError(e)) return { ok: false, error: 'An email to this contact about this role is already queued.', fix: 'Do not queue it again.' }
     return { ok: false, error: `Could not prepare the email: ${e instanceof Error ? e.message : String(e)}`, fix: 'Try again.' }
@@ -406,7 +410,7 @@ async function applyEdits(
   const versionNumber = await addVersion(admin, { userId, artifactId: row.artifact_id, author: 'user', content, note: 'Edited before approving' })
   const refreshed = await getArtifact(admin, userId, row.artifact_id, { version: versionNumber })
   if (!refreshed) return { ok: false, error: 'Could not save your edit.', fix: 'Try again.' }
-  const target = await syncTarget(admin, userId, row, refreshed.version.content as Record<string, unknown>)
+  const target = await syncTarget(admin, userId, row, refreshed.version.content as Record<string, unknown>, versionNumber)
   const { data } = await admin
     .from('approvals')
     .update({ artifact_version: versionNumber, payload_hash: hash(payloadFor(row.action, versionNumber, {}, target)) })
@@ -419,11 +423,19 @@ async function applyEdits(
 }
 
 /** Write the person's edit into the row the send or submit path reads, and return the payload that is hashed. */
-async function syncTarget(admin: AdminClient, userId: string, row: ApprovalRow, content: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function syncTarget(admin: AdminClient, userId: string, row: ApprovalRow, content: Record<string, unknown>, versionNumber: number): Promise<Record<string, unknown>> {
   if (row.target_table === 'outreach_messages') {
-    const { data } = await admin.from('outreach_messages').update({ subject: content.subject, body: content.body }).eq('id', row.target_id).eq('user_id', userId).select('to_email, kind').single()
+    // The row follows the version it was edited into (artifact_version), then the payload is rebuilt from the row.
+    const { data } = await admin
+      .from('outreach_messages')
+      .update({ subject: content.subject, body: content.body, artifact_version: versionNumber })
+      .eq('id', row.target_id)
+      .eq('user_id', userId)
+      .select('to_email, kind')
+      .single()
     const m = data as { to_email: string; kind: string } | null
-    return { subject: content.subject, body: content.body, to_email: m?.to_email, kind: m?.kind }
+    const newRecipient = m?.to_email ? await isNewRecipient(admin as unknown as SupabaseClient, userId, m.to_email) : undefined
+    return { subject: content.subject, body: content.body, to_email: m?.to_email, new_recipient: newRecipient, kind: m?.kind }
   }
   const field = typeof content.text === 'string' ? 'text' : ''
   const { data: draft } = await admin.from('application_drafts').select('job_id, cover_letter, resume_summary').eq('id', row.target_id).eq('user_id', userId).single()
