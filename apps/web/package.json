@@ -17,7 +17,9 @@
     "scorecard": "npx tsx scripts/scorecard.ts",
     "role-types:sync": "npx tsx scripts/role-types-sync.ts",
     "role-types:go-live": "npx tsx scripts/role-types-go-live.ts",
-    "role-types:label-set": "npx tsx scripts/role-types-label-set.ts"
+    "role-types:label-set": "npx tsx scripts/role-types-label-set.ts",
+    "directory:coverage": "npx tsx scripts/directory-coverage.ts",
+    "directory:add-links": "npx tsx scripts/directory-add-links.ts"
   },
   "dependencies": {
     "@a2a-js/sdk": "1.0.1",
