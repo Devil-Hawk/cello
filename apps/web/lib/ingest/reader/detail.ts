@@ -121,11 +121,20 @@ function readDetailBase(html: string, url: string): RoleDetail {
   }
 }
 
+/** Material icon names a page puts before its place. */
+const PLACE_ICON = /^(?:place|location_on|location_pin|pin_drop)$/
+
 /**
  * A place the page marks up rather than labels in its text: a site's location icon (Amazon: an element with aria-label="location"
- * beside its list) or, on a page that shows its list beside the role, the card of the role being read (aria-current="page"; Google).
+ * beside its list; Google: a place icon beside the text) or, on a page that shows its list beside the role, the card of the role being read (aria-current="page"; Google).
  */
 function pagePlace($: cheerio.CheerioAPI): string | undefined {
+  // A location icon (Google's role page: <i aria-hidden="true">place</i><span>Sunnyvale, CA, USA</span>) is followed by the role's own place.
+  const pin = $('[aria-hidden="true"]')
+    .filter((_, el) => PLACE_ICON.test(clean($(el).text())))
+    .first()
+  const beside = clean(pin.next().text())
+  if (beside && beside.length <= 120) return beside
   const icon = clean($('[aria-label="location"]').first().parent().find('li').first().text())
   if (icon) return icon
   const cardLine = $('a[aria-current="page"] p').first()
