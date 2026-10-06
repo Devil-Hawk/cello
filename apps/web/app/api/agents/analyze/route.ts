@@ -85,8 +85,8 @@ export async function POST(request: NextRequest) {
         goal: `Analyze job ${jobId}`,
         input: { jobId },
       })
-      // AnalystOutput is exactly {summary, talkingPoints, companyInsights,
-      // interviewTips} — the response IS the unit's output, unwrapped.
+      // AnalystOutput is exactly {summary, talkingPoints, companyInsights}
+      //, the response IS the unit's output, unwrapped.
       setTraceOutput({ summary: (result.output as { summary?: unknown } | null)?.summary })
       return NextResponse.json(result.output)
     } catch (error) {

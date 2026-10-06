@@ -31,6 +31,11 @@ vi.mock('../harness/llm', async (importOriginal) => {
   return { ...actual, callLlm: (...args: unknown[]) => callLlmMock(...args) }
 })
 
+const memoryAddMock = vi.fn(async (..._args: unknown[]) => [])
+vi.mock('../memory/mem0-store', () => ({
+  getMemoryStore: () => ({ search: async () => [], add: (...args: unknown[]) => memoryAddMock(...args) }),
+}))
+
 const loadApiKeysMock = vi.fn(async (..._args: unknown[]) => ({ userId: 'u1' }) as never)
 vi.mock('../harness/keys', () => ({
   loadApiKeys: (...args: unknown[]) => loadApiKeysMock(...args),
@@ -99,6 +104,7 @@ function graphConfig(threadId: string, saver: MemorySaver) {
 beforeEach(() => {
   callLlmMock.mockReset()
   loadApiKeysMock.mockClear()
+  memoryAddMock.mockClear()
   dispatchToolMock.mockClear()
 })
 
@@ -249,6 +255,18 @@ describe('systemPrompt — every block renders when present, none when blank', (
     const sys = systemPrompt(undefined, '', '', '', '', '', '', '')
     expect(sys).not.toContain('undefined')
     expect(sys).not.toContain('null')
+  })
+})
+
+describe('a finished turn writes nothing to memory', () => {
+  it('answers and ends the turn without calling MemoryStore.add', async () => {
+    callLlmMock.mockResolvedValueOnce(llmAction({ action: 'final', message: 'ok' }))
+    const result = await copilotGraph.invoke(
+      { pendingIncomingMessage: 'hello', turnConfig: baseTurnConfig() },
+      graphConfig('thread-no-memory-write', new MemorySaver())
+    )
+    expect((result as { finalMessage?: string }).finalMessage).toBe('ok')
+    expect(memoryAddMock).not.toHaveBeenCalled()
   })
 })
 

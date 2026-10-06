@@ -14,7 +14,7 @@
 //   account menu that used to live here moved to the foot of that rail.
 //
 //   It survives below `md` for one reason. The contextual sub-destinations
-//   (Companies, Needs you, Interview prep, Contacts, Insights) exist only
+//   (Companies, Needs you, Contacts, Insights) exist only
 //   inside the mobile drawer, and this hamburger is the drawer's only opener —
 //   MobileNav's bottom bar carries just the five primary routes. Remove this
 //   and a third of the app becomes unreachable on a phone.

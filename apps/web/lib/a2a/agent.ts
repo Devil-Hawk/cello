@@ -3,23 +3,17 @@
 // parts turn into that agent's validated input, and how a harness
 // agent_runs row's status maps onto an A2A TaskState.
 //
-// WHY ONLY THESE THREE AGENTS, AND WHY ID-ONLY INPUT
+// WHY ONLY THESE TWO AGENTS, AND WHY ID-ONLY INPUT
 //   Spec Architecture table: "A2A: real endpoint via @a2a-js/sdk; matcher +
-//   company_researcher + interview_prep; read/draft-only agents; one A2A
-//   task = one LangGraph thread." All three already have a real,
-//   schema-validated input contract (lib/harness/schemas.ts): matcher takes
-//   jobIds against ALREADY-TRACKED jobs, company_researcher takes a
-//   companyId, interview_prep takes a jobId (and internally falls back to
-//   the caller's own stored resume when no resumeText override is given —
-//   lib/harness/agents/interview_prep.ts). A2A_AGENT_REQUEST below matches
-//   those contracts exactly and adds NO free-text override field (no raw
-//   job-posting text, no resumeText override): those would be new,
-//   remote-attacker-controlled strings landing directly in an LLM prompt
-//   (interview_prep's buildSystem(resumeText) has no frameJobText call on
-//   that path today — see lib/security/injection-chokepoints.test.ts's
-//   PENDING_WIRING entry for that file), and nothing here needs to exist to
-//   satisfy "score an already-tracked job" / "research an already-tracked
-//   company" / "prep for an already-tracked job". This is why
+//   company_researcher; read/draft-only agents; one A2A task = one LangGraph
+//   thread." Both already have a real, schema-validated input contract
+//   (lib/harness/schemas.ts): matcher takes jobIds against ALREADY-TRACKED
+//   jobs, company_researcher takes a companyId. A2A_AGENT_REQUEST below
+//   matches those contracts exactly and adds NO free-text override field (no
+//   raw job-posting text, no resume override): those would be new,
+//   remote-attacker-controlled strings landing directly in an LLM prompt, and
+//   nothing here needs to exist to satisfy "score an already-tracked job" /
+//   "research an already-tracked company". This is why
 //   app/api/a2a/route.ts is a FORWARDER, not a PROMPT_BUILDER, in that
 //   ledger: every field this file accepts is an id, carried to the harness
 //   graph, never interpolated into a prompt here.
@@ -27,12 +21,12 @@
 import { z } from 'zod'
 import { Role, TaskState } from '@a2a-js/sdk'
 import type { Message, Part } from '@a2a-js/sdk'
-import { PlanSchema, MatcherInput, CompanyResearcherInput, InterviewPrepInput } from '../harness/schemas'
+import { PlanSchema, MatcherInput, CompanyResearcherInput } from '../harness/schemas'
 import type { Plan, RunStatus } from '../harness/types'
 
-/** The three read/draft-only agents A2A exposes — matches
+/** The two read/draft-only agents A2A exposes, matches
  *  supabase/migrations/20260819000002_a2a_tasks.sql's `agent` CHECK. */
-export const A2A_AGENTS = ['matcher', 'company_researcher', 'interview_prep'] as const
+export const A2A_AGENTS = ['matcher', 'company_researcher'] as const
 export type A2aAgent = (typeof A2A_AGENTS)[number]
 
 // Built off the harness's own input schemas (lib/harness/schemas.ts) rather
@@ -51,14 +45,8 @@ const CompanyResearcherRequest = CompanyResearcherInput.extend({
   agent: z.literal('company_researcher'),
   companyId: z.string().min(1),
 })
-// Drops resumeText: a remote-attacker-controlled free-text override has no
-// place in this contract (see this file's header comment).
-const InterviewPrepRequest = InterviewPrepInput.omit({ resumeText: true }).extend({
-  agent: z.literal('interview_prep'),
-  jobId: z.string().min(1),
-})
 
-export const A2aAgentRequest = z.discriminatedUnion('agent', [MatcherRequest, CompanyResearcherRequest, InterviewPrepRequest])
+export const A2aAgentRequest = z.discriminatedUnion('agent', [MatcherRequest, CompanyResearcherRequest])
 export type A2aAgentRequest = z.infer<typeof A2aAgentRequest>
 
 /** Finds the first structured `data` part in a Message and validates it
@@ -73,8 +61,8 @@ export function parseA2aAgentRequest(message: Message): A2aAgentRequest {
   if (!content || content.$case !== 'data') {
     throw new Error(
       `No structured data part found. Send one data part shaped like ` +
-        `{agent:"matcher", jobIds:[...]}, {agent:"company_researcher", companyId:"..."} or ` +
-        `{agent:"interview_prep", jobId:"..."}.`
+        `{agent:"matcher", jobIds:[...]}, or ` +
+        `{agent:"company_researcher", companyId:"..."}.`
     )
   }
   return A2aAgentRequest.parse(content.value)
@@ -96,8 +84,6 @@ function stepInput(req: A2aAgentRequest): Record<string, unknown> {
       return { jobIds: req.jobIds }
     case 'company_researcher':
       return { companyId: req.companyId }
-    case 'interview_prep':
-      return { jobId: req.jobId }
   }
 }
 

@@ -450,7 +450,7 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
       const kind = parsed.status === 'screen' ? 'phone screen' : 'interview'
       const note =
         interviewAt && !isNaN(interviewAt.getTime())
-          ? `Prep for your ${kind} with ${trackedCompany.name} on ${interviewAt.toLocaleString()} (detected from Gmail: "${subject}")`
+          ? `Your ${kind} with ${trackedCompany.name} on ${interviewAt.toLocaleString()} (detected from Gmail: "${subject}")`
           : `${kind[0].toUpperCase()}${kind.slice(1)} detected with ${trackedCompany.name} — check the email for the exact time ("${subject}")`
 
       await db.from('follow_ups').insert({

@@ -146,7 +146,6 @@ export const UNIT_GENERATION_NAME: Record<UnitType, string> = {
   applier: 'apply-to-job',
   verifier: 'verify-application',
   follow_upper: 'draft-follow-up',
-  interview_prep: 'prepare-interview',
   company_researcher: 'research-company',
   contact_sourcer: 'find-contacts',
   digest: 'write-digest',
@@ -154,7 +153,7 @@ export const UNIT_GENERATION_NAME: Record<UnitType, string> = {
   resume_optimizer: 'optimize-resume',
   strategist: 'plan-strategy',
   analyst: 'analyze-pipeline',
-  coach: 'coach-reply',
+  application_follow_up: 'draft-application-follow-up',
 }
 
 /** Langfuse agent-node name per unit type. */
@@ -167,7 +166,6 @@ export const UNIT_AGENT_NAME: Record<UnitType, string> = {
   applier: 'run-applier',
   verifier: 'run-verifier',
   follow_upper: 'run-follow-upper',
-  interview_prep: 'run-interview-prep',
   company_researcher: 'run-company-researcher',
   contact_sourcer: 'run-contact-sourcer',
   digest: 'run-digest',
@@ -175,7 +173,7 @@ export const UNIT_AGENT_NAME: Record<UnitType, string> = {
   resume_optimizer: 'run-resume-optimizer',
   strategist: 'run-strategist',
   analyst: 'run-analyst',
-  coach: 'run-coach',
+  application_follow_up: 'run-application-follow-up',
 }
 
 /** Unit types that author content a human or an employer reads, and so get a

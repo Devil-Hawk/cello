@@ -125,11 +125,10 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",
   },
   'apps/web/lib/context/assemble.ts': {
-    calls: [".in('kind', kinds)", ".in('external_id', externalIds)"],
+    calls: [".in('kind', kinds)"],
     reason:
       "relevantInsights: kinds filters the insights.kind ENUM COLUMN (callers pass a fixed literal like " +
-      "['strategy','pattern']), not a user-owned id set. storedCompanyPages: externalIds is " +
-      'STORED_PAGE_KINDS.map(...) — a fixed 3-element const (home/about/careers), never per-user data.',
+      "['strategy','pattern']), not a user-owned id set.",
   },
 }
 

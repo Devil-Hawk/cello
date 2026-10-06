@@ -3,7 +3,7 @@
 // Mirrors supabase/migrations/20260724000002_phaseB.sql. The table is NOT in
 // @cello/shared's generated `Database` type, so lib/resume/store.ts talks to it
 // through an untyped Supabase client with the row shapes declared here (the same
-// convention as lib/interview/store.ts and lib/dossier/store.ts).
+// convention as lib/dossier/store.ts).
 //
 // THE VERSIONING MODEL
 //   Rows are append-only snapshots. A "bucket" is a (user_id, job_id) pair:

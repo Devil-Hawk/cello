@@ -205,7 +205,6 @@ describe('buildDemoWorkspace — shape', () => {
       'application_drafts',
       'outreach_messages',
       'resume_documents',
-      'interview_kits',
       'company_dossiers',
     ])
     for (const b of workspace.batches) expect(b.rows.length).toBeGreaterThan(0)
@@ -650,10 +649,10 @@ describe('seedDemoWorkspace', () => {
 
   it('degrades — but reports — when an optional table fails', async () => {
     const fake = fakeAdmin()
-    fake.failTable('interview_kits')
+    fake.failTable('company_dossiers')
     const result = await seedDemoWorkspace(fake.admin, DEMO_USER, { now: NOW })
     expect(result.warnings).toHaveLength(1)
-    expect(result.warnings[0]).toContain('interview_kits')
+    expect(result.warnings[0]).toContain('company_dossiers')
     // The rest of the demo still landed.
     expect(fake.rowsIn('jobs')).toHaveLength(40)
   })

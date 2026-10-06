@@ -22,7 +22,6 @@ const SUBMIT_CAPABLE_AGENT_TYPES = ['applier'] as const
 const SAMPLE_REQUESTS: A2aAgentRequest[] = [
   { agent: 'matcher', jobIds: ['j1', 'j2'] },
   { agent: 'company_researcher', companyId: 'c1' },
-  { agent: 'interview_prep', jobId: 'j1' },
 ]
 
 describe('A2A graph shape: no submit-capable node is ever reachable', () => {

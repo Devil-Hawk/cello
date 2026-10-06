@@ -2,7 +2,7 @@
 //
 // The table is not in @cello/shared's generated Database type, so this uses an
 // untyped SupabaseClient with the row shape from ./types.ts — the same
-// convention as lib/interview/store.ts and lib/dossier/store.ts.
+// convention as lib/dossier/store.ts.
 //
 // WHICH CLIENT TO PASS
 //   Pass the service-role admin client (lib/harness/supabase-admin.ts
