@@ -6,6 +6,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { AdminClient } from '@/lib/harness/types'
+import { OWNED_TABLES } from '@/lib/commands/owned'
 import { wipeExpiredDemoData } from './demo-wipe'
 
 /** memories lives in the `mem0` schema, not `public` (see demo-wipe.ts's own
@@ -176,6 +177,13 @@ describe('wipeExpiredDemoData', () => {
       { table: 'trace_spans', deleted: 0 },
       { table: 'a2a_tasks', deleted: 0 },
     ])
+  })
+
+  it('sweeps exactly the tables the owned-tables list marks demoWipe, and never the spend ledger', async () => {
+    const { admin } = fakeAdmin([{ id: 'demo-live', is_demo: true, demo_expires_at: AT(HOUR_MS) }])
+    const result = await wipeExpiredDemoData(admin, NOW)
+    expect(result.map((r) => r.table)).toEqual(OWNED_TABLES.filter((t) => t.demoWipe).map((t) => t.table))
+    expect(result.map((r) => r.table)).not.toContain('llm_spend')
   })
 
   it('logs and returns empty when the profile scan itself fails, rather than throwing', async () => {
