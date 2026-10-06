@@ -104,16 +104,21 @@ vi.mock('@/lib/harness/agents/outreach', async (importOriginal) => ({
   generateOutreachDraft: io.generateOutreachDraft,
 }))
 // The Writer (the draft route's door onto it) calls a real model and reader; this file is about the demo trail,
-// so it is faked as a template draft with nothing to judge. lib/outreach/write.test.ts and lib/workflows/writer.test.ts cover the real flow.
+// so it is faked with nothing to judge. lib/outreach/write.test.ts and lib/workflows/writer.test.ts cover the real flow.
 vi.mock('@/lib/outreach/write', () => ({
-  writeMessage: async () => ({
-    ok: true,
-    written: {
-      artifactId: 'artifact-1',
-      artifactVersion: 1,
-      review: { subject: 'Re: role', body: 'Body', tokensUsed: 0, source: 'template', templateReason: 'missing_key', verdicts: [], checks: { ok: true, checks: [] }, failed: false, judgeUnavailable: false },
-    },
-  }),
+  // The model call is the test's own generateOutreachDraft: paying for it makes a model draft, a throw is the model blowing up.
+  writeMessage: async () => {
+    const draft = await io.generateOutreachDraft()
+    const model = draft.tokensUsed > 0
+    return {
+      ok: true,
+      written: {
+        artifactId: 'artifact-1',
+        artifactVersion: 1,
+        review: { subject: draft.subject, body: draft.body, tokensUsed: draft.tokensUsed, source: model ? 'model' : 'template', templateReason: model ? undefined : 'missing_key', verdicts: [], checks: { ok: true, checks: [] }, failed: false, judgeUnavailable: false },
+      },
+    }
+  },
   discardMessage: async () => undefined,
 }))
 vi.mock('@/lib/harness/agents/resume_optimizer', () => ({ optimizeResumeAndSave: io.optimizeResumeAndSave }))
