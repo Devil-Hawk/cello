@@ -200,6 +200,22 @@ begin
   if (select match_score from public.jobs where id = jn) is not null then raise exception 'the shared role is unchanged'; end if;
 end $$;
 
+-- 6b. The company that stored a shared role cannot rewrite it for the others who hold it.
+do $$
+declare f record; jw uuid := gen_random_uuid(); jl uuid := gen_random_uuid();
+begin
+  select * into f from fx;
+  insert into public.jobs (id, company_id, employer_id, title, description, url, external_id) values (jw, f.co_a, f.emp, 'Held by two', 'd', 'https://shared.example/jobs/held', 'held-1');
+  insert into public.person_roles (user_id, job_id) values (f.a, jw), (f.b, jw);
+  if (select company_id from public.jobs where id = jw) is distinct from f.co_a then raise exception 'the role is stored under A''s own company'; end if;
+  if pg_temp.as_user(f.a, format('with u as (update public.jobs set url = ''https://evil.example/phish'', title = ''Hacked'' where id = %L returning 1) select count(*) from u', jw)) <> 0 then raise exception 'the first storer must not update a role another person holds'; end if;
+  if (select url from public.jobs where id = jw) <> 'https://shared.example/jobs/held' then raise exception 'the shared apply link is unchanged'; end if;
+  -- a role with no employer is nobody else's: its own company still writes it
+  insert into public.jobs (id, company_id, title, description, url, external_id) values (jl, f.co_a, 'Legacy', 'd', 'https://legacy.example/1', 'legacy-1');
+  update public.jobs set employer_id = null where id = jl;
+  if pg_temp.as_user(f.a, format('with u as (update public.jobs set title = ''Legacy two'' where id = %L returning 1) select count(*) from u', jl)) <> 1 then raise exception 'a person still updates a role with no employer'; end if;
+end $$;
+
 -- 7. A shared role outlives the follower whose company stored it: removing the company, or the account, keeps it for the others.
 do $$
 declare f record; jd uuid := gen_random_uuid(); jp uuid := gen_random_uuid(); c uuid := gen_random_uuid(); d uuid := gen_random_uuid(); co_c uuid := gen_random_uuid(); co_d uuid := gen_random_uuid();
