@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   AlertTriangle,
   CheckCircle,
-  Clock,
   Eye,
   EyeOff,
   Globe,
@@ -28,7 +27,6 @@ interface BackendStatus {
   label: string
   configured: boolean
   codeAvailable: boolean
-  health: { reason: string; detail: string | null; retryAfterMs: number } | null
 }
 
 interface SearchSettingsStatus {
@@ -59,12 +57,6 @@ const BLURB: Record<KeyProvider, { name: string; tradeoff: string; getKeyUrl: st
     getKeyUrl: 'https://dashboard.exa.ai',
     getKeyHost: 'dashboard.exa.ai',
   },
-}
-
-function formatRetry(ms: number): string {
-  if (ms <= 0) return 'now'
-  const mins = Math.ceil(ms / 60_000)
-  return mins <= 1 ? '~1m' : `~${mins}m`
 }
 
 function KeyField({
@@ -171,12 +163,6 @@ function StatusRow({ backend }: { backend: BackendStatus }) {
           <Badge tone="good">{isKeyless ? 'Always on' : 'Configured'}</Badge>
         ) : (
           <Badge tone="muted">Not configured</Badge>
-        )}
-        {backend.health && (
-          <span className="flex items-center gap-1 text-caption text-amber-700 dark:text-amber-400">
-            <Clock className="h-3 w-3" />
-            {backend.health.reason === 'blocked' ? 'Recently blocked' : `Recently failed (${backend.health.reason})`} — retrying automatically in {formatRetry(backend.health.retryAfterMs)}
-          </span>
         )}
       </div>
     </div>

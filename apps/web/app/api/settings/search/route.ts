@@ -10,8 +10,7 @@
 // GET also reports, HONESTLY and live (never hardcoded), which backends this
 // build's code can actually run right now (lib/search/index.ts's own
 // loadOptionalBackendFn probe — the same mechanism the chain itself uses to
-// decide whether tavily/serper/searxng are available) and each backend's
-// current health-memory status (lib/search/health.ts), so the Search
+// decide whether tavily/serper/searxng are available), so the Search
 // settings tab never overclaims what will happen on the next real search.
 //
 // GET never returns a key itself — only whether one is configured, same
@@ -21,7 +20,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { encrypt } from '@/lib/crypto'
 import { loadOptionalBackendFn, type OptionalBackendId } from '@/lib/search'
-import { getAllBackendHealth } from '@/lib/search/health'
 import type { SearchBackendId } from '@/lib/search/types'
 
 export const dynamic = 'force-dynamic'
@@ -83,11 +81,7 @@ export async function GET() {
     })
   )
 
-  const health = getAllBackendHealth()
-  const healthByBackend = new Map(health.map((h) => [h.backend, h]))
-
   const backends = BACKEND_ORDER.map((id) => {
-    const rec = healthByBackend.get(id)
     return {
       id,
       label: BACKEND_LABEL[id],
@@ -95,7 +89,6 @@ export async function GET() {
       // exa/duckduckgo ship in this build unconditionally; the other three
       // depend on backends/*.ts having landed — see the module header.
       codeAvailable: id === 'exa' || id === 'duckduckgo' ? true : Boolean(moduleAvailable[id]),
-      health: rec ? { reason: rec.reason, detail: rec.detail ?? null, retryAfterMs: Math.max(0, rec.retryAfter - Date.now()) } : null,
     }
   })
 
