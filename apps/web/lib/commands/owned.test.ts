@@ -38,6 +38,10 @@ describe('the migration scan', () => {
     expect([...scan('create table b (user_id uuid);', 'drop table if exists public.b;')]).toEqual([])
   })
 
+  it('follows a rename', () => {
+    expect([...scan('create table f (user_id uuid);', 'alter table public.f rename to g;')]).toEqual(['g'])
+  })
+
   it('ignores a table with no user_id and a user_id named only in a comment', () => {
     expect([...scan('create table c (id uuid, owner_user_id uuid);')]).toEqual([])
     expect([...scan('-- create table d (user_id uuid);\nselect 1;')]).toEqual([])

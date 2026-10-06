@@ -3,4 +3,10 @@
 
 import type { ProvenanceTable } from './types'
 
-export const tables: ProvenanceTable[] = []
+export const tables: ProvenanceTable[] = [
+  { table: 'chats', provenance: 'code' },
+  { table: 'chat_turns', provenance: 'origin' },
+  { table: 'chat_attachments', provenance: 'origin' },
+  { table: 'projects', provenance: 'person' },
+  { table: 'proposals', provenance: 'origin' },
+]

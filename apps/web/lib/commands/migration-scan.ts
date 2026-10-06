@@ -1,6 +1,6 @@
 // Reads supabase/migrations as text and answers "which public tables hold a
 // person's rows by user_id". Two tests use it: the owned-tables list and the
-// provenance table list. It follows create table, add column user_id and drop
+// provenance table list. It follows create table, add column user_id, rename and drop
 // table in version order. A table a migration builds with format() inside a do
 // block is invisible to it, which is why those migrations name their tables
 // plainly.
@@ -47,6 +47,9 @@ export function userIdTables(files: { name: string; sql: string }[]): Set<string
     for (const m of sql.matchAll(/drop\s+table\s+(?:if\s+exists\s+)?(?:public\.)?"?(\w+)"?/gi)) {
       tables.delete(m[1])
     }
+    for (const m of sql.matchAll(/alter\s+table\s+(?:if\s+exists\s+)?(?:public\.)?"?(\w+)"?\s+rename\s+to\s+"?(\w+)"?/gi)) {
+      if (tables.delete(m[1])) tables.add(m[2])
+    }
   }
   return tables
 }
@@ -70,6 +73,9 @@ export function originTables(files: { name: string; sql: string }[]): Set<string
       for (const m of list.matchAll(/'(\w+)'/g)) tables.add(m[1])
     }
     for (const m of sql.matchAll(/drop\s+table\s+(?:if\s+exists\s+)?(?:public\.)?"?(\w+)"?/gi)) tables.delete(m[1])
+    for (const m of sql.matchAll(/alter\s+table\s+(?:if\s+exists\s+)?(?:public\.)?"?(\w+)"?\s+rename\s+to\s+"?(\w+)"?/gi)) {
+      if (tables.delete(m[1])) tables.add(m[2])
+    }
   }
   return tables
 }

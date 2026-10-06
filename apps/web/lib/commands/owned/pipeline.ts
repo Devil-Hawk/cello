@@ -4,6 +4,10 @@
 import type { OwnedTable } from './types'
 
 export const owned: OwnedTable[] = [
-  // Brought here until K13 renames it in the migration that extends it.
-  { table: 'application_receipts', demoWipe: false },
+  { table: 'application_attempts', demoWipe: false },
+  { table: 'pipeline_events', demoWipe: false },
+  { table: 'answer_bank', demoWipe: false },
+  { table: 'messages', demoWipe: false },
+  { table: 'notification_log', demoWipe: false },
+  { table: 'push_subscriptions', demoWipe: false },
 ]
