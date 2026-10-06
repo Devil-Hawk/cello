@@ -10,7 +10,6 @@ export const UI_COPY_BASELINE: Record<string, number> = {
   'app/(app)/companies/page.tsx': 1,
   'app/(app)/contacts/page.tsx': 1,
   'app/(app)/copilot/dev-markdown-fixture/page.tsx': 5,
-  'app/(app)/copilot/page.tsx': 4,
   'app/(app)/error.tsx': 1,
   'app/(app)/insights/page.tsx': 4,
   'app/(app)/jobs/page.tsx': 4,

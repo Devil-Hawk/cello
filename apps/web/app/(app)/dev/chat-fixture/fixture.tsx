@@ -1,7 +1,7 @@
 'use client'
 
 // DEV-ONLY fixture for Chat's markdown renderer. Not linked
-// from product navigation — exists purely so the rewritten
+// from product navigation - exists purely so the rewritten
 // components/chat/markdown.tsx can be screenshotted and read back for
 // verification with real, representative assistant output (a GFM table,
 // fenced code, links, nested lists, a blockquote, bold/italic, and the
@@ -34,7 +34,7 @@ const KITCHEN_SINK = `## Top matches from this week's sourcing run
 
 I ran the sourcer against **14 companies** on your watch list and scored everything against your resume. Here's where things stand.
 
-> Three of these are fresh enough that no other candidate has likely applied yet — the newest was posted 6 hours ago.
+> Three of these are fresh enough that no other candidate has likely applied yet - the newest was posted 6 hours ago.
 
 ### Best matches
 
@@ -46,7 +46,7 @@ I ran the sourcer against **14 companies** on your watch list and scored everyth
 
 Next steps I'd recommend, in order:
 
-1. Review the Anthropic role first — it's the strongest match and the *most time-sensitive*.
+1. Review the Anthropic role first - it's the strongest match and the *most time-sensitive*.
 2. For Vercel, I can tailor your resume automatically:
    - Emphasize the Next.js migration work at your current job
    - Pull the on-call/reliability bullet up higher
@@ -101,7 +101,7 @@ const COMP_TABLE_FULL = `Comparing your three strongest matches by comp and leve
 
 I'd lead with Anthropic given the strongest technical match, then Stripe as a close second.`
 
-// Deliberately mid-row, not on a clean line boundary — proves the freeze
+// Deliberately mid-row, not on a clean line boundary - proves the freeze
 // isn't just "stopped between blocks".
 const FREEZE_EARLY = COMP_TABLE_FULL.slice(0, COMP_TABLE_FULL.indexOf('| Vercel') + 9)
 // Table complete, but the closing sentence is still mid-word.
@@ -191,9 +191,9 @@ export default function ChatFixture() {
         </p>
       </div>
 
-      <Bubble label="1 · Kitchen sink — headings, bold/italic, blockquote, table, nested list, links, code" content={KITCHEN_SINK} />
+      <Bubble label="1 · Kitchen sink - headings, bold/italic, blockquote, table, nested list, links, code" content={KITCHEN_SINK} />
       <Bubble label="2 · Fenced code (highlighted), task list, strikethrough, inline code" content={CODE_AND_TASKS} />
-      <Bubble label="3 · Unclosed fence — the model's turn ends mid-token, no closing ```" content={UNCLOSED_FENCE} />
+      <Bubble label="3 · Unclosed fence - the model's turn ends mid-token, no closing ```" content={UNCLOSED_FENCE} />
 
       <div className="space-y-1.5">
         <div className="text-label uppercase tracking-wide text-muted-foreground">
@@ -232,7 +232,7 @@ export default function ChatFixture() {
 
       <div className="space-y-1.5">
         <div className="text-label uppercase tracking-wide text-muted-foreground">
-          7 · Live simulated stream (~1-3 chars every 35ms) — click to replay
+          7 · Live simulated stream (~1-3 chars every 35ms) - click to replay
         </div>
         <StreamSim />
       </div>

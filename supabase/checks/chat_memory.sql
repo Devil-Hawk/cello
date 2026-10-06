@@ -20,7 +20,7 @@ insert into public.chat_turns (id, user_id, chat_id, kind, typed, answer, origin
   ('dddddddd-2222-0000-0000-000000000011', 'dddddddd-0000-0000-0000-000000000011', 'dddddddd-1111-0000-0000-000000000011', 'person', 'compare the Ramp and Linear roles', null, 'person'),
   ('dddddddd-2222-0000-0000-000000000012', 'dddddddd-0000-0000-0000-000000000011', 'dddddddd-1111-0000-0000-000000000011', 'cello', null, 'zebra only in the answer', 'model');
 insert into public.artifacts (id, user_id, type, title, chat_turn_id) values
-  ('dddddddd-3333-0000-0000-000000000011', 'dddddddd-0000-0000-0000-000000000011', 'dossier', 'Comparison of 6 AI roles', 'dddddddd-2222-0000-0000-000000000011');
+  ('dddddddd-3333-0000-0000-000000000011', 'dddddddd-0000-0000-0000-000000000011', 'research', 'Comparison of 6 AI roles', 'dddddddd-2222-0000-0000-000000000011');
 
 do $$
 begin

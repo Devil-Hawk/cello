@@ -250,7 +250,7 @@ function ConnectionBanner({ connection, onRetry }: { connection: ConnectionState
       <div className="mb-2 flex items-center gap-2 rounded-control border border-accent/40 bg-accent-soft/25 px-2.5 py-1.5 text-caption text-accent-deep">
         <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
         <span>
-          Connection dropped — reconnecting… (attempt {connection.attempt} of {connection.maxAttempts})
+          Connection dropped - reconnecting… (attempt {connection.attempt} of {connection.maxAttempts})
         </span>
       </div>
     )
@@ -259,7 +259,7 @@ function ConnectionBanner({ connection, onRetry }: { connection: ConnectionState
     <div className="mb-2 flex items-center justify-between gap-2 rounded-control border border-rose-500/30 bg-rose-500/5 px-2.5 py-1.5 text-caption text-rose-700 dark:text-rose-300">
       <span className="flex items-center gap-2">
         <WifiOff className="h-3.5 w-3.5 shrink-0" />
-        Connection lost — couldn&apos;t reconnect. What&apos;s above is what came through.
+        Connection lost - couldn&apos;t reconnect. What&apos;s above is what came through.
       </span>
       <Button type="button" size="sm" variant="outline" onClick={onRetry} className="h-6 shrink-0 px-2 text-[11px]">
         Retry
@@ -1157,8 +1157,8 @@ export default function CopilotPage() {
               </div>
               <h2 className="font-display text-section text-foreground">How can I help your search?</h2>
               <p className="mt-1.5 max-w-sm text-caption text-muted-foreground">
-                I reason step by step — reading your jobs, running the resume optimizer, researching
-                companies, and kicking off agent runs — and I show every tool call live.
+                I reason step by step - reading your jobs, running the resume optimizer, researching
+                companies, and kicking off agent runs - and I show every tool call live.
               </p>
               <div className="mt-5 flex max-w-lg flex-wrap justify-center gap-2">
                 {SUGGESTIONS.map((s) => (
