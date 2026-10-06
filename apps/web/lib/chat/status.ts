@@ -20,7 +20,7 @@ export interface StatusLine {
 export async function readStatusLines(db: AdminClient, userId: string, eventIds: string[]): Promise<Record<string, StatusLine>> {
   const ids = [...new Set(eventIds)].slice(0, 200)
   if (ids.length === 0) return {}
-  const { data } = await db.from('pipeline_events').select('id, application_id, sentence, to_state, created_at').eq('user_id', userId).in('id', ids)
+  const { data } = await db.from('pipeline_events').select('id, application_id, sentence, to_state, created_at').eq('user_id', userId).in('id', ids.slice(0, 200))
   const rows = (data as { id: string; application_id: string | null; sentence: string | null; to_state: string | null; created_at: string }[] | null) ?? []
   return Object.fromEntries(
     rows.flatMap((r) => (r.application_id && r.sentence ? [[r.id, { eventId: r.id, sentence: r.sentence.slice(0, 280), applicationId: r.application_id, state: r.to_state, at: r.created_at } satisfies StatusLine] as const] : []))

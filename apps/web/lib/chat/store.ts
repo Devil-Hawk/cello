@@ -140,7 +140,7 @@ export async function chatsHolding(db: AdminClient, userId: string, applicationI
   const { data } = await db.from('chat_attachments').select('chat_id, ref').eq('user_id', userId).eq('kind', 'application').is('removed_at', null).order('added_at', { ascending: false }).limit(1000)
   const ids = [...new Set(((data as { chat_id: string; ref: { id?: string } }[] | null) ?? []).filter((a) => a.ref?.id === applicationId).map((a) => a.chat_id))].slice(0, 100)
   if (ids.length === 0) return []
-  const { data: chats } = await db.from('chats').select('id, title, last_turn_at').eq('user_id', userId).in('id', ids).is('archived_at', null).order('last_turn_at', { ascending: false })
+  const { data: chats } = await db.from('chats').select('id, title, last_turn_at').eq('user_id', userId).in('id', ids.slice(0, 100)).is('archived_at', null).order('last_turn_at', { ascending: false })
   return (chats as Pick<ChatRow, 'id' | 'title' | 'last_turn_at'>[] | null) ?? []
 }
 
