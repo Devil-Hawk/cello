@@ -433,7 +433,6 @@ export async function triageRole(args: TriageArgs): Promise<TriageResult> {
     const hid = await db.from('person_roles').update({ hidden_reason: 'not_for_me' }).eq('user_id', userId).eq('job_id', jobId)
     if (hid.error) throw new Error('could not hide the role: ' + hid.error.message)
   }
-  // quality: emit feedback score here
   return { reaction, message: triageMessage(reaction, reason) }
 }
 

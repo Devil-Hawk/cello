@@ -23,14 +23,14 @@ Features: `outreach`, `cover-letter`, `dossier`, `gmail`,
   script stops and says it resets at 00:00 UTC. Answers are cached under
   `.cache/evals-outputs`, so a re-run only pays for what changed.
 - `--quick` uses the small subset in `data/` (at most 40 requests). Without it the
-  full sets in `/home/ankit/cello-scratch/evals/<feature>/` are used.
+  full sets in `~/cello-scratch/evals/<feature>/` are used.
 - `--no-model` runs only what needs no model (the pattern paths for mail and
   replies). `digest` never needs one. `--stub` checks a script's plumbing offline;
   its numbers mean nothing.
 - `--label before` runs the frozen release/1 code in `legacy/`; `--label after`
   runs the current code and exits 1 when a metric is below `thresholds.json`.
 - Results are written as JSON and a markdown table to
-  `/home/ankit/cello-scratch/evals/<feature>/results/` (or `--out DIR`).
+  `~/cello-scratch/evals/<feature>/results/` (or `--out DIR`).
 
 `collect-dossier-bundles.ts` freezes the public-source bundles the dossier eval
 reads; run it again only to refresh them.

@@ -80,6 +80,8 @@ const ReadBackEntry = z.union([
   z.object({ value: Value }).strict(),
 ])
 
+// The category here comes from the extension. The fill route must take it from the server's own
+// session field list, so a sensitive field reported without one is never accepted as a plain value.
 const ReadBackField = z.object({
   key: Key,
   kind: z.enum(FIELD_KINDS),

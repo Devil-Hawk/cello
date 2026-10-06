@@ -2,6 +2,7 @@
 // run, and a nonzero exit when a metric falls below its threshold.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { requestCount } from './free-model'
 
@@ -57,7 +58,7 @@ export function parseArgs(argv: string[]): Args {
   }
 }
 
-export const SCRATCH = '/home/ankit/cello-scratch/evals'
+export const SCRATCH = join(homedir(), 'cello-scratch', 'evals')
 
 export function dataDir(feature: string, args: Args): string {
   if (args.data) return args.data
