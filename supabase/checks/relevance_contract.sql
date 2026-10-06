@@ -443,7 +443,7 @@ begin
   if (select employer_id from public.companies where id = f.co_a) is distinct from f.emp then raise exception 'A is linked again'; end if;
 end $$;
 
--- 6f. No function a signed-in person may call writes jobs as definer. The next one to forget its revoke fails here.
+-- 6f. No function a signed-in person may call writes jobs, the directory, roles or types as definer (three own-row writers named). The next one to forget its revoke fails here.
 do $$
 declare bad text;
 begin
@@ -451,7 +451,8 @@ begin
     from pg_proc p
    where p.pronamespace = 'public'::regnamespace and p.prosecdef
      and has_function_privilege('authenticated', p.oid, 'execute')
-     and p.prosrc ~* '(update|delete\s+from|insert\s+into)\s+public\.jobs\M';
+     and p.proname not in ('sync_person_roles', 'set_person_role_type', 'set_person_counts')
+     and p.prosrc ~* '(update|delete\s+from|insert\s+into)\s+public\.(jobs|company_directory|person_roles|title_types|employer_stats)\M';
   if bad is not null then raise exception 'a security definer function that writes jobs is callable by a signed-in person: %', bad; end if;
 end $$;
 
@@ -480,6 +481,20 @@ begin
   update public.company_directory set name = 'Claim Co', name_norm = 'claim co' where ats_token = 'quietclaim';
   if (select name || '/' || name_norm from public.company_directory where ats_token = 'quietclaim') <> 'Quiet Claim/quiet claim' then raise exception 'a person-added employer keeps the name it was verified under'; end if;
   delete from public.company_directory where name_norm in ('claim co', 'quiet claim');
+end $$;
+
+-- 6j. A person cannot repoint their role row at another job, and can still save one.
+do $$
+declare f record; r bigint;
+begin
+  select * into f from fx;
+  begin
+    perform pg_temp.as_user(f.a, format($q$with u as (update public.person_roles set job_id = %L where user_id = %L returning 1) select count(*) from u$q$, f.jb, f.a));
+    raise exception 'a signed-in person must not repoint a person_roles row';
+  exception when insufficient_privilege then reset role;
+  end;
+  r := pg_temp.as_user(f.a, format($q$with u as (update public.person_roles set saved_at = now() where user_id = %L returning 1) select count(*) from u$q$, f.a));
+  if r < 1 then raise exception 'A saves a role they hold'; end if;
 end $$;
 
 -- 7. A shared role outlives the follower whose company stored it: removing the company, or the account, keeps it for the others.
