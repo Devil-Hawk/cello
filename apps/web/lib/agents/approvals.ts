@@ -15,7 +15,9 @@
 
 import { createHash } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { approveDraft, sendOutreach } from './send.stub'
+import { approveDraft } from '@/lib/commands/send/draft'
+import { sendOutreach } from '@/lib/commands/send/outreach'
+import type { CommandContext } from '@/lib/commands/define'
 import { findDuplicateInitial, findFollowUp, insertOutreach, isDuplicateOutreachError, isNewRecipient, updateOutreach } from '@/lib/outreach/store'
 import type { AdminClient } from '@/lib/harness/types'
 import { scoreTrace } from '@/lib/observability/langfuse'
@@ -333,22 +335,26 @@ async function execute(input: DecideInput, row: ApprovalRow): Promise<DecideResu
   let result: Record<string, unknown> = {}
   let error: string | null = null
 
+  // The decision is the person's click (or a rule they stored), so the send runs as the person.
+  const ctx: CommandContext = {
+    door: 'session',
+    userId: user.id,
+    supabase: input.supabase,
+    user: { id: user.id, email: user.email ?? '', identities: user.identities ?? undefined },
+    session: async () => input.session,
+    admin: () => admin,
+  }
+
   try {
     if (row.action === 'send_email') {
-      const sent = await sendOutreach({
-        supabase: input.supabase,
-        admin: () => admin,
-        user,
-        session: input.session,
-        readBody: async () => ({ id: row.target_id, approve: true }),
-      })
+      const sent = await sendOutreach(ctx, { id: row.target_id, approve: true })
       ok = sent.status === 200 && sent.body.ok === true
       const message = sent.body.message as { id?: string; to_name?: string | null; to_email?: string; gmail_message_id?: string | null } | null | undefined
       what = ok ? `Email sent to ${message?.to_name ?? message?.to_email ?? 'the contact'}` : ''
       result = { http: sent.status, gmail_message_id: message?.gmail_message_id ?? null, from: user.email ?? null, ...(sent.body.warning ? { warning: sent.body.warning } : {}) }
       if (!ok) error = sent.body.needsReauth ? GMAIL_REAUTH_COPY : `Not sent: ${String(sent.body.error ?? sent.body.reason ?? 'something went wrong').slice(0, 300)}`
     } else {
-      const submitted = await approveDraft({ admin, userId: user.id, draftId: row.target_id })
+      const submitted = await approveDraft(ctx, { draftId: row.target_id })
       const status = submitted.body.status
       ok = submitted.status === 200 && submitted.body.ok === true && status !== 'failed'
       what = status === 'submitted' ? 'Application submitted' : 'Application approved. Finish it on the company site.'

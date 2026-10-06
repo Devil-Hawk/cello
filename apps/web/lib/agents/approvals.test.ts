@@ -1,13 +1,14 @@
 // Approvals: queue, decide, edit, stale, rules, and the fact that no agent has a send path.
 // The send and submit code is mocked here; what matters is when, how many times, and by
-// whom it is called. The stub that stands in for the real send path has its own case at the end.
+// whom it is called.
 
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ sendOutreach: vi.fn(), approveDraft: vi.fn(), scoreTrace: vi.fn(async () => undefined) }))
-vi.mock('./send.stub', () => ({ sendOutreach: mocks.sendOutreach, approveDraft: mocks.approveDraft }))
+vi.mock('@/lib/commands/send/outreach', () => ({ sendOutreach: mocks.sendOutreach }))
+vi.mock('@/lib/commands/send/draft', () => ({ approveDraft: mocks.approveDraft }))
 vi.mock('@/lib/observability/langfuse', () => ({ scoreTrace: mocks.scoreTrace }))
 
 import type { AgentContext } from './context'
@@ -175,11 +176,11 @@ const decide = (w: { admin: FakeAdmin }, id: string, extra: Record<string, unkno
 describe('decideApproval: approve', () => {
   it('runs the send once, stores its outcome, scores the trace and says what happened', async () => {
     const w = await queued()
-    mocks.sendOutreach.mockImplementation(async (i: { readBody: () => Promise<{ id: string }> }) => sentOk((await i.readBody()).id))
+    mocks.sendOutreach.mockImplementation(async (_ctx: unknown, i: { id: string }) => sentOk(i.id))
     const r = await decide(w, w.approval.id)
     expect(mocks.sendOutreach).toHaveBeenCalledTimes(1)
-    const input = mocks.sendOutreach.mock.calls[0][0]
-    expect(await input.readBody()).toEqual({ id: w.approval.target_id, approve: true })
+    expect(mocks.sendOutreach.mock.calls[0][1]).toEqual({ id: w.approval.target_id, approve: true })
+    expect(mocks.sendOutreach.mock.calls[0][0]).toMatchObject({ door: 'session', userId: 'u1' })
     expect(r.status).toBe(200)
     expect(r.approval).toMatchObject({ status: 'done', decided_by: 'user' })
     expect(r.approval?.outcome).toMatchObject({ what: 'Email sent to Dana Lee', artifact_version: 1, approval_id: w.approval.id })
@@ -409,11 +410,11 @@ describe('no agent send path', () => {
   const files = walk(root).filter((f) => f.endsWith('.ts') && !f.includes('.test.'))
   const rel = (f: string) => path.relative(process.cwd(), f).split(path.sep).join('/')
 
-  it('only approvals.ts and its stub reach the send and submit code, and this scan sees real files', () => {
+  it('only approvals.ts reaches the send and submit code, and this scan sees real files', () => {
     expect(files.length).toBeGreaterThan(15)
     const offenders = files
-      .filter((f) => rel(f) !== 'lib/agents/approvals.ts' && rel(f) !== 'lib/agents/send.stub.ts')
-      .filter((f) => /sendOutreach|sendGmailMessage|approveDraft|lib\/outreach\/send|lib\/apply\/approve|lib\/outreach\/gmail|submitApplication|send\.stub/.test(readFileSync(f, 'utf8').split('\n').filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n')))
+      .filter((f) => rel(f) !== 'lib/agents/approvals.ts')
+      .filter((f) => /sendOutreach|sendGmailMessage|approveDraft|lib\/outreach\/send|lib\/apply\/approve|lib\/outreach\/gmail|submitApplication|commands\/send/.test(readFileSync(f, 'utf8').split('\n').filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n')))
       .map(rel)
     expect(offenders).toEqual([])
   })
@@ -421,20 +422,5 @@ describe('no agent send path', () => {
   it('the scan would catch a file that did', () => {
     const fixture = `import { sendOutreach } from '@/lib/outreach/send'`
     expect(/sendOutreach|sendGmailMessage|approveDraft/.test(fixture)).toBe(true)
-  })
-})
-
-// --- the stub -------------------------------------------------------------------
-
-describe('until the command registry lands', () => {
-  it('approving a send ends failed with the stub\'s sentence, and nothing is sent', async () => {
-    const w = await queued()
-    const stub = await vi.importActual<typeof import('./send.stub')>('./send.stub')
-    mocks.sendOutreach.mockImplementation(stub.sendOutreach)
-    const r = await decide(w, w.approval.id)
-    expect(r.approval).toMatchObject({ status: 'failed', outcome: null })
-    expect(r.copy).toContain('Not built yet: sending from an approval comes with the command registry')
-    expect(w.admin.tables.approvals[0].status).toBe('failed')
-    expect(w.admin.tables.outreach_messages[0].status).toBe('pending_review')
   })
 })
