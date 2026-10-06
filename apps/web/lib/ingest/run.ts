@@ -90,7 +90,7 @@ export function isDue(
 ): boolean {
   // A site still to be read in a browser, or whose browser step failed, is tried again at the next scheduled pass.
   const reason = readSourceCheck(company.metadata)?.reason
-  if (reason === 'reading' || reason === 'render_failed' || reason === 'read_failed') return true
+  if (reason === 'reading' || reason === 'render_failed' || reason === 'read_failed' || reason === 'model_unavailable' || reason === 'model_limit') return true
   return now >= dueAt(company)
 }
 

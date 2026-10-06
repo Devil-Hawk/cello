@@ -25,6 +25,8 @@ import { assertSsrfSafe, readLimitedText } from '../../security/untrusted'
  * `render_failed`: the browser step that was to read it crashed or timed out, which says nothing about the site.
  */
 export type ReaderReason = 'bot_check' | 'login_required' | 'robots' | 'no_roles' | 'unreachable' | 'reading' | 'budget' | 'role_pages' | 'render_failed'
+  // The page was rendered, and the step that reads it needs a free model: not available just now. Says nothing about the site.
+  | 'model_unavailable' | 'model_limit'
 
 /** Why Cello stopped reading a site, never carrying the address. */
 export class ReaderError extends Error {

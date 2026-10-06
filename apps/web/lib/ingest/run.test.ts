@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AtsStore, ExistingJob, JobUpsertRow } from '../ats/index'
 import { MODEL_LIMIT, newModelBudget, type ModelCall } from './model'
-import { ingestCompany, ingestUser, isDue, type DueCompany, type RunPatch, type RunsStore } from './run'
+import { ingestCompany, ingestUser, isDue, type CompanyDeps, type DueCompany, type RunPatch, type RunsStore } from './run'
 import type { FetchPage } from './fetch-page'
 import { createHash } from 'node:crypto'
 import { fakeFetcher, fixture, type Route } from './reader/fake-fetcher'
@@ -269,14 +269,17 @@ describe('ingestCompany', () => {
     expect((await run('a', { [CAREERS]: { error: 'bot_check' } })).failure).toBe('bot_check')
     expect((await run('b', { [CAREERS]: { error: 'login_required' } })).failure).toBe('login_required')
     expect((await run('c', { 'https://acme.example/robots.txt': 'User-agent: *\nDisallow: /\n', [CAREERS]: PLAIN_PAGE })).failure).toBe('robots')
-    // Scheduled, the browser has had its turn: no roles it is.
-    const done = await ingestCompany(store, company('d'), {
-      fetchPage: vi.fn(async (url: string) => ({ html: PLAIN_PAGE, finalUrl: url, rendered: true })),
-      model: null,
-      mode: 'scheduled',
-      fetcher: fakeFetcher({ [CAREERS]: PLAIN_PAGE }, 'scheduled'),
-    })
-    expect(done.failure).toBe('no_roles')
+    // Scheduled, the browser has had its turn. With no free model the page was not read, which is not "no roles".
+    const scheduled = (id: string, model: CompanyDeps['model']) =>
+      ingestCompany(store, company(id), {
+        fetchPage: vi.fn(async (url: string) => ({ html: PLAIN_PAGE, finalUrl: url, rendered: true })),
+        model,
+        mode: 'scheduled',
+        fetcher: fakeFetcher({ [CAREERS]: PLAIN_PAGE }, 'scheduled'),
+      })
+    expect((await scheduled('d', null)).failure).toBe('model_unavailable')
+    // A model that read the page and found no listing is the site having no roles.
+    expect((await scheduled('e', async () => JSON.stringify({ page_kind: 'other', jobs: [] }))).failure).toBe('no_roles')
   })
 
   it('writes the reason into the company so the screen can say it instead of "0 open roles"', async () => {

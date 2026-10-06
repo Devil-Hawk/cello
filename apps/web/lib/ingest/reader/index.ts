@@ -252,6 +252,7 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
   // The page as a browser builds it, then the model: scheduled passes only.
   const blocked = firstError && ['bot_check', 'login_required', 'robots'].includes((firstError as ReaderError).reason)
   let renderFailed = false
+  let modelSkipped: 'model_unavailable' | 'model_limit' | undefined
   if (!blocked) {
     if (f.mode === 'scheduled' && deps.fetchPage) {
       const rendered = await readRendered(input, deps, f)
@@ -262,6 +263,7 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
         if (rendered.failure instanceof ReaderError) note(rendered.failure)
         else renderFailed = true
       }
+      modelSkipped = rendered.modelSkipped
       if (rendered.result) {
         Object.assign(out, rendered.result)
         out.checked.push(...rendered.checked)
@@ -277,6 +279,8 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
   if (err && ['bot_check', 'login_required', 'robots'].includes(err.reason)) out.reason = err.reason
   else if (renderFailed) out.reason = 'render_failed'
   else if (err) out.reason = err.reason
+  // The page was reached and only the model step did not run: never "no roles" for a site that was not read.
+  else if (modelSkipped) out.reason = modelSkipped
   else if (f.mode === 'inline' && deps.renderedLater && (pages.length > 0 || listedNoRoles)) out.reason = 'reading'
   else out.reason = listedNoRoles ? 'role_pages' : 'no_roles'
   return finish()
@@ -288,6 +292,8 @@ interface RenderedRead {
   checked: string[]
   /** The browser step could not run (or the site refused it): a ReaderError for the site's own answers, else the fetcher's error. */
   failure?: ReaderError | Error
+  /** The rendered page held nothing to read without a model, and none was free: this says nothing about the site. */
+  modelSkipped?: 'model_unavailable' | 'model_limit'
 }
 
 /** Never throws: a crash comes back as `failure`. */
@@ -350,8 +356,9 @@ async function readRendered(input: SiteInput, deps: SiteDeps, f: SiteFetcher): P
       tried.push({ tier: read.modelCalls > 0 ? 'model' : 'rendered', outcome: 'roles' })
       return { result: { tier: read.modelCalls > 0 ? 'model' : 'rendered', jobs, complete: read.complete && own.length === read.jobs.length }, tried, checked: [] }
     }
-    tried.push({ tier: 'model', outcome: read.reason === 'model_unavailable' || read.reason === 'model_limit' ? 'skipped' : 'none' })
-    return { tried, checked: [] }
+    const modelSkipped = read.reason === 'model_unavailable' || read.reason === 'model_limit' ? read.reason : undefined
+    tried.push({ tier: 'model', outcome: modelSkipped ? 'skipped' : 'none' })
+    return { tried, checked: [], modelSkipped }
   } catch (error) {
     // Anything the rendered page's reading throws is the step failing, not the site having no roles.
     if (error instanceof ReaderError && error.reason !== 'budget') return { tried, checked: [], failure: error }

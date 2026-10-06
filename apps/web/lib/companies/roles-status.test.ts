@@ -50,6 +50,15 @@ describe('rolesStatus', () => {
     expect(rolesStatusLine(rolesStatus(company, 0, { now }))).toEqual({ text: 'Cello is reading this site. Next check around 12:41 UTC' })
   })
 
+  it('a page that was reached but not read because no free model was available says it is waiting, never "no open roles"', () => {
+    for (const reason of ['model_unavailable', 'model_limit']) {
+      const company = { metadata: { source_check: { checked_at: '2026-10-05T10:00:00Z', readable: false, reason } }, career_url: 'https://jobs.example/' }
+      const line = rolesStatusLine(rolesStatus(company, 0, { now }))
+      expect(line.text).toBe('Waiting for a free reading slot. Next check around 12:41 UTC')
+      expect(line.text).not.toContain('no open roles')
+    }
+  })
+
   it('names why a site was not read: a bot check, a login, robots.txt, no roles, no answer', () => {
     const line = (reason: string) =>
       rolesStatusLine(rolesStatus({ metadata: { source_check: { checked_at: '2026-10-05T10:00:00Z', readable: false, reason } }, career_url: 'https://x.test/' }, 0, { now })).text
