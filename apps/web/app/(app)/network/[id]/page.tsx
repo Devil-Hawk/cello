@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { notFound, redirect } from 'next/navigation'
 import { PersonPage } from '@/components/network/person'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
@@ -10,11 +11,13 @@ export const dynamic = 'force-dynamic'
 export const metadata = { title: 'Person' }
 
 export default async function Page({ params }: { params: { id: string } }) {
-  const supabase = await createClient()
+  const client = await createClient()
   const {
     data: { user },
-  } = await supabase.auth.getUser()
+  } = await client.auth.getUser()
   if (!user) redirect('/login')
+  // the tables here are newer than the generated types
+  const supabase = client as unknown as SupabaseClient
   if (!/^[0-9a-f-]{36}$/i.test(params.id)) notFound()
   const person = await getPerson(supabase, user.id, params.id)
   if (!person) notFound()

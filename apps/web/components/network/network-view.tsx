@@ -37,9 +37,9 @@ export interface NetworkViewProps {
   query: { view: 'list' | 'company' | 'map'; q: string; kind: string; address: string; waiting: boolean; quiet: boolean; hasApp: string; order: 'last' | 'closest' }
 }
 
-function href(q: NetworkViewProps['query'], patch: Partial<Record<string, string>> & { page?: number }): string {
+function href(q: NetworkViewProps['query'], patch: { view?: string; page?: number }): string {
   const p = new URLSearchParams()
-  const merged: Record<string, string> = { view: q.view, q: q.q, kind: q.kind, address: q.address, waiting: q.waiting ? '1' : '', quiet: q.quiet ? '1' : '', app: q.hasApp, order: q.order, ...(patch as Record<string, string>) }
+  const merged: Record<string, string> = { view: q.view, q: q.q, kind: q.kind, address: q.address, waiting: q.waiting ? '1' : '', quiet: q.quiet ? '1' : '', app: q.hasApp, order: q.order, ...(patch.view ? { view: patch.view } : {}) }
   for (const [k, v] of Object.entries(merged)) if (v && !(k === 'view' && v === 'list') && !(k === 'order' && v === 'last')) p.set(k, v)
   if (patch.page && patch.page > 1) p.set('page', String(patch.page))
   const s = p.toString()

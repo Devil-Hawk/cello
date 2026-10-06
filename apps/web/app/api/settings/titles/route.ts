@@ -1,6 +1,7 @@
 // GET /api/settings/titles: the titles the person counts as theirs (corrections and titles they typed), each
 // with the role type it counts as. DELETE { title_norm }: Remove. Row level security scopes both to the person.
 
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getRoleType } from '@/lib/jobs/role-types/taxonomy'
@@ -8,7 +9,8 @@ import { getRoleType } from '@/lib/jobs/role-types/taxonomy'
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  const supabase = await createClient()
+  // role_type_synonyms is newer than the generated types
+  const supabase = (await createClient()) as unknown as SupabaseClient
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -21,7 +23,8 @@ export async function GET() {
 }
 
 export async function DELETE(request: NextRequest) {
-  const supabase = await createClient()
+  // role_type_synonyms is newer than the generated types
+  const supabase = (await createClient()) as unknown as SupabaseClient
   const {
     data: { user },
   } = await supabase.auth.getUser()

@@ -4,6 +4,7 @@
 // Last run, what it found, next run and Do it now. Plain words: no cron strings, no run ids.
 
 import { useCallback, useEffect, useState } from 'react'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 import { Key } from '@/components/ui/key'
 
@@ -42,7 +43,8 @@ export function OnItsOwn() {
   const [note, setNote] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    const { data } = await createClient()
+    // job_heartbeats is newer than the generated types
+    const { data } = await (createClient() as unknown as SupabaseClient)
       .from('job_heartbeats')
       .select('job, succeeded_at, next_due_at, found, failure')
       .in('job', JOBS.map((j) => j.job))

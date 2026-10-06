@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { redirect } from 'next/navigation'
 import { NetworkView } from '@/components/network/network-view'
 import { leftOutSentence, type LeftOutCounts } from '@/lib/network/filter'
@@ -12,11 +13,13 @@ const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) 
 
 // Network: the address is the whole state (view, search, filters, page), so Back returns to where the list was.
 export default async function NetworkPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
-  const supabase = await createClient()
+  const client = await createClient()
   const {
     data: { user },
-  } = await supabase.auth.getUser()
+  } = await client.auth.getUser()
   if (!user) redirect('/login')
+  // the tables here are newer than the generated types
+  const supabase = client as unknown as SupabaseClient
 
   const view = one(searchParams.view)
   const query = {
