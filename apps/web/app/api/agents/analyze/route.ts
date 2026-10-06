@@ -8,7 +8,7 @@
 //
 // Everything that used to live here — building a Job/Company/UserProfile out
 // of three separate reads, constructing a provider client, and the hand-
-// placed assertWithinBudget/recordSpend this route needed because that
+// placed spend reservation this route needed because that
 // client bypassed callLlm entirely — is gone. lib/graph/oneshot.ts#
 // runUnitOnce -> lib/graph/unit.ts#runAgentUnit('analyst') now does the DB
 // reads, the metered/demo-gated model call, and the journaling; this route's
@@ -85,8 +85,8 @@ export async function POST(request: NextRequest) {
         goal: `Analyze job ${jobId}`,
         input: { jobId },
       })
-      // AnalystOutput is exactly {summary, talkingPoints, companyInsights,
-      // interviewTips} — the response IS the unit's output, unwrapped.
+      // AnalystOutput is exactly {summary, talkingPoints, companyInsights}
+      //, the response IS the unit's output, unwrapped.
       setTraceOutput({ summary: (result.output as { summary?: unknown } | null)?.summary })
       return NextResponse.json(result.output)
     } catch (error) {

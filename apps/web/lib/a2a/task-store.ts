@@ -72,7 +72,7 @@ interface A2aTaskRow {
 }
 
 /** Builds the artifact carrying the harness step's real output (the score
- *  verdict / dossier / prep kit) once agent_runs.result is populated —
+ *  verdict / dossier) once agent_runs.result is populated:
  *  `undefined` while the run is still in flight, so a non-terminal Task
  *  simply has no artifacts yet rather than a placeholder one. */
 function outcomeArtifact(taskId: string, run: AgentRunRow): Task['artifacts'] {

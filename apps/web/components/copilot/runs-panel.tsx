@@ -32,6 +32,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/use-toast'
 import { AnimatePresence, motion, transitionBase, transitionFast } from '@/components/ui/motion'
 import { cn, formatRelativeTime } from '@/lib/utils'
+import { runSkipNote } from '@/lib/harness/run-outcome'
 
 // 'completed_with_errors' = at least one step failed (or the run was aborted
 // on budget/deadline before finishing) but something still completed — kept
@@ -61,6 +62,7 @@ interface AgentRun {
   budget_tokens: number
   spent_tokens: number
   error: string | null
+  result?: unknown
   created_at: string
   finished_at: string | null
 }
@@ -97,19 +99,20 @@ const ACTIVE_STATUSES: RunStatus[] = ['queued', 'planning', 'running']
  * with something broken". 'muted' + a pause icon reads as "waiting", not
  * "wrong".
  */
-const STATUS_META: Record<RunStatus, { label: string; tone: BadgeTone; icon: LucideIcon; spin?: boolean }> = {
+const STATUS_META: Record<RunStatus | 'partial', { label: string; tone: BadgeTone; icon: LucideIcon; spin?: boolean }> = {
   queued: { label: 'Queued', tone: 'neutral', icon: CircleDashed },
   planning: { label: 'Planning', tone: 'accent', icon: Loader2, spin: true },
   running: { label: 'Running', tone: 'accent', icon: Loader2, spin: true },
   completed: { label: 'Completed', tone: 'good', icon: CheckCircle2 },
   completed_with_errors: { label: 'Completed with errors', tone: 'warn', icon: AlertTriangle },
-  paused: { label: 'Paused — resuming', tone: 'muted', icon: PauseCircle },
+  partial: { label: 'Partly done', tone: 'warn', icon: AlertTriangle },
+  paused: { label: 'Paused, will resume', tone: 'muted', icon: PauseCircle },
   failed: { label: 'Failed', tone: 'bad', icon: XCircle },
   cancelled: { label: 'Cancelled', tone: 'muted', icon: Ban },
 }
 
-function RunStatusBadge({ status, className }: { status: RunStatus; className?: string }) {
-  const meta = STATUS_META[status]
+function RunStatusBadge({ run, className }: { run: AgentRun; className?: string }) {
+  const meta = STATUS_META[run.status === 'completed' && runSkipNote(run.result) ? 'partial' : run.status]
   const Icon = meta.icon
   return (
     <Badge tone={meta.tone} className={className}>
@@ -364,11 +367,9 @@ export function RunsPanel({ collapsed, onToggleCollapsed, mobile }: RunsPanelPro
                     <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                       <Clock className="h-3 w-3" />
                       {formatRelativeTime(run.created_at)}
-                      <span>·</span>
-                      {fmtTokens(run.spent_tokens)} tok
                     </div>
                   </div>
-                  <RunStatusBadge status={run.status} className="shrink-0 text-[10px]" />
+                  <RunStatusBadge run={run} className="shrink-0 text-[10px]" />
                 </button>
               ))}
             </div>
@@ -378,7 +379,7 @@ export function RunsPanel({ collapsed, onToggleCollapsed, mobile }: RunsPanelPro
                 <div>
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-caption font-semibold text-foreground">Steps</h3>
-                    <RunStatusBadge status={selectedRun.status} className="text-[10px]" />
+                    <RunStatusBadge run={selectedRun} className="text-[10px]" />
                   </div>
                   <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{selectedRun.goal}</p>
 
@@ -426,29 +427,18 @@ export function RunsPanel({ collapsed, onToggleCollapsed, mobile }: RunsPanelPro
                       Failed — it will not retry on its own.
                     </p>
                   )}
+                  {selectedRun.status === 'completed' && runSkipNote(selectedRun.result) && (
+                    <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                      {runSkipNote(selectedRun.result)}
+                    </p>
+                  )}
                   {selectedRun.status === 'completed_with_errors' && (
                     <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-700 dark:text-amber-400">
                       <AlertTriangle className="h-3 w-3 shrink-0" />
                       Finished, but {stepProgress.total > 0 ? `only ${stepProgress.completed}/${stepProgress.total} steps` : 'not everything'} completed.
                     </p>
                   )}
-                </div>
-
-                <div>
-                  <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
-                    <span>Token budget</span>
-                    <span className="tabular-nums">
-                      {fmtTokens(selectedRun.spent_tokens)} / {fmtTokens(selectedRun.budget_tokens)}
-                    </span>
-                  </div>
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-sunken">
-                    <div
-                      className="h-full rounded-full bg-accent transition-all"
-                      style={{
-                        width: `${Math.min(100, (selectedRun.spent_tokens / Math.max(1, selectedRun.budget_tokens)) * 100)}%`,
-                      }}
-                    />
-                  </div>
                 </div>
 
                 {/* Raw error detail: skipped for 'paused' — the progress line

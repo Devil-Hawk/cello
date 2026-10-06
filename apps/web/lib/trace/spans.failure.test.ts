@@ -25,6 +25,7 @@ function configureLangfuse() {
   vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
   vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
   vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+  vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'u,user-1,11111111-2222-4333-8444-555555555555')
 }
 
 const admin = {

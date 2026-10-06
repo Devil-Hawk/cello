@@ -4,8 +4,9 @@
 // WHY THIS FILE EXISTS
 //   spend.ts's header says the cap is "enforced at the single LLM choke point",
 //   and that was true while lib/harness/llm.ts's callLlm was the only way to
-//   reach a provider — assertWithinBudget and recordSpend live there, so every
-//   metered feature inherited them for free.
+//   reach a provider: reserveSpend and settleSpend live there, so every
+//   metered feature inherits them for free. (They replaced the old
+//   check-then-charge pair, which let N parallel calls all pass the check.)
 //
 //   Then /api/outreach/judge shipped. It reaches OpenRouter through autoevals,
 //   which needs an OpenAI-compatible client rather than an injectable function,
@@ -55,6 +56,13 @@ const API_ROOT = path.resolve(process.cwd(), 'app/api')
 // walk ahead of time — it stays a no-op until that file exists.
 const GRAPH_ROOT = path.resolve(process.cwd(), 'lib/graph')
 
+// Everything else that can reach a model is scanned too. lib/harness itself is
+// excluded: callLlm, callEmbedding and the providers are the chokepoint's own
+// internals and are pinned by name below.
+const EXTRA_ROOTS = ['lib/evals', 'lib/scoring', 'lib/agents', 'lib/outreach', 'lib/gmail', 'lib/resume', 'lib/jobs'].map((r) =>
+  path.resolve(process.cwd(), r)
+)
+
 // Step 7's MemoryStore (lib/memory/mem0-store.ts) is a THIRD non-route place
 // that reaches a model: its 'langchain' LLM/embedder delegates call callLlm/
 // callEmbedding directly (see that file's own header), so a caller that
@@ -87,7 +95,24 @@ const DIRECT_MODEL_CLIENT_MARKERS = [
   // this exact `it.each` case went red, naming the scratch file as an
   // offender. Deleted immediately.
   '/embeddings',
+  // A raw fetch to a chat endpoint, or a hand-rolled Anthropic/LangChain client.
+  'chat/completions',
+  'api.anthropic.com',
+  'new Anthropic(',
+  'ChatOpenRouter(',
 ]
+
+/**
+ * Routes that reach a provider WITHOUT the Cello ledger because they spend the
+ * USER'S OWN key (their Anthropic or OpenAI account), not Cello's OpenRouter
+ * credit. A demo can only hold the openrouter provider (lib/access/guardrails.ts),
+ * so nothing here can spend an owner's money. Adding a file here is a decision:
+ * say whose key it spends.
+ */
+const ALLOWED_DIRECT_USER_KEY: Record<string, string> = {
+  'app/api/scraper/trigger/route.ts': "user's own OpenAI/Anthropic key",
+  'app/api/resume/upload/route.ts': "user's own Anthropic/OpenAI key",
+}
 
 /**
  * Callers that reach a model THROUGH callLlm, where the guards already live —
@@ -147,29 +172,65 @@ describe('every path to a model is behind the spend cap', () => {
   const memoryFiles = existsSync(MEMORY_ROOT)
     ? walk(MEMORY_ROOT, (name) => name.endsWith('.ts') && !name.includes('.test.'))
     : []
-  const routes = [...walk(API_ROOT), ...graphFiles, ...memoryFiles]
+  const extraFiles = EXTRA_ROOTS.filter((r) => existsSync(r)).flatMap((r) =>
+    walk(r, (name) => name.endsWith('.ts') && !name.includes('.test.'))
+  )
+  // Non-route modules under app/api (helpers) are scanned as well as route.ts.
+  const apiFiles = walk(API_ROOT, (name) => name.endsWith('.ts') && !name.includes('.test.'))
+  const routes = [...apiFiles, ...graphFiles, ...memoryFiles, ...extraFiles]
 
   it('finds routes to check (guards against a broken walk silently passing)', () => {
     expect(routes.length).toBeGreaterThan(20)
   })
 
   it.each(DIRECT_MODEL_CLIENT_MARKERS)(
-    'every route using %s also calls assertWithinBudget and recordSpend',
+    'every file using %s also calls reserveSpend and settleSpend, or is an allowed own-key path',
     (marker) => {
       const offenders: string[] = []
       for (const file of routes) {
         const src = readFileSync(file, 'utf8')
         if (!src.includes(marker)) continue
-        const guarded = src.includes('assertWithinBudget') && src.includes('recordSpend')
-        if (!guarded) offenders.push(path.relative(process.cwd(), file))
+        const rel = path.relative(process.cwd(), file)
+        if (rel in ALLOWED_DIRECT_USER_KEY) continue
+        const guarded = src.includes('reserveSpend(') && src.includes('settleSpend(')
+        if (!guarded) offenders.push(rel)
       }
       expect(
         offenders,
-        `These routes build their own model client but skip the budget guards, so ` +
+        `These files build their own model client but skip the spend reservation, so ` +
           `they spend outside the monthly cap and never reach the ledger:\n  ${offenders.join('\n  ')}`
       ).toEqual([])
     }
   )
+
+  it('the allowed own-key files exist and name their reason', () => {
+    for (const [rel, reason] of Object.entries(ALLOWED_DIRECT_USER_KEY)) {
+      expect(existsSync(path.resolve(process.cwd(), rel)), `${rel} is allowlisted but missing; delete the entry`).toBe(true)
+      expect(reason.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('the old check-then-charge helpers are gone: a charge without a reservation cannot be written', () => {
+    const offenders: string[] = []
+    for (const root of ['lib', 'app']) {
+      for (const file of walk(path.resolve(process.cwd(), root), (name) => /\.tsx?$/.test(name) && !name.includes('.test.'))) {
+        const src = readFileSync(file, 'utf8')
+        // Code, not comments: a call, an import or an rpc name.
+        if (/\brecordSpend\(|\brecord_llm_spend\b|import\s*{[^}]*\brecordSpend\b/.test(src.replace(/\/\/.*$/gm, ''))) {
+          offenders.push(path.relative(process.cwd(), file))
+        }
+      }
+    }
+    expect(offenders, `recordSpend / record_llm_spend must not come back:\n  ${offenders.join('\n  ')}`).toEqual([])
+  })
+
+  it('the engine spend middleware, when present, reserves and settles', () => {
+    const middleware = path.join(process.cwd(), 'lib/agents/middleware.ts')
+    if (!existsSync(middleware)) return
+    const src = readFileSync(middleware, 'utf8')
+    expect(src).toContain('reserveSpend(')
+    expect(src).toContain('settleSpend(')
+  })
 
   it.each(CALL_LLM_WRAPPERS)(
     'every route calling %s passes a user id, so callLlm actually meters',
@@ -220,21 +281,33 @@ describe('every path to a model is behind the spend cap', () => {
     // runAgentUnit check above: read the VALUE, not a claim about it.
     //
     // MUTATION CHECK (executed, not left to trust): replaced the
-    // `recordSpend(admin, apiKeys.userId, EMBEDDING_MODEL, ...)` line inside
-    // callEmbedding with a comment containing neither "recordSpend" nor
-    // "assertWithinBudget", ran this test alone — it went red on exactly this
-    // assertion ("These routes build their own model client but skip the
-    // budget guards" is the sibling failure the `/embeddings` marker below
-    // produces; this test's own failure read "expected fnSrc to contain
-    // 'recordSpend'"). Reverted immediately.
+    // `settleSpend(admin, reservation, ...)` call inside callEmbedding's chain
+    // with a comment and ran this test alone: it went red on "expected fnSrc to
+    // contain 'settleSpend('". Reverted immediately.
     const llmFile = path.join(process.cwd(), 'lib/harness/llm.ts')
     const src = readFileSync(llmFile, 'utf8')
     const start = src.indexOf('export async function callEmbedding')
     expect(start, 'lib/harness/llm.ts must export callEmbedding').toBeGreaterThan(-1)
     const fnSrc = src.slice(start)
     expect(fnSrc).toContain("provider === 'openrouter' && Boolean(apiKeys.userId)")
-    expect(fnSrc).toContain('assertWithinBudget')
-    expect(fnSrc).toContain('recordSpend')
+    expect(fnSrc).toContain('reserveSpend(')
+    expect(fnSrc).toContain('settleSpend(')
+  })
+
+  it('callLlm reserves per attempt and settles, and never charges without a reservation', () => {
+    const src = readFileSync(path.join(process.cwd(), 'lib/harness/llm.ts'), 'utf8')
+    const start = src.indexOf('export async function callLlm')
+    const end = src.indexOf('export async function callEmbedding')
+    const fnSrc = src.slice(start, end)
+    expect(fnSrc).toContain('reserveSpend(')
+    expect(fnSrc).toContain('settleSpend(')
+    expect(fnSrc).toContain('DEFAULT_MAX_TOKENS')
+  })
+
+  it('the judge client reserves and settles inside its fetch wrapper', () => {
+    const src = readFileSync(path.join(process.cwd(), 'lib/evals/judge.ts'), 'utf8')
+    expect(src).toContain('reserveSpend(')
+    expect(src).toContain('settleSpend(')
   })
 
   it('lib/memory/mem0-store.ts never constructs its own provider client or holds a key at module scope', () => {
@@ -268,11 +341,11 @@ describe('every path to a model is behind the spend cap', () => {
 
   it('the judge route specifically is guarded — it is why this test exists', () => {
     const src = readFileSync(path.join(API_ROOT, 'outreach/judge/route.ts'), 'utf8')
-    // A fail-fast pre-check before any request is built, PLUS the metered
-    // client every request actually goes through — recordSpend itself now
-    // lives only inside meteredJudgeClient's fetch wrapper (see that CALL_LLM_
-    // WRAPPERS entry above), so this route no longer carries its own literal
-    // recordSpend text; duplicating it here would double-bill the same call.
+    // A read-only early refusal before any request is built, PLUS the metered
+    // client every request actually goes through. Reserving and settling live
+    // only inside meteredJudgeClient's fetch wrapper (see that CALL_LLM_
+    // WRAPPERS entry above), so this route carries no reserve text of its own;
+    // duplicating it here would double-bill the same call.
     expect(src).toContain('assertWithinBudget')
     expect(src).toContain('meteredJudgeClient(')
     // A cap hit is an answer, not a crash: the user is told they are out of

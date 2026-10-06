@@ -112,13 +112,12 @@ export async function POST(request: NextRequest) {
     try {
       // Fail fast, BEFORE building a client or making any request: a user
       // already at their cap gets the same 429 they'd get from
-      // meteredJudgeClient's own per-request check below (see judge.ts's
-      // meteredFetch), just without the wasted round trip. Redundant with that
-      // per-call check by design, NOT with its recordSpend half — this route
-      // used to also record its own post-call estimate here, but
-      // meteredJudgeClient's fetch wrapper now records real usage per request
+      // meteredJudgeClient's own per-request reservation below (see judge.ts's
+      // meteredFetch), just without the wasted round trip. This read-only check
+      // is only an early refusal, never the enforcement: the reservation is.
+      // meteredJudgeClient's fetch wrapper also settles real usage per request
       // (proven covering both calls below in lib/evals/judge.test.ts), so a
-      // second manual recordSpend would double-bill the same two calls.
+      // second manual charge here would double-bill the same two calls.
       await assertWithinBudget(admin, user.id)
 
       const client = meteredJudgeClient(admin, user.id, apiKeys)

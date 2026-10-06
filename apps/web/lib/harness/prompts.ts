@@ -87,7 +87,6 @@ export const PROMPT_DOC_NAMES = [
   'resume_optimizer',
   'outreach',
   'follow_upper',
-  'interview_prep',
   'company_researcher',
   'planner',
   'visa',

@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { EmptyState } from '@/components/ui/empty-state'
 import { TiltCard } from '@/components/ui/motion'
 import { formatRelativeTime } from '@/lib/utils'
+import { runSkipNote } from '@/lib/harness/run-outcome'
 
 export type AgentRunStatus =
   | 'queued'
@@ -36,9 +37,10 @@ export interface LatestAgentRun {
   createdAt: string
   finishedAt: string | null
   error: string | null
+  result?: unknown
 }
 
-const STATUS_META: Record<AgentRunStatus, { label: string; tone: BadgeTone; icon: LucideIcon }> = {
+const STATUS_META: Record<AgentRunStatus | 'partial', { label: string; tone: BadgeTone; icon: LucideIcon }> = {
   queued: { label: 'Queued', tone: 'neutral', icon: CircleDashed },
   planning: { label: 'Planning', tone: 'neutral', icon: Loader2 },
   running: { label: 'Running', tone: 'accent', icon: Loader2 },
@@ -46,7 +48,8 @@ const STATUS_META: Record<AgentRunStatus, { label: string; tone: BadgeTone; icon
   completed_with_errors: { label: 'Completed with errors', tone: 'warn', icon: AlertTriangle },
   // Paused at the time limit and will resume itself — a better outcome than
   // 'failed', so deliberately muted rather than warned.
-  paused: { label: 'Paused — resuming', tone: 'muted', icon: PauseCircle },
+  partial: { label: 'Partly done', tone: 'warn', icon: AlertTriangle },
+  paused: { label: 'Paused, will resume', tone: 'muted', icon: PauseCircle },
   failed: { label: 'Failed', tone: 'bad', icon: XCircle },
   cancelled: { label: 'Cancelled', tone: 'muted', icon: Clock },
 }
@@ -55,23 +58,23 @@ interface AgentActivityCardProps {
   run: LatestAgentRun | null
 }
 
-/** Latest agent_runs row: what the agent last did, and whether it worked. */
+/** The newest stored task: what Cello last did, and whether it worked. */
 export function AgentActivityCard({ run }: AgentActivityCardProps) {
   if (!run) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Agent activity</CardTitle>
-          <CardDescription>The last automated sourcing/matching run.</CardDescription>
+          <CardTitle>Cello&apos;s last task</CardTitle>
+          <CardDescription>What Cello last did for you.</CardDescription>
         </CardHeader>
         <CardContent>
           <EmptyState
             icon={Sparkles}
-            title="No agent runs yet"
-            body="Start one from the Copilot page — sourcing, matching, and interview prep all run there."
+            title="Nothing yet"
+            body="Ask Cello to find roles or research a company."
             action={
               <Button size="sm" asChild>
-                <Link href="/copilot">Start a run</Link>
+                <Link href="/copilot">Ask Cello</Link>
               </Button>
             }
           />
@@ -80,7 +83,8 @@ export function AgentActivityCard({ run }: AgentActivityCardProps) {
     )
   }
 
-  const meta = STATUS_META[run.status]
+  const skipNote = run.status === 'completed' ? runSkipNote(run.result) : null
+  const meta = STATUS_META[skipNote ? 'partial' : run.status]
   const Icon = meta.icon
   const isActive = run.status === 'running' || run.status === 'planning' || run.status === 'queued'
   const when = run.finishedAt ? formatRelativeTime(run.finishedAt) : formatRelativeTime(run.createdAt)
@@ -93,13 +97,13 @@ export function AgentActivityCard({ run }: AgentActivityCardProps) {
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <div>
-            <CardTitle>Agent activity</CardTitle>
+            <CardTitle>Cello&apos;s last task</CardTitle>
             <CardDescription>
-              Last run {isActive ? 'started' : 'finished'} {when}.
+              {isActive ? 'Started' : 'Finished'} {when}.
             </CardDescription>
           </div>
           <Link href="/copilot" className="text-caption font-medium text-accent-deep hover:underline">
-            View runs
+            Open
           </Link>
         </CardHeader>
         <CardContent>
@@ -110,6 +114,7 @@ export function AgentActivityCard({ run }: AgentActivityCardProps) {
             </Badge>
             <div className="min-w-0 flex-1">
               <p className="truncate text-body text-foreground">{run.goal}</p>
+              {skipNote && <p className="mt-1 text-caption text-muted-foreground">{skipNote}</p>}
               {/* One plain sentence, with the executor's own string behind a
                   disclosure. This used to print `run.error` verbatim and
                   clamped to two lines — "run failed: 0 of 3 step(s) completed
@@ -122,8 +127,8 @@ export function AgentActivityCard({ run }: AgentActivityCardProps) {
                 <details className="group/err mt-1">
                   <summary className="cursor-pointer list-none text-caption text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     {run.status === 'failed'
-                      ? "This run didn't finish. See what failed"
-                      : 'This run finished with problems. See what failed'}
+                      ? "This did not finish. See what failed"
+                      : 'This finished with problems. See what failed'}
                   </summary>
                   <p className="mt-1.5 whitespace-pre-wrap break-words rounded-control bg-sunken/60 p-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
                     {run.error}

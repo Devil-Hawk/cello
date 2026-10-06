@@ -1,5 +1,5 @@
 // Everything downstream of a job: the pipeline, its timeline, the approval
-// queue, outreach, follow-ups, one finished agent run, and the prep artefacts.
+// queue, outreach, follow-ups and one finished agent run.
 //
 // WHY ALL OF THIS AND NOT JUST APPLICATIONS
 //   The brief is that a demo must not hit an empty state. Tracing what the four
@@ -20,7 +20,6 @@
 //   A demo where someone applied to a job three days before it was posted is a
 //   demo where the viewer stops trusting the data.
 
-import type { InterviewQuestion, StarStory } from '@/lib/interview/store'
 import type { CompIntel, DossierSignals, SourceRef } from '@/lib/dossier/store'
 
 // ---------------------------------------------------------------------------
@@ -459,137 +458,6 @@ export const DEMO_AGENT_RUN = {
     },
   ] as readonly DemoAgentStep[],
 } as const
-
-// ---------------------------------------------------------------------------
-// Interview prep kits
-// ---------------------------------------------------------------------------
-
-export interface DemoInterviewKit {
-  jobSlug: string
-  questions: readonly InterviewQuestion[]
-  prepNotes: string
-  starStories: readonly StarStory[]
-}
-
-export const DEMO_INTERVIEW_KITS: readonly DemoInterviewKit[] = [
-  {
-    jobSlug: 'orchid-ledger-core',
-    prepNotes:
-      'Panel is three rounds: ledger design, a Postgres performance discussion, and a values ' +
-      'conversation. They will push hard on correctness under concurrency — have the dual-write ' +
-      'migration story ready, including what you would do differently.',
-    questions: [
-      {
-        category: 'technical',
-        question: 'How would you guarantee that a double-entry ledger stays balanced under concurrent writes?',
-        guidance:
-          'Name the isolation level you would rely on and why. Talk about idempotency keys and the ' +
-          'difference between preventing a bad write and detecting one after the fact.',
-        sampleAnswer:
-          'I would make the posting operation a single transaction at repeatable read or higher, keyed ' +
-          'by an idempotency token so retries collapse. Then I would still run a continuous ' +
-          'reconciliation job, because the invariant is too important to defend in only one place — ' +
-          'that is the pattern I used for billing reconciliation at Halden & Reeve.',
-      },
-      {
-        category: 'technical',
-        question: 'Walk us through a Postgres performance problem you diagnosed end to end.',
-        guidance: 'Pick one with numbers. Show the measurement before the fix, not just the fix.',
-        sampleAnswer:
-          'Dashboard p99 was 1.9s. Plans showed a sequential scan on a partition we thought was ' +
-          'pruned. I fixed the predicate so pruning applied, added a covering index, and moved cold ' +
-          'partitions to tiered storage. p99 landed at 310ms and compute spend dropped 48%.',
-      },
-      {
-        category: 'behavioral',
-        question: 'Tell us about a migration you ran that could not have downtime.',
-        guidance: 'STAR. Be specific about the rollback plan — that is what they are testing.',
-        sampleAnswer:
-          'The ingestion rebuild at Cobalt Harbor: dual-write, shadow reads with a diff job, then a ' +
-          'per-tenant cutover with a one-command rollback for two weeks after. Zero customer-visible ' +
-          'downtime and no backfill gaps.',
-      },
-      {
-        category: 'company-specific',
-        question: 'What do you think is hard about close automation specifically?',
-        guidance:
-          'You have no accounting background — say so, and show you have thought about the domain ' +
-          'anyway. Honesty here beats a confident guess.',
-        sampleAnswer:
-          'I have not modelled an accounting close before, so I would be learning the domain. What ' +
-          'looks hard from the outside is that correctness is not eventually-consistent — a close is ' +
-          'a hard deadline with a legally meaningful output.',
-      },
-      {
-        category: 'reverse',
-        question: 'What would you ask them?',
-        guidance: 'Ask about the thing that would actually change your decision.',
-        sampleAnswer:
-          'How much of the ledger core is still being changed weekly versus stable? And who owns the ' +
-          'reconciliation alerts today?',
-      },
-    ],
-    starStories: [
-      {
-        situation: 'Ingestion tier at Cobalt Harbor could not keep up with 4B events/day and reads were degrading.',
-        task: 'Move to a columnar store without customer-visible downtime or data loss.',
-        action: 'Built a dual-write path, ran shadow reads with a continuous diff, cut over per tenant with a one-command rollback.',
-        result: 'Zero downtime, no backfill gaps, and p99 dashboard reads fell from 1.9s to 310ms.',
-        mapsToQuestion: 'Tell us about a migration you ran that could not have downtime.',
-      },
-      {
-        situation: 'Billing reconciliation at Halden & Reeve was leaking six figures a year in unmatched invoice lines.',
-        task: 'Find the leak and stop it without disrupting the nightly close.',
-        action: 'Wrote a reconciliation service that matched lines on a composite key and quarantined mismatches for review.',
-        result: 'Closed the recurring leak and gave finance an auditable exception queue for the first time.',
-        mapsToQuestion: 'How would you guarantee that a double-entry ledger stays balanced under concurrent writes?',
-      },
-    ],
-  },
-  {
-    jobSlug: 'vantage-payments',
-    prepNotes:
-      'Offer stage — this kit is for the final values conversation and the comp discussion. Have the ' +
-      'competing-timeline framing ready and a number you will actually say out loud.',
-    questions: [
-      {
-        category: 'behavioral',
-        question: 'Tell us about a time you disagreed with a technical decision your team had already made.',
-        guidance: 'Show the disagreement AND the commitment. They are checking for both halves.',
-        sampleAnswer:
-          'I argued against sharding the metrics API by tenant and lost. I wrote down my concern, ' +
-          'committed to the decision, and built the load-shedding policy that made the chosen design ' +
-          'survivable. Six months later we revisited it with data.',
-      },
-      {
-        category: 'role-specific',
-        question: 'How do you think about exactly-once semantics in a payments path?',
-        guidance: 'Do not claim exactly-once. Talk about effectively-once via idempotency and dedupe.',
-        sampleAnswer:
-          'You do not get exactly-once delivery; you get effectively-once processing. Idempotency keys ' +
-          'at the boundary, a dedupe table with a retention window, and reconciliation that assumes ' +
-          'both will occasionally fail.',
-      },
-      {
-        category: 'reverse',
-        question: 'What would you ask before accepting?',
-        guidance: 'The offer is the moment you have the most leverage and the least information.',
-        sampleAnswer:
-          'What does the on-call rotation actually look like in a bad week, and what is the refresh ' +
-          'policy on equity after year one?',
-      },
-    ],
-    starStories: [
-      {
-        situation: 'The metrics API sharding decision at Trellis Point went against my recommendation.',
-        task: 'Keep the system reliable under a design I had argued against.',
-        action: 'Documented the risk, then built contract tests and a staged rollout pipeline plus a load-shedding policy.',
-        result: 'Change failure rate fell from 18% to under 4%, and the design was revisited later with real data.',
-        mapsToQuestion: 'Tell us about a time you disagreed with a technical decision your team had already made.',
-      },
-    ],
-  },
-]
 
 // ---------------------------------------------------------------------------
 // Company dossiers

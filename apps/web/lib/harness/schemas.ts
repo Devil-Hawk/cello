@@ -24,7 +24,6 @@ export const AGENT_TYPES = [
   'applier',
   'verifier',
   'follow_upper',
-  'interview_prep',
   'company_researcher',
   'contact_sourcer',
   'bulk_matcher',
@@ -33,7 +32,7 @@ export const AGENT_TYPES = [
   'resume_optimizer',
   'strategist',
   'analyst',
-  'coach',
+  'application_follow_up',
 ] as const
 
 export const AgentTypeSchema = z.enum(AGENT_TYPES)
@@ -47,7 +46,6 @@ export const STEP_AGENT_TYPES = [
   'applier',
   'verifier',
   'follow_upper',
-  'interview_prep',
   'company_researcher',
   'contact_sourcer',
 ] as const
@@ -55,7 +53,7 @@ export const STEP_AGENT_TYPES = [
 export const StepAgentTypeSchema = z.enum(STEP_AGENT_TYPES)
 
 /**
- * Every unit type lib/graph/unit.ts#runAgentUnit can run: the ten plannable
+ * Every unit type lib/graph/unit.ts#runAgentUnit can run: the nine plannable
  * STEP_AGENT_TYPES plus the five stragglers that bypassed the executor
  * before the graph port (lib/harness/agents/bulk_matcher.ts, digest.ts,
  * outreach.ts, resume_optimizer.ts, strategist.ts — each still callable
@@ -74,7 +72,7 @@ export const UNIT_TYPES = [
   'resume_optimizer',
   'strategist',
   'analyst',
-  'coach',
+  'application_follow_up',
 ] as const
 
 export const UnitTypeSchema = z.enum(UNIT_TYPES)
@@ -185,21 +183,6 @@ export const FollowUpperInput = z.object({
 export const FollowUpperOutput = z.object({
   message: z.string(),
   suggestedContacts: z.array(z.string()).default([]),
-})
-
-// interview_prep — build a per-job interview prep kit (questions + STAR stories).
-export const InterviewPrepInput = z.object({
-  jobId: z.string(),
-  resumeText: z.string().optional(),
-})
-export const InterviewPrepOutput = z.object({
-  kitId: z.string().nullable(),
-  jobId: z.string(),
-  questionCount: z.number().int().nonnegative(),
-  starCount: z.number().int().nonnegative(),
-  status: z.enum(['ready', 'practiced']).default('ready'),
-  needsResume: z.boolean().optional(),
-  needsKey: z.boolean().optional(),
 })
 
 // company_researcher — assemble a public-source company dossier + visa + comp.
@@ -725,14 +708,14 @@ export const StrategistOutput = z.object({
   proposals: z.array(StrategyProposalSchema),
 })
 
-// --- analyst + coach ----------------------------------------------------------
+// --- analyst + application follow-up ------------------------------------------
 //
 // Two MORE stragglers, joining the five above (step 9 of the langgraph port —
 // docs/superpowers/specs/2026-08-16-langgraph-port-design.md). Both used to
 // reach a model through packages/agents' own OpenAI/Anthropic-fetch client
 // (packages/agents/src/analyst/llm-client.ts) instead of the harness's own
 // metered model path; both now
-// run as lib/harness/agents/{analyst,coach}.ts, callable through
+// run as lib/harness/agents/{analyst,application_follow_up}.ts, callable through
 // runAgentUnit the same as everything else.
 
 // analyst — per-job AI insights for the job-detail modal
@@ -745,15 +728,14 @@ export const AnalystOutput = z.object({
   summary: z.string(),
   talkingPoints: z.array(z.string()),
   companyInsights: z.array(z.string()),
-  interviewTips: z.array(z.string()),
 })
 
-// coach — a follow-up suggestion (+ drafted message, when one is due) for one
-// application (lib/harness/agents/coach.ts).
-export const CoachInput = z.object({
+// application_follow_up: a follow-up suggestion (+ drafted message, when one is
+// due) for one application (lib/harness/agents/application_follow_up.ts).
+export const ApplicationFollowUpInput = z.object({
   applicationId: z.string(),
 })
-export const CoachOutput = z.object({
+export const ApplicationFollowUpOutput = z.object({
   applicationId: z.string(),
   suggestion: z.string(),
   suggestedContacts: z.array(z.string()).optional(),
@@ -771,7 +753,6 @@ export const agentSchemas = {
   applier: { input: ApplierInput, output: ApplierOutput },
   verifier: { input: VerifierInput, output: VerifierOutput },
   follow_upper: { input: FollowUpperInput, output: FollowUpperOutput },
-  interview_prep: { input: InterviewPrepInput, output: InterviewPrepOutput },
   company_researcher: { input: CompanyResearcherInput, output: CompanyResearcherOutput },
   contact_sourcer: { input: ContactSourcerInput, output: ContactSourcerOutput },
   bulk_matcher: { input: BulkMatcherInput, output: BulkMatcherOutput },
@@ -780,5 +761,5 @@ export const agentSchemas = {
   resume_optimizer: { input: ResumeOptimizerInput, output: ResumeOptimizerOutput },
   strategist: { input: StrategistInput, output: StrategistOutput },
   analyst: { input: AnalystInput, output: AnalystOutput },
-  coach: { input: CoachInput, output: CoachOutput },
+  application_follow_up: { input: ApplicationFollowUpInput, output: ApplicationFollowUpOutput },
 } as const satisfies Record<(typeof AGENT_TYPES)[number], { input: z.ZodTypeAny; output: z.ZodTypeAny }>

@@ -259,6 +259,16 @@ describe('readStandingPreferences — byte-parity with the retired FIFO format',
     expect(actual).toBe(expected)
   })
 
+  it('leaves out preference rows a model wrote', async () => {
+    const { admin, rows } = makeFakeAdmin()
+    const base = { user_id: U, kind: 'preference', evidence: null, confidence: null, status: 'active', company_id: null, supersedes_id: null, embedding: null, created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-01T00:00:00.000Z' }
+    rows.push({ ...base, id: 'a', statement: 'Model guess', source: 'reward_loop' })
+    rows.push({ ...base, id: 'b', statement: 'Remote only', source: 'user_stated' })
+    const block = await readStandingPreferences(admin, U)
+    expect(block).toContain('Remote only')
+    expect(block).not.toContain('Model guess')
+  })
+
   it('renders "" for a user with no preference insights, same as the FIFO did for an empty list', async () => {
     const { admin } = makeFakeAdmin()
     expect(await readStandingPreferences(admin, U)).toBe('')
@@ -408,6 +418,7 @@ describe('searchInsights in Langfuse', () => {
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
     vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
     vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'u1,u,me,user-1')
     const { runInTraceContext, SpanBuffer } = await import('../trace/spans')
     callEmbeddingMock.mockResolvedValue({ embeddings: [[0.5]], model: 'x', promptTokens: 1 })
     const row0 = { id: 'i1', kind: 'preference', statement: 'Salary floor is 180k, remote only', evidence: null, confidence: 0.9, status: 'active', source: 'chat', company_id: null, supersedes_id: null, created_at: 'x', updated_at: 'x' }
@@ -426,6 +437,7 @@ describe('searchInsights in Langfuse', () => {
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
     vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
     vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'u1,u,me,user-1')
     const { runInTraceContext, SpanBuffer } = await import('../trace/spans')
     const { MissingKeyError } = await import('../harness/llm')
     callEmbeddingMock.mockRejectedValue(new MissingKeyError('No embedding provider configured'))

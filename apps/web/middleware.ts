@@ -145,7 +145,7 @@ export function demoWindowGate(facts: DemoWindowFacts | null, now: Date = new Da
  * request from every user, owner included, which is a far larger outage than
  * the thing being guarded against.
  */
-type DemoWindowRead = { kind: 'facts'; facts: DemoWindowFacts } | { kind: 'none' } | { kind: 'unreadable' }
+export type DemoWindowRead = { kind: 'facts'; facts: DemoWindowFacts } | { kind: 'none' } | { kind: 'unreadable' }
 
 /** PostgREST surfaces a missing column as Postgres 42703 (undefined_column). */
 const UNDEFINED_COLUMN = '42703'
@@ -153,19 +153,18 @@ const UNDEFINED_COLUMN = '42703'
 /**
  * How long a resolved read is reused, in ms.
  *
- * THIS TTL CANNOT DELAY EXPIRY. What is cached is the DEADLINE, not the
- * verdict — demoWindowGate re-runs against `new Date()` on every single
- * request, so an hour-72 session is refused the instant it arrives, cache or no
- * cache. What the TTL does bound is staleness in the OTHER two facts:
+ * ONLY NON-DEMO READS ARE CACHED. A demo's facts are read again on every
+ * request, because revoking a code pulls the demo profile's deadline to now()
+ * (revoke_access_code, migration 20261008030001) and that must end the session on
+ * its very next request, not up to a minute later. Demos are rare and short
+ * lived, so the extra read costs nothing that matters; ordinary accounts are the
+ * traffic this cache exists for.
  *
- *   * a profile that becomes a demo after being cached as an ordinary account.
- *     Not a state this feature produces — demo workspaces are minted fresh at
- *     redemption, never converted from an existing account — but bounded at 60s
- *     rather than unbounded, because "not a state today" is not a guarantee.
- *   * a deadline moved EARLIER. Revoking a code today sets
- *     access_codes.revoked_at and does not touch the profile at all, so
- *     revocation is not enforced here with or without this cache. See the
- *     report accompanying this change; the fix belongs in the revoke route.
+ * What the TTL does bound, for an ordinary account, is staleness in one fact: a
+ * profile that becomes a demo after being cached as an ordinary account. Not a
+ * state this feature produces (demo workspaces are minted fresh at redemption,
+ * never converted from an existing account), but bounded at 60s rather than
+ * unbounded, because "not a state today" is not a guarantee.
  */
 const DEMO_FACTS_TTL_MS = 60_000
 
@@ -194,11 +193,19 @@ function cacheGet(userId: string, nowMs: number): DemoWindowRead | null {
   return hit.read
 }
 
+/** Whether a resolved read may be reused. A demo (either signal) never is, so a
+ *  revoked or expired workspace is refused on its next request. Exported ONLY so
+ *  a test can execute it; Next ignores every export but `middleware` and `config`. */
+export function isCacheableRead(read: DemoWindowRead): boolean {
+  if (read.kind === 'unreadable') return false
+  if (read.kind === 'facts' && (read.facts.is_demo === true || read.facts.demo_expires_at)) return false
+  return true
+}
+
 function cacheSet(userId: string, read: DemoWindowRead, nowMs: number): void {
-  // Never cache a failure. An unreadable profile is a transient condition and
-  // caching it would turn one blip into a minute of refusals; it is also the
-  // fail-closed branch, so retrying costs the user nothing but a reload.
-  if (read.kind === 'unreadable') return
+  // Never cache a demo, and never cache a failure (an unreadable profile is a
+  // transient condition, and retrying costs the user nothing but a reload).
+  if (!isCacheableRead(read)) return
 
   if (demoFactsCache.size >= DEMO_FACTS_MAX_ENTRIES) {
     const oldest = demoFactsCache.keys().next()
@@ -353,18 +360,29 @@ function clearAuthCookies(request: NextRequest, response: NextResponse): NextRes
   return response
 }
 
+/**
+ * Pages that no longer exist, keyed by first path segment, and where an old
+ * link goes instead. /agent was folded into /copilot's runs panel; the prep pages
+ * went away with the interview feature, so old bookmarks land on Today.
+ */
+export const RETIRED_PAGES: Record<string, string> = {
+  agent: '/copilot',
+  prep: '/dashboard',
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // /agent was folded into /copilot's runs panel. A page-level redirect()
-  // in app/(app)/agent/page.tsx only fires client-side once React mounts
-  // (its parent layout is a client component that streams a 200 first), so
-  // plain HTTP clients (curl, old bookmarks with no JS) never leave /agent.
-  // Redirect here instead — middleware runs before any rendering and always
-  // returns a real 307.
-  if (pathname === '/agent') {
+  // A page-level redirect() in a retired page's own file only fires
+  // client-side once React mounts (the parent layout is a client component
+  // that streams a 200 first), so plain HTTP clients (curl, old bookmarks
+  // with no JS) never leave. Redirect here instead, middleware runs before
+  // any rendering and always returns a real 307.
+  const segment = pathname.split('/')[1] ?? ''
+  const retiredTo = Object.hasOwn(RETIRED_PAGES, segment) ? RETIRED_PAGES[segment] : undefined
+  if (retiredTo) {
     const url = request.nextUrl.clone()
-    url.pathname = '/copilot'
+    url.pathname = retiredTo
     return NextResponse.redirect(url)
   }
 

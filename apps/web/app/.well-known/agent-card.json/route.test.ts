@@ -16,7 +16,7 @@ describe('GET /.well-known/agent-card.json', () => {
     expect(card.protocolVersion).toBe('0.3')
     expect(card.url).toBe('http://localhost/api/a2a')
     expect(card.preferredTransport).toBe('JSONRPC')
-    expect(card.skills.map((s: { id: string }) => s.id).sort()).toEqual(['company_researcher', 'interview_prep', 'matcher'])
+    expect(card.skills.map((s: { id: string }) => s.id).sort()).toEqual(['company_researcher', 'matcher'])
   })
 
   it('declares a bearer securityScheme and carries no secret', () => {

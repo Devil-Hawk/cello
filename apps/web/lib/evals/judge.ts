@@ -41,10 +41,10 @@
 //   completions.create` — there is no per-call hook to inject a budget check
 //   around, only the OpenAI SDK's own `fetch` constructor option (which every
 //   request already goes through). Wrapping THAT is the one seam that sees
-//   every request this client ever makes, so assertWithinBudget/recordSpend
+//   every request this client ever makes, so reserveSpend/settleSpend
 //   live there instead of at judgeGroundedness/judgeSpecificity's call sites
-//   — see lib/evals/judge.test.ts for the ordering proof (assert before the
-//   real fetch, record only after a successful response).
+//   (see lib/evals/judge.test.ts for the ordering proof: reserve before the
+//   real fetch, settle after the response).
 //
 // COST
 //   Judge model is `anthropic/claude-haiku-4.5` — the cheapest model in
@@ -59,7 +59,15 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import OpenAI from 'openai'
 import { ClosedQA, Factuality } from 'autoevals'
 import { MissingKeyError } from '../harness/llm'
-import { assertWithinBudget, estimateCostDetails, estimateCostUsd, recordSpend } from '../harness/spend'
+import {
+  actualCostUsd,
+  estimateCostDetails,
+  estimateCostUsd,
+  estimatePromptTokens,
+  reserveSpend,
+  rungFor,
+  settleSpend,
+} from '../harness/spend'
 import { logHarnessError } from '../observability/log'
 import { warnLlmFallback } from '../observability/llm-fallback'
 import { acquireSpanScope, withSpan } from '../trace/spans'
@@ -120,7 +128,10 @@ const JUDGE_FALLBACK_COMPLETION_TOKENS = 300
 // more headroom.
 const JUDGE_MAX_TOKENS_CEILING = 2000
 
-/** Cap an outgoing judge request's `max_tokens` at JUDGE_MAX_TOKENS_CEILING.
+/** Bound an outgoing judge request's `max_tokens` to JUDGE_MAX_TOKENS_CEILING:
+ *  clamp a larger value and SET one when the request carries none, because the
+ *  spend reservation is priced from it (a request with no ceiling would reserve,
+ *  and could spend, the model's full output window).
  *  `init.body` is always a JSON string here — the OpenAI SDK builds it via
  *  `JSON.stringify(body)` before ever calling `fetch` (see openai/internal/
  *  request-options.js) — so a parse failure means this wasn't a chat request
@@ -133,21 +144,21 @@ function clampJudgeMaxTokens(init: RequestInit | undefined): RequestInit | undef
   } catch {
     return init
   }
-  if (typeof body.max_tokens !== 'number' || body.max_tokens <= JUDGE_MAX_TOKENS_CEILING) return init
+  if (typeof body.max_tokens === 'number' && body.max_tokens <= JUDGE_MAX_TOKENS_CEILING) return init
   return { ...init, body: JSON.stringify({ ...body, max_tokens: JUDGE_MAX_TOKENS_CEILING }) }
 }
 
 /**
  * Wrap the global `fetch` with the same two guards every other model path
- * gets: refuse BEFORE the request (a request already sent cannot be
- * refunded), meter AFTER a successful response, parsing real usage off the
+ * gets: reserve BEFORE the request (a request already sent cannot be
+ * refunded), settle AFTER the response, parsing real usage and cost off the
  * body. Scoped to one (admin, userId) pair per client — see
  * meteredJudgeClient below, which is the only thing that constructs this.
  *
  * MUTATION CHECK (executed, not left to trust): commented out the
- * `recordSpend(admin, userId, body.model ?? JUDGE_MODEL, ...)` line below —
- * lib/evals/judge.test.ts's "checks budget before the request and records
- * real usage..." and "meters both calls (2 asserts, 2 records)..." tests
+ * `settleSpend(admin, reservation, {...})` call below:
+ * lib/evals/judge.test.ts's "reserves before the request and settles real
+ * usage..." and "meters both calls (2 reservations, 2 settles)..." tests
  * both went red (`expected [...] to deeply equal [...]`, `expected "spy" to
  * be called 2 times, but got 0 times`). Reverted immediately; `git diff`
  * confirmed a byte-identical file.
@@ -157,15 +168,26 @@ function meteredFetch(
   userId: string
 ): (input: string | URL | Request, init?: RequestInit) => Promise<Response> {
   return async (input, init) => {
-    await assertWithinBudget(admin, userId)
     const clamped = clampJudgeMaxTokens(init)
     const requestedModel = requestedModelOf(clamped)
-
     // One 'llm' span per request, same shape callLlm emits, so judge calls show
     // up in trace_spans (and the Langfuse mirror) next to every other model call.
     const scope = acquireSpanScope(userId)
+    // Reserve the worst case BEFORE the request (a request already sent cannot be
+    // refunded): the whole body as the prompt estimate, plus the max_tokens ceiling.
+    const sentBody = typeof clamped?.body === 'string' ? clamped.body : ''
+    const reservation = await reserveSpend(admin, {
+      userId,
+      model: requestedModel,
+      promptTokens: estimatePromptTokens(sentBody, requestMessagesOf(clamped)?.length ?? 1),
+      maxTokens: JUDGE_MAX_TOKENS_CEILING,
+      rung: rungFor('openrouter', requestedModel),
+      step: 'judge',
+      traceId: scope.buffer.traceId,
+    })
+
     const slot = judgeSlot.getStore()
-    let used: { model: string; promptTokens: number; completionTokens: number; text?: string } | undefined
+    let used: { model: string; promptTokens: number; completionTokens: number; costUsd?: number; text?: string } | undefined
     try {
       return await withSpan(
         scope.buffer,
@@ -175,9 +197,18 @@ function meteredFetch(
           const response = await fetch(input, clamped)
           // Thrown (not returned) so the span is marked 'error'; the catch
           // below hands the same response back to the OpenAI SDK untouched.
-          if (!response.ok) throw await JudgeHttpError.from(response)
+          if (!response.ok) {
+            // The provider answered with an error and generated nothing.
+            await settleSpend(admin, reservation, { failed: { status: response.status } })
+            throw await JudgeHttpError.from(response)
+          }
           used = await readUsage(response)
-          await recordSpend(admin, userId, used.model, used.promptTokens, used.completionTokens)
+          await settleSpend(admin, reservation, {
+            model: used.model,
+            promptTokens: used.promptTokens,
+            completionTokens: used.completionTokens,
+            costUsd: used.costUsd,
+          })
           return response
         },
         (response, err) =>
@@ -187,7 +218,7 @@ function meteredFetch(
                 promptTokens: used.promptTokens,
                 completionTokens: used.completionTokens,
                 tokensUsed: used.promptTokens + used.completionTokens,
-                costUsd: estimateCostUsd(used.model, used.promptTokens, used.completionTokens),
+                costUsd: used.costUsd ?? estimateCostUsd(used.model, used.promptTokens, used.completionTokens),
                 metered: true,
                 userId,
                 source: 'judge',
@@ -210,7 +241,10 @@ function meteredFetch(
           ...(used
             ? {
                 usage: { input: used.promptTokens, output: used.completionTokens, total: used.promptTokens + used.completionTokens },
-                cost: estimateCostDetails(used.model, used.promptTokens, used.completionTokens),
+                cost:
+                  used.costUsd !== undefined
+                    ? { total: used.costUsd }
+                    : estimateCostDetails(used.model, used.promptTokens, used.completionTokens),
               }
             : {}),
           ...(capture
@@ -303,11 +337,11 @@ function requestParamsOf(init: RequestInit | undefined): Record<string, number> 
  *  the deliberately high fallback when the body has none. */
 async function readUsage(
   response: Response
-): Promise<{ model: string; promptTokens: number; completionTokens: number; text?: string }> {
+): Promise<{ model: string; promptTokens: number; completionTokens: number; costUsd?: number; text?: string }> {
   try {
     const body = (await response.clone().json()) as {
       model?: string
-      usage?: { prompt_tokens?: number; completion_tokens?: number }
+      usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
       choices?: { message?: { content?: unknown; tool_calls?: { function?: { arguments?: unknown } }[] } }[]
     }
     const usage = body.usage
@@ -321,6 +355,7 @@ async function readUsage(
         model: body.model ?? JUDGE_MODEL,
         promptTokens: usage.prompt_tokens,
         completionTokens: usage.completion_tokens,
+        costUsd: actualCostUsd(usage),
         text,
       }
     }

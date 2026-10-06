@@ -127,35 +127,24 @@ const JOB_SELECT_COLUMNS =
   'match_score, match_details, is_new, job_function, seniority, language, country, ' +
   'is_remote, quality_score, description, job_type, companies(name, logo_url, domain)'
 
-/** Same default as lib/harness/spend.ts DEFAULT_MONTHLY_USD — duplicated (not
- *  imported) because that module is server-only (imports the AdminClient type
- *  and calls that take an admin client), while this needs to run client-side
- *  purely to read the already-fetched profiles.preferences payload. */
-const DEFAULT_MONTHLY_BUDGET_USD = 10
-
 /**
- * Plain-language "$X of your $Y monthly AI budget left" from
- * profiles.preferences.budget — the same shape lib/harness/spend.ts reads and
- * writes when it meters a real LLM call. Mirrors that module's period-reset
- * rule (a new UTC month means $0 spent so far) so this never shows a stale
- * spent total carried over from last month. Returns null (never blocks
- * anything) when preferences carries nothing usable yet.
+ * Plain-language "$X of your $Y monthly AI budget left", from the same route the
+ * dashboard meter reads (GET /api/settings/budget, which sums the spend ledger).
+ * Money held for calls still in flight counts as spent, so the hint never
+ * promises more than a batch can use. Returns null (never blocks anything) when
+ * the budget cannot be read.
  */
-function computeBudgetHint(preferences: unknown): string | null {
-  if (!preferences || typeof preferences !== 'object') return null
-  const budget = (preferences as Record<string, unknown>).budget
-  if (!budget || typeof budget !== 'object') return null
-  const raw = budget as Record<string, unknown>
-
-  const capUsd = typeof raw.monthlyUsd === 'number' && raw.monthlyUsd > 0 ? raw.monthlyUsd : DEFAULT_MONTHLY_BUDGET_USD
-
-  const now = new Date()
-  const currentPeriod = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
-  const samePeriod = raw.periodStart === currentPeriod
-  const spentUsd = samePeriod && typeof raw.spentUsd === 'number' && raw.spentUsd > 0 ? raw.spentUsd : 0
-
-  const remainingUsd = Math.max(0, capUsd - spentUsd)
-  return `$${remainingUsd.toFixed(2)} of your $${capUsd.toFixed(2)} monthly AI budget left`
+async function loadBudgetHint(): Promise<string | null> {
+  try {
+    const res = await fetch('/api/settings/budget')
+    if (!res.ok) return null
+    const { budget } = (await res.json()) as { budget?: { monthlyUsd?: number; spentUsd?: number; heldUsd?: number } }
+    if (typeof budget?.monthlyUsd !== 'number' || typeof budget.spentUsd !== 'number') return null
+    const remainingUsd = Math.max(0, budget.monthlyUsd - budget.spentUsd - (budget.heldUsd ?? 0))
+    return `$${remainingUsd.toFixed(2)} of your $${budget.monthlyUsd.toFixed(2)} monthly AI budget left`
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -629,7 +618,7 @@ function JobsPageInner() {
 
     setTargeting(resolveTargeting(safePrefs))
     setProfileTargetTitles(resolveTargetTitles(safePrefs))
-    setBudgetHint(computeBudgetHint(safePrefs))
+    void loadBudgetHint().then(setBudgetHint)
 
     setCompaniesLoaded(true)
   }

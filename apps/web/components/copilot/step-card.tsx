@@ -68,7 +68,6 @@ function formatObservation(obs: unknown): { summary: string; pretty: string } {
   if (Array.isArray(o.contacts)) return { summary: `${(o.count as number) ?? o.contacts.length} contact(s)`, pretty }
   if (typeof o.atsScore === 'number') return { summary: `ATS ${o.atsScore} -> ${o.rescore ?? o.atsScore}`, pretty }
   if (typeof o.status === 'string' && typeof o.runId === 'string') return { summary: `run ${String(o.status)}`, pretty }
-  if (typeof o.kitId === 'string') return { summary: `kit ready (${(o.questionCount as number) ?? 0} questions)`, pretty }
   if (typeof o.dossierId === 'string' || typeof o.exists === 'boolean') return { summary: 'company research', pretty }
   const keys = Object.keys(o)
   return { summary: keys.length ? keys.slice(0, 4).join(', ') : 'done', pretty }
@@ -330,7 +329,7 @@ export function StepCard({ step, live, onApprove, onContinue, onConfirm, onDecli
       {isGuarded && (
         <div className="space-y-2 border-t border-destructive/20 px-2.5 py-2.5">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            This is irreversible — it never runs without your explicit confirmation, bypass mode or not
+            This is irreversible. It never runs without your explicit confirmation
           </p>
           <Textarea
             value={declineNote}

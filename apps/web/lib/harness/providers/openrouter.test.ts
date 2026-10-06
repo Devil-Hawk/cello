@@ -48,3 +48,33 @@ describe('callOpenRouter request body', () => {
     expect(createMock.mock.calls[0][0]).not.toHaveProperty('user')
   })
 })
+
+describe('callOpenRouter provider-reported cost', () => {
+  it('returns usage.cost so the ledger settles the real figure', async () => {
+    createMock.mockResolvedValue({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, cost: 0.00042, is_byok: false },
+    })
+    const result = await callOpenRouter({ openrouter: 'or-key', userId: USER_ID } as DecryptedApiKeys, { prompt: 'hi' })
+    expect(result.costUsd).toBe(0.00042)
+  })
+
+  it('adds the upstream charge for a bring-your-own-key request', async () => {
+    createMock.mockResolvedValue({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2, cost: 0.001, is_byok: true, cost_details: { upstream_inference_cost: 0.009 } },
+    })
+    const result = await callOpenRouter({ openrouter: 'or-key' } as DecryptedApiKeys, { prompt: 'hi' })
+    expect(result.costUsd).toBeCloseTo(0.01, 9)
+  })
+
+  it('leaves costUsd undefined when the response has no cost, so the price table applies', async () => {
+    const result = await callOpenRouter({ openrouter: 'or-key' } as DecryptedApiKeys, { prompt: 'hi' })
+    expect(result.costUsd).toBeUndefined()
+  })
+
+  it('always sends a max_tokens ceiling', async () => {
+    await callOpenRouter({ openrouter: 'or-key' } as DecryptedApiKeys, { prompt: 'hi' })
+    expect(createMock.mock.calls[0][0].max_tokens).toBe(2048)
+  })
+})

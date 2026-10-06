@@ -106,7 +106,6 @@ function stepDetail(step: AgentStepRow): string | null {
   if (typeof out.resumeSummary === 'string') return 'CV tailored'
   if (typeof out.dossierId !== 'undefined') return out.hasSummary ? 'company research ready' : 'company research (partial)'
   if (typeof out.message === 'string') return out.message
-  if (typeof out.kitId !== 'undefined') return `${(out.questionCount as number) ?? 0} question(s)`
   return null
 }
 

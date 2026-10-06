@@ -137,7 +137,7 @@ describe('auth', () => {
 })
 
 describe('tools/list parity', () => {
-  it('lists exactly the 19 first-party tool names from COPILOT_TOOLS — nothing added, nothing missing', async () => {
+  it('lists exactly the 18 first-party tool names from COPILOT_TOOLS, nothing added, nothing missing', async () => {
     const res = await POST(req(TOOLS_LIST))
     expect(res.status).toBe(200)
     const body = await res.json()

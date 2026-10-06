@@ -12,8 +12,8 @@ export const metadata = {
  * Root not-found — catches any URL that matches no route at all, signed in
  * or not, so unlike app/(app)/error.tsx it can't assume the authenticated
  * shell (Sidebar/Header) is standing around it. Same EmptyState language as
- * every other "X not found" moment in the app (see companies/[id]/page.tsx,
- * prep/[id]/page.tsx), plus its own wordmark for wayfinding since there's no
+ * every other "X not found" moment in the app (see companies/[id]/page.tsx), plus
+ * its own wordmark for wayfinding since there's no
  * sidebar here to supply one.
  */
 export default function NotFound() {

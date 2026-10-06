@@ -169,7 +169,7 @@ function validateDocuments(value: unknown, errors: string[]): void {
     return
   }
   if (value.length > MAX_DOCUMENTS) {
-    errors.push(`No more than ${MAX_DOCUMENTS} documents per receipt.`)
+    errors.push(`No more than ${MAX_DOCUMENTS} documents per record.`)
     return
   }
   let hasResume = false

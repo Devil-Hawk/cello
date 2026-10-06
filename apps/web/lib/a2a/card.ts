@@ -19,12 +19,11 @@ import { A2A_AGENTS } from './agent'
 const SKILL_DESCRIPTIONS: Record<(typeof A2A_AGENTS)[number], string> = {
   matcher: 'Score already-tracked jobs (by id) against the caller\'s resume. Read-only — never applies.',
   company_researcher: 'Assemble a public-source company dossier (visa/sponsorship signal, summary) for an already-tracked company. Read-only.',
-  interview_prep: 'Build an interview prep kit (questions + STAR stories) for an already-tracked job. Draft-only — never sends anything.',
 }
 
 const NAME = 'cello'
 const DESCRIPTION =
-  'Cello: read/draft-only job-search agents over A2A. matcher, company_researcher and interview_prep — none of these ' +
+  'Cello: read/draft-only job-search agents over A2A: matcher and company_researcher. Neither of these ' +
   'agents has a submit-capable code path (see lib/a2a/graph-shape.test.ts). Every field is an id into the caller\'s ' +
   'own already-tracked jobs/companies; no free-text job posting or resume override is accepted.'
 const VERSION = '1.0.0'

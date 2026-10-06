@@ -112,7 +112,7 @@ export interface ComposerSettings {
   /** DEFAULT_MODEL_SENTINEL ('default') or a concrete ModelId. */
   model: string
   thinkingMode: 'auto' | 'review'
-  /** Per-conversation "bypass permissions" toggle — see route.ts's doc
-   *  comment for exactly what it does and does not skip. */
+  /** Stored per conversation but no longer offered in the UI: the page always
+   *  sends false, which overwrites any older true on the next turn. */
   bypassMode: boolean
 }

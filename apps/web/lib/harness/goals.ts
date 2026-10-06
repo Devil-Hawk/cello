@@ -1121,8 +1121,8 @@ export async function judgeCandidates(opts: JudgeBatchOptions): Promise<JudgeBat
 /**
  * Merge a goal we just advanced with whatever is stored now.
  *
- * profiles.preferences is a read-modify-write blob shared with the spend ledger
- * (lib/harness/spend.ts#recordSpend does the same dance), and two ticks for the
+ * profiles.preferences is a read-modify-write blob shared with the budget cap
+ * and the user's other settings, and two ticks for the
  * same user can in principle overlap. A last-writer-wins overwrite there would
  * DELETE judgements someone already paid for — the one loss this module cannot
  * accept, since a lost judgement is money spent for nothing AND a candidate

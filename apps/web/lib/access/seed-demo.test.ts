@@ -205,7 +205,6 @@ describe('buildDemoWorkspace — shape', () => {
       'application_drafts',
       'outreach_messages',
       'resume_documents',
-      'interview_kits',
       'company_dossiers',
     ])
     for (const b of workspace.batches) expect(b.rows.length).toBeGreaterThan(0)
@@ -500,7 +499,7 @@ describe('the demo data cannot reach anyone', () => {
   })
 
   it('queues outreach for review rather than sending, and caps the daily volume', () => {
-    const prefs = buildDemoPreferences(null, NOW)
+    const prefs = buildDemoPreferences(null)
     expect((prefs.outreach as { autoSend: boolean }).autoSend).toBe(false)
     expect(prefs.autoSubmit).toBe(false)
   })
@@ -511,33 +510,29 @@ describe('the demo data cannot reach anyone', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildDemoPreferences — the $1 spend cap', () => {
-  it('caps a fresh demo profile at $1 with nothing spent', () => {
-    const prefs = buildDemoPreferences(null, NOW)
-    expect(prefs.budget).toEqual({ periodStart: '2026-08', spentUsd: 0, monthlyUsd: DEMO_MONTHLY_USD })
+  it('caps a fresh demo profile at $1 and stores no spend counters', () => {
+    const prefs = buildDemoPreferences(null)
+    expect(prefs.budget).toEqual({ monthlyUsd: DEMO_MONTHLY_USD })
     expect(DEMO_MONTHLY_USD).toBe(1)
   })
 
-  it('PRESERVES accumulated spend across a re-seed', () => {
-    // Re-running the seeder is the same event as re-entering the access code.
-    // Zeroing spentUsd here would make re-entering the code a one-keystroke way
-    // to refill the allowance, and the cap would bound nothing.
-    const prefs = buildDemoPreferences(
-      { budget: { monthlyUsd: 1, spentUsd: 0.87, periodStart: '2026-08' } },
-      NOW
-    )
-    expect(prefs.budget).toEqual({ periodStart: '2026-08', spentUsd: 0.87, monthlyUsd: 1 })
+  it('does not carry spend counters forward: spend lives in the ledger, not on the profile', () => {
+    // A re-seed (the same event as re-entering the code) cannot refill the
+    // allowance because there is nothing on the row to refill.
+    const prefs = buildDemoPreferences({ budget: { monthlyUsd: 1, spentUsd: 0.87, periodStart: '2026-08' } })
+    expect(prefs.budget).toEqual({ monthlyUsd: 1 })
   })
 
   it('lowers an inherited cap but never raises one', () => {
-    const lowered = buildDemoPreferences({ budget: { monthlyUsd: 500, spentUsd: 0 } }, NOW)
+    const lowered = buildDemoPreferences({ budget: { monthlyUsd: 500, spentUsd: 0 } })
     expect((lowered.budget as { monthlyUsd: number }).monthlyUsd).toBe(1)
 
-    const alreadyLower = buildDemoPreferences({ budget: { monthlyUsd: 0.25, spentUsd: 0 } }, NOW)
+    const alreadyLower = buildDemoPreferences({ budget: { monthlyUsd: 0.25, spentUsd: 0 } })
     expect((alreadyLower.budget as { monthlyUsd: number }).monthlyUsd).toBe(0.25)
   })
 
   it('keeps unrelated preference keys the profile already had', () => {
-    const prefs = buildDemoPreferences({ gmail_sync: { lastSyncDate: '2026-07-01' } }, NOW)
+    const prefs = buildDemoPreferences({ gmail_sync: { lastSyncDate: '2026-07-01' } })
     expect(prefs.gmail_sync).toEqual({ lastSyncDate: '2026-07-01' })
     expect(prefs.targeting).toBeTruthy()
   })
@@ -654,10 +649,10 @@ describe('seedDemoWorkspace', () => {
 
   it('degrades — but reports — when an optional table fails', async () => {
     const fake = fakeAdmin()
-    fake.failTable('interview_kits')
+    fake.failTable('company_dossiers')
     const result = await seedDemoWorkspace(fake.admin, DEMO_USER, { now: NOW })
     expect(result.warnings).toHaveLength(1)
-    expect(result.warnings[0]).toContain('interview_kits')
+    expect(result.warnings[0]).toContain('company_dossiers')
     // The rest of the demo still landed.
     expect(fake.rowsIn('jobs')).toHaveLength(40)
   })

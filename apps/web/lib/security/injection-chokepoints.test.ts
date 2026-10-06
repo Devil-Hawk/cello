@@ -127,8 +127,6 @@ const PROMPT_BUILDERS: Record<string, string> = {
     'Role description block in the drafting prompt (~L133) — the redirect-the-email payload.',
   'apps/web/lib/harness/agents/resume_optimizer.ts':
     'jobBlock() (~L79), used by the score/rewrite/rescore passes; the rewrite pass writes resume text.',
-  'apps/web/lib/harness/agents/interview_prep.ts':
-    'buildPrompt() JOB DESCRIPTION block (~L129).',
   'apps/web/lib/harness/goals.ts':
     'judgeCandidate() (~L921-L929). Already has a `frameJobText?: JobTextFramer` seam and its own ' +
     'MCP_SAFETY_PREFACE-modelled system-prompt note, but defaultJobTextFramer is a bare .slice(). ' +
@@ -143,12 +141,12 @@ const PROMPT_BUILDERS: Record<string, string> = {
     'this file frames it directly, no cross-package hop needed.',
   'apps/web/lib/context/assemble.ts':
     'The langgraph port step 9 context-assembly door: buildMatchContext/buildOutreachContext/' +
-    'buildInterviewContext/buildTurnContext all interpolate employer-derived prose (a kb search ' +
+    'buildTurnContext all interpolate employer-derived prose (a kb search ' +
     "hit's .content, a company dossier's .summary) into context blocks headed for a prompt — " +
     'lib/harness/agents/matcher.ts, lib/harness/agents/outreach.ts, ' +
-    'lib/harness/agents/interview_prep.ts and lib/graph/copilot.ts all interpolate this file\'s ' +
+    'and lib/graph/copilot.ts all interpolate this file\'s ' +
     'output. Framed at the source (this file), never at a consumer — every employer-derived ' +
-    'string is wrapped in frameJobText/frameJobTextList before it leaves one of the four ' +
+    'string is wrapped in frameJobText/frameJobTextList before it leaves one of the ' +
     'builders, so it is framed from day one and never appears in PENDING_WIRING below.',
   'apps/web/lib/graph/distill.ts':
     'Step 6, the reward-loop distiller: buildDistillPrompt (~L200) quotes a SAMPLE of judged ' +
@@ -172,7 +170,6 @@ const PROMPT_BUILDERS: Record<string, string> = {
 const PENDING_WIRING: string[] = [
   'apps/web/lib/harness/agents/outreach.ts',
   'apps/web/lib/harness/agents/resume_optimizer.ts',
-  'apps/web/lib/harness/agents/interview_prep.ts',
   'apps/web/lib/harness/goals.ts',
   'apps/web/app/api/outreach/judge/route.ts',
 ]
@@ -198,9 +195,8 @@ const FORWARDERS: Record<string, string> = {
     'the same way it is for copilot-tools.ts.',
   'apps/web/app/api/a2a/route.ts':
     "The A2A endpoint (langgraph port step 3): parses an inbound message into an id-only request " +
-    "(lib/a2a/agent.ts's A2aAgentRequest — jobIds/companyId/jobId, no free-text override field at " +
-    'all: see that file\'s header for why interview_prep\'s resumeText override is deliberately not ' +
-    'exposed here) and hands it to invokeGraphForUser. Builds no prompt of its own and does not ' +
+    "(lib/a2a/agent.ts's A2aAgentRequest, jobIds/companyId, no free-text override field at " +
+    'all: see that file\'s header) and hands it to invokeGraphForUser. Builds no prompt of its own and does not ' +
     "currently match this scan's CANDIDATES filter (no `.description`/prompt marker in its source, " +
     'or in lib/a2a/executor.ts, which is the same shape) — listed here per ruling 7\'s instruction, ' +
     'same as app/api/mcp/route.ts above.',

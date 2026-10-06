@@ -240,9 +240,8 @@ export async function POST(request: NextRequest) {
 
   const admin = createAdminClient()
 
-  // MemoryStore.add's own demo-write refusal (lib/memory/types.ts's header)
-  // takes this as the caller's already-computed guard result rather than
-  // re-reading profiles itself — same is_demo/demo_expires_at columns every
+  // The turn config carries the demo verdict (read by the graph's trace
+  // buffer) so nothing re-reads profiles itself. Same is_demo/demo_expires_at columns every
   // other demo chokepoint in this codebase reads directly (see
   // lib/access/demo-chokepoints.test.ts).
   const { data: demoProfileRow } = await admin.from('profiles').select('is_demo, demo_expires_at').eq('id', user.id).maybeSingle()
