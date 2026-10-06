@@ -9,7 +9,7 @@ import { checkChance, sendCorrection } from './fit-call'
 import { UNREAD, isPartial, needsFold, pastedLine, sourceLine, sponsorshipLines, statusSentence, stripOf, stripSentence, whyKept, whyType } from './logic'
 import { RecordView } from './record-view'
 
-const text = (html: string) => html.replace(/<[^>]*>/g, ' ').replace(/&#x27;/g, "'").replace(/\s+/g, ' ')
+const text = (html: string) => html.replace(/<[^>]*>/g, ' ').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ')
 const render = (over = {}) => renderToStaticMarkup(<RecordView data={fixtureRecord(over)} />)
 
 describe('the words of the record', () => {
@@ -183,8 +183,9 @@ describe('the fit strip and the requirements', () => {
   it('marks a model verdict, and not a code one, and reads a correction as "You said"', () => {
     const base = fixtureFit(1)
     const one = (over: object) => ({ fit: { ...base.fit, items: [{ ...base.fit.items[0], ...over }] }, kinds: base.kinds })
-    expect(text(render(one({ origin: 'model' })))).toContain("Cello's read")
-    expect(text(render(one({ origin: 'code' })))).not.toContain("Cello's read")
+    // the line above the fold already says "Cello's read" for the chance; a model verdict adds one more
+    const marks = (html: string) => (text(html).match(/Cello's read/g) ?? []).length
+    expect(marks(render(one({ origin: 'model' })))).toBe(marks(render(one({ origin: 'code' }))) + 1)
     expect(text(render(one({ verdict: 'gap', evidence: [], origin: 'person', note: 'I have not used it' })))).toContain('You said: I have not used it')
   })
 
