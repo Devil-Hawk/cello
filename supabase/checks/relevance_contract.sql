@@ -403,7 +403,8 @@ end $$;
 insert into public.jobs (company_id, employer_id, title, description, url, external_id, source, match_score, match_details)
 select co_a, emp, 'Scored role', 'd', 'https://shared.example/jobs/scored-1', 'scored-1', 'greenhouse', 64, '{"score": 64}'::jsonb from fx;
 insert into public.person_roles (user_id, job_id)
-select a, (select id from public.jobs where external_id = 'scored-1') from fx;
+select a, (select id from public.jobs where external_id = 'scored-1') from fx
+on conflict do nothing;
 \ir ../migrations/20261008060007_employer_of_a_read.sql
 \ir ../migrations/20261008060008_shared_scores_kept.sql
 do $$
