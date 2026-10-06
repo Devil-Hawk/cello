@@ -130,6 +130,27 @@ describe('POST /api/drafts/approve (assisted-apply branch)', () => {
   })
 })
 
+describe('POST /api/drafts/approve (the session door)', () => {
+  it('answers 401 with no session and writes nothing', async () => {
+    state.user = null
+    const res = await POST(post({ draftId: 'draft-1' }))
+    expect(res.status).toBe(401)
+    expect(state.updates.length).toBe(0)
+  })
+
+  it('answers 403 to a request another site made and writes nothing', async () => {
+    const res = await POST(
+      new NextRequest('http://localhost/api/drafts/approve', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' },
+        body: JSON.stringify({ draftId: 'draft-1' }),
+      })
+    )
+    expect(res.status).toBe(403)
+    expect(state.updates.length).toBe(0)
+  })
+})
+
 describe('POST /api/drafts/approve (official submit)', () => {
   it('reads the apply credentials from the viewer own company, never the first storer', async () => {
     // One shared role held by two people. person_jobs gives each their own company metadata; the role's
