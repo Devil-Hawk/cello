@@ -13,7 +13,7 @@
 // - CelloSpend is innermost on the model path, so every real attempt, each
 //   fallback included, reserves and settles its own cost.
 // - A BudgetCapError from CelloSpend is not retried; it reaches fallback, which
-//   moves to the free list (a free model reserves nothing). A demo has an empty
+//   moves to the free list (a free model reserves $0). A demo has an empty
 //   list, so the error reaches the person as plain copy.
 // - Summarization is not here: Deep Agents adds langchain's summarization
 //   middleware itself, with offload to the backend. Adding it twice would
@@ -90,8 +90,8 @@ function usageOf(message: unknown): { promptTokens: number; completionTokens: nu
 /**
  * Reserve before every model call and settle after it. The reserve and settle
  * functions are the seam in spend-port.ts; this file adds no budget check.
- * A call that throws after reserving settles with zero tokens, which releases
- * the reservation without a charge.
+ * A call that throws after reserving settles as failed: the provider's refusal
+ * is charged nothing, and any other failure stays reserved for the sweeper.
  */
 export function celloSpend(ctx: Pick<GuardContext, 'admin' | 'userId' | 'traceId'>) {
   return createMiddleware({
@@ -107,17 +107,15 @@ export function celloSpend(ctx: Pick<GuardContext, 'admin' | 'userId' | 'traceId
         maxTokens: maxTokensOf(request.model),
         traceId: ctx.traceId,
       })
-      let usage = { promptTokens: 0, completionTokens: 0 }
-      let settledModel = model
       try {
         const response = await handler(request)
         const { model: answeredBy, ...tokens } = usageOf(response)
-        usage = tokens
         // OpenRouter may have answered from a free model through its own fallback list.
-        if (answeredBy && isFreeModel(answeredBy)) settledModel = answeredBy
+        await settle(reservation, { model: answeredBy && isFreeModel(answeredBy) ? answeredBy : model, ...tokens })
         return response
-      } finally {
-        await settle(reservation, { model: settledModel, ...usage })
+      } catch (err) {
+        await settle(reservation, { failed: err })
+        throw err
       }
     },
   })

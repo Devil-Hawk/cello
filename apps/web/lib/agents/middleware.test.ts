@@ -9,13 +9,13 @@ import { HumanMessage, ToolMessage } from '@langchain/core/messages'
 import { z } from 'zod'
 
 const spend = vi.hoisted(() => ({
-  assertWithinBudget: vi.fn(),
-  recordSpend: vi.fn(),
+  reserveSpend: vi.fn(),
+  settleSpend: vi.fn(),
 }))
 vi.mock('@/lib/harness/spend', async (orig) => ({
   ...(await orig<typeof import('@/lib/harness/spend')>()),
-  assertWithinBudget: spend.assertWithinBudget,
-  recordSpend: spend.recordSpend,
+  reserveSpend: spend.reserveSpend,
+  settleSpend: spend.settleSpend,
 }))
 
 import { BudgetCapError } from '@/lib/harness/spend'
@@ -42,16 +42,23 @@ const farFuture = () => Date.now() + 60_000
 const run = (agent: ReturnType<typeof createAgent>, config: Record<string, unknown> = {}) =>
   agent.invoke({ messages: [new HumanMessage('go')] }, { recursionLimit: 200, ...config })
 
+/** The ledger as it behaves: a paid call is refused once the cap is reached, a free one never is. */
+const capReached = () =>
+  spend.reserveSpend.mockImplementation(async (_admin, input: { rung: string }) => {
+    if (input.rung === 'R4') throw new BudgetCapError(10, 10)
+    return { id: null, userId: 'u1', model: 'free', rung: input.rung, estimateUsd: 0 }
+  })
+
 beforeEach(() => {
-  spend.assertWithinBudget.mockReset()
-  spend.recordSpend.mockReset()
+  spend.reserveSpend.mockReset().mockResolvedValue({ id: 'r1', userId: 'u1', model: 'm', rung: 'R4', estimateUsd: 0.1 })
+  spend.settleSpend.mockReset().mockResolvedValue(undefined)
 })
 
 describe('CelloSpend', () => {
   it('reserves before and settles after every model call', async () => {
     const order: string[] = []
-    spend.assertWithinBudget.mockImplementation(async () => void order.push('reserve'))
-    spend.recordSpend.mockImplementation(async () => void order.push('settle'))
+    spend.reserveSpend.mockImplementation(async () => (order.push('reserve'), { id: 'r1', userId: 'u1', model: 'm', rung: 'R4', estimateUsd: 0.1 }))
+    spend.settleSpend.mockImplementation(async () => void order.push('settle'))
     const model = new ScriptedChatModel({
       model: 'anthropic/claude-sonnet-5',
       script: [callTools([{ name: 'echo' }]), say('done')],
@@ -59,27 +66,25 @@ describe('CelloSpend', () => {
     await run(createAgent({ model, tools: [echo], middleware: [celloSpend(ctx())] }))
     expect(order).toEqual(['reserve', 'settle', 'reserve', 'settle'])
     // Settled from the usage the model reported, not an estimate.
-    expect(spend.recordSpend).toHaveBeenCalledWith({}, 'u1', 'anthropic/claude-sonnet-5', 100, 20)
+    expect(spend.settleSpend).toHaveBeenCalledWith({}, expect.objectContaining({ id: 'r1' }), { model: 'anthropic/claude-sonnet-5', promptTokens: 100, completionTokens: 20 })
   })
 
-  it('settles with zero tokens when the call throws after reserving', async () => {
-    spend.assertWithinBudget.mockResolvedValue(undefined)
+  it('settles as failed when the call throws after reserving', async () => {
     const model = new ScriptedChatModel({ model: 'anthropic/claude-sonnet-5', script: [new Error('provider exploded')] })
     await expect(run(createAgent({ model, tools: [echo], middleware: [celloSpend(ctx())] }))).rejects.toThrow('provider exploded')
-    expect(spend.assertWithinBudget).toHaveBeenCalledTimes(1)
-    // A failed call is released, not charged.
-    expect(spend.recordSpend).not.toHaveBeenCalled()
+    expect(spend.reserveSpend).toHaveBeenCalledTimes(1)
+    // A failed call is settled as failed, never as a charge for tokens it did not use.
+    expect(spend.settleSpend).toHaveBeenCalledWith({}, expect.anything(), { failed: expect.objectContaining({ message: 'provider exploded' }) })
   })
 
-  it('never reserves or settles for a free model', async () => {
+  it('a free model reserves on the free rung, which costs nothing', async () => {
     const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('ok')] })
     await run(createAgent({ model, tools: [echo], middleware: [celloSpend(ctx())] }))
-    expect(spend.assertWithinBudget).not.toHaveBeenCalled()
-    expect(spend.recordSpend).not.toHaveBeenCalled()
+    expect(spend.reserveSpend).toHaveBeenCalledWith({}, expect.objectContaining({ rung: 'R3', step: 'agent-turn' }))
   })
 
   it('falls back to a free model when the cap is reached, and the turn completes', async () => {
-    spend.assertWithinBudget.mockRejectedValue(new BudgetCapError(10, 10))
+    capReached()
     const paid = new ScriptedChatModel({ model: 'anthropic/claude-sonnet-5', script: [say('should not be used')] })
     const free = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('answered on the free model')] })
     const agent = createAgent({
@@ -94,7 +99,7 @@ describe('CelloSpend', () => {
   })
 
   it('a demo has no free fallback, so the cap error reaches the person', async () => {
-    spend.assertWithinBudget.mockRejectedValue(new BudgetCapError(1, 1))
+    capReached()
     const paid = new ScriptedChatModel({ model: 'anthropic/claude-sonnet-5', script: [say('nope')] })
     const free = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('should not run')] })
     const agent = createAgent({
@@ -107,7 +112,7 @@ describe('CelloSpend', () => {
   })
 
   it('does not retry a budget error', async () => {
-    spend.assertWithinBudget.mockRejectedValue(new BudgetCapError(10, 10))
+    capReached()
     const paid = new ScriptedChatModel({ model: 'anthropic/claude-sonnet-5', script: [say('x')] })
     const agent = createAgent({
       model: paid,
@@ -115,13 +120,12 @@ describe('CelloSpend', () => {
       middleware: guardStack({ ctx: ctx(), agent: 'orchestrator', deadlineAt: farFuture(), fallbacks: [] }),
     })
     await expect(run(agent).catch((e) => Promise.reject(isBudgetCapError(e) ? new Error('budget') : e))).rejects.toThrow('budget')
-    expect(spend.assertWithinBudget).toHaveBeenCalledTimes(1)
+    expect(spend.reserveSpend).toHaveBeenCalledTimes(1)
   })
 })
 
 describe('call limits', () => {
   it('the orchestrator stops at 24 model calls', async () => {
-    spend.assertWithinBudget.mockResolvedValue(undefined)
     const model = new ScriptedChatModel({
       model: 'qwen/qwen3.8-27b:free',
       script: [() => callTools([{ name: 'echo' }])],
