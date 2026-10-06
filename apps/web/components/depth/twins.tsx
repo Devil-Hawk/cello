@@ -1,5 +1,5 @@
-import { SCROLL_PATH } from '@/components/brand/logo'
-import { cn } from '@/lib/utils'
+import { SCROLL_PATH } from '@/components/brand/scroll-path'
+import { clsx as cn } from 'clsx'
 
 // The SVG twin of the rendered mark: the same silhouette in the same box, so a
 // page with no WebGL (no context, software rendering, Save-Data, a lost
