@@ -109,8 +109,9 @@ export async function POST(request: NextRequest) {
 
   // Load job + company + profile.
   const { data: jobData, error: jobErr } = await admin
-    .from('jobs')
-    .select('id, url, description, company_id, companies(metadata)')
+    .from('person_jobs')
+    .select('id, url, description, company_id:viewer_company_id, companies(metadata)')
+    .eq('viewer_id', user.id)
     .eq('id', draft.job_id)
     .single()
   if (jobErr || !jobData) {

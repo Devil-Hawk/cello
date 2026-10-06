@@ -128,8 +128,8 @@ export async function POST(request: NextRequest) {
     let matchHighlights: string[] = []
     if (jobId) {
       const { data: job } = await supabase
-        .from('jobs')
-        .select('id, title, description, company_id, match_details')
+        .from('person_jobs')
+        .select('id, title, description, company_id:viewer_company_id, match_details')
         .eq('id', jobId)
         .single()
       if (job) {

@@ -151,8 +151,9 @@ export const verifier: AgentFn = async (ctx) => {
         .join(',')
       if (orFilter) {
         const { data: collisions } = await ctx.admin
-          .from('jobs')
+          .from('person_jobs')
           .select('id')
+          .eq('viewer_id', ctx.userId)
           .eq('company_id', job.company_id)
           .or(orFilter)
           .neq('id', job.id)
