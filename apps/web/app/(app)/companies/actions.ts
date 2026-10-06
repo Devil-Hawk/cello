@@ -25,7 +25,7 @@ import { canRunLlm } from '@/lib/harness/llm-key-message'
 import { classifyJob } from '@/lib/jobs/classify'
 import { createClient } from '@/lib/supabase/server'
 import { checkedAgainLine, type Found } from '@/components/companies/logic'
-import { REMOVE_REFUSED, closedLine } from '@/components/companies/company-logic'
+import { RATE_LINE, REMOVE_REFUSED, closedLine } from '@/components/companies/company-logic'
 import { followCompanies, type FollowResult } from './follow.stub'
 import { findPosting, ownFor, previewRequirements } from './[id]/read'
 import { findCompanies } from './read'
@@ -91,12 +91,13 @@ export async function takeCheck(scope: 'all' | string): Promise<{ ok: true } | {
   return { ok: false, sentence: checkedAgainLine(new Date((Math.floor(now / 3_600_000) + 1) * 3_600_000).toISOString()) }
 }
 
-/** What keeping or checking a previewed posting needs: the employer, the person's own row for it, and the posting found in the live read by the employer's own key. Never a link from the browser. */
+/** What keeping or checking a previewed posting needs: the employer, the person's own row for it, and the posting found in the live read by the employer's own key. Never a link from the browser. It takes a place in the same preview limit the page read does ('limited' when none is left), so a loop of calls cannot read boards. */
 async function previewOf(db: Awaited<ReturnType<typeof createClient>>, userId: string, employerId: string, key: string) {
   if (!UUID.test(employerId) || key.length === 0 || key.length > 500) return null
   const admin = createAdminClient()
   const employer = await getEmployer(admin, employerId)
   if (!employer) return null
+  if (!(await rpcSlotStore(admin).take({ userId, channel: 'page', bucket: 'roles.preview', limit: 30, windowSeconds: 600 }))) return 'limited' as const
   const own = await ownFor(db, userId, employerId)
   const found = await findPosting(db, userId, employer, own, key)
   if (!found) return null
@@ -110,6 +111,7 @@ export async function keepPreview(employerId: string, key: string, intent: 'keep
   if (!user) return { ok: false, sentence: SIGN_IN }
   try {
     const got = await previewOf(db, user.id, employerId, key)
+    if (got === 'limited') return { ok: false, sentence: RATE_LINE }
     if (!got) return { ok: false, sentence: closedLine }
     const { admin, employer, row, preview } = got
     const nowIso = new Date().toISOString()
@@ -147,6 +149,7 @@ export async function previewChance(employerId: string, key: string): Promise<{ 
   if (!user) return { ok: false, sentence: SIGN_IN }
   try {
     const got = await previewOf(db, user.id, employerId, key)
+    if (got === 'limited') return { ok: false, sentence: RATE_LINE }
     if (!got) return { ok: false, sentence: closedLine }
     const { admin, preview } = got
     const { reqs, authorizationIds, kinds } = previewRequirements(preview)
