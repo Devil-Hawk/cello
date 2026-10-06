@@ -35,7 +35,7 @@ export const doorsStub: ModelDoor = {
   async complete(step, opts, ctx) {
     if (!ctx.userId) throw new Error('doors stub: a model call needs the person it is for')
     const keys = await loadApiKeys(createAdminClient(), ctx.userId)
-    const res = await callLlm(keys, opts, ctx.signal)
+    const res = await callLlm(keys, { ...opts, name: opts.name ?? step.id }, ctx.signal)
     return { ...res, prov: { step: step.id, model: res.model, rung: rungOf(keys), evidence: [], at: new Date().toISOString() } }
   },
 
