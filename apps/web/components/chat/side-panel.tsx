@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { Markdown } from '@/components/chat/markdown'
 import { CopyButton } from '@/components/chat/parts'
-import { EditorStub } from '@/components/chat/editor.stub'
+import { ResumeEditor } from '@/components/resume/editor/resume-editor'
 import type { EditorProps } from '@/components/resume/editor/types'
 import { Button } from '@/components/ui/button'
 
@@ -97,7 +97,7 @@ export function PanelView({ thing, versions, selected, onSelect, editing, onEdit
         {!current ? (
           <p className="text-caption text-muted-foreground">This has no versions yet.</p>
         ) : editing ? (
-          <EditorStub markdown={field ? String(current.content[field] ?? '') : ''} versionLabel={`Version ${current.version}`} templateId={null} onSave={onSave} />
+          <ResumeEditor key={current.version} markdown={field ? String(current.content[field] ?? '') : ''} versionLabel={`Version ${current.version}`} templateId={null} onSave={onSave} />
         ) : (
           <Markdown content={current.content_text} />
         )}
