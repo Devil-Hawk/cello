@@ -1,0 +1,3 @@
+comment = 'stub of pg_cron for local checks: records jobs, never runs them'
+default_version = '1.0'
+relocatable = false
