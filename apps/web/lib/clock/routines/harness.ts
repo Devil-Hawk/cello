@@ -342,7 +342,7 @@ export async function runDemoPasses(admin: AdminClient): Promise<{ demoWipe: Dem
   return { demoWipe, traceSpansPruned }
 }
 
-// --- the people the digest and distill passes run for -------------------------------
+// --- the people the digest and learning passes run for -------------------------------
 
 /** Demo profiles are never part of the per-user batch: they would crowd the owner out of CRON_MAX_USERS and burn LLM spend. */
 async function activeBatch(admin: AdminClient): Promise<{ active: ActiveProfile[]; batch: ActiveProfile[] }> {

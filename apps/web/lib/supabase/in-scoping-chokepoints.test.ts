@@ -111,7 +111,7 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     reason: 'retired is the ids of role types the module no longer has: a handful, never user data.',
   },
   'apps/web/lib/harness/agents/enricher.ts': {
-    calls: [".in('id', chunk)", ".in('job_id', chunk)"],
+    calls: [".in('id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",
   },
   'apps/web/lib/harness/agents/follow_upper.ts': {
