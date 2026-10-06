@@ -135,7 +135,7 @@ describe('All open roles', () => {
   })
 
   it('says a word that matches nothing matches nothing', () => {
-    const none = view(fixtureCompany(), q({ q: 'zzz' }), fixtureLive(30, 0, { items: [], matched: 0 }))
+    const none = view(fixtureCompany(), q({ q: 'zzz' }), fixtureLive(30, 0, { items: [], matched: 0, pages: 1 }))
     expect(text(none)).toContain("No open role at Fixture Employer 001 matches 'zzz'.")
     expect(none).not.toContain('Page 1 of')
   })

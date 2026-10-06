@@ -158,7 +158,7 @@ export function OpenRoles({ company, query, live, now = Date.now() }: OpenRolesP
 
       {line && <p className="r-meta">{line}</p>}
 
-      {live.pages > 1 && (
+      {live.matched > 0 && live.pages > 1 && (
         <nav aria-label="Pages" className="flex flex-wrap items-center gap-3">
           {live.page > 0 && (
             <Key asChild variant="ghost">

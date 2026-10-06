@@ -206,7 +206,9 @@ export async function readCompany(db: Db, userId: string, r: Extract<Resolved, {
 
   const readAt = statRows.map((s) => s.read_at).filter((x): x is string => !!x).sort().pop() ?? employer?.last_read_at ?? null
   const facts: Fact[] = []
-  const split = Object.entries(statRows.reduce<Record<string, number>>((m, s) => (s.role_type ? { ...m, [s.role_type]: (m[s.role_type] ?? 0) + s.open_count } : m, {})))
+  const openByType = new Map<string, number>()
+  for (const s of statRows) if (s.role_type) openByType.set(s.role_type, (openByType.get(s.role_type) ?? 0) + s.open_count)
+  const split = [...openByType.entries()]
     .flatMap(([id, n]) => (n > 0 && labelOf(id) ? [{ label: labelOf(id)!, n }] : []))
     .sort((a, b) => b.n - a.n)
     .slice(0, 6)

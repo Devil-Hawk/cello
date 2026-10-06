@@ -3,6 +3,7 @@
 // What the Companies page does as the signed-in person. Each action names the person from the session; the browser
 // never sends who it is. A refusal is a sentence, never a code.
 
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { isDemoProfile } from '@/lib/access/guardrails'
 import { jobRow } from '@/lib/ats'
 import type { AtsJob } from '@/lib/ats/types'
@@ -128,7 +129,8 @@ export async function keepPreview(employerId: string, key: string, intent: 'keep
     const { data, error } = await admin.rpc('keep_company_role', { p_user: user.id, p_employer: employer.id, p_row: stored })
     if (error || typeof data !== 'string') return { ok: false, sentence: 'Could not save that. Try again.' }
     if (intent === 'save') {
-      const { error: saveError } = await db.from('person_roles').update({ saved_at: nowIso }).eq('user_id', user.id).eq('job_id', data)
+      // The generated types predate person_roles.saved_at.
+      const { error: saveError } = await (db as unknown as SupabaseClient).from('person_roles').update({ saved_at: nowIso }).eq('user_id', user.id).eq('job_id', data)
       if (saveError) return { ok: false, sentence: 'Could not save that. Try again.' }
     }
     return { ok: true, id: data }

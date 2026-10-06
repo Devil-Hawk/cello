@@ -88,6 +88,8 @@ do $$
 declare f record; order_ids uuid[];
 begin
   select * into f from fx;
+  raise notice 'hiring_a: %', (select jsonb_agg(to_jsonb(h) - 'k' - 'logo_url' - 'careers_url' order by pos) from hiring_a h);
+  raise notice 'own: %', (select jsonb_agg(to_jsonb(c) - 'metadata') from public.companies c where c.user_id = f.a);
 
   -- Pinned and followed first (Gamma), then roles posted in 7 days (Delta 2, Alpha 1, Beta 0).
   select array_agg(id order by pos) into order_ids from hiring_a;
