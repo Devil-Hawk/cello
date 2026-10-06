@@ -444,7 +444,7 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
 
     // Interview/screen detected — this is precisely the case that used to be
     // invisible. Create a follow-up reminder due before the interview.
-    if (parsed.status === 'interview' || parsed.status === 'screen') {
+    if (trust === 'proven' && (parsed.status === 'interview' || parsed.status === 'screen')) {
       const interviewAt = parsed.interviewDateTime ? new Date(parsed.interviewDateTime) : null
       const dueDate =
         interviewAt && !isNaN(interviewAt.getTime())
