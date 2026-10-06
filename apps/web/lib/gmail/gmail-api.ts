@@ -1,8 +1,9 @@
 // Thin Gmail REST helpers: fetch/parse messages. No Supabase/DB concerns here.
 
+import { gmail, type gmail_v1 } from '@googleapis/gmail'
+import { OAuth2Client } from 'google-auth-library'
+import PostalMime from 'postal-mime'
 import type { GmailMessage } from './types'
-
-const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1'
 
 /**
  * Search query for job-application-related email. Tightened from the old
@@ -33,6 +34,9 @@ export function decodeBase64Url(data: string): string {
 }
 
 export function extractBody(payload: GmailMessage['payload']): string {
+  // A raw read has already decoded every MIME layer; the walk below is for the
+  // older shape (base64url `body.data`) that tests and `format=full` mail still use.
+  if (payload.text !== undefined) return payload.text
   if (payload.parts) {
     for (const part of payload.parts) {
       if (part.mimeType === 'text/plain' && part.body?.data) {
@@ -57,30 +61,83 @@ export function extractDomain(email: string): string | null {
   return match ? match[1].toLowerCase() : null
 }
 
+/**
+ * One Gmail client on the person's access token. gaxios loads node-fetch unless it
+ * is handed a fetch, so it gets the global one, looked up per call (Node's own
+ * client, and a test can stub it).
+ * ponytail: no retries. gaxios would re-POST a send on a 5xx and could mail twice;
+ * a failed read fails the sync as it always did and the next sync tries again.
+ */
+export const GOOGLE_TRANSPORT = {
+  fetchImplementation: ((input, init) => globalThis.fetch(input, init)) as typeof fetch,
+  retryConfig: { retry: 0, noResponseRetries: 0 },
+}
+
+export function googleAuthClient(credentials: { clientId?: string; clientSecret?: string } = {}): OAuth2Client {
+  return new OAuth2Client({ ...credentials, transporterOptions: GOOGLE_TRANSPORT })
+}
+
+export function gmailFor(accessToken: string): gmail_v1.Gmail {
+  const auth = googleAuthClient()
+  auth.setCredentials({ access_token: accessToken })
+  return gmail({ version: 'v1', auth })
+}
+
+/** The HTTP status of a failed Gmail call (gaxios keeps it on the error), or undefined for a network failure. */
+export function gmailErrorStatus(error: unknown): number | undefined {
+  const status = (error as { status?: unknown })?.status
+  return typeof status === 'number' ? status : undefined
+}
+
+function setHeader(headers: GmailMessage['payload']['headers'], name: string, value: string | undefined) {
+  if (!value) return
+  const existing = headers.find((h) => h.name.toLowerCase() === name.toLowerCase())
+  if (existing) existing.value = value
+  else headers.push({ name, value })
+}
+
+/** One raw Gmail message parsed with postal-mime. Every header is kept (Authentication-Results too). */
+async function readRawMessage(g: gmail_v1.Gmail, id: string): Promise<GmailMessage> {
+  const { data } = await g.users.messages.get({ userId: 'me', id, format: 'raw' })
+  const mail = await PostalMime.parse(Buffer.from(data.raw ?? '', 'base64url'))
+  const headers = mail.headers.map((h) => ({ name: h.originalKey, value: h.value }))
+  // postal-mime leaves header values as sent; Gmail's own were decoded, so the two the callers read are put back decoded.
+  setHeader(headers, 'Subject', mail.subject)
+  setHeader(headers, 'From', mail.from?.address ? (mail.from.name ? `${mail.from.name} <${mail.from.address}>` : mail.from.address) : undefined)
+  const invite = mail.attachments.find((a) => a.mimeType === 'text/calendar')
+  return {
+    id: data.id ?? id,
+    threadId: data.threadId ?? '',
+    labelIds: data.labelIds ?? undefined,
+    snippet: data.snippet ?? '',
+    internalDate: data.internalDate ?? '',
+    payload: {
+      headers,
+      text: mail.text ?? mail.html ?? '',
+      calendar: invite ? (typeof invite.content === 'string' ? invite.content : new TextDecoder().decode(invite.content)) : undefined,
+    },
+  }
+}
+
 export async function fetchGmailMessages(
   accessToken: string,
   query: string,
   maxResults = 500
 ): Promise<GmailMessage[]> {
+  const g = gmailFor(accessToken)
   const allMessageIds: Array<{ id: string }> = []
   let pageToken: string | undefined
 
   while (allMessageIds.length < maxResults) {
-    const searchUrl = `${GMAIL_API}/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${Math.min(100, maxResults - allMessageIds.length)}${pageToken ? `&pageToken=${pageToken}` : ''}`
-    const searchResponse = await fetch(searchUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
-
-    if (!searchResponse.ok) {
-      const error = await searchResponse.text()
-      throw new Error(`Gmail search failed: ${error}`)
+    let page: gmail_v1.Schema$ListMessagesResponse
+    try {
+      page = (await g.users.messages.list({ userId: 'me', q: query, maxResults: Math.min(100, maxResults - allMessageIds.length), pageToken })).data
+    } catch (error) {
+      throw new Error(`Gmail search failed: ${error instanceof Error ? error.message : String(error)}`)
     }
+    allMessageIds.push(...((page.messages ?? []) as Array<{ id: string }>))
 
-    const searchData = await searchResponse.json()
-    const messageIds = searchData.messages || []
-    allMessageIds.push(...messageIds)
-
-    pageToken = searchData.nextPageToken
+    pageToken = page.nextPageToken ?? undefined
     if (!pageToken) break
   }
 
@@ -90,14 +147,8 @@ export async function fetchGmailMessages(
   for (let i = 0; i < Math.min(allMessageIds.length, maxResults); i += batchSize) {
     const batch = allMessageIds.slice(i, i + batchSize)
     const batchResults = await Promise.all(
-      batch.map(async ({ id }) => {
-        const msgUrl = `${GMAIL_API}/users/me/messages/${id}?format=full`
-        const msgResponse = await fetch(msgUrl, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        })
-        if (msgResponse.ok) return msgResponse.json()
-        return null
-      })
+      // A message that cannot be read is skipped; it is not marked scanned, so the next sync tries it again.
+      batch.map(({ id }) => readRawMessage(g, id).catch(() => null))
     )
     messages.push(...batchResults.filter((m): m is GmailMessage => m !== null))
   }
@@ -105,20 +156,24 @@ export async function fetchGmailMessages(
   return messages
 }
 
-/** Every message in one Gmail thread (full format), oldest first, or null when the thread cannot be read. */
+/** Every message in one Gmail thread, oldest first, or null when the thread cannot be read.
+ *  threads.get has no raw format, so it gives the ids and each message is read raw. */
 export async function fetchGmailThread(accessToken: string, threadId: string): Promise<GmailMessage[] | null> {
-  const res = await fetch(`${GMAIL_API}/users/me/threads/${encodeURIComponent(threadId)}?format=full`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  })
-  if (!res.ok) return null
-  const data = (await res.json()) as { messages?: GmailMessage[] }
-  return data.messages ?? []
+  const g = gmailFor(accessToken)
+  try {
+    const { data } = await g.users.threads.get({ userId: 'me', id: threadId, format: 'minimal' })
+    return await Promise.all((data.messages ?? []).map((m) => readRawMessage(g, m.id as string)))
+  } catch {
+    return null
+  }
 }
 
 /** The mailbox's own address (needs gmail.readonly, which the sync already holds), or null. */
 export async function fetchGmailAddress(accessToken: string): Promise<string | null> {
-  const res = await fetch(`${GMAIL_API}/users/me/profile`, { headers: { Authorization: `Bearer ${accessToken}` } })
-  if (!res.ok) return null
-  const data = (await res.json()) as { emailAddress?: string }
-  return data.emailAddress ? data.emailAddress.toLowerCase() : null
+  try {
+    const { data } = await gmailFor(accessToken).users.getProfile({ userId: 'me' })
+    return data.emailAddress ? data.emailAddress.toLowerCase() : null
+  } catch {
+    return null
+  }
 }

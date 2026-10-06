@@ -359,6 +359,7 @@ describe('the three key sources ARE the demo spend + expiry chokepoint', () => {
 const MAIL_DELIVERY_MARKERS = [
   'sendGmailMessage(',
   'users/me/messages/send', // a hand-rolled call to the Gmail REST API
+  'users.messages.send(', // the Gmail client's own send, which the helper uses
 ]
 
 /** Either form of the refusal from lib/access/guardrails.ts. */
@@ -390,7 +391,10 @@ describe('every path that can deliver mail refuses a demo first', () => {
   })
 
   it('nothing hand-rolls a Gmail send around the helper', () => {
-    const callers = [...routes, ...libFiles].filter((file) => read(file).includes('users/me/messages/send'))
+    const callers = [...routes, ...libFiles].filter((file) => {
+      const src = read(file)
+      return src.includes('users/me/messages/send') || src.includes('users.messages.send(')
+    })
     expect(callers.map(rel)).toEqual([MAIL_HELPER])
   })
 

@@ -222,7 +222,7 @@ describe('follow-ups', () => {
 
   it('does not call a Gmail 403 on the thread "already replied": the draft stays pending and the user is told what is missing', async () => {
     const realFetch = global.fetch
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 403, text: async () => 'insufficient scopes' }) as unknown as typeof fetch
+    global.fetch = vi.fn().mockResolvedValue(new Response('insufficient scopes', { status: 403 })) as unknown as typeof fetch
     const actual = await vi.importActual<typeof import('@/lib/outreach/gmail')>('@/lib/outreach/gmail')
     threadHasReplyMock.mockImplementation(actual.threadHasReply)
     try {
