@@ -111,6 +111,212 @@ const cases = [
   },
 ]
 
+// ---------------------------------------------------------------------------
+// K13: the pipeline's races, through the pooler. Every move is one statement, so each runs in its own
+// transaction on whichever server session the pooler hands out; the per-person transaction lock is the
+// only thing that can order them.
+// ---------------------------------------------------------------------------
+
+const TRANSITION = 'select public.pipeline_transition($1::uuid, $2::text[], $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb) as r'
+
+const ev = (kind, actor, key, extra = {}) => ({ kind, actor, sentence: 'A line for the person.', idempotency_key: key, ...extra })
+
+async function move(c, app, from, to, e, cap = null, reason = null, detail = null) {
+  const { rows } = await c.query(TRANSITION, [
+    app, from, to, 'Working', reason, detail && JSON.stringify(detail), JSON.stringify(e), cap && JSON.stringify(cap),
+  ])
+  return rows[0].r
+}
+
+async function mkPerson(db, { send = false } = {}) {
+  const u = randomUUID()
+  const co = randomUUID()
+  const tok = randomUUID()
+  await db.query('insert into auth.users (id, email) values ($1, $2)', [u, `race-${u}@example.invalid`])
+  await db.query("insert into public.companies (id, user_id, name, career_url) values ($1, $2, 'Race Co', 'https://race.example')", [co, u])
+  await db.query('select public.companies_follow(array[$1::uuid], true, $2::uuid)', [co, u])
+  if (send) {
+    await db.query(
+      "insert into public.api_tokens (id, user_id, name, token_hash, scopes, last_used_at) values ($1, $2, 'race', $3, array['fill:extension'], now())",
+      [tok, u, `hash-${tok}`],
+    )
+    await db.query(
+      "update public.profiles set preferences = coalesce(preferences, '{}'::jsonb) || jsonb_build_object('pipeline', jsonb_build_object('send', jsonb_build_object('mode', 'auto', 'maxPerDay', 3, 'tokenId', $2::text))) where id = $1",
+      [u, tok],
+    )
+  }
+  return { u, co, tok }
+}
+
+async function mkApp(db, p, n) {
+  const j = randomUUID()
+  await db.query(
+    "insert into public.jobs (id, company_id, title, description, url, external_id) values ($1, $2, $3, 'd', $4, $5)",
+    [j, p.co, `Engineer ${n}`, `https://race.example/jobs/${p.u}/${n}`, `race-${n}-${j}`],
+  )
+  const { rows } = await db.query('insert into public.applications (user_id, job_id) values ($1, $2) returning id', [p.u, j])
+  return { id: rows[0].id, job: j }
+}
+
+// A ready application Send for me may claim: chosen by the person, Strong, at a followed company.
+async function mkAllowed(db, p, n) {
+  // a throwaway database: scoring's column, if the migrations have not added it
+  await db.query('alter table public.person_roles add column if not exists chance text')
+  const a = await mkApp(db, p, n)
+  await db.query(
+    "insert into public.person_roles (user_id, job_id, chance) values ($1, $2, 'strong') on conflict (user_id, job_id) do update set chance = 'strong'",
+    [p.u, a.job],
+  )
+  const started = await move(db, a.id, ['none'], 'preparing', ev('application.created', 'person', `race-s:${a.id}`))
+  if (!started.ok) throw new Error(`setup start: ${JSON.stringify(started)}`)
+  const ready = await move(db, a.id, ['preparing'], 'ready', ev('step.finished', 'schedule', `race-r:${a.id}`))
+  if (!ready.ok) throw new Error(`setup ready: ${JSON.stringify(ready)}`)
+  return a.id
+}
+
+const claimBody = (p, id, extra = {}) =>
+  ev('fill.auto_started', 'extension', `race-claim:${id}`, { payload: { token_id: p.tok, auto: true, files: [{ name: 'resume.pdf', sha256: 'aa' }], ...extra } })
+
+const drop = (db, p) => db.query('delete from auth.users where id = $1', [p.u])
+
+const pausedAt = async (db, p) =>
+  (await db.query("select (preferences -> 'pipeline' ->> 'paused_at')::timestamptz as t from public.profiles where id = $1", [p.u])).rows[0].t
+
+const pipelineCases = [
+  {
+    name: 'ten starts under a cap of 3 let exactly three through',
+    run: async ({ direct }) => {
+      const p = await mkPerson(direct)
+      const apps = []
+      for (let i = 0; i < 10; i++) apps.push(await mkApp(direct, p, i))
+      const cs = await connect(POOLER, 10)
+      const rs = await Promise.all(
+        cs.map((c, i) =>
+          move(c, apps[i].id, ['none'], 'preparing', ev('application.created', 'rule', `race-cap:${apps[i].id}`), { kind: 'application.created', actor: 'rule', max: 3 }),
+        ),
+      )
+      same(rs.filter((r) => r.ok).length, 3, 'starts let through')
+      same(rs.filter((r) => r.refusal === 'cap').length, 7, 'starts refused for the cap')
+      await drop(direct, p)
+    },
+  },
+  {
+    name: 'Pause racing five starts leaves no start after paused_at',
+    run: async ({ direct }) => {
+      const p = await mkPerson(direct)
+      const apps = []
+      for (let i = 0; i < 5; i++) apps.push(await mkApp(direct, p, i))
+      const cs = await connect(POOLER, 6)
+      const rs = await Promise.all([
+        ...apps.map((a, i) => move(cs[i], a.id, ['none'], 'preparing', ev('application.created', 'person', `race-pz:${a.id}`))),
+        cs[5].query('select public.pipeline_pause($1::uuid)', [p.u]),
+      ])
+      const t = await pausedAt(direct, p)
+      if (!t) throw new Error('the pause did not land')
+      const { rows } = await direct.query(
+        "select count(*)::int as n from public.pipeline_events where user_id = $1 and kind = 'application.created' and created_at > $2",
+        [p.u, t],
+      )
+      same(rows[0].n, 0, 'starts written after paused_at')
+      const refused = rs.slice(0, 5).filter((r) => r.refusal === 'paused').length
+      const moved = rs.slice(0, 5).filter((r) => r.ok).length
+      same(refused + moved, 5, 'every start was either moved or refused for the pause')
+      await drop(direct, p)
+    },
+  },
+  {
+    name: 'two claims on one application: one wins',
+    run: async ({ direct }) => {
+      const p = await mkPerson(direct, { send: true })
+      const id = await mkAllowed(direct, p, 'one')
+      const cs = await connect(POOLER, 2)
+      const rs = await Promise.all([
+        move(cs[0], id, ['ready'], 'applying', claimBody(p, id, {})),
+        move(cs[1], id, ['ready'], 'applying', { ...claimBody(p, id), idempotency_key: `race-claim-b:${id}` }),
+      ])
+      same(rs.filter((r) => r.ok && !r.replay).length, 1, 'claims that won')
+      const { rows } = await direct.query("select count(*)::int as n from public.pipeline_events where application_id = $1 and kind = 'fill.auto_started'", [id])
+      same(rows[0].n, 1, 'claim events')
+      await drop(direct, p)
+    },
+  },
+  {
+    name: 'ten claims under a send cap of 3 let exactly three through',
+    run: async ({ direct }) => {
+      const p = await mkPerson(direct, { send: true })
+      const ids = []
+      for (let i = 0; i < 10; i++) ids.push(await mkAllowed(direct, p, i))
+      const cs = await connect(POOLER, 10)
+      const rs = await Promise.all(cs.map((c, i) => move(c, ids[i], ['ready'], 'applying', claimBody(p, ids[i]))))
+      same(rs.filter((r) => r.ok).length, 3, 'claims let through')
+      same(rs.filter((r) => r.refusal === 'cap').length, 7, 'claims refused for the cap')
+      await drop(direct, p)
+    },
+  },
+  {
+    name: 'two submission.sending calls for one application write one event',
+    run: async ({ direct }) => {
+      const p = await mkPerson(direct, { send: true })
+      const id = await mkAllowed(direct, p, 'send')
+      const claim = await move(direct, id, ['ready'], 'applying', claimBody(p, id))
+      if (!claim.ok) throw new Error(`claim: ${JSON.stringify(claim)}`)
+      const files = [{ name: 'resume.pdf', sha256: 'aa' }]
+      const served = await direct.query(
+        "select public.pipeline_note($1::uuid, $2::uuid, $3::jsonb) as r",
+        [p.u, id, JSON.stringify(ev('fill.started', 'extension', `race-fs:${id}`, { payload: { auto: true, files } }))],
+      )
+      if (!served.rows[0].r.ok) throw new Error(`fill.started: ${JSON.stringify(served.rows[0].r)}`)
+      const sending = () => ev('submission.sending', 'extension', `sending:${id}`, { payload: { token_id: p.tok, lease_holder: claim.lease_holder, files } })
+      const cs = await connect(POOLER, 2)
+      const rs = await Promise.all(cs.map((c) => move(c, id, ['applying'], 'applying', sending())))
+      same(rs.filter((r) => r.ok).length, 2, 'both calls answered')
+      same(rs.filter((r) => r.replay).length, 1, 'one of them a replay')
+      same(rs[0].event.id, rs[1].event.id, 'the same event')
+      const { rows } = await direct.query("select count(*)::int as n from public.pipeline_events where application_id = $1 and kind = 'submission.sending'", [id])
+      same(rows[0].n, 1, 'sending events')
+      await drop(direct, p)
+    },
+  },
+  {
+    name: 'Pause racing five claims leaves no claim after paused_at',
+    run: async ({ direct }) => {
+      const p = await mkPerson(direct, { send: true })
+      const ids = []
+      for (let i = 0; i < 5; i++) ids.push(await mkAllowed(direct, p, i))
+      const cs = await connect(POOLER, 6)
+      const rs = await Promise.all([
+        ...ids.map((id, i) => move(cs[i], id, ['ready'], 'applying', claimBody(p, id))),
+        cs[5].query('select public.pipeline_pause($1::uuid)', [p.u]),
+      ])
+      const t = await pausedAt(direct, p)
+      if (!t) throw new Error('the pause did not land')
+      const { rows } = await direct.query(
+        "select count(*)::int as n from public.pipeline_events where user_id = $1 and kind in ('fill.auto_started', 'submission.sending') and created_at > $2",
+        [p.u, t],
+      )
+      same(rows[0].n, 0, 'claims written after paused_at')
+      same(rs.slice(0, 5).filter((r) => r.ok || r.refusal === 'paused').length, 5, 'every claim was moved or refused for the pause')
+      await drop(direct, p)
+    },
+  },
+  {
+    name: 'the person filling and an automatic claim race for one application: one takes it',
+    run: async ({ direct }) => {
+      const p = await mkPerson(direct, { send: true })
+      const id = await mkAllowed(direct, p, 'both')
+      const cs = await connect(POOLER, 2)
+      const rs = await Promise.all([
+        move(cs[0], id, ['ready'], 'applying', ev('fill.started', 'extension', `race-manual:${id}`, { payload: { auto: false } })),
+        move(cs[1], id, ['ready'], 'applying', claimBody(p, id)),
+      ])
+      same(rs.filter((r) => r.ok).length, 1, 'the applications taken')
+      same(rs.filter((r) => r.refusal === 'stale').length + rs.filter((r) => r.refusal === 'not_allowed').length, 1, 'the one refused')
+      await drop(direct, p)
+    },
+  },
+]
+cases.push(...pipelineCases)
+
 let failed = 0
 try {
   await waitFor(POOLER)
