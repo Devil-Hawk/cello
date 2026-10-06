@@ -26,7 +26,7 @@ export function OnboardingChecklist({ hasCompany, hasResume, hasApiKey }: Onboar
       done: hasResume,
       label: 'Upload your resume',
       body: 'Powers AI match scores for every discovered job.',
-      href: '/settings',
+      href: '/profile',
       cta: 'Upload',
     },
     {

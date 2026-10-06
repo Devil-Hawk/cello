@@ -21,7 +21,7 @@ function render(overrides: Partial<EditorProps> = {}): string {
       markdown: MARKDOWN,
       versionLabel: 'Version 1',
       templateId: DEFAULT_TEMPLATE_ID,
-      onSave: async () => ({ ok: false }),
+      onSave: async () => ({ ok: false as const }),
       ...overrides,
     })
   )
@@ -98,7 +98,9 @@ describe('ResumeEditor markup', () => {
 })
 
 describe('saveResumeVersion', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
 
   it('posts the edit into the version\'s own bucket as source edited', async () => {
     const fetchStub = vi.fn(async () => new Response(JSON.stringify({ document: { version: 4 }, markdown: '# Canonical' }), { status: 200 }))

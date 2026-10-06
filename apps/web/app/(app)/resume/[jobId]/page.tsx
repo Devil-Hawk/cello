@@ -470,8 +470,8 @@ export default function ResumeStudioPage() {
     }
   }
 
-  const backHref = isBase ? '/settings' : '/jobs'
-  const backLabel = isBase ? 'Settings' : 'All jobs'
+  const backHref = isBase ? '/profile' : '/jobs'
+  const backLabel = isBase ? 'Profile' : 'All jobs'
 
   if (loading) {
     return (
@@ -592,8 +592,8 @@ export default function ResumeStudioPage() {
           </Button>
           {!hasResumeAtAll && (
             <p className="mt-2 text-caption text-muted-foreground">
-              <Link href="/settings" className="font-medium text-accent-deep hover:underline">
-                Upload a resume in Settings
+              <Link href="/profile" className="font-medium text-accent-deep hover:underline">
+                Add a resume on Profile
               </Link>{' '}
               first.
             </p>

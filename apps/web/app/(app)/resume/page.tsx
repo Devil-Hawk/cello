@@ -439,17 +439,17 @@ export default function ResumeHomePage() {
 
       {/* The no-resume path. The editor below still renders and still saves, so
           "write one here" is a real option — but an upload is the faster one,
-          and Settings is where that lives. */}
+          and Profile is where that lives. */}
       {!hasResumeAtAll && (
         <EmptyState
           icon={FileText}
           title="No resume on file yet"
-          body="Upload one in Settings and it becomes your base resume — or write it below and save your first version."
+          body="Add one on Profile and it becomes your base resume, or write it below and save your first version."
           action={
             <Button asChild size="sm">
-              <Link href="/settings">
+              <Link href="/profile">
                 <Upload aria-hidden="true" className="h-3.5 w-3.5" />
-                Upload in Settings
+                Add on Profile
               </Link>
             </Button>
           }

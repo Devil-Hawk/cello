@@ -96,7 +96,7 @@ export function ResumeOptimizerPanel({
   const disabledReason: string | null = statusError
     ? "Couldn't check your account status — retry"
     : !hasResume
-      ? 'Upload a resume in Settings'
+      ? 'Add your resume on Profile'
       : hasApiKey === false
         ? (apiKeyMessage ?? 'Add an API key in Settings')
         : null
