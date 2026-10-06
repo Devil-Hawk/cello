@@ -14,7 +14,7 @@
 import type { AtsJob, AtsProvider, DetectInput, FetchContext } from './types'
 import { isValidToken } from './types'
 import { CircuitOpenError, HttpError, fetchJson } from './http'
-import { htmlToPlainText } from './html'
+import { htmlToPlainText, rawHtmlOf } from './html'
 import { mapWithConcurrency } from './concurrency'
 import { isStalePosting } from '../jobs/freshness'
 import { assertSsrfSafe } from '../security/untrusted'
@@ -94,7 +94,7 @@ function fromV2(host: string, p: V2Position): AtsJob | null {
     location: p.location || (Array.isArray(p.locations) ? p.locations.join(' · ') : undefined) || undefined,
     postedAt: iso(p.t_create),
     ...(requisitionId ? { requisitionId } : {}),
-    ...(p.job_description ? { description: htmlToPlainText(p.job_description, MAX_DESCRIPTION_CHARS) } : {}),
+    ...(p.job_description ? { description: htmlToPlainText(p.job_description, MAX_DESCRIPTION_CHARS), descriptionHtml: rawHtmlOf(p.job_description) } : {}),
   }
 }
 
@@ -164,7 +164,7 @@ async function politePage(run: () => Promise<{ jobs: AtsJob[]; count: number }>,
   }
 }
 
-async function description(flavor: Flavor, host: string, domain: string, job: AtsJob, site: SiteFetcher): Promise<string | undefined> {
+async function description(flavor: Flavor, host: string, domain: string, job: AtsJob, site: SiteFetcher): Promise<{ text?: string; html?: string } | undefined> {
   const id = job.url.match(/\/careers\/job\/(\d+)/)?.[1]
   if (!id) return undefined
   try {
@@ -172,12 +172,12 @@ async function description(flavor: Flavor, host: string, domain: string, job: At
       const url = `https://${host}/api/apply/v2/jobs/${id}?domain=${domain}`
       await site.gate(url)
       const json = await fetchJson<V2Position>(url, { redirect: 'manual', retries: 1 })
-      return json.job_description ? htmlToPlainText(json.job_description, MAX_DESCRIPTION_CHARS) : undefined
+      return json.job_description ? { text: htmlToPlainText(json.job_description, MAX_DESCRIPTION_CHARS), html: rawHtmlOf(json.job_description) } : undefined
     }
     const url = `https://${host}/api/pcsx/position_details?position_id=${id}&domain=${domain}&hl=en`
     await site.gate(url)
     const json = await fetchJson<{ data?: { jobDescription?: string } }>(url, { redirect: 'manual', retries: 1 })
-    return json.data?.jobDescription ? htmlToPlainText(json.data.jobDescription, MAX_DESCRIPTION_CHARS) : undefined
+    return json.data?.jobDescription ? { text: htmlToPlainText(json.data.jobDescription, MAX_DESCRIPTION_CHARS), html: rawHtmlOf(json.data.jobDescription) } : undefined
   } catch {
     return undefined
   }
@@ -270,7 +270,11 @@ async function fetchJobs(token: string, ctx?: FetchContext): Promise<AtsJob[]> {
     .slice(0, DESCRIPTION_BUDGET)
   const bodies = await mapWithConcurrency(needBody, 2, (j) => description(flavor, host, domain, j, site))
   needBody.forEach((j, i) => {
-    if (bodies[i]) j.description = bodies[i]
+    const body = bodies[i]
+    if (body?.text) {
+      j.description = body.text
+      if (body.html) j.descriptionHtml = body.html
+    }
   })
   return jobs
 }

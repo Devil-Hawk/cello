@@ -5,7 +5,7 @@
 import type { AtsJob, AtsProvider, DetectInput } from './types'
 import { isValidToken } from './types'
 import { HttpError, assertAllowedHost, fetchJson } from './http'
-import { htmlToPlainText, linkHostsOf } from './html'
+import { htmlToPlainText, linkHostsOf, rawHtmlOf } from './html'
 
 const API_HOSTS = new Set(['api.lever.co', 'api.eu.lever.co'])
 
@@ -21,8 +21,11 @@ interface LeverPosting {
   lists?: { text?: string; content?: string }[]
   /** The closing text (benefits, equal opportunity, visa notes). */
   additionalPlain?: string
-  /** The same body as HTML; kept only for the hosts it links to. */
+  /** The opening paragraph as HTML (also read for the hosts it links to). */
   description?: string
+  /** The closing text as HTML. */
+  additional?: string
+  applyUrl?: string
   createdAt?: number
   country?: string
   workplaceType?: string
@@ -97,6 +100,18 @@ function fullDescription(j: LeverPosting): string | undefined {
   return parts.length > 0 ? parts.join('\n\n').slice(0, MAX_DESCRIPTION_CHARS) : undefined
 }
 
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+/** The same posting as HTML, in the same order: opening, each titled list, closing. Kept whole by syncJobs. */
+function fullHtml(j: LeverPosting): string | undefined {
+  const lists = (Array.isArray(j.lists) ? j.lists : []).flatMap((l) =>
+    l && typeof l === 'object' && typeof l.content === 'string' && l.content.trim()
+      ? [`${typeof l.text === 'string' && l.text.trim() ? `<h3>${escapeHtml(l.text.trim())}</h3>` : ''}<ul>${l.content}</ul>`]
+      : []
+  )
+  return rawHtmlOf(j.description, ...lists, j.additional)
+}
+
 function detect(input: DetectInput): { token: string } | null {
   if (!input.careerUrl) return null
   let url: URL
@@ -124,6 +139,8 @@ async function fetchBoard(host: string, token: string): Promise<AtsJob[]> {
       externalId: j.hostedUrl,
       location: formatLocation(j),
       description: fullDescription(j),
+      descriptionHtml: fullHtml(j),
+      ...(typeof j.applyUrl === 'string' && j.applyUrl ? { applyUrl: j.applyUrl } : {}),
       linkHosts: typeof j.description === 'string' && j.description ? linkHostsOf(j.description) : undefined,
       postedAt: toIsoFromEpochMs(j.createdAt),
       salary: formatSalary(j),

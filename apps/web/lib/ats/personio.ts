@@ -24,7 +24,7 @@ import * as cheerio from 'cheerio'
 import type { AtsJob, AtsProvider, DetectInput } from './types'
 import { isValidToken } from './types'
 import { assertAllowedHostSuffix, fetchText } from './http'
-import { htmlSectionsToPlainText } from './html'
+import { htmlSectionsToPlainText, rawHtmlOf } from './html'
 
 // Personio serves each customer's board on both .de and .com (verified: the
 // same board answers on both). One canonical host is used for every request so
@@ -104,6 +104,7 @@ async function fetchJobs(token: string): Promise<AtsJob[]> {
       externalId: url,
       location: uniqueOffices.length > 0 ? uniqueOffices.join(' · ') : undefined,
       description: htmlSectionsToPlainText(sections),
+      descriptionHtml: rawHtmlOf(...sections),
       postedAt: toIso(position.children('createdAt').text().trim()),
     })
   })
