@@ -1,8 +1,8 @@
 // POST|GET /api/harness/cron — the harness's one scheduled tick: resume every
 // checkpointed run that stalled, wipe ruling-5 user-data rows past their
 // demo's expiry, create + run a daily-digest agent_run for each active user,
-// then run lib/graph/distill.ts#distillInsights per active user (its own
-// internal weekly gate makes this a cheap no-op on six of every seven ticks)
+// then run lib/learning/learner.ts#runLearner per active user (counts in code,
+// at most one model read a night)
 // (docs/superpowers/specs/2026-08-16-langgraph-port-design.md).
 //
 // Guarded by the CRON_SECRET env var: the caller must present it as either
@@ -53,7 +53,7 @@ import { invokeGraphForUser, type CompiledGraphLike } from '@/lib/graph/invoke'
 import { harnessRunGraph, markRunPausedOnInterrupt, type RunOutcome } from '@/lib/graph/runs'
 import { summarizeRunOutcome } from '@/lib/graph/run-summary'
 import { countThreadCheckpoints } from '@/lib/graph/pg'
-import { distillInsights } from '@/lib/graph/distill'
+import { runLearner } from '@/lib/learning/learner'
 import { composeAndStoreDigest, type DigestOutcome } from '@/lib/harness/agents/digest'
 import { wipeExpiredDemoData, type DemoWipeResult } from '@/lib/access/demo-wipe'
 import { pruneOldTraceSpans } from '@/lib/trace/spans'
@@ -389,7 +389,7 @@ export async function POST(request: NextRequest) {
   // trace_spans retention — rides the same tick as the demo wipe just above,
   // for the same reason (see lib/trace/spans.ts#pruneOldTraceSpans and the
   // trace_spans migration's own header): independent of every other pass, a
-  // prune failure must never block resume/digest/distill and vice versa.
+  // prune failure must never block resume/digest/learning and vice versa.
   const traceSpansPruned = await pruneOldTraceSpans(admin).catch((e) => {
     logApiError('harness/cron:trace-prune', e)
     return 0
@@ -400,7 +400,7 @@ export async function POST(request: NextRequest) {
     .select('id, resume_text, preferences, is_demo, demo_expires_at')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // Demo profiles are never part of the per-user digest/distill batch: they
+  // Demo profiles are never part of the per-user digest/learning batch: they
   // would crowd the owner out of CRON_MAX_USERS and burn LLM spend. The demo
   // wipe above has already run for them.
   const active = ((profiles ?? []) as ActiveProfile[]).filter(
@@ -491,32 +491,28 @@ export async function POST(request: NextRequest) {
     Array.from({ length: Math.max(1, Math.min(CRON_CONCURRENCY, batch.length)) }, digestWorker)
   )
 
-  // --- Weekly insight distillation pass (Step 6) ------------------------------
-  // distillInsights carries its OWN weekly gate (agent_runs.created_at for
-  // goal=DISTILL_GOAL) — most ticks this is one cheap SELECT per user that
-  // returns { ran: false } immediately, so riding the existing per-user batch
-  // here (same active-user set, same bounded concurrency) costs nothing extra
-  // on the six days out of seven it does not actually distill. A failure for
-  // one user must never block another's digest/resume/distillation, same
-  // independence discipline as every other pass in this route.
-  const distillResults: { userId: string; ran: boolean; reason?: string; insightsWritten?: number; refusals?: number }[] = []
+  // --- Nightly learning pass (K15) ---------------------------------------------
+  // runLearner recounts what Cello learned for each active person: counts from code over
+  // their record, and at most one model read stored as a proposal. A failure for one
+  // user must never block another's digest, resume or learning pass.
+  const learningResults: { userId: string; counted?: number; read?: string; error?: string }[] = []
   let xNext = 0
-  const distillWorker = async () => {
+  const learningWorker = async () => {
     while (true) {
       const i = xNext++
       if (i >= batch.length) return
       const profile = batch[i]
       try {
-        const r = await distillInsights(admin, profile.id)
-        distillResults.push({ userId: profile.id, ran: r.ran, reason: r.reason, insightsWritten: r.insightsWritten, refusals: r.refusals })
+        const r = await runLearner(profile.id, { admin })
+        learningResults.push({ userId: profile.id, counted: r.counted, read: r.read.ran ? `proposed ${r.read.proposed}` : (r.read.reason ?? 'skipped') })
       } catch (e) {
-        logApiError('harness/cron:distill', e, { userId: profile.id })
-        distillResults.push({ userId: profile.id, ran: false, reason: e instanceof Error ? e.message : String(e) })
+        logApiError('harness/cron:learning', e, { userId: profile.id })
+        learningResults.push({ userId: profile.id, error: e instanceof Error ? e.message : String(e) })
       }
     }
   }
   await Promise.all(
-    Array.from({ length: Math.max(1, Math.min(CRON_CONCURRENCY, batch.length)) }, distillWorker)
+    Array.from({ length: Math.max(1, Math.min(CRON_CONCURRENCY, batch.length)) }, learningWorker)
   )
 
   return NextResponse.json({
@@ -526,7 +522,7 @@ export async function POST(request: NextRequest) {
     skippedForCapacity: Math.max(0, active.length - batch.length),
     results,
     digest: digestResults,
-    distill: distillResults,
+    learning: learningResults,
     demoWipe,
     traceSpansPruned,
     resumed: {
