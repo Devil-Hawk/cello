@@ -294,7 +294,10 @@ const pipelineCases = [
         "select count(*)::int as n from public.pipeline_events where user_id = $1 and kind in ('fill.auto_started', 'submission.sending') and created_at > $2",
         [p.u, t],
       )
-      same(rows[0].n, 0, 'claims written after paused_at')
+      if (rows[0].n !== 0) {
+        const late = await direct.query("select kind, created_at, idempotency_key from public.pipeline_events where user_id = $1 order by created_at", [p.u])
+        throw new Error(`claims written after paused_at ${t.toISOString()}: ${JSON.stringify(late.rows)} results ${JSON.stringify(rs.map((r) => r.ok ?? r.refusal ?? r))}`)
+      }
       same(rs.slice(0, 5).filter((r) => r.ok || r.refusal === 'paused').length, 5, 'every claim was moved or refused for the pause')
       await drop(direct, p)
     },

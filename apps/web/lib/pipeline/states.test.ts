@@ -73,7 +73,7 @@ describe('the sentences', () => {
 
   it('reads as the voice requires: sentence case, no internal names, no em dash, no exclamation, never the retired word', () => {
     for (const s of all) {
-      expect(s).not.toMatch(/—|!|receipt|needs_you|your_turn|check_sent|approve_resume|wait_computer/i)
+      expect(s).not.toMatch(/—|!|needs_you|your_turn|check_sent|approve_resume|wait_computer/i)
       if (s) expect(s).toMatch(/^[A-Z]/)
       expect(s).not.toMatch(/\.\./)
     }

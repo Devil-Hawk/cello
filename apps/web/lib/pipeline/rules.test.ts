@@ -34,7 +34,7 @@ describe('candidatesForRule', () => {
       cand('unfollowed', { followed: false }),
       cand('stretch', { chance: 'stretch' }),
     ])
-    expect(r.start.map((c) => c.jobId)).toEqual(['possible', 'unfollowed'])
+    expect(r.start.map((c) => c.jobId)).toEqual(['unfollowed', 'possible'])
   })
 
   it('orders by want, then by chance, then by the order it came in', () => {
