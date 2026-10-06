@@ -33,7 +33,7 @@
 // exception already wired below: it does not live in `public` (mem0's own
 // table sits in the `mem0` schema, keyed by payload, not `user_id` — see
 // supabase/migrations/20260816000006_memories.sql), so a generic
-// `.from(table).delete().in(column ?? 'user_id', chunk)` pass can never reach it —
+// `.from(table).delete().in('user_id', chunk)` pass can never reach it —
 // it goes through MemoryStore.deleteAll(), the same chokepoint every other
 // memory read/write does.
 //
@@ -106,7 +106,7 @@ export async function wipeExpiredDemoData(
   // already is (same file, same reason: this can outgrow a request's
   // querystring long before this codebase notices).
   const results: DemoWipeResult[] = []
-  for (const { table, column } of WIPED) {
+  for (const { table } of WIPED) {
     const perChunkDeleted = await chunkedIn(expiredIds, async (chunk) => {
       const { error: delErr, count } = await admin
         .from(table)

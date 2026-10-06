@@ -153,7 +153,7 @@ describe('the loaders and routes that must never hard-require the demo columns',
     'lib/outreach/config.ts',
     'app/api/settings/budget/route.ts',
     'app/api/settings/keys/route.ts',
-    'app/api/outreach/send/route.ts',
+    'lib/commands/send/outreach.ts',
     'app/api/digest/send/route.ts',
   ]
 
