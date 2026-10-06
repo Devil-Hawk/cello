@@ -223,7 +223,7 @@ export async function ingestCompany(store: AtsStore, company: DueCompany, deps: 
         await saveSourceCheck(store, company, board)
         return
       }
-      const stored = await loadStoredJobs(store, company.id, result)
+      const stored = await loadStoredJobs(store, company.id, result, company.employer_id)
       if (!stored) {
         outcome.failure = 'board_error'
         return

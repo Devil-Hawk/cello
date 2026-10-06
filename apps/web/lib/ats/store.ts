@@ -41,14 +41,15 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
   const lock = opts.lockClient
 
   return {
-    async listJobs(companyId: string): Promise<ExistingJob[]> {
+    async listJobs(companyId: string, employerId?: string | null): Promise<ExistingJob[]> {
       const rows: ExistingJob[] = []
       // Pagination within a company is always sequential.
       for (let from = 0; ; from += PAGE_SIZE) {
         const { data, error } = await client
           .from('jobs')
           .select('external_id, title, location, salary_range, description_md5, source, still_open, url, last_seen_at, job_function, seniority, country, language, is_remote, posted_at')
-          .eq('company_id', companyId)
+          // A role is one row per posting, shared by everyone who follows its employer.
+          .eq(employerId ? 'employer_id' : 'company_id', employerId ?? companyId)
           .order('external_id')
           .range(from, from + PAGE_SIZE - 1)
         fail(error)
@@ -102,10 +103,19 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
 
     async upsertJobs(rows): Promise<void> {
       if (dry) return
-      const { error } = await client
-        .from('jobs')
-        .upsert(rows as never, { onConflict: 'company_id,external_id', ignoreDuplicates: false })
-      fail(error)
+      const shared = rows.filter((r) => r.employer_id)
+      const own = rows.filter((r) => !r.employer_id)
+      if (shared.length > 0) {
+        // One row per (employer, posting): the first follower's company stays, later reads update it.
+        const { error } = await client.rpc('upsert_shared_jobs', { p_rows: shared })
+        // Before the contract migration the function does not exist yet: the company's own row is written as it always was.
+        if (error?.code === 'PGRST202') own.push(...shared)
+        else fail(error)
+      }
+      if (own.length > 0) {
+        const { error } = await client.from('jobs').upsert(own as never, { onConflict: 'company_id,external_id', ignoreDuplicates: false })
+        fail(error)
+      }
     },
 
     async keepForPerson({ userId, companyId, externalIds, hiddenIds, targetsVersion }): Promise<void> {
@@ -132,7 +142,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
         const { data, error } = await client
           .from('jobs')
           .update(u.fields as never)
-          .eq('company_id', u.companyId)
+          .eq(u.employerId ? 'employer_id' : 'company_id', u.employerId ?? u.companyId)
           .eq('external_id', u.externalId)
           .select('id')
         fail(error)

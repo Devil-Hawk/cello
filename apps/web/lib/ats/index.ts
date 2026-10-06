@@ -96,6 +96,8 @@ export interface CompanyInput {
 /** Row shape upserted into jobs (onConflict company_id,external_id). */
 export interface JobUpsertRow {
   company_id: string
+  /** Set only for a company in the directory: its rows are written once per employer, whoever reads first. */
+  employer_id?: string
   title: string
   description: string
   url: string
@@ -160,6 +162,8 @@ export interface CountWrite {
 /** Column changes for one stored job. Only the fields that differ are present. */
 export interface JobUpdate {
   companyId: string
+  /** The company's employer, when it has one: the stored row is the employer's, not the company's. */
+  employerId?: string
   externalId: string
   fields: Record<string, unknown>
 }
@@ -178,8 +182,8 @@ export interface SightingResult {
  * isolates failures per company.
  */
 export interface AtsStore {
-  /** The company's stored jobs (paged internally). */
-  listJobs(companyId: string): Promise<ExistingJob[]>
+  /** The company's stored jobs (paged internally); the employer's, when the company has one, since a role is shared by everyone who follows it. */
+  listJobs(companyId: string, employerId?: string | null): Promise<ExistingJob[]>
   /**
    * Make room in a full company: delete the named stored roles that nothing
    * points at (an application, a draft...) and return the external ids it
@@ -187,7 +191,7 @@ export interface AtsStore {
    * full company simply drops the roles that do not fit.
    */
   evictJobs?(companyId: string, externalIds: string[]): Promise<string[]>
-  /** Insert new rows (on_conflict company_id,external_id, merge). */
+  /** Insert new rows (on_conflict company_id,external_id, merge; employer rows on_conflict employer_id,posting_key). */
   upsertJobs(rows: JobUpsertRow[]): Promise<void>
   /**
    * Give the person the roles a read kept (person_roles), `hiddenIds` of them hidden because nothing
@@ -405,10 +409,11 @@ export async function withCompanyLock(
 export async function loadStoredJobs(
   store: AtsStore,
   companyId: string,
-  result: CompanyRefreshResult
+  result: CompanyRefreshResult,
+  employerId?: string | null
 ): Promise<Map<string, ExistingJob> | null> {
   try {
-    return new Map((await store.listJobs(companyId)).map((job) => [job.externalId, job]))
+    return new Map((await store.listJobs(companyId, employerId)).map((job) => [job.externalId, job]))
   } catch (error) {
     result.errors.push(`listing existing jobs failed: ${errorMessage(error)}`)
     return null
@@ -460,7 +465,7 @@ export async function refreshLocked(
   // 0. What is stored already. Read first so a provider that needs a second
   //    request per posting (Workday, SmartRecruiters) spends it on the postings
   //    that have no description yet.
-  const stored = await loadStoredJobs(store, company.id, result)
+  const stored = await loadStoredJobs(store, company.id, result, company.employer_id)
   if (!stored) {
     board.skipSave = true
     return board
@@ -770,6 +775,7 @@ export async function syncJobs(
     .slice(0, room)
     .map(({ job, title, c }) => ({
       company_id: company.id,
+      ...(company.employer_id ? { employer_id: company.employer_id } : {}),
       title,
       description: (job.description ?? '').slice(0, MAX_DESCRIPTION_CHARS),
       url: job.url,
@@ -866,7 +872,7 @@ export async function syncJobs(
       })
       fields.requirements_extracted_at = now
     }
-    if (Object.keys(fields).length > 0) updates.push({ companyId: company.id, externalId: job.externalId, fields })
+    if (Object.keys(fields).length > 0) updates.push({ companyId: company.id, ...(company.employer_id ? { employerId: company.employer_id } : {}), externalId: job.externalId, fields })
   }
   if (updates.length > 0) {
     try {
