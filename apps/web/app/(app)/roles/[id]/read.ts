@@ -6,11 +6,15 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { visaFromCuratedList } from '@/lib/dossier/visa'
 import { resolveConstraints } from '@/lib/scoring/constraints'
+import { RequirementsSchema } from '@/lib/jobs/requirements'
+import type { RequirementItem, TypeProv } from '@/lib/jobs/relevance-types'
+import { readFit } from '@/lib/record/fit.stub'
 import { FIT_COLUMNS } from '@/lib/scoring'
+import { parseFit } from '@/lib/scoring/read'
 import { resolveTargeting } from '@/lib/targeting'
 import { NOT_FOR_ME_REASONS } from '@/components/roles/reactions'
-import { toItem, type ListRow } from '../read'
-import { sponsorshipLines, statusSentence, whyKept } from '@/components/roles/record/logic'
+import { TYPE_OPTIONS, toItem, type ListRow } from '../read'
+import { pastedLine, sponsorshipLines, statusSentence, whyKept, whyType } from '@/components/roles/record/logic'
 import type { RecordData, RecordHistoryItem, RecordPerson } from '@/components/roles/record/record-view'
 import type { PassReason, Reaction } from '@/lib/scoring/types'
 
@@ -19,8 +23,8 @@ type Db = SupabaseClient<any, any, any>
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const COLUMNS =
-  `job_id, saved_at, hidden_reason, visible_since, checked_at, ${FIT_COLUMNS}, ` +
-  'jobs!inner(id, title, description, url, location, salary_range, posted_at, seniority, job_function, is_remote, country, still_open, legit_label, employer_id, company_id, source_tier, companies(name, logo_url, domain))'
+  `job_id, saved_at, hidden_reason, visible_since, checked_at, via, role_type, ${FIT_COLUMNS}, ` +
+  'jobs!inner(id, title, description, description_md, description_state, description_source, apply_url, requirements, url, location, salary_range, posted_at, seniority, job_function, is_remote, country, still_open, legit_label, employer_id, company_id, source_tier, role_type, type_origin, type_prov, companies(name, logo_url, domain))'
 
 const reasonLabel = (r: string | null) => NOT_FOR_ME_REASONS.find((x) => x.reason === r)?.label ?? null
 
@@ -49,7 +53,11 @@ export async function readRecord(db: Db, userId: string, id: string): Promise<Re
   const prefs = (profile.data as { preferences?: unknown } | null)?.preferences ?? null
   const constraints = resolveConstraints(prefs)
   const targets = resolveTargeting(prefs)
-  const description = job.description ?? ''
+  // The posting as the employer wrote it, whole; a role read before the reader kept it falls back to the plain text.
+  const description = job.description_md ?? job.description ?? ''
+  const requirements = RequirementsSchema.safeParse(job.requirements)
+  const items: RequirementItem[] = requirements.success ? ((requirements.data.items ?? []) as RequirementItem[]) : []
+  const fit = readFit(items)
   const key = job.employer_id ?? job.company_id
   const forYou = (counts.data as { key: string; n: number }[] | null)?.find((c) => c.key === key)?.n ?? null
 
@@ -85,14 +93,23 @@ export async function readRecord(db: Db, userId: string, id: string): Promise<Re
 
   return {
     role: { ...role, reaction: r ? { reaction: r.reaction, reason: r.reason } : null },
-    url: job.url ?? null,
+    url: job.apply_url ?? job.url ?? null,
     description,
+    partial: job.description_md != null ? job.description_state === 'partial' || job.description_state === 'none' : undefined,
     tier: job.source_tier ?? null,
     checkedAt: row.checked_at,
     place: job.location ?? null,
     remote: job.is_remote ?? null,
     status: statusSentence(app ? { stage: app.stage, appliedAt: app.applied_at } : null),
-    why: whyKept({ jobFunction: job.job_function ?? null, seniority: job.seniority ?? null, isRemote: job.is_remote ?? null, country: job.country ?? null }, targets),
+    why: whyKept({ roleType: role.type, jobFunction: job.job_function ?? null, seniority: job.seniority ?? null, isRemote: job.is_remote ?? null, country: job.country ?? null }, { ...targets, roleTypes: targets.role_types ?? [] }),
+    typeWhy: whyType(role.type, (job.type_prov ?? null) as TypeProv | null),
+    pasted: pastedLine(role.pasted, role.type, targets.role_types ?? []),
+    typeOptions: TYPE_OPTIONS,
+    fit,
+    kinds: Object.fromEntries(items.map((i) => [i.id, i.kind])),
+    // ponytail: no route stores a correction until K17b's roles.correct_evidence is on main, so Correct is not offered.
+    correctUrl: null,
+    chanceFit: parseFit({ id: job.id, ...row } as Parameters<typeof parseFit>[0]),
     sponsorship: sponsorshipLines(constraints.needsSponsorship, visaFromCuratedList(role.company) === 'likely', description),
     employer: { open, forYou },
     people,

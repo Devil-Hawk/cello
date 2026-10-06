@@ -13,13 +13,15 @@ export interface PostingProps {
   tier: string | null
   closed: boolean
   checkedAt: string | null
+  /** The reader kept only part of it. Without this, a body under 200 characters counts as part. */
+  partial?: boolean
 }
 
 // The whole posting, headings and lists kept, as the employer wrote it. It goes
 // through react-markdown with GFM and rehype-sanitize and never through raw HTML,
 // so a script tag in a posting shows as text. A long one is folded after 12 lines
 // by CSS (the checkbox is the whole mechanism, so it works with no script).
-export function Posting({ text, company, url, tier, closed, checkedAt }: PostingProps) {
+export function Posting({ text, company, url, tier, closed, checkedAt, partial }: PostingProps) {
   const read = sourceLine(company, tier, closed, checkedAt)
   const body = (
     <div className="r-body r-prose">
@@ -30,7 +32,7 @@ export function Posting({ text, company, url, tier, closed, checkedAt }: Posting
   )
   return (
     <div className="space-y-4">
-      {isPartial(text) && <p className="r-body">Cello has only part of this posting.</p>}
+      {(partial ?? isPartial(text)) && <p className="r-body">Cello has only part of this posting.</p>}
       {text.trim() &&
         (needsFold(text) ? (
           <div className="r-fold">

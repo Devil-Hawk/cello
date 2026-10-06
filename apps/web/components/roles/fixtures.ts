@@ -1,6 +1,8 @@
 // Made-up roles for the Roles and record fixtures and their tests. No company
 // here is real, and nothing reads a database.
 
+import type { FitItem, RoleFitView } from '@/lib/fit/types'
+import { stripOf } from './record/logic'
 import type { RecordData } from './record/record-view'
 import type { RoleItem } from './types'
 
@@ -84,6 +86,36 @@ export function fixturePosting(chars = 2400): string {
   return out
 }
 
+/**
+ * `n` made-up requirements read against the person, in the mix the record has to show: a plus with a
+ * resume quote, a minus, a plus a model read (carries the mark), one nothing was found for, one not read,
+ * and one the person corrected. `long` makes the first requirement 400 characters.
+ */
+export function fixtureFit(n: number, long = false): { fit: RoleFitView; kinds: Record<string, 'must' | 'nice' | 'other'> } {
+  const kinds: Record<string, 'must' | 'nice' | 'other'> = {}
+  const items: FitItem[] = Array.from({ length: n }, (_, i): FitItem => {
+    const id = `req-${i + 1}`
+    kinds[id] = i % 3 === 0 ? 'must' : i % 3 === 1 ? 'nice' : 'other'
+    const requirement = long && i === 0 ? `Experience with ${'distributed systems, '.repeat(20)}in production.`.slice(0, 400) : `Requirement ${i + 1}: ${['Python', 'Kubernetes', 'Evaluation design', 'SQL', 'Talking to users', 'Rust', 'Data pipelines'][i % 7]}`
+    const base = { requirementId: id, requirement }
+    switch (i % 6) {
+      case 0:
+        return { ...base, verdict: 'strength', origin: 'code', evidence: [{ source: 'resume', ref: 'v1', quote: 'Led the ranking rewrite in Python' }] }
+      case 1:
+        return { ...base, verdict: 'gap', origin: 'model', evidence: [] }
+      case 2:
+        return { ...base, verdict: 'strength', origin: 'model', evidence: [{ source: 'answer', ref: 'a1', quote: 'I built the evaluation harness' }] }
+      case 3:
+        return { ...base, verdict: 'unknown', origin: 'code', evidence: [], notFound: true }
+      case 4:
+        return { ...base, verdict: 'unknown', origin: 'code', evidence: [] }
+      default:
+        return { ...base, verdict: 'gap', origin: 'person', evidence: [], note: 'I have not used it' }
+    }
+  })
+  return { fit: { items, strip: stripOf(items), needsModel: false, readAt: null }, kinds }
+}
+
 /** One role's record, made up. Pass overrides for the states a test needs. */
 export function fixtureRecord(over: Partial<RecordData> = {}): RecordData {
   const role = { ...fixtureRoles(1, 1)[0], title: 'AI Engineer', company: 'Vantage Loom', chance: 'possible' as const, read: 'Looks like what you go for.' }
@@ -97,6 +129,12 @@ export function fixtureRecord(over: Partial<RecordData> = {}): RecordData {
     remote: true,
     status: null,
     why: 'Kept: Engineering is one of your role types, and Senior is your level.',
+    typeWhy: { text: 'AI Engineer, from the title words "ai engineer".', model: false },
+    pasted: null,
+    typeOptions: fixtureTypeOptions,
+    ...fixtureFit(9),
+    correctUrl: null,
+    chanceFit: null,
     sponsorship: [],
     employer: { open: 636, forYou: 12 },
     people: [{ id: 'p1', name: 'Priya Nair', title: 'Engineering manager', how: 'In your contacts' }],
