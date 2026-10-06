@@ -47,9 +47,17 @@ export function ResumeDiff({ before, after, beforeLabel = 'Before', afterLabel =
                 key={idx}
                 className={cn(
                   'min-h-[1.4em] px-1',
+                  // ponytail: emerald and red until PG0's ok and stop tokens are on the base; swap at the rebase
                   row.type === 'remove' && 'bg-red-100 text-red-900 dark:bg-red-500/15 dark:text-red-200'
                 )}
               >
+                {/* A sign as well as a colour, so a change reads without seeing the colour. */}
+                {row.type === 'remove' && (
+                  <>
+                    <span aria-hidden="true">- </span>
+                    <span className="sr-only">Removed: </span>
+                  </>
+                )}
                 {row.left ?? ' '}
               </div>
             ))}
@@ -68,6 +76,12 @@ export function ResumeDiff({ before, after, beforeLabel = 'Before', afterLabel =
                   row.type === 'add' && 'bg-emerald-100 text-emerald-900 dark:bg-emerald-500/15 dark:text-emerald-200'
                 )}
               >
+                {row.type === 'add' && (
+                  <>
+                    <span aria-hidden="true">+ </span>
+                    <span className="sr-only">Added: </span>
+                  </>
+                )}
                 {row.right ?? ' '}
               </div>
             ))}
