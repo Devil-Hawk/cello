@@ -232,6 +232,20 @@ function normalizeSourceText(raw: string): string[] {
     .map((line) => line.replace(/\s+$/, ''))
 }
 
+/** Shown to the person, and kept on the resume, when a file reads as a table or columns. */
+export const COLUMNS_WARNING = 'One column reads cleanly. Tables and columns are read out of order.'
+
+/**
+ * True when extracted text carries a table row (a line that starts and ends with a pipe) or a line
+ * with two runs of three or more spaces between words, which is how a column layout comes out.
+ * A contact line like "Seattle, WA | me@x.com | 555" is not a table.
+ * ponytail: line shapes only; a layout analysis of the PDF itself would catch more.
+ */
+export function looksLikeColumns(raw: string | null | undefined): boolean {
+  if (typeof raw !== 'string') return false
+  return normalizeSourceText(raw).some((line) => /^\s*\|.+\|\s*$/.test(line) || /\S {3,}\S.* {3,}\S/.test(line))
+}
+
 /**
  * Infer resume Markdown from undesigned plain text.
  *
