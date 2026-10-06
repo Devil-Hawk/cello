@@ -71,6 +71,10 @@ export async function relayTick(d: RelayDeps = defaults): Promise<boolean> {
 }
 
 async function serve(d: RelayDeps, rung: 'R1' | 'R2', wait: number, model: string, run: (req: LocalRequest) => Promise<string>): Promise<boolean> {
+  // ponytail: the five minute alarm polls, so each relay-set extension costs one claim
+  // invocation per tick (about 8,640 a month) and holds the function up to 25 s (wait: 25
+  // here, maxDuration = 60 in claim/route.ts). Move to Realtime with a short-lived JWT
+  // once relay users pass about 50.
   const claimed = await d.call<Claimed>('/api/model-jobs/claim', { rung, wait })
   const job = claimed?.job
   if (!job) return false
