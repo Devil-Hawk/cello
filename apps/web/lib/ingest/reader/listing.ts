@@ -241,6 +241,47 @@ export function listingSiteFor(careerUrl: string): ListingSite | null {
   }
 }
 
+const KEYWORD_FIELD = /^(?:q|k|s|query|keywords?|search|search[-_]?(?:term|text|query)|searchterm|text|term|what|title|job[-_]?title)$/i
+
+/**
+ * The address a page's own search form would open for one phrase, or null. Only
+ * a plain GET form on the page's own host: a POST form (NHS Jobs sends its search
+ * as a POST with a CSRF token) needs a handshake Cello does not make, and one
+ * with a password field is a login.
+ */
+export function searchFormUrl(html: string, pageUrl: string, term: string): string | null {
+  let $: cheerio.CheerioAPI
+  try {
+    $ = cheerio.load(html)
+  } catch {
+    return null
+  }
+  for (const form of $('form').toArray()) {
+    const f = $(form)
+    if (clean(f.attr('method')).toLowerCase() !== 'get' && f.attr('method') !== undefined) continue
+    if (f.find('input[type=password],input[type=file]').length > 0) continue
+    const field = f
+      .find('input')
+      .toArray()
+      .find((i) => {
+        const type = clean($(i).attr('type')).toLowerCase()
+        return (type === '' || type === 'text' || type === 'search') && KEYWORD_FIELD.test($(i).attr('name') ?? '')
+      })
+    if (!field) continue
+    let to: URL
+    try {
+      to = new URL(f.attr('action') ?? '', pageUrl)
+    } catch {
+      continue
+    }
+    if (to.origin !== new URL(pageUrl).origin || /log-?in|sign-?in|subscribe|newsletter/i.test(to.pathname)) continue
+    for (const i of f.find('input[type=hidden][name]').toArray()) to.searchParams.set($(i).attr('name')!, $(i).attr('value') ?? '')
+    to.searchParams.set($(field).attr('name')!, term)
+    return to.toString()
+  }
+  return null
+}
+
 export interface ListingRead {
   jobs: AtsJob[]
   /** Role links the pages listed, before targets and confirmation. */
@@ -270,6 +311,20 @@ export async function readListing(
 ): Promise<ListingRead> {
   const all = new Map<string, RoleLink>()
   for (const p of pages) for (const l of roleLinks(p.html, p.url)) if (!all.has(l.url)) all.set(l.url, l)
+
+  // A page with no roles on it but a plain search form (a landing page that shows roles only for a search): ask it for the person's search once.
+  const landing = pages[0]
+  if (all.size === 0 && landing) {
+    const url = searchFormUrl(landing.html, landing.url, searchTerms(opts.targets)[0] ?? 'engineer')
+    if (url && !pages.some((p) => p.url === url)) {
+      try {
+        const res = await f.get(url, { follow: (next) => new URL(next).origin === new URL(url).origin })
+        for (const l of res.ok ? roleLinks(res.text, res.finalUrl) : []) if (!all.has(l.url)) all.set(l.url, l)
+      } catch (error) {
+        if (error instanceof ReaderError && error.reason !== 'robots') throw error
+      }
+    }
+  }
 
   const site = listingSiteFor(careerUrl)
   if (site) {

@@ -448,3 +448,111 @@ describe('the rendered tier and the roles outside the targets', () => {
     expect(read.listedIds).toHaveLength(2)
   })
 })
+
+// The second host has no job word in its name, so only the standard-address rule can let its sitemap through.
+describe.each([
+  ['https://www.kaiserpermanentejobs.org', 'kaiserpermanentejobs.org'],
+  ['https://www.kphealth.test', 'kphealth.test'],
+])('a site that publishes its roles in a plain /sitemap.xml and names no sitemap in robots.txt (Kaiser Permanente at %s)', (origin, domain) => {
+  const home = `${origin}/`
+  const day = new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10)
+  const posting = (title: string) =>
+    `<html><head><title>${title}</title><script type="application/ld+json">${JSON.stringify({
+      '@type': 'JobPosting',
+      title,
+      description: `<p>${'You will care for patients, work with the care team and keep clear records. '.repeat(6)}</p>`,
+      datePosted: day,
+      hiringOrganization: { '@type': 'Organization', name: 'Kaiser Permanente' },
+      jobLocation: { '@type': 'Place', address: { '@type': 'PostalAddress', addressLocality: 'Seattle', addressRegion: 'WA', addressCountry: 'US' } },
+    })}</script></head><body><h1>${title}</h1></body></html>`
+  const roles = [
+    ['seattle-wa', 'data-engineer', '641', '84000001'],
+    ['oakland-ca', 'data-analyst', '641', '84000002'],
+    ['denver-co', 'software-engineer', '641', '84000003'],
+  ]
+  const urlOf = (r: string[]) => `${origin}/job/${r[0]}/${r[1]}/${r[2]}/${r[3]}`
+  const mixed = `<?xml version="1.0"?><urlset>${[`${origin}/`, `${origin}/about-us/`, `${origin}/search-jobs`, ...roles.map(urlOf)].map((u) => `<url><loc>${u}</loc></url>`).join('')}</urlset>`
+  const routes = (): Record<string, Route> => ({
+    [`${origin}/robots.txt`]: 'User-agent: *\nDisallow: /admin\n',
+    [home]: '<html><body><div id="app"></div></body></html>',
+    [`${origin}/sitemap.xml`]: mixed,
+    ...Object.fromEntries(roles.map((r) => [urlOf(r), posting(r[1].split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' '))])),
+  })
+
+  it('is read by the sitemap tier with no model and no browser', async () => {
+    const fetchPage = notCalled('the rendered fetch')
+    const read = await readSite(company('Kaiser Permanente', domain, home), { fetcher: fakeFetcher(routes()), fetchPage, model: null })
+    expect(read.reason).toBeNull()
+    expect(read.tier).toBe('sitemap')
+    expect(read.jobs.map((j) => j.title).sort()).toEqual(['Data Analyst', 'Data Engineer', 'Software Engineer'])
+    expect(fetchPage).not.toHaveBeenCalled()
+  })
+
+  it('is the same when robots.txt does not exist', async () => {
+    const r = routes()
+    delete r[`${origin}/robots.txt`]
+    const read = await readSite(company('Kaiser Permanente', domain, home), { fetcher: fakeFetcher(r) })
+    expect(read.tier).toBe('sitemap')
+    expect(read.jobs).toHaveLength(3)
+  })
+})
+
+describe('a pasted search page, and a landing page with a search form', () => {
+  const origin = 'https://careers.acme.test'
+  const day = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10)
+  const posting = (title: string) =>
+    `<html><head><title>${title}</title><script type="application/ld+json">${JSON.stringify({
+      '@type': 'JobPosting',
+      title,
+      description: `<p>${'You will build and ship data pipelines for the team and own your projects. '.repeat(6)}</p>`,
+      datePosted: day,
+      hiringOrganization: { '@type': 'Organization', name: 'Acme' },
+      jobLocation: { '@type': 'Place', address: { '@type': 'PostalAddress', addressLocality: 'Austin', addressRegion: 'TX', addressCountry: 'US' } },
+    })}</script></head><body><h1>${title}</h1></body></html>`
+  const results = (titles: string[]) =>
+    `<html><body><ul>${titles.map((t, i) => `<li><a href="/jobs/${72000001 + i}/${t.toLowerCase().replace(/\W+/g, '-')}">${t}</a></li>`).join('')}</ul></body></html>`
+  const searched = ['Data Engineer', 'Software Engineer', 'Analytics Engineer']
+  const pagesOf = (): Record<string, Route> =>
+    Object.fromEntries(searched.map((t, i) => [`${origin}/jobs/${72000001 + i}/${t.toLowerCase().replace(/\W+/g, '-')}`, posting(t)]))
+  // A sitemap full of other roles (stores, kitchens): what a person who searched did not ask for.
+  const sitemap = `<urlset>${[1, 2, 3].map((n) => `<url><loc>${origin}/jobs/store-associate/9100000${n}</loc></url>`).join('')}</urlset>`
+
+  it('the pasted results page is read before the sitemap that lists everything', async () => {
+    const url = `${origin}/us/en/search-results?keywords=software+engineer`
+    const f = fakeFetcher({
+      [`${origin}/robots.txt`]: `Sitemap: ${origin}/sitemap.xml`,
+      [`${origin}/sitemap.xml`]: sitemap,
+      [url]: results(searched),
+      ...pagesOf(),
+      ...Object.fromEntries([1, 2, 3].map((n) => [`${origin}/jobs/store-associate/9100000${n}`, posting('Store Associate')])),
+    })
+    const read = await readSite(company('Acme', 'acme.test', url), { fetcher: f })
+    expect(read.tier).toBe('listing')
+    expect(read.jobs.map((j) => j.title).sort()).toEqual([...searched].sort())
+    expect(f.calls).not.toContain(`${origin}/sitemap.xml`)
+  })
+
+  it('a landing page with a plain GET search form is searched with the person\'s words', async () => {
+    const landing = `${origin}/search`
+    const form = `<html><body><form action="/search/results" method="get"><input type="hidden" name="lang" value="en"><input type="search" name="keyword"><input type="submit"></form></body></html>`
+    const f = fakeFetcher({
+      [`${origin}/robots.txt`]: 'User-agent: *\nAllow: /',
+      [landing]: form,
+      [`${origin}/search/results?lang=en&keyword=engineer`]: results(searched),
+      ...pagesOf(),
+    })
+    const read = await readSite({ company: { name: 'Acme', domain: 'acme.test', careerUrl: landing }, targets: { ...targets, titles: ['engineer'] } }, { fetcher: f })
+    expect(read.tier).toBe('listing')
+    expect(read.jobs).toHaveLength(3)
+  })
+
+  it('a POST search form (NHS Jobs: CSRF token) is never submitted, and the result says the site could not be read', async () => {
+    const landing = `${origin}/candidate/search`
+    const form = `<html><body><form method="post" id="search_form"><input type="hidden" name="_csrf" value="x"><input name="keyword" type="search"><input type="submit"></form></body></html>`
+    const f = fakeFetcher({ [`${origin}/robots.txt`]: 'User-agent: *\nAllow: /', [landing]: form })
+    const read = await readSite(company('Acme', 'acme.test', landing), { fetcher: f })
+    expect(read.jobs).toEqual([])
+    expect(read.reason).toBe('no_roles')
+    expect(f.calls.some((c) => c.includes('keyword='))).toBe(false)
+  })
+})
