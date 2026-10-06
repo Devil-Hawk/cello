@@ -13,7 +13,10 @@
     "clean": "rm -rf .next .turbo node_modules",
     "setup:checkpointer": "npx tsx scripts/setup-checkpointer.ts",
     "mutation:scans": "npx tsx scripts/mutation-check-scans.ts",
-    "scorecard": "npx tsx scripts/scorecard.ts"
+    "scorecard": "npx tsx scripts/scorecard.ts",
+    "role-types:sync": "npx tsx scripts/role-types-sync.ts",
+    "role-types:go-live": "npx tsx scripts/role-types-go-live.ts",
+    "role-types:label-set": "npx tsx scripts/role-types-label-set.ts"
   },
   "dependencies": {
     "@a2a-js/sdk": "1.0.1",
