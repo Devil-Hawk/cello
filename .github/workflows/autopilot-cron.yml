@@ -13,7 +13,7 @@ name: Autopilot Cron - Continuous Draft
 # official-APIs-only boundary baked into lib/harness/autopilot.ts.
 #
 # Guarded by the CRON_SECRET repo secret (must match the CRON_SECRET env var on
-# the Vercel deployment — the same secret harness-cron.yml uses). Target URL
+# the Vercel deployment). Target URL
 # defaults to prod but can be overridden with the AUTOPILOT_CRON_URL repo
 # variable (Settings -> Secrets and variables -> Actions -> Variables).
 
