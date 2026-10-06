@@ -258,6 +258,7 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
 
     async get(url, opts = {}) {
       let current = url
+      let askedOnce = false
       for (let hop = 0; hop <= MAX_HOPS; hop++) {
         await mustBeAllowed(current)
         spend()
@@ -277,6 +278,14 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
           if (opts.follow && !opts.follow(next)) throw new ReaderError('unreachable')
           current = next
           if (LOGIN_PATH.test(new URL(current).pathname)) throw new ReaderError('login_required')
+          continue
+        }
+        // A host that says "slow down" (Microsoft answers its first request of the day so) is asked once more, after its own Retry-After at most 5 s.
+        if (res.status === 429 && !askedOnce) {
+          askedOnce = true
+          void res.body?.cancel().catch(() => {})
+          const after = Number(res.headers.get('retry-after'))
+          await sleep(Math.min(Number.isFinite(after) && after > 0 ? after * 1000 : 3000, 5000))
           continue
         }
         let text = ''
