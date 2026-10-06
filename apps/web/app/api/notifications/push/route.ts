@@ -5,7 +5,7 @@
 // Without the owner's VAPID keys push is off and GET says so in a sentence.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { PUSH_OFF_SENTENCE, vapidKeys } from '@/lib/notifications/push'
+import { PUSH_OFF_SENTENCE, isPushEndpoint, vapidKeys } from '@/lib/notifications/push'
 import { isCtx, sessionCtx } from '@/lib/pipeline/session'
 
 export const dynamic = 'force-dynamic'
@@ -25,14 +25,8 @@ export async function POST(request: NextRequest) {
   const endpoint = typeof b?.endpoint === 'string' ? b.endpoint : ''
   const p256dh = typeof b?.keys?.p256dh === 'string' ? b.keys.p256dh : ''
   const auth = typeof b?.keys?.auth === 'string' ? b.keys.auth : ''
-  let url: URL | null = null
-  try {
-    url = new URL(endpoint)
-  } catch {
-    // handled below
-  }
-  // a push service over https, with keys of the size the protocol fixes (65 and 16 bytes)
-  if (!url || url.protocol !== 'https:' || endpoint.length > 2000 || Buffer.from(p256dh, 'base64url').length !== 65 || Buffer.from(auth, 'base64url').length !== 16) {
+  // a browser's own push service, with keys of the size the protocol fixes (65 and 16 bytes)
+  if (!isPushEndpoint(endpoint) || endpoint.length > 2000 || Buffer.from(p256dh, 'base64url').length !== 65 || Buffer.from(auth, 'base64url').length !== 16) {
     return NextResponse.json({ error: 'That is not a browser subscription.' }, { status: 400 })
   }
   const { data: have } = await c.admin.from('push_subscriptions').select('id, user_id').eq('endpoint', endpoint).maybeSingle()

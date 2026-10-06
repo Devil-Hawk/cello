@@ -4,6 +4,7 @@
 //
 // Env: VAPID_PUBLIC_KEY (base64url, the 65-byte uncompressed point), VAPID_PRIVATE_KEY (base64url, the
 // 32-byte scalar), VAPID_SUBJECT (a mailto: or https: address the push service can reach).
+// ponytail: the allow-list of push services is the four the browsers use today; add a host here when a browser adds one.
 // ponytail: one record per message (payloads under about 4 KB) and no retries; a 404 or 410 from the
 // push service means the browser unsubscribed, and the caller deletes that subscription.
 
@@ -29,15 +30,33 @@ export function vapidKeys(env: NodeJS.ProcessEnv = process.env): { publicKey: st
 
 const hkdf = (ikm: Buffer, salt: Buffer, info: Buffer, length: number) => Buffer.from(hkdfSync('sha256', ikm, salt, info, length))
 
+function freshKey() {
+  const e = createECDH('prime256v1')
+  e.generateKeys()
+  return e
+}
+
+// The browsers' push services. A subscription is the person's to store, so the server posts only to these
+// hosts: never to an address of the person's choosing (a stored endpoint cannot make the server call its own network).
+const PUSH_HOSTS = [/^fcm\.googleapis\.com$/, /^updates\.push\.services\.mozilla\.com$/, /(^|\.)push\.apple\.com$/, /(^|\.)notify\.windows\.com$/]
+
+export function isPushEndpoint(endpoint: string): boolean {
+  try {
+    const u = new URL(endpoint)
+    return u.protocol === 'https:' && !u.username && !u.password && u.port === '' && PUSH_HOSTS.some((re) => re.test(u.hostname))
+  } catch {
+    return false
+  }
+}
+
 /** RFC 8291: the body to POST, for one browser's p256dh and auth. */
-export function encryptPayload(sub: Pick<PushSubscription, 'p256dh' | 'auth'>, payload: Buffer, random = { salt: randomBytes(16), ecdh: createECDH('prime256v1') }): Buffer {
+export function encryptPayload(sub: Pick<PushSubscription, 'p256dh' | 'auth'>, payload: Buffer, random = { salt: randomBytes(16), ecdh: freshKey() }): Buffer {
   const uaPublic = fromB64u(sub.p256dh)
   const authSecret = fromB64u(sub.auth)
   if (uaPublic.length !== 65 || authSecret.length !== 16) throw new Error('bad subscription keys')
   if (payload.length > 3993) throw new Error('payload too large')
 
   const ecdh = random.ecdh
-  ecdh.generateKeys()
   const asPublic = ecdh.getPublicKey()
   const secret = ecdh.computeSecret(uaPublic)
 
@@ -73,14 +92,7 @@ export type PushResult = 'sent' | 'gone' | 'failed' | 'off'
 export async function sendPush(sub: PushSubscription, message: { title: string; body: string; url: string }, fetchImpl: typeof fetch = fetch): Promise<PushResult> {
   const keys = vapidKeys()
   if (!keys) return 'off'
-  let url: URL
-  try {
-    url = new URL(sub.endpoint)
-  } catch {
-    return 'gone'
-  }
-  // only a push service over https, never an address inside the network
-  if (url.protocol !== 'https:') return 'gone'
+  if (!isPushEndpoint(sub.endpoint)) return 'gone'
   try {
     const res = await fetchImpl(sub.endpoint, {
       method: 'POST',
