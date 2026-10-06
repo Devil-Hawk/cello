@@ -117,6 +117,17 @@ describe('AI verification (the path that never ran)', () => {
   })
 })
 
+describe('a link on a reposting site is not an employer careers page', () => {
+  it.each(['https://builtin.com/company/acme/jobs', 'https://www.linkedin.com/company/acme/jobs/'])('%s is refused in words, and nothing is fetched', async (url) => {
+    const res = await POST(post(url))
+    const body = await res.json()
+    expect(body).toMatchObject({ isValid: false, status: 'reposting' })
+    expect(body.message).toContain('a reposting site')
+    expect(body.message).toContain('own careers site')
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+})
+
 describe('every fallback is still the heuristic verifier, never a 500', () => {
   async function expectHeuristic() {
     const res = await POST(post())

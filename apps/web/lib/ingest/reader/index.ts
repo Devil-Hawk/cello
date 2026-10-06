@@ -30,7 +30,7 @@ import { readJobPostings } from '../jsonld'
 import { readCareersPage } from '../page-reader'
 import { boardsInHtml, classifyLink, discoverBoards, type DiscoveredBoard, type DiscoveredVia, type PageRead } from './discover'
 import { jobFromDetail, readDetail } from './detail'
-import { confirmRoles, mislabelledSource, onOwnSite } from './legit'
+import { confirmRoles, mislabelledSource, onOwnSite, repostHostOf, repostMessage } from './legit'
 import { readListing, roleLinks } from './listing'
 import { looksLikeChallenge, ReaderError, type ReaderReason, type SiteFetcher } from './site-fetch'
 import { readSitemapRoles } from './sitemap'
@@ -128,6 +128,14 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
       note(error)
       return false
     }
+  }
+
+  // A link on a reposting site is never read: its roles are not the employer's own, and the person is told so.
+  const repost = repostHostOf(company.careerUrl)
+  if (repost && !onOwnSite(company.careerUrl, { company })) {
+    out.message = repostMessage(repost, company.name, classifyLink(company.careerUrl) === 'posting' ? 'posting' : 'link')
+    out.reason = 'no_roles'
+    return finish()
   }
 
   // The link itself is an applicant system's board (or one of its postings).

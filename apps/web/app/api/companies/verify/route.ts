@@ -9,6 +9,7 @@ import { callLlm } from '@/lib/harness/llm'
 import { canRunLlm } from '@/lib/harness/llm-key-message'
 import type { DecryptedApiKeys } from '@/lib/harness/types'
 import { warnLlmFallback } from '@/lib/observability/llm-fallback'
+import { repostHostOf, repostMessage } from '@/lib/ingest/reader/legit'
 import { lookupKnownCompanyByDomain, faviconForDomain } from '@/lib/companies/known-companies'
 
 interface VerificationResult {
@@ -264,6 +265,21 @@ export async function POST(request: NextRequest) {
         isValid: false,
         status: 'invalid_url',
         message: 'Only http and https URLs can be verified.',
+        companyName: null,
+        logoUrl: null,
+        jobCount: 0,
+        confidence: 0,
+        aiVerified: false,
+      } satisfies VerificationResult)
+    }
+
+    // A link on a reposting site (LinkedIn, Indeed, Built In...) is not the employer's careers site: say so, and do not read it.
+    const repost = repostHostOf(normalizedUrl)
+    if (repost) {
+      return NextResponse.json({
+        isValid: false,
+        status: 'reposting',
+        message: `${repostMessage(repost, 'the employer')} Paste the employer's own careers link instead.`,
         companyName: null,
         logoUrl: null,
         jobCount: 0,

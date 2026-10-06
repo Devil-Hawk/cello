@@ -172,6 +172,34 @@ describe('readSite: any link a person pastes', () => {
   })
 })
 
+describe('readSite: a link on a reposting site is not the employer\'s careers site', () => {
+  it('a listing on builtin.com is not read, nothing is requested, and the person is told why', async () => {
+    const url = 'https://builtin.com/company/acme/jobs'
+    const jobs = [1, 2, 3, 4].map((n) => `<a href="/job/acme/${n}0000${n}">Data Engineer ${n}</a>`).join('')
+    const f = fakeFetcher({ [url]: `<html><body>${jobs}</body></html>` })
+    const read = await readSite(company('Acme', 'acme.com', url), { fetcher: f })
+    expect(read).toMatchObject({ tier: null, jobs: [], reason: 'no_roles', message: "This link is on builtin.com, a reposting site, not Acme's own careers site." })
+    expect(f.calls).toEqual([])
+  })
+
+  it('a pasted LinkedIn posting is labelled as a posting on a reposting site', async () => {
+    const read = await readSite(company('Acme', 'acme.com', 'https://www.linkedin.com/jobs/view/123456'), { fetcher: fakeFetcher({}) })
+    expect(read.jobs).toEqual([])
+    expect(read.message).toBe("This posting is on linkedin.com, a reposting site, not Acme's own careers site.")
+  })
+
+  it('a sitemap on a reposting host stores nothing either', async () => {
+    const url = 'https://builtin.com/company/acme/jobs'
+    const f = fakeFetcher({
+      'https://builtin.com/robots.txt': 'Sitemap: https://builtin.com/sitemap.xml',
+      'https://builtin.com/sitemap.xml': '<urlset><url><loc>https://builtin.com/job/acme/123456</loc></url></urlset>',
+    })
+    const read = await readSite(company('Acme', 'acme.com', url), { fetcher: f })
+    expect(read.jobs).toEqual([])
+    expect(read.message).toContain('reposting site')
+  })
+})
+
 describe('readSite: could not read, with the reason', () => {
   const careers = 'https://jobs.uber.com/'
   const read = (routes: Record<string, Route>) => readSite(company('Uber', 'uber.com', careers), { fetcher: fakeFetcher(routes), renderedLater: true })

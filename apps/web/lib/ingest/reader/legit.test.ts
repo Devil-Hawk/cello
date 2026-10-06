@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AtsJob } from '../../ats/types'
-import { cleanEmployer, confirmRoles, dedupeRoles, judgeRole, mislabelledSource, orderForCap, type JudgeContext } from './legit'
+import { cleanEmployer, confirmRoles, dedupeRoles, judgeRole, mislabelledSource, onOwnSite, orderForCap, type JudgeContext } from './legit'
 
 const NOW = Date.parse('2026-10-06T12:00:00Z')
 const DAY = 86_400_000
@@ -29,6 +29,18 @@ describe('judgeRole: own', () => {
     const repost = job({ url: 'https://www.linkedin.com/jobs/view/123' })
     expect(judgeRole(repost, acme)).toEqual({ keep: false, why: 'reposting' })
     expect(mislabelledSource(repost, 'Acme')).toContain('linkedin.com, a reposting site')
+  })
+
+  it('a careers link on a reposting site does not make that site the employer\'s own', () => {
+    const builtin: JudgeContext = { company: { name: 'Acme', domain: 'acme.com', careerUrl: 'https://builtin.com/company/acme/jobs' }, now: NOW }
+    expect(judgeRole(job({ url: 'https://builtin.com/job/1' }), builtin)).toEqual({ keep: false, why: 'reposting' })
+    expect(onOwnSite('https://builtin.com/job/1', builtin)).toBe(false)
+    const linkedin: JudgeContext = { company: { name: 'Acme', domain: 'acme.com', careerUrl: 'https://www.linkedin.com/jobs/search/?keywords=acme' }, now: NOW }
+    expect(judgeRole(job({ url: 'https://www.linkedin.com/jobs/view/123456' }), linkedin)).toEqual({ keep: false, why: 'reposting' })
+    // The employer's own site still passes, and a company whose own domain is the reposting site keeps its own pages.
+    expect(judgeRole(job({ url: 'https://acme.com/jobs/1' }), builtin)).toEqual({ keep: true })
+    const own: JudgeContext = { company: { name: 'Built In', domain: 'builtin.com', careerUrl: 'https://builtin.com/careers' }, now: NOW }
+    expect(onOwnSite('https://builtin.com/careers/1', own)).toBe(true)
   })
 
   it('keeps an employer the site and the company agree on, including legal-entity names', () => {

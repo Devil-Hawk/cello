@@ -113,6 +113,8 @@ export function employerAgrees(employer: string, companyName: string): boolean {
 export function onOwnSite(url: string, ctx: JudgeContext): boolean {
   const { domain, careerUrl } = ctx.company
   if (onCompanyDomain(url, domain)) return true
+  // A reposting site is the employer's own only when it IS the company's domain: a careers link on builtin.com does not make builtin.com the employer's site.
+  if (repostHostOf(url)) return false
   const careerHost = careerUrl ? hostOf(careerUrl) : ''
   const host = hostOf(url)
   return !!careerHost && (host === careerHost || host.endsWith(`.${careerHost}`))
@@ -142,8 +144,13 @@ export function mislabelledSource(job: AtsJob, companyName: string): string | nu
   const agency = agencyOf(job.employer)
   if (agency) return `This posting is from ${job.employer}, a staffing agency, not ${companyName}.`
   const repost = repostHostOf(job.url)
-  if (repost) return `This posting is on ${repost}, a reposting site, not ${companyName}'s own careers site.`
+  if (repost) return repostMessage(repost, companyName, 'posting')
   return null
+}
+
+/** In words, for a link on a reposting site: who it is, and that it is not the employer's careers site. */
+export function repostMessage(host: string, companyName: string, noun: 'posting' | 'link' = 'link'): string {
+  return `This ${noun} is on ${host}, a reposting site, not ${companyName}'s own careers site.`
 }
 
 // --- unique -----------------------------------------------------------------
