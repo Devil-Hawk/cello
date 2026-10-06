@@ -619,7 +619,7 @@ describe('every callLlm( call passes a generation name', () => {
         if (!/\bname:/.test(args)) offenders.push(filePath)
       }
     }
-    expect(sites).toBeGreaterThan(10) // the walk really found the call sites
+    expect(sites).toBeGreaterThan(3) // the walk really found the call sites (most live behind lib/steps now)
     expect(
       offenders,
       `These callLlm( calls name no Langfuse generation (they would show up as call-llm):\n  ${offenders.join('\n  ')}`

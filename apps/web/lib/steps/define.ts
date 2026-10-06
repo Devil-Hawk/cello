@@ -99,10 +99,10 @@ export function defineModelStep(input: ModelStepDef): ModelStep {
     const runOpts: LlmRunOptions = {
       ...opts,
       ...(def.prompt ? { system: withPolicy(def.prompt, opts.system) } : {}),
-      name: def.id,
       door: ctx.door ?? opts.door,
     }
-    const result = await callLlm(keys, runOpts, ctx.signal)
+    // The step id is the generation name in the ledger and in Langfuse.
+    const result = await callLlm(keys, { ...runOpts, name: def.id }, ctx.signal)
 
     let parsed: unknown
     if (def.outputSchema) {
