@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { LinearMeter } from '@/components/charts/linear-meter'
-import { DB_WARN_BYTES, type HealthReport } from '@/lib/quality/health'
+import { DB_WARN_BYTES } from '@/lib/quality/db-limits'
+import type { HealthReport } from '@/lib/quality/health'
 
 const MB = 1024 * 1024
 const mb = (bytes: number) => `${Math.round(bytes / MB)} MB`
