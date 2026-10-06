@@ -59,7 +59,8 @@ begin
   select * into f from fx;
   perform set_config('request.jwt.claims', json_build_object('sub', f.a, 'role', 'authenticated')::text, true);
   execute 'set local role authenticated';
-  select count(*) into n_own from public.routines where user_id = f.a;
+  -- the person's other routines (the daily summary) are theirs to read too; this check names the roles.check one
+  select count(*) into n_own from public.routines where user_id = f.a and command = 'roles.check';
   select count(*) into n_other from public.routines where user_id = f.b;
   select count(*) into n_inst from public.routines where user_id is null;
   select count(*) into n_hb_other from public.job_heartbeats where user_id = f.b;
