@@ -27,7 +27,7 @@
 // classic bug: twips (1/20 pt) for page geometry, indents and spacing;
 // half-points for font size; eighths of a point for border thickness.
 //
-// FONTS. pdf-lib can only embed the standard-14 PostScript families; Word
+// FONTS. The PDF exporter can only draw the standard-14 PostScript families; Word
 // needs a font that exists on the reader's machine. Helvetica is not installed
 // on Windows, so it maps to Arial — its metric-compatible substitute, which is
 // also what every Word-on-Windows install does with a Helvetica request

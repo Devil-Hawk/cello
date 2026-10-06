@@ -23,7 +23,7 @@
 //   Page breaks, and the exact line-wrap points of the standard PDF fonts
 //   (the browser substitutes Arial/Liberation for Helvetica). Structure,
 //   hierarchy, order, rules, bullets and density are all faithful; "will this
-//   fit on one page" is not — that answer only exists once pdf-lib lays it out.
+//   fit on one page" is not — that answer only exists once the PDF exporter lays it out.
 
 import type { CSSProperties } from 'react'
 import type {
@@ -39,7 +39,7 @@ import type { ResumeHeadingLevel } from '@/lib/resume/markdown'
 export const PREVIEW_PX_PER_PT = 1.2
 
 /**
- * Browser stacks for the three standard PDF families. pdf-lib embeds the base
+ * Browser stacks for the three standard PDF families. The PDF exporter draws the base
  * PostScript fonts (Helvetica/Times-Roman/Courier); a browser almost never has
  * those exact files, so each stack lists the metric-compatible substitutes a
  * Mac, a Windows box and a Linux box respectively actually ship. The generic

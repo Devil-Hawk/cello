@@ -5,6 +5,7 @@ import {
   looksLikeMarkdown,
   markdownToPlainText,
   parseResumeMarkdown,
+  splitResumeHeader,
   type ResumeBlock,
   type ResumeInlineLine,
   type ResumeListBlock,
@@ -255,5 +256,30 @@ describe('looksLikeMarkdown', () => {
     expect(looksLikeMarkdown('JANE DOE\njane@example.com')).toBe(false)
     expect(looksLikeMarkdown('')).toBe(false)
     expect(looksLikeMarkdown(null)).toBe(false)
+  })
+})
+
+describe('splitResumeHeader', () => {
+  it('treats an h1 plus the following paragraph as the name and contact block', () => {
+    const split = splitResumeHeader(parseResumeMarkdown('# Jane Doe\n\njane@example.com | 555-0100\n\n## Skills\n'))
+    expect(split.name?.map((r) => r.text).join('')).toBe('Jane Doe')
+    expect(split.contact).toHaveLength(1)
+    expect(split.bodyStart).toBe(2)
+  })
+
+  it('promotes the first line of an undesigned plain-text upload to the name', () => {
+    const split = splitResumeHeader(parseResumeMarkdown('Jane Doe\njane@example.com | 555-0100\n\nSUMMARY\n'))
+    expect(split.name?.map((r) => r.text).join('')).toBe('Jane Doe')
+    expect(split.contact.map(textOf)).toEqual(['jane@example.com | 555-0100'])
+    expect(split.bodyStart).toBe(1)
+  })
+
+  it('does not blow a summary sentence up to a name', () => {
+    const blocks = parseResumeMarkdown('Experienced platform engineer with a decade of production ownership.\nMore prose.\n')
+    expect(splitResumeHeader(blocks)).toEqual({ name: null, contact: [], bodyStart: 0 })
+  })
+
+  it('returns an empty split for an empty document', () => {
+    expect(splitResumeHeader([])).toEqual({ name: null, contact: [], bodyStart: 0 })
   })
 })

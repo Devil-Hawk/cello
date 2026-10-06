@@ -1,5 +1,7 @@
-import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { describe, expect, it } from 'vitest'
+import { extractText, getDocumentProxy } from 'unpdf'
+
+import { renderResumePdf } from './pdf'
 
 import {
   DEFAULT_TEMPLATE_ID,
@@ -142,8 +144,12 @@ describe('ATS + renderer constraints', () => {
     }
   })
 
-  it('maps every font family to a real pdf-lib StandardFonts value', () => {
-    const known = new Set<string>(Object.values(StandardFonts))
+  it('maps every font family to one of the 14 standard PDF fonts', () => {
+    const known = new Set([
+      'Helvetica', 'Helvetica-Bold', 'Helvetica-Oblique', 'Helvetica-BoldOblique',
+      'Times-Roman', 'Times-Bold', 'Times-Italic', 'Times-BoldItalic',
+      'Courier', 'Courier-Bold', 'Courier-Oblique', 'Courier-BoldOblique',
+    ])
     for (const [family, styles] of Object.entries(STANDARD_FONT_NAMES)) {
       for (const [style, name] of Object.entries(styles)) {
         expect(known.has(name), `${family}.${style} = ${name}`).toBe(true)
@@ -151,39 +157,18 @@ describe('ATS + renderer constraints', () => {
     }
   })
 
-  it('every template font family is one the renderer can embed', async () => {
-    const doc = await PDFDocument.create()
+  it('every bullet glyph is drawn by the standard fonts, not silently a "?"', async () => {
+    const md = '# Jane Doe\n\n- one\n  - two\n    - three'
     for (const template of RESUME_TEMPLATES) {
-      for (const family of [template.fonts.heading, template.fonts.body, template.fonts.mono]) {
-        for (const name of Object.values(STANDARD_FONT_NAMES[family])) {
-          const font = await doc.embedFont(name as StandardFonts)
-          expect(font.name.length).toBeGreaterThan(0)
-        }
-      }
-    }
-  })
-
-  it('every bullet glyph is encodable by the standard fonts, not silently a "?"', async () => {
-    const doc = await PDFDocument.create()
-    const charSets = new Map<string, Set<number>>()
-    for (const family of ['helvetica', 'times', 'courier'] as const) {
-      const font = await doc.embedFont(STANDARD_FONT_NAMES[family].regular as StandardFonts)
-      charSets.set(family, new Set(font.getCharacterSet()))
-    }
-    for (const template of RESUME_TEMPLATES) {
+      const pdf = await getDocumentProxy(new Uint8Array(await renderResumePdf(md, { template })))
+      const { text } = await extractText(pdf, { mergePages: true })
       expect(template.bullets.glyphs.length).toBeGreaterThan(0)
-      const supported = charSets.get(template.fonts.body)
-      expect(supported).toBeDefined()
       for (const glyph of template.bullets.glyphs) {
-        for (const ch of glyph) {
-          expect(
-            supported?.has(ch.codePointAt(0) ?? 0),
-            `${template.id}: glyph ${JSON.stringify(glyph)} is not in the ${template.fonts.body} character set`
-          ).toBe(true)
-        }
+        expect(text, `${template.id}: glyph ${JSON.stringify(glyph)}`).toContain(glyph)
       }
+      expect(text, template.id).not.toContain('?')
     }
-  })
+  }, 60_000)
 
   it('uses well-formed hex colours', () => {
     for (const template of RESUME_TEMPLATES) {
