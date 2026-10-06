@@ -75,8 +75,21 @@ let cached: DepthDecision | null = null
 export function useDepth(): DepthDecision {
   const [d, setD] = useState<DepthDecision>(cached ?? SAFE_DEPTH)
   useEffect(() => {
-    if (!cached) cached = decideDepth(readInputs())
-    setD(cached)
+    if (cached) {
+      setD(cached)
+      return
+    }
+    // The probe makes a WebGL context, so it waits until the page is idle.
+    const run = () => {
+      cached = decideDepth(readInputs())
+      setD(cached)
+    }
+    if (typeof requestIdleCallback === 'function') {
+      const id = requestIdleCallback(run)
+      return () => cancelIdleCallback(id)
+    }
+    const id = setTimeout(run, 200)
+    return () => clearTimeout(id)
   }, [])
   return d
 }

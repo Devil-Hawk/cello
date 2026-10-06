@@ -8,6 +8,7 @@ import { Toaster } from '@/components/ui/toaster'
 // Display face — an engineered grotesque with real character, tuned for the
 // instrument-panel headings and the wordmark.
 const spaceGrotesk = Space_Grotesk({
+  preload: false,
   subsets: ['latin'],
   variable: '--font-display',
   display: 'swap',
@@ -16,6 +17,7 @@ const spaceGrotesk = Space_Grotesk({
 // Readout face — the monospace sibling of the display family. Carries the
 // numeric vitals, eyebrow labels, and anything that should read like a gauge.
 const spaceMono = Space_Mono({
+  preload: false,
   subsets: ['latin'],
   weight: ['400', '700'],
   variable: '--font-readout',
@@ -24,6 +26,7 @@ const spaceMono = Space_Mono({
 
 // Body face — refined, highly readable prose.
 const dmSans = DM_Sans({
+  preload: false,
   subsets: ['latin'],
   variable: '--font-sans',
   display: 'swap',
