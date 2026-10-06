@@ -3,6 +3,7 @@ import type { AtsJob } from '../../ats/types'
 import { eightfold } from '../../ats/eightfold'
 import { fakeFetcher, fixture, type Route } from './fake-fetcher'
 import { readSite, type SiteDeps } from './index'
+import { roleLinks } from './listing'
 import { amazonJobs } from './sites'
 import { NO_TARGETS, type ReaderTargets } from './targets'
 
@@ -169,6 +170,21 @@ describe('readSite: any link a person pastes', () => {
     const read = await readSite(company('Acme', 'acme.com', url), { fetcher: fakeFetcher({ [url]: html }) })
     expect(read.jobs).toEqual([])
     expect(read.message).toBe('This posting is from Robert Half, a staffing agency, not Acme.')
+  })
+})
+
+describe('readSite: a hospital job search with reference ids', () => {
+  it('NHS Jobs: a pasted search page is a server-rendered listing, read with no browser and no model', async () => {
+    const url = 'https://www.jobs.nhs.uk/candidate/search/results?keyword=data+analyst&language=en'
+    const search = fixture('nhs-search.html')
+    const routes: Record<string, Route> = { [url]: search }
+    for (const l of roleLinks(search, url)) routes[l.url] = fixture('nhs-detail.html').replaceAll('Data Analyst till 31.03.28', l.title)
+    const fetchPage = notCalled('the rendered fetch')
+    const read = await readSite(company('NHS Jobs', 'jobs.nhs.uk', url), { fetcher: fakeFetcher(routes), fetchPage, model: null })
+    expect(read.tier).toBe('listing')
+    expect(read.reason).toBeNull()
+    expect(read.jobs.length).toBeGreaterThanOrEqual(4)
+    expect(fetchPage).not.toHaveBeenCalled()
   })
 })
 

@@ -59,6 +59,35 @@ describe('roleLinks', () => {
   })
 })
 
+describe('roleLinks: a reference id is an id', () => {
+  const NHS = 'https://www.jobs.nhs.uk/candidate/search/results?keyword=data+analyst&language=en'
+
+  it('NHS Jobs: ids like C9389-26-0506 form a role list, titled by their cards', () => {
+    const links = roleLinks(fixture('nhs-search.html'), NHS)
+    expect(links.map((l) => l.title)).toEqual(['Data Analyst till 31.03.28', 'Configuration Analyst', 'Data Validator', 'Data Administrator', 'Data Assistant', 'Behaviour Analyst'])
+    expect(links[0].url).toBe('https://www.jobs.nhs.uk/candidate/jobadvert/C9389-26-0506?keyword=data%20analyst&language=en')
+  })
+
+  it('templates a reference id, with or without a separator, and leaves years and plain words alone', () => {
+    expect(templateOf('/candidate/jobadvert/C9389-26-0506')).toBe('/candidate/jobadvert/:id')
+    expect(templateOf('/us/en/jobs/R-1075582')).toBe('/us/en/jobs/:id')
+    expect(templateOf('/careers/REQ-123/data-engineer')).toBe('/careers/:id')
+    expect(templateOf('/events/2026/summit')).toBeNull()
+    expect(templateOf('/careers/web3')).toBeNull()
+  })
+
+  it('NHS Jobs: the search page is read, each advert confirmed on its own page (a date, a reference and a place the page labels)', async () => {
+    const links = roleLinks(fixture('nhs-search.html'), NHS)
+    const detail = fixture('nhs-detail.html')
+    const routes: Record<string, string> = { [NHS]: fixture('nhs-search.html') }
+    for (const l of links) routes[l.url] = detail.replaceAll('Data Analyst till 31.03.28', l.title)
+    const read = await readListing(NHS, [{ url: NHS, html: fixture('nhs-search.html') }], fakeFetcher(routes), { targets: NO_TARGETS, max: 20 })
+    expect(read.jobs.map((j) => j.title)).toContain('Data Analyst till 31.03.28')
+    expect(read.jobs.length).toBeGreaterThanOrEqual(4)
+    expect(read.jobs[0]).toMatchObject({ postedAt: '2026-09-24T00:00:00.000Z', location: expect.stringContaining('Bradford') })
+  })
+})
+
 describe('roleLinks: a role id in the query', () => {
   it('DigitalOcean: when the link says only the place, the card own first line is the title', () => {
     const card = (id: number, title: string, place: string) =>

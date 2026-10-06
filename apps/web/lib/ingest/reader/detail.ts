@@ -104,14 +104,15 @@ function readDetailBase(html: string, url: string): RoleDetail {
     }
   }
 
-  const { terms, place } = jobTermsAndPlace(html)
+  const { terms, place, labelled } = jobTermsAndPlace(html)
   const title = pageTitle($)
   const embedded = EMBEDDED_DATE.exec(html)?.[1]
-  const posted = isoOf(embedded) ?? isoOf($('meta[property="article:published_time"]').attr('content')) ?? isoOf($('time[datetime]').first().attr('datetime'))
+  const posted = isoOf(embedded) ?? isoOf($('meta[property="article:published_time"]').attr('content')) ?? isoOf($('time[datetime]').first().attr('datetime')) ?? labelled.postedAt
   return {
     title,
     postedAt: posted,
-    ...(place ? { location: place } : {}),
+    ...(place ?? labelled.place ? { location: place ?? labelled.place } : {}),
+    ...(labelled.requisitionId ? { requisitionId: labelled.requisitionId } : {}),
     jobTerms: terms,
     description: title ? descriptionFromPage(html, url, title) : undefined,
     hrefs,
@@ -131,16 +132,35 @@ const JOB_TERMS = [
 /** A place a page labels as one ("Office: New York, NY"). */
 const LABELLED_PLACE = /\b(?:office|job location|work location|locations?)\s*:\s*([^\n:]{2,80}?)\s*(?:\n|$|\s(?:department|team|job id|req|category|employment)\b)/i
 
-function jobTermsAndPlace(html: string): { terms: number; place?: string } {
+/**
+ * Facts a page lists as label, then value on the next line (a definition list: "Date posted", "Reference number", "Job locations").
+ * Only labels that name one fact: a bare "Locations" heading is a menu as often as a place.
+ */
+const LABEL_THEN_VALUE = (label: string) => new RegExp(`(?:^|\\n)\\s*(?:${label})\\s*:?[ \\t]*\\n+\\s*([^\\n]{2,80})`, 'i')
+const POSTED_LABEL = LABEL_THEN_VALUE('date posted|posted on|publication date|date published')
+const REQ_LABEL = LABEL_THEN_VALUE('reference number|job reference|reference|requisition(?: id| number)?|job id|req(?:uisition)? id')
+const PLACE_LABEL = LABEL_THEN_VALUE('job locations?|work locations?')
+
+function jobTermsAndPlace(html: string): { terms: number; place?: string; labelled: { postedAt?: string; requisitionId?: string; place?: string } } {
   let $: cheerio.CheerioAPI
   try {
     $ = cheerio.load(html)
   } catch {
-    return { terms: 0 }
+    return { terms: 0, labelled: {} }
   }
   $('script,style,noscript,svg,iframe,template,nav,header,footer,form,aside').remove()
   const text = htmlToPlainText($('body').html() ?? '', 200_000) ?? ''
-  return { terms: JOB_TERMS.filter((re) => re.test(text)).length, place: LABELLED_PLACE.exec(text)?.[1]?.trim() }
+  const req = REQ_LABEL.exec(text)?.[1]?.trim()
+  const when = POSTED_LABEL.exec(text)?.[1]?.trim()
+  return {
+    terms: JOB_TERMS.filter((re) => re.test(text)).length,
+    place: LABELLED_PLACE.exec(text)?.[1]?.trim(),
+    labelled: {
+      postedAt: when && /\d{4}/.test(when) ? isoOf(`${when} UTC`) : undefined,
+      requisitionId: req && /\d/.test(req) && /^[\w./-]{3,40}$/.test(req) ? req : undefined,
+      place: PLACE_LABEL.exec(text)?.[1]?.trim(),
+    },
+  }
 }
 
 /**

@@ -1,0 +1,521 @@
+
+<!DOCTYPE html>
+<!--[if lt IE 9]><html class="ie8" lang="en"><![endif]--><!--[if IE 9]><html class="ie9" lang="en"><![endif]--><!--[if gt IE 9]><!--><html lang="en" style=""><!--<![endif]-->
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="">
+    <meta name="google-site-verification" content="VX5VwE9NfZvosB9oACSjMkSiMhA__j-iYpatqJxzLME" />
+    <title>
+  Job Advert
+</title>
+    <link href="https://www.nhs.uk/" rel="preconnect">
+    <link href="https://assets.nhs.uk/" rel="preconnect" crossorigin>
+    <link type="font/woff2" href="https://assets.nhs.uk/fonts/FrutigerLTW01-55Roman.woff2" rel="preload" as="font" crossorigin>
+    <link type="font/woff2" href="https://assets.nhs.uk/fonts/FrutigerLTW01-65Bold.woff2" rel="preload" as="font" crossorigin>
+  <link href="/candidate/public/hmrc-frontend/hmrc-frontend-6.41-ed71ee092a.0.min.css" rel="stylesheet">
+  <link href="/candidate/public/css/main-24cc10d806.css" rel="stylesheet">
+    <link rel="shortcut icon" href="/candidate/public/nhsuk-frontend/assets/favicons/favicon-68c7f017cf.ico" type="image/x-icon">
+    <link rel="apple-touch-icon" href="/candidate/public/nhsuk-frontend/assets/favicons/apple-touch-icon-180x180-15a5044def.png">
+    <link rel="mask-icon" href="/candidate/public/nhsuk-frontend/assets/favicons/favicon-ec22bc2cbc.svg" color="#005eb8">
+    <link rel="icon" sizes="192x192" href="/candidate/public/nhsuk-frontend/assets/favicons/favicon-192x192-43924bfe6c.png">
+    <meta name="msapplication-TileImage" content="/candidate/public/nhsuk-frontend/assets/favicons/mediumtile-144x144-cf49858724.png">
+    <meta name="msapplication-TileColor" content="#005eb8">
+    <meta name="msapplication-square70x70logo" content="/candidate/public/nhsuk-frontend/assets/favicons/smalltile-70x70-29f75b06cf.png">
+    <meta name="msapplication-square150x150logo" content="/candidate/public/nhsuk-frontend/assets/favicons/mediumtile-150x150-89688d93af.png">
+    <meta name="msapplication-wide310x150logo" content="/candidate/public/nhsuk-frontend/assets/favicons/widetile-310x150-535c399663.png">
+    <meta name="msapplication-square310x310logo" content="/candidate/public/nhsuk-frontend/assets/favicons/largetile-310x310-294742e00f.png">
+  <meta property="og:image" content="" />
+  </head>
+  <body class=" govuk-frontend-supported" id="main-body">
+      <a class="nhsuk-skip-link" href="#maincontent">Skip to main content</a>
+    <div id="heading-body">
+  <header class="nhsuk-header" role="banner" id="heading-body">
+  <div class="top-banner" id="cookie-banner">
+    <div class="nhsuk-width-container">
+      <h2>Cookies on NHS Jobs</h2>
+      <p>We&#39;ve put some small files called cookies on your device to help us make improvements to our site.</p>
+      <p>To improve our site we&#39;d also like to use cookies which will send information to Google Analytics. You can <a href="/candidate/cookies" id="cookies-info-link">read more about our cookies</a> before you choose.</p>
+      <form class="form" method="POST" action="/candidate/save-seen-cookie">
+        <input type="hidden" name="_csrf" value="PSEgSsFY-e2bqBySRJeKT8xz6Ge6mIXB-F5M">
+        <button class="nhsuk-button" type="submit" id="accept-cookies" name="accept-cookies" value="true">Accept analytics cookies</button>
+        <button class="nhsuk-button" type="submit" id="reject-cookies" name="accept-cookies" value="false">Do not accept analytics cookies</button>
+      </form>
+    </div>
+  </div>
+  <div class="nhsuk-width-container nhsuk-header__container ">
+    <div class=" nhsuk-header__logo">
+      <a class="nhsuk-header__link nhsuk-header__link--service nhsuk-header__link--service-short-name" href="/candidate" aria-label="NHS jobs homepage" data-test="nhs-logo-home-link">
+        <div class="nhsuk-header__service-name">Jobs</div>
+      </a>
+    </div>
+    <div class="nhsuk-header__content" id="content-header">
+      <div class="nhsuk-header__menu show-mobile show-tablet">
+        <button class="nhsuk-header__menu-toggle" id="toggle-menu" aria-controls="header-navigation" aria-label="Open menu" aria-expanded="false">
+           Menu
+        </button>
+      </div>
+      <nav class="gem-c-translation-nav hide-mobile nhsuk-u-margin-0 nhsuk-u-padding-left-7"
+     aria-label="Translations">
+  <ul class="nhsuk-header__navigation-list-right">
+        <li class="gem-c-translation-nav__list-item">
+          <a class="sign-in-link"
+             id="candidate_sign_in"
+             href="/candidate/auth/login">
+            Sign in
+          </a>
+        </li>
+        <li class="gem-c-translation-nav__list-item-none-border">
+          <a href="/candidate/auth/register/first-last-name"
+             id="create-account-link-header"
+             class="sign-in-link"
+             data-test="header-create-account"> Create an account</a>
+        </li>
+  </ul>
+  <ul class="nhsuk-header__navigation-list-right">
+    <li class="gem-c-translation-nav__list-item">
+      <a lang="en" href="/candidate/locale/en"
+         class="language-toggle-selected"
+         id="english-language-link"
+         data-test="english-language-link">English</a>
+    </li>
+    <li class="gem-c-translation-nav__list-item-none-border">
+      <a lang="cy" href="/candidate/locale/cy"
+         class="language-toggle"
+         id="welsh-language-link"
+         data-test="welsh-language-link">Cymraeg</a>
+    </li>
+  </ul>
+</nav>
+    </div>
+  </div>
+    <nav class="nhsuk-header__navigation" id="header-navigation" role="navigation" aria-label="Primary navigation" aria-labelledby="label-navigation">
+      <div class="nhsuk-width-container">
+        <p class="nhsuk-header__navigation-title">
+          <span id="label-navigation" style="color: white">Menu</span>
+          <button class="nhsuk-header__navigation-close" id="close-menu">
+            <span class="nhsuk-u-visually-hidden" style="color: white">Close menu</span>
+          </button>
+        </p>
+      </div>
+        <ul class="nhsuk-header__navigation-list" id="signedOutMenu">
+    <li class="nhsuk-header__navigation-item">
+    <a class="nhsuk-header__navigation-link" href="/candidate/search">
+      Search
+    </a>
+  </li>
+    <li class="nhsuk-header__navigation-item nhsuk-header__navigation-item--for-mobile">
+      <a class="nhsuk-header__navigation-link" href="/candidate/auth/login" id="candidate_sign_in_mobile">
+        Sign in
+      </a>
+    </li>
+    <li class="nhsuk-header__navigation-item nhsuk-header__navigation-item--for-mobile">
+      <a class="nhsuk-header__navigation-link" href="/candidate/auth/register/first-last-name" data-test="header-create-account">
+        Create an account
+      </a>
+    </li>
+    <li class="nhsuk-header__navigation-item nhsuk-header__navigation-item--for-mobile">
+      <a class="nhsuk-header__navigation-link" href="/candidate/locale/cy">
+        Display in Welsh (Cymraeg)
+      </a>
+    </li>
+</ul>
+    </nav>
+    <noscript>
+      <nav class="header-mobile-menu-no-javascript" id="header-navigation" role="navigation" aria-label="Primary navigation" aria-labelledby="label-navigation">
+          <ul class="nhsuk-header__navigation-list" id="signedOutMenu">
+    <li class="nhsuk-header__navigation-item">
+    <a class="nhsuk-header__navigation-link" href="/candidate/search">
+      Search
+    </a>
+  </li>
+    <li class="nhsuk-header__navigation-item nhsuk-header__navigation-item--for-mobile">
+      <a class="nhsuk-header__navigation-link" href="/candidate/auth/login" id="candidate_sign_in_mobile">
+        Sign in
+      </a>
+    </li>
+    <li class="nhsuk-header__navigation-item nhsuk-header__navigation-item--for-mobile">
+      <a class="nhsuk-header__navigation-link" href="/candidate/auth/register/first-last-name" data-test="header-create-account">
+        Create an account
+      </a>
+    </li>
+    <li class="nhsuk-header__navigation-item nhsuk-header__navigation-item--for-mobile">
+      <a class="nhsuk-header__navigation-link" href="/candidate/locale/cy">
+        Display in Welsh (Cymraeg)
+      </a>
+    </li>
+</ul>
+      </nav>
+    </noscript>
+</header>
+        <div class="beta-banner" role="complementary" aria-label="banner">
+          <div class="nhsuk-width-container ">
+            <strong class="status-box status-box-blue">BETA</strong>
+            <span>Your <a href="mailto:nhsbsa.nhsjobs@nhsbsa.nhs.uk?subject=How could we improve NHS Jobs service?">feedback</a> will help us to improve this service.</span>
+          </div>
+        </div>
+    </div>    
+          <div class="nhsuk-width-container ">
+            <main class="nhsuk-main-wrapper " id="maincontent" role="main">
+  <div class="nhsuk-grid-row">
+    <div class="nhsuk-grid-column-two-thirds">
+      <span id="employer_name" class="nhsuk-caption-l">Bradford Teaching Hospitals NHS Foundation Trust</span>
+      <h1 class="nhsuk-heading-xl word-wrap" id="heading" style="margin-bottom: -25px;">Data Analyst till 31.03.28</h1>
+        <div class="nhsuk-inset-text nhsuk-u-margin-bottom-4 nhs-open-job-inset">
+          <p style="margin-left: -2px;" id="closing_date" class="closing-date"><strong>The closing date is 15 October 2026</strong></p>
+        </div>
+    </div>
+    <div class="nhsuk-grid-column-one-third nhsuk-u-padding-top-2">
+  <div class="nhsuk-action-link">
+    <a id="apply-ats-direct" class="nhsuk-button" style="width: 100%" href="/candidate/jobadvert/C9389-26-0506/ats-direct-apply">
+      Apply for this job
+    </a>
+  </div>
+    </div>
+    <div class="nhsuk-grid-column-two-thirds wrap-paragraphs">
+  <h2 class="nhsuk-heading-s">Job summary</h2>
+  <p id="job_overview"><p>Closing Date: <strong>15.10.26</strong></p> <p>Shortlisting to take place after closing date: commencing <strong>16.10.26</strong></p> <p>Interview expected to take place in the week following shortlisting: commencing <strong>02.11.26</strong></p> <p><strong><em>Due to current Home Office Guidelines, Bradford Teaching Hospitals NHS Foundation Trust is unable to provide sponsorship for this role</em></strong>.</p> <p>Bradford Institute for Health Research does large epidemiological studies and works with local communities to deliver high impact research. Our data resources include Born In Bradford (www.borninbradford.nhs.uk), our flagship birth cohort study; Born In Bradford's Better Start, which is designed to evaluate early-life interventions; BiB4All, an ongoing study of new mothers based on consented data linkage; and Connected West Yorkshire, a whole-population linked database including health, social care, and education records</p> <p>Together these resources make Bradford a unique place to study the determinants of child health and effects of policy and healthcare interventions. We collaborate with national and international partners to study topics including childhood obesity, allergies and infections, mental health, and the urban environment.</p> <p></p></p>
+  <h3 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Main duties of the job</h3>
+  <p id="job_description"><p>We are looking to appoint a research data analyst to support the development and analysis of a the Connected West Yorkshire dataset in Bradford, a whole-population linked database including health, social care, and education records. You will be responsible for preparing data for research use, supporting colleagues to do good quality research, quantitative analysis and writing up of research papers and in the planning of new research studies. Previous experience with the use of R, Python and Transactional SQL (T-SQL) will be an advantage, as these tools are used predominantly in the preparation of research datasets.</p></p>
+  <h3 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">About us</h3>
+  <p id="about_organisation"><p>Our People Charter outlines the behaviours we can expect from one another and what you can expect from Bradford Teaching Hospitals Foundation Trust:</p> <ul>  <li>We value people</li>  <li>We are one team</li>  <li>We care</li> </ul> <p>We're keen to meet people who share these values and are passionate about delivering the highest quality of care to our patients.</p></p>
+      <div class="show-mobile">
+        <div class="forms-wrapper-white nhsuk-u-margin-bottom-4">
+  <h2 class="nhsuk-u-visually-hidden">Details</h2>
+  <h3 class="nhsuk-heading-s nhsuk-u-margin-bottom-2" id="date_posted_heading">Date posted</h3>
+  <p id="date_posted">24 September 2026</p>
+    <h3 class="nhsuk-heading-s nhsuk-u-margin-bottom-2">Pay scheme</h3>
+    <p id="payscheme-type">Agenda for change</p>
+        <h3 class="nhsuk-heading-s nhsuk-u-margin-bottom-2">Band</h3>
+      <p id="payscheme-band">Band 5</p>
+    <h3 class="nhsuk-heading-s nhsuk-u-margin-bottom-2">Salary</h3>
+    <p id="range_salary">
+      £32,073 to £39,043 a year
+        per annum
+    </p>
+  <h3 id="contract_type_heading" class="nhsuk-heading-s nhsuk-u-margin-bottom-2">Contract</h3>
+  <p id="contract_type">Fixed term</p>
+    <h3 id="contract_duration_heading" class="nhsuk-heading-s nhsuk-u-margin-bottom-2">Duration</h3>
+    <p id="contract_duration">18 months</p>
+    <h3 id="working_pattern_heading" class="nhsuk-heading-s nhsuk-u-margin-bottom-2">Working pattern</h3>
+    <p>
+          Full-time
+    </p>
+  <h3 class="nhsuk-heading-s nhsuk-u-margin-bottom-2" id="reference_number_heading">Reference number</h3>
+  <p id="trac-job-reference" style="margin-bottom: 0;">389-26-8303144</p>
+        <h3 id="employer_location_heading" class="nhsuk-heading-s nhsuk-u-margin-bottom-2">Job locations</h3>
+      <p class="nhsuk-u-no-margin-bottom grid-row-min-width-columns address-text-wrap" id="employer_address_line_1">Bradford Royal Infirmary</p>
+      <p class="nhsuk-u-no-margin-bottom grid-row-min-width-columns address-text-wrap" id="employer_address_line_2">Duckworth Lane</p>
+      <p class="nhsuk-u-no-margin-bottom grid-row-min-width-columns address-text-wrap" id="employer_town">Bradford</p>
+      <p class="nhsuk-u-no-margin-bottom grid-row-min-width-columns address-text-wrap" id="employer_county"></p>
+      <p class="nhsuk-u-no-margin-bottom grid-row-min-width-columns address-text-wrap" id="employer_postcode">BD9 6RJ</p>
+        <p class="nhsuk-u-no-margin-bottom grid-row-min-width-columns address-text-wrap" id="employer_country">United Kingdom</p>
+      <br/>
+</div>
+      </div>
+  <div class="hide-mobile">
+    <h2 class="nhsuk-heading-l">Job description</h2>
+    <h3 class="nhsuk-heading-s">Job responsibilities</h3>
+    <p id="job_description_large" style="white-space: pre-line"><p>This role will be based within the Connected West Yorkshire team who will provide technical and data analytics support. We are a collaborative and inclusive team that does high impact applied research. We aim to improve the health of people in Bradford and contribute important new findings to knowledge about determinants of health. We support all of our colleagues to develop their research interests and skills and enjoy their work. We operate a hybrid working model with 50% office attendance required."</p></p>
+  </div>
+  <details class="nhsuk-details nhsuk-expander show-mobile">
+    <summary class="nhsuk-details__summary">
+      <span class="nhsuk-details__summary-text">
+        Job description
+      </span>
+    </summary>
+    <div class="nhsuk-details__text">
+      <h3 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Job responsibilities</h3>
+      <p id="job_description_large" style="white-space: pre-line"><p>This role will be based within the Connected West Yorkshire team who will provide technical and data analytics support. We are a collaborative and inclusive team that does high impact applied research. We aim to improve the health of people in Bradford and contribute important new findings to knowledge about determinants of health. We support all of our colleagues to develop their research interests and skills and enjoy their work. We operate a hybrid working model with 50% office attendance required."</p></p>
+    </div>
+  </details>
+  <div class="hide-mobile">
+    <h2 class="nhsuk-heading-l">Person Specification</h2>
+      <h3 id="skill_category_1" class="nhsuk-heading-m">
+          Experience
+      </h3>
+      <h4 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Essential</h4>
+      <ul class="nhsuk-list nhsuk-list--bullet nhsuk-u-margin-bottom-2">
+        <li id="essential_skill_1_criteria_1">Experience of developing processes for collecting and reporting on raw data</li>
+        <li id="essential_skill_1_criteria_2">Experience of working in NHS and/or other Public Sector Information Management, or in an academic/research context</li>
+        <li id="essential_skill_1_criteria_3">Experience of designing, developing and maintaining databases in a major RDBMS package</li>
+      </ul>
+        <h4 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Desirable</h4>
+        <ul class="nhsuk-list nhsuk-list--bullet nhsuk-u-margin-bottom-4">
+          <li id="desirable_skill_1_criteria_1">Evidence of innovative use of technology</li>
+          <li id="desirable_skill_1_criteria_2">Evidence of collaborative working with technical and non-technical staff in same or other organisations</li>
+          <li id="desirable_skill_1_criteria_3">Experience of data quality/data integrity monitoring and improvement</li>
+        </ul>
+      <h3 id="skill_category_2" class="nhsuk-heading-m">
+          Skills
+      </h3>
+      <h4 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Essential</h4>
+      <ul class="nhsuk-list nhsuk-list--bullet nhsuk-u-margin-bottom-2">
+        <li id="essential_skill_2_criteria_1">Ability to communicate highly complex information clearly and simply to information users in a research/service setting and understand and translate their information requirements</li>
+        <li id="essential_skill_2_criteria_2">Ability to help information users appreciate the value and purpose of research project data</li>
+        <li id="essential_skill_2_criteria_3">Ability to work logically with great attention to detail</li>
+        <li id="essential_skill_2_criteria_4">Advanced user of modern PC environment and associated desktop software productivity tools for data extraction, analysis, transformation and presentation, in particular SQL Server Management Studio, Microsoft Visual Studio, Excel Outlook and Word</li>
+        <li id="essential_skill_2_criteria_5">Advanced skills in T-SQL</li>
+        <li id="essential_skill_2_criteria_6">Advanced keyboard skills to enable the extraction and manipulation of complex data at speed with accuracy</li>
+        <li id="essential_skill_2_criteria_7">Ability to plan and organise complex programmes of work for self and the Data and Research Team, some of which will be ongoing and may require adjustment to accommodate changing demands and situations</li>
+      </ul>
+      <h3 id="skill_category_3" class="nhsuk-heading-m">
+          Knowledge
+      </h3>
+      <h4 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Essential</h4>
+      <ul class="nhsuk-list nhsuk-list--bullet nhsuk-u-margin-bottom-2">
+        <li id="essential_skill_3_criteria_1">Knowledge of ETL methods, SQL Server Integration Services (SSIS), and SQL Server Reporting Services (SSRS)</li>
+        <li id="essential_skill_3_criteria_2">Knowledge of business intelligence (BI) development applications and tools</li>
+        <li id="essential_skill_3_criteria_3">Understanding of Information Governance and Confidentiality</li>
+        <li id="essential_skill_3_criteria_4">Advanced understanding of the principles of data management to degree level or equivalent</li>
+        <li id="essential_skill_3_criteria_5">Detailed knowledge of NHS or other public sector data standards and NHS or other public sector Information Management issues at degree-level or equivalent</li>
+        <li id="essential_skill_3_criteria_6">Detailed, expert-level knowledge of SQL, including T-SQL</li>
+      </ul>
+        <h4 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Desirable</h4>
+        <ul class="nhsuk-list nhsuk-list--bullet nhsuk-u-margin-bottom-4">
+          <li id="desirable_skill_3_criteria_1">Knowledge of Data Protection legislation</li>
+          <li id="desirable_skill_3_criteria_2">Understanding of clinical coding terminology</li>
+          <li id="desirable_skill_3_criteria_3">Knowledge of SQL Server Integration Services, scripting (i.e. PowerShell) and statistical packages (R/Python)</li>
+        </ul>
+      <h3 id="skill_category_4" class="nhsuk-heading-m">
+          Qualifications
+      </h3>
+      <h4 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Essential</h4>
+      <ul class="nhsuk-list nhsuk-list--bullet nhsuk-u-margin-bottom-2">
+        <li id="essential_skill_4_criteria_1">Degree level qualification in a numerate/computing discipline or equivalent experience</li>
+        <li id="essential_skill_4_criteria_2">Evidence of continuing professional development</li>
+      </ul>
+      <h3 id="skill_category_5" class="nhsuk-heading-m">
+          Other Requirements
+      </h3>
+      <h4 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Essential</h4>
+      <ul class="nhsuk-list nhsuk-list--bullet nhsuk-u-margin-bottom-2">
+        <li id="essential_skill_5_criteria_1">High levels of motivation, commitment and resourcefulness</li>
+        <li id="essential_skill_5_criteria_2">Lateral thinking and problem solving</li>
+        <li id="essential_skill_5_criteria_3">Effective communication with all levels of staff both verbally and in writing</li>
+        <li id="essential_skill_5_criteria_4">Team player who can also work independently on own initiative</li>
+        <li id="essential_skill_5_criteria_5">Ability to prioritise and work well under pressure to specified, sometimes changing, deadlines</li>
+        <li id="essential_skill_5_criteria_6">Ability to travel across sites</li>
+      </ul>
+  </div>
+  <details class="nhsuk-details nhsuk-expander show-mobile">
+    <summary class="nhsuk-details__summary">
+      <span class="nhsuk-details__summary-text">
+        Person Specification
+      </span>
+    </summary>
+    <div class="nhsuk-details__text">
+        <h3 id="skill_category_1" class="nhsuk-heading-m">
+            Experience
+        </h3>
+        <h4 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Essential</h4>
+        <ul class="nhsuk-list nhsuk-list--bullet nhsuk-u-margin-bottom-2">
+          <li id="essential_skill_1_criteria_1">Experience of developing processes for collecting and reporting on raw data</li>
+          <li id="essential_skill_1_criteria_2">Experience of working in NHS and/or other Public Sector Information Management, or in an academic/research context</li>
+          <li id="essential_skill_1_criteria_3">Experience of designing, developing and maintaining databases in a major RDBMS package</li>
+        </ul>
+          <h4 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Desirable</h4>
+          <ul class="nhsuk-list nhsuk-list--bullet nhsuk-u-margin-bottom-4">
+            <li id="desirable_skill_1_criteria_1">Evidence of innovative use of technology</li>
+            <li id="desirable_skill_1_criteria_2">Evidence of collaborative working with technical and non-technical staff in same or other organisations</li>
+            <li id="desirable_skill_1_criteria_3">Experience of data quality/data integrity monitoring and improvement</li>
+          </ul>
+        <h3 id="skill_category_2" class="nhsuk-heading-m">
+            Skills
+        </h3>
+        <h4 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Essential</h4>
+        <ul class="nhsuk-list nhsuk-list--bullet nhsuk-u-margin-bottom-2">
+          <li id="essential_skill_2_criteria_1">Ability to communicate highly complex information clearly and simply to information users in a research/service setting and understand and translate their information requirements</li>
+          <li id="essential_skill_2_criteria_2">Ability to help information users appreciate the value and purpose of research project data</li>
+          <li id="essential_skill_2_criteria_3">Ability to work logically with great attention to detail</li>
+          <li id="essential_skill_2_criteria_4">Advanced user of modern PC environment and associated desktop software productivity tools for data extraction, analysis, transformation and presentation, in particular SQL Server Management Studio, Microsoft Visual Studio, Excel Outlook and Word</li>
+          <li id="essential_skill_2_criteria_5">Advanced skills in T-SQL</li>
+          <li id="essential_skill_2_criteria_6">Advanced keyboard skills to enable the extraction and manipulation of complex data at speed with accuracy</li>
+          <li id="essential_skill_2_criteria_7">Ability to plan and organise complex programmes of work for self and the Data and Research Team, some of which will be ongoing and may require adjustment to accommodate changing demands and situations</li>
+        </ul>
+        <h3 id="skill_category_3" class="nhsuk-heading-m">
+            Knowledge
+        </h3>
+        <h4 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Essential</h4>
+        <ul class="nhsuk-list nhsuk-list--bullet nhsuk-u-margin-bottom-2">
+          <li id="essential_skill_3_criteria_1">Knowledge of ETL methods, SQL Server Integration Services (SSIS), and SQL Server Reporting Services (SSRS)</li>
+          <li id="essential_skill_3_criteria_2">Knowledge of business intelligence (BI) development applications and tools</li>
+          <li id="essential_skill_3_criteria_3">Understanding of Information Governance and Confidentiality</li>
+          <li id="essential_skill_3_criteria_4">Advanced understanding of the principles of data management to degree level or equivalent</li>
+          <li id="essential_skill_3_criteria_5">Detailed knowledge of NHS or other public sector data standards and NHS or other public sector Information Management issues at degree-level or equivalent</li>
+          <li id="essential_skill_3_criteria_6">Detailed, expert-level knowledge of SQL, including T-SQL</li>
+        </ul>
+          <h4 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Desirable</h4>
+          <ul class="nhsuk-list nhsuk-list--bullet nhsuk-u-margin-bottom-4">
+            <li id="desirable_skill_3_criteria_1">Knowledge of Data Protection legislation</li>
+            <li id="desirable_skill_3_criteria_2">Understanding of clinical coding terminology</li>
+            <li id="desirable_skill_3_criteria_3">Knowledge of SQL Server Integration Services, scripting (i.e. PowerShell) and statistical packages (R/Python)</li>
+          </ul>
+        <h3 id="skill_category_4" class="nhsuk-heading-m">
+            Qualifications
+        </h3>
+        <h4 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Essential</h4>
+        <ul class="nhsuk-list nhsuk-list--bullet nhsuk-u-margin-bottom-2">
+          <li id="essential_skill_4_criteria_1">Degree level qualification in a numerate/computing discipline or equivalent experience</li>
+          <li id="essential_skill_4_criteria_2">Evidence of continuing professional development</li>
+        </ul>
+        <h3 id="skill_category_5" class="nhsuk-heading-m">
+            Other Requirements
+        </h3>
+        <h4 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Essential</h4>
+        <ul class="nhsuk-list nhsuk-list--bullet nhsuk-u-margin-bottom-2">
+          <li id="essential_skill_5_criteria_1">High levels of motivation, commitment and resourcefulness</li>
+          <li id="essential_skill_5_criteria_2">Lateral thinking and problem solving</li>
+          <li id="essential_skill_5_criteria_3">Effective communication with all levels of staff both verbally and in writing</li>
+          <li id="essential_skill_5_criteria_4">Team player who can also work independently on own initiative</li>
+          <li id="essential_skill_5_criteria_5">Ability to prioritise and work well under pressure to specified, sometimes changing, deadlines</li>
+          <li id="essential_skill_5_criteria_6">Ability to travel across sites</li>
+        </ul>
+    </div>
+  </details>
+      <div id="dbs-container" class="hide-mobile">
+    <h3 id="dbs-message" class="nhsuk-heading-m nhsuk-u-margin-bottom-2">Disclosure and Barring Service Check</h3>
+    <p>This post is subject to the Rehabilitation of Offenders Act (Exceptions Order) 1975 and as such it will be necessary for a submission for Disclosure to be made to the Disclosure and Barring Service (formerly known as CRB) to check for any previous criminal convictions.</p>
+    <h3 id="uk-registration" class="nhsuk-heading-m nhsuk-u-margin-bottom-2">UK Registration</h3>
+    <p>
+      Applicants must have current UK professional registration. For further information please see 
+      <a href="https://www.healthcareers.nhs.uk/working-health/overseas-health-professionals" target="_blank" rel="noopener noreferrer">NHS Careers website (opens in a new window).</a>
+    </p>
+</div>
+  <details class="nhsuk-details nhsuk-expander show-mobile">
+    <summary class="nhsuk-details__summary">
+      <span class="nhsuk-details__summary-text">
+        Additional information
+      </span>
+    </summary>
+    <div class="nhsuk-details__text">
+        <h3 id="dbs-message" class="nhsuk-heading-m nhsuk-u-margin-bottom-2">Disclosure and Barring Service Check</h3>
+        <p>This post is subject to the Rehabilitation of Offenders Act (Exceptions Order) 1975 and as such it will be necessary for a submission for Disclosure to be made to the Disclosure and Barring Service (formerly known as CRB) to check for any previous criminal convictions.</p>
+        <h3 id="uk-registration" class="nhsuk-heading-m nhsuk-u-margin-bottom-2">UK Registration</h3>
+        <p>
+          Applicants must have current UK professional registration. For further information please see 
+          <a href="https://www.healthcareers.nhs.uk/working-health/overseas-health-professionals" target="_blank" rel="noopener noreferrer">NHS Careers website (opens in a new window).</a>
+        </p>
+    </div>
+  </details>
+      <div class="hide-mobile">
+    <h2 class="nhsuk-heading-l">Employer details</h2>
+    <h3 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Employer name</h3>
+    <p id="employer_name_details">Bradford Teaching Hospitals NHS Foundation Trust</p>
+    <h3 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Address</h3>
+      <p class="nhsuk-u-margin-bottom-2" id="employer_address_line_1_a">Bradford Royal Infirmary</p>
+      <p class="nhsuk-u-margin-bottom-2" id="employer_address_line_2_b">Duckworth Lane</p>
+      <p class="nhsuk-u-margin-bottom-2" id="employer_town_c">Bradford</p>
+      <p class="nhsuk-u-margin-bottom-2" id="employer_county_d"></p>
+      <p class="nhsuk-u-margin-bottom-2" id="employer_postcode_e">BD9 6RJ</p>
+      <p class="nhsuk-u-margin-bottom-2" id="employer_country_f">United Kingdom</p>
+    <br/>
+    <h3 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2" id="employer_website_heading">Employer&#39;s website</h3>
+        <p class="nhsuk-u-margin-bottom-2" id="employer_website_url"><a href="https://www.bradfordhospitals.nhs.uk" target="_blank" id="employer_website_url_link">https://www.bradfordhospitals.nhs.uk (Opens in a new tab)</a></p>
+</div>
+<div class="show-mobile">
+  <div class="forms-wrapper-white nhsuk-u-margin-bottom-4">
+        <h2 class="nhsuk-heading-l nhsuk-u-margin-bottom-2">Employer details</h2>
+        <h3 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Employer name</h3>
+        <p id="employer_name_details">Bradford Teaching Hospitals NHS Foundation Trust</p>
+        <h3 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2">Address</h3>
+          <p class="nhsuk-u-margin-bottom-2" id="employer_address_line_1_a">Bradford Royal Infirmary</p>
+          <p class="nhsuk-u-margin-bottom-2" id="employer_address_line_2_b">Duckworth Lane</p>
+          <p class="nhsuk-u-margin-bottom-2" id="employer_town_c">Bradford</p>
+          <p class="nhsuk-u-margin-bottom-2" id="employer_county_d"></p>
+          <p class="nhsuk-u-margin-bottom-2" id="employer_postcode_e">BD9 6RJ</p>
+          <p class="nhsuk-u-margin-bottom-2" id="employer_country_f">United Kingdom</p>
+        <br/>
+        <h3 class="nhsuk-heading-xs nhsuk-u-margin-bottom-2" id="employer_website_heading">Employer&#39;s website</h3>
+            <p class="nhsuk-u-margin-bottom-2" id="employer_website_url"><a href="https://www.bradfordhospitals.nhs.uk" target="_blank" id="employer_website_url_link_mobile">https://www.bradfordhospitals.nhs.uk (Opens in a new tab)</a></p>
+  </div>
+</div>
+    </div>
+    <div class="nhsuk-grid-column-one-third">
+      <div class="forms-wrapper-white nhsuk-u-margin-bottom-4" style="overflow-wrap: break-word;">
+  <h2 class="nhsuk-u-visually-hidden">Employer contact details</h2>
+  <h3 class="nhsuk-heading-s nhsuk-u-margin-bottom-2">For questions about the job, contact:</h3>
+  <div id="contact_details">
+    <p class="nhsuk-u-margin-bottom-2" id="contact_details_job_title">Research Data Infrastructure Manager</p>
+    <p class="nhsuk-u-margin-bottom-2" id="contact_details_name">John Birkinshaw</p>
+    <p class="nhsuk-u-margin-bottom-2" id="contact_details_email"><a href="mailto:john.birkinshaw@bthft.nhs.uk">john.birkinshaw@bthft.nhs.uk</a></p>
+    <p class="nhsuk-u-margin-bottom-2" id="contact_details_number"></p>
+  </div>
+</div>
+  <img id="employer_logo" src="data:image/png;base64,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" style="max-width: 100%" class="nhsuk-u-margin-bottom-4 nhsuk-u-margin-top-2" alt="logo of employer">
+      <div class="hide-mobile">
+        <div class="forms-wrapper-white nhsuk-u-margin-bottom-4">
+  <h2 class="nhsuk-u-visually-hidden">Details</h2>
+  <h3 class="nhsuk-heading-s nhsuk-u-margin-bottom-2" id="date_posted_heading">Date posted</h3>
+  <p id="date_posted">24 September 2026</p>
+    <h3 class="nhsuk-heading-s nhsuk-u-margin-bottom-2">Pay scheme</h3>
+    <p id="payscheme-type">Agenda for change</p>
+        <h3 class="nhsuk-heading-s nhsuk-u-margin-bottom-2">Band</h3>
+      <p id="payscheme-band">Band 5</p>
+    <h3 class="nhsuk-heading-s nhsuk-u-margin-bottom-2">Salary</h3>
+    <p id="range_salary">
+      £32,073 to £39,043 a year
+        per annum
+    </p>
+  <h3 id="contract_type_heading" class="nhsuk-heading-s nhsuk-u-margin-bottom-2">Contract</h3>
+  <p id="contract_type">Fixed term</p>
+    <h3 id="contract_duration_heading" class="nhsuk-heading-s nhsuk-u-margin-bottom-2">Duration</h3>
+    <p id="contract_duration">18 months</p>
+    <h3 id="working_pattern_heading" class="nhsuk-heading-s nhsuk-u-margin-bottom-2">Working pattern</h3>
+    <p>
+          Full-time
+    </p>
+  <h3 class="nhsuk-heading-s nhsuk-u-margin-bottom-2" id="reference_number_heading">Reference number</h3>
+  <p id="trac-job-reference" style="margin-bottom: 0;">389-26-8303144</p>
+        <h3 id="employer_location_heading" class="nhsuk-heading-s nhsuk-u-margin-bottom-2">Job locations</h3>
+      <p class="nhsuk-u-no-margin-bottom grid-row-min-width-columns address-text-wrap" id="employer_address_line_1">Bradford Royal Infirmary</p>
+      <p class="nhsuk-u-no-margin-bottom grid-row-min-width-columns address-text-wrap" id="employer_address_line_2">Duckworth Lane</p>
+      <p class="nhsuk-u-no-margin-bottom grid-row-min-width-columns address-text-wrap" id="employer_town">Bradford</p>
+      <p class="nhsuk-u-no-margin-bottom grid-row-min-width-columns address-text-wrap" id="employer_county"></p>
+      <p class="nhsuk-u-no-margin-bottom grid-row-min-width-columns address-text-wrap" id="employer_postcode">BD9 6RJ</p>
+        <p class="nhsuk-u-no-margin-bottom grid-row-min-width-columns address-text-wrap" id="employer_country">United Kingdom</p>
+      <br/>
+</div>
+      </div>
+  <h3 class="nhsuk-heading-s nhsuk-u-margin-bottom-2" id="supporting_documents_heading">Supporting documents</h3>
+    <form method="post">
+      <div class="nhsuk-form-group" id="supporting_document-1">
+        <input type="hidden" name="_csrf" value="PSEgSsFY-e2bqBySRJeKT8xz6Ge6mIXB-F5M">
+        <input type="hidden" name="document" value="3067802">
+        <input id="getfile-1" class="nhsuk-button--link" style="font-size: 19px" type="submit" value="Job Description.pdf (PDF, 456 KB)">
+      </div>
+    </form>
+    <form method="post">
+      <div class="nhsuk-form-group" id="supporting_document-2">
+        <input type="hidden" name="_csrf" value="PSEgSsFY-e2bqBySRJeKT8xz6Ge6mIXB-F5M">
+        <input type="hidden" name="document" value="3067803">
+        <input id="getfile-2" class="nhsuk-button--link" style="font-size: 19px" type="submit" value="person specification.pdf (PDF, 225 KB)">
+      </div>
+    </form>
+        <h3 class="nhsuk-heading-s nhsuk-u-margin-bottom-2">Privacy notice</h3>
+        <p id="privacyPolicy"><a href="https://www.bradfordhospitals.nhs.uk/privacy-statement/" target="_blank" rel="noopener noreferrer">Bradford Teaching Hospitals NHS Foundation Trust&#39;s privacy notice (opens in a new tab)</a></p>
+    </div>
+  </div>
+            </main>
+          </div>
+<footer role="contentinfo">
+  <div class="nhsuk-footer" id="nhsuk-footer">
+    <div class="nhsuk-width-container">
+      <h2 class="nhsuk-u-visually-hidden">Support links</h2>
+      <ul class="nhsuk-footer__list adjust-width">
+        <li class="nhsuk-footer__list-item"><a class="nhsuk-footer__list-item-link" target="_blank" id="privacy" href="/candidate/privacy-policy">Privacy policy</a></li>
+        <li class="nhsuk-footer__list-item"><a class="nhsuk-footer__list-item-link" target="_blank" id="acceptableUse" href="/candidate/acceptable-use">Terms and conditions</a></li>
+        <li class="nhsuk-footer__list-item"><a class="nhsuk-footer__list-item-link" target="_blank" id="accessibility" href="https://www.nhsbsa.nhs.uk/our-policies/accessibility/accessibility-statement-nhs-jobs-applicants">Accessibility Statement</a></li>
+        <li class="nhsuk-footer__list-item"><a class="nhsuk-footer__list-item-link" target="_blank" id="cookies" href="/candidate/cookies">Cookies</a></li>
+        <li class="nhsuk-footer__list-item"><a class="nhsuk-footer__list-item-link" target="_blank" id="helpText" href="https://www.nhsbsa.nhs.uk/new-nhs-jobs-service/help-and-support-applicants">Help and guidance</a></li>
+      </ul>
+      <p class="nhsuk-footer__copyright">&copy; Crown copyright</p>
+    </div>
+  </div>
+</footer>
+    <!-- Custom JavaScript files can be added to this file -->
+<!-- Add any custom scripts -->
+    <!-- For adding page specific JavaScript -->
+  </body>
+</html>

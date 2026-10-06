@@ -50,7 +50,7 @@ export function classifyLink(url: string): 'posting' | 'board' | 'search' | 'car
   }
   if (detect(url)) return 'board'
   const path = u.pathname
-  const idSegment = /(^|\/)(\d{5,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|R-?\d{4,}|[A-Z]{1,4}\d{4,})([-/]|$)/i.test(path)
+  const idSegment = /(^|\/)(\d{5,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[A-Z]{1,4}[-_]?\d{3,})([-/]|$)/i.test(path)
   if (idSegment && /(job|position|role|opening|detail|requisition|posting|career)/i.test(path)) return 'posting'
   if (u.search && /(q|query|search|keyword|keywords|search_term|base_query)=/i.test(u.search)) return 'search'
   if (/(search|results|listing|list|openings)/i.test(path)) return 'search'

@@ -28,7 +28,8 @@ export interface RoleLink {
   location?: string
 }
 
-const ID_SEGMENT = /^(?:\d{5,}(?:-[\w-]*)?|[0-9a-f]{8,}(?:-[\w-]*)?|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
+// A reference id with letters before its digits (C9389-26-0506, R-1075582, REQ-123) is an id too: every candidate is confirmed on its own page.
+const ID_SEGMENT = /^(?:\d{5,}(?:-[\w-]*)?|[a-z]{1,4}[-_]?\d{3,}(?:-[\w-]*)?|[0-9a-f]{8,}(?:-[\w-]*)?|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
 const MONTHS = 'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec'
 const CARD_DATE = new RegExp(`((?:${MONTHS})[a-z]*\\.? \\d{1,2}, \\d{4}|\\d{4}-\\d{2}-\\d{2})`)
 const MIN_GROUP = 3
