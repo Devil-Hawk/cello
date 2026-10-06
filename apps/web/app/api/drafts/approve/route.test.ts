@@ -16,14 +16,31 @@ interface State {
   user: { id: string } | null
   draft: Record<string, unknown> | null
   updates: Record<string, unknown>[]
+  /** person_jobs rows, one per follower of a shared role; the embed on jobs would give the first storer's company. */
+  personJobs: Record<string, unknown>[]
+  selects: string[]
 }
 
 let state: State
 
 function adminFrom(table: string) {
+  const eqs: Record<string, unknown> = {}
   const self = {
-    select: () => self,
-    eq: () => self,
+    select(cols: string) {
+      if (table === 'person_jobs') state.selects.push(cols)
+      return self
+    },
+    eq(col: string, val: unknown) {
+      eqs[col] = val
+      return self
+    },
+    async single() {
+      if (table === 'person_jobs') {
+        const row = state.personJobs.find((r) => r.viewer_id === eqs.viewer_id && r.id === eqs.id)
+        return { data: row ?? null, error: null }
+      }
+      return { data: null, error: null }
+    },
     async maybeSingle() {
       if (table === 'application_drafts') return { data: state.draft, error: null }
       return { data: null, error: null }
@@ -51,6 +68,7 @@ vi.mock('@/lib/ats-apply', () => ({
   resolveApplyCredentials: vi.fn(),
 }))
 
+import { resolveApplyCredentials, submitApplication } from '@/lib/ats-apply'
 import { POST } from './route'
 
 function post(body: unknown) {
@@ -72,6 +90,8 @@ beforeEach(() => {
       fill_state: { first_name: 'Ada' },
     },
     updates: [],
+    personJobs: [],
+    selects: [],
   }
 })
 
@@ -107,5 +127,22 @@ describe('POST /api/drafts/approve (assisted-apply branch)', () => {
     const body = await res.json()
     expect(body.status).toBe('submitted')
     expect(state.updates.length).toBe(0)
+  })
+})
+
+describe('POST /api/drafts/approve (official submit)', () => {
+  it('reads the apply credentials from the viewer own company, never the first storer', async () => {
+    // One shared role held by two people. person_jobs gives each their own company metadata; the role's
+    // jobs.company_id is the first storer's, so a companies(metadata) embed would hand B this key.
+    state.draft = { id: 'draft-1', user_id: 'user-2', job_id: 'job-1', status: 'pending_review', fill_state: null }
+    state.user = { id: 'user-2' }
+    state.personJobs = [
+      { viewer_id: 'user-1', id: 'job-1', url: 'https://x.test/1', viewer_company_metadata: { ats: { applyKey: 'A-KEY' } } },
+      { viewer_id: 'user-2', id: 'job-1', url: 'https://x.test/1', viewer_company_metadata: { ats: { applyKey: 'B-KEY' } } },
+    ]
+    vi.mocked(submitApplication).mockResolvedValue({ outcome: 'handoff', fields: [], prefilledUrl: 'https://x.test/1', provider: 'greenhouse' } as never)
+    await POST(post({ draftId: 'draft-1' }))
+    expect(vi.mocked(resolveApplyCredentials).mock.calls[0][0]).toEqual({ ats: { applyKey: 'B-KEY' } })
+    expect(state.selects.join(' ')).not.toMatch(/companies\(/)
   })
 })

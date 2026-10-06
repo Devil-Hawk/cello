@@ -50,6 +50,20 @@ describe('person roles scan', () => {
     expect(stale, 'no longer reads jobs: remove it from person-roles-scan.allow.ts').toEqual([])
   })
 
+  it('has no companies( embed in a select on person_jobs: it follows jobs.company_id, the first storer\'s company', () => {
+    const embed = (text: string) => /(?:\.from\(\s*['"`]person_jobs['"`]\s*\)|personJobs\([^)]*\))\s*\.select\(\s*['"`][^'"`]*companies\(/.test(strip(text))
+    expect(embed("db.from('person_jobs').select('id, companies(metadata)')")).toBe(true)
+    expect(embed("personJobs(db).select('id, companies(name)')")).toBe(true)
+    expect(embed("db.from('person_jobs').select('id, viewer_company_metadata')")).toBe(false)
+    const found: string[] = []
+    for (const root of ROOTS) {
+      for (const file of walk(path.join(WEB, root))) {
+        if (embed(readFileSync(file, 'utf8'))) found.push(path.relative(WEB, file).split(path.sep).join('/'))
+      }
+    }
+    expect(found, 'read viewer_company_name or viewer_company_metadata from the view').toEqual([])
+  })
+
   it('has no inner join to companies: a role the sweep stored has company_id null, and the join drops it', () => {
     const found: string[] = []
     for (const root of ROOTS) {
