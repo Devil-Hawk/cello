@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { LlmResult, LlmRunOptions } from '@/lib/harness/types'
 import { MissingKeyError } from '@/lib/harness/llm'
-import { assessChances, labelChance, resumeLines, verifyChecks, type CitationStats } from './chance'
+import { applyVerdicts, assessChances, labelChance, resumeLines, verifyChecks, type CitationStats } from './chance'
 import type { Requirement, RequirementsOutcome } from './posting-requirements'
 import type { RequirementCheck, RoleFacts } from './types'
 
@@ -191,6 +191,16 @@ describe('assessChances', () => {
     expect(res.get('a')!.gaps).toContain('4+ years backend')
   })
 
+  it('reads the stored verdicts: a person\'s gap pulls a Strong role down, a strength lifts a Stretch one', async () => {
+    const met = JSON.stringify({ checks: [{ id: 'j1.r1', status: 'met', line: 2, quote: 'Backend engineer, Brightpay, 2020-2024' }, { id: 'j1.r2', status: 'met', line: 2, quote: 'built payment services in Go' }] })
+    const gap = [{ requirement: 'Strong Go', verdict: 'gap' as const, origin: 'person' as const }, { requirement: '4+ years backend', verdict: 'gap' as const, origin: 'person' as const }]
+    const down = await assessChances(llmReturning(met).fn, RESUME, [{ role: role('a'), outcome: ok(reqs), verdicts: gap }])
+    expect(down.get('a')!.chance).toBe('stretch')
+    const none = JSON.stringify({ checks: [] })
+    const up = await assessChances(llmReturning(none).fn, RESUME, [{ role: role('a'), outcome: ok(reqs), verdicts: [{ requirement: 'Strong Go', verdict: 'strength', origin: 'code' }, { requirement: '4+ years backend', verdict: 'strength', origin: 'code' }] }])
+    expect(up.get('a')!.chance).toBe('strong')
+  })
+
   it('marks the roles of a failed call as cannot assess and does not throw', async () => {
     const { fn } = llmReturning('not json')
     const res = await assessChances(fn, RESUME, [{ role: role('a'), outcome: ok(reqs) }])
@@ -206,5 +216,21 @@ describe('assessChances', () => {
     const { fn, calls } = llmReturning(JSON.stringify({ checks: [] }))
     await assessChances(fn, RESUME, ['a', 'b', 'c', 'd'].map((id) => ({ role: role(id), outcome: ok(reqs) })))
     expect(calls).toHaveLength(2)
+  })
+})
+
+describe('applyVerdicts', () => {
+  const met = { requirement: 'Go', mustHave: true, status: 'met' as const, evidence: { line: 2, quote: 'Go' } }
+  const notMet = { requirement: 'Go', mustHave: true, status: 'not_met' as const, evidence: null }
+
+  it('a model gap does not overrule a line the check cited, a person\'s gap does', () => {
+    expect(applyVerdicts([met], [{ requirement: 'go', verdict: 'gap', origin: 'model' }])[0].status).toBe('met')
+    expect(applyVerdicts([met], [{ requirement: 'go', verdict: 'gap', origin: 'person' }])[0]).toMatchObject({ status: 'not_met', evidence: null })
+  })
+
+  it('a strength shows a requirement the resume check did not, and unknown changes nothing', () => {
+    expect(applyVerdicts([notMet], [{ requirement: 'Go', verdict: 'strength', origin: 'code' }])[0].status).toBe('met')
+    expect(applyVerdicts([notMet], [{ requirement: 'Go', verdict: 'unknown', origin: 'code' }])[0].status).toBe('not_met')
+    expect(applyVerdicts([notMet], undefined)).toEqual([notMet])
   })
 })

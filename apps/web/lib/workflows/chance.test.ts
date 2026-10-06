@@ -48,6 +48,38 @@ describe('checkChance', () => {
     expect(out.limit).toBe('cap')
   })
 
+  it('the chance step receives each role\'s settled verdicts, and a changed verdict changes what it receives', async () => {
+    const item = (verdict: string, origin = 'code') => ({ requirement: 'Python', requirementId: 'r1', verdict, evidence: [], origin })
+    fit.readRoleFit.mockImplementation(async (_d: unknown, id: string) => ({ items: id === 'job-1' ? [item('strength'), { ...item('unknown'), requirement: 'Go' }] : [] }))
+    await checkChance(ctx, ['job-1', 'job-2'])
+    const first = assess.assessJobs.mock.calls[0][0].verdicts as Map<string, unknown>
+    expect(first.get('job-1')).toEqual([{ requirement: 'Python', verdict: 'strength', origin: 'code' }])
+    expect(first.has('job-2')).toBe(false)
+    fit.readRoleFit.mockImplementation(async () => ({ items: [item('gap', 'person')] }))
+    await checkChance(ctx, ['job-1'])
+    expect((assess.assessJobs.mock.calls[1][0].verdicts as Map<string, unknown>).get('job-1')).toEqual([{ requirement: 'Python', verdict: 'gap', origin: 'person' }])
+  })
+
+  it('a failed evidence read falls back to code verdicts for that role and the chance still runs for the batch', async () => {
+    fit.readRoleFit.mockImplementation(async (_d: unknown, id: string, mode: string) => {
+      if (id === 'job-1' && mode === 'check') throw new Error('model down')
+      return { items: [{ requirement: 'Python', requirementId: 'r1', verdict: 'strength', evidence: [], origin: 'code' }] }
+    })
+    const out = await checkChance(ctx, ['job-1', 'job-2'])
+    expect(fit.readRoleFit.mock.calls.filter((c) => c[1] === 'job-1').map((c) => c[2])).toEqual(['check', 'view'])
+    const sent = assess.assessJobs.mock.calls[0][0]
+    expect(sent.jobIds).toEqual(['job-1', 'job-2'])
+    expect([...(sent.verdicts as Map<string, unknown>).keys()]).toEqual(['job-1', 'job-2'])
+    expect(out.assessed).toBe(2)
+  })
+
+  it('a role whose fit cannot be read at all is still assessed, without verdicts', async () => {
+    fit.readRoleFit.mockRejectedValue(new Error('db down'))
+    const out = await checkChance(ctx, ['job-1'])
+    expect(out.assessed).toBe(1)
+    expect((assess.assessJobs.mock.calls[0][0].verdicts as Map<string, unknown>).size).toBe(0)
+  })
+
   it('a role named twice is checked once, and no ids make no call', async () => {
     await checkChance(ctx, ['a', 'a', 'b'])
     expect(assess.assessJobs.mock.calls[0][0].jobIds).toEqual(['a', 'b'])

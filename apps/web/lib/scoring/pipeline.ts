@@ -20,7 +20,7 @@
 import { createHash } from 'node:crypto'
 import { scoreTitleAgainstTargets, parseTitle } from '@/lib/matching/title-rank'
 import type { LlmRunner } from '@/lib/harness/types'
-import { assessChances } from './chance'
+import { assessChances, type RequirementVerdict } from './chance'
 import { checkConstraints, type StatedConstraints } from './constraints'
 import { entropy } from './math'
 import { NOT_READ_YET } from './posting-requirements'
@@ -57,6 +57,8 @@ export interface AssessRequest {
   chanceFor?: number
   /** False when the person turned `taste:blend` off (or mem0 could not be read): no reaction orders anything, the code order stands. Default on. */
   taste?: boolean
+  /** Each role's strengths and gaps, read first. The chance step reads them, and a role that has some is checked again. */
+  verdicts?: ReadonlyMap<string, readonly RequirementVerdict[]>
 }
 
 export interface AssessResult {
@@ -268,7 +270,7 @@ export async function assessRoles(deps: PipelineDeps, req: AssessRequest): Promi
   for (const role of chanceRoles) {
     const p = prior.get(role.id)
     // A settled label for this resume is kept; one that failed or could not be read is tried again.
-    if (p?.chance && p.chance.chance !== 'cannot_assess' && p.resumeKey === resumeKey) chances.set(role.id, p.chance)
+    if (p?.chance && p.chance.chance !== 'cannot_assess' && p.resumeKey === resumeKey && !req.verdicts?.get(role.id)?.length) chances.set(role.id, p.chance)
     else toCheck.push(role)
   }
   if (toCheck.length > 0) {
@@ -277,7 +279,7 @@ export async function assessRoles(deps: PipelineDeps, req: AssessRequest): Promi
     const fresh = await assessChances(
       llm,
       req.resumeText,
-      toCheck.map((role) => ({ role, outcome: outcomes.get(role.id) ?? { kind: 'thin' as const, reason: NOT_READ_YET } }))
+      toCheck.map((role) => ({ role, outcome: outcomes.get(role.id) ?? { kind: 'thin' as const, reason: NOT_READ_YET }, verdicts: req.verdicts?.get(role.id) }))
     )
     for (const [id, c] of fresh) chances.set(id, c)
   }

@@ -8,7 +8,8 @@
 // rolesGaps counts only Not found items (K17b): what the person's resume, answers and material do not answer.
 
 import { readRoleFit } from '@/lib/fit'
-import { assessJobs, type AssessJobsArgs, type AssessJobsResult, type RoleFit } from '@/lib/scoring'
+import { assessJobs, type AssessJobsArgs, type AssessJobsResult, type RequirementVerdict, type RoleFit } from '@/lib/scoring'
+import { logApiError } from '@/lib/observability/log'
 import type { AdminClient } from '@/lib/harness/types'
 
 /** How many roles one chance check reads. */
@@ -27,6 +28,24 @@ export interface CheckChanceResult extends Omit<AssessJobsResult, 'skippedReason
 }
 
 /**
+ * One role's fit before its chance. A model or database failure reading it is not the end of the batch:
+ * the code verdicts (and what is stored) stand in, and a role with no readable fit is assessed without one.
+ */
+async function fitBefore(args: CheckChanceArgs, id: string) {
+  const deps = { admin: args.admin, userId: args.userId, keys: args.apiKeys }
+  try {
+    return await readRoleFit(deps, id, 'check')
+  } catch (e) {
+    logApiError('roles.check_chance.fit', e, { jobId: id })
+    try {
+      return await readRoleFit({ admin: args.admin, userId: args.userId }, id, 'view')
+    } catch {
+      return null
+    }
+  }
+}
+
+/**
  * Checks the chance for these roles, twelve at a time, and adds up what each batch did. The strengths and
  * gaps come first: each role's requirements are read against the person's material (code, then the
  * `role.evidence` step where it is stale or missing and the daily cap allows) before the chance is assessed.
@@ -36,11 +55,15 @@ export async function checkChance(args: CheckChanceArgs, jobIds: readonly string
   const total: CheckChanceResult = { assessed: 0, blocked: 0, failed: 0, remaining: 0, fits: new Map<string, RoleFit>(), batches: 0 }
   for (let i = 0; i < unique.length; i += CHANCE_BATCH) {
     const chunk = unique.slice(i, i + CHANCE_BATCH)
+    const verdicts = new Map<string, RequirementVerdict[]>()
     for (const id of chunk) {
-      const fit = await readRoleFit({ admin: args.admin, userId: args.userId, keys: args.apiKeys }, id, 'check')
+      const fit = await fitBefore(args, id)
+      if (!fit) continue
       if (fit.limit) total.limit = fit.limit
+      const settled = fit.items.filter((i) => i.verdict !== 'unknown').map((i) => ({ requirement: i.requirement, verdict: i.verdict, origin: i.origin }))
+      if (settled.length > 0) verdicts.set(id, settled)
     }
-    const part = await assessJobs({ ...args, jobIds: chunk, limit: chunk.length })
+    const part = await assessJobs({ ...args, jobIds: chunk, limit: chunk.length, verdicts })
     total.batches++
     total.assessed += part.assessed
     total.blocked += part.blocked
