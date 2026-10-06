@@ -7,7 +7,7 @@ import { relayCall } from './api'
 import type { RelayRoute } from './api'
 
 // The extension carrier. It runs inside the existing five minute alarm: one claim,
-// which the server may hold up to 25 seconds, then the job on this computer (R2,
+// answered at once, then the job on this computer (R2,
 // loopback) and the answer back. R1 (a model in this browser) is off here, see browserReady.
 // There is no timer of its own and no loop. A send and a relay job never run
 // together: both take the same lock.
@@ -56,26 +56,26 @@ const defaults: RelayDeps = {
 export async function relayTick(d: RelayDeps = defaults): Promise<boolean> {
   const cfg = await d.config()
   if (!(await d.haveToken())) return false
+  const browserModel = await d.browserReady()
+  if (!cfg && !browserModel) return false
   if (!(await d.lock())) return false
   try {
     await d.keepAlive.start()
-    const browserModel = await d.browserReady()
-    if (!cfg && !browserModel) return false
-    // R2 first; the long wait only when R2 is the one rung this device serves.
-    if (cfg && (await serve(d, 'R2', browserModel ? 0 : 25, cfg.model, (req) => d.run(cfg, req)))) return true
-    return browserModel ? await serve(d, 'R1', 0, R1_MODEL, d.runBrowser) : false
+    if (cfg && (await serve(d, 'R2', cfg.model, (req) => d.run(cfg, req)))) return true
+    return browserModel ? await serve(d, 'R1', R1_MODEL, d.runBrowser) : false
   } finally {
     await d.keepAlive.stop()
     await d.unlock()
   }
 }
 
-async function serve(d: RelayDeps, rung: 'R1' | 'R2', wait: number, model: string, run: (req: LocalRequest) => Promise<string>): Promise<boolean> {
-  // ponytail: the five minute alarm polls, so each relay-set extension costs one claim
-  // invocation per tick (about 8,640 a month) and holds the function up to 25 s (wait: 25
-  // here, maxDuration = 60 in claim/route.ts). Move to Realtime with a short-lived JWT
+async function serve(d: RelayDeps, rung: 'R1' | 'R2', model: string, run: (req: LocalRequest) => Promise<string>): Promise<boolean> {
+  // ponytail: the five minute alarm polls with wait: 0, so each relay-set extension costs
+  // one near-instant claim invocation per tick (about 8,640 a month) and a job waits up to
+  // five minutes. A long hold (wait: 25) would be about 60 function-hours a month per user
+  // against Hobby's budget, so do not raise it. Move to Realtime with a short-lived JWT
   // once relay users pass about 50.
-  const claimed = await d.call<Claimed>('/api/model-jobs/claim', { rung, wait })
+  const claimed = await d.call<Claimed>('/api/model-jobs/claim', { rung, wait: 0 })
   const job = claimed?.job
   if (!job) return false
   let answer: { text: string } | { error: string }

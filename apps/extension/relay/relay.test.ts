@@ -32,7 +32,7 @@ describe('the extension carrier', () => {
     const d = deps()
     expect(await relayTick(d)).toBe(true)
     expect(d.calls.map(([r]) => r)).toEqual(['/api/model-jobs/claim', '/api/model-jobs/result'])
-    expect(d.calls[0]![1]).toEqual({ rung: 'R2', wait: 25 })
+    expect(d.calls[0]![1]).toEqual({ rung: 'R2', wait: 0 })
     expect(d.calls[1]![1]).toEqual({ job_id: 'j1', claim_id: 'c1', model: 'llama3.1:8b', text: 'a reply' })
     expect(d.keepAlive.start).toHaveBeenCalledTimes(1)
     expect(d.keepAlive.stop).toHaveBeenCalledTimes(1)
