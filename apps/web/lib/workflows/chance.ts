@@ -22,14 +22,24 @@ export type CheckChanceArgs = Omit<AssessJobsArgs, 'jobIds' | 'limit'>
 export interface CheckChanceResult extends Omit<AssessJobsResult, 'skippedReason'> {
   batches: number
   skippedReason?: AssessJobsResult['skippedReason']
+  /** Set when the daily cap stopped the model reading some roles' requirements: their verdicts are code only. */
+  limit?: 'cap'
 }
 
-/** Checks the chance for these roles, twelve at a time, and adds up what each batch did. */
+/**
+ * Checks the chance for these roles, twelve at a time, and adds up what each batch did. The strengths and
+ * gaps come first: each role's requirements are read against the person's material (code, then the
+ * `role.evidence` step where it is stale or missing and the daily cap allows) before the chance is assessed.
+ */
 export async function checkChance(args: CheckChanceArgs, jobIds: readonly string[]): Promise<CheckChanceResult> {
   const unique = [...new Set(jobIds)]
   const total: CheckChanceResult = { assessed: 0, blocked: 0, failed: 0, remaining: 0, fits: new Map<string, RoleFit>(), batches: 0 }
   for (let i = 0; i < unique.length; i += CHANCE_BATCH) {
     const chunk = unique.slice(i, i + CHANCE_BATCH)
+    for (const id of chunk) {
+      const fit = await readRoleFit({ admin: args.admin, userId: args.userId, keys: args.apiKeys }, id, 'check')
+      if (fit.limit) total.limit = fit.limit
+    }
     const part = await assessJobs({ ...args, jobIds: chunk, limit: chunk.length })
     total.batches++
     total.assessed += part.assessed

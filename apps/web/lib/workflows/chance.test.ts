@@ -13,6 +13,7 @@ const ctx = { admin: {} as AdminClient, userId: 'u1', llm: vi.fn() as never }
 const ids = (n: number) => Array.from({ length: n }, (_, i) => `job-${i + 1}`)
 
 beforeEach(() => {
+  fit.readRoleFit.mockReset().mockResolvedValue({ items: [] })
   assess.assessJobs.mockReset().mockImplementation(async (a: { jobIds: string[] }) => ({
     assessed: a.jobIds.length,
     blocked: 0,
@@ -30,6 +31,21 @@ describe('checkChance', () => {
     expect(assess.assessJobs.mock.calls.map((c) => c[0].limit)).toEqual([12, 12, 1])
     expect(out).toMatchObject({ batches: 3, assessed: 25, blocked: 0, failed: 0 })
     expect(out.fits.size).toBe(25)
+  })
+
+  it('reads each role\'s strengths and gaps before its chance, and reports the daily cap', async () => {
+    const order: string[] = []
+    fit.readRoleFit.mockImplementation(async (_d: unknown, id: string, mode: string) => {
+      order.push(`fit:${id}:${mode}`)
+      return { items: [], ...(id === 'job-2' ? { limit: 'cap' } : {}) }
+    })
+    assess.assessJobs.mockImplementation(async (a: { jobIds: string[] }) => {
+      order.push(`assess:${a.jobIds.join(',')}`)
+      return { assessed: a.jobIds.length, blocked: 0, failed: 0, remaining: 0, fits: new Map() }
+    })
+    const out = await checkChance(ctx, ['job-1', 'job-2'])
+    expect(order).toEqual(['fit:job-1:check', 'fit:job-2:check', 'assess:job-1,job-2'])
+    expect(out.limit).toBe('cap')
   })
 
   it('a role named twice is checked once, and no ids make no call', async () => {
