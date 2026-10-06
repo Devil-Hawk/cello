@@ -52,6 +52,8 @@ export interface EvalCase {
 export interface StepSet {
   /** The step's prompt: a change to it makes the measured row stale. */
   prompt: string
+  /** The step's output schema (JSON schema), when it has one: a change to it also makes the row stale. */
+  schema?: unknown
   /** The score a rung must reach, 0 to 1. */
   bar: number
   cases(): EvalCase[]
@@ -87,7 +89,7 @@ export interface RungsFile {
   steps: Record<string, StepEntry>
 }
 
-export const stepHash = (id: string, set: StepSet): string => createHash('sha256').update(JSON.stringify([id, set.prompt])).digest('hex')
+export const stepHash = (id: string, set: StepSet): string => createHash('sha256').update(JSON.stringify([id, set.prompt, set.schema ?? null])).digest('hex')
 
 /** The 10-case smoke set Settings > Models > Test runs. The same cases as the eval, no second data set. */
 export const smokeCases = (stepId: string, sets: Record<string, StepSet> = STEP_SETS): EvalCase[] => sets[stepId]?.cases().slice(0, 10) ?? []

@@ -31,6 +31,7 @@ describe('rungs.json freshness', () => {
     const file = fileWith(everyStep({ 'inbox.classify': measured }))
     expect(staleSteps(file, { 'inbox.classify': set('old prompt') })).toEqual([])
     expect(staleSteps(file, { 'inbox.classify': set('a new prompt') })).toEqual(['inbox.classify'])
+    expect(staleSteps(file, { 'inbox.classify': { ...set('old prompt'), schema: { type: 'object' } } })).toEqual(['inbox.classify'])
   })
 
   it('names a step with a set that was never measured, a missing step and an unlisted one', () => {
