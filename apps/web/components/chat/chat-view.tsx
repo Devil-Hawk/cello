@@ -67,6 +67,8 @@ export function ChatView({ chatId, person, initialAsk }: ChatViewProps) {
   const [draft, setDraft] = useState(initialAsk ?? '')
   const [panel, setPanel] = useState<string | null>(null)
   const [railOpen, setRailOpen] = useState(false)
+  const [quoted, setQuoted] = useState<{ text: string; turn_id: string } | null>(null)
+  const [selection, setSelection] = useState<{ text: string; turnId: string; x: number; y: number } | null>(null)
   const poll = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadChats = useCallback(async () => {
@@ -114,6 +116,18 @@ export function ChatView({ chatId, person, initialAsk }: ChatViewProps) {
   const lastPersonTurn = [...(page?.turns ?? [])].reverse().find((t) => t.kind === 'person')
   const turnTasks = page?.tasks.filter((t) => t.turn_id === lastPersonTurn?.id) ?? []
 
+  // Selecting text in one of Cello's answers offers "Ask Cello": the selection becomes a quote above the compose box,
+  // kept apart from what the person types. It never counts as their words.
+  function onSelect() {
+    const sel = window.getSelection()
+    const text = sel?.toString().trim() ?? ''
+    const anchor = sel?.anchorNode instanceof Element ? sel.anchorNode : sel?.anchorNode?.parentElement
+    const turn = anchor?.closest('[data-answer-turn]')
+    if (!sel || sel.rangeCount === 0 || text.length < 3 || !turn) return setSelection(null)
+    const rect = sel.getRangeAt(0).getBoundingClientRect()
+    setSelection({ text: text.slice(0, 1500), turnId: turn.getAttribute('data-answer-turn') ?? '', x: rect.left + rect.width / 2, y: rect.top })
+  }
+
   const openThing = (kind: AttachKind, ref: string) => {
     if (kind === 'made') setPanel(ref)
   }
@@ -155,7 +169,7 @@ export function ChatView({ chatId, person, initialAsk }: ChatViewProps) {
           <span className="truncate text-body font-medium text-foreground">{page?.chat.title || 'New chat'}</span>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto" onMouseUp={onSelect} onScroll={() => setSelection(null)}>
           <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-4">
             {tiles.length > 0 && <Tiles tiles={tiles} onOpen={(t) => openThing(t.kind, t.ref)} onRemove={(t) => void send(`/api/chat/${chatId}/attachments?tile=${encodeURIComponent(t.id)}`, 'DELETE').then(loadPage)} />}
 
@@ -183,7 +197,7 @@ export function ChatView({ chatId, person, initialAsk }: ChatViewProps) {
                       <p className="whitespace-pre-wrap break-words">{t.typed}</p>
                     </div>
                   ) : t.kind === 'cello' ? (
-                    <div key={t.id} className="space-y-1">
+                    <div key={t.id} className="space-y-1" data-answer-turn={t.id}>
                       {t.parts.length > 0 ? <AnswerParts parts={t.parts} names={names} tileCount={active.length} cards={page?.cards ?? []} onOpen={openThing} /> : t.answer ? <Markdown content={t.answer} /> : null}
                       {t.disclosure ? <p className="text-caption text-muted-foreground">{disclosureLine(t.disclosure as Disclosure)}</p> : null}
                     </div>
@@ -208,9 +222,25 @@ export function ChatView({ chatId, person, initialAsk }: ChatViewProps) {
         </div>
 
         <div className="mx-auto w-full max-w-3xl px-4 pb-3">
-          <Composer value={draft} onChange={setDraft} onSend={() => undefined} onStop={() => undefined} running={false} notice={SEND_NOTICE} />
+          <Composer value={draft} onChange={setDraft} onSend={() => undefined} onStop={() => undefined} running={false} notice={SEND_NOTICE} quoted={quoted} onRemoveQuote={() => setQuoted(null)} />
         </div>
       </main>
+
+      {selection && (
+        <button
+          type="button"
+          className="fixed z-50 -translate-x-1/2 -translate-y-full rounded-control border border-border bg-card px-2 py-1 text-caption text-foreground shadow-pop hover:bg-muted"
+          style={{ left: selection.x, top: Math.max(selection.y - 6, 8) }}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            setQuoted({ text: selection.text, turn_id: selection.turnId })
+            setSelection(null)
+            window.getSelection()?.removeAllRanges()
+          }}
+        >
+          Ask Cello
+        </button>
+      )}
 
       {panel && (
         <div className="fixed inset-0 z-50 bg-background md:static md:z-auto md:w-[26rem] md:shrink-0">
