@@ -6,11 +6,18 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push: () => undefined, r
 import { NOT_FOUND } from '@/lib/fit/types'
 import { fixtureFit, fixturePosting, fixtureRecord } from '../fixtures'
 import { checkChance, sendCorrection } from './fit-call'
-import { UNREAD, isPartial, needsFold, pastedLine, sourceLine, sponsorshipLines, statusSentence, stripOf, stripSentence, whyKept, whyType } from './logic'
+import { UNREAD, isPartial, needsFold, pastedLine, sourceLine, sponsorshipLines, statusSentence, stripOf, stripSentence, whyKept, whyType, webUrl } from './logic'
 import { RecordView } from './record-view'
 
 const text = (html: string) => html.replace(/<[^>]*>/g, ' ').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ')
 const render = (over = {}) => renderToStaticMarkup(<RecordView data={fixtureRecord(over)} />)
+
+describe('the apply link', () => {
+  it('is a link only when the posting gave an http or https address', () => {
+    expect(webUrl('https://boards.greenhouse.io/x/jobs/1')).toBe('https://boards.greenhouse.io/x/jobs/1')
+    for (const bad of ['javascript:alert(1)', 'data:text/html,x', '//evil.example', '', null, undefined]) expect(webUrl(bad)).toBeNull()
+  })
+})
 
 describe('the words of the record', () => {
   it('says why a role was kept from the person own search, or nothing', () => {
@@ -231,6 +238,8 @@ describe('checking the chance from the record', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/roles/4f5ad7eb-912c-4e15-ab3c-0f8248113d69/fit', { method: 'POST' })
     fetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'No resume uploaded. Add one in Settings first.' }) })
     expect(await checkChance('x')).toEqual({ ok: false, message: 'No resume uploaded. Add one in Settings first.' })
+    fetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'No model.', skippedReason: 'no-llm-key' }) })
+    expect(await checkChance('x')).toEqual({ ok: false, message: 'No model.', stop: true })
     fetchMock.mockRejectedValueOnce(new Error('offline'))
     expect((await checkChance('x')).ok).toBe(false)
     vi.unstubAllGlobals()

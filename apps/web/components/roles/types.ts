@@ -32,6 +32,8 @@ export interface RoleItem {
   type: RoleTypeView | null
   /** The person pasted the link, so the role is here even when its type is not one of theirs. */
   pasted: boolean
+  /** The posting is the employer's own (it has a shared employer), not only a job-board listing. */
+  traced: boolean
   legit: 'agency' | 'repost' | null
   /** Cello's band for the person's chance, null until checked. */
   chance: Chance | null

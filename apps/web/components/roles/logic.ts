@@ -24,6 +24,15 @@ export type Posted = (typeof POSTED)[number]
 export const POSTED_LABEL: Record<Posted, string> = { any: 'Any time', '24h': '24 hours', '7d': '7 days', '30d': '30 days' }
 export const POSTED_HOURS: Record<Exclude<Posted, 'any'>, number> = { '24h': 24, '7d': 168, '30d': 720 }
 
+/** The languages the classifier tells apart (jobs.language). */
+export const LANGUAGES = ['en', 'de', 'fr', 'nl', 'es'] as const
+export type Language = (typeof LANGUAGES)[number]
+export const LANGUAGE_LABEL: Record<Language, string> = { en: 'English', de: 'German', fr: 'French', nl: 'Dutch', es: 'Spanish' }
+
+/** The chance bands a person can filter by; a role not yet checked has none. */
+export const CHANCES = ['strong', 'possible', 'stretch'] as const
+export type ChanceFilter = (typeof CHANCES)[number]
+
 export const LEVELS = ['intern', 'junior', 'mid', 'senior', 'staff', 'principal', 'manager', 'director', 'exec'] as const
 
 export interface RolesQuery {
@@ -31,6 +40,12 @@ export interface RolesQuery {
   group: GroupBy
   sort: 'ranked' | 'newest'
   level: (typeof LEVELS)[number] | null
+  /** The posting's language. */
+  language: Language | null
+  /** Only roles Cello has checked, at this chance. */
+  chance: ChanceFilter | null
+  /** Only postings whose text mentions sponsorship (code over the text; it says nothing about whether the employer sponsors). */
+  sponsorship: boolean
   posted: Posted
   undated: boolean
   remote: boolean
@@ -54,6 +69,9 @@ export const DEFAULT_QUERY: RolesQuery = {
   group: 'ranked',
   sort: 'ranked',
   level: null,
+  language: null,
+  chance: null,
+  sponsorship: false,
   posted: 'any',
   undated: false,
   remote: false,
@@ -88,6 +106,9 @@ export function parseRolesQuery(sp: Record<string, string | string[] | undefined
     group: pick(one(sp.group), GROUPS, DEFAULT_QUERY.group),
     sort: one(sp.sort) === 'newest' ? 'newest' : 'ranked',
     level: LEVELS.includes(one(sp.level) as (typeof LEVELS)[number]) ? (one(sp.level) as (typeof LEVELS)[number]) : null,
+    language: LANGUAGES.includes(one(sp.lang) as Language) ? (one(sp.lang) as Language) : null,
+    chance: CHANCES.includes(one(sp.chance) as ChanceFilter) ? (one(sp.chance) as ChanceFilter) : null,
+    sponsorship: one(sp.sponsor) === '1',
     posted: pick(one(sp.posted), POSTED, DEFAULT_QUERY.posted),
     undated: one(sp.undated) === '1',
     remote: one(sp.remote) === '1',
@@ -109,6 +130,9 @@ export function rolesHref(q: RolesQuery, change: Partial<RolesQuery> = {}): stri
   if (n.group !== DEFAULT_QUERY.group) p.set('group', n.group)
   if (n.sort !== DEFAULT_QUERY.sort) p.set('sort', n.sort)
   if (n.level) p.set('level', n.level)
+  if (n.language) p.set('lang', n.language)
+  if (n.chance) p.set('chance', n.chance)
+  if (n.sponsorship) p.set('sponsor', '1')
   if (n.posted !== DEFAULT_QUERY.posted) p.set('posted', n.posted)
   if (n.undated) p.set('undated', '1')
   if (n.remote) p.set('remote', '1')
@@ -123,9 +147,14 @@ export function rolesHref(q: RolesQuery, change: Partial<RolesQuery> = {}): stri
   return s ? `/roles?${s}` : '/roles'
 }
 
+/** What Clear sets back: every filter, nothing of the tab, grouping or sort. */
+export const NO_FILTERS: Partial<RolesQuery> = {
+  level: null, language: null, chance: null, sponsorship: false, posted: 'any', undated: false, remote: false, country: null, company: null, roleType: null, following: false, h1b: false, hideAgency: false,
+}
+
 /** How many filters are on, for the Filters button. Tab, grouping and sort are not filters. */
 export function filterCount(q: RolesQuery): number {
-  return [q.level, q.posted !== 'any', q.remote, q.country, q.company, q.roleType, q.following, q.h1b, q.hideAgency].filter(Boolean).length
+  return [q.level, q.language, q.chance, q.sponsorship, q.posted !== 'any', q.remote, q.country, q.company, q.roleType, q.following, q.h1b, q.hideAgency].filter(Boolean).length
 }
 
 // --- order -------------------------------------------------------------------
@@ -306,6 +335,21 @@ export function outsideLine(byReason: Readonly<Record<string, number>>): string 
   if (total === 0) return null
   const list = parts.map(([r, n]) => `${n} ${OUTSIDE_WORD[r] ?? r}`).join(', ')
   return `${total} ${total === 1 ? 'role' : 'roles'} outside your search this week: ${list}.`
+}
+
+/** "12 more are being checked. Until then they are listed by title and date." Null when none wait. The count is from SQL. */
+export function uncheckedLine(n: number): string | null {
+  return n > 0 ? `${n} more ${n === 1 ? 'is' : 'are'} being checked. Until then ${n === 1 ? 'it is' : 'they are'} listed by title and date.` : null
+}
+
+/** What For you says when no model can rank the roles and the person has not reacted to any yet. */
+export const NO_MODEL_LINE = 'Listed by title and date. React to a few and Cello orders them by what you pick. Chances need a model; free ones work.'
+
+/** What a pasted link turned out to be, from the stored posting: the employer's own, or only a board's listing. Null for a role the person did not paste. */
+export function pastedTraceLine(i: Pick<RoleItem, 'pasted' | 'traced' | 'legit'>): string | null {
+  if (!i.pasted) return null
+  if (!i.traced) return "Cello could not trace this to the employer's own site."
+  return i.legit === 'repost' ? "This link is a repost on a job board. Cello found the employer's own posting." : null
 }
 
 /** The chance as the chip says it, or null when it has not been checked (a row then says nothing, never "Not scored"). */

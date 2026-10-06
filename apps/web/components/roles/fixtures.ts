@@ -49,6 +49,7 @@ export function fixtureRoles(count: number, employers: number): RoleItem[] {
       level: i % 2 === 0 ? 'senior' : null,
       type: { ...TYPES[i % TYPES.length], own: false },
       pasted: false,
+      traced: e !== null,
       legit: null,
       chance: i % 4 === 0 ? 'strong' : i % 4 === 1 ? 'possible' : null,
       wantP: i % 4 === 3 ? null : 0.9 - (i % 10) / 20,

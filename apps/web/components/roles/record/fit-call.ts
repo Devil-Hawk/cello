@@ -4,14 +4,15 @@
 import type { FitVerdict } from '@/lib/fit/types'
 import type { RoleFit } from '@/lib/scoring/types'
 
-export type CheckResult = { ok: true; fit: RoleFit } | { ok: false; message: string }
+/** `stop` is set when the route refused for a reason that holds for every role (no model, no resume, budget), so a loop over many roles should end. */
+export type CheckResult = { ok: true; fit: RoleFit } | { ok: false; message: string; stop?: boolean }
 
 /** Checks the person's chance for one role. The words of a refusal (no resume, no model) come from the route. */
 export async function checkChance(jobId: string): Promise<CheckResult> {
   try {
     const res = await fetch(`/api/roles/${jobId}/fit`, { method: 'POST' })
-    const body = (await res.json().catch(() => null)) as (RoleFit & { error?: string }) | null
-    if (!res.ok || !body) return { ok: false, message: body?.error ?? 'Could not check your chance. Try again.' }
+    const body = (await res.json().catch(() => null)) as (RoleFit & { error?: string; skippedReason?: string }) | null
+    if (!res.ok || !body) return { ok: false, message: body?.error ?? 'Could not check your chance. Try again.', ...(body?.skippedReason ? { stop: true } : {}) }
     return { ok: true, fit: body }
   } catch {
     return { ok: false, message: 'Could not check your chance. Try again.' }

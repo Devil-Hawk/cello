@@ -20,11 +20,12 @@ describe('PKCE', () => {
     expect(url.searchParams.get('code_challenge_method')).toBe('S256')
   })
 
-  it('returns only to Welcome, Settings or Today', () => {
+  it('returns only to Welcome, Settings, Today or Roles', () => {
     expect(safeReturn('/settings')).toBe('/settings')
     expect(safeReturn('/today')).toBe('/today')
+    expect(safeReturn('/roles')).toBe('/roles')
     expect(safeReturn('/welcome?screen=connect')).toBe('/welcome')
-    for (const bad of ['https://evil.example', '//evil.example', '/roles', '', null, undefined]) {
+    for (const bad of ['https://evil.example', '//evil.example', '/roles/abc', '/rolesx', '', null, undefined]) {
       expect(safeReturn(bad)).toBe('/welcome')
     }
   })

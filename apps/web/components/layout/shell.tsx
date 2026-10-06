@@ -33,8 +33,13 @@ export function Shell({ pathname, user, onSignOut, needsYou, children }: ShellPr
       <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto focus:outline-none focus-visible:ring-0">
         <div className="mx-auto w-full px-4 py-5 sm:px-6 sm:py-6 md:px-8 md:py-8">{children}</div>
       </main>
+      {/* The record mounts its own, with the role attached: one quick chat per page. Above the tabs on a phone. */}
+      {!pathname.startsWith('/roles/') && (
+        <div className="px-4 pb-2 empty:hidden sm:px-6">
+          <QuickChatSlot />
+        </div>
+      )}
       <PhoneTabs pathname={pathname} needsYou={needsYou} />
-      <QuickChatSlot />
     </div>
   )
 }

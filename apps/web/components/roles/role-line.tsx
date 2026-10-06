@@ -2,7 +2,7 @@
 
 import type { Dispatch } from 'react'
 import { ChangeType, type ChangeTypeProps } from './change-type'
-import { chanceWord, metaLine } from './logic'
+import { chanceWord, metaLine, pastedTraceLine } from './logic'
 import { ReadMark } from './read-mark'
 import type { ReactionAction, ReactionState } from './reactions'
 import { RoleRow } from './role-row'
@@ -33,6 +33,7 @@ export function RoleLine({ item, state, dispatch, now, pickKind, sentence, types
   const { keys, panel } = useRoleReactions({ id: item.id, reaction: item.reaction?.reaction ?? null, state, dispatch, now, pickKind })
   const chance = chanceWord(item.chance)
   const says = sentence ?? item.read
+  const trace = pastedTraceLine(item)
   return (
     <div>
       <RoleRow
@@ -50,6 +51,7 @@ export function RoleLine({ item, state, dispatch, now, pickKind, sentence, types
             {chance && <span className="ml-2 text-r-ink-2">{chance}</span>}
             {item.closed && <span className="ml-2 text-r-ink-2">Closed</span>}
             {says && <span className="mt-1 block">{says}</span>}
+            {trace && <span className="mt-1 block">{trace}</span>}
           </>
         }
         actions={keys}

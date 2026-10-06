@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { Key } from '@/components/ui/key'
-import { LEVELS, POSTED, POSTED_LABEL, filterCount, rolesHref, type RolesQuery } from './logic'
+import { CHANCES, chanceWord, LANGUAGES, LANGUAGE_LABEL, LEVELS, NO_FILTERS, POSTED, POSTED_LABEL, filterCount, rolesHref, type RolesQuery } from './logic'
 
 const LEVEL_LABEL: Record<(typeof LEVELS)[number], string> = {
   intern: 'Intern',
@@ -25,18 +25,17 @@ export interface FiltersProps {
 }
 
 // The filter row: a plain form that sends its fields to the address (GET), so
-// every filter is a link someone can share, and it works with no script. Only
-// filters that have a column today are here; Language, Chance and Mentions
-// sponsorship join as their columns do.
+// every filter is a link someone can share, and it works with no script.
 export function Filters({ query, typeOptions, companyOptions, needsSponsorship }: FiltersProps) {
   const n = filterCount(query)
   const checks: Array<readonly [string, string, boolean, string]> = [
     ['undated', '1', query.undated, 'Include roles with no posted date'],
     ['remote', '1', query.remote, 'Remote only'],
     ['following', '1', query.following, 'Following only'],
+    ['sponsor', '1', query.sponsorship, 'Mentions sponsorship'],
     ['agency', 'hide', query.hideAgency, 'Hide agency postings and reposts'],
   ]
-  if (needsSponsorship) checks.splice(3, 0, ['h1b', '1', query.h1b, 'Past H-1B filings'])
+  if (needsSponsorship) checks.splice(4, 0, ['h1b', '1', query.h1b, 'Past H-1B filings'])
   return (
     <details className="relative">
       <summary className="r-key r-key-raised min-h-11 min-w-11 cursor-pointer list-none font-r">Filters{n > 0 ? ` (${n})` : ''}</summary>
@@ -63,6 +62,30 @@ export function Filters({ query, typeOptions, companyOptions, needsSponsorship }
             {LEVELS.map((l) => (
               <option key={l} value={l}>
                 {LEVEL_LABEL[l]}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="block space-y-1.5">
+          <span className="r-meta">Language</span>
+          <select name="lang" defaultValue={query.language ?? ''} className="r-field">
+            <option value="">Any language</option>
+            {LANGUAGES.map((l) => (
+              <option key={l} value={l}>
+                {LANGUAGE_LABEL[l]}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="block space-y-1.5">
+          <span className="r-meta">Chance</span>
+          <select name="chance" defaultValue={query.chance ?? ''} className="r-field">
+            <option value="">Any chance</option>
+            {CHANCES.map((c) => (
+              <option key={c} value={c}>
+                {chanceWord(c)}
               </option>
             ))}
           </select>
@@ -109,7 +132,7 @@ export function Filters({ query, typeOptions, companyOptions, needsSponsorship }
         <div className="flex gap-2">
           <Key type="submit">Apply</Key>
           <Key asChild variant="ghost">
-            <Link href={rolesHref(query, { level: null, posted: 'any', undated: false, remote: false, country: null, company: null, roleType: null, following: false, h1b: false, hideAgency: false })}>Clear</Link>
+            <Link href={rolesHref(query, NO_FILTERS)}>Clear</Link>
           </Key>
         </div>
       </form>
