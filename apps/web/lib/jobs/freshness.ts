@@ -5,6 +5,8 @@
 // Pure: no I/O, so lib/ats, the scripts and the new ingestion path can all call it.
 
 export const ROLE_MAX_AGE_DAYS = 180
+/** At an employer nobody follows (the directory) a role is open for 30 days: the window rule, mirrored in prune_stale_rows(). */
+export const DIRECTORY_MAX_AGE_DAYS = 30
 const DAY_MS = 86_400_000
 
 /** The oldest posted_at that still counts as open, as an ISO string. */
@@ -17,10 +19,10 @@ export function staleCutoffIso(now: number = Date.now()): string {
  * An undated posting is not stale: some sources never carry a date, and
  * dropping them would hide real roles.
  */
-export function isStalePosting(postedAt: string | null | undefined, now: number = Date.now()): boolean {
+export function isStalePosting(postedAt: string | null | undefined, now: number = Date.now(), maxAgeDays: number = ROLE_MAX_AGE_DAYS): boolean {
   if (!postedAt) return false
   const t = Date.parse(postedAt)
-  return !Number.isNaN(t) && now - t > ROLE_MAX_AGE_DAYS * DAY_MS
+  return !Number.isNaN(t) && now - t > maxAgeDays * DAY_MS
 }
 
 /** The two PostgREST calls every role list needs, on any query builder. */
