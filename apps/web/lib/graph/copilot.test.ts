@@ -333,7 +333,7 @@ describe('a find request', () => {
     callLlmMock
       .mockResolvedValueOnce(llmAction({ action: 'tool', tool: 'search_roles', args: { title: 'FDE', place: 'SF', limit: 5 }, thought: 'search stored roles' }))
       .mockResolvedValueOnce(llmAction({ action: 'final', message: 'Want me to broaden to Solutions Engineer?' }))
-    dispatchToolMock.mockResolvedValueOnce({ jobs: [{ jobId: 'j1', title: 'Forward Deployed Engineer, Applied AI' }], count: 1, answer })
+    dispatchToolMock.mockResolvedValueOnce({ jobs: [{ jobId: 'j1', title: 'Forward Deployed Engineer, Applied AI' }], count: 1, answer } as never)
 
     const result = await copilotGraph.invoke(
       { pendingIncomingMessage: 'Find me 5 FDE roles in SF', turnConfig: baseTurnConfig() },
