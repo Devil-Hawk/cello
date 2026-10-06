@@ -4,8 +4,8 @@
 // there is one, and Send, which becomes Stop while a turn runs. What the person types here is what lands in
 // chat_turns.typed; a selection quoted from an answer is kept apart and never counts as their words.
 
-import type { ReactNode } from 'react'
-import { ArrowUp, Square, X } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { ArrowUp, Mic, Square, X } from 'lucide-react'
 
 export interface ComposerProps {
   value: string
@@ -26,6 +26,63 @@ export interface ComposerProps {
 }
 
 const MAX_LINES = 8
+
+// The browser's own speech to text. Where it is missing (Firefox, some phones) the microphone is not drawn.
+// ponytail: the browser's service hears the audio; "This browser" and a local model replace it with K22c.
+interface Recognition {
+  continuous: boolean
+  interimResults: boolean
+  onresult: ((e: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null
+  onend: (() => void) | null
+  onerror: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+type RecognitionCtor = new () => Recognition
+const recognitionCtor = (): RecognitionCtor | null => {
+  const w = typeof window === 'undefined' ? null : (window as unknown as { SpeechRecognition?: RecognitionCtor; webkitSpeechRecognition?: RecognitionCtor })
+  return w?.SpeechRecognition ?? w?.webkitSpeechRecognition ?? null
+}
+
+function Dictate({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [supported, setSupported] = useState(false)
+  const [listening, setListening] = useState(false)
+  const rec = useRef<Recognition | null>(null)
+  const latest = useRef(value)
+  latest.current = value
+  useEffect(() => {
+    setSupported(recognitionCtor() !== null)
+    return () => rec.current?.stop()
+  }, [])
+  if (!supported) return null
+  return (
+    <button
+      type="button"
+      aria-label={listening ? 'Stop dictating' : 'Dictate'}
+      aria-pressed={listening}
+      className={`inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-muted ${listening ? 'bg-muted text-foreground' : 'text-muted-foreground'}`}
+      onClick={() => {
+        if (listening) return rec.current?.stop()
+        const Ctor = recognitionCtor()
+        if (!Ctor) return
+        const r = new Ctor()
+        r.continuous = true
+        r.interimResults = false
+        // What is heard goes into the field as typed words, for the person to read and send; nothing is sent by it.
+        r.onresult = (e) => {
+          const heard = Array.from(e.results).slice(e.resultIndex).filter((x) => x.isFinal).map((x) => x[0].transcript).join(' ').trim()
+          if (heard) onChange([latest.current.trimEnd(), heard].filter(Boolean).join(' '))
+        }
+        r.onend = r.onerror = () => setListening(false)
+        rec.current = r
+        setListening(true)
+        r.start()
+      }}
+    >
+      <Mic className="h-4 w-4" aria-hidden />
+    </button>
+  )
+}
 
 export function Composer({ value, onChange, onSend, onStop, running, quoted, onRemoveQuote, notice, above, controls, placeholder = 'Ask Cello to find, compare, write or apply' }: ComposerProps) {
   const canSend = !running && value.trim().length > 0 && !notice
@@ -62,6 +119,7 @@ export function Composer({ value, onChange, onSend, onStop, running, quoted, onR
       />
       <div className="mt-1 flex items-center gap-2">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{controls}</div>
+        <Dictate value={value} onChange={onChange} />
         {running ? (
           <button type="button" aria-label="Stop" className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90" onClick={onStop}>
             <Square className="h-4 w-4" aria-hidden />

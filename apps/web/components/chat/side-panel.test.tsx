@@ -9,7 +9,7 @@ const versions: PanelVersion[] = [
 ]
 const html = (over: Partial<PanelViewProps> = {}) =>
   renderToStaticMarkup(
-    <PanelView thing={{ id: 'a1', type: 'cover_letter', title: 'Letter for Ramp' }} versions={versions} selected={2} onSelect={noop} editing={false} draft="" onEdit={noop} onDraft={noop} onSave={noop} onCancel={noop} onClose={noop} {...over} />
+    <PanelView thing={{ id: 'a1', type: 'cover_letter', title: 'Letter for Ramp' }} versions={versions} selected={2} onSelect={noop} editing={false} onEdit={noop} onSave={async () => ({ ok: true, markdown: '', versionLabel: '' })} onCancel={noop} onClose={noop} {...over} />
   )
 
 describe('PanelView', () => {
@@ -30,10 +30,17 @@ describe('PanelView', () => {
     expect(html({ thing: { id: 'a2', type: 'dossier', title: 'Research' } })).not.toContain('>Edit<')
   })
 
+  it('offers Add to chat and Use in a new chat only when the page gives them', () => {
+    expect(html()).not.toContain('Add to chat')
+    const out = html({ onAddToChat: noop, onUseInNewChat: noop })
+    expect(out).toContain('>Add to chat<')
+    expect(out).toContain('>Use in a new chat<')
+  })
+
   it('shows the person\'s draft in a field while editing, with Save as my version', () => {
-    const out = html({ editing: true, draft: 'my words' })
+    const out = html({ editing: true })
     expect(out).toContain('aria-label="Edit this version"')
-    expect(out).toContain('my words')
+    expect(out).toContain('Dear team, v2')
     expect(out).toContain('Save as my version')
   })
 

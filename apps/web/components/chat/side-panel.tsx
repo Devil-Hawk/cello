@@ -3,12 +3,15 @@
 // The side panel: a made thing opens beside the conversation from a turn or a tile. It shows the title and kind, every
 // version ("Version 3 of 3") with who wrote it, and the text. Edit saves the person's own version through
 // /api/artifacts/[id]; the version Cello wrote stays. The conversation narrows beside it and is never covered.
-// ponytail: Compare, Ask for a change, Save answer, Download and Delete arrive with the documents package (K17).
+// Add to chat and Use in a new chat work on any made thing. ponytail: Compare, Ask for a change, Save answer, Download and
+// Delete arrive with the documents package (K17), the editor (PG8a) and the pipeline's sent-version rule (K13).
 
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { Markdown } from '@/components/chat/markdown'
 import { CopyButton } from '@/components/chat/parts'
+import { EditorStub } from '@/components/chat/editor.stub'
+import type { EditorProps } from '@/components/resume/editor/types'
 import { Button } from '@/components/ui/button'
 
 export interface PanelVersion {
@@ -48,17 +51,19 @@ export interface PanelViewProps {
   selected: number
   onSelect: (version: number) => void
   editing: boolean
-  draft: string
   onEdit: () => void
-  onDraft: (text: string) => void
-  onSave: () => void
+  /** Saves the person's text as a new version of their own; the version Cello wrote stays. */
+  onSave: EditorProps['onSave']
   onCancel: () => void
   onClose: () => void
-  saving?: boolean
+  /** Adds the thing to the open chat as a tile. Left out when there is no chat or the chat already holds it. */
+  onAddToChat?: () => void
+  /** Opens a new chat with the thing attached. */
+  onUseInNewChat?: () => void
   error?: string | null
 }
 
-export function PanelView({ thing, versions, selected, onSelect, editing, draft, onEdit, onDraft, onSave, onCancel, onClose, saving, error }: PanelViewProps) {
+export function PanelView({ thing, versions, selected, onSelect, editing, onEdit, onSave, onCancel, onClose, onAddToChat, onUseInNewChat, error }: PanelViewProps) {
   const current = versions.find((v) => v.version === selected) ?? versions[0]
   const latest = versions[0]?.version ?? 0
   const field = EDITABLE_FIELD[thing.type]
@@ -92,7 +97,7 @@ export function PanelView({ thing, versions, selected, onSelect, editing, draft,
         {!current ? (
           <p className="text-caption text-muted-foreground">This has no versions yet.</p>
         ) : editing ? (
-          <textarea aria-label="Edit this version" value={draft} onChange={(e) => onDraft(e.target.value)} rows={16} className="w-full rounded-control border border-input bg-card p-2 text-body text-foreground" />
+          <EditorStub markdown={field ? String(current.content[field] ?? '') : ''} versionLabel={`Version ${current.version}`} templateId={null} onSave={onSave} />
         ) : (
           <Markdown content={current.content_text} />
         )}
@@ -101,14 +106,9 @@ export function PanelView({ thing, versions, selected, onSelect, editing, draft,
       {current && (
         <footer className="flex flex-wrap items-center gap-2 border-t border-border p-3">
           {editing ? (
-            <>
-              <Button size="sm" onClick={onSave} disabled={saving || !draft.trim()}>
-                Save as my version
-              </Button>
-              <Button size="sm" variant="ghost" onClick={onCancel}>
-                Cancel
-              </Button>
-            </>
+            <Button size="sm" variant="ghost" onClick={onCancel}>
+              Cancel
+            </Button>
           ) : (
             <>
               {field && selected === latest && (
@@ -117,6 +117,16 @@ export function PanelView({ thing, versions, selected, onSelect, editing, draft,
                 </Button>
               )}
               <CopyButton text={current.content_text} />
+              {onAddToChat && (
+                <Button size="sm" variant="outline" onClick={onAddToChat}>
+                  Add to chat
+                </Button>
+              )}
+              {onUseInNewChat && (
+                <Button size="sm" variant="outline" onClick={onUseInNewChat}>
+                  Use in a new chat
+                </Button>
+              )}
             </>
           )}
         </footer>
@@ -125,13 +135,11 @@ export function PanelView({ thing, versions, selected, onSelect, editing, draft,
   )
 }
 
-export function SidePanel({ artifactId, onClose }: { artifactId: string; onClose: () => void }) {
+export function SidePanel({ artifactId, onClose, onAddToChat, onUseInNewChat }: { artifactId: string; onClose: () => void; onAddToChat?: () => void; onUseInNewChat?: () => void }) {
   const [thing, setThing] = useState<PanelThing | null>(null)
   const [versions, setVersions] = useState<PanelVersion[]>([])
   const [selected, setSelected] = useState(0)
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function load() {
@@ -164,31 +172,23 @@ export function SidePanel({ artifactId, onClose }: { artifactId: string; onClose
       selected={current?.version ?? 0}
       onSelect={setSelected}
       editing={editing}
-      draft={draft}
-      saving={saving}
       error={error}
       onClose={onClose}
-      onEdit={() => {
-        setDraft(field && current ? String(current.content[field] ?? '') : '')
-        setEditing(true)
-      }}
-      onDraft={setDraft}
+      onAddToChat={onAddToChat}
+      onUseInNewChat={onUseInNewChat}
+      onEdit={() => setEditing(true)}
       onCancel={() => setEditing(false)}
-      onSave={async () => {
-        if (!field || !current) return
-        setSaving(true)
+      onSave={async ({ markdown }) => {
+        if (!field || !current) return { ok: false }
         const res = await fetch(`/api/artifacts/${encodeURIComponent(artifactId)}`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ content: { ...current.content, [field]: draft } }),
+          body: JSON.stringify({ content: { ...current.content, [field]: markdown } }),
         })
-        setSaving(false)
-        if (!res.ok) {
-          setError('Cello could not save that. Your text is still here.')
-          return
-        }
+        if (!res.ok) return { ok: false }
         setEditing(false)
         await load()
+        return { ok: true, markdown, versionLabel: `Version ${current.version + 1}` }
       }}
     />
   )

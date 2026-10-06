@@ -12,17 +12,22 @@ import { Markdown } from '@/components/chat/markdown'
 import { ModelPicker, type PickScope } from '@/components/chat/model-picker'
 import { Composer } from '@/components/chat/composer'
 import { AnswerParts, type Named } from '@/components/chat/parts'
-import { Rail, type RailChat } from '@/components/chat/rail'
+import { Finder } from '@/components/chat/finder'
+import { Rail, type EarlierChat, type RailChat, type ScheduledRow } from '@/components/chat/rail'
 import { SidePanel } from '@/components/chat/side-panel'
 import { StatusTurn } from '@/components/chat/status-turn'
 import { TasksLine, type TaskRow, type TaskStatus } from '@/components/chat/tasks-line'
 import { Tiles, type TileData } from '@/components/chat/tiles'
 import { disclosureLine, type Disclosure } from '@/lib/chat/disclosure'
+import type { Found } from '@/lib/chat/find'
+import { chatHref } from '@/lib/chat/links'
 import type { ChatPageData } from '@/lib/chat/page-data'
 import type { SettingsView } from '@/lib/chat/settings'
 import type { Suggestions } from '@/lib/chat/suggest'
 import { refId, type AttachKind } from '@/lib/chat/types'
+import { visibleTurns } from '@/lib/chat/versions'
 import type { ModelChoice } from '@/lib/models/choice'
+import { createClient } from '@/lib/supabase/client'
 
 export interface ChatViewProps {
   /** The chat to open; null for a new one. */
@@ -37,6 +42,14 @@ export interface ChatViewProps {
 // ponytail: Send is switched on by the stream route of the engine package; until then the compose box says so.
 const SEND_NOTICE = 'Chat cannot send yet. Every page and button works without it.'
 const POLL_MS = 2000
+const PAGE = 50
+/** "@" and then the start of a name, at the end of what is typed. */
+const AT_WORD = /(^|\s)@([^\s@]{0,40})$/
+
+type ListRow = { id: string; title: string; pinned_at: string | null; last_turn_at: string }
+
+/** The ref object /api/chat/[id]/attachments reads for a thing's id (the server checks it strictly). */
+const refOf = (kind: string, id: string) => (kind === 'chat' ? { chat_id: id } : kind === 'made' ? { table: 'artifacts', id } : { id })
 
 async function getJson<T>(url: string): Promise<T | null> {
   try {
@@ -66,7 +79,17 @@ const seconds = (rows: ChatPageData['tasks']) => {
 
 export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewProps) {
   const router = useRouter()
-  const [chats, setChats] = useState<RailChat[]>([])
+  const [rows, setRows] = useState<ListRow[]>([])
+  const [more, setMore] = useState(false)
+  const [earlier, setEarlier] = useState<EarlierChat[]>([])
+  // Null until it has been read, and when it cannot be: the rail then says nothing rather than "Nothing scheduled".
+  const [scheduled, setScheduled] = useState<ScheduledRow[] | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [addWords, setAddWords] = useState('')
+  const [picks, setPicks] = useState<Record<string, number>>({})
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
+  const paging = useRef(false)
   const [page, setPage] = useState<ChatPageData | null>(null)
   const [missing, setMissing] = useState(false)
   const [suggested, setSuggested] = useState<Suggestions | null>(null)
@@ -83,9 +106,33 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
   const poll = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadChats = useCallback(async () => {
-    const body = await getJson<{ chats: { id: string; title: string; pinned_at: string | null }[] }>('/api/chat')
-    if (body) setChats(body.chats.map((c) => ({ id: c.id, title: c.title, pinned: Boolean(c.pinned_at) })))
+    const body = await getJson<{ chats: ListRow[] }>(`/api/chat?limit=${PAGE}`)
+    if (!body) return
+    setRows(body.chats)
+    setMore(body.chats.filter((c) => !c.pinned_at).length >= PAGE)
   }, [])
+
+  // The next page of Recents, from the last chat listed. ponytail: pages by last_turn_at, so two chats with the very same instant could straddle a page.
+  const loadMore = useCallback(async () => {
+    const last = [...rows].reverse().find((c) => !c.pinned_at)
+    if (paging.current || !last) return
+    paging.current = true
+    const body = await getJson<{ chats: ListRow[] }>(`/api/chat?limit=${PAGE}&before=${encodeURIComponent(last.last_turn_at)}`)
+    paging.current = false
+    if (!body) return setMore(false)
+    setRows((have) => [...have, ...body.chats.filter((c) => !have.some((h) => h.id === c.id))])
+    setMore(body.chats.length >= PAGE)
+  }, [rows])
+
+  const loadScheduled = useCallback(async () => {
+    const body = await getJson<{ tasks: { id: string; name: string; card: { schedule: string; last: string | null; next: string | null } }[] }>('/api/scheduled-tasks')
+    setScheduled(body ? body.tasks.map((t) => ({ id: t.id, name: t.name, detail: [t.card.schedule, t.card.last, t.card.next].filter(Boolean).join(' \u00b7 ') })) : null)
+  }, [])
+
+  useEffect(() => {
+    void loadScheduled()
+    void getJson<{ earlier: { id: string; title: string }[] }>('/api/chat?earlier=1').then((b) => b && setEarlier(b.earlier))
+  }, [loadScheduled])
 
   const loadPage = useCallback(async () => {
     if (!chatId) return
@@ -119,9 +166,11 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
   }, [choice?.rung, choice?.model, choice?.effort]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function pick(next: ModelChoice, scope: PickScope) {
-    if (!chatId || scope === 'once') return setPending(next)
-    const ok = await send('/api/chat/settings', 'POST', { chat: chatId, choice: next, as_default: scope === 'default' })
+    // One message, or this chat before it exists: held until the first turn is sent. A default needs no chat.
+    if (scope === 'once' || (!chatId && scope === 'chat')) return setPending(next)
+    const ok = await send('/api/chat/settings', 'POST', { ...(chatId ? { chat: chatId } : {}), choice: next, as_default: scope === 'default' })
     if (ok) setPending(null)
+    else setNote('Cello could not save that choice. It is above what you allow, or the save failed.')
     await loadSettings()
   }
 
@@ -150,7 +199,8 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
   const active = useMemo(() => (page?.attachments ?? []).filter((a) => !a.removed_at), [page])
   const names: Named[] = useMemo(() => (page?.attachments ?? []).map((a) => ({ kind: a.kind, ref: refId(a.kind, a.ref), name: page?.names[a.id] ?? 'No longer listed' })), [page])
   const tiles: TileData[] = useMemo(() => active.map((a) => ({ id: a.id, kind: a.kind, ref: refId(a.kind, a.ref), name: page?.names[a.id] ?? 'No longer listed', origin: a.origin })), [active, page])
-  const lastPersonTurn = [...(page?.turns ?? [])].reverse().find((t) => t.kind === 'person')
+  const seen = useMemo(() => visibleTurns(page?.turns ?? [], picks), [page, picks])
+  const lastPersonTurn = [...seen.turns].reverse().find((t) => t.kind === 'person')
   const turnTasks = page?.tasks.filter((t) => t.turn_id === lastPersonTurn?.id) ?? []
 
   // Selecting text in one of Cello's answers offers "Ask Cello": the selection becomes a quote above the compose box,
@@ -165,8 +215,35 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
     setSelection({ text: text.slice(0, 1500), turnId: turn.getAttribute('data-answer-turn') ?? '', x: rect.left + rect.width / 2, y: rect.top })
   }
 
+  // A role, company, application, person or earlier chat has a page, so Open goes there; a made thing opens in the panel.
   const openThing = (kind: AttachKind, ref: string) => {
-    if (kind === 'made') setPanel(ref)
+    const href = chatHref(kind, ref)
+    if (href) router.push(href)
+    else if (kind === 'made') setPanel(ref)
+  }
+
+  // [Add] attaches at once; "@" and a new chat hold a chip until the first turn is sent.
+  const chipThing = (found: Found) => setChips((have) => (have.some((c) => c.kind === found.kind && c.ref === found.id) ? have : [...have, { kind: found.kind, ref: found.id, name: found.name }]))
+
+  async function addThing(found: Found) {
+    setAdding(false)
+    setAddWords('')
+    if (!chatId) return chipThing(found)
+    try {
+      const res = await fetch(`/api/chat/${encodeURIComponent(chatId)}/attachments`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: found.kind, ref: refOf(found.kind, found.id) }) })
+      const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; fix?: string } | null
+      setNote(body?.ok ? null : [body?.error ?? 'Cello could not add that.', body?.fix].filter(Boolean).join(' '))
+    } catch {
+      setNote('Cello could not add that.')
+    }
+    await loadPage()
+  }
+
+  const at = AT_WORD.exec(draft)
+
+  async function signOut() {
+    await createClient().auth.signOut()
+    router.push('/login')
   }
 
   async function railAction(action: Promise<boolean>, leave = false) {
@@ -183,7 +260,18 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
     <div className="flex h-[calc(100dvh-9.5rem)] min-h-[24rem] overflow-hidden rounded-card border border-border bg-background md:h-[calc(100dvh-5rem)]">
       <div className={`${railOpen ? 'fixed inset-y-0 left-0 z-40 w-72 bg-background shadow-pop' : 'hidden'} md:static md:block md:w-64 md:shrink-0 md:border-r md:border-border md:shadow-none`}>
         <Rail
-          chats={chats}
+          chats={rows.map((c): RailChat => ({ id: c.id, title: c.title, pinned: Boolean(c.pinned_at) }))}
+          hasMore={more}
+          onLoadMore={() => void loadMore()}
+          earlier={earlier}
+          scheduled={scheduled}
+          onRunNow={(id) =>
+            void send(`/api/scheduled-tasks/${encodeURIComponent(id)}/run`, 'POST').then((ok) => {
+              setNote(ok ? 'Started. Its result shows in Needs you when it is done.' : 'Cello could not start that. Try again.')
+              void loadScheduled()
+            })
+          }
+          onSignOut={() => void signOut()}
           activeId={chatId}
           person={person}
           onNew={() => {
@@ -208,7 +296,18 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
 
         <div className="min-h-0 flex-1 overflow-y-auto" onMouseUp={onSelect} onScroll={() => setSelection(null)}>
           <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-4">
-            {tiles.length > 0 && <Tiles tiles={tiles} onOpen={(t) => openThing(t.kind, t.ref)} onRemove={(t) => void send(`/api/chat/${chatId}/attachments?tile=${encodeURIComponent(t.id)}`, 'DELETE').then(loadPage)} />}
+            <Tiles tiles={tiles} onAdd={() => setAdding((v) => !v)} onOpen={(t) => openThing(t.kind, t.ref)} onRemove={(t) => void send(`/api/chat/${chatId}/attachments?tile=${encodeURIComponent(t.id)}`, 'DELETE').then(loadPage)} />
+            {adding && (
+              <div className="rounded-card border border-border bg-card p-2">
+                <input autoFocus aria-label="Find something to add" value={addWords} onChange={(e) => setAddWords(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setAdding(false)} placeholder="Search your roles, companies, applications, people, chats and things Cello made" className="mb-1 h-8 w-full rounded-control border border-input bg-background px-2 text-body" />
+                <Finder query={addWords} onPick={(f) => void addThing(f)} />
+              </div>
+            )}
+            {note && (
+              <p role="status" className="text-caption text-muted-foreground">
+                {note}
+              </p>
+            )}
 
             {empty ? (
               <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4 text-center">
@@ -225,23 +324,69 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
                 </ul>
               </div>
             ) : (
-              (page?.turns ?? [])
-                .filter((t) => !t.superseded_at)
-                .map((t) =>
-                  t.kind === 'person' ? (
-                    <div key={t.id} className="ml-auto max-w-[85%] rounded-card bg-muted px-3 py-2 text-body text-foreground">
-                      {t.quoted && <p className="mb-1 border-l-2 border-border pl-2 text-caption text-muted-foreground">{t.quoted.text}</p>}
-                      <p className="whitespace-pre-wrap break-words">{t.typed}</p>
-                    </div>
-                  ) : t.kind === 'cello' ? (
-                    <div key={t.id} className="space-y-1" data-answer-turn={t.id}>
-                      {t.parts.length > 0 ? <AnswerParts parts={t.parts} names={names} tileCount={active.length} cards={page?.cards ?? []} onOpen={openThing} /> : t.answer ? <Markdown content={t.answer} /> : null}
-                      {t.disclosure ? <p className="text-caption text-muted-foreground">{disclosureLine(t.disclosure as Disclosure)}</p> : null}
-                    </div>
-                  ) : (
-                    <StatusTurn key={t.id} line={t.event_id ? page?.statuses[t.event_id] : undefined} />
-                  )
+              seen.turns.map((t) =>
+                t.kind === 'person' ? (
+                  <div key={t.id} className="group ml-auto max-w-[85%]">
+                    {editing?.id === t.id ? (
+                      <div className="space-y-1">
+                        <textarea aria-label="Edit your message" value={editing.text} rows={3} onChange={(e) => setEditing({ id: t.id, text: e.target.value })} className="w-full rounded-control border border-input bg-card p-2 text-body" />
+                        <div className="flex justify-end gap-2 text-caption">
+                          <button type="button" className="rounded-control px-2 py-1 text-muted-foreground hover:bg-muted" onClick={() => setEditing(null)}>
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!editing.text.trim()}
+                            className="rounded-control border border-border bg-card px-2 py-1 text-foreground hover:bg-muted disabled:opacity-40"
+                            onClick={() =>
+                              // ponytail: this forks the chat and keeps the old version; the answer for the new one comes from the stream route.
+                              void send(`/api/chat/${chatId}/edit`, 'POST', { turn_id: t.id, typed: editing.text }).then((ok) => {
+                                if (!ok) setNote('Cello could not save that edit.')
+                                setEditing(null)
+                                return loadPage()
+                              })
+                            }
+                          >
+                            Save edit
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="rounded-card bg-muted px-3 py-2 text-body text-foreground">
+                          {t.quoted && <p className="mb-1 border-l-2 border-border pl-2 text-caption text-muted-foreground">{t.quoted.text}</p>}
+                          <p className="whitespace-pre-wrap break-words">{t.typed}</p>
+                        </div>
+                        <div className="mt-0.5 flex items-center justify-end gap-2 text-caption text-muted-foreground">
+                          {seen.slots[t.id] && (
+                            <span className="flex items-center gap-1">
+                              <button type="button" aria-label="Previous version" disabled={seen.slots[t.id].index <= 1} className="px-1 hover:text-foreground disabled:opacity-40" onClick={() => setPicks({ ...picks, [seen.slots[t.id].root]: seen.slots[t.id].index - 2 })}>
+                                {'\u2039'}
+                              </button>
+                              Version {seen.slots[t.id].index} of {seen.slots[t.id].count}
+                              <button type="button" aria-label="Next version" disabled={seen.slots[t.id].index >= seen.slots[t.id].count} className="px-1 hover:text-foreground disabled:opacity-40" onClick={() => setPicks({ ...picks, [seen.slots[t.id].root]: seen.slots[t.id].index })}>
+                                {'\u203a'}
+                              </button>
+                            </span>
+                          )}
+                          {chatId && !t.superseded_at && (
+                            <button type="button" className="hover:text-foreground md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100" onClick={() => setEditing({ id: t.id, text: t.typed ?? '' })}>
+                              Edit
+                            </button>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ) : t.kind === 'cello' ? (
+                  <div key={t.id} className="space-y-1" data-answer-turn={t.id}>
+                    {t.parts.length > 0 ? <AnswerParts parts={t.parts} names={names} tileCount={active.length} cards={page?.cards ?? []} onOpen={openThing} /> : t.answer ? <Markdown content={t.answer} /> : null}
+                    {t.disclosure ? <p className="text-caption text-muted-foreground">{disclosureLine(t.disclosure as Disclosure)}</p> : null}
+                  </div>
+                ) : (
+                  <StatusTurn key={t.id} line={t.event_id ? page?.statuses[t.event_id] : undefined} />
                 )
+              )
             )}
 
             {turnTasks.length > 0 && (
@@ -261,7 +406,19 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
             onRemoveQuote={() => setQuoted(null)}
             controls={settings ? <ModelPicker key={`${choice?.rung}:${choice?.model}:${choice?.effort}`} choice={choice} rungs={settings.rungs} estimate={estimate} onPick={(c, scope) => void pick(c, scope)} /> : null}
             above={
-              chips.length > 0 ? (
+              <>
+                {at && (
+                  <div className="mb-2 rounded-control border border-border bg-background p-1">
+                    <Finder
+                      query={at[2]}
+                      onPick={(f) => {
+                        setDraft(draft.replace(AT_WORD, '$1'))
+                        chipThing(f)
+                      }}
+                    />
+                  </div>
+                )}
+                {chips.length > 0 ? (
                 <ul className="mb-2 flex flex-wrap gap-2" aria-label="Will be attached when you send">
                   {chips.map((c) => (
                     <li key={`${c.kind}:${c.ref}`} className="flex items-center gap-1 rounded-control border border-border bg-muted py-0.5 pl-2 pr-1 text-caption text-foreground">
@@ -272,7 +429,8 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
                     </li>
                   ))}
                 </ul>
-              ) : null
+                ) : null}
+              </>
             }
           />
         </div>
@@ -296,7 +454,12 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
 
       {panel && (
         <div className="fixed inset-0 z-50 bg-background md:static md:z-auto md:w-[26rem] md:shrink-0">
-          <SidePanel artifactId={panel} onClose={() => setPanel(null)} />
+          <SidePanel
+            artifactId={panel}
+            onClose={() => setPanel(null)}
+            onAddToChat={chatId && !active.some((a) => a.kind === 'made' && refId('made', a.ref) === panel) ? () => void addThing({ kind: 'made', id: panel, name: '', detail: null }) : undefined}
+            onUseInNewChat={() => router.push(`/chat?about=made:${encodeURIComponent(panel)}`)}
+          />
         </div>
       )}
     </div>

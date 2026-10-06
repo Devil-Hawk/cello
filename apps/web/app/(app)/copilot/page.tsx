@@ -10,7 +10,8 @@ import LegacyCopilot from './legacy'
 
 export const dynamic = 'force-dynamic'
 
-export default async function CopilotPage({ searchParams }: { searchParams: { ask?: string } }) {
-  if (await chatShownToAll(createAdminClient())) redirect(searchParams.ask ? `/chat?ask=${encodeURIComponent(searchParams.ask)}` : '/chat')
+export default async function CopilotPage({ searchParams }: { searchParams: { ask?: string; conversationId?: string } }) {
+  // A link from Chat's Earlier list names an old conversation: that is the one case this page still opens.
+  if (!searchParams.conversationId && (await chatShownToAll(createAdminClient()))) redirect(searchParams.ask ? `/chat?ask=${encodeURIComponent(searchParams.ask)}` : '/chat')
   return <LegacyCopilot />
 }

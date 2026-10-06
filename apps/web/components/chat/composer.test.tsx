@@ -28,6 +28,10 @@ describe('Composer', () => {
     expect(out).toMatch(/<textarea[^>]*><\/textarea>/)
   })
 
+  it('draws no microphone until the browser is known to have speech to text', () => {
+    expect(html()).not.toContain('Dictate')
+  })
+
   it('grows to 8 lines and no more, and gives a notice that stops sending', () => {
     expect(html({ value: 'a\n'.repeat(20) })).toContain('rows="8"')
     expect(html({ value: 'a' })).toContain('rows="1"')

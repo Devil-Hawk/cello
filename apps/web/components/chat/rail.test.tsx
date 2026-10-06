@@ -9,7 +9,7 @@ const chats: RailChat[] = [
   { id: 'c', title: '', pinned: false },
 ]
 const html = (over: Partial<Parameters<typeof Rail>[0]> = {}) =>
-  renderToStaticMarkup(<Rail chats={chats} person={{ name: 'Ankit' }} onNew={noop} onRename={noop} onPin={noop} onArchive={noop} onDelete={noop} {...over} />)
+  renderToStaticMarkup(<Rail chats={chats} scheduled={[]} person={{ name: 'Ankit' }} onNew={noop} onRename={noop} onPin={noop} onArchive={noop} onDelete={noop} {...over} />)
 const text = (markup: string) => markup.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
 
 describe('Rail', () => {
@@ -38,6 +38,25 @@ describe('Rail', () => {
     expect(text(html({ chats: [] }))).toContain('Your chats and what Cello made from them stay here.')
     expect(text(html())).toContain('Nothing scheduled.')
     expect(text(html({ scheduled: [{ id: 's1', name: 'Find new roles', detail: 'Last read 8:00, found 3' }] }))).toContain('Find new roles Last read 8:00, found 3')
+  })
+
+  it('says nothing about Scheduled when it could not be read, and gives each scheduled item Do it now', () => {
+    const none = html({ scheduled: null })
+    expect(text(none)).not.toContain('Scheduled')
+    expect(text(none)).not.toContain('Nothing scheduled')
+    const out = html({ scheduled: [{ id: 's1', name: 'Find new roles', detail: 'Next at 8:00 tomorrow' }], onRunNow: noop })
+    expect(out).toContain('aria-label="Do it now: Find new roles"')
+  })
+
+  it('offers Load more when more chats are stored, lists Earlier conversations after Recents, and has Sign out beside Settings', () => {
+    expect(html()).not.toContain('Load more')
+    expect(html({ hasMore: true })).toContain('Load more')
+    const out = html({ earlier: [{ id: 'k1', title: 'Old question' }], onSignOut: noop })
+    expect(text(out)).toContain('Earlier Old question')
+    expect(out).toContain('href="/copilot?conversationId=k1"')
+    expect([...out.matchAll(/<h2[^>]*>([^<]+)<\/h2>/g)].map((m) => m[1].trim())).toEqual(['Scheduled', 'Recents'])
+    expect(out).toContain('aria-label="Sign out"')
+    expect(html()).not.toContain('Sign out')
   })
 
   it('renders 200 chats', () => {

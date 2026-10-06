@@ -32,6 +32,11 @@ describe('/copilot and /agent', () => {
     await expect(CopilotPage({ searchParams: { ask: 'Find roles & more' } })).rejects.toThrow('REDIRECT:/chat?ask=Find%20roles%20%26%20more')
   })
 
+  it('/copilot still opens an old conversation named by Chat\'s Earlier list', async () => {
+    flags.on = true
+    expect(await CopilotPage({ searchParams: { conversationId: 'k1' } })).toBeTruthy()
+  })
+
   it('/agent goes to /copilot', () => {
     expect(() => AgentPage()).toThrow('REDIRECT:/copilot')
   })
