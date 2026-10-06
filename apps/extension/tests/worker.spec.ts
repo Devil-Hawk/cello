@@ -15,6 +15,15 @@ const manifest = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'ut
   version: string
 }
 
+// A worker pointed at a source path (.ts) does not exist in the package. This is how the
+// browser model's worker once shipped broken, so the built chunks must not name one.
+test('the built package points at no source files', () => {
+  const dir = path.join(EXT, 'chunks')
+  for (const f of fs.readdirSync(dir)) {
+    expect(fs.readFileSync(path.join(dir, f), 'utf8'), f).not.toMatch(/new Worker\([^)]*\.ts/)
+  }
+})
+
 test('the manifest asks for exactly the blueprint permissions and no broad hosts', () => {
   expect([...manifest.permissions].sort()).toEqual(['activeTab', 'alarms', 'offscreen', 'scripting', 'storage', 'tabs'])
   expect(manifest.host_permissions).toEqual(
