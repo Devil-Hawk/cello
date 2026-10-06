@@ -370,7 +370,7 @@ export interface ListArtifactsInput {
 export async function listArtifacts(admin: AdminClient, userId: string, opts: ListArtifactsInput = {}): Promise<ArtifactRow[]> {
   const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100)
   let q = admin.from('artifacts').select(ARTIFACT_COLUMNS).eq('user_id', userId)
-  if (opts.type) q = q.in('type', storedNames(opts.type))
+  if (opts.type) q = q.in('type', [...storedNames(opts.type)])
   if (opts.jobId) q = q.eq('job_id', opts.jobId)
   const { data } = await q.order('updated_at', { ascending: false }).range(opts.offset ?? 0, (opts.offset ?? 0) + limit - 1)
   return ((data as ArtifactRow[] | null) ?? []).map(normalizeRow)

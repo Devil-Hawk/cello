@@ -552,8 +552,8 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
       { table: 'trace_spans', rows: agentStepRows, required: false, conflictColumn: 'span_id' },
       { table: 'application_drafts', rows: draftRows, required: false },
       { table: 'outreach_messages', rows: outreachRows, required: false },
-      { table: 'artifacts', rows: resumeArtifactRows, required: false, conflictColumn: 'user_id,idempotency_key' },
-      { table: 'artifact_versions', rows: resumeRows, required: false, conflictColumn: 'artifact_id,version' },
+      { table: 'artifacts', rows: resumeArtifactRows, required: false },
+      { table: 'artifact_versions', rows: resumeRows, required: false },
       { table: 'company_dossiers', rows: dossierRows, required: false },
     ],
   }

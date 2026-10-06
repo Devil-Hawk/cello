@@ -11,6 +11,7 @@
 //      auto-answered — neither leaked into buildHandoffFields output, nor
 //      auto-submitted when the JD raises a knock-out question.
 
+import { artifactWorld } from '@/lib/artifacts/testing'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SubmitAuthorization } from './types'
 import { submitApplication } from './index'
@@ -36,10 +37,10 @@ const PROFILE: ApplyProfile = {
   email: 'ann@example.com',
 }
 
-// --- fake resume_documents client -------------------------------------------
-// Minimal in-memory fake of the exact chain lib/resume/store.ts's
-// getLatestVersion uses: .from('resume_documents').select('*').eq('user_id',
-// ..).eq('job_id', ..)|.is('job_id', null).order().limit(1).maybeSingle().
+// --- fake resume store -----------------------------------------------------------
+// A resume is an artifact with numbered versions (K17): the bucket for a job (or the base
+// resume) is one artifact, found by the key lib/resume/store.ts gives it, and each version
+// is a row of artifact_versions. This builds that shape from plain docs.
 
 interface FakeDoc {
   id: string
@@ -50,37 +51,12 @@ interface FakeDoc {
 }
 
 function fakeResumeClient(docs: FakeDoc[]): SupabaseClient {
-  const client = {
-    from(_table: string) {
-      let rows = [...docs]
-      const builder = {
-        select(_cols: string) {
-          return builder
-        },
-        eq(col: string, val: unknown) {
-          rows = rows.filter((r) => (r as unknown as Record<string, unknown>)[col] === val)
-          return builder
-        },
-        is(col: string, val: unknown) {
-          rows = rows.filter((r) => (r as unknown as Record<string, unknown>)[col] === val)
-          return builder
-        },
-        order(_col: string, _opts?: unknown) {
-          rows = [...rows].sort((a, b) => b.version - a.version)
-          return builder
-        },
-        limit(n: number) {
-          rows = rows.slice(0, n)
-          return builder
-        },
-        async maybeSingle() {
-          return { data: rows[0] ?? null, error: null }
-        },
-      }
-      return builder
-    },
-  }
-  return client as unknown as SupabaseClient
+  const artifacts = [...new Set(docs.map((d) => `${d.user_id}:${d.job_id ?? 'base'}`))].map((k) => {
+    const d = docs.find((x) => `${x.user_id}:${x.job_id ?? 'base'}` === k)!
+    return { id: `a-${k}`, user_id: d.user_id, type: 'resume', job_id: d.job_id, is_base: d.job_id === null, current_version: Math.max(...docs.filter((x) => `${x.user_id}:${x.job_id ?? 'base'}` === k).map((x) => x.version)), idempotency_key: `k17:resume_documents:${k}` }
+  })
+  const versions = docs.map((d) => ({ id: d.id, artifact_id: `a-${d.user_id}:${d.job_id ?? 'base'}`, version: d.version, author: 'user', content: { text: d.content }, content_text: d.content, created_at: '2026-01-01T00:00:00Z' }))
+  return artifactWorld({ artifacts, artifact_versions: versions }).client
 }
 
 /** The submit POST, not the boards-api schema read that now precedes it. */

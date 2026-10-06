@@ -68,7 +68,7 @@ const norm = (s: string) => s.trim().replace(/\s+/g, ' ')
 export async function rolesGaps(admin: AdminClient, userId: string, jobIds: readonly string[]): Promise<RolesGaps> {
   const ids = [...new Set(jobIds)].slice(0, 200)
   if (ids.length === 0) return { assessed: 0, stretch: 0, gaps: [], tooFew: true, line: 'Too few roles to tell.' }
-  const { data } = await admin.from('person_roles').select('job_id, chance, chance_detail').eq('user_id', userId).in('job_id', ids)
+  const { data } = await admin.from('person_roles').select('job_id, chance, chance_detail').eq('user_id', userId).in('job_id', [...ids])
   const rows = ((data as { job_id: string; chance: string | null; chance_detail: { gaps?: unknown } | null }[] | null) ?? []).filter(
     (r) => r.chance === 'strong' || r.chance === 'possible' || r.chance === 'stretch'
   )
