@@ -60,7 +60,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
-from .polite import USER_AGENT
+from .polite import USER_AGENT, guard_browser, is_public, robots_allowed
 from .render import count_job_links, looks_like_unrendered_shell
 
 logger = logging.getLogger(__name__)
@@ -168,12 +168,11 @@ def _same_site(candidate: str, origin: str) -> bool:
     navigate a real browser there.
 
     # ponytail: same-host-or-subdomain by string suffix, not a public-suffix
-    # -list match or an IP-literal/link-local blocklist. `origin` is always
-    # this system's own DB-sourced company URL, never attacker input, so the
-    # only thing that has to be true is "candidate did not leave that site" —
-    # a suffix check is enough for that. Add PSL-aware comparison or an
-    # IP-literal/link-local check if this tier ever has to trust a `origin`
-    # it did not already pick itself.
+    # -list match. `origin` is a company URL a signed-in person can type, so it
+    # is NOT trusted: the suffix check only says "candidate did not leave that
+    # site", and what the browser may then reach is held by guard_browser (every
+    # request public, every page load robots-allowed), not by this function.
+    # Add PSL-aware comparison if sibling registrable domains ever matter.
     """
     try:
         cand = urlparse(candidate)
@@ -205,6 +204,10 @@ def _click_careers_link(page: Any) -> str | None:
             try:
                 link.click(timeout=5_000)
                 page.wait_for_load_state("networkidle", timeout=_PAGE_LOAD_TIMEOUT_MS)
+                # The guard on the browser refuses a request that leaves a public,
+                # robots-allowed address; this checks where the click landed.
+                if not (is_public(page.url) and robots_allowed(page.url)):
+                    return None
                 return page.content()
             except Exception:
                 continue
@@ -228,7 +231,9 @@ def _deterministic_click_through(url: str) -> str | None:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             try:
-                page = browser.new_context(user_agent=USER_AGENT).new_page()
+                context = browser.new_context(user_agent=USER_AGENT)
+                guard_browser(context)
+                page = context.new_page()
                 page.goto(url, timeout=_PAGE_LOAD_TIMEOUT_MS, wait_until="networkidle")
                 html = page.content()
                 if not looks_like_unrendered_shell(html).is_shell:
