@@ -30,7 +30,7 @@ async function earlierChat(db: AdminClient, userId: string, chatId: string): Pro
   ])
   const held = ((tiles.data as { kind: string; ref: Record<string, string> }[] | null) ?? []).map((t) => ({ kind: t.kind, id: t.ref.id ?? t.ref.chat_id ?? '' }))
   const madeIds = held.filter((t) => t.kind === 'made').map((t) => t.id)
-  const made = madeIds.length ? (((await db.from('artifacts').select('id, type, title').eq('user_id', userId).in('id', madeIds)).data as Row[] | null) ?? []) : []
+  const made = madeIds.length ? (((await db.from('artifacts').select('id, type, title').eq('user_id', userId).in('id', madeIds.slice(0, 25))).data as Row[] | null) ?? []) : []
   return {
     kind: 'chat',
     id: chatId,
