@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
+import { viewerRoles } from '@/lib/jobs/person-jobs'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,7 +37,7 @@ export async function GET(request: NextRequest) {
   let query = admin
     .from('application_drafts')
     .select(
-      'id, job_id, run_id, resume_summary, cover_letter, answers, status, submission_ref, submitted_at, created_at, updated_at, fill_state, screenshots, review_confirmed_at, jobs(id, title, url, location, company_id, companies(name, logo_url, domain), employer:company_directory(name, domain, logo_url))'
+      'id, job_id, run_id, resume_summary, cover_letter, answers, status, submission_ref, submitted_at, created_at, updated_at, fill_state, screenshots, review_confirmed_at, jobs(id, title, url, location, employer:company_directory(name, domain, logo_url))'
     )
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
@@ -49,7 +50,22 @@ export async function GET(request: NextRequest) {
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // A role stored under no company of this person's (the directory sweep, or another follower's) names its employer through the directory.
-  const drafts = ((data ?? []) as unknown as { jobs?: { companies?: unknown; employer?: unknown } | null }[]).map((d) => (d.jobs ? { ...d, jobs: { ...d.jobs, companies: d.jobs.companies ?? d.jobs.employer } } : d))
+  // A shared role is stored under the first follower's company, so no companies(...) embed here: the company is the
+  // viewer's own (their role row), else the employer in the directory.
+  type Rel = { name: string | null; domain: string | null; logo_url: string | null }
+  type Row = { job_id: string; jobs?: { employer?: Rel | Rel[] | null } | null }
+  const rows = (data ?? []) as unknown as Row[]
+  const viewer = await viewerRoles(admin, user.id, rows.map((d) => d.job_id))
+  const drafts = rows.map((d) => {
+    if (!d.jobs) return d
+    const employer = Array.isArray(d.jobs.employer) ? (d.jobs.employer[0] ?? null) : (d.jobs.employer ?? null)
+    const own = viewer.get(d.job_id)
+    const companies = {
+      name: own?.viewer_company_name ?? employer?.name ?? null,
+      domain: own?.viewer_company_domain ?? employer?.domain ?? null,
+      logo_url: employer?.logo_url ?? null,
+    }
+    return { ...d, jobs: { ...d.jobs, companies } }
+  })
   return NextResponse.json({ drafts })
 }
