@@ -1,8 +1,8 @@
 // Every string a person can read in the product is held to one voice:
 // sentence case, plain verbs, no em dashes, no emoji, no exclamation marks, no
 // word for what was sent that Cello retired, and none of the phrases that mark
-// copy as generated. This test reads the source of every screen (app/ outside
-// api/, and components/), drops the comments, and scans what is left.
+// copy as generated. This test parses the source of every screen (app/ outside
+// api/, and components/) and scans the text a person could read in it.
 //
 // Screens that broke the rule before this test existed are listed in
 // ui-copy.allow.ts with their count of violations. A listed file may not get
@@ -11,6 +11,7 @@
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { UI_COPY_BASELINE } from './ui-copy.allow'
 
@@ -62,16 +63,24 @@ export function stripComments(source: string): string {
     .replace(/(^|\s)\/\/[^\n]*/g, (m) => m.replace(/[^\n]/g, ' '))
 }
 
-const JSX_TEXT = />([^<>{}]*[A-Za-z][^<>{}]*)</g
-
-/** What a person could read: JSX text nodes and string literals. */
-export function readableStrings(code: string): { text: string; jsx: boolean }[] {
-  const out: { text: string; jsx: boolean }[] = []
-  for (const m of code.matchAll(JSX_TEXT)) out.push({ text: m[1], jsx: true })
-  for (const m of code.matchAll(/'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g)) {
-    // An identifier inside ${...} is code, not words a person reads.
-    out.push({ text: (m[1] ?? m[2] ?? m[3] ?? '').replace(/\$\{[^}]*\}/g, ''), jsx: false })
+/**
+ * What a person could read: JSX text and string or template literals, with the offset each starts at.
+ * It reads the syntax tree, so text a formatter wrapped onto its own line, text beside an
+ * expression ({n} roles) and multi-line templates are all seen, and code is not mistaken for text.
+ */
+export function readableStrings(file: string, source: string): { text: string; jsx: boolean; at: number }[] {
+  const kind = file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+  const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, kind)
+  const out: { text: string; jsx: boolean; at: number }[] = []
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxText(node)) {
+      if (/[A-Za-z]/.test(node.text)) out.push({ text: node.text, jsx: true, at: node.pos })
+    } else if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) {
+      out.push({ text: node.text, jsx: false, at: node.getStart(tree) })
+    }
+    ts.forEachChild(node, visit)
   }
+  visit(tree)
   return out
 }
 
@@ -83,27 +92,26 @@ interface Violation {
 }
 
 export function scanSource(file: string, source: string): Violation[] {
-  const code = stripComments(source)
   const found: Violation[] = []
 
-  code.split('\n').forEach((line, index) => {
-    const at = index + 1
-    if (EM_DASH.test(line)) found.push({ file, line: at, rule: 'em dash', text: line.trim() })
-    if (EMOJI.test(line)) found.push({ file, line: at, rule: 'emoji', text: line.trim() })
-    for (const { text, jsx } of readableStrings(line)) {
-      for (const phrase of BANNED_PHRASES) {
-        if (phrase.test(text)) found.push({ file, line: at, rule: `banned phrase ${phrase.source}`, text: text.trim() })
-      }
-      if (RETIRED_WORD.test(text) && (jsx || /\s/.test(text.trim()))) {
-        found.push({ file, line: at, rule: 'retired word for what was sent', text: text.trim() })
-      }
+  stripComments(source).split('\n').forEach((line, index) => {
+    if (EM_DASH.test(line)) found.push({ file, line: index + 1, rule: 'em dash', text: line.trim() })
+    if (EMOJI.test(line)) found.push({ file, line: index + 1, rule: 'emoji', text: line.trim() })
+  })
+
+  for (const { text, jsx, at } of readableStrings(file, source)) {
+    const first = at + text.length - text.trimStart().length
+    const line = source.slice(0, first).split('\n').length
+    for (const phrase of BANNED_PHRASES) {
+      if (phrase.test(text)) found.push({ file, line, rule: `banned phrase ${phrase.source}`, text: text.trim() })
+    }
+    if (RETIRED_WORD.test(text) && (jsx || /\s/.test(text.trim()))) {
+      found.push({ file, line, rule: 'retired word for what was sent', text: text.trim() })
     }
     // Exclamation marks only count in text a person reads between tags.
-    for (const m of line.matchAll(JSX_TEXT)) {
-      if (m[1].includes('!')) found.push({ file, line: at, rule: 'exclamation mark', text: m[1].trim() })
-    }
-  })
-  return found
+    if (jsx && text.includes('!')) found.push({ file, line, rule: 'exclamation mark', text: text.trim() })
+  }
+  return found.sort((a, b) => a.line - b.line)
 }
 
 /** Violations per file, and the files that are over what the baseline allows them. */
@@ -136,14 +144,14 @@ describe('UI copy', () => {
 
   it('catches each rule on a sample', () => {
     const sample = [
-      "const a = 'Unlock your potential'",
-      '<p>Done!</p>',
-      '<p>Jobs \u2014 ranked</p>',
-      '<span>\u{1F389}</span>',
+      "const a = 'Unlock your potential';",
+      '<p>Done!</p>;',
+      '<p>Jobs \u2014 ranked</p>;',
+      '<span>\u{1F389}</span>;',
       '// a comment \u2014 with a dash is fine',
-      "const url = 'https://example.com/path' // trailing comment \u2014 fine",
-      '<p>View your receipt</p>',
-      "const msg = 'Your receipt is saved'",
+      "const url = 'https://example.com/path'; // trailing comment \u2014 fine",
+      '<p>View your receipt</p>;',
+      "const msg = 'Your receipt is saved';",
       'const dest = `Sent to ${receipt.destination}`',
     ].join('\n')
     const rules = scanSource('sample.tsx', sample).map((v) => `${v.line}:${v.rule}`)
@@ -157,15 +165,40 @@ describe('UI copy', () => {
     ])
   })
 
+  it('reads text a formatter wrapped, text beside an expression, and multi-line templates', () => {
+    const sample = [
+      '<p>',
+      '  Your receipt is saved!',
+      '</p>;',
+      '<p>',
+      '  Get AI-powered insights',
+      '</p>;',
+      '<p>Saved {n} roles!</p>;',
+      '<p>{n} roles are ready, seamless</p>;',
+      'const t = `a',
+      'seamless ${x} text`;',
+      'const f = (a) => a > 1 ? b : c',
+    ].join('\n')
+    const rules = scanSource('sample.tsx', sample).map((v) => `${v.line}:${v.rule}`)
+    expect(rules).toEqual([
+      '2:retired word for what was sent',
+      '2:exclamation mark',
+      '5:banned phrase \\bAI[- ]powered\\b',
+      '7:exclamation mark',
+      '8:banned phrase \\bseamless(ly)?\\b',
+      '9:banned phrase \\bseamless(ly)?\\b',
+    ])
+  })
+
   it('does not count the retired word in an import path or an identifier', () => {
     const source = ["import { listReceipts } from '@/lib/applications/receipts'", "const key = 'receipt'", 'const rows = await listReceipts()'].join('\n')
     expect(scanSource('sample.tsx', source)).toEqual([])
   })
 
   it('fails an unlisted file with one violation, and a listed file that gets worse', () => {
-    const one = scanSource('components/new.tsx', '<p>Jobs \u2014 ranked</p>')
+    const one = scanSource('components/new.tsx', '<p>Jobs \u2014 ranked</p>;')
     expect(overBaseline(one, {}).over).toEqual(['components/new.tsx: 1 found, 0 allowed'])
-    const two = scanSource('components/old.tsx', ['<p>Jobs \u2014 ranked</p>', '<p>Done!</p>'].join('\n'))
+    const two = scanSource('components/old.tsx', ['<p>Jobs \u2014 ranked</p>;', '<p>Done!</p>;'].join('\n'))
     expect(overBaseline(two, { 'components/old.tsx': 2 }).over).toEqual([])
     expect(overBaseline(two, { 'components/old.tsx': 1 }).over).toEqual(['components/old.tsx: 2 found, 1 allowed'])
   })
