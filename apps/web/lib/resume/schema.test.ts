@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   ResumeLlmSchema,
@@ -59,7 +61,7 @@ describe('parseLooseDate', () => {
 describe('parseDateRange', () => {
   it('splits ranges in every common spelling', () => {
     expect(parseDateRange('Mar 2021 - Present')).toEqual({ startDate: '2021-03', current: true })
-    expect(parseDateRange('Jun 2018 – Feb 2021')).toEqual({ startDate: '2018-06', endDate: '2021-02' })
+    expect(parseDateRange('Jun 2018 \u2013 Feb 2021')).toEqual({ startDate: '2018-06', endDate: '2021-02' })
     expect(parseDateRange('2012-2016')).toEqual({ startDate: '2012', endDate: '2016' })
     expect(parseDateRange('2021-03 - 2022-05')).toEqual({ startDate: '2021-03', endDate: '2022-05' })
     expect(parseDateRange('03/2019-12/2021')).toEqual({ startDate: '2019-03', endDate: '2021-12' })
@@ -131,5 +133,19 @@ describe('normalizeLlmResume', () => {
     expect(r.education[0]).toMatchObject({ endDate: '2016', current: false })
     expect(r.skills).toEqual([{ name: 'Skills', keywords: ['Go'] }])
     expect(r.meta.cello.warnings.join(' ')).toMatch(/could not find your name/)
+  })
+})
+
+describe('the files that reach a browser', () => {
+  it('use no regex lookbehind, a parse error on Safari before 16.4 that would take the resume page down', () => {
+    for (const file of ['schema.ts', 'render.ts', 'from-markdown.ts', 'resolve.ts', 'types.ts']) {
+      expect(readFileSync(path.join(__dirname, file), 'utf8'), file).not.toMatch(/\(\?<[=!]/)
+    }
+  })
+
+  it('splits a range at a hyphen after a year and keeps a year-month together', () => {
+    expect(parseDateRange('2019-2023')).toEqual({ startDate: '2019', endDate: '2023' })
+    expect(parseDateRange('Mar 2019-Present')).toEqual({ startDate: '2019-03', current: true })
+    expect(parseDateRange('2021-03')).toEqual({ single: '2021-03' })
   })
 })

@@ -168,8 +168,10 @@ export function parseLooseDate(text: string): { date?: PartialDateString; curren
 
 // A hyphen splits a range only between a year and a year/month/open end, so
 // "2021-03" stays one date and "2019-2023" and "Mar 2019-Present" split.
-const RANGE_SPLIT =
-  /\s*(?:–|—|→|\bto\b|\bthrough\b|\buntil\b)\s*|\s+-\s+|(?<=\d{4})\s*-\s*(?=\d{4}|\d{1,2}\/|[A-Za-z])/i
+// No lookbehind: this file reaches browsers through the resume pages, and a lookbehind is a parse error
+// on Safari before 16.4. The hyphen after a year is first given spaces, then every range splits the same way.
+const RANGE_SPLIT = /\s*(?:\u2013|\u2014|\u2192|\bto\b|\bthrough\b|\buntil\b)\s*|\s+-\s+/i
+const YEAR_HYPHEN = /(\d{4})\s*-\s*(?=\d{4}|\d{1,2}\/|[A-Za-z])/g
 
 export interface ParsedRange {
   startDate?: PartialDateString
@@ -183,7 +185,7 @@ export interface ParsedRange {
 export function parseDateRange(text: string): ParsedRange {
   const t = text.trim()
   if (!t) return {}
-  const parts = t.split(RANGE_SPLIT).map((p) => p.trim()).filter(Boolean)
+  const parts = t.replace(YEAR_HYPHEN, '$1 - ').split(RANGE_SPLIT).map((p) => p.trim()).filter(Boolean)
   if (parts.length === 1) {
     const one = parseLooseDate(parts[0])
     if (one.date) return { single: one.date }

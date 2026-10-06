@@ -260,7 +260,7 @@ describe('importResumeFile — .pdf', () => {
   }, 20_000)
 })
 
-describe('importResumeFile — pictures', () => {
+describe('importResumeFile: pictures', () => {
   it('asks for a transcription instead of guessing', async () => {
     await expect(
       importResumeFile({ filename: 'resume.jpg', mimeType: 'image/jpeg', bytes: Buffer.from([1, 2, 3]) })

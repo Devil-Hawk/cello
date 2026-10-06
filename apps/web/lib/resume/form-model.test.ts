@@ -192,6 +192,6 @@ describe('the preview follows the form', () => {
   })
 
   it('the draft never contains an em dash the user did not type', () => {
-    expect(previewMarkdown(CANONICAL_RESUME)).not.toContain('—')
+    expect(previewMarkdown(CANONICAL_RESUME)).not.toContain('\u2014')
   })
 })

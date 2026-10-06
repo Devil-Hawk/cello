@@ -1,4 +1,4 @@
-// POST /api/resume/upload — bring a resume in, in whatever form the user has it.
+// POST /api/resume/upload: bring a resume in, in whatever form the user has it.
 //
 // EVERY INPUT ENDS AS A VALID STRUCTURED Resume (lib/resume/schema.ts):
 //   multipart `resume` file   .pdf .docx .txt .md        -> text -> structure -> save
@@ -264,7 +264,7 @@ async function importResume(request: NextRequest, user: { id: string; email?: st
     success: true,
     message: `Resume imported from ${result.format.toUpperCase()} · ${method}`,
     // `extractionMethod` and `wordCount` are the field names the settings card
-    // already renders — kept.
+    // already renders; kept.
     extractionMethod: method,
     wordCount: result.plainText.split(/\s+/).filter(Boolean).length,
     format: result.format,

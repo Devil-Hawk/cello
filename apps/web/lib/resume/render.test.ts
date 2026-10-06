@@ -25,7 +25,7 @@ describe('resumeToMarkdown', () => {
   })
 
   it('never writes an em dash', () => {
-    expect(md).not.toContain('—')
+    expect(md).not.toContain('\u2014')
   })
 
   it('omits empty sections and respects sectionOrder', () => {

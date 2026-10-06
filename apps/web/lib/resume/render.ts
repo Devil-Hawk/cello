@@ -35,7 +35,7 @@ export function formatDates(e: DatedEntry): string {
 
 const esc = escapeInlineMarkdown
 /** Free text is paragraphs: a lone newline is a soft wrap (it would print as a hard break in the PDF), a blank line is a paragraph break. */
-const prose = (s: string): string => esc(s.trim().replace(/[ \t]*\n(?:[ \t]*\n)+[ \t]*/g, '\n\n').replace(/(?<!\n)[ \t]*\n[ \t]*(?!\n)/g, ' '))
+const prose = (s: string): string => esc(s.trim().replace(/[ \t]*\n(?:[ \t]*\n)+[ \t]*/g, '\n\n').replace(/([^\n])[ \t]*\n[ \t]*(?!\n)/g, '$1 '))
 const join = (parts: Array<string | undefined>, sep: string): string =>
   parts.map((p) => p?.trim()).filter(Boolean).join(sep)
 
