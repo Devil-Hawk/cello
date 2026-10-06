@@ -91,7 +91,7 @@ Fan-out (`lib/agents/fanout.ts`) runs at most four branches at once, each with i
 
 ## Skills
 
-Ten skills live in `apps/web/skills/<name>/SKILL.md`: role-fit, tailor-resume, cover-letter, cold-outreach, follow-up, company-research, visa-sponsorship, interview-prep, negotiation, search-strategy. The orchestrator sees each name and description and reads the file when it applies. Each folder has an `evals.json` (three trigger cases and an output case with plain checks). A skill's `description` must be a quoted string: an unquoted colon makes the loader skip the skill.
+Nine skills live in `apps/web/skills/<name>/SKILL.md`: role-fit, tailor-resume, cover-letter, cold-outreach, follow-up, company-research, visa-sponsorship, negotiation, search-strategy. The orchestrator sees each name and description and reads the file when it applies. Each folder has an `evals.json` (three trigger cases and an output case with plain checks). A skill's `description` must be a quoted string: an unquoted colon makes the loader skip the skill.
 
 ## Memory and files
 
