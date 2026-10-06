@@ -458,7 +458,7 @@ async function checkCurrent(
   if (acknowledge !== got.version.version) {
     return { ok: false, fix: `Show the person version ${got.version.version}, then approve with acknowledge_version ${got.version.version}.` }
   }
-  const target = await syncTarget(admin, userId, row, got.version.content as Record<string, unknown>)
+  const target = await syncTarget(admin, userId, row, got.version.content as Record<string, unknown>, got.version.version)
   const { data } = await admin
     .from('approvals')
     .update({ artifact_version: got.version.version, payload_hash: hash(payloadFor(row.action, got.version.version, {}, target)) })

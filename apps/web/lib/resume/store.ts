@@ -178,6 +178,9 @@ interface InsertRow {
   contentJson: ResumeContentJson
   atsScore?: number | null
   source?: ResumeSource | null
+  /** The Reviewer's result for a draft, and the trace that wrote it. */
+  review?: unknown
+  traceId?: string | null
 }
 
 /** Append a version to a bucket. artifact_add_version assigns the next number atomically. */
@@ -194,7 +197,9 @@ async function insertVersionRow(client: SupabaseClient, input: InsertRow): Promi
 
   let versionNumber = 1
   if (created) {
-    const { error } = await client.from('artifact_versions').insert({ artifact_id: bucket.id, version: 1, author, content: stored, content_text: content })
+    const { error } = await client
+      .from('artifact_versions')
+      .insert({ artifact_id: bucket.id, version: 1, author, content: stored, content_text: content, review: input.review ?? null, trace_id: input.traceId ?? null })
     if (error) throw new Error(`createResumeVersion failed: ${error.message}`)
   } else {
     const { data, error } = await client.rpc('artifact_add_version', {
@@ -204,8 +209,8 @@ async function insertVersionRow(client: SupabaseClient, input: InsertRow): Promi
       p_content: stored,
       p_content_text: content,
       p_note: null,
-      p_review: null,
-      p_trace_id: null,
+      p_review: input.review ?? null,
+      p_trace_id: input.traceId ?? null,
       p_idempotency_key: null,
     })
     if (error) throw new Error(`createResumeVersion failed: ${error.message}`)
@@ -231,6 +236,8 @@ export async function createResumeVersion(
     title?: string | null
     atsScore?: number | null
     draftId?: string | null
+    review?: unknown
+    traceId?: string | null
   }
 ): Promise<StoredResume> {
   const resume = ResumeSchema.parse(input.resume)
@@ -244,6 +251,8 @@ export async function createResumeVersion(
     contentJson: content_json,
     atsScore: input.atsScore,
     source: input.source,
+    review: input.review,
+    traceId: input.traceId,
   })
 }
 

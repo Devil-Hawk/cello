@@ -139,7 +139,7 @@ const PROMPT_BUILDERS: Record<string, string> = {
     'output. Framed at the source (this file), never at a consumer — every employer-derived ' +
     'string is wrapped in frameJobText/frameJobTextList before it leaves one of the ' +
     'builders, so it is framed from day one and never appears in PENDING_WIRING below.',
-  'apps/web/lib/agents/subagents/writer.ts':
+  'apps/web/lib/workflows/writer.ts':
     'The Writer specialist of the agent engine. The cover letter and email path hands the posting to ' +
     'cv_tailor framed (frameJobText, ~L260); the resume path frames it before optimizeResume, whose own ' +
     'jobBlock is a plain slice. Framed at the source from day one, so it is never in PENDING_WIRING.',

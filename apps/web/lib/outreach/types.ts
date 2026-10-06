@@ -10,7 +10,7 @@ export type OutreachStatus =
   | 'failed'
   | 'skipped'
 
-export type OutreachKind = 'initial' | 'follow_up'
+export type OutreachKind = 'initial' | 'follow_up' | 'reply'
 
 /**
  * Coarse polarity for an inbound reply, per supabase/migrations/

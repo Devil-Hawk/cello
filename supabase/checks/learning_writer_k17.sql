@@ -29,8 +29,8 @@ insert into public.jobs (id, company_id, title, description, url, external_id) s
 
 -- The old stores as they were.
 insert into public.resume_documents (id, user_id, job_id, version, title, content, source)
-select base1, user_id, null, 1, 'Base', 'base one', 'base' from fx
-union all select base2, user_id, null, 2, 'Base', 'base two', 'edited' from fx
+select base1, user_id, null::uuid, 1, 'Base', 'base one', 'base' from fx
+union all select base2, user_id, null::uuid, 2, 'Base', 'base two', 'edited' from fx
 union all select tailored1, user_id, job_id, 1, 'Tailored', 'tailored one', 'tailored' from fx;
 insert into public.application_drafts (id, user_id, job_id, cover_letter, answers)
 select draft_id, user_id, job_id, 'Dear team, I am writing about the k17 role.', '{"visa": "no"}'::jsonb from fx;
