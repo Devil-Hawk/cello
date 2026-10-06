@@ -223,7 +223,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
   }
 
   // [Add] attaches at once; "@" and a new chat hold a chip until the first turn is sent.
-  const chipThing = (found: Found) => setChips((have) => (have.some((c) => c.kind === found.kind && c.ref === found.id) ? have : [...have, { kind: found.kind, ref: found.id, name: found.name }]))
+  const chipThing = (found: Found) => setChips((have) => (have.some((c) => c.kind === found.kind && c.ref === found.id) ? have : [...have, { kind: found.kind, ref: found.id, name: (found.kind === 'role' || found.kind === 'application') && found.detail ? `${found.name} at ${found.detail}` : found.name }]))
 
   async function addThing(found: Found) {
     setAdding(false)

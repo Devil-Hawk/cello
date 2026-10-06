@@ -51,6 +51,9 @@ export interface ChatObject {
   body: string | null
 }
 
+/** What the page and a chip call a thing: a role or an application is named with its employer, so two roles with one title differ. */
+export const objectName = (o: Pick<ChatObject, 'kind' | 'title' | 'company'>) => ((o.kind === 'role' || o.kind === 'application') && o.company ? `${o.title} at ${o.company}` : o.title)
+
 /** Reads one thing for one person. Null for anything that is not theirs or no longer exists. */
 export type ObjectReader = (db: AdminClient, userId: string, kind: AttachKind, ref: StoredRef) => Promise<ChatObject | null>
 

@@ -3,6 +3,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { refFromId } from '@/lib/chat/attach'
+import { objectName } from '@/lib/chat/types'
 import { getObject } from '@/lib/chat/ports/commands.stub'
 import { chatSession, isResponse } from '../door'
 
@@ -14,5 +15,5 @@ export async function GET(request: NextRequest) {
   const kind = request.nextUrl.searchParams.get('kind') ?? ''
   const ref = refFromId(kind, request.nextUrl.searchParams.get('ref') ?? '')
   const found = ref ? await getObject(session.db, session.userId, kind as Parameters<typeof getObject>[2], ref) : null
-  return found ? NextResponse.json({ kind: found.kind, ref: found.id, name: found.title }, { headers: { 'Cache-Control': 'no-store' } }) : NextResponse.json({ error: 'not_found', message: 'That is not in your account.' }, { status: 404 })
+  return found ? NextResponse.json({ kind: found.kind, ref: found.id, name: objectName(found) }, { headers: { 'Cache-Control': 'no-store' } }) : NextResponse.json({ error: 'not_found', message: 'That is not in your account.' }, { status: 404 })
 }

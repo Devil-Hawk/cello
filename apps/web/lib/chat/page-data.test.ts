@@ -47,6 +47,14 @@ describe('loadChatPage', () => {
     expect(page?.names).toEqual({ a1: 'Title of r1', a2: null })
   })
 
+  it('names a role with its company, so two roles with one title read differently', async () => {
+    const two: ObjectReader = async (_db, _u, kind, ref) => ({ kind, id: ref.id, title: 'Engineer', company: ref.id === 'r1' ? 'Ramp' : 'Brex', facts: [], body: null })
+    const db = seed()
+    db.tables.chat_attachments.push({ id: 'a3', user_id: 'u1', chat_id: 'c1', position: 3, kind: 'role', ref: { id: 'r2' }, removed_at: null })
+    const page = await loadChatPage(db, 'u1', 'c1', two)
+    expect(page?.names).toMatchObject({ a1: 'Engineer at Ramp', a3: 'Engineer at Brex' })
+  })
+
   it('reads one card for each subject named, and none for a subject that cannot be read', async () => {
     const page = await loadChatPage(seed(), 'u1', 'c1', get)
     expect(page?.cards.map((c) => c.id)).toEqual(['r1'])
