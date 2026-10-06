@@ -257,7 +257,7 @@ begin
   insert into public.jobs (id, company_id, title, description, url, external_id, apply_url, description_md, description_state, description_md5)
   values (ja2, f.co_a, 'Written by A', 'x', 'https://shared.example/jobs/adopt-1', 'adopt-1', 'https://evil.example/apply', 'poison', 'full', md5('poison'));
   update public.jobs set employer_id = null where id = ja2;
-  perform public.upsert_shared_jobs(jsonb_build_array(jsonb_build_object('company_id', f.co_a, 'external_id', 'adopt-1', 'title', 'Real title',
+  perform public.upsert_shared_jobs(jsonb_build_array(jsonb_build_object('company_id', f.co_a, 'external_id', 'adopt-1', 'title', 'Real title', 'description', 'd',
             'url', 'https://shared.example/jobs/adopt-1', 'source', 'greenhouse')));
   if (select employer_id from public.jobs where id = ja2) is distinct from f.emp then raise exception 'the read adopts the role'; end if;
   if (select title from public.jobs where id = ja2) <> 'Real title' then raise exception 'the read writes the title'; end if;
