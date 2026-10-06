@@ -10,6 +10,10 @@ export const dynamic = 'force-dynamic'
 export async function GET(request: NextRequest) {
   const session = await chatSession()
   if (isResponse(session)) return session
-  const found = await findThings(session.db, session.userId, request.nextUrl.searchParams.get('q') ?? '')
-  return NextResponse.json({ found }, { headers: { 'Cache-Control': 'no-store' } })
+  try {
+    const found = await findThings(session.db, session.userId, request.nextUrl.searchParams.get('q') ?? '')
+    return NextResponse.json({ found }, { headers: { 'Cache-Control': 'no-store' } })
+  } catch {
+    return NextResponse.json({ error: 'unreadable', message: 'Cello could not search just now.' }, { status: 500 })
+  }
 }

@@ -3,7 +3,7 @@ import type { AdminClient } from '@/lib/harness/types'
 import { findThings } from './find'
 
 // The fake admin has no ilike, so this stands in for the database: it records what each read asked for and answers per table.
-function db(tables: Record<string, unknown[]>) {
+function db(tables: Record<string, unknown[]>, failing?: string) {
   const asked: { table: string; user: unknown; pattern: unknown }[] = []
   const client = {
     from: (table: string) => {
@@ -12,7 +12,7 @@ function db(tables: Record<string, unknown[]>) {
       q.select = () => q
       q.eq = (_c: string, v: unknown) => ((ask.user = v), q)
       q.ilike = (_c: string, v: unknown) => ((ask.pattern = v), q)
-      q.limit = () => (asked.push({ table, user: ask.user, pattern: ask.pattern }), Promise.resolve({ data: tables[table] ?? [] }))
+      q.limit = () => (asked.push({ table, user: ask.user, pattern: ask.pattern }), Promise.resolve(table === failing ? { data: null, error: { message: 'down' } } : { data: tables[table] ?? [] }))
       return q
     },
   }
@@ -46,5 +46,10 @@ describe('findThings', () => {
     expect(asked).toHaveLength(0)
     await findThings(client, 'u1', '100%_off')
     expect(asked[0].pattern).toBe('%100 off%')
+  })
+
+  it('throws when any read fails, so it never reads as no match', async () => {
+    const { client } = db({ companies: [{ id: 'c1', name: 'Ramp' }] }, 'person_roles')
+    await expect(findThings(client, 'u1', 'ra')).rejects.toThrow('could not read')
   })
 })

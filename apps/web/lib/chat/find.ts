@@ -36,6 +36,9 @@ export async function findThings(db: AdminClient, userId: string, words: string)
     db.from('chats').select('id, title').eq('user_id', userId).ilike('title', like).limit(PER_KIND),
     db.from('artifacts').select('id, title, type').eq('user_id', userId).ilike('title', like).limit(PER_KIND),
   ])
+  // A read that failed is not an empty list: say so, so the page never reads 0 for what it could not read.
+  const failed = [roles, companies, applications, people, chats, made].find((r) => r.error)
+  if (failed) throw new Error(`find could not read: ${failed.error?.message ?? 'unknown'}`)
   const rows = <T>(r: { data: unknown }) => ((r.data as T[] | null) ?? [])
   return [
     ...rows<{ job_id: string; jobs: JobRel }>(roles).map((r): Found => ({ kind: 'role', id: r.job_id, ...job(r.jobs) })),
