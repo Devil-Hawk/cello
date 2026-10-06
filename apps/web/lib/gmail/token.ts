@@ -46,8 +46,8 @@ export type GmailAccessTokenResult =
   | { ok: false; reason: 'network_error'; message: string }
 
 /**
- * One refresh against Google's token endpoint through google-auth-library. Pure —
- * no DB, no Supabase — so it is unit-testable with a mocked `fetch` alone.
+ * One refresh against Google's token endpoint through google-auth-library. Pure:
+ * no DB, no Supabase, so it is unit-testable with a mocked `fetch` alone.
  */
 export async function refreshGoogleAccessToken(refreshToken: string): Promise<GmailAccessTokenResult> {
   const clientId = process.env.GOOGLE_CLIENT_ID

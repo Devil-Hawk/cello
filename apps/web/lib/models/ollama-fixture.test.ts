@@ -71,7 +71,7 @@ describe('a self-hosted fixture Ollama drafts a reply', () => {
     expect(seen[0].body).not.toHaveProperty('response_format')
 
     // The checks every draft must pass: said in plain words, no placeholder left in, no em dash, no exclamation mark.
-    expect(result.content).not.toMatch(/[—–]|!|\[[^\]]*\]|\{\{/)
+    expect(result.content).not.toMatch(/[\u2014\u2013]|!|\[[^\]]*\]|\{\{/)
     expect(result.content.split(/\s+/).length).toBeLessThan(120)
   })
 })

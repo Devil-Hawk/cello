@@ -32,7 +32,7 @@
 //                server IP.
 // The chain itself is lib/search/tools.ts: one LangChain tool per configured
 // backend, joined with withFallbacks, so the next backend runs only when the one
-// before it throws — see runChain() below.
+// before it throws (see runChain() below).
 //
 // tavily/serper/searxng are loaded lazily through loadOptionalBackendFn()'s
 // STATIC LITERAL import() map (see that function's comment for why the

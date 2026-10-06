@@ -80,7 +80,7 @@ export interface RunApifyActorOptions {
  * Throws ApifyError with Apify's own status/error text on:
  *   - a bad token or unknown actor id (start call fails)
  *   - the run itself ending FAILED / ABORTED / TIMED-OUT
- *   - our own wait budget (maxWaitMs) running out first — in that case the
+ *   - our own wait budget (maxWaitMs) running out first; in that case the
  *     run keeps going on Apify's side; the message says so and the run id
  *     is attached so the user can check the Apify console.
  */
@@ -101,7 +101,7 @@ export async function runApifyActor(opts: RunApifyActorOptions): Promise<ApifyRu
     const runId = started?.id
     if (!runId) {
       throw new ApifyError(
-        `Apify did not return a run id for actor "${actorId}" — check that the actor id is correct and the token has access to it.`
+        `Apify did not return a run id for actor "${actorId}". Check that the actor id is correct and the token has access to it.`
       )
     }
 
@@ -113,7 +113,7 @@ export async function runApifyActor(opts: RunApifyActorOptions): Promise<ApifyRu
     if (!TERMINAL_STATUSES.has(status)) {
       throw new ApifyError(
         `Apify run ${runId} did not finish within ${Math.round(maxWaitMs / 1000)}s (last status: ${status}). ` +
-          `It may still complete on Apify's side — check the Apify console and re-sync once it finishes.`,
+          `It may still complete on Apify's side. Check the Apify console and re-sync once it finishes.`,
         { runId }
       )
     }

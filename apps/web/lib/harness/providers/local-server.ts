@@ -67,7 +67,7 @@ export async function detectLocalServer(baseUrl: string): Promise<LocalServerAva
 
 /**
  * Call an OpenAI-compatible local server's chat-completions endpoint through the
- * factory (ChatOpenAI pointed at the server). No key is required — a placeholder
+ * factory (ChatOpenAI pointed at the server). No key is required: a placeholder
  * is sent because the client insists on a non-empty apiKey string, but local
  * servers generally never check it.
  *

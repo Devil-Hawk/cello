@@ -1,4 +1,4 @@
-// OpenRouter provider — pay-per-token chat completions through ChatOpenRouter,
+// OpenRouter provider: pay-per-token chat completions through ChatOpenRouter,
 // built by the model factory (lib/models/factory.ts).
 //
 // This is Cello's original (and still default) LLM backend. The request it makes
