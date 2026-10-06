@@ -125,3 +125,39 @@ export interface RoleTypeSynonym {
   role_type: string
   source: 'correction' | 'typed'
 }
+
+// --- The posting, whole (K5d; blueprint 6 "What the reader keeps") --------------------------------------
+
+/** full: the employer's whole text. partial: only a listing's snippet could be read, or the body passed the guard. none: no body yet. cleared: the body was cleared at the storage alert and is read again on open. */
+export type DescriptionState = 'full' | 'partial' | 'none' | 'cleared'
+
+/** Where the body came from: the applicant system's API, the posting page's JSON-LD, its detail page, the rendered page, or a listing. */
+export type DescriptionSource = 'api' | 'jsonld' | 'detail' | 'rendered' | 'listing'
+
+/** What the reader stores of one posting's body. `description_md5` is the md5 of `description_md`: null with no body, and kept when the body is cleared. */
+export interface PostingCapture {
+  description_md: string | null
+  description_state: DescriptionState
+  description_source: DescriptionSource | null
+  apply_url: string | null
+  description_md5: string | null
+}
+
+/** One requirement of a posting (requirements version 2): a bullet or sentence under a requirements heading. */
+export interface RequirementItem {
+  /** A hash of the normalised text: the same requirement keeps its id when the posting is edited elsewhere. */
+  id: string
+  text: string
+  kind: 'must' | 'nice' | 'other'
+  /** The heading it sat under, as the posting wrote it. */
+  heading: string
+  /** The posting's own words for it: always a substring of `description_md`. */
+  quote: string
+  skills: string[]
+  years: { min: number | null; max: number | null } | null
+  degree: string | null
+  visa: 'offered' | 'not_offered' | null
+  clearance: string | null
+  origin: 'code' | 'model'
+  prov: { rule?: string; step?: string; model?: string; at?: string }
+}
