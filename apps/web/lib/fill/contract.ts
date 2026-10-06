@@ -95,7 +95,20 @@ export const PHASES = ['filled', 'blocked', 'ready_to_send', 'submitted', 'confi
 export type Phase = (typeof PHASES)[number]
 
 /** Why the extension stopped and handed the form to the person. */
-export const STOP_CAUSES = ['sign_in', 'account', 'site_check', 'unreadable', 'prefilled', 'wrong_page', 'interrupted'] as const
+export const STOP_CAUSES = [
+  'sign_in',
+  'account',
+  'site_check',
+  'unreadable',
+  'unknown_field',
+  'prefilled',
+  'wrong_page',
+  'upload',
+  'form_changed',
+  'no_submit',
+  'form_error',
+  'interrupted',
+] as const
 export type StopCause = (typeof STOP_CAUSES)[number]
 
 /** The site's own confirmation, seen after a submit. Only this makes something Sent by Cello. */

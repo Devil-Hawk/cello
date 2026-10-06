@@ -131,6 +131,8 @@ const FIXED_MESSAGE: GmailMessage = {
     headers: [
       { name: 'from', value: 'Acme Corp <recruiter@acme.com>' },
       { name: 'subject', value: 'Thank you for applying to Acme Corp' },
+      // signed by the employer's own domain: the mail is believed
+      { name: 'Authentication-Results', value: 'mx.google.com; dkim=pass header.i=@acme.com header.s=s1' },
     ],
     body: { data: '' },
   },
@@ -152,6 +154,10 @@ const syncOutreachRepliesMock = vi.fn(async (..._args: unknown[]) => 0)
 vi.mock('@/lib/outreach/reply', () => ({
   syncOutreachReplies: (...args: unknown[]) => syncOutreachRepliesMock(...args),
 }))
+// Telling the person has its own tests (lib/notifications/deliver.test.ts); here it is only observed.
+const sendAlertMock = vi.fn(async (..._args: unknown[]) => ({ email: 'sent', push: 'none' }))
+vi.mock('@/lib/notifications/deliver', () => ({ sendAlert: (...args: unknown[]) => sendAlertMock(...args) }))
+vi.mock('@/lib/notifications/mail', () => ({ selfMailer: () => async () => 'sent' }))
 vi.mock('./gmail-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./gmail-api')>()
   return { ...actual, fetchGmailMessages: async () => mailbox }
@@ -448,5 +454,167 @@ describe('runGmailSyncCore: email never creates companies', () => {
     expect(result.createdApplications).toEqual(['Acme Corp'])
     expect(fakeDb.tables.get('jobs')?.[0].company_id).toBe('company-1')
     expect(fakeDb.tables.get('activities')).toHaveLength(1)
+  })
+})
+
+describe('runGmailSyncCore: mail that cannot be verified', () => {
+  const unsigned = (id: string, from: string, subject: string, auth?: string): GmailMessage => ({
+    id,
+    threadId: `t-${id}`,
+    snippet: '',
+    payload: {
+      headers: [{ name: 'from', value: from }, { name: 'subject', value: subject }, ...(auth ? [{ name: 'Authentication-Results', value: auth }] : [])],
+      body: { data: '' },
+    },
+    internalDate: String(Date.now()),
+  })
+
+  beforeEach(() => {
+    reserveSpendMock.mockReset().mockResolvedValue(RESERVATION)
+    settleSpendMock.mockReset().mockResolvedValue(undefined)
+    fakeDb = makeFakeDb()
+    fakeDb.tables.set('companies', [{ id: 'company-1', user_id: USER_ID, name: 'Acme Corp', domain: 'acme.com', metadata: null }])
+    fakeDb.tables.set('profiles', [{ id: USER_ID, preferences: {} }])
+    fakeDb.tables.set('jobs', [{ id: 'job-1', company_id: 'company-1', title: 'Backend Engineer' }])
+    fakeDb.tables.set('applications', [{ id: 'app-1', user_id: USER_ID, job_id: 'job-1', stage: 'applied', state: null }])
+    callOpenRouterMock.mockReset().mockResolvedValue({
+      content: JSON.stringify({ isJobRelated: true, employerName: 'Acme Corp', employerDomain: 'acme.com', jobTitle: 'Backend Engineer', status: 'rejected', careerPageUrl: null, interviewDateTime: null, confidence: 0.95, reasoning: null }),
+      tokensUsed: 600, promptTokens: 500, completionTokens: 100, model: 'google/gemini-2.0-flash-001',
+    })
+  })
+
+  const run = () => runGmailSyncCore({ db: fakeDb as any, userId: USER_ID, accessToken: 'fake-access-token', apiKeys: { openrouter: 'fake-key', userId: USER_ID }, preferences: preferences() })
+
+  it('a rejection with a failing signature stays unconfirmed and moves no stage', async () => {
+    mailbox = [unsigned('spoof-1', 'Acme Talent <careers@acme.com>', 'Unfortunately we are not moving forward', 'mx.google.com; dkim=fail header.d=acme.com')]
+    await run()
+    expect(fakeDb.tables.get('applications')?.[0].stage).toBe('applied')
+    expect(fakeDb.tables.get('activities')).toHaveLength(1)
+    expect((fakeDb.tables.get('activities') as any[])[0].metadata.trust).toBe('unconfirmed')
+  })
+
+  it('a rejection carrying the sender own forged Authentication-Results stays unconfirmed and moves no stage', async () => {
+    const forged = { name: 'Authentication-Results', value: 'other.example; dkim=pass header.d=acme.com' }
+    // Gmail's own header says fail; the sender's forged pass sits below it. And with no Gmail header at all.
+    for (const gmail of [[{ name: 'Authentication-Results', value: 'mx.google.com; dkim=fail header.d=acme.com' }], []]) {
+      const m = unsigned(`forged-${gmail.length}`, 'Acme Talent <careers@acme.com>', 'Unfortunately we are not moving forward')
+      m.payload.headers.push(...gmail, forged)
+      mailbox = [m]
+      await run()
+      expect(fakeDb.tables.get('applications')?.[0].stage).toBe('applied')
+    }
+    expect((fakeDb.tables.get('activities') as any[]).every((a) => a.metadata.trust === 'unconfirmed')).toBe(true)
+  })
+
+  it('a relay may confirm an application but not move a later stage', async () => {
+    mailbox = [unsigned('relay-1', 'Acme <no-reply@us.greenhouse-mail.io>', 'Unfortunately we are not moving forward', 'mx.google.com; dkim=pass header.d=us.greenhouse-mail.io')]
+    await run()
+    expect(fakeDb.tables.get('applications')?.[0].stage).toBe('applied')
+    expect((fakeDb.tables.get('activities') as any[])[0].metadata.trust).toBe('unconfirmed')
+  })
+
+  it('the same rejection signed by the employer moves the stage', async () => {
+    mailbox = [unsigned('real-1', 'Acme Talent <careers@acme.com>', 'Unfortunately we are not moving forward', 'mx.google.com; dkim=pass header.d=acme.com')]
+    await run()
+    expect(fakeDb.tables.get('applications')?.[0].stage).toBe('rejected')
+    expect((fakeDb.tables.get('activities') as any[])[0].metadata.trust).toBe('proven')
+  })
+
+  it('a display name equal to the employer with DKIM failing makes no application and no company', async () => {
+    fakeDb.tables.set('applications', [])
+    fakeDb.tables.set('jobs', [])
+    mailbox = [unsigned('spoof-2', 'Acme Corp <careers@acme.com>', 'Thank you for applying to Acme Corp', 'mx.google.com; dkim=fail header.d=acme.com')]
+    callOpenRouterMock.mockResolvedValue({
+      content: JSON.stringify({ isJobRelated: true, employerName: 'Acme Corp', employerDomain: 'acme.com', jobTitle: 'Backend Engineer', status: 'applied', careerPageUrl: null, interviewDateTime: null, confidence: 0.95, reasoning: null }),
+      tokensUsed: 600, promptTokens: 500, completionTokens: 100, model: 'google/gemini-2.0-flash-001',
+    })
+    const result = await run()
+    expect(fakeDb.tables.get('applications') ?? []).toHaveLength(0)
+    expect(fakeDb.tables.get('jobs') ?? []).toHaveLength(0)
+    expect(fakeDb.tables.get('companies')).toHaveLength(1)
+    expect(result.createdApplications).toEqual([])
+  })
+
+  it('an application found in mail waits for Confirm', async () => {
+    fakeDb.tables.set('applications', [])
+    fakeDb.tables.set('jobs', [])
+    mailbox = [FIXED_MESSAGE]
+    callOpenRouterMock.mockResolvedValue({
+      content: JSON.stringify({ isJobRelated: true, employerName: 'Acme Corp', employerDomain: 'acme.com', jobTitle: 'Backend Engineer', status: 'applied', careerPageUrl: null, interviewDateTime: null, confidence: 0.95, reasoning: null }),
+      tokensUsed: 600, promptTokens: 500, completionTokens: 100, model: 'google/gemini-2.0-flash-001',
+    })
+    await run()
+    expect((fakeDb.tables.get('applications') as any[])[0].found_state).toBe('to_confirm')
+  })
+})
+
+describe('runGmailSyncCore: telling the person', () => {
+  const mail = (id: string, subject: string, dkim: 'pass' | 'fail'): GmailMessage => ({
+    id,
+    threadId: `t-${id}`,
+    snippet: '',
+    payload: { headers: [{ name: 'from', value: 'Acme Talent <careers@acme.com>' }, { name: 'subject', value: subject }, { name: 'Authentication-Results', value: `mx.google.com; dkim=${dkim} header.d=acme.com` }], body: { data: '' } },
+    internalDate: String(Date.now()),
+  })
+  const as = (status: string) =>
+    callOpenRouterMock.mockResolvedValue({
+      content: JSON.stringify({ isJobRelated: true, employerName: 'Acme Corp', employerDomain: 'acme.com', jobTitle: 'Backend Engineer', status, careerPageUrl: null, interviewDateTime: null, confidence: 0.95, reasoning: null }),
+      tokensUsed: 600, promptTokens: 500, completionTokens: 100, model: 'google/gemini-2.0-flash-001',
+    })
+  const run = () => runGmailSyncCore({ db: fakeDb as any, userId: USER_ID, accessToken: 'fake-access-token', apiKeys: { openrouter: 'fake-key', userId: USER_ID }, preferences: preferences() })
+
+  beforeEach(() => {
+    reserveSpendMock.mockReset().mockResolvedValue(RESERVATION)
+    settleSpendMock.mockReset().mockResolvedValue(undefined)
+    sendAlertMock.mockClear()
+    fakeDb = makeFakeDb()
+    fakeDb.tables.set('companies', [{ id: 'company-1', user_id: USER_ID, name: 'Acme Corp', domain: 'acme.com', metadata: null }])
+    fakeDb.tables.set('profiles', [{ id: USER_ID, preferences: {} }])
+    fakeDb.tables.set('jobs', [{ id: 'job-1', company_id: 'company-1', title: 'Backend Engineer' }])
+    fakeDb.tables.set('applications', [{ id: 'app-1', user_id: USER_ID, job_id: 'job-1', stage: 'applied', state: null }])
+  })
+
+  it('an interview mail the employer signed sends an alert once, naming the company and the role and not the mail', async () => {
+    mailbox = [mail('i-1', 'Your technical interview is scheduled', 'pass')]
+    as('interview')
+    await run()
+    expect(sendAlertMock).toHaveBeenCalledTimes(1)
+    expect(sendAlertMock.mock.calls[0][1]).toBe(USER_ID)
+    expect(sendAlertMock.mock.calls[0][2]).toMatchObject({ kind: 'interview', subjectId: 'i-1', company: 'Acme Corp', role: 'Backend Engineer' })
+  })
+
+  it('an offer and a signed rejection alert too; a confirmation of applying does not', async () => {
+    mailbox = [mail('o-1', 'We are pleased to offer you the Backend Engineer role', 'pass')]
+    as('offer')
+    await run()
+    expect(sendAlertMock.mock.calls[0][2]).toMatchObject({ kind: 'offer_due', subjectId: 'o-1' })
+    sendAlertMock.mockClear()
+    mailbox = [mail('r-1', 'Unfortunately we are not moving forward', 'pass')]
+    as('rejected')
+    await run()
+    expect(sendAlertMock.mock.calls[0][2]).toMatchObject({ kind: 'reply', subjectId: 'r-1' })
+    sendAlertMock.mockClear()
+    mailbox = [mail('a-1', 'Thank you for applying to Acme Corp', 'pass')]
+    as('applied')
+    await run()
+    expect(sendAlertMock).not.toHaveBeenCalled()
+  })
+
+  it('old proven mail tells no one, and neither does a first sync', async () => {
+    const old = { ...mail('old-1', 'Your technical interview is scheduled', 'pass'), internalDate: String(Date.now() - 10 * 24 * 60 * 60 * 1000) }
+    mailbox = [old]
+    as('interview')
+    await run()
+    expect(sendAlertMock).not.toHaveBeenCalled()
+    mailbox = [mail('first-1', 'Your technical interview is scheduled', 'pass')]
+    await runGmailSyncCore({ db: fakeDb as any, userId: USER_ID, accessToken: 'fake-access-token', apiKeys: { openrouter: 'fake-key', userId: USER_ID }, preferences: {} })
+    expect(sendAlertMock).not.toHaveBeenCalled()
+  })
+
+  it('a mail that cannot be verified tells no one', async () => {
+    mailbox = [mail('x-1', 'Your technical interview is scheduled', 'fail')]
+    as('interview')
+    await run()
+    expect(sendAlertMock).not.toHaveBeenCalled()
   })
 })

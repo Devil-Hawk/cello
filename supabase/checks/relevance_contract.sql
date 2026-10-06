@@ -34,6 +34,10 @@ insert into public.companies (id, user_id, name, domain, career_url, metadata)
 select co_a, a, 'Shared Co', 'shared.example', 'https://shared.example/careers', '{}'::jsonb from fx
 union all select co_b, b, 'Shared Co', 'shared.example', 'https://shared.example/careers', '{}'::jsonb from fx;
 
+-- Following has one writer (K13), so the check follows through it.
+select public.companies_follow(array[co_a], true, a) from fx;
+select public.companies_follow(array[co_b], true, b) from fx;
+
 create function pg_temp.as_user(uid uuid, q text) returns bigint language plpgsql as $$
 declare n bigint;
 begin

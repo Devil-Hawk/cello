@@ -5,6 +5,10 @@ import { saveCompany } from './add'
 function fakeDb(existing: Record<string, unknown> | null, writeError: { message: string } | null = null) {
   const calls: { op: string; payload?: any; id?: string }[] = []
   const db = {
+    rpc: async (name: string, args: any) => {
+      calls.push({ op: `rpc ${name}`, payload: args })
+      return { data: { ok: true }, error: null }
+    },
     from() {
       let op = 'select'
       let payload: any
@@ -50,6 +54,9 @@ describe('saveCompany', () => {
     expect(update.payload.career_url).toBe('https://notion.so/careers')
     expect(update.payload.is_dream_company).toBe(true)
     expect(calls.some((c) => c.op === 'insert')).toBe(false)
+    // followed through the one writer, not by a write to the column
+    expect(update.payload.watching).toBeUndefined()
+    expect(calls.find((c) => c.op === 'rpc companies_follow')?.payload).toEqual({ p_ids: ['lead-1'], p_on: true, p_user: 'u1' })
   })
 
   it('says so when the company is already tracked', async () => {
@@ -62,6 +69,8 @@ describe('saveCompany', () => {
     const { db, calls } = fakeDb(null)
     expect(await saveCompany(db, 'u1', notion)).toEqual({ id: 'new-id' })
     expect(calls[0].payload.name_key).toBe('notion')
+    expect(calls[0].payload.watching).toBeUndefined()
+    expect(calls.find((c) => c.op === 'rpc companies_follow')?.payload).toEqual({ p_ids: ['new-id'], p_on: true, p_user: 'u1' })
   })
 
   it('returns the database error instead of dropping it', async () => {

@@ -106,7 +106,9 @@ begin
     ('Followed Co',   'followed co',   'followed.example',    'greenhouse', 'followedco','kalil', now() - interval '1 minute', 'pending'),
     ('Failed Later',  'failed later',  null,                  'greenhouse', 'failedlater','kalil', now() + interval '60 days', 'failed'),
     ('Failed Due',    'failed due',    null,                  'greenhouse', 'faileddue', 'kalil', now() - interval '3 days', 'failed');
-  insert into public.companies (user_id, name, domain, career_url, watching) values (f.u, 'Followed Co', 'followed.example', '', true);
+  insert into public.companies (user_id, name, domain, career_url) values (f.u, 'Followed Co', 'followed.example', '');
+  -- Following has one writer (K13), so the check follows through it.
+  perform public.companies_follow(array[(select id from public.companies where user_id = f.u and name = 'Followed Co')], true, f.u);
   select string_agg(name, ' > ' order by ord) into order_ from (select name, row_number() over () as ord from public.directory_candidates_due(10)) s;
   if order_ <> 'Followed Co > Yc Co > Old Seed > Failed Due > New Seed' then raise exception 'the due order is wrong: %', order_; end if;
   if (select count(*) from public.directory_candidates_due(2)) <> 2 then raise exception 'the limit holds'; end if;

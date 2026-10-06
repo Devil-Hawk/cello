@@ -5,7 +5,7 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
-export type ContinueReason = 'routine' | 'slice' | 'stale' | 'due'
+export type ContinueReason = 'routine' | 'slice' | 'stale' | 'due' | 'advance'
 
 export interface ContinuePayload {
   reason: ContinueReason
@@ -16,6 +16,8 @@ export interface ContinuePayload {
   /** The engine's reasons. */
   thread_id?: string
   scheduled_task_id?: string
+  /** reason advance: the application to move one step. */
+  application_id?: string
   force?: boolean
   /** Seconds since the epoch. */
   exp: number
@@ -24,7 +26,7 @@ export interface ContinuePayload {
 /** The longest an `exp` may be ahead of now. The sweeper signs five minutes ahead. */
 export const MAX_EXP_AHEAD_S = 300
 
-const REASONS: readonly string[] = ['routine', 'slice', 'stale', 'due']
+const REASONS: readonly string[] = ['routine', 'slice', 'stale', 'due', 'advance']
 
 function secret(): string {
   const s = process.env.AGENT_CONTINUE_SECRET

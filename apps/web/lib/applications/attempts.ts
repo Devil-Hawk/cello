@@ -1,4 +1,4 @@
-// CRUD for public.application_receipts + the side effects a new receipt has
+// CRUD for public.application_attempts + the side effects a new attempt has
 // on its parent public.applications row.
 //
 // The table is not in @cello/shared's generated Database type, so this uses
@@ -14,20 +14,81 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type {
   ApplicationActivity,
-  ApplicationReceipt,
-  ApplicationReceiptRow,
-  NewReceiptInput,
-  ReceiptPatch,
-  ReceiptProvenance,
-  ReceiptVerificationState,
+  ApplicationAttempt,
+  ApplicationAttemptRow,
+  NewAttemptInput,
+  AttemptPatch,
+  AttemptProvenance,
+  AttemptVerificationState,
 } from './types'
-import { toApplicationReceipt } from './types'
+import { toApplicationAttempt } from './types'
 import { recordInteraction } from '../interactions/store'
+import { DATA_URL_RE } from './attempt-rules'
 
-const RECEIPTS_TABLE = 'application_receipts'
+const ATTEMPTS_TABLE = 'application_attempts'
 const APPLICATIONS_TABLE = 'applications'
 const ACTIVITIES_TABLE = 'activities'
 const ACTIVITIES_LIMIT = 50
+const SCREENSHOT_BUCKET = 'attempts'
+/** The bucket takes JPEG up to 256 KB (migration 20261013000000). */
+const SCREENSHOT_MAX_BYTES = 262144
+
+/**
+ * Move one attempt's data-URL screenshot into the private bucket and point the row at it. Only a JPEG
+ * that fits the bucket's limit moves; anything else stays a data URL on the row.
+ * ponytail: PNG, WebP and large images stay as data URLs. Upgrade: re-encode with sharp before upload.
+ * Returns the path, or null when nothing moved. Never throws: the attempt is saved either way.
+ */
+async function moveScreenshot(
+  client: SupabaseClient,
+  row: { id: string; user_id: string; confirmation_attachment_url: string | null }
+): Promise<string | null> {
+  const url = row.confirmation_attachment_url
+  const match = url ? DATA_URL_RE.exec(url) : null
+  if (!url || !match || !/^data:image\/jpe?g;/i.test(url)) return null
+  const bytes = Buffer.from(match[2], 'base64')
+  if (bytes.length > SCREENSHOT_MAX_BYTES) return null
+  const path = `${row.user_id}/${row.id}.jpg`
+  const up = await client.storage.from(SCREENSHOT_BUCKET).upload(path, bytes, { contentType: 'image/jpeg', upsert: true })
+  if (up.error) return null
+  const { error } = await client
+    .from(ATTEMPTS_TABLE)
+    .update({ screenshot_path: path, confirmation_attachment_url: null })
+    .eq('id', row.id)
+    .eq('user_id', row.user_id)
+  return error ? null : path
+}
+
+export interface MoveResult {
+  moved: number
+  /** Not a JPEG, or over 256 KB: left as a data URL. */
+  left: number
+  failed: number
+}
+
+/** Move the data-URL screenshots of saved attempts into the bucket, `limit` rows a call. */
+export async function moveDataUrlImages(client: SupabaseClient, limit = 200): Promise<MoveResult> {
+  const { data, error } = await client
+    .from(ATTEMPTS_TABLE)
+    .select('id, user_id, confirmation_attachment_url')
+    .is('screenshot_path', null)
+    .like('confirmation_attachment_url', 'data:%')
+    .limit(limit)
+  if (error) throw new Error(`moveDataUrlImages failed: ${error.message}`)
+  const result: MoveResult = { moved: 0, left: 0, failed: 0 }
+  for (const row of (data as Array<{ id: string; user_id: string; confirmation_attachment_url: string | null }>) ?? []) {
+    const url = row.confirmation_attachment_url ?? ''
+    const match = DATA_URL_RE.exec(url)
+    if (!match || !/^data:image\/jpe?g;/i.test(url) || Buffer.from(match[2], 'base64').length > SCREENSHOT_MAX_BYTES) {
+      result.left++
+    } else if (await moveScreenshot(client, row)) {
+      result.moved++
+    } else {
+      result.failed++
+    }
+  }
+  return result
+}
 
 export interface OwnedApplication {
   id: string
@@ -56,26 +117,27 @@ export async function getOwnedApplication(
   return (data as OwnedApplication | null) ?? null
 }
 
-/** Insert a new receipt row. `provenance` and `verificationState` are
+/** Insert a new attempt row. `provenance` and `verificationState` are
  *  explicit PARAMETERS, not read off `input` — callers (the API route)
  *  decide those, so a client-supplied body can never smuggle a stronger
- *  claim than it's entitled to (see receipts.ts's header).
+ *  claim than it's entitled to (see attempt-rules.ts's header).
  *
  *  `application` is the OwnedApplication every caller has already loaded
  *  (to validate ownership before calling this) — passed through rather than
- *  re-fetched so this function can resolve the receipt's company for the
+ *  re-fetched so this function can resolve the attempt's company for the
  *  STEP 5 interactions projection without a redundant applications read. */
-export async function createReceipt(
+export async function createAttempt(
   client: SupabaseClient,
   userId: string,
-  input: NewReceiptInput,
-  provenance: ReceiptProvenance,
-  verificationState: ReceiptVerificationState,
+  input: NewAttemptInput,
+  provenance: AttemptProvenance,
+  verificationState: AttemptVerificationState,
   application: OwnedApplication,
   sourceDetail: Record<string, unknown> | null = null
-): Promise<ApplicationReceipt> {
+): Promise<ApplicationAttempt> {
   const row = {
     application_id: input.applicationId,
+    job_id: application.job_id,
     user_id: userId,
     provenance,
     verification_state: verificationState,
@@ -88,9 +150,12 @@ export async function createReceipt(
     source_detail: sourceDetail,
     updated_at: new Date().toISOString(),
   }
-  const { data, error } = await client.from(RECEIPTS_TABLE).insert(row).select('*').single()
-  if (error) throw new Error(`createReceipt failed: ${error.message}`)
-  const receipt = toApplicationReceipt(data as ApplicationReceiptRow)
+  const { data, error } = await client.from(ATTEMPTS_TABLE).insert(row).select('*').single()
+  if (error) throw new Error(`createAttempt failed: ${error.message}`)
+  const attempt = toApplicationAttempt(data as ApplicationAttemptRow)
+  // New uploads go to the bucket; the row keeps the data URL if the move does not work.
+  const stored = await moveScreenshot(client, data as ApplicationAttemptRow)
+  if (stored) Object.assign(attempt, { screenshotPath: stored, confirmationAttachmentUrl: null })
 
   const { data: job } = await client
     .from('person_jobs')
@@ -103,32 +168,32 @@ export async function createReceipt(
     userId,
     companyId: (job as { company_id: string | null } | null)?.company_id ?? null,
     jobId: application.job_id,
-    applicationId: receipt.applicationId,
+    applicationId: attempt.applicationId,
     kind: 'application_submitted',
-    occurredAt: receipt.submittedAt,
+    occurredAt: attempt.submittedAt,
     title: `Application submitted — ${input.destination}`,
-    refTable: RECEIPTS_TABLE,
-    refId: receipt.id,
+    refTable: ATTEMPTS_TABLE,
+    refId: attempt.id,
     metadata: { provenance, verification_state: verificationState },
   })
 
-  return receipt
+  return attempt
 }
 
-/** Every receipt for one application, newest submission first. */
-export async function listReceipts(
+/** Every attempt for one application, newest submission first. */
+export async function listAttempts(
   client: SupabaseClient,
   userId: string,
   applicationId: string
-): Promise<ApplicationReceipt[]> {
+): Promise<ApplicationAttempt[]> {
   const { data, error } = await client
-    .from(RECEIPTS_TABLE)
+    .from(ATTEMPTS_TABLE)
     .select('*')
     .eq('user_id', userId)
     .eq('application_id', applicationId)
     .order('submitted_at', { ascending: false })
-  if (error) throw new Error(`listReceipts failed: ${error.message}`)
-  return ((data as ApplicationReceiptRow[]) ?? []).map(toApplicationReceipt)
+  if (error) throw new Error(`listAttempts failed: ${error.message}`)
+  return ((data as ApplicationAttemptRow[]) ?? []).map(toApplicationAttempt)
 }
 
 /** The activity timeline for one application, newest first, capped — the
@@ -150,32 +215,32 @@ export async function listActivities(
   return (data as ApplicationActivity[]) ?? []
 }
 
-/** One receipt by id, scoped to its owner. */
-export async function getReceipt(
+/** One attempt by id, scoped to its owner. */
+export async function getAttempt(
   client: SupabaseClient,
   userId: string,
   id: string
-): Promise<ApplicationReceipt | null> {
+): Promise<ApplicationAttempt | null> {
   const { data, error } = await client
-    .from(RECEIPTS_TABLE)
+    .from(ATTEMPTS_TABLE)
     .select('*')
     .eq('id', id)
     .eq('user_id', userId)
     .maybeSingle()
-  if (error) throw new Error(`getReceipt failed: ${error.message}`)
-  return data ? toApplicationReceipt(data as ApplicationReceiptRow) : null
+  if (error) throw new Error(`getAttempt failed: ${error.message}`)
+  return data ? toApplicationAttempt(data as ApplicationAttemptRow) : null
 }
 
-/** Patch a receipt's user-correctable fields. Never touches provenance or
- *  verification_state — see ReceiptPatch's doc comment for why a correction
+/** Patch an attempt's user-correctable fields. Never touches provenance or
+ *  verification_state — see AttemptPatch's doc comment for why a correction
  *  to an asserted fact stays an assertion. Returns null if the row doesn't
  *  exist or isn't owned by this user. */
-export async function updateReceipt(
+export async function updateAttempt(
   client: SupabaseClient,
   userId: string,
   id: string,
-  patch: ReceiptPatch
-): Promise<ApplicationReceipt | null> {
+  patch: AttemptPatch
+): Promise<ApplicationAttempt | null> {
   const fields: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (patch.submittedAt !== undefined) fields.submitted_at = patch.submittedAt
   if (patch.destination !== undefined) fields.destination = patch.destination
@@ -185,56 +250,58 @@ export async function updateReceipt(
   if (patch.confirmationAttachmentUrl !== undefined) fields.confirmation_attachment_url = patch.confirmationAttachmentUrl
 
   const { data, error } = await client
-    .from(RECEIPTS_TABLE)
+    .from(ATTEMPTS_TABLE)
     .update(fields)
     .eq('id', id)
     .eq('user_id', userId)
+    .eq('provenance', 'manual')
     .select('*')
     .maybeSingle()
-  if (error) throw new Error(`updateReceipt failed: ${error.message}`)
-  return data ? toApplicationReceipt(data as ApplicationReceiptRow) : null
+  if (error) throw new Error(`updateAttempt failed: ${error.message}`)
+  return data ? toApplicationAttempt(data as ApplicationAttemptRow) : null
 }
 
-/** Delete one receipt. Idempotent — deleting an already-gone/foreign id is
+/** Delete one attempt. Idempotent — deleting an already-gone/foreign id is
  *  not an error, matching lib/resume/store.ts's deleteVersion. */
-export async function deleteReceipt(client: SupabaseClient, userId: string, id: string): Promise<void> {
-  const { error } = await client.from(RECEIPTS_TABLE).delete().eq('id', id).eq('user_id', userId)
-  if (error) throw new Error(`deleteReceipt failed: ${error.message}`)
+export async function deleteAttempt(client: SupabaseClient, userId: string, id: string): Promise<void> {
+  // Only the person's own entry can be removed; what Cello or the extension recorded keeps its record.
+  const { error } = await client.from(ATTEMPTS_TABLE).delete().eq('id', id).eq('user_id', userId).eq('provenance', 'manual')
+  if (error) throw new Error(`deleteAttempt failed: ${error.message}`)
 }
 
-/** How a receipt's provenance reads onto applications.source, the FIRST time
- *  something concrete is known (see syncApplicationFromReceipt — this never
+/** How an attempt's provenance reads onto applications.source, the FIRST time
+ *  something concrete is known (see syncApplicationFromAttempt — this never
  *  overwrites an existing, more specific source). */
-const SOURCE_FOR_PROVENANCE: Record<ReceiptProvenance, string> = {
+const SOURCE_FOR_PROVENANCE: Record<AttemptProvenance, string> = {
   manual: 'manual',
   ats_direct: 'cello-autopilot',
   browser_companion: 'browser_companion',
 }
 
 /**
- * Reflect a newly-created receipt onto its parent `applications` row:
- *   - fills `applied_at` from the receipt's submitted_at, but only if the
- *     application doesn't already have one (a correction receipt must not
+ * Reflect a newly-created attempt onto its parent `applications` row:
+ *   - fills `applied_at` from the attempt's submitted_at, but only if the
+ *     application doesn't already have one (a correction attempt must not
  *     silently change an already-known applied date).
  *   - sets `stage` when the caller asked for one — this is a first-class
  *     manual stage correction, the same as the pipeline board's drag/menu
  *     path, not a fallback bolted on for when automation fails.
- *   - sets `source` only when it is currently null — a manual receipt added
+ *   - sets `source` only when it is currently null — a manual attempt added
  *     later to correct/annotate an application that Cello's own autopilot
  *     or Gmail sync already originated must never overwrite that history.
  * Best-effort in the sense that partial failure of one field must not lose
  * the others; each write is independent.
  */
-export async function syncApplicationFromReceipt(
+export async function syncApplicationFromAttempt(
   client: SupabaseClient,
   userId: string,
   application: OwnedApplication,
-  receipt: Pick<ApplicationReceipt, 'submittedAt' | 'provenance'>,
+  attempt: Pick<ApplicationAttempt, 'submittedAt' | 'provenance'>,
   stage?: string | null
 ): Promise<void> {
   const fields: Record<string, unknown> = { updated_at: new Date().toISOString() }
-  if (!application.applied_at) fields.applied_at = receipt.submittedAt
-  if (!application.source) fields.source = SOURCE_FOR_PROVENANCE[receipt.provenance]
+  if (!application.applied_at) fields.applied_at = attempt.submittedAt
+  if (!application.source) fields.source = SOURCE_FOR_PROVENANCE[attempt.provenance]
   if (stage && stage !== application.stage) fields.stage = stage
 
   // Nothing beyond updated_at to change — skip the write entirely.
@@ -245,5 +312,5 @@ export async function syncApplicationFromReceipt(
     .update(fields)
     .eq('id', application.id)
     .eq('user_id', userId)
-  if (error) throw new Error(`syncApplicationFromReceipt failed: ${error.message}`)
+  if (error) throw new Error(`syncApplicationFromAttempt failed: ${error.message}`)
 }

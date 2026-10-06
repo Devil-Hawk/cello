@@ -6,7 +6,7 @@
 // already reads off `activities`, just scoped to one application instead
 // of surfaced ambiently.
 //
-// Auth + ownership mirror app/api/applications/receipts/route.ts exactly:
+// Auth + ownership mirror app/api/applications/attempts/route.ts exactly:
 // session auth for "is anyone signed in", then the service-role admin
 // client with an explicit getOwnedApplication(admin, user.id, applicationId)
 // check — never trust an applicationId in the query string without it.
@@ -14,7 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
-import { getOwnedApplication, listActivities } from '@/lib/applications/store'
+import { getOwnedApplication, listActivities } from '@/lib/applications/attempts'
 
 export const dynamic = 'force-dynamic'
 

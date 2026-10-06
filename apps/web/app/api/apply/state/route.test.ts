@@ -4,10 +4,10 @@
 //   1. Wrong/missing secret refuses.
 //   2. fill: filling -> pending_review, screenshots validated (shape + size
 //      cap), out-of-order/replayed callbacks refused (draft not 'filling').
-//   3. submit 'submitted': writes a receipt with the HONEST verification
+//   3. submit 'submitted': writes an attempt with the HONEST verification
 //      state — system_confirmed only when the runner says `confirmed: true`,
 //      unconfirmed otherwise — and moves the draft to 'submitted'.
-//   4. submit 'deviation': back to pending_review, no receipt written.
+//   4. submit 'deviation': back to pending_review, no attempt written.
 //   5. Out-of-order submit callbacks (draft not 'approved') are refused.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
@@ -55,9 +55,9 @@ function adminFrom(table: string) {
 
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({ from: adminFrom }) }))
 
-const createReceiptMock = vi.fn()
-vi.mock('@/lib/applications/store', () => ({
-  createReceipt: (...args: unknown[]) => createReceiptMock(...args),
+const createAttemptMock = vi.fn()
+vi.mock('@/lib/applications/attempts', () => ({
+  createAttempt: (...args: unknown[]) => createAttemptMock(...args),
 }))
 
 // verifyReportToken() is real /api/apply/bundle-and-token machinery with its
@@ -89,7 +89,7 @@ beforeEach(() => {
     updates: [],
     applications: [],
   }
-  createReceiptMock.mockReset().mockResolvedValue({ id: 'receipt-1' })
+  createAttemptMock.mockReset().mockResolvedValue({ id: 'attempt-1' })
   verifyReportTokenMock.mockReset().mockResolvedValue(true)
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
@@ -126,7 +126,7 @@ describe('PATCH /api/apply/state', () => {
       patchRequest({ draftId: 'draft-1', phase: 'submit', result: 'submitted', confirmed: true, confirmationIdentifier: 'FORGED-CONF-999' })
     )
     expect(res.status).toBe(403)
-    expect(createReceiptMock).not.toHaveBeenCalled()
+    expect(createAttemptMock).not.toHaveBeenCalled()
     expect(state.draft?.status).toBe('approved')
   })
 
@@ -195,8 +195,8 @@ describe('PATCH /api/apply/state', () => {
         patchRequest({ draftId: 'draft-1', phase: 'submit', result: 'submitted', confirmed: true, confirmationIdentifier: 'CONF-123' })
       )
       expect(res.status).toBe(200)
-      expect(createReceiptMock).toHaveBeenCalled()
-      const [, , , provenance, verificationState] = createReceiptMock.mock.calls[0]
+      expect(createAttemptMock).toHaveBeenCalled()
+      const [, , , provenance, verificationState] = createAttemptMock.mock.calls[0]
       expect(provenance).toBe('browser_companion')
       expect(verificationState).toBe('system_confirmed')
       expect(state.draft?.status).toBe('submitted')
@@ -206,7 +206,7 @@ describe('PATCH /api/apply/state', () => {
     it('writes unconfirmed when the runner attempted but did not witness a confirmation', async () => {
       const res = await PATCH(patchRequest({ draftId: 'draft-1', phase: 'submit', result: 'submitted', confirmed: false }))
       expect(res.status).toBe(200)
-      const [, , , , verificationState] = createReceiptMock.mock.calls[0]
+      const [, , , , verificationState] = createAttemptMock.mock.calls[0]
       expect(verificationState).toBe('unconfirmed')
     })
 
@@ -215,25 +215,25 @@ describe('PATCH /api/apply/state', () => {
       await PATCH(
         patchRequest({ draftId: 'draft-1', phase: 'submit', result: 'submitted', confirmationIdentifier: 'CONF-999' })
       )
-      const [, , , , verificationState] = createReceiptMock.mock.calls[0]
+      const [, , , , verificationState] = createAttemptMock.mock.calls[0]
       expect(verificationState).toBe('unconfirmed')
     })
 
-    it('deviation sends the draft back to pending_review and writes NO receipt', async () => {
+    it('deviation sends the draft back to pending_review and writes NO attempt', async () => {
       const res = await PATCH(
         patchRequest({ draftId: 'draft-1', phase: 'submit', result: 'deviation', deviationDetail: 'a new required field appeared' })
       )
       expect(res.status).toBe(200)
       expect(state.draft?.status).toBe('pending_review')
-      expect(createReceiptMock).not.toHaveBeenCalled()
+      expect(createAttemptMock).not.toHaveBeenCalled()
       expect((state.draft?.fill_state as Record<string, unknown>).deviation).toBeDefined()
     })
 
-    it('failed marks the draft failed and writes NO receipt', async () => {
+    it('failed marks the draft failed and writes NO attempt', async () => {
       const res = await PATCH(patchRequest({ draftId: 'draft-1', phase: 'submit', result: 'failed', error: 'timeout' }))
       expect(res.status).toBe(200)
       expect(state.draft?.status).toBe('failed')
-      expect(createReceiptMock).not.toHaveBeenCalled()
+      expect(createAttemptMock).not.toHaveBeenCalled()
     })
   })
 })

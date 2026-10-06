@@ -35,6 +35,10 @@ insert into public.companies (id, user_id, name, domain, career_url, metadata)
 select co_a, a, 'Overlap Co', 'overlap.example', 'https://overlap.example/careers', '{}'::jsonb from fx
 union all select co_b, b, 'Overlap Co', 'Overlap.Example', 'https://overlap.example/careers', '{}'::jsonb from fx;
 
+-- Following has one writer (K13), so the check follows through it.
+select public.companies_follow(array[co_a], true, a) from fx;
+select public.companies_follow(array[co_b], true, b) from fx;
+
 do $$
 declare f record;
 begin
@@ -250,8 +254,12 @@ begin
   if (select watching from public.companies where id = f.co_lead) then raise exception 'a lead must not be followed'; end if;
   if not (select watching from public.companies where id = f.co_a) then raise exception 'a person''s own company is followed'; end if;
   if (select value from public.measure_t9()) <> 0 then raise exception 'T9 must be 0, got %', (select value from public.measure_t9()); end if;
+  -- K13: dropping the lead flag no longer follows; only companies_follow does.
   update public.companies set metadata = '{}'::jsonb where id = f.co_lead;
+  if (select watching from public.companies where id = f.co_lead) then raise exception 'the lead flag is not what follows a company'; end if;
+  perform public.companies_follow(array[f.co_lead], true, f.a);
   if not (select watching from public.companies where id = f.co_lead) then raise exception 'adding a lead the person chose follows it'; end if;
+  if (select value from public.measure_t9()) <> 0 then raise exception 'T9 must stay 0 after a follow, got %', (select value from public.measure_t9()); end if;
 end $$;
 
 -- A targets change bumps the version and makes the check due now; the same targets again do not.

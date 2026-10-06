@@ -1,7 +1,7 @@
 /**
  * OWNER-RUN. Projects every pre-existing source row that STEP 5's live write
  * paths (lib/outreach/store.ts#updateOutreach, lib/gmail/activity.ts
- * #recordStageActivity, lib/applications/store.ts#createReceipt) now project
+ * #recordStageActivity, lib/applications/attempts.ts#createAttempt) now project
  * going forward, onto public.interactions — so the unified timeline covers
  * history, not just whatever happens after this migration lands. Four
  * sources, one kind each:
@@ -9,7 +9,7 @@
  *   outreach_messages (status='sent')        -> outreach_sent
  *   activities (interview/stage-advance rows) -> interview | stage_change
  *   follow_ups (is_completed=true)            -> follow_up_done
- *   application_receipts (every row)          -> application_submitted
+ *   application_attempts (every row)          -> application_submitted
  *
  * follow_ups HAS NO LIVE WRITER: nothing in this codebase currently sets
  * is_completed=true (no "mark done" action exists yet), so there is no
@@ -23,7 +23,7 @@
  * IDEMPOTENT BY THE SAME KEY THE LIVE PATH USES: every projection goes
  * through lib/interactions/store.ts#recordInteraction, which upserts on
  * (ref_table, ref_id, kind) — the exact key recordStageActivity/
- * updateOutreach/createReceipt already write under. A second run of this
+ * updateOutreach/createAttempt already write under. A second run of this
  * script (or a live write racing it for the same source row) updates the
  * same interactions row instead of duplicating it; it is therefore also safe
  * to run AFTER the live paths are already deployed and producing new rows.
@@ -253,18 +253,18 @@ export async function backfillFollowUps(admin: Admin, apply: boolean, limit: num
   return counts
 }
 
-export async function backfillReceipts(admin: Admin, apply: boolean, limit: number | null): Promise<Counts> {
+export async function backfillAttempts(admin: Admin, apply: boolean, limit: number | null): Promise<Counts> {
   const counts: Counts = { eligible: 0, written: 0, skipped: 0 }
   let cursor: string | null = null
   for (;;) {
     let q = admin
-      .from('application_receipts')
+      .from('application_attempts')
       .select('id, application_id, user_id, destination, provenance, verification_state, submitted_at')
       .order('id', { ascending: true })
       .limit(READ_PAGE)
     if (cursor) q = q.gt('id', cursor)
     const { data, error } = await q
-    if (error) throw new Error(`load application_receipts: ${error.message}`)
+    if (error) throw new Error(`load application_attempts: ${error.message}`)
     const rows = (data ?? []) as {
       id: string; application_id: string; user_id: string; destination: string | null
       provenance: string; verification_state: string; submitted_at: string
@@ -273,12 +273,12 @@ export async function backfillReceipts(admin: Admin, apply: boolean, limit: numb
 
     const appIds = [...new Set(rows.map((r) => r.application_id))]
     const { data: apps, error: appsError } = await admin.from('applications').select('id, job_id').in('id', appIds)
-    if (appsError) throw new Error(`load applications for receipts page: ${appsError.message}`)
+    if (appsError) throw new Error(`load applications for attempts page: ${appsError.message}`)
     const jobByApp = new Map(((apps ?? []) as { id: string; job_id: string | null }[]).map((a) => [a.id, a.job_id]))
     const jobIds = [...new Set([...jobByApp.values()].filter((j): j is string => !!j))]
     const { data: jobs, error: jobsError } =
       jobIds.length > 0 ? await admin.from('person_jobs').select('id, viewer_id, company_id:viewer_company_id').in('id', jobIds) : { data: [], error: null }
-    if (jobsError) throw new Error(`load jobs for receipts page: ${jobsError.message}`)
+    if (jobsError) throw new Error(`load jobs for attempts page: ${jobsError.message}`)
     // A shared role has one jobs row; the company is the person's own, so the key is (person, job).
     const companyByJob = new Map(((jobs ?? []) as { id: string; viewer_id: string; company_id: string | null }[]).map((j) => [`${j.viewer_id}|${j.id}`, j.company_id]))
 
@@ -295,7 +295,7 @@ export async function backfillReceipts(admin: Admin, apply: boolean, limit: numb
           kind: 'application_submitted',
           occurredAt: r.submitted_at,
           title: `Application submitted — ${r.destination ?? 'unknown destination'}`,
-          refTable: 'application_receipts',
+          refTable: 'application_attempts',
           refId: r.id,
           metadata: { provenance: r.provenance, verification_state: r.verification_state },
         })
@@ -326,7 +326,7 @@ async function main(): Promise<void> {
   report('outreach_messages', await backfillOutreach(admin, apply, limit), apply)
   report('activities', await backfillActivities(admin, apply, limit), apply)
   report('follow_ups', await backfillFollowUps(admin, apply, limit), apply)
-  report('application_receipts', await backfillReceipts(admin, apply, limit), apply)
+  report('application_attempts', await backfillAttempts(admin, apply, limit), apply)
 }
 
 // Guarded, unlike this directory's other owner-run scripts: this is the one

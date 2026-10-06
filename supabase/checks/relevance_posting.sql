@@ -28,6 +28,10 @@ insert into public.companies (id, user_id, name, domain, career_url, metadata, l
 select co_a, a, 'Posting Co', 'posting.example', 'https://posting.example/careers', '{}'::jsonb, now() from fx
 union all select co_b, b, 'Posting Co', 'posting.example', 'https://posting.example/careers', '{}'::jsonb, now() from fx;
 
+-- Following has one writer (K13), so the check follows through it.
+select public.companies_follow(array[co_a], true, a) from fx;
+select public.companies_follow(array[co_b], true, b) from fx;
+
 -- 1. The hash is a plain column.
 do $$
 begin

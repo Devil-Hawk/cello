@@ -2,7 +2,8 @@
 //
 // A person's `companies` row is their own (notes, dream flag, who they know there); the employer it points at is
 // shared (company_directory). Following gives the person a row tied to the employer and to its verified board, so
-// their next check reads that board and keeps the roles inside their targets. K13 later makes this the only writer.
+// their next check reads that board and keeps the roles inside their targets. saveCompany follows through companies_follow (K13),
+// the one writer of the flag; this file only ties the row to the employer.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { saveCompany } from './add'
@@ -22,7 +23,7 @@ export async function followEmployer(db: Db, userId: string, employer: Pick<Dire
   if (employer.ats_provider && employer.ats_token) {
     metadata.ats = { provider: employer.ats_provider, token: employer.ats_token, source, discovered_at: new Date().toISOString(), verified_by: employer.verified_by ?? undefined, verified_at: new Date().toISOString() }
   }
-  const { error } = await db.from('companies').update({ employer_id: employer.id, watching: true, metadata }).eq('id', saved.id).eq('user_id', userId)
+  const { error } = await db.from('companies').update({ employer_id: employer.id, metadata }).eq('id', saved.id).eq('user_id', userId)
   if (error) return { error: `Could not follow ${employer.name}: ${error.message}` }
   return { id: saved.id }
 }

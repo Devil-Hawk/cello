@@ -130,6 +130,8 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
         .from('applications')
         .select('id, job_id, stage, applied_at, created_at, source')
         .eq('user_id', userId)
+        // an application found in email counts once the person confirms it
+        .or('found_state.is.null,found_state.neq.to_confirm')
       if (error) {
         console.error('[strategy] getApplications: applications query failed', error)
         return []
@@ -190,6 +192,8 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
         .from('activities')
         .select('id, application_id, type, occurred_at, applications!inner(user_id)')
         .eq('applications.user_id', userId)
+        // trusted events only: a message whose sender could not be verified is not evidence of an outcome
+        .or('metadata->>trust.is.null,metadata->>trust.neq.unconfirmed')
       if (error) {
         console.error('[strategy] getActivities query failed', error)
         return []
