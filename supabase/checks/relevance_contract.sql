@@ -206,7 +206,7 @@ declare f record; jw uuid := gen_random_uuid(); jl uuid := gen_random_uuid();
 begin
   select * into f from fx;
   insert into public.jobs (id, company_id, employer_id, title, description, url, external_id) values (jw, f.co_a, f.emp, 'Held by two', 'd', 'https://shared.example/jobs/held', 'held-1');
-  insert into public.person_roles (user_id, job_id) values (f.a, jw), (f.b, jw);
+  insert into public.person_roles (user_id, job_id) values (f.a, jw), (f.b, jw) on conflict do nothing;
   if (select company_id from public.jobs where id = jw) is distinct from f.co_a then raise exception 'the role is stored under A''s own company'; end if;
   if pg_temp.as_user(f.a, format('with u as (update public.jobs set url = ''https://evil.example/phish'', title = ''Hacked'' where id = %L returning 1) select count(*) from u', jw)) <> 0 then raise exception 'the first storer must not update a role another person holds'; end if;
   if (select url from public.jobs where id = jw) <> 'https://shared.example/jobs/held' then raise exception 'the shared apply link is unchanged'; end if;
