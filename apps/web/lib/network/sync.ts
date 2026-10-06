@@ -11,9 +11,14 @@ import { fetchGmailAddress, fetchSendAs, fetchThreadHeaders, listThreadIds, type
 import { domainOf, judge, parseAddress, parseAddressList, type Candidate, type LeftOutCounts, type LeftOutRule, type MessageHeaders, type Verdict } from './filter'
 import { employerTie } from './ties'
 
-// ponytail: 50 threads a tick, newest first; a first sync reaches back only as far as those 50 and
-// the rest arrive through Import. Raise it with a queue if first syncs need more.
+// A tick reads 50 threads; the rest wait in the heartbeat's `pending` and are read on the next ticks, so a
+// first sync finishes over several ticks and a thread that failed to load is tried again. The cursor moves
+// only after the whole list was fetched.
+// ponytail: one listing reads at most 1,000 newest sent threads; a window with more is cut at that, upgrade by
+// paging with a stored page token if a mailbox sends more than that in a year.
 export const THREADS_PER_TICK = 50
+const LIST_MAX = 1000
+const PENDING_MAX = 1000
 const LEFT_OUT_KEPT = 200
 
 export interface ParsedMessage {
@@ -83,6 +88,8 @@ export function readThread(msgs: ParsedMessage[], yours: Set<string>, ctx: { job
 
 export interface SyncFound {
   cursor?: number
+  /** Thread ids listed but not read yet. */
+  pending?: string[]
   sendAs?: string[]
   leftOut?: { counts: LeftOutCounts; addresses: { email: string; rule: LeftOutRule }[] }
   note?: string
@@ -126,11 +133,15 @@ export async function networkSync(
     .not('thread_id', 'is', null)
     .limit(200)
   const jobIds = [...new Set(((jobRows ?? []) as { thread_id: string }[]).map((r) => r.thread_id))]
-  const sentIds = await listThreadIds(a.accessToken, found.cursor ? `in:sent after:${found.cursor}` : 'in:sent newer_than:365d', 100)
-  const ids = [...new Set([...jobIds, ...sentIds])].slice(0, THREADS_PER_TICK)
+  // a failed listing throws, so the cursor and the carry stay where they were
+  const listed = await listThreadIds(a.accessToken, found.cursor ? `in:sent after:${found.cursor}` : 'in:sent newer_than:365d', LIST_MAX)
+  const queue = [...new Set([...(found.pending ?? []), ...jobIds, ...listed])]
+  const ids = queue.slice(0, THREADS_PER_TICK)
   const jobSet = new Set(jobIds)
 
-  const threads = (await Promise.all(ids.map((id) => fetchThreadHeaders(a.accessToken, id)))).filter((t): t is ThreadHeaders => !!t)
+  const fetched = await Promise.allSettled(ids.map((id) => fetchThreadHeaders(a.accessToken, id)))
+  const failed = ids.filter((_, i) => fetched[i].status === 'rejected')
+  const threads = fetched.flatMap((r) => (r.status === 'fulfilled' && r.value ? [r.value] : []))
   const parsed = threads.map((t) => ({ id: t.id, msgs: parseThread(t, yours) }))
 
   // verified employer domains among every address seen
@@ -143,12 +154,12 @@ export async function networkSync(
   }
 
   // what K19 already knows about these threads: the application and the employer the mail is about
-  const known = new Map<string, { applicationId: string | null; employerId: string | null }>()
+  const known = new Map<string, { applicationId: string | null; employerId: string | null; recruiter: boolean }>()
   if (ids.length) {
-    const { data } = await admin.from('messages').select('thread_id, application_id, employer_id').eq('user_id', a.userId).in('thread_id', ids.slice(0, 50))
-    for (const r of (data ?? []) as { thread_id: string; application_id: string | null; employer_id: string | null }[]) {
-      const k = known.get(r.thread_id) ?? { applicationId: null, employerId: null }
-      known.set(r.thread_id, { applicationId: k.applicationId ?? r.application_id, employerId: k.employerId ?? r.employer_id })
+    const { data } = await admin.from('messages').select('thread_id, application_id, employer_id, kind').eq('user_id', a.userId).in('thread_id', ids)
+    for (const r of (data ?? []) as { thread_id: string; application_id: string | null; employer_id: string | null; kind: string | null }[]) {
+      const k = known.get(r.thread_id) ?? { applicationId: null, employerId: null, recruiter: false }
+      known.set(r.thread_id, { applicationId: k.applicationId ?? r.application_id, employerId: k.employerId ?? r.employer_id, recruiter: k.recruiter || r.kind === 'recruiter' })
     }
   }
 
@@ -158,7 +169,7 @@ export async function networkSync(
   const contactIdOf = new Map<string, string>()
 
   for (const t of parsed) {
-    const job = jobSet.has(t.id) || !!known.get(t.id)?.applicationId
+    const job = jobSet.has(t.id) || !!known.get(t.id)?.applicationId || !!known.get(t.id)?.recruiter
     const read = readThread(t.msgs, yours, { job, verified: (d) => directory.has(d) })
     for (const l of read.left) {
       if (leftSeen.has(l.email)) continue
@@ -167,7 +178,7 @@ export async function networkSync(
     }
     if (read.kept.length === 0) continue
     result.threads += 1
-    const thread = known.get(t.id) ?? { applicationId: null, employerId: null }
+    const thread = known.get(t.id) ?? { applicationId: null, employerId: null, recruiter: false }
 
     for (const p of read.kept) {
       let id = contactIdOf.get(p.email)
@@ -205,14 +216,16 @@ export async function networkSync(
     )
     for (const [cid, rs] of groupBy(rows.filter((r) => r.contactId), (r) => r.contactId as string)) {
       const mids = rs.map((r) => r.m.id)
-      await admin.from('messages').update({ contact_id: cid }).eq('user_id', a.userId).in('gmail_message_id', mids.slice(0, 100)).is('contact_id', null)
+      await admin.from('messages').update({ contact_id: cid }).eq('user_id', a.userId).in('gmail_message_id', mids).is('contact_id', null)
     }
     if (job) {
       result.jobThreads.push({ threadId: t.id, contactIds: [...new Set(read.kept.map((p) => contactIdOf.get(p.email)).filter((x): x is string => !!x))], applicationId: thread.applicationId, employerId: thread.employerId, messageIds: t.msgs.map((m) => m.id) })
     }
   }
 
+  // moves because the whole listing was fetched; what was not read yet waits in `pending`
   found.cursor = Math.floor(now.getTime() / 1000) - 60
+  found.pending = [...failed, ...queue.slice(THREADS_PER_TICK)].slice(0, PENDING_MAX)
   found.leftOut = { counts, addresses: [...leftSeen].slice(-LEFT_OUT_KEPT).map(([email, rule]) => ({ email, rule })) }
   found.people = (found.people ?? 0) + result.people
   return result

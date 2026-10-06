@@ -178,7 +178,9 @@ export interface ThreadHeaders {
   messages: { id: string; internalDate: string; headers: Array<{ name: string; value: string }> }[]
 }
 
-/** One thread's headers only (format=metadata): no body is read. Null when it cannot be read. */
+const isGone = (e: unknown) => Number((e as { status?: number; code?: number | string })?.status ?? (e as { code?: number | string })?.code) === 404
+
+/** One thread's headers only (format=metadata): no body is read. Null when the thread is gone; any other failure throws, so the caller retries it. */
 export async function fetchThreadHeaders(accessToken: string, threadId: string): Promise<ThreadHeaders | null> {
   try {
     const { data } = await gmailFor(accessToken).users.threads.get({ userId: 'me', id: threadId, format: 'metadata', metadataHeaders: THREAD_HEADERS })
@@ -188,19 +190,22 @@ export async function fetchThreadHeaders(accessToken: string, threadId: string):
       headers: (m.payload?.headers ?? []).map((h) => ({ name: h.name ?? '', value: h.value ?? '' })),
     }))
     return { id: threadId, messages: messages.filter((m) => m.id) }
-  } catch {
-    return null
+  } catch (e) {
+    if (isGone(e)) return null
+    throw e
   }
 }
 
-/** Thread ids of a search, newest first, at most `max`. */
+/** Thread ids of a search, newest first, paged 100 at a time up to `max`. Throws when a page cannot be read, so a failed list is never mistaken for an empty one. */
 export async function listThreadIds(accessToken: string, query: string, max: number): Promise<string[]> {
-  try {
-    const { data } = await gmailFor(accessToken).users.threads.list({ userId: 'me', q: query, maxResults: Math.min(max, 100) })
-    return (data.threads ?? []).map((t) => t.id ?? '').filter(Boolean)
-  } catch {
-    return []
-  }
+  const ids: string[] = []
+  let pageToken: string | undefined
+  do {
+    const { data } = await gmailFor(accessToken).users.threads.list({ userId: 'me', q: query, maxResults: 100, pageToken })
+    ids.push(...(data.threads ?? []).map((t) => t.id ?? '').filter(Boolean))
+    pageToken = data.nextPageToken ?? undefined
+  } while (pageToken && ids.length < max)
+  return ids.slice(0, max)
 }
 
 /** Every address the mailbox sends as (gmail.readonly reads it), so an alias counts as "you". */
