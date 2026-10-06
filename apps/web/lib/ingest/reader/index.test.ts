@@ -3,6 +3,7 @@ import type { AtsJob } from '../../ats/types'
 import { eightfold } from '../../ats/eightfold'
 import { fakeFetcher, fixture, type Route } from './fake-fetcher'
 import { readSite, type SiteDeps } from './index'
+import { makeSiteFetcher } from './site-fetch'
 import { roleLinks } from './listing'
 import { amazonJobs } from './sites'
 import { NO_TARGETS, type ReaderTargets } from './targets'
@@ -273,6 +274,32 @@ describe('the rendered tier meets a bot check', () => {
   })
 })
 
+describe('the rendered tier reached a page and no model was free', () => {
+  const careers = 'https://acme.example/careers'
+  const shell = '<html><body><div id="root"></div></body></html>'
+  const filler = '<p>We are a team that cares about customers and about each other, and we work in the open.</p>'.repeat(4)
+  const html = `<html><body><h1>Open roles</h1>${filler}<ul><li>Platform Engineer, Remote</li><li>Data Analyst, Seattle</li></ul></body></html>`
+  const run = (model: SiteDeps['model']) => {
+    const fetchPage = vi.fn(async (url: string) => ({ html, finalUrl: url, rendered: true }))
+    return readSite(company('Acme', '', careers), { fetcher: fakeFetcher({ [careers]: shell }, 'scheduled'), fetchPage, model, readBoard: async () => null })
+  }
+
+  it('with no model configured the site was not read, and that is not "no roles"', async () => {
+    const read = await run(null)
+    expect(read.jobs).toEqual([])
+    expect(read.reason).toBe('model_unavailable')
+    expect(read.tried.at(-1)).toMatchObject({ tier: 'model', outcome: 'skipped' })
+  })
+
+  it("with today's free limit spent it says so, not no roles", async () => {
+    const read = await run(async () => {
+      throw Object.assign(new Error('rate limited'), { status: 429 })
+    })
+    expect(read.reason).not.toBe('no_roles')
+    expect(['model_limit', 'model_unavailable']).toContain(read.reason)
+  })
+})
+
 describe("the rendered tier stores only what is the employer's own", () => {
   const careers = 'https://acme.example/careers'
   const shell = '<html><body><div id="root"></div></body></html>'
@@ -306,5 +333,118 @@ describe("the rendered tier stores only what is the employer's own", () => {
 describe('amazon fixture sanity', () => {
   it('has roles for the site search to return', () => {
     expect(amazonJobs(JSON.parse(fixture('amazon-search.json')))).toHaveLength(5)
+  })
+})
+
+describe('readSite: a single pasted posting is one role, never the whole site behind it', () => {
+  it('an Amazon posting link (no JobPosting block, a redirect to its own address) is one role with its place', async () => {
+    const pasted = 'https://www.amazon.jobs/en/jobs/10570428/software-development-engineer'
+    const landed = 'https://www.amazon.jobs/en/jobs/10570428/software-development-engineer-ii-aws-proactive-security-aws-piezo-aws-proactive-security-aws-piezo'
+    const f = fakeFetcher({ [pasted]: { location: landed }, [landed]: fixture('amazon-job.html'), 'https://www.amazon.jobs/en/search.json*': fixture('amazon-search.json') })
+    const read = await readSite(company('Amazon', 'amazon.com', pasted), { fetcher: f })
+    expect(read.tier).toBe('listing')
+    expect(read.single).toBe(true)
+    expect(read.jobs).toHaveLength(1)
+    expect(read.jobs[0]).toMatchObject({ title: expect.stringMatching(/^Software Development Engineer II/), location: 'USA, WA, Seattle', url: landed })
+    // The site's search was never asked: Amazon's 192 roles are not this link.
+    expect(f.jsonCalls).toEqual([])
+    expect(f.calls.some((u) => u.includes('search.json'))).toBe(false)
+  })
+
+  it('a Google posting link is one role with its place, and no results list is requested', async () => {
+    const url = 'https://www.google.com/about/careers/applications/jobs/results/131402277670789830-rtl-design-engineer-machine-learning-accelerators'
+    const f = fakeFetcher({ 'https://www.google.com/robots.txt': fixture('google-robots.txt'), [url]: fixture('google-job.html'), 'https://www.google.com/about/careers/applications/jobs/results?q=*': fixture('google-search.html') })
+    const read = await readSite(company('Google', 'google.com', url), { fetcher: f })
+    expect(read.single).toBe(true)
+    expect(read.jobs).toHaveLength(1)
+    expect(read.jobs[0]).toMatchObject({ title: 'RTL Design Engineer, Machine Learning Accelerators', location: 'Sunnyvale, CA, USA' })
+    expect(f.calls.filter((u) => u.includes('results?'))).toEqual([])
+  })
+
+  it("a Microsoft posting link takes its place from the host's detail answer, as its page names none", async () => {
+    const url = 'https://apply.careers.microsoft.com/careers/job/1970393557022797'
+    const f = fakeFetcher({
+      [url]: fixture('ms-job-shell.html'),
+      'https://apply.careers.microsoft.com/api/pcsx/position_details?position_id=1970393557022797&domain=microsoft.com&hl=en': fixture('ms-position-detail.json'),
+    })
+    // A company added by pasting this link has the link's host as its domain.
+    for (const domain of ['microsoft.com', 'apply.careers.microsoft.com']) {
+      const again = await readSite(company('Microsoft', domain, url), { fetcher: f })
+      expect(again.jobs[0]?.location).toBe('United States, Washington, Redmond')
+    }
+    const read = await readSite(company('Microsoft', 'microsoft.com', url), { fetcher: f })
+    expect(read.single).toBe(true)
+    expect(read.jobs).toHaveLength(1)
+    expect(read.jobs[0]).toMatchObject({ title: 'Software Engineer II', location: 'United States, Washington, Redmond', employer: 'Microsoft' })
+  })
+
+  it('a posting page that names no place is kept, and the person is told the place is missing', async () => {
+    const url = 'https://acme.test/jobs/12345678'
+    const html = '<html><head><title>Data Engineer</title></head><body><h1>Data Engineer</h1><h2>Responsibilities</h2><p>You will build pipelines. You will own them.</p><p>Minimum qualifications: 3 years of experience.</p></body></html>'
+    const read = await readSite(company('Acme', 'acme.test', url), { fetcher: fakeFetcher({ [url]: html }) })
+    expect(read.jobs).toHaveLength(1)
+    expect(read.jobs[0].location).toBeUndefined()
+    expect(read.message).toBe('Found the posting. Its page does not say where the role is.')
+  })
+
+  it('a link that is not a posting stores nothing, says so, and does not read the site around it', async () => {
+    const url = 'https://acme.test/jobs/12345678'
+    const f = fakeFetcher({ [url]: '<html><head><title>Acme</title></head><body><p>Welcome.</p></body></html>', 'https://acme.test/sitemap.xml': '<urlset/>' })
+    const read = await readSite(company('Acme', 'acme.test', url), { fetcher: f })
+    expect(read).toMatchObject({ tier: null, jobs: [], reason: 'no_roles', message: 'That page does not read as a single job posting, so Cello stored nothing from it.' })
+    expect(f.calls).toEqual([url])
+  })
+
+  it('a posting that closed (404) says so', async () => {
+    const url = 'https://acme.test/jobs/12345678'
+    const read = await readSite(company('Acme', 'acme.test', url), { fetcher: fakeFetcher({ [url]: { status: 404, body: 'gone' } }) })
+    expect(read).toMatchObject({ jobs: [], reason: 'no_roles' })
+    expect(read.message).toContain('404')
+  })
+})
+
+describe('readSite: a read that ran out of requests or time did not finish, and never says there are no roles', () => {
+  const careers = 'https://acme.test/careers'
+  const page = '<html><body><nav><a href="/careers/teams">Teams</a><a href="/careers/jobs">Jobs</a></nav><p>Join us.</p></body></html>'
+  const fetcher = (budget: { requests?: number; ms?: number }) =>
+    makeSiteFetcher({
+      budget,
+      fetchImpl: (async (u: unknown) => (String(u).endsWith('/robots.txt') ? new Response('', { status: 404 }) : new Response(page, { status: 200, headers: { 'content-type': 'text/html' } }))) as typeof fetch,
+      sleep: async () => {},
+      assertSafe: async () => {},
+    })
+
+  it('two requests are not enough to read a site: budget, or reading when a browser pass is to come', async () => {
+    const early = await readSite(company('Acme', 'acme.test', careers), { fetcher: fetcher({ requests: 2 }) })
+    expect(early.tier).toBeNull()
+    expect(early.reason).toBe('budget')
+    const inline = await readSite(company('Acme', 'acme.test', careers), { fetcher: fetcher({ requests: 2 }), renderedLater: true })
+    expect(inline.reason).toBe('reading')
+  })
+
+  it('a spent clock is the same', async () => {
+    const read = await readSite(company('Acme', 'acme.test', careers), { fetcher: fetcher({ ms: 0 }) })
+    expect(read.reason).toBe('budget')
+    expect(read.tried.map((t) => t.outcome)).not.toContain('roles')
+  })
+
+  it('with room to read the same site, a page with no roles is still no roles', async () => {
+    const read = await readSite(company('Acme', 'acme.test', careers), { fetcher: fetcher({ requests: 25 }) })
+    expect(read.reason).toBe('no_roles')
+  })
+})
+
+describe('the rendered tier and the roles outside the targets', () => {
+  it('lists every role the page shows for sightings, so a stored role outside the targets is not counted as gone', async () => {
+    const careers = 'https://jobs.uber.com/'
+    const shell = '<html><body><div id="root"></div></body></html>'
+    const post = (title: string, n: number) =>
+      `<script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', title, url: `https://jobs.uber.com/jobs/${n}`, datePosted: '2026-10-01' })}</script>`
+    const html = `<html><body><div id="root"><h1>Jobs</h1>${'<p>text</p>'.repeat(60)}${post('Data Engineer', 1)}${post('Marketing Manager', 2)}</div></body></html>`
+    const fetchPage = vi.fn(async (url: string) => ({ html, finalUrl: url, rendered: true }))
+    const read = await readSite(company('Uber', 'uber.com', careers), { fetcher: fakeFetcher({ [careers]: shell }, 'scheduled'), fetchPage, model: null })
+    expect(read.jobs.map((j) => j.title)).toEqual(['Data Engineer'])
+    expect(read.complete).toBe(true)
+    expect(read.listedIds).toHaveLength(2)
   })
 })

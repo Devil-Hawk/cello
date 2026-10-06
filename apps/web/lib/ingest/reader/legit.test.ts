@@ -25,6 +25,29 @@ describe('judgeRole: own', () => {
     expect(mislabelledSource(job({ employer: 'Robert Half' }), 'Acme')).toBe('This posting is from Robert Half, a staffing agency, not Acme.')
   })
 
+  it("a name that only begins with the company's letters is another employer", () => {
+    const off = (employer: string, name: string) => judgeRole(job({ employer, url: 'https://boards.greenhouse.io/x/jobs/1' }), { company: { name, domain: `${name.toLowerCase()}.com`, careerUrl: `https://${name.toLowerCase()}.com/careers` }, now: NOW })
+    expect(off('Metadata Inc', 'Meta')).toEqual({ keep: false, why: 'other_employer' })
+    expect(off('Uberall GmbH', 'Uber')).toEqual({ keep: false, why: 'other_employer' })
+    expect(off("Applebee's International", 'Apple')).toEqual({ keep: false, why: 'other_employer' })
+    expect(off('Meta Platforms', 'Meta')).toEqual({ keep: true })
+  })
+
+  it("a careers link on a shared host does not make the whole host the employer's own site", () => {
+    for (const careerUrl of ['https://jobs.lever.co/acme', 'https://sites.google.com/view/acme-jobs', 'https://acme.notion.site/jobs']) {
+      const ctx: JudgeContext = { company: { name: 'Acme', domain: 'acme.com', careerUrl }, now: NOW }
+      expect(onOwnSite('https://jobs.lever.co/othercorp/1', ctx)).toBe(false)
+      expect(judgeRole(job({ employer: 'Othercorp', url: new URL('/x/1', careerUrl).toString() }), ctx)).toEqual({ keep: false, why: 'other_employer' })
+    }
+    expect(onOwnSite('https://careers.acme.com/jobs/1', { company: { name: 'Acme', domain: 'acme.com', careerUrl: 'https://careers.acme.com' }, now: NOW })).toBe(true)
+  })
+
+  it("a tracked staffing firm's own roles are kept under it", () => {
+    const rh: JudgeContext = { company: { name: 'Robert Half', domain: 'roberthalf.com', careerUrl: 'https://roberthalf.com/careers' }, now: NOW }
+    expect(judgeRole(job({ employer: 'Robert Half', url: 'https://roberthalf.com/jobs/1' }), rh)).toEqual({ keep: true })
+    expect(mislabelledSource(job({ employer: 'Robert Half', url: 'https://roberthalf.com/jobs/1' }), 'Robert Half')).toBeNull()
+  })
+
   it('labels a reposting site and never keeps it under the employer', () => {
     const repost = job({ url: 'https://www.linkedin.com/jobs/view/123' })
     expect(judgeRole(repost, acme)).toEqual({ keep: false, why: 'reposting' })
