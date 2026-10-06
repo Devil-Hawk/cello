@@ -119,7 +119,7 @@ describe('callOpenRouter structured output', () => {
   it('sends a strict json_schema response format and the response-healing plugin', async () => {
     const schema = { type: 'object', properties: {}, additionalProperties: false }
     await callOpenRouter(keys, { prompt: 'x', json: true, jsonSchema: { name: 'resume', schema } })
-    const body = createMock.mock.calls[0][0]
+    const body = firstBody()
     expect(body.response_format).toEqual({
       type: 'json_schema',
       json_schema: { name: 'resume', strict: true, schema },
@@ -131,7 +131,7 @@ describe('callOpenRouter structured output', () => {
 
   it('falls back to a plain JSON object without a schema', async () => {
     await callOpenRouter(keys, { prompt: 'x', json: true })
-    const body = createMock.mock.calls[0][0]
+    const body = firstBody()
     expect(body.response_format).toEqual({ type: 'json_object' })
     expect(body.plugins).toBeUndefined()
   })

@@ -64,6 +64,8 @@ const PASS_REASON_TEXT: Record<PassReason, string> = {
   sponsorship: 'sponsorship',
   pay: 'the pay',
   other: 'another reason',
+  level: 'the level',
+  role_type: 'the kind of role',
 }
 
 export interface ReactionCount {

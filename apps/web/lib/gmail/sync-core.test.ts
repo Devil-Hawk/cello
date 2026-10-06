@@ -250,6 +250,8 @@ describe('runGmailSyncCore: calendar invite', () => {
         employerDomain: 'acme.com',
         jobTitle: 'Backend Engineer',
         status: 'interview',
+        // A status needs a quote the email really holds.
+        evidence: 'Thank you for applying to Acme Corp',
         careerPageUrl: null,
         interviewDateTime: new Date(start.getTime() + 3 * 24 * 3600 * 1000).toISOString(),
         confidence: 0.95,

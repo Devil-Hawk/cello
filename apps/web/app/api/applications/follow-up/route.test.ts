@@ -13,7 +13,7 @@ const supabase = {
 }
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => supabase }))
 
-const rows: Record<string, unknown> = { jobs: { company_id: 'c1' }, contacts: [{ id: 'k1', name: 'Sam' }] }
+const rows: Record<string, unknown> = { person_jobs: { company_id: 'c1' }, contacts: [{ id: 'k1', name: 'Sam' }] }
 const admin = {
   from: (t: string) => {
     const chain: Record<string, unknown> = { select: () => chain, eq: () => chain, single: async () => ({ data: rows[t] }), then: (r: (v: unknown) => void) => r({ data: rows[t] }) }

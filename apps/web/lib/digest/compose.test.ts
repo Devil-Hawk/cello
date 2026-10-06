@@ -29,7 +29,7 @@ function tables() {
       role(USER, { id: 'j-old', title: 'Old Role', url: null, discovered_at: day(30), company_id: 'co-1' }, 'strong', 0.99, null),
       role('someone-else', { id: 'j-other', title: 'Not Yours', url: null, discovered_at: day(1), company_id: 'co-x' }, 'strong', 0.99, null),
     ],
-    jobs: [{ id: 'j-title', title: 'Senior Backend Engineer' }],
+    person_jobs: [{ id: 'j-title', viewer_id: USER, title: 'Senior Backend Engineer' }],
     applications: [
       { id: 'a1', user_id: USER, job_id: 'j-applied', stage: 'interview', updated_at: day(2), applied_at: day(20), jobs: { id: 'j-applied', title: 'Applied Role', company_id: 'co-1' } },
       { id: 'a2', user_id: 'someone-else', job_id: 'j-other', stage: 'applied', updated_at: day(30), applied_at: day(30), jobs: { id: 'j-other', title: 'Not Yours', company_id: 'co-x' } },

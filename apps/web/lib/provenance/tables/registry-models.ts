@@ -33,5 +33,4 @@ export const tables: ProvenanceTable[] = [
   { table: 'company_dossiers', provenance: 'code', retiredBy: 'K24b' },
   { table: 'resume_claims', provenance: 'code', retiredBy: 'K17b' },
   { table: 'claim_evidence', provenance: 'code', retiredBy: 'K17b' },
-  { table: 'insights', provenance: 'code', retiredBy: 'K15' },
 ]

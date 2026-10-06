@@ -26,6 +26,7 @@ function world() {
         { id: 'k2', user_id: 'u1', name: 'No Email', email: null, company_id: 'c1' },
       ],
       jobs: [{ id: 'j1', company_id: 'c1', title: 'PM', companies: { user_id: 'u1' } }],
+      person_roles: [{ user_id: 'u1', job_id: 'j1' }],
       outreach_messages: [],
       application_drafts: [],
       approvals: [],

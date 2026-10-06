@@ -2,6 +2,7 @@ import { tables as registryModels } from './tables/registry-models'
 import { tables as clockRelevance } from './tables/clock-relevance'
 import { tables as shellPages } from './tables/shell-pages'
 import { tables as chat } from './tables/chat'
+import { tables as integrate } from './tables/integrate'
 import { tables as pipeline } from './tables/pipeline'
 import { tables as learningWriter } from './tables/learning-writer'
 import { tables as network } from './tables/network'
@@ -21,6 +22,7 @@ export const PROVENANCE_TABLES: readonly ProvenanceTable[] = [
   ...clockRelevance,
   ...shellPages,
   ...chat,
+  ...integrate,
   ...pipeline,
   ...learningWriter,
   ...network,

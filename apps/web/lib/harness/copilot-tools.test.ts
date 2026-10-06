@@ -165,7 +165,8 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
 function fakeAdmin(tables: Record<string, Row[]>, rpc: Record<string, Row[]> = {}): AdminClient {
   const admin = {
     from(table: string) {
-      return new FakeQuery([...(tables[table] ?? [])], tables)
+      // person_jobs is the view over jobs
+      return new FakeQuery([...(tables[table === 'person_jobs' ? 'jobs' : table] ?? [])], tables)
     },
     async rpc(fn: string) {
       return { data: rpc[fn] ?? [], error: null }
@@ -329,7 +330,7 @@ describe('dispatchTool — job ownership enforced transitively via companies.use
     const result = await dispatchTool(ctx, 'explain_match', { jobId: 'job-1' })
 
     expect(result).toMatchObject({ error: expect.stringContaining('job-1') })
-    expect(result).toMatchObject({ error: expect.stringContaining('not in your tracked companies') })
+    expect(result).toMatchObject({ error: expect.stringContaining('No job found') })
     // Precise-id-error requirement: names the tool that returns real ids, so
     // a model that guessed wrong can self-correct in one step.
     expect(result).toMatchObject({ error: expect.stringContaining('list_jobs') })
@@ -370,7 +371,7 @@ describe('dispatchTool — job ownership enforced transitively via companies.use
     const ctx = baseCtx(admin)
 
     const result = await dispatchTool(ctx, 'explain_match', { jobId: 'job-3' })
-    expect(result).toEqual({ error: 'Job has no company' })
+    expect(result).toMatchObject({ error: expect.stringContaining('No job found') })
   })
 
   it('get_dossier (agent: company_researcher) enforces ownership too, and does not leak whether a dossier exists for a company that is not the caller\'s', async () => {

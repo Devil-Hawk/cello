@@ -217,14 +217,17 @@ export async function loadOwnedJob(
 ): Promise<{ job: OwnedJob; companyName: string } | { error: string }> {
   // `company_id` names the person's own company for the role (viewer_company_id), not the one that stored it first.
   const cols = columns.split(',').map((c) => c.trim()).filter((c) => c !== 'company_id').concat('company_id:viewer_company_id', 'viewer_company_name')
-  const { data } = await personJobs(ctx.admin).select(cols.join(', ')).eq('viewer_id', ctx.userId).eq('id', jobId).maybeSingle()
+  let query = personJobs(ctx.admin)
+    .select(opts.fit ? cols.join(', ') + ', person_roles(' + FIT_COLUMNS + ')' : cols.join(', '))
+    .eq('viewer_id', ctx.userId)
+    .eq('id', jobId)
+  // Only this person's own row comes back inside the role.
+  if (opts.fit) query = query.eq('person_roles.user_id', ctx.userId)
+  const { data } = await query.maybeSingle()
   if (!data) return { error: jobNotFoundError(jobId) }
-  const { viewer_company_name: viewerName, ...posting } = data as unknown as OwnedJob & { viewer_company_name: string | null }
-  let job: OwnedJob = posting
-  if (opts.fit) {
-    const { data: verdict } = await ctx.admin.from('person_roles').select(FIT_COLUMNS).eq('user_id', ctx.userId).eq('job_id', jobId).maybeSingle()
-    job = { ...posting, ...fitRowOf((verdict ?? {}) as FitRow) }
-  }
+  const { viewer_company_name: viewerName, ...rest } = data as unknown as OwnedJob & { viewer_company_name: string | null; person_roles?: FitRow | FitRow[] | null }
+  const { person_roles: _embedded, ...posting } = rest
+  const job: OwnedJob = opts.fit ? { ...posting, ...fitRowOf(rest) } : posting
   if (!job.company_id) return { error: 'Job has no company' }
   return { job, companyName: viewerName ?? 'Unknown company' }
 }

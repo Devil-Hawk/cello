@@ -202,7 +202,7 @@ export const checksStatus = defineCommand({
     state: codeText(20),
     started_at: codeText(40).nullable(),
     finished_at: codeText(40).nullable(),
-    next_check_at: codeText(40),
+    next_check_at: codeText(40).nullable(),
     companies_checked: z.number().int(),
     companies_total: z.number().int(),
     jobs_new: z.number().int(),

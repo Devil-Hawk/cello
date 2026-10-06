@@ -52,8 +52,8 @@ interface Rule {
 }
 
 const RULES: Rule[] = [
-  { name: 'new ChatOpenRouter(', pattern: /\bnew\s+ChatOpenRouter\s*\(/, allowed: ['lib/agents/model.ts'] },
-  { name: 'new ChatOpenAI(', pattern: /\bnew\s+ChatOpenAI\s*\(/, allowed: [] },
+  { name: 'new ChatOpenRouter(', pattern: /\bnew\s+ChatOpenRouter\s*\(/, allowed: ['lib/agents/model.ts', 'lib/models/factory.ts'] },
+  { name: 'new ChatOpenAI(', pattern: /\bnew\s+ChatOpenAI\s*\(/, allowed: ['lib/models/factory.ts'] },
   { name: 'createDeepAgent(', pattern: /\bcreateDeepAgent\s*\(/, allowed: ['lib/agents/factory.ts'] },
   { name: 'createSubAgent(', pattern: /\bcreateSubAgent\s*\(/, allowed: ['lib/agents/factory.ts'] },
   { name: 'createAgent(', pattern: /\bcreateAgent\s*\(/, allowed: [] },

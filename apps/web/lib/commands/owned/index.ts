@@ -7,6 +7,7 @@ import { owned as registryModels } from './registry-models'
 import { owned as clockRelevance } from './clock-relevance'
 import { owned as shellPages } from './shell-pages'
 import { owned as chat } from './chat'
+import { owned as integrate } from './integrate'
 import { owned as pipeline } from './pipeline'
 import { owned as learningWriter } from './learning-writer'
 import { owned as network } from './network'
@@ -22,6 +23,7 @@ export const OWNED_TABLES: readonly OwnedTable[] = [
   ...clockRelevance,
   ...shellPages,
   ...chat,
+  ...integrate,
   ...pipeline,
   ...learningWriter,
   ...network,
