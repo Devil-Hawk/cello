@@ -11,7 +11,7 @@ import { useState } from 'react'
 import { Tile } from '@/components/ui/tile'
 import { companyHref } from '@/lib/routes/companies'
 import { recordHref } from '@/lib/routes/roles'
-import { cn } from '@/lib/utils'
+import { clsx as cn } from 'clsx'
 
 /** The favicon service, from a domain. Job hosts become the employer's own domain (amazon.jobs to amazon.com). */
 export function logoSrc(domain?: string | null, logoUrl?: string | null): string | null {

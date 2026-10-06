@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { cn } from '@/lib/utils'
+import { clsx as cn } from 'clsx'
 import { LogoTile, RoleTitle, type TileState } from './role-tile'
 
 export interface RoleRowProps {

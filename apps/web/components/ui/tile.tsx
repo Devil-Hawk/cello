@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { cn } from '@/lib/utils'
+import { clsx as cn } from 'clsx'
 
 // The bevel dose follows the size, because a 1px bevel that is right at 40px
 // disappears at 64px on a 1x screen: lg from 48, xl from 56.

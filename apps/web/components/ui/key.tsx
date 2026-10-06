@@ -1,7 +1,9 @@
 import * as React from 'react'
 import { Slot } from '@radix-ui/react-slot'
 import { cva, type VariantProps } from 'class-variance-authority'
-import { cn } from '@/lib/utils'
+// ponytail: clsx, not tailwind-merge. Relief classes do not collide with utility classes, and
+// tailwind-merge is about 7 KB of every page's first load. Add it back if a caller needs to override a utility.
+import { clsx as cn } from 'clsx'
 
 // A key: lit on its top edge, resting on a contact shadow, 1px proud. It sits
 // down when pressed. Every key is at least 44px each way (min-h-11 min-w-11).
