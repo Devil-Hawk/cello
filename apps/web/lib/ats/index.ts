@@ -32,6 +32,8 @@ import {
 } from '../ingest/reader/legit'
 import { searchTerms, type ReaderTargets } from '../ingest/reader/targets'
 import { targetVerdict, type TargetVerdict } from '../targeting/roles'
+import { hasPersonTargets, judgeForPerson, prepareTargets, type OutsideReason } from '../jobs/target-relevance'
+import type { SourceTier } from '../jobs/relevance-types'
 import { EMPTY_TARGETING, type Targeting } from '../targeting'
 // Relative import (not `@/...`): lib/ats/* stays framework-free, and
 // lib/jobs/classify.ts is itself a zero-dependency pure module, so this is
@@ -85,6 +87,10 @@ export interface CompanyInput {
   career_url: string | null
   /** companies.metadata jsonb — may be absent when the column doesn't exist yet. */
   metadata?: unknown
+  /** The person who follows the company: the roles a read keeps are kept for them. */
+  user_id?: string
+  /** The shared employer (company_directory), when the company's board passed the verifier. */
+  employer_id?: string | null
 }
 
 /** Row shape upserted into jobs (onConflict company_id,external_id). */
@@ -109,6 +115,8 @@ export interface JobUpsertRow {
   quality_score: number
   /** Ingest provenance: the ATS provider (or 'scraper', the page reader) that produced this row. */
   source: string
+  /** Which tier of the reader produced it: a board, the site's search, a sitemap, a listing or the rendered page. */
+  source_tier?: SourceTier | null
   /** The refresh that listed this posting; the prune and the closed check read it. */
   last_seen_at: string
   /** What the posting asks for (lib/jobs/requirements.ts), read from the description now. */
@@ -138,6 +146,15 @@ export interface ExistingJob {
   language?: string | null
   isRemote?: boolean | null
   postedAt?: string | null
+}
+
+/** One count of a read: what was found outside the person's targets, at one employer, for one reason. */
+export interface CountWrite {
+  employer_id: string | null
+  company_id: string | null
+  kind: 'outside_targets'
+  reason: OutsideReason
+  n: number
 }
 
 /** Column changes for one stored job. Only the fields that differ are present. */
@@ -172,6 +189,14 @@ export interface AtsStore {
   evictJobs?(companyId: string, externalIds: string[]): Promise<string[]>
   /** Insert new rows (on_conflict company_id,external_id, merge). */
   upsertJobs(rows: JobUpsertRow[]): Promise<void>
+  /**
+   * Give the person the roles a read kept (person_roles), `hiddenIds` of them hidden because nothing
+   * disagreed with their targets but a dimension could not be read. Optional so a store that cannot
+   * (a test double) keeps compiling.
+   */
+  keepForPerson?(input: { userId: string; companyId: string; externalIds: string[]; hiddenIds: string[]; targetsVersion: number }): Promise<void>
+  /** Record how many listed roles were outside the person's targets, by reason (person_counts); numbers, never rows. */
+  setCounts?(userId: string, rows: CountWrite[]): Promise<void>
   /** Apply column changes to stored rows; returns how many rows changed. Never touches match data. */
   updateJobs(updates: JobUpdate[]): Promise<number>
   /**
@@ -538,6 +563,7 @@ export async function refreshLocked(
     stored,
     judge: { name: company.name, domain: company.domain ?? null, careerUrl: company.career_url },
     targeting: targets?.targeting,
+    ...(company.user_id ? { owner: { userId: company.user_id, targetsVersion: targets?.version ?? 0 }, titles: targets?.titles } : {}),
     windowed: providers[provider].searchesByQuery === true && query.length > 0,
   }, result)
   return board
@@ -559,6 +585,17 @@ export interface SyncOptions {
   listedIds?: string[]
   /** The list is a window onto the board (a search, a few pages): a role missing from it is not thereby gone. */
   windowed?: boolean
+  /** The person the roles are kept for, and the version of their targets. Without it nothing is kept per person. */
+  owner?: { userId: string; targetsVersion: number }
+  /** The role titles the person typed: with the targets, they decide what is kept. */
+  titles?: readonly string[]
+}
+
+/** jobs.source_tier of what a source wrote. */
+export function tierOfSource(source: string): SourceTier {
+  if (source === 'site_search' || source === 'sitemap' || source === 'listing') return source
+  if (source === 'scraper') return 'rendered'
+  return Object.prototype.hasOwnProperty.call(providers, source) ? 'board' : 'listing'
 }
 
 /**
@@ -581,9 +618,11 @@ export async function syncJobs(
   // Roles the source lists that are not open roles of this employer (stale, expired, agency, repost, other employer, non-role)
   // are not sighted either, so a stored one of them misses and closes instead of being kept open by the listing.
   const notOpen = new Set<string>()
+  let tooOld = 0
   const clean = sanitizeJobs(listed).filter((job) => {
     if (!isStalePosting(job.postedAt)) return true
     notOpen.add(job.externalId)
+    tooOld++
     return false
   })
   result.found = clean.length
@@ -637,7 +676,7 @@ export async function syncJobs(
   let room = Math.max(0, MAX_ROLES_PER_COMPANY - stored.size)
   const targeting = opts.targeting ?? EMPTY_TARGETING
   const fresh = candidates.filter((job) => !stored.has(job.externalId)).map(classify).filter(({ c }) => !c.rejectReason && !isLowQuality(c))
-  const ranked = orderForCap(fresh, ({ job, c }) =>
+  let ranked = orderForCap(fresh, ({ job, c }) =>
     targetVerdict(
       { title: job.title, description: job.description, job_function: c.jobFunction, seniority: c.seniority, country: c.country, language: c.language, is_remote: c.isRemote },
       targeting,
@@ -645,6 +684,31 @@ export async function syncJobs(
     ),
     ({ job }) => job.postedAt
   )
+  // Only roles inside the person's stated targets are stored, and the rest are counted by why. With no
+  // targets stated the followed employer keeps up to the cap, as before, and those roles are marked
+  // by targets version 0. A role nothing disagrees with, whose place or level could not be read, is
+  // kept hidden for the person.
+  const personTargets = { targeting, titles: opts.titles ?? [] }
+  const filtering = Boolean(opts.owner) && hasPersonTargets(personTargets)
+  const outside: Record<OutsideReason, number> = { place: 0, age: tooOld, excluded: 0, level: 0, title: 0 }
+  const hiddenIds = new Set<string>()
+  if (filtering) {
+    const prepared = prepareTargets(personTargets.titles)
+    ranked = ranked.filter(({ job, c }) => {
+      const verdict = judgeForPerson(
+        { title: job.title, description: job.description, job_function: c.jobFunction, seniority: c.seniority, country: c.country, language: c.language, is_remote: c.isRemote, postedAt: job.postedAt },
+        personTargets,
+        company.name,
+        prepared
+      )
+      if (!verdict.keep) {
+        outside[verdict.reason]++
+        return false
+      }
+      if (verdict.hidden) hiddenIds.add(job.externalId)
+      return true
+    })
+  }
   // Closed roles go first, oldest first: the ones nothing points at are deleted, the rest stay and count.
   const closedStoredRows = [...stored.values()].filter((s) => s.open === false)
   if (ranked.length > room && store.evictJobs && closedStoredRows.length > 0) {
@@ -723,6 +787,7 @@ export async function syncJobs(
       job_type: c.jobType,
       quality_score: c.qualityScore,
       source: opts.source,
+      source_tier: tierOfSource(opts.source),
       last_seen_at: now,
       requirements: parseRequirements({
         title,
@@ -740,6 +805,39 @@ export async function syncJobs(
     } catch (error) {
       result.errors.push(`upsert failed: ${errorMessage(error)}`)
       return
+    }
+  }
+
+  // The roles this read kept are the person's: one person_roles row each, beside the old reads.
+  if (opts.owner && store.keepForPerson && newRows.length > 0) {
+    try {
+      await store.keepForPerson({
+        userId: opts.owner.userId,
+        companyId: company.id,
+        externalIds: newRows.map((r) => r.external_id),
+        hiddenIds: [...hiddenIds],
+        targetsVersion: filtering ? opts.owner.targetsVersion : 0,
+      })
+    } catch (error) {
+      result.errors.push(`person roles failed: ${errorMessage(error)}`)
+    }
+  }
+  // What was left out is a number. A read of the employer replaces that day's numbers for it, every reason sent so a zero resets.
+  if (filtering && opts.owner && store.setCounts) {
+    const employerId = company.employer_id ?? null
+    try {
+      await store.setCounts(
+        opts.owner.userId,
+        (Object.keys(outside) as OutsideReason[]).map((reason) => ({
+          employer_id: employerId,
+          company_id: employerId ? null : company.id,
+          kind: 'outside_targets' as const,
+          reason,
+          n: outside[reason],
+        }))
+      )
+    } catch (error) {
+      result.errors.push(`counts failed: ${errorMessage(error)}`)
     }
   }
 

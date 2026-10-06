@@ -108,6 +108,24 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
       fail(error)
     },
 
+    async keepForPerson({ userId, companyId, externalIds, hiddenIds, targetsVersion }): Promise<void> {
+      if (dry || externalIds.length === 0) return
+      const { error } = await client.rpc('sync_person_roles', {
+        p_user: userId,
+        p_company: companyId,
+        p_external_ids: externalIds,
+        p_targets_version: targetsVersion,
+        p_hidden: hiddenIds,
+      })
+      fail(error)
+    },
+
+    async setCounts(userId, rows): Promise<void> {
+      if (dry) return
+      const { error } = await client.rpc('set_person_counts', { p_user: userId, p_rows: rows })
+      fail(error)
+    },
+
     async updateJobs(updates: JobUpdate[]): Promise<number> {
       if (dry) return updates.length
       const changed = await mapWithConcurrency(updates, UPDATE_CONCURRENCY, async (u) => {
