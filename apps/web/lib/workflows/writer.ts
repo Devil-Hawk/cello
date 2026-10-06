@@ -64,6 +64,9 @@ export interface WriterResult {
   /** The first lines of the draft, so the answer can quote it without a second read. */
   preview?: string
   review?: { passed: boolean; issues: string[]; checks: ReviewResult['checks']; judge: ReviewResult['judge']; checked_by: string }
+  /** A message only: false when the text is the standard template, and why (missing_key, spend_cap, provider_error). */
+  used_llm?: boolean
+  template_reason?: string
   error?: string
   fix?: string
   note?: string
@@ -96,6 +99,9 @@ interface Draft {
   /** A tailored resume's structured form: it is saved as a version of the role's resume. */
   resume?: Resume
   atsScore?: number | null
+  /** A message only: the standard template stands in when no model could write it. */
+  source?: 'model' | 'template'
+  templateReason?: string
 }
 
 const WriterState = Annotation.Root({
@@ -153,7 +159,8 @@ export function buildWriterGraph(deps: WriterDeps) {
 
   async function gather(state: State, config: RunnableConfig) {
     const brief = state.brief!
-    if (!canRunLlm(ctx.apiKeys)) return { result: fail({ error: missingOpenRouterMessage(ctx.apiKeys), fix: 'Tell the person to add an OpenRouter key in Settings.' }) }
+    // A message has a free path, the standard template, so only a resume or a letter needs a key.
+    if (!isMessage(brief.type) && !canRunLlm(ctx.apiKeys)) return { result: fail({ error: missingOpenRouterMessage(ctx.apiKeys), fix: 'Tell the person to add an OpenRouter key in Settings.' }) }
 
     // A retried call with the same key returns what it already made.
     if (brief.idempotency_key) {
@@ -337,6 +344,8 @@ export function buildWriterGraph(deps: WriterDeps) {
           },
           title: `${wrote === 'follow_up' ? 'Follow-up' : wrote === 'reply' ? 'Reply' : wrote === 'note' ? 'Note' : 'Email'} to ${facts.contact?.name ?? company}`,
           artifactType: 'message' as const,
+          source: out.source ?? 'model',
+          templateReason: out.templateReason,
         },
       }
     } catch (e) {
@@ -446,6 +455,7 @@ export function buildWriterGraph(deps: WriterDeps) {
       title: d.title,
       preview: (d.subject ? `Subject: ${d.subject}\n\n` : '') + d.text.slice(0, 500),
       review: reviewJson,
+      ...(d.source ? { used_llm: d.source === 'model', template_reason: d.source === 'model' ? undefined : d.templateReason } : {}),
       ...(r.passed ? {} : { note: 'The draft is saved with its issues listed. Show them to the person.' }),
     }
     return { result }

@@ -12,9 +12,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { findDuplicateInitial, insertOutreach, isDuplicateOutreachError } from '@/lib/outreach/store'
-import type { OutreachDraftInput, OutreachDraftResult } from '@/lib/harness/agents/outreach'
-import { runUnitOnce } from '@/lib/graph/oneshot'
-import { verifyOutreachDraft } from '@/lib/graph/verify/outreach'
+import { discardMessage, writeMessage } from '@/lib/outreach/write'
+import type { OutreachReview } from '@/lib/graph/verify/outreach-review'
 import { loadOutreachSources } from '@/lib/outreach/sources'
 import { writeReviewVerdicts } from '@/lib/outreach/persist-review'
 import { recordDemoEvent } from '@/lib/access/session'
@@ -134,39 +133,21 @@ export async function POST(request: NextRequest) {
     // What a reviewer needs at a glance in Langfuse (the ids are in the trace metadata).
     setTraceInput({ jobTitle: sources.input.jobTitle, companyName: sources.input.companyName })
 
-    const draftInput: OutreachDraftInput = {
-      ...sources.input,
-      userName: sources.senderName,
-      contactName: contact.name,
-      contactTitle: contact.title,
-      kind: 'initial',
-    }
-
-    // runUnitOnce builds its own metered LlmRunner from the user's stored keys.
-    // generateOutreachDraft never throws: it returns the standard template with
-    // a reason on any model failure, so this try only guards the infra around it
-    // (schema validation, journaling, the containment check the unit always runs).
-    let review: Awaited<ReturnType<typeof verifyOutreachDraft>>
+    // The Writer drafts, checks once and saves the text as a message artifact; the row below queues that version.
+    // It never throws for a model failure: the standard template stands in and the reason is recorded.
+    let review: OutreachReview
+    let written: { artifactId: string; artifactVersion: number }
     try {
-      const unitResult = await runUnitOnce('outreach', {
-        admin,
-        userId: user.id,
-        goal: 'Draft outreach email',
-        input: draftInput,
-      })
-      // Review: deterministic checks, the claims judge and the specificity judge,
-      // one regeneration on failure. Never blocks persistence: the approve queue
-      // is the send gate, and the verdicts ride along with the draft it settles on.
-      review = await verifyOutreachDraft({
-        admin,
-        userId: user.id,
-        goal: 'Draft outreach email (review regeneration)',
-        input: draftInput,
-        draft: unitResult.output as OutreachDraftResult,
-      })
+      const made = await writeMessage(admin, { id: user.id, email: user.email || '' }, { type: 'message', job_id: jobId ?? undefined, contact_id: contactId })
+      if (!made.ok) {
+        await recordDraftOutcome(supabase, { outcome: 'failed', reason: 'llm_failed' }, request.headers)
+        return NextResponse.json({ error: made.error, fix: made.fix }, { status: 422 })
+      }
+      review = made.written.review
+      written = made.written
     } catch (e) {
       // Whether or not OpenRouter billed for the attempt, the visitor reached
-      // the paid path — which is the thing the owner is watching for.
+      // the paid path, which is the thing the owner is watching for.
       // Journalled and RETHROWN: what this request returns is exactly what it
       // returned before, because an audit row is not a licence to change a
       // handler's behaviour.
@@ -194,8 +175,11 @@ export async function POST(request: NextRequest) {
         kind: 'initial',
         used_llm: usedLlm,
         template_reason: templateReason,
+        artifact_id: written.artifactId,
+        artifact_version: written.artifactVersion,
       })
     } catch (e) {
+      await discardMessage(admin, user.id, written.artifactId)
       // Two drafts for the same contact and role raced past the check above and
       // the unique index caught the loser. That is the duplicate refusal, not a
       // server fault.

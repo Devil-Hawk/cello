@@ -45,9 +45,6 @@ vi.mock('@/lib/outreach/gmail', async (importOriginal) => ({
   threadHasReply: (...a: unknown[]) => threadHasReplyMock(...a),
 }))
 
-const runUnitOnceMock = vi.fn(async (..._a: unknown[]) => ({ output: { subject: 'Re: Staff', body: 'Hi again', tokensUsed: 12, source: 'model' } }))
-vi.mock('@/lib/graph/oneshot', () => ({ runUnitOnce: (...a: unknown[]) => runUnitOnceMock(...a) }))
-
 let senderName: string | null = 'Alex Candidate'
 vi.mock('@/lib/outreach/sources', () => ({
   loadOutreachSources: async () => ({
@@ -80,8 +77,9 @@ interface ReviewFixture {
   judgeUnavailable: boolean
 }
 let review: ReviewFixture
-const verifyMock = vi.fn(async (..._a: unknown[]) => review)
-vi.mock('@/lib/graph/verify/outreach', () => ({ verifyOutreachDraft: (...a: unknown[]) => verifyMock(...a) }))
+const writeMessageMock = vi.fn(async (..._a: unknown[]): Promise<unknown> => ({ ok: true, written: { artifactId: 'art-1', artifactVersion: 1, review } }))
+const discardMessageMock = vi.fn(async (..._a: unknown[]) => undefined)
+vi.mock('@/lib/outreach/write', () => ({ writeMessage: (...a: unknown[]) => writeMessageMock(...a), discardMessage: (...a: unknown[]) => discardMessageMock(...a) }))
 const writeVerdictMock = vi.fn().mockResolvedValue(undefined)
 vi.mock('@/lib/evals/verdicts', () => ({ writeVerdict: (...a: unknown[]) => writeVerdictMock(...a) }))
 
@@ -127,6 +125,7 @@ beforeEach(() => {
     failed: false,
     judgeUnavailable: false,
   }
+  writeMessageMock.mockImplementation(async () => ({ ok: true, written: { artifactId: 'art-1', artifactVersion: 1, review } }))
   parent = { ...parent, subject: 'Staff Engineer at Acme', body: 'Hi Jordan,\n\nThe first email.\n\nThanks,\nAlex Candidate' }
 })
 
@@ -138,7 +137,7 @@ describe('the reply gate', () => {
 
     expect(body).toMatchObject({ ok: false, skipped: true, reason: 'contact already replied' })
     expect(threadHasReplyMock).not.toHaveBeenCalled()
-    expect(runUnitOnceMock).not.toHaveBeenCalled()
+    expect(writeMessageMock).not.toHaveBeenCalled()
   })
 
   it('refuses (fails closed) when no Gmail credential is usable, instead of drafting a chase it cannot vet', async () => {
@@ -149,7 +148,7 @@ describe('the reply gate', () => {
 
     expect(res.status).toBe(401)
     expect(body.needsReauth).toBe(true)
-    expect(runUnitOnceMock).not.toHaveBeenCalled()
+    expect(writeMessageMock).not.toHaveBeenCalled()
     expect(insertOutreachMock).not.toHaveBeenCalled()
   })
 
@@ -175,7 +174,7 @@ describe('the reply gate', () => {
       expect(res.status).toBe(403)
       expect(body.error).toBe(REPLY_CHECK_UNKNOWN_MESSAGE)
       expect(body.skipped).toBeUndefined()
-      expect(runUnitOnceMock).not.toHaveBeenCalled()
+      expect(writeMessageMock).not.toHaveBeenCalled()
       expect(insertOutreachMock).not.toHaveBeenCalled()
     } finally {
       global.fetch = realFetch
@@ -194,23 +193,16 @@ describe('the reply gate', () => {
 })
 
 describe('what the follow-up is written from', () => {
-  it('gives the writer the email it follows, how long ago it went out, and the sender name', async () => {
+  it('asks the Writer for a follow-up to this contact and role, and queues the version it saved', async () => {
     await post()
 
-    const input = (runUnitOnceMock.mock.calls[0][1] as { input: Record<string, unknown> }).input
-    expect(input).toMatchObject({
-      kind: 'follow_up',
-      userName: 'Alex Candidate',
-      jobTitle: 'Staff Engineer',
-      previousEmail: { subject: 'Staff Engineer at Acme', body: expect.stringContaining('The first email.') },
-    })
-    expect(typeof input.daysSinceSent).toBe('number')
+    expect(writeMessageMock).toHaveBeenCalledWith(expect.anything(), { id: 'user-1', email: 'alex@example.com' }, { type: 'follow_up', job_id: undefined, contact_id: 'c1' })
+    expect(insertOutreachMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ artifact_id: 'art-1', artifact_version: 1 }))
   })
 
-  it('gets the same review as the first email, and its verdict rows', async () => {
+  it('gets the same verdict rows as the first email', async () => {
     await post()
 
-    expect(verifyMock).toHaveBeenCalledTimes(1)
     expect(writeVerdictMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ judge: 'deterministic', subjectId: 'fu-1' }))
   })
 
@@ -219,7 +211,7 @@ describe('what the follow-up is written from', () => {
     const res = await post()
     expect(res.status).toBe(409)
     expect((await res.json()).needsName).toBe(true)
-    expect(runUnitOnceMock).not.toHaveBeenCalled()
+    expect(writeMessageMock).not.toHaveBeenCalled()
   })
 
   it('stores a template with its reason so the card can say so', async () => {

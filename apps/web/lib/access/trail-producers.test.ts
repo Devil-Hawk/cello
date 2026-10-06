@@ -103,22 +103,18 @@ vi.mock('@/lib/harness/agents/outreach', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/harness/agents/outreach')>()),
   generateOutreachDraft: io.generateOutreachDraft,
 }))
-// verifyOutreachDraft (lib/graph/verify/outreach.ts) calls the REAL judge
-// (autoevals -> a real fetch) — this file is about the demo trail, not
-// verify, so it's faked as a pass-through (unchanged draft, no verdicts).
-// lib/graph/verify/outreach.test.ts covers the real control flow.
-vi.mock('@/lib/graph/verify/outreach', () => ({
-  verifyOutreachDraft: async ({ draft }: { draft: { subject: string; body: string; tokensUsed: number } }) => ({
-    subject: draft.subject,
-    body: draft.body,
-    tokensUsed: draft.tokensUsed,
-    source: draft.tokensUsed > 0 ? 'model' : 'template',
-    templateReason: draft.tokensUsed > 0 ? undefined : 'missing_key',
-    verdicts: [],
-    checks: { ok: true, checks: [] },
-    failed: false,
-    judgeUnavailable: false,
+// The Writer (the draft route's door onto it) calls a real model and reader; this file is about the demo trail,
+// so it is faked as a template draft with nothing to judge. lib/outreach/write.test.ts and lib/workflows/writer.test.ts cover the real flow.
+vi.mock('@/lib/outreach/write', () => ({
+  writeMessage: async () => ({
+    ok: true,
+    written: {
+      artifactId: 'artifact-1',
+      artifactVersion: 1,
+      review: { subject: 'Re: role', body: 'Body', tokensUsed: 0, source: 'template', templateReason: 'missing_key', verdicts: [], checks: { ok: true, checks: [] }, failed: false, judgeUnavailable: false },
+    },
   }),
+  discardMessage: async () => undefined,
 }))
 vi.mock('@/lib/harness/agents/resume_optimizer', () => ({ optimizeResumeAndSave: io.optimizeResumeAndSave }))
 vi.mock('@/lib/resume/store', () => ({

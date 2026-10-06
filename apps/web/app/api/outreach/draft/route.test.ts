@@ -4,9 +4,9 @@
 //    review stage does;
 //  - a draft is never signed with a guessed name, and a template is recorded as
 //    one, with the reason, so the card can say so.
-// Everything below verifyOutreachDraft is mocked (the review's own control flow is
-// lib/graph/verify/outreach.test.ts's job); the verdict rows go through the real
-// writeReviewVerdicts into a mocked writeVerdict.
+// Everything below writeMessage is mocked (the Writer's own control flow is
+// lib/workflows/writer.test.ts's job and the shape of its review is lib/outreach/write.test.ts's);
+// the verdict rows go through the real writeReviewVerdicts into a mocked writeVerdict.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
@@ -17,14 +17,6 @@ vi.mock('@/lib/outreach/store', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/outreach/store')>()),
   insertOutreach: (...args: unknown[]) => insertOutreachMock(...args),
   findDuplicateInitial: (...args: unknown[]) => findDuplicateInitialMock(...args),
-}))
-
-const runUnitOnceMock = vi.fn(async (..._args: unknown[]) => ({
-  output: { subject: 'Hi', body: 'Draft body', tokensUsed: 10, source: 'model' },
-  tokensUsed: 10,
-}))
-vi.mock('@/lib/graph/oneshot', () => ({
-  runUnitOnce: (...args: unknown[]) => runUnitOnceMock(...args),
 }))
 
 const PASSING_CHECKS = { ok: true, checks: [{ id: 'one_ask', ok: true, message: 'One ask' }] }
@@ -41,9 +33,11 @@ interface ReviewFixture {
   judgeRefused?: 'missing-key' | 'budget-cap'
 }
 let review: ReviewFixture
-const verifyOutreachDraftMock = vi.fn(async (..._args: unknown[]) => review)
-vi.mock('@/lib/graph/verify/outreach', () => ({
-  verifyOutreachDraft: (...args: unknown[]) => verifyOutreachDraftMock(...args),
+const writeMessageMock = vi.fn(async (..._args: unknown[]): Promise<unknown> => ({ ok: true, written: { artifactId: 'art-1', artifactVersion: 1, review } }))
+const discardMessageMock = vi.fn(async (..._args: unknown[]) => undefined)
+vi.mock('@/lib/outreach/write', () => ({
+  writeMessage: (...args: unknown[]) => writeMessageMock(...args),
+  discardMessage: (...args: unknown[]) => discardMessageMock(...args),
 }))
 
 let senderName: string | null
@@ -138,6 +132,7 @@ beforeEach(() => {
   user = { id: 'user-1', email: 'alex@example.com' }
   senderName = 'Alex Candidate'
   review = modelReview()
+  writeMessageMock.mockImplementation(async () => ({ ok: true, written: { artifactId: 'art-1', artifactVersion: 1, review } }))
   insertOutreachMock.mockImplementation(async (_admin: unknown, row: Record<string, unknown>) => ({ id: 'msg-1', ...row }))
 })
 
@@ -150,13 +145,22 @@ describe('POST, no name no draft', () => {
 
     expect(response.status).toBe(409)
     expect(body).toMatchObject({ needsName: true, error: 'Add your full name in Settings first. Drafts are signed with it.' })
-    expect(runUnitOnceMock).not.toHaveBeenCalled()
+    expect(writeMessageMock).not.toHaveBeenCalled()
     expect(insertOutreachMock).not.toHaveBeenCalled()
   })
 
-  it('signs with the profile name, never the email local part', async () => {
+  it('hands the contact and the role to the Writer and queues the version it saved', async () => {
     await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
-    expect(runUnitOnceMock).toHaveBeenCalledWith('outreach', expect.objectContaining({ input: expect.objectContaining({ userName: 'Alex Candidate', kind: 'initial' }) }))
+    expect(writeMessageMock).toHaveBeenCalledWith(expect.anything(), { id: 'user-1', email: 'alex@example.com' }, { type: 'message', job_id: 'job-1', contact_id: 'contact-1' })
+    expect(insertOutreachMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ artifact_id: 'art-1', artifact_version: 1 }))
+  })
+
+  it('answers 422 with what to fix when the Writer cannot write, and queues nothing', async () => {
+    writeMessageMock.mockResolvedValue({ ok: false, error: 'There is no resume on file.', fix: 'Upload one.' })
+    const response = await POST(post({ contactId: 'contact-1', jobId: 'job-1' }))
+    expect(response.status).toBe(422)
+    expect(await response.json()).toMatchObject({ error: 'There is no resume on file.' })
+    expect(insertOutreachMock).not.toHaveBeenCalled()
   })
 })
 
@@ -251,6 +255,8 @@ describe('POST, duplicates and templates', () => {
     expect(response.status).toBe(409)
     expect(body.error).toBe('An outreach email to this contact for this role already exists.')
     expect(body.error).not.toContain('duplicate key')
+    // The artifact made for the loser does not stay behind as a draft nobody queued.
+    expect(discardMessageMock).toHaveBeenCalledWith(expect.anything(), 'user-1', 'art-1')
   })
 
   it('still answers 500 for a save failure that is not the duplicate refusal', async () => {

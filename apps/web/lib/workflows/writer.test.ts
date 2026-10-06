@@ -33,7 +33,12 @@ vi.mock('@/lib/outreach/sources', () => ({ loadOutreachSources: sources.loadOutr
 const learned = vi.hoisted(() => ({ items: [] as { kind: string; effect: string; status: string; origin: string; statement: string; params: Record<string, unknown> }[] }))
 vi.mock('@/lib/learning/read', () => ({ readLearnings: async () => ({ ok: true, items: learned.items }) }))
 
+// The page path loads the person's keys itself; the second reader is a pass so no model call is made.
+vi.mock('@/lib/harness/keys', async (orig) => ({ ...(await orig<typeof import('@/lib/harness/keys')>()), loadApiKeys: async () => ({ openrouter: 'k', userId: 'u1' }) }))
+vi.mock('@/lib/evals/claims-judge', async (orig) => ({ ...(await orig<typeof import('@/lib/evals/claims-judge')>()), judgeClaims: async () => ({ verdict: 'pass', unsupported: [] }) }))
+
 import type { AgentContext } from '@/lib/agents/context'
+import { writeMessage } from '@/lib/outreach/write'
 import { buildWriterGraph, runWriter, type WriterDeps } from './writer'
 import type { FakeAdmin } from '@/lib/agents/testing/fake-admin'
 import { getArtifact } from '@/lib/agents/artifacts'
@@ -372,5 +377,30 @@ describe('Writer: what it reads, replies and notes', () => {
     expect(b.version).toBe(a.version)
     expect(viaTask.admin.tables.artifact_versions[0].trace_id).toBe('trace-1')
     expect(direct.admin.tables.artifact_versions[0].trace_id).toBe('trace-1')
+  })
+})
+
+describe('the draft routes run the Writer', () => {
+  const BODY = 'Hi Sam, I built the billing system at Acme and cut release time by 40%. Could we talk for ten minutes about the Product Engineer role?'
+
+  it('the page path and a direct call make the same version with the same text and checks', async () => {
+    mocks.outreach.mockResolvedValue({ subject: 'Billing at Acme', body: BODY, tokensUsed: 0 })
+    const direct = setup()
+    const page = setup()
+    const a = await runWriter(direct.deps, { type: 'message', job_id: 'j1', contact_id: 'k1' })
+    const b = await writeMessage(page.admin as never, { id: 'u1', email: 'dana@example.com' }, { type: 'message', job_id: 'j1', contact_id: 'k1' })
+    if (!b.ok) throw new Error(b.error)
+    expect(b.written.artifactVersion).toBe(a.version)
+    expect(page.admin.tables.artifact_versions[0].content).toEqual(direct.admin.tables.artifact_versions[0].content)
+    expect(b.written.review).toMatchObject({ subject: 'Billing at Acme', body: BODY, source: 'model', failed: false })
+    expect(b.written.review.checks.checks.every((c) => c.ok)).toBe(true)
+  })
+
+  it('with no key a message is the standard template and says why, instead of refusing', async () => {
+    const { deps } = setup({ apiKeys: {} })
+    mocks.outreach.mockResolvedValue({ subject: 'Product Engineer at Stripe', body: 'Hi Sam, I am interested in the Product Engineer role at Stripe. Would you be open to a short chat?', tokensUsed: 0, source: 'template', templateReason: 'missing_key' })
+    const result = await runWriter(deps, { type: 'message', job_id: 'j1', contact_id: 'k1' })
+    expect(result).toMatchObject({ used_llm: false, template_reason: 'missing_key' })
+    expect(result.status).not.toBe('failed')
   })
 })
