@@ -7,7 +7,7 @@ import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { QUALITY_REJECT_THRESHOLD } from '@/lib/jobs/classify'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { prioritiseByTargetTitles } from '@/lib/jobs/target-relevance'
-import { getMemoryStore } from '@/lib/memory/mem0-store'
+import { readLearnings, tasteFrom } from '@/lib/learning/read'
 import { resolveTargeting, type Targeting } from '@/lib/targeting'
 import { resolveTargetTitles } from '@/lib/targeting/titles'
 import { resolveConstraints, type StatedConstraints } from './constraints'
@@ -22,11 +22,13 @@ export interface ScoringInputs {
   /** The person's targeting settings: what narrows the roles worth assessing. */
   targeting: Targeting
   nReactions: number
+  /** False when `taste:blend` is off, or mem0 could not be read: reactions order nothing this run. */
+  taste: boolean
+  /** One line for the page when what Cello learned could not be read. */
+  learningNote: string | null
 }
 
-const MEMORY_QUERY = 'what roles, companies, places and pay they want or refuse'
 const MEMORY_NOTES = 6
-const MEMORY_TIMEOUT_MS = 3000
 
 /** One or two lines of what the resume says about the person, for the judge. */
 export function resumeBackground(resume: string): string {
@@ -40,25 +42,26 @@ export function resumeBackground(resume: string): string {
     .slice(0, 600)
 }
 
-async function memoryNotes(userId: string): Promise<string[]> {
-  try {
-    const found = await Promise.race([
-      getMemoryStore().search(userId, MEMORY_QUERY, { limit: MEMORY_NOTES }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('memory search timed out')), MEMORY_TIMEOUT_MS)),
-    ])
-    return found.map((m) => m.memory.trim()).filter(Boolean).slice(0, MEMORY_NOTES)
-  } catch {
-    // What Cello remembers is a bonus. Without it the stated preferences still stand.
-    return []
-  }
+/** What the person kept that states a want, for the judge, and whether their history may order roles. One read of mem0, held for this run. */
+async function learned(userId: string): Promise<{ notes: string[]; taste: boolean; learningNote: string | null }> {
+  const read = await readLearnings(userId, 'any')
+  const { taste, note } = tasteFrom(read)
+  const notes = read.ok
+    ? read.items
+        .filter((l) => l.status === 'active' && l.effect === 'rank.want' && l.origin !== 'code')
+        .map((l) => l.statement.trim())
+        .filter(Boolean)
+        .slice(0, MEMORY_NOTES)
+    : []
+  return { notes, taste, learningNote: note }
 }
 
 export async function loadScoringInputs(admin: AdminClient, userId: string): Promise<ScoringInputs> {
-  const [{ data: profile }, { data: dream }, { count }, notes] = await Promise.all([
+  const [{ data: profile }, { data: dream }, { count }, { notes, taste, learningNote }] = await Promise.all([
     admin.from('profiles').select('resume_text, preferences').eq('id', userId).maybeSingle(),
     admin.from('companies').select('name').eq('user_id', userId).eq('is_dream_company', true).limit(10),
     admin.from('role_reactions').select('id', { count: 'exact', head: true }).eq('user_id', userId),
-    memoryNotes(userId),
+    learned(userId),
   ])
   const prefs = (profile as { preferences?: unknown } | null)?.preferences ?? {}
   const resumeText = ((profile as { resume_text?: string | null } | null)?.resume_text ?? '').trim()
@@ -68,6 +71,8 @@ export async function loadScoringInputs(admin: AdminClient, userId: string): Pro
     constraints: resolveConstraints(prefs),
     targeting: t,
     nReactions: count ?? 0,
+    taste,
+    learningNote,
     stated: {
       titles: resolveTargetTitles(prefs),
       functions: t.functions,

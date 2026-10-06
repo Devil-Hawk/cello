@@ -139,6 +139,7 @@ export async function runDailyShortlist(args: DailyShortlistArgs): Promise<Short
       stated: inputs.stated,
       constraints: inputs.constraints,
       candidates,
+      taste: inputs.taste,
       forDate,
       size: args.size ?? 6,
       exploreCount: args.exploreCount ?? 1,
@@ -151,7 +152,7 @@ export async function runDailyShortlist(args: DailyShortlistArgs): Promise<Short
       unfinished,
       counts: { newRoles: candidates.length, filtered: result.blocked.length },
       learning: { nReactions: result.taste.nReactions, mode: learningMode(result.taste.nReactions, result.taste.fitted) },
-      notes: result.notes,
+      notes: inputs.learningNote ? [inputs.learningNote, ...result.notes] : result.notes,
     }
   } catch (err) {
     if (err instanceof MissingKeyError) return { ...base, status: 'no_key', counts: { newRoles: candidates.length, filtered: 0 } }
@@ -278,6 +279,7 @@ export async function assessJobs(args: AssessJobsArgs): Promise<AssessJobsResult
       stated: inputs.stated,
       constraints: inputs.constraints,
       candidates,
+      taste: inputs.taste,
       judgePool: candidates.length,
       chanceFor: Math.min(candidates.length, 12),
     })
