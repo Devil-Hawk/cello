@@ -140,10 +140,14 @@ async function mkPerson(db, { send = false, maxPerDay = 3 } = {}) {
       "insert into public.api_tokens (id, user_id, name, token_hash, scopes, last_used_at) values ($1, $2, 'race', $3, array['fill:extension'], now())",
       [tok, u, `hash-${tok}`],
     )
+    // preferences.pipeline is written only by set_autonomy(); the setup writes it directly, as its writer.
+    await db.query('begin')
+    await db.query("select set_config('cello.autonomy_writer', 'on', true)")
     await db.query(
       "update public.profiles set preferences = coalesce(preferences, '{}'::jsonb) || jsonb_build_object('pipeline', jsonb_build_object('send', jsonb_build_object('mode', 'auto', 'maxPerDay', $3::int, 'tokenId', $2::text))) where id = $1",
       [u, tok, maxPerDay],
     )
+    await db.query('commit')
   }
   return { u, co, tok }
 }
