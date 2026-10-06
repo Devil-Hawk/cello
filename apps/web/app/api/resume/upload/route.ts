@@ -40,12 +40,11 @@
 //   comment for why that matters.
 
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
-import OpenAI from 'openai'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { BudgetCapError } from '@/lib/harness/spend'
 import { callLlm } from '@/lib/harness/llm'
+import { resumePhotoStep } from '@/lib/steps'
 import { canRunLlm } from '@/lib/harness/llm-key-message'
 import { createMarkdownVersion, getBaseResume } from '@/lib/resume/store'
 import { getResumeTemplateId } from '@/lib/resume/types'
@@ -69,59 +68,10 @@ export const dynamic = 'force-dynamic'
 // the default 10s. Still well under the optimizer's 300.
 export const maxDuration = 120
 
-const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
-
 /** Enough for a long resume in Markdown; a truncated resume is a corrupt one. */
 const MAX_OUTPUT_TOKENS = 8000
 
 // --- model access (all of it optional) -------------------------------------
-
-/**
- * Read a PDF natively. This is the ONLY way to recover a scanned, image-only
- * resume, and it is also the best reader for a multi-column layout — but it is
- * a model, so its answer is cross-checked in lib/resume/import against the text
- * unpdf extracts whenever there is any.
- */
-async function readPdfWithClaude(pdfBase64: string, apiKey: string): Promise<string> {
-  const client = new Anthropic({ apiKey })
-  const response = await client.messages.create({
-    // A DATED SNAPSHOT IS A TIME BOMB HERE. This was pinned to
-    // claude-sonnet-4-20250514, whose retirement date has now passed — a
-    // retired snapshot 404s, so every Anthropic-key user's scanned-PDF upload
-    // would have failed with a generic error. Prefer the unversioned alias so
-    // the model rolls forward; the faithfulness check in lib/resume/import is
-    // what guards output quality, not the pin.
-    model: 'claude-sonnet-5',
-    max_tokens: MAX_OUTPUT_TOKENS,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'document',
-            source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 },
-          },
-          { type: 'text', text: RESUME_MARKDOWN_PROMPT },
-        ],
-      },
-    ],
-  })
-  const textBlock = response.content.find((block) => block.type === 'text')
-  if (!textBlock || textBlock.type !== 'text') throw new Error('No text response from Claude')
-  return textBlock.text
-}
-
-/** Direct OpenAI, for an account that has an OpenAI key but no OpenRouter one. */
-async function completeWithOpenAI(prompt: string, apiKey: string): Promise<string> {
-  const client = new OpenAI({ apiKey })
-  const response = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
-    max_tokens: MAX_OUTPUT_TOKENS,
-    temperature: 0,
-    messages: [{ role: 'user', content: prompt }],
-  })
-  return response.choices[0]?.message?.content ?? ''
-}
 
 /**
  * Wire whichever models this account actually has. Every field may be null —
@@ -132,20 +82,33 @@ function buildModels(apiKeys: DecryptedApiKeys): ResumeImportModels {
   const models: ResumeImportModels = {}
 
   if (apiKeys.anthropic) {
-    const key = apiKeys.anthropic
-    models.readPdf = (base64) => readPdfWithClaude(base64, key)
-  }
-
-  if (canRunLlm(apiKeys)) {
-    // The harness runner: honours the account's provider choice, enforces the
-    // monthly spend cap and retries transient failures.
-    models.reformat = async (prompt) => {
-      const result = await callLlm(apiKeys, { prompt, maxTokens: MAX_OUTPUT_TOKENS, temperature: 0, name: 'import-resume' })
+    // The only way to recover a scanned, image-only resume, and the best reader for a multi-column
+    // layout. It is a model, so lib/resume/import cross-checks its answer against the text unpdf
+    // extracts whenever there is any. The resume.photo step picks the rung, the model and the key.
+    models.readPdf = async (pdfBase64) => {
+      const result = await resumePhotoStep.call(
+        apiKeys,
+        { prompt: RESUME_MARKDOWN_PROMPT, files: [{ mimeType: 'application/pdf', data: pdfBase64 }], maxTokens: MAX_OUTPUT_TOKENS, temperature: 0 },
+        { door: 'session' }
+      )
       return result.content
     }
-  } else if (apiKeys.openai) {
-    const key = apiKeys.openai
-    models.reformat = (prompt) => completeWithOpenAI(prompt, key)
+  }
+
+  // The harness runner: honours the account's provider choice, enforces the monthly spend cap and
+  // retries transient failures. An account with only an OpenAI key goes to it directly.
+  const direct = !canRunLlm(apiKeys) && apiKeys.openai
+  if (canRunLlm(apiKeys) || direct) {
+    models.reformat = async (prompt) => {
+      const result = await callLlm(apiKeys, {
+        prompt,
+        maxTokens: MAX_OUTPUT_TOKENS,
+        temperature: 0,
+        name: 'import-resume',
+        ...(direct ? { via: 'openai' as const, model: 'gpt-4o-mini' } : {}),
+      })
+      return result.content
+    }
   }
 
   return models
@@ -282,11 +245,9 @@ export async function POST(request: NextRequest) {
 
     const { getDecryptedApiKeys } = await import('@/lib/apikeys')
     const apiKeys = await getDecryptedApiKeys(user.id)
-    // Spend: the callLlm leg of buildModels reserves and settles its own cost
-    // (lib/harness/spend.ts). The PDF read through Anthropic and the OpenAI
-    // fallback use the user's OWN key, so they cost the Cello ledger nothing and
-    // are not metered (see ALLOWED_DIRECT_USER_KEY in spend-chokepoints.test.ts).
-    // A capped user's callLlm leg throws BudgetCapError, answered below.
+    // Spend: both legs of buildModels (the photo step and callLlm) reserve and settle their own
+    // cost (lib/harness/spend.ts), on the person's own key too. A capped user's call throws
+    // BudgetCapError, answered below.
     const models = buildModels(apiKeys)
 
     let result: ResumeImportResult

@@ -24,6 +24,16 @@ export const chanceStep = defineModelStep({
   below: 'Roles are ordered by title match and date.',
 })
 
+/** Reading a resume that is a scan or a photo: the model sees the PDF and writes it out as Markdown.
+ *  Free hosted models or better; a person's own Anthropic or OpenAI key works too. */
+export const resumePhotoStep = defineModelStep({
+  id: 'resume.photo',
+  kind: 'step',
+  measure: 'P6',
+  minRung: 'R3',
+  below: 'Reading a photo needs a model. Paste the text instead.',
+})
+
 /** Sorting one email: is it about a job application, and what happened. */
 export const inboxClassifyStep = defineModelStep({
   id: 'inbox.classify',

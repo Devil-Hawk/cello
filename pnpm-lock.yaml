@@ -26,9 +26,6 @@ importers:
       '@a2a-js/sdk':
         specifier: 1.0.1
         version: 1.0.1(express@5.2.1)
-      '@anthropic-ai/sdk':
-        specifier: ^0.72.1
-        version: 0.72.1(zod@4.4.3)
       '@cello/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -160,7 +157,7 @@ importers:
         version: 1.12.0
       mem0ai:
         specifier: 3.1.6
-        version: 3.1.6(@anthropic-ai/sdk@0.72.1)(@cloudflare/workers-types@4.20260702.1)(@langchain/core@1.2.14)(@supabase/supabase-js@2.93.3)(@types/jest@29.5.14)(@types/pg@8.21.0)(better-sqlite3@12.11.1)(compromise@14.16.0)(natural@8.1.1)(pg@8.23.0)
+        version: 3.1.6(@cloudflare/workers-types@4.20260702.1)(@langchain/core@1.2.14)(@supabase/supabase-js@2.93.3)(@types/jest@29.5.14)(@types/pg@8.21.0)(better-sqlite3@12.11.1)(compromise@14.16.0)(natural@8.1.1)(pg@8.23.0)
       next:
         specifier: 14.2.35
         version: 14.2.35(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(react-dom@18.3.1)(react@18.3.1)
@@ -332,19 +329,6 @@ packages:
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.1.1
-      zod: 4.4.3
-    dev: false
-
-  /@anthropic-ai/sdk@0.72.1(zod@4.4.3):
-    resolution: {integrity: sha512-MiUnue7qN7DvLIoYHgkedN2z05mRf2CutBzjXXY2krzOhG2r/rIfISS2uVkNLikgToB5hYIzw+xp2jdOtRkqYQ==}
-    hasBin: true
-    peerDependencies:
-      zod: ^3.25.0 || ^4.0.0
-    peerDependenciesMeta:
-      zod:
-        optional: true
-    dependencies:
-      json-schema-to-ts: 3.1.1
       zod: 4.4.3
     dev: false
 
@@ -7549,7 +7533,7 @@ packages:
     engines: {node: '>= 0.8'}
     dev: false
 
-  /mem0ai@3.1.6(@anthropic-ai/sdk@0.72.1)(@cloudflare/workers-types@4.20260702.1)(@langchain/core@1.2.14)(@supabase/supabase-js@2.93.3)(@types/jest@29.5.14)(@types/pg@8.21.0)(better-sqlite3@12.11.1)(compromise@14.16.0)(natural@8.1.1)(pg@8.23.0):
+  /mem0ai@3.1.6(@cloudflare/workers-types@4.20260702.1)(@langchain/core@1.2.14)(@supabase/supabase-js@2.93.3)(@types/jest@29.5.14)(@types/pg@8.21.0)(better-sqlite3@12.11.1)(compromise@14.16.0)(natural@8.1.1)(pg@8.23.0):
     resolution: {integrity: sha512-arbotbiNxevHgs/GoVMfqS77SV9yO7F7tUWU9VqU8qKHNzXUXH7CNGk7dKeRpdQESdkooPIpI3E4B6ppc1WTEA==}
     engines: {node: '>=18'}
     peerDependencies:
@@ -7667,7 +7651,6 @@ packages:
       zeroentropy:
         optional: true
     dependencies:
-      '@anthropic-ai/sdk': 0.72.1(zod@4.4.3)
       '@cloudflare/workers-types': 4.20260702.1
       '@langchain/core': 1.2.14(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.11.0)(openai@6.17.0)
       '@supabase/supabase-js': 2.93.3

@@ -50,10 +50,11 @@ export function availableRungs(keys: DecryptedApiKeys, ceiling: Ceiling = keys.m
   return out
 }
 
-/** The highest rung with no cost that is set up, unless the person already chose a paid model:
- *  then their choice stands, so turning the ladder on does not stop what they pay for today. */
+/** The highest rung with no cost that is set up, unless the person already chose to pay: their own
+ *  OpenAI or Anthropic key (only ever used to pay) or a paid model on OpenRouter. Then their choice
+ *  stands, so turning the ladder on does not stop what they pay for today. */
 function defaultCeiling(keys: DecryptedApiKeys): Ceiling {
-  if (keys.model && !isFreeModel(keys.model) && hasPaidKey(keys)) return 'R4'
+  if (keys.openai || keys.anthropic || (keys.openrouter && keys.model && !isFreeModel(keys.model))) return 'R4'
   const free = availableRungs(keys, 'R3')
   return free.includes('R3') ? 'R3' : free.includes('R2') ? 'R2' : 'R0'
 }

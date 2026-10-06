@@ -339,6 +339,8 @@ export interface LlmRunOptions {
   promptRef?: { name: string; hash?: string }
   /** The door this call came through, written to the spend ledger. */
   door?: Door
+  /** Files the model reads with the prompt (a PDF), as base64. Added to the last user message. */
+  files?: { mimeType: string; data: string }[]
   /** Where to send the call, set by the rung a step picked. Absent means the person's active provider. */
   via?: RungVia
 }

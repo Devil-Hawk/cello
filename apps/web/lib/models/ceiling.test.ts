@@ -129,8 +129,9 @@ describe('the default ceiling', () => {
     expect(personModels({ openrouter: 'k', provider: LOCAL }, {}).ceiling).toBe('R3')
   })
 
-  it('stays R4 for a person who already chose a paid model, so nothing they pay for stops', () => {
+  it('stays R4 for a person who already chose to pay, so nothing they pay for stops', () => {
     expect(personModels({ openrouter: 'k', model: PAID }, {}).ceiling).toBe('R4')
+    expect(personModels({ anthropic: 'k' }, {}).ceiling).toBe('R4')
     expect(personModels({ openrouter: 'k', model: FREE }, {}).ceiling).toBe('R3')
   })
 

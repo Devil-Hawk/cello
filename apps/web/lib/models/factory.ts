@@ -52,6 +52,11 @@ const LOCAL_PLACEHOLDER_KEY = 'local-server-no-key-required'
 
 const normalizeBaseUrl = (url: string) => url.trim().replace(/\/+$/, '')
 
+/** The Claude models that think adaptively (the client's own list). */
+const ADAPTIVE_ONLY = /^claude-(opus-4-[78]|opus-5|sonnet-5|fable-5|mythos)/
+
+const OPENAI_REASONING = /^(gpt-5|o\d)/
+
 /** OpenAI takes up to xhigh; Cello's "max" is the same ask. */
 const openAiEffort = (e: ReasoningEffort) => (e === 'max' ? 'xhigh' : e)
 
@@ -83,7 +88,8 @@ export function chatModelFor(via: RungVia, model: string, keys: DecryptedApiKeys
   }
   if (via === 'openai') {
     if (!keys.openai) throw new MissingKeyError('No OpenAI API key configured')
-    return new ChatOpenAI({ ...common, temperature, apiKey: keys.openai, ...(effort ? { reasoning: { effort: openAiEffort(effort) } } : {}) })
+    // OpenAI's reasoning models (gpt-5, o-series) refuse a temperature of their own choosing.
+    return new ChatOpenAI({ ...common, ...(OPENAI_REASONING.test(model) ? {} : { temperature }), apiKey: keys.openai, ...(effort ? { reasoning: { effort: openAiEffort(effort) } } : {}) })
   }
   if (via === 'local-server') {
     const baseUrl = keys.provider?.localServerBaseUrl?.trim()
@@ -93,8 +99,12 @@ export function chatModelFor(via: RungVia, model: string, keys: DecryptedApiKeys
   }
   if (via === 'anthropic') {
     if (!keys.anthropic) throw new MissingKeyError('No Anthropic API key configured')
+    // The newest Claude models think adaptively and take an effort level, no temperature and no thinking
+    // budget (the client refuses them); older ones take a budget of at least 1024, and no temperature while thinking.
+    if (ADAPTIVE_ONLY.test(model)) {
+      return new ChatAnthropic({ ...common, apiKey: keys.anthropic, ...(effort ? { outputConfig: { effort: effort === 'minimal' ? 'low' : effort } } : {}) })
+    }
     const budget = effort ? Math.min(ANTHROPIC_THINKING_BUDGET[effort], maxTokens - 1) : 0
-    // Extended thinking takes no temperature and needs a budget of at least 1024.
     return budget >= 1024
       ? new ChatAnthropic({ ...common, apiKey: keys.anthropic, thinking: { type: 'enabled', budget_tokens: budget } })
       : new ChatAnthropic({ ...common, temperature, apiKey: keys.anthropic })
@@ -116,6 +126,20 @@ function toMessages(opts: LlmRunOptions, via: RungVia): BaseMessage[] {
     for (const m of opts.messages) out.push(m.role === 'system' ? new SystemMessage(m.content) : m.role === 'assistant' ? new AIMessage(m.content) : new HumanMessage(m.content))
   } else if (opts.prompt) {
     out.push(new HumanMessage(opts.prompt))
+  }
+  if (opts.files?.length) {
+    // The files ride on the last user message. Anthropic takes LangChain's standard file block;
+    // OpenAI and OpenRouter take OpenAI's own.
+    const last = out.findLastIndex((m) => m instanceof HumanMessage)
+    const text = last >= 0 ? String(out[last].content) : ''
+    const blocks = opts.files.map((f, i) =>
+      via === 'anthropic'
+        ? { type: 'file', mimeType: f.mimeType, data: f.data }
+        : { type: 'file', file: { filename: `attachment-${i + 1}.${f.mimeType.split('/')[1] ?? 'bin'}`, file_data: `data:${f.mimeType};base64,${f.data}` } }
+    )
+    const withFiles = new HumanMessage({ content: [{ type: 'text', text }, ...blocks] as never })
+    if (last >= 0) out[last] = withFiles
+    else out.push(withFiles)
   }
   return out
 }

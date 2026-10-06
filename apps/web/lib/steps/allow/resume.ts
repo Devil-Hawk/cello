@@ -6,7 +6,7 @@ import type { AllowEntry } from './types'
 export const allow: AllowEntry[] = [
   {
     file: 'app/api/resume/upload/route.ts',
-    reason: 'Reads a resume photo with Claude or OpenAI; K14 moves it behind resume.photo.',
+    reason: 'Reformats an imported resume with callLlm; resume moves it behind the Writer. The photo read is the resume.photo step.',
   },
   {
     file: 'app/api/resume/documents/route.ts',
