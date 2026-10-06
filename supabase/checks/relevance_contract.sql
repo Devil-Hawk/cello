@@ -216,6 +216,54 @@ begin
   if pg_temp.as_user(f.a, format('with u as (update public.jobs set title = ''Legacy two'' where id = %L returning 1) select count(*) from u', jl)) <> 1 then raise exception 'a person still updates a role with no employer'; end if;
 end $$;
 
+-- 6c. A signed-in person cannot put a role into what others read: not by insert at a company linked to an employer,
+-- not with an employer id, not through upsert_shared_jobs. A Gmail placeholder stays the person's own.
+do $$
+declare f record; co_u uuid := gen_random_uuid(); jh uuid; ja2 uuid := gen_random_uuid();
+begin
+  select * into f from fx;
+  begin
+    perform pg_temp.as_user(f.a, format($q$with i as (insert into public.jobs (company_id, title, description, url, external_id) values (%L, 'Attack', 'x', 'https://evil.example/a', 'atk-1') returning 1) select count(*) from i$q$, f.co_a));
+    raise exception 'a person must not insert a role at a company linked to an employer';
+  exception when insufficient_privilege then reset role;
+  end;
+  insert into public.companies (id, user_id, name, domain, career_url, metadata) values (co_u, f.a, 'Unlinked Co', 'unlinked.example', 'https://unlinked.example/careers', '{}'::jsonb);
+  if (select employer_id from public.companies where id = co_u) is not null then raise exception 'the setup company has no employer'; end if;
+  begin
+    perform pg_temp.as_user(f.a, format($q$with i as (insert into public.jobs (company_id, employer_id, title, description, url, external_id) values (%L, %L, 'Attack', 'x', 'https://evil.example/b', 'atk-2') returning 1) select count(*) from i$q$, co_u, f.emp2));
+    raise exception 'a person must not insert a role with another employer''s id';
+  exception when insufficient_privilege then reset role;
+  end;
+  if exists (select 1 from public.jobs where url like 'https://evil.example/%') then raise exception 'no attacker role is stored'; end if;
+  if exists (select 1 from public.directory_roles_for(f.b, null, 1000) where title = 'Attack') then raise exception 'an attacker role is offered to another person'; end if;
+
+  -- placeholders: two at one linked company with one address both insert, carry no employer, and are offered to no one else
+  if pg_temp.as_user(f.a, format($q$with i as (insert into public.jobs (company_id, title, description, url, source) values (%L, 'Placeholder one', '[Unverified]', 'https://shared.example', 'gmail_sync') returning 1) select count(*) from i$q$, f.co_a)) <> 1 then raise exception 'a Gmail placeholder inserts'; end if;
+  if pg_temp.as_user(f.a, format($q$with i as (insert into public.jobs (company_id, title, description, url, source) values (%L, 'Placeholder two', '[Unverified]', 'https://shared.example', 'gmail_share') returning 1) select count(*) from i$q$, f.co_a)) <> 1 then raise exception 'a second placeholder at the same address inserts'; end if;
+  if (select count(*) from public.jobs where title like 'Placeholder %' and employer_id is null) <> 2 then raise exception 'a placeholder carries no employer'; end if;
+  if (select count(*) from public.person_jobs where viewer_id = f.a and title like 'Placeholder %') <> 2 then raise exception 'the person reads their placeholders'; end if;
+  if exists (select 1 from public.directory_roles_for(f.b, null, 1000) where title like 'Placeholder %') then raise exception 'a placeholder is offered to another person'; end if;
+
+  -- the RPC: B calls it with B's own company against a role A and B hold
+  select id into jh from public.jobs where employer_id = f.emp and external_id = 'held-1';
+  begin
+    perform pg_temp.as_user(f.b, format($q$select public.upsert_shared_jobs(jsonb_build_array(jsonb_build_object('company_id', %L, 'external_id', 'held-1', 'title', 'Hacked by B', 'url', 'https://evil.example/phish', 'apply_url', 'https://evil.example/apply')))$q$, f.co_b));
+    raise exception 'a signed-in person must not call upsert_shared_jobs';
+  exception when insufficient_privilege then reset role;
+  end;
+  if (select title || url || coalesce(apply_url, '') from public.jobs where id = jh) <> 'Held by twohttps://shared.example/jobs/held' then raise exception 'the shared role is unchanged by the call'; end if;
+
+  -- a role a person wrote with no employer carries nothing of its body into the shared row the service role adopts it into
+  insert into public.jobs (id, company_id, title, description, url, external_id, apply_url, description_md, description_state, description_md5)
+  values (ja2, f.co_a, 'Written by A', 'x', 'https://shared.example/jobs/adopt-1', 'adopt-1', 'https://evil.example/apply', 'poison', 'full', md5('poison'));
+  update public.jobs set employer_id = null where id = ja2;
+  perform public.upsert_shared_jobs(jsonb_build_array(jsonb_build_object('company_id', f.co_a, 'external_id', 'adopt-1', 'title', 'Real title',
+            'url', 'https://shared.example/jobs/adopt-1', 'source', 'greenhouse')));
+  if (select employer_id from public.jobs where id = ja2) is distinct from f.emp then raise exception 'the read adopts the role'; end if;
+  if (select title from public.jobs where id = ja2) <> 'Real title' then raise exception 'the read writes the title'; end if;
+  if (select apply_url is not null or description_md is not null or description_state is not null from public.jobs where id = ja2) then raise exception 'what a person wrote does not carry into the shared row'; end if;
+end $$;
+
 -- 7. A shared role outlives the follower whose company stored it: removing the company, or the account, keeps it for the others.
 do $$
 declare f record; jd uuid := gen_random_uuid(); jp uuid := gen_random_uuid(); c uuid := gen_random_uuid(); d uuid := gen_random_uuid(); co_c uuid := gen_random_uuid(); co_d uuid := gen_random_uuid();
