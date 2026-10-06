@@ -287,6 +287,34 @@ svg.lucide {
   }
 }
 
+/* a text field: set into the sheet, one hairline, a visible focus ring */
+.r-field {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--r-raised);
+  color: var(--r-ink);
+  font-size: var(--r-t-body);
+  box-shadow: inset 0 0 0 1px var(--r-line-2);
+}
+textarea.r-field {
+  padding: 12px 14px;
+  min-height: 120px;
+  line-height: 1.45;
+}
+.r-field::placeholder {
+  color: var(--r-ink-3);
+}
+.r-field:focus-visible {
+  outline: 2px solid var(--r-ink);
+  outline-offset: 2px;
+}
+.r-field[aria-invalid='true'] {
+  box-shadow: inset 0 0 0 1.5px var(--r-stop);
+}
+
 /* a tab on the phone's bottom plinth; the current one is a key standing proud */
 .r-tabkey {
   border-radius: 12px;

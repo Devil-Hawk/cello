@@ -173,6 +173,13 @@ describe('GET /auth/callback', () => {
     expect(response.headers.get('location')).toContain('/dashboard')
   })
 
+  it('sends a person who backed out of Google to the sign-in page with the reason', async () => {
+    const response = await GET(new NextRequest('http://localhost/auth/callback?error=access_denied'))
+    const to = new URL(response.headers.get('location')!)
+    expect(to.pathname + to.search).toBe('/login?error=cancelled')
+    expect(exchangeCodeForSession).not.toHaveBeenCalled()
+  })
+
   it('an exchange error skips persistence entirely', async () => {
     exchangeCodeForSession.mockResolvedValue({ data: {}, error: { message: 'bad code' } })
     const response = await GET(request())
