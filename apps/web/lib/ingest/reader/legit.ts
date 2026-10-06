@@ -16,6 +16,7 @@ import type { AtsJob } from '../../ats/types'
 import { normalizeEmployerName, onCompanyDomain, sameEmployerName } from '../../ats/verify'
 import { classifyJob, isLowQuality } from '../../jobs/classify'
 import { isStalePosting } from '../../jobs/freshness'
+import { KNOWN_JOB_HOSTS } from '../snapshot'
 import type { TargetVerdict } from '../../targeting/roles'
 
 export type ExcludeReason = 'agency' | 'reposting' | 'other_employer' | 'expired' | 'stale' | 'gone' | 'non_role' | 'duplicate'
@@ -104,10 +105,14 @@ export interface JudgeContext {
 export function employerAgrees(employer: string, companyName: string): boolean {
   const e = cleanEmployer(employer)
   if (sameEmployerName(e, companyName)) return true
-  const ne = normalizeEmployerName(e)
-  const nc = normalizeEmployerName(companyName)
-  return nc.length >= 3 && ne.startsWith(nc)
+  // Whole words only: "Metadata Inc" is not Meta, "Uberall GmbH" is not Uber, "Amazon Data Services" is Amazon.
+  const words = (name: string) => name.replace(/\.(com|io|ai|co|dev|app|net|org|so|xyz|tech)\s*$/i, '').normalize('NFKD').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim()
+  const we = words(e)
+  const wc = words(companyName)
+  return normalizeEmployerName(companyName).length >= 3 && (we === wc || we.startsWith(`${wc} `))
 }
+
+const SHARED_HOSTS = [...KNOWN_JOB_HOSTS, 'sites.google.com', 'notion.site', 'notion.so', 'github.io', 'wixsite.com', 'webflow.io', 'carrd.co', 'squarespace.com', 'wordpress.com']
 
 /** Is the role's address on the employer's own site: its domain, or the host of its careers page? */
 export function onOwnSite(url: string, ctx: JudgeContext): boolean {
@@ -116,6 +121,8 @@ export function onOwnSite(url: string, ctx: JudgeContext): boolean {
   // A reposting site is the employer's own only when it IS the company's domain: a careers link on builtin.com does not make builtin.com the employer's site.
   if (repostHostOf(url)) return false
   const careerHost = careerUrl ? hostOf(careerUrl) : ''
+  // A careers link on a shared host (an applicant system, a page builder) does not make that whole host the employer's own site.
+  if (SHARED_HOSTS.some((h) => careerHost === h || careerHost.endsWith(`.${h}`))) return false
   const host = hostOf(url)
   return !!careerHost && (host === careerHost || host.endsWith(`.${careerHost}`))
 }
@@ -128,7 +135,8 @@ export function judgeRole(job: AtsJob, ctx: JudgeContext): Verdict {
     if (!Number.isNaN(t) && t < now) return { keep: false, why: 'expired' }
   }
   if (isStalePosting(job.postedAt, now)) return { keep: false, why: 'stale' }
-  if (agencyOf(job.employer)) return { keep: false, why: 'agency' }
+  // A tracked staffing firm's own roles are its own: the rule is for another employer's roles posted by an agency.
+  if (agencyOf(job.employer) && !employerAgrees(job.employer!, ctx.company.name)) return { keep: false, why: 'agency' }
   if (repostHostOf(job.url) && !onOwnSite(job.url, ctx)) return { keep: false, why: 'reposting' }
   if (job.employer && !employerAgrees(job.employer, ctx.company.name) && !onOwnSite(job.url, ctx)) {
     return { keep: false, why: 'other_employer' }
@@ -141,7 +149,7 @@ export function judgeRole(job: AtsJob, ctx: JudgeContext): Verdict {
  * words, or null when the role is not one of those.
  */
 export function mislabelledSource(job: AtsJob, companyName: string): string | null {
-  const agency = agencyOf(job.employer)
+  const agency = employerAgrees(job.employer ?? '', companyName) ? null : agencyOf(job.employer)
   if (agency) return `This posting is from ${job.employer}, a staffing agency, not ${companyName}.`
   const repost = repostHostOf(job.url)
   if (repost) return repostMessage(repost, companyName, 'posting')
