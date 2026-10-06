@@ -1,7 +1,7 @@
 import { browser } from 'wxt/browser'
 import type { Route } from './fill-contract'
 import { ROUTES } from './fill-contract'
-import type { ApiResult } from './messages'
+import type { ApiResult, ExtensionStatus } from './messages'
 import { getConnection } from './storage'
 
 // The one client for Cello's fill routes. Worker only: it holds the token.
@@ -34,6 +34,20 @@ export async function callApi<T = unknown>(route: Route, body: unknown): Promise
     return res.ok ? { ok: true, status: res.status, data: data as T } : { ok: false, status: res.status, error: raw.slice(0, 200) }
   } catch {
     return { ok: false, status: 0, error: 'network' }
+  }
+}
+
+/** The popup's numbers, from Cello's own count. Null when Cello cannot be reached or the token is refused. */
+export async function getStatus(): Promise<ExtensionStatus | null> {
+  const { origin, token } = await getConnection()
+  if (!token) return null
+  try {
+    const res = await fetch(`${origin}/api/extension/status`, {
+      headers: { authorization: `Bearer ${token}`, 'x-cello-extension-version': version() },
+    })
+    return res.ok ? ((await res.json()) as ExtensionStatus) : null
+  } catch {
+    return null
   }
 }
 

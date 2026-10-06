@@ -5,6 +5,7 @@ import { send } from '../lib/messages'
 import { isPaused } from '../lib/storage'
 import { mountBar } from '../ui/bar'
 import { errorCount, findSubmit, holdsAnAnswer, holdsValue } from './checks'
+import { CAUSE_LINES } from './causes'
 import { sensitivityOf } from './classify'
 import { matchConfirmation, toPatterns } from './confirm-text'
 import { detectBlockers, visibleChallenge } from './detect'
@@ -35,12 +36,12 @@ export async function runAuto(job: Job): Promise<void> {
     send({ type: 'outcome', application: app, outcome, keepOpen })
   const stop = async (cause: StopCause, detail?: string, keepOpen = false): Promise<void> => {
     await report({ phase: 'blocked', application: app, url: location.href, cause, detail })
-    if (keepOpen) bar.show({ text: 'Cello stopped here. Finish this application yourself.', tone: 'warn' })
+    if (keepOpen) bar.show({ text: CAUSE_LINES[cause], tone: 'warn' })
     await finish('blocked', keepOpen)
   }
   bar.show({
     text: `Cello is sending your application to ${claim.company}.`,
-    actions: [{ label: 'Pause Cello', onClick: () => void send({ type: 'pause' }) }],
+    actions: [{ label: 'Pause Cello', icon: 'pause', onClick: () => void send({ type: 'pause' }) }],
   })
 
   let release: (() => void) | null = null
@@ -159,7 +160,7 @@ async function conclude(
   if (seen) {
     const cause: StopCause = seen.kind === 'check' ? 'site_check' : 'form_error'
     await report({ phase: 'blocked', application: app, url: location.href, cause })
-    bar.show({ text: 'Cello stopped here. Check your application on this page.', tone: 'warn' })
+    bar.show({ text: CAUSE_LINES[cause], tone: 'warn' })
     await finish('blocked', true)
     return
   }
@@ -182,7 +183,7 @@ export async function resumeAuto(job: Job, pending: Pending): Promise<void> {
   }
   bar.show({
     text: `Cello is sending your application to ${claim.company}.`,
-    actions: [{ label: 'Pause Cello', onClick: () => void send({ type: 'pause' }) }],
+    actions: [{ label: 'Pause Cello', icon: 'pause', onClick: () => void send({ type: 'pause' }) }],
   })
   const left = Math.max(1, CONFIRM_MS - (Date.now() - pending.since))
   await conclude(claim, host, await watchAfter(host, null, 0, left), finish, bar)

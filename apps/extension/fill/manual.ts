@@ -62,7 +62,7 @@ export async function manualFill(): Promise<void> {
     const need = total - filled.filled.length
     bar.show({
       text: `Filled ${filled.filled.length} of ${total} fields.${need > 0 ? ` ${need} need you on the page.` : ''}`,
-      actions: [{ label: 'Send next', onClick: () => void sendNext(bar) }],
+      actions: [{ label: 'Send next', primary: true, onClick: () => void sendNext(bar) }],
     })
   } finally {
     release()
@@ -124,5 +124,9 @@ export async function watchManualConfirmation(application: string, bar: Bar = mo
     ...(screenshot ? { screenshot } : {}),
   })
   void send({ type: 'pending', pending: null })
-  bar.show({ text: 'Cello saved the confirmation.', actions: [{ label: 'Send next', onClick: () => void sendNext(bar) }] })
+  bar.show({
+    text: 'Cello saved the confirmation.',
+    tone: 'done',
+    actions: [{ label: 'Send next', primary: true, onClick: () => void sendNext(bar) }],
+  })
 }

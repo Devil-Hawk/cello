@@ -1,11 +1,18 @@
 import { browser } from 'wxt/browser'
 import { version } from '../../lib/api'
+import type { ExtensionStatus } from '../../lib/messages'
 import { getLocal } from '../../lib/storage'
 import { needsUpdate } from '../../lib/version'
+import { icon, type IconName } from '../../ui/icons'
+import { tokenCss } from '../../ui/tokens'
 
-// The plain popup. PG10 rebuilds it on the design tokens with the numbers from
-// Cello's own count; this one says whether the extension is connected and offers
-// the two things a person does from the toolbar: fill this page, pause Cello.
+// The popup. One state at a time, one next step in each. The numbers come from
+// Cello's own count (GET /api/extension/status through the worker); nothing is
+// computed here.
+
+const style = document.createElement('style')
+style.textContent = tokenCss(':root')
+document.head.append(style)
 
 const app = document.getElementById('app') as HTMLElement
 
@@ -16,9 +23,11 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, cls?: 
   return e
 }
 
-function button(label: string, onClick: () => void | Promise<void>, primary = false): HTMLButtonElement {
-  const b = el('button', label, primary ? 'primary' : undefined)
+function button(label: string, onClick: () => void | Promise<void>, opts: { primary?: boolean; icon?: IconName } = {}): HTMLButtonElement {
+  const b = el('button', undefined, opts.primary ? 'primary' : undefined)
   b.type = 'button'
+  if (opts.icon) b.append(icon(opts.icon))
+  b.append(label)
   b.addEventListener('click', () => void onClick())
   return b
 }
@@ -30,54 +39,59 @@ async function fillThisPage(): Promise<void> {
   window.close()
 }
 
+const pause = (): Promise<void> => browser.runtime.sendMessage({ type: 'pause' }).then(render)
+const resume = (): Promise<void> => browser.runtime.sendMessage({ type: 'resume' }).then(render)
+
+function show(title: string, line: string, ...actions: HTMLElement[]): void {
+  const row = el('div', undefined, 'row')
+  row.append(...actions)
+  app.replaceChildren(el('h1', title), el('p', line), ...(actions.length ? [row] : []))
+}
+
 async function render(): Promise<void> {
   const token = await getLocal('token')
-  const paused = (await getLocal('paused')) === true
   const presence = await getLocal('presence')
-  app.replaceChildren()
 
   if (!token) {
-    app.append(
-      el('h1', 'Cello is not connected'),
-      el('p', 'In Cello, open Your search and choose Connect the extension. Or paste the token on the options page.'),
-      button('Open options', () => browser.runtime.openOptionsPage(), true),
+    show(
+      'Cello is not connected',
+      'In Cello, open Your search and choose Connect the extension. Or paste the token on the options page.',
+      button('Open options', () => browser.runtime.openOptionsPage(), { primary: true }),
     )
     return
   }
   if (needsUpdate(version(), presence?.min_version)) {
-    app.append(
-      el('h1', 'Update the Cello extension'),
-      el('p', 'This version is older than Cello allows. Load the new build from the install guide.'),
-    )
+    show('Update the Cello extension', 'This version is older than Cello allows. Load the new build from the install guide.')
     return
   }
+
+  const status = (await browser.runtime.sendMessage({ type: 'status' }).catch(() => null)) as ExtensionStatus | null
+  const paused = (await getLocal('paused')) === true || status?.paused === true
+
   if (paused) {
-    app.append(
-      el('h1', 'Cello is paused'),
-      el('p', 'Nothing will be sent until you resume.'),
-      button(
-        'Resume Cello',
-        async () => {
-          await browser.runtime.sendMessage({ type: 'resume' })
-          await render()
-        },
-        true,
-      ),
+    show('Cello is paused', 'Nothing is sent until you resume.', button('Resume Cello', resume, { primary: true, icon: 'play' }))
+    return
+  }
+  if (!status) {
+    show('Cello could not be reached', 'Check your connection. Your token is saved.', button('Try again', render, { primary: true }))
+    return
+  }
+  const fill = button('Fill this page', fillThisPage)
+  if (status.send_for_me) {
+    show(
+      'Send for me is on.',
+      `${status.sent_today} sent today, ${status.tries_today} of ${status.cap} tries used.`,
+      button('Pause Cello', pause, { primary: true, icon: 'pause' }),
+      fill,
     )
     return
   }
-  const row = el('div', undefined, 'row')
-  row.append(
-    button('Fill this page', fillThisPage, true),
-    button('Pause Cello', async () => {
-      await browser.runtime.sendMessage({ type: 'pause' })
-      await render()
-    }),
-  )
-  app.append(
-    el('h1', 'Cello is connected'),
-    el('p', presence?.at ? `Cello last heard from this browser at ${new Date(presence.at).toLocaleTimeString()}.` : 'Waiting for the first check.'),
-    row,
+  fill.className = 'primary'
+  show(
+    'Send for me is off.',
+    'Turn it on in Cello, in Your search. You can still fill a page from here.',
+    fill,
+    button('Pause Cello', pause, { icon: 'pause' }),
   )
 }
 

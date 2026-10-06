@@ -1,30 +1,12 @@
-:root {
-  color-scheme: light dark;
-  --bg: #ffffff;
-  --fg: #181d24;
-  --muted: #5b6573;
-  --line: #d5d9df;
-  --btn: #181d24;
-  --btn-fg: #ffffff;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #181d24;
-    --fg: #eceff3;
-    --muted: #a3acb8;
-    --line: #2f3742;
-    --btn: #eceff3;
-    --btn-fg: #181d24;
-  }
-}
+/* Colours are the design tokens, written into the page by main.ts (ui/tokens.ts). */
 * {
   box-sizing: border-box;
 }
 body {
   margin: 0;
   width: 320px;
-  background: var(--bg);
-  color: var(--fg);
+  background: var(--surface);
+  color: var(--ink);
   font: 14px/1.45 system-ui, sans-serif;
 }
 main {
@@ -36,7 +18,7 @@ h1 {
 }
 p {
   margin: 0 0 12px;
-  color: var(--muted);
+  color: var(--ink2);
 }
 .row {
   display: flex;
@@ -44,21 +26,26 @@ p {
   gap: 8px;
 }
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   min-height: 44px;
+  min-width: 44px;
   padding: 0 14px;
   border-radius: 6px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--ink3);
   background: transparent;
-  color: var(--fg);
+  color: var(--ink);
   font: inherit;
   cursor: pointer;
 }
 button.primary {
-  background: var(--btn);
+  background: var(--copper-text);
   color: var(--btn-fg);
-  border-color: var(--btn);
+  border-color: var(--copper-text);
 }
 button:focus-visible {
-  outline: 2px solid #0f766e;
+  outline: 2px solid var(--petrol-text);
   outline-offset: 2px;
 }

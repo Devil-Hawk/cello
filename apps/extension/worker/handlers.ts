@@ -1,6 +1,6 @@
 import { browser } from 'wxt/browser'
 import type { Browser } from 'wxt/browser'
-import { callApi, fetchFile, isRoute, version } from '../lib/api'
+import { callApi, fetchFile, getStatus, isRoute, version } from '../lib/api'
 import { ROUTES } from '../lib/fill-contract'
 import type { NextResponse } from '../lib/fill-contract'
 import type { ApiResult, FileReply, Hello, ToWorker } from '../lib/messages'
@@ -31,6 +31,8 @@ async function hello(tabId: number | undefined): Promise<Hello> {
 export async function handle(msg: ToWorker, sender: Browser.runtime.MessageSender): Promise<unknown> {
   const tabId = sender.tab?.id
   switch (msg.type) {
+    case 'status':
+      return getStatus()
     case 'api':
       return api(msg.route, msg.body)
     case 'file': {

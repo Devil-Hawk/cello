@@ -1,45 +1,55 @@
 // The page bar, the in-page Fill button and the Draft this buttons. Each lives in
 // its own closed-off shadow root so the page's styles and scripts cannot reach it,
 // and none of it is a form control the page could count as a submit button.
+// Colours come from the design tokens (ui/tokens.ts), light and dark.
+
+import { icon, type IconName } from './icons'
+import { tokenCss } from './tokens'
 
 export interface BarAction {
   label: string
   onClick: () => void
   primary?: boolean
   disabled?: boolean
+  icon?: IconName
 }
 
 export interface BarState {
   text: string
   actions?: BarAction[]
-  tone?: 'info' | 'warn'
+  /** info: working. warn: handed back to the person. done: finished. */
+  tone?: 'info' | 'warn' | 'done'
 }
 
 const BASE = `
   :host { all: initial; }
+  ${tokenCss(':host')}
   * { box-sizing: border-box; }
   button { font: inherit; cursor: pointer; }
 `
 
 const BAR_CSS = `
   .bar { position: fixed; top: 0; left: 0; right: 0; z-index: 2147483647; min-height: 44px;
-    display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 16px;
-    font: 14px/1.4 system-ui, sans-serif; background: #181d24; color: #eceff3; border-bottom: 1px solid #2f3742; }
-  .bar.warn { background: #3b2a12; border-bottom-color: #8a5a14; }
-  .text { flex: 1 1 auto; }
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 4px 16px;
+    font: 14px/1.4 system-ui, sans-serif; background: var(--surface); color: var(--ink);
+    border-bottom: 1px solid var(--ink3); }
+  .mark { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; background: var(--petrol); }
+  .warn .mark { background: var(--stop); }
+  .glyph { flex: 0 0 auto; display: flex; color: var(--ok); }
+  .text { flex: 1 1 12rem; }
   .actions { display: flex; gap: 8px; flex: 0 0 auto; }
-  button { min-height: 44px; min-width: 44px; padding: 0 14px; border-radius: 6px; border: 1px solid #4b5563;
-    background: transparent; color: inherit; }
-  button.primary { background: #eceff3; color: #181d24; border-color: #eceff3; }
+  button { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; min-width: 44px; padding: 0 14px;
+    border-radius: 6px; border: 1px solid var(--ink3); background: transparent; color: var(--ink); }
+  button.primary { background: var(--copper-text); color: var(--btn-fg); border-color: var(--copper-text); }
   button:disabled { opacity: 0.5; cursor: default; }
-  button:focus-visible { outline: 2px solid #5eead4; outline-offset: 2px; }
+  button:focus-visible { outline: 2px solid var(--petrol-text); outline-offset: 2px; }
 `
 
 const BUTTON_CSS = `
   button { position: fixed; right: 16px; bottom: 16px; z-index: 2147483647; min-height: 44px; min-width: 44px;
-    padding: 0 16px; border-radius: 22px; border: 1px solid #181d24; background: #181d24; color: #eceff3;
-    font: 600 14px system-ui, sans-serif; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
-  button:focus-visible { outline: 2px solid #5eead4; outline-offset: 2px; }
+    padding: 0 16px; border-radius: 22px; border: 1px solid var(--copper-text); background: var(--copper-text);
+    color: var(--btn-fg); font: 600 14px system-ui, sans-serif; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  button:focus-visible { outline: 2px solid var(--petrol-text); outline-offset: 2px; }
 `
 
 function host(tag: string, css: string): { host: HTMLElement; root: ShadowRoot } {
@@ -68,9 +78,17 @@ export function mountBar(): Bar {
         document.documentElement.append(mounted.host)
       }
       const b = body as HTMLElement
-      b.className = `bar ${state.tone === 'warn' ? 'warn' : ''}`
+      const tone = state.tone ?? 'info'
+      b.className = `bar ${tone}`
       b.replaceChildren()
       b.setAttribute('role', 'status')
+      const lead = document.createElement('span')
+      if (tone === 'done') {
+        lead.className = 'glyph'
+        lead.append(icon('check'))
+      } else {
+        lead.className = 'mark'
+      }
       const t = document.createElement('div')
       t.className = 'text'
       t.textContent = state.text
@@ -79,7 +97,8 @@ export function mountBar(): Bar {
       for (const a of state.actions ?? []) {
         const btn = document.createElement('button')
         btn.type = 'button'
-        btn.textContent = a.label
+        if (a.icon) btn.append(icon(a.icon, 16))
+        btn.append(a.label)
         if (a.primary) btn.className = 'primary'
         btn.disabled = !!a.disabled
         btn.addEventListener('click', (e) => {
@@ -87,7 +106,7 @@ export function mountBar(): Bar {
         })
         actions.append(btn)
       }
-      b.append(t, actions)
+      b.append(lead, t, actions)
     },
     hide() {
       mounted?.host.remove()
@@ -113,8 +132,8 @@ export function mountFillButton(onClick: () => void): () => void {
 
 const DRAFT_CSS = `
   button { min-height: 44px; min-width: 44px; margin: 4px 0; padding: 0 14px; border-radius: 6px;
-    border: 1px solid #181d24; background: #fff; color: #181d24; font: 600 14px system-ui, sans-serif; }
-  button:focus-visible { outline: 2px solid #0f766e; outline-offset: 2px; }
+    border: 1px solid var(--ink3); background: var(--surface); color: var(--ink); font: 600 14px system-ui, sans-serif; }
+  button:focus-visible { outline: 2px solid var(--petrol-text); outline-offset: 2px; }
 `
 
 /** "Draft this" after a motivation field. Returns a remover. */

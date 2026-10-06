@@ -17,7 +17,17 @@ export interface Pending {
   since: number
 }
 
+/** What Cello's own count says (GET /api/extension/status). The popup shows it and computes nothing. */
+export interface ExtensionStatus {
+  send_for_me: boolean
+  paused: boolean
+  sent_today: number
+  tries_today: number
+  cap: number
+}
+
 export type ToWorker =
+  | { type: 'status' }
   | { type: 'api'; route: Route; body: unknown }
   | { type: 'file'; url: string }
   | { type: 'screenshot' }
