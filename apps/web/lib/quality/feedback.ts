@@ -196,6 +196,10 @@ export async function exportFeedback(admin: AdminClient, opts: { limit?: number;
       .from('feedback_events')
       .update({ status: 'sent', sent_at: now.toISOString() })
       .in('id', sentIds.slice(0, MAX_BATCH))
+    // The size of each edit stays on its event, so the median can be read back (measure P2).
+    for (const { event, score } of toSend) {
+      if (event.signal === 'draft_edited') await admin.from('feedback_events').update({ edit_size: score.value }).eq('id', event.id)
+    }
     result.sent = toSend.length
     return result
   }

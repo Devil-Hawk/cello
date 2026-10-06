@@ -35,6 +35,9 @@ create table if not exists public.feedback_events (
   status text not null default 'pending' check (status in ('pending', 'sent', 'expired', 'failed')),
   attempts smallint not null default 0,
   sent_at timestamptz,
+  -- draft_edited only: the word-level edit size (0 to 1) that was sent, kept so the
+  -- median can be read back from here (measure P2).
+  edit_size real check (edit_size is null or (edit_size >= 0 and edit_size <= 1)),
   unique (user_id, signal, subject_table, subject_id)
 );
 

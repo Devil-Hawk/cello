@@ -115,6 +115,17 @@ describe('exportFeedback', () => {
     expect(score.value).toBeCloseTo(0.1, 3)
   })
 
+  it('keeps the edit size on the event once it is sent, and nothing on an approval', async () => {
+    const { admin, tables } = fakeAdmin({
+      feedback_events: [event({ id: 'edit', signal: 'draft_edited' }), event({ id: 'ok', subject_id: 'msg-9' })],
+      outreach_messages: [{ id: 'msg-1', generated_subject: 'Hello', generated_body: 'a b c d', subject: 'Hello', body: 'a b c x' }],
+    })
+    await exportFeedback(admin, { now: NOW })
+    const byId = Object.fromEntries(tables.feedback_events.map((r) => [r.id, r]))
+    expect(byId.edit).toMatchObject({ status: 'sent', edit_size: 0.2 })
+    expect(byId.ok).not.toHaveProperty('edit_size')
+  })
+
   it('an edit that changed nothing, or whose original was never kept, is skipped, not sent', async () => {
     const { admin, tables } = fakeAdmin({
       feedback_events: [event({ id: 'same', signal: 'draft_edited' }), event({ id: 'nokept', signal: 'draft_edited', subject_id: 'msg-2' })],
