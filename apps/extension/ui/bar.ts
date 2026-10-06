@@ -1,6 +1,7 @@
 // The page bar, the in-page Fill button and the Draft this buttons. Each lives in
-// its own closed-off shadow root so the page's styles and scripts cannot reach it,
-// and none of it is a form control the page could count as a submit button.
+// its own shadow root so the page's styles do not reach it, and none of it is a form
+// control the page could count as a submit button. The root is open (the specs look inside
+// it), so page script can read it; a click it fakes is not trusted and is ignored.
 // Colours come from the design tokens (ui/tokens.ts), light and dark.
 
 import { icon, type IconName } from './icons'
