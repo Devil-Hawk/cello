@@ -18,10 +18,8 @@ name: Autopilot Cron - Continuous Draft
 # variable (Settings -> Secrets and variables -> Actions -> Variables).
 
 on:
-  schedule:
-    # Every 4 hours at an odd minute. Each tick writes a fresh graph thread and
-    # checkpoints per enabled user, so hourly was the main DB growth source.
-    - cron: '23 */4 * * *'
+  # No schedule: paused until the database clock runs it. Run it by hand from
+  # the Actions tab.
   workflow_dispatch:
 
 # Never let two ticks overlap; guardrails are idempotent but a single in-flight
