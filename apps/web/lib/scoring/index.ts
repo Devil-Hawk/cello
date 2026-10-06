@@ -426,8 +426,12 @@ export async function triageRole(args: TriageArgs): Promise<TriageResult> {
     } else if (reaction === 'applied' && app.stage === 'discovered') {
       await db.from('applications').update({ stage: 'applied', applied_at: new Date().toISOString() }).eq('id', app.id).eq('user_id', userId)
     }
-    // A role the person hid and now wants is theirs again.
-    if (mine.hidden_reason === 'not_for_me') await db.from('person_roles').update({ hidden_reason: null }).eq('user_id', userId).eq('job_id', jobId)
+    // A role the person wants is saved (a prune never takes a saved role), and if they hid it, it is theirs again.
+    await db
+      .from('person_roles')
+      .update({ saved_at: new Date().toISOString(), ...(mine.hidden_reason === 'not_for_me' && { hidden_reason: null }) })
+      .eq('user_id', userId)
+      .eq('job_id', jobId)
   } else {
     // Only an application that triage itself created is taken back. One the person made on purpose stays.
     if (app && app.source === 'triage' && app.stage === 'discovered') await db.from('applications').delete().eq('id', app.id).eq('user_id', userId)
@@ -451,6 +455,8 @@ export async function undoReaction(args: { db: Db; userId: string; jobId: string
   const app = existing.data as { id: string; source: string | null; stage: string } | null
   if (app && app.source === 'triage' && app.stage === 'discovered') await db.from('applications').delete().eq('id', app.id).eq('user_id', userId)
   if (prior.reaction === 'not_for_me') await db.from('person_roles').update({ hidden_reason: null }).eq('user_id', userId).eq('job_id', jobId).eq('hidden_reason', 'not_for_me')
+  // Only the reaction that saved the role un-saves it. An applied role stays saved.
+  if (prior.reaction === 'interested') await db.from('person_roles').update({ saved_at: null }).eq('user_id', userId).eq('job_id', jobId)
   return { undone: true }
 }
 

@@ -127,6 +127,9 @@ describe('triageRole', () => {
       predicted: { judge: 0.8, embedding: 0.6, stated: 0.5, blended: 0.7, chance: 'possible' },
     })
     expect(String(db.tables.role_reactions[0].job_text)).toContain('Build payment services in Go.')
+    // Interested keeps the role in Saved, for this person only.
+    expect(db.tables.person_roles.find((r) => r.user_id === 'u')?.saved_at).toBeTruthy()
+    expect(db.tables.person_roles.find((r) => r.user_id === 'someone-else')?.saved_at ?? null).toBeNull()
   })
 
   it('does not save a second application, and reacting twice keeps one reaction', async () => {
@@ -173,6 +176,7 @@ describe('undoReaction', () => {
     expect(db.tables.applications).toHaveLength(1)
     await undoReaction({ db, userId: 'u', jobId: 'job1' })
     expect(db.tables.applications).toHaveLength(0)
+    expect(db.tables.person_roles.find((r) => r.user_id === 'u')?.saved_at ?? null).toBeNull()
     expect((await undoReaction({ db, userId: 'u', jobId: 'job1' })).undone).toBe(false)
   })
 })
