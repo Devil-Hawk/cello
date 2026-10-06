@@ -107,7 +107,7 @@ export default function CompaniesPage() {
       setCompanies(
         (data ?? [])
           .map((company) => {
-            const jobs = company.jobs ?? []
+            const jobs = (company.jobs ?? []) as { person_roles?: { match_score: number | null }[] }[]
             const scores = jobs
               .map((j) => j.person_roles?.[0]?.match_score)
               .filter((s): s is number => typeof s === 'number')
