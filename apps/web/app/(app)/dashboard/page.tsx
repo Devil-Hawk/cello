@@ -260,6 +260,7 @@ export default function DashboardPage() {
             created_at: string
             finished_at: string | null
             error: string | null
+            result?: unknown
           }
         | undefined
       setLatestRun(
@@ -271,6 +272,7 @@ export default function DashboardPage() {
               createdAt: runRow.created_at,
               finishedAt: runRow.finished_at,
               error: runRow.error,
+              result: runRow.result,
             }
           : null
       )
@@ -428,7 +430,7 @@ export default function DashboardPage() {
           />
           {/* Side by side from `sm` up: neither of these needs full width, and
               pairing them stops the primary column ending in a ragged stack. */}
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-6 sm:grid-cols-2 [&>*]:min-w-0">
             <AgentActivityCard run={latestRun} />
             <BudgetMeterCard
               budget={budget}

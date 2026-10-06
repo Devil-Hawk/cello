@@ -96,6 +96,15 @@ export const STAGE_META: Record<PipelineStage, StageMeta> = {
   },
 }
 
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+
+/** True when the posting's own date is within the last 7 days. First-seen dates never count. */
+export function postedThisWeek(postedAt: string | null | undefined, now = Date.now()): boolean {
+  if (!postedAt) return false
+  const t = new Date(postedAt).getTime()
+  return !Number.isNaN(t) && now - t < WEEK_MS
+}
+
 /** "Jan 5" this year, "Jan 5, 2025" otherwise. Empty string for missing/invalid input. */
 export function formatShortDate(iso: string | null | undefined): string {
   if (!iso) return ''

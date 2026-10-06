@@ -58,7 +58,7 @@ export function GmailSyncCard({
 
   const status = !monitor
     ? {
-        text: 'Applications are monitored through ATS receipts and browser activity. Inbox monitoring is off.',
+        text: 'Applications are tracked through employer confirmations and browser activity. Inbox monitoring is off.',
         cta: 'Turn on Gmail monitoring',
       }
     : !backgroundReady

@@ -168,6 +168,27 @@ describe('buildGoalStrategyContext', () => {
   })
 })
 
+// --- model-written insights stay out of prompts ---------------------------------
+
+describe('reward_loop insights', () => {
+  const insights = [
+    { user_id: USER, status: 'active', kind: 'pattern', source: 'reward_loop', company_id: null, statement: 'Model-written pattern.', updated_at: '2026-01-02' },
+    { user_id: USER, status: 'active', kind: 'strategy', source: 'user_stated', company_id: null, statement: 'Person-stated strategy.', updated_at: '2026-01-01' },
+  ]
+
+  it('are absent from every context builder while user-stated rows stay', async () => {
+    const admin = fakeAdmin({ insights })
+    for (const block of [
+      await buildMatchContext(admin, USER, COMPANY),
+      await buildGoalStrategyContext(admin, USER),
+      await buildOutreachContext(admin, USER, null, COMPANY),
+    ]) {
+      expect(block).not.toContain('Model-written pattern.')
+      expect(block).toContain('Person-stated strategy.')
+    }
+  })
+})
+
 // --- buildOutreachContext -------------------------------------------------------
 
 describe('buildOutreachContext', () => {
@@ -208,7 +229,7 @@ describe('buildTurnContext', () => {
   it('composes mcp/standing/goals blocks and degrades kb/entity to empty with nothing on file', async () => {
     mcpToolsPromptBlockMock.mockResolvedValueOnce('MCP TOOLS BLOCK')
     const admin = fakeAdmin({
-      insights: [{ user_id: USER, status: 'active', kind: 'preference', statement: 'Remote only.', updated_at: '2026-01-01' }],
+      insights: [{ user_id: USER, status: 'active', kind: 'preference', source: 'user_stated', statement: 'Remote only.', updated_at: '2026-01-01' }],
       profiles: [{ id: USER, preferences: {} }],
     })
     const ctx = await buildTurnContext(admin, USER, 'hello')

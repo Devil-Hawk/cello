@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isUnknownText, knownParts } from './format'
+import { isUnknownText, knownParts, postedThisWeek } from './format'
 import { computeJobProvenance } from './sources/provenance'
 
 describe('knownParts', () => {
@@ -35,5 +35,18 @@ describe('provenance discovery date', () => {
     const seen = reasons.find((r) => r.startsWith('Seen once on'))
     expect(seen).toBe('Seen once on Oct 5, 2020 and never re-checked since.')
     expect(seen).not.toMatch(/T\d\d:/)
+  })
+})
+
+describe('postedThisWeek', () => {
+  const now = Date.parse('2026-10-05T12:00:00Z')
+  const daysAgo = (d: number) => new Date(now - d * 86_400_000).toISOString()
+
+  it('counts only a posting date inside 7 days', () => {
+    expect(postedThisWeek(null, now)).toBe(false)
+    expect(postedThisWeek(undefined, now)).toBe(false)
+    expect(postedThisWeek('not a date', now)).toBe(false)
+    expect(postedThisWeek(daysAgo(3), now)).toBe(true)
+    expect(postedThisWeek(daysAgo(8), now)).toBe(false)
   })
 })

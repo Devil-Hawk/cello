@@ -245,6 +245,7 @@ export async function readStandingPreferences(admin: AdminClient, userId: string
     .select('statement, updated_at')
     .eq('user_id', userId)
     .eq('kind', 'preference')
+    .eq('source', 'user_stated')
     .eq('status', 'active')
     .order('updated_at', { ascending: false })
     .limit(MAX_STANDING_PREFERENCES)

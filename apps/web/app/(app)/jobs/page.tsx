@@ -1161,9 +1161,9 @@ function JobsPageInner() {
         <EmptyState
           icon={Briefcase}
           title="No jobs discovered yet"
-          body={`Cello checks your ${companies.length} ${
+          body={`Refresh now to fetch open roles from your ${companies.length} ${
             companies.length === 1 ? 'company' : 'companies'
-          } hourly — or refresh now to fetch open roles.`}
+          }.`}
           action={<RefreshJobsButton onRefreshed={refreshAll} />}
         />
       ) : (

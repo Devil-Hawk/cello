@@ -2,12 +2,11 @@
 
 // Composer: agent chips (which harness agents' tools are callable this turn),
 // model selector (falls back to the account's Settings -> Model preference),
-// thinking-mode toggle (auto vs. review-before-each-tool-call), the bypass-
-// permissions toggle (with its boundary spelled out while it's on — see the
-// banner below), and the send/stop control.
+// thinking-mode toggle (auto vs. review-before-each-tool-call), and the
+// send/stop control.
 
 import { useState } from 'react'
-import { ShieldAlert, Send, Square } from 'lucide-react'
+import { Send, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Segmented } from '@/components/ui/segmented'
@@ -29,8 +28,6 @@ interface ComposerProps {
   defaultModelLabel: string
   thinkingMode: 'auto' | 'review'
   onThinkingModeChange: (mode: 'auto' | 'review') => void
-  bypassMode: boolean
-  onBypassModeChange: (on: boolean) => void
   onSend: (text: string) => void
   onStop: () => void
   streaming: boolean
@@ -44,8 +41,6 @@ export function Composer({
   defaultModelLabel,
   thinkingMode,
   onThinkingModeChange,
-  bypassMode,
-  onBypassModeChange,
   onSend,
   onStop,
   streaming,
@@ -140,58 +135,7 @@ export function Composer({
               it or redirect the plan first.
             </TooltipContent>
           </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-pressed={bypassMode}
-                onClick={() => onBypassModeChange(!bypassMode)}
-                className={cn(
-                  'flex h-8 items-center gap-1.5 rounded-control border px-2.5 text-caption font-medium transition-colors',
-                  // A permission-loosening control needs weight even at rest —
-                  // unlike the model/thinking-mode pickers beside it, this one
-                  // stays visibly flagged (the `destructive` token, not a raw
-                  // amber/rose utility) whether it's on or off, just heavier
-                  // once it actually is on.
-                  bypassMode
-                    ? 'border-destructive/50 bg-destructive/10 text-destructive'
-                    : 'border-destructive/30 bg-destructive/5 text-destructive hover:bg-destructive/10'
-                )}
-              >
-                <ShieldAlert className="h-3.5 w-3.5" />
-                Bypass permissions
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-[260px] font-normal">
-              Skips per-step approval for read/research/scoring/drafting/tailoring tool calls in this
-              conversation. Submitting an application or sending outreach to a real person always still stops
-              for your explicit confirmation, on or off.
-            </TooltipContent>
-          </Tooltip>
         </div>
-
-        <AnimatePresence initial={false}>
-          {bypassMode && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={transitionFast}
-              className="overflow-hidden"
-            >
-              <div className="flex items-start gap-2 rounded-control border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-[11px] leading-relaxed text-destructive">
-                <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <p>
-                  <span className="font-medium">Bypass permissions is on</span> for this conversation — research,
-                  matching, scoring, drafting, and tailoring tool calls run without asking first. Submitting a job
-                  application or sending outreach to a real person still always stops and asks for your explicit
-                  confirmation.
-                </p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         <div className="flex items-end gap-2">
           <Textarea
