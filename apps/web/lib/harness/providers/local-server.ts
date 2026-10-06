@@ -7,13 +7,9 @@
 // gated by isSelfHosted() exactly like local-cli, even though nothing here
 // technically *requires* a spawned process.
 
-import OpenAI from 'openai'
-import type {
-  ChatCompletionMessageParam,
-  ChatCompletionCreateParamsNonStreaming,
-} from 'openai/resources/chat/completions'
 import type { DecryptedApiKeys, LlmResult, LlmRunOptions } from '../types'
-import { ProviderUnavailableError, TruncatedResponseError, estimateTokens, isSelfHosted, tokenBuckets } from './index'
+import { chatModelFor, completeOn } from '../../models/factory'
+import { ProviderUnavailableError, TruncatedResponseError, isSelfHosted } from './index'
 
 /** Timeout for the lightweight reachability probe used by the settings route. */
 const PROBE_TIMEOUT_MS = 2_500
@@ -70,9 +66,10 @@ export async function detectLocalServer(baseUrl: string): Promise<LocalServerAva
 }
 
 /**
- * Call an OpenAI-compatible local server's chat-completions endpoint. No key
- * is required — a placeholder is sent because the OpenAI SDK insists on a
- * non-empty apiKey string, but local servers generally never check it.
+ * Call an OpenAI-compatible local server's chat-completions endpoint through the
+ * factory (ChatOpenAI pointed at the server). No key is required — a placeholder
+ * is sent because the client insists on a non-empty apiKey string, but local
+ * servers generally never check it.
  *
  * Honors AbortSignal and opts.maxTokens (both map directly onto the
  * OpenAI-compatible request). Does NOT honor opts.reasoning or
@@ -105,47 +102,12 @@ export async function callLocalServer(
     )
   }
 
-  const client = new OpenAI({
-    apiKey: 'local-server-no-key-required',
-    baseURL: normalizeBaseUrl(baseUrl),
-  })
-
-  const messages: ChatCompletionMessageParam[] = []
-  if (opts.system) messages.push({ role: 'system', content: opts.system })
-  if (opts.messages && opts.messages.length > 0) {
-    for (const m of opts.messages) messages.push({ role: m.role, content: m.content })
-  } else if (opts.prompt) {
-    messages.push({ role: 'user', content: opts.prompt })
-  }
-
-  const maxTokens = opts.maxTokens ?? 2048
-  const body: ChatCompletionCreateParamsNonStreaming = {
-    model,
-    messages,
-    max_tokens: maxTokens,
-    temperature: opts.temperature ?? 0.4,
-    ...(opts.json ? { response_format: { type: 'json_object' as const } } : {}),
-  }
-
-  const response = await client.chat.completions.create(body, { signal }).catch((err: unknown) => {
+  try {
+    return await completeOn(chatModelFor('local-server', model, apiKeys, opts), model, 'local-server', opts, signal)
+  } catch (err) {
+    // A JSON reply cut off at max_tokens is the model's answer, not an unreachable server.
+    if (err instanceof TruncatedResponseError) throw err
     const message = err instanceof Error ? err.message : String(err)
     throw new ProviderUnavailableError(`Local server at ${baseUrl} did not respond: ${message}`)
-  })
-
-  const choice = response.choices[0]
-  const content = choice?.message?.content ?? ''
-  const finishReason = choice?.finish_reason ?? undefined
-  const usage = response.usage
-  const promptTokens = usage?.prompt_tokens ?? estimateTokens(messages.map((m) => String(m.content)).join('\n'))
-  const completionTokens = usage?.completion_tokens ?? estimateTokens(content)
-  const tokensUsed = usage?.total_tokens ?? promptTokens + completionTokens
-
-  // Same cap semantics as OpenRouter: a JSON response cut off at max_tokens
-  // is unrecoverable, so fail loudly instead of handing the caller
-  // unparseable JSON to puzzle over.
-  if (opts.json && finishReason === 'length') {
-    throw new TruncatedResponseError(completionTokens, maxTokens)
   }
-
-  return { content, tokensUsed, promptTokens, completionTokens, model, finishReason, ...tokenBuckets(usage) }
 }
