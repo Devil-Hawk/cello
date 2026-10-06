@@ -80,6 +80,18 @@ function facts(text: string, claim = true): { dates: Set<string>; numbers: Set<s
   return { dates, numbers, quotes }
 }
 
+/** The numbers, dates and quotations in `text` that none of the `evidence` texts state, worded for a failure line. */
+export function unsupported(text: string, evidence: string[]): string[] {
+  const have = evidence.map((e) => facts(e, false))
+  const haystack = squash(evidence.join('\n'))
+  const stated = facts(text)
+  return [
+    ...[...stated.numbers].filter((n) => !have.some((h) => h.numbers.has(n))).map((n) => `the number ${n}`),
+    ...[...stated.dates].filter((d) => !have.some((h) => h.dates.has(d))).map((d) => `the date ${d}`),
+    ...stated.quotes.filter((q) => !haystack.includes(q)).map((q) => `the quotation "${q.slice(0, 60)}"`),
+  ]
+}
+
 // --- the check ----------------------------------------------------------------------------------------
 
 export interface Checked {
@@ -105,14 +117,7 @@ export function checkAnswer(answer: ModelAnswer, input: CheckInput): Checked {
     }
     const aboutKeys = new Set(about.map(key))
     const evidence = input.results.filter((r) => (about.length ? r.object !== null && aboutKeys.has(key(r.object)) : true)).map((r) => r.text)
-    const have = evidence.map((e) => facts(e, false))
-    const haystack = squash(evidence.join('\n'))
-    const stated = facts(p.text)
-    const missing = [
-      ...[...stated.numbers].filter((n) => !have.some((h) => h.numbers.has(n))).map((n) => `the number ${n}`),
-      ...[...stated.dates].filter((d) => !have.some((h) => h.dates.has(d))).map((d) => `the date ${d}`),
-      ...stated.quotes.filter((q) => !haystack.includes(q)).map((q) => `the quotation "${q.slice(0, 60)}"`),
-    ]
+    const missing = unsupported(p.text, evidence)
     if (missing.length) {
       failures.push({ part: i + 1, reason: `${missing.slice(0, 5).join(', ')} not in the results for ${about.length ? about.map((a) => `${a.kind} ${a.ref}`).join(', ') : 'this turn'}` })
       return

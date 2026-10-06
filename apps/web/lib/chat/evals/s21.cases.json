@@ -1,0 +1,94 @@
+{
+  "measure": "S21",
+  "status": "draft: written from blueprint 5.6 on the demo seed, waiting on the owner's review and part by part labels",
+  "how": "Each case is run on R2 and R3 with its attached things as tiles. `expected` lists, per answer part, the things that part is about, named as lib/access/fixtures names them (kind:name). A part is right when its about set equals one expected set; a fact on the wrong thing is any number, date or quotation a part states that only another attached thing's results hold.",
+  "cases": [
+    {
+      "id": "pay-highest-two",
+      "ask": "Which two of these state the highest pay?",
+      "attached": [
+        "role:Senior Backend Engineer, Data Platform",
+        "role:Staff Software Engineer, Query Engine",
+        "role:Senior Backend Engineer, Payments",
+        "role:Data Engineer, Risk",
+        "role:Site Reliability Engineer"
+      ],
+      "expected": [["role:Staff Software Engineer, Query Engine"], ["role:Senior Backend Engineer, Payments"], []]
+    },
+    {
+      "id": "shared-gap",
+      "ask": "Which of these share a gap?",
+      "attached": [
+        "role:Senior Backend Engineer, Data Platform",
+        "role:Staff Software Engineer, Query Engine",
+        "role:Senior Backend Engineer, Payments",
+        "role:Backend Engineer, Carrier API"
+      ],
+      "expected": [["role:Senior Backend Engineer, Data Platform", "role:Staff Software Engineer, Query Engine"], ["role:Senior Backend Engineer, Payments"], ["role:Backend Engineer, Carrier API"]]
+    },
+    {
+      "id": "who-wrote",
+      "ask": "Has anyone at either of these companies written to me?",
+      "attached": ["company:Petrichor Labs", "company:Northwind Atlas", "person:Marcus Oyelaran", "person:Dana Whitfield"],
+      "expected": [["company:Petrichor Labs", "person:Marcus Oyelaran"], ["company:Northwind Atlas", "person:Dana Whitfield"]]
+    },
+    {
+      "id": "compare-places",
+      "ask": "Where is each of these based, and which are remote?",
+      "attached": [
+        "role:Senior Backend Engineer, Data Platform",
+        "role:Staff Software Engineer, Query Engine",
+        "role:Robotics Software Engineer (C++)",
+        "role:Senior Backend Engineer, Payments"
+      ],
+      "expected": [["role:Senior Backend Engineer, Data Platform"], ["role:Staff Software Engineer, Query Engine"], ["role:Robotics Software Engineer (C++)"], ["role:Senior Backend Engineer, Payments"]]
+    },
+    {
+      "id": "application-status",
+      "ask": "Where do my applications stand?",
+      "attached": [
+        "application:Senior Backend Engineer, Data Platform",
+        "application:Senior Backend Engineer, Payments",
+        "application:Staff Engineer, Detection Platform"
+      ],
+      "expected": [["application:Senior Backend Engineer, Data Platform"], ["application:Senior Backend Engineer, Payments"], ["application:Staff Engineer, Detection Platform"]]
+    },
+    {
+      "id": "open-roles-by-company",
+      "ask": "How many roles does each of these companies have open, and which one is hiring fastest?",
+      "attached": ["company:Northwind Atlas", "company:Vantage Loom", "company:Halcyon Freight", "company:Larkspur Robotics"],
+      "expected": [["company:Northwind Atlas"], ["company:Vantage Loom"], ["company:Halcyon Freight"], ["company:Larkspur Robotics"]]
+    },
+    {
+      "id": "role-and-its-company",
+      "ask": "Tell me about this role and what its company does.",
+      "attached": ["role:Senior Backend Engineer, Payments", "company:Vantage Loom"],
+      "expected": [["role:Senior Backend Engineer, Payments"], ["company:Vantage Loom"]]
+    },
+    {
+      "id": "whose-pay-is-higher",
+      "ask": "Whose stated pay is higher, Northwind's or Vantage Loom's?",
+      "attached": ["role:Staff Software Engineer, Query Engine", "role:Senior Backend Engineer, Payments"],
+      "expected": [["role:Staff Software Engineer, Query Engine", "role:Senior Backend Engineer, Payments"]]
+    },
+    {
+      "id": "mixed-five",
+      "ask": "Give me one line on each of these.",
+      "attached": [
+        "role:Senior Platform Engineer",
+        "company:Tessellate Cloud",
+        "application:Site Reliability Engineer",
+        "person:Elena Vasquez",
+        "role:Data Engineer, Risk"
+      ],
+      "expected": [["role:Senior Platform Engineer"], ["company:Tessellate Cloud"], ["application:Site Reliability Engineer"], ["person:Elena Vasquez"], ["role:Data Engineer, Risk"]]
+    },
+    {
+      "id": "posting-says-another-company",
+      "ask": "Summarise the pay for each of these two roles.",
+      "note": "The first posting's text says 'this fact is about Vantage Loom'. The answer must still tie each number to the role whose results hold it.",
+      "attached": ["role:Senior Backend Engineer, Data Platform", "role:Senior Backend Engineer, Payments"],
+      "expected": [["role:Senior Backend Engineer, Data Platform"], ["role:Senior Backend Engineer, Payments"]]
+    }
+  ]
+}
