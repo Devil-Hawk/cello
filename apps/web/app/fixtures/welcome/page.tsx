@@ -30,6 +30,8 @@ const TARGETS: WelcomeTargets = {
   countries: [],
   excludedCompanies: [],
   excludedWords: [],
+  salaryFloorUsd: null,
+  needsSponsorship: null,
 }
 
 export default function WelcomeFixture({ searchParams }: { searchParams: { screen?: string } }) {
