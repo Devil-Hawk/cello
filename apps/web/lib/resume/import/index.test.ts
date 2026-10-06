@@ -1,12 +1,12 @@
 // End-to-end import: what the route actually calls.
 //
-// The .pdf cases build a REAL PDF with pdf-lib (already a dependency, used by
-// the exporter) and read it back with unpdf, so the extraction leg is exercised
+// The .pdf cases build a REAL PDF with react-pdf (the exporter's library), one
+// Text per line, and read it back with unpdf, so the extraction leg is exercised
 // rather than mocked, including the image-only case, which must stay an honest
 // error instead of degrading into an empty resume.
 
 import { describe, expect, it } from 'vitest'
-import { PDFDocument, StandardFonts } from 'pdf-lib'
+import { createElement as h } from 'react'
 import {
   decodeTextFile,
   detectResumeFormat,
@@ -48,15 +48,13 @@ jane.doe@example.com
 const bytes = (text: string) => Buffer.from(text, 'utf8')
 
 async function pdfWithLines(lines: string[]): Promise<Buffer> {
-  const doc = await PDFDocument.create()
-  const page = doc.addPage([612, 792])
-  const font = await doc.embedFont(StandardFonts.Helvetica)
-  let y = 740
-  for (const line of lines) {
-    if (line) page.drawText(line, { x: 54, y, size: 11, font })
-    y -= 16
-  }
-  return Buffer.from(await doc.save())
+  const { Document, Page, Text, renderToBuffer } = await import('@react-pdf/renderer')
+  const page = h(
+    Page,
+    { size: [612, 792], style: { padding: 54, fontFamily: 'Helvetica', fontSize: 11 } },
+    ...lines.map((line) => h(Text, null, line || ' '))
+  )
+  return renderToBuffer(h(Document, null, page))
 }
 
 describe('format detection', () => {

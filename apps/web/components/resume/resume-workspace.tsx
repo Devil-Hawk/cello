@@ -31,7 +31,9 @@
 //   Markdown-to-Markdown.
 
 import { useState } from 'react'
-import { Segmented } from '@/components/ui/segmented'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeSanitize from 'rehype-sanitize'
 import { cn } from '@/lib/utils'
 import { MarkdownEditor } from './markdown-editor'
 import { ResumeDiff } from './resume-diff'
@@ -44,9 +46,11 @@ export interface ResumeWorkspaceProps {
   /** The authored Markdown being edited. */
   markdown: string
   onMarkdownChange: (markdown: string) => void
-  /** Selected template id — persisted as content_json.templateId on save. */
-  templateId: string
+  /** Selected template id — persisted as content_json.templateId on save. Null for a letter or message: no picker, plain preview. */
+  templateId: string | null
   onTemplateChange: (templateId: string) => void
+  /** Ctrl/Cmd + S in the editor. */
+  onSave?: () => void
   /** The compared version's MARKDOWN, or null when there is nothing to diff. */
   compareMarkdown?: string | null
   compareLabel?: string
@@ -65,11 +69,36 @@ export interface ResumeWorkspaceProps {
   className?: string
 }
 
+const VIEWS: { value: ResumeWorkspaceMode; label: string }[] = [
+  { value: 'edit', label: 'Edit' },
+  { value: 'preview', label: 'Preview' },
+  { value: 'diff', label: 'Diff' },
+]
+
+/** A letter or message has no template: the same sanitised Markdown, plainly set. */
+function PlainPreview({ markdown, className, ...rest }: { markdown: string; className?: string; 'aria-label': string }) {
+  return (
+    <div
+      {...rest}
+      role="region"
+      className={cn(
+        'overflow-auto rounded-control border bg-card p-4 text-body leading-relaxed [&_h1]:mb-2 [&_h1]:text-title [&_h2]:mb-2 [&_h2]:text-body [&_h2]:font-semibold [&_li]:ml-5 [&_li]:list-disc [&_p]:mb-3',
+        className
+      )}
+    >
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+        {markdown}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
 export function ResumeWorkspace({
   markdown,
   onMarkdownChange,
   templateId,
   onTemplateChange,
+  onSave,
   compareMarkdown = null,
   compareLabel = 'Previous version',
   currentLabel = 'Current draft',
@@ -95,35 +124,45 @@ export function ResumeWorkspace({
 
   return (
     <div className={cn('flex min-w-0 flex-col gap-3', className)}>
-      <TemplatePicker value={templateId} onChange={onTemplateChange} />
+      {templateId !== null && <TemplatePicker value={templateId} onChange={onTemplateChange} />}
 
       {!readOnly && (
-        <Segmented
+        // ponytail: plain tokens at 44px until PG0's Key is on the base; swap at the rebase
+        <div
+          role="group"
           aria-label="Document view"
-          value={active}
-          onValueChange={(value) => setMode(value as ResumeWorkspaceMode)}
-          options={
-            compareMarkdown === null
-              ? [
-                  { value: 'edit', label: 'Edit' },
-                  { value: 'preview', label: 'Preview' },
-                ]
-              : [
-                  { value: 'edit', label: 'Edit' },
-                  { value: 'preview', label: 'Preview' },
-                  { value: 'diff', label: 'Diff' },
-                ]
-          }
-        />
+          className="inline-flex max-w-full items-center gap-0.5 self-start overflow-x-auto rounded-control border bg-sunken p-0.5"
+        >
+          {VIEWS.filter((v) => v.value !== 'diff' || compareMarkdown !== null).map((v) => (
+            <button
+              key={v.value}
+              type="button"
+              aria-pressed={v.value === active}
+              onClick={() => setMode(v.value)}
+              className={cn(
+                'min-h-11 min-w-11 shrink-0 rounded-[6px] border px-3 text-caption font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                v.value === active
+                  ? 'bg-card text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
       )}
 
       {readOnly || active === 'preview' ? (
-        <ResumePreview
-          markdown={markdown}
-          templateId={templateId}
-          className={paneClassName}
-          aria-label="Formatted resume preview"
-        />
+        templateId === null ? (
+          <PlainPreview markdown={markdown} className={paneClassName} aria-label="Formatted preview" />
+        ) : (
+          <ResumePreview
+            markdown={markdown}
+            templateId={templateId}
+            className={paneClassName}
+            aria-label="Formatted resume preview"
+          />
+        )
       ) : active === 'diff' && compareMarkdown !== null ? (
         <ResumeDiff
           before={compareMarkdown}
@@ -142,15 +181,24 @@ export function ResumeWorkspace({
             value={markdown}
             onChange={onMarkdownChange}
             label="Resume editor"
-            placeholder="Start typing a resume…"
+            placeholder="Start typing a resume..."
             className="min-h-0"
+            onSave={onSave}
           />
-          <ResumePreview
-            markdown={markdown}
-            templateId={templateId}
-            className="hidden min-h-0 xl:block"
-            aria-label="Live preview of the formatted resume"
-          />
+          {templateId === null ? (
+            <PlainPreview
+              markdown={markdown}
+              className="hidden min-h-0 xl:block"
+              aria-label="Live preview of the formatted text"
+            />
+          ) : (
+            <ResumePreview
+              markdown={markdown}
+              templateId={templateId}
+              className="hidden min-h-0 xl:block"
+              aria-label="Live preview of the formatted resume"
+            />
+          )}
         </div>
       )}
     </div>

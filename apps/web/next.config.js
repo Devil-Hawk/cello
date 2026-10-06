@@ -85,6 +85,9 @@ const nextConfig = {
       // binaries cannot go through webpack.
       '@huggingface/transformers',
       'onnxruntime-node',
+      // The resume PDF exporter (lib/resume/pdf.ts): react-pdf runs its own React reconciler
+      // and must load its own copy of react, so webpack must not bundle it into the route.
+      '@react-pdf/renderer',
       '@langfuse/tracing',
       '@langfuse/otel',
       '@langfuse/client',

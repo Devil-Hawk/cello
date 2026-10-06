@@ -24,6 +24,7 @@ import {
   type Resume,
 } from '../schema'
 import { MIN_RETENTION, findInventedFacts, wordRetention } from './llm'
+import { COLUMNS_WARNING, looksLikeColumns } from './infer'
 
 export type StructureRunner = (opts: LlmRunOptions) => Promise<{ content: string }>
 
@@ -159,6 +160,12 @@ async function viaLlm(
   return { resume }
 }
 
+/** Keeps the columns warning on the resume, so Profile can list it as a format fix. */
+function withColumns(resume: Resume, sourceText: string): { resume: Resume; warnings: string[] } {
+  if (looksLikeColumns(sourceText)) resume.meta.cello.warnings.push(COLUMNS_WARNING)
+  return { resume, warnings: resume.meta.cello.warnings }
+}
+
 export async function structureResume(
   markdown: string,
   sourceText: string,
@@ -166,10 +173,10 @@ export async function structureResume(
 ): Promise<{ resume: Resume; warnings: string[] }> {
   if (opts.run) {
     const out = await viaLlm(markdown, sourceText, opts)
-    if ('resume' in out) return { resume: out.resume, warnings: out.resume.meta.cello.warnings }
+    if ('resume' in out) return withColumns(out.resume, sourceText)
     console.error('[resume/structure] LLM leg discarded:', out.reason)
   }
   const resume = markdownToResume(markdown, { ...opts.nameCtx, parsedFrom: opts.parsedFrom })
   resume.meta.cello.warnings.push(HEURISTIC_WARNING)
-  return { resume, warnings: resume.meta.cello.warnings }
+  return withColumns(resume, sourceText)
 }

@@ -1,7 +1,7 @@
 'use client'
 
 // The resume editor: a Markdown source textarea with a formatting toolbar and
-// the keyboard shortcuts anyone editing a resume expects (Ctrl/Cmd + B, I, K).
+// the keyboard shortcuts anyone editing a resume expects (Ctrl/Cmd + B, I, K, and S to save).
 //
 // WHY A TEXTAREA AND NOT A CONTENTEDITABLE RICH-TEXT SURFACE
 //   The saved artefact is Markdown (content_json.markdown), and the plain text
@@ -51,6 +51,8 @@ export interface MarkdownEditorProps {
   label?: string
   /** Id of the element describing the editor (a hint line under the toolbar). */
   describedById?: string
+  /** Ctrl/Cmd + S. Omit and the key keeps the browser's own meaning. */
+  onSave?: () => void
 }
 
 export function MarkdownEditor({
@@ -60,6 +62,7 @@ export function MarkdownEditor({
   className,
   label = 'Resume Markdown editor',
   describedById,
+  onSave,
 }: MarkdownEditorProps) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const pendingSelection = useRef<TextSelection | null>(null)
@@ -124,13 +127,18 @@ export function MarkdownEditor({
       // combinations a keyboard layout uses for real characters still type.
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return
       const key = event.key.toLowerCase()
+      if (key === 's' && onSave) {
+        event.preventDefault()
+        onSave()
+        return
+      }
       const command: ToolbarCommand | null =
         key === 'b' ? 'bold' : key === 'i' ? 'italic' : key === 'k' ? 'link' : null
       if (!command) return
       event.preventDefault()
       run(command)
     },
-    [run]
+    [run, onSave]
   )
 
   const marks = useMemo(() => activeMarks(value, selection), [value, selection])
@@ -158,7 +166,7 @@ export function MarkdownEditor({
         className="min-h-0 flex-1 resize-none font-sans text-caption leading-relaxed"
       />
       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-        <span>Formatting is Markdown — the toolbar writes it for you.</span>
+        <span>Formatting is Markdown. The toolbar writes it for you.</span>
         <span className="tabular-nums">{words.toLocaleString()} words</span>
       </div>
     </div>

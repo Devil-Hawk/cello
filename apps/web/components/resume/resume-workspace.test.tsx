@@ -38,9 +38,9 @@ describe('ResumeWorkspace — accessible names', () => {
     for (const label of [
       'Bold (Ctrl+B)',
       'Italic (Ctrl+I)',
-      'Heading 1 — your name',
-      'Heading 2 — section title',
-      'Heading 3 — role or company',
+      'Heading 1, your name',
+      'Heading 2, section title',
+      'Heading 3, role or company',
       'Bulleted list',
       'Numbered list',
       'Insert link (Ctrl+K)',

@@ -54,20 +54,20 @@ const BUTTONS: ButtonSpec[] = [
   { command: 'italic', label: 'Italic (Ctrl+I)', icon: Italic, pressed: (m) => m.italic },
   {
     command: 'h1',
-    label: 'Heading 1 — your name',
+    label: 'Heading 1, your name',
     icon: Heading1,
     pressed: (m) => m.heading === 1,
     startsGroup: true,
   },
   {
     command: 'h2',
-    label: 'Heading 2 — section title',
+    label: 'Heading 2, section title',
     icon: Heading2,
     pressed: (m) => m.heading === 2,
   },
   {
     command: 'h3',
-    label: 'Heading 3 — role or company',
+    label: 'Heading 3, role or company',
     icon: Heading3,
     pressed: (m) => m.heading === 3,
   },
@@ -115,15 +115,16 @@ export function MarkdownToolbar({ marks, onCommand, disabled, className }: Markd
               aria-pressed={isPressed}
               title={label}
               className={cn(
-                'inline-flex h-7 w-7 items-center justify-center rounded-[6px] transition-colors',
+                // ponytail: plain tokens at 44px until PG0's Key is on the base; swap at the rebase
+                'inline-flex h-11 w-11 items-center justify-center rounded-[6px] transition-colors',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 'disabled:pointer-events-none disabled:opacity-40',
                 isPressed
-                  ? 'bg-card text-foreground shadow-card'
-                  : 'text-muted-foreground hover:bg-card/70 hover:text-foreground'
+                  ? 'border bg-card text-foreground'
+                  : 'border border-transparent text-muted-foreground hover:bg-card/70 hover:text-foreground'
               )}
             >
-              <Icon aria-hidden="true" className="h-3.5 w-3.5" />
+              <Icon aria-hidden="true" className="h-[18px] w-[18px]" />
             </button>
           </div>
         )

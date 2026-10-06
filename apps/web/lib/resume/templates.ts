@@ -22,11 +22,11 @@
 //   fails to compile rather than fails in someone's applicant tracking system.
 //
 // FONT HONESTY
-//   pdf-lib can embed the 14 standard PDF fonts without shipping any font
-//   files, and nothing else. Naming "Inter" or "Garamond" here would be a lie
-//   the renderer could not satisfy. So a template declares a font FAMILY from
-//   the standard set, and STANDARD_FONT_NAMES maps family + style to the exact
-//   PostScript name pdf-lib's StandardFonts enum uses.
+//   The PDF exporter can draw the 14 standard PDF fonts without shipping any
+//   font files, and nothing else. Naming "Inter" or "Garamond" here would be a
+//   lie the renderer could not satisfy. So a template declares a font FAMILY
+//   from the standard set, and STANDARD_FONT_NAMES maps family + style to the
+//   exact PostScript name react-pdf takes as a font family.
 
 import type { ResumeHeadingLevel } from './markdown'
 
@@ -40,10 +40,10 @@ export type StandardFontFamily = 'helvetica' | 'times' | 'courier'
 export type FontStyleKey = 'regular' | 'bold' | 'italic' | 'boldItalic'
 
 /**
- * family + style -> the PostScript name pdf-lib's `StandardFonts` enum uses.
+ * family + style -> the PostScript name react-pdf takes as a font family.
  * Exported as data so every renderer maps fonts identically; kept as strings so
- * this module never imports pdf-lib (it is style data, not a renderer).
- * Verified against pdf-lib's enum in templates.test.ts.
+ * this module never imports a renderer (it is style data).
+ * Checked against the 14 standard fonts in templates.test.ts.
  */
 export const STANDARD_FONT_NAMES: Record<
   StandardFontFamily,

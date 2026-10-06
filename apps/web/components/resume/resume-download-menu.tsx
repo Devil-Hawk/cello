@@ -18,11 +18,6 @@
 //   yet. The server falls back to the version's stored content_json.templateId
 //   and then to the registry default, so an omitted or unknown id still renders.
 //
-// DOCX MAY NOT EXIST YET
-//   The .docx renderer is server-side work that lands separately; until it does
-//   the route answers 501. That is reported honestly ("not available yet") and
-//   the item stays visible, because hiding it would make a shipped feature look
-//   like a missing one the moment it lands.
 
 import { useState } from 'react'
 import { ChevronDown, Download, FileText, FileType, Loader2 } from 'lucide-react'
@@ -86,17 +81,6 @@ export function ResumeDownloadMenu({
         } catch {
           /* body wasn't JSON — keep the generic message */
         }
-        // The .docx renderer lands server-side separately. Until it does the
-        // route answers 501 (not implemented) or rejects the format outright,
-        // and either way the useful thing to say is "not yet, use the PDF" —
-        // not the route's own wording about which formats it accepts.
-        if (
-          format === 'docx' &&
-          (res.status === 501 || (res.status === 400 && /format/i.test(message)))
-        ) {
-          message =
-            "Word (.docx) export isn't available yet — the document renderer for it hasn't shipped. The PDF is ready now."
-        }
         throw new Error(message)
       }
 
@@ -141,7 +125,7 @@ export function ResumeDownloadMenu({
         {hasUnsavedChanges && (
           <>
             <DropdownMenuLabel className="font-normal text-[11px] leading-snug text-muted-foreground">
-              Exports the last saved version — save to include your current edits.
+              Exports the last saved version. Save to include your current edits.
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
           </>
@@ -156,7 +140,7 @@ export function ResumeDownloadMenu({
           <span className="min-w-0">
             <span className="block font-medium text-foreground">PDF</span>
             <span className="block text-[11px] leading-snug text-muted-foreground">
-              Send this to employers — the layout is fixed.
+              Send this to employers. The layout is fixed.
             </span>
           </span>
         </DropdownMenuItem>

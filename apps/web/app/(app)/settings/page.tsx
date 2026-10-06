@@ -3,14 +3,13 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { AlertCircle, CheckCircle, ChevronRight, Cpu, Database, FileWarning, Key, KeyRound, Network, Plug, Search, Server, Target, Terminal, User } from 'lucide-react'
+import { AlertCircle, CheckCircle, ChevronRight, Cpu, Database, FileWarning, Key, KeyRound, Network, Plug, Search, Server, Target, Terminal } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ProfileTab } from '@/components/settings/profile-tab'
 import { ApiKeysTab } from '@/components/settings/api-keys-tab'
 import { ModelTab } from '@/components/settings/model-tab'
 import { ProviderTab } from '@/components/settings/provider-tab'
@@ -20,13 +19,11 @@ import { SourcesTab } from '@/components/settings/sources-tab'
 import { SearchTab } from '@/components/settings/search-tab'
 import { McpTab } from '@/components/settings/mcp-tab'
 import { TokensTab } from '@/components/settings/tokens-tab'
-import type { ResumeStatus } from '@/components/settings/resume-upload-card'
 import { EMPTY_TARGETING, type Targeting } from '@/lib/targeting'
 
-type TabId = 'profile' | 'connections' | 'sources' | 'search' | 'mcp' | 'tokens' | 'api-keys' | 'provider' | 'model' | 'targeting'
+type TabId = 'connections' | 'sources' | 'search' | 'mcp' | 'tokens' | 'api-keys' | 'provider' | 'model' | 'targeting'
 
-const TABS: Array<{ id: TabId; label: string; icon: typeof User }> = [
-  { id: 'profile', label: 'Profile', icon: User },
+const TABS: Array<{ id: TabId; label: string; icon: typeof Plug }> = [
   { id: 'connections', label: 'Connections', icon: Plug },
   { id: 'sources', label: 'Sources', icon: Database },
   { id: 'search', label: 'Search', icon: Search },
@@ -47,15 +44,11 @@ export default function SettingsPage() {
   // ?tab=connections lets the Gmail sync card deep-link straight to the fix.
   const searchParams = useSearchParams()
   const requestedTab = searchParams.get('tab')
-  const [activeTab, setActiveTab] = useState<TabId>(isTabId(requestedTab) ? requestedTab : 'profile')
+  const [activeTab, setActiveTab] = useState<TabId>(isTabId(requestedTab) ? requestedTab : 'connections')
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   // Loaded once, handed to tabs as initial values
-  const [fullName, setFullName] = useState('')
-  const [email, setEmail] = useState('')
-  const [resumeStatus, setResumeStatus] = useState<ResumeStatus>('none')
-  const [resumeInfo, setResumeInfo] = useState<string | null>(null)
   const [hasOpenaiKey, setHasOpenaiKey] = useState(false)
   const [hasAnthropicKey, setHasAnthropicKey] = useState(false)
   const [hasOpenrouterKey, setHasOpenrouterKey] = useState(false)
@@ -92,38 +85,6 @@ export default function SettingsPage() {
       if (!user) {
         setLoadError("Couldn't verify your session. Sign in again and try again.")
         return
-      }
-
-      setEmail(user.email || '')
-      setFullName(user.user_metadata?.full_name || user.user_metadata?.name || '')
-
-      // Load profile.
-      //
-      // maybeSingle, NOT single: `single()` raises PGRST116 when zero rows
-      // match, so treating any error here as fatal locked every user without a
-      // profiles row (trigger never fired, RLS mismatch, pre-trigger account)
-      // out of the whole settings page — including the API-keys tab they would
-      // need to fix anything. A missing row is a legitimate state this page has
-      // always tolerated; only a real query failure is worth blocking on.
-      // Matches lib/resume/store.ts and lib/applications/store.ts.
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('full_name, resume_text')
-        .eq('id', user.id)
-        .maybeSingle()
-
-      if (profileError) {
-        setLoadError("Couldn't load your profile. Check your connection and try again.")
-        return
-      }
-
-      if (profile) {
-        if (profile.full_name) setFullName(profile.full_name)
-        if (profile.resume_text) {
-          setResumeStatus('has_resume')
-          const wordCount = profile.resume_text.split(/\s+/).length
-          setResumeInfo(`${wordCount} words extracted`)
-        }
       }
 
       // Load account status (key presence, model, resume, targeting) from the
@@ -260,14 +221,6 @@ export default function SettingsPage() {
                   Retry
                 </Button>
               }
-            />
-          ) : activeTab === 'profile' ? (
-            <ProfileTab
-              initialFullName={fullName}
-              email={email}
-              initialResumeStatus={resumeStatus}
-              initialResumeInfo={resumeInfo}
-              onStatus={reportStatus}
             />
           ) : activeTab === 'connections' ? (
             <ConnectionsTab onStatus={reportStatus} />

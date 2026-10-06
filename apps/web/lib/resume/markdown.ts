@@ -563,3 +563,69 @@ export function looksAuthoredInMarkdown(text: string | null | undefined): boolea
   if (typeof text !== 'string') return false
   return /^#{1,6}\s+\S/m.test(text) || /\*\*\S/.test(text)
 }
+
+// ---------------------------------------------------------------------------
+// Header detection (shared by the PDF and Word exporters)
+// ---------------------------------------------------------------------------
+
+export interface ResumeHeaderSplit {
+  /** The line to set in the template's name treatment, or null for none. */
+  name: ResumeInlineLine | null
+  /** The line(s) to set in the contact treatment. */
+  contact: ResumeInlineLine[]
+  /** Index of the first block that is NOT part of the header. */
+  bodyStart: number
+}
+
+/**
+ * Decide which leading blocks form the name/contact header.
+ *
+ * Exported here, with the block model, so both exporters import one copy rather than
+ * duplicating it, because they MUST agree: if one promoted a line to the name treatment and the
+ * other did not, the same resume would look like two different documents
+ * depending on which download button the user pressed. That is the whole class
+ * of bug this feature exists to remove. Word export never loads the PDF renderer.
+ *
+ * Two shapes are recognised:
+ *   - authored Markdown: `# Jane Doe` followed by a contact paragraph;
+ *   - an undesigned .txt/.docx upload, where "Jane Doe\njane@example.com" is
+ *     ONE paragraph with a soft break — its first line is promoted to the name
+ *     when it looks like a name.
+ */
+export function splitResumeHeader(blocks: readonly ResumeBlock[]): ResumeHeaderSplit {
+  const none: ResumeHeaderSplit = { name: null, contact: [], bodyStart: 0 }
+  const head = blocks[0]
+  if (!head) return none
+
+  if (head.type === 'heading' && head.level === 1 && head.lines.length > 0) {
+    const next = blocks[1]
+    const contactLines = next && next.type === 'paragraph' ? next.lines : []
+    return {
+      name: head.lines[0]!,
+      contact: [...head.lines.slice(1), ...contactLines],
+      bodyStart: contactLines.length > 0 ? 2 : 1,
+    }
+  }
+
+  if (head.type === 'paragraph' && head.lines.length > 0 && isNameLike(head.lines[0]!)) {
+    return { name: head.lines[0]!, contact: head.lines.slice(1), bodyStart: 1 }
+  }
+
+  return none
+}
+
+/**
+ * Is this opening line plausibly a person's name rather than the first line of
+ * a summary paragraph? Deliberately conservative — getting it wrong the other
+ * way sets a sentence in 22pt. A name is short, has few words, and does not
+ * end in sentence punctuation.
+ */
+function isNameLike(line: ResumeInlineLine): boolean {
+  const text = line
+    .map((run) => run.text)
+    .join('')
+    .trim()
+  if (text.length === 0 || text.length > 64) return false
+  if (/[.!?,;:]$/.test(text)) return false
+  return text.split(/\s+/).length <= 8
+}

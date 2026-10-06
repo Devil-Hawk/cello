@@ -27,7 +27,7 @@
 // classic bug: twips (1/20 pt) for page geometry, indents and spacing;
 // half-points for font size; eighths of a point for border thickness.
 //
-// FONTS. pdf-lib can only embed the standard-14 PostScript families; Word
+// FONTS. The PDF exporter can only draw the standard-14 PostScript families; Word
 // needs a font that exists on the reader's machine. Helvetica is not installed
 // on Windows, so it maps to Arial — its metric-compatible substitute, which is
 // also what every Word-on-Windows install does with a Helvetica request
@@ -60,8 +60,8 @@ import {
   type ResumeHeadingLevel,
   type ResumeInlineLine,
   type ResumeListBlock,
+  splitResumeHeader,
 } from './markdown'
-import { splitResumeHeader } from './pdf'
 import {
   getTemplate,
   type HeadingStyle,
@@ -347,9 +347,8 @@ export async function renderResumeBlocksDocx(
   }
 
   // --- name / contact header -----------------------------------------------
-  // `splitResumeHeader` is imported from the PDF renderer rather than
-  // reimplemented, so the two exports can never disagree about which line is
-  // the candidate's name — see its doc comment.
+  // `splitResumeHeader` lives with the block model, so the two exports can never
+  // disagree about which line is the candidate's name. See its doc comment.
   const header = splitResumeHeader(list)
   if (header.name) {
     push({ style: NAME_STYLE_ID, children: linesToChildren([header.name], nb.nameCasing) })
