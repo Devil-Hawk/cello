@@ -360,8 +360,8 @@ async function handleGenerate(
   // per-user rows, but this keeps the lookup typed against @cello/shared's
   // generated Database type instead of the untyped admin client.
   const { data: job } = await supabase
-    .from('jobs')
-    .select('id, title, description, companies(name)')
+    .from('person_jobs')
+    .select('id, title, description, viewer_company_name')
     .eq('id', jobId)
     .single()
   if (!job) {
@@ -369,8 +369,7 @@ async function handleGenerate(
     return bad('Job not found', 404)
   }
 
-  const companyRel = (job as { companies?: { name?: string } | { name?: string }[] | null }).companies
-  const companyName = Array.isArray(companyRel) ? companyRel[0]?.name : companyRel?.name
+  const companyName = (job as { viewer_company_name?: string | null }).viewer_company_name
   setTraceInput({ jobTitle: job.title, companyName: companyName ?? null })
 
   const apiKeys = await loadApiKeys(admin, userId)

@@ -157,20 +157,18 @@ export async function userCompanyIds(admin: AdminClient, userId: string): Promis
 }
 
 /**
- * A `jobs` query scoped to userId's own companies through the FK join
+ * The roles userId holds (a person_roles row), through the person_jobs view
  * instead of an `.in('company_id', companyIds)` querystring array — which
  * broke every load once an account passed ~600 companies (the array crossed
- * the request URL length limit). Ownership semantics are identical: RLS
- * itself scopes jobs the same way (EXISTS companies.id = jobs.company_id AND
- * companies.user_id = auth.uid()), this just does it server-side against an
- * admin client that bypasses RLS.
+ * the request URL length limit). A role is one shared row, so ownership is
+ * the person's person_roles row, not the company that stored it first. Done
+ * server-side against an admin client that bypasses RLS.
  *
- * `columns` must embed the join as `companies!inner(...)` (any fields) —
- * `!inner` is what turns the embed into a row-restricting join; without it
- * the `.eq('companies.user_id', ...)` filter has nothing to attach to.
+ * `columns` may still embed `companies!inner(...)`; with the admin client it
+ * matches every row and no longer fences anything, the viewer_id filter does.
  */
 export function ownedJobsQuery(admin: AdminClient, userId: string, columns: string, opts?: { count?: 'exact'; head?: boolean }) {
-  return admin.from('jobs').select(columns, opts).eq('companies.user_id', userId)
+  return admin.from('person_jobs').select(columns, opts).eq('viewer_id', userId)
 }
 
 /** Collect jobIds from static input and any dependency step output carrying jobIds. */

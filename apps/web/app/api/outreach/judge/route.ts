@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
     let jobDescription: string | null = null
     if (message.job_id) {
       const { data: job } = await supabase
-        .from('jobs')
+        .from('person_jobs')
         .select('title, description')
         .eq('id', message.job_id)
         .single()

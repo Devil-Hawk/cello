@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
   // repo boundary can reach — see invariant 3). Leaving the description out
   // entirely is the safer choice over half-wiring an unframed field a future
   // edit could plug straight into the prompt.
-  const { data: job } = await admin.from('jobs').select('url').eq('id', row.job_id).maybeSingle()
+  const { data: job } = await admin.from('person_jobs').select('url').eq('viewer_id', row.user_id).eq('id', row.job_id).maybeSingle()
   if (!job?.url) return NextResponse.json({ error: 'Job has no URL.' }, { status: 422, headers: NO_STORE })
 
   // Consume only AFTER every read-only validation above, so a malformed or

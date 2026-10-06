@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
     let matchHighlights: string[] = []
     if (parent.job_id) {
       const { data: job } = await supabase
-        .from('jobs')
+        .from('person_jobs')
         .select('title, match_details')
         .eq('id', parent.job_id)
         .single()

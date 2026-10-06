@@ -91,14 +91,13 @@ export async function POST(request: NextRequest) {
 
     // Job + company (RLS-scoped read via the signed-in client).
     const { data: job } = await supabase
-      .from('jobs')
-      .select('id, title, description, companies(name)')
+      .from('person_jobs')
+      .select('id, title, description, viewer_company_name')
       .eq('id', jobId)
       .single()
     if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 })
 
-    const companyRel = (job as { companies?: { name?: string } | { name?: string }[] | null }).companies
-    const companyName = Array.isArray(companyRel) ? companyRel[0]?.name : companyRel?.name
+    const companyName = (job as { viewer_company_name?: string | null }).viewer_company_name
     setTraceInput({ jobTitle: job.title, companyName: companyName ?? null })
 
     // PROVIDER GATE ALIGNMENT: the harness only ever calls OpenRouter — gate on
