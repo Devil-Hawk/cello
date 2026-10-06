@@ -66,7 +66,7 @@
 import { createAdminClient } from '../lib/harness/supabase-admin'
 import { loadApiKeys } from '../lib/harness/keys'
 import { callLlm, MissingKeyError, parseJsonLoose } from '../lib/harness/llm'
-import { embedMaterial } from '../lib/kb/embed'
+import { EMBEDDER_READY, embedMaterial } from '../lib/kb/embed'
 import { BudgetCapError } from '../lib/harness/spend'
 import { getBaseResume } from '../lib/resume/store'
 import { listDocuments } from '../lib/kb/store'
@@ -296,7 +296,8 @@ async function main(): Promise<void> {
 
     // Embed every claim just written, in one batch — matches lib/kb/store.ts
     // #embedChunksBestEffort's shape: best-effort, never fails the run.
-    try {
+    // Until K15's 384 embedder is on main (EMBEDDER_READY) claims are matched by exact key.
+    if (EMBEDDER_READY) try {
       const texts = extracted.map((c) => c.claimText)
       const embeddings = await embedMaterial(keys, texts, 'embed-claims')
       for (let i = 0; i < extracted.length; i++) {
@@ -311,10 +312,11 @@ async function main(): Promise<void> {
       console.error(`\n  user ${userId}: embedding failed (claims kept, exact-match only) — ${err instanceof Error ? err.message : err}`)
     }
 
-    // Pass 2: KB documents.
+    // Pass 2: KB documents. Only what the person gave Cello and left on: a page Cello
+    // fetched (company site, dossier) is not evidence of the person's own claims.
     let kbDocs: KbDocument[] = []
     try {
-      kbDocs = await listDocuments(admin, userId, { limit: KB_DOCS_PER_USER })
+      kbDocs = await listDocuments(admin, userId, { limit: KB_DOCS_PER_USER, personOnly: true })
     } catch (err) {
       console.error(`\n  user ${userId}: KB document list failed — ${err instanceof Error ? err.message : err}`)
     }

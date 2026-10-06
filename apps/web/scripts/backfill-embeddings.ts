@@ -42,10 +42,10 @@ import { createAdminClient } from '../lib/harness/supabase-admin'
 import { loadApiKeys } from '../lib/harness/keys'
 import { MissingKeyError } from '../lib/harness/llm'
 import { BudgetCapError } from '../lib/harness/spend'
-import { embedMaterial } from '../lib/kb/embed'
+import { EMBEDDER_READY, embedMaterial } from '../lib/kb/embed'
 import { replaceChunks } from '../lib/kb/store'
 
-/** Chunks embedded per embedMaterial() call — one provider round trip per
+/** Chunks embedded per embedMaterial() call - one provider round trip per
  *  batch, well under any provider's per-request item cap. */
 const EMBED_BATCH = 100
 
@@ -74,7 +74,7 @@ async function main(): Promise<void> {
 
   console.log('backfill-embeddings')
   console.log(`  mode  : ${args.dryRun ? 'DRY RUN (no writes, no spend)' : 'APPLY (writes + spends against each user\'s own cap)'}`)
-  console.log(`  limit : ${args.limit ?? '(none — every chunk with no 384 vector)'}`)
+  console.log(`  limit : ${args.limit ?? '(none - every chunk with no 384 vector)'}`)
 
   // Material moved to 384 dimension vectors (20261123000000_material_expand.sql). --rechunk
   // first re-splits every document with the current splitter, which also embeds its chunks
@@ -89,10 +89,18 @@ async function main(): Promise<void> {
         await replaceChunks(admin, d.user_id, d.id, d.content)
         done++
       } catch (err) {
-        console.error(`\n  document ${d.id}: rechunk failed — ${err instanceof Error ? err.message : err}`)
+        console.error(`\n  document ${d.id}: rechunk failed - ${err instanceof Error ? err.message : err}`)
       }
     }
     console.log(`  rechunked ${done} document(s)`)
+  }
+
+  // The 384 embedder is K15's. Until it is on main nothing here can write a vector, and
+  // the count of chunks with no vector cannot reach 0, so the contract migration waits.
+  if (!EMBEDDER_READY) {
+    console.log('\nNo 384 dimension embedder is on main yet (K15), so this embeds nothing and spends nothing.')
+    console.log('Chunks are found by words until it lands. Run this again then.')
+    return
   }
 
   const { data: userRows, error: userErr } = await admin

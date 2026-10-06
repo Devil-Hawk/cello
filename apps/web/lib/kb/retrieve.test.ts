@@ -14,11 +14,9 @@ import { runInTraceContext, SpanBuffer, type SpanRecord } from '../trace/spans'
 const loadApiKeysMock = vi.fn()
 vi.mock('../harness/keys', () => ({ loadApiKeys: (...args: unknown[]) => loadApiKeysMock(...args) }))
 
-const callEmbeddingMock = vi.fn()
-vi.mock('../harness/llm', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../harness/llm')>()
-  return { ...actual, callEmbedding: (...args: unknown[]) => callEmbeddingMock(...args) }
-})
+// The embedder is one seam (lib/kb/embed.ts): it returns a 384 vector per text, or null.
+const embedMock = vi.fn()
+vi.mock('./embed', () => ({ embedMaterial: (...args: unknown[]) => embedMock(...args) }))
 
 const searchKbMock = vi.fn()
 vi.mock('./store', () => ({ searchKb: (...args: unknown[]) => searchKbMock(...args) }))
@@ -37,7 +35,7 @@ const FTS_HIT = [
 
 beforeEach(() => {
   loadApiKeysMock.mockReset()
-  callEmbeddingMock.mockReset()
+  embedMock.mockReset()
   searchKbMock.mockReset()
   searchKbMock.mockResolvedValue(FTS_HIT)
 })
@@ -45,7 +43,7 @@ beforeEach(() => {
 describe('retrieveKb', () => {
   it('embeds the query and passes the vector through on the happy path', async () => {
     loadApiKeysMock.mockResolvedValue({ userId: 'u1' })
-    callEmbeddingMock.mockResolvedValue({ embeddings: [VECTOR_384], model: 'x', promptTokens: 3 })
+    embedMock.mockResolvedValue([VECTOR_384])
 
     const hits = await retrieveKb(admin, 'u1', 'search this')
 
@@ -58,9 +56,9 @@ describe('retrieveKb', () => {
     )
   })
 
-  it('ignores a vector that is not 384 long, so search stays words only', async () => {
+  it('searches by words only when the embedder has no 384 vector for the query', async () => {
     loadApiKeysMock.mockResolvedValue({ userId: 'u1' })
-    callEmbeddingMock.mockResolvedValue({ embeddings: [new Array(1536).fill(0.1)], model: 'x', promptTokens: 3 })
+    embedMock.mockResolvedValue([null])
 
     const hits = await retrieveKb(admin, 'u1', 'search this')
 
@@ -70,7 +68,7 @@ describe('retrieveKb', () => {
 
   it('degrades to FTS-only when no embedding provider is configured (MissingKeyError)', async () => {
     loadApiKeysMock.mockResolvedValue({})
-    callEmbeddingMock.mockRejectedValue(new MissingKeyError('No embedding provider configured'))
+    embedMock.mockRejectedValue(new MissingKeyError('No embedding provider configured'))
 
     const hits = await expectNoThrow(() => retrieveKb(admin, 'u1', 'search this'))
 
@@ -85,7 +83,7 @@ describe('retrieveKb', () => {
 
   it('degrades to FTS-only when the monthly spend cap is already hit (BudgetCapError)', async () => {
     loadApiKeysMock.mockResolvedValue({})
-    callEmbeddingMock.mockRejectedValue(new BudgetCapError(10, 10))
+    embedMock.mockRejectedValue(new BudgetCapError(10, 10))
 
     const hits = await expectNoThrow(() => retrieveKb(admin, 'u1', 'search this'))
 
@@ -102,7 +100,7 @@ describe('retrieveKb', () => {
     loadApiKeysMock.mockResolvedValue({})
     const timeout = new Error('The operation was aborted due to timeout')
     timeout.name = 'TimeoutError'
-    callEmbeddingMock.mockRejectedValue(timeout)
+    embedMock.mockRejectedValue(timeout)
 
     const hits = await expectNoThrow(() => retrieveKb(admin, 'u1', 'search this'))
 
@@ -117,7 +115,7 @@ describe('retrieveKb', () => {
 
   it('an unexpected embedding failure also degrades rather than throwing', async () => {
     loadApiKeysMock.mockResolvedValue({})
-    callEmbeddingMock.mockRejectedValue(new Error('dimension mismatch'))
+    embedMock.mockRejectedValue(new Error('dimension mismatch'))
 
     const hits = await expectNoThrow(() => retrieveKb(admin, 'u1', 'search this'))
 
@@ -146,7 +144,7 @@ describe('retrieveKb in Langfuse', () => {
     vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'u1,u,me,user-1')
     vi.stubEnv('LANGFUSE_DEMO_SAMPLE_RATE', '1')
     loadApiKeysMock.mockResolvedValue({ userId: 'u1' })
-    callEmbeddingMock.mockResolvedValue({ embeddings: [[0.1]], model: 'x', promptTokens: 1 })
+    embedMock.mockResolvedValue([[0.1]])
     searchKbMock.mockResolvedValue([{ ...FTS_HIT[0], title: 'My notes', url: 'https://x.test/n', content: 'PRIVATE CHUNK TEXT' }])
     const buffer = new SpanBuffer('u1', null, undefined, { isDemo })
     await runInTraceContext({ buffer, parentSpanId: 'root', runId: null }, () => retrieveKb(admin, 'u1', 'visa rules', { limit: 5 }))
@@ -162,13 +160,13 @@ describe('retrieveKb in Langfuse', () => {
     expect(row.lf).toMatchObject({ name: 'retrieve-knowledge', type: 'retriever', input: { query: 'visa rules' }, metadata: { limit: 5, hits: 1 } })
     expect(JSON.stringify(row.lf)).toContain('My notes')
     expect(row.lf?.output).toMatchObject({ hits: [{ excerpt: 'PRIVATE CHUNK TEXT' }] })
-    expect(callEmbeddingMock.mock.calls[0][1]).toMatchObject({ name: 'embed-query' })
+    expect(embedMock.mock.calls[0][2]).toBe('embed-query')
   })
 
   it('no embedding provider is recorded as a fts-only fallback on the retriever, and a working embedding is not', async () => {
     const row = await run(false)
     expect(row.lf?.metadata).not.toHaveProperty('fallback')
-    callEmbeddingMock.mockRejectedValue(new MissingKeyError('No embedding provider configured'))
+    embedMock.mockRejectedValue(new MissingKeyError('No embedding provider configured'))
     const buffer = new SpanBuffer('u1', null, undefined, { isDemo: false })
     await runInTraceContext({ buffer, parentSpanId: 'root', runId: null }, () => retrieveKb(admin, 'u1', 'visa rules'))
     const [fallback] = (buffer as unknown as { pending: SpanRecord[] }).pending
