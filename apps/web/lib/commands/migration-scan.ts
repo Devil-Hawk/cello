@@ -47,6 +47,10 @@ export function userIdTables(files: { name: string; sql: string }[]): Set<string
     for (const m of sql.matchAll(/drop\s+table\s+(?:if\s+exists\s+)?(?:public\.)?"?(\w+)"?/gi)) {
       tables.delete(m[1])
     }
+    // a renamed table keeps its user_id under the new name
+    for (const m of sql.matchAll(/alter\s+table\s+(?:if\s+exists\s+)?(?:public\.)?"?(\w+)"?\s+rename\s+to\s+"?(\w+)"?\s*;/gi)) {
+      if (tables.delete(m[1])) tables.add(m[2])
+    }
   }
   return tables
 }
