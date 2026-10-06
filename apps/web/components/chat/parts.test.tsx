@@ -22,7 +22,7 @@ describe('role card', () => {
     expect(out).toContain('Chance: Strong')
     expect(out).toContain('New York, NY (Hybrid)')
     expect(out).toContain('Applied')
-    expect(out).toContain('href="/roles/r1"')
+    expect(out).toContain('href="/jobs"')
     // The title and the company carry the same classes.
     expect((out.match(new RegExp(`<p class="${NAME_CLASS} break-words">`, 'g')) ?? []).length).toBe(2)
   })
@@ -85,7 +85,7 @@ describe('AnswerParts', () => {
 
   it('opens a role or a company from its card by link, even when the page also opens made things in the panel', () => {
     const out = renderToStaticMarkup(<AnswerParts parts={[{ card: { kind: 'role', ref: 'r1' } }, { card: { kind: 'company', ref: 'c1' } }]} names={names} tileCount={2} cards={[role, company]} onOpen={() => undefined} />)
-    expect(out).toContain('href="/roles/r1"')
+    expect(out).toContain('href="/jobs"')
     expect(out).toContain('href="/companies/c1"')
     expect(out).not.toMatch(/<button[^>]*>Open</)
   })

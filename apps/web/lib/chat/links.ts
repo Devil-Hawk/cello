@@ -1,6 +1,6 @@
 // Where a named thing opens. An answer names a thing with a link `cello:<kind>/<id>`; code (answer.ts) keeps the link
 // only for a thing the part is about or this turn returned, and this turns it into the page's own link.
-// ponytail: a role opens PG3's record, which does not exist until PG3 ships; swap for lib/routes/roles.ts's recordHref then.
+// ponytail: a role opens the jobs list until PG3's /roles/[id] ships; swap for lib/routes/roles.ts's recordHref when PG1 and PG3 land.
 
 import { ATTACH_KINDS, type AttachKind } from './types'
 
@@ -10,7 +10,7 @@ const enc = encodeURIComponent
 export function chatHref(kind: AttachKind, id: string): string | null {
   switch (kind) {
     case 'role':
-      return `/roles/${enc(id)}`
+      return '/jobs'
     case 'company':
       return `/companies/${enc(id)}`
     case 'application':
