@@ -36,9 +36,9 @@ const BANNED_PHRASES = [
 // when the string has a space in it, so an import path or an identifier never does.
 const RETIRED_WORD = /\breceipts?\b/i
 
-// © and ® are Extended_Pictographic too; neither is an emoji in practice.
-const EMOJI = /(?![©®])\p{Extended_Pictographic}|[\u{1F000}-\u{1FAFF}]|[☀-➿]️?/u
-const EM_DASH = /—|&mdash;|&#8212;|\\u2014/
+// The copyright and registered signs are Extended_Pictographic too; neither is an emoji in practice.
+const EMOJI = /(?![\u00A9\u00AE])\p{Extended_Pictographic}|[\u{1F000}-\u{1FAFF}]|[\u2600-\u27BF]\uFE0F?/u
+const EM_DASH = /\u2014|&mdash;|&#8212;|\\u2014/
 
 export function listSourceFiles(dir: string): string[] {
   const out: string[] = []
@@ -69,7 +69,8 @@ export function readableStrings(code: string): { text: string; jsx: boolean }[] 
   const out: { text: string; jsx: boolean }[] = []
   for (const m of code.matchAll(JSX_TEXT)) out.push({ text: m[1], jsx: true })
   for (const m of code.matchAll(/'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g)) {
-    out.push({ text: m[1] ?? m[2] ?? m[3] ?? '', jsx: false })
+    // An identifier inside ${...} is code, not words a person reads.
+    out.push({ text: (m[1] ?? m[2] ?? m[3] ?? '').replace(/\$\{[^}]*\}/g, ''), jsx: false })
   }
   return out
 }
@@ -137,12 +138,13 @@ describe('UI copy', () => {
     const sample = [
       "const a = 'Unlock your potential'",
       '<p>Done!</p>',
-      '<p>Jobs — ranked</p>',
+      '<p>Jobs \u2014 ranked</p>',
       '<span>\u{1F389}</span>',
-      '// a comment — with a dash is fine',
-      "const url = 'https://example.com/path' // trailing comment — fine",
+      '// a comment \u2014 with a dash is fine',
+      "const url = 'https://example.com/path' // trailing comment \u2014 fine",
       '<p>View your receipt</p>',
       "const msg = 'Your receipt is saved'",
+      'const dest = `Sent to ${receipt.destination}`',
     ].join('\n')
     const rules = scanSource('sample.tsx', sample).map((v) => `${v.line}:${v.rule}`)
     expect(rules).toEqual([
@@ -161,9 +163,9 @@ describe('UI copy', () => {
   })
 
   it('fails an unlisted file with one violation, and a listed file that gets worse', () => {
-    const one = scanSource('components/new.tsx', '<p>Jobs — ranked</p>')
+    const one = scanSource('components/new.tsx', '<p>Jobs \u2014 ranked</p>')
     expect(overBaseline(one, {}).over).toEqual(['components/new.tsx: 1 found, 0 allowed'])
-    const two = scanSource('components/old.tsx', ['<p>Jobs — ranked</p>', '<p>Done!</p>'].join('\n'))
+    const two = scanSource('components/old.tsx', ['<p>Jobs \u2014 ranked</p>', '<p>Done!</p>'].join('\n'))
     expect(overBaseline(two, { 'components/old.tsx': 2 }).over).toEqual([])
     expect(overBaseline(two, { 'components/old.tsx': 1 }).over).toEqual(['components/old.tsx: 2 found, 1 allowed'])
   })
