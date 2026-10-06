@@ -64,7 +64,7 @@ export function clampText(text: string): string {
 /**
  * fetch with Chrome's local network hint, so a page asks the person once instead of
  * failing (developer.chrome.com/blog/local-network-access; the value is "local" for
- * loopback too). An extension worker ignores the extra option.
+ * loopback too). The extension passes plain fetch instead: its host permission covers loopback.
  */
 export const localFetch = (url: string, init: RequestInit): Promise<Response> =>
   fetch(url, { ...init, targetAddressSpace: 'local' } as RequestInit)

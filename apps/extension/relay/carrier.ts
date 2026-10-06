@@ -35,7 +35,9 @@ const defaults: RelayDeps = {
   unlock: () => releaseLock('relay'),
   keepAlive: { start: startKeepAlive, stop: stopKeepAlive },
   call: (route, body) => relayCall(route, body),
-  run: (cfg, req) => runLocal(cfg, req),
+  // Plain fetch: the extension's host permission covers loopback, and the page-only
+  // local network hint would make Chrome ask for a permission a worker cannot answer.
+  run: (cfg, req) => runLocal(cfg, req, (url, init) => fetch(url, init)),
 }
 
 /** Returns true when a job was claimed (and answered or failed), false otherwise. */
