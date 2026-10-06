@@ -256,8 +256,106 @@ export const onboardingFinish = defineCommand({
 })
 
 // ---------------------------------------------------------------------------
+// models.get, settings.models, models.test: Settings > Models (blueprint 11.1)
+// ---------------------------------------------------------------------------
+
+export const modelsGet = defineCommand({
+  id: 'models.get',
+  label: 'Models',
+  input: z.strictObject({}),
+  output: z.object({
+    rungs: z.array(z.object({ rung: codeText(4), state: z.enum(['ready', 'not_set_up']) })),
+    ceiling: codeText(4),
+    order: z.array(codeText(4)),
+    creditBought: z.boolean(),
+    freeToday: z.number().int(),
+    freeLimit: z.number().int(),
+    resetsAt: codeText(40),
+  }),
+  callers: ['session'],
+  kind: 'code',
+  sends: false,
+  egress: 'none',
+  measure: 'P5',
+  async run(ctx) {
+    const { readModelSettings } = await import('@/lib/models/settings')
+    return readModelSettings(ctx.admin(), ctx.userId)
+  },
+})
+
+export const settingsModels = defineCommand({
+  id: 'settings.models',
+  label: 'Highest model Cello may use',
+  input: z.strictObject({
+    ceiling: z.enum(['R0', 'R1', 'R2', 'R3', 'R4']).optional(),
+    order: z.array(z.enum(['R1', 'R2', 'R3', 'R4'])).max(4).optional(),
+    creditBought: z.boolean().optional(),
+  }),
+  output: z.object({ saved: z.boolean() }),
+  callers: ['session'],
+  kind: 'code',
+  sends: false,
+  egress: 'none',
+  measure: 'P5',
+  guard: (ctx) => demoRefusal(ctx, 'Demo workspaces cannot change this.'),
+  async run(ctx, input) {
+    const db = ctx.supabase
+    if (!db) throw new CommandRefusal(403, 'This action needs the person signed in.', 'proof')
+    if (input.ceiling === undefined && input.order === undefined && input.creditBought === undefined) {
+      throw new CommandRefusal(400, 'Nothing to change.', 'input')
+    }
+    const readPreferences = async () => {
+      const { data, error } = await db.from('profiles').select('preferences').eq('id', ctx.userId).single()
+      if (error) throw new Error('Could not read the settings.')
+      return ((data as { preferences?: Record<string, unknown> | null } | null)?.preferences ?? {}) as Record<string, unknown>
+    }
+    // credit_bought lives in preferences.pipeline, which only set_autonomy() writes.
+    if (input.creditBought !== undefined) {
+      const pipeline = ((await readPreferences()).pipeline ?? {}) as Record<string, unknown>
+      const { error } = await db.rpc('set_autonomy', { p_pipeline: { ...pipeline, credit_bought: input.creditBought } })
+      if (error) {
+        if (error.code === '42501') throw new CommandRefusal(403, 'This workspace cannot change that setting.', 'guard')
+        throw new Error('Could not save that setting.')
+      }
+    }
+    if (input.ceiling !== undefined || input.order !== undefined) {
+      const preferences = await readPreferences()
+      const models = { ...((preferences.models ?? {}) as Record<string, unknown>), ...(input.ceiling ? { ceiling: input.ceiling } : {}), ...(input.order ? { order: input.order } : {}) }
+      const { error } = await db.from('profiles').update({ preferences: { ...preferences, models } }).eq('id', ctx.userId)
+      if (error) throw new Error('Could not save that setting.')
+    }
+    return { saved: true }
+  },
+})
+
+export const modelsTest = defineCommand({
+  id: 'models.test',
+  label: 'Test the models',
+  input: z.strictObject({}),
+  output: z.object({ results: z.array(z.object({ rung: codeText(4), ok: z.boolean(), sentence: untrustedText(300) })) }),
+  callers: ['session'],
+  kind: 'step',
+  sends: false,
+  egress: 'fixed',
+  measure: 'P5',
+  async run(ctx) {
+    const { testRungs } = await import('@/lib/models/settings')
+    return { results: await testRungs(ctx.admin(), ctx.userId, ctx.signal) }
+  },
+})
+
+// ---------------------------------------------------------------------------
 // settings.delete_account: every owned table, then the sign-in itself
 // ---------------------------------------------------------------------------
+
+/** The refusal sentence for a demo workspace, or null for a real account. */
+async function demoRefusal(ctx: CommandContext, sentence: string): Promise<string | null> {
+  const { readProfileForDemoGuards } = await import('@/lib/harness/keys')
+  const { isDemoProfile } = await import('@/lib/access/guardrails')
+  const { row, error } = await readProfileForDemoGuards(ctx.admin(), ctx.userId)
+  if (error || !row) return "We couldn't verify this account."
+  return isDemoProfile({ is_demo: row.is_demo ?? null, demo_expires_at: row.demo_expires_at ?? null }) ? sentence : null
+}
 
 export const deleteAccount = defineCommand({
   id: 'settings.delete_account',
@@ -269,15 +367,7 @@ export const deleteAccount = defineCommand({
   sends: false,
   egress: 'none',
   measure: 'none',
-  async guard(ctx) {
-    const { readProfileForDemoGuards } = await import('@/lib/harness/keys')
-    const { isDemoProfile } = await import('@/lib/access/guardrails')
-    const { row, error } = await readProfileForDemoGuards(ctx.admin(), ctx.userId)
-    if (error || !row) return "We couldn't verify this account."
-    return isDemoProfile({ is_demo: row.is_demo ?? null, demo_expires_at: row.demo_expires_at ?? null })
-      ? 'Demo workspaces cannot delete an account.'
-      : null
-  },
+  guard: (ctx) => demoRefusal(ctx, 'Demo workspaces cannot delete an account.'),
   async run(ctx) {
     const admin = ctx.admin()
     let cleared = 0
@@ -308,5 +398,8 @@ export const coreCommands: AnyCommand[] = [
   activityGet,
   checksStatus,
   onboardingFinish,
+  modelsGet,
+  settingsModels,
+  modelsTest,
   deleteAccount,
 ]
