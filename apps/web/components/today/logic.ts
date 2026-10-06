@@ -3,6 +3,7 @@
 // schedule; every count is passed in. No model writes any of this.
 
 import type { ChecksStatus } from '@/lib/clock/status'
+import { NEEDS_YOU_GROUPS, type NeedsYouRow } from '@/lib/needs-you/types'
 
 const MIN = 60_000
 const HOUR = 60 * MIN
@@ -42,7 +43,22 @@ export function checkLine(s: Pick<ChecksStatus, 'backgroundText' | 'pausedText' 
   return [checked, next].filter(Boolean).join(' ') || null
 }
 
+/** Seven rows, then "Show N more" (4.4). */
+export const NEEDS_SHOWN = 7
+
+/** The list in the order of 4.4. K20 sends it ordered; this keeps a row's place when two share a group (the sort is stable). */
+export function orderNeedsYou(rows: readonly NeedsYouRow[]): NeedsYouRow[] {
+  return [...rows].sort((a, b) => NEEDS_YOU_GROUPS.indexOf(a.group) - NEEDS_YOU_GROUPS.indexOf(b.group))
+}
+
+/** What the badge counts: each application in a grouped row, and every other row once. */
+export function needsYouCount(rows: readonly NeedsYouRow[]): number {
+  return rows.reduce((n, r) => n + Math.max(1, r.count), 0)
+}
+
 export interface HeaderFacts {
+  /** What waits on the person (Needs you). It leads the sentence when there is any. */
+  needs?: number
   /** Roles in today's band, and what kind they are. */
   band: { kind: 'picks' | 'newest'; count: number }
   /** Roles that became visible today, from SQL. */
@@ -51,6 +67,7 @@ export interface HeaderFacts {
 
 /** The one sentence at the top. It only counts what is stored; with nothing to count it says so. */
 export function headerSentence(f: HeaderFacts): string {
+  if (f.needs && f.needs > 0) return `${f.needs} ${f.needs === 1 ? 'thing needs' : 'things need'} you.`
   if (f.band.count > 0 && f.band.kind === 'picks') return `${f.band.count} ${f.band.count === 1 ? 'pick' : 'picks'} from ${f.newCount} new ${f.newCount === 1 ? 'role' : 'roles'}.`
   if (f.newCount > 0) return `${f.newCount} new ${f.newCount === 1 ? 'role' : 'roles'} kept for you today.`
   return 'Nothing new today.'

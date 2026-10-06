@@ -4,9 +4,11 @@ import { metaLine } from '@/components/roles/logic'
 import { RoleRow } from '@/components/roles/role-row'
 import type { PickItem, RoleItem } from '@/components/roles/types'
 import { OpenRouterDoor } from '@/components/settings/openrouter-door'
+import type { NeedsYouRow } from '@/lib/needs-you/types'
 import { Key } from '@/components/ui/key'
 import { roles, search } from '@/lib/routes'
-import { FAILED, FIRST_USE, headerSentence, keptSince, quietSentence, sentLine, type SentRow, type SinceChange } from './logic'
+import { FAILED, FIRST_USE, headerSentence, keptSince, needsYouCount, quietSentence, sentLine, type SentRow, type SinceChange } from './logic'
+import { NeedsYou } from './needs-you'
 
 export interface TodayData {
   /** failed: the reads did not come back. first: nothing has been read for this person yet. */
@@ -27,6 +29,8 @@ export interface TodayData {
   canReadReplies: boolean
   /** The person has a model, so Cello can rank roles. */
   hasModel: boolean
+  /** What waits on the person, from K20's list (lib/today/needs-you.stub.ts until it is on main). */
+  needs: NeedsYouRow[]
   now: number
 }
 
@@ -53,7 +57,7 @@ export function TodayView({ data }: { data: TodayData }) {
 
   const { band } = data
   const shown = band.items.slice(0, SHOWN)
-  const header = data.state === 'first' ? 'Welcome.' : headerSentence({ band: { kind: band.kind, count: band.items.length }, newCount: data.newCount })
+  const header = data.state === 'first' ? 'Welcome.' : headerSentence({ needs: needsYouCount(data.needs), band: { kind: band.kind, count: band.items.length }, newCount: data.newCount })
   const kept = data.since ? keptSince(data.since.kept) : null
 
   return (
@@ -62,6 +66,8 @@ export function TodayView({ data }: { data: TodayData }) {
         <h1 className="r-display">{header}</h1>
         {data.state === 'first' ? <p className="r-body">{FIRST_USE}</p> : data.check && <p className="r-meta">{data.check}</p>}
       </header>
+
+      <NeedsYou rows={data.needs} />
 
       {data.working && (
         <section aria-labelledby="working" className="space-y-2">

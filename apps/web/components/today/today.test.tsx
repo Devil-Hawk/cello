@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { BACKGROUND_OFF_TEXT } from '@/lib/clock/status'
 import { fixtureRoles } from '@/components/roles/fixtures'
-import { fixtureSent, fixtureToday } from './fixtures'
+import { fixtureNeedsYou, fixtureSent, fixtureToday } from './fixtures'
 import { ago, checkLine, headerSentence, keptSince, quietSentence, sentLine } from './logic'
 import { TodayView } from './today-view'
 
@@ -71,6 +71,45 @@ describe('the sentences', () => {
     expect(quietSentence(1, true, 1)).toBe('You sent 1 application in the last 14 days. 1 has moved past applied.')
     expect(quietSentence(0, true, 0)).toBe('')
     expect(sentLine(fixtureSent(2)[1], NOW)).toBe('Sent 3 days ago, still listed')
+  })
+})
+
+describe('Needs you', () => {
+  it('draws nothing for no rows, and does not say that nothing needs the person', () => {
+    const html = text(render({ needs: [] }))
+    expect(html).not.toContain('Needs you')
+    expect(html).not.toMatch(/need you|Nothing needs/)
+  })
+
+  it('counts them in the header sentence', () => {
+    expect(text(render({ needs: fixtureNeedsYou(1) }))).toContain('1 thing needs you.')
+    expect(text(render({ needs: fixtureNeedsYou(3) }))).toContain('3 things need you.')
+    expect(headerSentence({ needs: 0, band: { kind: 'newest', count: 0 }, newCount: 0 })).toBe('Nothing new today.')
+  })
+
+  it('shows seven rows, then Show N more, and none at seven', () => {
+    expect(text(render({ needs: fixtureNeedsYou(7) }))).not.toContain('Show')
+    const eight = render({ needs: fixtureNeedsYou(8) })
+    expect(text(eight)).toContain('Show 1 more')
+    const before = eight.slice(0, eight.indexOf('<details'))
+    expect((before.match(/class="r-row/g) ?? []).length).toBe(7)
+    expect(text(render({ needs: fixtureNeedsYou(11) }))).toContain('Show 4 more')
+  })
+
+  it('puts the first Needs you button before the picks, with the role title at the company weight opening its record', () => {
+    const rows = fixtureNeedsYou(3)
+    const html = render({ needs: rows })
+    expect(html.indexOf('Review')).toBeGreaterThan(-1)
+    expect(html.indexOf('Review')).toBeLessThan(html.indexOf('Open Roles'))
+    expect(html).toContain(`href="/roles/${rows[0].target.id}"`)
+    expect(html).not.toMatch(/truncate|line-clamp/)
+  })
+
+  it('orders by the groups of 4.4', () => {
+    const [a, b, c] = fixtureNeedsYou(3) // follow_up, reply, ready
+    const html = render({ needs: [a, c, b] })
+    expect(html.indexOf(b.sentence)).toBeLessThan(html.indexOf(c.sentence))
+    expect(html.indexOf(c.sentence)).toBeLessThan(html.indexOf(a.sentence))
   })
 })
 

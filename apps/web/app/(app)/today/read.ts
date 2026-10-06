@@ -12,6 +12,7 @@ import { readFindNewRoles } from '@/lib/ingest/status'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { readShortlist, todayUtc } from '@/lib/scoring'
 import { OnJobs } from '@/lib/scoring/person-roles-query'
+import { readNeedsYou } from '@/lib/today/needs-you.stub'
 import { checkLine, STAGE_WORDS, type SentRow, type SinceChange } from '@/components/today/logic'
 import type { TodayData } from '@/components/today/today-view'
 import type { PickItem, RoleItem } from '@/components/roles/types'
@@ -63,7 +64,7 @@ export async function readToday(db: Db, userId: string, nowMs = Date.now()): Pro
   const newest = new OnJobs(db.from('person_roles').select(LIST).is('hidden_reason', null))
   openRolesOnly(newest)
 
-  const [list, today, kept, moved, sentRows, checks, profile, find, keys] = await Promise.all([
+  const [list, today, kept, moved, sentRows, checks, profile, find, keys, needs] = await Promise.all([
     newest.query.order('jobs(posted_at)', { ascending: false, nullsFirst: false }).limit(BAND),
     db.from('person_roles').select('job_id', { count: 'exact', head: true }).is('hidden_reason', null).gte('visible_since', start),
     seenAt ? db.from('person_roles').select('job_id', { count: 'exact', head: true }).is('hidden_reason', null).gt('visible_since', seenAt) : Promise.resolve({ count: 0 }),
@@ -73,6 +74,7 @@ export async function readToday(db: Db, userId: string, nowMs = Date.now()): Pro
     db.from('profiles').select('preferences').eq('id', userId).maybeSingle(),
     readFindNewRoles(db as never, now).catch(() => null),
     admin ? loadApiKeys(admin as never, userId).catch(() => null) : Promise.resolve(null),
+    readNeedsYou().catch(() => []),
   ])
   if (list.error) return failed(nowMs)
 
@@ -114,10 +116,11 @@ export async function readToday(db: Db, userId: string, nowMs = Date.now()): Pro
     sent,
     canReadReplies: parseGmailPermissions(prefs).state.monitor.enabled === true,
     hasModel: keys ? canRunLlm(keys) : true,
+    needs,
     now: nowMs,
   }
 }
 
 function failed(now: number): TodayData {
-  return { state: 'failed', band: { kind: 'newest', items: [] }, newCount: 0, check: null, working: false, since: null, sent: [], canReadReplies: false, hasModel: true, now }
+  return { state: 'failed', band: { kind: 'newest', items: [] }, newCount: 0, check: null, working: false, since: null, sent: [], canReadReplies: false, hasModel: true, needs: [], now }
 }
