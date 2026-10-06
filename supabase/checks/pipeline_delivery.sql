@@ -13,6 +13,19 @@ create temp table fx as select gen_random_uuid() as u1, gen_random_uuid() as u2;
 grant select on fx to public;
 insert into auth.users (id, email) select u1, 'dl-1@example.invalid' from fx union all select u2, 'dl-2@example.invalid' from fx;
 
+-- every person has a daily summary routine at 08:00, not due before the next 08:00
+do $$
+declare r record;
+begin
+  select * into r from public.routines where user_id = (select u1 from fx) and command = 'summary.send';
+  if not found then raise exception 'a new person has no summary.send routine'; end if;
+  if r.local_time <> time '08:00' or r.every is not null or r.timezone <> 'UTC' or r.next_due_at <= now() or r.next_due_at > now() + interval '25 hours' then
+    raise exception 'summary.send should be daily at 08:00 UTC, next due within a day: %', r;
+  end if;
+  if (r.next_due_at at time zone 'UTC')::time <> time '08:00' then raise exception 'summary.send is not due at 08:00: %', r.next_due_at; end if;
+end
+$$;
+
 insert into public.notification_log (user_id, kind, subject_id) select u1, 'summary', '2026-10-06' from fx;
 insert into public.push_subscriptions (user_id, endpoint, p256dh, auth) select u1, 'https://push.example/abc', 'k', 'a' from fx;
 
