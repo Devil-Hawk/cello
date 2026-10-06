@@ -9,4 +9,8 @@ export const allow: AllowEntry[] = [
     reason: 'Holds the scanner patterns as string fixtures. The one permanent entry, named in the strict rule.',
     permanent: true,
   },
+  {
+    file: 'lib/models/settings.ts',
+    reason: 'The settings page tests each rung with one eight-token call. It moves behind a models.test step before the strict rule turns on.',
+  },
 ]

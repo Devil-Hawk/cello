@@ -24,7 +24,7 @@ export const RAW_CALL_PATTERNS: { name: string; re: RegExp }[] = [
 ]
 
 /** The model doors and the steps: they are the code the rule is about. */
-const EXEMPT = ['lib/harness/llm.ts', 'lib/harness/providers/', 'lib/steps/', 'lib/models/']
+const EXEMPT = ['lib/harness/llm.ts', 'lib/harness/providers/', 'lib/steps/', 'lib/models/factory.ts']
 
 export const isExempt = (rel: string) => EXEMPT.some((e) => (e.endsWith('/') ? rel.startsWith(e) : rel === e))
 
