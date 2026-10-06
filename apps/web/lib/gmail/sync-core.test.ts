@@ -227,6 +227,46 @@ describe('runGmailSyncCore — idempotency', () => {
   })
 })
 
+describe('runGmailSyncCore: calendar invite', () => {
+  it('stores the invite time over the time the model read, on the model path', async () => {
+    const start = new Date(Date.now() + 10 * 24 * 3600 * 1000)
+    start.setUTCMinutes(0, 0, 0)
+    const stamp = start.toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '')
+    const calendar = ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', `DTSTART:${stamp}`, 'SUMMARY:Interview', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n')
+    mailbox = [{ ...FIXED_MESSAGE, payload: { ...FIXED_MESSAGE.payload, calendar } }]
+    callOpenRouterMock.mockReset().mockResolvedValue({
+      content: JSON.stringify({
+        isJobRelated: true,
+        employerName: 'Acme Corp',
+        employerDomain: 'acme.com',
+        jobTitle: 'Backend Engineer',
+        status: 'interview',
+        careerPageUrl: null,
+        interviewDateTime: new Date(start.getTime() + 3 * 24 * 3600 * 1000).toISOString(),
+        confidence: 0.95,
+        reasoning: null,
+      }),
+      tokensUsed: 600,
+      promptTokens: 500,
+      completionTokens: 100,
+      model: 'google/gemini-2.0-flash-001',
+    })
+    reserveSpendMock.mockReset().mockResolvedValue(RESERVATION)
+    settleSpendMock.mockReset().mockResolvedValue(undefined)
+    fakeDb = makeFakeDb()
+    fakeDb.tables.set('companies', [{ id: 'company-1', user_id: USER_ID, name: 'Acme Corp', domain: 'acme.com', metadata: null }])
+    fakeDb.tables.set('profiles', [{ id: USER_ID, preferences: {} }])
+    await runGmailSyncCore({
+      db: fakeDb as any,
+      userId: USER_ID,
+      accessToken: 'fake-access-token',
+      apiKeys: { openrouter: 'fake-key', userId: USER_ID },
+      preferences: preferences(),
+    })
+    expect(fakeDb.tables.get('activities')?.[0].metadata.interview_datetime).toBe(start.toISOString())
+  })
+})
+
 describe('runGmailSyncCore: outreach replies', () => {
   it('checks the tracked outreach threads on every pass, whatever the job-email search returns', async () => {
     fakeDb = makeFakeDb()
