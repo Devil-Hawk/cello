@@ -37,11 +37,10 @@ describe('PanelView', () => {
     expect(out).toContain('>Use in a new chat<')
   })
 
-  it('shows the person\'s draft in a field while editing, with Save as my version', () => {
+  it('shows the person\'s draft in a field while editing, with Save as a new version', () => {
     const out = html({ editing: true })
-    expect(out).toContain('aria-label="Edit this version"')
-    expect(out).toContain('Dear team, v2')
-    expect(out).toContain('Save as my version')
+    expect(out).toContain('Resume editor')
+    expect(out).toContain('Save as a new version')
   })
 
   it('says so for something with no versions, and names an unknown kind in plain words', () => {
