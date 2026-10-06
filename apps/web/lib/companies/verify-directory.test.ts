@@ -122,13 +122,19 @@ describe('checkBoard: the employer a board belongs to', () => {
   })
 })
 
+const idOf = async (p: ReturnType<typeof writeEmployer>) => {
+  const r = await p
+  if (!r.ok) throw new Error(`refused: ${r.reason}`)
+  return r.employerId
+}
+
 describe('writeEmployer: the one writer of company_directory', () => {
   const base = { name: 'Retell AI', careersUrl: null, provider: 'ashby' as const, token: 'retell-ai', verifiedBy: 'careers_page_link', source: 'person' as const, openCount: 12, readTier: 'board' }
 
   it('writes a row once by board and keeps what the row knew when a later check knows less', async () => {
     const { client, tables } = fakeDb()
-    const id = await writeEmployer(client, { ...base, domain: 'retellai.com' }, () => NOW)
-    const again = await writeEmployer(client, { ...base, domain: null, openCount: 14 }, () => NOW)
+    const id = await idOf(writeEmployer(client, { ...base, domain: 'retellai.com' }, () => NOW))
+    const again = await idOf(writeEmployer(client, { ...base, domain: null, openCount: 14 }, () => NOW))
     expect(again).toBe(id)
     expect(tables.company_directory).toHaveLength(1)
     expect(tables.company_directory[0]).toMatchObject({ name: 'Retell AI', name_norm: 'retell ai', domain: 'retellai.com', open_count: 14, verified_by: 'careers_page_link', ats_provider: 'ashby' })
@@ -143,7 +149,7 @@ describe('writeEmployer: the one writer of company_directory', () => {
   it('a board whose declared home is a verified employer\'s domain leaves that row\'s board, owner and address alone', async () => {
     const real = { id: 'e1', source: 'person', domain: 'retellai.com', ats_provider: 'greenhouse', ats_token: 'real', verified_by: 'careers_page_link', careers_url: 'https://retellai.com/jobs' }
     const { client, tables } = fakeDb({ company_directory: [{ ...real }] })
-    const id = await writeEmployer(client, { ...base, domain: 'retellai.com', careersUrl: 'https://evil.example/jobs', verifiedBy: 'careers_url' }, () => NOW)
+    const id = await idOf(writeEmployer(client, { ...base, domain: 'retellai.com', careersUrl: 'https://evil.example/jobs', verifiedBy: 'careers_url' }, () => NOW))
     expect(id).toBe('e1')
     expect(tables.company_directory).toEqual([real])
     // a site-only check never nulls the board either
@@ -156,12 +162,41 @@ describe('writeEmployer: the one writer of company_directory', () => {
     const siteOnly = { id: 'e2', source: 'person', name: 'Acme', domain: 'acme.com', ats_provider: null, ats_token: null, verified_by: 'careers_url_host', careers_url: 'https://acme.com/jobs' }
     const { client, tables } = fakeDb({ company_directory: [{ ...real }, { ...siteOnly }] })
     // a pasted page the person controls that links the verified board
-    const hit = await writeEmployer(client, { ...base, name: 'Evil', domain: 'evil.example', careersUrl: 'https://evil.example/jobs', provider: 'greenhouse', token: 'real', verifiedBy: 'careers_page_link', keepExisting: true }, () => NOW)
+    const hit = await idOf(writeEmployer(client, { ...base, name: 'Evil', domain: 'evil.example', careersUrl: 'https://evil.example/jobs', provider: 'greenhouse', token: 'real', verifiedBy: 'careers_page_link', keepExisting: true }, () => NOW))
     expect(hit).toBe('e1')
     // a lead whose companyDomain is the site-only employer's, with a board of its own
-    const lead = await writeEmployer(client, { ...base, domain: 'acme.com', provider: 'ashby', token: 'attacker', keepExisting: true, source: 'lead' }, () => NOW)
+    const lead = await idOf(writeEmployer(client, { ...base, domain: 'acme.com', provider: 'ashby', token: 'attacker', keepExisting: true, source: 'lead' }, () => NOW))
     expect(lead).toBe('e2')
     expect(tables.company_directory).toEqual([real, siteOnly])
+  })
+})
+
+describe('a person or a lead never writes an employer under a name another employer holds', () => {
+  const notion = { id: 'e1', source: 'seed', name: 'Notion', name_norm: 'notion', domain: 'notion.so', ats_provider: 'greenhouse', ats_token: 'notion', verified_at: '2026-10-01T00:00:00Z' }
+  const squat = world({ identity: { name: 'Notion', homeUrls: [] } })
+
+  it('a lead whose board is a Workable account named like a verified employer is other_owner, and the directory keeps one row', async () => {
+    const { client, tables } = fakeDb({ company_directory: [{ ...notion }] })
+    const r = await verifyEmployer(client, { name: 'Notion', domain: null, boards: [{ provider: 'workable', token: 'squat' }], source: 'lead' }, squat)
+    expect(r).toMatchObject({ ok: false, reason: 'other_owner' })
+    expect(tables.company_directory).toEqual([notion])
+  })
+
+  it('a person with a big employer name and no domain is refused; with that employer domain the row is written', async () => {
+    const base = { name: 'Stripe', careersUrl: null, provider: 'workable' as const, token: 'squat', verifiedBy: 'provider_name', source: 'person' as const, openCount: 1, readTier: 'board', keepExisting: true }
+    const { client, tables } = fakeDb()
+    expect(await writeEmployer(client, { ...base, domain: null }, () => NOW)).toMatchObject({ ok: false, reason: 'other_owner' })
+    expect(await writeEmployer(client, { ...base, domain: 'evil.example' }, () => NOW)).toMatchObject({ ok: false, reason: 'other_owner' })
+    expect(tables.company_directory ?? []).toHaveLength(0)
+    expect(await writeEmployer(client, { ...base, domain: 'stripe.com' }, () => NOW)).toMatchObject({ ok: true })
+    expect(tables.company_directory).toHaveLength(1)
+  })
+
+  it('the seed keeps its path: a namesake from a list is written', async () => {
+    const { client, tables } = fakeDb({ company_directory: [{ ...notion }] })
+    const r = await verifyEmployer(client, { name: 'Notion', domain: null, boards: [{ provider: 'workable', token: 'other' }], source: 'seed' }, squat)
+    expect(r.ok).toBe(true)
+    expect(tables.company_directory).toHaveLength(2)
   })
 })
 
