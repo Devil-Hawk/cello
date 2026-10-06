@@ -62,6 +62,26 @@ function host(tag: string, css: string): { host: HTMLElement; root: ShadowRoot }
   return { host: el, root }
 }
 
+/** The bar is fixed, so the page gets its height as top padding (and scroll padding, so a focused
+ * field is never scrolled under it) while it shows. ponytail: the page's own top padding on <html>
+ * is read once, when the bar mounts. Returns the undo. */
+function reserve(bar: HTMLElement): () => void {
+  const root = document.documentElement
+  const was = { pad: root.style.paddingTop, scroll: root.style.scrollPaddingTop }
+  const own = getComputedStyle(root).paddingTop
+  const ro = new ResizeObserver(() => {
+    const h = `${bar.getBoundingClientRect().height}px`
+    root.style.paddingTop = `calc(${own} + ${h})`
+    root.style.scrollPaddingTop = h
+  })
+  ro.observe(bar)
+  return () => {
+    ro.disconnect()
+    root.style.paddingTop = was.pad
+    root.style.scrollPaddingTop = was.scroll
+  }
+}
+
 export interface Bar {
   show(state: BarState): void
   hide(): void
@@ -70,6 +90,7 @@ export interface Bar {
 export function mountBar(): Bar {
   let mounted: { host: HTMLElement; root: ShadowRoot } | null = null
   let body: HTMLElement | null = null
+  let undo: (() => void) | null = null
   return {
     show(state) {
       if (!mounted) {
@@ -77,6 +98,7 @@ export function mountBar(): Bar {
         body = document.createElement('div')
         mounted.root.append(body)
         document.documentElement.append(mounted.host)
+        undo = reserve(body)
       }
       const b = body as HTMLElement
       const tone = state.tone ?? 'info'
@@ -110,6 +132,8 @@ export function mountBar(): Bar {
       b.append(lead, t, actions)
     },
     hide() {
+      undo?.()
+      undo = null
       mounted?.host.remove()
       mounted = null
       body = null

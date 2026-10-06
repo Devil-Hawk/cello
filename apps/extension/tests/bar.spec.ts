@@ -16,6 +16,17 @@ async function open(context: BrowserContext, site: Site, job: number, html: stri
   return p
 }
 
+// The bar is fixed, so the page must leave room: its first heading starts at or below the bar.
+async function pageClear(p: Page, label: string): Promise<void> {
+  await expect
+    .poll(async () => {
+      const bar = await p.locator('cello-bar .bar').boundingBox()
+      const h1 = await p.locator('h1').first().boundingBox()
+      return h1!.y - (bar!.y + bar!.height)
+    }, { message: `${label}: the heading is not under the bar` })
+    .toBeGreaterThanOrEqual(0)
+}
+
 async function check(p: Page, name: string): Promise<void> {
   await expect(p.locator('cello-bar .bar')).toBeVisible()
   for (const scheme of ['light', 'dark'] as const) {
@@ -32,11 +43,14 @@ async function check(p: Page, name: string): Promise<void> {
   }
   // On a phone the bar still fits the width.
   await p.setViewportSize({ width: 390, height: 844 })
+  await pageClear(p, `${name} 390`)
   await shoot(p, `bar-${name}-390`)
   const box = await p.locator('cello-bar .bar').boundingBox()
   expect(box!.x).toBeGreaterThanOrEqual(0)
   expect(box!.x + box!.width).toBeLessThanOrEqual(390)
   expect(copyProblems(await p.locator('cello-bar .text').innerText())).toEqual([])
+  await p.setViewportSize({ width: 1440, height: 900 })
+  await pageClear(p, `${name} 1440`)
   await p.setViewportSize({ width: 1280, height: 720 })
 }
 
