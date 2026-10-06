@@ -19,6 +19,7 @@ import { SourcesTab } from '@/components/settings/sources-tab'
 import { SearchTab } from '@/components/settings/search-tab'
 import { McpTab } from '@/components/settings/mcp-tab'
 import { TokensTab } from '@/components/settings/tokens-tab'
+import { AccountStatus } from '@/components/settings/account-status'
 import { EMPTY_TARGETING, type Targeting } from '@/lib/targeting'
 
 type TabId = 'connections' | 'sources' | 'search' | 'mcp' | 'tokens' | 'api-keys' | 'provider' | 'model' | 'targeting'
@@ -250,6 +251,8 @@ export default function SettingsPage() {
           )}
         </Card>
       </div>
+
+      <AccountStatus />
     </div>
   )
 }
