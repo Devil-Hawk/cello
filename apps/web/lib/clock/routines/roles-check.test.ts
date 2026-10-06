@@ -226,21 +226,21 @@ describe('after a change of targets', () => {
     posted_at: new Date(START - 86_400_000).toISOString(),
     employer_id: 'emp-1',
     company_id: 'co-1',
-    companies: { name: 'Overlap Co' },
     ...over,
   })
   interface Held { job_id: string; saved_at: string | null; hidden_reason: string | null; targets_version: number; jobs: ReturnType<typeof job> }
 
-  /** The person_roles, applications and set_person_counts the re-judge touches, in memory. */
-  function store(held: Held[], appliedTo: string[] = []) {
+  /** The person_roles, applications, person_jobs (the viewer's own company name by job id) and set_person_counts the re-judge touches, in memory. */
+  function store(held: Held[], appliedTo: string[] = [], viewers: Record<string, string> = {}) {
     const rpcs: { name: string; args: Record<string, any> }[] = []
+    const selects: string[] = []
     const admin = {
       from(table: string) {
         const filters: ((r: any) => boolean)[] = []
         let op: 'select' | 'delete' | 'update' = 'select'
         let patch: Record<string, unknown> = {}
         const b: any = {
-          select: () => b,
+          select: (cols: string) => (table === 'person_roles' && selects.push(cols), b),
           delete: () => ((op = 'delete'), b),
           update: (p: Record<string, unknown>) => ((op = 'update'), (patch = p), b),
           eq: (c: string, v: unknown) => (filters.push((r) => c === 'user_id' || r[c] === v), b),
@@ -250,6 +250,7 @@ describe('after a change of targets', () => {
           limit: () => b,
           then(resolve: (v: unknown) => void) {
             if (table === 'applications') return resolve({ data: appliedTo.map((job_id) => ({ job_id })), error: null })
+            if (table === 'person_jobs') return resolve({ data: Object.entries(viewers).map(([id, viewer_company_name]) => ({ id, viewer_company_name })), error: null })
             const hit = held.filter((r) => filters.every((f) => f(r)))
             if (op === 'delete') for (const r of hit) held.splice(held.indexOf(r), 1)
             if (op === 'update') for (const r of hit) Object.assign(r, patch)
@@ -260,7 +261,7 @@ describe('after a change of targets', () => {
       },
       rpc: async (name: string, args: Record<string, any>) => (rpcs.push({ name, args }), { data: 1, error: null }),
     }
-    return { admin: admin as unknown as RoutineContext['admin'], rpcs, held }
+    return { admin: admin as unknown as RoutineContext['admin'], rpcs, held, selects }
   }
 
   const targets = (over: Record<string, unknown> = {}) => ({
@@ -290,14 +291,31 @@ describe('after a change of targets', () => {
   })
 
   it('drops an excluded-company role the sweep stored with no company, named by its employer', async () => {
-    const { admin, held } = store([
-      row('owned', { jobs: job('Engineer') }),
-      row('swept', { jobs: { ...job('Engineer'), company_id: null, companies: null, employer: { name: 'Overlap Co' } } as never }),
-      row('other', { jobs: { ...job('Engineer'), company_id: null, companies: null, employer: { name: 'Fine Inc' } } as never }),
-    ])
+    const { admin, held } = store(
+      [
+        row('owned', { jobs: job('Engineer') }),
+        row('swept', { jobs: { ...job('Engineer'), company_id: null, employer: { name: 'Overlap Co' } } as never }),
+        row('other', { jobs: { ...job('Engineer'), company_id: null, employer: { name: 'Fine Inc' } } as never }),
+      ],
+      [],
+      { owned: 'Overlap Co' }
+    )
     const out = await rejudgeHeldRoles(admin, 'u1', targets({ excludedCompanies: ['overlap'] }), () => START, START + 200_000)
     expect(out).toEqual({ checked: 3, removed: 2 })
     expect(held.map((r) => r.job_id)).toEqual(['other'])
+  })
+
+  it("judges a shared role by the viewer's own company name, never the company that stored it first", async () => {
+    // stored under another person's company 'Overlap Co' (what a companies(...) embed would return); this person follows the employer as 'Fine Inc'
+    const stored = (over: Record<string, unknown> = {}) => ({ ...job('Engineer'), companies: { name: 'Overlap Co' }, employer: { name: 'Overlap Co' }, ...over }) as never
+    const { admin, held, selects } = store([row('theirs', { jobs: stored() })], [], { theirs: 'Fine Inc' })
+    const out = await rejudgeHeldRoles(admin, 'u1', targets({ excludedCompanies: ['overlap'] }), () => START, START + 200_000)
+    expect(out).toEqual({ checked: 1, removed: 0 })
+    expect(held.map((r) => r.job_id)).toEqual(['theirs'])
+    expect(selects.every((s) => !s.includes('companies('))).toBe(true)
+    // and their own company still excludes: the viewer's name is the one judged
+    const own = store([row('mine', { jobs: stored({ employer: null }) })], [], { mine: 'Overlap Co' })
+    expect(await rejudgeHeldRoles(own.admin, 'u1', targets({ excludedCompanies: ['overlap'] }), () => START, START + 200_000)).toEqual({ checked: 1, removed: 1 })
   })
 
   it('leaves roles already under the current version alone, and does nothing for a person with no saved targets', async () => {
