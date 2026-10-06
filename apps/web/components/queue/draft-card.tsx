@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils'
 import { formatShortDate } from '@/lib/format'
 import { checkDraft, type DraftCheck, type LetterTier } from '@/lib/writing/checks'
 import { DraftChecks } from '@/components/writing/draft-checks'
-import { letterNote } from '@/lib/applications/letter-note'
+import { letterNote } from '@/lib/writing/letter-note'
 
 interface JobRel {
   id: string
