@@ -1,7 +1,6 @@
 // A posting older than this is not an open role, whatever the board still lists
 // (evergreen requisitions, forgotten reqs). One rule, used where roles are
-// stored (every provider) and where they are listed. Mirrored in
-// packages/scrapers/src/runner.py (ROLE_MAX_AGE_DAYS).
+// stored (every provider) and where they are listed; lib/ingest/reader/legit.ts applies it to every role the reader reads.
 //
 // Pure: no I/O, so lib/ats, the scripts and the new ingestion path can all call it.
 

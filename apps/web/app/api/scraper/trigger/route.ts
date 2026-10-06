@@ -35,6 +35,7 @@ const REASON_MESSAGE: Record<FailureReason, string> = {
   unreachable: 'Its careers site did not answer. Try again in a few minutes.',
   role_pages: 'Its site lists roles, but their pages cannot be read without a browser. Cello will not report them as no roles.',
   render_failed: "Cello's browser could not read its careers page just now. The next scheduled check tries again.",
+  budget: 'Its site is large. Cello read as much as one check allows and the next scheduled check reads more.',
   time: 'Not reached this time.',
 }
 

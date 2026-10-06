@@ -23,17 +23,15 @@ const LIVENESS_TIMEOUT_MS = 8000
 
 interface JobRow {
   id: string
-  company_id: string
+  company_id: string | null
   title: string | null
   url: string | null
   external_id: string | null
-  companies?: { name: string | null } | { name: string | null }[] | null
+  viewer_company_name?: string | null
 }
 
 function companyName(job: JobRow): string {
-  const c = job.companies
-  if (Array.isArray(c)) return c[0]?.name ?? ''
-  return c?.name ?? ''
+  return job.viewer_company_name ?? ''
 }
 
 async function userCompanyIds(admin: AdminClient, userId: string): Promise<string[]> {
@@ -97,9 +95,9 @@ export const verifier: AgentFn = async (ctx) => {
     return { output: { verified: true, issues: [] }, tokensUsed: 0 }
   }
 
-  // Ownership scoped via the companies FK join (see ownedJobsQuery), not an
+  // Ownership scoped by ownedJobsQuery's viewer_id fence, not an
   // .in('company_id', companyIds) array — that breaks past ~600 companies.
-  const SELECT_COLUMNS = 'id, company_id, title, url, external_id, companies!inner(name)'
+  const SELECT_COLUMNS = 'id, company_id, title, url, external_id, viewer_company_name'
   let jobs: JobRow[]
   if (jobIds.length > 0) {
     const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, SELECT_COLUMNS).in(

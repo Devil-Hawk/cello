@@ -31,13 +31,14 @@ interface AppRow {
     title: string | null
     company_id: string | null
     companies?: { name: string | null } | { name: string | null }[] | null
+    employer?: { name: string | null } | null
   } | null
 }
 
 function coName(app: AppRow): string {
   const c = app.jobs?.companies
-  if (Array.isArray(c)) return c[0]?.name ?? ''
-  return c?.name ?? ''
+  if (Array.isArray(c)) return c[0]?.name ?? app.jobs?.employer?.name ?? ''
+  return c?.name ?? app.jobs?.employer?.name ?? ''
 }
 
 function lastTouchMs(app: AppRow, lastActivity: number | undefined): number {
@@ -69,7 +70,7 @@ export const follow_upper: AgentFn = async (ctx) => {
   // 1) Resolve candidate applications.
   let query = ctx.admin
     .from('applications')
-    .select('id, stage, applied_at, updated_at, created_at, job_id, jobs(title, company_id, companies(name))')
+    .select('id, stage, applied_at, updated_at, created_at, job_id, jobs(title, company_id, companies(name), employer:company_directory(name))')
     .eq('user_id', ctx.userId)
 
   if (input.applicationId) {

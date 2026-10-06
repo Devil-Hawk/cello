@@ -18,7 +18,7 @@ import { htmlToPlainText } from './html'
 import { mapWithConcurrency } from './concurrency'
 import { isStalePosting } from '../jobs/freshness'
 import { assertSsrfSafe } from '../security/untrusted'
-import { makeSiteFetcher, type SiteFetcher } from '../ingest/reader/site-fetch'
+import { makeSiteFetcher, ReaderError, type SiteFetcher } from '../ingest/reader/site-fetch'
 
 const PAGE_SIZE = 10
 /** 5 pages x 10 = 50 roles per search word; at most 3 words, and 20 pages (200 roles) with none. */
@@ -181,6 +181,29 @@ async function description(flavor: Flavor, host: string, domain: string, job: At
   } catch {
     return undefined
   }
+}
+
+/**
+ * Where one position is, from its host's own detail answer. A tenant's posting page is a script shell that
+ * names no place, and its JobPosting block leaves the place empty; the detail API names it. Undefined when
+ * the host gives none, and when a request is refused (robots, a bot check, the budget): never a guess.
+ */
+export async function eightfoldPlace(site: SiteFetcher, token: string, id: string): Promise<string | undefined> {
+  const parts = splitEightfoldToken(token)
+  if (!parts || !/^\d{5,}$/.test(id)) return undefined
+  const { host, domain } = parts
+  const allowedHosts = new Set([host])
+  for (const url of [`https://${host}/api/pcsx/position_details?position_id=${id}&domain=${domain}&hl=en`, `https://${host}/api/apply/v2/jobs/${id}?domain=${domain}`]) {
+    try {
+      const json = await site.json<{ data?: V2Position; location?: string; locations?: string[] }>(url, { allowedHosts })
+      const d: V2Position = json.data ?? json
+      const place = d.location || (Array.isArray(d.locations) ? d.locations.join(' · ') : '')
+      if (place) return place
+    } catch (error) {
+      if (error instanceof ReaderError && error.reason !== 'unreachable') return undefined
+    }
+  }
+  return undefined
 }
 
 function detect(input: DetectInput): { token: string } | null {

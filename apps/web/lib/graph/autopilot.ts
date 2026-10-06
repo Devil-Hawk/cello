@@ -948,7 +948,7 @@ async function loadCandidateJobs(admin: AdminClient, userId: string, excluded: S
   const { data } = await ownedJobsQuery(
     admin,
     userId,
-    'id, title, description, location, url, company_id, match_score, companies!inner(user_id)'
+    'id, title, description, location, url, company_id, match_score'
   )
     .order('discovered_at', { ascending: false })
     .limit(CANDIDATE_JOB_LIMIT)
