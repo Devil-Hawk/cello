@@ -99,7 +99,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
 
     async evictJobs(companyId, externalIds): Promise<string[]> {
       if (dry) return externalIds
-      const { data, error } = await client.rpc('evict_company_jobs', { p_company_id: companyId, p_external_ids: externalIds })
+      const { data, error } = await writer.rpc('evict_company_jobs', { p_company_id: companyId, p_external_ids: externalIds })
       fail(error)
       return Array.isArray(data) ? (data as string[]) : []
     },
@@ -143,26 +143,25 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
     async updateJobs(updates: JobUpdate[]): Promise<number> {
       if (dry) return updates.length
       const changed = await mapWithConcurrency(updates, UPDATE_CONCURRENCY, async (u) => {
-        const { data, error } = await writer
+        const byKey = writer
           .from('jobs')
           .update(u.fields as never)
           .eq(u.employerId ? 'employer_id' : 'company_id', u.employerId ?? u.companyId)
           .eq('external_id', u.externalId)
-          .select('id')
+        // A shared row keeps its first storer's company_id: a write keyed by company never reaches one.
+        const { data, error } = await (u.employerId ? byKey : byKey.is('employer_id', null)).select('id')
         fail(error)
         return (data as unknown[] | null)?.length ?? 0
       })
       return changed.reduce((sum, n) => sum + n, 0)
     },
 
-    async recordSightings(companyId, externalIds, sources): Promise<SightingResult> {
+    async recordSightings(companyId, externalIds, sources, employerId): Promise<SightingResult> {
       if (dry) return { seen: 0, reopened: 0, missed: 0, closed: 0 }
-      const { data, error } = await client.rpc('record_job_sightings', {
-        p_company_id: companyId,
-        p_external_ids: externalIds,
-        p_sources: sources,
-        p_close_after: 2,
-      })
+      // A linked company's read stamps and closes the employer's shared roles, by employer; the company's own rows stay by company.
+      const { data, error } = employerId
+        ? await writer.rpc('record_employer_sightings', { p_employer: employerId, p_external_ids: externalIds, p_sources: sources, p_close_after: 2 })
+        : await client.rpc('record_job_sightings', { p_company_id: companyId, p_external_ids: externalIds, p_sources: sources, p_close_after: 2 })
       fail(error)
       const r = (data ?? {}) as Partial<SightingResult>
       return { seen: r.seen ?? 0, reopened: r.reopened ?? 0, missed: r.missed ?? 0, closed: r.closed ?? 0 }
@@ -195,7 +194,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
 
     async clearBoardJobs(companyId, source) {
       if (dry) return { deleted: 0, closed: 0 }
-      return clearBoardJobsRpc(client, companyId, source)
+      return clearBoardJobsRpc(writer, companyId, source)
     },
 
     async updateCompanyLastScraped(companyId: string): Promise<void> {
