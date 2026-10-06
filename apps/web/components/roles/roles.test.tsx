@@ -252,6 +252,13 @@ describe('role types', () => {
     expect(html).toContain('Filters (3)')
   })
 
+  it('fits the filter panel to the phone width and anchors it to the button from 640 up', () => {
+    const html = text(view({ items: fixtureRoles(2, 2), total: 2 }))
+    expect(html).toContain('fixed inset-x-4')
+    expect(html).toContain('sm:absolute')
+    expect(html).not.toContain('w-[min(92vw')
+  })
+
   it('says how many roles are being checked, from the count it is given, and nothing when none are', () => {
     expect(uncheckedLine(12)).toBe('12 more are being checked. Until then they are listed by title and date.')
     expect(uncheckedLine(1)).toBe('1 more is being checked. Until then it is listed by title and date.')

@@ -39,7 +39,8 @@ export function Filters({ query, typeOptions, companyOptions, needsSponsorship }
   return (
     <details className="relative">
       <summary className="r-key r-key-raised min-h-11 min-w-11 cursor-pointer list-none font-r">Filters{n > 0 ? ` (${n})` : ''}</summary>
-      <form action="/roles" method="get" className="r-sheet-lead absolute left-0 top-full z-30 mt-2 max-h-[80vh] w-[min(92vw,360px)] space-y-4 overflow-y-auto p-4">
+      {/* Under 640 the panel is fixed to the screen's own margins, so it never runs off a phone. */}
+      <form action="/roles" method="get" className="r-sheet-lead fixed inset-x-4 z-30 mt-2 max-h-[80vh] space-y-4 sm:absolute sm:inset-x-auto sm:left-0 sm:top-full sm:w-[360px] overflow-y-auto p-4">
         {query.sort !== 'ranked' && <input type="hidden" name="sort" value={query.sort} />}
         {query.group !== 'ranked' && <input type="hidden" name="group" value={query.group} />}
 
