@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { formatRelativeTime } from '@/lib/utils'
-import { knownParts } from '@/lib/format'
+import { knownParts, postedThisWeek } from '@/lib/format'
 import { MatchBadge, parseMatchDetails, type MatchDetails } from './match-badge'
 import { VisaBadge } from './visa-badge'
 import type { VisaSignal } from '@/lib/dossier/store'
@@ -58,16 +58,9 @@ interface JobRowProps {
   onCalculateMatch: () => void
 }
 
-// `job.is_new` only means "Cello has ever seen this row" — it's written
-// `true` by every ingest path (lib/sources, lib/ats, the scraper trigger
-// route) and cleared only when the verifier's dead-URL/dedupe knockout
-// fires, never on a timer. A job discovered six months ago still carries
-// it. The flag alone can't answer "is this actually new right now", so we
-// require it to agree with a real recency window computed from the job's
-// own timestamp (the same posted_at-else-discovered_at fallback the date
-// label below uses) before painting anything.
-const NEW_JOB_WINDOW_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
-
+// `job.is_new` only means "Cello has ever seen this row", so the marker also
+// needs the posting's own date inside the last week. A role with no posting
+// date never gets it: the date Cello found it says nothing about when it went up.
 /** One job as a list row: 40px logo, strong title, single caption meta line, one visible action. */
 export function JobRow({
   job,
@@ -92,11 +85,7 @@ export function JobRow({
     ? `Posted ${formatRelativeTime(job.posted_at as string)}`
     : `Discovered ${formatRelativeTime(job.discovered_at)}`
 
-  // Same reference timestamp as dateLabel above — see NEW_JOB_WINDOW_MS for
-  // why the DB flag alone isn't enough to decide "new".
-  const referenceTimestamp = hasPostedDate ? (job.posted_at as string) : job.discovered_at
-  const isRecent = Date.now() - new Date(referenceTimestamp).getTime() < NEW_JOB_WINDOW_MS
-  const showNewMarker = job.is_new && isRecent
+  const showNewMarker = job.is_new && postedThisWeek(job.posted_at)
 
   const meta = knownParts(job.companies?.name, job.location, job.salary_range)
 
