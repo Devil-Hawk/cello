@@ -77,15 +77,11 @@ const SCAN_ROOTS = ['apps/web/lib', 'apps/web/app/api']
 // (it has no leading identifier at all), so this brings the other two
 // markers in line with it instead of leaving a real inconsistency.
 //
-// `\brationales\b` — step 6 (lib/graph/distill.ts, the reward-loop
-// distiller) quotes a sample of judge verdicts' rationale text (itself
-// built from framed job text, e.g. matcher gaps/missingSkills) into a
-// distillation prompt. Checked against every current file in SCAN_ROOTS
-// before landing, same discipline as the other narrow identifiers here: the
-// plural only matches this file and lib/harness/goals.ts (already
-// PROMPT_BUILDERS/PENDING_WIRING) — a bare `\brationale\b` would have
-// dragged in a dozen unrelated eval/verdict-store files that reference a
-// verdict's rationale field without ever building a prompt from it.
+// `\brationales\b` — a prompt that quotes a sample of judge verdicts' rationale text (itself
+// built from framed job text, e.g. matcher gaps/missingSkills). The plural only matches
+// lib/harness/goals.ts (already PROMPT_BUILDERS/PENDING_WIRING) — a bare `\brationale\b` would
+// have dragged in a dozen unrelated eval/verdict-store files that reference a verdict's
+// rationale field without ever building a prompt from it.
 const DESCRIPTION_MARKER =
   /\.description\b|\bjobDescription\b|\bjob_description\b|\bformatKbContext\b|\bhit\??\.content\b|\bdossier(?:Row)?\??\.summary\b|\brationales\b/
 
@@ -147,13 +143,6 @@ const PROMPT_BUILDERS: Record<string, string> = {
     'The Writer specialist of the agent engine. The cover letter and email path hands the posting to ' +
     'cv_tailor framed (frameJobText, ~L260); the resume path frames it before optimizeResume, whose own ' +
     'jobBlock is a plain slice. Framed at the source from day one, so it is never in PENDING_WIRING.',
-  'apps/web/lib/graph/distill.ts':
-    'Step 6, the reward-loop distiller: buildDistillPrompt (~L200) quotes a SAMPLE of judged ' +
-    "verdicts' rationale text into the distillation prompt — those rationales can carry model " +
-    'output built from framed job text (matcher gaps/missingSkills, a judge summary — see ' +
-    'lib/graph/verify/cv-tailor.ts / outreach.ts). Uses frameJobTextList, same ' +
-    "batch shape as lib/scoring/want-judge.ts, so this file's own scan-mutation check " +
-    'documented in its header stays true.',
   'apps/web/lib/scoring/want-judge.ts':
     'judgeWant puts a posting excerpt per role in the judging prompt. Frames the batch with ' +
     'frameJobTextList. The model only returns a probability and one sentence, clamped and parsed in code.',

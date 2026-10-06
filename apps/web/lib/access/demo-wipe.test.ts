@@ -57,7 +57,6 @@ function fakeAdmin(profiles: ProfileRow[]) {
       }
       if (
         table === 'interactions' ||
-        table === 'insights' ||
         table === 'resume_claims' ||
         table === 'claim_evidence' ||
         table === 'company_merge_candidates' ||
@@ -98,7 +97,6 @@ describe('wipeExpiredDemoData', () => {
     expect(deleteAllCalls).toEqual(['demo-expired'])
     expect(result).toEqual([
       { table: 'interactions', deleted: 1 },
-      { table: 'insights', deleted: 1 },
       { table: 'resume_claims', deleted: 1 },
       { table: 'claim_evidence', deleted: 1 },
       { table: 'company_merge_candidates', deleted: 1 },
@@ -168,7 +166,6 @@ describe('wipeExpiredDemoData', () => {
     expect(deletedFor.insights).toEqual([])
     expect(result).toEqual([
       { table: 'interactions', deleted: 0 },
-      { table: 'insights', deleted: 0 },
       { table: 'resume_claims', deleted: 0 },
       { table: 'claim_evidence', deleted: 0 },
       { table: 'company_merge_candidates', deleted: 0 },

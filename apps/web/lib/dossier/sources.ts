@@ -81,7 +81,7 @@ function escapeRegExp(s: string): string {
 
 /**
  * Case-insensitive, WORD-BOUNDARY match of `phrase` — "Distyl" must match the
- * word "Distyl" and NOT match inside "Distill"/"distilling"/"distillation".
+ * word "Distyl" and NOT match inside "Distill"/"Distilling"/"Distillation".
  * This is a real regex check, never a substring test, and it is applied on
  * top of any API-level "exact" flags (never trusted alone — see fetchHackerNews).
  */
@@ -335,7 +335,7 @@ async function fetchHnByDomain(domain: string, limit: number): Promise<NewsItem[
 /**
  * Fallback signal: a story whose TITLE contains an EXACT, case-insensitive,
  * word-boundary match of the company name — "Distyl" must not match
- * "Distill"/"distilling"/"distillation". Typo tolerance is disabled and the
+ * "Distill"/"Distilling"/"Distillation". Typo tolerance is disabled and the
  * query is sent as a quoted phrase server-side, but that alone is not
  * trusted either: every hit is re-checked with the same word-boundary regex
  * used for Wikipedia title verification.

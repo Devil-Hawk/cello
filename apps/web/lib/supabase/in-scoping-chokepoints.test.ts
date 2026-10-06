@@ -96,13 +96,6 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     calls: [".in('job_id', jobIds)"],
     reason: "jobIds is pendingDraftJobIds(goal): one autopilot goal's own small kept-list, not an owned-id set.",
   },
-  'apps/web/lib/graph/distill.ts': {
-    calls: [".in('id', ids)"],
-    reason:
-      "fetchRationales's only caller (distillCandidate) passes candidate.verdictIds.slice(0, " +
-      'RATIONALE_SAMPLE_SIZE) — capped at 6 before this call ever runs, regardless of how many verdict ids ' +
-      "a candidate's own SQL aggregation carries.",
-  },
   'apps/web/lib/harness/agents/enricher.ts': {
     calls: [".in('id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",

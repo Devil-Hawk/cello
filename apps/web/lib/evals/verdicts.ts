@@ -36,7 +36,6 @@ export type VerdictSubjectKind =
   | 'outreach_draft'
   | 'plan'
   | 'tool_call'
-  | 'distillation'
 
 /** Matches the `judge` CHECK constraint. containment/deterministic need no model call. */
 export type VerdictJudge = 'factuality' | 'closed_qa' | 'containment' | 'deterministic' | 'groundedness' | 'specificity'

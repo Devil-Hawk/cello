@@ -76,7 +76,6 @@ export interface DemoWipeResult {
  *  each table's own `deleted` count in DemoWipeResult stays meaningful). */
 const RULING_5_TABLES = [
   'interactions',
-  'insights',
   'resume_claims',
   'claim_evidence',
   'company_merge_candidates',

@@ -256,9 +256,8 @@ export async function scanMergeCandidates(db: SupabaseClient, userId: string): P
  * Tracked job count for a company — a cheap size proxy (this schema stores no
  * headcount; see lib/contacts/relevance.ts's own header for the identical
  * proxy reasoning), not a live ATS pull. Moved here from lib/context/
- * assemble.ts#trackedRoleCount (langgraph port Step 6, the reward-loop
- * distiller) so buildMatchContext and lib/graph/distill.ts share ONE
- * accessor instead of two copies of the same count query — callers pass an
+ * assemble.ts#trackedRoleCount (langgraph port Step 6) so every caller shares ONE
+ * accessor instead of copies of the same count query — callers pass an
  * already-resolved id (resolveCompanyId first) if they need the canonical
  * company's count, not a duplicate's.
  */
