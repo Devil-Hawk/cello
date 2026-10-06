@@ -263,9 +263,11 @@ export async function proposeFromChat(
   userId: string,
   input: { answerId: string; answer: unknown; quote: string; conversationId?: string },
 ): Promise<SaveResult> {
-  const { data: row } = await admin.from('answer_bank').select('id, category, answer').eq('id', input.answerId).eq('user_id', userId).maybeSingle()
-  const r = row as { id: string; category: Category; answer: unknown } | null
+  const { data: row } = await admin.from('answer_bank').select('id, category, answer, origin').eq('id', input.answerId).eq('user_id', userId).maybeSingle()
+  const r = row as { id: string; category: Category; answer: unknown; origin: string } | null
   if (!r) return { ok: false, sentence: 'That question is gone.' }
+  // what the person already said is theirs: Chat fills an open question or replaces its own earlier proposal
+  if (r.answer != null && r.origin !== 'model') return { ok: false, sentence: 'You already answered this one. Change it on the Answers page.' }
   if (isSensitive(r.category)) return { ok: false, sentence: 'Answer this one yourself on the Answers page. Cello does not take it from a chat.' }
   const { error } = await admin
     .from('answer_bank')

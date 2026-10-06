@@ -216,6 +216,12 @@ describe('Chat and Confirm', () => {
     expect(rpcs).toEqual(['pipeline_note'])
   })
 
+  it('never overwrites an answer the person already gave', async () => {
+    const { client, bank } = fakeAdmin([{ user_id: U, question_key: 'notice period', category: 'notice', answer: '30 days', source: 'person', origin: 'person' }])
+    expect((await proposeFromChat(client, U, { answerId: 'r0', answer: '2 weeks', quote: 'I can give two weeks' })).ok).toBe(false)
+    expect(bank[0]).toMatchObject({ answer: '30 days', origin: 'person' })
+  })
+
   it('refuses a sensitive answer from Chat', async () => {
     const { client } = fakeAdmin([{ user_id: U, question_key: 'salary', category: 'salary', answer: null, source: 'person', origin: 'person' }])
     expect((await proposeFromChat(client, U, { answerId: 'r0', answer: '150000', quote: 'about 150k' })).ok).toBe(false)
