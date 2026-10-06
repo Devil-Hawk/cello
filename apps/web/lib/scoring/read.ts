@@ -1,5 +1,5 @@
 // Reading the verdict on a role. The assessment lives on the job row (see
-// migration 20261006000200), so every screen selects FIT_COLUMNS next to the
+// migration 20261009000200), so every screen selects FIT_COLUMNS next to the
 // columns it already reads and passes the row through parseFit. Nothing here
 // produces a number to show: the chance is a label with evidence, and the want
 // is a band.

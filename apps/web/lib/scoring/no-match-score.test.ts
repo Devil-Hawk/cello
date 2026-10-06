@@ -1,4 +1,4 @@
-// The 0-100 match score is retired (migration 20261006000201): nothing writes
+// The 0-100 match score is retired (migration 20261009000201): nothing writes
 // jobs.match_score and no screen, route or prompt may read it. The columns stay in
 // the database for one release, so a stray reader would quietly show nothing.
 // This walks the source and fails naming every file that still mentions it, so a

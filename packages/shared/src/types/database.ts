@@ -127,14 +127,6 @@ export interface Database {
           match_details: Json | null
           is_new: boolean
           external_id: string | null
-          fit_assessed_at: string | null
-          blocked_reasons: Json
-          want_p: number | null
-          want_reason: string | null
-          want_detail: Json | null
-          chance: string | null
-          chance_detail: Json | null
-          requirement_items: Json | null
         }
         Insert: {
           id?: string
@@ -151,14 +143,6 @@ export interface Database {
           match_details?: Json | null
           is_new?: boolean
           external_id?: string | null
-          fit_assessed_at?: string | null
-          blocked_reasons?: Json
-          want_p?: number | null
-          want_reason?: string | null
-          want_detail?: Json | null
-          chance?: string | null
-          chance_detail?: Json | null
-          requirement_items?: Json | null
         }
         Update: {
           id?: string
@@ -175,14 +159,6 @@ export interface Database {
           match_details?: Json | null
           is_new?: boolean
           external_id?: string | null
-          fit_assessed_at?: string | null
-          blocked_reasons?: Json
-          want_p?: number | null
-          want_reason?: string | null
-          want_detail?: Json | null
-          chance?: string | null
-          chance_detail?: Json | null
-          requirement_items?: Json | null
         }
         Relationships: [
           {
@@ -385,6 +361,58 @@ export interface Database {
             foreignKeyName: "follow_ups_application_id_fkey"
             columns: ["application_id"]
             referencedRelation: "applications"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      person_roles: {
+        Row: {
+          user_id: string
+          job_id: string
+          hidden_reason: string | null
+          checked_at: string | null
+          blocked_reasons: Json
+          want_p: number | null
+          want_reason: string | null
+          want_detail: Json | null
+          chance: string | null
+          chance_detail: Json | null
+        }
+        Insert: {
+          user_id: string
+          job_id: string
+          hidden_reason?: string | null
+          checked_at?: string | null
+          blocked_reasons?: Json
+          want_p?: number | null
+          want_reason?: string | null
+          want_detail?: Json | null
+          chance?: string | null
+          chance_detail?: Json | null
+        }
+        Update: {
+          user_id?: string
+          job_id?: string
+          hidden_reason?: string | null
+          checked_at?: string | null
+          blocked_reasons?: Json
+          want_p?: number | null
+          want_reason?: string | null
+          want_detail?: Json | null
+          chance?: string | null
+          chance_detail?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "person_roles_user_id_fkey"
+            columns: ["user_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_roles_job_id_fkey"
+            columns: ["job_id"]
+            referencedRelation: "jobs"
             referencedColumns: ["id"]
           }
         ]
