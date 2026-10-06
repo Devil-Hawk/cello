@@ -91,6 +91,8 @@ describe('ProfileView', () => {
     expect(html).toContain('You set this')
     expect(html).toContain('From your resume, Base resume')
     expect(html).toContain('For letters and answers, not your resume.')
+    expect(html).toContain('Learn more')
+    expect(html).toContain('What your resume has no room for. Cello uses it in letters, answers and messages, and puts it on your resume only when you add it.')
   })
 
   it('keeps the first view inside five groups and ninety words a sentence', () => {

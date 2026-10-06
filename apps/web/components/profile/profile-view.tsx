@@ -185,7 +185,7 @@ export function ProfileView({ facts, versions, fallbackText, targets, hasModel, 
                 <Button type="button" variant="outline" className="min-h-11" onClick={() => setTailorOpen(true)}>
                   Tailor for a role
                 </Button>
-                <ResumeDownloadMenu documentId={base?.id ?? null} templateId={templateId} filenameBase="resume" hasUnsavedChanges={templateId !== savedTemplate} />
+                <ResumeDownloadMenu documentId={base?.id ?? null} templateId={templateId} filenameBase="resume" hasUnsavedChanges={templateId !== savedTemplate} className="min-h-11" />
                 <Button type="button" variant="ghost" className="min-h-11" onClick={() => setImportOpen(true)}>
                   Replace your resume
                 </Button>
@@ -210,7 +210,11 @@ export function ProfileView({ facts, versions, fallbackText, targets, hasModel, 
         )}
 
         <Group title="Your material">
-          <p className="mb-3 text-body text-muted-foreground">For letters and answers, not your resume.</p>
+          <p className="text-body text-muted-foreground">For letters and answers, not your resume.</p>
+          <details className="mb-3 mt-1 text-caption text-muted-foreground">
+            <summary className="flex min-h-11 cursor-pointer items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Learn more</summary>
+            <p>What your resume has no room for. Cello uses it in letters, answers and messages, and puts it on your resume only when you add it.</p>
+          </details>
           {/* ponytail: the Sources tab rendered as it is; restyle after the Settings page is rebuilt */}
           <SourcesTab onStatus={status} />
         </Group>
