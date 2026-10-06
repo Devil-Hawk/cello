@@ -32,8 +32,10 @@ export const renderDecided = (d: { sentence: string; at: string }) => `Decided: 
 
 export interface TurnMemories {
   chatId: string
+  /** The person's turn that started the exchange: what a made thing, a decision and the typed line all point at. */
   turnId: string
-  typed: string
+  /** The typed line. Left out when its memory is already written (a backfill that finds only a made thing missing). */
+  typed?: string
   /** The names of the things attached at this turn, kept beside the typed line. */
   attached: string[]
   made: { id: string; type: string; title: string; created_at: string }[]
@@ -48,7 +50,7 @@ export async function writeTurnMemories(store: ChatMemoryStore, userId: string, 
   if (isDemo) return { written: 0, failed: 0 }
   const where = { chat_id: turn.chatId, turn_id: turn.turnId }
   const writes: { fact: string; scope: ChatScope; refs: Record<string, unknown> }[] = [
-    { fact: renderSaid(turn.typed), scope: 'chat.said', refs: { ...where, attached: turn.attached, origin: 'person' } },
+    ...(turn.typed ? [{ fact: renderSaid(turn.typed), scope: 'chat.said' as const, refs: { ...where, attached: turn.attached, origin: 'person' } }] : []),
     ...turn.made.map((m) => ({ fact: renderMade(m), scope: 'chat.made' as const, refs: { ...where, table: 'artifacts', id: m.id, origin: 'code' } })),
     ...turn.decided.map((d) => ({ fact: renderDecided(d), scope: 'chat.decided' as const, refs: { ...where, ...(d.eventId ? { event_id: d.eventId } : {}), origin: 'code' } })),
   ]

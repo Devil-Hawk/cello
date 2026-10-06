@@ -63,4 +63,13 @@ describe('the drafted cases', () => {
     expect([...channels].sort()).toEqual(['attached_chat', 'made_text', 'quoted', 'tool_result'])
     for (const c of injection.cases) expect(Object.keys(c).length, c.id).toBeGreaterThan(3)
   })
+
+  it('give S22 ten recall pairs, each naming the earlier item that must come back', () => {
+    const s22 = JSON.parse(readFileSync(path.join(__dirname, 's22.cases.json'), 'utf8')) as { pairs: { id: string; later: string; expect: { item: string } }[] }
+    expect(s22.pairs).toHaveLength(10)
+    for (const p of s22.pairs) {
+      expect(['said', 'comparison', 'decided'], p.id).toContain(p.expect.item)
+      expect(p.later.length, p.id).toBeGreaterThan(10)
+    }
+  })
 })

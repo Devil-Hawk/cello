@@ -31,6 +31,8 @@ export type ModelAnswer = z.infer<typeof AnswerSchema>
 export interface TurnResult {
   object: ObjectRef | null
   text: string
+  /** Set when the result is something recalled from an earlier chat (chat.recall): where it came from. */
+  recalled?: { chat_id: string; turn_id: string }
 }
 
 export interface CheckInput {
@@ -107,6 +109,10 @@ export function checkAnswer(answer: ModelAnswer, input: CheckInput): Checked {
   const parts: Part[] = []
   const failures: PartFailure[] = []
   const named = new Map<string, ObjectRef>()
+  // Things known only from an earlier chat: a part that uses one must carry its link, which names the source.
+  const heldNow = new Set([...input.attached.map(key), ...input.results.filter((r) => r.object && !r.recalled).map((r) => key(r.object as ObjectRef))])
+  const recalled = new Map<string, { chat_id: string; turn_id: string }>()
+  for (const r of input.results) if (r.object && r.recalled && !heldNow.has(key(r.object))) recalled.set(key(r.object), r.recalled)
 
   answer.parts.forEach((p, i) => {
     const about: ObjectRef[] = p.about.map((a) => ({ kind: a.kind, ref: a.id }))
@@ -120,6 +126,11 @@ export function checkAnswer(answer: ModelAnswer, input: CheckInput): Checked {
     const missing = unsupported(p.text, evidence)
     if (missing.length) {
       failures.push({ part: i + 1, reason: `${missing.slice(0, 5).join(', ')} not in the results for ${about.length ? about.map((a) => `${a.kind} ${a.ref}`).join(', ') : 'this turn'}` })
+      return
+    }
+    const unlinked = about.filter((a) => recalled.has(key(a)) && !p.text.includes(`cello:${a.kind}/${a.ref}`))
+    if (unlinked.length) {
+      failures.push({ part: i + 1, reason: `it uses an earlier chat's ${unlinked.map((a) => `${a.kind} ${a.ref}`).join(', ')} without its link` })
       return
     }
     // A link to a thing this part is not about and no tool returned loses the link and keeps its words.
@@ -136,8 +147,18 @@ export function checkAnswer(answer: ModelAnswer, input: CheckInput): Checked {
   return {
     parts: subject ? [{ card: subject }, ...parts] : parts,
     failures,
-    links: [...named.values()].map((o) => ({ kind: o.kind, table: TABLE_OF[o.kind], id: o.ref, role: 'named' as const })),
+    links: [...named.values()].map((o): TurnLink => {
+      const source = recalled.get(key(o))
+      return { kind: o.kind, table: TABLE_OF[o.kind], id: o.ref, role: source ? 'recalled' : 'named', ...(source ? { source } : {}) }
+    }),
   }
+}
+
+/** An answer whose parts are about two or more attached things is a comparison; code saves it as one. */
+export function isComparison(parts: Part[], attached: ObjectRef[]): boolean {
+  const held = new Set(attached.map(key))
+  const about = new Set(parts.flatMap((p) => ('about' in p ? p.about : [])).map(key).filter((k) => held.has(k)))
+  return about.size >= 2
 }
 
 // --- one retry ------------------------------------------------------------------------------------------

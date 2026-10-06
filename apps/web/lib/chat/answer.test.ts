@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { AnswerSchema, checkAnswer, LEFT_OUT, settleAnswer, type CheckInput, type ModelAnswer } from './answer'
+import type { AttachKind } from './types'
+import { AnswerSchema, checkAnswer, isComparison, LEFT_OUT, settleAnswer, type CheckInput, type ModelAnswer } from './answer'
 
 const RAMP = { kind: 'role' as const, ref: '00000000-0000-4000-8000-000000000001' }
 const STRIPE = { kind: 'role' as const, ref: '00000000-0000-4000-8000-000000000002' }
@@ -13,7 +14,7 @@ const input = (over: Partial<CheckInput> = {}): CheckInput => ({
   ],
   ...over,
 })
-const part = (about: { kind: 'role' | 'company'; ref: string }[], text: string) => ({ about: about.map((a) => ({ kind: a.kind, id: a.ref })), text })
+const part = (about: { kind: AttachKind; ref: string }[], text: string) => ({ about: about.map((a) => ({ kind: a.kind, id: a.ref })), text })
 const answer = (...parts: ModelAnswer['parts']): ModelAnswer => ({ parts })
 
 describe('checkAnswer', () => {
@@ -115,5 +116,38 @@ describe('settleAnswer', () => {
     const ask = vi.fn().mockResolvedValueOnce(bad).mockRejectedValueOnce(new Error('model down'))
     const out = await settleAnswer(ask, input())
     expect(out.text).toBe(`Ramp posted Oct 5.\n\n${LEFT_OUT}`)
+  })
+})
+
+describe('recalled things', () => {
+  const EARLIER = { kind: 'chat' as const, ref: '00000000-0000-4000-8000-000000000500' }
+  const from = { chat_id: EARLIER.ref, turn_id: 't9' }
+  const withRecall = () => input({ results: [...input().results, { object: EARLIER, text: 'You said you would only take roles that pay at least 200k.', recalled: from }] })
+
+  it('fails a recalled fact that comes without its link, and passes it with the link', () => {
+    const bare = checkAnswer(answer(part([EARLIER], 'You wanted at least 200k.')), withRecall())
+    expect(bare.failures[0].reason).toContain('without its link')
+    const linked = checkAnswer(answer(part([EARLIER], `You wanted at least 200k, [from that chat](cello:chat/${EARLIER.ref}).`)), withRecall())
+    expect(linked.failures).toEqual([])
+    expect(linked.links).toEqual([{ kind: 'chat', table: 'chats', id: EARLIER.ref, role: 'recalled', source: from }])
+  })
+
+  it('does not ask for a link on a thing the chat holds now', () => {
+    const held = input({ attached: [RAMP, STRIPE, EARLIER], results: [...input().results, { object: EARLIER, text: 'You wanted at least 200k.', recalled: from }] })
+    expect(checkAnswer(answer(part([EARLIER], 'You wanted at least 200k.')), held).failures).toEqual([])
+  })
+})
+
+describe('isComparison', () => {
+  const attached = [RAMP, STRIPE, LINEAR]
+  it('is true when the parts are about two or more attached things, false for one', () => {
+    const three = [{ about: [RAMP], text: 'a' }, { about: [STRIPE], text: 'b' }, { about: [LINEAR], text: 'c' }]
+    expect(isComparison(three, attached)).toBe(true)
+    expect(isComparison([{ about: [RAMP, STRIPE], text: 'both' }], attached)).toBe(true)
+    expect(isComparison([{ about: [RAMP], text: 'a' }, { card: RAMP }], attached)).toBe(false)
+    expect(isComparison([{ about: [], text: 'a' }], attached)).toBe(false)
+  })
+  it('does not count a thing the chat does not hold', () => {
+    expect(isComparison([{ about: [RAMP], text: 'a' }, { about: [LINEAR], text: 'b' }], [RAMP])).toBe(false)
   })
 })
