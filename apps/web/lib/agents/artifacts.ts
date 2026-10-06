@@ -1,6 +1,8 @@
-// Artifacts: the things the person keeps. A resume, a cover letter, an outreach
-// email, a dossier and a shortlist are rows with numbered
-// versions ("You edited" and "Cello revised" are the author of a version).
+// Artifacts: the things the person keeps, the one store of made things (K17). A resume,
+// a cover letter, drafted answers, a message, research, a comparison, a kept answer and a
+// shortlist are rows with numbered versions ("You edited" and "Cello revised" are the
+// author of a version). The type set and its two renames live in lib/artifacts/types.ts:
+// rows stored under an old name read as the new one.
 //
 // Every write goes through here, with the service client, scoped by user id in
 // code (the client bypasses RLS). A version is added by one database function so
@@ -9,9 +11,10 @@
 
 import { z } from 'zod'
 import type { AdminClient } from '@/lib/harness/types'
+import { ARTIFACT_TYPES, readType, storedNames, type ArtifactAbout, type ArtifactType } from '@/lib/artifacts/types'
 
-export const ARTIFACT_TYPES = ['resume', 'cover_letter', 'outreach_email', 'dossier', 'shortlist'] as const
-export type ArtifactType = (typeof ARTIFACT_TYPES)[number]
+export { ARTIFACT_TYPES }
+export type { ArtifactType }
 
 export type ArtifactAuthor = 'user' | 'cello'
 
@@ -33,28 +36,33 @@ export const ShortlistItemSchema = z.object({
 export type ShortlistItem = z.infer<typeof ShortlistItemSchema>
 
 export const ArtifactContentSchemas = {
-  resume: z.object({
-    text,
-    ats_score: z.number().nullable().optional(),
-    matched_keywords: z.array(z.string()).max(60).optional(),
-    missing_keywords: z.array(z.string()).max(60).optional(),
-    format_issues: z.array(z.string()).max(30).optional(),
-  }),
+  // passthrough: a resume version also carries its structured form (content_json), title and source.
+  resume: z
+    .object({
+      text,
+      ats_score: z.number().nullable().optional(),
+      matched_keywords: z.array(z.string()).max(60).optional(),
+      missing_keywords: z.array(z.string()).max(60).optional(),
+      format_issues: z.array(z.string()).max(30).optional(),
+    })
+    .passthrough(),
   cover_letter: z.object({
     text,
     keywords: z.array(z.string()).max(40).optional(),
     resume_summary: z.string().max(2000).optional(),
   }),
-  outreach_email: z.object({
+  /** Drafted answers for an application form. */
+  answers: z.object({ answers: z.unknown() }),
+  message: z.object({
     subject: z.string().max(300),
     body: text,
     to_name: z.string().nullable().optional(),
     to_email: z.string().nullable().optional(),
     outreach_id: z.string().nullable().optional(),
-    /** A first note or a single follow-up to one already sent. */
-    kind: z.enum(['initial', 'follow_up']).optional(),
+    /** A first note, a single follow-up to one already sent, a reply to a message received, or a note. */
+    kind: z.enum(['initial', 'follow_up', 'reply', 'note']).optional(),
   }),
-  dossier: z.object({
+  research: z.object({
     company: z.string(),
     summary: z.string().max(20_000).nullable(),
     sponsors_visa: z.string().nullable().optional(),
@@ -62,6 +70,9 @@ export const ArtifactContentSchemas = {
     dossier_id: z.string().nullable().optional(),
     partial: z.boolean().optional(),
   }),
+  comparison: z.object({ text, role_ids: z.array(z.string()).max(60).optional() }),
+  /** A kept answer to a question the person may be asked again. */
+  answer: z.object({ question: z.string().max(500), text }),
   shortlist: z.object({
     items: z.array(ShortlistItemSchema).max(60),
     generated_at: z.string(),
@@ -73,6 +84,13 @@ export type ArtifactContent<T extends ArtifactType> = z.infer<(typeof ArtifactCo
 
 export function parseContent<T extends ArtifactType>(type: T, content: unknown): ArtifactContent<T> {
   return ArtifactContentSchemas[type].parse(content) as ArtifactContent<T>
+}
+
+/** A type as stored (either name until the contract migration) as the type set's name. */
+function typeOf(stored: string): ArtifactType {
+  const type = readType(stored)
+  if (!type) throw new Error(`Unknown artifact type ${stored}`)
+  return type
 }
 
 // --- markdown -----------------------------------------------------------------------
@@ -93,13 +111,21 @@ export function renderMarkdown(type: ArtifactType, content: unknown): string {
     }
     case 'cover_letter':
       return ArtifactContentSchemas.cover_letter.parse(content).text
-    case 'outreach_email': {
-      const c = ArtifactContentSchemas.outreach_email.parse(content)
+    case 'message': {
+      const c = ArtifactContentSchemas.message.parse(content)
       const to = c.to_name ? `To: ${c.to_name}${c.to_email ? ` <${c.to_email}>` : ''}\n` : ''
       return `${to}Subject: ${c.subject}\n\n${c.body}`
     }
-    case 'dossier': {
-      const c = ArtifactContentSchemas.dossier.parse(content)
+    case 'answers':
+      return JSON.stringify(ArtifactContentSchemas.answers.parse(content).answers, null, 2)
+    case 'comparison':
+      return ArtifactContentSchemas.comparison.parse(content).text
+    case 'answer': {
+      const c = ArtifactContentSchemas.answer.parse(content)
+      return `${c.question}\n\n${c.text}`
+    }
+    case 'research': {
+      const c = ArtifactContentSchemas.research.parse(content)
       const sources = c.sources.length ? `\n\nSources:\n${list(c.sources.map((s) => `${s.title ?? s.url} (${s.url})`))}` : ''
       return `# ${c.company}\n\n${c.summary ?? 'No summary yet. Public signals were collected.'}${sources}`
     }
@@ -140,12 +166,18 @@ export function artifactIdFromPath(path: string): string | null {
 export interface ArtifactRow {
   id: string
   user_id: string
+  /** Always the type set's name: a row stored under an old name is read as the new one. */
   type: ArtifactType
   title: string
   job_id: string | null
   company_id: string | null
   contact_id: string | null
   conversation_id: string | null
+  /** Every object it is about; job_id, company_id and contact_id are indexed copies of the first of each. */
+  about: ArtifactAbout[]
+  application_id: string | null
+  /** The person's base resume. At most one per person. */
+  is_base: boolean
   current_version: number
   created_at: string
   updated_at: string
@@ -163,7 +195,12 @@ export interface ArtifactVersionRow {
   created_at: string
 }
 
-const ARTIFACT_COLUMNS = 'id, user_id, type, title, job_id, company_id, contact_id, conversation_id, current_version, created_at, updated_at'
+const ARTIFACT_COLUMNS = 'id, user_id, type, title, job_id, company_id, contact_id, conversation_id, about, application_id, is_base, current_version, created_at, updated_at'
+
+/** A stored row as the code reads it: the type under its current name. */
+function normalizeRow(row: ArtifactRow): ArtifactRow {
+  return { ...row, type: readType(row.type) ?? row.type }
+}
 
 export interface CreateArtifactInput {
   userId: string
@@ -175,6 +212,9 @@ export interface CreateArtifactInput {
   companyId?: string | null
   contactId?: string | null
   conversationId?: string | null
+  applicationId?: string | null
+  about?: ArtifactAbout[]
+  isBase?: boolean
   /** A retried call with the same key returns the first artifact. */
   idempotencyKey?: string
   review?: unknown
@@ -209,6 +249,9 @@ export async function createArtifact(admin: AdminClient, input: CreateArtifactIn
       company_id: input.companyId ?? null,
       contact_id: input.contactId ?? null,
       conversation_id: input.conversationId ?? null,
+      application_id: input.applicationId ?? null,
+      about: input.about ?? [],
+      is_base: input.isBase ?? false,
       idempotency_key: input.idempotencyKey ?? null,
     })
     .select('id')
@@ -244,7 +287,7 @@ export async function createArtifact(admin: AdminClient, input: CreateArtifactIn
 /** The artifact an earlier call with this key made, if any. */
 export async function findArtifactByKey(admin: AdminClient, userId: string, key: string): Promise<ArtifactRow | null> {
   const { data } = await admin.from('artifacts').select(ARTIFACT_COLUMNS).eq('user_id', userId).eq('idempotency_key', key).maybeSingle()
-  return (data as ArtifactRow | null) ?? null
+  return data ? normalizeRow(data as ArtifactRow) : null
 }
 
 export interface AddVersionInput {
@@ -262,13 +305,13 @@ export interface AddVersionInput {
 export async function addVersion(admin: AdminClient, input: AddVersionInput): Promise<number> {
   const artifact = await getArtifactRow(admin, input.userId, input.artifactId)
   if (!artifact) throw new Error(`No artifact with id ${input.artifactId}`)
-  const content = parseContent(artifact.type, input.content)
+  const content = parseContent(typeOf(artifact.type), input.content)
   const { data, error } = await admin.rpc('artifact_add_version', {
     p_user_id: input.userId,
     p_artifact_id: input.artifactId,
     p_author: input.author,
     p_content: content,
-    p_content_text: renderMarkdown(artifact.type, content),
+    p_content_text: renderMarkdown(typeOf(artifact.type), content),
     p_note: input.note ?? null,
     p_review: input.review ?? null,
     p_trace_id: input.traceId ?? null,
@@ -280,7 +323,7 @@ export async function addVersion(admin: AdminClient, input: AddVersionInput): Pr
 
 export async function getArtifactRow(admin: AdminClient, userId: string, id: string): Promise<ArtifactRow | null> {
   const { data } = await admin.from('artifacts').select(ARTIFACT_COLUMNS).eq('id', id).eq('user_id', userId).maybeSingle()
-  return (data as ArtifactRow | null) ?? null
+  return data ? normalizeRow(data as ArtifactRow) : null
 }
 
 export interface ArtifactWithVersion {
@@ -327,10 +370,10 @@ export interface ListArtifactsInput {
 export async function listArtifacts(admin: AdminClient, userId: string, opts: ListArtifactsInput = {}): Promise<ArtifactRow[]> {
   const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100)
   let q = admin.from('artifacts').select(ARTIFACT_COLUMNS).eq('user_id', userId)
-  if (opts.type) q = q.eq('type', opts.type)
+  if (opts.type) q = q.in('type', [...storedNames(opts.type)])
   if (opts.jobId) q = q.eq('job_id', opts.jobId)
   const { data } = await q.order('updated_at', { ascending: false }).range(opts.offset ?? 0, (opts.offset ?? 0) + limit - 1)
-  return (data as ArtifactRow[] | null) ?? []
+  return ((data as ArtifactRow[] | null) ?? []).map(normalizeRow)
 }
 
 /** Normalised edit distance between two texts, 0 (same) to 1 (nothing shared). Used for the "edited" feedback score. */

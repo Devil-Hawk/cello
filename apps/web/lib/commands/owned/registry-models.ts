@@ -5,7 +5,7 @@
 import type { OwnedTable } from './types'
 
 /** The expired-demo sweep's tables, in the order it has always deleted them. */
-const wiped = ['interactions', 'insights', 'resume_claims', 'claim_evidence', 'company_merge_candidates', 'eval_verdicts', 'trace_spans', 'a2a_tasks']
+const wiped = ['interactions', 'resume_claims', 'claim_evidence', 'company_merge_candidates', 'eval_verdicts', 'trace_spans', 'a2a_tasks']
 
 /** Kept when a demo expires: real product data, or the demo's spend, which must
  *  never reset (llm_spend keeps the demo cap true). */

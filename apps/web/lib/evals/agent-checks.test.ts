@@ -5,7 +5,7 @@ import { CELLO_TOOL_NAMES } from '@/lib/agents/tool-names'
 import { SkillEvalsSchema, runCheck, runChecks, skillsRead, type Check } from './agent-checks'
 
 const SKILLS_DIR = path.join(process.cwd(), 'skills')
-const NAMES = ['company-research', 'cold-outreach', 'cover-letter', 'follow-up', 'negotiation', 'role-fit', 'search-strategy', 'tailor-resume', 'visa-sponsorship']
+const NAMES = ['company-research', 'cold-outreach', 'cover-letter', 'follow-up', 'negotiation', 'reply', 'role-fit', 'search-strategy', 'tailor-resume', 'visa-sponsorship']
 
 describe('the checks', () => {
   const c = (check: Record<string, unknown>): Check => ({ ...check, note: 'n' }) as Check
@@ -59,8 +59,8 @@ describe('the checks', () => {
   })
 })
 
-describe('the nine skills', () => {
-  it('are exactly these nine', () => {
+describe('the skills', () => {
+  it('are exactly these', () => {
     expect(readdirSync(SKILLS_DIR).sort()).toEqual([...NAMES].sort())
   })
 

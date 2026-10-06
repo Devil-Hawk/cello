@@ -103,7 +103,7 @@ export const requestApproval = defineTool({
     'Use it as the last step, after the draft is ready and reviewed. Do not tell the person it was sent.',
   schema: z.object({
     action: z.enum(['send_email', 'submit_application']).describe('What the person is asked to approve.'),
-    artifact_id: z.string().min(1).describe('The finished draft: an outreach_email for send_email, a cover_letter or resume for submit_application.'),
+    artifact_id: z.string().min(1).describe('The finished draft: a message for send_email, a cover_letter or resume for submit_application.'),
     contact_id: z.string().min(1).optional().describe('For send_email, if the email was not written for a contact.'),
     job_id: z.string().min(1).optional().describe('The role, if the draft was not written for one.'),
     ...writeFields,

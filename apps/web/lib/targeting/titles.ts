@@ -28,7 +28,7 @@
  * almost everything will match something. Twelve is enough to describe a real
  * search (a few role families x a couple of levels) and few enough that the
  * ranking still means something. Matches MAX_STANDING_PREFERENCES in
- * lib/insights/store.ts, which caps the injected-preferences block for the
+ * lib/learning/store.ts, which caps the injected-preferences block for the
  * same reason.
  */
 export const MAX_TARGET_TITLES = 12

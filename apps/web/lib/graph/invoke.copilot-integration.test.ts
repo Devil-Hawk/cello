@@ -136,7 +136,7 @@ function makeFakeAdmin() {
         }
       }
       if (name === 'insights') {
-        // beginTurn's lib/insights/store.ts#readStandingPreferences read — no
+        // beginTurn's what-Cello-learned read — no
         // insights back this test's user, so an empty result is all it needs.
         const chain = {
           select: () => chain,

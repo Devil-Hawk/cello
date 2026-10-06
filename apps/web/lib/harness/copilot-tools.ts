@@ -22,7 +22,7 @@ import { legacyStep } from '../steps'
 import { invokeGraphForUser, type CompiledGraphLike } from '@/lib/graph/invoke'
 import { harnessRunGraph, markRunPausedOnInterrupt } from '@/lib/graph/runs'
 import { summarizeRunOutcome } from '@/lib/graph/run-summary'
-import { ingestInsight, MAX_PREFERENCE_LENGTH } from '../insights/store'
+import { proposeLearning, MAX_PREFERENCE_LENGTH } from '../learning/store'
 // Bounded-concurrency fan-out — reused, not reinvented (see
 // docs/REINVENTION-AUDIT.md's concurrency-limiter finding: lib/ats's
 // mapWithConcurrency and lib/harness/executor.ts's private copy are already
@@ -852,13 +852,9 @@ async function checkSponsorship(args: Args) {
 }
 
 /**
- * Record a standing preference so it survives this conversation.
- *
- * Writes through lib/insights/store.ts#ingestInsight (kind='preference',
- * source='user_stated') — the ONE door onto public.insights (binding ruling
- * 3). ingestInsight owns dedupe; the length guard stays here because it is a
- * UX ceiling on what the MODEL types into this tool, not a property of every
- * insight (a reward_loop/judge row may legitimately run longer).
+ * Record a preference the person stated, as a proposal: it waits under What Cello learned and
+ * acts on nothing until they keep it (lib/learning/store.ts#proposeLearning). The length guard
+ * stays here because it is a UX ceiling on what the MODEL types into this tool.
  */
 async function doRememberPreference(ctx: CopilotToolContext, args: Args) {
   const text = str(args.text)
@@ -871,25 +867,15 @@ async function doRememberPreference(ctx: CopilotToolContext, args: Args) {
 
   let saved
   try {
-    saved = await ingestInsight(ctx.admin, ctx.userId, { kind: 'preference', statement: text, source: 'user_stated' })
+    saved = await proposeLearning(ctx.userId, text, null)
   } catch (e) {
-    // An InsightError is actionable feedback for the model, so it goes back
-    // as a tool error it can correct rather than a throw.
+    // Actionable feedback for the model, so it goes back as a tool error it can correct rather than a throw.
     return { error: errMsg(e) }
   }
 
-  const { count, error: countError } = await ctx.admin
-    .from('insights')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', ctx.userId)
-    .eq('kind', 'preference')
-    .eq('status', 'active')
-  if (countError) return { error: `Could not confirm the save: ${countError.message}` }
-
   return {
     remembered: saved.statement,
-    total: count ?? undefined,
-    note: 'Saved. This will be honoured in future conversations without the user restating it.',
+    note: 'Noted. It waits under What Cello learned until the user keeps it, and acts on nothing before that.',
   }
 }
 

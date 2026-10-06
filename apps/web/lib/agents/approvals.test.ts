@@ -61,7 +61,7 @@ function world() {
 async function email(admin: FakeAdmin, over: Record<string, unknown> = {}) {
   return createArtifact(admin, {
     userId: 'u1',
-    type: 'outreach_email',
+    type: 'message',
     title: 'Email to Dana',
     content: { subject: 'Billing at Acme', body: 'Hi Dana, I built billing at Acme. Could we talk?', to_name: 'Dana Lee', to_email: 'dana@stripe.com', kind: 'initial', ...over },
     author: 'cello',
@@ -125,7 +125,7 @@ describe('queueApproval', () => {
 
   it('refuses another person\'s artifact and a missing one with the fix', async () => {
     const { admin, ctx } = world()
-    const other = await createArtifact(admin, { userId: 'u2', type: 'outreach_email', title: 'x', content: { subject: 's', body: 'b' }, author: 'cello' })
+    const other = await createArtifact(admin, { userId: 'u2', type: 'message', title: 'x', content: { subject: 's', body: 'b' }, author: 'cello' })
     const r = await queueApproval(ctx, { action: 'send_email', artifactId: other.id, idempotencyKey: 'x' })
     expect(r).toMatchObject({ ok: false })
     expect(!r.ok && r.fix).toMatch(/create_artifact/)

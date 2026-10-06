@@ -226,7 +226,7 @@ describe('buildInputOrResume — the resume matrix (spec item 2)', () => {
 // ---------------------------------------------------------------------------
 // (e) systemPrompt — parity for the surviving blocks + the two new ones
 //     (langgraph port step 9: buildTurnContext replaced the ad-hoc
-//     mcpToolsPromptBlock/readStandingPreferences/formatActiveGoalBlock(
+//     mcpToolsPromptBlock/keptLearningsBlock/formatActiveGoalBlock(
 //     readGoals(...)) trio with one call, adding kbBlock/entityBlock)
 // ---------------------------------------------------------------------------
 

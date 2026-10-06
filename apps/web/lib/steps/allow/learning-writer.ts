@@ -3,13 +3,4 @@
 
 import type { AllowEntry } from './types'
 
-export const allow: AllowEntry[] = [
-  {
-    file: 'lib/insights/store.ts',
-    reason: 'Embeds insights; learning-writer moves it behind the embed step in K15.',
-  },
-  {
-    file: 'lib/memory/mem0-store.ts',
-    reason: 'The memory store embeds and extracts; learning-writer moves it behind steps in K15.',
-  },
-]
+export const allow: AllowEntry[] = []

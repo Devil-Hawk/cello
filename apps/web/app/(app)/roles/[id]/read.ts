@@ -8,7 +8,7 @@ import { visaFromCuratedList } from '@/lib/dossier/visa'
 import { resolveConstraints } from '@/lib/scoring/constraints'
 import { RequirementsSchema } from '@/lib/jobs/requirements'
 import type { RequirementItem, TypeProv } from '@/lib/jobs/relevance-types'
-import { readFit } from '@/lib/record/fit.stub'
+import { readRoleFit } from '@/lib/fit'
 import { FIT_COLUMNS } from '@/lib/scoring'
 import { parseFit } from '@/lib/scoring/read'
 import { resolveTargeting } from '@/lib/targeting'
@@ -57,7 +57,8 @@ export async function readRecord(db: Db, userId: string, id: string): Promise<Re
   const description = job.description_md ?? job.description ?? ''
   const requirements = RequirementsSchema.safeParse(job.requirements)
   const items: RequirementItem[] = requirements.success ? ((requirements.data.items ?? []) as RequirementItem[]) : []
-  const fit = readFit(items)
+  // Opening the record reads what code settles; the model reads run on Check my chance (lib/fit).
+  const fit = await readRoleFit({ admin: createAdminClient(), userId }, id, 'view')
   const key = job.employer_id ?? job.company_id
   const forYou = (counts.data as { key: string; n: number }[] | null)?.find((c) => c.key === key)?.n ?? null
 

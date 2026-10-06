@@ -16,7 +16,7 @@
 import { createHash } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { approveDraft, sendOutreach } from './send.stub'
-import { findDuplicateInitial, findFollowUp, insertOutreach, isDuplicateOutreachError, updateOutreach } from '@/lib/outreach/store'
+import { findDuplicateInitial, findFollowUp, insertOutreach, isDuplicateOutreachError, isNewRecipient, updateOutreach } from '@/lib/outreach/store'
 import type { AdminClient } from '@/lib/harness/types'
 import { scoreTrace } from '@/lib/observability/langfuse'
 import { addVersion, getArtifact, type ArtifactContent } from './artifacts'
@@ -107,7 +107,7 @@ export async function queueApproval(ctx: AgentContext, input: QueueInput): Promi
 
   let target: { table: ApprovalRow['target_table']; id: string; payload: Record<string, unknown> }
   if (input.action === 'send_email') {
-    const queued = await materializeEmail(admin, ctx, artifact, version.content as ArtifactContent<'outreach_email'>, version.version, input)
+    const queued = await materializeEmail(admin, ctx, artifact, version.content as ArtifactContent<'message'>, version.version, input)
     if (!queued.ok) return queued
     target = queued.target
   } else {
@@ -150,12 +150,12 @@ async function materializeEmail(
   admin: AdminClient,
   ctx: AgentContext,
   artifact: { id: string; type: string; contact_id: string | null; job_id: string | null; company_id: string | null },
-  content: ArtifactContent<'outreach_email'>,
+  content: ArtifactContent<'message'>,
   versionNumber: number,
   input: QueueInput
 ): Promise<Materialized> {
-  if (artifact.type !== 'outreach_email') {
-    return { ok: false, error: `A ${artifact.type.replace('_', ' ')} cannot be sent as an email.`, fix: 'Use an outreach_email artifact.' }
+  if (artifact.type !== 'message') {
+    return { ok: false, error: `A ${artifact.type.replace('_', ' ')} cannot be sent as an email.`, fix: 'Use a message artifact.' }
   }
   const contactId = input.contactId ?? artifact.contact_id
   if (!contactId) return { ok: false, error: 'There is no contact to send this to.', fix: 'Pass contact_id, or use an email that was written for a contact.' }
@@ -198,11 +198,15 @@ async function materializeEmail(
       subject: content.subject,
       body: content.body,
       status: 'pending_review',
-      kind,
+      kind: kind === 'note' ? 'initial' : kind, // ponytail: a note keeps the row kind 'initial'; its own kind lives on the artifact version
       parent_id: parentId,
       used_llm: true,
+      artifact_id: artifact.id,
+      artifact_version: versionNumber,
     })
-    return { ok: true, target: { table: 'outreach_messages', id: row.id, payload: { subject: content.subject, body: content.body, to_email: c.email, kind } } }
+    // The approval shows the address and whether it is someone Cello has not written to before.
+    const newRecipient = await isNewRecipient(admin as unknown as SupabaseClient, ctx.userId, c.email)
+    return { ok: true, target: { table: 'outreach_messages', id: row.id, payload: { subject: content.subject, body: content.body, to_email: c.email, new_recipient: newRecipient, kind } } }
   } catch (e) {
     if (isDuplicateOutreachError(e)) return { ok: false, error: 'An email to this contact about this role is already queued.', fix: 'Do not queue it again.' }
     return { ok: false, error: `Could not prepare the email: ${e instanceof Error ? e.message : String(e)}`, fix: 'Try again.' }
@@ -406,7 +410,7 @@ async function applyEdits(
   const versionNumber = await addVersion(admin, { userId, artifactId: row.artifact_id, author: 'user', content, note: 'Edited before approving' })
   const refreshed = await getArtifact(admin, userId, row.artifact_id, { version: versionNumber })
   if (!refreshed) return { ok: false, error: 'Could not save your edit.', fix: 'Try again.' }
-  const target = await syncTarget(admin, userId, row, refreshed.version.content as Record<string, unknown>)
+  const target = await syncTarget(admin, userId, row, refreshed.version.content as Record<string, unknown>, versionNumber)
   const { data } = await admin
     .from('approvals')
     .update({ artifact_version: versionNumber, payload_hash: hash(payloadFor(row.action, versionNumber, {}, target)) })
@@ -419,11 +423,19 @@ async function applyEdits(
 }
 
 /** Write the person's edit into the row the send or submit path reads, and return the payload that is hashed. */
-async function syncTarget(admin: AdminClient, userId: string, row: ApprovalRow, content: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function syncTarget(admin: AdminClient, userId: string, row: ApprovalRow, content: Record<string, unknown>, versionNumber: number): Promise<Record<string, unknown>> {
   if (row.target_table === 'outreach_messages') {
-    const { data } = await admin.from('outreach_messages').update({ subject: content.subject, body: content.body }).eq('id', row.target_id).eq('user_id', userId).select('to_email, kind').single()
+    // The row follows the version it was edited into (artifact_version), then the payload is rebuilt from the row.
+    const { data } = await admin
+      .from('outreach_messages')
+      .update({ subject: content.subject, body: content.body, artifact_version: versionNumber })
+      .eq('id', row.target_id)
+      .eq('user_id', userId)
+      .select('to_email, kind')
+      .single()
     const m = data as { to_email: string; kind: string } | null
-    return { subject: content.subject, body: content.body, to_email: m?.to_email, kind: m?.kind }
+    const newRecipient = m?.to_email ? await isNewRecipient(admin as unknown as SupabaseClient, userId, m.to_email) : undefined
+    return { subject: content.subject, body: content.body, to_email: m?.to_email, new_recipient: newRecipient, kind: m?.kind }
   }
   const field = typeof content.text === 'string' ? 'text' : ''
   const { data: draft } = await admin.from('application_drafts').select('job_id, cover_letter, resume_summary').eq('id', row.target_id).eq('user_id', userId).single()
@@ -446,7 +458,7 @@ async function checkCurrent(
   if (acknowledge !== got.version.version) {
     return { ok: false, fix: `Show the person version ${got.version.version}, then approve with acknowledge_version ${got.version.version}.` }
   }
-  const target = await syncTarget(admin, userId, row, got.version.content as Record<string, unknown>)
+  const target = await syncTarget(admin, userId, row, got.version.content as Record<string, unknown>, got.version.version)
   const { data } = await admin
     .from('approvals')
     .update({ artifact_version: got.version.version, payload_hash: hash(payloadFor(row.action, got.version.version, {}, target)) })

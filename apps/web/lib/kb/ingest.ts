@@ -1,5 +1,5 @@
 // The named door for writing entity-scoped documents into the knowledge base
-// (Binding ruling 3: "Writers go through lib/insights/store.ts#ingestInsight()
+// (Binding ruling 3: "Writers go through lib/learning/store.ts
 // and lib/kb/ingest.ts only").
 //
 // Two writers live here, both idempotent via a stable external_id (re-ingesting

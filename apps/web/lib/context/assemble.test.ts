@@ -2,7 +2,7 @@
 // port design doc, step 9).
 //
 // A generic in-memory fake AdminClient stands in for Postgres (same idiom as
-// lib/insights/store.test.ts and lib/graph/autopilot.test.ts's FakeAdmin):
+// lib/graph/autopilot.test.ts's FakeAdmin):
 // seeded per table, real eq/in/is/or/not filtering so a test can trust that
 // what it seeds is what a builder actually reads back — this is not a
 // reimplementation of PostgREST, just enough of it for these compositions.
@@ -12,6 +12,21 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdminClient } from '../harness/types'
+import { FakeMemoryStore } from '../learning/fake-store'
+
+// What Cello learned lives in mem0 (lib/learning). A fake store stands in for it.
+const memory = new FakeMemoryStore()
+vi.mock('../memory/mem0-store', () => ({ getMemoryStore: () => memory }))
+
+/** A learning the person kept (or, with another status, did not). */
+async function learn(statement: string, over: { kind?: string; status?: string; origin?: string } = {}) {
+  await memory.add(USER, {
+    fact: statement,
+    scope: 'learning',
+    isDemo: false,
+    refs: { key: `k:${statement}`, kind: over.kind ?? 'outcome', effect: 'none', params: {}, status: over.status ?? 'active', origin: over.origin ?? 'person', evidence: [], n: 0, updated_at: '2026-01-01' },
+  })
+}
 
 const retrieveKbMock = vi.fn(async (..._args: unknown[]) => [] as { content: string; title: string | null; url: string | null }[])
 vi.mock('../kb/retrieve', () => ({ retrieveKb: (...args: unknown[]) => retrieveKbMock(...args) }))
@@ -92,6 +107,8 @@ const USER = 'user-1'
 const COMPANY = 'company-1'
 
 beforeEach(() => {
+  memory.rows = []
+  memory.down = false
   retrieveKbMock.mockReset().mockResolvedValue([])
   mcpToolsPromptBlockMock.mockReset().mockResolvedValue('')
 })
@@ -108,8 +125,8 @@ describe('buildMatchContext', () => {
       company_dossiers: [{ company_id: COMPANY, user_id: USER, summary: 'A payments infra startup, Series B.' }],
       person_jobs: [{ viewer_company_id: COMPANY }, { viewer_company_id: COMPANY }],
       interactions: [{ user_id: USER, company_id: COMPANY, occurred_at: '2026-01-01T00:00:00Z', kind: 'outreach_sent', title: 'Cold email' }],
-      insights: [{ user_id: USER, status: 'active', kind: 'strategy', company_id: COMPANY, statement: 'They respond best to concise emails.', updated_at: '2026-01-01' }],
     })
+    await learn('They respond best to concise emails.')
     const block = await buildMatchContext(admin, USER, COMPANY)
     expect(block).toContain('A payments infra startup, Series B.')
     expect(block).toContain('Tracked open roles at this company: 2.')
@@ -159,25 +176,20 @@ describe('buildGoalStrategyContext', () => {
     expect(await buildGoalStrategyContext(fakeAdmin(), USER)).toBe('')
   })
 
-  it('surfaces general (company_id null) strategy insights for the autopilot judge', async () => {
-    const admin = fakeAdmin({
-      insights: [{ user_id: USER, status: 'active', kind: 'strategy', company_id: null, statement: 'Prefer roles with equity upside.', updated_at: '2026-01-01' }],
-    })
-    const block = await buildGoalStrategyContext(admin, USER)
+  it('surfaces the kept strategy notes for the autopilot judge', async () => {
+    await learn('Prefer roles with equity upside.')
+    const block = await buildGoalStrategyContext(fakeAdmin(), USER)
     expect(block).toContain('Prefer roles with equity upside.')
   })
 })
 
-// --- model-written insights stay out of prompts ---------------------------------
+// --- a read nobody kept stays out of prompts --------------------------------------
 
-describe('reward_loop insights', () => {
-  const insights = [
-    { user_id: USER, status: 'active', kind: 'pattern', source: 'reward_loop', company_id: null, statement: 'Model-written pattern.', updated_at: '2026-01-02' },
-    { user_id: USER, status: 'active', kind: 'strategy', source: 'user_stated', company_id: null, statement: 'Person-stated strategy.', updated_at: '2026-01-01' },
-  ]
-
-  it('are absent from every context builder while user-stated rows stay', async () => {
-    const admin = fakeAdmin({ insights })
+describe('proposed reads', () => {
+  it('are absent from every context builder while kept learnings stay', async () => {
+    await learn('Model-written pattern.', { status: 'proposed', origin: 'model' })
+    await learn('Person-stated strategy.')
+    const admin = fakeAdmin()
     for (const block of [
       await buildMatchContext(admin, USER, COMPANY),
       await buildGoalStrategyContext(admin, USER),
@@ -186,6 +198,18 @@ describe('reward_loop insights', () => {
       expect(block).not.toContain('Model-written pattern.')
       expect(block).toContain('Person-stated strategy.')
     }
+  })
+
+  it('an off learning is absent too', async () => {
+    await learn('Turned off.', { status: 'off' })
+    expect(await buildGoalStrategyContext(fakeAdmin(), USER)).toBe('')
+  })
+
+  it('with mem0 unreachable a context still builds, without learnings', async () => {
+    memory.down = true
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(await buildGoalStrategyContext(fakeAdmin(), USER)).toBe('')
+    memory.down = false
   })
 })
 
@@ -209,11 +233,9 @@ describe('outreachHistory', () => {
     expect((await outreachHistory(admin, USER, 'contact-1', COMPANY)).lines).toEqual(['2026-02-01 outreach_sent: Initial note'])
   })
 
-  it('includes reply-pattern insights when on file', async () => {
-    const admin = fakeAdmin({
-      insights: [{ user_id: USER, status: 'active', kind: 'pattern', company_id: COMPANY, statement: 'Short subject lines get more replies.', updated_at: '2026-01-01' }],
-    })
-    expect((await outreachHistory(admin, USER, null, COMPANY)).patterns).toEqual(['Short subject lines get more replies.'])
+  it('includes the kept reply patterns', async () => {
+    await learn('Short subject lines get more replies.')
+    expect((await outreachHistory(fakeAdmin(), USER, null, COMPANY)).patterns).toEqual(['Short subject lines get more replies.'])
   })
 })
 
@@ -222,10 +244,8 @@ describe('outreachHistory', () => {
 describe('buildTurnContext', () => {
   it('composes mcp/standing/goals blocks and degrades kb/entity to empty with nothing on file', async () => {
     mcpToolsPromptBlockMock.mockResolvedValueOnce('MCP TOOLS BLOCK')
-    const admin = fakeAdmin({
-      insights: [{ user_id: USER, status: 'active', kind: 'preference', source: 'user_stated', statement: 'Remote only.', updated_at: '2026-01-01' }],
-      profiles: [{ id: USER, preferences: {} }],
-    })
+    await learn('Remote only.', { kind: 'preference' })
+    const admin = fakeAdmin({ profiles: [{ id: USER, preferences: {} }] })
     const ctx = await buildTurnContext(admin, USER, 'hello')
     expect(ctx.mcpBlock).toBe('MCP TOOLS BLOCK')
     expect(ctx.standingBlock).toContain('Remote only.')

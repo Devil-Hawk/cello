@@ -18,7 +18,7 @@ Use this for a first note to someone the person has not written to before.
 1. Pick the one strongest true reason this person fits this role. It must come from the resume or from the role's own match reasons.
 2. Make one small ask: a short call, or being pointed to the right person.
 3. Write under 120 words, plain text, no bullet points. Use the contact's name if you have it. If you do not, write "Hi there," and never guess a name.
-4. Create it with `create_artifact`, type `outreach_email`, passing the role id and the contact id.
+4. Create it with `create_artifact`, type `message`, passing the role id and the contact id.
 5. Show the draft and its review. If the person wants it sent, call `request_approval` with `send_email`. Then say it is waiting for their approval in Needs you.
 
 ## Output

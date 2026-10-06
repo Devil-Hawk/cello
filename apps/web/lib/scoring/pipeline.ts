@@ -20,7 +20,7 @@
 import { createHash } from 'node:crypto'
 import { scoreTitleAgainstTargets, parseTitle } from '@/lib/matching/title-rank'
 import type { LlmRunner } from '@/lib/harness/types'
-import { assessChances } from './chance'
+import { assessChances, type RequirementVerdict } from './chance'
 import { checkConstraints, type StatedConstraints } from './constraints'
 import { entropy } from './math'
 import { NOT_READ_YET } from './posting-requirements'
@@ -55,6 +55,10 @@ export interface AssessRequest {
   judgePool?: number
   /** How many get a chance check. 0 skips the chance check. */
   chanceFor?: number
+  /** False when the person turned `taste:blend` off (or mem0 could not be read): no reaction orders anything, the code order stands. Default on. */
+  taste?: boolean
+  /** Each role's strengths and gaps, read first. The chance step reads them, and a role that has some is checked again. */
+  verdicts?: ReadonlyMap<string, readonly RequirementVerdict[]>
 }
 
 export interface AssessResult {
@@ -169,16 +173,18 @@ export async function assessRoles(deps: PipelineDeps, req: AssessRequest): Promi
     else eligible.push(role)
   }
 
-  // 2. Taste. Refit the blend on the person's own history first.
-  let reactions = await store.reactions(req.userId)
+  // 2. Taste. Refit the blend on the person's own history first. With taste off the reactions
+  // are not read at all and the cached fit is left as it was.
+  const taste = req.taste !== false
+  let reactions = taste ? await store.reactions(req.userId) : []
   const fit = fitBlend(reactions)
-  await store.saveTaste(req.userId, { model: fit.model, evidence: fit.evidence }, { n: fit.evidence.n, positive: fit.evidence.positives })
+  if (taste) await store.saveTaste(req.userId, { model: fit.model, evidence: fit.evidence }, { n: fit.evidence.n, positive: fit.evidence.positives })
   const blend: BlendModel = fit.model
 
   // Vectors for the candidates (kept only for this pass) and for any reaction that has none for this model yet.
   const roleVec = new Map<string, number[]>()
   const embedModel = embed ? embed.model : null
-  if (embed && eligible.length + reactions.length > 0) {
+  if (embed && taste && eligible.length + reactions.length > 0) {
     try {
       const missingReactions = reactions.filter((r) => r.embeddingModel !== embed.model || !r.embedding)
       const vectors = await embedAll(embed, [...eligible.map(roleText), ...missingReactions.map((r) => r.text)])
@@ -197,7 +203,7 @@ export async function assessRoles(deps: PipelineDeps, req: AssessRequest): Promi
     } catch (err) {
       notes.push(`Taste similarity was skipped: ${err instanceof Error ? err.message : String(err)}`)
     }
-  } else if (!embed) {
+  } else if (taste && !embed) {
     notes.push('No embedding provider is configured, so taste similarity was skipped.')
   }
 
@@ -264,7 +270,7 @@ export async function assessRoles(deps: PipelineDeps, req: AssessRequest): Promi
   for (const role of chanceRoles) {
     const p = prior.get(role.id)
     // A settled label for this resume is kept; one that failed or could not be read is tried again.
-    if (p?.chance && p.chance.chance !== 'cannot_assess' && p.resumeKey === resumeKey) chances.set(role.id, p.chance)
+    if (p?.chance && p.chance.chance !== 'cannot_assess' && p.resumeKey === resumeKey && !req.verdicts?.get(role.id)?.length) chances.set(role.id, p.chance)
     else toCheck.push(role)
   }
   if (toCheck.length > 0) {
@@ -273,7 +279,7 @@ export async function assessRoles(deps: PipelineDeps, req: AssessRequest): Promi
     const fresh = await assessChances(
       llm,
       req.resumeText,
-      toCheck.map((role) => ({ role, outcome: outcomes.get(role.id) ?? { kind: 'thin' as const, reason: NOT_READ_YET } }))
+      toCheck.map((role) => ({ role, outcome: outcomes.get(role.id) ?? { kind: 'thin' as const, reason: NOT_READ_YET }, verdicts: req.verdicts?.get(role.id) }))
     )
     for (const [id, c] of fresh) chances.set(id, c)
   }

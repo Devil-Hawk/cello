@@ -71,7 +71,7 @@ describe('permissions', () => {
 
   it('the researcher cannot write anywhere, scratch included', async () => {
     const { run } = setup({ role: 'researcher' })
-    for (const filePath of ['/scratch/notes.md', '/memories/x.md', '/artifacts/dossier/x.md']) {
+    for (const filePath of ['/scratch/notes.md', '/memories/x.md', '/artifacts/research/x.md']) {
       const [msg] = await run([callTools([{ name: 'write_file', args: { file_path: filePath, content: 'x' } }]), say('done')])
       expect(textOf(msg), filePath).toMatch(/permission denied|denied/i)
     }
@@ -84,9 +84,9 @@ describe('permissions', () => {
   })
 
   it('each specialist may save only its own artifact types', () => {
-    expect(ARTIFACT_WRITE_TYPES.writer).toEqual(['resume', 'cover_letter', 'outreach_email'])
+    expect(ARTIFACT_WRITE_TYPES.writer).toEqual(['resume', 'cover_letter', 'message'])
     expect(ARTIFACT_WRITE_TYPES.scout).toEqual(['shortlist'])
-    expect(ARTIFACT_WRITE_TYPES.researcher).toEqual(['dossier'])
+    expect(ARTIFACT_WRITE_TYPES.researcher).toEqual(['research'])
     expect(ARTIFACT_WRITE_TYPES.scout).not.toContain('resume')
   })
 })

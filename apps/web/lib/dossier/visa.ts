@@ -4,7 +4,7 @@
 //   1. The company's OWN careers-page text (LLM-parsed, honesty-constrained).
 //      A first-party statement wins because "we do sponsor" / "we do not
 //      sponsor" is the most direct public evidence.
-//   2. A small in-repo list distilled from PUBLIC DoL H-1B LCA disclosure data
+//   2. A small in-repo list drawn from PUBLIC DoL H-1B LCA disclosure data
 //      (employers with a certified-filing track record) -> "likely".
 //   3. Otherwise -> "unknown".
 //

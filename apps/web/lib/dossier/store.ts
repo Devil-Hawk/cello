@@ -4,8 +4,13 @@
 // untyped client (server client for RLS-scoped reads, or the service-role admin
 // client for writes) with the row shape declared here. Upsert-only: the unique
 // key is (company_id) and there is intentionally no DELETE policy.
+//
+// The row is the index; the text is made once, as a `research` artifact (K17). Every upsert
+// adds a version when the research changed, so a refresh keeps what the earlier one said.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { addVersion, createArtifact, findArtifactByKey, getArtifact, renderMarkdown } from '../agents/artifacts'
+import type { AdminClient } from '../harness/types'
 import { resolveCompanyId } from '../entities/companies'
 
 const TABLE = 'company_dossiers'
@@ -156,7 +161,39 @@ export async function upsertDossier(
     .select('*')
     .single()
   if (error) throw new Error(`upsertDossier failed: ${error.message}`)
-  return data as CompanyDossierRow
+  const saved = data as CompanyDossierRow
+  try {
+    await writeResearchVersion(client as unknown as AdminClient, saved)
+  } catch (e) {
+    // The row already holds the research; the next refresh writes the version again.
+    console.error('[dossier] could not write the research version:', e instanceof Error ? e.message : e)
+  }
+  return saved
+}
+
+/** The artifact key of one dossier's research. The copy in migration 20261017000000 uses the same one. */
+const researchKey = (dossierId: string) => `k17:company_dossiers:${dossierId}`
+
+/** Adds a research version when the text changed, creating the artifact on the first one. */
+async function writeResearchVersion(admin: AdminClient, row: CompanyDossierRow): Promise<void> {
+  const { data: company } = await admin.from('companies').select('name').eq('id', row.company_id).maybeSingle()
+  const name = (company as { name?: string } | null)?.name ?? 'the company'
+  const content = {
+    company: name,
+    summary: row.summary,
+    sponsors_visa: row.sponsors_visa,
+    sources: (row.sources ?? []).map((s) => ({ title: s.title, url: s.url })),
+    dossier_id: row.id,
+  }
+  const key = researchKey(row.id)
+  const existing = await findArtifactByKey(admin, row.user_id, key)
+  if (!existing) {
+    await createArtifact(admin, { userId: row.user_id, type: 'research', title: `Research on ${name}`, content, author: 'cello', companyId: row.company_id, idempotencyKey: key })
+    return
+  }
+  const current = await getArtifact(admin, row.user_id, existing.id)
+  if (current?.version.content_text === renderMarkdown('research', content)) return
+  await addVersion(admin, { userId: row.user_id, artifactId: existing.id, author: 'cello', content, note: 'Refreshed' })
 }
 
 /**

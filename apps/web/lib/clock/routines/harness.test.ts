@@ -46,7 +46,7 @@ const invokeGraphForUserMock = vi.fn()
 const markRunPausedOnInterruptMock = vi.fn()
 const countThreadCheckpointsMock = vi.fn()
 const composeAndStoreDigestMock = vi.fn()
-const distillInsightsMock = vi.fn()
+const runLearnerMock = vi.fn()
 const wipeExpiredDemoDataMock = vi.fn()
 
 /** A chainable, thenable PostgREST-shaped stub over the three tables this
@@ -170,8 +170,8 @@ vi.mock('@/lib/harness/agents/digest', () => ({
 vi.mock('@/lib/access/demo-wipe', () => ({
   wipeExpiredDemoData: (...args: unknown[]) => wipeExpiredDemoDataMock(...args),
 }))
-vi.mock('@/lib/graph/distill', () => ({
-  distillInsights: (...args: unknown[]) => distillInsightsMock(...args),
+vi.mock('@/lib/learning/learner', () => ({
+  runLearner: (...args: unknown[]) => runLearnerMock(...args),
 }))
 
 import { resumeCheckpointedRuns, runDemoPasses, runDigestPasses, runDistillPass } from './harness'
@@ -216,7 +216,7 @@ beforeEach(() => {
   markRunPausedOnInterruptMock.mockReset()
   countThreadCheckpointsMock.mockReset()
   composeAndStoreDigestMock.mockReset()
-  distillInsightsMock.mockReset().mockResolvedValue({ ran: false, reason: 'weekly gate not yet elapsed' })
+  runLearnerMock.mockReset().mockResolvedValue({ counted: 0, untrusted: 0, read: { ran: false, reason: 'needs 3 sources, has 0', proposed: 0, refused: 0 } })
   wipeExpiredDemoDataMock.mockReset().mockResolvedValue([])
   countThreadCheckpointsMock.mockResolvedValue(1) // well under the ceiling unless a test overrides it
   vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -414,7 +414,7 @@ describe('harness routines — digest pass creates a fresh thread per run', () =
 })
 
 describe('harness routines — demo profiles', () => {
-  it('never selects a demo profile for the digest, distill or run passes, but still runs the demo wipe', async () => {
+  it('never selects a demo profile for the digest, learning or run passes, but still runs the demo wipe', async () => {
     profiles = [
       { id: 'demo-flag', resume_text: 'Resume.', preferences: null, is_demo: true, demo_expires_at: null },
       { id: 'demo-dated', resume_text: 'Resume.', preferences: null, is_demo: false, demo_expires_at: '2099-01-01T00:00:00Z' },
@@ -430,7 +430,7 @@ describe('harness routines — demo profiles', () => {
     expect(body.activeUsers).toBe(1)
     expect(invokeGraphForUserMock.mock.calls.map((c) => c[0].userId)).toEqual(['owner'])
     expect(composeAndStoreDigestMock.mock.calls.map((c) => c[1])).toEqual(['owner'])
-    expect(distillInsightsMock.mock.calls.map((c) => c[1])).toEqual(['owner'])
+    expect(runLearnerMock.mock.calls.map((c) => c[0])).toEqual(['owner'])
   })
 
   it('demo profiles do not use up CRON_MAX_USERS slots', async () => {

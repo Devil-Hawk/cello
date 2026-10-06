@@ -1,149 +1,71 @@
-// The ONE MemoryStore implementation — mem0ai@3.1.6, pgvector-backed, on our
-// own Postgres (MEM0 DOCTRINE, orchestrator ruling from the executed spike,
-// user-confirmed 2026-08-16). Read lib/memory/types.ts's header first — this
-// file is the seam's only tenant.
+// The ONE MemoryStore implementation: mem0ai 3.3.1, pgvector on our own Postgres
+// (the `mem0` schema), one collection named `learnings` at 384 dimensions.
+// Read lib/memory/types.ts's header first, this file is the seam's only tenant.
+//
+// WHAT CHANGED FROM 3.1.6
+//   - `add` is `infer: false` and nothing else. mem0 never reads a conversation and
+//     decides what to remember: Cello's code writes a statement, a person keeps it.
+//     The LLM delegate and the extraction prompt are gone, so mem0 cannot reach a model.
+//   - The embedder is the server's own 384-dimension model (lib/memory/embedder.ts),
+//     no key and no spend. With no embedder (spike SP3 failed, no network) a memory
+//     is still stored, with a zero vector, and search falls back to words.
+//   - The old 1536-dimension `memories` collection is left where it is. Its rows are
+//     re-added once, as proposals, by scripts/learning-move.ts.
 //
 // TELEMETRY: MEM0_TELEMETRY MUST BE 'false' BEFORE Memory IS EVER CONSTRUCTED
-//   mem0's Memory class phones home to PostHog on construction unless this
-//   env var is set (spike-proven necessity, not a doc-only claim). Setting it
-//   here — at module load, unconditionally — is what makes that true no
-//   matter which route imports this file first; a `.env` entry would only be
-//   true in whichever environment remembered to set it. Construction itself
-//   is lazy (see `instance()` below), so this assignment always runs before
-//   the only `new Memory(...)` call site in the process.
+//   mem0's Memory class phones home to PostHog on construction unless this env var is
+//   set. Setting it at module load makes that true whichever route imports this first.
 process.env.MEM0_TELEMETRY = 'false'
 
-import { AsyncLocalStorage } from 'node:async_hooks'
 import { Memory, type MemoryConfig } from 'mem0ai/oss'
-import type { BaseMessage } from '@langchain/core/messages'
-import { callLlm, callEmbedding, EMBEDDING_DIMS, isEmbeddingFallback } from '../harness/llm'
-import { observe } from '../trace/spans'
-import { loadApiKeys } from '../harness/keys'
-import { loadModeDoc, promptRef } from '../harness/prompts'
-import { createAdminClient } from '../harness/supabase-admin'
 import { parseDbUrl, sslFor } from '../graph/pg'
-import type { DecryptedApiKeys } from '../harness/types'
-import { DemoMemoryWriteRefusedError, MemoryPersistError, type MemoryAddInput, type MemoryItem, type MemoryStore } from './types'
+import { embed384, EMBED384_DIMS } from './embedder'
+import {
+  DemoMemoryWriteRefusedError,
+  MemoryPersistError,
+  type MemoryAddInput,
+  type MemoryItem,
+  type MemoryListOptions,
+  type MemoryPatch,
+  type MemoryStore,
+} from './types'
 
-/** mem0's internal fact-extraction/dedup-judgment calls are structured JSON
- *  reasoning over a handful of short messages, not user-facing prose — the
- *  cheapest chat model on the price table (lib/harness/spend.ts's PRICES)
- *  is the right default, same reasoning as autopilot's background tasks. */
-const MEM0_INTERNAL_MODEL = 'anthropic/claude-haiku-4.5'
+const MEM0_COLLECTION = 'learnings'
 
-const MEM0_COLLECTION = 'memories'
+// ponytail: a zero vector when there is no embedder. A memory stored this way is found
+// by words (search below falls back over getAll) and gets its real vector the next
+// time it is updated once an embedder exists.
+const ZERO_VECTOR = new Array<number>(EMBED384_DIMS).fill(0)
 
-// --- Per-call key context ---------------------------------------------------
-//
-// WHY AN AsyncLocalStorage, NOT A CONSTRUCTOR ARGUMENT
-//   mem0's 'langchain' LLM/embedder provider (LangchainLLM/LangchainEmbedder
-//   in mem0ai/oss) requires an already-constructed instance with an
-//   `.invoke`/`.embedQuery`+`.embedDocuments` method, handed in at Memory
-//   CONSTRUCTION time — see node_modules/mem0ai/dist/oss/index.mjs's
-//   LangchainLLM/LangchainEmbedder constructors, which throw immediately if
-//   `config.model` isn't already such an object. That collides head-on with
-//   the makeLlmRunner rule (apiKeys are per-call, never baked into a
-//   long-lived construction) — Memory itself is a process-lifetime singleton
-//   (see `instance()` below), so anything bound into its config at
-//   construction would either go stale or, worse, permanently pin one user's
-//   key into a shared instance every other user's call would then spend
-//   against.
-//
-//   The fix the MEM0 DOCTRINE calls for: bind THIN delegate objects at
-//   construction that hold no key material at all, and read the CURRENT
-//   call's apiKeys from context set for the duration of that one call. An
-//   AsyncLocalStorage is the simplest correct mechanism — Node's own
-//   per-async-chain context, no new dependency, and it can't leak between
-//   concurrent calls the way a module-level mutable variable would.
-const apiKeysContext = new AsyncLocalStorage<DecryptedApiKeys>()
-
-function currentApiKeys(): DecryptedApiKeys {
-  const apiKeys = apiKeysContext.getStore()
-  if (!apiKeys) {
-    throw new Error(
-      'lib/memory/mem0-store.ts: the langchain delegate was invoked outside an active MemoryStore call — every mem0 Memory call must run inside apiKeysContext.run().'
-    )
-  }
-  return apiKeys
-}
-
-function roleOf(message: BaseMessage): 'system' | 'user' | 'assistant' {
-  const type = message.getType()
-  if (type === 'system') return 'system'
-  if (type === 'ai') return 'assistant'
-  return 'user'
-}
-
-/**
- * The 'langchain' LLM shim's whole contract is `.invoke(messages, options)`
- * returning something with a string `.content` — see this file's
- * apiKeysContext comment for why this holds no key itself. Every mem0-
- * internal LLM call is metered/guarded exactly like any other callLlm call
- * because the caller (Mem0Store's own methods, below) already ran
- * loadApiKeys before entering the context this reads from.
- */
-const mem0LlmDelegate = {
-  async invoke(messages: BaseMessage[]): Promise<{ content: string }> {
-    const apiKeys = currentApiKeys()
-    const chatMessages = messages.map((m) => ({
-      role: roleOf(m),
-      content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-    }))
-    const res = await callLlm(apiKeys, {
-      messages: chatMessages,
-      model: MEM0_INTERNAL_MODEL,
-      maxTokens: 800,
-      temperature: 0,
-      name: 'extract-memories',
-      promptRef: promptRef('memory_extract'),
-    })
-    return { content: res.content }
-  },
-}
-
-/** Same shape as mem0LlmDelegate, for the 'langchain' embedder shim
- *  (`.embedQuery`/`.embedDocuments`) — see EMBEDDING_MODEL/EMBEDDING_DIMS's
- *  own lock comment in lib/harness/providers (ruling 10): callEmbedding's
- *  default model is the one locked embedding model, never overridden here. */
+/** mem0's 'langchain' embedder shim: `.embedQuery` and `.embedDocuments`, no key held. */
 const mem0EmbedderDelegate = {
   async embedQuery(text: string): Promise<number[]> {
-    const apiKeys = currentApiKeys()
-    const res = await callEmbedding(apiKeys, { texts: [text], name: 'embed-memory-lookup' })
-    const vec = res.embeddings[0]
-    if (!vec) throw new Error('lib/memory/mem0-store.ts: callEmbedding returned no vector for a single query embed')
-    return vec
+    return (await embed384([text]))?.[0] ?? ZERO_VECTOR
   },
   async embedDocuments(texts: string[]): Promise<number[][]> {
-    const apiKeys = currentApiKeys()
-    const res = await callEmbedding(apiKeys, { texts, name: 'embed-memory' })
-    return res.embeddings
+    return (await embed384(texts)) ?? texts.map(() => ZERO_VECTOR)
+  },
+}
+
+/** mem0 insists on an LLM at construction. With `infer: false` it is never called, and
+ *  this one refuses if something tries: Cello never lets mem0 call a model. */
+const mem0NoLlm = {
+  async invoke(): Promise<never> {
+    throw new Error('lib/memory/mem0-store.ts: mem0 may not call a model; memories are written with infer: false only.')
   },
 }
 
 /**
- * SUPABASE_DB_URL_DIRECT (falls back to POSTGRES_URL_NON_POOLING) — a
- * DEDICATED DIRECT (port 5432) connection, never the shared pooled
- * SUPABASE_DB_URL every other runtime caller (lib/graph/pg.ts's
- * withCheckpointer, same pool) uses. Same resolution order as
- * scripts/setup-checkpointer.ts's resolveConnectionString — reused via
- * parseDbUrl, not forked.
+ * SUPABASE_DB_URL_DIRECT (falls back to POSTGRES_URL_NON_POOLING): a DEDICATED DIRECT
+ * (port 5432) connection, never the shared pooled one. mem0 creates its tables with
+ * unqualified names, so every client it opens must run with `search_path` = mem0.
  *
- * WHY DIRECT, NOT POOLED: PGVectorConfig has NO schema field of its own
- * (spike-proven), so the only lever for scoping mem0's writes to the `mem0`
- * schema is a real `SET search_path` issued on its connection (see
- * scopeMem0SchemaSearchPath below). Live-probed 2026-08-25 against
- * Supabase's Supavisor pooler (throwaway mem0_probe schema, dropped after):
- * a `SET search_path` on one pooled client is backend-level GUC state that
- * OUTLIVES that client's logical session — the next unrelated client
- * Supavisor multiplexes onto the same physical backend inherits it. Over
- * the shared pooled URL, that meant every other pooled consumer in this
- * process (notably lib/graph/pg.ts's checkpointer, same URL, same pool)
- * could land on a backend mem0 had silently re-scoped. A direct connection
- * has no such multiplexing: each `Pool`/`Client` here owns its own
- * dedicated backend for the life of that connection, so `SET search_path`
- * is session-local in the way Postgres actually documents it — it dies
- * with the connection and is never handed to a different logical client.
- * Nothing else on this direct connection's backend exists to leak onto.
+ * mem0ai 3.3.1 opens its pg clients later than 3.1.6 did (its vector store connects
+ * after an awaited dynamic import, and a second client serves its entity store), so the
+ * old same-tick `SET search_path` on one client cannot reach them. The startup option in
+ * the connection string reaches every client, and a direct connection honours it.
+ * (Supavisor does not, which is why this must stay the direct URL.)
+ * `extensions` stays second: Supabase installs pgvector's `vector` type there.
  */
 function resolveMem0ConnectionString(): string {
   const raw = process.env.SUPABASE_DB_URL_DIRECT ?? process.env.POSTGRES_URL_NON_POOLING
@@ -152,170 +74,77 @@ function resolveMem0ConnectionString(): string {
       'Set SUPABASE_DB_URL_DIRECT (preferred) or POSTGRES_URL_NON_POOLING to a DIRECT (port 5432, non-pooled) Postgres connection string before using MemoryStore. See apps/web/.env.example.'
     )
   }
-  return parseDbUrl(raw)
-}
-
-/**
- * mem0ai@3.1.6's PGVector holds exactly ONE pg.Client for its whole process
- * lifetime (node_modules/mem0ai/dist/oss/index.mjs — `this.client = new
- * Client(...)`, never a Pool) and its constructor fires an UNAWAITED
- * `this.initialize().catch(console.error)` that connects it, then issues
- * unqualified DDL (`CREATE EXTENSION`, `CREATE TABLE memory_migrations`,
- * `listCols()`/`createCol()`) — every one of those, and every later
- * insert/search/get, resolves against whatever `search_path` that
- * connection has. With no schema field on PGVectorConfig, the only lever is
- * a real `SET search_path` SQL statement issued AFTER connecting — and this
- * only runs safely because resolveMem0ConnectionString above hands mem0 a
- * DEDICATED DIRECT connection, not the shared pooled one: a direct
- * connection's backend is never multiplexed onto another client, so this
- * SET is genuinely session-local (see that function's header for the
- * live-probed Supavisor leak this replaced).
- *
- * The remaining problem is ordering: mem0ai's own first query must not run
- * before ours does. `vectorStore` and `client` are typed `private` in
- * mem0ai's .d.ts, but are ordinary own properties at runtime — reached here
- * with a narrow cast rather than pretending PGVectorConfig has a hook it
- * doesn't. Node's async functions run synchronously up to their first
- * `await`, and this file sets `dimension` explicitly (skipping mem0's own
- * dimension-probe branch), so by the time `new Memory(...)` returns below,
- * `memory.vectorStore` (PGVector) and its `.client` already exist and
- * `.client.connect()` has already been called — pending, not yet resolved.
- * node-postgres queues `.query()` calls strictly in the order they were
- * CALLED, not awaited, so issuing our SET here, synchronously, in the same
- * tick, wins that queue race deterministically and lands ahead of mem0ai's
- * own first query. Live-probed 2026-08-25 by reproducing this exact
- * unawaited-constructor pattern standalone: the race-winning SET landed a
- * same-tick unqualified CREATE TABLE in the target schema on both
- * connection classes available to test with.
- *
- * `extensions` stays second, not omitted — Supabase installs pgvector's own
- * `vector` type into the `extensions` schema, not `public` (confirmed live:
- * `select extname, nspname from pg_extension join pg_namespace ...`).
- * Dropping it from the path would make PGVector's own `CREATE TABLE ...
- * vector(dims)` fail with "type vector does not exist" the first time it
- * needs to create the collection.
- */
-function scopeMem0SchemaSearchPath(memory: Memory): void {
-  const client = (memory as unknown as { vectorStore: { client: { query(sql: string): Promise<unknown> } } })
-    .vectorStore.client
-  client.query('SET search_path TO mem0, extensions').catch((err: unknown) => {
-    console.error('lib/memory/mem0-store.ts: failed to scope the mem0 schema search_path — writes may land in public', err)
-  })
+  const base = parseDbUrl(raw)
+  return base + (base.includes('?') ? '&' : '?') + 'options=-c%20search_path%3Dmem0%2Cextensions'
 }
 
 function buildMemoryConfig(): Partial<MemoryConfig> {
-  const mem0ConnectionString = resolveMem0ConnectionString()
+  const connectionString = resolveMem0ConnectionString()
   return {
     embedder: { provider: 'langchain', config: { model: mem0EmbedderDelegate } },
-    llm: { provider: 'langchain', config: { model: mem0LlmDelegate } },
+    llm: { provider: 'langchain', config: { model: mem0NoLlm } },
     vectorStore: {
       provider: 'pgvector',
       config: {
-        connectionString: mem0ConnectionString,
-        // Verified against the pinned Supabase root CA, same as
-        // lib/graph/pg.ts (see that file's header).
-        ssl: sslFor(mem0ConnectionString),
-        embeddingModelDims: EMBEDDING_DIMS,
-        // mem0's own Memory._autoInitialize() checks `dimension`, NOT
-        // `embeddingModelDims` (PGVectorConfig's field for the vector
-        // column width) — leaving it unset makes every cold Memory()
-        // construction fire an unguarded embedder.embed('dimension probe')
-        // call OUTSIDE apiKeysContext.run() before the vector store even
-        // exists, which throws for callers like deleteAll() that never open
-        // that context. Setting it explicitly skips the probe entirely.
-        dimension: EMBEDDING_DIMS,
+        connectionString,
+        // Verified against the pinned Supabase root CA, same as lib/graph/pg.ts.
+        ssl: sslFor(connectionString),
+        embeddingModelDims: EMBED384_DIMS,
+        // mem0's Memory._autoInitialize() checks `dimension`, not `embeddingModelDims`;
+        // leaving it unset makes every cold construction fire a dimension-probe embed.
+        dimension: EMBED384_DIMS,
         collectionName: MEM0_COLLECTION,
       },
     },
-    // ponytail: no historyStore, disableHistory:true. mem0's default history
-    // sink (unset historyStore) is a local sqlite file via the installed
-    // better-sqlite3 transitive dep — pointless on Vercel's per-invocation
-    // filesystem, and nothing in the MEM0 DOCTRINE asks for an update/delete
-    // audit trail. Upgrade path: a real historyStore only if a future
-    // feature needs one.
+    // ponytail: no history store. mem0's default is a local sqlite file, pointless on
+    // Vercel's per-invocation filesystem. Add one only if a feature needs an audit trail.
     disableHistory: true,
-    // What to keep: only what the person said about themselves. Without this
-    // mem0 also extracts from Cello's own replies, so a company Cello suggested
-    // or a salary it quoted from a posting became a "fact" about the person.
-    // See prompts/memory_extract.md.
-    customInstructions: loadModeDoc('memory_extract'),
-    // Graph memory (Neo4j) has no field on MemoryConfig in mem0ai@3.1.6 to
-    // even turn on — it's a separate opt-in class this file never imports.
-    // That IS "graph memory stays OFF": there is nothing here to disable.
   }
 }
 
-function toMemoryItem(raw: { id: string; memory: string; score?: number; createdAt?: string; metadata?: Record<string, unknown> }): MemoryItem {
+type RawItem = { id: string; memory: string; score?: number; createdAt?: string; metadata?: Record<string, unknown>; user_id?: string }
+
+function toMemoryItem(raw: RawItem): MemoryItem {
   return { id: raw.id, memory: raw.memory, score: raw.score, createdAt: raw.createdAt, metadata: raw.metadata }
 }
 
-/** Metadata for a memory call that did not run because no embedding was possible. */
-const skippedNoEmbedding = (err: unknown): Record<string, string> => (isEmbeddingFallback(err) ? { fallback: 'no-embedding' } : {})
+/** Words of three letters or more, lower case: the no-embedder search. */
+const words = (s: string): string[] => s.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []
 
 export class Mem0Store implements MemoryStore {
   private memory: Memory | undefined
 
-  /** Constructed once per process on first real use — see this file's
-   *  telemetry comment for why that is safe. */
+  /** Constructed once per process on first real use. */
   private instance(): Memory {
-    if (!this.memory) {
-      this.memory = new Memory(buildMemoryConfig())
-      scopeMem0SchemaSearchPath(this.memory)
-    }
+    this.memory ??= new Memory(buildMemoryConfig())
     return this.memory
   }
 
-  async add(userId: string, input: MemoryAddInput): Promise<void> {
-    // The demo guard: refused BEFORE loadApiKeys, before any spend, before
-    // any DB write. Does not re-derive demo-ness — input.isDemo is the
-    // caller's own already-computed guard result (lib/memory/types.ts's
-    // header explains why this file does not read profiles itself).
-    if (input.isDemo) throw new DemoMemoryWriteRefusedError(userId)
+  /** The memory when it is `userId`'s, else null. Every id-addressed call goes through here. */
+  private async owned(userId: string, id: string): Promise<RawItem | null> {
+    const found = (await this.instance().get(id)) as unknown as RawItem | null
+    return found && found.user_id === userId ? found : null
+  }
 
-    const admin = createAdminClient()
-    const apiKeys = await loadApiKeys(admin, userId)
-    const metadata = { scope: input.scope, ...(input.refs ?? {}) }
-    // One Langfuse observation for the whole write: the fact extraction call
-    // nests under it, and the lookup and storage embeddings fold into its
-    // metadata instead of hanging off the turn's root as bare observations.
-    await observe(
-      { name: 'save-memory', type: 'chain', persist: false, foldEmbeddings: true },
-      () =>
-        apiKeysContext.run(apiKeys, async () => {
-          const result =
-            input.fact !== undefined
-              ? // Already a distilled fact — store as-is, skip mem0's own
-                // extraction LLM call (infer: false).
-                await this.instance().add(input.fact, { userId, infer: false, metadata })
-              : // A conversation turn — let mem0 run its own fact-extraction LLM
-                // call and resolve ADD/UPDATE/DELETE (with hash dedup) against
-                // what it already knows about this user.
-                await this.instance().add(input.messages ?? [], { userId, infer: true, metadata })
-          await this.verifyPersisted(result.results)
-          return result.results.length
-        }),
-      (written, err) => ({
-        metadata: { scope: input.scope, ...(written !== undefined ? { memories: written } : {}), ...skippedNoEmbedding(err) },
-        ...(isEmbeddingFallback(err) ? { expected: true } : {}),
-      })
-    )
+  async add(userId: string, input: MemoryAddInput): Promise<MemoryItem> {
+    // The demo guard: refused before anything else. input.isDemo is the caller's own
+    // already-computed guard result (types.ts explains why this file does not read profiles).
+    if (input.isDemo) throw new DemoMemoryWriteRefusedError(userId)
+    const result = await this.instance().add(input.fact, {
+      userId,
+      infer: false,
+      metadata: { scope: input.scope, ...(input.refs ?? {}) },
+    })
+    const first = result.results[0]
+    if (!first) throw new MemoryPersistError('(none)')
+    await this.verifyPersisted(result.results)
+    return toMemoryItem(first)
   }
 
   /**
-   * mem0ai's own add() can resolve successfully while writing nothing:
-   * mem0ai@3.1.6's infer:true path (dist/oss/index.mjs's addToVectorStore)
-   * builds its returned {id, memory, ...} list from the records it INTENDS
-   * to write, then wraps the actual `vectorStore.insert()` call in a
-   * try/catch that only console.error()s on failure — never rethrows, never
-   * changes the return value. A fully-failed write still comes back looking
-   * like a successful ADD (proven live, 2026-08-25 throwaway-schema probe:
-   * a broken collection table produced a clean-looking add() result with
-   * zero rows ever landing). Every id add() claims to have written gets one
-   * real per-row existence check (Memory.get(), a single indexed lookup —
-   * the "cheap ... returning check" this store owes its callers) before
-   * add() is allowed to resolve. Refuse-over-guess: a memory add either
-   * verifiably landed or this throws MemoryPersistError, same discipline as
-   * every other chokepoint in this codebase that reports success.
+   * mem0's add can resolve while writing nothing (its insert failure is caught and only
+   * logged). Every id it claims gets one real lookup before add() may resolve: a memory
+   * either verifiably landed or this throws MemoryPersistError.
    */
   private async verifyPersisted(results: MemoryItem[]): Promise<void> {
     for (const r of results) {
@@ -324,52 +153,51 @@ export class Mem0Store implements MemoryStore {
     }
   }
 
-  async search(userId: string, query: string, opts: { limit?: number } = {}): Promise<MemoryItem[]> {
-    const admin = createAdminClient()
-    const apiKeys = await loadApiKeys(admin, userId)
-    // One Langfuse retriever observation (with its embed-query nested under
-    // it) when a trace is active. The query is user text: capture-gated.
-    const items = await observe(
-      { name: 'search-memory', type: 'retriever', persist: false, foldEmbeddings: true },
-      async () => {
-        const result = await apiKeysContext.run(apiKeys, () =>
-          this.instance().search(query, { topK: opts.limit ?? 6, filters: { user_id: userId } })
-        )
-        return result.results.map(toMemoryItem)
-      },
-      (found, err, capture) => ({
-        ...(capture ? { input: { query }, output: { count: found?.length ?? 0, hits: (found ?? []).slice(0, 10).map((m) => ({ text: m.memory.slice(0, 300), score: m.score })) } } : {}),
-        metadata: { limit: opts.limit ?? 6, ...(found ? { hits: found.length } : {}), ...skippedNoEmbedding(err) },
-        // No embedding key (or a capped month) is a normal configuration: the
-        // caller carries on without memories. Not an error.
-        ...(isEmbeddingFallback(err) ? { expected: true } : {}),
-      })
-    )
-    return items
+  async get(userId: string, id: string): Promise<MemoryItem | null> {
+    const found = await this.owned(userId, id)
+    return found ? toMemoryItem(found) : null
   }
 
-  async getAll(userId: string): Promise<MemoryItem[]> {
-    const admin = createAdminClient()
-    const apiKeys = await loadApiKeys(admin, userId)
-    const result = await apiKeysContext.run(apiKeys, () => this.instance().getAll({ filters: { user_id: userId } }))
+  async update(userId: string, id: string, patch: MemoryPatch): Promise<void> {
+    if (!(await this.owned(userId, id))) throw new Error(`lib/memory: memory ${id} is not ${userId}'s to change.`)
+    await this.instance().update(id, { ...(patch.text !== undefined ? { text: patch.text } : {}), ...(patch.metadata ? { metadata: patch.metadata } : {}) })
+  }
+
+  async delete(userId: string, id: string): Promise<void> {
+    if (!(await this.owned(userId, id))) throw new Error(`lib/memory: memory ${id} is not ${userId}'s to delete.`)
+    await this.instance().delete(id)
+  }
+
+  async search(userId: string, query: string, opts: { limit?: number } = {}): Promise<MemoryItem[]> {
+    const limit = opts.limit ?? 6
+    // With no embedder a vector search means nothing: rank by shared words instead.
+    if (!(await embed384([query]))) {
+      const q = new Set(words(query))
+      const scored = (await this.getAll(userId, { limit: 500 }))
+        .map((m) => ({ m, score: words(m.memory).filter((w) => q.has(w)).length }))
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score)
+      return scored.slice(0, limit).map((x) => ({ ...x.m, score: x.score }))
+    }
+    const result = await this.instance().search(query, { topK: limit, filters: { user_id: userId } })
     return result.results.map(toMemoryItem)
   }
 
+  async getAll(userId: string, opts: MemoryListOptions = {}): Promise<MemoryItem[]> {
+    const result = await this.instance().getAll({ filters: { ...(opts.filters ?? {}), user_id: userId }, topK: opts.limit ?? 500 })
+    return result.results.map(toMemoryItem).sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
+  }
+
   async deleteAll(userId: string): Promise<void> {
-    // A vector-store delete only — no LLM/embedder call, so no apiKeys and
-    // no context needed. This is what lib/access/demo-wipe.ts calls; it is
-    // deliberately NOT demo-guarded (the wipe's entire job is deleting a
-    // demo's data).
+    // Not demo-guarded: the wipe's whole job is deleting a demo's data.
     await this.instance().deleteAll({ userId })
   }
 }
 
 let singleton: Mem0Store | undefined
 
-/** The single MemoryStore instance for this process — see lib/memory/
- *  types.ts's header for why there is no second implementation and no env
- *  switch between them. */
+/** The single MemoryStore for this process. */
 export function getMemoryStore(): MemoryStore {
-  if (!singleton) singleton = new Mem0Store()
+  singleton ??= new Mem0Store()
   return singleton
 }

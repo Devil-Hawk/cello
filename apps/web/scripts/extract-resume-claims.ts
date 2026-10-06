@@ -201,13 +201,16 @@ async function main(): Promise<void> {
   console.log(`  mode  : ${args.dryRun ? 'DRY RUN (no writes, no spend)' : 'APPLY (writes + spends against each user\'s own cap)'}`)
   console.log(`  limit : ${args.limit ?? '(none — every user with a base resume)'}`)
 
-  const { data: baseRows, error: baseErr } = await admin.from('resume_documents').select('id, user_id').is('job_id', null)
-  if (baseErr) throw new Error(`resume_documents scan failed: ${baseErr.message}`)
+  const { data: baseRows, error: baseErr } = await admin.from('artifacts').select('user_id').eq('type', 'resume').eq('is_base', true)
+  if (baseErr) throw new Error(`base resume scan failed: ${baseErr.message}`)
 
   // One base resume per user: the newest version, matching getBaseResume's
   // own "latest wins" semantics.
   const latestByUser = new Map<string, string>()
-  for (const row of (baseRows ?? []) as { id: string; user_id: string }[]) latestByUser.set(row.user_id, row.id)
+  for (const row of (baseRows ?? []) as { user_id: string }[]) {
+    const doc = await getBaseResume(admin, row.user_id)
+    if (doc) latestByUser.set(row.user_id, doc.id)
+  }
 
   const already = await usersAlreadyExtracted(admin, [...latestByUser.values()])
   const pending = [...latestByUser.entries()].filter(([, docId]) => !already.has(docId))

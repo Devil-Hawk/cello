@@ -97,8 +97,6 @@ export const PROMPT_DOC_NAMES = [
   'gmail_classify',
   'reply_classify',
   'analyst',
-  'distill',
-  'memory_extract',
   'company_verify',
   'goal_judge',
   'orchestrator',

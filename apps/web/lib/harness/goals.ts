@@ -684,7 +684,7 @@ export function summarizeGoal(goal: SearchGoal): string {
  * (full narrative: drafted/kept/discarded/abandoned/unresolved plus the
  * "nothing submitted" reassurance) and would be a second permanent tax on
  * every planning call. Same char discipline as
- * lib/insights/store.ts#readStandingPreferences' block: one fact per line,
+ * lib/learning/read.ts#keptLearningsBlock's block: one fact per line,
  * '' when there is nothing to say so callers can concatenate unconditionally.
  */
 export function formatActiveGoalBlock(goals: SearchGoal[]): string {

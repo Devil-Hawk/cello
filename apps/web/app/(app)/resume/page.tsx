@@ -117,10 +117,9 @@ async function loadTailorTargets(
   supabase: ReturnType<typeof createClient>,
   userId: string
 ): Promise<TailorTarget[]> {
-  // resume_documents is not in the generated Database type (the codegen has
-  // not picked up the Phase B tables), so it is read through an untyped view
-  // of the same cookie-scoped client — the pattern jobs/page.tsx uses for
-  // company_dossiers. RLS still scopes the rows; the explicit user_id
+  // artifacts is not in the generated Database type (the codegen has not picked
+  // up the newer tables), so it is read through an untyped view of the same
+  // cookie-scoped client — the pattern jobs/page.tsx uses for company_dossiers. RLS still scopes the rows; the explicit user_id
   // predicate is belt-and-braces, matching lib/resume/store.ts.
   const untyped = supabase as unknown as SupabaseClient
 
@@ -132,11 +131,12 @@ async function loadTailorTargets(
       .order('updated_at', { ascending: false })
       .limit(TAILOR_LIMIT),
     untyped
-      .from('resume_documents')
-      .select('job_id, version')
+      .from('artifacts')
+      .select('job_id, current_version')
       .eq('user_id', userId)
+      .eq('type', 'resume')
       .not('job_id', 'is', null)
-      .order('version', { ascending: false }),
+      .order('current_version', { ascending: false }),
   ])
 
   if (appsRes.error) throw new Error(appsRes.error.message)
@@ -144,9 +144,9 @@ async function loadTailorTargets(
 
   // Ordered version-desc, so the FIRST row seen for a job is its newest.
   const tailored = new Map<string, number>()
-  for (const row of (docsRes.data ?? []) as { job_id: string | null; version: number }[]) {
+  for (const row of (docsRes.data ?? []) as { job_id: string | null; current_version: number }[]) {
     if (!row.job_id || tailored.has(row.job_id)) continue
-    tailored.set(row.job_id, row.version)
+    tailored.set(row.job_id, row.current_version)
   }
 
   const targets = new Map<string, TailorTarget>()
@@ -197,7 +197,7 @@ export default function ResumeHomePage() {
 
   const [versions, setVersions] = useState<ResumeDocument[]>([])
   /** profiles.resume_text — the uploaded resume, before anything is versioned.
-   *  lib/resume/store.ts's own contract: resume_documents has zero rows until
+   *  lib/resume/store.ts's own contract: the base resume has no artifact until
    *  someone saves, so this is the only copy a fresh account has. */
   const [profileResumeText, setProfileResumeText] = useState('')
 

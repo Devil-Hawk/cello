@@ -14,8 +14,7 @@
 //   context has to be free to assemble. Every builder below wraps its
 //   sub-fetches independently and degrades a missing piece to '' rather than
 //   failing the whole call — the same idiom lib/kb/retrieve.ts and
-//   lib/insights/store.ts#searchInsights already use for a missing/expired
-//   provider key.
+//   lib/learning/read.ts already use for an unreachable memory store.
 //
 //   ONE INJECTION CHOKEPOINT. Every string in here that originates from an
 //   employer (a dossier summary synthesized from a company's own pages, a kb
@@ -37,7 +36,8 @@
 
 import type { AdminClient } from '../harness/types'
 import { mcpToolsPromptBlock } from '../harness/copilot-tools'
-import { readStandingPreferences } from '../insights/store'
+import { readLearnings, keptLearningsBlock } from '../learning/read'
+import type { LearningKind } from '../learning/types'
 import { readGoals, formatActiveGoalBlock } from '../harness/goals'
 import { retrieveKb } from '../kb/retrieve'
 import { formatKbContext } from '../kb/store'
@@ -52,36 +52,18 @@ function errMsg(e: unknown): string {
 
 // --- shared, small relational reads (no embedding, no LLM) -----------------
 
+/** The kinds of learning that read as strategy notes: counts of what worked, and reads the person kept. */
+const STRATEGY_KINDS: readonly LearningKind[] = ['outcome', 'timing', 'resume', 'rejection', 'recruiter', 'writing']
+
 /**
- * Insights relevant to one company (or general, companyId null on the row),
- * newest-affirmed first. A plain filtered read, NOT lib/insights/store.ts's
- * searchInsights — that one embeds `query` first, and this file's callers
- * (buildMatchContext above all) need this to cost nothing.
+ * The strategy notes the person has kept or Cello counted, from the one read of what it
+ * learned (lib/learning/read.ts). Active learnings only: a read nobody kept is never here.
+ * Plain data read, no embedding; [] when mem0 cannot be read, so a context never fails.
  */
-async function relevantInsights(
-  admin: AdminClient,
-  userId: string,
-  companyId: string | null,
-  kinds: string[],
-  limit: number
-): Promise<{ statement: string }[]> {
-  try {
-    let q = admin
-      .from('insights')
-      .select('statement, company_id, updated_at')
-      .eq('user_id', userId)
-      .eq('status', 'active')
-      .in('kind', kinds)
-      // Model-written rows stay out of prompts until they are reviewed (K15).
-      .not('source', 'eq', 'reward_loop')
-    q = companyId ? q.or(`company_id.eq.${companyId},company_id.is.null`) : q.is('company_id', null)
-    const { data, error } = await q.order('updated_at', { ascending: false }).limit(limit)
-    if (error) throw new Error(error.message)
-    return (data ?? []) as { statement: string }[]
-  } catch (e) {
-    console.error(`[context] assemble: relevantInsights failed for user=${userId}: ${errMsg(e)}`)
-    return []
-  }
+async function strategyNotes(userId: string, limit: number): Promise<{ statement: string }[]> {
+  const read = await readLearnings(userId, 'active')
+  if (!read.ok) return []
+  return read.items.filter((l) => STRATEGY_KINDS.includes(l.kind)).slice(0, limit)
 }
 
 function formatTimeline(rows: InteractionRow[]): string {
@@ -120,7 +102,7 @@ export async function buildMatchContext(admin: AdminClient, userId: string, comp
       console.error(`[context] assemble: timelineFor failed for company=${companyId}: ${errMsg(e)}`)
       return [] as InteractionRow[]
     }),
-    relevantInsights(admin, userId, companyId, ['strategy', 'pattern'], MATCH_INSIGHTS_LIMIT),
+    strategyNotes(userId, MATCH_INSIGHTS_LIMIT),
   ])
 
   const parts: string[] = []
@@ -153,7 +135,7 @@ const GOAL_STRATEGY_INSIGHTS_LIMIT = 5
  * never employer-authored, so nothing here needs frameJobText.
  */
 export async function buildGoalStrategyContext(admin: AdminClient, userId: string): Promise<string> {
-  const insights = await relevantInsights(admin, userId, null, ['strategy', 'pattern'], GOAL_STRATEGY_INSIGHTS_LIMIT)
+  const insights = await strategyNotes(userId, GOAL_STRATEGY_INSIGHTS_LIMIT)
   if (insights.length === 0) return ''
   return `LEARNED STRATEGY NOTES (from past outcomes — weigh these, don't treat them as absolute rules):\n${insights
     .map((i) => `- ${i.statement}`)
@@ -186,7 +168,7 @@ export async function outreachHistory(
         return [] as InteractionRow[]
       }
     ),
-    relevantInsights(admin, userId, companyId, ['pattern', 'strategy'], OUTREACH_INSIGHTS_LIMIT),
+    strategyNotes(userId, OUTREACH_INSIGHTS_LIMIT),
   ])
 
   return {
@@ -206,7 +188,7 @@ export interface TurnContext {
   /** Live-listed BYO-MCP tools — verbatim from lib/harness/copilot-tools.ts,
    *  unchanged by this file (see the module header). */
   mcpBlock: string
-  /** The user's standing preferences (lib/insights/store.ts). */
+  /** What the user kept: their standing preferences and kept reads (lib/learning/read.ts). */
   standingBlock: string
   /** The active search goal, if any (lib/harness/goals.ts). */
   goalsBlock: string
@@ -292,11 +274,11 @@ async function buildKbBlock(admin: AdminClient, userId: string, message: string)
   }
 }
 
-async function safeStandingBlock(admin: AdminClient, userId: string): Promise<string> {
+async function safeStandingBlock(userId: string): Promise<string> {
   try {
-    return await readStandingPreferences(admin, userId)
+    return await keptLearningsBlock(userId)
   } catch (e) {
-    console.error(`[context] assemble: readStandingPreferences failed for user=${userId}: ${errMsg(e)}`)
+    console.error(`[context] assemble: keptLearningsBlock failed for user=${userId}: ${errMsg(e)}`)
     return ''
   }
 }
@@ -315,7 +297,7 @@ async function safeGoalsBlock(admin: AdminClient, userId: string): Promise<strin
  * Copilot's per-turn context: MCP tools + standing preferences + active goal
  * + KB hits for the current message + entity context when the message names
  * a tracked company. Replaces the ad-hoc mcpToolsPromptBlock/
- * readStandingPreferences/formatActiveGoalBlock(readGoals(...)) call trio
+ * keptLearningsBlock/formatActiveGoalBlock(readGoals(...)) call trio
  * lib/graph/copilot.ts#beginTurn used to make directly — mcpToolsPromptBlock
  * itself is unchanged (see file header), just relocated behind this door
  * alongside the two blocks that used to sit next to it.
@@ -334,7 +316,7 @@ async function safeGoalsBlock(admin: AdminClient, userId: string): Promise<strin
 export async function buildTurnContext(admin: AdminClient, userId: string, message: string): Promise<TurnContext> {
   const [mcpBlock, standingBlock, goalsBlock, kbBlock, entityBlock] = await Promise.all([
     mcpToolsPromptBlock(admin, userId),
-    safeStandingBlock(admin, userId),
+    safeStandingBlock(userId),
     safeGoalsBlock(admin, userId),
     buildKbBlock(admin, userId, message),
     buildEntityBlock(admin, userId, message),

@@ -47,7 +47,7 @@ async function dossierFromRecord(ctx: AgentContext, companyId: string, outcome: 
   const sources = (row?.sources ?? []).slice(0, 12)
   const ref = await createArtifact(ctx.admin, {
     userId: ctx.userId,
-    type: 'dossier',
+    type: 'research',
     title: `Research on ${outcome.company}`,
     content: { company: outcome.company, summary: row?.summary ?? null, sponsors_visa: row?.sponsors_visa ?? null, sources, dossier_id: row?.id ?? null, partial: outcome.partial ?? false },
     author: 'cello',
@@ -93,7 +93,7 @@ async function researchOne(
   }
   const ref = await createArtifact(ctx.admin, {
     userId: ctx.userId,
-    type: 'dossier',
+    type: 'research',
     title: `Research on ${subject}`,
     content: { company: subject, summary: res.summary, sources: res.sources, partial: res.hit_step_limit },
     author: 'cello',

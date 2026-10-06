@@ -207,7 +207,8 @@ describe('buildDemoWorkspace — shape', () => {
       'trace_spans',
       'application_drafts',
       'outreach_messages',
-      'resume_documents',
+      'artifacts',
+      'artifact_versions',
       'company_dossiers',
     ])
     for (const b of workspace.batches) expect(b.rows.length).toBeGreaterThan(0)
@@ -368,21 +369,23 @@ describe('buildDemoWorkspace — shape', () => {
     }
   })
 
-  it('stores a schema-valid structured resume and derives the text from it', () => {
-    const resume = batch(workspace.batches, 'resume_documents').rows[0]!
-    const contentJson = resume.content_json as { resume?: unknown; markdown?: string; templateId?: string }
-    expect(ResumeSchema.safeParse(contentJson.resume).success).toBe(true)
-    expect(typeof contentJson.markdown).toBe('string')
-    expect(typeof contentJson.templateId).toBe('string')
-    // lib/resume/types.ts: `content` is DERIVED from the structure, never
+  it('stores a schema-valid structured resume as a base artifact version and derives the text from it', () => {
+    const artifact = batch(workspace.batches, 'artifacts').rows[0]!
+    expect(artifact).toMatchObject({ type: 'resume', is_base: true, job_id: null, current_version: 1 })
+    const version = batch(workspace.batches, 'artifact_versions').rows[0]!
+    expect(version.artifact_id).toBe(artifact.id)
+    const stored = version.content as { content_json: { resume?: unknown; markdown?: string; templateId?: string }; source: string }
+    expect(ResumeSchema.safeParse(stored.content_json.resume).success).toBe(true)
+    expect(typeof stored.content_json.markdown).toBe('string')
+    expect(typeof stored.content_json.templateId).toBe('string')
+    // lib/resume/types.ts: the text is DERIVED from the structure, never
     // authored separately. If these ever diverge the exported PDF and the text
     // an ATS reads describe different resumes.
-    expect(resume.content).toBe(resumeToPlainText(ResumeSchema.parse(contentJson.resume)))
-    expect(resume.version).toBe(1)
-    expect(resume.job_id).toBeNull()
-    expect(resume.source).toBe('base')
+    expect(version.content_text).toBe(resumeToPlainText(ResumeSchema.parse(stored.content_json.resume)))
+    expect(version.version).toBe(1)
+    expect(stored.source).toBe('base')
     // The profile's plain-text resume is the same document.
-    expect(workspace.profile.resume_text).toBe(resume.content)
+    expect(workspace.profile.resume_text).toBe(version.content_text)
   })
 
   it('marks the profile as a demo', () => {

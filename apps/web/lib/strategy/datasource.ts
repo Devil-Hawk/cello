@@ -203,33 +203,38 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
     },
 
     async getResumeDocuments() {
+      // Resumes are artifacts (K17): each version, with the job its bucket was tailored for.
       const { data, error } = await admin
-        .from('resume_documents')
-        .select('id, job_id, version, source, ats_score, content, content_json')
-        .eq('user_id', userId)
+        .from('artifact_versions')
+        .select('id, version, content, content_text, artifacts!inner(job_id, user_id, type)')
+        .eq('artifacts.user_id', userId)
+        .eq('artifacts.type', 'resume')
       if (error) {
         console.error('[strategy] getResumeDocuments query failed', error)
         return []
       }
+      type Stored = { content_json?: unknown; source?: string | null; ats_score?: number | null }
+      type Joined = { job_id: string | null }
       return (
-        (data as {
+        (data as unknown as {
           id: string
-          job_id: string | null
           version: number
-          source: string | null
-          ats_score: number | null
-          content: string
-          content_json: unknown
+          content: Stored | null
+          content_text: string
+          artifacts: Joined | Joined[]
         }[] | null) ?? []
-      ).map((r) => ({
-        id: r.id,
-        jobId: r.job_id,
-        version: r.version,
-        source: r.source,
-        atsScore: r.ats_score,
-        content: r.content,
-        contentJson: (r.content_json ?? null) as ResumeDocumentRow['contentJson'],
-      }))
+      ).map((r) => {
+        const art = Array.isArray(r.artifacts) ? r.artifacts[0] : r.artifacts
+        return {
+          id: r.id,
+          jobId: art?.job_id ?? null,
+          version: r.version,
+          source: r.content?.source ?? null,
+          atsScore: r.content?.ats_score ?? null,
+          content: r.content_text,
+          contentJson: (r.content?.content_json ?? null) as ResumeDocumentRow['contentJson'],
+        }
+      })
     },
 
     async getOutreachMessages() {

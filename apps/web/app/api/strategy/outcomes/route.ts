@@ -2,7 +2,7 @@
 // lib/strategy proposal. Closes the loop lib/strategy/proposals.ts opens
 // (proposals are generated, never auto-applied) by persisting the "before"
 // half of a before/after comparison — see lib/strategy/measure.ts's module
-// doc and supabase/migrations/20260803000001_strategy_proposal_outcomes.sql.
+// doc. Each acceptance is a learning in mem0 (lib/learning/outcomes.ts).
 //
 // THE SNAPSHOT IS TAKEN HERE, ON THE SERVER, RIGHT NOW. The request body only
 // ever carries which proposal was accepted (id/question/title) — never a
@@ -21,7 +21,7 @@
 //
 // Auth pattern follows app/api/settings/targeting/route.ts: the request-scoped
 // client (@/lib/supabase/server) only ever answers "who is this", every
-// actual read/write against this new table goes through the service-role
+// read of the person's profile and job counts goes through the service-role
 // admin client (@/lib/harness/supabase-admin), matching every other agent in
 // this codebase — see lib/strategy/datasource.ts's module doc.
 
@@ -29,7 +29,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { createSupabaseStrategyDataSource, type JobScopeCounts } from '@/lib/strategy/datasource'
-import { measureProposalEffect, recordAcceptedProposal, type AcceptedProposalRecord } from '@/lib/strategy/measure'
+import { listAcceptedProposals, saveAcceptedProposal, type AcceptedProposal } from '@/lib/learning/outcomes'
+import { measureProposalEffect, recordAcceptedProposal } from '@/lib/strategy/measure'
 import { resolveTargeting } from '@/lib/targeting'
 
 export const dynamic = 'force-dynamic'
@@ -38,25 +39,9 @@ function bad(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status })
 }
 
-interface OutcomeRow {
-  id: string
-  proposal_id: string
-  question: string
-  title: string
-  accepted_at: string
-  metrics_before: JobScopeCounts
-}
-
-const OUTCOME_COLUMNS = 'id, proposal_id, question, title, accepted_at, metrics_before'
-
-function toRecord(row: Pick<OutcomeRow, 'proposal_id' | 'question' | 'title' | 'accepted_at' | 'metrics_before'>): AcceptedProposalRecord {
-  return {
-    proposalId: row.proposal_id,
-    question: row.question,
-    title: row.title,
-    acceptedAt: row.accepted_at,
-    metricsBefore: row.metrics_before,
-  }
+/** What the response carries for one accepted proposal. */
+function toRecord(p: AcceptedProposal) {
+  return { proposalId: p.proposalId, question: p.question, title: p.title, acceptedAt: p.acceptedAt, metricsBefore: p.metricsBefore }
 }
 
 interface AcceptBody {
@@ -103,26 +88,13 @@ export async function POST(request: NextRequest) {
   const metricsBefore = await dataSource.getJobScopeCounts(targeting)
   const record = recordAcceptedProposal(input.proposalId, input.question, input.title, metricsBefore, new Date())
 
-  const { data, error } = await admin
-    .from('strategy_proposal_outcomes')
-    .insert({
-      user_id: user.id,
-      proposal_id: record.proposalId,
-      question: record.question,
-      title: record.title,
-      accepted_at: record.acceptedAt,
-      metrics_before: record.metricsBefore,
-    })
-    .select(OUTCOME_COLUMNS)
-    .single()
-
-  if (error) {
-    console.error('[strategy/outcomes] insert failed', error)
+  try {
+    const saved = await saveAcceptedProposal(user.id, record)
+    return NextResponse.json({ ok: true, outcome: { id: saved.id, ...toRecord(saved) } })
+  } catch (error) {
+    console.error('[strategy/outcomes] save failed', error)
     return bad('Failed to record acceptance', 500)
   }
-
-  const row = data as OutcomeRow
-  return NextResponse.json({ ok: true, outcome: { id: row.id, ...toRecord(row) } })
 }
 
 export async function GET() {
@@ -133,13 +105,10 @@ export async function GET() {
   if (!user) return bad('Unauthorized', 401)
 
   const admin = createAdminClient()
-  const { data: rows, error } = await admin
-    .from('strategy_proposal_outcomes')
-    .select(OUTCOME_COLUMNS)
-    .eq('user_id', user.id)
-    .order('accepted_at', { ascending: false })
-
-  if (error) {
+  let accepted: AcceptedProposal[]
+  try {
+    accepted = await listAcceptedProposals(user.id)
+  } catch (error) {
     console.error('[strategy/outcomes] list failed', error)
     return bad('Failed to load outcomes', 500)
   }
@@ -155,7 +124,7 @@ export async function GET() {
   const metricsNow = await dataSource.getJobScopeCounts(targeting)
   const now = new Date()
 
-  const outcomes = ((rows as OutcomeRow[] | null) ?? []).map((row) => {
+  const outcomes = accepted.map((row) => {
     const record = toRecord(row)
     return {
       id: row.id,

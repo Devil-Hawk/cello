@@ -1,8 +1,7 @@
 // The harness's old daily tick, now four routines of the clock (lib/clock): harness.resume (stalled
 // checkpointed runs, every 5 minutes), demo.expire (demo wipe at expiry and the trace span
 // retention, hourly), harness.digest (a daily-digest agent run and the composed digest per active
-// user, daily) and harness.distill (the weekly insight distillation, whose own gate makes most days
-// a cheap no-op). They moved out of app/api/harness/cron, which a route file cannot export from, and
+// user, daily) and harness.distill (the nightly learning pass: counts in code, at most one model read). They moved out of app/api/harness/cron, which a route file cannot export from, and
 // the Vercel cron that called it is gone.
 //
 // Each pass is independent of the others, as before: a failure in one never blocks another.
@@ -22,7 +21,7 @@ import { invokeGraphForUser, type CompiledGraphLike } from '@/lib/graph/invoke'
 import { harnessRunGraph, markRunPausedOnInterrupt, type RunOutcome } from '@/lib/graph/runs'
 import { summarizeRunOutcome } from '@/lib/graph/run-summary'
 import { countThreadCheckpoints } from '@/lib/graph/pg'
-import { distillInsights } from '@/lib/graph/distill'
+import { runLearner } from '@/lib/learning/learner'
 import { composeAndStoreDigest, type DigestOutcome } from '@/lib/harness/agents/digest'
 import { wipeExpiredDemoData, type DemoWipeResult } from '@/lib/access/demo-wipe'
 import { pruneOldTraceSpans } from '@/lib/trace/spans'
@@ -428,16 +427,15 @@ export async function runDigestPasses(admin: AdminClient): Promise<DigestPassRes
 
 export interface DistillPassResult {
   userId: string
-  ran: boolean
-  reason?: string
-  insightsWritten?: number
-  refusals?: number
+  counted?: number
+  read?: string
+  error?: string
 }
 
 /**
- * The weekly insight distillation. distillInsights carries its own weekly gate, so most days this is
- * one cheap select per person that returns { ran: false }.
- * ponytail: until the learning package (K15) replaces distillInsights.
+ * The learning pass (K15): runLearner recounts what Cello learned for each active person, counts from
+ * code over their record and at most one model read stored as a proposal. A failure for one person never
+ * blocks another's. The routine keeps its id, harness.distill, so its schedule and its row stay.
  */
 export async function runDistillPass(admin: AdminClient): Promise<DistillPassResult[]> {
   const { batch } = await activeBatch(admin)
@@ -449,11 +447,11 @@ export async function runDistillPass(admin: AdminClient): Promise<DistillPassRes
       if (i >= batch.length) return
       const profile = batch[i]
       try {
-        const r = await distillInsights(admin, profile.id)
-        out.push({ userId: profile.id, ran: r.ran, reason: r.reason, insightsWritten: r.insightsWritten, refusals: r.refusals })
+        const r = await runLearner(profile.id, { admin })
+        out.push({ userId: profile.id, counted: r.counted, read: r.read.ran ? `proposed ${r.read.proposed}` : (r.read.reason ?? 'skipped') })
       } catch (e) {
-        logApiError('harness:distill', e, { userId: profile.id })
-        out.push({ userId: profile.id, ran: false, reason: e instanceof Error ? e.message : String(e) })
+        logApiError('harness:learning', e, { userId: profile.id })
+        out.push({ userId: profile.id, error: e instanceof Error ? e.message : String(e) })
       }
     }
   }
@@ -481,5 +479,5 @@ export async function harnessDigest(ctx: RoutineContext): Promise<RoutineOutcome
 
 export async function harnessDistill(ctx: RoutineContext): Promise<RoutineOutcome> {
   const r = await runDistillPass(ctx.admin)
-  return { ok: true, found: { distilled: r.filter((x) => x.ran).length, people: r.length } }
+  return { ok: true, found: { counted: r.reduce((n, x) => n + (x.counted ?? 0), 0), people: r.length, failed: r.filter((x) => x.error).length } }
 }

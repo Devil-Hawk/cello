@@ -73,6 +73,30 @@ export function verifyChecks(raw: unknown, requirements: readonly Requirement[],
   })
 }
 
+/** What the role's strengths and gaps (lib/fit) already settled for one requirement. */
+export interface RequirementVerdict {
+  requirement: string
+  verdict: 'strength' | 'gap' | 'unknown'
+  origin: 'code' | 'model' | 'person'
+}
+
+const sameText = (a: string, b: string) => a.toLowerCase().replace(/\s+/g, ' ').trim() === b.toLowerCase().replace(/\s+/g, ' ').trim()
+
+/**
+ * The chance step reads the stored verdicts. A strength shows the requirement even where the resume alone does
+ * not (an answer or saved material shows it). A gap from the person always stands; a model's gap does not
+ * overrule a line the check cited and code confirmed. Unknown changes nothing.
+ */
+export function applyVerdicts(checks: readonly RequirementCheck[], verdicts: readonly RequirementVerdict[] | undefined): RequirementCheck[] {
+  if (!verdicts?.length) return [...checks]
+  return checks.map((c) => {
+    const v = verdicts.find((x) => x.verdict !== 'unknown' && sameText(x.requirement, c.requirement))
+    if (!v) return c
+    if (v.verdict === 'gap') return c.status === 'met' && v.origin !== 'person' ? c : { ...c, status: 'not_met', evidence: null }
+    return c.status === 'met' ? c : { ...c, status: 'met', evidence: null }
+  })
+}
+
 /** Gaps that cannot be closed by wording on a resume: years of experience and licences. */
 const HARD_KINDS: ReadonlySet<Requirement['kind']> = new Set(['experience', 'credential'])
 
@@ -119,6 +143,8 @@ export function labelChance(reqs: readonly Requirement[], checks: readonly Requi
 export interface ChanceInput {
   role: RoleFacts
   outcome: RequirementsOutcome
+  /** The role's strengths and gaps, when they were read first (Check my chance). */
+  verdicts?: readonly RequirementVerdict[]
 }
 
 function cannot(note: string): ChanceResult {
@@ -132,11 +158,11 @@ function cannot(note: string): ChanceResult {
 export async function assessChances(llm: LlmRunner, resumeText: string, inputs: readonly ChanceInput[], stats?: CitationStats): Promise<Map<string, ChanceResult>> {
   const out = new Map<string, ChanceResult>()
   const lines = resumeLines(resumeText)
-  const ready: { role: RoleFacts; reqs: Requirement[] }[] = []
-  for (const { role, outcome } of inputs) {
+  const ready: { role: RoleFacts; reqs: Requirement[]; verdicts?: readonly RequirementVerdict[] }[] = []
+  for (const { role, outcome, verdicts } of inputs) {
     if (lines.length === 0) out.set(role.id, cannot('Add your resume so Cello can check the requirements against it.'))
     else if (outcome.kind === 'thin') out.set(role.id, cannot(`Cannot assess yet. ${outcome.reason}`))
-    else ready.push({ role, reqs: outcome.requirements })
+    else ready.push({ role, reqs: outcome.requirements, verdicts })
   }
 
   const resumeBlock = `Resume:\n${lines.map((l) => `[${l.n}] ${l.text}`).join('\n')}`
@@ -163,8 +189,8 @@ export async function assessChances(llm: LlmRunner, resumeText: string, inputs: 
         promptRef: scoringPromptRef('role_chance'),
       })
       const parsed = parseJsonLoose<{ checks?: unknown }>(res.content)
-      batch.forEach(({ role, reqs }, k) => {
-        out.set(role.id, labelChance(reqs, verifyChecks(parsed.checks, reqs, lines, idOf(k), stats)))
+      batch.forEach(({ role, reqs, verdicts }, k) => {
+        out.set(role.id, labelChance(reqs, applyVerdicts(verifyChecks(parsed.checks, reqs, lines, idOf(k), stats), verdicts)))
       })
     } catch (err) {
       if (err instanceof MissingKeyError || err instanceof BudgetCapError) throw err

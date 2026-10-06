@@ -1,3 +1,4 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "build": { "env": { "ONNXRUNTIME_NODE_INSTALL_CUDA": "skip" } }
 }

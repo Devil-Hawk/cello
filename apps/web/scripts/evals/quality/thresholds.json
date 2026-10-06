@@ -1,8 +1,6 @@
 {
   "planner": { "full": {}, "quick": {} },
   "analyst": { "full": {}, "quick": {} },
-  "distill": { "full": {}, "quick": {} },
-  "memory_extract": { "full": {}, "quick": {} },
   "company_verify": { "full": {}, "quick": {} },
   "goal_judge": { "full": {}, "quick": {} }
 }

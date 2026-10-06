@@ -49,8 +49,8 @@ export const PERMISSIONS: Record<'orchestrator' | 'researcher', FilesystemPermis
 /** The artifact types each specialist may create or revise. Enforced where they save. */
 export const ARTIFACT_WRITE_TYPES: Record<'scout' | 'researcher' | 'writer' | 'cello', readonly ArtifactType[]> = {
   scout: ['shortlist'],
-  researcher: ['dossier'],
-  writer: ['resume', 'cover_letter', 'outreach_email'],
+  researcher: ['research'],
+  writer: ['resume', 'cover_letter', 'message'],
   cello: ARTIFACT_TYPES,
 }
 

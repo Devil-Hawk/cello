@@ -67,7 +67,7 @@ describe('createArtifact', () => {
 
   it('refuses content that does not fit the type', async () => {
     await expect(
-      createArtifact(admin(), { userId: 'u1', type: 'outreach_email', title: 'x', content: { body: 'no subject' }, author: 'cello' })
+      createArtifact(admin(), { userId: 'u1', type: 'message', title: 'x', content: { body: 'no subject' }, author: 'cello' })
     ).rejects.toThrow()
   })
 
@@ -118,7 +118,7 @@ describe('listArtifacts', () => {
 
 describe('rendering and paths', () => {
   it('renders each type as readable text', () => {
-    expect(renderMarkdown('outreach_email', { subject: 'Hello', body: 'Body', to_name: 'Dana Lee', to_email: 'dana@x.com' })).toBe(
+    expect(renderMarkdown('message', { subject: 'Hello', body: 'Body', to_name: 'Dana Lee', to_email: 'dana@x.com' })).toBe(
       'To: Dana Lee <dana@x.com>\nSubject: Hello\n\nBody'
     )
     const shortlist = renderMarkdown('shortlist', {
@@ -126,7 +126,7 @@ describe('rendering and paths', () => {
       generated_at: '2026-10-05',
     })
     expect(shortlist).toContain('PM at Stripe [strong]: You shipped payments. (id j1)')
-    expect(renderMarkdown('dossier', { company: 'Stripe', summary: null, sources: [] })).toContain('No summary yet')
+    expect(renderMarkdown('research', { company: 'Stripe', summary: null, sources: [] })).toContain('No summary yet')
   })
 
   it('maps an artifact to a path and back', () => {
@@ -145,6 +145,6 @@ describe('rendering and paths', () => {
   })
 
   it('parseContent fills defaults', () => {
-    expect(parseContent('dossier', { company: 'Stripe', summary: null }).sources).toEqual([])
+    expect(parseContent('research', { company: 'Stripe', summary: null }).sources).toEqual([])
   })
 })

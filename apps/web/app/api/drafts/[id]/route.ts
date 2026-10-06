@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
+import { saveDraftText } from '@/lib/writing/drafts'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,13 +35,23 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   const admin = createAdminClient()
   const { data: draft } = await admin
     .from('application_drafts')
-    .select('id, status')
+    .select('id, status, job_id')
     .eq('id', params.id)
     .eq('user_id', user.id)
     .maybeSingle()
   if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 })
   if (draft.status !== 'pending_review') {
     return NextResponse.json({ error: `Cannot edit a ${draft.status} draft` }, { status: 409 })
+  }
+
+  // The letter is a made thing: its new version is written first, then the draft row follows it.
+  if (coverLetter !== undefined) {
+    try {
+      await saveDraftText(admin, { userId: user.id, jobId: draft.job_id as string, field: 'cover_letter', text: coverLetter, author: 'user' })
+    } catch (e) {
+      console.error('[drafts/update] could not save the letter version:', e instanceof Error ? e.message : e)
+      return NextResponse.json({ error: 'Failed to update draft' }, { status: 500 })
+    }
   }
 
   const fields: Record<string, unknown> = { updated_at: new Date().toISOString() }

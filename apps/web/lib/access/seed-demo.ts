@@ -475,24 +475,44 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
   // Every stored column is derived from one structured Resume, through the same
   // helper the writer uses (lib/resume/store.ts). This is the one place a
   // seeder could quietly make the exported PDF and the text an ATS reads
-  // describe different resumes. The profile is inserted first (the FK needs
-  // it), so the mirror trigger also sets profiles.resume_text; it is written
-  // explicitly below as well, which keeps a seed without that migration working.
+  // describe different resumes. The resume is a base resume artifact with one
+  // version (the made-thing store, K17), keyed like the bucket the store itself
+  // creates, so the store finds it and appends to it. The profile is inserted
+  // first (the FK needs it); the mirror trigger on artifact_versions sets
+  // profiles.resume_text, and it is written explicitly below as well.
   const demoColumns = deriveResumeColumns(DEMO_RESUME)
+  const resumeStamp = daysBefore(now, 24)
+  const resumeArtifactId = id('resume_artifact:base')
+  const resumeArtifactRows = [
+    {
+      id: resumeArtifactId,
+      user_id: demoUserId,
+      type: 'resume',
+      title: 'Base resume',
+      job_id: null,
+      is_base: true,
+      current_version: 1,
+      idempotency_key: `k17:resume_documents:${demoUserId}:base`,
+      created_at: resumeStamp,
+      updated_at: resumeStamp,
+    },
+  ]
   const resumeRows = [
     {
       id: id('resume_document:base:v1'),
-      user_id: demoUserId,
-      job_id: null,
-      draft_id: null,
+      artifact_id: resumeArtifactId,
       version: 1,
-      title: `${DEMO_PERSONA.fullName} — base resume`,
-      content: demoColumns.content,
-      content_json: demoColumns.content_json,
-      ats_score: 82,
-      source: 'base',
-      created_at: daysBefore(now, 24),
-      updated_at: daysBefore(now, 24),
+      author: 'user',
+      content: {
+        text: demoColumns.content,
+        content_json: demoColumns.content_json,
+        title: `${DEMO_PERSONA.fullName}, base resume`,
+        ats_score: 82,
+        source: 'base',
+        draft_id: null,
+      },
+      content_text: demoColumns.content,
+      created_at: resumeStamp,
     },
   ]
 
@@ -532,7 +552,8 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
       { table: 'trace_spans', rows: agentStepRows, required: false, conflictColumn: 'span_id' },
       { table: 'application_drafts', rows: draftRows, required: false },
       { table: 'outreach_messages', rows: outreachRows, required: false },
-      { table: 'resume_documents', rows: resumeRows, required: false },
+      { table: 'artifacts', rows: resumeArtifactRows, required: false },
+      { table: 'artifact_versions', rows: resumeRows, required: false },
       { table: 'company_dossiers', rows: dossierRows, required: false },
     ],
   }

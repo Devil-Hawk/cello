@@ -16,6 +16,7 @@
 import { MissingKeyError } from '@/lib/harness/llm'
 import type { AdminClient, DecryptedApiKeys, LlmRunner } from '@/lib/harness/types'
 import { candidateRoles, countUnassessed, loadScoringInputs, makeEmbedder, type ScoringInputs } from './inputs'
+import type { RequirementVerdict } from './chance'
 import { assessRoles, buildShortlist, roleText, type PipelineDeps } from './pipeline'
 import { wantTier } from './shortlist'
 import { FIT_COLUMNS, parseFit, type FitRow } from './read'
@@ -26,6 +27,7 @@ import { PASS_REASONS, type Chance, type PassReason, type PickKind, type Predict
 export { FIT_COLUMNS, FIT_EMBED, fitRowOf, parseFit, chanceLabel, fitHighlights, firstGapCopy, WANT_TIER_COPY } from './read'
 export { PASS_REASONS } from './types'
 export type { RoleFit, PassReason, Reaction, Surface, PickKind } from './types'
+export type { RequirementVerdict } from './chance'
 
 /**
  * The daily picks are off. A picked list has to beat plain ordering by what the
@@ -139,6 +141,7 @@ export async function runDailyShortlist(args: DailyShortlistArgs): Promise<Short
       stated: inputs.stated,
       constraints: inputs.constraints,
       candidates,
+      taste: inputs.taste,
       forDate,
       size: args.size ?? 6,
       exploreCount: args.exploreCount ?? 1,
@@ -151,7 +154,7 @@ export async function runDailyShortlist(args: DailyShortlistArgs): Promise<Short
       unfinished,
       counts: { newRoles: candidates.length, filtered: result.blocked.length },
       learning: { nReactions: result.taste.nReactions, mode: learningMode(result.taste.nReactions, result.taste.fitted) },
-      notes: result.notes,
+      notes: inputs.learningNote ? [inputs.learningNote, ...result.notes] : result.notes,
     }
   } catch (err) {
     if (err instanceof MissingKeyError) return { ...base, status: 'no_key', counts: { newRoles: candidates.length, filtered: 0 } }
@@ -244,6 +247,8 @@ export interface AssessJobsArgs extends ScoringContext {
   /** Assess exactly these roles, even if they were assessed before. Without them, the newest unassessed roles. */
   jobIds?: string[]
   limit?: number
+  /** Each role's strengths and gaps, read first: the chance step reads them for the band. */
+  verdicts?: ReadonlyMap<string, readonly RequirementVerdict[]>
 }
 
 export interface AssessJobsResult {
@@ -278,8 +283,10 @@ export async function assessJobs(args: AssessJobsArgs): Promise<AssessJobsResult
       stated: inputs.stated,
       constraints: inputs.constraints,
       candidates,
+      taste: inputs.taste,
       judgePool: candidates.length,
       chanceFor: Math.min(candidates.length, 12),
+      verdicts: args.verdicts,
     })
     const done = new Set([...result.assessed.map((a) => a.jobId), ...result.blocked.map((b) => b.jobId)])
     const fits = new Map<string, RoleFit>()

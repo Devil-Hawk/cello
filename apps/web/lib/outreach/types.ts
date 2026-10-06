@@ -10,7 +10,7 @@ export type OutreachStatus =
   | 'failed'
   | 'skipped'
 
-export type OutreachKind = 'initial' | 'follow_up'
+export type OutreachKind = 'initial' | 'follow_up' | 'reply'
 
 /**
  * Coarse polarity for an inbound reply, per supabase/migrations/
@@ -48,6 +48,9 @@ export interface OutreachMessageRow {
   observation_id?: string | null
   generated_subject?: string | null
   generated_body?: string | null
+  /** The artifact (type message) and version that hold this message's text. Null before the copy reached the row. */
+  artifact_id?: string | null
+  artifact_version?: number | null
   sent_at: string | null
   /** When an inbound reply was matched to this thread. NULL = no reply yet. */
   replied_at: string | null
