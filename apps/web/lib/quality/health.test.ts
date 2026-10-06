@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { AdminClient } from '../harness/types'
-import { DB_ALERT_BYTES, groupChecks, providerStreaks, recordHeartbeat, beatStart, runHealthCheck } from './health'
+import { DB_WARN_BYTES, groupChecks, providerStreaks, runHealthCheck } from './health'
 
 type Row = Record<string, unknown>
 const MB = 1024 * 1024
@@ -10,183 +10,147 @@ const NOW = new Date('2026-10-06T13:07:00Z')
 const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOString()
 
 interface World {
-  stats?: Row | null | 'error'
+  stats?: Row | 'error'
   tables: Record<string, Row[] | 'missing'>
 }
 
+/** Every table the check touches, and a record of which ones it did. */
 function fakeAdmin(world: World) {
-  let idSeq = 0
+  const touched = new Set<string>()
   const admin = {
-    rpc: async (name: string) => {
-      if (name !== 'ops_db_stats' || world.stats === 'error' || world.stats === undefined) return { data: null, error: { message: 'no such function' } }
-      return { data: world.stats, error: null }
-    },
+    rpc: async () => (world.stats === undefined || world.stats === 'error' ? { data: null, error: { message: 'no such function' } } : { data: world.stats, error: null }),
     from(name: string) {
+      touched.add(name)
       const table = world.tables[name]
-      let op: 'select' | 'insert' | 'update' | 'delete' | 'upsert' = 'select'
-      let patch: Row = {}
+      let op: 'select' | 'delete' = 'select'
       const filters: ((r: Row) => boolean)[] = []
-      let limit = Infinity
-      let sort: { col: string; asc: boolean } | null = null
       const run = () => {
         if (table === 'missing' || table === undefined) return { data: null, error: { message: `relation "${name}" does not exist`, code: '42P01' } }
-        const rows = table
-        const hit = rows.filter((r) => filters.every((f) => f(r)))
-        if (op === 'delete') {
-          for (const r of hit) rows.splice(rows.indexOf(r), 1)
-          return { data: null, error: null }
-        }
-        if (op === 'update') {
-          for (const r of hit) Object.assign(r, patch)
-          return { data: null, error: null }
-        }
-        const sorted = sort ? [...hit].sort((a, b) => (String(a[sort!.col]) < String(b[sort!.col]) ? -1 : 1) * (sort!.asc ? 1 : -1)) : hit
-        return { data: sorted.slice(0, limit), error: null }
+        const hit = table.filter((r) => filters.every((f) => f(r)))
+        if (op === 'delete') for (const r of hit) table.splice(table.indexOf(r), 1)
+        return { data: op === 'delete' ? null : hit, error: null }
       }
       const b: Record<string, unknown> = {
         select: () => b,
         insert: (row: Row) => {
           if (table === 'missing' || table === undefined) return Promise.resolve({ error: { message: 'missing' } })
-          // ops_alerts has one open row per kind and subject.
-          if (name === 'ops_alerts' && table.some((r) => r.kind === row.kind && r.subject === row.subject && r.resolved_at == null)) {
-            return Promise.resolve({ error: { message: 'duplicate key' } })
-          }
-          table.push({ id: `id-${(idSeq += 1)}`, resolved_at: null, ...row })
+          table.push({ ...row })
           return Promise.resolve({ error: null })
         },
-        upsert: (row: Row, o?: { onConflict?: string }) => {
-          if (table === 'missing' || table === undefined) return Promise.resolve({ error: { message: 'missing' } })
-          const keyCol = o?.onConflict ?? 'id'
-          const found = table.find((r) => r[keyCol] === row[keyCol])
-          if (found) Object.assign(found, row)
-          else table.push({ ...row })
-          return Promise.resolve({ error: null })
-        },
-        update: (p: Row) => ((op = 'update'), (patch = p), b),
         delete: () => ((op = 'delete'), b),
-        eq: (c: string, v: unknown) => (filters.push((r) => r[c] === v), b),
-        is: (c: string, v: unknown) => (filters.push((r) => (r[c] ?? null) === v), b),
         in: (c: string, v: unknown[]) => (filters.push((r) => v.includes(r[c])), b),
         lt: (c: string, v: string) => (filters.push((r) => String(r[c]) < v), b),
-        order: (c: string, o?: { ascending?: boolean }) => ((sort = { col: c, asc: o?.ascending !== false }), b),
-        limit: (n: number) => ((limit = n), b),
+        order: () => b,
+        limit: () => b,
         then: (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) => Promise.resolve(run()).then(res, rej),
       }
       return b
     },
   }
-  return admin as unknown as AdminClient
+  return { admin: admin as unknown as AdminClient, touched }
 }
 
-const stats = (bytes: number, schedules: Row[] = []): Row => ({ db_bytes: bytes, tables: [{ name: 'jobs', bytes: bytes - MB }], schedules })
-const beats = (over: Record<string, Partial<Row>> = {}): Row[] =>
-  ['daily-check', 'mail-check', 'autopilot'].map((job) => ({ job, last_ok_at: hoursAgo(0.5), last_started_at: hoursAgo(0.5), last_error: null, ...over[job] }))
+const stats = (bytes: number): Row => ({ db_bytes: bytes, tables: [{ name: 'jobs', bytes: bytes - MB }] })
+const beat = (job: string, succeededHoursAgo: number | null, dueHoursAgo: number): Row => ({
+  job,
+  succeeded_at: succeededHoursAgo === null ? null : hoursAgo(succeededHoursAgo),
+  next_due_at: hoursAgo(dueHoursAgo),
+})
+const onTime = (): Row[] => ['roles.check', 'inbox.sync', 'owner.health'].map((job) => beat(job, 1, -5))
 
 function runRow(batch: string, hours: number, provider: Record<string, { companies: number; failed: number }>): Row {
   return { batch_id: batch, status: 'partial', started_at: hoursAgo(hours), by_provider: provider }
 }
 
+const world = (over: World['tables'] = {}, s: World['stats'] = stats(10 * MB)): World => ({
+  stats: s,
+  tables: { job_heartbeats: onTime(), ops_health_checks: [], ingestion_runs: [], ...over },
+})
+
+describe('the report', () => {
+  it('stores one row whose report holds the size, the biggest tables, schedules and issues', async () => {
+    const w = world()
+    const { admin, touched } = fakeAdmin(w)
+    const report = await runHealthCheck(admin, NOW)
+    expect(report).toMatchObject({ db_bytes: 10 * MB, tables: [{ name: 'jobs', bytes: 9 * MB }], issues: [] })
+    expect(report.schedules.map((s) => s.state)).toEqual(['ok', 'ok', 'ok'])
+    expect(w.tables.ops_health_checks).toHaveLength(1)
+    expect((w.tables.ops_health_checks as Row[])[0]).toMatchObject({ db_bytes: 10 * MB, report })
+    expect([...touched].sort()).toEqual(['ingestion_runs', 'job_heartbeats', 'ops_health_checks'])
+  })
+
+  it('keeps 90 days of reports', async () => {
+    const w = world({ ops_health_checks: [{ checked_at: hoursAgo(24 * 91), db_bytes: 1, report: {} }] })
+    await runHealthCheck(fakeAdmin(w).admin, NOW)
+    expect(w.tables.ops_health_checks).toHaveLength(1)
+    expect((w.tables.ops_health_checks as Row[])[0].db_bytes).toBe(10 * MB)
+  })
+
+  it('a size the function cannot give is null and raises nothing', async () => {
+    const report = await runHealthCheck(fakeAdmin(world({}, 'error')).admin, NOW)
+    expect(report.db_bytes).toBeNull()
+    expect(report.issues).toEqual([])
+  })
+})
+
 describe('database size', () => {
-  it('351 MB raises one db_size alert; 349 MB resolves it', async () => {
-    const tables = { cron_heartbeats: beats(), ops_alerts: [] as Row[], ops_health_checks: [] as Row[], ingestion_runs: 'missing' as const }
-    const admin = fakeAdmin({ stats: stats(351 * MB), tables })
-    const high = await runHealthCheck(admin, NOW)
-    expect(high.alerts.map((a) => a.kind)).toEqual(['db_size'])
-    expect(high.alerts[0].message).toBe('Database is at 351 MB of 500 MB')
-    expect((tables.ops_alerts as Row[]).filter((a) => a.resolved_at === null)).toHaveLength(1)
-
-    const low = await runHealthCheck(fakeAdmin({ stats: stats(349 * MB), tables }), NOW)
-    expect(low.alerts).toEqual([])
-    expect(low.resolved).toBe(1)
-    expect((tables.ops_alerts as Row[])[0].resolved_at).toBe(NOW.toISOString())
-  })
-
-  it('the same alert on the next day is updated, not duplicated', async () => {
-    const tables = { cron_heartbeats: beats(), ops_alerts: [] as Row[], ops_health_checks: [] as Row[], ingestion_runs: 'missing' as const }
-    await runHealthCheck(fakeAdmin({ stats: stats(360 * MB), tables }), NOW)
-    await runHealthCheck(fakeAdmin({ stats: stats(362 * MB), tables }), new Date(NOW.getTime() + 60_000))
-    expect(tables.ops_alerts).toHaveLength(1)
-    expect(tables.ops_alerts[0].message).toBe('Database is at 362 MB of 500 MB')
-  })
-
-  it('the threshold is 350 MB, exclusive', async () => {
-    const tables = { cron_heartbeats: beats(), ops_alerts: [] as Row[], ops_health_checks: [] as Row[], ingestion_runs: 'missing' as const }
-    const report = await runHealthCheck(fakeAdmin({ stats: stats(DB_ALERT_BYTES), tables }), NOW)
-    expect(report.alerts).toEqual([])
-  })
-
-  it('stores one report and drops reports older than 90 days', async () => {
-    const tables = { cron_heartbeats: beats(), ops_alerts: [] as Row[], ops_health_checks: [{ checked_at: hoursAgo(24 * 91), db_bytes: 1, report: {} }] as Row[], ingestion_runs: 'missing' as const }
-    await runHealthCheck(fakeAdmin({ stats: stats(100 * MB), tables }), NOW)
-    expect(tables.ops_health_checks).toHaveLength(1)
-    expect(tables.ops_health_checks[0].db_bytes).toBe(100 * MB)
+  it('past 350 MB is an issue with a next step; at 350 MB it is not', async () => {
+    const high = await runHealthCheck(fakeAdmin(world({}, stats(351 * MB))).admin, NOW)
+    expect(high.issues).toHaveLength(1)
+    expect(high.issues[0]).toMatchObject({ kind: 'db_size', text: 'The database is at 351 MB, past the 350 MB line' })
+    expect(high.issues[0].next).toContain('Remove old jobs')
+    const edge = await runHealthCheck(fakeAdmin(world({}, stats(DB_WARN_BYTES))).admin, NOW)
+    expect(edge.issues).toEqual([])
   })
 })
 
 describe('schedules', () => {
-  it('a mail check last seen 4 hours ago raises schedule_missed; 2 hours does not', async () => {
-    const late = await runHealthCheck(
-      fakeAdmin({ stats: stats(10 * MB), tables: { cron_heartbeats: beats({ 'mail-check': { last_ok_at: hoursAgo(4), last_started_at: hoursAgo(4) } }), ops_alerts: [], ops_health_checks: [], ingestion_runs: 'missing' } }),
-      NOW
-    )
-    expect(late.alerts).toHaveLength(1)
-    expect(late.alerts[0]).toMatchObject({ kind: 'schedule_missed', subject: 'mail-check', message: 'Mail check has not run for 4 hours' })
-    expect(late.alerts[0].detail.body).toBe('It should run every hour. Open GitHub Actions and the mail check workflow.')
+  it('a routine due two hours ago with no success since is late; due 30 minutes ago is not', async () => {
+    const late = await runHealthCheck(fakeAdmin(world({ job_heartbeats: [beat('inbox.sync', 5, 2), beat('roles.check', 1, -5), beat('owner.health', 1, -5)] })).admin, NOW)
+    expect(late.issues).toHaveLength(1)
+    expect(late.issues[0]).toMatchObject({ kind: 'schedule_late', subject: 'inbox.sync' })
+    expect(late.issues[0].text).toBe('Mail check has not succeeded since 2026-10-06 08:07 UTC')
+    expect(late.schedules.find((s) => s.job === 'inbox.sync')?.state).toBe('late')
 
-    const fine = await runHealthCheck(
-      fakeAdmin({ stats: stats(10 * MB), tables: { cron_heartbeats: beats({ 'mail-check': { last_ok_at: hoursAgo(2) } }), ops_alerts: [], ops_health_checks: [], ingestion_runs: 'missing' } }),
-      NOW
-    )
-    expect(fine.alerts).toEqual([])
+    const fine = await runHealthCheck(fakeAdmin(world({ job_heartbeats: [beat('inbox.sync', 5, 0.5), beat('roles.check', 1, -5), beat('owner.health', 1, -5)] })).admin, NOW)
+    expect(fine.issues).toEqual([])
   })
 
-  it('a job that keeps starting but never succeeds is late once its last success is old', async () => {
-    const report = await runHealthCheck(
-      fakeAdmin({ stats: stats(10 * MB), tables: { cron_heartbeats: beats({ autopilot: { last_ok_at: hoursAgo(30), last_started_at: hoursAgo(1), last_error: 'boom' } }), ops_alerts: [], ops_health_checks: [], ingestion_runs: 'missing' } }),
-      NOW
-    )
-    expect(report.alerts[0]).toMatchObject({ kind: 'schedule_missed', subject: 'autopilot' })
-    expect(report.alerts[0].detail.last_error).toBe('boom')
+  it('a routine that succeeded after it was due is not late', async () => {
+    const report = await runHealthCheck(fakeAdmin(world({ job_heartbeats: [beat('roles.check', 1, 3), beat('inbox.sync', 1, -5), beat('owner.health', 1, -5)] })).admin, NOW)
+    expect(report.issues).toEqual([])
   })
 
-  it('a job with no heartbeat yet is not reporting, not late', async () => {
-    const report = await runHealthCheck(fakeAdmin({ stats: stats(10 * MB), tables: { cron_heartbeats: [], ops_alerts: [], ops_health_checks: [], ingestion_runs: 'missing' } }), NOW)
-    expect(report.alerts).toEqual([])
-    expect(report.notReporting).toEqual(expect.arrayContaining(['mail check', 'autopilot', 'daily check']))
+  it('a routine with no heartbeat row is not reporting, not late', async () => {
+    const report = await runHealthCheck(fakeAdmin(world({ job_heartbeats: [beat('roles.check', 1, -5)] })).admin, NOW)
+    expect(report.schedules.map((s) => [s.job, s.state])).toEqual([['roles.check', 'ok'], ['inbox.sync', 'not_reporting'], ['owner.health', 'not_reporting']])
+    expect(report.issues).toEqual([])
   })
 
-  it('the pg_cron cleanup job is late after 26 hours, and absent jobs are ignored', async () => {
-    const tables = { cron_heartbeats: beats(), ops_alerts: [] as Row[], ops_health_checks: [] as Row[], ingestion_runs: 'missing' as const }
-    const report = await runHealthCheck(fakeAdmin({ stats: stats(10 * MB, [{ job: 'prune-stale-rows', last_ok_at: hoursAgo(27) }]), tables }), NOW)
-    expect(report.alerts.map((a) => a.subject)).toEqual(['prune-stale-rows'])
-    expect(report.alerts[0].message).toBe('Cleanup has not run for 27 hours')
-  })
-
-  it('a database without the stats function reports "database size" as not reporting and raises nothing', async () => {
-    const report = await runHealthCheck(fakeAdmin({ stats: 'error', tables: { cron_heartbeats: beats(), ops_alerts: [], ops_health_checks: [], ingestion_runs: 'missing' } }), NOW)
-    expect(report.notReporting).toContain('database size')
-    expect(report.alerts).toEqual([])
+  it('a database without job_heartbeats reads every routine as not reporting', async () => {
+    const report = await runHealthCheck(fakeAdmin(world({ job_heartbeats: 'missing' })).admin, NOW)
+    expect(report.schedules.every((s) => s.state === 'not_reporting')).toBe(true)
+    expect(report.issues).toEqual([])
   })
 })
 
 describe('source failures', () => {
   const allFail = { greenhouse: { companies: 12, failed: 12 } }
   const fine = { greenhouse: { companies: 12, failed: 1 } }
-  const world = (runs: Row[]) => ({ stats: stats(10 * MB), tables: { cron_heartbeats: beats(), ops_alerts: [] as Row[], ops_health_checks: [] as Row[], ingestion_runs: runs } })
 
-  it('three failed checks in a row raise source_failing; two do not', async () => {
-    const three = await runHealthCheck(fakeAdmin(world([runRow('c', 1, allFail), runRow('b', 7, allFail), runRow('a', 13, allFail)])), NOW)
-    expect(three.alerts).toHaveLength(1)
-    expect(three.alerts[0]).toMatchObject({ kind: 'source_failing', subject: 'greenhouse', message: 'Greenhouse boards failed in the last 3 role checks' })
-    expect(three.alerts[0].detail.body).toBe('New roles from 12 companies are not coming in. Cello keeps trying every 6 hours.')
+  it('three failed checks in a row are an issue; two are not', async () => {
+    const three = await runHealthCheck(fakeAdmin(world({ ingestion_runs: [runRow('c', 1, allFail), runRow('b', 7, allFail), runRow('a', 13, allFail)] })).admin, NOW)
+    expect(three.issues).toHaveLength(1)
+    expect(three.issues[0]).toMatchObject({ kind: 'source_failing', subject: 'greenhouse', text: 'Greenhouse boards failed in the last 3 role checks' })
+    expect(three.issues[0].next).toBe('New roles from 12 companies are not coming in. Cello keeps trying.')
 
-    const two = await runHealthCheck(fakeAdmin(world([runRow('c', 1, allFail), runRow('b', 7, allFail), runRow('a', 13, fine)])), NOW)
-    expect(two.alerts).toEqual([])
+    const two = await runHealthCheck(fakeAdmin(world({ ingestion_runs: [runRow('c', 1, allFail), runRow('b', 7, allFail), runRow('a', 13, fine)] })).admin, NOW)
+    expect(two.issues).toEqual([])
   })
 
   it('a recovery in the newest check ends the streak', async () => {
-    const report = await runHealthCheck(fakeAdmin(world([runRow('c', 1, fine), runRow('b', 7, allFail), runRow('a', 13, allFail), runRow('z', 19, allFail)])), NOW)
-    expect(report.alerts).toEqual([])
+    const report = await runHealthCheck(fakeAdmin(world({ ingestion_runs: [runRow('c', 1, fine), runRow('b', 7, allFail), runRow('a', 13, allFail), runRow('z', 19, allFail)] })).admin, NOW)
+    expect(report.issues).toEqual([])
   })
 
   it('a check that did not try the provider is skipped, and rows of one batch count as one check', () => {
@@ -203,34 +167,9 @@ describe('source failures', () => {
     expect(streaks).toEqual({ greenhouse: 2, lever: 0 })
   })
 
-  it('a missing ingestion_runs table is "not reporting" and raises no alert', async () => {
-    const report = await runHealthCheck(fakeAdmin({ stats: stats(10 * MB), tables: { cron_heartbeats: beats(), ops_alerts: [], ops_health_checks: [], ingestion_runs: 'missing' } }), NOW)
-    expect(report.notReporting).toContain('role checks')
-    expect(report.alerts).toEqual([])
-  })
-
-  it('a role check that has not run for 16 hours is a missed schedule', async () => {
-    const report = await runHealthCheck(fakeAdmin(world([runRow('a', 16, fine)])), NOW)
-    expect(report.alerts.map((a) => [a.kind, a.subject])).toEqual([['schedule_missed', 'role-check']])
-    expect(report.alerts[0].message).toBe('Role check has not run for 16 hours')
-  })
-})
-
-describe('heartbeats', () => {
-  it('recordHeartbeat stamps the last success, a failure keeps the old success, and neither throws', async () => {
-    const tables = { cron_heartbeats: [] as Row[] }
-    const admin = fakeAdmin({ tables })
-    await beatStart(admin, 'mail-check', NOW)
-    expect(tables.cron_heartbeats[0]).toMatchObject({ job: 'mail-check', last_started_at: NOW.toISOString() })
-    await recordHeartbeat(admin, 'mail-check', true, undefined, NOW)
-    const later = new Date(NOW.getTime() + 3_600_000)
-    await recordHeartbeat(admin, 'mail-check', false, 'x'.repeat(500), later)
-    expect(tables.cron_heartbeats).toHaveLength(1)
-    expect(tables.cron_heartbeats[0].last_ok_at).toBe(NOW.toISOString())
-    expect((tables.cron_heartbeats[0].last_error as string).length).toBe(300)
-
-    const broken = { from: () => ({ upsert: () => Promise.reject(new Error('db down')) }) } as unknown as AdminClient
-    await expect(recordHeartbeat(broken, 'mail-check', true)).resolves.toBeUndefined()
-    await expect(beatStart(broken, 'mail-check')).resolves.toBeUndefined()
+  it('a missing ingestion_runs table raises nothing', async () => {
+    const report = await runHealthCheck(fakeAdmin(world({ ingestion_runs: 'missing' })).admin, NOW)
+    expect(report.sources).toEqual([])
+    expect(report.issues).toEqual([])
   })
 })
