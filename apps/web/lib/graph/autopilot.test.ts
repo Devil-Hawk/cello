@@ -192,19 +192,16 @@ class FakeQueryBuilder implements PromiseLike<{ data: unknown; error: unknown; c
     this.filters.push({ col, op: 'gte', val })
     return this
   }
-  not(col: string, _op: string, _val: unknown) {
-    this.filters.push({ col, op: 'notnull', val: null })
+  // `.not(col, 'is', null)` is a real filter (a reaction with a job); any other `.not` is trackedOnly / openRolesOnly, and nothing in these fixtures is suggested, stale or closed.
+  not(col: string, _op: string, val: unknown) {
+    if (val === null) this.filters.push({ col, op: 'notnull', val: null })
     return this
   }
   in(col: string, vals: unknown[]) {
     this.inFilter = [col, vals]
     return this
   }
-  // trackedOnly / openRolesOnly filters: nothing in these fixtures is suggested, stale or closed.
   or() {
-    return this
-  }
-  not() {
     return this
   }
   order() {
