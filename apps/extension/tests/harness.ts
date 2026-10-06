@@ -65,6 +65,10 @@ export async function launch(userDataDir: string): Promise<BrowserContext> {
   })
 }
 
+// A persistent context opens one blank page of its own. The pages a send opens are the others.
+const INITIAL = new WeakMap<BrowserContext, Set<Page>>()
+export const autoPages = (context: BrowserContext): Page[] => context.pages().filter((p) => !INITIAL.get(context)?.has(p))
+
 export async function serviceWorker(context: BrowserContext): Promise<Worker> {
   return context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'))
 }
@@ -129,6 +133,7 @@ export const test = base.extend<Fixtures>({
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cello-ext-'))
     const context = await launch(dir)
     await serviceWorker(context)
+    INITIAL.set(context, new Set(context.pages()))
     await use(context)
     await context.close().catch(() => undefined)
     fs.rmSync(dir, { recursive: true, force: true })

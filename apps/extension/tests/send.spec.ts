@@ -5,7 +5,7 @@ import type { BrowserContext } from '@playwright/test'
 import type { Stub } from './fill-server.stub'
 import { RESUME_SHA } from './fill-server.stub'
 import { FIELDS_GREENHOUSE, CHALLENGE_VISIBLE, SUBMIT, page as build } from './fixtures/pages'
-import { claim, connect, expect, gh, installSite, launch, offscreenCount, serviceWorker, test, tick } from './harness'
+import { autoPages, claim, connect, expect, gh, installSite, launch, offscreenCount, serviceWorker, test, tick } from './harness'
 import type { Site } from './harness'
 
 // Send for me (T14, T15, T16). The server's host list is empty in production, so
@@ -49,7 +49,7 @@ test('the happy path sends once and reports the confirmation', async ({ context,
   expect(confirmation[0]!.body.screenshot).toBeUndefined()
   expect(site.submits).toBe(1)
   // The window closes after a sent application.
-  await expect.poll(() => context.pages().length).toBe(0)
+  await expect.poll(() => autoPages(context).length).toBe(0)
 })
 
 test('page text that talks to Cello changes nothing', async ({ context, stub, site }) => {
@@ -120,7 +120,7 @@ for (const [name, job, cause, html] of AFTER_CLICK) {
     expect(site.clicks).toBe(1)
     expect(stub.reports('ready_to_send')).toHaveLength(1)
     expect(stub.reports('confirmation')).toHaveLength(0)
-    expect(context.pages().length).toBe(1)
+    expect(autoPages(context).length).toBe(1)
   })
 }
 
@@ -176,7 +176,7 @@ test('a Pause during the fill leaves no ready_to_send and no send', async ({ con
   stub.cfg.sessionDelayMs = 3000
   await send(context, stub, site, 4001, build())
   await expect.poll(() => stub.calls('/api/fill/session').length, { timeout: 20_000 }).toBe(1)
-  const auto = context.pages().find((p) => p.url().includes('/acme/jobs/4001'))!
+  const auto = autoPages(context).find((p) => p.url().includes('/acme/jobs/4001'))!
   await auto.getByRole('button', { name: 'Pause Cello' }).click()
   await waitTerminal(stub)
   expect(terminal(stub)[0]!.body).toMatchObject({ phase: 'blocked', cause: 'interrupted' })
@@ -200,7 +200,7 @@ test('with an empty host list the next call is never followed by a fill', async 
   await expect.poll(() => stub.calls('/api/fill/next').length).toBe(1)
   await new Promise((r) => setTimeout(r, 1500))
   expect(stub.calls('/api/fill/session')).toHaveLength(0)
-  expect(context.pages()).toHaveLength(0)
+  expect(autoPages(context)).toHaveLength(0)
 })
 
 test('a host the server did not list is never opened', async ({ context, stub, site }) => {
@@ -208,7 +208,7 @@ test('a host the server did not list is never opened', async ({ context, stub, s
   await send(context, stub, site, 4001, build(), other)
   await waitTerminal(stub)
   expect(terminal(stub)[0]!.body).toMatchObject({ phase: 'blocked', cause: 'wrong_page' })
-  expect(context.pages()).toHaveLength(0)
+  expect(autoPages(context)).toHaveLength(0)
   expect(stub.calls('/api/fill/session')).toHaveLength(0)
 })
 

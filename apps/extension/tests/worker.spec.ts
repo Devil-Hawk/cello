@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { TOKEN } from './fill-server.stub'
-import { EXT, alarmInfo, claim, connect, expect, localGet, serviceWorker, test, tick } from './harness'
+import { EXT, alarmInfo, autoPages, claim, connect, expect, localGet, serviceWorker, test, tick } from './harness'
 import { page as build } from './fixtures/pages'
 
 // The extension's own shell: manifest, presence, the options page, the token handoff and the popup.
@@ -73,7 +73,7 @@ test('below the minimum version the extension shows an update line and sends not
   await expect.poll(() => stub.calls('/api/fill/next').length).toBe(1)
   await new Promise((r) => setTimeout(r, 1000))
   expect(stub.calls('/api/fill/session')).toHaveLength(0)
-  expect(context.pages()).toHaveLength(0)
+  expect(autoPages(context)).toHaveLength(0)
 
   const id = new URL((await serviceWorker(context)).url()).host
   const popup = await context.newPage()
