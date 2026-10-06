@@ -8,7 +8,7 @@ import { fixtureRows } from '../_data'
 
 // Any page that has no fixture of its own yet: the primitives on the ground,
 // 25 rows, one bar mark. Each page package adds a static fixtures/<page>/page.tsx,
-// which wins over this one. Nothing here reads Supabase.
+// which wins over this one. Made-up data only, no database calls.
 export default function FixturePage({ params }: { params: { page: string } }) {
   const rows = fixtureRows(25)
   return (

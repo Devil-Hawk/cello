@@ -1,0 +1,22 @@
+{
+  "/(app)/agent/page": 87859,
+  "/(app)/companies/[id]/page": 233370,
+  "/(app)/companies/page": 188211,
+  "/(app)/contacts/page": 235725,
+  "/(app)/copilot/dev-markdown-fixture/page": 168960,
+  "/(app)/copilot/page": 300851,
+  "/(app)/dashboard/page": 236442,
+  "/(app)/insights/page": 330035,
+  "/(app)/jobs/page": 245862,
+  "/(app)/notifications/page": 209818,
+  "/(app)/onboarding/page": 159744,
+  "/(app)/pipeline/page": 264090,
+  "/(app)/queue/page": 194150,
+  "/(app)/resume/[jobId]/page": 256102,
+  "/(app)/resume/page": 255181,
+  "/(app)/settings/access/page": 128410,
+  "/(app)/settings/page": 232141,
+  "/_not-found/page": 87859,
+  "/login/page": 158310,
+  "/page": 87859
+}
