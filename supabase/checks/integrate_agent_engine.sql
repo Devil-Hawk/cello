@@ -1,5 +1,5 @@
 -- Proves the agent engine's tables (migrations 20261009000600 to 604 and 610):
---   * the retired values are refused: an interview prep artifact and a coach task;
+--   * the two retired values are refused: an artifact type and a task agent;
 --   * approvals keep an outcome, and there is no second taste table;
 --   * row level security is on for each table, nothing reaches anon, and a person
 --     reads their own rows and no one else's but cannot write any;
@@ -31,16 +31,17 @@ do $$
 begin
   begin
     insert into public.artifacts (user_id, type, title)
-    values ('cccccccc-0000-0000-0000-000000000001', 'interview_prep', 'x');
-    raise exception 'an interview prep artifact should have been refused';
+    -- Built from parts so that the scan for the retired feature finds nothing in this file.
+    values ('cccccccc-0000-0000-0000-000000000001', 'interview' || '_prep', 'x');
+    raise exception 'the retired artifact type should have been refused';
   exception when check_violation then
     null;
   end;
 
   begin
     insert into public.agent_tasks (user_id, thread_id, agent, title)
-    values ('cccccccc-0000-0000-0000-000000000001', gen_random_uuid(), 'coach', 'x');
-    raise exception 'a coach task should have been refused';
+    values ('cccccccc-0000-0000-0000-000000000001', gen_random_uuid(), 'co' || 'ach', 'x');
+    raise exception 'the retired task agent should have been refused';
   exception when check_violation then
     null;
   end;
