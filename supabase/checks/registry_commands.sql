@@ -137,4 +137,46 @@ exception when insufficient_privilege then
 end $$;
 reset role;
 
+-- ===========================================================================
+-- approvals: send_email only, decided by a person only (the post-deploy file)
+-- ===========================================================================
+-- The approvals table comes with the engine. Until it is on this branch the check
+-- builds a bare one so the constraints are still proven; once the real table is
+-- there it only asserts that both constraints exist on it.
+do $$
+begin
+  if to_regclass('public.approvals') is null then
+    create table public.approvals (id uuid primary key default gen_random_uuid(), action text not null, decided_by text);
+    perform set_config('cello.check_made_approvals', 'on', true);
+  end if;
+end $$;
+
+\ir ../migrations/20261010000002_approvals_send_only.sql
+\ir ../migrations/20261010000002_approvals_send_only.sql
+
+do $$
+begin
+  assert exists (select 1 from pg_constraint where conname = 'approvals_r2_send_only' and conrelid = 'public.approvals'::regclass),
+    'approvals_r2_send_only is missing';
+  assert exists (select 1 from pg_constraint where conname = 'approvals_decided_by_person' and conrelid = 'public.approvals'::regclass),
+    'approvals_decided_by_person is missing';
+
+  if coalesce(current_setting('cello.check_made_approvals', true), '') = 'on' then
+    begin
+      insert into public.approvals (action) values ('submit_application');
+      raise exception 'an approval for submit_application must be refused';
+    exception when check_violation then
+      null;
+    end;
+    begin
+      insert into public.approvals (action, decided_by) values ('send_email', 'rule');
+      raise exception 'an approval decided by a rule must be refused';
+    exception when check_violation then
+      null;
+    end;
+    insert into public.approvals (action, decided_by) values ('send_email', 'user');
+    insert into public.approvals (action) values ('send_email');
+  end if;
+end $$;
+
 rollback;

@@ -3,7 +3,7 @@
 // The numbers below are written out here from the blueprint on purpose: a change
 // to lib/commands/limits.ts that drifts from the table fails this file.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { defineCommand, type CommandContext } from './define'
 import { agentDoor, assistantDoor, chatDoor, routineDoor } from './doors'
@@ -11,6 +11,11 @@ import { runCommand } from './run'
 import { memorySlotStore } from './slots'
 import { codeText } from './text'
 import { limitFor, BUCKET_NAMES } from './limits'
+
+// The doors module imports the cookie-backed client; nothing here calls it.
+vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({}) }))
+vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({}) }))
+
 
 type DoorName = 'chat' | 'assistant' | 'agent' | 'routine'
 
