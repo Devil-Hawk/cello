@@ -89,6 +89,43 @@ describe('syncJobs: at most 200 open roles per company', () => {
     expect(upserted).toHaveLength(10)
   })
 
+  describe('closed rows count against the cap', () => {
+    const closed = (n: number): ExistingJob[] =>
+      Array.from({ length: n }, (_, i) => ({
+        externalId: `https://acme.com/gone/${i}`,
+        title: `Gone role ${i}`,
+        location: `Elsewhere ${i}`,
+        salaryRange: null,
+        descriptionMd5: 'x',
+        source: 'sitemap',
+        open: false,
+        lastSeenAt: ago(10 + i),
+      }))
+
+    it('200 closed rows plus 300 new roles never leave more than 200 rows', async () => {
+      const listed = Array.from({ length: 300 }, (_, i) => role(i))
+      const { upserted, evictAsked, result } = await run(listed, closed(200))
+      expect(evictAsked[0]).toHaveLength(200)
+      expect(200 - evictAsked[0].length + upserted.length).toBeLessThanOrEqual(200)
+      expect(upserted).toHaveLength(200)
+      expect(result.evicted).toBe(200)
+    })
+
+    it('a closed row something points at stays and still counts', async () => {
+      const listed = Array.from({ length: 300 }, (_, i) => role(i))
+      const { upserted } = await run(listed, closed(200), {}, (id) => id.endsWith('/gone/0') || id.endsWith('/gone/1'))
+      expect(2 + upserted.length).toBeLessThanOrEqual(200)
+    })
+
+    it('a store that cannot evict still keeps the total at 200', async () => {
+      const m = memory(closed(200))
+      delete (m.store as { evictJobs?: unknown }).evictJobs
+      const result = emptyResult(COMPANY)
+      await syncJobs(m.store, COMPANY, [role(1)], { source: 'sitemap', sightingSources: [], stored: new Map(closed(200).map((e) => [e.externalId, e])), judge }, result)
+      expect(m.upserted).toHaveLength(0)
+    })
+  })
+
   describe('a full company still takes a role inside the targets', () => {
     const targeting = { ...EMPTY_TARGETING, functions: ['engineering', 'data'] }
     const full = (n = 200, over: Partial<ExistingJob> = {}): ExistingJob[] =>

@@ -621,10 +621,10 @@ export async function syncJobs(
     candidates = deduped.kept
   }
 
-  // At most MAX_ROLES_PER_COMPANY open rows per company, the ones inside the person's targets first.
+  // At most MAX_ROLES_PER_COMPANY rows per company, open and closed together, the ones inside the person's targets first.
+  // A closed row holds a slot until it is given up, so churn cannot pile rows up on top of the cap.
   const openStoredRows = [...stored.values()].filter((s) => s.open !== false)
-  const openStored = openStoredRows.length
-  let room = Math.max(0, MAX_ROLES_PER_COMPANY - openStored)
+  let room = Math.max(0, MAX_ROLES_PER_COMPANY - stored.size)
   const targeting = opts.targeting ?? EMPTY_TARGETING
   const fresh = candidates.filter((job) => !stored.has(job.externalId)).map(classify).filter(({ c }) => !c.rejectReason && !isLowQuality(c))
   const ranked = orderForCap(fresh, ({ job, c }) =>
@@ -635,6 +635,22 @@ export async function syncJobs(
     ),
     ({ job }) => job.postedAt
   )
+  // Closed roles go first, oldest first: the ones nothing points at are deleted, the rest stay and count.
+  const closedStoredRows = [...stored.values()].filter((s) => s.open === false)
+  if (ranked.length > room && store.evictJobs && closedStoredRows.length > 0) {
+    const oldest = closedStoredRows
+      .sort((a, b) => (a.lastSeenAt ?? '').localeCompare(b.lastSeenAt ?? ''))
+      .slice(0, ranked.length - room)
+      .map((s) => s.externalId)
+    try {
+      const gone = await store.evictJobs(company.id, oldest)
+      room += gone.length
+      for (const id of gone) stored.delete(id)
+      result.evicted = (result.evicted ?? 0) + gone.length
+    } catch (error) {
+      result.errors.push(`making room failed: ${errorMessage(error)}`)
+    }
+  }
   // A full company still takes a role inside the targets: new and stored open roles are ranked together,
   // and the stored ones that lose are given up (those nothing points at; the others stay and count).
   if (ranked.length > room && store.evictJobs && ranked.length > 0) {
@@ -661,14 +677,15 @@ export async function syncJobs(
       })),
     ]
     // Stored first, so on a tie nothing is swapped.
-    const kept = new Set(orderForCap(pool, (p) => p.verdict, (p) => p.at).slice(0, MAX_ROLES_PER_COMPANY).map((p) => p.entry.id))
+    const closedLeft = stored.size - openStoredRows.length
+    const kept = new Set(orderForCap(pool, (p) => p.verdict, (p) => p.at).slice(0, Math.max(0, MAX_ROLES_PER_COMPANY - closedLeft)).map((p) => p.entry.id))
     const losers = openStoredRows.filter((s) => !kept.has(s.externalId)).map((s) => s.externalId)
     if (losers.length > 0) {
       try {
         const gone = await store.evictJobs(company.id, losers)
         room += gone.length
         for (const id of gone) stored.delete(id)
-        result.evicted = gone.length
+        result.evicted = (result.evicted ?? 0) + gone.length
       } catch (error) {
         result.errors.push(`making room failed: ${errorMessage(error)}`)
       }
