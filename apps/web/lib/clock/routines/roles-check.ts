@@ -54,7 +54,7 @@ const MATCH_LIMIT = 2000
  * known is never held back from someone it fits.
  */
 export async function matchDirectoryRoles(admin: RoutineContext['admin'], userId: string, targets: ReaderTargets): Promise<DirectoryMatch> {
-  const personTargets = { targeting: targets.targeting, titles: targets.titles }
+  const personTargets = { targeting: targets.targeting, titles: targets.titles, typeStep: targets.typeStep }
   if (!hasPersonTargets(personTargets)) return NO_MATCH
   const version = targets.version ?? 0
 
@@ -79,13 +79,15 @@ export async function matchDirectoryRoles(admin: RoutineContext['admin'], userId
     is_remote: boolean | null
     posted_at: string | null
     employer_name: string | null
+    title_norm: string | null
+    role_type: string | null
   }[]
   const prepared = prepareTargets(personTargets.titles)
   const keep: string[] = []
   const hidden: string[] = []
   for (const r of rows) {
     const verdict = judgeForPerson(
-      { title: r.title, job_function: r.job_function, seniority: r.seniority, country: r.country, language: r.language, is_remote: r.is_remote, postedAt: r.posted_at },
+      { title: r.title, job_function: r.job_function, seniority: r.seniority, country: r.country, language: r.language, is_remote: r.is_remote, postedAt: r.posted_at, title_norm: r.title_norm, role_type: r.role_type },
       personTargets,
       r.employer_name,
       prepared
@@ -117,6 +119,8 @@ interface HeldJob {
   posted_at: string | null
   employer_id: string | null
   company_id: string | null
+  title_norm: string | null
+  role_type: string | null
   companies: { name: string | null } | { name: string | null }[] | null
 }
 
@@ -136,7 +140,7 @@ export async function rejudgeHeldRoles(
   const version = targets.version ?? 0
   const done = { checked: 0, removed: 0 }
   if (version <= 0) return done
-  const person = { targeting: targets.targeting, titles: targets.titles }
+  const person = { targeting: targets.targeting, titles: targets.titles, typeStep: targets.typeStep }
   const stated = hasPersonTargets(person)
   const prepared = prepareTargets(person.titles)
   const counts = new Map<string, { employer_id: string | null; company_id: string | null; kind: 'outside_targets'; reason: string; n: number }>()
@@ -144,7 +148,7 @@ export async function rejudgeHeldRoles(
 
   while (now() < deadlineAt) {
     const { data, error } = await mine()
-      .select('job_id, saved_at, hidden_reason, jobs(title, job_function, seniority, country, language, is_remote, posted_at, employer_id, company_id, companies(name))')
+      .select('job_id, saved_at, hidden_reason, jobs(title, job_function, seniority, country, language, is_remote, posted_at, employer_id, company_id, title_norm, role_type, companies(name))')
       .eq('user_id', userId)
       .lt('targets_version', version)
       .order('job_id')
@@ -164,7 +168,7 @@ export async function rejudgeHeldRoles(
       if (!job || !stated) continue
       const company = Array.isArray(job.companies) ? job.companies[0] : job.companies
       const verdict = judgeForPerson(
-        { title: job.title, job_function: job.job_function, seniority: job.seniority, country: job.country, language: job.language, is_remote: job.is_remote, postedAt: job.posted_at },
+        { title: job.title, job_function: job.job_function, seniority: job.seniority, country: job.country, language: job.language, is_remote: job.is_remote, postedAt: job.posted_at, title_norm: job.title_norm, role_type: job.role_type },
         person,
         company?.name ?? null,
         prepared

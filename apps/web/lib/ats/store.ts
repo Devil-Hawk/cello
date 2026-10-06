@@ -118,7 +118,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
       }
     },
 
-    async keepForPerson({ userId, companyId, externalIds, hiddenIds, targetsVersion }): Promise<void> {
+    async keepForPerson({ userId, companyId, externalIds, hiddenIds, targetsVersion, via }): Promise<void> {
       if (dry || externalIds.length === 0) return
       const { error } = await client.rpc('sync_person_roles', {
         p_user: userId,
@@ -126,6 +126,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
         p_external_ids: externalIds,
         p_targets_version: targetsVersion,
         p_hidden: hiddenIds,
+        ...(via && via !== 'check' ? { p_via: via } : {}),
       })
       fail(error)
     },

@@ -32,8 +32,9 @@ import {
 } from '../ingest/reader/legit'
 import { searchTerms, type ReaderTargets } from '../ingest/reader/targets'
 import { targetVerdict, type TargetVerdict } from '../targeting/roles'
-import { hasPersonTargets, judgeForPerson, prepareTargets, type OutsideReason } from '../jobs/target-relevance'
-import type { SourceTier } from '../jobs/relevance-types'
+import { hasPersonTargets, judgeForPerson, prepareTargets, type OutsideReason, type TypeStep } from '../jobs/target-relevance'
+import type { SourceTier, TypeProv } from '../jobs/relevance-types'
+import { typeTitle } from '../jobs/role-types'
 import { EMPTY_TARGETING, type Targeting } from '../targeting'
 // Relative import (not `@/...`): lib/ats/* stays framework-free, and
 // lib/jobs/classify.ts is itself a zero-dependency pure module, so this is
@@ -124,6 +125,12 @@ export interface JobUpsertRow {
   /** What the posting asks for (lib/jobs/requirements.ts), read from the description now. */
   requirements: Requirements
   requirements_extracted_at: string
+  /** The title's key and its tier 1 type (lib/jobs/role-types); the type is null when no rule placed the title. */
+  title_norm?: string
+  dept_norm?: string
+  role_type?: string | null
+  type_origin?: 'code' | null
+  type_prov?: TypeProv | null
 }
 
 /** A stored job, as much of it as a refresh needs to decide whether anything changed. */
@@ -150,12 +157,15 @@ export interface ExistingJob {
   postedAt?: string | null
 }
 
-/** One count of a read: what was found outside the person's targets, at one employer, for one reason. */
+/**
+ * One count of a read, at one employer: what was found outside the person's targets, for one reason, or (while
+ * role_types_live is off) the roles the type step would keep that the old filter drops, and the reverse.
+ */
 export interface CountWrite {
   employer_id: string | null
   company_id: string | null
-  kind: 'outside_targets'
-  reason: OutsideReason
+  kind: 'outside_targets' | 'shadow_keep' | 'shadow_drop'
+  reason: OutsideReason | ''
   n: number
 }
 
@@ -198,7 +208,7 @@ export interface AtsStore {
    * disagreed with their targets but a dimension could not be read. Optional so a store that cannot
    * (a test double) keeps compiling.
    */
-  keepForPerson?(input: { userId: string; companyId: string; externalIds: string[]; hiddenIds: string[]; targetsVersion: number }): Promise<void>
+  keepForPerson?(input: { userId: string; companyId: string; externalIds: string[]; hiddenIds: string[]; targetsVersion: number; via?: 'check' | 'link' }): Promise<void>
   /** Record how many listed roles were outside the person's targets, by reason (person_counts); numbers, never rows. */
   setCounts?(userId: string, rows: CountWrite[]): Promise<void>
   /** Apply column changes to stored rows; returns how many rows changed. Never touches match data. */
@@ -568,7 +578,7 @@ export async function refreshLocked(
     stored,
     judge: { name: company.name, domain: company.domain ?? null, careerUrl: company.career_url },
     targeting: targets?.targeting,
-    ...(company.user_id ? { owner: { userId: company.user_id, targetsVersion: targets?.version ?? 0 }, titles: targets?.titles } : {}),
+    ...(company.user_id ? { owner: { userId: company.user_id, targetsVersion: targets?.version ?? 0 }, titles: targets?.titles, typeStep: targets?.typeStep } : {}),
     windowed: providers[provider].searchesByQuery === true && query.length > 0,
   }, result)
   return board
@@ -594,6 +604,10 @@ export interface SyncOptions {
   owner?: { userId: string; targetsVersion: number }
   /** The role titles the person typed: with the targets, they decide what is kept. */
   titles?: readonly string[]
+  /** The role types the person chose and what they are worth (K5c): counted beside the old filter, or deciding once the switch is on. */
+  typeStep?: TypeStep
+  /** The person pasted this role: it is kept for them whatever their targets say, and marked as a link's. */
+  pasted?: boolean
 }
 
 /** jobs.source_tier of what a source wrote. */
@@ -693,19 +707,31 @@ export async function syncJobs(
   // targets stated the followed employer keeps up to the cap, as before, and those roles are marked
   // by targets version 0. A role nothing disagrees with, whose place or level could not be read, is
   // kept hidden for the person.
-  const personTargets = { targeting, titles: opts.titles ?? [] }
-  const filtering = Boolean(opts.owner) && hasPersonTargets(personTargets)
-  const outside: Record<OutsideReason, number> = { place: 0, age: tooOld, excluded: 0, level: 0, title: 0 }
+  const personTargets = { targeting, titles: opts.titles ?? [], typeStep: opts.typeStep }
+  const filtering = Boolean(opts.owner) && !opts.pasted && hasPersonTargets(personTargets)
+  const outside: Record<OutsideReason, number> = { place: 0, age: tooOld, excluded: 0, level: 0, title: 0, type: 0, untyped: 0 }
   const hiddenIds = new Set<string>()
+  // Every title is typed by code before it is judged, so the type step and the stored row see the same answer.
+  const typed = new Map<string, ReturnType<typeof typeTitle>>()
+  const typedFor = (job: AtsJob, title: string) => {
+    let t = typed.get(job.externalId)
+    if (!t) typed.set(job.externalId, (t = typeTitle(title)))
+    return t
+  }
+  // While the switch is off the old filter decides and the type step is only counted beside it (T20).
+  const shadow = Boolean(opts.typeStep) && opts.typeStep!.live === false && opts.typeStep!.chosen.length > 0
+  const shadowCount = { keep: 0, drop: 0 }
   if (filtering) {
     const prepared = prepareTargets(personTargets.titles)
-    ranked = ranked.filter(({ job, c }) => {
-      const verdict = judgeForPerson(
-        { title: job.title, description: job.description, job_function: c.jobFunction, seniority: c.seniority, country: c.country, language: c.language, is_remote: c.isRemote, postedAt: job.postedAt },
-        personTargets,
-        company.name,
-        prepared
-      )
+    ranked = ranked.filter(({ job, title, c }) => {
+      const t = typedFor(job, title)
+      const role = { title: job.title, description: job.description, job_function: c.jobFunction, seniority: c.seniority, country: c.country, language: c.language, is_remote: c.isRemote, postedAt: job.postedAt, title_norm: t.title_norm, role_type: t.role_type }
+      const verdict = judgeForPerson(role, personTargets, company.name, prepared)
+      if (shadow) {
+        const typeStepVerdict = judgeForPerson(role, { ...personTargets, typeStep: { ...opts.typeStep!, live: true } }, company.name, prepared)
+        if (typeStepVerdict.keep && !verdict.keep) shadowCount.keep++
+        if (verdict.keep && !typeStepVerdict.keep) shadowCount.drop++
+      }
       if (!verdict.keep) {
         outside[verdict.reason]++
         return false
@@ -714,6 +740,7 @@ export async function syncJobs(
       return true
     })
   }
+  const typeFields = (t: ReturnType<typeof typeTitle>) => ({ title_norm: t.title_norm, dept_norm: t.dept_norm, role_type: t.role_type, type_origin: t.type_origin, type_prov: t.type_prov })
   // Closed roles go first, oldest first: the ones nothing points at are deleted, the rest stay and count.
   const closedStoredRows = [...stored.values()].filter((s) => s.open === false)
   if (ranked.length > room && store.evictJobs && closedStoredRows.length > 0) {
@@ -802,6 +829,7 @@ export async function syncJobs(
         salaryRange: job.salary,
       }),
       requirements_extracted_at: now,
+      ...typeFields(typedFor(job, title)),
     }))
 
   if (newRows.length > 0) {
@@ -823,6 +851,7 @@ export async function syncJobs(
         externalIds: newRows.map((r) => r.external_id),
         hiddenIds: [...hiddenIds],
         targetsVersion: filtering ? opts.owner.targetsVersion : 0,
+        ...(opts.pasted ? { via: 'link' as const } : {}),
       })
     } catch (error) {
       result.errors.push(`person roles failed: ${errorMessage(error)}`)
@@ -834,13 +863,24 @@ export async function syncJobs(
     try {
       await store.setCounts(
         opts.owner.userId,
-        (Object.keys(outside) as OutsideReason[]).map((reason) => ({
-          employer_id: employerId,
-          company_id: employerId ? null : company.id,
-          kind: 'outside_targets' as const,
-          reason,
-          n: outside[reason],
-        }))
+        [
+          ...(Object.keys(outside) as OutsideReason[]).map((reason) => ({
+            employer_id: employerId,
+            company_id: employerId ? null : company.id,
+            kind: 'outside_targets' as const,
+            reason,
+            n: outside[reason],
+          })),
+          ...(shadow
+            ? (['shadow_keep', 'shadow_drop'] as const).map((kind) => ({
+                employer_id: employerId,
+                company_id: employerId ? null : company.id,
+                kind,
+                reason: '' as const,
+                n: kind === 'shadow_keep' ? shadowCount.keep : shadowCount.drop,
+              }))
+            : []),
+        ]
       )
     } catch (error) {
       result.errors.push(`counts failed: ${errorMessage(error)}`)
@@ -858,7 +898,10 @@ export async function syncJobs(
     if (!have) continue
     const fields: Record<string, unknown> = {}
     const title = job.title.trim()
-    if (title && title !== have.title) fields.title = title
+    if (title && title !== have.title) {
+      fields.title = title
+      Object.assign(fields, typeFields(typeTitle(title)))
+    }
     if (job.location && job.location !== have.location) fields.location = job.location
     if (job.salary && job.salary !== have.salaryRange) fields.salary_range = job.salary
     const description = (job.description ?? '').trim().slice(0, MAX_DESCRIPTION_CHARS)

@@ -82,7 +82,7 @@ describe('syncJobs: store only what is inside the person\'s targets', () => {
 
   it('sends every reason, so a zero resets the day\'s number', async () => {
     const { counts } = await run(listed, { targeting: { ...EMPTY_TARGETING, functions: ['engineering'] } })
-    expect(counts[0].rows.map((r) => r.reason).sort()).toEqual(['age', 'excluded', 'level', 'place', 'title'])
+    expect(counts[0].rows.map((r) => r.reason).sort()).toEqual(['age', 'excluded', 'level', 'place', 'title', 'type', 'untyped'])
     expect(countOf(counts[0].rows, 'place')).toBe(0)
   })
 
@@ -147,3 +147,45 @@ describe('syncJobs: store only what is inside the person\'s targets', () => {
     expect(result.errors.some((e) => e.startsWith('upsert failed'))).toBe(false)
   })
 })
+
+describe('syncJobs: role types beside the old filter (K5c)', () => {
+  const step = (live: boolean) => ({ chosen: ['backend-engineer', 'data-engineer'], synonyms: {}, words: new Set(['backend', 'data', 'engineer']), live })
+  const targeting = { ...EMPTY_TARGETING, functions: ['engineering'] }
+  const listed = [
+    role(1, 'Backend Engineer'), // old keeps it, the type step keeps it
+    role(2, 'Platform Engineer'), // old keeps it (engineering), the type step drops it: platform-engineer is not chosen
+    role(3, 'Data Engineer'), // old drops it (classify says data), the type step keeps it
+    role(4, 'AI Engineer'), // both drop it
+  ]
+
+  it('while the switch is off the old filter decides, and the type step is counted beside it', async () => {
+    const { upserted, counts } = await run(listed, { targeting, typeStep: step(false) })
+    expect(upserted.map((r) => r.title).sort()).toEqual(['Backend Engineer', 'Platform Engineer'])
+    const rows = counts[0].rows
+    expect(rows.find((r) => r.kind === 'shadow_keep')).toMatchObject({ n: 1, reason: '', employer_id: 'e1' })
+    expect(rows.find((r) => r.kind === 'shadow_drop')).toMatchObject({ n: 1, reason: '' })
+    expect(rows.filter((r) => r.kind === 'outside_targets').reduce((n, r) => n + r.n, 0)).toBe(2)
+  })
+
+  it('once the switch is on the type step decides, and what it leaves out is counted as another type or an unknown one', async () => {
+    const { upserted, counts } = await run([...listed, role(5, 'Zoo Keeper')], { targeting, typeStep: step(true) })
+    expect(upserted.map((r) => r.title).sort()).toEqual(['Backend Engineer', 'Data Engineer'])
+    const outside = Object.fromEntries(counts[0].rows.filter((r) => r.kind === 'outside_targets').map((r) => [r.reason, r.n]))
+    expect(outside).toMatchObject({ type: 2, untyped: 1, title: 0 })
+    expect(counts[0].rows.some((r) => r.kind.startsWith('shadow'))).toBe(false)
+  })
+
+  it('stores each title with its key and tier 1 type', async () => {
+    const { upserted } = await run([role(1, 'Sr. Backend Engineer - Remote'), role(2, 'Zoo Keeper')], { targeting: EMPTY_TARGETING })
+    expect(upserted[0]).toMatchObject({ title_norm: 'backend engineer', role_type: 'backend-engineer', type_origin: 'code', type_prov: { rule: 'synonym', taxonomy_version: 1 } })
+    expect(upserted[1]).toMatchObject({ title_norm: 'zoo keeper', role_type: null, type_origin: null })
+  })
+
+  it('keeps a pasted role outside the person\'s types, as the person\'s link, and counts nothing', async () => {
+    const { upserted, kept, counts } = await run([role(9, 'Account Executive')], { targeting, typeStep: step(true), pasted: true })
+    expect(upserted.map((r) => r.title)).toEqual(['Account Executive'])
+    expect(kept[0]).toMatchObject({ via: 'link', externalIds: ['https://acme.com/jobs/9'], targetsVersion: 0 })
+    expect(counts).toEqual([])
+  })
+})
+
