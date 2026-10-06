@@ -19,6 +19,7 @@ import { SourcesTab } from '@/components/settings/sources-tab'
 import { SearchTab } from '@/components/settings/search-tab'
 import { McpTab } from '@/components/settings/mcp-tab'
 import { TokensTab } from '@/components/settings/tokens-tab'
+import { FixNamesCard } from '@/components/settings/fix-names-card'
 
 // Loaded after the page: the cards carry the meter, the toast and the sync motion, which the tabs do not need first.
 const AccountStatus = dynamic(() => import('@/components/settings/account-status').then((m) => m.AccountStatus), { ssr: false })
@@ -242,6 +243,8 @@ export default function SettingsPage() {
           )}
         </Card>
       </div>
+
+      <FixNamesCard />
 
       <AccountStatus />
     </div>
