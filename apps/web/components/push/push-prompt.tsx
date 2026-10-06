@@ -17,7 +17,7 @@ type State =
   | { kind: 'blocked' }
   | { kind: 'error' }
 
-function keyBytes(base64url: string): Uint8Array {
+function keyBytes(base64url: string) {
   const pad = '='.repeat((4 - (base64url.length % 4)) % 4)
   const raw = atob((base64url + pad).replace(/-/g, '+').replace(/_/g, '/'))
   const out = new Uint8Array(new ArrayBuffer(raw.length))

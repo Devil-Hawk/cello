@@ -8,8 +8,7 @@
 // confirmed; never one read from the resume by code; never a similar answer; never a demographic or a
 // consent. And only on a host on auto-hosts, which is empty until the owner has watched a real send.
 
-import type { FieldKind } from '@/lib/answers/categories'
-import type { Category } from '@/lib/answers/categories'
+import type { Category, FieldKind } from '@/lib/answers/categories'
 import type { Resolved } from '@/lib/answers'
 import { AUTO_HOSTS, type AutoHost } from './auto-hosts'
 
