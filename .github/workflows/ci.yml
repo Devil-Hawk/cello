@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, 'fix/**', 'feat/**', 'wp2/**', 'v2/**', 'chore/**', 'v3/**']
+    branches: [main, 'fix/**', 'feat/**', 'wp2/**', 'v2/**', 'chore/**', 'v3/**', 'v4/**']
   pull_request:
     branches: [main]
   workflow_dispatch:
