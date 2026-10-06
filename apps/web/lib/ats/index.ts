@@ -36,7 +36,7 @@ import { EMPTY_TARGETING, type Targeting } from '../targeting'
 // Relative import (not `@/...`): lib/ats/* stays framework-free, and
 // lib/jobs/classify.ts is itself a zero-dependency pure module, so this is
 // safe in both the Next.js route and the plain-tsx scheduled script.
-import { classifyJob, isLowQuality } from '../jobs/classify'
+import { classifyJob, isLowQuality, parseLocation } from '../jobs/classify'
 // Same reasoning as classify above: lib/jobs/mojibake.ts is pure and
 // dependency-free, so importing it here keeps lib/ats framework-free.
 import { repairMojibake } from '../jobs/mojibake'
@@ -755,7 +755,12 @@ export async function syncJobs(
     const fields: Record<string, unknown> = {}
     const title = job.title.trim()
     if (title && title !== have.title) fields.title = title
-    if (job.location && job.location !== have.location) fields.location = job.location
+    if (job.location && job.location !== have.location) {
+      fields.location = job.location
+      // A place that fills in later is what the country is read from: a role stored without one matched no country target.
+      const country = parseLocation(job.location).country
+      if (country) fields.country = country
+    }
     if (job.salary && job.salary !== have.salaryRange) fields.salary_range = job.salary
     const description = (job.description ?? '').trim().slice(0, MAX_DESCRIPTION_CHARS)
     if (description && md5(description) !== have.descriptionMd5) {
