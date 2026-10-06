@@ -156,7 +156,7 @@ export function ApplicationIdentityCard({ onStatus }: ApplicationIdentityCardPro
       <div className="space-y-2">
         <h2 className="font-display text-section text-foreground">Application identity</h2>
         <p className="text-caption text-muted-foreground">
-          Couldn&apos;t load your application identity. Check your connection and reload — until it
+          Couldn&apos;t load your application identity. Check your connection and reload. Until it
           loads, applications keep using whatever is already saved.
         </p>
       </div>
@@ -205,7 +205,7 @@ export function ApplicationIdentityCard({ onStatus }: ApplicationIdentityCardPro
       onStatus(
         'success',
         result.identity.usesSeparateEmail
-          ? `Saved — employers will reply to ${result.identity.email}`
+          ? `Saved. Employers will reply to ${result.identity.email}`
           : 'Application identity saved'
       )
     } catch {
@@ -221,11 +221,11 @@ export function ApplicationIdentityCard({ onStatus }: ApplicationIdentityCardPro
         <h2 className="font-display text-section text-foreground">Application identity</h2>
         <p className="mt-1 text-caption text-muted-foreground">
           What goes <em>on</em> the applications Cello prepares and submits. This is separate from
-          your account on purpose — plenty of people apply from a dedicated address so recruiter
+          your account on purpose. Plenty of people apply from a dedicated address so recruiter
           mail stays out of their personal inbox, or because the address they signed up with is a
           university one that expires. Signing in, billing and Cello&apos;s own alerts always keep
           using your account address, {accountEmail || 'which is not set'}. Work authorisation,
-          visa, demographic and salary questions are never auto-answered — those always come back to
+          visa, demographic and salary questions are never auto-answered. Those always come back to
           you.
         </p>
       </div>
@@ -241,7 +241,7 @@ export function ApplicationIdentityCard({ onStatus }: ApplicationIdentityCardPro
               {isDirty ? 'After you save, employers will reply to' : 'Employers reply to'}
             </p>
             <p className="mt-0.5 break-all text-body font-medium text-foreground">
-              {pendingEmail || 'no address — an employer would have no way to answer'}
+              {pendingEmail || 'no address, so an employer would have no way to answer'}
             </p>
             <p className="mt-1 text-caption text-muted-foreground">
               {!accountEmail
@@ -285,7 +285,7 @@ export function ApplicationIdentityCard({ onStatus }: ApplicationIdentityCardPro
         >
           {emailInvalid && (
             <p className="mt-1.5 text-caption text-destructive">
-              That isn&apos;t a usable address. A typo here doesn&apos;t bounce — the reply just
+              That isn&apos;t a usable address. A typo here doesn&apos;t bounce. The reply just
               never arrives.
             </p>
           )}
@@ -302,7 +302,7 @@ export function ApplicationIdentityCard({ onStatus }: ApplicationIdentityCardPro
                 interview reply there instead of {accountEmail || 'my account address'}.
                 {!EMAIL_VERIFICATION_AVAILABLE && (
                   <span className="mt-1 block text-muted-foreground">
-                    Cello can&apos;t verify this for you — nothing here sends a test message and
+                    Cello can&apos;t verify this for you. Nothing here sends a test message and
                     waits for it to come back. Until you confirm, applications keep going out from
                     your account address.
                   </span>
@@ -318,7 +318,7 @@ export function ApplicationIdentityCard({ onStatus }: ApplicationIdentityCardPro
                 month: 'short',
                 day: 'numeric',
               })}
-              . Confirmed, not verified — Cello never sent anything to it.
+              . Confirmed, not verified. Cello never sent anything to it.
             </p>
           )}
         </Field>
@@ -336,7 +336,7 @@ export function ApplicationIdentityCard({ onStatus }: ApplicationIdentityCardPro
         <Field
           id="application-phone"
           label="Phone"
-          hint="Filled into the phone field when a board has one. Written down exactly as you type it — no reformatting."
+          hint="Filled into the phone field when a board has one. Written down exactly as you type it, with no reformatting."
           value={form.phone}
           onChange={(v) => set('phone', v)}
           placeholder="+1 555 0100"
@@ -347,7 +347,7 @@ export function ApplicationIdentityCard({ onStatus }: ApplicationIdentityCardPro
         <Field
           id="application-location"
           label="Location"
-          hint="Your current city or region, for the location field. Not used for job filtering — that lives in Job targeting."
+          hint="Your current city or region, for the location field. Not used for job filtering. That lives in Job targeting."
           value={form.location}
           onChange={(v) => set('location', v)}
           placeholder="Seattle, WA"

@@ -210,7 +210,7 @@ export function ApplyCredentialsCard({ onStatus }: ApplyCredentialsCardProps) {
       <div>
         <h2 className="font-display text-section text-foreground">Employer board sign-ins</h2>
         <p className="mt-1 text-caption text-muted-foreground">
-          Some boards — Workday especially — will not take an application without an account on that
+          Some boards, Workday especially, will not take an application without an account on that
           specific employer&apos;s site. Save the sign-in you already use there and applications can be
           submitted for you instead of stopping to ask. Boards that need a new account, or that put up
           a challenge, always come back to you as a prefilled draft.
@@ -227,7 +227,7 @@ export function ApplyCredentialsCard({ onStatus }: ApplyCredentialsCardProps) {
             <p className="text-body font-medium text-foreground">Before you save a password</p>
             <p>
               It is encrypted before it is written down, with a key that lives in this
-              deployment&apos;s environment and not in the database — so a copy of the database on its
+              deployment&apos;s environment and not in the database, so a copy of the database on its
               own is useless. Anyone who holds <em>both</em> that key and the database can read it.
               That is the real boundary, and it is worth knowing rather than guessing.
             </p>
@@ -235,12 +235,12 @@ export function ApplyCredentialsCard({ onStatus }: ApplyCredentialsCardProps) {
               <span className="font-medium text-foreground">
                 Use a job-search account you do not use anywhere else.
               </span>{' '}
-              A password reused across your email and your bank is the wrong thing to put here — not
+              A password reused across your email and your bank is the wrong thing to put here, not
               because this is careless with it, but because the cost of ever being wrong about that is
               your whole life rather than one job board.
             </p>
             <p>
-              Saved passwords are never shown again — not here, not masked, not behind a reveal
+              Saved passwords are never shown again. Not here, not masked, not behind a reveal
               button. They are decrypted on the server only at the moment an application is being
               submitted, and you can see below when that last happened.
             </p>
@@ -265,7 +265,7 @@ export function ApplyCredentialsCard({ onStatus }: ApplyCredentialsCardProps) {
                 your administrator". */}
             <p className="mt-1">{encryption.message}</p>
             <p className="mt-1">
-              Everything else keeps working — applications to boards that need a sign-in just come back
+              Everything else keeps working. Applications to boards that need a sign-in just come back
               to you as prefilled drafts.
             </p>
           </div>
@@ -486,7 +486,7 @@ export function ApplyCredentialsCard({ onStatus }: ApplyCredentialsCardProps) {
               ))}
             </ul>
             <p className="mt-2 text-caption text-muted-foreground">
-              To change a password, save the same board and username again — it replaces what is
+              To change a password, save the same board and username again. It replaces what is
               stored.
             </p>
           </>
