@@ -53,20 +53,34 @@ export interface LiveCompany {
 
 export interface LiveRow {
   title: string
+  /** The employer's own key for the posting: what the preview address carries instead of a link. */
+  key: string
   url: string
   location: string | null
   postedAt: string | null
   /** The role's type by tier 1 (lib/jobs/role-types), null when no rule placed the title. */
   role_type: string | null
+  /** The level the title reads as. */
+  level: string
   /** Null for a role that is inside the person's targets. */
   reason: OutsideReason | null
   /** The stored role the person holds, when they hold it. */
   jobId: string | null
 }
 
+/** What narrows the list before it is paged: words of the title, a role type, a place, or one posting's key. */
+export interface LiveMatch {
+  words?: string
+  type?: string
+  place?: string
+  key?: string
+}
+
 export interface LiveRoles {
   /** This page: the person's roles first, then the others in the employer's order. */
   rows: LiveRow[]
+  /** Rows after the match (every row without one): what the pages are cut from. kept, counts and total stay the whole read's. */
+  matched: number
   /** Roles inside the person's targets; kept + the counts = total. */
   kept: number
   counts: Record<OutsideReason, number>
@@ -153,8 +167,27 @@ async function read(company: LiveCompany, targets: ReaderTargets): Promise<Read>
   return { tier: site.tier, listed: slim(site.jobs, company.name), complete: site.complete, failure: site.tier ? null : (site.reason ?? 'no_roles') }
 }
 
+/** The words of a search as the stored title key spells them, so "forward deployed" finds "Forward-Deployed Engineer". */
+function wordsOf(words: string): string[] {
+  const norm = typeTitle(words).title_norm
+  return (norm || words.toLowerCase()).split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+}
+
+/** Does one listed role pass the match? Every word of the search is in its title; type, place and key are exact or contained. */
+function matchesOne(l: Listed, m: LiveMatch | undefined): boolean {
+  if (!m) return true
+  if (m.key !== undefined && l.externalId !== m.key) return false
+  if (m.type && l.role_type !== m.type) return false
+  if (m.place && !(l.location ?? '').toLowerCase().includes(m.place.toLowerCase())) return false
+  if (m.words) {
+    const title = l.title.toLowerCase()
+    if (!wordsOf(m.words).every((w) => l.title_norm.includes(w) || title.includes(w))) return false
+  }
+  return true
+}
+
 /** Every role the employer lists, judged for this person, paged. Writes only the employer's open count. */
-export async function liveRoles(input: { db: Db; userId: string; company: LiveCompany; targets: ReaderTargets; page?: number }): Promise<LiveRoles> {
+export async function liveRoles(input: { db: Db; userId: string; company: LiveCompany; targets: ReaderTargets; page?: number; match?: LiveMatch }): Promise<LiveRoles> {
   const { db, userId, company, targets } = input
   const query = searchTerms(targets).join('|')
   const board = readCachedAts(company.metadata)
@@ -169,28 +202,31 @@ export async function liveRoles(input: { db: Db; userId: string; company: LiveCo
 
   // The person's own roles at this employer, by the employer's id for them.
   // ponytail: 5,000 held roles at one employer is far beyond the 1,500 a person can hold per company.
-  const { data: held } = await db.from('person_jobs').select('id, external_id').eq('viewer_id', userId).eq('viewer_company_id', company.id).limit(5000)
+  // They are the person's by their own company row, or by the employer's id when the person does not follow it.
+  const mineQuery = db.from('person_jobs').select('id, external_id').eq('viewer_id', userId)
+  const { data: held } = await (company.employer_id ? mineQuery.or(`viewer_company_id.eq.${company.id},employer_id.eq.${company.employer_id}`) : mineQuery.eq('viewer_company_id', company.id)).limit(5000)
   const heldByExternal = new Map(((held ?? []) as { id: string; external_id: string | null }[]).filter((h) => h.external_id).map((h) => [h.external_id as string, h.id]))
 
   const person = { targeting: targets.targeting, titles: targets.titles, typeStep: targets.typeStep }
   const stated = hasPersonTargets(person)
   const prepared = prepareTargets(person.titles)
-  const mine: LiveRow[] = []
-  const rest: LiveRow[] = []
-  const others: LiveRow[] = []
+  type Entry = { row: LiveRow; l: Listed }
+  const mine: Entry[] = []
+  const rest: Entry[] = []
+  const others: Entry[] = []
   const counts = Object.fromEntries(REASONS.map((r) => [r, 0])) as Record<OutsideReason, number>
   for (const l of got.listed) {
     const verdict = stated
       ? judgeForPerson({ title: l.title, job_function: l.job_function, seniority: l.seniority, country: l.country, language: l.language, is_remote: l.is_remote, postedAt: l.postedAt, title_norm: l.title_norm, role_type: l.role_type }, person, company.name, prepared)
       : ({ keep: true, hidden: false } as const)
-    const row: LiveRow = { title: l.title, url: l.url, location: l.location, postedAt: l.postedAt, role_type: l.role_type, reason: verdict.keep ? null : verdict.reason, jobId: heldByExternal.get(l.externalId) ?? null }
-    if (verdict.keep) (row.jobId ? mine : rest).push(row)
+    const row: LiveRow = { title: l.title, key: l.externalId, url: l.url, location: l.location, postedAt: l.postedAt, role_type: l.role_type, level: l.seniority, reason: verdict.keep ? null : verdict.reason, jobId: heldByExternal.get(l.externalId) ?? null }
+    if (verdict.keep) (row.jobId ? mine : rest).push({ row, l })
     else {
       counts[verdict.reason]++
-      others.push(row)
+      others.push({ row, l })
     }
   }
-  const all = [...mine, ...rest, ...others]
+  const all = [...mine, ...rest, ...others].filter((e) => matchesOne(e.l, input.match)).map((e) => e.row)
   const pages = Math.max(1, Math.ceil(all.length / LIVE_PAGE_SIZE))
   const page = Math.min(Math.max(0, Math.floor(input.page ?? 0)), pages - 1)
 
@@ -201,6 +237,7 @@ export async function liveRoles(input: { db: Db; userId: string; company: LiveCo
 
   return {
     rows: all.slice(page * LIVE_PAGE_SIZE, (page + 1) * LIVE_PAGE_SIZE),
+    matched: all.length,
     kept: mine.length + rest.length,
     counts,
     total: got.listed.length,
