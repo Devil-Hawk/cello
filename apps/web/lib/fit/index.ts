@@ -9,6 +9,9 @@
 // computer can (rung R2, no request spent), once per role while its verdicts are fresh. On free models or
 // the person's own key it runs only on Check my chance. Every run counts against one daily cap, 24 roles.
 // With no model the code verdicts show and the rest say "Cello needs a model to read this one".
+//
+// The model step stays off until the instance flag `role_evidence_live` is on (the measure S20 passes before it
+// is switched on). With the flag off, or with no flag table or row at all, only code reads a role.
 
 import { createHash } from 'node:crypto'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
@@ -37,6 +40,16 @@ export interface FitDeps {
 export interface RoleFitResult extends RoleFitView {
   /** Set when the daily cap stopped a model read that would otherwise have run. */
   limit?: 'cap'
+}
+
+/** True only when the instance has switched the model step on. Absent flag table or row: off, as `picks_live` is. */
+export async function evidenceLive(admin: AdminClient): Promise<boolean> {
+  try {
+    const { data, error } = await admin.from('instance_flags').select('on').eq('key', 'role_evidence_live').maybeSingle()
+    return !error && (data as { on?: boolean } | null)?.on === true
+  } catch {
+    return false
+  }
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
@@ -110,7 +123,7 @@ export async function readRoleFit(deps: FitDeps, jobId: string, mode: FitMode = 
   let limit: 'cap' | undefined
 
   const unsettled = () => role.requirements.filter((r, n) => items[n].origin === 'code' && items[n].verdict === 'unknown' && !role.authorizationIds.has(r.id))
-  if (mode !== 'view' && unsettled().length > 0 && deps.keys) {
+  if (mode !== 'view' && unsettled().length > 0 && deps.keys && (await evidenceLive(admin))) {
     const door = deps.door ?? doorsStub
     const rung = door.pickRung(EVIDENCE_STEP, { ceiling: 'R4', order: [], creditBought: false }, availableRungs(deps.keys))
     const allowed = rung.rung !== null && (mode === 'check' || rung.rung === 'R2')

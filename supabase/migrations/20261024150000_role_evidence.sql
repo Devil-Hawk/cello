@@ -88,6 +88,19 @@ exception when others then
 end
 $cron$;
 
+-- The model step stays off until the owner turns it on (S20). Absent row reads as off, so this is only the
+-- visible row. instance_flags comes with K5c: where it is not there yet, the row is added when it lands.
+do $flag$
+begin
+  if to_regclass('public.instance_flags') is not null then
+    execute 'insert into public.instance_flags (key, "on", note) values ($1, false, $2) on conflict (key) do nothing'
+      using 'role_evidence_live', 'role.evidence model step (strengths and gaps), off until S20 passes';
+  end if;
+exception when others then
+  raise notice 'role_evidence_live flag not added: %', sqlerrm;
+end
+$flag$;
+
 notify pgrst, 'reload schema';
 
 do $$

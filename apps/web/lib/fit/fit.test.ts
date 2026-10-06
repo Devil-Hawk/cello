@@ -194,10 +194,11 @@ describe('reading a role', () => {
   const record = (must: string[]) => ({ version: 1, source: 'deterministic', skills_resolved: true, must_have: must, nice_to_have: [], years_experience: { min: null, max: null }, seniority: null, location: { mode: null, places: [] }, visa: { sponsorship: 'not_stated', evidence: null }, salary: null })
   const MUST = ['Kubernetes', 'Rust', 'PostgreSQL']
 
-  function world(opts: { roles?: number; resume?: string; other?: string } = {}) {
+  function world(opts: { roles?: number; resume?: string; other?: string; live?: boolean } = {}) {
     const roles = opts.roles ?? 1
     const seed = {
       profiles: [{ id: 'u1', resume_text: opts.resume ?? RESUME }],
+      instance_flags: opts.live === false ? [] : [{ key: 'role_evidence_live', on: true }],
       artifacts: [{ id: 'a1', user_id: 'u1', type: 'resume', title: 'Base resume', job_id: null, is_base: true, current_version: 1, idempotency_key: 'k17:resume_documents:u1:base' }, ...(opts.other ? [{ id: 'a2', user_id: 'u2', type: 'resume', title: 'Base resume', job_id: null, is_base: true, current_version: 1, idempotency_key: 'k17:resume_documents:u2:base' }] : [])],
       artifact_versions: [{ id: 'v1', artifact_id: 'a1', version: 1, author: 'user', content: { text: opts.resume ?? RESUME }, content_text: opts.resume ?? RESUME, created_at: '2026-01-01T00:00:00Z' }, ...(opts.other ? [{ id: 'v2', artifact_id: 'a2', version: 1, author: 'user', content: { text: opts.other }, content_text: opts.other, created_at: '2026-01-01T00:00:00Z' }] : [])],
       person_roles: Array.from({ length: roles }, (_, i) => ({ user_id: 'u1', job_id: `j${i + 1}`, jobs: { requirements: record(MUST), description_md5: `d${i + 1}` } })),
@@ -237,6 +238,20 @@ describe('reading a role', () => {
     expect(fit.needsModel).toBe(true)
     expect(NEEDS_MODEL).toBe('Cello needs a model to read this one')
     expect(fit.strip).toEqual({ strengths: 2, gaps: 0, unknown: 1 })
+  })
+
+  it('with role_evidence_live off, or no flag at all, the step makes no call on any rung and code verdicts still show', async () => {
+    const { admin, fake } = world({ roles: 3, live: false })
+    const { d, state } = door('R2')
+    for (const mode of ['open', 'check'] as const) for (let i = 1; i <= 3; i++) await readRoleFit({ admin, userId: 'u1', keys, door: d }, `j${i}`, mode)
+    expect(state.calls).toBe(0)
+    expect(fake.tables.role_evidence ?? []).toHaveLength(0)
+    const fit = await readRoleFit({ admin, userId: 'u1', keys, door: d }, 'j1', 'check')
+    expect(fit.items.some((i) => i.origin === 'code' && i.verdict === 'strength')).toBe(true)
+    // An explicitly off row reads the same.
+    fake.tables.instance_flags = [{ key: 'role_evidence_live', on: false }]
+    await readRoleFit({ admin, userId: 'u1', keys, door: d }, 'j1', 'check')
+    expect(state.calls).toBe(0)
   })
 
   it('opening 30 records on a free key makes no model call', async () => {
