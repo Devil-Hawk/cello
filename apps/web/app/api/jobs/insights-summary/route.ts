@@ -25,6 +25,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { SCORE_BANDS, scoreBandFor, type ScoreBand } from '@/lib/jobs/score-bands'
 import { openRolesOnly } from '@/lib/jobs/freshness'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 export const dynamic = 'force-dynamic'
 
@@ -63,8 +64,7 @@ export async function GET(request: NextRequest) {
     )
 
     let query = openRolesOnly(
-      supabase
-        .from('person_jobs')
+      personJobs(supabase)
         .select(
           'id, title, url, match_score, match_details, posted_at, viewer_company_name, viewer_company_domain',
           { count: 'exact' }
@@ -116,7 +116,7 @@ export async function GET(request: NextRequest) {
 
   let from = 0
   for (; from < SUMMARY_MAX_ROWS; from += SUMMARY_PAGE) {
-    const { data, error } = await openRolesOnly(supabase.from('person_jobs').select('source, match_score'))
+    const { data, error } = await openRolesOnly(personJobs(supabase).select('source, match_score'))
       .order('id', { ascending: true })
       .range(from, from + SUMMARY_PAGE - 1)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

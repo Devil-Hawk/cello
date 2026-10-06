@@ -18,7 +18,8 @@ import { hasSource, ingestUser, isDue, makeSupabaseRunsStore, type DueCompany, t
 import type { RoutineContext, RoutineOutcome } from '../routines'
 
 const PAGE_SIZE = 1000
-const REJUDGE_PAGE = 500
+/** Small enough that the id lists below stay inside a request URL (100 uuids is under 4 KB). */
+const REJUDGE_PAGE = 100
 /** The state a slice hands the next: the employers already read in this check. */
 const MAX_DONE = 1500
 

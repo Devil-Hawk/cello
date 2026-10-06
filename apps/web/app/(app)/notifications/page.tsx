@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { createClient } from '@/lib/supabase/client'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { cn, formatRelativeTime } from '@/lib/utils'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 interface HotJob {
   id: string
@@ -125,8 +126,7 @@ export default function NotificationsPage() {
         // New, unreviewed jobs that scored well. RLS already scopes jobs to
         // this user's tracked companies.
         openRolesOnly(
-          supabase
-            .from('person_jobs')
+          personJobs(supabase)
             .select('id, title, match_score, posted_at, discovered_at, viewer_company_name')
             .eq('is_new', true)
             .gte('match_score', 70)

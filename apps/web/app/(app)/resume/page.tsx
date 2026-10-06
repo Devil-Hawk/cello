@@ -53,6 +53,7 @@ import {
   type ResumeDocument,
   type ResumeSource,
 } from '@/lib/resume/types'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 /** Rows in the "tailor for a job" list. Enough to choose from, not a second
  *  jobs page — /jobs is one link away at the foot of that card. */
@@ -164,7 +165,7 @@ async function loadTailorTargets(
 
   const missing = [...tailored.keys()].filter((id) => !targets.has(id)).slice(0, TAILOR_LIMIT)
   if (missing.length > 0) {
-    const { data } = await supabase.from('person_jobs').select('id, title, viewer_company_name').in('id', missing)
+    const { data } = await personJobs(supabase).select('id, title, viewer_company_name').in('id', missing)
     for (const job of (data ?? []) as unknown as {
       id: string
       title: string

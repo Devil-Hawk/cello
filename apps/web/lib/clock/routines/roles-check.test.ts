@@ -253,7 +253,7 @@ describe('after a change of targets', () => {
             const hit = held.filter((r) => filters.every((f) => f(r)))
             if (op === 'delete') for (const r of hit) held.splice(held.indexOf(r), 1)
             if (op === 'update') for (const r of hit) Object.assign(r, patch)
-            resolve({ data: op === 'select' ? hit.slice(0, 500) : null, error: null })
+            resolve({ data: op === 'select' ? hit.slice(0, 100) : null, error: null })
           },
         }
         return b

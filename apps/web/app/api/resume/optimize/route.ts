@@ -27,6 +27,7 @@ import { callLlm, MissingKeyError } from '@/lib/harness/llm'
 import { canRunLlm, missingOpenRouterMessage } from '@/lib/harness/llm-key-message'
 import type { DecryptedApiKeys, LlmRunner } from '@/lib/harness/types'
 import { setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -90,8 +91,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Job + company (RLS-scoped read via the signed-in client).
-    const { data: job } = await supabase
-      .from('person_jobs')
+    const { data: job } = await personJobs(supabase)
       .select('id, title, description, viewer_company_name')
       .eq('id', jobId)
       .single()

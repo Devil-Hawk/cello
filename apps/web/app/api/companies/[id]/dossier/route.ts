@@ -16,6 +16,7 @@ import { loadApiKeys } from '@/lib/harness/keys'
 import { generateDossier } from '@/lib/harness/agents/company_researcher'
 import { getDossierByCompany, withDisplaySummaryStatus } from '@/lib/dossier/store'
 import { resolveCompanyId } from '@/lib/entities/companies'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -63,8 +64,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
     .single()
   if (!company) return NextResponse.json({ error: 'Company not found' }, { status: 404 })
 
-  const { data: jobsData } = await supabase
-    .from('person_jobs')
+  const { data: jobsData } = await personJobs(supabase)
     .select('salary_range, title')
     .eq('viewer_company_id', companyId)
   const jobs = (jobsData as { salary_range: string | null; title: string | null }[]) ?? []
