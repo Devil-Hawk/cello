@@ -422,7 +422,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
                 <ul className="mb-2 flex flex-wrap gap-2" aria-label="Will be attached when you send">
                   {chips.map((c) => (
                     <li key={`${c.kind}:${c.ref}`} className="flex items-center gap-1 rounded-control border border-border bg-muted py-0.5 pl-2 pr-1 text-caption text-foreground">
-                      <span className="max-w-[14rem] truncate">{c.name}</span>
+                      <span className="max-w-[14rem] truncate" title={c.name}>{c.name}</span>
                       <button type="button" aria-label={`Remove ${c.name}`} className="inline-flex h-5 w-5 items-center justify-center rounded-control text-muted-foreground hover:bg-card hover:text-foreground" onClick={() => setChips(chips.filter((x) => x !== c))}>
                         <X className="h-3 w-3" aria-hidden />
                       </button>
