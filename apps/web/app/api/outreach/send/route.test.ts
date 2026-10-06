@@ -222,7 +222,7 @@ describe('follow-ups', () => {
 
   it('does not call a Gmail 403 on the thread "already replied": the draft stays pending and the user is told what is missing', async () => {
     const realFetch = global.fetch
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 403, text: async () => 'insufficient scopes' }) as unknown as typeof fetch
+    global.fetch = vi.fn().mockResolvedValue(new Response('insufficient scopes', { status: 403 })) as unknown as typeof fetch
     const actual = await vi.importActual<typeof import('@/lib/outreach/gmail')>('@/lib/outreach/gmail')
     threadHasReplyMock.mockImplementation(actual.threadHasReply)
     try {
@@ -237,5 +237,36 @@ describe('follow-ups', () => {
     } finally {
       global.fetch = realFetch
     }
+  })
+})
+
+describe('the session door', () => {
+  it('answers 401 with no session and never reaches Gmail', async () => {
+    user = null
+    const res = await POST(post({ id: 'msg-1', approve: true }))
+
+    expect(res.status).toBe(401)
+    expect(resolveTokenMock).not.toHaveBeenCalled()
+    expect(sendGmailMessageMock).not.toHaveBeenCalled()
+  })
+
+  it('answers 403 to a request another site made, and sends nothing', async () => {
+    const res = await POST(
+      new NextRequest('http://localhost/api/outreach/send', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' },
+        body: JSON.stringify({ id: 'msg-1', approve: true }),
+      })
+    )
+
+    expect(res.status).toBe(403)
+    expect(resolveTokenMock).not.toHaveBeenCalled()
+    expect(sendGmailMessageMock).not.toHaveBeenCalled()
+  })
+
+  it('answers 400 to a body with no id, after the session is proven', async () => {
+    const res = await POST(post({ approve: true }))
+    expect(res.status).toBe(400)
+    expect(sendGmailMessageMock).not.toHaveBeenCalled()
   })
 })

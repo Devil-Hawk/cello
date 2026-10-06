@@ -20,10 +20,9 @@
 
 import type { Json } from '@cello/shared'
 import { decrypt, isEncrypted } from '@/lib/crypto'
+import { googleAuthClient, gmailErrorStatus } from '@/lib/gmail/gmail-api'
 import { applyGmailPermissionChange } from '@/lib/gmail/permissions'
 import type { SyncState } from '@/lib/gmail/types'
-
-const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 
 /**
  * True when a Gmail refresh token is stored for this account — the
@@ -47,8 +46,8 @@ export type GmailAccessTokenResult =
   | { ok: false; reason: 'network_error'; message: string }
 
 /**
- * Raw call against Google's token endpoint. Pure — no DB, no Supabase — so
- * it is unit-testable with a mocked `fetch` alone.
+ * One refresh against Google's token endpoint through google-auth-library. Pure:
+ * no DB, no Supabase, so it is unit-testable with a mocked `fetch` alone.
  */
 export async function refreshGoogleAccessToken(refreshToken: string): Promise<GmailAccessTokenResult> {
   const clientId = process.env.GOOGLE_CLIENT_ID
@@ -61,42 +60,27 @@ export async function refreshGoogleAccessToken(refreshToken: string): Promise<Gm
     }
   }
 
-  let res: Response
   try {
-    res = await fetch(GOOGLE_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-        grant_type: 'refresh_token',
-      }),
-    })
+    const client = googleAuthClient({ clientId, clientSecret })
+    client.setCredentials({ refresh_token: refreshToken })
+    const { token } = await client.getAccessToken()
+    if (!token) {
+      return { ok: false, reason: 'network_error', message: 'Google token endpoint returned no access_token' }
+    }
+    return { ok: true, accessToken: token }
   } catch (err) {
-    return { ok: false, reason: 'network_error', message: err instanceof Error ? err.message : 'network error contacting Google' }
-  }
-
-  let body: { access_token?: string; error?: string; error_description?: string } = {}
-  try {
-    body = await res.json()
-  } catch {
-    // Leave body empty — handled by the checks below, which treat a missing
-    // access_token / unrecognized error the same as an unparseable one.
-  }
-
-  if (!res.ok) {
-    if (body.error === 'invalid_grant') {
+    // gaxios keeps Google's answer on the error: the HTTP status and the parsed OAuth error body.
+    const body = (err as { response?: { data?: { error?: string; error_description?: string } } }).response?.data
+    if (body?.error === 'invalid_grant') {
       return { ok: false, reason: 'invalid_grant', message: body.error_description || 'Google refused this refresh token — the grant was revoked.' }
     }
-    return { ok: false, reason: 'network_error', message: body.error_description || `Google token endpoint returned ${res.status}` }
+    const status = gmailErrorStatus(err)
+    return {
+      ok: false,
+      reason: 'network_error',
+      message: body?.error_description || (status ? `Google token endpoint returned ${status}` : err instanceof Error ? err.message : 'network error contacting Google'),
+    }
   }
-
-  if (!body.access_token) {
-    return { ok: false, reason: 'network_error', message: 'Google token endpoint returned no access_token' }
-  }
-
-  return { ok: true, accessToken: body.access_token }
 }
 
 /**

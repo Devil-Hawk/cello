@@ -30,9 +30,9 @@
 //   5. duckduckgo — free, keyless, always "configured" — the true last
 //                resort, since it's the one most likely to be blocked from a
 //                server IP.
-// A backend that just failed is deprioritized (not permanently excluded) via
-// lib/search/health.ts's short-TTL memory, so a call doesn't repeatedly waste
-// a round trip on a backend that's currently down — see runChain() below.
+// The chain itself is lib/search/tools.ts: one LangChain tool per configured
+// backend, joined with withFallbacks, so the next backend runs only when the one
+// before it throws (see runChain() below).
 //
 // tavily/serper/searxng are loaded lazily through loadOptionalBackendFn()'s
 // STATIC LITERAL import() map (see that function's comment for why the
@@ -55,7 +55,7 @@ import { classifyError } from '../util/retry'
 import { searchDuckDuckGo, DuckDuckGoBlockedError } from './backends/duckduckgo'
 import { searchExa } from './backends/exa'
 import { getSearchProviderKeys, getSearxngBaseUrl } from './keys'
-import { recordBackendFailure, recordBackendSuccess, isBackendRecentlyFailed } from './health'
+import { runSearchTools } from './tools'
 import { SearchBlockedError, SearchQuotaExceededError } from './types'
 import type {
   SearchAttempt,
@@ -369,56 +369,34 @@ export function describeAttempts(attempts: SearchAttempt[]): string {
 }
 
 /**
- * Walk `candidates` in priority order, skipping (deprioritizing) any that
- * failed recently (lib/search/health.ts) in favor of one that hasn't, but —
- * critically — still falling back to a recently-failed one as a genuine last
- * resort if nothing healthier works, so "only when every candidate fails
- * does webSearch() return ok:false" stays true even when health memory has
- * every configured backend marked down. A recently-failed backend that
- * actually succeeds when finally tried self-heals immediately
- * (recordBackendSuccess), not just after its TTL.
+ * Run the configured `candidates` in priority order through withFallbacks
+ * (lib/search/tools.ts) and return the first that answers. Only when every
+ * candidate fails does this return ok:false, with the complete priority-ordered
+ * picture of what was tried.
  */
 async function runChain(candidates: BackendCandidate[]): Promise<WebSearchResponse> {
-  const realAttempts = new Map<SearchBackendId, SearchAttempt>()
-  const configured = candidates.filter((c) => c.configured)
-  const healthyNow = configured.filter((c) => !isBackendRecentlyFailed(c.id))
-  const recentlyFailed = configured.filter((c) => isBackendRecentlyFailed(c.id))
+  const { winner, attempts } = await runSearchTools(
+    candidates.filter((c) => c.configured),
+    { classify: classifyBackendFailure }
+  )
 
-  for (const pass of [healthyNow, recentlyFailed]) {
-    for (const cand of pass) {
-      try {
-        const results = await cand.run()
-        recordBackendSuccess(cand.id)
-        const successAttempt: SearchAttempt = {
-          backend: cand.id,
-          ok: true,
-          reason: results.length === 0 ? 'no_results' : undefined,
-        }
-        realAttempts.set(cand.id, successAttempt)
-        // Only attach `attempts` when this call actually fell through a real
-        // prior failure — a first-try success (the overwhelmingly common
-        // case) stays lean.
-        const orderedReal = candidates.map((c) => realAttempts.get(c.id)).filter((a): a is SearchAttempt => Boolean(a))
-        return {
-          backend: cand.id,
-          results,
-          ok: true,
-          reason: successAttempt.reason,
-          ...(orderedReal.length > 1 ? { attempts: orderedReal } : {}),
-        }
-      } catch (error) {
-        const { reason, detail } = classifyBackendFailure(error)
-        recordBackendFailure(cand.id, reason, detail)
-        realAttempts.set(cand.id, { backend: cand.id, ok: false, reason, detail })
-      }
+  if (winner) {
+    const won = attempts.get(winner.id) as SearchAttempt
+    // Only attach `attempts` when this call actually fell through a real prior
+    // failure; a first-try success (the overwhelmingly common case) stays lean.
+    const orderedReal = candidates.map((c) => attempts.get(c.id)).filter((a): a is SearchAttempt => Boolean(a))
+    return {
+      backend: winner.id,
+      results: winner.results,
+      ok: true,
+      reason: won.reason,
+      ...(orderedReal.length > 1 ? { attempts: orderedReal } : {}),
     }
   }
 
-  // Every candidate exhausted (attempted-and-failed, or never configured) —
-  // build the complete, priority-ordered picture for an honest, actionable
-  // failure response.
+  // Every candidate exhausted (attempted-and-failed, or never configured).
   const fullAttempts: SearchAttempt[] = candidates.map(
-    (c) => realAttempts.get(c.id) ?? { backend: c.id, ok: false, reason: 'no_key', detail: 'not configured' }
+    (c) => attempts.get(c.id) ?? { backend: c.id, ok: false, reason: 'no_key', detail: 'not configured' }
   )
   const last = fullAttempts[fullAttempts.length - 1]
   return {
@@ -469,11 +447,9 @@ export async function webSearch(query: string, opts: WebSearchOptions = {}): Pro
     }
     try {
       const results = await forced.run()
-      recordBackendSuccess(forced.id)
       return { backend: forced.id, results, ok: true, reason: results.length === 0 ? 'no_results' : undefined }
     } catch (error) {
       const { reason, detail } = classifyBackendFailure(error)
-      recordBackendFailure(forced.id, reason, detail)
       return failure(forced.id, reason, detail)
     }
   }

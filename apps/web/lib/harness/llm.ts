@@ -8,7 +8,9 @@
 // is every account today — byte-identical OpenRouter behavior.
 //
 // What's new: apiKeys.provider (profiles.preferences.provider) picks which
-// of three backends actually runs the call:
+// of three backends actually runs the call, unless the call names its own way in
+// with opts.via (a model step sets it from the rung it picked, lib/models/ladder.ts),
+// which also reaches the person's own OpenAI or Anthropic key (lib/models/factory.ts):
 //   - openrouter    (default): today's pay-per-token API path. Works
 //     everywhere Cello runs, including Vercel. See ./providers/openrouter.
 //   - local-cli:    spawns the user's own subscription CLI (Claude Code /
@@ -28,7 +30,7 @@
 // what it does and doesn't honor.
 
 import pRetry from 'p-retry'
-import type { AdminClient, DecryptedApiKeys, LlmResult, LlmRunOptions } from './types'
+import type { AdminClient, DecryptedApiKeys, LlmResult, LlmRunOptions, ProviderId } from './types'
 import {
   BudgetCapError,
   DEFAULT_MAX_TOKENS,
@@ -42,10 +44,12 @@ import {
   rungFor,
 } from './spend'
 import { createAdminClient } from './supabase-admin'
-import { resolveProviderId, resolveLocalCliId, MissingKeyError } from './providers'
+import { resolveProviderId, resolveLocalCliId, MissingKeyError, ProviderUnavailableError } from './providers'
 import { callOpenRouter, DEFAULT_MODEL } from './providers/openrouter'
 import { callLocalCli } from './providers/local-cli'
 import { callLocalServer } from './providers/local-server'
+import { assertCeiling, callDirect } from '../models/factory'
+import { FreeLimitReachedError } from '../models/waiting'
 import { isTransient } from '../util/retry'
 import { acquireSpanScope, currentTraceContext, withSpan, type LfPayload } from '../trace/spans'
 import {
@@ -97,6 +101,18 @@ function tryAdminClient(): AdminClient | null {
     return null
   }
 }
+
+/** The backend that runs a call: the way in a step picked, else the person's active provider. */
+type Backend = ProviderId | 'openai' | 'anthropic'
+
+function backendFor(opts: LlmRunOptions, apiKeys: DecryptedApiKeys): Backend {
+  if (!opts.via) return resolveProviderId(apiKeys.provider?.active)
+  if (opts.via === 'relay') throw new ProviderUnavailableError('A model on your computer through the browser is not available yet.')
+  return opts.via
+}
+
+/** The rung the call ran on. A call on the person's own OpenAI or Anthropic key is paid, so R4. */
+const rungOf = (provider: Backend, model: string) => (provider === 'openai' || provider === 'anthropic' ? 'R4' : rungFor(provider, model))
 
 /** The model a call was aimed at, for a call that failed before any result
  *  named it (so errors can be grouped by model). DEFAULT_MODEL is only the
@@ -150,7 +166,7 @@ function generationPayload(
       // 1 is the first try; higher means the provider call was retried.
       attempt,
       // Local backends report char/4 estimates, not provider token counts.
-      ...(provider !== 'openrouter' ? { usage_estimated: true } : {}),
+      ...(provider === 'local-cli' || provider === 'local-server' ? { usage_estimated: true } : {}),
       ...(opts.promptRef ? { prompt_name: opts.promptRef.name } : {}),
       ...(opts.promptRef?.hash ? { prompt_hash: opts.promptRef.hash } : {}),
     },
@@ -196,14 +212,16 @@ export async function callLlm(
   opts: LlmRunOptions,
   signal?: AbortSignal
 ): Promise<LlmResult> {
-  const provider = resolveProviderId(apiKeys.provider?.active)
+  const provider = backendFor(opts, apiKeys)
+  // Both model doors refuse a paid model under a ceiling below R4, before anything is reserved.
+  assertCeiling(apiKeys, provider, requestedModel(opts, apiKeys, provider))
 
   // Only the metered path is capped in dollars. A local server costs nothing per
   // token, and a signed-in CLI bills a flat subscription, so charging them against
   // a dollar budget would be wrong, and would push users off the free options
   // exactly when they are trying to conserve credit. They still write a $0 ledger
   // row per attempt (see spend.ts), so the daily free count has something to read.
-  const metered = provider === 'openrouter' && Boolean(apiKeys.userId)
+  const metered = (provider === 'openrouter' || provider === 'openai' || provider === 'anthropic') && Boolean(apiKeys.userId)
   const admin = metered ? createAdminClient() : apiKeys.userId ? tryAdminClient() : null
 
   // Apply the user's default reasoning effort only when the call didn't
@@ -238,7 +256,9 @@ export async function callLlm(
         ? callLocalCli(apiKeys, effectiveOpts, signal)
         : provider === 'local-server'
           ? callLocalServer(apiKeys, effectiveOpts, signal)
-          : callOpenRouter(apiKeys, effectiveOpts, signal)
+          : provider === 'openai' || provider === 'anthropic'
+            ? callDirect(provider, apiKeys, effectiveOpts, signal)
+            : callOpenRouter(apiKeys, effectiveOpts, signal)
     if (!admin || !apiKeys.userId) return call()
 
     const messages = requestMessages(effectiveOpts)
@@ -248,7 +268,7 @@ export async function callLlm(
       model,
       promptTokens: estimatePromptTokens(messages.map((m) => m.content).join('\n'), messages.length),
       maxTokens: effectiveOpts.maxTokens ?? DEFAULT_MAX_TOKENS,
-      rung: rungFor(provider, model),
+      rung: rungOf(provider, model),
       step: effectiveOpts.name ?? 'call-llm',
       door: effectiveOpts.door,
       traceId: scope?.buffer.traceId,
@@ -269,7 +289,8 @@ export async function callLlm(
   }
 
   // A transient failure (429/500/502/503/504/529, a dropped connection, a
-  // timeout) gets retried with backoff before it's allowed to fail the call.
+  // timeout) gets retried with backoff before it's allowed to fail the call,
+  // except the daily free-model limit: waiting seconds cannot lift it (11.3).
   // A permanent failure (MissingKeyError, TruncatedResponseError, BudgetCapError,
   // a 400/401/402/403/404 from the provider) throws on the very first attempt;
   // see lib/util/retry's classifyError, plugged in below as p-retry's
@@ -284,7 +305,7 @@ export async function callLlm(
       maxTimeout: 8_000,
       randomize: true,
       signal,
-      shouldRetry: ({ error }) => isTransient(error),
+      shouldRetry: ({ error }) => !(error instanceof FreeLimitReachedError) && isTransient(error),
     })
 
   let result: LlmResult

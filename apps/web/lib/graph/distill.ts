@@ -63,7 +63,8 @@
 import { randomUUID } from 'node:crypto'
 import type { AdminClient, DecryptedApiKeys } from '../harness/types'
 import { loadApiKeys } from '../harness/keys'
-import { callLlm, MissingKeyError } from '../harness/llm'
+import { MissingKeyError } from '../harness/llm'
+import { legacyStep } from '../steps'
 import { composeSystemPrompt, loadModeDoc, promptRef } from '../harness/prompts'
 import { BudgetCapError } from '../harness/spend'
 import { JUDGE_MODEL } from '../evals/judge'
@@ -289,13 +290,12 @@ async function distillCandidate(admin: AdminClient, userId: string, runId: strin
 
   let content: string
   try {
-    const result = await callLlm(apiKeys, {
+    const result = await legacyStep('distill-insight').call(apiKeys, {
       system,
       prompt,
       model: JUDGE_MODEL,
       maxTokens: 220,
       temperature: 0.2,
-      name: 'distill-insight',
       promptRef: promptRef('distill'),
     })
     content = result.content.trim()

@@ -192,20 +192,19 @@ describe('autopilotTickGraph — graph shape', () => {
 })
 
 // ---------------------------------------------------------------------------
-// app/api/mcp/route.ts — the tool-callback template's guard order
+// lib/commands/defs/legacy-mcp.ts: the legacy MCP tools' guard order (the route
+// registers them through runCommand; the guard runs inside each command)
 // ---------------------------------------------------------------------------
 
-const MCP_ROUTE_SOURCE_PATH = path.join(process.cwd(), 'app/api/mcp/route.ts')
+const MCP_ROUTE_SOURCE_PATH = path.join(process.cwd(), 'lib/commands/defs/legacy-mcp.ts')
 
-/** Extracts the one `async (args): Promise<CallToolResult> => { ... }`
- *  callback buildServer() registers for every tool — same brace-counting
- *  technique as extractDispatchExecuteBody above, applied to an arrow
- *  function instead of a `function` declaration. Works against any source
- *  string, real or mutated, which is what makes the mutation check below
- *  possible. */
+/** Extracts runLegacy(), the one function every legacy MCP command runs —
+ *  same brace-counting technique as extractDispatchExecuteBody above. Works
+ *  against any source string, real or mutated, which is what makes the
+ *  mutation check below possible. */
 function extractMcpToolCallbackBody(src: string): string {
   const stripped = stripComments(src)
-  const marker = 'async (args): Promise<CallToolResult> => {'
+  const marker = 'async function runLegacy(ctx: CommandContext, name: string, args: Record<string, unknown>) {'
   const start = stripped.indexOf(marker)
   if (start < 0) throw new Error('MCP tool callback not found in source')
   const braceStart = start + marker.length - 1
@@ -243,7 +242,7 @@ function findMcpGuardViolations(body: string): string[] {
   return violations
 }
 
-describe('app/api/mcp/route.ts tool callback: submitOrSendReason before dispatchTool, unconditionally', () => {
+describe('legacy MCP commands: submitOrSendReason before dispatchTool, unconditionally', () => {
   it('the real file has no violations', () => {
     const body = extractMcpToolCallbackBody(readFileSync(MCP_ROUTE_SOURCE_PATH, 'utf8'))
     expect(findMcpGuardViolations(body)).toEqual([])
@@ -255,7 +254,7 @@ describe('app/api/mcp/route.ts tool callback: submitOrSendReason before dispatch
     expect(body.indexOf('submitOrSendReason(')).toBeLessThan(body.indexOf('dispatchTool('))
 
     const mutated = body.replace(
-      /const reason = submitOrSendReason\(spec\.name, toolArgs\)\s*\n\s*if \(reason\) return refusalResult\(reason\)\n/,
+      /const reason = submitOrSendReason\(name, args\)\s*\n\s*if \(reason\) return \{ text: mcpRefusalText\(reason\), is_error: true \}\n/,
       '// MUTATED: guard precheck removed\n'
     )
     const violations = findMcpGuardViolations(mutated)
@@ -267,8 +266,8 @@ describe('app/api/mcp/route.ts tool callback: submitOrSendReason before dispatch
     const real = readFileSync(MCP_ROUTE_SOURCE_PATH, 'utf8')
     const body = extractMcpToolCallbackBody(real)
     const mutated = body.replace(
-      'const reason = submitOrSendReason(spec.name, toolArgs)',
-      "let reason = null\n          if (spec.kind !== 'run') { reason = submitOrSendReason(spec.name, toolArgs) }"
+      'const reason = submitOrSendReason(name, args)',
+      "let reason = null\n  if (name !== 'trigger_run') { reason = submitOrSendReason(name, args) }"
     )
     expect(findMcpGuardViolations(mutated)).toEqual([
       'submitOrSendReason( is reached only through a conditional — MCP has no human-confirm channel, so it must be unconditional',

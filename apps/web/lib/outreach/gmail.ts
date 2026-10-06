@@ -2,12 +2,11 @@
 //
 // Sending goes through the user's OWN Gmail account via the Gmail API (no paid
 // vendor, no spoofing — From is the authenticated account). Contact mining reads
-// the user's OWN mailbox headers only. Framework-free (global fetch), so this is
-// safe to import from both request handlers and the harness.
+// the user's OWN mailbox headers only. Framework-free (the Gmail client on the
+// global fetch), so this is safe to import from both request handlers and the harness.
 
+import { gmailErrorStatus, gmailFor } from '@/lib/gmail/gmail-api'
 import type { MinedContact } from './types'
-
-const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1'
 
 const PERSONAL_DOMAINS = new Set([
   'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com',
@@ -90,25 +89,25 @@ export async function sendGmailMessage(input: GmailSendInput): Promise<GmailSend
   }
   const raw = base64Url(`${headers.join('\r\n')}\r\n\r\n${input.body}`)
 
-  const res = await fetch(`${GMAIL_API}/users/me/messages/send`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${input.accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(input.threadId ? { raw, threadId: input.threadId } : { raw }),
-  })
-
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '')
-    throw new GmailSendError(`Gmail send failed (${res.status}): ${detail.slice(0, 300)}`, res.status)
+  try {
+    const { data } = await gmailFor(input.accessToken).users.messages.send({
+      userId: 'me',
+      requestBody: input.threadId ? { raw, threadId: input.threadId } : { raw },
+    })
+    return { id: data.id as string, threadId: data.threadId as string }
+  } catch (error) {
+    const status = gmailErrorStatus(error)
+    if (status === undefined) throw error
+    throw new GmailSendError(`Gmail send failed (${status}): ${(error as Error).message.slice(0, 300)}`, status)
   }
-  const data = (await res.json()) as { id: string; threadId: string }
-  return { id: data.id, threadId: data.threadId }
 }
 
 interface GmailHeader { name: string; value: string }
-interface GmailListItem { id: string; threadId: string }
+
+/** A message's headers in the shape getHeader reads (Gmail marks every field optional). */
+function headersOf(message: { payload?: { headers?: { name?: string | null; value?: string | null }[] } | null }): GmailHeader[] {
+  return (message.payload?.headers ?? []).map((h) => ({ name: h.name ?? '', value: h.value ?? '' }))
+}
 
 function getHeader(headers: GmailHeader[], name: string): string {
   const h = headers.find((x) => x.name.toLowerCase() === name.toLowerCase())
@@ -173,16 +172,14 @@ export async function mineRecruiterContacts(opts: MineOptions): Promise<MinedCon
     .map((d) => `from:${d}`)
     .join(' OR ')
 
-  const listRes = await fetch(
-    `${GMAIL_API}/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${Math.min(100, maxMessages)}`,
-    { headers: { Authorization: `Bearer ${opts.accessToken}` } }
-  )
-  if (!listRes.ok) {
-    const detail = await listRes.text().catch(() => '')
-    throw new Error(`Gmail search failed (${listRes.status}): ${detail.slice(0, 200)}`)
+  const g = gmailFor(opts.accessToken)
+  let ids: { id?: string | null }[]
+  try {
+    const { data } = await g.users.messages.list({ userId: 'me', q: query, maxResults: Math.min(100, maxMessages) })
+    ids = (data.messages ?? []).slice(0, maxMessages)
+  } catch (error) {
+    throw new Error(`Gmail search failed (${gmailErrorStatus(error) ?? 'no response'}): ${(error as Error).message.slice(0, 200)}`)
   }
-  const listData = (await listRes.json()) as { messages?: GmailListItem[] }
-  const ids = (listData.messages || []).slice(0, maxMessages)
 
   const best = new Map<string, MinedContact>()
 
@@ -190,18 +187,18 @@ export async function mineRecruiterContacts(opts: MineOptions): Promise<MinedCon
   for (let i = 0; i < ids.length; i += batchSize) {
     const batch = ids.slice(i, i + batchSize)
     const results = await Promise.all(
-      batch.map(async ({ id }) => {
-        const r = await fetch(
-          `${GMAIL_API}/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
-          { headers: { Authorization: `Bearer ${opts.accessToken}` } }
-        )
-        return r.ok ? ((await r.json()) as { payload?: { headers?: GmailHeader[] }; internalDate?: string }) : null
-      })
+      batch.map(({ id }) =>
+        g.users.messages
+          .get({ userId: 'me', id: id as string, format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] })
+          .then((r) => r.data)
+          .catch(() => null)
+      )
     )
     for (const msg of results) {
       if (!msg?.payload?.headers) continue
-      const from = getHeader(msg.payload.headers, 'from')
-      const subject = getHeader(msg.payload.headers, 'subject')
+      const headers = headersOf(msg)
+      const from = getHeader(headers, 'from')
+      const subject = getHeader(headers, 'subject')
       const { name, email } = parseFromHeader(from)
       if (!email) continue
       const domain = emailDomain(email)
@@ -249,21 +246,18 @@ export async function threadHasReply(
   threadId: string,
   userEmail: string
 ): Promise<ReplyState> {
-  const res = await fetch(
-    `${GMAIL_API}/users/me/threads/${threadId}?format=metadata&metadataHeaders=From`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  )
-  if (!res.ok) {
-    console.warn('[outreach] reply check failed, reply state unknown', {
-      status: res.status,
-      threadId,
-    })
+  let data
+  try {
+    data = (await gmailFor(accessToken).users.threads.get({ userId: 'me', id: threadId, format: 'metadata', metadataHeaders: ['From'] })).data
+  } catch (error) {
+    const status = gmailErrorStatus(error)
+    if (status === undefined) throw error
+    console.warn('[outreach] reply check failed, reply state unknown', { status, threadId })
     return 'unknown'
   }
-  const data = (await res.json()) as { messages?: { payload?: { headers?: GmailHeader[] } }[] }
   const me = userEmail.toLowerCase()
   for (const m of data.messages || []) {
-    const from = getHeader(m.payload?.headers || [], 'from')
+    const from = getHeader(headersOf(m), 'from')
     const { email } = parseFromHeader(from)
     if (email && email !== me) return 'replied'
   }

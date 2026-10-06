@@ -125,6 +125,10 @@ const BANNED_LANGCHAIN_PACKAGES = [
   '@langchain/google-genai',
 ]
 const BANNED_CHAT_CONSTRUCTOR = /new Chat[A-Z]\w+\(/
+
+/** The only files that may import the model packages: lib/models/factory.ts builds the chat models,
+ *  providers/embeddings.ts the embedders (lib/steps/source.test.ts fences every other raw call). */
+const MODEL_FACTORY_FILES = ['lib/models/factory.ts', 'lib/harness/providers/embeddings.ts']
 const BANNED_BIND_TOOLS = /\.bindTools\(/
 
 /**
@@ -192,6 +196,9 @@ describe('LangChain model abstractions stay banned', () => {
 
     const offenders: string[] = []
     for (const file of files) {
+      // The ladder's model doors build every chat model and embedder here, and nowhere else:
+      // callLlm and the Chat door call them, so the ceiling and the spend ledger sit in front.
+      if (MODEL_FACTORY_FILES.includes(rel(file))) continue
       const offenses = findLangchainBanOffenses(readFileSync(file, 'utf8'), rel(file))
       if (offenses.length > 0) offenders.push(`${rel(file)}: ${offenses.join(', ')}`)
     }
@@ -636,7 +643,7 @@ describe('every callLlm( call passes a generation name', () => {
         if (!/\bname:/.test(args)) offenders.push(filePath)
       }
     }
-    expect(sites).toBeGreaterThan(10) // the walk really found the call sites
+    expect(sites).toBeGreaterThan(3) // the walk really found the call sites (most live behind lib/steps now)
     expect(
       offenders,
       `These callLlm( calls name no Langfuse generation (they would show up as call-llm):\n  ${offenders.join('\n  ')}`

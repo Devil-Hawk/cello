@@ -4,7 +4,7 @@
 // an ATS, not the employer.
 
 import type { ParsedEmail } from './types'
-import { callLlm } from '../harness/llm'
+import { inboxClassifyStep } from '../steps'
 import { composeSystemPrompt, loadModeDoc, promptRef } from '../harness/prompts'
 import { frameJobText } from '../security/job-text'
 import type { DecryptedApiKeys, LlmRunner } from '../harness/types'
@@ -125,9 +125,9 @@ export async function classifyEmailWith(
 }
 
 /**
- * Use an LLM (through callLlm, so budget-checked, spend-recorded and traced) to
+ * Use an LLM (through the inbox.classify step, so budget-checked, spend-recorded and traced) to
  * parse an email into structured job-application info. Takes the whole
- * DecryptedApiKeys (with userId), never a bare key: without a userId callLlm
+ * DecryptedApiKeys (with userId), never a bare key: without a userId it
  * cannot meter or trace the call.
  */
 export async function parseEmailWithAI(
@@ -140,13 +140,12 @@ export async function parseEmailWithAI(
   try {
     return await classifyEmailWith(
       (opts) =>
-        callLlm(apiKeys, {
+        inboxClassifyStep.call(apiKeys, {
           ...opts,
           model: CLASSIFY_MODEL,
           // The account-wide default effort would add thinking tokens to a call
           // that never used them.
           reasoning: { effort: 'none' },
-          name: 'classify-email',
         }),
       from,
       subject,
@@ -227,7 +226,7 @@ function detectStatusFromPatterns(subject: string, body: string): { status: Pars
 }
 
 /** Deterministic classifier used when no LLM key is configured. */
-export function classifyWithPatterns(from: string, subject: string, body: string, referenceDate: Date): ParsedEmail {
+export function classifyWithPatterns(from: string, subject: string, body: string, referenceDate: Date, calendar?: string): ParsedEmail {
   const { status, confidence } = detectStatusFromPatterns(subject, body)
   const employer = extractEmployerFromContent(from, subject, body)
 
@@ -242,7 +241,7 @@ export function classifyWithPatterns(from: string, subject: string, body: string
     reasoning: null,
     interviewDateTime:
       status === 'interview' || status === 'screen'
-        ? extractInterviewDateTime(`${subject}\n${body}`, referenceDate).iso
+        ? extractInterviewDateTime(`${subject}\n${body}`, referenceDate, calendar).iso
         : null,
   }
 }

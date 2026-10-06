@@ -12,10 +12,9 @@
 // would otherwise poison the ANN space with incompatible vectors (the exact
 // failure mode the mem0 doctrine calls out by name).
 
-import OpenAI from 'openai'
+import { OpenAIEmbeddings } from '@langchain/openai'
 import type { DecryptedApiKeys } from '../types'
-import { MissingKeyError, ProviderUnavailableError, isSelfHosted } from './index'
-import { actualCostUsd } from '../spend'
+import { MissingKeyError, ProviderUnavailableError, estimateTokens, isSelfHosted } from './index'
 
 /** OpenRouter's catalog id (vendor-prefixed) — also the PRICES key in spend.ts. */
 export const EMBEDDING_MODEL = 'openai/text-embedding-3-small'
@@ -49,24 +48,25 @@ function assertDims(embeddings: number[][], source: string): void {
   }
 }
 
+/** One OpenAI-compatible embeddings endpoint, through LangChain's OpenAIEmbeddings. Newlines are
+ *  kept: the texts are résumés and notes, and stripping them would change what is embedded. */
+function embedder(model: string, apiKey: string, baseURL: string): OpenAIEmbeddings {
+  return new OpenAIEmbeddings({ model, apiKey, stripNewLines: false, maxRetries: 0, configuration: { baseURL } })
+}
+
 async function requestEmbeddings(
-  client: OpenAI,
+  client: OpenAIEmbeddings,
   model: string,
   texts: string[],
-  signal: AbortSignal | undefined,
+  _signal: AbortSignal | undefined,
   source: string
 ): Promise<EmbedBatchResult> {
-  const response = await client.embeddings.create({ model, input: texts }, { signal })
-  // The API guarantees one entry per input but not that `data` arrives in
-  // input order — `index` is the actual position.
-  const embeddings = [...response.data].sort((a, b) => a.index - b.index).map((d) => d.embedding)
+  // Vectors come back in input order. The class returns no usage and takes no abort signal
+  // (ponytail: so tokens are estimated, no provider cost is read and the price table applies,
+  // and a cancel waits for the request; both go when K15's server embedder replaces this).
+  const embeddings = await client.embedDocuments(texts)
   assertDims(embeddings, source)
-  return {
-    embeddings,
-    model: response.model || model,
-    promptTokens: response.usage?.prompt_tokens ?? 0,
-    costUsd: actualCostUsd(response.usage),
-  }
+  return { embeddings, model, promptTokens: estimateTokens(texts.join('\n')) }
 }
 
 /** Primary: OpenRouter's embeddings endpoint, same key as chat completions. */
@@ -78,8 +78,7 @@ export async function callOpenRouterEmbedding(
 ): Promise<EmbedBatchResult> {
   const key = apiKeys.openrouter
   if (!key) throw new MissingKeyError('No OpenRouter API key configured')
-  const client = new OpenAI({ apiKey: key, baseURL: OPENROUTER_BASE_URL })
-  return requestEmbeddings(client, model, texts, signal, 'OpenRouter')
+  return requestEmbeddings(embedder(model, key, OPENROUTER_BASE_URL), model, texts, signal, 'OpenRouter')
 }
 
 /**
@@ -96,8 +95,7 @@ export async function callOpenAiDirectEmbedding(
   const key = apiKeys.openai
   if (!key) throw new MissingKeyError('No OpenAI API key configured')
   const directModel = model.startsWith('openai/') ? model.slice('openai/'.length) : model
-  const client = new OpenAI({ apiKey: key, baseURL: OPENAI_BASE_URL })
-  return requestEmbeddings(client, directModel, texts, signal, 'OpenAI-direct')
+  return requestEmbeddings(embedder(directModel, key, OPENAI_BASE_URL), directModel, texts, signal, 'OpenAI-direct')
 }
 
 /**
@@ -126,9 +124,8 @@ export async function callLocalServerEmbedding(
       'No local server URL configured — set one (e.g. http://localhost:11434/v1 for Ollama) in Settings → Model.'
     )
   }
-  const client = new OpenAI({ apiKey: 'local-server-no-key-required', baseURL: normalizeBaseUrl(baseUrl) })
   try {
-    return await requestEmbeddings(client, model, texts, signal, 'local server')
+    return await requestEmbeddings(embedder(model, 'local-server-no-key-required', normalizeBaseUrl(baseUrl)), model, texts, signal, 'local server')
   } catch (err) {
     // A dimension mismatch is real signal, not unreachability — surface it
     // verbatim rather than relabeling it as "did not respond".

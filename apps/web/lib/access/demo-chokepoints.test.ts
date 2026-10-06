@@ -198,6 +198,8 @@ const KNOWN_UNGUARDED_MODEL_ROUTES: string[] = []
  */
 const KEY_TAKING_MODEL_PLUMBING = [
   'lib/harness/llm.ts', // defines callLlm; takes DecryptedApiKeys
+  'lib/steps/define.ts', // defineModelStep: runs callLlm for a caller that hands it DecryptedApiKeys
+  'lib/steps/source.ts', // the steps source test's scanner: holds the raw-call patterns as text and calls no model
   'lib/harness/planner.ts',
   'lib/harness/copilot-tools.ts',
   'lib/harness/agents/company_researcher.ts',
@@ -361,6 +363,7 @@ describe('the three key sources ARE the demo spend + expiry chokepoint', () => {
 const MAIL_DELIVERY_MARKERS = [
   'sendGmailMessage(',
   'users/me/messages/send', // a hand-rolled call to the Gmail REST API
+  'users.messages.send(', // the Gmail client's own send, which the helper uses
 ]
 
 /** Either form of the refusal from lib/access/guardrails.ts. */
@@ -392,12 +395,15 @@ describe('every path that can deliver mail refuses a demo first', () => {
   })
 
   it('nothing hand-rolls a Gmail send around the helper', () => {
-    const callers = [...routes, ...libFiles].filter((file) => read(file).includes('users/me/messages/send'))
+    const callers = [...routes, ...libFiles].filter((file) => {
+      const src = read(file)
+      return src.includes('users/me/messages/send') || src.includes('users.messages.send(')
+    })
     expect(callers.map(rel)).toEqual([MAIL_HELPER])
   })
 
   it.each([
-    ['app/api/outreach/send/route.ts', 'outreach'],
+    ['lib/commands/send/outreach.ts', 'outreach'],
     ['app/api/digest/send/route.ts', 'digest'],
   ])('%s selects the demo columns and gates on them', (route) => {
     const src = read(path.resolve(WEB_ROOT, route))
@@ -517,9 +523,15 @@ describe('applyDemoKeyGuards — what the loaders actually enforce', () => {
       model: 'anthropic/claude-sonnet-5',
     }
     const profile = { id: OWNER_ID, is_demo: false, demo_expires_at: null }
-    // Only addition: isDemo:false, which the Langfuse export reads to send the
-    // owner's prompt text (a demo and an unknown flag send none by default).
-    expect(applyDemoKeyGuards({ ...owner }, profile, OWNER_ID)).toEqual({ ...owner, isDemo: false })
+    // Only additions: isDemo:false, which the Langfuse export reads to send the
+    // owner's prompt text (a demo and an unknown flag send none by default), and
+    // models, the highest rung the person allows (lib/models/ladder.ts). The owner
+    // chose a paid model, so their ceiling stays R4: nothing they pay for stops.
+    expect(applyDemoKeyGuards({ ...owner }, profile, OWNER_ID)).toEqual({
+      ...owner,
+      isDemo: false,
+      models: { ceiling: 'R4', order: ['R4', 'R3', 'R2', 'R1'], creditBought: false },
+    })
   })
 
   it('tells the Langfuse export who this is: owner false, demo true, unreadable flag undefined (fails closed)', () => {

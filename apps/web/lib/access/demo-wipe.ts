@@ -61,29 +61,20 @@ import type { AdminClient } from '@/lib/harness/types'
 import { demoSessionGate, isDemoProfile, type DemoProfileFacts } from './guardrails'
 import { chunkedIn } from '@/lib/supabase/chunked-in'
 import { getMemoryStore } from '@/lib/memory/mem0-store'
+import { OWNED_TABLES } from '@/lib/commands/owned'
 
 export interface DemoWipeResult {
   table: string
   deleted: number
 }
 
-/** Every ruling-5 user-data table owned 1:1 by user_id, in delete order (no
- *  FK between them, so order doesn't matter for correctness — kept as
- *  migration-landing order for readability). claim_evidence is listed before
- *  resume_claims purely for readability (claim_evidence.claim_id already
- *  cascades on resume_claims delete, so either order deletes the same rows —
- *  this loop deletes both explicitly rather than relying on the cascade so
- *  each table's own `deleted` count in DemoWipeResult stays meaningful). */
-const RULING_5_TABLES = [
-  'interactions',
-  'insights',
-  'resume_claims',
-  'claim_evidence',
-  'company_merge_candidates',
-  'eval_verdicts',
-  'trace_spans',
-  'a2a_tasks',
-] as const
+/** Every user-data table the sweep deletes, read from the owned-tables list
+ *  (lib/commands/owned). A table joins by being added there with
+ *  `demoWipe: true`, in the same commit as its migration. Order is the list's;
+ *  there is no FK between them, so it only matters for readability. claim_evidence
+ *  is deleted explicitly rather than through its cascade so each table's own
+ *  `deleted` count in DemoWipeResult stays meaningful. */
+const WIPED = OWNED_TABLES.filter((t) => t.demoWipe)
 
 /**
  * Deletes ruling-5 user-data rows owned by a demo profile whose access has
@@ -108,14 +99,14 @@ export async function wipeExpiredDemoData(
   const expiredIds = ((data ?? []) as (DemoProfileFacts & { id: string })[])
     .filter((p) => isDemoProfile(p) && !demoSessionGate(p, now).allowed)
     .map((p) => p.id)
-  if (expiredIds.length === 0) return RULING_5_TABLES.map((table) => ({ table, deleted: 0 }))
+  if (expiredIds.length === 0) return WIPED.map((t) => ({ table: t.table, deleted: 0 }))
 
   // System-wide, not owner-scoped by any FK join — chunked rather than one
   // .in() the way app/api/harness/cron/route.ts's own graph_threads lookup
   // already is (same file, same reason: this can outgrow a request's
   // querystring long before this codebase notices).
   const results: DemoWipeResult[] = []
-  for (const table of RULING_5_TABLES) {
+  for (const { table } of WIPED) {
     const perChunkDeleted = await chunkedIn(expiredIds, async (chunk) => {
       const { error: delErr, count } = await admin
         .from(table)

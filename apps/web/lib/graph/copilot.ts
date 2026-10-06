@@ -103,7 +103,8 @@ import { Annotation, StateGraph, START, END, interrupt } from '@langchain/langgr
 import type { LangGraphRunnableConfig } from '@langchain/langgraph'
 import { AskUserError, parseAskUserRequest, type AskQuestion } from '../harness/ask-user'
 import { buildTurnContext } from '../context/assemble'
-import { callLlm, parseJsonLoose } from '../harness/llm'
+import { parseJsonLoose } from '../harness/llm'
+import { legacyStep } from '../steps'
 import type { ReasoningEffort } from '../harness/types'
 import { loadApiKeys } from '../harness/keys'
 import { templateRef } from '../harness/prompts'
@@ -684,7 +685,7 @@ export async function refreshConversationSummary(admin: AdminClient, userId: str
     // Its own Langfuse trace in the conversation's session (this runs from the
     // route, before the turn's graph invoke, so there is no ambient trace).
     const res = await withTrace(admin, userId, { name: 'summarize-conversation', sessionId: conversationId }, () =>
-      callLlm(apiKeys, {
+      legacyStep('write-summary').call(apiKeys, {
         system:
           'You maintain a rolling summary of an ongoing job-search assistant conversation. Fold the new messages into the ' +
           'existing summary, keeping concrete facts (job/company names, decisions made, numbers, preferences stated) and ' +
@@ -693,8 +694,7 @@ export async function refreshConversationSummary(admin: AdminClient, userId: str
         model: SUMMARY_REFRESH_MODEL,
         maxTokens: 500,
         temperature: 0.2,
-        name: 'write-summary',
-      })
+      }, { door: 'chat' })
     )
     const newSummary = res.content.trim()
     if (!newSummary) return
@@ -953,7 +953,7 @@ async function plan(state: CopilotStateType, config: LangGraphRunnableConfig): P
     let message: string | undefined
     if (remaining() > 2_000) {
       try {
-        const res = await callLlm(
+        const res = await legacyStep('write-final-answer').call(
           apiKeys,
           {
             system: state.sys,
@@ -967,9 +967,8 @@ async function plan(state: CopilotStateType, config: LangGraphRunnableConfig): P
             json: true,
             maxTokens: 1200,
             temperature: 0.2,
-            name: 'write-final-answer',
           },
-          config.signal
+          { door: 'chat', signal: config.signal }
         )
         const parsed = parseJsonLoose<ModelAction>(res.content)
         if (typeof parsed.message === 'string' && parsed.message.trim()) message = scrubJargon(parsed.message)
@@ -989,7 +988,7 @@ async function plan(state: CopilotStateType, config: LangGraphRunnableConfig): P
   const wireEvents: WireEvent[] = []
   let action: ModelAction
   try {
-    const res = await callLlm(
+    const res = await legacyStep('plan-copilot-step').call(
       apiKeys,
       {
         system: state.sys,
@@ -999,10 +998,9 @@ async function plan(state: CopilotStateType, config: LangGraphRunnableConfig): P
         maxTokens: 4000,
         temperature: 0.2,
         reasoning: { effort: state.turnConfig.effort },
-        name: 'plan-copilot-step',
         promptRef: copilotPromptRef(),
       },
-      config.signal
+      { door: 'chat', signal: config.signal }
     )
     if (res.reasoning) wireEvents.push({ type: 'reasoning', step: state.trace.length, reasoning: scrubJargon(res.reasoning) })
     action = parseJsonLoose<ModelAction>(res.content)

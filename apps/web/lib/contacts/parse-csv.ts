@@ -14,13 +14,16 @@
 //   wrong addresses are the worst failure available, so the parser is now a
 //   real character scanner living in a pure module that can be tested.
 //
-//   It is deliberately framework-free: no React, no DOM, no network.
+//   It is deliberately framework-free: no React, no DOM, no network. The
+//   scanning itself is Papa Parse's; what stays here is the contact rules.
 //
 // SCOPE
 //   This handles the parts of RFC 4180 that real exports actually produce:
 //   quoted fields, commas and newlines inside quotes, doubled quotes as an
 //   escape, CRLF, and a UTF-8 BOM. It does not attempt to guess a delimiter —
 //   comma only, which is what the dialog asks for.
+
+import Papa from 'papaparse'
 
 /** One contact as parsed from a CSV row. `null` means the column was absent or blank. */
 export interface CsvContactRow {
@@ -60,92 +63,23 @@ export interface ParsedCsv {
 const PREVIEW_LIMIT = 5
 
 /**
- * Split one CSV document into rows of raw fields.
+ * Split one CSV document into rows of raw fields, with Papa Parse.
  *
- * A single pass over the characters, because a line-based split cannot be
- * correct: a quoted field may legally contain the delimiter AND the line
- * separator, so "where does this row end" is only answerable while tracking
- * whether we are inside quotes.
+ * A quoted field may legally contain the delimiter AND the line separator, so
+ * "where does this row end" is only answerable by a real parser; a line-based
+ * split cannot be correct. Papa Parse is that parser, and the three lines of
+ * normalising around it keep what this module has always promised:
+ *   - a UTF-8 BOM is dropped (Excel writes one, and it would otherwise become
+ *     part of the first header name, so `name` would never match),
+ *   - CRLF, lone CR and LF all end a row,
+ *   - a file that ends in a newline gets no phantom last row.
  */
 export function splitCsvRows(content: string): string[][] {
-  // Strip a UTF-8 BOM; Excel writes one and it would otherwise become part of
-  // the first header name, so `name` would never match.
-  const text = content.replace(/^﻿/, '')
-
-  const rows: string[][] = []
-  let row: string[] = []
-  let field = ''
-  let inQuotes = false
-  let sawAnyChar = false
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i]
-
-    if (inQuotes) {
-      if (ch === '"') {
-        // A doubled quote inside a quoted field is one literal quote.
-        if (text[i + 1] === '"') {
-          field += '"'
-          i++
-        } else {
-          inQuotes = false
-        }
-      } else {
-        field += ch
-      }
-      continue
-    }
-
-    if (ch === '"') {
-      // Only opens a quoted field at the start of one; a stray mid-field quote
-      // is kept verbatim rather than silently swallowed.
-      if (field.length === 0) {
-        inQuotes = true
-      } else {
-        field += ch
-      }
-      sawAnyChar = true
-      continue
-    }
-
-    if (ch === ',') {
-      row.push(field)
-      field = ''
-      sawAnyChar = true
-      continue
-    }
-
-    if (ch === '\r') {
-      // CRLF or a lone CR both end the row; the LF (if any) is consumed next.
-      if (text[i + 1] === '\n') i++
-      row.push(field)
-      rows.push(row)
-      row = []
-      field = ''
-      sawAnyChar = false
-      continue
-    }
-
-    if (ch === '\n') {
-      row.push(field)
-      rows.push(row)
-      row = []
-      field = ''
-      sawAnyChar = false
-      continue
-    }
-
-    field += ch
-    sawAnyChar = true
-  }
-
-  // Flush a trailing row that had no line terminator. A file ending in a
-  // newline leaves nothing pending, which is why sawAnyChar is tracked.
-  if (inQuotes || sawAnyChar || field.length > 0) {
-    row.push(field)
-    rows.push(row)
-  }
-
+  const text = content.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n')
+  if (text === '') return []
+  const rows = Papa.parse<string[]>(text, { delimiter: ',', newline: '\n', skipEmptyLines: false }).data
+  const last = rows[rows.length - 1]
+  if (last && last.length === 1 && last[0] === '' && text.endsWith('\n')) rows.pop()
   return rows
 }
 

@@ -16,7 +16,7 @@ const input = {
 }
 
 function gmailAnswers(status: number, text: string) {
-  global.fetch = vi.fn().mockResolvedValue({ ok: false, status, text: async () => text }) as unknown as typeof fetch
+  global.fetch = vi.fn().mockResolvedValue(new Response(text, { status })) as unknown as typeof fetch
 }
 
 describe('sendGmailMessage failures keep the HTTP status', () => {
@@ -48,7 +48,10 @@ describe('isGmailAuthError: is it the credential or the message?', () => {
 
 describe('threadHasReply is tri-state', () => {
   const thread = (froms: string[]) =>
-    ({ ok: true, status: 200, json: async () => ({ messages: froms.map((f) => ({ payload: { headers: [{ name: 'From', value: f }] } })) }) })
+    new Response(JSON.stringify({ messages: froms.map((f) => ({ payload: { headers: [{ name: 'From', value: f }] } })) }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
 
   it.each([401, 403, 500])('is unknown, never replied, when Gmail answers %i', async (status) => {
     gmailAnswers(status, 'nope')

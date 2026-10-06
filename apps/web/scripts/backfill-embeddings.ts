@@ -38,7 +38,8 @@
  */
 import { createAdminClient } from '../lib/harness/supabase-admin'
 import { loadApiKeys } from '../lib/harness/keys'
-import { callEmbedding, MissingKeyError } from '../lib/harness/llm'
+import { MissingKeyError } from '../lib/harness/llm'
+import { embedStep } from '../lib/steps'
 import { BudgetCapError } from '../lib/harness/spend'
 
 /** Chunks embedded per callEmbedding() call — one provider round trip per
@@ -128,7 +129,7 @@ async function main(): Promise<void> {
         const batch = rows.slice(i, i + EMBED_BATCH)
         let embeddings: number[][]
         try {
-          const result = await callEmbedding(keys, { texts: batch.map((r) => r.content) })
+          const result = await embedStep.call(keys, { texts: batch.map((r) => r.content) })
           embeddings = result.embeddings
         } catch (err) {
           if (err instanceof MissingKeyError || err instanceof BudgetCapError) {

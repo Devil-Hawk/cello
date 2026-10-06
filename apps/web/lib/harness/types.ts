@@ -10,6 +10,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { z } from 'zod'
+import type { PersonModels, RungVia } from '../models/doors.types'
 import type {
   PlanSchema,
   StepAgentTypeSchema,
@@ -80,6 +81,12 @@ export interface DecryptedApiKeys {
    * sent by default, and demo traces are sampled lower); absent counts as demo.
    */
   isDemo?: boolean
+  /**
+   * What this person allows model calls to use (their highest rung and order),
+   * attached by applyDemoKeyGuards. Absent for a script or an operator key, and
+   * then a call behaves as it always did: no ceiling is enforced.
+   */
+  models?: PersonModels
 }
 
 // --- DB row shapes (hand-declared; mirror the harness migration) -------------
@@ -343,6 +350,10 @@ export interface LlmRunOptions {
   promptRef?: { name: string; hash?: string }
   /** The door this call came through, written to the spend ledger. */
   door?: Door
+  /** Files the model reads with the prompt (a PDF), as base64. Added to the last user message. */
+  files?: { mimeType: string; data: string }[]
+  /** Where to send the call, set by the rung a step picked. Absent means the person's active provider. */
+  via?: RungVia
 }
 
 /**

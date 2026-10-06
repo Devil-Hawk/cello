@@ -26,6 +26,7 @@ import type { PipelineStage } from '@/lib/format'
 import type { Json } from '@cello/shared'
 import type { DecryptedApiKeys } from '@/lib/harness/types'
 
+import { extractInterviewDateTime } from './datetime'
 import type { SyncState, ParsedEmail, UnmatchedEmail } from './types'
 import { JOB_EMAIL_QUERY, fetchGmailMessages, extractBody, getHeader, extractDomain } from './gmail-api'
 import { isPersonalEmailDomain } from './skip-lists'
@@ -92,7 +93,7 @@ export interface GmailSyncCoreResult {
  * callers (the route, the cron) are responsible for catching and reporting.
  */
 export async function runGmailSyncCore(params: GmailSyncCoreParams): Promise<GmailSyncCoreResult> {
-  // One Langfuse trace per sync pass, every classify-email generation under it
+  // One Langfuse trace per sync pass, every inbox.classify generation under it
   // (the 400-observation cap bounds a large scan). Counts only as output:
   // sender names and subjects are other people's data.
   return withTrace(
@@ -182,7 +183,11 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
     if (apiKeys.openrouter) {
       parsed = await parseEmailWithAI(from, subject, body, apiKeys, receivedAt)
     } else {
-      parsed = classifyWithPatterns(from, subject, body, receivedAt)
+      parsed = classifyWithPatterns(from, subject, body, receivedAt, msg.payload.calendar)
+    }
+    // An invite's time is exact; it wins over whatever the model read from the prose.
+    if (msg.payload.calendar && (parsed.status === 'interview' || parsed.status === 'screen')) {
+      parsed.interviewDateTime = extractInterviewDateTime('', receivedAt, msg.payload.calendar).iso ?? parsed.interviewDateTime
     }
 
     if (!parsed.isJobRelated) continue

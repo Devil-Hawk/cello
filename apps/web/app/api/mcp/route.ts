@@ -14,17 +14,17 @@
 // same "expiry/eligibility evaluated at use time, not just at mint time"
 // discipline lib/harness/keys.ts's header already states for demo key loads.
 //
-// STATELESS, PER lib/graph/invoke.ts-STYLE SINGLE-DOOR REUSE, NOT A SECOND
-// TOOL SURFACE: this route builds no tool logic of its own. It builds the
-// SAME CopilotToolContext lib/graph/copilot.ts#dispatchExecute builds (admin
-// client scoped by loadApiKeys — which applies the demo/spend guards a key
-// load always carries — userId, userEmail, apiKeys) and calls the SAME
-// dispatchTool() every copilot turn calls. trigger_run therefore reaches
-// invokeGraphForUser (binding ruling 7) exactly the way it already does from
-// the copilot graph — through lib/graph/invoke.ts, the ONE call site
-// (lib/graph/graph-chokepoints.test.ts scan (b) — this file imports no
-// graph-definition module and calls neither .invoke( nor .stream( itself, so
-// it never becomes a second one).
+// THE TOOLS ARE REGISTRY COMMANDS: this route builds no tool logic of its own.
+// It serves mcpView() (lib/commands/views.ts): the commands the assistant door
+// may call, plus today's 18 first-party copilot tools under their old names
+// (lib/commands/defs/legacy-mcp.ts, Q6), so hosts that already use them keep
+// working. Every call runs through runCommand with an assistant-door context,
+// so the door, the limits and the output check apply here exactly as they do
+// for Chat. A legacy tool still reaches the SAME dispatchTool() every copilot
+// turn calls, so trigger_run reaches invokeGraphForUser (binding ruling 7)
+// exactly the way it always did, through lib/graph/invoke.ts, the ONE call site
+// (lib/graph/graph-chokepoints.test.ts scan (b): this file imports no
+// graph-definition module and calls neither .invoke( nor .stream( itself).
 //
 // EXCLUDES mcp:<server>:<tool> (the user's OWN configured MCP servers,
 // lib/mcp/*): COPILOT_TOOLS never contains one (they are dispatched
@@ -37,7 +37,9 @@
 // header already names as the reason lib/mcp's own guards exist; that
 // boundary would be pointless to build only to hand a bridge around it here.
 //
-// SUBMIT/SEND GUARD — UNCONDITIONAL, EVERY CALL, NO HUMAN-CONFIRM CHANNEL:
+// SUBMIT/SEND GUARD, UNCONDITIONAL, EVERY CALL, NO HUMAN-CONFIRM CHANNEL (it now
+// runs inside each legacy command, in lib/commands/defs/legacy-mcp.ts; no command
+// that sends is ever listed here, because mcpView drops every sends command):
 // lib/graph/copilot.ts's dispatchExecute node runs the model, sees a proposed
 // tool call, and — for anything submitOrSendReason() flags — PAUSES at
 // interrupt() so a human can click confirm. MCP has no such channel: nobody
@@ -69,14 +71,14 @@ import { withTrace } from '@/lib/trace/spans'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
+import type { z } from 'zod'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
-import type { AdminClient } from '@/lib/harness/types'
 import { validateToken } from '@/lib/access/tokens'
-import { readProfileForDemoGuards, loadApiKeys } from '@/lib/harness/keys'
+import { readProfileForDemoGuards } from '@/lib/harness/keys'
 import { isDemoProfile } from '@/lib/access/guardrails'
-import { dispatchTool, COPILOT_TOOLS, type CopilotToolContext } from '@/lib/harness/copilot-tools'
-import { submitOrSendReason } from '@/lib/graph/copilot'
-import { TOOL_SCHEMAS } from '@/lib/mcp/tool-schemas'
+import { COPILOT_TOOLS } from '@/lib/harness/copilot-tool-catalog'
+import { mcpView, mcpToolName, runCommand, refusalResponse, assistantDoor, type AnyCommand, type CommandContext } from '@/lib/commands'
+import { LEGACY_PREFIX } from '@/lib/commands/views'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -97,80 +99,47 @@ function bearerFromRequest(request: NextRequest): string | null {
   return value || null
 }
 
-/** GoTrue's own address for this auth user, or null. Same read
- *  app/api/access/redeem/route.ts's authEmailForUser already established for
- *  the identical "no session, only a userId" situation — reused as the
- *  smallest local copy rather than exporting a one-line helper across an
- *  unrelated route for a single second caller. */
-async function emailForUser(admin: AdminClient, userId: string): Promise<string> {
-  const { data } = await admin.auth.admin.getUserById(userId)
-  return typeof data?.user?.email === 'string' ? data.user.email : ''
-}
-
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-function toolResult(observation: unknown): CallToolResult {
-  const text = typeof observation === 'string' ? observation : JSON.stringify(observation)
-  const isError = Boolean(observation && typeof observation === 'object' && 'error' in (observation as Record<string, unknown>))
-  return { content: [{ type: 'text', text }], isError }
-}
-
-/** The refusal every guarded call gets — see the file header's SUBMIT/SEND
- *  GUARD section. Points at the one place this action CAN happen: a human,
- *  in the web app, clicking confirm. */
-function refusalResult(reason: string): CallToolResult {
-  return {
-    isError: true,
-    content: [
-      {
-        type: 'text',
-        text: `${reason} This cannot be approved over MCP — there is no human to confirm it here. Open the Cello web app and approve it from the copilot chat instead.`,
-      },
-    ],
+/** What a command's output looks like to an MCP host. A legacy tool answers
+ *  {text, is_error}; any other command's output is sent as JSON. */
+function toolResult(def: AnyCommand, out: unknown): CallToolResult {
+  if (def.id.startsWith(LEGACY_PREFIX)) {
+    const o = out as { text: string; is_error: boolean }
+    return { content: [{ type: 'text', text: o.text }], isError: o.is_error }
   }
+  return { content: [{ type: 'text', text: JSON.stringify(out) }], isError: false }
 }
 
-/** Builds a fresh McpServer with all 18 first-party tools registered against
- *  `ctx` — one call per POST (see the file header's STATELESS TRANSPORT
- *  note), so `ctx` (and everything it closes over) never survives past the
- *  request that built it. */
-function buildServer(ctx: CopilotToolContext): McpServer {
+function describe(def: AnyCommand): string {
+  return COPILOT_TOOLS.find((t) => `${LEGACY_PREFIX}${t.name}` === def.id)?.desc ?? def.label
+}
+
+/** Builds a fresh McpServer with every command mcpView lists, registered
+ *  against `ctx`: one call per POST (see the file header's STATELESS TRANSPORT
+ *  note), so `ctx` never survives past the request that built it. */
+function buildServer(ctx: CommandContext): McpServer {
   const server = new McpServer({ name: 'cello', version: '1.0.0' })
 
-  for (const spec of COPILOT_TOOLS) {
-    const inputSchema = TOOL_SCHEMAS[spec.name]
-    if (!inputSchema) {
-      // Cannot happen outside a drift between the catalog and tool-schemas.ts
-      // (app/api/mcp/route.test.ts pins the two lists equal) — fails loudly
-      // rather than silently registering a tool with no argument shape.
-      throw new Error(`lib/mcp/tool-schemas.ts has no schema for catalog tool "${spec.name}"`)
-    }
-    server.registerTool(
-      spec.name,
-      { title: spec.name, description: spec.desc, inputSchema },
-      async (args): Promise<CallToolResult> => {
-        const toolArgs = (args ?? {}) as Record<string, unknown>
-        try {
-          // (3) UNCONDITIONAL submit/send guard — before anything else, every
-          // call, no exceptions. See the file header.
-          const reason = submitOrSendReason(spec.name, toolArgs)
-          if (reason) return refusalResult(reason)
-          // (4)/(5): no review/bypass step exists here (that is the copilot
-          // graph's confirm/review interrupt, which needs a human watching a
-          // UI) — an unguarded tool just runs, exactly like a copilot turn
-          // with bypassMode on for read/act tools.
-          const observation = await dispatchTool(ctx, spec.name, toolArgs)
-          return toolResult(observation)
-        } catch (e) {
-          // dispatchTool's own contract is "always resolves, never throws"
-          // (lib/harness/copilot-tools.ts) — this is defense in depth against
-          // a future violation of that contract, not the expected path.
-          return { isError: true, content: [{ type: 'text', text: `Tool "${spec.name}" failed: ${errMsg(e)}` }] }
-        }
+  for (const def of mcpView()) {
+    const name = mcpToolName(def)
+    // The SDK reads the shape and drops keys it does not know before our own
+    // strict parse sees the arguments, so a host that sends an extra key is not
+    // refused, exactly as before.
+    const inputSchema = (def.input as z.ZodObject<z.ZodRawShape>).shape
+    server.registerTool(name, { title: name, description: describe(def), inputSchema }, async (args): Promise<CallToolResult> => {
+      try {
+        return toolResult(def, await runCommand(def, ctx, args ?? {}))
+      } catch (e) {
+        const refusal = refusalResponse(e)
+        if (refusal) return { isError: true, content: [{ type: 'text', text: refusal.body.error }] }
+        // The commands' own contract is to answer, not throw: this is defense in
+        // depth against a future violation of it, not the expected path.
+        return { isError: true, content: [{ type: 'text', text: `Tool "${name}" failed: ${errMsg(e)}` }] }
       }
-    )
+    })
   }
 
   return server
@@ -214,14 +183,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: DEMO_CANNOT_USE_MCP }, { status: 403, headers: NO_STORE })
   }
 
-  let ctx: CopilotToolContext
-  try {
-    const [apiKeys, userEmail] = await Promise.all([loadApiKeys(admin, userId), emailForUser(admin, userId)])
-    ctx = { admin, userId, userEmail, apiKeys, signal: request.signal }
-  } catch (e) {
-    console.error('[mcp] failed to build tool context', errMsg(e))
-    return NextResponse.json({ error: "Couldn't set up this request." }, { status: 500, headers: NO_STORE })
-  }
+  const ctx = assistantDoor({ userId, signal: request.signal })
 
   // Construct, use, tear down — see the file header's STATELESS TRANSPORT
   // note for why this never persists past one request.

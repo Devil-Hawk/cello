@@ -1,5 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { _resetSearchHealthState } from './health'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SearchHttpError } from './fetch'
 import { DuckDuckGoBlockedError } from './backends/duckduckgo'
 
@@ -19,10 +18,6 @@ const {
 } = await import('./index')
 
 const realFetch = globalThis.fetch
-
-beforeEach(() => {
-  _resetSearchHealthState()
-})
 
 afterEach(() => {
   globalThis.fetch = realFetch
@@ -243,55 +238,6 @@ describe('webSearch — malformed responses and abort/timeout never throw', () =
     await expect(
       webSearch('AI Engineer', { exaKey: 'test-key', signal: controller.signal })
     ).resolves.toMatchObject({ ok: false })
-  })
-})
-
-describe('webSearch — health memory skip + recovery', () => {
-  it('skips a backend that just failed in favor of the next call, without re-hitting it', async () => {
-    // First call: exa fails, duckduckgo picks up the slack — exa's failure
-    // is now remembered.
-    const firstFetch = vi.fn().mockImplementation(async (url: string) => {
-      if (String(url).includes('exa.ai')) return exaResponse(401)
-      return ddgResponse(DDG_RESULTS_HTML)
-    })
-    globalThis.fetch = firstFetch as unknown as typeof fetch
-    const first = await webSearch('AI Engineer', { exaKey: 'bad-key' })
-    expect(first.ok).toBe(true)
-    expect(first.backend).toBe('duckduckgo')
-
-    // Second call, same process, same (still "bad") exa key: if the chain
-    // tries exa again it will explode this mock — proving health memory
-    // steered the chain past it entirely this time, straight to duckduckgo.
-    const secondFetch = vi.fn().mockImplementation(async (url: string) => {
-      if (String(url).includes('exa.ai')) throw new Error('TEST FAILURE: exa should have been skipped via health memory')
-      return ddgResponse(DDG_RESULTS_HTML)
-    })
-    globalThis.fetch = secondFetch as unknown as typeof fetch
-    const second = await webSearch('AI Engineer', { exaKey: 'bad-key' })
-
-    expect(second.ok).toBe(true)
-    expect(second.backend).toBe('duckduckgo')
-    expect(secondFetch).toHaveBeenCalledTimes(1)
-    expect(String(secondFetch.mock.calls[0][0])).not.toContain('exa.ai')
-  })
-
-  it('still tries a recently-failed backend as a last resort when nothing else is configured', async () => {
-    // Only duckduckgo is ever a candidate here. Even after it's marked
-    // recently-failed by a first call, a second call must still attempt it
-    // for real — there is nothing else to fall back to, and returning
-    // ok:false without even trying would be dishonest.
-    const blockedFetch = vi.fn().mockResolvedValue(ddgResponse(DDG_BLOCKED_HTML, 202))
-    globalThis.fetch = blockedFetch as unknown as typeof fetch
-    const first = await webSearch('remote software engineer')
-    expect(first.ok).toBe(false)
-
-    const recoveredFetch = vi.fn().mockResolvedValue(ddgResponse(DDG_RESULTS_HTML))
-    globalThis.fetch = recoveredFetch as unknown as typeof fetch
-    const second = await webSearch('remote software engineer')
-
-    expect(recoveredFetch).toHaveBeenCalledTimes(1)
-    expect(second.ok).toBe(true)
-    expect(second.backend).toBe('duckduckgo')
   })
 })
 

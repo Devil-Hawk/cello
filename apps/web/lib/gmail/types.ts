@@ -10,6 +10,10 @@ export interface GmailMessage {
     headers: Array<{ name: string; value: string }>
     body?: { data?: string }
     parts?: Array<{ body?: { data?: string }; mimeType?: string }>
+    /** The decoded body, set when the message came from a raw read (gmail-api.ts). */
+    text?: string
+    /** The first text/calendar part (an invite), decoded, when the message carried one. */
+    calendar?: string
   }
   internalDate: string
 }
