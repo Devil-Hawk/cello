@@ -12,12 +12,6 @@
     "thin items avoid the missing skill": 1,
     "cut-off answers": 0
   },
-  "interview-prep": {
-    "shown stories traced to the resume (yardstick)": 0.9,
-    "story count within label": 1,
-    "no company questions without research": 1,
-    "guidance specific (yardstick)": 0.8
-  },
   "dossier": {
     "funding null when unstated": 1,
     "bundles with an unsupported statement (yardstick)": 1,

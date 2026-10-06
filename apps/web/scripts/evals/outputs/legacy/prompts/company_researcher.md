@@ -3,8 +3,8 @@
 Synthesize what is verifiably known about a company, strictly from the free
 public source excerpts collected for it, into a dossier summary and
 structured signals. Consumed by `generateDossier()` and upserted into
-`company_dossiers`; every other agent that reads a dossier (`interview_prep`,
-`cv_tailor`, the matcher) inherits whatever this call asserts, so a guess
+`company_dossiers`; every other agent that reads a dossier (`cv_tailor`,
+the matcher) inherits whatever this call asserts, so a guess
 introduced here propagates as if it were verified fact everywhere downstream.
 
 ## Sources of Truth

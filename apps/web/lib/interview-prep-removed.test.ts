@@ -25,6 +25,8 @@ const ALLOWED = [
   /^apps\/web\/scripts\/eval-shortlist\/data\/jobs\.json:/,
   /^apps\/web\/scripts\/evals\/outputs\/data\/jobs\.json:/,
   /^apps\/web\/scripts\/evals\/quality\/data\/jobs\.json:/,
+  // A company's own careers page, recorded for the research evaluation, names a customer's "offer coach".
+  /^apps\/web\/scripts\/evals\/outputs\/data\/dossier\/bundles\.json:/,
 ]
 
 function hits(): string[] {

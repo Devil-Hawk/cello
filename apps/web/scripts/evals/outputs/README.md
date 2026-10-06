@@ -9,7 +9,7 @@ cd apps/web
 sh scripts/evals/outputs/run.sh <feature> --label before|after [--quick] [--no-model] [--stub]
 ```
 
-Features: `outreach`, `cover-letter`, `interview-prep`, `dossier`, `gmail`,
+Features: `outreach`, `cover-letter`, `dossier`, `gmail`,
 `reply`, `digest`, `judges`, `follow-upper`.
 
 - Writer: `google/gemma-4-31b-it:free`. Production judges in the app run on a

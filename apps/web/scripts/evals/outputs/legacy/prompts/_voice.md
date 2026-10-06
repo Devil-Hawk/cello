@@ -7,7 +7,7 @@
      to Cello's actual surfaces. This document supersedes — and should
      replace, as each agent migrates — the buzzword/filler bans that were
      independently hand-duplicated inside cv_tailor.ts, outreach.ts,
-     interview_prep.ts, resume_optimizer.ts, and follow_upper.ts. Keeping one
+     resume_optimizer.ts, and follow_upper.ts. Keeping one
      copy means a ban added here reaches every surface at once, instead of
      five copies quietly drifting apart.
      ============================================================ -->
@@ -81,10 +81,6 @@ prose.
 - **Resume summary** (resume_optimizer, cv_tailor): 2-4 sentences,
   ATS-dense, formal register. Tier 2 conversational looseness does NOT apply
   here.
-- **Interview prep guidance / sampleAnswer** (interview_prep): specific to
-  THIS candidate and role. Banned: generic interview-coaching filler ("be
-  confident", "make eye contact", "show enthusiasm") — the tell that a line
-  isn't grounded is that it would fit any candidate for any job.
 - **Digest / status lines** (follow_upper, autopilot summaries): 1-2
   sentences, no greeting, no encouragement filler, name the specific
   number/company/day-count that makes the line true.

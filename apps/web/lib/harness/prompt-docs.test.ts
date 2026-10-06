@@ -13,7 +13,6 @@ const DOCS = [
   'judge_claims',
   'judge_specificity',
   'cv_tailor',
-  'interview_prep',
   'company_researcher',
   'visa',
   'gmail_classify',

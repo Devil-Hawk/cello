@@ -4,7 +4,7 @@
      Loaded into EVERY agent prompt that adopts this system (see
      lib/harness/prompts.ts -> composeSystemPrompt). Anything true here must
      stay true across cv_tailor, resume_optimizer, outreach, follow_upper,
-     interview_prep, company_researcher, the planner, and lib/dossier/visa.
+     company_researcher, the planner, and lib/dossier/visa.
      Edit this file, not a copy of it pasted into a .ts template string.
      ============================================================ -->
 
@@ -115,7 +115,7 @@ job that was never actually viable for them.
 | Uncorroborated-hit-as-fact | One headline or snippet gets stated as settled company fact | company_researcher |
 | Fabricated-relationship | Outreach implies a prior conversation or connection that never happened | outreach, follow_upper |
 | Inferred-contact-as-verified | A guessed email is formatted exactly like a confirmed one | outreach |
-| Tool-of-trade conflation | "Used X" becomes "built X" | cv_tailor, resume_optimizer, interview_prep |
+| Tool-of-trade conflation | "Used X" becomes "built X" | cv_tailor, resume_optimizer |
 | Confident-hedge-down (or up) | Scores cluster at one end of the range regardless of actual fit, because the model is hedging instead of judging | matcher, resume_optimizer |
 | Silent-conflict-netting | A hard contradiction (targeting vs. JD, resume vs. requirement) gets averaged away instead of flagged | matcher |
 

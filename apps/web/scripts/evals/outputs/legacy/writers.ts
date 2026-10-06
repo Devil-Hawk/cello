@@ -1,5 +1,5 @@
 // release/1 writers frozen for the "before" measurement: the cover letter, the
-// interview prep kit, the company research synthesis, the visa parse and the
+// company research synthesis, the visa parse and the
 // follow-up status line, each as it built its prompt and read the model's answer
 // before the output work. Not used by the app.
 
@@ -59,60 +59,6 @@ export async function legacyTailor(
     resumeSummary: str(p.resumeSummary),
     coverLetter: str(p.coverLetter),
     keywords: Array.isArray(p.keywords) ? p.keywords.filter((k): k is string => typeof k === 'string') : [],
-  }
-}
-
-// --- interview prep -------------------------------------------------------------
-
-export interface LegacyKit {
-  questions: { category: string; question: string; guidance: string; sampleAnswer: string }[]
-  stories: { situation: string; task: string; action: string; result: string; mapsToQuestion: string }[]
-  notes: string
-}
-
-export async function legacyKit(
-  run: LlmRunner,
-  a: { title: string; company: string; description: string; resumeText: string; context: string }
-): Promise<LegacyKit> {
-  const prompt = [
-    `JOB TITLE: ${a.title}`,
-    `COMPANY: ${a.company}`,
-    '',
-    'JOB DESCRIPTION:',
-    a.description.slice(0, 6_000) || '(none provided — base technical/role-specific questions on the title alone, and flag that in prep_notes)',
-    '',
-    a.context
-      ? 'COMPANY CONTEXT (public research, prior history, and your resume claims — for company-specific and evidence-grounded questions):'
-      : '(no company context provided — skip or generalize company-specific questions, and flag that in prep_notes)',
-    a.context,
-    '',
-    'Produce the interview prep kit as JSON per the system rules.',
-  ]
-    .filter((line) => line !== '')
-    .join('\n')
-  const res = await run({
-    system: legacySystem({
-      mode: 'interview_prep',
-      stableContext:
-        "CANDIDATE RESUME (the ONLY source of truth for STAR stories and any claim about the candidate's experience):\n" + a.resumeText.slice(0, 12_000),
-    }),
-    prompt,
-    json: true,
-    maxTokens: 4096,
-    temperature: 0.4,
-    reasoning: { effort: 'medium' },
-    cachePrefix: true,
-  })
-  const p = parseLoose(res.content)
-  const arr = (v: unknown) => (Array.isArray(v) ? (v as Record<string, unknown>[]) : [])
-  return {
-    questions: arr(p.questions)
-      .filter((q) => str(q.question))
-      .map((q) => ({ category: str(q.category) || 'behavioral', question: str(q.question), guidance: str(q.guidance), sampleAnswer: str(q.sampleAnswer) })),
-    stories: arr(p.star_stories)
-      .filter((s) => str(s.situation) || str(s.action))
-      .map((s) => ({ situation: str(s.situation), task: str(s.task), action: str(s.action), result: str(s.result), mapsToQuestion: str(s.mapsToQuestion) })),
-    notes: str(p.prep_notes),
   }
 }
 

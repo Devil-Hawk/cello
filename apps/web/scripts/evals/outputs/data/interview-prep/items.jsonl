@@ -1,3 +1,0 @@
-{"id": "p01", "resume": "SYNTHETIC_r1_senior_backend.txt", "jobId": "gh:stripe:7232592", "company": "Stripe", "context": "COMPANY RESEARCH ON FILE:\nWho we are\n\nAbout Stripe\n\nStripe is a financial infrastructure platform for businesses.", "hasResearch": true, "maxStories": 5, "meta": {"resumeKey": "r1", "outcomes": 6}}
-{"id": "p02", "resume": "SYNTHETIC_r5_career_changer.txt", "jobId": "gh:lyft:8772592002", "company": "Lyft", "context": "", "hasResearch": false, "maxStories": 3, "meta": {"resumeKey": "r5", "outcomes": 6}}
-{"id": "p04", "resume": "SYNTHETIC_r3_product_designer_b2b.txt", "jobId": "ashby:ramp:eca54d0e-232a-4c3e-bfcc-d6c6add393f5", "company": "Ramp", "context": "", "hasResearch": false, "maxStories": 4, "meta": {"resumeKey": "r3", "outcomes": 6}}
