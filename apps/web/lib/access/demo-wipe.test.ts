@@ -38,7 +38,6 @@ interface ProfileRow {
 function fakeAdmin(profiles: ProfileRow[]) {
   const deletedFor: Record<string, string[]> = {
     interactions: [],
-    insights: [],
     resume_claims: [],
     claim_evidence: [],
     company_merge_candidates: [],
@@ -80,14 +79,13 @@ function fakeAdmin(profiles: ProfileRow[]) {
 }
 
 describe('wipeExpiredDemoData', () => {
-  it('deletes interactions AND insights AND resume_claims AND claim_evidence AND company_merge_candidates AND eval_verdicts AND trace_spans AND a2a_tasks AND memories for a demo past its deadline', async () => {
+  it('deletes interactions AND resume_claims AND claim_evidence AND company_merge_candidates AND eval_verdicts AND trace_spans AND a2a_tasks AND memories for a demo past its deadline', async () => {
     deleteAllCalls.length = 0
     const { admin, deletedFor } = fakeAdmin([
       { id: 'demo-expired', is_demo: true, demo_expires_at: AT(-HOUR_MS) },
     ])
     const result = await wipeExpiredDemoData(admin, NOW)
     expect(deletedFor.interactions).toEqual(['demo-expired'])
-    expect(deletedFor.insights).toEqual(['demo-expired'])
     expect(deletedFor.resume_claims).toEqual(['demo-expired'])
     expect(deletedFor.claim_evidence).toEqual(['demo-expired'])
     expect(deletedFor.company_merge_candidates).toEqual(['demo-expired'])
@@ -113,7 +111,6 @@ describe('wipeExpiredDemoData', () => {
     ])
     await wipeExpiredDemoData(admin, NOW)
     expect(deletedFor.interactions).toEqual([])
-    expect(deletedFor.insights).toEqual([])
     expect(deletedFor.resume_claims).toEqual([])
     expect(deletedFor.claim_evidence).toEqual([])
     expect(deletedFor.company_merge_candidates).toEqual([])
@@ -125,7 +122,6 @@ describe('wipeExpiredDemoData', () => {
     const { admin, deletedFor } = fakeAdmin([{ id: 'demo-undated', is_demo: true, demo_expires_at: null }])
     await wipeExpiredDemoData(admin, NOW)
     expect(deletedFor.interactions).toEqual(['demo-undated'])
-    expect(deletedFor.insights).toEqual(['demo-undated'])
     expect(deletedFor.resume_claims).toEqual(['demo-undated'])
     expect(deletedFor.claim_evidence).toEqual(['demo-undated'])
     expect(deletedFor.company_merge_candidates).toEqual(['demo-undated'])
@@ -137,7 +133,6 @@ describe('wipeExpiredDemoData', () => {
     const { admin, deletedFor } = fakeAdmin([{ id: 'demo-corrupt', is_demo: true, demo_expires_at: 'whenever' }])
     await wipeExpiredDemoData(admin, NOW)
     expect(deletedFor.interactions).toEqual(['demo-corrupt'])
-    expect(deletedFor.insights).toEqual(['demo-corrupt'])
     expect(deletedFor.resume_claims).toEqual(['demo-corrupt'])
     expect(deletedFor.claim_evidence).toEqual(['demo-corrupt'])
     expect(deletedFor.company_merge_candidates).toEqual(['demo-corrupt'])
@@ -151,7 +146,6 @@ describe('wipeExpiredDemoData', () => {
     ])
     await wipeExpiredDemoData(admin, NOW)
     expect(deletedFor.interactions).toEqual([])
-    expect(deletedFor.insights).toEqual([])
     expect(deletedFor.resume_claims).toEqual([])
     expect(deletedFor.claim_evidence).toEqual([])
     expect(deletedFor.company_merge_candidates).toEqual([])
@@ -163,7 +157,6 @@ describe('wipeExpiredDemoData', () => {
     const { admin, deletedFor } = fakeAdmin([{ id: 'demo-live', is_demo: true, demo_expires_at: AT(HOUR_MS) }])
     const result = await wipeExpiredDemoData(admin, NOW)
     expect(deletedFor.interactions).toEqual([])
-    expect(deletedFor.insights).toEqual([])
     expect(result).toEqual([
       { table: 'interactions', deleted: 0 },
       { table: 'resume_claims', deleted: 0 },

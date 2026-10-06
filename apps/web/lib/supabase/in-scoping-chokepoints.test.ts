@@ -136,12 +136,6 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     calls: [".in('id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",
   },
-  'apps/web/lib/context/assemble.ts': {
-    calls: [".in('kind', kinds)"],
-    reason:
-      "relevantInsights: kinds filters the insights.kind ENUM COLUMN (callers pass a fixed literal like " +
-      "['strategy','pattern']), not a user-owned id set.",
-  },
 }
 
 function stripComments(src: string): string {
