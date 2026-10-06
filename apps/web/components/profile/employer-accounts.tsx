@@ -362,7 +362,7 @@ export function ApplyCredentialsCard({ onStatus }: ApplyCredentialsCardProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button type="submit">
+            <Button type="submit" className="min-h-11">
               {isSaving ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
               ) : (
@@ -394,6 +394,7 @@ export function ApplyCredentialsCard({ onStatus }: ApplyCredentialsCardProps) {
             type="button"
             variant="ghost"
             size="sm"
+            className="min-h-11"
             onClick={load}
             disabled={listState === 'loading'}
           >
@@ -421,7 +422,7 @@ export function ApplyCredentialsCard({ onStatus }: ApplyCredentialsCardProps) {
             title="Couldn't load your sign-ins"
             body={listError ?? undefined}
             action={
-              <Button size="sm" onClick={load}>
+              <Button size="sm" className="min-h-11" onClick={load}>
                 Retry
               </Button>
             }
@@ -443,7 +444,7 @@ export function ApplyCredentialsCard({ onStatus }: ApplyCredentialsCardProps) {
                 <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                 <div className="min-w-0 flex-1">
                   <p>{listError} These are the sign-ins from the last successful load.</p>
-                  <Button type="button" variant="outline" size="sm" className="mt-2" onClick={load}>
+                  <Button type="button" variant="outline" size="sm" className="mt-2 min-h-11" onClick={load}>
                     Try again
                   </Button>
                 </div>
@@ -471,6 +472,7 @@ export function ApplyCredentialsCard({ onStatus }: ApplyCredentialsCardProps) {
                       type="button"
                       variant="outline"
                       size="sm"
+                      className="min-h-11"
                       onClick={() => {
                         setRemoveError(null)
                         setRemoveTarget(credential)
@@ -526,12 +528,13 @@ export function ApplyCredentialsCard({ onStatus }: ApplyCredentialsCardProps) {
             <Button
               type="button"
               variant="outline"
+              className="min-h-11"
               onClick={() => setRemoveTarget(null)}
               disabled={isRemoving}
             >
               Keep it
             </Button>
-            <Button type="button" variant="destructive" onClick={confirmRemove} disabled={isRemoving}>
+            <Button type="button" variant="destructive" className="min-h-11" onClick={confirmRemove} disabled={isRemoving}>
               {isRemoving ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
               ) : (

@@ -376,6 +376,7 @@ export function ApplicationIdentityCard({ onStatus }: ApplicationIdentityCardPro
 
       <div className="flex items-center gap-2 pt-1">
         <Button
+          className="min-h-11"
           onClick={save}
           disabled={isSaving || !isDirty || emailInvalid || (mustConfirm && !confirmChecked)}
         >
@@ -386,6 +387,7 @@ export function ApplicationIdentityCard({ onStatus }: ApplicationIdentityCardPro
           <Button
             type="button"
             variant="ghost"
+            className="min-h-11"
             onClick={() => {
               setForm(saved)
               setConfirmChecked(false)
