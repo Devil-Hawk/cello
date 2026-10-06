@@ -12,8 +12,8 @@ type Db = SupabaseClient<any, any, any>
 
 export type Followed = { id: string; error?: undefined } | { id?: undefined; error: string }
 
-export async function followEmployer(db: Db, userId: string, employer: Pick<DirectoryRow, 'id' | 'name' | 'domain' | 'logo_url' | 'careers_url' | 'ats_provider' | 'ats_token' | 'verified_by'>, source: 'url' | 'known'): Promise<Followed> {
-  const saved = await saveCompany(db, userId, { name: employer.name, domain: employer.domain, careerUrl: employer.careers_url, logoUrl: employer.logo_url, isDream: false })
+export async function followEmployer(db: Db, userId: string, employer: Pick<DirectoryRow, 'id' | 'name' | 'domain' | 'logo_url' | 'careers_url' | 'ats_provider' | 'ats_token' | 'verified_by'>, source: 'url' | 'known', dream = false): Promise<Followed> {
+  const saved = await saveCompany(db, userId, { name: employer.name, domain: employer.domain, careerUrl: employer.careers_url, logoUrl: employer.logo_url, isDream: dream })
   if (saved.error !== undefined) return { error: saved.error }
 
   // The board the verifier tied to the employer is the pointer a refresh reads first; no guessing by name.

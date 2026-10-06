@@ -164,38 +164,39 @@ async function addsToday(db: Db, userId: string): Promise<number> {
 
 const briefOf = (e: DirectoryRow): AddedEmployer => ({ employerId: e.id, name: e.name, domain: e.domain, logoUrl: e.logo_url, openCount: e.open_count })
 
-async function follow(db: Db, userId: string, employer: DirectoryRow, source: 'url' | 'known'): Promise<AddResult> {
-  const f = await followEmployer(db, userId, employer, source)
+async function follow(db: Db, userId: string, employer: DirectoryRow, source: 'url' | 'known', dream: boolean): Promise<AddResult> {
+  const f = await followEmployer(db, userId, employer, source, dream)
   if (f.error !== undefined) return refuse('not_saved')
   return { ok: true, companyId: f.id, already: false, employer: briefOf(employer) }
 }
 
 // --- the three ways in -----------------------------------------------------------
 
-export async function addCompany(db: Db, userId: string, by: AddBy, deps: AddDeps = realAddDeps): Promise<AddResult> {
+export async function addCompany(db: Db, userId: string, by: AddBy, deps: AddDeps = realAddDeps, opts: { dream?: boolean } = {}): Promise<AddResult> {
+  const dream = opts.dream === true
   const { data: profile } = await db.from('profiles').select('is_demo, demo_expires_at').eq('id', userId).maybeSingle()
   if (isDemoProfile(profile as { is_demo: boolean | null; demo_expires_at: string | null } | null)) return refuse('demo')
 
-  if ('employerId' in by) return addVerified(db, userId, await getEmployer(db, by.employerId), 'known')
-  if ('candidateId' in by) return addCandidate(db, userId, by.candidateId, deps)
-  return addLink(db, userId, by.link, deps)
+  if ('employerId' in by) return addVerified(db, userId, await getEmployer(db, by.employerId), 'known', dream)
+  if ('candidateId' in by) return addCandidate(db, userId, by.candidateId, deps, dream)
+  return addLink(db, userId, by.link, deps, dream)
 }
 
 /** An employer the directory has verified: already followed shows it, otherwise it is followed. No check, no new evidence. */
-async function addVerified(db: Db, userId: string, employer: DirectoryRow | null, source: 'url' | 'known'): Promise<AddResult> {
+async function addVerified(db: Db, userId: string, employer: DirectoryRow | null, source: 'url' | 'known', dream: boolean): Promise<AddResult> {
   if (!employer) return refuse('not_found')
   const have = await followedRow(db, userId, { employerId: employer.id, domain: employer.domain })
   if (have) return { ok: true, companyId: have.id, already: true, employer: briefOf(employer) }
   if ((await addsToday(db, userId)) >= DAILY_ADD_LIMIT) return refuse('daily_limit')
-  return follow(db, userId, employer, source)
+  return follow(db, userId, employer, source, dream)
 }
 
-async function addCandidate(db: Db, userId: string, candidateId: string, deps: AddDeps): Promise<AddResult> {
+async function addCandidate(db: Db, userId: string, candidateId: string, deps: AddDeps, dream: boolean): Promise<AddResult> {
   const { data } = await db.from('directory_candidates').select('id, name, domain, ats_provider, ats_token, source, failed_reads, state, employer_id').eq('id', candidateId).maybeSingle()
   const candidate = data as (CandidateRow & { state: string; employer_id: string | null }) | null
   if (!candidate) return refuse('not_found')
   // Verified already: the employer is in the directory.
-  if (candidate.state === 'verified' && candidate.employer_id) return addVerified(db, userId, await getEmployer(db, candidate.employer_id), 'known')
+  if (candidate.state === 'verified' && candidate.employer_id) return addVerified(db, userId, await getEmployer(db, candidate.employer_id), 'known', dream)
   const have = await followedRow(db, userId, { domain: candidate.domain })
   if (have) return { ok: true, companyId: have.id, already: true, employer: { employerId: have.employer_id, name: have.name, domain: have.domain, logoUrl: have.logo_url, openCount: null } }
   if ((await addsToday(db, userId)) >= DAILY_ADD_LIMIT) return refuse('daily_limit')
@@ -204,13 +205,13 @@ async function addCandidate(db: Db, userId: string, candidateId: string, deps: A
   const settled = await settleCandidate(db, candidate, deps.verify)
   if (settled.state === 'verified') {
     const employer = await getEmployer(db, settled.employerId)
-    return employer ? follow(db, userId, employer, 'known') : refuse('not_saved')
+    return employer ? follow(db, userId, employer, 'known', dream) : refuse('not_saved')
   }
   if (settled.state === 'retry') return refuse('cannot_read')
   return refuse(settled.reason, settled.offers)
 }
 
-async function addLink(db: Db, userId: string, raw: string, deps: AddDeps): Promise<AddResult> {
+async function addLink(db: Db, userId: string, raw: string, deps: AddDeps, dream: boolean): Promise<AddResult> {
   const url = parseLink(raw)
   if (!url) return refuse('bad_link')
 
@@ -233,7 +234,7 @@ async function addLink(db: Db, userId: string, raw: string, deps: AddDeps): Prom
 
   const verified = await verifyLink(db, url, domain, direct?.token ?? null, deps)
   if (!verified.ok) return refuse(verified.reason, verified.offers)
-  return addVerified(db, userId, await getEmployer(db, verified.employerId), 'url')
+  return addVerified(db, userId, await getEmployer(db, verified.employerId), 'url', dream)
 }
 
 type Verified = { ok: true; employerId: string } | { ok: false; reason: FailReason; offers: Offer[] }
