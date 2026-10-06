@@ -3,7 +3,7 @@ import { Space_Grotesk, Space_Mono, DM_Sans, Figtree } from 'next/font/google'
 import './globals.css'
 import './relief.css'
 import { ThemeProvider } from '@/components/providers/theme-provider'
-import { Toaster } from '@/components/ui/toaster'
+import { Toaster } from '@/components/providers/lazy-toaster'
 
 // Display face — an engineered grotesque with real character, tuned for the
 // instrument-panel headings and the wordmark.
