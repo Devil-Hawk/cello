@@ -106,6 +106,7 @@ export function WantScreen({
         <h3 id="want-where" className="r-title">
           Where you can work
         </h3>
+        <p className="r-meta">The countries you are allowed to work in.</p>
         <div className="flex flex-wrap gap-2">
           <Chip on={value.remoteOnly} onClick={() => onChange({ ...value, remoteOnly: !value.remoteOnly })}>
             Remote only
@@ -116,6 +117,38 @@ export function WantScreen({
             </Chip>
           ))}
         </div>
+      </section>
+
+      <section className="space-y-3" aria-labelledby="want-pay">
+        <h3 id="want-pay" className="r-title">
+          Pay and sponsorship
+        </h3>
+        <div className="space-y-1.5">
+          <label htmlFor="pay-floor" className="r-meta">
+            Lowest pay you will consider, in US dollars a year
+          </label>
+          <input
+            id="pay-floor"
+            className="r-field"
+            inputMode="numeric"
+            defaultValue={value.salaryFloorUsd ?? ''}
+            onBlur={(e) => {
+              const n = Number(e.target.value.replace(/[^\d]/g, ''))
+              onChange({ ...value, salaryFloorUsd: n > 0 && n <= 5_000_000 ? n : null })
+            }}
+          />
+        </div>
+        <fieldset className="space-y-2">
+          <legend className="r-meta">Do you need an employer to sponsor your right to work</legend>
+          <div className="flex gap-2">
+            <Chip on={value.needsSponsorship === true} onClick={() => onChange({ ...value, needsSponsorship: true })}>
+              Yes
+            </Chip>
+            <Chip on={value.needsSponsorship === false} onClick={() => onChange({ ...value, needsSponsorship: false })}>
+              No
+            </Chip>
+          </div>
+        </fieldset>
       </section>
 
       <section className="space-y-3" aria-labelledby="want-out">

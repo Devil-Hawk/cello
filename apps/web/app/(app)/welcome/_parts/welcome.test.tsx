@@ -20,7 +20,7 @@ import {
   tourStops,
   typedTitle,
 } from './logic'
-import { toTargeting, EMPTY_WELCOME_TARGETS } from '@/lib/welcome/commands.stub'
+import { toTargeting, setFacts, EMPTY_WELCOME_TARGETS } from '@/lib/welcome/commands.stub'
 
 const text = (html: string) => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ')
 
@@ -109,5 +109,39 @@ describe('a real account', () => {
     expect(html).toContain('role="progressbar"')
     expect(text(html)).toContain('Start with your resume')
     expect(text(html)).not.toMatch(/API key|OpenRouter/i)
+  })
+})
+
+describe('the facts', () => {
+  const stored = { blockedCountries: ['RU'], onlyCountries: [], onsiteCities: ['berlin'], needsSponsorship: false, salaryFloorUsd: null, remoteOnly: false, excludedCompanies: [], refusedSeniority: ['intern'], excludedTitleWords: [] }
+
+  function fakeFetch() {
+    const puts: unknown[] = []
+    const fn = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        puts.push(JSON.parse(String(init.body)))
+        return { ok: true, json: async () => ({}) }
+      }
+      return { ok: true, json: async () => ({ constraints: stored }) }
+    })
+    vi.stubGlobal('fetch', fn)
+    return puts
+  }
+
+  it('keeps the fields it did not edit and sends the countries and sponsorship as two facts', async () => {
+    const puts = fakeFetch()
+    const ok = await setFacts({ ...EMPTY_WELCOME_TARGETS, countries: ['us', 'ca'], needsSponsorship: true, salaryFloorUsd: 150000 })
+    expect(ok).toBe(true)
+    expect(puts).toEqual([{ ...stored, onlyCountries: ['US', 'CA'], needsSponsorship: true, salaryFloorUsd: 150000 }])
+    vi.unstubAllGlobals()
+  })
+
+  it('writes nothing when no fact was asked, and does not overwrite an unanswered sponsorship', async () => {
+    const puts = fakeFetch()
+    expect(await setFacts(EMPTY_WELCOME_TARGETS)).toBe(true)
+    expect(puts).toEqual([])
+    await setFacts({ ...EMPTY_WELCOME_TARGETS, salaryFloorUsd: 90000 })
+    expect(puts).toEqual([{ ...stored, salaryFloorUsd: 90000 }])
+    vi.unstubAllGlobals()
   })
 })

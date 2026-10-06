@@ -5,10 +5,10 @@
 // are on main. When PG1 rebases after K10, Welcome calls those through K10's
 // session door and this file is deleted.
 //
-// What is not here, on purpose: the facts (pay floor, work authorization,
-// sponsorship) and the reactions on the roles. Main has no store for either, and
-// a field that saves nowhere is worse than no field. They arrive with K10's
-// profile.set_facts and roles.react.
+// The facts (pay floor, work authorization, sponsorship) are saved through
+// /api/settings/constraints, the same store Settings' dealbreakers edits. They
+// move to K10's profile.set_facts, and the roles' reactions to roles.react
+// (Welcome's roles use the Interested and Not for me control of components/fit).
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ROLE_TAXONOMY } from '@/lib/jobs/role-taxonomy'
@@ -59,6 +59,10 @@ export interface WelcomeTargets {
   countries: string[]
   excludedCompanies: string[]
   excludedWords: string[]
+  /** Lowest yearly pay in USD, null when not asked. */
+  salaryFloorUsd: number | null
+  /** Needs an employer to sponsor the right to work: null until answered, so an unanswered question never overwrites. */
+  needsSponsorship: boolean | null
 }
 
 export const EMPTY_WELCOME_TARGETS: WelcomeTargets = {
@@ -68,6 +72,8 @@ export const EMPTY_WELCOME_TARGETS: WelcomeTargets = {
   countries: [],
   excludedCompanies: [],
   excludedWords: [],
+  salaryFloorUsd: null,
+  needsSponsorship: null,
 }
 
 /** What a person asked for, as the targeting main stores and every reader already understands. */
@@ -84,6 +90,31 @@ export function toTargeting(w: WelcomeTargets): Targeting {
   }
 }
 
+/**
+ * The facts, as the constraints store keeps them. Read first and written back
+ * whole, so everything the person did not touch here (blocked countries, levels,
+ * on-site cities) survives. The countries they can work in are work
+ * authorization; the question about sponsorship is the second fact.
+ */
+export async function setFacts(w: WelcomeTargets): Promise<boolean> {
+  const asked = {
+    ...(w.salaryFloorUsd !== null && { salaryFloorUsd: w.salaryFloorUsd }),
+    ...(w.needsSponsorship !== null && { needsSponsorship: w.needsSponsorship }),
+    ...(w.countries.length > 0 && { onlyCountries: w.countries.map((c) => c.toUpperCase()) }),
+  }
+  if (Object.keys(asked).length === 0) return true
+  const current = await fetch('/api/settings/constraints')
+    .then((r) => (r.ok ? (r.json() as Promise<{ constraints?: Record<string, unknown> }>) : null))
+    .catch(() => null)
+  if (!current?.constraints) return false
+  const res = await fetch('/api/settings/constraints', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...current.constraints, ...asked }),
+  })
+  return res.ok
+}
+
 /** search.update, over main's route. It keeps whatever else the person already set (languages, minimum score). */
 export async function searchUpdate(w: WelcomeTargets): Promise<{ ok: boolean }> {
   try {
@@ -95,7 +126,7 @@ export async function searchUpdate(w: WelcomeTargets): Promise<{ ok: boolean }> 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...(current?.targeting ?? EMPTY_TARGETING), ...toTargeting(w) }),
     })
-    return { ok: res.ok }
+    return { ok: res.ok && (await setFacts(w)) }
   } catch {
     return { ok: false }
   }
