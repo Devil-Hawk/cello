@@ -153,9 +153,10 @@ function boardReader(company: DueCompany, stored: Map<string, ExistingJob>): Non
     let jobs
     try {
       jobs = await provider.fetch(candidate.token, { hasDescription: (id) => stored.get(id)?.descriptionMd5 != null, ...(query.length ? { query } : {}) })
-    } catch {
+    } catch (error) {
       // The board answered with an error (a rate limit, a timeout): not "no board", so the company says it did not answer rather than "reading".
-      throw new ReaderError('unreachable')
+      // A robots.txt rule or a bot check keeps its own reason.
+      throw error instanceof ReaderError && (error.reason === 'robots' || error.reason === 'bot_check') ? error : new ReaderError('unreachable')
     }
     if (jobs.length === 0) return null
     if (candidate.via === 'url') return { ...candidate, jobs, verifiedBy: 'careers_url' }

@@ -83,6 +83,8 @@ export interface SiteFetcher {
   get(url: string, opts?: { accept?: string; follow?: (to: string) => boolean }): Promise<SiteResponse>
   /** A JSON answer from a host in `allowedHosts`, under the same robots, delay and budget rules. */
   json<T>(url: string, opts: { allowedHosts: ReadonlySet<string>; method?: 'GET' | 'POST'; body?: string; headers?: Record<string, string> }): Promise<T>
+  /** Take a turn for a request another client is about to make to `url`: robots.txt, the request budget and the gap between requests. Throws ReaderError. */
+  gate(url: string): Promise<void>
   /** Where the first request to `url` redirects, without following it; null when it does not redirect. */
   redirectOf(url: string): Promise<string | null>
   /** Does the site's robots.txt allow this address? */
@@ -263,6 +265,12 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
         return { status: res.status, ok: res.ok, text, finalUrl: current, contentType: res.headers.get('content-type') ?? '' }
       }
       throw new ReaderError('unreachable')
+    },
+
+    async gate(url) {
+      if (!(await allowed(url))) throw new ReaderError('robots')
+      spend()
+      await politely(new URL(url).host)
     },
 
     async redirectOf(url) {

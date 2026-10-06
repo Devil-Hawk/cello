@@ -18,6 +18,7 @@ import { htmlToPlainText } from './html'
 import { mapWithConcurrency } from './concurrency'
 import { isStalePosting } from '../jobs/freshness'
 import { assertSsrfSafe } from '../security/untrusted'
+import { makeSiteFetcher, type SiteFetcher } from '../ingest/reader/site-fetch'
 
 const PAGE_SIZE = 10
 /** 5 pages x 10 = 50 roles per search word; at most 3 words, and 20 pages (200 roles) with none. */
@@ -25,11 +26,11 @@ const MAX_PAGES_PER_QUERY = 5
 const MAX_PAGES_UNQUERIED = 20
 const MAX_QUERIES = 3
 const DESCRIPTION_BUDGET = 8
-/** Pause between the pages of one search: Microsoft answers 429 to a quick run of them. */
+/** Pause between the requests to one host: Microsoft answers 429 to a quick run of them. */
 const PAGE_PAUSE_MS = 400
+/** One read of a board: robots.txt, at most 3 words x 5 pages (or 20 unqueried), 8 bodies, and some room for a retry. */
+const REQUEST_BUDGET = 40
 const MAX_DESCRIPTION_CHARS = 20_000
-
-const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 const DOMAIN_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i
 
@@ -122,9 +123,12 @@ async function page(
   domain: string,
   query: string,
   start: number,
+  site: SiteFetcher,
   sleep?: (ms: number) => Promise<void>
 ): Promise<{ jobs: AtsJob[]; count: number }> {
-  const json = await fetchJson<Record<string, unknown>>(searchUrl(flavor, host, domain, query, start), { redirect: 'manual', retries: 2, sleep })
+  const url = searchUrl(flavor, host, domain, query, start)
+  await site.gate(url)
+  const json = await fetchJson<Record<string, unknown>>(url, { redirect: 'manual', retries: 2, sleep })
   if (flavor === 'v2') {
     const positions = Array.isArray(json.positions) ? (json.positions as V2Position[]) : []
     return { jobs: positions.map((p) => fromV2(host, p)).filter((j): j is AtsJob => !!j), count: Number(json.count) || 0 }
@@ -134,18 +138,19 @@ async function page(
   return { jobs: positions.map((p) => fromPcsx(host, p)).filter((j): j is AtsJob => !!j), count: Number(data.count) || 0 }
 }
 
-async function description(flavor: Flavor, host: string, domain: string, job: AtsJob): Promise<string | undefined> {
+async function description(flavor: Flavor, host: string, domain: string, job: AtsJob, site: SiteFetcher): Promise<string | undefined> {
   const id = job.url.match(/\/careers\/job\/(\d+)/)?.[1]
   if (!id) return undefined
   try {
     if (flavor === 'v2') {
-      const json = await fetchJson<V2Position>(`https://${host}/api/apply/v2/jobs/${id}?domain=${domain}`, { redirect: 'manual', retries: 1 })
+      const url = `https://${host}/api/apply/v2/jobs/${id}?domain=${domain}`
+      await site.gate(url)
+      const json = await fetchJson<V2Position>(url, { redirect: 'manual', retries: 1 })
       return json.job_description ? htmlToPlainText(json.job_description, MAX_DESCRIPTION_CHARS) : undefined
     }
-    const json = await fetchJson<{ data?: { jobDescription?: string } }>(
-      `https://${host}/api/pcsx/position_details?position_id=${id}&domain=${domain}&hl=en`,
-      { redirect: 'manual', retries: 1 }
-    )
+    const url = `https://${host}/api/pcsx/position_details?position_id=${id}&domain=${domain}&hl=en`
+    await site.gate(url)
+    const json = await fetchJson<{ data?: { jobDescription?: string } }>(url, { redirect: 'manual', retries: 1 })
     return json.data?.jobDescription ? htmlToPlainText(json.data.jobDescription, MAX_DESCRIPTION_CHARS) : undefined
   } catch {
     return undefined
@@ -171,6 +176,8 @@ async function fetchJobs(token: string, ctx?: FetchContext): Promise<AtsJob[]> {
   if (!parts) throw new Error('eightfold: invalid board token')
   const { host, domain } = parts
   await assertSsrfSafe(`https://${host}/`)
+  // Every request of this read goes through the one polite door: the host's robots.txt for the exact path, a request budget, a gap.
+  const site = makeSiteFetcher({ budget: { requests: REQUEST_BUDGET, gapMs: PAGE_PAUSE_MS }, sleep: ctx?.sleep })
 
   const queries = (ctx?.query ?? []).map((q) => q.trim()).filter(Boolean).slice(0, MAX_QUERIES)
   const terms = queries.length ? queries : ['']
@@ -181,15 +188,14 @@ async function fetchJobs(token: string, ctx?: FetchContext): Promise<AtsJob[]> {
   for (const query of terms) {
     for (let p = 0; p < maxPages; p++) {
       let got: { jobs: AtsJob[]; count: number }
-      // Pages come one after another with a pause; a host that says slow down ends the read with what it gave.
-      if (p > 0) await (ctx?.sleep ?? pause)(PAGE_PAUSE_MS)
+      // Pages come one after another, a gap apart; a host that says slow down ends the read with what it gave.
       try {
-        got = await page(flavor, host, domain, query, p * PAGE_SIZE, ctx?.sleep)
+        got = await page(flavor, host, domain, query, p * PAGE_SIZE, site, ctx?.sleep)
       } catch (error) {
         // The tenant answers the other flavor of the same search.
         if (error instanceof HttpError && (error.status === 403 || error.status === 404) && flavor === 'v2' && byId.size === 0 && p === 0) {
           flavor = 'pcsx'
-          got = await page(flavor, host, domain, query, 0, ctx?.sleep)
+          got = await page(flavor, host, domain, query, 0, site, ctx?.sleep)
         } else if (byId.size > 0 || p > 0) {
           break
         } else {
@@ -212,7 +218,7 @@ async function fetchJobs(token: string, ctx?: FetchContext): Promise<AtsJob[]> {
     .filter((j) => !isStalePosting(j.postedAt) && !j.description && !ctx?.hasDescription?.(j.externalId))
     .sort((a, b) => wanted(a) - wanted(b))
     .slice(0, DESCRIPTION_BUDGET)
-  const bodies = await mapWithConcurrency(needBody, 2, (j) => description(flavor, host, domain, j))
+  const bodies = await mapWithConcurrency(needBody, 2, (j) => description(flavor, host, domain, j, site))
   needBody.forEach((j, i) => {
     if (bodies[i]) j.description = bodies[i]
   })

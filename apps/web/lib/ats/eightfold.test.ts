@@ -47,6 +47,7 @@ describe('eightfold adapter', () => {
     const urls: string[] = []
     globalThis.fetch = vi.fn(async (input: unknown) => {
       const url = String(input)
+      if (url.endsWith('/robots.txt')) return new Response('', { status: 404 })
       urls.push(url)
       if (url.includes('/api/apply/v2/jobs/')) return json(fixture('netflix-detail.json'))
       return json(fixture('netflix-v2.json'))
@@ -69,6 +70,7 @@ describe('eightfold adapter', () => {
     const urls: string[] = []
     globalThis.fetch = vi.fn(async (input: unknown) => {
       const url = String(input)
+      if (url.endsWith('/robots.txt')) return new Response('', { status: 404 })
       urls.push(url)
       if (url.includes('/api/apply/v2/')) return new Response('forbidden', { status: 403 })
       if (url.includes('position_details')) return json(fixture('ms-detail.json'))
@@ -91,6 +93,7 @@ describe('eightfold adapter', () => {
     let calls = 0
     globalThis.fetch = vi.fn(async (input: unknown) => {
       const url = String(input)
+      if (url.endsWith('/robots.txt')) return new Response('', { status: 404 })
       if (url.includes('/api/apply/v2/jobs/')) return json('{}')
       const start = Number(new URL(url).searchParams.get('start'))
       calls++
@@ -112,6 +115,7 @@ describe('eightfold adapter', () => {
     let calls = 0
     globalThis.fetch = vi.fn(async (input: unknown) => {
       const url = String(input)
+      if (url.endsWith('/robots.txt')) return new Response('', { status: 404 })
       if (url.includes('/api/apply/v2/jobs/')) return json('{}')
       calls++
       if (calls > 2) return new Response('slow down', { status: 403 })
@@ -128,6 +132,7 @@ describe('eightfold adapter', () => {
     const detailed: string[] = []
     globalThis.fetch = vi.fn(async (input: unknown) => {
       const url = String(input)
+      if (url.endsWith('/robots.txt')) return new Response('', { status: 404 })
       if (url.includes('/api/apply/v2/jobs/')) {
         detailed.push(url.match(/jobs\/(\d+)/)![1])
         return json('{"job_description":"<p>Build things.</p>"}')
@@ -144,6 +149,46 @@ describe('eightfold adapter', () => {
     // Ten roles, a budget of eight: the four data roles come first, then the first four cooks.
     expect(detailed.slice(0, 4).sort()).toEqual(['106', '107', '108', '109'])
     expect(detailed).toHaveLength(8)
+  })
+
+  it('obeys the host robots.txt for the exact path: a tenant that disallows its search is not read', async () => {
+    const urls: string[] = []
+    globalThis.fetch = vi.fn(async (input: unknown) => {
+      const url = String(input)
+      urls.push(url)
+      if (url.endsWith('/robots.txt')) return new Response('User-agent: *\nDisallow: /api/', { status: 200, headers: { 'content-type': 'text/plain' } })
+      return json(fixture('netflix-v2.json'))
+    }) as unknown as typeof fetch
+    await expect(eightfold.fetch('explore.jobs.netflix.net_netflix.com', { query: ['data'], sleep: async () => {} })).rejects.toMatchObject({ reason: 'robots' })
+    expect(urls.filter((u) => u.includes('/api/'))).toEqual([])
+  })
+
+  it('reads a tenant whose robots.txt disallows the site but allows its search path (Netflix, Microsoft)', async () => {
+    globalThis.fetch = vi.fn(async (input: unknown) => {
+      const url = String(input)
+      if (url.endsWith('/robots.txt')) return new Response('User-agent: *\nDisallow: /\nAllow: /api/apply\nAllow: /api/pcsx', { status: 200, headers: { 'content-type': 'text/plain' } })
+      if (url.includes('/api/apply/v2/jobs/')) return json(fixture('netflix-detail.json'))
+      return json(fixture('netflix-v2.json'))
+    }) as unknown as typeof fetch
+    const jobs = await eightfold.fetch('explore.jobs.netflix.net_netflix.com', { query: ['data'], sleep: async () => {} })
+    expect(jobs.length).toBe(5)
+  })
+
+  it('counts every request against a budget', async () => {
+    const page = JSON.parse(fixture('netflix-v2.json')) as { positions: Record<string, unknown>[] }
+    let api = 0
+    globalThis.fetch = vi.fn(async (input: unknown) => {
+      const url = String(input)
+      if (url.endsWith('/robots.txt')) return new Response('', { status: 404 })
+      api++
+      if (url.includes('/api/apply/v2/jobs/')) return json('{}')
+      const start = Number(new URL(url).searchParams.get('start'))
+      const positions = Array.from({ length: 10 }, (_, i) => ({ ...page.positions[0], id: String(start + i + 1), canonicalPositionUrl: `https://explore.jobs.netflix.net/careers/job/${start + i + 1}` }))
+      return json(JSON.stringify({ count: 9000, positions }))
+    }) as unknown as typeof fetch
+    // No search words: 20 pages and 8 bodies would be 28 requests; never more than the budget of 40 including robots.txt.
+    await eightfold.fetch('explore.jobs.netflix.net_netflix.com', { sleep: async () => {} })
+    expect(api).toBeLessThanOrEqual(39)
   })
 
   it('refuses a token that is not a host and a domain', async () => {
