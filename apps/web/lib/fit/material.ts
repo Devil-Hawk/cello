@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AdminClient } from '@/lib/harness/types'
 import { getBaseResume } from '@/lib/resume/store'
-import { savedAnswers } from '@/lib/workflows/answers.stub'
+import { savedAnswers } from '@/lib/workflows/answers'
 import type { EvidenceSource } from './types'
 
 export interface MaterialSource {

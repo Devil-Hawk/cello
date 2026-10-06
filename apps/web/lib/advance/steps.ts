@@ -14,7 +14,7 @@ import { detectApplyTarget } from '@/lib/ats-apply/detect'
 import { assertAllowedHost, fetchJson } from '@/lib/ats'
 import { resolveFieldValues, type FormField } from '@/lib/answers'
 import type { NeedsReason } from '@/lib/pipeline/types'
-import { currentResume } from './documents.stub'
+import { currentResume } from './documents'
 
 export interface StepApp {
   id: string

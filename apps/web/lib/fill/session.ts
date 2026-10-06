@@ -5,7 +5,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { classify, resolveFieldValues, type FormField, type Resolved } from '@/lib/answers'
-import { currentResume } from '@/lib/advance/documents.stub'
+import { currentResume } from '@/lib/advance/documents'
 import { eligibility, type EligibleField } from './eligibility'
 import { portalOf } from './portals'
 import type { ServerField } from './wire'

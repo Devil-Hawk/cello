@@ -12,7 +12,7 @@ import { readFindNewRoles } from '@/lib/ingest/status'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { readShortlist, todayUtc } from '@/lib/scoring'
 import { OnJobs } from '@/lib/scoring/person-roles-query'
-import { readNeedsYou } from '@/lib/today/needs-you.stub'
+import { loadNeedsYou } from '@/lib/needs-you'
 import { checkLine, STAGE_WORDS, type SentRow, type SinceChange } from '@/components/today/logic'
 import type { TodayData } from '@/components/today/today-view'
 import type { PickItem, RoleItem } from '@/components/roles/types'
@@ -74,7 +74,7 @@ export async function readToday(db: Db, userId: string, nowMs = Date.now()): Pro
     db.from('profiles').select('preferences').eq('id', userId).maybeSingle(),
     readFindNewRoles(db as never, now).catch(() => null),
     admin ? loadApiKeys(admin as never, userId).catch(() => null) : Promise.resolve(null),
-    readNeedsYou().catch(() => []),
+    admin ? loadNeedsYou(admin as never, userId, now).then((l) => l.rows).catch(() => []) : Promise.resolve([]),
   ])
   if (list.error) return failed(nowMs)
 

@@ -29,7 +29,7 @@ export interface TodayData {
   canReadReplies: boolean
   /** The person has a model, so Cello can rank roles. */
   hasModel: boolean
-  /** What waits on the person, from K20's list (lib/today/needs-you.stub.ts until it is on main). */
+  /** What waits on the person, from lib/needs-you. */
   needs: NeedsYouRow[]
   now: number
 }

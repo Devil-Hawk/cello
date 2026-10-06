@@ -2,6 +2,7 @@
 // stored verdicts and corrections, and who may run the model and how often. Fake store and a fake door, no network.
 
 import { describe, expect, it, vi } from 'vitest'
+vi.mock('@/lib/workflows/answers', () => ({ savedAnswers: async () => [] }))
 import { artifactWorld } from '@/lib/artifacts/testing'
 import type { AdminClient } from '@/lib/harness/types'
 import type { ModelDoor, Rung } from '@/lib/models/doors.types'

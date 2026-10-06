@@ -13,7 +13,7 @@ import type { AdminClient } from '@/lib/harness/types'
 import { readLearnings } from '@/lib/learning/read'
 import { formatKeptBlock } from '@/lib/learning/store'
 import { getBaseResume } from '@/lib/resume/store'
-import { savedAnswers, type SavedAnswer } from '../answers.stub'
+import { savedAnswers, type SavedAnswer } from '../answers'
 import { gatherNetwork, type NetworkLine } from './network'
 
 export interface Gathered {

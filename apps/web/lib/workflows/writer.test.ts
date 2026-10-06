@@ -29,6 +29,8 @@ const sources = vi.hoisted(() => ({
   })),
 }))
 vi.mock('@/lib/outreach/sources', () => ({ loadOutreachSources: sources.loadOutreachSources }))
+// No saved answers unless a test says so; the real read needs a database.
+vi.mock('@/lib/workflows/answers', () => ({ savedAnswers: async () => [] }))
 // What the person kept: a test sets `learned` to put a writing preference in front of the Writer.
 const learned = vi.hoisted(() => ({ items: [] as { kind: string; effect: string; status: string; origin: string; statement: string; params: Record<string, unknown> }[] }))
 vi.mock('@/lib/learning/read', () => ({ readLearnings: async () => ({ ok: true, items: learned.items }) }))
