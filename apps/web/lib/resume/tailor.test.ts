@@ -1,0 +1,114 @@
+import { describe, expect, it } from 'vitest'
+import { applyTailorPatch } from './tailor'
+import { ResumeSchema, type TailorPatch } from './schema'
+import { CANONICAL_RESUME } from './test-fixtures'
+
+const base = ResumeSchema.parse({
+  ...CANONICAL_RESUME,
+  skills: [
+    { name: 'Languages', keywords: ['Go', 'TypeScript', 'C++'] },
+    { name: 'Platforms', keywords: ['Google Cloud', 'Kafka'] },
+  ],
+  meta: { cello: { templateId: 'classic', sectionOrder: ['skills', 'work'] } },
+})
+
+const empty: TailorPatch = { summary: '', skills: [], work: [], projects: [] }
+const patch = (over: Partial<TailorPatch>): TailorPatch => ({ ...empty, ...over })
+
+describe('applyTailorPatch', () => {
+  it('rewrites a summary and highlights that stay inside the base', () => {
+    const { resume, warnings } = applyTailorPatch(
+      base,
+      patch({
+        summary: 'Engineer with 8 years building data platforms.',
+        work: [{ index: 0, highlights: ['Led a team of 6 engineers on data platforms.'] }],
+      })
+    )
+    expect(resume.basics.summary).toBe('Engineer with 8 years building data platforms.')
+    expect(resume.work[0].highlights).toEqual(['Led a team of 6 engineers on data platforms.'])
+    expect(warnings).toEqual([])
+  })
+
+  it('cannot change identity: employers, titles, dates, education, template and order survive', () => {
+    const { resume } = applyTailorPatch(
+      base,
+      patch({ work: [{ index: 0, highlights: ['Led a team of 6 engineers.'] }] })
+    )
+    expect(resume.work.map((w) => [w.name, w.position, w.startDate, w.endDate, w.current])).toEqual(
+      base.work.map((w) => [w.name, w.position, w.startDate, w.endDate, w.current])
+    )
+    expect(resume.education).toEqual(base.education)
+    expect(resume.basics.name).toBe(base.basics.name)
+    expect(resume.meta.cello.templateId).toBe('classic')
+    expect(resume.meta.cello.sectionOrder).toEqual(['skills', 'work'])
+    expect(resume.meta.cello.structuredBy).toBe('tailor')
+  })
+
+  it('ignores an index that does not exist', () => {
+    const { resume } = applyTailorPatch(base, patch({ work: [{ index: 9, highlights: ['Anything.'] }] }))
+    expect(resume.work).toEqual(base.work)
+  })
+
+  it('reverts an entry that invents a fact, and says so', () => {
+    const { resume, warnings } = applyTailorPatch(
+      base,
+      patch({ work: [{ index: 0, highlights: ['Directed 40 engineers at Initech.'] }] })
+    )
+    expect(resume.work[0].highlights).toEqual(base.work[0].highlights)
+    expect(warnings[0]).toMatch(/dropped because they are not in your resume/)
+    expect(warnings[0]).toMatch(/Initech/)
+  })
+
+  it('reverts an invented summary', () => {
+    const { resume, warnings } = applyTailorPatch(base, patch({ summary: 'Former Director of Engineering at Google.' }))
+    expect(resume.basics.summary).toBe(base.basics.summary)
+    expect(warnings).toHaveLength(1)
+  })
+
+  describe('skills', () => {
+    it('drops a keyword the base never mentions, with a warning', () => {
+      const { resume, warnings } = applyTailorPatch(
+        base,
+        patch({ skills: [{ name: 'Languages', keywords: ['Go', 'kubernetes'] }] })
+      )
+      expect(resume.skills).toEqual([{ name: 'Languages', keywords: ['Go'] }])
+      expect(warnings[0]).toMatch(/kubernetes/)
+    })
+
+    it('does not accept "Go" from inside "Google"', () => {
+      const googleOnly = ResumeSchema.parse({
+        basics: { name: 'Ada' },
+        skills: [{ name: 'Cloud', keywords: ['Google Cloud'] }],
+      })
+      const { resume } = applyTailorPatch(googleOnly, patch({ skills: [{ name: 'Cloud', keywords: ['Go', 'Google Cloud'] }] }))
+      expect(resume.skills[0].keywords).toEqual(['Google Cloud'])
+    })
+
+    it('keeps "C++" when the base has it', () => {
+      const { resume } = applyTailorPatch(base, patch({ skills: [{ name: 'Languages', keywords: ['C++', 'Go'] }] }))
+      expect(resume.skills[0].keywords).toEqual(['C++', 'Go'])
+    })
+
+    it('keeps a keyword that appears in the base as a whole token outside the skills list', () => {
+      const { resume } = applyTailorPatch(base, patch({ skills: [{ name: 'Languages', keywords: ['engineers'] }] }))
+      expect(resume.skills[0].keywords).toEqual(['engineers'])
+    })
+
+    it('renames an invented group to the base group at that position', () => {
+      const { resume } = applyTailorPatch(base, patch({ skills: [{ name: 'Quantum', keywords: ['Go'] }] }))
+      expect(resume.skills[0].name).toBe('Languages')
+    })
+
+    it('drops a group left with no keywords', () => {
+      const { resume } = applyTailorPatch(
+        base,
+        patch({ skills: [{ name: 'Languages', keywords: ['Go'] }, { name: 'Ops', keywords: ['terraform'] }] })
+      )
+      expect(resume.skills).toHaveLength(1)
+    })
+
+    it('keeps the base skills when the patch has none', () => {
+      expect(applyTailorPatch(base, empty).resume.skills).toEqual(base.skills)
+    })
+  })
+})

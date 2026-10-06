@@ -578,6 +578,11 @@ const AtsScoreSchema = z.object({
 })
 export const ResumeOptimizerOutput = AtsScoreSchema.extend({
   suggestedRewrite: z.string(),
+  /** The merged structured Resume (lib/resume/schema.ts). Left loose here so
+   *  this contract does not import the resume module. */
+  resume: z.unknown().optional(),
+  /** Tailoring suggestions dropped because they were not in the base resume. */
+  warnings: z.array(z.string()).optional(),
   rescore: AtsScoreSchema,
   tokensUsed: z.number().int().nonnegative(),
   /** Unused by the current ACT-ONLY unit wrapper (lib/harness/registry.ts
