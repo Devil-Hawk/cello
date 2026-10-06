@@ -433,3 +433,18 @@ describe('readSite: a read that ran out of requests or time did not finish, and 
     expect(read.reason).toBe('no_roles')
   })
 })
+
+describe('the rendered tier and the roles outside the targets', () => {
+  it('lists every role the page shows for sightings, so a stored role outside the targets is not counted as gone', async () => {
+    const careers = 'https://jobs.uber.com/'
+    const shell = '<html><body><div id="root"></div></body></html>'
+    const post = (title: string, n: number) =>
+      `<script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', title, url: `https://jobs.uber.com/jobs/${n}`, datePosted: '2026-10-01' })}</script>`
+    const html = `<html><body><div id="root"><h1>Jobs</h1>${'<p>text</p>'.repeat(60)}${post('Data Engineer', 1)}${post('Marketing Manager', 2)}</div></body></html>`
+    const fetchPage = vi.fn(async (url: string) => ({ html, finalUrl: url, rendered: true }))
+    const read = await readSite(company('Uber', 'uber.com', careers), { fetcher: fakeFetcher({ [careers]: shell }, 'scheduled'), fetchPage, model: null })
+    expect(read.jobs.map((j) => j.title)).toEqual(['Data Engineer'])
+    expect(read.complete).toBe(true)
+    expect(read.listedIds).toHaveLength(2)
+  })
+})

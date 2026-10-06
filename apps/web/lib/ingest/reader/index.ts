@@ -384,7 +384,8 @@ async function readRendered(input: SiteInput, deps: SiteDeps, f: SiteFetcher): P
     const jobs = own.filter((j) => matchesTargets(j.title, targets))
     if (own.length > 0) {
       tried.push({ tier: read.modelCalls > 0 ? 'model' : 'rendered', outcome: 'roles' })
-      return { result: { tier: read.modelCalls > 0 ? 'model' : 'rendered', jobs, complete: read.complete && own.length === read.jobs.length }, tried, checked: [] }
+      // `jobs` is only the roles inside the person's targets; sightings must see every role the page lists, or a stored role outside them would be counted as gone.
+      return { result: { tier: read.modelCalls > 0 ? 'model' : 'rendered', jobs, complete: read.complete && own.length === read.jobs.length, listedIds: own.map((j) => j.externalId) }, tried, checked: [] }
     }
     const modelSkipped = read.reason === 'model_unavailable' || read.reason === 'model_limit' ? read.reason : undefined
     tried.push({ tier: 'model', outcome: modelSkipped ? 'skipped' : 'none' })
