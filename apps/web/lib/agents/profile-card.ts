@@ -5,7 +5,7 @@
 // compact on purpose (ids and counts, never documents), so the prompt stays stable and
 // cacheable; the resume itself is read with my_profile when it is needed.
 
-import { readStandingPreferences } from '@/lib/insights/store'
+import { keptLearningsBlock } from '@/lib/learning/read'
 import { resolveTargeting } from '@/lib/targeting'
 import type { AdminClient } from '@/lib/harness/types'
 
@@ -27,7 +27,7 @@ export async function profileCard(admin: AdminClient, userId: string, now: Date 
   for (const a of (apps as { stage: string }[] | null) ?? []) byStage[a.stage] = (byStage[a.stage] ?? 0) + 1
 
   const locations = Array.isArray(prefs.preferredLocations) ? (prefs.preferredLocations as unknown[]).filter((x): x is string => typeof x === 'string') : []
-  const standing = (await readStandingPreferences(admin, userId).catch(() => '')).trim()
+  const standing = (await keptLearningsBlock(userId).catch(() => '')).trim()
 
   const lines = [
     'ABOUT THE PERSON (from their own record):',

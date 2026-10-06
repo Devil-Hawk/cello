@@ -8,7 +8,8 @@
 import { HumanMessage } from '@langchain/core/messages'
 import { z } from 'zod'
 import { getApplication } from '@/lib/harness/copilot-tools'
-import { ingestInsight, MAX_PREFERENCE_LENGTH } from '@/lib/insights/store'
+import { readLearnings } from '@/lib/learning/read'
+import { proposeLearning, MAX_PREFERENCE_LENGTH } from '@/lib/learning/store'
 import { resolveTargeting } from '@/lib/targeting'
 import { renderTaste, TASTE_REACTIONS } from '../backends'
 import { clip, defineTool, readFields, toolFix, writeFields, type CelloTool, type ToolMeta } from './common'
@@ -43,14 +44,14 @@ export const myProfile = defineTool({
       ...(resumeText ? {} : { note: 'No resume on file. Ask the person to upload one in Settings.' }),
     })
     const preferences = async () => {
-      const { data: insights } = await ctx.admin.from('insights').select('statement').eq('user_id', ctx.userId).eq('kind', 'preference').eq('status', 'active').order('updated_at', { ascending: false }).limit(a.limit)
+      const read = await readLearnings(ctx.userId, 'active')
       return {
         preferred_locations: Array.isArray(prefs.preferredLocations) ? (prefs.preferredLocations as unknown[]).slice(0, a.limit) : [],
         remote_preference: typeof prefs.remotePreference === 'string' ? prefs.remotePreference : null,
         functions: targeting.functions,
         seniority: targeting.seniority,
         countries: targeting.countries,
-        stated: ((insights as { statement: string }[] | null) ?? []).map((i) => i.statement),
+        stated: read.ok ? read.items.filter((l) => l.kind === 'preference').slice(0, a.limit).map((l) => l.statement) : [],
       }
     }
     const dealbreakers = () => ({
@@ -141,11 +142,11 @@ export const remember = defineTool({
       return toolFix('That quote is not in anything the person wrote in this conversation.', 'Ask the person to say it, or confirm it in their own words, then call remember with their exact words.')
     }
     try {
-      await ingestInsight(ctx.admin, ctx.userId, { kind: 'preference', statement: a.fact.trim(), source: 'user_stated' })
+      await proposeLearning(ctx.userId, a.fact, a.user_quote, { isDemo: ctx.isDemo })
     } catch (e) {
       return toolFix(e instanceof Error ? e.message : 'Could not save that.', 'Shorten the fact to one sentence and try again.')
     }
-    return { remembered: clip(a.fact, 200), saved_in: ['preferences'], note: 'Saved. Cello will use it in later conversations without being told again.' }
+    return { remembered: clip(a.fact, 200), saved_in: ['what Cello learned'], note: 'Noted. It waits under What Cello learned until the person keeps it, and acts on nothing before that.' }
   },
 }) satisfies CelloTool
 

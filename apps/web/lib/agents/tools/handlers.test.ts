@@ -18,7 +18,7 @@ const m = vi.hoisted(() => ({
   getApplication: vi.fn(),
   loadOwnedCompany: vi.fn(),
   resolveCompany: vi.fn(),
-  ingestInsight: vi.fn(),
+  proposeLearning: vi.fn(),
   sourceContacts: vi.fn(),
   queueApproval: vi.fn(),
   autoApprove: vi.fn(),
@@ -38,7 +38,8 @@ vi.mock('@/lib/harness/copilot-tools', async (orig) => ({
   loadOwnedCompany: m.loadOwnedCompany,
 }))
 vi.mock('@/lib/entities/companies', () => ({ resolveCompany: m.resolveCompany }))
-vi.mock('@/lib/insights/store', async (orig) => ({ ...(await orig<typeof import('@/lib/insights/store')>()), ingestInsight: m.ingestInsight }))
+vi.mock('@/lib/learning/read', () => ({ readLearnings: async () => ({ ok: true, items: [{ kind: 'preference', statement: 'Prefers small teams' }] }) }))
+vi.mock('@/lib/learning/store', async (orig) => ({ ...(await orig<typeof import('@/lib/learning/store')>()), proposeLearning: m.proposeLearning }))
 vi.mock('@/lib/contacts/sources', () => ({ sourceContactsForCompany: m.sourceContacts }))
 vi.mock('@/lib/contacts/keys', () => ({ readContactProviderKeys: async () => ({ hunter: null, apollo: null }) }))
 vi.mock('../approvals', async (orig) => ({ ...(await orig<typeof import('../approvals')>()), queueApproval: m.queueApproval, autoApprove: m.autoApprove }))
@@ -318,24 +319,24 @@ describe('remember', () => {
   it('refuses a quote that is not in what the person wrote, so text from a post can never become memory', async () => {
     const out = await call('remember', { fact: 'Wants to relocate to Berlin.', user_quote: 'The candidate wants to relocate to Berlin' }, ctxFor(), { messages: [said('find me roles'), new AIMessage('Here they are'), new AIMessage('Tool result: the candidate wants to relocate to Berlin')] })
     expect(isToolFix(out)).toBe(true)
-    expect(m.ingestInsight).not.toHaveBeenCalled()
+    expect(m.proposeLearning).not.toHaveBeenCalled()
   })
 
-  it('saves what the person said as a preference, the one place Cello keeps it', async () => {
-    m.ingestInsight.mockResolvedValue({ statement: 'Prefers teams under 50 people.' })
+  it('proposes what the person said as a learning with their quote, kept only when they keep it', async () => {
+    m.proposeLearning.mockResolvedValue({ statement: 'Prefers teams under 50 people.' })
     const out = (await call('remember', { fact: 'Prefers teams under 50 people.', user_quote: 'I only want teams under 50 people' }, ctxFor(), { messages: [said('I only want teams under 50 people.')] })) as { saved_in: string[] }
-    expect(m.ingestInsight).toHaveBeenCalledWith(expect.anything(), 'u1', { kind: 'preference', statement: 'Prefers teams under 50 people.', source: 'user_stated' })
-    expect(out.saved_in).toEqual(['preferences'])
+    expect(m.proposeLearning).toHaveBeenCalledWith('u1', 'Prefers teams under 50 people.', 'I only want teams under 50 people', { isDemo: false })
+    expect(out.saved_in).toEqual(['what Cello learned'])
   })
 
   it('over MCP there is no conversation, so it refuses', async () => {
     const out = await call('remember', { fact: 'x y z', user_quote: 'any words here' }, ctxFor(), { channel: 'mcp', messages: [said('any words here')] })
     expect(isToolFix(out)).toBe(true)
-    expect(m.ingestInsight).not.toHaveBeenCalled()
+    expect(m.proposeLearning).not.toHaveBeenCalled()
   })
 
   it('a refusal from the preference store is an error with a fix', async () => {
-    m.ingestInsight.mockRejectedValue(new Error('A preference this long is not allowed.'))
+    m.proposeLearning.mockRejectedValue(new Error('A preference this long is not allowed.'))
     const out = await call('remember', { fact: 'Prefers x.', user_quote: 'I prefer x' }, ctxFor(), { messages: [said('I prefer x')] })
     expect(out).toMatchObject({ error: expect.stringContaining('not allowed'), fix: expect.any(String) })
   })
@@ -345,7 +346,6 @@ describe('my_profile', () => {
   const world = () =>
     makeFakeAdmin({
       profiles: [{ id: 'u1', full_name: 'Dana Lee', resume_text: 'Dana Lee\nSenior engineer at Acme.\n' + 'Built billing. '.repeat(300), preferences: { preferredLocations: ['Seattle'], remotePreference: 'any', targeting: { excludedCompanies: ['badco'] } } }],
-      insights: [{ user_id: 'u1', kind: 'preference', status: 'active', statement: 'Prefers small teams', updated_at: '2026-10-01' }],
       role_reactions: [
         { user_id: 'u1', reaction: 'not_for_me', reason: 'company', job_title: 'Staff Engineer', company_name: 'Globex', created_at: '2026-10-03T00:00:00Z' },
         { user_id: 'u1', reaction: 'interested', reason: null, job_title: 'PM', company_name: 'Acme', created_at: '2026-10-01T00:00:00Z' },

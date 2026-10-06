@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/lib/insights/store', () => ({ readStandingPreferences: async () => 'WHAT THIS USER HAS TOLD YOU THEY WANT:\n- Prefers small teams' }))
+vi.mock('@/lib/learning/read', () => ({ keptLearningsBlock: async () => 'WHAT THIS USER HAS TOLD YOU THEY WANT:\n- Prefers small teams' }))
 
 import { profileCard } from './profile-card'
 import { makeFakeAdmin } from './testing/fake-admin'
