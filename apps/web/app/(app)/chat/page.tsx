@@ -5,7 +5,11 @@ import { requireChat } from './gate'
 
 export const dynamic = 'force-dynamic'
 
-export default async function ChatPage({ searchParams }: { searchParams: { ask?: string } }) {
+// "?about=role:<id>" is a thing the person was looking at: it shows as a chip, and attaches when the first turn is sent.
+const ABOUT = /^([a-z]+):([\w.:-]{1,200})$/
+
+export default async function ChatPage({ searchParams }: { searchParams: { ask?: string; about?: string } }) {
   const person = await requireChat()
-  return <ChatView chatId={null} person={person} initialAsk={searchParams.ask?.slice(0, 2000)} />
+  const about = ABOUT.exec(searchParams.about ?? '')
+  return <ChatView chatId={null} person={person} initialAsk={searchParams.ask?.slice(0, 2000)} initialAbout={about ? { kind: about[1], ref: about[2] } : undefined} />
 }

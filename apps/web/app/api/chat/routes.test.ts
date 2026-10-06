@@ -22,6 +22,7 @@ import { DELETE as untile, POST as tile } from './[id]/attachments/route'
 import { POST as stop } from './[id]/stop/route'
 import { GET as suggestions } from './suggest/route'
 import { GET as made } from './made/route'
+import { GET as objectName } from './object/route'
 
 const UUID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const ctx = (id: string) => ({ params: { id } })
@@ -141,5 +142,17 @@ describe('stop', () => {
     db.tables.agent_tasks.push({ id: 'w3', user_id: 'u1', turn_id: 't2', finished_at: null }, { id: 'w4', user_id: 'u1', turn_id: 't2', finished_at: null })
     expect(await (await stop(json('/api/chat/c1/stop', 'POST', { turn_id: 't2' }))).json()).toEqual({ ok: true, stopped: 2 })
     expect(await (await stop(json('/api/chat/c1/stop', 'POST', { turn_id: 't9' }))).json()).toEqual({ ok: true, stopped: 0 })
+  })
+})
+
+describe('object', () => {
+  it('names a thing the person owns, and answers not found for another kind of thing or another person\'s', async () => {
+    const ok = await objectName(req(`/api/chat/object?kind=role&ref=${UUID(1)}`))
+    expect(await ok.json()).toEqual({ kind: 'role', ref: UUID(1), name: 'A thing' })
+    expect((await objectName(req('/api/chat/object?kind=project&ref=x'))).status).toBe(404)
+    expect((await objectName(req(`/api/chat/object?kind=role&ref=not-an-id`))).status).toBe(404)
+    state.user = { id: 'u2' }
+    db.tables.instance_flags[0].on = true
+    expect((await objectName(req(`/api/chat/object?kind=role&ref=${UUID(1)}`))).status).toBe(404)
   })
 })

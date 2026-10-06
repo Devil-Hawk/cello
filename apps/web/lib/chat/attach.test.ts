@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
-import { activeTiles, attach, CELLO_ATTACHES_PER_TURN, detach, ledgerKey, type AttachBy } from './attach'
+import { activeTiles, attach, CELLO_ATTACHES_PER_TURN, detach, ledgerKey, refFromId, type AttachBy } from './attach'
 import { refId, type ObjectReader } from './types'
 
 // attach's default reader is the stub, which loads the scoring module; every test here passes its own reader.
@@ -123,5 +123,16 @@ describe('detach', () => {
     const db = setup([{ id: 'a1', user_id: 'u2', chat_id: uuid(901), kind: 'role', ref: { id: uuid(1) }, position: 1, removed_at: null }])
     expect(await detach(db, 'u1', uuid(901), 'a1')).toMatchObject({ ok: false })
     expect(db.tables.chat_attachments[0].removed_at).toBeNull()
+  })
+})
+
+describe('refFromId', () => {
+  it('builds the stored ref for a kind and its id, and refuses anything a chat cannot hold', () => {
+    expect(refFromId('role', uuid(1))).toEqual({ id: uuid(1) })
+    expect(refFromId('chat', uuid(2))).toEqual({ chat_id: uuid(2) })
+    expect(refFromId('made', uuid(3))).toEqual({ table: 'artifacts', id: uuid(3) })
+    expect(refFromId('preview', uuid(4))).toBeNull()
+    expect(refFromId('role', 'not-an-id')).toBeNull()
+    expect(refFromId('project', uuid(5))).toBeNull()
   })
 })

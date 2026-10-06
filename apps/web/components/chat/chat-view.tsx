@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Menu } from 'lucide-react'
+import { Menu, X } from 'lucide-react'
 import { Markdown } from '@/components/chat/markdown'
 import { Composer } from '@/components/chat/composer'
 import { AnswerParts, type Named } from '@/components/chat/parts'
@@ -26,6 +26,8 @@ export interface ChatViewProps {
   person: { name: string }
   /** A question carried in by /ask?ask= or a quick chat: put in the compose box, never sent for the person. */
   initialAsk?: string
+  /** A thing the person was looking at: a chip in the compose box that attaches when the first turn is sent. */
+  initialAbout?: { kind: string; ref: string }
 }
 
 // ponytail: Send is switched on by the stream route of the engine package; until then the compose box says so.
@@ -58,7 +60,7 @@ const seconds = (rows: ChatPageData['tasks']) => {
   return starts.length ? Math.max(0, Math.round((Math.max(...ends) - Math.min(...starts)) / 1000)) : 0
 }
 
-export function ChatView({ chatId, person, initialAsk }: ChatViewProps) {
+export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewProps) {
   const router = useRouter()
   const [chats, setChats] = useState<RailChat[]>([])
   const [page, setPage] = useState<ChatPageData | null>(null)
@@ -68,6 +70,7 @@ export function ChatView({ chatId, person, initialAsk }: ChatViewProps) {
   const [panel, setPanel] = useState<string | null>(null)
   const [railOpen, setRailOpen] = useState(false)
   const [quoted, setQuoted] = useState<{ text: string; turn_id: string } | null>(null)
+  const [chips, setChips] = useState<{ kind: string; ref: string; name: string }[]>([])
   const [selection, setSelection] = useState<{ text: string; turnId: string; x: number; y: number } | null>(null)
   const poll = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -103,6 +106,12 @@ export function ChatView({ chatId, person, initialAsk }: ChatViewProps) {
       if (poll.current) clearInterval(poll.current)
     }
   }, [running, loadPage])
+
+  // A chip is read under the person's rights before it is shown; one that is not theirs never appears.
+  useEffect(() => {
+    if (!initialAbout) return
+    void getJson<{ kind: string; ref: string; name: string }>(`/api/chat/object?kind=${encodeURIComponent(initialAbout.kind)}&ref=${encodeURIComponent(initialAbout.ref)}`).then((o) => o && setChips([o]))
+  }, [initialAbout])
 
   const empty = !chatId || (page !== null && page.turns.length === 0)
   useEffect(() => {
@@ -222,7 +231,23 @@ export function ChatView({ chatId, person, initialAsk }: ChatViewProps) {
         </div>
 
         <div className="mx-auto w-full max-w-3xl px-4 pb-3">
-          <Composer value={draft} onChange={setDraft} onSend={() => undefined} onStop={() => undefined} running={false} notice={SEND_NOTICE} quoted={quoted} onRemoveQuote={() => setQuoted(null)} />
+          <Composer value={draft} onChange={setDraft} onSend={() => undefined} onStop={() => undefined} running={false} notice={SEND_NOTICE} quoted={quoted}
+            onRemoveQuote={() => setQuoted(null)}
+            above={
+              chips.length > 0 ? (
+                <ul className="mb-2 flex flex-wrap gap-2" aria-label="Will be attached when you send">
+                  {chips.map((c) => (
+                    <li key={`${c.kind}:${c.ref}`} className="flex items-center gap-1 rounded-control border border-border bg-muted py-0.5 pl-2 pr-1 text-caption text-foreground">
+                      <span className="max-w-[14rem] truncate">{c.name}</span>
+                      <button type="button" aria-label={`Remove ${c.name}`} className="inline-flex h-5 w-5 items-center justify-center rounded-control text-muted-foreground hover:bg-card hover:text-foreground" onClick={() => setChips(chips.filter((x) => x !== c))}>
+                        <X className="h-3 w-3" aria-hidden />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null
+            }
+          />
         </div>
       </main>
 

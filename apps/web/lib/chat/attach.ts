@@ -25,6 +25,14 @@ const REF_SHAPES: Record<AttachKind, z.ZodType<StoredRef>> = {
   preview: z.strictObject({ employer_id: id, posting_key: z.string().min(1).max(200) }),
 }
 
+/** The stored ref for a kind and the id string `refId` gives it, or null when the pair is not something a chat can hold. */
+export function refFromId(kind: string, id: string): StoredRef | null {
+  const k = ATTACH_KINDS.find((x) => x === kind)
+  const shaped: Record<string, unknown> | null = !k || k === 'preview' ? null : k === 'chat' ? { chat_id: id } : k === 'made' ? { table: 'artifacts', id } : { id }
+  const parsed = k && shaped ? REF_SHAPES[k].safeParse(shaped) : null
+  return parsed?.success ? parsed.data : null
+}
+
 export const CELLO_ATTACHES_PER_TURN = 12
 
 /** The key a turn's ledger uses for a thing a tool returned. */
