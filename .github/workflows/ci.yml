@@ -138,6 +138,57 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key' }}
 
+      - name: Bundle check (three stays out of first-load JS, the layer stays small)
+        run: node apps/web/scripts/check-bundle.mjs
+
+  lighthouse:
+    name: Lighthouse
+    runs-on: ubuntu-latest
+    needs: [lint-and-typecheck]
+    env:
+      # Fixture pages hold made-up data and are on only for this build.
+      CELLO_FIXTURES: '1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key' }}
+
+      - name: Start the app
+        run: |
+          nohup pnpm --filter @cello/web start > start.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:3000/fixtures/today > /dev/null && exit 0
+            sleep 2
+          done
+          cat start.log
+          exit 1
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key' }}
+
+      - name: Lighthouse budgets (mobile preset, median of 3)
+        run: npx -y @lhci/cli@0.14.0 autorun --config=apps/web/lighthouserc.json
+
   sql-checks:
     name: SQL checks
     runs-on: ubuntu-latest
