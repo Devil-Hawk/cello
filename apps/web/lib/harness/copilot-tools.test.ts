@@ -57,7 +57,7 @@ type Row = Record<string, unknown>
 class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
   private rows: Row[]
   // Full table set, so an embedded-relation filter (ownedJobsQuery's own
-  // `.eq('viewer_id', userId)`) can join company_id -> companies
+  // `.eq('companies.user_id', userId)`) can join company_id -> companies
   // the way PostgREST's `companies!inner(...)` embed actually does — a plain
   // `r['companies.user_id']` lookup would just be undefined for every row.
   constructor(
@@ -159,8 +159,7 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
 function fakeAdmin(tables: Record<string, Row[]>, rpc: Record<string, Row[]> = {}): AdminClient {
   const admin = {
     from(table: string) {
-      // person_jobs is the view over jobs
-      return new FakeQuery([...(tables[table === 'person_jobs' ? 'jobs' : table] ?? [])], tables)
+      return new FakeQuery([...(tables[table] ?? [])], tables)
     },
     async rpc(fn: string) {
       return { data: rpc[fn] ?? [], error: null }

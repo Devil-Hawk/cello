@@ -15,7 +15,6 @@ import type { OutreachDraftInput } from '@/lib/harness/agents/outreach'
 import { runUnitOnce } from '@/lib/graph/oneshot'
 import { fitHighlights, fitRowOf } from '@/lib/scoring/read'
 import { setTraceInput, setTraceMeta, setTraceOutput, withTrace } from '@/lib/trace/spans'
-import { personJobs } from '@/lib/jobs/person-jobs'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60

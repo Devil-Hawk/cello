@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
+
+// The quick chat in the shell asks for the router.
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: () => undefined }), usePathname: () => '/' }))
+
 import { Shell } from './shell'
 
 const user = { email: 'sam@example.com', fullName: 'Sam Rivera', avatarUrl: null }

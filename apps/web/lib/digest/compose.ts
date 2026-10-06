@@ -38,8 +38,7 @@ interface JobRow {
   title: string
   url: string | null
   is_new: boolean | null
-  company_id: string | null
-  viewer_company_name: string | null
+  company_id: string
   discovered_at: string | null
 }
 
@@ -114,17 +113,17 @@ export async function composeDigest(
   // 3) The user's applications (for stale + prep cuts). Join job title.
   const { data: appData } = await admin
     .from('applications')
-    .select('id, job_id, stage, updated_at, applied_at, jobs(id, title, company_id, employer:company_directory(name))')
+    .select('id, job_id, stage, updated_at, applied_at, jobs(id, title, company_id)')
     .eq('user_id', userId)
   const apps = (appData as unknown as (AppRow & {
-    jobs: { id: string; title: string; company_id: string | null; employer: { name: string | null } | null } | null
+    jobs: { id: string; title: string; company_id: string } | null
   })[] | null) ?? []
 
   const staleApps: DigestStaleApp[] = []
   const prepReady: DigestPrepReady[] = []
   for (const app of apps) {
     const jobTitle = app.jobs?.title ?? 'Untitled role'
-    const cName = (app.jobs?.company_id ? companyName.get(app.jobs.company_id) : null) ?? app.jobs?.employer?.name ?? null
+    const cName = app.jobs?.company_id ? companyName.get(app.jobs.company_id) ?? null : null
     if (PREP_STAGES.includes(app.stage as PipelineStage)) {
       prepReady.push({
         jobId: app.job_id,

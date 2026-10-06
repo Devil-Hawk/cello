@@ -14,6 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { ROLE_TAXONOMY } from '@/lib/jobs/role-taxonomy'
 import type { JobFunction } from '@/lib/jobs/classify'
 import { openRolesOnly } from '@/lib/jobs/freshness'
+import { personJobs } from '@/lib/jobs/person-jobs'
 import { fetchClientSafePreferences, markOnboarded } from '@/lib/preferences/client-safe'
 import { EMPTY_TARGETING, type Targeting } from '@/lib/targeting'
 import { applyRoleTargets, hasRoleTargets } from '@/lib/targeting/roles'
@@ -151,13 +152,15 @@ export interface WelcomeRole {
   postedAt: string | null
 }
 
+// The person's roles as the view gives them: the posting, with the person's own company for it.
 type Rows = Array<{
   id: string
   title: string
-  company_id: string | null
+  viewer_company_id: string | null
+  viewer_company_name: string | null
+  viewer_company_domain: string | null
   location: string | null
   posted_at: string | null
-  companies: { name: string | null; domain: string | null; logo_url: string | null } | null
 }>
 
 // The Jobs page types its query this way: the builder's generics are too deep
@@ -176,7 +179,7 @@ function openInsideTargets(query: unknown, t: Targeting): JobsQuery {
 export async function fitCount(supabase: SupabaseClient, t: Targeting): Promise<number | null> {
   if (!hasRoleTargets(t)) return null
   try {
-    const q = openInsideTargets(supabase.from('jobs').select('id', { count: 'exact', head: true }), t)
+    const q = openInsideTargets(personJobs(supabase).select('id', { count: 'exact', head: true }), t)
     const { count, error } = await q
     return error ? null : (count ?? 0)
   } catch {
@@ -188,7 +191,7 @@ export async function fitCount(supabase: SupabaseClient, t: Targeting): Promise<
 export async function rolesFind(supabase: SupabaseClient, t: Targeting, limit = 8): Promise<WelcomeRole[] | null> {
   try {
     const q = openInsideTargets(
-      supabase.from('jobs').select('id, title, company_id, location, posted_at, companies(name, domain, logo_url)'),
+      personJobs(supabase).select('id, title, viewer_company_id, viewer_company_name, viewer_company_domain, location, posted_at'),
       t,
     )
       .order('posted_at', { ascending: false, nullsFirst: false })
@@ -199,10 +202,10 @@ export async function rolesFind(supabase: SupabaseClient, t: Targeting, limit = 
     return ((data ?? []) as unknown as Rows).map((r) => ({
       id: r.id,
       title: r.title,
-      company: r.companies?.name ?? 'Employer',
-      companyId: r.company_id,
-      domain: r.companies?.domain ?? null,
-      logoUrl: r.companies?.logo_url ?? null,
+      company: r.viewer_company_name ?? 'Employer',
+      companyId: r.viewer_company_id,
+      domain: r.viewer_company_domain,
+      logoUrl: null,
       location: r.location,
       postedAt: r.posted_at,
     }))

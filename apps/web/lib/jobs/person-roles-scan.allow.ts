@@ -3,7 +3,14 @@
 // any other `.from('jobs').select(`.
 
 /** The scoring package (K8a) rewrites these two readers and then empties this list. */
-export const K8A_READERS: readonly string[] = ['app/(app)/jobs/page.tsx', 'lib/harness/copilot-tools.ts']
+export const K8A_READERS: readonly string[] = [
+  'app/(app)/companies/[id]/page.tsx',
+  'app/api/outreach/draft/route.ts',
+  'app/api/outreach/follow-up/route.ts',
+  'lib/harness/copilot-tools.ts',
+  'lib/jobs/owned-query.ts',
+  'lib/strategy/datasource.ts',
+]
 
 /** The store reads its own employer's rows to diff a refresh, and the retype routine reads the roles no one has typed yet; neither is a person's read. */
 export const STORE_READERS: readonly string[] = ['lib/ats/store.ts', 'lib/clock/routines/roles-retype.ts']

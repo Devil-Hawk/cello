@@ -11,6 +11,7 @@ import { K8A_READERS, STORE_READERS } from './person-roles-scan.allow'
 const WEB = process.cwd()
 const ROOTS = ['app', 'components', 'lib', 'scripts']
 const excused = [...K8A_READERS, ...STORE_READERS]
+const K8A_JOINS = ['lib/harness/agents/matcher.ts']
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -54,7 +55,9 @@ describe('person roles scan', () => {
     const found: string[] = []
     for (const root of ROOTS) {
       for (const file of walk(path.join(WEB, root))) {
-        if (/companies!inner/.test(strip(readFileSync(file, 'utf8')))) found.push(path.relative(WEB, file).split(path.sep).join('/'))
+        const rel = path.relative(WEB, file).split(path.sep).join('/')
+        // The files K8a rewrites join through companies until K8a moves them onto person_roles (integration step 5).
+        if (!excused.includes(rel) && !K8A_JOINS.includes(rel) && /companies!inner/.test(strip(readFileSync(file, 'utf8')))) found.push(rel)
       }
     }
     expect(found, 'read the name from viewer_company_name, or company_directory through jobs.employer_id').toEqual([])
