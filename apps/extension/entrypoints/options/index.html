@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="manifest.open_in_tab" content="true" />
+    <title>Cello options</title>
+    <link rel="stylesheet" href="../popup/style.css" />
+    <style>
+      body { width: auto; max-width: 520px; }
+      label { display: block; margin: 12px 0 4px; font-weight: 600; }
+      input { width: 100%; min-height: 44px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); font: inherit; }
+      input:focus-visible { outline: 2px solid #0f766e; outline-offset: 2px; }
+      .row { margin-top: 16px; }
+      #status { margin-top: 12px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Cello</h1>
+      <p>The address Cello runs at and the token that lets this browser fill your applications.</p>
+      <label for="origin">Cello address</label>
+      <input id="origin" type="url" autocomplete="off" spellcheck="false" />
+      <label for="token">Token</label>
+      <input id="token" type="password" autocomplete="off" spellcheck="false" />
+      <div class="row"><button id="save" class="primary" type="button">Save</button></div>
+      <p id="status" role="status"></p>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

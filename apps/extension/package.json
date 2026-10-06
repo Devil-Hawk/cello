@@ -2,16 +2,14 @@
   "name": "@cello/extension",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "description": "Fills job applications in your own browser.",
   "scripts": {
-    "postinstall": "wxt prepare",
     "dev": "wxt",
     "build": "wxt build",
     "zip": "wxt zip",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "wxt prepare && tsc --noEmit",
     "lint": "node scripts/lint-store.mjs",
-    "test": "vitest run --passWithNoTests",
+    "test": "wxt prepare && vitest run --passWithNoTests",
     "test:e2e": "playwright test",
     "clean": "rm -rf .output .wxt node_modules"
   },
