@@ -12,6 +12,8 @@ function deps(over: Partial<RelayDeps> = {}): RelayDeps & { calls: Array<[string
   return {
     calls,
     config: async () => cfg,
+    browserReady: async () => false,
+    runBrowser: async () => 'a browser reply',
     haveToken: async () => true,
     lock: async () => true,
     unlock: vi.fn(async () => undefined),
@@ -56,6 +58,28 @@ describe('the extension carrier', () => {
     expect(await relayTick(d)).toBe(false)
     expect(d.unlock).toHaveBeenCalledTimes(1)
     expect(d.keepAlive.stop).toHaveBeenCalledTimes(1)
+  })
+
+  it('serves R1 in this browser when R2 has nothing, and holds no long wait then', async () => {
+    const d = deps({
+      browserReady: async () => true,
+      call: (async (route: string, body: { rung?: string }) => {
+        d.calls.push([route, body])
+        return route.endsWith('claim') ? { job: body.rung === 'R1' ? job : null } : { ok: true }
+      }) as RelayDeps['call'],
+    })
+    expect(await relayTick(d)).toBe(true)
+    expect(d.calls.map(([, b]) => b)).toEqual([
+      { rung: 'R2', wait: 0 },
+      { rung: 'R1', wait: 0 },
+      { job_id: 'j1', claim_id: 'c1', text: 'a browser reply' },
+    ])
+  })
+
+  it('serves R1 alone when no model is set up on this computer', async () => {
+    const d = deps({ config: async () => null, browserReady: async () => true })
+    expect(await relayTick(d)).toBe(true)
+    expect(d.calls[0]![1]).toEqual({ rung: 'R1', wait: 0 })
   })
 
   it('knows two routes only: a fill route cannot be called through it', async () => {

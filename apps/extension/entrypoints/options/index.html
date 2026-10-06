@@ -32,6 +32,7 @@
       <select id="runtime"><option value="ollama">Ollama</option><option value="lmstudio">LM Studio</option></select>
       <label for="model">Model name</label>
       <input id="model" type="text" autocomplete="off" spellcheck="false" placeholder="llama3.1:8b" />
+      <label style="display:flex;align-items:center;gap:8px;min-height:44px;font-weight:400"><input id="browser-model" type="checkbox" style="width:20px;min-height:20px" /> Run small steps in this browser</label>
       <div class="row"><button id="save" class="primary" type="button">Save</button></div>
       <p id="status" role="status"></p>
     </main>

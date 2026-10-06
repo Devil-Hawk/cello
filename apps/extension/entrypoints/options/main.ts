@@ -7,6 +7,7 @@ const status = document.getElementById('status') as HTMLElement
 const relayToken = document.getElementById('relay-token') as HTMLInputElement
 const runtime = document.getElementById('runtime') as HTMLSelectElement
 const model = document.getElementById('model') as HTMLInputElement
+const browserModel = document.getElementById('browser-model') as HTMLInputElement
 const save = document.getElementById('save') as HTMLButtonElement
 
 async function load(): Promise<void> {
@@ -16,6 +17,7 @@ async function load(): Promise<void> {
   const local = await getLocal('relayLocal')
   runtime.value = local?.runtime ?? 'ollama'
   model.value = local?.model ?? ''
+  browserModel.checked = (await getLocal('relayBrowser')) === true
 }
 
 // This build can talk to the address it was built for, and to this computer. Any
@@ -41,7 +43,7 @@ save.addEventListener('click', () => {
       status.textContent = `This build cannot talk to ${url.origin}. Build the extension for that address, as the install guide says.`
       return
     }
-    await setLocal({ origin: url.origin, token: token.value.trim(), relayToken: relayToken.value.trim() })
+    await setLocal({ origin: url.origin, token: token.value.trim(), relayToken: relayToken.value.trim(), relayBrowser: browserModel.checked })
     const name = model.value.trim()
     if (name) {
       const kind = runtime.value === 'lmstudio' ? 'lmstudio' : 'ollama'
