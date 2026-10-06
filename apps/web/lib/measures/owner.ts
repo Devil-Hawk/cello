@@ -3,7 +3,7 @@
 // Anyone else, and everyone when it is not set, is not the owner; the route that wraps a command
 // answers a non-owner with 404, so the page does not say it exists.
 
-export function isOwner(userId: string | null | undefined, env: { OWNER_USER_ID?: string } = process.env): boolean {
+export function isOwner(userId: string | null | undefined, env: Record<string, string | undefined> = process.env): boolean {
   const owner = env.OWNER_USER_ID?.trim()
   return Boolean(owner) && Boolean(userId) && owner === userId
 }
