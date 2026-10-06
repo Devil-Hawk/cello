@@ -97,6 +97,7 @@ async function fetchBoard(host: string, token: string): Promise<AtsJob[]> {
       externalId: j.absolute_url,
       location: j.location?.name || undefined,
       description: typeof j.content === 'string' && j.content ? descriptionToText(j.content) : undefined,
+      descriptionHtml: typeof j.content === 'string' && j.content ? unescapeDoubleEncodedHtml(j.content) : undefined,
       linkHosts: typeof j.content === 'string' && j.content ? linkHostsOf(unescapeDoubleEncodedHtml(j.content)) : undefined,
       postedAt: toIso(j.first_published) ?? toIso(j.updated_at),
     })

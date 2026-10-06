@@ -21,7 +21,7 @@
 import type { AtsJob, AtsProvider, DetectInput, FetchContext } from './types'
 import { isValidToken } from './types'
 import { assertAllowedHostSuffix, fetchJson } from './http'
-import { htmlToPlainText } from './html'
+import { htmlToPlainText, rawHtmlOf } from './html'
 import { mapWithConcurrency } from './concurrency'
 
 const API_HOST_SUFFIXES = ['.myworkdayjobs.com']
@@ -154,6 +154,7 @@ async function fetchDetail(
     const json = await fetchJson<WorkdayDetailResponse>(apiUrl)
     return {
       description: htmlToPlainText(json?.jobPostingInfo?.jobDescription),
+      descriptionHtml: rawHtmlOf(json?.jobPostingInfo?.jobDescription),
       postedAt: toIso(json?.jobPostingInfo?.startDate),
     }
   } catch {

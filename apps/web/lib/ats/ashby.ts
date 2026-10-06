@@ -65,6 +65,9 @@ interface AshbyJob {
   publishedAt?: string
   isListed?: boolean
   descriptionPlain?: string
+  /** The posting as the employer wrote it. */
+  descriptionHtml?: string
+  applyUrl?: string
   compensation?: AshbyCompensation
 }
 
@@ -194,6 +197,8 @@ async function fetchJobs(token: string, ctx?: FetchContext): Promise<AtsJob[]> {
         typeof j.descriptionPlain === 'string' && j.descriptionPlain
           ? j.descriptionPlain.slice(0, MAX_DESCRIPTION_CHARS)
           : undefined,
+      ...(typeof j.descriptionHtml === 'string' && j.descriptionHtml ? { descriptionHtml: j.descriptionHtml } : {}),
+      ...(typeof j.applyUrl === 'string' && j.applyUrl ? { applyUrl: j.applyUrl } : {}),
       postedAt: toIso(j.publishedAt),
       salary: formatSalary(j.compensation),
     })

@@ -73,6 +73,15 @@ export function htmlToPlainText(raw: unknown, maxChars: number = MAX_DESCRIPTION
 }
 
 /**
+ * The raw HTML of a posting body (or its sections, in order), joined, for lib/ingest/markdown.ts to clean and keep
+ * whole. Never cut and never converted: a fragment that is not a string is skipped, and nothing usable gives undefined.
+ */
+export function rawHtmlOf(...fragments: unknown[]): string | undefined {
+  const parts = fragments.filter((f): f is string => typeof f === 'string' && f.trim().length > 0)
+  return parts.length > 0 ? parts.join('\n') : undefined
+}
+
+/**
  * Join several HTML fragments into one description. SmartRecruiters splits a
  * posting across `jobAd.sections` (company description / job description /
  * qualifications / additional information) and Recruitee across
