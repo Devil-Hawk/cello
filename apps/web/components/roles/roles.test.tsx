@@ -253,7 +253,7 @@ describe('role types', () => {
   })
 
   it('fits the filter panel to the phone width and anchors it to the button from 640 up', () => {
-    const html = text(view({ items: fixtureRoles(2, 2), total: 2 }))
+    const html = view({ items: fixtureRoles(2, 2), total: 2 })
     expect(html).toContain('fixed inset-x-4')
     expect(html).toContain('sm:absolute')
     expect(html).not.toContain('w-[min(92vw')
