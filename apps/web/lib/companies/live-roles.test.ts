@@ -17,6 +17,7 @@ vi.mock('../ats/index', async (orig) => {
 })
 // The classifier is not what is under test: a marker in the title says what it would have read.
 vi.mock('../jobs/classify', () => ({
+  parseLocation: () => ({ country: null, isRemote: false }),
   classifyJob: ({ title }: { title: string }) => ({
     jobFunction: /\[sales\]/.test(title) ? 'sales' : 'engineering',
     seniority: /\[junior\]/.test(title) ? 'junior' : 'senior',
@@ -26,7 +27,7 @@ vi.mock('../jobs/classify', () => ({
   }),
 }))
 
-import { LIVE_PAGE_SIZE, liveRoles, type LiveCompany } from './live-roles'
+import { LIVE_PAGE_SIZE, liveRoles, reasonText, type LiveCompany } from './live-roles'
 
 const ago = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString()
 const targets = {
@@ -92,7 +93,7 @@ describe('liveRoles', () => {
     const out = await liveRoles({ db, userId: 'u1', company, targets })
     expect(out.total).toBe(60)
     expect(out.kept).toBe(5)
-    expect(out.counts).toEqual({ place: 11, age: 7, excluded: 9, level: 13, title: 15 })
+    expect(out.counts).toEqual({ place: 11, age: 7, excluded: 9, level: 13, title: 15, type: 0, untyped: 0 })
     expect(out.kept + Object.values(out.counts).reduce((a, b) => a + b, 0)).toBe(out.total)
     expect(out.tier).toBe('board')
     expect(out.window).toBe(false)
@@ -147,6 +148,52 @@ describe('liveRoles', () => {
     const { db } = fakeDb([])
     const out = await liveRoles({ db, userId: 'u1', company, targets: { targeting: EMPTY_TARGETING, titles: [] } })
     expect(out.kept).toBe(60)
-    expect(out.counts).toEqual({ place: 0, age: 0, excluded: 0, level: 0, title: 0 })
+    expect(out.counts).toEqual({ place: 0, age: 0, excluded: 0, level: 0, title: 0, type: 0, untyped: 0 })
   })
 })
+
+describe('liveRoles with role types chosen and the switch on', () => {
+  const step = { chosen: ['ai-engineer'], synonyms: {}, words: new Set(['engineer', 'ai']), live: true }
+  const on = { ...targets, typeStep: step }
+  const posting = (id: string, title: string) => ({ externalId: id, url: `https://acme.example/jobs/${id}`, title, postedAt: ago(2), location: 'Remote' })
+
+  it('splits what the title step left as one bucket: other role types, and a type no tier could tell', async () => {
+    const { db } = fakeDb([])
+    fetchMock.mockImplementation(async () => [
+      posting('k1', 'AI Engineer'),
+      posting('k2', 'Applied AI Engineer'),
+      posting('t1', 'Product Manager'),
+      posting('t2', 'Technical Product Manager'),
+      posting('t3', 'Account Executive [sales]'),
+      posting('u1', 'Zookeeper'),
+      posting('p1', 'AI Engineer [DE]'),
+      posting('l1', 'AI Engineer [junior]'),
+    ])
+    const out = await liveRoles({ db, userId: 'u1', company, targets: on })
+    expect(out.kept).toBe(2)
+    expect(out.counts).toMatchObject({ type: 3, untyped: 1, place: 1, level: 1, title: 0 })
+    expect(out.kept + Object.values(out.counts).reduce((a, b) => a + b, 0)).toBe(out.total)
+    const rows = out.rows
+    expect(rows.find((r) => r.title === 'Product Manager')).toMatchObject({ role_type: 'product-manager', reason: 'type' })
+    expect(reasonText(rows.find((r) => r.title === 'Product Manager')!)).toBe('Other role type: Product Manager')
+    expect(reasonText(rows.find((r) => r.title === 'Zookeeper')!)).toBe('Role type unknown')
+    expect(rows.find((r) => r.title === 'AI Engineer')).toMatchObject({ role_type: 'ai-engineer', reason: null })
+  })
+
+  it('keeps a role no tier could type hidden-worthy when its title shares a word with a chosen type, and leaves the rest', async () => {
+    const { db } = fakeDb([])
+    fetchMock.mockImplementation(async () => [posting('n1', 'Mechanical Engineer'), posting('n2', 'Zookeeper')])
+    const out = await liveRoles({ db, userId: 'u1', company, targets: on })
+    expect(out.kept).toBe(1)
+    expect(out.counts.untyped).toBe(1)
+  })
+
+  it('does not use the type step while the switch is off: the old title filter says "Not one of your titles"', async () => {
+    const { db } = fakeDb([])
+    fetchMock.mockImplementation(async () => [posting('t1', 'Account Executive [sales]'), posting('k1', 'AI Engineer')])
+    const out = await liveRoles({ db, userId: 'u1', company, targets: { ...targets, typeStep: { ...step, live: false } } })
+    expect(out.counts).toMatchObject({ title: 1, type: 0, untyped: 0 })
+    expect(reasonText(out.rows.find((r) => r.reason)!)).toBe('Not one of your titles')
+  })
+})
+
