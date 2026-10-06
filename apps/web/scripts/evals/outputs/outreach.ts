@@ -31,7 +31,7 @@ interface Item {
 
 /** What release/1's buildOutreachContext handed the writer for a contact with no history. */
 const LEGACY_NO_HISTORY =
-  'RELATIONSHIP HISTORY: none recorded. Do not claim a prior conversation, reply, or any existing familiarity with this person or company — this is a first contact.'
+  'RELATIONSHIP HISTORY: none recorded. Do not claim a prior conversation, reply, or any existing familiarity with this person or company, this is a first contact.'
 
 async function main() {
   const args = start()

@@ -132,7 +132,7 @@ export function checkDraft(input: DraftCheckInput): DraftCheckResult {
   }
 
   // Dashes.
-  const dash = /[–—]/.test(`${subject}\n${body}`)
+  const dash = /[\u2013\u2014]/.test(`${subject}\n${body}`)
   checks.push({
     id: 'no_em_dash',
     ok: !dash,

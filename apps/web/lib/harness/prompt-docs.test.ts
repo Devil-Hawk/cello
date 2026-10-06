@@ -29,7 +29,7 @@ describe('prompt documents', () => {
   })
 
   it.each(DOCS)('%s has no long dash', (name) => {
-    expect(read(name)).not.toMatch(/[–—]/)
+    expect(read(name)).not.toMatch(/[\u2013\u2014]/)
   })
 
   it.each(DOCS)('%s is registered so it is hashed into the trace', (name) => {

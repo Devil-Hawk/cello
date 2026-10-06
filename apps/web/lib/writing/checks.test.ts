@@ -56,7 +56,7 @@ describe('checkDraft', () => {
   })
 
   it('fails an em dash and an en dash in the subject or body', () => {
-    expect(failing({ ...base, subject: 'Ramp — quick note' })).toContain('no_em_dash')
+    expect(failing({ ...base, subject: 'Ramp \u2014 quick note' })).toContain('no_em_dash')
     expect(failing({ ...base, body: GOOD_BODY.replace('hiring', 'hiring –') })).toContain('no_em_dash')
   })
 

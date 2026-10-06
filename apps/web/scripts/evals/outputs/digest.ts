@@ -103,7 +103,7 @@ async function main() {
       const w = e.workingNumbers
       add('numbers exact', item.id, shape.text.includes(`sent ${w.sent} email`) && (w.replies === undefined || shape.text.includes(`${w.replies} repl`)))
     }
-    add('no long dash or filler', item.id, !/[–—]/.test(all) && !/enjoy the calm|great job|keep it up/i.test(all))
+    add('no long dash or filler', item.id, !/[\u2013\u2014]/.test(all) && !/enjoy the calm|great job|keep it up/i.test(all))
     if (e.empty) {
       const names = e.companyCount ? `watching ${e.companyCount} compan` : 'Add companies'
       add('empty digest names what is watched or the next step', item.id, shape.text.includes(names))

@@ -154,7 +154,7 @@ describe('the empty digest', () => {
     expect(d.subject).toBe('Cello daily: nothing needs you today')
     expect(d.text).toContain('Nothing needs you today. Cello is watching 42 companies and will write when something changes.')
     expect(d.html).toContain('Nothing needs you today. Cello is watching 42 companies')
-    expect(allText({ ...empty, companyCount: 42 })).not.toMatch(/[–—]/)
+    expect(allText({ ...empty, companyCount: 42 })).not.toMatch(/[\u2013\u2014]/)
     expect(d.text).not.toMatch(/enjoy the calm|great job/i)
   })
 
@@ -174,7 +174,7 @@ describe('subject and formatting', () => {
   })
 
   it('has no long dash anywhere in a full digest and escapes the html', () => {
-    expect(allText(rich)).not.toMatch(/[–—]/)
+    expect(allText(rich)).not.toMatch(/[\u2013\u2014]/)
     const html = buildDigest({ ...empty, roles: [role({ title: 'Engineer <script>', company: 'A & B' })] }, NOW).html
     expect(html).toContain('Engineer &lt;script&gt; at A &amp; B')
     expect(html).not.toContain('<script>')

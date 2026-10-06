@@ -36,7 +36,7 @@ describe('lineMatchesInput', () => {
   it('rejects approximations, weeks and months, a long dash, and an empty line', () => {
     expect(lineMatchesInput('Figma has been silent for roughly 16 days.', items)).toBe(false)
     expect(lineMatchesInput('Figma has been silent for over 2 weeks.', items)).toBe(false)
-    expect(lineMatchesInput('Figma — 16 days.', items)).toBe(false)
+    expect(lineMatchesInput('Figma \u2014 16 days.', items)).toBe(false)
     expect(lineMatchesInput('   ', items)).toBe(false)
   })
 })
