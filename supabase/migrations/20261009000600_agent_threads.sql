@@ -28,7 +28,7 @@ create index if not exists idx_graph_threads_lease
   where lease_until is not null;
 
 -- Which scheduled task a conversation belongs to (its own results thread).
--- The foreign key is added by 20261006000602, once scheduled_tasks exists.
+-- The foreign key is added by 20261009000602, once scheduled_tasks exists.
 alter table public.copilot_conversations add column if not exists scheduled_task_id uuid;
 
 notify pgrst, 'reload schema';
