@@ -11,6 +11,10 @@
 \set ON_ERROR_STOP 1
 begin;
 
+-- This check builds per-person copies of one posting to fold them; the contract's unique index would refuse
+-- them, so it is dropped here (the transaction rolls back).
+drop index if exists public.jobs_employer_posting_key;
+
 create temp table fx as
 select gen_random_uuid() as a, gen_random_uuid() as b, gen_random_uuid() as c,
        gen_random_uuid() as emp,
@@ -323,7 +327,7 @@ select pg_temp.must_be_denied('authenticated', $q$select public.add_person_roles
 select pg_temp.must_be_denied('anon', 'select 1 from public.person_roles');
 select pg_temp.must_be_denied('anon', 'select 1 from public.person_jobs');
 select pg_temp.must_be_denied('anon', 'select 1 from public.company_directory');
-select pg_temp.must_be_denied('authenticated', 'select 1 from public.company_directory');
+-- (the contract migration lets a signed-in person read company_directory; relevance_contract.sql checks that)
 select pg_temp.must_be_denied('authenticated', 'select 1 from public.seen_postings');
 select pg_temp.must_be_denied('authenticated', $q$insert into public.person_roles (user_id, job_id) values (gen_random_uuid(), gen_random_uuid())$q$);
 select pg_temp.must_be_denied('authenticated', $q$insert into public.person_counts (user_id, day, kind, n) values (gen_random_uuid(), current_date, 'outside_targets', 1)$q$);
