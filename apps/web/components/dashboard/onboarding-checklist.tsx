@@ -25,14 +25,14 @@ export function OnboardingChecklist({ hasCompany, hasResume, hasApiKey }: Onboar
     {
       done: hasResume,
       label: 'Upload your resume',
-      body: 'Powers AI match scores for every discovered job.',
+      body: 'Lets Cello check every role against your background.',
       href: '/settings',
       cta: 'Upload',
     },
     {
       done: hasApiKey,
       label: 'Add an AI API key',
-      body: 'Enables match scoring, job insights, and outreach drafts.',
+      body: 'Lets Cello assess roles and write drafts.',
       href: '/settings',
       cta: 'Add key',
     },
@@ -47,7 +47,7 @@ export function OnboardingChecklist({ hasCompany, hasResume, hasApiKey }: Onboar
       <CardHeader>
         <CardTitle>Get set up</CardTitle>
         <CardDescription>
-          {remaining} step{remaining === 1 ? '' : 's'} left to unlock everything Cello can do.
+          {remaining} step{remaining === 1 ? '' : 's'} left to finish setup.
         </CardDescription>
       </CardHeader>
       <CardContent>

@@ -882,9 +882,9 @@ function JobsPageInner() {
       }
 
       if (!response.ok || !data || typeof data.scored !== 'number') {
-        const message = data?.error ?? `Batch scoring failed (HTTP ${response.status})`
+        const message = data?.error ?? `Could not assess roles (HTTP ${response.status})`
         console.error('[jobs] calculateBatch failed:', message)
-        toast({ title: 'Batch scoring failed', description: message, variant: 'destructive' })
+        toast({ title: 'Could not assess roles', description: message, variant: 'destructive' })
         return null
       }
 
@@ -961,7 +961,7 @@ function JobsPageInner() {
     } catch (error) {
       console.error('[jobs] calculateBatch network error:', error)
       toast({
-        title: 'Batch scoring failed',
+        title: 'Could not assess roles',
         description: error instanceof Error ? error.message : 'Network error while scoring jobs.',
         variant: 'destructive',
       })
