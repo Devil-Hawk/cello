@@ -34,6 +34,12 @@ describe('the code tier', () => {
     expect(item.notFound).toBeUndefined()
   })
 
+  it('a slash is not "or": a line that only says "pipelines" does not show "CI/CD pipelines", while "Go or Java" is shown by either', () => {
+    expect(codeVerdict(req('CI/CD pipelines'), [src('Built data pipelines for billing')]).verdict).toBe('unknown')
+    expect(codeVerdict(req('CI/CD pipelines'), [src('Owned the CI/CD pipelines for billing')]).verdict).toBe('strength')
+    expect(codeVerdict(req('Go or Java'), [src('Services in Java')]).verdict).toBe('strength')
+  })
+
   it.each(['I have never used Kubernetes', 'Without Kubernetes in my last two jobs', 'Not familiar with Kubernetes', 'Kubernetes: not yet'])('a negated mention is not a strength: %s', (line) => {
     expect(codeVerdict(req('Kubernetes'), [src(line)]).verdict).toBe('unknown')
   })

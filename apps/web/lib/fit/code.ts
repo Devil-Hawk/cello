@@ -7,7 +7,7 @@
 // anywhere is Not found, a fact about where code looked.
 //
 // ponytail: whole-word matching on lowercase text, a four-word negation window, and for a requirement
-// with no skills a line must hold two of its words (one when it has only one, or when the requirement says "or"). A synonym ("k8s") is not
+// with no skills a line must hold two of its words (one when it has only one, or when the requirement says "or", but not a slash). A synonym ("k8s") is not
 // matched; the model step reads those. Upgrade path: a synonym list per skill from the skills taxonomy.
 
 import type { FitEvidence, FitItem, FitRequirement } from './types'
@@ -114,7 +114,8 @@ export function codeVerdict(req: FitRequirement, sources: readonly MaterialSourc
   const terms = skills.length > 0 ? skills : words
   if (terms.length === 0) return { ...base, verdict: 'unknown', evidence: [], notFound: true }
   // "Go or Java" is satisfied by either; otherwise two of the words on one line, so "systems" alone settles nothing.
-  const alternatives = /\bor\b|\//i.test(req.text)
+  // A slash is not "or": "CI/CD pipelines" must not be a strength from a line that only says "pipelines".
+  const alternatives = /\bor\b/i.test(req.text)
   const needed = skills.length > 0 || alternatives ? 1 : Math.min(2, terms.length)
   const found = findIn(sources, terms, needed)
   if (found.strength) return { ...base, verdict: 'strength', evidence: [found.strength] }
