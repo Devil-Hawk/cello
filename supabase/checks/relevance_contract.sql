@@ -455,6 +455,33 @@ begin
   if bad is not null then raise exception 'a security definer function that writes jobs is callable by a signed-in person: %', bad; end if;
 end $$;
 
+-- 6i. A person's or a lead's directory row never takes a name another verified employer holds, and keeps the name it was
+-- verified under. Seed namesakes (lists) are kept.
+do $$
+declare n int;
+begin
+  insert into public.company_directory (name, name_norm, ats_provider, ats_token, verified_by, verified_at, source)
+  values ('Claim Co', 'claim co', 'greenhouse', 'claimco', 'seed_checked', now(), 'seed');
+  insert into public.company_directory (name, name_norm, ats_provider, ats_token, verified_by, verified_at, source)
+  values ('Claim Co', 'claim co', 'workable', 'squat', 'provider_name', now(), 'person');
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'a person cannot add an employer under a verified name'; end if;
+  insert into public.company_directory (name, name_norm, ats_provider, ats_token, verified_by, verified_at, source)
+  values ('Claim Co', 'claim co', 'workable', 'squat', 'seed_checked', now(), 'lead');
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'a lead cannot add an employer under a verified name'; end if;
+  insert into public.company_directory (name, name_norm, ats_provider, ats_token, verified_by, verified_at, source)
+  values ('Claim Co', 'claim co', 'lever', 'claimco', 'seed_checked', now(), 'seed');
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'a namesake from a seed list is kept'; end if;
+
+  insert into public.company_directory (name, name_norm, ats_provider, ats_token, verified_by, verified_at, source)
+  values ('Quiet Claim', 'quiet claim', 'ashby', 'quietclaim', 'careers_link', now(), 'person');
+  update public.company_directory set name = 'Claim Co', name_norm = 'claim co' where ats_token = 'quietclaim';
+  if (select name || '/' || name_norm from public.company_directory where ats_token = 'quietclaim') <> 'Quiet Claim/quiet claim' then raise exception 'a person-added employer keeps the name it was verified under'; end if;
+  delete from public.company_directory where name_norm in ('claim co', 'quiet claim');
+end $$;
+
 -- 7. A shared role outlives the follower whose company stored it: removing the company, or the account, keeps it for the others.
 do $$
 declare f record; jd uuid := gen_random_uuid(); jp uuid := gen_random_uuid(); c uuid := gen_random_uuid(); d uuid := gen_random_uuid(); co_c uuid := gen_random_uuid(); co_d uuid := gen_random_uuid();
