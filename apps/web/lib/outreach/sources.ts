@@ -10,23 +10,7 @@ import type { AdminClient } from '@/lib/harness/types'
 import type { OutreachDraftInput, SourceLine } from '@/lib/harness/agents/outreach'
 import { outreachHistory } from '@/lib/context/assemble'
 import { companyFacts } from '@/lib/dossier/facts'
-
-interface MatchDetails {
-  highlights?: unknown
-  skillsMatch?: { matched?: unknown }
-}
-
-export function highlightsFrom(matchDetails: unknown): string[] {
-  const md = (matchDetails ?? {}) as MatchDetails
-  const out: string[] = []
-  if (Array.isArray(md.highlights)) {
-    for (const h of md.highlights) if (typeof h === 'string') out.push(h)
-  }
-  if (out.length === 0 && md.skillsMatch && Array.isArray(md.skillsMatch.matched)) {
-    for (const s of md.skillsMatch.matched) if (typeof s === 'string') out.push(s)
-  }
-  return out.slice(0, 6)
-}
+import { fitHighlights, fitRowOf } from '@/lib/scoring/read'
 
 export interface OutreachSourceArgs {
   /** The signed-in user's client (row-level security). */
@@ -58,14 +42,15 @@ export async function loadOutreachSources(args: OutreachSourceArgs): Promise<Loa
   if (args.jobId) {
     const { data: job } = await supabase
       .from('jobs')
-      .select('id, title, description, company_id, match_details')
+      .select('id, title, description, company_id, person_roles(chance_detail)')
       .eq('id', args.jobId)
       .single()
     if (job) {
       jobTitle = job.title || null
       jobDescription = job.description ?? null
       companyId = job.company_id ?? companyId
-      matchHighlights = highlightsFrom(job.match_details)
+      // Only what the resume really shows, each with the line that shows it: nothing the model could invent.
+      matchHighlights = fitHighlights(fitRowOf(job).chance_detail)
     }
   }
 
