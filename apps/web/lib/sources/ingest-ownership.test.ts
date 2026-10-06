@@ -86,7 +86,7 @@ const LEAD: JobLead = {
 }
 
 describe('ingestLeads — existing-jobs dedup lookup is ownership-scoped through person_roles', () => {
-  it('filters the existing-jobs query by the person's roles, not a company-id array', async () => {
+  it("filters the existing-jobs query by the person's roles, not a company-id array", async () => {
     const { admin, eqCalls } = fakeAdmin()
 
     const result = await ingestLeads(admin, USER_ID, [LEAD])

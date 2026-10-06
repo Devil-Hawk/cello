@@ -94,8 +94,8 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: unknown }> {
 
 let tables: Record<string, FakeTable>
 function freshAdmin() {
-  tables = { jobs: new FakeTable(), profiles: new FakeTable(), application_drafts: new FakeTable(), eval_verdicts: new FakeTable() }
-  tables.jobs.rows.push({ id: 'job-1', title: 'Staff Engineer', description: 'Build things.', companies: { name: 'Acme' } })
+  tables = { person_jobs: new FakeTable(), profiles: new FakeTable(), application_drafts: new FakeTable(), eval_verdicts: new FakeTable() }
+  tables.person_jobs.rows.push({ id: 'job-1', title: 'Staff Engineer', description: 'Build things.', viewer_company_name: 'Acme' })
   tables.profiles.rows.push({ id: 'user-1', resume_text: 'Senior engineer with 8 years of Go.' })
   return {
     from: (name: string) => {

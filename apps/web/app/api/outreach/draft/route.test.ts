@@ -67,7 +67,7 @@ vi.mock('@/lib/trace/spans', async (importOriginal) => {
 let user: { id: string; email: string } | null
 const supabaseTableRow: Record<string, Record<string, unknown> | null> = {
   contacts: { id: 'contact-1', name: 'Jordan', email: 'jordan@example.com', title: 'Eng Manager', company_id: 'co-1' },
-  jobs: { id: 'job-1', title: 'Staff Engineer', description: 'Build things.', company_id: 'co-1', match_details: null },
+  person_jobs: { id: 'job-1', title: 'Staff Engineer', description: 'Build things.', company_id: 'co-1', match_details: null },
   companies: { id: 'co-1', name: 'Acme' },
   profiles: { full_name: 'Alex Candidate', resume_text: 'Senior engineer.' },
 }
