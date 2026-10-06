@@ -1,13 +1,26 @@
 // The answer bank: what is a sensitive or specific question, what matches what, and what the person's
 // Confirm does and does not change. A small in-memory client stands in for the table.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { NextRequest } from 'next/server'
 import { categorize, isSpecific, workAuthAnswer } from './categories'
-import { classify, confirmAnswer, proposeFromChat, resolveFieldValues, saveFromAttempt, type FormField } from './index'
+import { answerArrived, classify, confirmAnswer, proposeFromChat, resolveFieldValues, saveAnswer, saveFromAttempt, type FormField } from './index'
 import { findAnswer, type BankRow } from './match'
 import { normalizeQuestion, similarity } from './normalize'
+import { eligibility, type EligibleField } from '@/lib/fill/eligibility'
 
 type Row = Record<string, any>
+
+// the route's session, a demo account for the 403 case
+const session = vi.hoisted(() => ({ demo: true }))
+vi.mock('@/lib/pipeline/session', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/pipeline/session')>()),
+  sessionCtx: async () => ({
+    userId: 'u1',
+    door: { actor: 'person', channel: 'session' },
+    admin: { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { is_demo: session.demo, demo_expires_at: null } }) }) }) }) },
+  }),
+}))
 
 function fakeAdmin(seed: Row[] = [], profile: Row = { full_name: 'Ada Lovelace', email: 'ada@example.com', preferences: { contact: { phone: '555 0100' } } }) {
   const bank: Row[] = seed.map((r, i) => ({ id: `r${i}`, declined: false, answer: null, company_id: null, source_ref: null, ...r }))
@@ -235,3 +248,41 @@ describe('saveFromAttempt', () => {
     expect(bank[0]).toMatchObject({ answer: 'A friend', source: 'person', origin: 'person', source_ref: { application_id: 'a1', attempt_id: 't1' } })
   })
 })
+
+describe('declining and arriving', () => {
+  it('a declined toggle on a model answer keeps its origin, and the row stays out of Send for me', async () => {
+    const { client, bank } = fakeAdmin([{ user_id: U, question_key: 'notice period', category: 'notice', answer: '2 weeks', source: 'chat', origin: 'model', confirmed_at: '2026-10-01T00:00:00Z' }])
+    expect((await saveAnswer(client, U, 'r0', { declined: false })).ok).toBe(true)
+    expect(bank[0]).toMatchObject({ source: 'chat', origin: 'model', answer: '2 weeks', confirmed_at: '2026-10-01T00:00:00Z' })
+    const hit = findAnswer(bank as unknown as BankRow[], classify({ id: 'f', label: 'notice period' }), { companyId: null, applicationId: null })
+    expect(hit?.row.origin).toBe('model')
+    expect(check([{ label: 'notice period', category: 'notice', kind: 'text', required: true, resolved: { value: '2 weeks', via: hit!.via, origin: hit!.row.origin } }])).toBe('Answer it yourself to let Cello send this.')
+    // text the person writes does make it theirs
+    await saveAnswer(client, U, 'r0', { answer: '1 month' })
+    expect(bank[0]).toMatchObject({ source: 'person', origin: 'person', answer: '1 month', confirmed_at: null })
+  })
+
+  it('an answer resumes every application waiting on it, and not the one still holding another open question', async () => {
+    const waiting = [
+      { id: 'A', needs_detail: { answer_ids: ['q1'] }, last_event_at: null },
+      { id: 'B', needs_detail: { answer_ids: ['q1', 'q2'] }, last_event_at: null },
+    ]
+    const asked = [{ id: 'q1', answer: 'Yes', declined: false }, { id: 'q2', answer: null, declined: false }]
+    const moved: unknown[] = []
+    const from = (table: string) => {
+      const q: any = { select: () => q, eq: () => q, contains: () => q, in: () => q, then: (res: (v: unknown) => unknown) => res({ data: table === 'applications' ? waiting : asked, error: null }) }
+      return q
+    }
+    const client = { from, rpc: async (_n: string, a: any) => (moved.push([a.p_app, a.p_to, a.p_event.idempotency_key]), { data: { ok: true, replay: false, event: { id: 'e' } }, error: null }) }
+    expect(await answerArrived(client as never, U, 'q1')).toEqual({ moved: 1 })
+    expect(moved).toEqual([['A', 'preparing', 'answered:A:q1:none']])
+  })
+
+  it('POST /api/answers/[id] refuses a demo account with 403 and saves nothing', async () => {
+    const { POST } = await import('@/app/api/answers/[id]/route')
+    const res = await POST(new NextRequest('http://localhost/api/answers/x', { method: 'POST', body: JSON.stringify({ answer: 'x' }) }), { params: { id: '11111111-1111-4111-8111-111111111111' } })
+    expect(res.status).toBe(403)
+  })
+})
+
+const check = (fields: EligibleField[]) => eligibility({ company: 'Stripe', url: 'https://boards.greenhouse.io/stripe/jobs/1', fields, hosts: [{ host: 'boards.greenhouse.io', urlPattern: '', submitLabels: [], confirmationPatterns: [], confirmationUrls: [] }] })

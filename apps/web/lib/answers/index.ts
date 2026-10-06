@@ -178,10 +178,11 @@ export async function saveAnswer(admin: SupabaseClient, userId: string, id: stri
     const size = JSON.stringify(answer).length
     if (size > 4000) return { ok: false, sentence: 'That answer is too long. Keep it under 4,000 characters.' }
   }
-  const patch: Record<string, unknown> = { source: 'person', origin: 'person', prov: { door: 'session' }, confirmed_at: null, updated_at: new Date().toISOString() }
+  // Only text the person supplied makes a row theirs. A declined toggle leaves the source, the origin and
+  // the Confirm of a model's answer alone, so Send for me still refuses it.
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (answer !== undefined) {
-    patch.answer = answer
-    patch.declined = false
+    Object.assign(patch, { source: 'person', origin: 'person', prov: { door: 'session' }, confirmed_at: null, answer, declined: false })
   }
   if (input.declined !== undefined) patch.declined = input.declined
   const { data } = await admin.from('answer_bank').update(patch).eq('id', id).eq('user_id', userId).select('id').maybeSingle()
