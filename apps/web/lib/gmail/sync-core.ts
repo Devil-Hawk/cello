@@ -26,6 +26,7 @@ import type { PipelineStage } from '@/lib/format'
 import type { Json } from '@cello/shared'
 import type { DecryptedApiKeys } from '@/lib/harness/types'
 
+import { extractInterviewDateTime } from './datetime'
 import type { SyncState, ParsedEmail, UnmatchedEmail } from './types'
 import { JOB_EMAIL_QUERY, fetchGmailMessages, extractBody, getHeader, extractDomain } from './gmail-api'
 import { isPersonalEmailDomain } from './skip-lists'
@@ -183,6 +184,10 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
       parsed = await parseEmailWithAI(from, subject, body, apiKeys, receivedAt)
     } else {
       parsed = classifyWithPatterns(from, subject, body, receivedAt, msg.payload.calendar)
+    }
+    // An invite's time is exact; it wins over whatever the model read from the prose.
+    if (msg.payload.calendar && (parsed.status === 'interview' || parsed.status === 'screen')) {
+      parsed.interviewDateTime = extractInterviewDateTime('', receivedAt, msg.payload.calendar).iso ?? parsed.interviewDateTime
     }
 
     if (!parsed.isJobRelated) continue
