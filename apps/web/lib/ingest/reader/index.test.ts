@@ -367,6 +367,11 @@ describe('readSite: a single pasted posting is one role, never the whole site be
       [url]: fixture('ms-job-shell.html'),
       'https://apply.careers.microsoft.com/api/pcsx/position_details?position_id=1970393557022797&domain=microsoft.com&hl=en': fixture('ms-position-detail.json'),
     })
+    // A company added by pasting this link has the link's host as its domain.
+    for (const domain of ['microsoft.com', 'apply.careers.microsoft.com']) {
+      const again = await readSite(company('Microsoft', domain, url), { fetcher: f })
+      expect(again.jobs[0]?.location).toBe('United States, Washington, Redmond')
+    }
     const read = await readSite(company('Microsoft', 'microsoft.com', url), { fetcher: f })
     expect(read.single).toBe(true)
     expect(read.jobs).toHaveLength(1)

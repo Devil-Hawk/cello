@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyLink, discoverBoards } from './discover'
+import { classifyLink, discoverBoards, eightfoldBoards } from './discover'
 import { fakeFetcher, fixture } from './fake-fetcher'
 
 describe('discoverBoards: only through the company own site', () => {
@@ -86,5 +86,15 @@ describe('classifyLink', () => {
     expect(classifyLink('https://jobs.apple.com/en-us/details/200684990-3956/front-end-engineer')).toBe('posting')
     expect(classifyLink('https://www.amazon.jobs/en/search?base_query=data')).toBe('search')
     expect(classifyLink('https://stripe.com/jobs')).toBe('careers')
+  })
+})
+
+describe('eightfoldBoards: a company added by its careers address', () => {
+  it("never takes the page's own host as the tenant domain, even when the page's config names it too", () => {
+    const html = fixture('ms-job-shell.html')
+    const url = 'https://apply.careers.microsoft.com/careers/job/1970393557022797'
+    for (const domain of ['apply.careers.microsoft.com', 'microsoft.com']) {
+      expect(eightfoldBoards(html, url, domain)).toEqual([{ provider: 'eightfold', token: 'apply.careers.microsoft.com_microsoft.com', via: 'eightfold' }])
+    }
   })
 })
