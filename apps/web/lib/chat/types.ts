@@ -100,6 +100,8 @@ export interface TurnRow {
   /** Written by code at the turn's end (lib/chat/disclosure.ts). */
   disclosure: unknown
   superseded_at: string | null
+  /** Set on a turn that replaced an earlier one of the person's (chat.edit_turn); the old branch stays. */
+  branch_of: string | null
   created_at: string
 }
 

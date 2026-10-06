@@ -20,6 +20,8 @@ import { GET as list } from './route'
 import { DELETE as remove, GET as one, PATCH as patch } from './[id]/route'
 import { DELETE as untile, POST as tile } from './[id]/attachments/route'
 import { POST as stop } from './[id]/stop/route'
+import { POST as editTurn } from './[id]/edit/route'
+import { POST as saveSettings } from './settings/route'
 import { GET as suggestions } from './suggest/route'
 import { GET as made } from './made/route'
 import { GET as objectName } from './object/route'
@@ -154,5 +156,28 @@ describe('object', () => {
     state.user = { id: 'u2' }
     db.tables.instance_flags[0].on = true
     expect((await objectName(req(`/api/chat/object?kind=role&ref=${UUID(1)}`))).status).toBe(404)
+  })
+})
+
+describe('edit', () => {
+  it('forks from one of the person\'s own turns, keeps the old branch, and refuses another person\'s or empty words', async () => {
+    db.tables.chat_turns.push({ id: 't1', user_id: 'u1', chat_id: 'c1', kind: 'person', typed: 'first', created_at: '2026-10-05T10:00:00Z', superseded_at: null, ran: null })
+    db.tables.chat_turns.push({ id: 'x1', user_id: 'u2', chat_id: 'c2', kind: 'person', typed: 'theirs', created_at: '2026-10-05T10:00:00Z', superseded_at: null, ran: null })
+    const done = await editTurn(json('/api/chat/c1/edit', 'POST', { turn_id: 't1', typed: 'better' }), ctx('c1'))
+    expect(done.status).toBe(200)
+    expect(db.tables.chat_turns.find((t) => t.id === 't1')?.superseded_at).toBeTruthy()
+    expect(db.tables.chat_turns.at(-1)).toMatchObject({ typed: 'better', branch_of: 't1' })
+    expect((await editTurn(json('/api/chat/c2/edit', 'POST', { turn_id: 'x1', typed: 'mine now' }), ctx('c2'))).status).toBe(422)
+    expect((await editTurn(json('/api/chat/c1/edit', 'POST', { turn_id: 't1', typed: ' ' }), ctx('c1'))).status).toBe(422)
+    expect((await editTurn(json('/api/chat/c1/edit', 'POST', { typed: 'x' }), ctx('c1'))).status).toBe(400)
+  })
+})
+
+describe('settings', () => {
+  it('saves the choice for new chats with no chat, and says which chat for anything else', async () => {
+    const choice = { rung: 'R3', model: 'qwen/qwen3.8-27b:free', effort: 'low' }
+    expect((await saveSettings(json('/api/chat/settings', 'POST', { choice, as_default: true }))).status).toBe(200)
+    expect(db.tables.profiles[0].preferences).toMatchObject({ chat_choice: choice })
+    expect((await saveSettings(json('/api/chat/settings', 'POST', { review: true }))).status).toBe(400)
   })
 })
