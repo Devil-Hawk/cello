@@ -46,6 +46,7 @@ export function AddOrFind({ onAdded, autoFocus, initial }: AddOrFindProps) {
   const [text, setText] = useState('')
   const [found, setFound] = useState<Found | null>(null)
   const [finding, setFinding] = useState(false)
+  const [failed, setFailed] = useState<string | null>(null)
   const [add, dispatch] = useReducer(addReducer, initial ?? { kind: 'idle' })
   const typed = classifyInput(text)
 
@@ -53,15 +54,17 @@ export function AddOrFind({ onAdded, autoFocus, initial }: AddOrFindProps) {
   useEffect(() => {
     if (typed.kind !== 'name') {
       setFound(null)
+      setFailed(null)
       setFinding(false)
       return
     }
     const id = ++latest.current
     setFinding(true)
     const t = setTimeout(async () => {
-      const r = await findCompaniesAction(typed.text).catch(() => ({ error: 'x' }))
+      const r = await findCompaniesAction(typed.text).catch(() => ({ error: 'Could not search companies. Try again.' }))
       if (id !== latest.current) return
-      setFound('error' in r ? { employers: [], notChecked: [] } : r)
+      setFailed('error' in r ? r.error : null)
+      setFound('error' in r ? null : r)
       setFinding(false)
     }, 250)
     return () => clearTimeout(t)
@@ -215,6 +218,12 @@ export function AddOrFind({ onAdded, autoFocus, initial }: AddOrFindProps) {
             </>
           )}
         </div>
+      )}
+
+      {failed && !finding && (
+        <p role="status" className="r-body">
+          {failed}
+        </p>
       )}
 
       {none && name && (
