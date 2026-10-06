@@ -27,7 +27,7 @@ const m = vi.hoisted(() => ({
 
 vi.mock('../scoring-port', async (orig) => ({ ...(await orig<typeof import('../scoring-port')>()), shortlistFor: m.shortlistFor, recordReaction: m.recordReaction, roleView: m.roleView }))
 vi.mock('../subagents/scout', async (orig) => ({ ...(await orig<typeof import('../subagents/scout')>()), runScout: m.runScout }))
-vi.mock('../subagents/writer', async (orig) => ({ ...(await orig<typeof import('../subagents/writer')>()), runWriter: m.runWriter }))
+vi.mock('@/lib/workflows/writer', async (orig) => ({ ...(await orig<typeof import('@/lib/workflows/writer')>()), runWriter: m.runWriter }))
 vi.mock('@/lib/memory/mem0-store', () => ({ getMemoryStore: () => ({ search: m.searchMemories }) }))
 vi.mock('../run', () => ({ runResearcher: m.runResearcher }))
 vi.mock('@/lib/harness/copilot-tools', async (orig) => ({

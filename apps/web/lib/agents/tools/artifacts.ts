@@ -6,7 +6,7 @@
 
 import { z } from 'zod'
 import { getArtifactRow } from '../artifacts'
-import { runWriter } from '../subagents/writer'
+import { runWriter } from '@/lib/workflows/writer'
 import { defineTool, keyFor, toolFix, writeFields, type CelloTool } from './common'
 
 export const createArtifactTool = defineTool({
