@@ -45,7 +45,6 @@ import {
   DEMO_DOSSIERS,
   DEMO_DRAFTS,
   DEMO_FOLLOW_UPS,
-  DEMO_INTERVIEW_KITS,
   DEMO_JOBS,
   DEMO_OUTREACH,
   DEMO_PERSONA,
@@ -166,7 +165,7 @@ export interface DemoBatch {
   /**
    * True when a failure leaves the demo unusable and the seeder should abort.
    * False for the surfaces that merely degrade to an empty state — losing the
-   * interview kits is a worse demo, losing the jobs is no demo at all.
+   * dossiers is a worse demo, losing the jobs is no demo at all.
    */
   required: boolean
   /** Primary-key column the idempotent upsert below conflicts on. Defaults
@@ -502,23 +501,6 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
     },
   ]
 
-  // --- prep artefacts ------------------------------------------------------
-  const interviewKitRows = DEMO_INTERVIEW_KITS.map((kit) => {
-    const job = jobBySlug(kit.jobSlug)
-    return {
-      id: id(`interview_kit:${kit.jobSlug}`),
-      user_id: demoUserId,
-      job_id: jobIdBySlug.get(kit.jobSlug)!,
-      company_id: companyIdBySlug.get(job.companySlug)!,
-      questions: kit.questions,
-      prep_notes: kit.prepNotes,
-      star_stories: kit.starStories,
-      status: 'ready',
-      created_at: daysBefore(now, 3),
-      updated_at: daysBefore(now, 3),
-    }
-  })
-
   const dossierRows = DEMO_DOSSIERS.map((dossier) => ({
     id: id(`company_dossier:${dossier.companySlug}`),
     company_id: companyIdBySlug.get(dossier.companySlug)!,
@@ -555,7 +537,6 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
       { table: 'application_drafts', rows: draftRows, required: false },
       { table: 'outreach_messages', rows: outreachRows, required: false },
       { table: 'resume_documents', rows: resumeRows, required: false },
-      { table: 'interview_kits', rows: interviewKitRows, required: false },
       { table: 'company_dossiers', rows: dossierRows, required: false },
     ],
   }

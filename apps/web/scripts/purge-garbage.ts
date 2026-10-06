@@ -24,12 +24,11 @@
  *   the stored one and could condemn a real posting).
  *
  * WHAT IS NEVER DELETED
- *   jobs      any job with an application, an application draft, an interview
- *             kit or an outreach message attached (applications and interview
- *             kits cascade off jobs — deleting the job would delete the user's
- *             pipeline row).
+ *   jobs      any job with an application, an application draft or an outreach
+ *             message attached (applications cascade off jobs — deleting the
+ *             job would delete the user's pipeline row).
  *   companies anything with an application, a generated dossier, a contact, an
- *             interview kit, an outreach message, a working ATS provider in
+ *             outreach message, a working ATS provider in
  *             metadata, is_dream_company, hand-written notes, or ANY remaining
  *             non-garbage job. Only companies that fail every one of those tests
  *             AND look auto-created are removed.
@@ -171,7 +170,6 @@ interface JobRow {
   source: string | null
   has_application: boolean
   has_draft: boolean
-  has_kit: boolean
   has_outreach: boolean
 }
 
@@ -187,7 +185,6 @@ interface CompanyRow {
   has_application: boolean
   has_dossier: boolean
   has_contacts: boolean
-  has_kits: boolean
   has_outreach: boolean
 }
 
@@ -212,7 +209,6 @@ function jobsPageSql(afterId: string | null): string {
              c.name AS company_name,
              EXISTS (SELECT 1 FROM public.applications a WHERE a.job_id = j.id) AS has_application,
              EXISTS (SELECT 1 FROM public.application_drafts d WHERE d.job_id = j.id) AS has_draft,
-             EXISTS (SELECT 1 FROM public.interview_kits k WHERE k.job_id = j.id) AS has_kit,
              EXISTS (SELECT 1 FROM public.outreach_messages o WHERE o.job_id = j.id) AS has_outreach
       FROM public.jobs j
       LEFT JOIN public.companies c ON c.id = j.company_id
@@ -233,7 +229,6 @@ const COMPANIES_SQL = `
                     WHERE j.company_id = c.id) AS has_application,
            EXISTS (SELECT 1 FROM public.company_dossiers d WHERE d.company_id = c.id) AS has_dossier,
            EXISTS (SELECT 1 FROM public.contacts ct WHERE ct.company_id = c.id) AS has_contacts,
-           EXISTS (SELECT 1 FROM public.interview_kits k WHERE k.company_id = c.id) AS has_kits,
            EXISTS (SELECT 1 FROM public.outreach_messages o WHERE o.company_id = c.id) AS has_outreach
     FROM public.companies c
     ORDER BY c.id ASC
@@ -318,7 +313,6 @@ async function main(): Promise<void> {
       const keptBy =
         (row.has_application && 'application') ||
         (row.has_draft && 'application draft') ||
-        (row.has_kit && 'interview kit') ||
         (row.has_outreach && 'outreach message') ||
         null
 
@@ -406,7 +400,6 @@ async function main(): Promise<void> {
       (c.has_dossier && 'has a generated dossier') ||
       (c.ats_provider && `has a working ATS (${c.ats_provider})`) ||
       (c.has_contacts && 'has contacts') ||
-      (c.has_kits && 'has an interview kit') ||
       (c.has_outreach && 'has outreach messages') ||
       (c.is_dream_company && 'is marked a dream company') ||
       (c.has_notes && 'has hand-written notes') ||
