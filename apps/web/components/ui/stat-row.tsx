@@ -15,17 +15,33 @@ export interface StatRowProps extends React.HTMLAttributes<HTMLDivElement> {
   stats: StatRowItem[]
 }
 
-/** One card, N stats separated by hairline rules, display-font tabular numerals. */
+// Literal class names so Tailwind sees them; the row sizes to what is shown.
+const COLS: Record<number, string> = {
+  1: 'sm:grid-cols-1',
+  2: 'sm:grid-cols-2',
+  3: 'sm:grid-cols-3',
+  4: 'sm:grid-cols-4',
+  5: 'sm:grid-cols-5',
+}
+
+/**
+ * One card, N stats separated by hairline rules, display-font tabular numerals.
+ * A stat whose value is the number 0 is not drawn (a bare zero gives a person
+ * nothing to act on); with none left the row is not drawn at all.
+ */
 export function StatRow({ stats, className, ...props }: StatRowProps) {
+  const shown = stats.filter((s) => s.value !== 0)
+  if (shown.length === 0) return null
   return (
     <div
       className={cn(
-        'grid grid-cols-2 gap-px overflow-hidden rounded-card border bg-border shadow-card sm:grid-cols-4',
+        'grid grid-cols-2 gap-px overflow-hidden rounded-card border bg-border shadow-card',
+        COLS[Math.min(shown.length, 5)],
         className
       )}
       {...props}
     >
-      {stats.map((stat) => {
+      {shown.map((stat) => {
         const content = (
           <>
             <div className="font-readout text-label uppercase tracking-[0.12em] text-muted-foreground">

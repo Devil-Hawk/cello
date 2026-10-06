@@ -61,7 +61,8 @@ export function PipelineSnapshot({ applicationsCount, stageCounts, followUps }: 
     )
   }
 
-  const stageStats: StatRowItem[] = SNAPSHOT_STAGES.map((stage) => ({
+  // CountUp hides the number from StatRow, so empty stages are dropped here.
+  const stageStats: StatRowItem[] = SNAPSHOT_STAGES.filter((stage) => (stageCounts[stage] ?? 0) > 0).map((stage) => ({
     label: STAGE_META[stage].label,
     value: <CountUp value={stageCounts[stage] ?? 0} />,
     href: '/pipeline',
@@ -83,7 +84,7 @@ export function PipelineSnapshot({ applicationsCount, stageCounts, followUps }: 
         </Link>
       </CardHeader>
       <CardContent className="space-y-4">
-        <StatRow stats={stageStats} className="sm:grid-cols-5" />
+        <StatRow stats={stageStats} />
         {hasFollowUps ? (
           <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-caption">
             {followUps.overdueCount > 0 && (
