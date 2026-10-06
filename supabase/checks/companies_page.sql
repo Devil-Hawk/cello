@@ -58,8 +58,8 @@ select (select b from fx), id from public.jobs where external_id like 'x-%';
 
 -- A follows Beta and Gamma (Gamma pinned) and one employer Cello has no row for; a company made from email is not followed.
 insert into public.companies (id, user_id, name, domain, career_url, employer_id, watching, is_dream_company, metadata)
-select ca2, a, 'Beta Works', null, 'https://beta-works.example/careers', e2, true, false, '{}'::jsonb from fx
-union all select ca3, a, 'Gamma Works', null, 'https://gamma-works.example/careers', e3, true, true, '{}'::jsonb from fx
+select ca2, a, 'Beta Works', 'beta-works.example', 'https://beta-works.example/careers', e2, true, false, '{}'::jsonb from fx
+union all select ca3, a, 'Gamma Works', 'gamma-works.example', 'https://gamma-works.example/careers', e3, true, true, '{}'::jsonb from fx
 union all select ca_solo, a, 'Solo Person', null, '', null, true, false, '{}'::jsonb from fx
 union all select ca_mail, a, 'Mail Only', null, '', null, false, false, '{}'::jsonb from fx;
 
