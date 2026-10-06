@@ -38,7 +38,7 @@ vi.mock('@/lib/observability/log', () => ({
   logHarnessError: (...args: unknown[]) => logHarnessErrorMock(...args),
 }))
 
-const { scoreJobWithLlm, scoreJobBatch, verifyMatchVerdict } = await import('./matcher')
+const { scoreJobWithLlm, scoreJobBatch, verifyMatchVerdict, toScorable } = await import('./matcher')
 
 const FAKE_ADMIN = {} as AdminClient
 
@@ -100,6 +100,17 @@ describe('scoreJobWithLlm — buildMatchContext wiring', () => {
     await scoreJobWithLlm(llm, 'A completely different resume.', job, FAKE_ADMIN, 'user-1')
     expect(calls[0]!.promptRef).toMatchObject({ name: 'matcher', hash: expect.stringMatching(/^[0-9a-f]{8}$/) })
     expect(calls[0]!.promptRef).toEqual(calls[1]!.promptRef)
+  })
+
+  it("never falls back to another person's company for a directory-held role", async () => {
+    const calls: LlmRunOptions[] = []
+    // viewer_company_id null = the viewer holds the role from the directory; company_id (if a row carried it) is the first storer's.
+    const row = { id: 'job-1', title: 'Backend Engineer', description: 'x', location: 'Remote', viewer_company_id: null, company_id: 'co-of-person-a' }
+    const scorable = toScorable(row as never)
+    expect(scorable.companyId).toBeNull()
+    await scoreJobWithLlm(fakeLlm(calls), RESUME, scorable, FAKE_ADMIN, 'person-b')
+    expect(calls[0]!.prompt).not.toContain('co-of-person-a')
+    expect(calls[0]!.prompt).not.toContain('CONTEXT FOR')
   })
 
   it('adds no context block when the job has no company', async () => {
@@ -256,7 +267,7 @@ describe('verifyMatchVerdict — writeVerdict / floor-before-spend / catch branc
 
 describe('scoreJobBatch — where the score is written', () => {
   const JOB = {
-    id: 'job-1', company_id: null, title: 'Backend Engineer', description: 'Do the work.', location: 'Remote', url: 'https://x.example/1',
+    id: 'job-1', title: 'Backend Engineer', description: 'Do the work.', location: 'Remote', url: 'https://x.example/1',
     is_new: true, match_score: null, posted_at: null, job_function: null, seniority: null, language: null, country: null, is_remote: null,
     quality_score: 80, viewer_company_id: 'co-1', viewer_company_name: 'Acme',
   }

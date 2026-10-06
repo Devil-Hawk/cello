@@ -72,7 +72,6 @@ const RESUME_LIMIT = 8000
 
 interface JobRow {
   id: string
-  company_id: string | null
   title: string
   description: string | null
   location: string | null
@@ -141,7 +140,7 @@ export function toScorable(job: JobRow): ScorableJob {
     description: job.description,
     location: job.location,
     companyName: companyName(job),
-    companyId: job.viewer_company_id ?? job.company_id,
+    companyId: job.viewer_company_id ?? null,
   }
 }
 
@@ -357,7 +356,7 @@ function passesQualityAndTargeting(job: JobRow, targeting: Targeting): boolean {
 }
 
 const SELECT_COLUMNS =
-  'id, company_id, title, description, location, url, is_new, match_score, posted_at, ' +
+  'id, title, description, location, url, is_new, match_score, posted_at, ' +
   'job_function, seniority, language, country, is_remote, quality_score, viewer_company_id, viewer_company_name'
 
 async function fetchJobsByIds(admin: AdminClient, ids: string[], userId: string): Promise<JobRow[]> {
