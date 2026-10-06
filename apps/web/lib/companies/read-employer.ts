@@ -113,7 +113,7 @@ export async function readEmployer(db: Db, employer: DirectoryRow, people: Perso
     }
     await writeEmployer(
       db,
-      { name: check.name, domain: check.domain ?? employer.domain, careersUrl: employer.careers_url, provider, token, verifiedBy: check.verifiedBy, source: employer.source as DirectorySource, openCount: employer.open_count, readTier: employer.read_tier },
+      { name: check.name, domain: employer.domain, careersUrl: employer.careers_url, provider, token, verifiedBy: check.verifiedBy, source: employer.source as DirectorySource, openCount: employer.open_count, readTier: employer.read_tier },
       deps.verify.now
     )
     return check.jobs

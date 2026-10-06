@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { HttpError } from '../ats/http'
 import type { AtsJob } from '../ats/types'
 import type { BoardIdentity, BoardRef } from '../ats/verify'
 import type { SiteRead } from '../ingest/reader'
@@ -102,12 +103,31 @@ describe('companies.add by link', () => {
     expect(tables.company_directory ?? []).toHaveLength(0)
   })
 
+  it('a pasted Workable board named like a verified employer is other_owner, offers that employer, and writes nothing', async () => {
+    const real = { id: 'e1', name: 'Retell AI', name_norm: 'retell ai', domain: 'retellai.com', logo_url: null, careers_url: 'https://retellai.com/careers', ats_provider: 'ashby', ats_token: 'retell-ai', verified_by: 'careers_page_link', verified_at: '2026-10-01T00:00:00Z', open_count: 12, source: 'person' }
+    const { client, tables } = world({ company_directory: [{ ...real }] })
+    const d = deps({ boards: [{ provider: 'workable', token: 'squat', via: 'url' }], identity: { name: 'Retell AI', homeUrls: [] } })
+    const r = await addCompany(client, 'u1', { link: 'https://apply.workable.com/squat' }, d.value)
+    expect(r).toMatchObject({ ok: false, reason: 'other_owner', offers: [{ kind: 'employer', name: 'Retell AI', employerId: 'e1' }] })
+    expect(tables.company_directory).toEqual([real])
+    expect(tables.companies).toHaveLength(0)
+  })
+
   it('a pasted board no one big has the name of is taken on the person say-so while it is alive', async () => {
     const { client, tables } = world()
     const d = deps({ boards: [{ provider: 'personio', token: 'tiny-co', via: 'url' }], identity: null })
     const r = await addCompany(client, 'u1', { link: 'https://tiny-co.jobs.personio.de/' }, d.value)
     expect(r).toMatchObject({ ok: true, employer: { name: 'Tiny Co' } })
     expect(tables.company_directory[0]).toMatchObject({ verified_by: 'careers_url', ats_provider: 'personio', ats_token: 'tiny-co' })
+  })
+
+  it('a pasted page that links a verified employer board changes nothing in that employer row', async () => {
+    const real = { id: 'e1', name: 'Retell AI', name_norm: 'retell ai', domain: 'retellai.com', logo_url: null, careers_url: 'https://retellai.com/careers', ats_provider: 'ashby', ats_token: 'retell-ai', verified_by: 'careers_page_link', verified_at: '2026-10-01T00:00:00Z', open_count: 12, source: 'person' }
+    const { client, tables } = world({ company_directory: [{ ...real }] })
+    const d = deps({ boards: [{ provider: 'ashby', token: 'retell-ai', via: 'link' }], identity: null, page: [{ provider: 'ashby', token: 'retell-ai' }] })
+    const r = await addCompany(client, 'u1', { link: 'https://evil-site.com/careers' }, d.value)
+    expect(r).toMatchObject({ ok: true, employer: { employerId: 'e1' } })
+    expect(tables.company_directory).toEqual([real])
   })
 
   it('a board whose newest posting is 200 days old is stale', async () => {
@@ -208,6 +228,17 @@ describe('companies.add by directory id and by candidate', () => {
     expect(r).toMatchObject({ ok: false, reason: 'other_owner', offers: [{ kind: 'employer', name: 'Retell AI' }] })
     expect(tables.directory_candidates[0]).toMatchObject({ state: 'failed', fail_reason: 'other_owner' })
     expect(tables.companies).toHaveLength(0)
+  })
+
+  it('a person choosing a candidate whose board does not answer never fails it: three checks leave it pending and read the board once', async () => {
+    const cand = { id: 'c1', name: 'Gusto', domain: null, ats_provider: 'greenhouse', ats_token: 'gusto', source: 'kalil', failed_reads: 0, state: 'pending', employer_id: null }
+    const { client, tables } = world({ directory_candidates: [cand] })
+    const d = deps()
+    const fetchBoard = vi.fn(async (): Promise<AtsJob[]> => { throw new HttpError('down', 503) })
+    d.value.verify.fetchBoard = fetchBoard
+    for (let i = 0; i < 3; i++) expect(await addCompany(client, 'u1', { candidateId: 'c1' }, d.value)).toMatchObject({ ok: false, reason: 'cannot_read' })
+    expect(tables.directory_candidates[0]).toMatchObject({ state: 'pending', failed_reads: 0 })
+    expect(fetchBoard).toHaveBeenCalledTimes(1)
   })
 
   it('choosing a candidate that passes writes the employer and follows it', async () => {

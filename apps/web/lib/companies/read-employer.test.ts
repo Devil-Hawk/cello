@@ -122,6 +122,12 @@ describe('readEmployer: what a sweep read keeps, counts and records', () => {
     expect(same.directory.verified_at).toBe(new Date(NOW).toISOString())
   })
 
+  it('the check of a row with no domain does not give it the domain its board declares', async () => {
+    const r = await run({ jobs: board, row: { domain: null, verified_at: iso(100) }, identity: { name: 'Acme', homeUrls: ['https://victim.com'] } })
+    expect(r.result.failure).toBeUndefined()
+    expect(r.directory.domain).toBeNull()
+  })
+
   it('a board that is not due is checked at once when its jobs name another employer, before anything is stored or counted', async () => {
     const taken = board.map((j) => ({ ...j, employer: 'Other Co' }))
     const other = await run({ jobs: taken, identity: { name: 'Other Co', homeUrls: ['https://other.com'] } })

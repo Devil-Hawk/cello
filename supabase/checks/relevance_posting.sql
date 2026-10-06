@@ -42,7 +42,7 @@ declare f record; row_a jsonb; later jsonb;
 begin
   select * into f from fx;
   row_a := jsonb_build_array(jsonb_build_object(
-    'company_id', f.co_a, 'external_id', 'p-1', 'title', 'Backend Engineer', 'description', 'plain copy', 'url', 'https://posting.example/jobs/1',
+    'company_id', f.co_a, 'employer_id', f.emp, 'external_id', 'p-1', 'title', 'Backend Engineer', 'description', 'plain copy', 'url', 'https://posting.example/jobs/1',
     'source', 'greenhouse', 'last_seen_at', now(), 'description_md', E'## About\n\nWhole body.', 'description_state', 'full',
     'description_source', 'api', 'apply_url', 'https://apply.example/1', 'description_md5', md5(E'## About\n\nWhole body.')));
   perform public.upsert_shared_jobs(row_a);
@@ -50,7 +50,7 @@ begin
   if (select description_md5 from public.jobs where employer_id = f.emp and posting_key = 'p-1') <> md5(E'## About\n\nWhole body.') then raise exception 'the hash is the md5 of the Markdown'; end if;
 
   -- a read that found no body (a provider that did not send one this time) leaves the stored body alone
-  later := jsonb_build_array(jsonb_build_object('company_id', f.co_b, 'external_id', 'p-1', 'title', 'Backend Engineer', 'description', '', 'url', 'https://posting.example/jobs/1', 'source', 'greenhouse', 'last_seen_at', now()));
+  later := jsonb_build_array(jsonb_build_object('company_id', f.co_b, 'employer_id', f.emp, 'external_id', 'p-1', 'title', 'Backend Engineer', 'description', '', 'url', 'https://posting.example/jobs/1', 'source', 'greenhouse', 'last_seen_at', now()));
   perform public.upsert_shared_jobs(later);
   if (select description_state from public.jobs where employer_id = f.emp and posting_key = 'p-1') <> 'full' or (select description_md from public.jobs where employer_id = f.emp and posting_key = 'p-1') is null then
     raise exception 'a read with no body must not blank the stored one';
@@ -58,7 +58,7 @@ begin
   if (select apply_url from public.jobs where employer_id = f.emp and posting_key = 'p-1') <> 'https://apply.example/1' then raise exception 'the apply link stays'; end if;
 
   -- a changed body replaces it, with its hash
-  later := jsonb_build_array(jsonb_build_object('company_id', f.co_b, 'external_id', 'p-1', 'title', 'Backend Engineer', 'description', 'plain copy', 'url', 'https://posting.example/jobs/1', 'source', 'greenhouse', 'last_seen_at', now(),
+  later := jsonb_build_array(jsonb_build_object('company_id', f.co_b, 'employer_id', f.emp, 'external_id', 'p-1', 'title', 'Backend Engineer', 'description', 'plain copy', 'url', 'https://posting.example/jobs/1', 'source', 'greenhouse', 'last_seen_at', now(),
     'description_md', E'## About\n\nWhole body.\n\n## Requirements\n\n- Go', 'description_state', 'full', 'description_source', 'api', 'description_md5', md5(E'## About\n\nWhole body.\n\n## Requirements\n\n- Go')));
   perform public.upsert_shared_jobs(later);
   if (select description_md5 from public.jobs where employer_id = f.emp and posting_key = 'p-1') <> md5(E'## About\n\nWhole body.\n\n## Requirements\n\n- Go') then raise exception 'a changed body takes its hash'; end if;

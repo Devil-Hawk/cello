@@ -192,17 +192,20 @@ async function addVerified(db: Db, userId: string, employer: DirectoryRow | null
 }
 
 async function addCandidate(db: Db, userId: string, candidateId: string, deps: AddDeps, dream: boolean): Promise<AddResult> {
-  const { data } = await db.from('directory_candidates').select('id, name, domain, ats_provider, ats_token, source, failed_reads, state, employer_id').eq('id', candidateId).maybeSingle()
-  const candidate = data as (CandidateRow & { state: string; employer_id: string | null }) | null
+  const { data } = await db.from('directory_candidates').select('id, name, domain, ats_provider, ats_token, source, failed_reads, state, employer_id, next_check_at').eq('id', candidateId).maybeSingle()
+  const candidate = data as (CandidateRow & { state: string; employer_id: string | null; next_check_at: string | null }) | null
   if (!candidate) return refuse('not_found')
   // Verified already: the employer is in the directory.
   if (candidate.state === 'verified' && candidate.employer_id) return addVerified(db, userId, await getEmployer(db, candidate.employer_id), 'known', dream)
+  // A check someone else made lately stands: a click is not a new look, so a script cannot hammer a candidate's provider.
+  if (candidate.next_check_at && Date.parse(candidate.next_check_at) > Date.now()) return refuse('cannot_read')
   const have = await followedRow(db, userId, { domain: candidate.domain })
   if (have) return { ok: true, companyId: have.id, already: true, employer: { employerId: have.employer_id, name: have.name, domain: have.domain, logoUrl: have.logo_url, openCount: null } }
   if ((await addsToday(db, userId)) >= DAILY_ADD_LIMIT) return refuse('daily_limit')
 
   // Chosen by a person, so checked now. A failed one is marked failed and never shows in search again.
-  const settled = await settleCandidate(db, candidate, deps.verify)
+  // A person's check never counts an unread board against the candidate: only the sweep does.
+  const settled = await settleCandidate(db, candidate, deps.verify, { person: true })
   if (settled.state === 'verified') {
     const employer = await getEmployer(db, settled.employerId)
     return employer ? follow(db, userId, employer, 'known', dream) : refuse('not_saved')
@@ -271,9 +274,10 @@ async function verifyLink(db: Db, url: URL, domain: string | null, directToken: 
   if (read.board) {
     const ok = passed.get(`${read.board.provider}:${read.board.token}`)
     if (ok) {
-      const employerId = await writeEmployer(db, {
+      return writeEmployer(db, {
         name: ok.name,
-        domain: ok.domain ?? domain,
+        // the host of the pasted link, never the board's own declared home (whoever owns a board can edit that)
+        domain,
         careersUrl: directToken ? null : url.href,
         provider: read.board.provider,
         token: read.board.token,
@@ -281,13 +285,13 @@ async function verifyLink(db: Db, url: URL, domain: string | null, directToken: 
         source: 'person',
         openCount: ok.jobs.length,
         readTier: 'board',
+        keepExisting: true,
       })
-      return { ok: true, employerId }
     }
   }
   // No board, but the employer's own site lists roles Cello could read: tied to the employer by the address it was read at.
   if (domain && read.tier && read.tier !== 'board' && read.jobs.length > 0) {
-    const employerId = await writeEmployer(db, {
+    return writeEmployer(db, {
       name: guess ?? domain,
       domain,
       careersUrl: url.href,
@@ -297,8 +301,8 @@ async function verifyLink(db: Db, url: URL, domain: string | null, directToken: 
       source: 'person',
       openCount: read.complete ? read.jobs.length : null,
       readTier: read.tier,
+      keepExisting: true,
     })
-    return { ok: true, employerId }
   }
 
   // Nothing verified: the board that failed says why; otherwise the reader's own reason.
