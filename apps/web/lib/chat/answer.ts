@@ -134,7 +134,8 @@ export function checkAnswer(answer: ModelAnswer, input: CheckInput): Checked {
       return
     }
     // A link to a thing this part is not about and no tool returned loses the link and keeps its words.
-    const text = p.text.replace(/\[([^\]]*)\]\(cello:([a-z]+)\/([^)\s]+)\)/gi, (whole, label: string, kind: string, id: string) =>
+    // A markdown image is a request the browser makes with no click, so it keeps only its alt text.
+    const text = p.text.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\[([^\]]*)\]\(cello:([a-z]+)\/([^)\s]+)\)/gi, (whole, label: string, kind: string, id: string) =>
       aboutKeys.has(`${kind}:${id}`) || returned.has(`${kind}:${id}`) ? whole : label
     )
     about.forEach((a) => named.set(key(a), a))

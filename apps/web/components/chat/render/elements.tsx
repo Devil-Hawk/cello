@@ -108,6 +108,10 @@ export const mdComponents: Components = {
     </a>
   ),
 
+  // An image from a model's text is a request the browser would make with no click, and its address can carry private words.
+  // Only the alt text is drawn.
+  img: ({ alt }) => (alt ? <span className="text-muted-foreground">{alt}</span> : null),
+
   strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
   em: ({ children }) => <em className="italic">{children}</em>,
   del: ({ children }) => <del className="text-muted-foreground line-through">{children}</del>,

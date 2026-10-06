@@ -22,15 +22,15 @@ export function CompanyCard({ card, onOpen }: { card: CompanyCardData; onOpen?: 
         <p className={`${NAME_CLASS} break-words`}>{card.name}</p>
         <p className="mt-1 text-caption text-muted-foreground">{facts.join(' · ')}</p>
       </div>
-      {onOpen ? (
-        <button type="button" className={buttonVariants({ variant: 'outline', size: 'sm' })} onClick={() => onOpen('company', card.id)}>
+      {href ? (
+        <Link href={href} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
           Open
-        </button>
+        </Link>
       ) : (
-        href && (
-          <Link href={href} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+        onOpen && (
+          <button type="button" className={buttonVariants({ variant: 'outline', size: 'sm' })} onClick={() => onOpen('company', card.id)}>
             Open
-          </Link>
+          </button>
         )
       )}
     </article>

