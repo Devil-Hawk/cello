@@ -17,8 +17,7 @@ async function open(context: BrowserContext, site: Site, job: number, html: stri
 }
 
 async function check(p: Page, name: string): Promise<void> {
-  const bar = p.locator('cello-bar')
-  await expect(bar).toBeVisible()
+  await expect(p.locator('cello-bar .bar')).toBeVisible()
   for (const scheme of ['light', 'dark'] as const) {
     await p.emulateMedia({ colorScheme: scheme })
     await shoot(p, `bar-${name}-${scheme}`)

@@ -64,6 +64,7 @@ function luminance(hex: string): number {
 
 /** WCAG contrast ratio of two #rrggbb colours. */
 export function contrastRatio(a: string, b: string): number {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+  const hi = Math.max(luminance(a), luminance(b))
+  const lo = Math.min(luminance(a), luminance(b))
   return (hi + 0.05) / (lo + 0.05)
 }
