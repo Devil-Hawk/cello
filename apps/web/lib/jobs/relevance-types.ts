@@ -39,7 +39,8 @@ export interface PersonRole {
 }
 
 /** The stage of the targets code that decided a role is not for a person (lib/jobs/target-relevance.ts). */
-export type OutsideReason = 'place' | 'age' | 'excluded' | 'level' | 'title'
+/** `type` and `untyped` replace `title` while role_types_live is on (K5c): another role type, and a type no tier could tell. */
+export type OutsideReason = 'place' | 'age' | 'excluded' | 'level' | 'title' | 'type' | 'untyped'
 
 /** What a person_counts row counts. Counts are numbers, never rows of roles (directive 26). */
 export type CountKind = 'outside_targets' | 'untraced' | 'cannot_read' | 'untyped' | 'shadow_keep' | 'shadow_drop'
