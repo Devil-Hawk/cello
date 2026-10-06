@@ -253,7 +253,7 @@ function errorMessage(error: unknown): string {
 }
 
 /** Read a valid cached ATS pointer out of companies.metadata, if any. */
-function readCachedAts(
+export function readCachedAts(
   metadata: unknown
 ): { provider: AtsProviderId; token: string; source?: string; verifiedBy?: string } | null {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null
