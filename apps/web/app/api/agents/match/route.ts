@@ -118,11 +118,13 @@ export async function POST(request: NextRequest) {
       )
       const matchDetails = buildMatchDetails(verdict)
 
-      // The score is written by the service role: a role is a shared row, and a person cannot update it (migration 20261008055000).
+      // The score is the scorer's own, from their resume and key: it goes on their role row, never on the shared one.
+      // The service role writes it; a signed-in person cannot (migration 20261008060013).
       await admin
-        .from('jobs')
+        .from('person_roles')
         .update({ match_score: verdict.score, match_details: matchDetails as unknown as Json })
-        .eq('id', jobId)
+        .eq('user_id', user.id)
+        .eq('job_id', jobId)
 
       setTraceOutput({ score: verdict.score, seniorityFit: verdict.seniorityFit })
       return NextResponse.json(matchDetails)

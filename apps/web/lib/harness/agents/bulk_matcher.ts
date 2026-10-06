@@ -397,12 +397,14 @@ interface ScoreUpdate {
   matchDetails: Record<string, unknown>
 }
 
-async function persistScores(admin: AdminClient, updates: ScoreUpdate[]): Promise<void> {
+// The score is the person's own (their resume, their key): it goes on their role row, never on the shared role.
+async function persistScores(admin: AdminClient, userId: string, updates: ScoreUpdate[]): Promise<void> {
   await runWithConcurrency(updates, PERSIST_CONCURRENCY, async (u) => {
     const { error } = await admin
-      .from('jobs')
+      .from('person_roles')
       .update({ match_score: u.score, match_details: u.matchDetails })
-      .eq('id', u.jobId)
+      .eq('user_id', userId)
+      .eq('job_id', u.jobId)
     if (error) console.error(`[bulk_matcher] persist failed for job ${u.jobId}`, error)
   })
 }
@@ -558,6 +560,7 @@ export async function runBulkMatch(opts: BulkMatchOptions): Promise<BulkMatchRes
 
   await persistScores(
     opts.admin,
+    opts.userId,
     [...tier1.verdicts.entries()].map(([jobId, v]) => ({ jobId, score: v.score, matchDetails: buildTier1MatchDetails(v) }))
   )
   bump('tier1-no-verdict', tier1.failedJobIds.length)
@@ -572,6 +575,7 @@ export async function runBulkMatch(opts: BulkMatchOptions): Promise<BulkMatchRes
     if (tier2.missingKey) bump('no-llm-key', 1)
     await persistScores(
       opts.admin,
+      opts.userId,
       [...tier2.matchDetailsByJobId.entries()].map(([jobId, r]) => ({ jobId, score: r.score, matchDetails: r.matchDetails }))
     )
   }

@@ -840,10 +840,12 @@ export async function scoreJobBatch(opts: ScoreBatchOptions): Promise<ScoreBatch
     try {
       const { verdict } = await scoreJobWithLlm(opts.llm, opts.resume, toScorable(job), opts.admin, opts.userId)
       const matchDetails = buildMatchDetails(verdict)
+      // the person's own role row: a score from their resume is never written to the shared role
       await opts.admin
-        .from('jobs')
+        .from('person_roles')
         .update({ match_score: verdict.score, match_details: matchDetails })
-        .eq('id', job.id)
+        .eq('user_id', opts.userId)
+        .eq('job_id', job.id)
       scored.push({
         jobId: job.id,
         isNew: job.is_new,

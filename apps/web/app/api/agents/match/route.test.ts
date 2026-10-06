@@ -25,9 +25,18 @@ vi.mock('@/lib/harness/agents/matcher', () => ({
 vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: async () => ({ openrouter: 'k' }) }))
 vi.mock('@/lib/harness/llm', () => ({ callLlm: vi.fn(), MissingKeyError: class extends Error {} }))
 vi.mock('@/lib/harness/llm-key-message', () => ({ canRunLlm: () => true, missingOpenRouterMessage: () => 'no key' }))
-// Who wrote the score: a person cannot update a shared role (migration 20261008055000), so only the service role may.
-const writes: { by: 'admin' | 'user'; table: string; values: unknown }[] = []
-const admin = { from: (table: string) => ({ update: (values: unknown) => (writes.push({ by: 'admin', table, values }), { eq: () => ({ is: async () => ({ error: null }) }) }) }) }
+// Who wrote the score, and where: a role is a shared row, so the score goes on the scorer's own person_roles row, by the service role.
+const writes: { by: 'admin' | 'user'; table: string; values: unknown; eq?: Record<string, unknown> }[] = []
+const admin = {
+  from: (table: string) => ({
+    update: (values: unknown) => {
+      const w = { by: 'admin' as const, table, values, eq: {} as Record<string, unknown> }
+      writes.push(w)
+      const chain = { eq: (column: string, value: unknown) => ((w.eq[column] = value), chain), then: (resolve: (v: unknown) => void) => resolve({ error: null }) }
+      return chain
+    },
+  }),
+}
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => admin }))
 
 const rows: Record<string, unknown> = {
@@ -68,7 +77,10 @@ describe('POST /api/agents/match in Langfuse', () => {
   it('saves the score with the admin client, never the person\'s own session', async () => {
     scoreMock.mockResolvedValue({ verdict: { score: 85, seniorityFit: 'Strong fit for senior IC' } })
     await post()
-    expect(writes).toEqual([{ by: 'admin', table: 'jobs', values: { match_score: 85, match_details: { score: 85 } } }])
+    expect(writes).toEqual([
+      { by: 'admin', table: 'person_roles', values: { match_score: 85, match_details: { score: 85 } }, eq: { user_id: 'u1', job_id: 'job-1' } },
+    ])
+    expect(writes.some((w) => w.table === 'jobs')).toBe(false)
   })
 
   it('a handled scoring failure answers 500 and marks the root failed', async () => {
