@@ -129,6 +129,15 @@ type Rows = Array<{
   companies: { name: string | null; domain: string | null; logo_url: string | null } | null
 }>
 
+// The Jobs page types its query this way: the builder's generics are too deep
+// for the compiler once the filters are chained.
+type JobsQuery = ReturnType<ReturnType<SupabaseClient['from']>['select']>
+
+/** Open roles inside the person's targets: the same two filters the Jobs list applies. */
+function openInsideTargets(query: unknown, t: Targeting): JobsQuery {
+  return applyRoleTargets(openRolesOnly(query as JobsQuery), t)
+}
+
 /**
  * How many open roles fit the targets right now, by the same code filter the
  * Jobs list uses. Null when it cannot be counted, and the line then hides.
@@ -136,7 +145,7 @@ type Rows = Array<{
 export async function fitCount(supabase: SupabaseClient, t: Targeting): Promise<number | null> {
   if (!hasRoleTargets(t)) return null
   try {
-    const q = applyRoleTargets(openRolesOnly(supabase.from('jobs').select('id', { count: 'exact', head: true })), t)
+    const q = openInsideTargets(supabase.from('jobs').select('id', { count: 'exact', head: true }), t)
     const { count, error } = await q
     return error ? null : (count ?? 0)
   } catch {
@@ -147,8 +156,8 @@ export async function fitCount(supabase: SupabaseClient, t: Targeting): Promise<
 /** The roles that fit, newest first: code order, nothing ranked. Empty when none, null when unreadable. */
 export async function rolesFind(supabase: SupabaseClient, t: Targeting, limit = 8): Promise<WelcomeRole[] | null> {
   try {
-    const q = applyRoleTargets(
-      openRolesOnly(supabase.from('jobs').select('id, title, company_id, location, posted_at, companies(name, domain, logo_url)')),
+    const q = openInsideTargets(
+      supabase.from('jobs').select('id, title, company_id, location, posted_at, companies(name, domain, logo_url)'),
       t,
     )
       .order('posted_at', { ascending: false, nullsFirst: false })
