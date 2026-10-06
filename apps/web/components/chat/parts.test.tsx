@@ -85,7 +85,8 @@ describe('AnswerParts', () => {
   it('renders a long answer with headings, tables and Copy', () => {
     const long = Array.from({ length: 400 }, (_, i) => `Sentence number ${i} of a very long answer.`).join(' ')
     const out = html([{ about: [], text: `## Heading\n\n${long}\n\n| a | b |\n| - | - |\n| 1 | 2 |` }])
-    expect(out).toContain('<h2')
+    // The product's Markdown draws a heading as a bold paragraph of its own.
+    expect(out).toContain('>Heading</p>')
     expect(out).toContain('<table')
     expect(out).toContain('aria-label="Copy"')
   })
