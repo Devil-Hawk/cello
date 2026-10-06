@@ -94,10 +94,10 @@ export function countAsks(text: string): number {
 }
 
 /**
- * The length of a call or chat the email asks for is not a claim about the person.
- * Without this the containment check flags "ten minutes" in every outreach email.
+ * The length of a call or chat the email asks for, and the day it proposes, are not claims about the person.
+ * Without this the containment check flags "ten minutes" in every outreach email and "Thursday" in every reply.
  */
-const ASK_DURATIONS = ['five minutes', 'ten minutes', 'fifteen minutes', 'twenty minutes', 'thirty minutes', '5 minutes', '10 minutes', '15 minutes', '20 minutes', '30 minutes']
+const ASK_DURATIONS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'five minutes', 'ten minutes', 'fifteen minutes', 'twenty minutes', 'thirty minutes', '5 minutes', '10 minutes', '15 minutes', '20 minutes', '30 minutes']
 
 /** The kinds of message that go to someone and ask for one thing. A reply and a note answer or record, so they may ask for nothing. */
 const isEmail = (kind: DraftKind) => kind === 'message' || kind === 'follow_up' || kind === 'reply'

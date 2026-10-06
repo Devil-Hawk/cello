@@ -14,6 +14,7 @@ begin;
 create temp table fx as
 select gen_random_uuid() as user_a, gen_random_uuid() as user_b, gen_random_uuid() as company_id,
        gen_random_uuid() as job_old, gen_random_uuid() as job_reacted, gen_random_uuid() as job_young, gen_random_uuid() as job_gone;
+grant select on fx to authenticated;
 insert into auth.users (id, email) select user_a, 'k17b-a@example.invalid' from fx union all select user_b, 'k17b-b@example.invalid' from fx;
 insert into public.profiles (id, email) select user_a, 'k17b-a@example.invalid' from fx union all select user_b, 'k17b-b@example.invalid' from fx on conflict (id) do nothing;
 insert into public.companies (id, user_id, name, career_url) select company_id, user_a, 'K17b Check', 'https://example.invalid/jobs' from fx;

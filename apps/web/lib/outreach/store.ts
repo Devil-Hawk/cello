@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { addVersion, createArtifact } from '../agents/artifacts'
 import type { AdminClient } from '../harness/types'
-import type { OutreachMessageRow, OutreachStatus, ReplyClassification, TemplateReason } from './types'
+import type { OutreachKind, OutreachMessageRow, OutreachStatus, ReplyClassification, TemplateReason } from './types'
 import { recordInteraction } from '../interactions/store'
 import { traceRefFor } from '../trace/spans'
 
@@ -32,7 +32,7 @@ export interface NewOutreach {
   subject: string
   body: string
   status?: OutreachStatus
-  kind?: 'initial' | 'follow_up'
+  kind?: OutreachKind
   parent_id?: string | null
   /** False when the text is the deterministic template, not a model draft. */
   used_llm?: boolean

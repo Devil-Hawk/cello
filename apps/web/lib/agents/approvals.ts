@@ -198,7 +198,7 @@ async function materializeEmail(
       subject: content.subject,
       body: content.body,
       status: 'pending_review',
-      kind,
+      kind: kind === 'note' ? 'initial' : kind, // ponytail: a note keeps the row kind 'initial'; its own kind lives on the artifact version
       parent_id: parentId,
       used_llm: true,
       artifact_id: artifact.id,
