@@ -1,0 +1,64 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #181d24;
+  --muted: #5b6573;
+  --line: #d5d9df;
+  --btn: #181d24;
+  --btn-fg: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #181d24;
+    --fg: #eceff3;
+    --muted: #a3acb8;
+    --line: #2f3742;
+    --btn: #eceff3;
+    --btn-fg: #181d24;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  width: 320px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.45 system-ui, sans-serif;
+}
+main {
+  padding: 16px;
+}
+h1 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+p {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+button {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+button.primary {
+  background: var(--btn);
+  color: var(--btn-fg);
+  border-color: var(--btn);
+}
+button:focus-visible {
+  outline: 2px solid #0f766e;
+  outline-offset: 2px;
+}
