@@ -280,7 +280,8 @@ begin
   if (select employer_id from public.jobs where id = ja2) is distinct from f.emp then raise exception 'the read adopts the role'; end if;
   if (select title from public.jobs where id = ja2) <> 'Real title' then raise exception 'the read writes the title'; end if;
   if (select apply_url is not null or description_md is not null or description_state is not null from public.jobs where id = ja2) then raise exception 'what a person wrote does not carry into the shared row'; end if;
-  if (select discovered_at < now() - interval '1 day' or still_open is not true or legit_label is not null or match_score is not null from public.jobs where id = ja2) then raise exception 'the age, state, label and score a person planted do not carry into the shared row'; end if;
+  if (select discovered_at < now() - interval '1 day' or still_open is not true or legit_label is not null from public.jobs where id = ja2) then raise exception 'the age, state and label a person planted do not carry into the shared row'; end if;
+  if (select match_score from public.jobs where id = ja2) is distinct from 99 then raise exception 'the score a role already had survives its adoption'; end if;
 end $$;
 
 -- 6d. A company's employer and board are the directory's, never the person's: not by the employer id sent, not by
@@ -482,6 +483,28 @@ begin
   update public.company_directory set name = 'Claim Co', name_norm = 'claim co' where ats_token = 'quietclaim';
   if (select name || '/' || name_norm from public.company_directory where ats_token = 'quietclaim') <> 'Quiet Claim/quiet claim' then raise exception 'a person-added employer keeps the name it was verified under'; end if;
   delete from public.company_directory where name_norm in ('claim co', 'quiet claim');
+
+  -- a row the backfill keyed with a plain strip ('acme inc') is given the key every reader uses, and then holds its name
+  insert into public.company_directory (name, name_norm, ats_provider, ats_token, verified_by, verified_at, source)
+  values ('Stale, Inc.', 'stale inc', 'ashby', 'stale', 'careers_link', now(), 'person');
+  update public.company_directory set name_norm = public.company_name_norm(name) where name_norm is distinct from public.company_name_norm(name) and ats_token = 'stale';
+  if (select name_norm from public.company_directory where ats_token = 'stale') <> 'stale' then raise exception 'a backfilled name is re-keyed with company_name_norm'; end if;
+  update public.company_directory set name = 'Other', name_norm = 'other' where ats_token = 'stale';
+  if (select name || '/' || name_norm from public.company_directory where ats_token = 'stale') <> 'Stale, Inc./stale' then raise exception 'a re-keyed employer still keeps its name'; end if;
+  delete from public.company_directory where ats_token = 'stale';
+
+  -- the same name with a legal word: 'Acme, Inc.' is held as 'acme', so a person's or a lead's 'Acme' adds nothing
+  insert into public.company_directory (name, name_norm, ats_provider, ats_token, verified_by, verified_at, source)
+  values ('Acme, Inc.', public.company_name_norm('Acme, Inc.'), 'greenhouse', 'acme', 'seed_checked', now(), 'seed');
+  insert into public.company_directory (name, name_norm, ats_provider, ats_token, verified_by, verified_at, source)
+  values ('Acme', public.company_name_norm('Acme'), 'workable', 'acmesquat', 'provider_name', now(), 'person');
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'a person cannot add Acme next to a verified Acme, Inc.'; end if;
+  insert into public.company_directory (name, name_norm, ats_provider, ats_token, verified_by, verified_at, source)
+  values ('Acme', public.company_name_norm('Acme'), 'workable', 'acmesquat', 'seed_checked', now(), 'lead');
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'a lead cannot add Acme next to a verified Acme, Inc.'; end if;
+  delete from public.company_directory where name_norm = 'acme';
 end $$;
 
 -- 6j. A person cannot repoint their role row at another job, and can still save one.

@@ -192,6 +192,16 @@ describe('a person or a lead never writes an employer under a name another emplo
     expect(tables.company_directory).toHaveLength(1)
   })
 
+  it('a row named with a legal word holds its name: Acme, Inc. is kept as acme, so a person or a lead named Acme is other_owner', async () => {
+    const acme = { id: 'e2', source: 'person', name: 'Acme, Inc.', name_norm: 'acme', domain: 'acme.example', ats_provider: 'greenhouse', ats_token: 'acme', verified_at: '2026-10-01T00:00:00Z' }
+    for (const source of ['person', 'lead'] as const) {
+      const { client, tables } = fakeDb({ company_directory: [{ ...acme }] })
+      const r = await verifyEmployer(client, { name: 'Acme', domain: null, boards: [{ provider: 'workable', token: 'squat' }], source }, world({ identity: { name: 'Acme', homeUrls: [] } }))
+      expect(r).toMatchObject({ ok: false, reason: 'other_owner' })
+      expect(tables.company_directory).toEqual([acme])
+    }
+  })
+
   it('the seed keeps its path: a namesake from a list is written', async () => {
     const { client, tables } = fakeDb({ company_directory: [{ ...notion }] })
     const r = await verifyEmployer(client, { name: 'Notion', domain: null, boards: [{ provider: 'workable', token: 'other' }], source: 'seed' }, squat)
