@@ -440,8 +440,8 @@ export function JobDetailModal({
 
             {!insights && !failure && !isLoadingInsights && (
               <p className="text-caption text-muted-foreground">
-                Get AI-powered insights about this job, including talking points, company
-                information, and interview tips.
+                Get AI-powered insights about this job, including talking points and company
+                information.
               </p>
             )}
 

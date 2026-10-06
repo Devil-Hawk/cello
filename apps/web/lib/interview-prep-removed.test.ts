@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest'
 const REPO_ROOT = path.resolve(process.cwd(), '../..')
 
 const RETIRED =
-  'interview_prep|interview_kits|interview ?kit|prep_interview|interviewTips|interview prep|/prep\\b|coach([^i]|$)|prep ?kit|star stor'
+  'interview_prep|interview_kits|interview ?kit|prep_interview|interviewTips|interview prep|interview tips|/prep\\b|coach([^i]|$)|prep ?kit|star stor|kitId|questionCount|prep/\\[id\\]'
 
 const ALLOWED = [/^apps\/web\/lib\/jobs\/classify\.ts:\d+:\s+'professor', 'tutor', 'coach',/]
 
