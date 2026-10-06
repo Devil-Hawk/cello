@@ -164,7 +164,7 @@ describe('liveRoles with role types chosen and the switch on', () => {
       posting('k2', 'Applied AI Engineer'),
       posting('t1', 'Product Manager'),
       posting('t2', 'Technical Product Manager'),
-      posting('t3', 'Account Executive [sales]'),
+      posting('t3', 'Product Designer'),
       posting('u1', 'Zookeeper'),
       posting('p1', 'AI Engineer [DE]'),
       posting('l1', 'AI Engineer [junior]'),
