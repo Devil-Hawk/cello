@@ -10,5 +10,4 @@ update public.routines
        end
  where user_id is null and command in ('directory.sweep', 'directory.seed', 'suggestions.refresh') and not enabled;
 
--- Leads are traced to an employer's own posting, or counted, from here on.
-update public.instance_flags set "on" = true, set_by = 'migration 20261008060002', set_at = now() where key = 'directory_leads' and not "on";
+-- The directory_leads flag stays off here: leads keep their old path until the directory has filled (20261008060003).

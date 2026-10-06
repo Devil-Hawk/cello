@@ -6,7 +6,7 @@
 // directory; a feed never creates an employer by itself. A lead that cannot be traced is a number, kept for the person
 // as a count ("14 leads not traced to an employer's own posting"), never a row, never a company.
 //
-// Behind the instance flag directory_leads: until the directory has filled (migration 20261008060002) leads keep
+// Behind the instance flag directory_leads: until the directory has filled (migration 20261008060003, applied by the owner once T26 shows the fill far along) leads keep
 // their old path, so nothing is lost while the seed is still being verified.
 
 import type { SupabaseClient } from '@supabase/supabase-js'

@@ -459,7 +459,7 @@ $$;
 revoke execute on function public.measure_t11(), public.measure_t26() from public, anon, authenticated;
 grant execute on function public.measure_t11(), public.measure_t26() to service_role;
 
--- Leads take the traced path (lib/sources/trace-leads.ts) only once the directory has filled: off until 20261008060002.
+-- Leads take the traced path (lib/sources/trace-leads.ts) only once the directory has filled: off until 20261008060003, applied when the T26 measure shows the fill far along.
 insert into public.instance_flags (key, "on", note)
 values ('directory_leads', false, 'off: a lead keeps its old path; on: a lead becomes a role only when traced to the employer''s own posting, else a count')
 on conflict (key) do nothing;
