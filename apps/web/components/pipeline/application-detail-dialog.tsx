@@ -16,7 +16,6 @@ import { toast } from '@/components/ui/use-toast'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { formatShortDate, matchTone, STAGE_META, type PipelineStage } from '@/lib/format'
 import { CompanyLogo } from '@/components/companies/company-logo'
-import { PrepForInterviewButton } from '@/components/prep/prep-launcher'
 import { LogApplicationDialog } from '@/components/pipeline/log-application-dialog'
 import { PROVENANCE_LABELS } from '@/lib/applications/receipts'
 import type { ApplicationActivity, ApplicationReceipt } from '@/lib/applications/types'
@@ -427,13 +426,6 @@ function DialogBody({ application }: { application: ApplicationWithJob }) {
                   )}
               </div>
             )}
-          </div>
-        )}
-
-        {/* Interview prep — surfaced once the candidate is in a live conversation */}
-        {['screen', 'interview'].includes(application.stage) && job?.id && (
-          <div className="border-t pt-4">
-            <PrepForInterviewButton jobId={job.id} applicationId={application.id} />
           </div>
         )}
       </div>

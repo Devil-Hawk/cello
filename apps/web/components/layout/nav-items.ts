@@ -9,7 +9,6 @@ import {
   Settings,
   Inbox,
   Sparkles,
-  GraduationCap,
   BarChart3,
   type LucideIcon,
 } from 'lucide-react'
@@ -44,14 +43,14 @@ export interface NavItem {
  *
  *   Today         /dashboard
  *   Opportunities /jobs        + Companies (watchlist / research context)
- *   Applications  /pipeline    + Needs you (queue), Interview prep,
- *                                Contacts, Insights (funnel + source stats)
+ *   Applications  /pipeline    + Needs you (queue), Contacts,
+ *                                Insights (funnel + source stats)
  *   Resume        /resume
  *   Copilot       /copilot
  *   Settings      /settings    + Demo access (issue/revoke demo codes, and
  *                                read what was done with each one)
  *
- * Old subsystem-organised sections (Companies, Contacts, Prep, Queue,
+ * Old subsystem-organised sections (Companies, Contacts, Queue,
  * Insights) are not gone — they're the `subItems` above, still real routes,
  * just reached as a sub-view of the destination they belong to now instead of
  * sitting in the primary rail themselves.
@@ -112,7 +111,6 @@ export const navItems: NavItem[] = [
     icon: KanbanSquare,
     subItems: [
       { href: '/queue', label: 'Needs you', icon: Inbox },
-      { href: '/prep', label: 'Interview prep', icon: GraduationCap },
       { href: '/contacts', label: 'Contacts', icon: Users },
       { href: '/insights', label: 'Insights', icon: BarChart3 },
     ],

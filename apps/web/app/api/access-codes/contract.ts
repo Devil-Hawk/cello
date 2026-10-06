@@ -148,7 +148,7 @@ export interface AccessCodeTimelineEntry {
  * Pages the demo user can open, keyed by the first path segment.
  *
  * Mirrors the routes under app/(app)/. An unknown slug is title-cased rather
- * than dropped: a page added later should read as "Interview prep", not vanish
+ * than dropped: a page added later should read as "Needs you", not vanish
  * from the trail because this map was not updated.
  */
 const PAGE_NAMES: Record<string, string> = {
@@ -160,7 +160,6 @@ const PAGE_NAMES: Record<string, string> = {
   companies: 'Companies',
   insights: 'Insights',
   copilot: 'Copilot',
-  prep: 'Interview prep',
   queue: 'Needs you',
   agent: 'Agent',
   settings: 'Settings',
@@ -193,7 +192,6 @@ const ACTION_PHRASES: Record<string, string> = {
   'application.stage': 'Moved an application along the pipeline',
   'contacts.source': 'Looked up contacts',
   'company.dossier': 'Built a company dossier',
-  'interview.prep': 'Generated interview prep',
   'settings.update': 'Changed a setting',
   // lib/access/audit.ts writes 'unknown' rather than dropping an event whose
   // action sanitised down to nothing. "Unknown" alone reads like a UI bug.

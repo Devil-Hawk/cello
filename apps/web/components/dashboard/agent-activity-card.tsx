@@ -68,7 +68,7 @@ export function AgentActivityCard({ run }: AgentActivityCardProps) {
           <EmptyState
             icon={Sparkles}
             title="No agent runs yet"
-            body="Start one from the Copilot page — sourcing, matching, and interview prep all run there."
+            body="Start one from the Copilot page — sourcing, matching, and company research all run there."
             action={
               <Button size="sm" asChild>
                 <Link href="/copilot">Start a run</Link>

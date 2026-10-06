@@ -209,7 +209,7 @@ function renderText(p: RenderParts): string {
     lines.push('')
   }
   if (p.prepReady.length) {
-    lines.push('Interviews to prep for:')
+    lines.push('Upcoming interviews:')
     for (const k of p.prepReady) {
       lines.push(`  • ${k.jobTitle}${k.companyName ? ` @ ${k.companyName}` : ''} (${stageLabel(k.stage)})`)
     }
@@ -254,7 +254,7 @@ function renderHtml(p: RenderParts): string {
     const items = p.prepReady
       .map((k) => `<li>${esc(k.jobTitle)}${k.companyName ? ` @ ${esc(k.companyName)}` : ''} <em>(${esc(stageLabel(k.stage))})</em></li>`)
       .join('')
-    sections.push(`<h3>Interviews to prep for</h3><ul>${items}</ul>`)
+    sections.push(`<h3>Upcoming interviews</h3><ul>${items}</ul>`)
   }
   if (p.staleApps.length) {
     const items = p.staleApps

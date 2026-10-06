@@ -353,18 +353,28 @@ function clearAuthCookies(request: NextRequest, response: NextResponse): NextRes
   return response
 }
 
+/**
+ * Pages that no longer exist, keyed by first path segment, and where an old
+ * link goes instead. /agent was folded into /copilot's runs panel; /prep (and
+ * /prep/<id>) went away with interview prep, so old bookmarks land on Today.
+ */
+export const RETIRED_PAGES: Record<string, string> = {
+  agent: '/copilot',
+  prep: '/dashboard',
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // /agent was folded into /copilot's runs panel. A page-level redirect()
-  // in app/(app)/agent/page.tsx only fires client-side once React mounts
-  // (its parent layout is a client component that streams a 200 first), so
-  // plain HTTP clients (curl, old bookmarks with no JS) never leave /agent.
-  // Redirect here instead — middleware runs before any rendering and always
-  // returns a real 307.
-  if (pathname === '/agent') {
+  // A page-level redirect() in a retired page's own file only fires
+  // client-side once React mounts (the parent layout is a client component
+  // that streams a 200 first), so plain HTTP clients (curl, old bookmarks
+  // with no JS) never leave. Redirect here instead — middleware runs before
+  // any rendering and always returns a real 307.
+  const retiredTo = RETIRED_PAGES[pathname.split('/')[1] ?? '']
+  if (retiredTo) {
     const url = request.nextUrl.clone()
-    url.pathname = '/copilot'
+    url.pathname = retiredTo
     return NextResponse.redirect(url)
   }
 
