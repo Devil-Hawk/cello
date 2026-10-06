@@ -127,7 +127,7 @@ describe('a failed analysis never becomes renderable advice', () => {
     expect((thrown as AnalystError).code).toBe(code)
   })
 
-  it('keeps a partial BUT REAL analysis — only sections the model actually wrote', async () => {
+  it('keeps a partial BUT REAL analysis: only sections the model actually wrote', async () => {
     const response = JSON.stringify({
       summary: 'A backend role that leans on your Node.js work.',
       talkingPoints: [],

@@ -114,7 +114,7 @@ re-runs that step until the target is met:
 - `until.key` is a dot-path into **that step's own JSON output**. `.length` on
   an array path gives its length, so `"matches.length"` is valid.
 - `until.op` is one of `gte` `gt` `lte` `lt` `eq` `neq`.
-- `maxIterations` is a hard cap, 1–10.
+- `maxIterations` is a hard cap, 1-10.
 
 You do not need to defend against runaway loops. The executor stops on
 whichever comes first: the condition holding, `maxIterations`, the run's

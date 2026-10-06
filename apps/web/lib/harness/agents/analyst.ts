@@ -172,7 +172,7 @@ export function buildAnalystPrompt(input: AnalysisPromptInput): AnalystPrompt {
     `RESUME:\n${resume.block}`,
     // INJECTION DEFENCE (lib/security/job-text.ts): the description is
     // EMPLOYER-CONTROLLED, and frameJobText fences it as data before it
-    // reaches the prompt — see lib/security/injection-chokepoints.test.ts's
+    // reaches the prompt; see lib/security/injection-chokepoints.test.ts's
     // PROMPT_BUILDERS entry for this file.
     `JOB:\n${frameJobText(job.block)}`,
   ]

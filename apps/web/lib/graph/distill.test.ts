@@ -336,7 +336,7 @@ describe('distillInsights — insight evidence traceability', () => {
   })
 })
 
-describe('distillInsights — the sentence must show its counts', () => {
+describe('distillInsights: the sentence must show its counts', () => {
   const setup = (statement: string) => {
     const ids = Array.from({ length: 23 }, (_, i) => `v${i}`)
     const { handlers, insightInserts } = makeRpcHandlers({
