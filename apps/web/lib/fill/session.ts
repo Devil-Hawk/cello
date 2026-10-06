@@ -8,6 +8,8 @@ import { classify, resolveFieldValues, type FormField, type Resolved } from '@/l
 import { currentResume } from '@/lib/advance/documents.stub'
 import { eligibility, type EligibleField } from './eligibility'
 import { portalOf } from './portals'
+import type { ServerField } from './wire'
+import { postingUrlHash } from '@/lib/pipeline/posting'
 
 export interface FillApp {
   id: string
@@ -16,16 +18,27 @@ export interface FillApp {
   posting_url_hash: string | null
   auto_attempted_at: string | null
   lease_holder: string | null
+  lease_until: string | null
+  needs_reason: string | null
   last_event_at: string | null
   form_fields: FormField[] | null
   job_id: string
   jobs: { url: string; title: string; company_id: string; companies: { name: string } | null } | null
 }
 
-const COLUMNS = 'id, user_id, state, posting_url_hash, auto_attempted_at, lease_holder, last_event_at, form_fields, job_id, jobs(url, title, company_id, companies(name))'
+const COLUMNS = 'id, user_id, state, posting_url_hash, auto_attempted_at, lease_holder, lease_until, needs_reason, last_event_at, form_fields, job_id, jobs(url, title, company_id, companies(name))'
 
 export async function loadFillApp(admin: SupabaseClient, userId: string, applicationId: string): Promise<FillApp | null> {
   const { data } = await admin.from('applications').select(COLUMNS).eq('id', applicationId).eq('user_id', userId).maybeSingle()
+  const a = data as unknown as FillApp | null
+  return a && a.jobs ? a : null
+}
+
+/** The application a page is the form of: the ones the person may fill, matched by the posting's address. */
+export async function findFillAppByUrl(admin: SupabaseClient, userId: string, url: string): Promise<FillApp | null> {
+  const hash = postingUrlHash(url)
+  if (!hash) return null
+  const { data } = await admin.from('applications').select(COLUMNS).eq('user_id', userId).eq('posting_url_hash', hash).in('state', ['ready', 'applying', 'needs_you']).order('last_event_at', { ascending: false }).limit(1).maybeSingle()
   const a = data as unknown as FillApp | null
   return a && a.jobs ? a : null
 }
@@ -34,32 +47,13 @@ export interface FillSession {
   applicationId: string
   company: string
   title: string
-  values: Record<string, { value: unknown; via: Resolved['via']; usedQuestion?: string }>
+  values: Record<string, { value: unknown; via: Resolved['via']; origin: Resolved['origin']; usedQuestion?: string }>
   open: { fieldId: string; question: string }[]
   never: string[]
   portal: string | null
   files: { kind: 'resume'; name: string; id: string }[]
   /** Why Send for me may not send this one (null when it may). Informational: the claim checks again. */
   autoReason: string | null
-}
-
-/** Clean what the extension may fill: never a field of another kind than the form lists. */
-export function cleanFields(raw: unknown): FormField[] | null {
-  if (!Array.isArray(raw) || raw.length > 200) return null
-  const out: FormField[] = []
-  for (const f of raw) {
-    if (!f || typeof f !== 'object') return null
-    const o = f as Record<string, unknown>
-    if (typeof o.id !== 'string' || !o.id || o.id.length > 200 || typeof o.label !== 'string' || !o.label || o.label.length > 500) return null
-    out.push({
-      id: o.id,
-      label: o.label,
-      required: o.required === true,
-      kind: typeof o.kind === 'string' ? (o.kind as FormField['kind']) : undefined,
-      options: Array.isArray(o.options) ? (o.options as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 100) : undefined,
-    })
-  }
-  return out
 }
 
 export async function buildSession(admin: SupabaseClient, app: FillApp, fields: readonly FormField[]): Promise<FillSession> {
@@ -75,11 +69,26 @@ export async function buildSession(admin: SupabaseClient, app: FillApp, fields: 
     applicationId: app.id,
     company,
     title: job.title,
-    values: Object.fromEntries(Object.entries(r.values).map(([id, v]) => [id, { value: v.value, via: v.via, usedQuestion: v.usedQuestion }])),
+    values: Object.fromEntries(Object.entries(r.values).map(([id, v]) => [id, { value: v.value, via: v.via, origin: v.origin, usedQuestion: v.usedQuestion }])),
     open: r.open.map((o) => ({ fieldId: o.fieldId, question: o.question })),
     never: r.never,
     portal: portalOf(job.url)?.sentence ?? null,
     files: doc ? [{ kind: 'resume', name: doc.name, id: doc.id }] : [],
     autoReason: eligibility({ company, url: job.url, fields: eligible }),
   }
+}
+
+type Source = 'profile' | 'person' | 'resume' | 'draft'
+
+/** The session as the extension reads it: a value and its source per field key, the category of every field, nothing else. */
+export function toWire(session: FillSession, fields: readonly ServerField[]) {
+  const source = (v: FillSession['values'][string], origin: string): Source => (v.via === 'profile' || v.via === 'fact' ? 'profile' : origin === 'code' ? 'resume' : origin === 'model' ? 'draft' : 'person')
+  const values: Record<string, { value: string | boolean; source: Source }> = {}
+  for (const [key, v] of Object.entries(session.values)) {
+    const value = typeof v.value === 'boolean' ? v.value : typeof v.value === 'string' || typeof v.value === 'number' ? String(v.value) : null
+    if (value !== null) values[key] = { value, source: source(v, v.origin) }
+  }
+  const categories: Record<string, string> = {}
+  for (const f of fields) categories[f.key] = f.category === 'eeo' || f.category === 'consent' || f.category === 'motivation' ? f.category : ['work_auth', 'sponsorship', 'salary'].includes(f.category) ? 'sensitive' : 'standard'
+  return { values, categories }
 }

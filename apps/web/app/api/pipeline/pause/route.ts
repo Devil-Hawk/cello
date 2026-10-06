@@ -11,8 +11,9 @@ import { pause } from '@/lib/pipeline/transition'
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest) {
-  const body = (await request.json().catch(() => ({}))) as { resume?: unknown }
-  const resuming = body.resume === true
+  const body = (await request.json().catch(() => ({}))) as { resume?: unknown; paused?: unknown }
+  // the extension says { paused: true | false }, the app says { resume: true }
+  const resuming = body.resume === true || body.paused === false
 
   if (request.headers.get('authorization')) {
     if (resuming) return NextResponse.json({ error: 'Resume Cello from the app.' }, { status: 403 })
