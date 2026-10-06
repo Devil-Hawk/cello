@@ -272,14 +272,54 @@ begin
   if (select title || url || coalesce(apply_url, '') from public.jobs where id = jh) <> 'Held by twohttps://shared.example/jobs/held' then raise exception 'the shared role is unchanged by the call'; end if;
 
   -- a role a person wrote with no employer carries nothing of its body into the shared row the service role adopts it into
-  insert into public.jobs (id, company_id, title, description, url, external_id, apply_url, description_md, description_state, description_md5)
-  values (ja2, f.co_a, 'Written by A', 'x', 'https://shared.example/jobs/adopt-1', 'adopt-1', 'https://evil.example/apply', 'poison', 'full', md5('poison'));
+  insert into public.jobs (id, company_id, title, description, url, external_id, apply_url, description_md, description_state, description_md5,
+                           discovered_at, still_open, legit_label, match_score)
+  values (ja2, f.co_a, 'Written by A', 'x', 'https://shared.example/jobs/adopt-1', 'adopt-1', 'https://evil.example/apply', 'poison', 'full', md5('poison'),
+          '2000-01-01', false, 'agency', 99);
   update public.jobs set employer_id = null where id = ja2;
   perform public.upsert_shared_jobs(jsonb_build_array(jsonb_build_object('company_id', f.co_a, 'external_id', 'adopt-1', 'title', 'Real title', 'description', 'd',
             'url', 'https://shared.example/jobs/adopt-1', 'source', 'greenhouse')));
   if (select employer_id from public.jobs where id = ja2) is distinct from f.emp then raise exception 'the read adopts the role'; end if;
   if (select title from public.jobs where id = ja2) <> 'Real title' then raise exception 'the read writes the title'; end if;
   if (select apply_url is not null or description_md is not null or description_state is not null from public.jobs where id = ja2) then raise exception 'what a person wrote does not carry into the shared row'; end if;
+  if (select discovered_at < now() - interval '1 day' or still_open is not true or legit_label is not null or match_score is not null from public.jobs where id = ja2) then raise exception 'the age, state, label and score a person planted do not carry into the shared row'; end if;
+end $$;
+
+-- 6d. A company's employer and board are the directory's, never the person's: not by the employer id sent, not by
+-- updating it, not by a pointer the person wrote, not by a careers address that is not the board-less employer's.
+do $$
+declare
+  f record; emp3 uuid := gen_random_uuid(); ca uuid := gen_random_uuid(); cb uuid := gen_random_uuid(); cc uuid := gen_random_uuid(); cd uuid := gen_random_uuid();
+  forged jsonb := '{"ats": {"provider": "greenhouse", "token": "evilboard", "source": "config", "verified_by": "manual"}}';
+begin
+  select * into f from fx;
+  insert into public.company_directory (id, name, name_norm, domain, careers_url, verified_by, verified_at, source)
+  values (emp3, 'Own Site Co', 'own site co', 'ownsite.example', 'https://ownsite.example/jobs', 'careers_url_host', now(), 'person');
+
+  -- (a) an insert with another employer's id and an unrelated domain is not linked
+  perform pg_temp.as_user(f.a, format($q$with i as (insert into public.companies (id, user_id, name, domain, career_url, employer_id, metadata) values (%L, %L, 'Mine', 'unrelated.example', 'https://unrelated.example/c', %L, '{}'::jsonb) returning 1) select count(*) from i$q$, ca, f.a, f.emp2));
+  if (select employer_id from public.companies where id = ca) is not null then raise exception 'an employer id a person sends is ignored'; end if;
+
+  -- (b) updating the employer id changes nothing
+  perform pg_temp.as_user(f.a, format($q$with u as (update public.companies set employer_id = %L where id = %L returning 1) select count(*) from u$q$, f.emp2, f.co_a));
+  if (select employer_id from public.companies where id = f.co_a) is distinct from f.emp then raise exception 'a person cannot move their company to another employer'; end if;
+
+  -- (c) a pointer the person wrote is replaced by the directory's board; with an unrelated domain nothing links
+  perform pg_temp.as_user(f.a, format($q$with u as (update public.companies set metadata = %L::jsonb where id = %L returning 1) select count(*) from u$q$, forged, f.co_a));
+  if (select metadata -> 'ats' ->> 'token' from public.companies where id = f.co_a) <> 'sharedco' or (select employer_id from public.companies where id = f.co_a) is distinct from f.emp then raise exception 'a linked company''s board is the directory''s'; end if;
+  perform pg_temp.as_user(f.a, format($q$with i as (insert into public.companies (id, user_id, name, domain, career_url, metadata) values (%L, %L, 'Forged', 'evil.example', 'https://evil.example/c', %L::jsonb) returning 1) select count(*) from i$q$, cb, f.a, forged));
+  if (select employer_id from public.companies where id = cb) is not null then raise exception 'a forged board links no employer'; end if;
+  begin
+    perform public.upsert_shared_jobs(jsonb_build_array(jsonb_build_object('company_id', cb, 'external_id', 'forged-1', 'title', 'Hacked', 'url', 'https://evil.example/p', 'source', 'greenhouse')));
+    raise exception 'a company with a forged board has no shared write';
+  exception when sqlstate '22023' then null;
+  end;
+
+  -- (d) a board-less employer is linked by its careers address, and has no board pointer
+  perform pg_temp.as_user(f.a, format($q$with i as (insert into public.companies (id, user_id, name, domain, career_url, metadata) values (%L, %L, 'Own Site', 'ownsite.example', 'https://elsewhere.example/jobs', '{}'::jsonb) returning 1) select count(*) from i$q$, cc, f.a));
+  if (select employer_id from public.companies where id = cc) is not null then raise exception 'a board-less employer is not linked by domain or another address'; end if;
+  perform pg_temp.as_user(f.a, format($q$with i as (insert into public.companies (id, user_id, name, domain, career_url, metadata) values (%L, %L, 'Own Site', 'x.example', 'https://ownsite.example/jobs', %L::jsonb) returning 1) select count(*) from i$q$, cd, f.a, forged));
+  if (select employer_id from public.companies where id = cd) is distinct from emp3 or (select metadata ? 'ats' from public.companies where id = cd) then raise exception 'a board-less employer is linked by its careers address and carries no board'; end if;
 end $$;
 
 -- 7. A shared role outlives the follower whose company stored it: removing the company, or the account, keeps it for the others.
