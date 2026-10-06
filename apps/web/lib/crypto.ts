@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto'
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes, scryptSync } from 'crypto'
 
 // aes-256-gcm requires exactly 32 bytes: decode 64-char hex keys, scrypt-derive anything else.
 //
@@ -37,6 +37,18 @@ function getKey(): Buffer {
   }
   cached = { raw, key }
   return key
+}
+
+/**
+ * A 32 byte key for one purpose, derived from the server's encryption key by
+ * HKDF-SHA256 under a distinct label (for example 'cello/access-code/v1'). Keys
+ * derived under different labels are unrelated to each other and to the
+ * encryption key itself, so one secret can pepper access-code hashes and key the
+ * redemption limiter without any of them being usable for another. No new
+ * environment variable: rotating API_ENCRYPTION_KEY rotates every derived key.
+ */
+export function deriveKey(label: string): Buffer {
+  return Buffer.from(hkdfSync('sha256', getKey(), Buffer.alloc(0), label, 32))
 }
 
 const ALGORITHM = 'aes-256-gcm'

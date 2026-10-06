@@ -1,5 +1,5 @@
-// meteredJudgeClient's own contract: the fetch wrapper metres BEFORE the
-// real request and records AFTER a successful one, and a null judge score
+// meteredJudgeClient's own contract: the fetch wrapper reserves BEFORE the
+// real request and settles AFTER it, and a null judge score
 // reaches logHarnessError rather than surfacing silently. ZERO real network
 // calls or database writes — lib/harness/spend is fully mocked (same idiom
 // as lib/harness/llm.test.ts) and every HTTP response is a hand-built
@@ -7,19 +7,20 @@
 //
 // The "both judges share one client" test below is also the mutation-check
 // evidence app/api/outreach/judge/route.ts's comment points at: it is what
-// let that route drop its own manual recordSpend without double-billing.
+// let that route drop its own manual spend call without double-billing.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdminClient } from '../harness/types'
 import { runInTraceContext, SpanBuffer, type SpanRecord } from '../trace/spans'
 
-const assertWithinBudgetMock = vi.fn()
-const recordSpendMock = vi.fn()
+const reserveSpendMock = vi.fn()
+const settleSpendMock = vi.fn()
+const RESERVATION = { id: 'res-1', userId: 'user-1', model: 'm', estimateUsd: 0.01 }
 vi.mock('../harness/spend', async (importOriginal) => ({
   // estimateCostUsd stays real: the span's costUsd is asserted below.
   ...(await importOriginal<typeof import('../harness/spend')>()),
-  assertWithinBudget: (...args: unknown[]) => assertWithinBudgetMock(...args),
-  recordSpend: (...args: unknown[]) => recordSpendMock(...args),
+  reserveSpend: (...args: unknown[]) => reserveSpendMock(...args),
+  settleSpend: (...args: unknown[]) => settleSpendMock(...args),
 }))
 
 const logHarnessErrorMock = vi.fn()
@@ -63,8 +64,8 @@ function chatCompletion(usage?: { prompt_tokens: number; completion_tokens: numb
 
 beforeEach(() => {
   insertedSpans.length = 0
-  assertWithinBudgetMock.mockReset().mockResolvedValue(undefined)
-  recordSpendMock.mockReset().mockResolvedValue(undefined)
+  reserveSpendMock.mockReset().mockResolvedValue(RESERVATION)
+  settleSpendMock.mockReset().mockResolvedValue(undefined)
   logHarnessErrorMock.mockReset()
 })
 
@@ -78,13 +79,14 @@ describe('meteredJudgeClient', () => {
     expect(() => meteredJudgeClient(FAKE_ADMIN, 'user-1', {})).toThrow(MissingKeyError)
   })
 
-  it('checks budget before the request and records real usage only after a successful response', async () => {
+  it('reserves before the request and settles real usage only after the response', async () => {
     const order: string[] = []
-    assertWithinBudgetMock.mockImplementation(async () => {
-      order.push('assert')
+    reserveSpendMock.mockImplementation(async () => {
+      order.push('reserve')
+      return RESERVATION
     })
-    recordSpendMock.mockImplementation(async () => {
-      order.push('record')
+    settleSpendMock.mockImplementation(async () => {
+      order.push('settle')
     })
     const fetchMock = vi.fn(async () => {
       order.push('fetch')
@@ -96,20 +98,56 @@ describe('meteredJudgeClient', () => {
     await client.chat.completions.create({
       model: JUDGE_MODEL,
       messages: [{ role: 'user', content: 'hi' }],
+      max_tokens: 300,
     })
 
-    expect(order).toEqual(['assert', 'fetch', 'record'])
-    expect(assertWithinBudgetMock).toHaveBeenCalledWith(FAKE_ADMIN, 'user-1')
-    expect(recordSpendMock).toHaveBeenCalledWith(FAKE_ADMIN, 'user-1', JUDGE_MODEL, 111, 22)
+    expect(order).toEqual(['reserve', 'fetch', 'settle'])
+    expect(reserveSpendMock).toHaveBeenCalledWith(
+      FAKE_ADMIN,
+      expect.objectContaining({ userId: 'user-1', model: JUDGE_MODEL, maxTokens: 2000, traceId: expect.any(String) })
+    )
+    expect(settleSpendMock).toHaveBeenCalledWith(FAKE_ADMIN, RESERVATION, {
+      model: JUDGE_MODEL,
+      promptTokens: 111,
+      completionTokens: 22,
+      costUsd: undefined,
+    })
   })
 
-  it('never reaches fetch or recordSpend when assertWithinBudget refuses', async () => {
-    // assertWithinBudget rejects on every attempt (the OpenAI SDK retries a
+  it('a :free judge model reserves rung R3 and a paid one R4, both under the step judge', async () => {
+    globalThis.fetch = vi.fn(async () => chatCompletion({ prompt_tokens: 1, completion_tokens: 1 })) as unknown as typeof fetch
+    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
+    const body = { messages: [{ role: 'user' as const, content: 'hi' }], max_tokens: 100 }
+
+    await client.chat.completions.create({ ...body, model: 'google/gemma-4-31b-it:free' })
+    expect(reserveSpendMock.mock.calls[0][1]).toMatchObject({ rung: 'R3', step: 'judge' })
+
+    await client.chat.completions.create({ ...body, model: JUDGE_MODEL })
+    expect(reserveSpendMock.mock.calls[1][1]).toMatchObject({ rung: 'R4', step: 'judge' })
+  })
+
+  it('settles the provider-reported cost when the response carries usage.cost', async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse({
+        id: 'c',
+        model: JUDGE_MODEL,
+        choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 100, completion_tokens: 10, cost: 0.000321 },
+      })
+    ) as unknown as typeof fetch
+    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
+    await client.chat.completions.create({ model: JUDGE_MODEL, messages: [{ role: 'user', content: 'hi' }] })
+    expect(settleSpendMock.mock.calls[0][2]).toMatchObject({ costUsd: 0.000321 })
+    expect(insertedSpans[0]).toMatchObject({ attributes: { costUsd: 0.000321 } })
+  })
+
+  it('never reaches fetch or settle when the reservation refuses', async () => {
+    // The reservation rejects on every attempt (the OpenAI SDK retries a
     // thrown fetch a few times before giving up and wrapping the original
-    // error as APIConnectionError('Connection error.', {cause}) — the point
-    // this test pins is that `fetch` and `recordSpend` are never reached,
-    // not the SDK's own retry/wrapping behavior).
-    assertWithinBudgetMock.mockRejectedValue(new Error('cap hit'))
+    // error as APIConnectionError('Connection error.', {cause}); the point
+    // this test pins is that `fetch` and settle are never reached, not the
+    // SDK's own retry/wrapping behavior).
+    reserveSpendMock.mockRejectedValue(new Error('cap hit'))
     const fetchMock = vi.fn()
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
@@ -119,7 +157,7 @@ describe('meteredJudgeClient', () => {
     ).rejects.toThrow()
 
     expect(fetchMock).not.toHaveBeenCalled()
-    expect(recordSpendMock).not.toHaveBeenCalled()
+    expect(settleSpendMock).not.toHaveBeenCalled()
   })
 
   it('falls back to the conservative estimate when the response carries no usage field', async () => {
@@ -128,7 +166,11 @@ describe('meteredJudgeClient', () => {
     const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
     await client.chat.completions.create({ model: JUDGE_MODEL, messages: [{ role: 'user', content: 'hi' }] })
 
-    expect(recordSpendMock).toHaveBeenCalledWith(FAKE_ADMIN, 'user-1', JUDGE_MODEL, 2000, 300)
+    expect(settleSpendMock).toHaveBeenCalledWith(FAKE_ADMIN, RESERVATION, {
+      model: JUDGE_MODEL,
+      promptTokens: 2000,
+      completionTokens: 300,
+    })
   })
 
   it('emits one llm span per request with model, tokens, cost and user, flushed to trace_spans', async () => {
@@ -172,7 +214,7 @@ describe('meteredJudgeClient', () => {
 
     expect(insertedSpans).toHaveLength(1)
     expect(insertedSpans[0]).toMatchObject({ status: 'error', attributes: { model: JUDGE_MODEL, error: expect.stringContaining('402') } })
-    expect(recordSpendMock).not.toHaveBeenCalled()
+    expect(settleSpendMock).toHaveBeenCalledWith(FAKE_ADMIN, RESERVATION, { failed: { status: 402 } })
     const line = warn.mock.calls.map((c) => String(c[0])).find((l) => l.startsWith('[llm:fallback]'))
     expect(line).toBeDefined()
     expect(line).toContain('"scope":"judge"')
@@ -180,7 +222,7 @@ describe('meteredJudgeClient', () => {
     expect(line).toContain('Insufficient credits')
   })
 
-  it('does not record spend for a non-ok response', async () => {
+  it('settles a non-ok response at zero, never at the estimate', async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({ error: 'bad request' }, 400)) as unknown as typeof fetch
 
     const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
@@ -188,7 +230,8 @@ describe('meteredJudgeClient', () => {
       client.chat.completions.create({ model: JUDGE_MODEL, messages: [{ role: 'user', content: 'hi' }] })
     ).rejects.toThrow()
 
-    expect(recordSpendMock).not.toHaveBeenCalled()
+    expect(settleSpendMock).toHaveBeenCalledTimes(1)
+    expect(settleSpendMock).toHaveBeenCalledWith(FAKE_ADMIN, RESERVATION, { failed: { status: 400 } })
   })
 
   it('clamps an outgoing max_tokens above the ceiling before the request is sent', async () => {
@@ -205,6 +248,17 @@ describe('meteredJudgeClient', () => {
     const [, init] = fetchMock.mock.calls[0] as [unknown, RequestInit]
     const sentBody = JSON.parse(String(init.body)) as { max_tokens: number }
     expect(sentBody.max_tokens).toBe(2000)
+  })
+
+  it('SETS max_tokens when the request carries none, so every judge call has a ceiling to reserve against', async () => {
+    const fetchMock = vi.fn(async (_input: unknown, _init?: RequestInit) => chatCompletion({ prompt_tokens: 10, completion_tokens: 5 }))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
+    await client.chat.completions.create({ model: JUDGE_MODEL, messages: [{ role: 'user', content: 'hi' }] })
+
+    const [, init] = fetchMock.mock.calls[0] as [unknown, RequestInit]
+    expect((JSON.parse(String(init.body)) as { max_tokens: number }).max_tokens).toBe(2000)
   })
 
   it('leaves max_tokens under the ceiling untouched', async () => {
@@ -232,8 +286,8 @@ describe('meteredJudgeClient', () => {
 describe('judgeGroundedness + judgeSpecificity share one meteredJudgeClient', () => {
   // Real autoevals (Factuality/ClosedQA), fake OpenRouter underneath — proves
   // the ROUTE can rely on the client alone for both budget checkpoints
-  // (assert + record) across BOTH of its judge calls, without its own
-  // separate recordSpend. Discriminates which template rendered by the
+  // (reserve + settle) across BOTH of its judge calls, without its own
+  // separate spend call. Discriminates which template rendered by the
   // "[Criterion]:" marker ClosedQA's prompt carries and Factuality's doesn't.
   function classifierResponse(text: string): Response {
     const isClosedQA = text.includes('Criterion')
@@ -255,7 +309,7 @@ describe('judgeGroundedness + judgeSpecificity share one meteredJudgeClient', ()
     })
   }
 
-  it('meters both calls (2 asserts, 2 records) and both verdicts come back pass', async () => {
+  it('meters both calls (2 reservations, 2 settles) and both verdicts come back pass', async () => {
     globalThis.fetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body))
       return classifierResponse(JSON.stringify(body.messages))
@@ -269,8 +323,8 @@ describe('judgeGroundedness + judgeSpecificity share one meteredJudgeClient', ()
 
     expect(groundedness.verdict).toBe('pass')
     expect(specificity.verdict).toBe('pass')
-    expect(assertWithinBudgetMock).toHaveBeenCalledTimes(2)
-    expect(recordSpendMock).toHaveBeenCalledTimes(2)
+    expect(reserveSpendMock).toHaveBeenCalledTimes(2)
+    expect(settleSpendMock).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -313,6 +367,7 @@ describe('judge calls in Langfuse', () => {
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
     vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
     vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'u1,u,me,user-1')
   }
   afterEach(() => {
     vi.unstubAllEnvs()

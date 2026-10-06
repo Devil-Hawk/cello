@@ -44,7 +44,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
-import { assertWithinBudget, recordSpend, BudgetCapError } from '@/lib/harness/spend'
+import { BudgetCapError } from '@/lib/harness/spend'
 import { callLlm } from '@/lib/harness/llm'
 import { canRunLlm } from '@/lib/harness/llm-key-message'
 import { createMarkdownVersion, getBaseResume } from '@/lib/resume/store'
@@ -282,25 +282,11 @@ export async function POST(request: NextRequest) {
 
     const { getDecryptedApiKeys } = await import('@/lib/apikeys')
     const apiKeys = await getDecryptedApiKeys(user.id)
-    // Budget, enforced at the route rather than inside buildModels, because two
-    // of that function's three model paths never touch lib/harness/llm.ts and so
-    // never inherit its guards: readPdfWithClaude calls Anthropic directly, and
-    // the completeWithOpenAI fallback calls OpenAI directly. Only the callLlm
-    // branch was capped — its own comment claims the cap for the whole function,
-    // which was true of one path in three.
-    //
-    // See lib/harness/spend-chokepoints.test.ts, which asserts this invariant
-    // across every route that builds its own client.
-    const budgetAdmin = createAdminClient()
-    try {
-      await assertWithinBudget(budgetAdmin, user.id)
-    } catch (e) {
-      if (e instanceof BudgetCapError) {
-        return NextResponse.json({ error: e.message, budgetExhausted: true }, { status: 429 })
-      }
-      throw e
-    }
-
+    // Spend: the callLlm leg of buildModels reserves and settles its own cost
+    // (lib/harness/spend.ts). The PDF read through Anthropic and the OpenAI
+    // fallback use the user's OWN key, so they cost the Cello ledger nothing and
+    // are not metered (see ALLOWED_DIRECT_USER_KEY in spend-chokepoints.test.ts).
+    // A capped user's callLlm leg throws BudgetCapError, answered below.
     const models = buildModels(apiKeys)
 
     let result: ResumeImportResult
@@ -308,12 +294,10 @@ export async function POST(request: NextRequest) {
       result = parsed.file
         ? await importResumeFile(parsed.file, models)
         : await importPastedResume(parsed.text ?? '', models)
-      // Estimated, and only meaningful for the direct-client paths — the callLlm
-      // branch already recorded its own real usage, so this deliberately errs
-      // small to avoid double-counting that case, while still putting the
-      // otherwise-invisible PDF read and OpenAI fallback into the ledger.
-      await recordSpend(budgetAdmin, user.id, 'resume-import', 2000, 800)
     } catch (err) {
+      if (err instanceof BudgetCapError) {
+        return NextResponse.json({ error: err.message, budgetExhausted: true }, { status: 429 })
+      }
       if (err instanceof ResumeImportError) {
         // Every one of these is something the user can act on, and the message
         // says what to do — do not flatten them into "Failed to process resume".

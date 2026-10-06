@@ -100,21 +100,15 @@ function hoursFromNow(now: Date, hours: number): string {
 // Preferences (the budget cap lives here)
 // ---------------------------------------------------------------------------
 
-/** Current UTC billing month, mirroring lib/harness/spend.ts's currentPeriod(). */
-function currentPeriod(now: Date): string {
-  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
-}
-
 /**
  * Merge the demo preferences onto whatever the profile already has.
  *
  * TWO THINGS HERE ARE SECURITY DECISIONS, NOT STYLE:
  *
- *   1. `spentUsd` IS PRESERVED, NEVER RESET. Re-running the seeder is the same
- *      event as re-redeeming a code, and a demo user can re-enter their code as
- *      many times as they like. If a re-seed zeroed the spend counter, entering
- *      the code again would be a one-keystroke way to refill the allowance and
- *      the cap would bound nothing at all.
+ *   1. SPEND IS NOT HERE. What a demo has spent lives in the llm_spend ledger,
+ *      which only the service role writes, so a re-seed (the same event as
+ *      re-redeeming a code) can never refill the allowance. This block carries
+ *      the cap only.
  *
  *   2. THE CAP ONLY EVER GOES DOWN. If a profile somehow already carries a
  *      LOWER cap than the demo default, the lower number wins. Seeding must
@@ -127,28 +121,21 @@ function currentPeriod(now: Date): string {
  * untouched here, so no guardrail that module forces can be loosened by a
  * re-seed: `provider`, `gmail_permissions`, `api_keys` and `autopilot` survive
  * verbatim, and the only key this writes on top (`outreach`) keeps
- * autoSend: false. The one behaviour that deliberately differs is the spend
- * ledger: provisioning resets it (correct — the workspace is new), and this
- * never does (correct — re-entering a code must not refill the allowance).
+ * autoSend: false.
  */
 export function buildDemoPreferences(
-  existing: Record<string, unknown> | null | undefined,
-  now: Date = new Date()
+  existing: Record<string, unknown> | null | undefined
 ): Record<string, unknown> {
   const base = existing && typeof existing === 'object' ? existing : {}
   const rawBudget = (base as { budget?: unknown }).budget
   const budget = (rawBudget && typeof rawBudget === 'object' ? rawBudget : {}) as Record<string, unknown>
 
   const existingCap = typeof budget.monthlyUsd === 'number' && budget.monthlyUsd > 0 ? budget.monthlyUsd : null
-  const existingSpent = typeof budget.spentUsd === 'number' && budget.spentUsd > 0 ? budget.spentUsd : 0
-  const existingPeriod = typeof budget.periodStart === 'string' && budget.periodStart ? budget.periodStart : null
 
   return {
     ...base,
     ...DEMO_PREFERENCES,
     budget: {
-      periodStart: existingPeriod ?? currentPeriod(now),
-      spentUsd: existingSpent,
       monthlyUsd: existingCap == null ? DEMO_MONTHLY_USD : Math.min(DEMO_MONTHLY_USD, existingCap),
     },
   }
@@ -639,7 +626,7 @@ export async function seedDemoWorkspace(
   // fabricated job search.
   const profilePatch: Record<string, unknown> = {
     ...workspace.profile,
-    preferences: buildDemoPreferences(profile.preferences, now),
+    preferences: buildDemoPreferences(profile.preferences),
   }
   // The auth trigger copies auth.users.email into profiles.email, and that is
   // the account's real login. Only fill it in if it is somehow missing —

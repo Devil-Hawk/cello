@@ -15,6 +15,7 @@ import type {
 import type { DecryptedApiKeys, LlmResult, LlmRunOptions } from '../types'
 import { ANTHROPIC_THINKING_BUDGET } from '../types'
 import { MissingKeyError, TruncatedResponseError, estimateTokens, tokenBuckets } from './index'
+import { actualCostUsd, DEFAULT_MAX_TOKENS } from '../spend'
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 export const DEFAULT_MODEL = 'anthropic/claude-sonnet-5'
@@ -73,7 +74,7 @@ export async function callOpenRouter(
     messages.push({ role: 'user', content: opts.prompt })
   }
 
-  const maxTokens = opts.maxTokens ?? 2048
+  const maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS
   const body: ChatCompletionCreateParamsNonStreaming = {
     model,
     messages,
@@ -119,5 +120,16 @@ export async function callOpenRouter(
     throw new TruncatedResponseError(completionTokens, maxTokens)
   }
 
-  return { content, tokensUsed, promptTokens, completionTokens, model, finishReason, reasoning: reasoningText, ...tokenBuckets(usage) }
+  return {
+    content,
+    tokensUsed,
+    promptTokens,
+    completionTokens,
+    model,
+    finishReason,
+    reasoning: reasoningText,
+    // What OpenRouter says the call cost (usage.cost), so the ledger settles the real figure.
+    costUsd: actualCostUsd(usage),
+    ...tokenBuckets(usage),
+  }
 }

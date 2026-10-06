@@ -14,9 +14,9 @@ import {
   MAX_SCORES_PER_TRACE,
   __setLangfuseForTest,
   contentCaptureFor,
+  langfuseContentUserIds,
   exportTrace,
   finalize,
-  langfuseCaptureDemoEnabled,
   langfuseCaptureEnabled,
   langfuseConfigured,
   langfuseDemoSampleRate,
@@ -35,6 +35,7 @@ function configure() {
   vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')
   vi.stubEnv('LANGFUSE_SECRET_KEY', 'sk-lf-fake')
   vi.stubEnv('LANGFUSE_BASE_URL', 'https://langfuse.example.com')
+  vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'u,user-1,11111111-2222-4333-8444-555555555555')
 }
 
 const T0 = Date.parse('2026-10-04T12:00:00.000Z')
@@ -157,19 +158,36 @@ describe('env gates', () => {
     expect(langfuseCaptureEnabled()).toBe(false) // unconfigured
   })
 
-  it('demo content is off by default and only an explicit on turns it on', () => {
-    expect(langfuseCaptureDemoEnabled()).toBe(false)
-    expect(contentCaptureFor(false)).toBe(true)
-    expect(contentCaptureFor(true)).toBe(false)
-    expect(contentCaptureFor(undefined)).toBe(false) // unknown counts as demo
-    vi.stubEnv('LANGFUSE_CAPTURE_DEMO_CONTENT', 'typo')
-    expect(contentCaptureFor(true)).toBe(false)
-    vi.stubEnv('LANGFUSE_CAPTURE_DEMO_CONTENT', '1')
-    expect(contentCaptureFor(true)).toBe(true)
-    expect(contentCaptureFor(undefined)).toBe(true)
+  it('content goes only for allowlisted owners: an empty list means nobody', () => {
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', '')
+    expect(langfuseContentUserIds().size).toBe(0)
+    expect(contentCaptureFor('owner-1', false)).toBe(false)
+    // Unset (the default): nobody either.
+    delete process.env.LANGFUSE_CONTENT_USER_IDS
+    expect(contentCaptureFor('owner-1', false)).toBe(false)
+  })
+
+  it('a listed non-demo user sends content; an unlisted one, a demo and an unknown owner do not', () => {
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', ' owner-1 , Owner-2,,')
+    expect([...langfuseContentUserIds()].sort()).toEqual(['owner-1', 'owner-2'])
+    expect(contentCaptureFor('owner-1', false)).toBe(true)
+    expect(contentCaptureFor('OWNER-2', false)).toBe(true)
+    // A stranger's resume and mail stay in the app.
+    expect(contentCaptureFor('stranger', false)).toBe(false)
+    expect(contentCaptureFor(undefined, false)).toBe(false)
+    expect(contentCaptureFor('', false)).toBe(false)
+    // Even a listed id sends nothing from a demo workspace or an unknown one.
+    expect(contentCaptureFor('owner-1', true)).toBe(false)
+    expect(contentCaptureFor('owner-1', undefined)).toBe(false)
+  })
+
+  it('the kill switch beats the allowlist', () => {
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'owner-1')
+    expect(contentCaptureFor('owner-1', false)).toBe(true)
     vi.stubEnv('LANGFUSE_CAPTURE_CONTENT', '0')
-    expect(contentCaptureFor(false)).toBe(false) // the kill switch beats everything
-    expect(contentCaptureFor(true)).toBe(false)
+    expect(contentCaptureFor('owner-1', false)).toBe(false)
+    vi.unstubAllEnvs()
+    expect(contentCaptureFor('owner-1', false)).toBe(false) // unconfigured
   })
 
   it('sample rates parse and clamp; demo defaults to 0.25', () => {
@@ -408,6 +426,7 @@ describe('masking canary: nothing planted survives', () => {
   }
 
   it('capture on: readable text, secrets masked, no planted substring in ANY attribute, name or status', async () => {
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', `user-${KEY}`)
     const buffer = new SpanBuffer(`user-${KEY}`, null, undefined, {
       isDemo: false,
       sessionId: planted,
@@ -441,15 +460,23 @@ describe('masking canary: nothing planted survives', () => {
     expect(dump()).not.toMatch(canary)
   })
 
-  it('demo traces send no content by default, and LANGFUSE_CAPTURE_DEMO_CONTENT=1 restores it', async () => {
+  it('a demo trace sends no content even when its user id is listed, and an unlisted owner sends metadata only', async () => {
     for (const isDemo of [true, undefined]) {
       exporter.reset()
       await run(new SpanBuffer('u', null, undefined, { isDemo }), tree())
       for (const s of spans()) expect(Object.keys(s.attributes).join(' ')).not.toMatch(/observation\.(input|output)/)
     }
+    // A real owner who is NOT on the list: no text, but the trace still exports.
     exporter.reset()
-    vi.stubEnv('LANGFUSE_CAPTURE_DEMO_CONTENT', '1')
-    await run(new SpanBuffer('u', null, undefined, { isDemo: true }), tree())
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'someone-else')
+    await run(new SpanBuffer('u', null, undefined, { isDemo: false }), tree())
+    expect(spans().length).toBeGreaterThan(0)
+    for (const s of spans()) expect(Object.keys(s.attributes).join(' ')).not.toMatch(/observation\.(input|output)/)
+    expect(byName('score-job-match').attributes['langfuse.observation.model.name']).toBeDefined()
+    // The same owner once listed: text is sent.
+    exporter.reset()
+    vi.stubEnv('LANGFUSE_CONTENT_USER_IDS', 'u')
+    await run(new SpanBuffer('u', null, undefined, { isDemo: false }), tree())
     expect(byName('score-job-match').attributes['langfuse.observation.input']).toBeDefined()
   })
 

@@ -73,6 +73,19 @@ const STATUS_TONE: Record<AccessCodeStatus, 'accent' | 'muted' | 'none'> = {
  * component: the "here is your code" panel is a deliberate, dismissible
  * checkpoint rather than a toast that can be missed.
  */
+function formatDollars(value: number): string {
+  return `$${value.toFixed(2)}`
+}
+
+/** The first day of next month in UTC, when the monthly allowance starts over. */
+function nextMonthStart(now: Date = new Date()): string {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'UTC',
+  })
+}
+
 export function AccessCodesCard({ onStatus }: AccessCodesCardProps) {
   const labelInputId = useId()
 
@@ -80,6 +93,9 @@ export function AccessCodesCard({ onStatus }: AccessCodesCardProps) {
   const [listState, setListState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [listError, setListError] = useState<string | null>(null)
   const [liveLimit, setLiveLimit] = useState<number | null>(null)
+  // What this owner's demos have spent this month against the pool they share.
+  // Null when the server could not say, in which case no line is shown.
+  const [demoAllowance, setDemoAllowance] = useState<{ usedUsd: number; capUsd: number } | null>(null)
   /**
    * How many codes are live, AS COUNTED BY THE SERVER — null until it says.
    *
@@ -121,6 +137,7 @@ export function AccessCodesCard({ onStatus }: AccessCodesCardProps) {
       const payload = (await response.json().catch(() => ({}))) as {
         codes?: AccessCodeSummary[]
         liveLimit?: number
+        demoAllowance?: { usedUsd?: number; capUsd?: number } | null
         /** Server-counted live codes. Absent on older deployments — see below. */
         liveCount?: number
         ttlHours?: number
@@ -139,6 +156,12 @@ export function AccessCodesCard({ onStatus }: AccessCodesCardProps) {
       }
       setCodes(payload.codes ?? [])
       if (typeof payload.liveLimit === 'number') setLiveLimit(payload.liveLimit)
+      const allowance = payload.demoAllowance
+      setDemoAllowance(
+        allowance && typeof allowance.usedUsd === 'number' && typeof allowance.capUsd === 'number'
+          ? { usedUsd: allowance.usedUsd, capUsd: allowance.capUsd }
+          : null
+      )
       // Only ever the server's number. `undefined` leaves it null, and the
       // counter then says what it can prove instead of guessing.
       setLiveCount(typeof payload.liveCount === 'number' ? payload.liveCount : null)
@@ -309,6 +332,14 @@ export function AccessCodesCard({ onStatus }: AccessCodesCardProps) {
                 // The cap is still enforced — a create past it comes back as a
                 // 409 whose message names the limit, shown inline below.
                 `Up to ${liveLimit} codes can be live at once.`}
+          </p>
+        )}
+
+        {demoAllowance !== null && (
+          <p className="mt-1 text-caption text-muted-foreground">
+            {demoAllowance.usedUsd >= demoAllowance.capUsd
+              ? `Demos have used this month's ${formatDollars(demoAllowance.capUsd)} allowance. They can still look around; AI work resumes on ${nextMonthStart()}.`
+              : `Demo spend this month: ${formatDollars(demoAllowance.usedUsd)} of ${formatDollars(demoAllowance.capUsd)}.`}
           </p>
         )}
 

@@ -15,6 +15,7 @@
 import OpenAI from 'openai'
 import type { DecryptedApiKeys } from '../types'
 import { MissingKeyError, ProviderUnavailableError, isSelfHosted } from './index'
+import { actualCostUsd } from '../spend'
 
 /** OpenRouter's catalog id (vendor-prefixed) — also the PRICES key in spend.ts. */
 export const EMBEDDING_MODEL = 'openai/text-embedding-3-small'
@@ -27,6 +28,8 @@ export interface EmbedBatchResult {
   embeddings: number[][]
   model: string
   promptTokens: number
+  /** Provider-reported cost, USD, when the response carries one. */
+  costUsd?: number
 }
 
 /** Strip a trailing slash, same normalization local-server.ts uses for chat. */
@@ -58,7 +61,12 @@ async function requestEmbeddings(
   // input order — `index` is the actual position.
   const embeddings = [...response.data].sort((a, b) => a.index - b.index).map((d) => d.embedding)
   assertDims(embeddings, source)
-  return { embeddings, model: response.model || model, promptTokens: response.usage?.prompt_tokens ?? 0 }
+  return {
+    embeddings,
+    model: response.model || model,
+    promptTokens: response.usage?.prompt_tokens ?? 0,
+    costUsd: actualCostUsd(response.usage),
+  }
 }
 
 /** Primary: OpenRouter's embeddings endpoint, same key as chat completions. */

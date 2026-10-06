@@ -298,3 +298,23 @@ describe('decrypt auth tag length', () => {
     expect(() => decrypt(`${iv}:${short}:${data}`)).toThrow()
   })
 })
+
+describe('deriveKey', () => {
+  it('is 32 bytes, stable for a label, and different per label', async () => {
+    process.env.API_ENCRYPTION_KEY = 'c'.repeat(64)
+    const { deriveKey } = await freshCrypto()
+    const a = deriveKey('cello/access-code/v1')
+    expect(a).toHaveLength(32)
+    expect(deriveKey('cello/access-code/v1').equals(a)).toBe(true)
+    expect(deriveKey('cello/redeem-limit/v1').equals(a)).toBe(false)
+  })
+
+  it('is not the encryption key itself and changes with it', async () => {
+    process.env.API_ENCRYPTION_KEY = 'c'.repeat(64)
+    const first = (await freshCrypto()).deriveKey('cello/access-code/v1')
+    expect(first.equals(Buffer.from('c'.repeat(64), 'hex'))).toBe(false)
+    process.env.API_ENCRYPTION_KEY = 'd'.repeat(64)
+    const second = (await freshCrypto()).deriveKey('cello/access-code/v1')
+    expect(second.equals(first)).toBe(false)
+  })
+})

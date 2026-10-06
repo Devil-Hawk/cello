@@ -15,7 +15,7 @@ vi.mock('../harness/keys', () => ({ loadApiKeys: (...a: unknown[]) => loadApiKey
 vi.mock('../harness/supabase-admin', () => ({ createAdminClient: () => ({ from: () => ({ insert: async () => ({ error: null }) }) }) }))
 vi.mock('../harness/spend', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../harness/spend')>()
-  return { ...actual, assertWithinBudget: async () => undefined, recordSpend: async () => undefined }
+  return { ...actual, reserveSpend: async () => ({ id: 'res-1', userId: 'user-1', model: 'm', estimateUsd: 0.01 }), settleSpend: async () => undefined }
 })
 vi.mock('../harness/providers/openrouter', () => ({
   callOpenRouter: async () => ({ content: '{"facts":[]}', tokensUsed: 30, promptTokens: 20, completionTokens: 10, model: 'anthropic/claude-sonnet-5', finishReason: 'stop' }),
