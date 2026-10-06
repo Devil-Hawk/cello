@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { Key } from '@/components/ui/key'
+import { OpenRouterDoor } from '@/components/settings/openrouter-door'
 import { createClient } from '@/lib/supabase/client'
 import { GMAIL_PERMISSION_SCOPES, INCREMENTAL_OAUTH_QUERY_PARAMS } from '@/lib/gmail/permissions'
 import { welcome } from '@/lib/routes'
@@ -86,6 +87,7 @@ export function ConnectScreen({ onDone }: { onDone: () => void }) {
           Cello works with no model. A model lets it rank roles and check your chances.
         </p>
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+          <OpenRouterDoor returnTo="/welcome" />
           <Key asChild variant="raised">
             <Link href="/settings?tab=api-keys">Use a key I have</Link>
           </Key>

@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { Key } from '@/components/ui/key'
+import { OpenRouterDoor } from '@/components/settings/openrouter-door'
 import { RoleRow } from '@/components/roles/role-row'
 import { companies } from '@/lib/routes'
 import type { WelcomeRole } from '@/lib/welcome/commands.stub'
@@ -77,6 +78,14 @@ export function YourRolesScreen({
           </div>
         </div>
       )}
+
+      <section className="space-y-3" aria-labelledby="rank">
+        <h3 id="rank" className="r-title">
+          Want a model to rank these
+        </h3>
+        <p className="r-body text-r-ink-2">Free models let Cello rank roles and check your chances.</p>
+        <OpenRouterDoor returnTo="/welcome" />
+      </section>
 
       <p className="r-body text-r-ink-2">{FOLLOW_LINE}</p>
       {error && (
