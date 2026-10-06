@@ -52,7 +52,7 @@ alter table public.answer_bank enable row level security;
 drop policy if exists answer_bank_select_own on public.answer_bank;
 create policy answer_bank_select_own on public.answer_bank for select to authenticated using (user_id = auth.uid());
 
-revoke all on public.answer_bank from public, anon;
+revoke all on public.answer_bank from public, anon, authenticated;
 grant select on public.answer_bank to authenticated;
 grant all on public.answer_bank to service_role;
 
