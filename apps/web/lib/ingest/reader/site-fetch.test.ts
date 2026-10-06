@@ -92,6 +92,15 @@ describe('site fetcher: robots.txt', () => {
     expect(calls.filter((c) => c.url.endsWith('/robots.txt'))).toHaveLength(1)
     expect(await fetcher.sitemapsOf('https://acme.test')).toEqual(['https://acme.test/jobs-sitemap.xml'])
   })
+
+  it('offers /sitemap.xml when robots.txt names none or does not exist, and nothing when robots.txt cannot be read', async () => {
+    const none = harness({ 'https://acme.test/robots.txt': robots('User-agent: *\nDisallow: /admin\n') })
+    expect(await none.fetcher.sitemapsOf('https://acme.test')).toEqual(['https://acme.test/sitemap.xml'])
+    const missing = harness({ 'https://acme.test/robots.txt': robots('nope', 404) })
+    expect(await missing.fetcher.sitemapsOf('https://acme.test')).toEqual(['https://acme.test/sitemap.xml'])
+    const down = harness({ 'https://acme.test/robots.txt': robots('down', 503) })
+    expect(await down.fetcher.sitemapsOf('https://acme.test')).toEqual([])
+  })
 })
 
 describe('site fetcher: identity, pace and budget', () => {

@@ -89,7 +89,9 @@ export async function readSitemapEntries(origin: string, f: SiteFetcher): Promis
   const jobby = named.filter((u) => SITEMAP_WORDS.test(u))
   // On a careers host (careers.walmart.com) every sitemap is about jobs; on a company's main site only the job ones are.
   const careersHost = /career|(^|\.)jobs?\./i.test(new URL(origin).hostname)
-  const wanted = careersHost && !jobby.length ? named : jobby
+  // A lone /sitemap.xml that robots.txt did not name (the standard address, offered when it names none) is the whole site's list: job words in its file name cannot be asked of it, isPostingUrl picks out the roles.
+  const standardOnly = all.length === 1 && all[0] === `${new URL(origin).origin}/sitemap.xml`
+  const wanted = (careersHost || standardOnly) && !jobby.length ? named : jobby
   const queue = wanted.slice(0, MAX_SITEMAPS)
   const entries: SitemapEntry[] = []
   // Anything left unread (a sitemap past the limit, a gzipped one, entries past the cap) means the list is not the whole list.
