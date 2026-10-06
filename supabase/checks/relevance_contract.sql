@@ -408,7 +408,7 @@ do $$
 declare f record;
 begin
   select * into f from fx;
-  perform public.upsert_shared_jobs(jsonb_build_array(jsonb_build_object('company_id', f.co_a, 'employer_id', f.emp, 'external_id', 'collide-1', 'title', 'Real Role',
+  perform public.upsert_shared_jobs(jsonb_build_array(jsonb_build_object('company_id', f.co_a, 'employer_id', f.emp, 'external_id', 'collide-1', 'title', 'Real Role', 'description', 'd',
             'url', 'https://shared.example/jobs/collide-1', 'source', 'greenhouse')));
   if (select employer_id from public.jobs where company_id = f.co_a and external_id = 'collide-1') is distinct from f.emp then raise exception 'the role is stored shared'; end if;
   perform pg_temp.as_user(f.a, format($q$with u as (update public.companies set domain = 'unlinked.example', career_url = 'https://unlinked.example/c', metadata = '{}'::jsonb where id = %L returning 1) select count(*) from u$q$, f.co_a));
