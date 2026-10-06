@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { Claim, FieldInfo, SessionResponse } from '../lib/fill-contract'
+import type { ExtensionStatus } from '../lib/messages'
 import { fieldsSignature } from '../fill/read-fields'
 
 export const STUB_PORT = 4599
@@ -56,6 +57,8 @@ export interface StubConfig {
   profile: Record<string, string>
   /** The next ready application, for Send next. */
   nextReady: { application: string; url: string; company: string } | null
+  /** What GET /api/extension/status answers. Null: the server fails. */
+  status: ExtensionStatus | null
   /** The model job handed out once by /api/model-jobs/claim. */
   relayJob: { job_id: string; claim_id: string; request: unknown } | null
 }
@@ -71,6 +74,7 @@ const defaults = (): StubConfig => ({
   file: true,
   profile: {},
   nextReady: null,
+  status: { send_for_me: true, paused: false, sent_today: 1, tries_today: 2, cap: 3 },
   relayJob: null,
 })
 
@@ -209,6 +213,8 @@ export class Stub {
           ...(!body.auto && this.cfg.nextReady ? { next: this.cfg.nextReady } : {}),
         })
       }
+      case '/api/extension/status':
+        return this.cfg.status ? send(200, this.cfg.status) : send(500, { error: 'failed' })
       case '/api/pipeline/pause':
         return send(200, { ok: true, paused: body.paused })
       default:

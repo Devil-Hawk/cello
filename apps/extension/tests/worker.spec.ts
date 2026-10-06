@@ -123,11 +123,11 @@ test('the popup says when the extension is not connected, and offers Pause Cello
 
   await connect(context, stub)
   await p.reload()
-  await expect(p.getByRole('heading', { name: 'Cello is connected' })).toBeVisible()
+  await expect(p.getByRole('heading', { name: 'Send for me is on.' })).toBeVisible()
   await p.getByRole('button', { name: 'Pause Cello' }).click()
   await expect(p.getByRole('heading', { name: 'Cello is paused' })).toBeVisible()
   await expect.poll(() => stub.calls('/api/pipeline/pause').length).toBe(1)
   expect(stub.calls('/api/pipeline/pause')[0]!.body).toEqual({ paused: true })
   await p.getByRole('button', { name: 'Resume Cello' }).click()
-  await expect(p.getByRole('heading', { name: 'Cello is connected' })).toBeVisible()
+  await expect(p.getByRole('heading', { name: 'Send for me is on.' })).toBeVisible()
 })

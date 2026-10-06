@@ -5,6 +5,6 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['fill/**/*.test.ts', 'lib/**/*.test.ts', 'relay/**/*.test.ts', 'scripts/**/*.test.ts'],
+    include: ['fill/**/*.test.ts', 'lib/**/*.test.ts', 'relay/**/*.test.ts', 'scripts/**/*.test.ts', 'ui/**/*.test.ts'],
   },
 })
