@@ -79,14 +79,14 @@ describe('formatKbContext', () => {
       hit({ title: 'First', url: 'https://a.com', content: 'alpha' }),
       hit({ title: 'Second', content: 'beta' }),
     ])
-    expect(out).toBe('[1] First (https://a.com)\nalpha\n\n[2] Second\nbeta')
+    expect(out).toBe('[1] From your notes: First (https://a.com)\nalpha\n\n[2] From your notes: Second\nbeta')
   })
 
   it('falls back to url then a placeholder when the title is null', () => {
     expect(formatKbContext([hit({ title: null, url: 'https://b.com' })])).toContain(
-      '[1] https://b.com (https://b.com)'
+      '[1] From your notes: https://b.com (https://b.com)'
     )
-    expect(formatKbContext([hit({ title: null, url: null })])).toContain('[1] untitled source')
+    expect(formatKbContext([hit({ title: null, url: null })])).toContain('[1] From your notes: untitled source')
   })
 
   it('stops before exceeding maxChars', () => {
@@ -95,7 +95,7 @@ describe('formatKbContext', () => {
     )
     const out = formatKbContext(hits, { maxChars: 900 })
     expect(out.length).toBeLessThanOrEqual(900)
-    expect(out).toContain('[1] D0')
+    expect(out).toContain('[1] From your notes: D0')
   })
 
   it('enforces a 500-char floor on maxChars so context is never unusably tiny', () => {
@@ -110,7 +110,7 @@ describe('formatKbContext', () => {
       maxChars: 800,
     })
     expect(out).not.toBe('')
-    expect(out.startsWith('[1] Big')).toBe(true)
+    expect(out.startsWith('[1] From your notes: Big')).toBe(true)
     expect(out.endsWith('…')).toBe(true)
     expect(out.length).toBeLessThanOrEqual(800)
   })
@@ -135,7 +135,7 @@ describe('formatKbContext', () => {
       ],
       { maxChars: 500 }
     )
-    expect(out).toContain('[1] First')
+    expect(out).toContain('[1] From your notes: First')
     expect(out).not.toContain('Second')
     expect(out).not.toContain('…')
   })
@@ -153,8 +153,8 @@ describe('formatKbContext', () => {
 
 // --- searchKb hybrid (RRF) fusion --------------------------------------------
 //
-// The actual fusion runs in SQL (supabase/migrations/20260816000007_hybrid_
-// search.sql) — there is no Postgres in this test run, so these two halves
+// The actual fusion runs in SQL (supabase/migrations/20261123000000_
+// material_expand.sql) — there is no Postgres in this test run, so these two halves
 // split the guarantee the way the spec asks:
 //   1. the formula itself, `score = sum(1/(60+rank))`, mirrored here exactly
 //      and checked on the fixture the migration's own comment cites;
@@ -195,7 +195,7 @@ describe('searchKb hybrid (RRF) fusion', () => {
     const vector = [0.1, 0.2, 0.3]
     const hits = await searchKb(client, 'user-1', 'query text', { vector, companyId: 'co-1' })
 
-    expect(rpc).toHaveBeenCalledWith('search_kb_chunks', {
+    expect(rpc).toHaveBeenCalledWith('search_material', {
       p_user_id: 'user-1',
       p_query: 'query text',
       p_limit: 12,
@@ -213,7 +213,7 @@ describe('searchKb hybrid (RRF) fusion', () => {
     await searchKb(client, 'user-1', 'query')
 
     expect(rpc).toHaveBeenCalledWith(
-      'search_kb_chunks',
+      'search_material',
       expect.objectContaining({ p_vec: null, p_company_id: null })
     )
   })
@@ -242,6 +242,18 @@ describe('replaceChunks embed-failure isolation', () => {
     }
     return { client: client as unknown as Parameters<typeof replaceChunks>[0], inserted }
   }
+
+  it('stores chunks of at most 1200 characters, in order', async () => {
+    loadApiKeysMock.mockRejectedValueOnce(new Error('no embedding provider configured'))
+    const { client, inserted } = fakeChunksClient()
+    const paragraph = 'A sentence about shipping a product with a small team. '.repeat(20)
+
+    await replaceChunks(client, 'user-1', 'doc-1', Array.from({ length: 8 }, () => paragraph).join('\n\n'))
+
+    expect(inserted.length).toBeGreaterThan(1)
+    expect(inserted.every((r) => (r.content as string).length <= 1200)).toBe(true)
+    expect(inserted.map((r) => r.ord)).toEqual(inserted.map((_, i) => i))
+  })
 
   it('a rejected loadApiKeys (no provider configured) never blocks or fails ingestion', async () => {
     loadApiKeysMock.mockRejectedValueOnce(new Error('no embedding provider configured'))

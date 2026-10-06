@@ -1,9 +1,9 @@
-// Source-level guard on supabase/migrations/20260816000007_hybrid_search.sql:
-// SECURITY INVOKER and the `k.user_id = p_user_id` scoping predicate must
-// survive every future edit to search_kb_chunks(), because nothing else
+// Source-level guard on supabase/migrations/20261123000000_material_expand.sql:
+// SECURITY INVOKER, the `k.user_id = p_user_id` scoping predicate and the two
+// material filters (person material only, Cello may use it) must
+// survive every future edit to search_material(), because nothing else
 // scopes a service-role call to one user's chunks — see that migration's own
-// comment (copied VERBATIM from 20260724000002_phaseB.sql's original
-// definition) for why both callers (service-role admin client, cookie-scoped
+// comment (carried over from search_kb_chunks, 20260816000007) for why both callers (service-role admin client, cookie-scoped
 // RLS client) rely on it.
 //
 // This is a standalone file rather than living in a step-6 "RLS shape" test
@@ -30,7 +30,7 @@ import { fileURLToPath } from 'node:url'
 
 const MIGRATION_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  '../../../../supabase/migrations/20260816000007_hybrid_search.sql'
+  '../../../../supabase/migrations/20261123000000_material_expand.sql'
 )
 
 const RAW_SQL = readFileSync(MIGRATION_PATH, 'utf8')
@@ -61,10 +61,36 @@ function hasUserScoping(sql: string): boolean {
   return hasInvoker && predicateCount >= 2
 }
 
-describe('search_kb_chunks (hybrid) preserves its security posture', () => {
+/**
+ * True iff both candidate lists keep fetched pages out and honour the use switch:
+ * each filter appears at least twice, once in the words list and once in the vector list.
+ */
+function hasMaterialFilters(sql: string): boolean {
+  const person = (sql.match(/s\.material_kind\s*=\s*'person'/g) ?? []).length
+  const mayUse = (sql.match(/\bs\.may_use\b/g) ?? []).length
+  return person >= 2 && mayUse >= 2
+}
+
+describe('search_material preserves its security posture', () => {
   it('is defined in the migration at all (a broken path must not pass silently)', () => {
     expect(RAW_SQL.length).toBeGreaterThan(500)
-    expect(RAW_SQL).toContain('search_kb_chunks')
+    expect(RAW_SQL).toContain('search_material')
+  })
+
+  it('keeps fetched pages and unusable sources out of both candidate lists', () => {
+    expect(hasMaterialFilters(SQL)).toBe(true)
+  })
+
+  it('MUTATION: goes red when the person-material filter is dropped from the vector list only', () => {
+    const first = SQL.indexOf("s.material_kind = 'person'")
+    const second = SQL.indexOf("s.material_kind = 'person'", first + 1)
+    expect(second).toBeGreaterThan(first)
+    const mutated = SQL.slice(0, second) + 'true' + SQL.slice(second + "s.material_kind = 'person'".length)
+    expect(hasMaterialFilters(mutated)).toBe(false)
+  })
+
+  it('MUTATION: goes red when the use switch is dropped from either list', () => {
+    expect(hasMaterialFilters(SQL.replace(/\bs\.may_use\b/, 'true'))).toBe(false)
   })
 
   it('the real migration has SECURITY INVOKER and the user_id predicate on both candidate lists', () => {
