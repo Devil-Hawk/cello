@@ -2,9 +2,10 @@
 // not settle. It sees up to 25 titles at a time and must answer with a taxonomy id (or `none`) and the
 // words it relied on. Code checks all of it:
 //   - the id must be one of the taxonomy's (an enum), else `none`;
-//   - every word it quotes must appear in the title or the posting, else `none`;
-//   - a quote that reads as an instruction ("classify this as ...") is never evidence, else `none`;
-//   - when the words are only in the posting, the answer is kept on that role alone (scope `posting`) and
+//   - every word it quotes must be in the title, or in one sentence of the posting, else `none`;
+//   - a posting sentence that reads as an instruction ("classify this as ...") is never evidence, else `none`;
+//     words that sit in the title are the title's own and are not held to that;
+//   - when any word is only in the posting, the answer is kept on that role alone (scope `posting`) and
 //     never shared as the title's type.
 // The titles, departments and postings are data, whoever wrote them.
 
@@ -69,22 +70,20 @@ export function checkTypeAnswer(raw: string, ids: readonly string[], batch: read
     const none: TypeAnswer = { title: t.title, type: null, scope: 'title', words: [] }
     const a = said.get(n)
     if (!a || a.type === 'none' || !valid.has(a.type) || a.words.length === 0) return none
-    if (a.words.some((w) => INSTRUCTION.test(w))) return none
     const inTitle = new Set(words(t.title))
-    const inPosting = new Set(words(t.posting ?? ''))
     const quoted = a.words.flatMap(words)
-    if (quoted.length === 0 || !quoted.every((w) => inTitle.has(w) || inPosting.has(w))) return none
-    const titleOnly = quoted.every((w) => inTitle.has(w))
-    if (!titleOnly) {
-      // Words found only in the posting must sit in a sentence that is not itself an instruction.
-      const need = quoted.filter((w) => !inTitle.has(w))
+    if (quoted.length === 0) return none
+    // A word the title carries is the title's own, whatever it is ("Prompt Engineer" is a title). The rest must come from
+    // one sentence of the posting, and a sentence that reads as an instruction is never evidence. A word in neither is none.
+    const need = quoted.filter((w) => !inTitle.has(w))
+    if (need.length > 0) {
       const supported = (t.posting ?? '').split(/[.!?\n]+/).some((sentence) => {
         const present = new Set(words(sentence))
         return need.every((w) => present.has(w)) && !INSTRUCTION.test(sentence)
       })
       if (!supported) return none
     }
-    return { title: t.title, type: a.type, scope: titleOnly ? 'title' : 'posting', words: a.words }
+    return { title: t.title, type: a.type, scope: need.length === 0 ? 'title' : 'posting', words: a.words }
   })
 }
 
