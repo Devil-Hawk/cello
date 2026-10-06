@@ -570,6 +570,13 @@ export async function refreshLocked(
     }
   }
 
+  // A company linked to an employer is read only from the board the directory gave it. Detection works from what the
+  // person typed (name, domain, careers link), so what it finds must never be written under the employer's shared rows.
+  if (jobs === null && company.employer_id) {
+    board.unreadable = cachedFailed ? 'board_unreachable' : 'no_supported_board'
+    return board
+  }
+
   if (jobs === null) {
     let detected
     try {
