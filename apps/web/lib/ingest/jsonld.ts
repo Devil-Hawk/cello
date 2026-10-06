@@ -113,6 +113,30 @@ function isoDate(v: unknown): string | undefined {
   return Number.isNaN(t) ? undefined : new Date(t).toISOString()
 }
 
+/** JSON.parse, and on failure once more with raw line breaks and tabs inside strings escaped (Kaiser Permanente's posting data has them; strict JSON does not allow them). */
+function parseLoose(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch (first) {
+    let out = ''
+    let inString = false
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i]
+      if (inString && c === '\\') out += c + (text[++i] ?? '')
+      else if (c === '"') {
+        inString = !inString
+        out += c
+      } else if (inString && c < ' ') out += c === '\n' ? '\\n' : c === '\r' ? '\\r' : c === '\t' ? '\\t' : ' '
+      else out += c
+    }
+    try {
+      return JSON.parse(out)
+    } catch {
+      throw first
+    }
+  }
+}
+
 /**
  * The postings a page declares. A posting without its own url gets the page's
  * URL with a fragment from its title, so two of them stay two jobs instead of
@@ -129,7 +153,7 @@ export function readJobPostings(html: string, pageUrl: string): AtsJob[] {
   const nodes: Json[] = []
   $('script[type="application/ld+json"]').each((_, el) => {
     try {
-      collect(JSON.parse($(el).contents().text().trim()), nodes)
+      collect(parseLoose($(el).contents().text().trim()) as Json, nodes)
     } catch {
       /* one bad block must not hide the others */
     }
