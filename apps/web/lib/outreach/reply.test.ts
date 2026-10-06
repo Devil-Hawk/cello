@@ -72,13 +72,30 @@ function fakeAdmin(threadRows: { gmail_thread_id: string }[]) {
   return { from: () => builder } as never
 }
 
+// The Gmail client answers: a thread lists its message ids, and each message is read raw.
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+
+function rawOf(m: GmailMessage): string {
+  const head = m.payload.headers.map((h) => `${h.name}: ${h.value}`).join('\r\n')
+  const body = Buffer.from(m.payload.body?.data ?? '', 'base64url').toString()
+  return Buffer.from(`${head}\r\n\r\n${body}`).toString('base64url')
+}
+
 function fakeGmail(threads: Record<string, GmailMessage[]>, address = 'alex@example.com') {
   global.fetch = vi.fn(async (url: string | URL | Request) => {
     const u = String(url)
-    if (u.endsWith('/users/me/profile')) return { ok: true, json: async () => ({ emailAddress: address }) } as Response
-    const m = u.match(/threads\/([^?]+)/)
-    const found = m ? threads[decodeURIComponent(m[1])] : undefined
-    return found ? ({ ok: true, json: async () => ({ messages: found }) } as Response) : ({ ok: false, status: 404 } as Response)
+    if (u.endsWith('/users/me/profile')) return json({ emailAddress: address })
+    const t = u.match(/threads\/([^?]+)/)
+    if (t) {
+      const found = threads[decodeURIComponent(t[1])]
+      return found ? json({ messages: found.map((m) => ({ id: m.id, threadId: m.threadId })) }) : json({ error: { code: 404, message: 'Not Found' } }, 404)
+    }
+    const one = u.match(/messages\/([^?]+)/)
+    const m = one ? Object.values(threads).flat().find((x) => x.id === decodeURIComponent(one[1])) : undefined
+    return m
+      ? json({ id: m.id, threadId: m.threadId, labelIds: m.labelIds, snippet: m.snippet, internalDate: m.internalDate, raw: rawOf(m) })
+      : json({ error: { code: 404, message: 'Not Found' } }, 404)
   }) as unknown as typeof fetch
 }
 

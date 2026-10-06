@@ -80,7 +80,8 @@ export function googleAuthClient(credentials: { clientId?: string; clientSecret?
 export function gmailFor(accessToken: string): gmail_v1.Gmail {
   const auth = googleAuthClient()
   auth.setCredentials({ access_token: accessToken })
-  return gmail({ version: 'v1', auth })
+  // ponytail: @googleapis/gmail ships its own google-auth-library (10.5.0), so the client type differs from ours in a private field; same shape at runtime. Drop the cast when the two versions meet.
+  return gmail({ version: 'v1', auth: auth as unknown as gmail_v1.Options['auth'] })
 }
 
 /** The HTTP status of a failed Gmail call (gaxios keeps it on the error), or undefined for a network failure. */
