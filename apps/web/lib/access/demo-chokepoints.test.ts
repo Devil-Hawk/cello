@@ -180,6 +180,9 @@ const MODEL_KEY_SLOT = /\b(openrouter|openai|anthropic)\b/
  */
 const KNOWN_UNGUARDED_MODEL_ROUTES: string[] = []
 
+/** Mints the person's own OpenRouter key by PKCE, calls no model, and refuses a demo first (pinned below). */
+const KEY_EXCHANGE_ROUTES = ['app/api/auth/openrouter/callback/route.ts']
+
 /**
  * Files that reach a model but are HANDED their key rather than obtaining one.
  *
@@ -214,7 +217,7 @@ const KEY_TAKING_MODEL_PLUMBING = [
 /** Anything an exempt file could use to obtain key material by itself. */
 const KEY_SOURCING_MARKERS = [/\bapi_keys\b/, /process\.env\.\w*(KEY|TOKEN|SECRET)\w*/]
 
-const EXEMPT_FROM_MODEL_SCAN = new Set([...KNOWN_UNGUARDED_MODEL_ROUTES, ...KEY_TAKING_MODEL_PLUMBING])
+const EXEMPT_FROM_MODEL_SCAN = new Set([...KNOWN_UNGUARDED_MODEL_ROUTES, ...KEY_EXCHANGE_ROUTES, ...KEY_TAKING_MODEL_PLUMBING])
 
 /**
  * ROUTES **AND** LIB FILES. The mail half below has always scanned both; this
@@ -270,6 +273,14 @@ describe('every path that reaches a model is behind the demo spend + expiry guar
         `their caller, but they now reach for key material themselves. The exemption no longer ` +
         `holds — either route them through a guarded source or take them off the list:\n  ${offenders.join('\n  ')}`
     ).toEqual([])
+  })
+
+  it('a key exchange route refuses a demo first and never decrypts a key', () => {
+    for (const relPath of KEY_EXCHANGE_ROUTES) {
+      const src = read(path.resolve(WEB_ROOT, relPath))
+      expect(calls(src, 'demoSettingsGate'), relPath).toBe(true)
+      expect(src, relPath).not.toMatch(/\bdecrypt\b/)
+    }
   })
 
   it('companies/verify loads keys through the guarded loader and reaches the model through callLlm', () => {
