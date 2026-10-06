@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
-import { archiveChat, earlier, getChat, listChats, listMade, pinChat, renameChat } from './store'
+import { archiveChat, chatsHolding, earlier, getChat, listChats, listMade, pinChat, renameChat } from './store'
 
 const day = (n: number) => new Date(Date.UTC(2026, 9, n)).toISOString()
 const chat = (id: string, user: string, over: Record<string, unknown> = {}) => ({
@@ -154,5 +154,16 @@ describe('listMade', () => {
     const next = await listMade(db, 'u1', { limit: 100, before: first[first.length - 1].updated_at })
     expect(next).toHaveLength(100)
     expect(next[0].id).not.toBe(first[0].id)
+  })
+})
+
+describe('chatsHolding', () => {
+  it('lists the person\'s chats that hold the application as a tile, newest first, and not one that let it go', async () => {
+    const tile = (chat: string, id: string, over: Record<string, unknown> = {}) => ({ user_id: 'u1', chat_id: chat, kind: 'application', ref: { id }, removed_at: null, added_at: day(1), ...over })
+    const db = makeFakeAdmin({
+      chat_attachments: [tile('c1', 'app1'), tile('c2', 'app1'), tile('c3', 'app1', { removed_at: day(2) }), tile('c4', 'app2'), tile('c5', 'app1', { user_id: 'u2' })],
+      chats: [chat('c1', 'u1', { last_turn_at: day(3) }), chat('c2', 'u1', { last_turn_at: day(5) }), chat('c3', 'u1'), chat('c4', 'u1'), chat('c5', 'u2')],
+    })
+    expect((await chatsHolding(db, 'u1', 'app1')).map((c) => c.id)).toEqual(['c2', 'c1'])
   })
 })

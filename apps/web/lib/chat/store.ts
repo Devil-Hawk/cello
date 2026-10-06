@@ -133,6 +133,18 @@ export async function listMade(
 }
 
 /**
+ * The chats that hold an application as a tile, newest first, for the application's record.
+ * ponytail: reads the person's 1,000 newest application tiles and matches in code; an index on ref->>'id' when anyone has more.
+ */
+export async function chatsHolding(db: AdminClient, userId: string, applicationId: string): Promise<Pick<ChatRow, 'id' | 'title' | 'last_turn_at'>[]> {
+  const { data } = await db.from('chat_attachments').select('chat_id, ref').eq('user_id', userId).eq('kind', 'application').is('removed_at', null).order('added_at', { ascending: false }).limit(1000)
+  const ids = [...new Set(((data as { chat_id: string; ref: { id?: string } }[] | null) ?? []).filter((a) => a.ref?.id === applicationId).map((a) => a.chat_id))].slice(0, 100)
+  if (ids.length === 0) return []
+  const { data: chats } = await db.from('chats').select('id, title, last_turn_at').eq('user_id', userId).in('id', ids).is('archived_at', null).order('last_turn_at', { ascending: false })
+  return (chats as Pick<ChatRow, 'id' | 'title' | 'last_turn_at'>[] | null) ?? []
+}
+
+/**
  * Earlier: the person's old Copilot conversations, newest first. Read only: this module has no write to them.
  * ponytail: the latest 30, which is all the old page ever listed; page it if anyone has more worth finding.
  */
