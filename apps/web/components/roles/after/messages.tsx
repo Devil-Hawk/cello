@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 import { ago } from '@/lib/network/format'
 
@@ -21,7 +22,8 @@ export function MessagesGroup({ jobId }: { jobId: string }) {
   const [msgs, setMsgs] = useState<Msg[] | null>(null)
 
   useEffect(() => {
-    const db = createClient()
+    // messages is newer than the generated types
+    const db = createClient() as unknown as SupabaseClient
     db.from('applications')
       .select('id')
       .eq('job_id', jobId)

@@ -4,6 +4,7 @@
 // newest first, from the person's own artifacts.
 
 import { useEffect, useState } from 'react'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 
 interface Doc {
@@ -19,7 +20,8 @@ export function DocumentsGroup({ jobId }: { jobId: string }) {
   const [docs, setDocs] = useState<Doc[] | null>(null)
 
   useEffect(() => {
-    createClient()
+    // artifacts is newer than the generated types
+    ;(createClient() as unknown as SupabaseClient)
       .from('artifacts')
       .select('id, type, title, created_at')
       .eq('job_id', jobId)
