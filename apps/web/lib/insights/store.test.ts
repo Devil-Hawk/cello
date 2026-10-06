@@ -259,6 +259,16 @@ describe('readStandingPreferences — byte-parity with the retired FIFO format',
     expect(actual).toBe(expected)
   })
 
+  it('leaves out preference rows a model wrote', async () => {
+    const { admin, rows } = makeFakeAdmin()
+    const base = { user_id: U, kind: 'preference', evidence: null, confidence: null, status: 'active', company_id: null, supersedes_id: null, embedding: null, created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-01T00:00:00.000Z' }
+    rows.push({ ...base, id: 'a', statement: 'Model guess', source: 'reward_loop' })
+    rows.push({ ...base, id: 'b', statement: 'Remote only', source: 'user_stated' })
+    const block = await readStandingPreferences(admin, U)
+    expect(block).toContain('Remote only')
+    expect(block).not.toContain('Model guess')
+  })
+
   it('renders "" for a user with no preference insights, same as the FIFO did for an empty list', async () => {
     const { admin } = makeFakeAdmin()
     expect(await readStandingPreferences(admin, U)).toBe('')
