@@ -506,7 +506,7 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
       content: {
         text: demoColumns.content,
         content_json: demoColumns.content_json,
-        title: `${DEMO_PERSONA.fullName} — base resume`,
+        title: `${DEMO_PERSONA.fullName}, base resume`,
         ats_score: 82,
         source: 'base',
         draft_id: null,
