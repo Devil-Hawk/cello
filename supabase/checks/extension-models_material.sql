@@ -74,14 +74,17 @@ begin
   assert ids = array['aaaaaaaa-5555-0000-0000-000000000001', 'aaaaaaaa-5555-0000-0000-000000000005']::uuid[],
     'words-only search must return exactly the note and the saved link, got ' || coalesce(ids::text, 'nothing');
 
-  -- By vector: the query vector sits on a fetched page and on the hidden note; neither may come back.
-  select array_agg(chunk_id order by chunk_id) into ids from public.search_material(a, 'zzzzqqq', 12, pg_temp.unit(3));
-  assert ids is null, 'a vector match on a fetched page came back: ' || ids::text;
-  select array_agg(chunk_id order by chunk_id) into ids from public.search_material(a, 'zzzzqqq', 12, pg_temp.unit(2));
-  assert ids is null, 'a vector match on a hidden source came back: ' || ids::text;
-  -- ...and a vector that sits on the note finds it with no word in common.
-  select array_agg(chunk_id) into ids from public.search_material(a, 'zzzzqqq', 12, pg_temp.unit(1));
-  assert ids = array['aaaaaaaa-5555-0000-0000-000000000001']::uuid[], 'the vector did not find the note, got ' || coalesce(ids::text, 'nothing');
+  -- By vector: the nearest neighbours are searched among the person's usable material only.
+  -- A query vector sitting exactly on a fetched page, or on the hidden note, must not bring either back.
+  select array_agg(chunk_id) into ids from public.search_material(a, 'zzzzqqq', 12, pg_temp.unit(3));
+  assert not coalesce(ids && array['aaaaaaaa-5555-0000-0000-000000000003', 'aaaaaaaa-5555-0000-0000-000000000004']::uuid[], false),
+    'a vector match on a fetched page came back: ' || coalesce(ids::text, 'nothing');
+  select array_agg(chunk_id) into ids from public.search_material(a, 'zzzzqqq', 12, pg_temp.unit(2));
+  assert not coalesce(ids && array['aaaaaaaa-5555-0000-0000-000000000002']::uuid[], false),
+    'a vector match on a hidden source came back: ' || coalesce(ids::text, 'nothing');
+  -- ...and a vector that sits on the note finds it first, with no word in common.
+  assert (select chunk_id from public.search_material(a, 'zzzzqqq', 12, pg_temp.unit(1)) order by rank desc limit 1) = 'aaaaaaaa-5555-0000-0000-000000000001'::uuid,
+    'the vector did not find the note first';
 
   -- One company's documents: the saved link is tagged, the note is not.
   select array_agg(chunk_id) into ids from public.search_material(a, 'kayak', 12, null, 'aaaaaaaa-2222-0000-0000-000000000001');
