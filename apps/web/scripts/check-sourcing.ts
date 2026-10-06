@@ -24,7 +24,7 @@
 
 import { ingestCompany, type DueCompany } from '../lib/ingest/run'
 import { pageFetcherFromEnv } from '../lib/ingest/fetch-page'
-import { makeSiteFetcher, type ReaderMode } from '../lib/ingest/reader/site-fetch'
+import type { ReaderMode } from '../lib/ingest/reader/site-fetch'
 import { onOwnSite } from '../lib/ingest/reader/legit'
 import { ROLE_MAX_AGE_DAYS } from '../lib/jobs/freshness'
 import { targetVerdict } from '../lib/targeting/roles'
@@ -113,7 +113,6 @@ async function main(): Promise<void> {
 
   for (const e of list) {
     const { store, rows, metadata } = memoryStore()
-    const fetcher = makeSiteFetcher({ mode })
     const company: DueCompany = {
       id: `check-${e.name}`,
       user_id: 'check',
@@ -126,10 +125,12 @@ async function main(): Promise<void> {
       is_dream_company: false,
     }
     const started = Date.now()
-    const outcome = await ingestCompany(store, company, { fetchPage, model: null, mode, targets: TARGETS, fetcher })
+    const outcome = await ingestCompany(store, company, { fetchPage, model: null, mode, targets: TARGETS })
     const seconds = ((Date.now() - started) / 1000).toFixed(1)
     const meta = metadata[metadata.length - 1] ?? {}
-    const check = (meta.source_check ?? {}) as { readable?: boolean; reason?: string }
+    const check = (meta.source_check ?? {}) as { readable?: boolean; reason?: string; requests?: number }
+    // The reader makes its own fetcher inside ingestCompany, so its clock starts with the read, not before the board stage.
+    const requests = check.requests ?? 0
     const ats = (meta.ats ?? null) as { provider?: string; token?: string; verified_by?: string } | null
 
     const inside = rows.filter((r) =>
@@ -163,10 +164,10 @@ async function main(): Promise<void> {
     // "Read" means a tier answered with roles (or, for a sitemap, listed them and has read the newest few so far).
     const status = outcome.tier ? 'read' : outcome.reading ? 'reading: only the scheduled pass can read this site' : `COULD NOT READ (${check.reason ?? outcome.failure ?? 'no_roles'})`
     if (!outcome.tier) unread.push(`${e.name}: ${outcome.reading ? 'reading' : (check.reason ?? outcome.failure ?? 'no_roles')}`)
-    table.push([e.name, tier, String(outcome.result.found), String(rows.length), String(inside), `${noPlace.length}/${noText.length}`, newest, String(fetcher.spent().requests), `${(bytes / 1024).toFixed(0)} KB`, seconds + 's', status])
+    table.push([e.name, tier, String(outcome.result.found), String(rows.length), String(inside), `${noPlace.length}/${noText.length}`, newest, String(requests), `${(bytes / 1024).toFixed(0)} KB`, seconds + 's', status])
     console.log(`${e.name}`)
     console.log(`  tier ${tier}${ats ? ` (verified by ${ats.verified_by})` : ''}, ${status}, ${seconds}s`)
-    console.log(`  roles found ${outcome.result.found}, to store ${rows.length}, inside targets ${inside}, no place ${noPlace.length}, no description ${noText.length}, newest ${newest}, requests ${fetcher.spent().requests}, ${(bytes / 1024).toFixed(0)} KB`)
+    console.log(`  roles found ${outcome.result.found}, to store ${rows.length}, inside targets ${inside}, no place ${noPlace.length}, no description ${noText.length}, newest ${newest}, requests ${requests}, ${(bytes / 1024).toFixed(0)} KB`)
     if (excluded) console.log(`  not stored: ${Object.entries(excluded).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}`)
     for (const t of samples) console.log(`  - ${t}`)
     if (outcome.message) console.log(`  ${outcome.message}`)
