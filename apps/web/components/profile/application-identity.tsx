@@ -98,7 +98,7 @@ function Field({
         placeholder={placeholder}
         autoComplete={autoComplete}
         aria-invalid={invalid || undefined}
-        className={cn('mt-1.5', invalid && 'border-destructive focus-visible:ring-destructive')}
+        className={cn('mt-1.5 min-h-11', invalid && 'border-destructive focus-visible:ring-destructive')}
       />
       {children}
     </div>

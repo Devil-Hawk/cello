@@ -295,7 +295,7 @@ export function ApplyCredentialsCard({ onStatus }: ApplyCredentialsCardProps) {
                 inputMode="url"
                 autoComplete="off"
                 spellCheck={false}
-                className="mt-2"
+                className="mt-2 min-h-11"
                 required
               />
             </div>
@@ -313,7 +313,7 @@ export function ApplyCredentialsCard({ onStatus }: ApplyCredentialsCardProps) {
                 onChange={(event) => setLabel(event.target.value)}
                 maxLength={MAX_LABEL_CHARS}
                 placeholder="Acme careers"
-                className="mt-2"
+                className="mt-2 min-h-11"
               />
             </div>
 
@@ -331,7 +331,7 @@ export function ApplyCredentialsCard({ onStatus }: ApplyCredentialsCardProps) {
                 autoComplete="off"
                 spellCheck={false}
                 placeholder="you@example.com"
-                className="mt-2"
+                className="mt-2 min-h-11"
                 required
               />
             </div>
@@ -355,7 +355,7 @@ export function ApplyCredentialsCard({ onStatus }: ApplyCredentialsCardProps) {
                 onChange={(event) => setSecret(event.target.value)}
                 autoComplete="new-password"
                 spellCheck={false}
-                className="mt-2"
+                className="mt-2 min-h-11"
                 required
               />
             </div>
