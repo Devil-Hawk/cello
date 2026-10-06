@@ -79,7 +79,7 @@ describe('without the owner\'s keys', () => {
     const r = await sendPush({ endpoint: 'https://push.example/x', p256dh: 'a', auth: 'b' }, { title: 't', body: 'b', url: '/' }, (async () => ((called = true), new Response())) as typeof fetch)
     expect(r).toBe('off')
     expect(called).toBe(false)
-    expect(vapidKeys({})).toBeNull()
+    expect(vapidKeys({} as NodeJS.ProcessEnv)).toBeNull()
     if (had.pub) process.env.VAPID_PUBLIC_KEY = had.pub
     if (had.priv) process.env.VAPID_PRIVATE_KEY = had.priv
   })

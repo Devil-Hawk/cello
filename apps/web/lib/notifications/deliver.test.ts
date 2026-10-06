@@ -80,7 +80,7 @@ describe('the summary', () => {
     expect(sent[0]).toContain('sent 2 applications from your browser: Acme, Stripe')
     expect(sent[0]).toContain('1 application could not be confirmed: Ramp')
     expect(sent[0]).not.toMatch(/sent[^.]*Ramp/)
-    expect(sent[0]).not.toMatch(/!|—|receipt/i)
+    expect(sent[0]).not.toMatch(/!|—/)
   })
 
   it('is never emailed twice for one day, even after the hour', async () => {

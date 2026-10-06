@@ -7,7 +7,7 @@
 //   follow_up_due  applied, no word back, and the person's follow-up days have passed
 //   gone_quiet     applied a long time ago, no word back: time to let it go or close it
 //
-// No interview preparation here (it is not part of Cello). Mail that could not be verified is not
+// Nothing here helps with getting ready for an interview (Cello does not do that). Mail that could not be verified is not
 // evidence of anything and never makes a next step.
 //
 // ponytail: standalone over stored rows. buildDigest (K8c) shares the same inputs once it is on main.

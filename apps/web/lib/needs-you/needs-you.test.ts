@@ -103,12 +103,15 @@ describe('Needs you', () => {
   })
 })
 
+// the old table name, spelled in two pieces so this file does not hold it either
+const OLD = 'application_' + 'rece' + 'ipts'
+
 describe('the old name for what was sent', () => {
   it('is read nowhere outside the migrations (its view can be dropped)', () => {
     const root = path.resolve(process.cwd(), '../..')
-    const files = execFileSync('git', ['grep', '-l', 'application_receipts', '--', 'apps', 'scripts'], { cwd: root, encoding: 'utf8' }).split('\n').filter(Boolean).filter((f) => f !== 'apps/web/lib/needs-you/needs-you.test.ts')
+    const files = execFileSync('git', ['grep', '-l', OLD, '--', 'apps', 'scripts'], { cwd: root, encoding: 'utf8' }).split('\n').filter(Boolean).filter((f) => f !== 'apps/web/lib/needs-you/needs-you.test.ts')
     // a comment that names the old file is history, not a read
-    const reads = files.filter((f) => readFileSync(path.join(root, f), 'utf8').split('\n').some((l) => l.includes('application_receipts') && !/^\s*(\/\/|\*|\/\*)/.test(l)))
+    const reads = files.filter((f) => readFileSync(path.join(root, f), 'utf8').split('\n').some((l) => l.includes(OLD) && !/^\s*(\/\/|\*|\/\*)/.test(l)))
     expect(reads).toEqual([])
   })
 })

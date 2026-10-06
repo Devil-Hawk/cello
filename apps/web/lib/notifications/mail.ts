@@ -7,14 +7,17 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getGmailAccessToken } from '@/lib/gmail/token'
 import { hasGmailPermission } from '@/lib/gmail/permissions'
+import { demoSendGate, type DemoProfileFacts } from '@/lib/access/guardrails'
 import { sendGmailMessage } from '@/lib/outreach/gmail'
 import type { MailResult } from './deliver'
 
 export function selfMailer(admin: SupabaseClient) {
   return async (userId: string, subject: string, text: string): Promise<MailResult> => {
-    const { data } = await admin.from('profiles').select('email, full_name, preferences').eq('id', userId).maybeSingle()
-    const p = data as { email: string | null; full_name: string | null; preferences: Record<string, unknown> | null } | null
+    const { data } = await admin.from('profiles').select('email, full_name, preferences, is_demo, demo_expires_at').eq('id', userId).maybeSingle()
+    const p = data as { email: string | null; full_name: string | null; preferences: Record<string, unknown> | null; is_demo: boolean | null; demo_expires_at: string | null } | null
     if (!p?.email) return 'failed'
+    // a demo never delivers mail, whoever the recipient is
+    if (!demoSendGate(p as unknown as DemoProfileFacts).allowed) return 'failed'
     const preferences = p.preferences ?? {}
     if (!hasGmailPermission(preferences, 'send')) return 'no_scope'
     const token = await getGmailAccessToken(admin, userId, preferences)
