@@ -13,7 +13,7 @@
     "clean": "rm -rf .next .turbo node_modules",
     "setup:checkpointer": "npx tsx scripts/setup-checkpointer.ts",
     "mutation:scans": "npx tsx scripts/mutation-check-scans.ts",
-    "rungs:eval": "npx tsx lib/relay/rungs.ts"
+    "rungs:eval": "npx tsx scripts/rungs-eval.ts"
   },
   "dependencies": {
     "@a2a-js/sdk": "1.0.1",
@@ -25,6 +25,7 @@
     "@langchain/core": "1.2.8",
     "@langchain/langgraph": "1.4.10",
     "@langchain/langgraph-checkpoint-postgres": "1.0.4",
+    "@langchain/textsplitters": "1.0.2",
     "@langfuse/client": "5.11.1",
     "@langfuse/otel": "5.11.1",
     "@langfuse/tracing": "5.11.1",
