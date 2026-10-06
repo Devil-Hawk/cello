@@ -270,7 +270,8 @@ describe('declining and arriving', () => {
     const asked = [{ id: 'q1', answer: 'Yes', declined: false }, { id: 'q2', answer: null, declined: false }]
     const moved: unknown[] = []
     const from = (table: string) => {
-      const q: any = { select: () => q, eq: () => q, contains: () => q, in: () => q, then: (res: (v: unknown) => unknown) => res({ data: table === 'applications' ? waiting : asked, error: null }) }
+      let ids: string[] | null = null
+      const q: any = { select: () => q, eq: () => q, contains: () => q, in: (_c: string, v: string[]) => ((ids = v), q), then: (res: (v: unknown) => unknown) => res({ data: table === 'applications' ? waiting : asked.filter((r) => !ids || ids.includes(r.id)), error: null }) }
       return q
     }
     const client = { from, rpc: async (_n: string, a: any) => (moved.push([a.p_app, a.p_to, a.p_event.idempotency_key]), { data: { ok: true, replay: false, event: { id: 'e' } }, error: null }) }
