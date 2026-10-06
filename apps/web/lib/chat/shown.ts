@@ -11,6 +11,12 @@ const flagOn = async (db: AdminClient, key: string) => {
   return (data as { on: boolean } | null)?.on === true
 }
 
+/**
+ * Chat is on for everyone, which is when the old Copilot page forwards to it. The owner's own access (chatOpen) does
+ * not retire it: until the owner turns the switch on, Copilot stays the page that works.
+ */
+export const chatShownToAll = (db: AdminClient) => flagOn(db, 'chat_shown')
+
 export async function chatOpen(db: AdminClient, userId: string | null | undefined): Promise<boolean> {
   if (!userId) return false
   return isOpsOwner(userId) || flagOn(db, 'chat_shown')

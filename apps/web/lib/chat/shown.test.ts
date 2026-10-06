@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
-import { chatOpen, recallInWordsOn } from './shown'
+import { chatOpen, chatShownToAll, recallInWordsOn } from './shown'
 
 afterEach(() => {
   delete process.env.OWNER_USER_ID
@@ -29,5 +29,11 @@ describe('chatOpen', () => {
     expect(await recallInWordsOn(makeFakeAdmin({ instance_flags: [{ key: 'chat_recall_words', on: false }] }))).toBe(false)
     expect(await recallInWordsOn(makeFakeAdmin({ instance_flags: [] }))).toBe(false)
     expect(await recallInWordsOn(makeFakeAdmin({ instance_flags: [{ key: 'chat_recall_words', on: true }] }))).toBe(true)
+  })
+
+  it('retires the old Copilot only when the switch is on, never because the owner can see Chat', async () => {
+    process.env.OWNER_USER_ID = 'owner'
+    expect(await chatShownToAll(makeFakeAdmin({ instance_flags: [{ key: 'chat_shown', on: false }] }))).toBe(false)
+    expect(await chatShownToAll(makeFakeAdmin({ instance_flags: [{ key: 'chat_shown', on: true }] }))).toBe(true)
   })
 })
