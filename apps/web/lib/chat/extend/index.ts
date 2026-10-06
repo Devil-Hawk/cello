@@ -5,12 +5,16 @@ import type { AdminClient } from '@/lib/harness/types'
 import type { ChatObject } from '../types'
 import * as network from './network'
 
-/** One thing Chat can offer on an empty chat. Higher `priority` comes first. */
+/**
+ * One thing Chat can offer on an empty chat (chat.suggest). Higher `priority` comes first, one per `kind`,
+ * never two about one object, the first three that hold. `text` is at most 40 characters, names from code.
+ */
 export interface SuggestCandidate {
+  kind: string
   text: string
   priority: number
-  /** What the suggestion is about, when it is about one thing. */
-  about?: { kind: string; ref: string }
+  /** What a tap attaches as tiles. */
+  objects?: { kind: string; ref: string }[]
 }
 
 /**
