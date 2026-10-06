@@ -4,7 +4,8 @@
 // "of 636 open" number. The employer's answer is kept for ten minutes so paging does not read it again.
 //
 // A reason is the stage of the targets code that said no (lib/jobs/target-relevance.ts): place, age, an
-// excluded company or word, level, or "Not one of your titles". Role types replace the last one later.
+// excluded company or word, level, and "Not one of your titles". While role_types_live is on the last one is
+// two: "Other role type: Product Manager" and "Role type unknown". Each row carries its tier 1 type.
 
 import { unstable_cache } from 'next/cache'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -12,6 +13,7 @@ import { providers, readCachedAts } from '../ats/index'
 import { classifyJob } from '../jobs/classify'
 import { hasPersonTargets, judgeForPerson, prepareTargets, type OutsideReason } from '../jobs/target-relevance'
 import { readSite, type Tier } from '../ingest/reader'
+import { getRoleType, typeTitle } from '../jobs/role-types'
 import { makeSiteFetcher } from '../ingest/reader/site-fetch'
 import { searchTerms, type ReaderTargets } from '../ingest/reader/targets'
 
@@ -19,7 +21,7 @@ type Db = SupabaseClient<any, any, any>
 
 export const LIVE_PAGE_SIZE = 25
 const REVALIDATE_SECONDS = 600
-const REASONS: readonly OutsideReason[] = ['place', 'age', 'excluded', 'level', 'title']
+const REASONS: readonly OutsideReason[] = ['place', 'age', 'excluded', 'level', 'title', 'type', 'untyped']
 
 /** What each reason says on a row. */
 export const REASON_COPY: Record<OutsideReason, string> = {
@@ -28,6 +30,15 @@ export const REASON_COPY: Record<OutsideReason, string> = {
   excluded: 'An excluded company or word',
   level: 'Not your level',
   title: 'Not one of your titles',
+  type: 'Other role type',
+  untyped: 'Role type unknown',
+}
+
+/** What a row says about why it is not the person's: a type reason names the type. */
+export function reasonText(row: Pick<LiveRow, 'reason' | 'role_type'>): string | null {
+  if (!row.reason) return null
+  if (row.reason === 'type' && row.role_type) return `Other role type: ${getRoleType(row.role_type)?.label ?? row.role_type}`
+  return REASON_COPY[row.reason]
 }
 
 export interface LiveCompany {
@@ -45,6 +56,8 @@ export interface LiveRow {
   url: string
   location: string | null
   postedAt: string | null
+  /** The role's type by tier 1 (lib/jobs/role-types), null when no rule placed the title. */
+  role_type: string | null
   /** Null for a role that is inside the person's targets. */
   reason: OutsideReason | null
   /** The stored role the person holds, when they hold it. */
@@ -79,6 +92,8 @@ interface Listed {
   country: string | null
   language: string
   is_remote: boolean
+  title_norm: string
+  role_type: string | null
 }
 
 interface Read {
@@ -99,6 +114,7 @@ function slim(jobs: { title: string; url: string; externalId: string; location?:
     if (seen.has(key)) continue
     seen.add(key)
     const c = classifyJob({ title, description: j.description, location: j.location, companyName })
+    const t = typeTitle(title)
     out.push({
       externalId: key,
       title,
@@ -110,6 +126,8 @@ function slim(jobs: { title: string; url: string; externalId: string; location?:
       country: c.country,
       language: c.language,
       is_remote: c.isRemote,
+      title_norm: t.title_norm,
+      role_type: t.role_type,
     })
   }
   return out
@@ -154,7 +172,7 @@ export async function liveRoles(input: { db: Db; userId: string; company: LiveCo
   const { data: held } = await db.from('person_jobs').select('id, external_id').eq('viewer_id', userId).eq('viewer_company_id', company.id).limit(5000)
   const heldByExternal = new Map(((held ?? []) as { id: string; external_id: string | null }[]).filter((h) => h.external_id).map((h) => [h.external_id as string, h.id]))
 
-  const person = { targeting: targets.targeting, titles: targets.titles }
+  const person = { targeting: targets.targeting, titles: targets.titles, typeStep: targets.typeStep }
   const stated = hasPersonTargets(person)
   const prepared = prepareTargets(person.titles)
   const mine: LiveRow[] = []
@@ -163,9 +181,9 @@ export async function liveRoles(input: { db: Db; userId: string; company: LiveCo
   const counts = Object.fromEntries(REASONS.map((r) => [r, 0])) as Record<OutsideReason, number>
   for (const l of got.listed) {
     const verdict = stated
-      ? judgeForPerson({ title: l.title, job_function: l.job_function, seniority: l.seniority, country: l.country, language: l.language, is_remote: l.is_remote, postedAt: l.postedAt }, person, company.name, prepared)
+      ? judgeForPerson({ title: l.title, job_function: l.job_function, seniority: l.seniority, country: l.country, language: l.language, is_remote: l.is_remote, postedAt: l.postedAt, title_norm: l.title_norm, role_type: l.role_type }, person, company.name, prepared)
       : ({ keep: true, hidden: false } as const)
-    const row: LiveRow = { title: l.title, url: l.url, location: l.location, postedAt: l.postedAt, reason: verdict.keep ? null : verdict.reason, jobId: heldByExternal.get(l.externalId) ?? null }
+    const row: LiveRow = { title: l.title, url: l.url, location: l.location, postedAt: l.postedAt, role_type: l.role_type, reason: verdict.keep ? null : verdict.reason, jobId: heldByExternal.get(l.externalId) ?? null }
     if (verdict.keep) (row.jobId ? mine : rest).push(row)
     else {
       counts[verdict.reason]++
