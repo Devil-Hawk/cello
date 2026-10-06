@@ -217,8 +217,13 @@ alter table public.jobs add column if not exists legit_label text check (legit_l
 -- The unique index (employer, posting key) arrives with the contract migration, once the copies are folded.
 create index if not exists jobs_employer_posting_idx on public.jobs (employer_id, posting_key) where employer_id is not null;
 
+-- A row is shared only when the employer's own board wrote it (its source is the board's provider and the
+-- company's pointer is the directory's token). Mail placeholders, aggregator and site rows stay the person's own.
 update public.jobs j
-   set employer_id = c.employer_id,
+   set employer_id = case when exists (
+         select 1 from public.company_directory d
+          where d.id = c.employer_id and d.ats_provider = j.source and d.ats_token = c.metadata -> 'ats' ->> 'token'
+       ) then c.employer_id end,
        posting_key = coalesce(nullif(j.external_id, ''), md5(j.url))
   from public.companies c
  where c.id = j.company_id
@@ -235,8 +240,12 @@ begin
   if new.posting_key is null then
     new.posting_key := coalesce(nullif(new.external_id, ''), md5(new.url));
   end if;
+  -- Only a row the employer's own board wrote is shared; everything else stays the person's own.
   if new.employer_id is null and new.company_id is not null then
-    select c.employer_id into new.employer_id from public.companies c where c.id = new.company_id;
+    select c.employer_id into new.employer_id
+      from public.companies c
+      join public.company_directory d on d.id = c.employer_id
+     where c.id = new.company_id and d.ats_provider is not null and d.ats_provider = new.source;
   end if;
   return new;
 end;
@@ -537,6 +546,10 @@ $$;
 -- repointed to the survivor (applications, drafts, kits and the rest), the way the evict migration
 -- finds them. A copy whose repoint would break a per-person unique key is left where it is and
 -- counted. Safe to run again.
+--
+-- It first takes the employer off every row the employer's board did not write (a mail placeholder, an
+-- aggregator or a site row): two people's copies of those are two people's own and must not merge. This
+-- runs once, in 055000, before any site-employer row is shared; a site employer's rows carry no provider.
 create or replace function public.fold_shared_postings()
 returns jsonb
 language plpgsql
@@ -556,6 +569,14 @@ declare
   skipped integer := 0;
   repointed integer := 0;
 begin
+  update public.jobs j set employer_id = null
+   where j.employer_id is not null
+     and j.source is distinct from (select d.ats_provider from public.company_directory d where d.id = j.employer_id);
+  delete from public.person_roles pr
+   using public.jobs j
+   where j.id = pr.job_id and j.employer_id is null and j.company_id is not null and pr.saved_at is null
+     and not exists (select 1 from public.companies c where c.id = j.company_id and c.user_id = pr.user_id);
+
   select array_agg(c.conrelid::regclass::text order by c.oid), array_agg(a.attname::text order by c.oid)
     into fk_tbl, fk_col
     from pg_catalog.pg_constraint c

@@ -2,8 +2,13 @@
 // Rows of a company in the directory are written once per employer; a repost under a new id leaves one
 // open row for the person, because the old id is no longer listed and closes.
 
-import { describe, expect, it } from 'vitest'
-import { emptyResult, syncJobs, type AtsStore, type CompanyInput, type ExistingJob, type JobUpdate, type JobUpsertRow } from './index'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('../security/untrusted', async (orig) => ({
+  ...(await orig<typeof import('../security/untrusted')>()),
+  assertSsrfSafe: async () => {},
+}))
+import { emptyResult, refreshCompany, syncJobs, type AtsStore, type CompanyInput, type ExistingJob, type JobUpdate, type JobUpsertRow } from './index'
 import { makeSupabaseAtsStore } from './store'
 import type { AtsJob } from './types'
 
@@ -71,6 +76,38 @@ describe('rows of a company in the directory', () => {
   })
 })
 
+describe('a company with no employer', () => {
+  it('sends a changed role that is stored as shared to updateJobs and never upserts it', async () => {
+    const m = await sync(PLAIN, [{ ...listing('a'), title: 'Backend Engineer II' }], [existing('a', 'Backend Engineer')])
+    expect(m.upserted).toEqual([])
+    expect(m.updated).toMatchObject([{ companyId: 'c2', externalId: 'a', fields: { title: 'Backend Engineer II' } }])
+  })
+})
+
+describe('a company linked to an employer', () => {
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+  })
+
+  it('is read only from its stored board: a failed read is not followed by a detection from what the person typed', async () => {
+    const fetchMock = vi.fn(async () => new Response('nf', { status: 404 }))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const { store, upserted, updated } = memory([existing('a', 'Backend Engineer')])
+    const linked: CompanyInput = { ...DIRECTORY, metadata: { ats: { provider: 'greenhouse', token: 'acme', source: 'known', verified_by: 'manual' } } }
+
+    const result = await refreshCompany(store, linked)
+
+    expect(result.errors.join(' ')).toContain('cached greenhouse board "acme" failed')
+    // only the stored board was asked: no probe of the name, the domain or the careers link
+    const urls = fetchMock.mock.calls.map((c) => String((c as unknown[])[0]))
+    expect(urls.length).toBeGreaterThan(0)
+    expect(urls.every((u) => u.includes('greenhouse') && u.includes('acme'))).toBe(true)
+    expect(upserted).toEqual([])
+    expect(updated).toEqual([])
+  })
+})
+
 describe('a posting reposted with a new id', () => {
   it('is stored as the new role and the old id is not sighted, so it counts a miss and closes', async () => {
     const first = await sync(DIRECTORY, [listing('old')])
@@ -123,6 +160,57 @@ describe('the store', () => {
     expect(calls.map((c) => `${c.kind}:${c.name}`)).toEqual(['rpc:upsert_shared_jobs', 'upsert:jobs'])
     expect((calls[0].args as { p_rows: unknown[] }).p_rows).toHaveLength(1)
     expect((calls[1].args as { opts: unknown }).opts).toMatchObject({ onConflict: 'company_id,external_id' })
+  })
+
+  it('writes through the service client when one is given, never the signed-in one', async () => {
+    const person = client()
+    const service = client()
+    await makeSupabaseAtsStore(person.db, { lockClient: service.db }).upsertJobs([row('e1')])
+    expect(person.calls).toEqual([])
+    expect(service.calls.map((c) => `${c.kind}:${c.name}`)).toEqual(['rpc:upsert_shared_jobs'])
+  })
+
+  it('updates by company only the rows that have no employer, and by employer the shared one, through the service client', async () => {
+    const person = client()
+    const service = client()
+    const calls: string[] = []
+    const update = () => {
+      const b: Record<string, unknown> = {
+        eq: (col: string) => (calls.push(`eq:${col}`), b),
+        is: (col: string, val: unknown) => (calls.push(`is:${col}:${val}`), b),
+        select: () => Promise.resolve({ data: [{ id: 'j' }], error: null }),
+      }
+      return b
+    }
+    ;(service.db as { from: unknown }).from = () => ({ update: update })
+    const store = makeSupabaseAtsStore(person.db, { lockClient: service.db })
+    await store.updateJobs([{ companyId: 'c1', externalId: 'a', fields: { title: 'x' } }])
+    expect(calls).toEqual(['eq:company_id', 'eq:external_id', 'is:employer_id:null'])
+    calls.length = 0
+    await store.updateJobs([{ companyId: 'c1', employerId: 'e1', externalId: 'a', fields: { title: 'x' } }])
+    expect(calls).toEqual(['eq:employer_id', 'eq:external_id'])
+    expect(person.calls).toEqual([])
+  })
+
+  it('evicts and clears a company\'s roles through the service client, never the signed-in one', async () => {
+    const person = client()
+    const service = client()
+    const store = makeSupabaseAtsStore(person.db, { lockClient: service.db })
+    await store.evictJobs!('c1', ['a'])
+    await store.clearBoardJobs('c1', 'greenhouse')
+    expect(person.calls).toEqual([])
+    expect(service.calls.map((c) => `${c.kind}:${c.name}`)).toEqual(['rpc:evict_company_jobs', 'rpc:clear_unverified_board_jobs'])
+  })
+
+  it('records a linked company\'s sightings by employer on the service client, and an unlinked one\'s by company', async () => {
+    const person = client()
+    const service = client()
+    const store = makeSupabaseAtsStore(person.db, { lockClient: service.db })
+    await store.recordSightings!('c1', ['a'], ['greenhouse'], 'e1')
+    expect(service.calls).toEqual([{ kind: 'rpc', name: 'record_employer_sightings', args: { p_employer: 'e1', p_external_ids: ['a'], p_sources: ['greenhouse'], p_close_after: 2 } }])
+    expect(person.calls).toEqual([])
+    await store.recordSightings!('c1', ['a'], ['greenhouse'], null)
+    expect(person.calls.map((c) => c.name)).toEqual(['record_job_sightings'])
   })
 
   it('falls back to the company\'s own row before the function exists, and fails on any other error', async () => {

@@ -218,7 +218,7 @@ export interface AtsStore {
    * given sources, close after two. Optional so a store that cannot (a test
    * double) keeps compiling.
    */
-  recordSightings?(companyId: string, externalIds: string[], sources: string[]): Promise<SightingResult>
+  recordSightings?(companyId: string, externalIds: string[], sources: string[], employerId?: string | null): Promise<SightingResult>
   /**
    * One refresh of a company at a time, across the scheduled run, the in-app
    * button and the autopilot. Returns false when someone else holds it.
@@ -568,6 +568,13 @@ export async function refreshLocked(
       board.skipSave = true
       return board
     }
+  }
+
+  // A company linked to an employer is read only from the board the directory gave it. Detection works from what the
+  // person typed (name, domain, careers link), so what it finds must never be written under the employer's shared rows.
+  if (jobs === null && company.employer_id) {
+    board.unreadable = cachedFailed ? 'board_unreachable' : 'no_supported_board'
+    return board
   }
 
   if (jobs === null) {
@@ -950,7 +957,8 @@ export async function syncJobs(
       const sighted = await store.recordSightings(
         company.id,
         (opts.listedIds ?? clean.map((j) => j.externalId)).filter((id) => !notOpen.has(id)),
-        windowed ? [] : opts.sightingSources
+        windowed ? [] : opts.sightingSources,
+        company.employer_id
       )
       result.closed = sighted.closed
       result.reopened = sighted.reopened
