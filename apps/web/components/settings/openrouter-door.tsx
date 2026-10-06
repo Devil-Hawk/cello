@@ -19,7 +19,7 @@ export function doorStateFromQuery(search: string): DoorState {
 // The "Use free models" door. One tap signs in to OpenRouter by PKCE and brings
 // a key back, so nobody pastes anything. It is offered on Welcome's Connect
 // screen and in Settings, never as step one, and never to a demo.
-export function OpenRouterDoor({ returnTo = '/welcome' }: { returnTo?: '/welcome' | '/settings' | '/today' }) {
+export function OpenRouterDoor({ returnTo = '/welcome' }: { returnTo?: '/welcome' | '/settings' | '/today' | '/roles' }) {
   const [state, setState] = useState<DoorState>('idle')
 
   useEffect(() => {
