@@ -105,12 +105,29 @@ function isDateOnlyLine(text: string): boolean {
  * text an ATS reads.
  */
 export function escapeInlineMarkdown(text: string): string {
-  return text
-    .replace(/([\\`*_[\]~])/g, '\\$1')
-    .replace(/^(\s*)(#{1,6})(\s|$)/, '$1\\$2$3')
-    .replace(/^(\s*)>/, '$1\\>')
-    // A leading "2019." would otherwise open an ordered list numbered 2019.
-    .replace(/^(\s*)(\d{1,9})([.)])(\s)/, '$1$2\\$3$4')
+  // Per line, so a multi-line string (a summary) is protected on every line,
+  // not only the first.
+  return text.split('\n').map(escapeLine).join('\n')
+}
+
+function escapeLine(text: string): string {
+  return (
+    text
+      .replace(/([\\`*_[\]~])/g, '\\$1')
+      .replace(/^(\s*)(#{1,6})(\s|$)/, '$1\\$2$3')
+      .replace(/^(\s*)>/, '$1\\>')
+      // A leading "2019." would otherwise open an ordered list numbered 2019.
+      .replace(/^(\s*)(\d{1,9})([.)])(\s)/, '$1$2\\$3$4')
+      // A leading "- " or "+ " would open a list.
+      .replace(/^(\s*)([-+])(\s|$)/, '$1\\$2$3')
+      // A line of only dashes is a thematic break or a setext underline, and a
+      // line of only "=" is a setext underline.
+      .replace(/^(\s*)(-{2,}|={1,})(\s*)$/, (_m, a: string, run: string, b: string) =>
+        a + run.split('').map((c) => `\\${c}`).join('') + b
+      )
+      // A leading pipe would start a GFM table.
+      .replace(/^(\s*)\|/, '$1\\|')
+  )
 }
 
 /** Normalize a heading candidate for vocabulary lookup. */
@@ -296,6 +313,15 @@ export function inferResumeMarkdown(raw: string | null | undefined): string {
         continue
       }
       // A lone glyph with no text after it: fall through and treat as prose.
+    }
+    // --- a wrapped bullet: PDF extraction breaks a long bullet across lines,
+    // and the tail starts lowercase or with a digit ("14s to 2.1s."). Keep it in
+    // its bullet instead of leaving a stray paragraph.
+    // ponytail: only a lowercase/digit/paren start counts; an uppercase wrap stays a paragraph.
+    const above = last()
+    if (above && above.kind === 'list' && !precededByBlank && /^[a-z0-9(]/.test(text) && !DATE_RANGE.test(text)) {
+      above.items[above.items.length - 1].text += ' ' + escapeInlineMarkdown(text)
+      continue
     }
     bulletBaseIndent = null
 

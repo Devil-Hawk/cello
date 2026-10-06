@@ -71,7 +71,7 @@ const io = vi.hoisted(() => ({
   insertOutreach: vi.fn(),
   generateOutreachDraft: vi.fn(),
   optimizeResumeAndSave: vi.fn(),
-  createMarkdownVersion: vi.fn(),
+  createResumeVersion: vi.fn(),
   deleteVersion: vi.fn(),
   getVersionById: vi.fn(),
   listVersions: vi.fn(),
@@ -122,7 +122,7 @@ vi.mock('@/lib/graph/verify/outreach', () => ({
 }))
 vi.mock('@/lib/harness/agents/resume_optimizer', () => ({ optimizeResumeAndSave: io.optimizeResumeAndSave }))
 vi.mock('@/lib/resume/store', () => ({
-  createMarkdownVersion: io.createMarkdownVersion,
+  createResumeVersion: io.createResumeVersion,
   deleteVersion: io.deleteVersion,
   getVersionById: io.getVersionById,
   listVersions: io.listVersions,
@@ -351,7 +351,7 @@ function installDefaults(): void {
     document: { id: 'doc-1', version: 5, title: null },
     rescore: { atsScore: 80 },
   })
-  io.createMarkdownVersion.mockResolvedValue({ id: 'doc-1', version: 4, title: null })
+  io.createResumeVersion.mockResolvedValue({ id: 'doc-1', version: 4, title: null })
   io.deleteVersion.mockResolvedValue(undefined)
   io.getVersionById.mockResolvedValue({ id: 'doc-1', version: 4, title: null })
   io.listVersions.mockResolvedValue([])
@@ -634,7 +634,7 @@ const PRODUCERS: Producer[] = [
   },
   {
     name: 'resume save — failed (edited)',
-    arrange: () => io.createMarkdownVersion.mockRejectedValue(new Error('insert failed')),
+    arrange: () => io.createResumeVersion.mockRejectedValue(new Error('insert failed')),
     run: () => resumePost(post('/api/resume/documents', { ...SAVE_BODY, source: 'edited' })),
     status: 500,
     action: 'resume.edit',
@@ -647,7 +647,7 @@ const PRODUCERS: Producer[] = [
     // row is, and a table read correctly in one branch and not the other is
     // exactly the bug that survives a single-case test.
     name: 'resume save — failed (base)',
-    arrange: () => io.createMarkdownVersion.mockRejectedValue(new Error('insert failed')),
+    arrange: () => io.createResumeVersion.mockRejectedValue(new Error('insert failed')),
     run: () => resumePost(post('/api/resume/documents', { ...SAVE_BODY, source: 'base' })),
     status: 500,
     action: 'resume.upload',

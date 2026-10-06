@@ -208,6 +208,7 @@ const KEY_TAKING_MODEL_PLUMBING = [
   'lib/gmail/classify.ts', // takes DecryptedApiKeys (+ userId), handed by sync-core and gmail/share
   'lib/outreach/reply.ts', // reads a reply with the keys sync-core hands it (loaded through loadApiKeys upstream); never obtained here
   'lib/evals/claims-judge.ts', // judgeRunner binds callLlm to the keys its caller loaded (the outreach routes, via loadApiKeys); never obtained here
+  'lib/resume/import/vision.ts', // takes apiKey: string; its only caller, app/api/resume/upload/route.ts, gets keys from getDecryptedApiKeys
   'lib/harness/providers/local-server.ts',
   'lib/harness/providers/openrouter.ts',
   'lib/harness/providers/embeddings.ts', // defines callEmbedding's backends; takes DecryptedApiKeys

@@ -27,10 +27,11 @@ import {
   seedDemoWorkspace,
   type DemoBatch,
 } from './seed-demo'
-import { DEMO_COMPANIES, DEMO_CONTACTS, DEMO_JOBS, DEMO_APPLICATIONS, DEMO_RESUME_MARKDOWN } from './fixtures'
+import { DEMO_COMPANIES, DEMO_CONTACTS, DEMO_JOBS, DEMO_APPLICATIONS, DEMO_RESUME } from './fixtures'
 import { resumeLines } from '@/lib/scoring/chance'
 import { quoteIsIn } from '@/lib/scoring/posting-requirements'
-import { markdownToPlainText } from '@/lib/resume/markdown'
+import { resumeToPlainText } from '@/lib/resume/render'
+import { ResumeSchema } from '@/lib/resume/schema'
 
 const DEMO_USER = '11111111-2222-4333-8444-555555555555'
 const OTHER_USER = '99999999-8888-4777-8666-555555555555'
@@ -254,7 +255,7 @@ describe('buildDemoWorkspace — shape', () => {
   })
 
   it('writes the assessment in the shape lib/scoring reads, with every cited resume line really on the resume', () => {
-    const resume = markdownToPlainText(DEMO_RESUME_MARKDOWN)
+    const resume = resumeToPlainText(DEMO_RESUME)
     const lines = resumeLines(resume)
     // The posting carries no verdict: it is shared, and what Cello concluded is the person's own.
     for (const row of batch(workspace.batches, 'jobs').rows) {
@@ -367,16 +368,16 @@ describe('buildDemoWorkspace — shape', () => {
     }
   })
 
-  it('stores the resume as authored Markdown AND the derived plain text together', () => {
+  it('stores a schema-valid structured resume and derives the text from it', () => {
     const resume = batch(workspace.batches, 'resume_documents').rows[0]!
-    const contentJson = resume.content_json as { markdown?: string; templateId?: string }
+    const contentJson = resume.content_json as { resume?: unknown; markdown?: string; templateId?: string }
+    expect(ResumeSchema.safeParse(contentJson.resume).success).toBe(true)
     expect(typeof contentJson.markdown).toBe('string')
-    expect(contentJson.markdown!.length).toBeGreaterThan(500)
     expect(typeof contentJson.templateId).toBe('string')
-    // lib/resume/types.ts: `content` is DERIVED from `markdown`, never authored
-    // separately. If these ever diverge the exported PDF and the text an ATS
-    // reads describe different resumes.
-    expect(resume.content).toBe(markdownToPlainText(contentJson.markdown!))
+    // lib/resume/types.ts: `content` is DERIVED from the structure, never
+    // authored separately. If these ever diverge the exported PDF and the text
+    // an ATS reads describe different resumes.
+    expect(resume.content).toBe(resumeToPlainText(ResumeSchema.parse(contentJson.resume)))
     expect(resume.version).toBe(1)
     expect(resume.job_id).toBeNull()
     expect(resume.source).toBe('base')

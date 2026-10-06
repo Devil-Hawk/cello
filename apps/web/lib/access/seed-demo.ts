@@ -28,9 +28,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import { markdownToPlainText } from '@/lib/resume/markdown'
-import { DEFAULT_TEMPLATE_ID } from '@/lib/resume/templates'
-import { toResumeContentJson } from '@/lib/resume/types'
+import { deriveResumeColumns } from '@/lib/resume/store'
 import { PICKS_ON } from '@/lib/scoring'
 import { chooseShortlist, toPicks } from '@/lib/scoring/shortlist'
 
@@ -52,7 +50,7 @@ import {
   DEMO_OUTREACH,
   DEMO_PERSONA,
   DEMO_PREFERENCES,
-  DEMO_RESUME_MARKDOWN,
+  DEMO_RESUME,
   demoUuid,
   externalIdFor,
   jobBySlug,
@@ -212,7 +210,7 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
 
   // --- jobs ----------------------------------------------------------------
   const jobIdBySlug = new Map<string, string>()
-  const demoResumeText = markdownToPlainText(DEMO_RESUME_MARKDOWN)
+  const demoResumeText = deriveResumeColumns(DEMO_RESUME).content
   // What Cello concluded about each demo role is the demo person's own: it goes on their
   // person_roles row, never on the shared posting.
   const fitByJobId = new Map<string, DemoFit>()
@@ -474,10 +472,13 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
   })
 
   // --- the base resume -----------------------------------------------------
-  // markdown AND plain text written together, through the same two helpers the
-  // resume studio uses. lib/resume/types.ts is emphatic that authoring one
-  // without the other makes the exported PDF and the text an ATS reads describe
-  // different resumes; this is the one place a seeder could quietly do that.
+  // Every stored column is derived from one structured Resume, through the same
+  // helper the writer uses (lib/resume/store.ts). This is the one place a
+  // seeder could quietly make the exported PDF and the text an ATS reads
+  // describe different resumes. The profile is inserted first (the FK needs
+  // it), so the mirror trigger also sets profiles.resume_text; it is written
+  // explicitly below as well, which keeps a seed without that migration working.
+  const demoColumns = deriveResumeColumns(DEMO_RESUME)
   const resumeRows = [
     {
       id: id('resume_document:base:v1'),
@@ -486,8 +487,8 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
       draft_id: null,
       version: 1,
       title: `${DEMO_PERSONA.fullName} — base resume`,
-      content: markdownToPlainText(DEMO_RESUME_MARKDOWN),
-      content_json: toResumeContentJson(DEMO_RESUME_MARKDOWN, DEFAULT_TEMPLATE_ID),
+      content: demoColumns.content,
+      content_json: demoColumns.content_json,
       ats_score: 82,
       source: 'base',
       created_at: daysBefore(now, 24),
@@ -511,7 +512,7 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
   return {
     profile: {
       full_name: DEMO_PERSONA.fullName,
-      resume_text: markdownToPlainText(DEMO_RESUME_MARKDOWN),
+      resume_text: demoColumns.content,
       is_demo: true,
     },
     fallbackEmail: DEMO_PERSONA.email,

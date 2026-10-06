@@ -1251,7 +1251,7 @@ vi.mock('@/lib/outreach/store', () => ({
   insertOutreach: async (_client: unknown, row: Record<string, unknown>) => ({ id: 'msg-1', ...row }),
 }))
 vi.mock('@/lib/resume/store', () => ({
-  createMarkdownVersion: async () => ({ id: 'doc-1', version: 4, title: null }),
+  createResumeVersion: async () => ({ id: 'doc-1', version: 4, title: null }),
   deleteVersion: async () => {},
   getBaseResume: async () => null,
   getVersionById: async () => ({ id: 'doc-1', version: 4, title: null }),

@@ -553,3 +553,13 @@ export function looksLikeMarkdown(text: string | null | undefined): boolean {
   if (typeof text !== 'string' || text.trim().length === 0) return false
   return /^#{1,6}\s+\S/m.test(text) || /\*\*\S/.test(text) || /^\s*[-*+]\s+\S/m.test(text)
 }
+
+/**
+ * Stronger evidence of Markdown than looksLikeMarkdown(), which also fires on a
+ * `- ` line. A heading or a `**` only appears on purpose; a `- ` bullet is just
+ * as much a plain-text convention, so it does not count here.
+ */
+export function looksAuthoredInMarkdown(text: string | null | undefined): boolean {
+  if (typeof text !== 'string') return false
+  return /^#{1,6}\s+\S/m.test(text) || /\*\*\S/.test(text)
+}
