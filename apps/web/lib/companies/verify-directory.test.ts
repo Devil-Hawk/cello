@@ -163,6 +163,15 @@ describe('settleCandidate', () => {
     expect(tables.directory_candidates[0]).toMatchObject({ state: 'failed', fail_reason: 'other_owner' })
   })
 
+  it('a write the database refuses counts as an unread board, so the candidate does not stay first in line', async () => {
+    const c = kalil()
+    const { client, tables } = fakeDb({ directory_candidates: [{ ...c, state: 'pending' }], company_directory: [{ id: 'e0', name: 'Gusto', name_norm: 'gusto', ats_provider: 'lever', ats_token: 'other' }] }, { unique: { company_directory: [['name_norm']] } })
+    const r = await settleCandidate(client, c, world({ identity: { name: 'Gusto', homeUrls: [] } }))
+    expect(r).toMatchObject({ state: 'retry' })
+    expect(tables.directory_candidates[0]).toMatchObject({ state: 'pending', failed_reads: 1 })
+    expect(tables.directory_candidates[0].next_check_at).not.toBeNull()
+  })
+
   it('a board that does not answer is tried again, and fails for good at the third read', async () => {
     const down = world({ jobs: new HttpError('down', 503) })
     const first = seeded(kalil())
