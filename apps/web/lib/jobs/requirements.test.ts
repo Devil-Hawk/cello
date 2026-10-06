@@ -241,3 +241,114 @@ describe('completeRequirements', () => {
     expect(req.name).toBe('read-job-requirements')
   })
 })
+
+const MARKDOWN = `## About the team
+
+We build the analytics platform that every product team at Acme relies on.
+
+## Minimum requirements
+
+-   5+ years of experience in data engineering
+-   Strong SQL and Python
+-   Have run Airflow in production
+-   Bachelor's degree in a technical field
+-   Active security clearance
+
+## Preferred requirements
+
+-   Experience with dbt or Snowflake
+-   Nice to have: Terraform
+
+## Pay Range
+
+$150,000 - $190,000 USD
+`
+
+describe('requirements version 2: the items', () => {
+  const items = parseRequirements({ title: 'Data Engineer', description: DATA_ENGINEER, descriptionMd: MARKDOWN }).items ?? []
+
+  it('is version 2, and the version 1 keys are what version 1 read from the same text', () => {
+    const v2 = parseRequirements({ title: 'Data Engineer', description: DATA_ENGINEER, descriptionMd: MARKDOWN })
+    expect(v2.version).toBe(2)
+    expect(RequirementsSchema.safeParse(v2).success).toBe(true)
+    const plain = parseRequirements({ title: 'Data Engineer', description: DATA_ENGINEER })
+    const { items: _a, ...v1keys } = v2
+    const { items: _b, ...v1plain } = plain
+    expect(v1keys).toEqual(v1plain)
+    expect(v1keys.must_have).toContain('Airflow')
+    expect(v1keys.years_experience).toEqual({ min: 5, max: null })
+  })
+
+  it('reads one item for each bullet under a requirements heading, with its kind and heading', () => {
+    expect(items.map((i) => [i.kind, i.heading, i.text])).toEqual([
+      ['must', 'Minimum requirements', '5+ years of experience in data engineering'],
+      ['must', 'Minimum requirements', 'Strong SQL and Python'],
+      ['must', 'Minimum requirements', 'Have run Airflow in production'],
+      ['must', 'Minimum requirements', "Bachelor's degree in a technical field"],
+      ['must', 'Minimum requirements', 'Active security clearance'],
+      ['nice', 'Preferred requirements', 'Experience with dbt or Snowflake'],
+      ['nice', 'Preferred requirements', 'Nice to have: Terraform'],
+    ])
+    // the pay section is not a requirement
+    expect(items.some((i) => i.text.includes('150,000'))).toBe(false)
+  })
+
+  it('has every quote verbatim in the Markdown, and every item read by code', () => {
+    for (const i of items) {
+      expect(MARKDOWN, i.text).toContain(i.quote)
+      expect(i.origin).toBe('code')
+      expect(i.prov.rule).toBeTruthy()
+    }
+  })
+
+  it('reads skills, years, degree and clearance of each item by code', () => {
+    const by = (text: string) => items.find((i) => i.text.startsWith(text))!
+    expect(by('5+ years').years).toEqual({ min: 5, max: null })
+    expect(by('Strong SQL').skills).toEqual(expect.arrayContaining(['SQL', 'Python']))
+    expect(by("Bachelor's").degree?.toLowerCase()).toContain('bachelor')
+    expect(by('Active security').clearance?.toLowerCase()).toBe('security clearance')
+    expect(by('Have run').years).toBeNull()
+  })
+
+  it('gives an item an id that stays when the posting is edited elsewhere', () => {
+    const edited = MARKDOWN.replace('We build the analytics platform', 'We build the whole analytics platform')
+    const again = parseRequirements({ title: 'Data Engineer', description: DATA_ENGINEER, descriptionMd: edited }).items ?? []
+    expect(again.map((i) => i.id)).toEqual(items.map((i) => i.id))
+    expect(new Set(items.map((i) => i.id)).size).toBe(items.length)
+  })
+
+  it('reads a plain-text posting the same way, headings without markers', () => {
+    const plain = parseRequirements({ title: 'Data Engineer', description: DATA_ENGINEER }).items ?? []
+    expect(plain.filter((i) => i.kind === 'must').map((i) => i.text)).toEqual(['5+ years of experience in data engineering', 'Strong SQL and Python', 'Have run Airflow in production'])
+    for (const i of plain) expect(DATA_ENGINEER).toContain(i.quote)
+  })
+
+  it('reads the sentences of a paragraph under a requirements heading', () => {
+    const md = '## Requirements\n\nYou know Go well. You have shipped a service to production.\n\n## Perks\n\n- Free lunch'
+    const read = parseRequirements({ title: 'Engineer', description: md, descriptionMd: md }).items ?? []
+    expect(read.map((i) => i.text)).toEqual(['You know Go well.', 'You have shipped a service to production.'])
+  })
+
+  it('finds no items in a posting that never says what it asks for', () => {
+    expect(parseRequirements({ title: 'Cook', description: 'Join our kitchen team.\nWe love food.' }).items).toEqual([])
+  })
+})
+
+describe('a model\'s item needs the posting\'s own words', () => {
+  const base = parseRequirements({ title: 'Engineer', description: 'We build things.', descriptionMd: 'We build things.' })
+
+  it('is kept with the line that says it, verbatim in the Markdown, and marked as a model\'s', () => {
+    const md = 'We use Kubernetes and Terraform every day.\n\nYou will own our deploys.'
+    const out = groundModelAnswer(base, md, { must_have: ['Kubernetes'], nice_to_have: [] }, { descriptionMd: md, at: '2026-10-08T00:00:00Z' })
+    const item = out.items?.find((i) => i.text === 'Kubernetes')
+    expect(item).toMatchObject({ origin: 'model', kind: 'must', quote: 'We use Kubernetes and Terraform every day.', prov: { step: 'read-job-requirements', at: '2026-10-08T00:00:00Z' } })
+    expect(md).toContain(item!.quote)
+  })
+
+  it('is dropped when the skill is not in the Markdown, even if the plain copy has it', () => {
+    const out = groundModelAnswer(base, 'We use Kubernetes.', { must_have: ['Kubernetes'], nice_to_have: [] }, { descriptionMd: 'Something else entirely.' })
+    expect(out.items ?? []).toEqual([])
+    // nothing grounded in the plain copy either way: the skill list follows the plain copy as before
+    expect(out.must_have).toEqual(['Kubernetes'])
+  })
+})
