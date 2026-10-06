@@ -4,6 +4,8 @@
 
 import type { RoutineHandler } from '../routines'
 import { demoExpire, harnessDigest, harnessDistill, harnessResume } from './harness'
+import { directorySeed } from './directory-seed'
+import { directorySweep } from './directory-sweep'
 import { inboxSync } from './inbox-sync'
 import { clockMeter } from './meter'
 import { ownerHealth } from './owner-health'
@@ -18,6 +20,8 @@ export const HANDLERS: Record<string, RoutineHandler> = {
   'roles.retype': rolesRetype,
   'postings.backfill': postingsBackfill,
   'storage.alert': storageAlert,
+  'directory.sweep': directorySweep,
+  'directory.seed': directorySeed,
   'inbox.sync': inboxSync,
   'owner.health': ownerHealth,
   'clock.meter': clockMeter,
