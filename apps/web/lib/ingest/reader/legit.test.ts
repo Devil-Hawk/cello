@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AtsJob } from '../../ats/types'
-import { cleanEmployer, dedupeRoles, judgeRole, mislabelledSource, orderForCap, type JudgeContext } from './legit'
+import { cleanEmployer, confirmRoles, dedupeRoles, judgeRole, mislabelledSource, orderForCap, type JudgeContext } from './legit'
 
 const NOW = Date.parse('2026-10-06T12:00:00Z')
 const DAY = 86_400_000
@@ -111,6 +111,33 @@ describe('dedupeRoles', () => {
     expect(dedupeRoles([job({ externalId: 'new' })], own, 'greenhouse').kept).toHaveLength(1)
     const closed = [{ title: 'Data Engineer', location: 'Remote', source: 'scraper', open: false, externalId: 'old' }]
     expect(dedupeRoles([job({ externalId: 'new' })], closed, 'greenhouse').kept).toHaveLength(1)
+  })
+})
+
+describe('dedupeRoles across tiers', () => {
+  it('a role with a requisition id is the same opening as a row another source stored under its title and place', () => {
+    const stored = [{ title: 'Data Engineer', location: 'Remote', source: 'sitemap', open: true, externalId: 'https://acme.com/jobs/9' }]
+    expect(dedupeRoles([job({ externalId: 'gh-1', requisitionId: 'R-7' })], stored, 'greenhouse')).toMatchObject({ duplicates: 1 })
+    // Its own source's row is an update, and a closed row is not an opening.
+    expect(dedupeRoles([job({ externalId: 'gh-1', requisitionId: 'R-7' })], [{ ...stored[0], source: 'greenhouse', externalId: 'gh-1' }], 'greenhouse').kept).toHaveLength(1)
+    expect(dedupeRoles([job({ externalId: 'gh-1', requisitionId: 'R-7' })], [{ ...stored[0], open: false }], 'greenhouse').kept).toHaveLength(1)
+  })
+})
+
+describe('confirmRoles: a page that is only its site shell is not a role', () => {
+  const shell = (n: number): AtsJob => ({ title: 'Acme Careers Home', url: `https://acme.com/jobs/${n}`, externalId: `https://acme.com/jobs/${n}` })
+
+  it('the same few words on three pages with no place, date or id are dropped', () => {
+    expect(confirmRoles([shell(1), shell(2), shell(3)], 'Acme Corp')).toEqual([])
+  })
+
+  it('twice is not enough to call it a shell, and a place, date or id on each rescues it', () => {
+    expect(confirmRoles([shell(1), shell(2)], 'Acme Corp')).toHaveLength(2)
+    expect(confirmRoles([shell(1), shell(2), shell(3)].map((j) => ({ ...j, location: 'Berlin' })), 'Acme Corp')).toHaveLength(3)
+  })
+
+  it('a title that is only the company name is dropped', () => {
+    expect(confirmRoles([{ ...shell(1), title: 'Acme Careers' }], 'Acme')).toEqual([])
   })
 })
 

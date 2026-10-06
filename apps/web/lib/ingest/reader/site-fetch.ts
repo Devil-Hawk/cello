@@ -95,6 +95,11 @@ export interface SiteFetcher {
 }
 
 const CHALLENGE = /just a moment|cf-chl|challenge-platform|captcha|attention required|access denied|verify you are (a )?human|px-captcha/i
+/** Is this page a bot check (a challenge page the browser was given), not the site? A small page that says so, or a title that says so. */
+export function looksLikeChallenge(html: string): boolean {
+  const title = /<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1] ?? ''
+  return /just a moment|attention required|access denied|verify you are (a )?human|are you a robot/i.test(title) || (html.length < 30_000 && CHALLENGE.test(html))
+}
 const LOGIN_PATH = /\/(login|log-in|signin|sign-in|sso|auth)(\/|$|\?)/i
 
 /** Up to `max` bytes as text. A heavy page is read as far as the cap, not refused: its links are nearly always in the part that was read. */

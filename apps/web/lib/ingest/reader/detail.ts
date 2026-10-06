@@ -8,6 +8,7 @@ import type { AtsJob } from '../../ats/types'
 import { descriptionFromPage } from '../details'
 import { readJobPostings } from '../jsonld'
 import { normalizeJobUrl } from '../snapshot'
+import { htmlToPlainText } from '../../ats/html'
 import { readEmbeddedPosting } from './embedded'
 
 export interface RoleDetail {
@@ -19,6 +20,10 @@ export interface RoleDetail {
   description?: string
   location?: string
   isEvent?: boolean
+  /** Job language in the page's text (responsibilities, qualifications, "you will"), whether or not the page names its role. */
+  jobTerms?: number
+  /** The page carries a schema.org JobPosting: the employer's own statement that it is one. */
+  declared?: boolean
   /** Every address the page links to, for finding the applicant system behind a posting. */
   hrefs: string[]
 }
@@ -94,23 +99,75 @@ function readDetailBase(html: string, url: string): RoleDetail {
       description: declared.description,
       location: declared.location,
       isEvent: declared.isEvent,
+      declared: true,
       hrefs,
     }
   }
 
+  const { terms, place } = jobTermsAndPlace(html)
   const title = pageTitle($)
   const embedded = EMBEDDED_DATE.exec(html)?.[1]
   const posted = isoOf(embedded) ?? isoOf($('meta[property="article:published_time"]').attr('content')) ?? isoOf($('time[datetime]').first().attr('datetime'))
   return {
     title,
     postedAt: posted,
+    ...(place ? { location: place } : {}),
+    jobTerms: terms,
     description: title ? descriptionFromPage(html, url, title) : undefined,
     hrefs,
   }
 }
 
+/** What a posting says and a department, category or landing page does not (a footer's "equal opportunity" or a menu's "apply" is not here). */
+const JOB_TERMS = [
+  /\bresponsibilit(?:y|ies)\b/i,
+  /\b(?:minimum |basic |preferred )?qualifications?\b/i,
+  /\bjob description\b/i,
+  /\bwhat you(?:'|\u2019)ll (?:do|bring|need)\b/i,
+  /\byou will\b|\byou(?:'|\u2019)ll (?:be|work|own|build|lead)\b/i,
+  /\babout the (?:role|job|position)\b/i,
+  /\byears of (?:relevant |professional )?experience\b/i,
+]
+/** A place a page labels as one ("Office: New York, NY"). */
+const LABELLED_PLACE = /\b(?:office|job location|work location|locations?)\s*:\s*([^\n:]{2,80}?)\s*(?:\n|$|\s(?:department|team|job id|req|category|employment)\b)/i
+
+function jobTermsAndPlace(html: string): { terms: number; place?: string } {
+  let $: cheerio.CheerioAPI
+  try {
+    $ = cheerio.load(html)
+  } catch {
+    return { terms: 0 }
+  }
+  $('script,style,noscript,svg,iframe,template,nav,header,footer,form,aside').remove()
+  const text = htmlToPlainText($('body').html() ?? '', 200_000) ?? ''
+  return { terms: JOB_TERMS.filter((re) => re.test(text)).length, place: LABELLED_PLACE.exec(text)?.[1]?.trim() }
+}
+
+/**
+ * Is this page a posting and not merely a page that shares a title with a link? A declared
+ * JobPosting is proof; otherwise at least two of: a place, a date, a requisition id, and a
+ * description in job language. (The card a link sat in may supply the place or the date.)
+ */
+export function isPostingPage(detail: RoleDetail, card?: { location?: string; postedAt?: string }): boolean {
+  if (detail.declared) return true
+  const evidence = [
+    detail.location ?? card?.location,
+    detail.postedAt ?? card?.postedAt,
+    detail.requisitionId,
+    // Two different job terms: a department page that says "responsibilities" once is not a posting.
+    (detail.jobTerms ?? 0) >= 2 ? 'language' : undefined,
+  ].filter(Boolean)
+  return evidence.length >= 2
+}
+
 /** A role built from what its own page says, or null when the page does not name `expectedTitle` (a redirect to somewhere generic). */
-export function jobFromDetail(url: string, detail: RoleDetail, expected?: { title?: string; location?: string; postedAt?: string }): AtsJob | null {
+export function jobFromDetail(
+  url: string,
+  detail: RoleDetail,
+  expected?: { title?: string; location?: string; postedAt?: string },
+  opts: { requirePosting?: boolean } = {}
+): AtsJob | null {
+  if (opts.requirePosting && !isPostingPage(detail, expected)) return null
   const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
   // A role is confirmed by its own page: a page with no title of its own (a script shell) confirms nothing, so the card's title alone never makes a role.
   if (expected?.title && !detail.title) return null

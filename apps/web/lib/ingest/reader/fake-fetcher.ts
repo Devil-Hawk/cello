@@ -52,6 +52,9 @@ export function fakeFetcher(routes: Record<string, Route>, mode: 'inline' | 'sch
       }
       throw new ReaderError('unreachable')
     },
+    async gate(url) {
+      if (!(await allowed(url))) throw new ReaderError('robots')
+    },
     async redirectOf(url) {
       calls.push(`redirect:${norm(url)}`)
       const r = routeOf(url)

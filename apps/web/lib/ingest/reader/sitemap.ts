@@ -169,7 +169,7 @@ export async function readSitemapRoles(
         return
       }
       if (!res.ok) return
-      const job = jobFromDetail(res.finalUrl, readDetail(res.text, res.finalUrl), { postedAt: e.lastmod && stampsMean ? e.lastmod : undefined })
+      const job = jobFromDetail(res.finalUrl, readDetail(res.text, res.finalUrl), { postedAt: e.lastmod && stampsMean ? e.lastmod : undefined }, { requirePosting: true })
       checked.push(id)
       // A page that names no role is remembered as read and not kept. A role outside the person's targets is kept
       // (it cost a request already, and "All roles" shows it); the cap stores the ones inside the targets first.

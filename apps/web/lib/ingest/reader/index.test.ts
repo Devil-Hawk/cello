@@ -42,6 +42,10 @@ const eightfoldBoard: SiteDeps['readBoard'] = async (c) => {
   }
 }
 
+/** A role page with the body of a posting added at the end: a title, then what the role asks for. */
+const withLanguage = (html: string, title: string) =>
+  html.replace(/<\/body>(?![\s\S]*<\/body>)/, `<section><h1>${title}</h1><h2>Responsibilities</h2><p>You will build and ship data pipelines for the team, work with partners across the business and own your projects from design to launch. Minimum qualifications: 3 years of experience with distributed systems and a degree or equivalent practical experience.</p></section></body>`)
+
 describe('readSite: each of the big employers resolves to its tier, with no model and no browser', () => {
   it('Amazon: the site search', async () => {
     const f = fakeFetcher({ 'https://www.amazon.jobs/en/search.json*': fixture('amazon-search.json') })
@@ -77,7 +81,7 @@ describe('readSite: each of the big employers resolves to its tier, with no mode
     const f = fakeFetcher({
       'https://jobs.apple.com/en-us/search': fixture('apple-search.html'),
       'https://jobs.apple.com/en-us/search?sort=newest&location=united-states-USA': fixture('apple-search.html'),
-      [first]: fixture('apple-detail.html'),
+      [first]: withLanguage(fixture('apple-detail.html'), 'Front End Web Accessibility Engineer, Retail Engineering'),
     })
     const read = await readSite(company('Apple', 'apple.com', 'https://jobs.apple.com/en-us/search'), { fetcher: f })
     expect(read.tier).toBe('listing')
@@ -211,6 +215,17 @@ describe('readSite: could not read, with the reason', () => {
     const inline = await readSite(company('Uber', 'uber.com', careers), { fetcher: fakeFetcher({ [careers]: shell }, 'inline'), fetchPage, model: null, renderedLater: true })
     expect(fetchPage).not.toHaveBeenCalled()
     expect(inline.reason).toBe('reading')
+  })
+})
+
+describe('the rendered tier meets a bot check', () => {
+  it('a browser that was handed a challenge page says bot_check, not that there are no roles', async () => {
+    const careers = 'https://uber.test/careers'
+    const shell = '<html><body><div id="root"></div></body></html>'
+    const fetchPage = vi.fn(async (url: string) => ({ html: fixture('uber-challenge.html'), finalUrl: url, rendered: true }))
+    const read = await readSite(company('Uber', 'uber.com', careers), { fetcher: fakeFetcher({ [careers]: shell }, 'scheduled'), fetchPage, model: null })
+    expect(read.jobs).toEqual([])
+    expect(read.reason).toBe('bot_check')
   })
 })
 

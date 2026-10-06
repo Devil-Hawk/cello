@@ -309,7 +309,7 @@ export async function readListing(
       const res = await f.get(l.url)
       if (!res.ok) return
       const detail = readDetail(res.text, res.finalUrl)
-      const job = jobFromDetail(res.finalUrl, detail, { title: l.title, postedAt: l.postedAt, location: l.location })
+      const job = jobFromDetail(res.finalUrl, detail, { title: l.title, postedAt: l.postedAt, location: l.location }, { requirePosting: true })
       checked.push(l.url)
       if (!job) {
         rejected++

@@ -32,7 +32,7 @@ import { boardsInHtml, classifyLink, discoverBoards, type DiscoveredBoard, type 
 import { jobFromDetail, readDetail } from './detail'
 import { confirmRoles, mislabelledSource, onOwnSite } from './legit'
 import { readListing, roleLinks } from './listing'
-import { ReaderError, type ReaderReason, type SiteFetcher } from './site-fetch'
+import { looksLikeChallenge, ReaderError, type ReaderReason, type SiteFetcher } from './site-fetch'
 import { readSitemapRoles } from './sitemap'
 import { siteFor } from './sites'
 import { matchesTargets, searchTerms, type ReaderTargets } from './targets'
@@ -144,7 +144,7 @@ export async function readSite(input: SiteInput, deps: SiteDeps): Promise<SiteRe
         const detail = readDetail(res.text, res.finalUrl)
         const upgrade = findBoardLinks(res.text, (u) => detectFromUrl({ careerUrl: u, domain: null }))[0]
         if (upgrade && (await tryBoard({ ...upgrade, via: 'posting' }))) return finish()
-        const job = jobFromDetail(res.finalUrl, detail)
+        const job = jobFromDetail(res.finalUrl, detail, undefined, { requirePosting: true })
         if (job) {
           const label = mislabelledSource(job, company.name)
           if (label) {
@@ -294,6 +294,11 @@ async function readRendered(input: SiteInput, deps: SiteDeps, f: SiteFetcher): P
     // The fetcher's error class (fetcher_failed, fetcher_<Class>, http_<n>), never an address.
     tried.push({ tier: 'rendered', outcome: failure instanceof ReaderError ? failure.reason : 'render_failed', detail: failure.message.slice(0, 60) })
     return { tried, checked: [], failure }
+  }
+  // A browser that was handed a bot check read nothing: say so, and never go on to "no roles".
+  if (looksLikeChallenge(page.html)) {
+    tried.push({ tier: 'rendered', outcome: 'bot_check' })
+    return { tried, checked: [], failure: new ReaderError('bot_check') }
   }
   try {
     const rendered: PageRead[] = [{ url: page.finalUrl, html: page.html }]

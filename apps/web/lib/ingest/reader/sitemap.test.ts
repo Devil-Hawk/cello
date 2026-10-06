@@ -108,7 +108,7 @@ describe('sitemap tier: a lastmod that is only the time the sitemap was made', (
   it('a role from such a sitemap is stored undated, never as posted today', async () => {
     const r = routes()
     const { entries } = await readSitemapEntries(origin, fakeFetcher(r))
-    for (const e of entries) r[e.url] = '<html><head><title>Data Engineer - Jobs at Zalando</title></head><body><h1>Data Engineer</h1></body></html>'
+    for (const e of entries) r[e.url] = '<html><head><title>Data Engineer - Jobs at Zalando</title><script type="application/ld+json">{"@type":"JobPosting","title":"Data Engineer","jobLocation":{"address":{"addressLocality":"Berlin"}},"description":"Build pipelines."}</script></head><body><h1>Data Engineer</h1></body></html>'
     const read = await readSitemapRoles(origin, fakeFetcher(r), { targets: NO_TARGETS, skip: new Set(), max: 3 })
     expect(read.jobs).toHaveLength(3)
     expect(read.jobs.every((j) => j.postedAt === undefined)).toBe(true)
@@ -132,7 +132,7 @@ describe('sitemap tier: only the employer own pages are fetched', () => {
       'https://acme.test/robots.txt': 'User-agent: *\nAllow: /\nSitemap: https://acme.test/jobs-sitemap.xml\n',
       'https://acme.test/jobs-sitemap.xml':
         '<urlset><url><loc>https://acme.test/jobs/4000001-data-engineer</loc></url><url><loc>https://evil.test/jobs/4000002-data-engineer</loc></url></urlset>',
-      'https://acme.test/jobs/4000001-data-engineer': '<html><head><title>Data Engineer</title></head><body><h1>Data Engineer</h1></body></html>',
+      'https://acme.test/jobs/4000001-data-engineer': '<html><head><title>Data Engineer</title><script type="application/ld+json">{"@type":"JobPosting","title":"Data Engineer","jobLocation":{"address":{"addressLocality":"Berlin"}},"description":"Build pipelines."}</script></head><body><h1>Data Engineer</h1></body></html>',
     })
     const own = (u: string) => new URL(u).hostname === 'acme.test'
     const read = await readSitemapRoles('https://acme.test', f, { targets: NO_TARGETS, skip: new Set(), ownSite: own })

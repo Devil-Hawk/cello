@@ -8,6 +8,10 @@ const engData: ReaderTargets = { targeting: { ...NO_TARGETS.targeting, functions
 const APPLE = 'https://jobs.apple.com/en-us/search?sort=newest&location=united-states-USA'
 const GOOGLE = 'https://www.google.com/about/careers/applications/jobs/results?q=data%20engineer&location=United%20States'
 
+/** A role page with the body of a posting added at the end: a title, then what the role asks for. */
+const withLanguage = (html: string, title: string) =>
+  html.replace(/<\/body>(?![\s\S]*<\/body>)/, `<section><h1>${title}</h1><h2>Responsibilities</h2><p>You will build and ship data pipelines for the team, work with partners across the business and own your projects from design to launch. Minimum qualifications: 3 years of experience with distributed systems and a degree or equivalent practical experience.</p></section></body>`)
+
 describe('roleLinks', () => {
   it('Apple: 20 distinct roles with titles and the card date, the duplicate anchors folded', () => {
     const links = roleLinks(fixture('apple-search.html'), APPLE)
@@ -84,7 +88,7 @@ describe('readListing: every role is confirmed on its own page', () => {
   const first = 'https://jobs.apple.com/en-us/details/200684990-3956/front-end-web-accessibility-engineer-retail-engineering?team=SFTWR'
 
   it('Apple: reads the list, keeps the titles inside the targets, confirms and dates each on its page', async () => {
-    const f = fakeFetcher({ [APPLE]: fixture('apple-search.html'), [first]: appleDetail })
+    const f = fakeFetcher({ [APPLE]: fixture('apple-search.html'), [first]: withLanguage(appleDetail, 'Front End Web Accessibility Engineer, Retail Engineering') })
     const read = await readListing('https://jobs.apple.com/en-us/search', [], f, { targets: engData, max: 20 })
     expect(read.listed).toBeGreaterThanOrEqual(20)
     expect(read.jobs.map((j) => j.title)).toContain('Front End Web Accessibility Engineer, Retail Engineering')
@@ -111,7 +115,7 @@ describe('readListing: every role is confirmed on its own page', () => {
     })
     const links = roleLinks(fixture('google-search.html'), GOOGLE)
     const detailRoutes: Record<string, string> = {}
-    for (const l of links) detailRoutes[l.url] = `<html><head><title>${l.title} \u2014 Google Careers</title></head><body><main>${l.title}</main></body></html>`
+    for (const l of links) detailRoutes[l.url] = `<html><head><title>${l.title} \u2014 Google Careers</title></head><body><main>${l.title}</main><section><h2>Responsibilities</h2><p>You will build and ship data pipelines for the team, work with partners across the business and own your projects from design to launch. Minimum qualifications: 3 years of experience with distributed systems and a degree or equivalent practical experience.</p></section></body></html>`
     const g = fakeFetcher({ 'https://www.google.com/robots.txt': fixture('google-robots.txt'), [GOOGLE]: fixture('google-search.html'), ...detailRoutes })
     const read = await readListing(GOOGLE, [], g, { targets: { ...engData, titles: ['data engineer'] }, max: 20 })
     expect(read.jobs.length).toBeGreaterThan(5)
@@ -126,7 +130,7 @@ describe('readListing: every role is confirmed on its own page', () => {
     const detail = fixture('nyt-detail.html')
     const links = roleLinks(list, 'https://www.nytco.com/careers/job-listings/')
     const routes: Record<string, string> = {}
-    for (const l of links) routes[l.url] = detail.replace('Art Director', l.title)
+    for (const l of links) routes[l.url] = withLanguage(detail.replace('Art Director', l.title), l.title)
     const f = fakeFetcher(routes)
     const read = await readListing('https://www.nytco.com/careers/', [{ url: 'https://www.nytco.com/careers/job-listings/', html: list }], f, { targets: NO_TARGETS, max: 5 })
     // The first role page names the applicant system, which ends the read: the board is the better source.
