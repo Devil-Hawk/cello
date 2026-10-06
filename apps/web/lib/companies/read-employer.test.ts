@@ -121,4 +121,19 @@ describe('readEmployer: what a sweep read keeps, counts and records', () => {
     expect(same.result.listed).toBe(4)
     expect(same.directory.verified_at).toBe(new Date(NOW).toISOString())
   })
+
+  it('a board that is not due is checked at once when its jobs name another employer, before anything is stored or counted', async () => {
+    const taken = board.map((j) => ({ ...j, employer: 'Other Co' }))
+    const other = await run({ jobs: taken, identity: { name: 'Other Co', homeUrls: ['https://other.com'] } })
+    expect(other.result).toMatchObject({ failure: 'other_owner', listed: 0, stored: 0 })
+    expect(other.directory).toMatchObject({ cannot_read_reason: 'other_owner', next_read_at: null })
+    expect(other.sent).toEqual([])
+    expect(other.rpcs.bump_employer_stats).toEqual([])
+    expect(other.rpcs.record_employer_sightings).toEqual([])
+
+    // the same employer under its legal name, or jobs that name nobody, are read as usual
+    const same = await run({ jobs: board.map((j) => ({ ...j, employer: 'Acme, Inc.' })) })
+    expect(same.result).toMatchObject({ listed: 4, stored: 2 })
+    expect(same.directory.verified_at).toBe(iso(5))
+  })
 })
