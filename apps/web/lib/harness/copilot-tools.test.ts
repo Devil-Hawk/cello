@@ -669,6 +669,19 @@ describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
     expect(result.jobs[0].jobId).toBe('job-1')
   })
 
+  it("a role held from the directory returns no company id, never the first storer's", async () => {
+    const admin = fakeAdmin({
+      companies: [co],
+      person_jobs: [
+        { id: 'job-9', viewer_id: 'me', title: 'Directory Role', company_id: 'co-of-person-a', viewer_company_id: null, viewer_company_name: null, match_score: 50, is_new: false, location: null, posted_at: null },
+      ],
+    })
+    const result = (await dispatchTool(baseCtx(admin), 'list_jobs', {})) as { jobs: { jobId: string; companyId: string | null }[] }
+    expect(result.jobs).toHaveLength(1)
+    expect(result.jobs[0].companyId).toBeNull()
+    expect(JSON.stringify(result)).not.toContain('co-of-person-a')
+  })
+
   it('a short query (<4 chars) skips FTS and goes straight to the trgm rpc', async () => {
     const admin = fakeAdmin({ companies: [co], jobs }, { search_jobs_by_title_trgm: [{ job_id: 'job-2', score: 0.9 }] })
     const ctx = baseCtx(admin)

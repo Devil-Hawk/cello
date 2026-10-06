@@ -548,7 +548,6 @@ const JOB_TITLE_FTS_MIN_LENGTH = 4
 type JobListRow = {
   id: string
   title: string | null
-  company_id: string | null
   viewer_company_id: string | null
   viewer_company_name: string | null
   match_score: number | null
@@ -579,7 +578,7 @@ async function listJobs(ctx: CopilotToolContext, args: Args) {
   const ids = (dreamOnly ? companyRows.filter((c) => c.is_dream_company) : companyRows).map((c) => c.id)
   if (ids.length === 0) return { jobs: [], note: dreamOnly ? 'No dream companies tracked yet.' : 'No companies tracked yet.' }
 
-  const SELECT = 'id, title, company_id, viewer_company_id, viewer_company_name, match_score, is_new, location, posted_at'
+  const SELECT = 'id, title, viewer_company_id, viewer_company_name, match_score, is_new, location, posted_at'
   // Ownership is the viewer_id fence. Only dreamOnly narrows by company ids, which are few; the plain list
   // needs none (hundreds of ids would pass the request URL length limit).
   const baseQuery = () => {
@@ -630,7 +629,7 @@ async function listJobs(ctx: CopilotToolContext, args: Args) {
       jobId: j.id,
       title: j.title,
       company: j.viewer_company_name ?? null,
-      companyId: j.viewer_company_id ?? j.company_id,
+      companyId: j.viewer_company_id ?? null,
       matchScore: j.match_score,
       fresh: j.is_new === true,
       location: j.location,
