@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { groupOf } from '@/lib/pipeline/groups'
-import { ApplicationsView, GROUPS, applyFilters, groupRows, NO_FILTERS, type AppRow } from './applications-view'
+import { ApplicationsView, ConfirmFound, GROUPS, applyFilters, groupRows, NO_FILTERS, type AppRow } from './applications-view'
 
 const LONG = 'Staff Machine Learning Engineer, Applied Research and Platform'
 
@@ -113,5 +113,26 @@ describe('filters', () => {
     expect(applyFilters(fixture, { ...NO_FILTERS, closed: 'rejected' }).map((r) => r.id)).toEqual(['a9'])
     expect(applyFilters(fixture, { ...NO_FILTERS, month: '2026-03' }).length).toBeGreaterThan(0)
     expect(applyFilters(fixture, { ...NO_FILTERS, month: '2025-01' })).toEqual([])
+  })
+})
+
+describe('Confirm these applications', () => {
+  const found = [{ applicationId: 'a12', messageId: null, company: 'Petrichor Labs', title: 'Data Engineer', at: '2026-03-04T10:00:00Z' }, { applicationId: null, messageId: 'm1', company: 'Ramp', title: null, at: '2026-03-03T10:00:00Z' }]
+  it('is at the top only when email found applications, with a Confirm on each', () => {
+    const out = html({ found })
+    expect(out.indexOf('Confirm these applications')).toBeGreaterThan(-1)
+    expect(out.indexOf('Confirm these applications')).toBeLessThan(out.indexOf('Needs you'))
+    expect((out.match(/>Confirm</g) ?? []).length).toBe(2)
+    expect(out).not.toContain('in Needs you.')
+    expect(html({})).not.toContain('Confirm these applications')
+    expect(renderToStaticMarkup(<ConfirmFound found={[]} onConfirm={() => undefined} />)).toBe('')
+  })
+})
+
+describe('the board', () => {
+  it('has a drag handle for a laptop on each card, hidden on a phone, and none on Closed', () => {
+    const board = html({ mode: 'board' })
+    expect(board).toContain('Drag Role 5 to another stage')
+    expect((board.match(/md:inline-flex/g) ?? []).length).toBeGreaterThan(0)
   })
 })

@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Key } from '@/components/ui/key'
-import { ApplicationsView, type AppRow } from '@/components/pipeline/applications-view'
+import { AddApplicationDialog, type NewApplication } from '@/components/pipeline/add-application-dialog'
+import { ApplicationsView, ConfirmFound, type AppRow } from '@/components/pipeline/applications-view'
+import type { FoundItem } from '@/lib/applications/found'
 import { FindingsView } from '@/components/insights/findings'
 
 // Applications: the list and the board of what has been sent or found, and Results (what is working).
@@ -13,12 +15,18 @@ export default function ApplicationsPage() {
   const [rows, setRows] = useState<AppRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
+  const [found, setFound] = useState<FoundItem[]>([])
+  const [gmailConnected, setGmailConnected] = useState(true)
+  const [adding, setAdding] = useState(false)
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch('/api/applications')
+      const [res, foundRes] = await Promise.all([fetch('/api/applications'), fetch('/api/applications/found').catch(() => null)])
       if (!res.ok) throw new Error(String(res.status))
-      setRows(((await res.json()) as { applications: AppRow[] }).applications)
+      const body = (await res.json()) as { applications: AppRow[]; gmailConnected?: boolean }
+      setRows(body.applications)
+      setGmailConnected(body.gmailConnected !== false)
+      setFound(foundRes?.ok ? ((await foundRes.json()) as { found: FoundItem[] }).found : [])
       setError(null)
     } catch {
       setError('Could not load your applications. Try again.')
@@ -36,12 +44,19 @@ export default function ApplicationsPage() {
     await load()
   }
 
-  async function add() {
-    const company = window.prompt('Company')?.trim()
-    const title = company ? window.prompt('Job title')?.trim() : null
-    if (!company || !title) return
-    const res = await fetch('/api/applications', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ add: { company, title } }) })
-    setNote(res.ok ? 'Added.' : 'Could not add that.')
+  async function add(a: NewApplication): Promise<string | null> {
+    const res = await fetch('/api/applications', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ add: a }) })
+    const body = (await res.json().catch(() => ({}))) as { error?: string; existed?: boolean }
+    if (!res.ok) return body.error ?? 'Could not add that.'
+    setNote(body.existed ? 'You already had that one.' : 'Added.')
+    await load()
+    return null
+  }
+
+  async function confirm(f: FoundItem) {
+    const res = await fetch('/api/applications/found', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(f.applicationId ? { applicationId: f.applicationId } : { messageId: f.messageId }) })
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    setNote(res.ok ? 'Confirmed.' : (body.error ?? 'Could not confirm that. Nothing changed.'))
     await load()
   }
 
@@ -62,7 +77,7 @@ export default function ApplicationsPage() {
           </nav>
           {!results && (
             <>
-              <Key variant="raised" onClick={add}>Add application</Key>
+              <Key variant="raised" onClick={() => setAdding(true)}>Add application</Key>
               <Key variant="raised" asChild>
                 <label className="cursor-pointer">
                   Import CSV
@@ -75,6 +90,15 @@ export default function ApplicationsPage() {
         </div>
       </header>
       {note && <p className="r-meta" role="status">{note}</p>}
+      {!results && !gmailConnected && rows && rows.some((r) => r.group) && (
+        <section className="r-sheet space-y-3 p-6">
+          <p className="r-body">Gmail is not connected, so applications you sent elsewhere are not here.</p>
+          <div className="flex flex-wrap gap-2">
+            <Key asChild><Link href="/settings?tab=connections">Connect Gmail</Link></Key>
+            <Key variant="raised" onClick={() => setAdding(true)}>Add one by hand</Key>
+          </div>
+        </section>
+      )}
       {results ? (
         <FindingsView />
       ) : error ? (
@@ -82,6 +106,8 @@ export default function ApplicationsPage() {
       ) : rows === null ? (
         <p className="r-meta">Reading.</p>
       ) : rows.filter((r) => r.group).length === 0 ? (
+        <>
+        <ConfirmFound found={found} onConfirm={confirm} />
         <section className="r-sheet space-y-3 p-6">
           <p className="r-body">No applications yet. Roles you apply to land here, and so do applications Cello finds in your email.</p>
           <div className="flex flex-wrap gap-2">
@@ -89,9 +115,11 @@ export default function ApplicationsPage() {
             <Key asChild variant="raised"><Link href="/settings?tab=connections">Connect Gmail</Link></Key>
           </div>
         </section>
+        </>
       ) : (
-        <ApplicationsView rows={rows} onMove={move} />
+        <ApplicationsView rows={rows} onMove={move} found={found} onConfirmFound={confirm} />
       )}
+      <AddApplicationDialog open={adding} onClose={() => setAdding(false)} onAdd={add} />
     </div>
   )
 }

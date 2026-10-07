@@ -19,7 +19,9 @@ export async function GET() {
   const { data, error } = await c.admin.from('applications').select(COLUMNS).eq('user_id', c.userId).order('last_event_at', { ascending: false, nullsFirst: false }).limit(500)
   if (error) return NextResponse.json({ error: 'Could not load your applications. Try again.' }, { status: 500 })
   const applications = (data ?? []).map((a) => ({ ...a, group: groupOf(a as never, null) }))
-  return NextResponse.json({ applications })
+  // Gmail counts as connected once the mail has been read for this person
+  const { data: beat } = await c.admin.from('job_heartbeats').select('job').eq('user_id', c.userId).eq('job', 'inbox.sync').limit(1).maybeSingle()
+  return NextResponse.json({ applications, gmailConnected: !!beat })
 }
 
 export async function POST(request: NextRequest) {

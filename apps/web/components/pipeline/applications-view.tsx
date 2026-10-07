@@ -6,10 +6,13 @@
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
+import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { GripVertical } from 'lucide-react'
 import { Key } from '@/components/ui/key'
 import { LogoTile, RoleTitle } from '@/components/roles/role-tile'
 import { recordHref } from '@/lib/routes/roles'
 import { statusSentence } from '@/lib/pipeline/states'
+import type { FoundItem } from '@/lib/applications/found'
 import type { ApplicationGroup } from '@/lib/pipeline/types'
 import { ago } from '@/lib/network/format'
 
@@ -117,8 +120,13 @@ function Row({ r }: { r: AppRow }) {
 }
 
 function BoardCard({ r, onMove }: { r: AppRow; onMove: (id: string, stage: string) => void }) {
+  // Drag is for a laptop; the handle is hidden on a phone, where Move to does the same
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: r.id })
   return (
-    <li className="r-sheet space-y-2 p-3">
+    <li ref={setNodeRef} style={transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined} className={`r-sheet relative space-y-2 p-3${isDragging ? ' z-10 opacity-80' : ''}`}>
+      <button type="button" aria-label={`Drag ${r.jobs?.title ?? 'this application'} to another stage`} className="absolute right-1 top-1 hidden min-h-11 min-w-11 touch-none cursor-grab items-center justify-center md:inline-flex" {...attributes} {...listeners}>
+        <GripVertical className="h-4 w-4" aria-hidden />
+      </button>
       <RoleTitle id={r.job_id} title={r.jobs?.title ?? 'A role'} company={company(r)} />
       <label className="block">
         <span className="r-meta block">Move to</span>
@@ -131,7 +139,42 @@ function BoardCard({ r, onMove }: { r: AppRow; onMove: (id: string, stage: strin
   )
 }
 
-export function ApplicationsView({ rows, onMove, mode = 'list' }: { rows: AppRow[]; onMove: (id: string, stage: string) => void; mode?: 'list' | 'board' }) {
+/** A board column that takes a dropped card. Closed takes none: not selected and withdrew are different facts, so Move to names which. */
+function BoardColumn({ c, items, onMove }: { c: (typeof COLUMNS)[number]; items: AppRow[]; onMove: (id: string, stage: string) => void }) {
+  const { setNodeRef, isOver } = useDroppable({ id: c.id, disabled: c.id === 'closed' })
+  return (
+    <section ref={setNodeRef} aria-labelledby={`c-${c.id}`} className={`w-72 flex-none rounded-[12px]${isOver ? ' ring-2 ring-[var(--r-ink)]' : ''}`}>
+      <h2 id={`c-${c.id}`} className="r-title mb-2">{c.label} ({items.length})</h2>
+      <ul className="min-h-24 space-y-3">{items.map((r) => <BoardCard key={r.id} r={r} onMove={onMove} />)}</ul>
+    </section>
+  )
+}
+
+/** Cello found these in the person's email and is unsure they are theirs; nothing counts until they confirm. */
+export function ConfirmFound({ found, onConfirm }: { found: FoundItem[]; onConfirm: (f: FoundItem) => void }) {
+  if (found.length === 0) return null
+  return (
+    <section aria-labelledby="confirm-h" className="r-sheet px-4 py-2">
+      <h2 id="confirm-h" className="r-title pt-2">Confirm these applications</h2>
+      <p className="r-meta">Cello found these in your email and is unsure they are yours. Nothing counts until you confirm.</p>
+      <ul className="divide-y divide-[var(--r-line)]">
+        {found.map((f) => (
+          <li key={f.applicationId ?? f.messageId} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3">
+            <LogoTile name={f.company || 'Company'} size={40} />
+            <div className="min-w-0 flex-1 basis-56">
+              <p className="r-name">{f.title ?? 'A role'}</p>
+              <p className="r-name">{f.company || 'An employer'}</p>
+              <p className="r-meta">Found in your email, {ago(f.at)}.</p>
+            </div>
+            <Key onClick={() => onConfirm(f)}>Confirm</Key>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+export function ApplicationsView({ rows, onMove, mode = 'list', found = [], onConfirmFound }: { rows: AppRow[]; onMove: (id: string, stage: string) => void; mode?: 'list' | 'board'; found?: FoundItem[]; onConfirmFound?: (f: FoundItem) => void }) {
   const [view, setView] = useState<'list' | 'board'>(mode)
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
   const apps = useMemo(() => rows.filter((r) => r.group), [rows])
@@ -141,11 +184,16 @@ export function ApplicationsView({ rows, onMove, mode = 'list' }: { rows: AppRow
   const sources = useMemo(() => [...new Set(apps.map((r) => r.source ?? 'other'))], [apps])
   const months = useMemo(() => [...new Set(apps.map((r) => (r.applied_at ?? '').slice(0, 7)).filter(Boolean))].sort().reverse(), [apps])
   const set = (k: keyof Filters) => (e: React.ChangeEvent<HTMLSelectElement>) => setFilters({ ...filters, [k]: e.target.value })
-  const toConfirm = apps.filter((r) => r.found_state === 'to_confirm').length
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor))
+  function dropped(e: DragEndEvent) {
+    const stage = COLUMNS.find((c) => c.id === e.over?.id)?.stages[0]
+    const r = apps.find((x) => x.id === e.active.id)
+    if (stage && r && !COLUMNS.find((c) => c.id === e.over?.id)?.stages.includes(r.stage)) onMove(r.id, stage)
+  }
 
   return (
     <div className="space-y-6">
-      {toConfirm > 0 && <p className="r-body">Cello found {toConfirm} {toConfirm === 1 ? 'application' : 'applications'} in your email and is unsure. Confirm {toConfirm === 1 ? 'it' : 'them'} in Needs you.</p>}
+      <ConfirmFound found={found} onConfirm={(f) => onConfirmFound?.(f)} />
       <div className="flex flex-wrap items-end gap-3">
         <nav aria-label="View" className="flex gap-2">
           <Key variant={view === 'list' ? 'ink' : 'raised'} aria-pressed={view === 'list'} onClick={() => setView('list')}>List</Key>
@@ -193,17 +241,11 @@ export function ApplicationsView({ rows, onMove, mode = 'list' }: { rows: AppRow
           )
         })
       ) : (
-        <div className="flex gap-4 overflow-x-auto pb-2">
-          {COLUMNS.map((c) => {
-            const items = shown.filter((r) => c.stages.includes(r.stage))
-            return (
-              <section key={c.id} aria-labelledby={`c-${c.id}`} className="w-72 flex-none">
-                <h2 id={`c-${c.id}`} className="r-title mb-2">{c.label} ({items.length})</h2>
-                <ul className="space-y-3">{items.map((r) => <BoardCard key={r.id} r={r} onMove={onMove} />)}</ul>
-              </section>
-            )
-          })}
-        </div>
+        <DndContext sensors={sensors} onDragEnd={dropped}>
+          <div className="flex gap-4 overflow-x-auto pb-2">
+            {COLUMNS.map((c) => <BoardColumn key={c.id} c={c} items={shown.filter((r) => c.stages.includes(r.stage))} onMove={onMove} />)}
+          </div>
+        </DndContext>
       )}
     </div>
   )
