@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { groupOf } from '@/lib/pipeline/groups'
+import { Board } from './board'
 import { ApplicationsView, ConfirmFound, GROUPS, applyFilters, groupRows, NO_FILTERS, type AppRow } from './applications-view'
 
 const LONG = 'Staff Machine Learning Engineer, Applied Research and Platform'
@@ -78,7 +79,7 @@ describe('groups', () => {
 describe('Board and List', () => {
   it('both show every application of the one list, and the board has Move to on each card', () => {
     const list = html({ mode: 'list' })
-    const board = html({ mode: 'board' })
+    const board = renderToStaticMarkup(<Board rows={fixture.filter((r) => r.group)} onMove={() => undefined} />).replace(/<!-- -->/g, '')
     for (const r of fixture.filter((x) => x.group && x.stage !== 'discovered')) {
       expect(list).toContain(`Role ${r.id.slice(1)}`)
       expect(board).toContain(`Role ${r.id.slice(1)}`)
@@ -131,7 +132,7 @@ describe('Confirm these applications', () => {
 
 describe('the board', () => {
   it('has a drag handle for a laptop on each card, hidden on a phone', () => {
-    const board = html({ mode: 'board' })
+    const board = renderToStaticMarkup(<Board rows={fixture.filter((r) => r.group)} onMove={() => undefined} />)
     expect(board).toContain('Drag Role 5 to another stage')
     expect((board.match(/md:inline-flex/g) ?? []).length).toBeGreaterThan(0)
   })

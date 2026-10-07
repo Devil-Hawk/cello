@@ -1,12 +1,10 @@
 'use client'
 
-// Conversations' menu (blueprint 4.9): Paste an email and Find people at a company. Add a person and Import contacts
-// are in Network's menu. Both open a dialog; neither sends anything.
+// The dialogs behind Conversations' menu (blueprint 4.9): Paste an email and Find people at a company. Add a person and
+// Import contacts are in Network's menu. Neither sends anything.
 
 import { useEffect, useState } from 'react'
-import { MoreHorizontal } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Key } from '@/components/ui/key'
 import { Textarea } from '@/components/ui/textarea'
@@ -16,20 +14,12 @@ import { createClient } from '@/lib/supabase/client'
 
 export type MenuDialog = 'paste' | 'find' | null
 
-export function ConversationMenu({ open, onOpen, onSaved }: { open: MenuDialog; onOpen: (d: MenuDialog) => void; onSaved: () => void }) {
+/** The two dialogs behind Conversations' menu. They load when one is first opened, so the page's first load stays small. */
+export function MenuDialogs({ open, onClose, onSaved }: { open: MenuDialog; onClose: () => void; onSaved: () => void }) {
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Key variant="raised" aria-label="Conversations menu"><MoreHorizontal className="h-4 w-4" aria-hidden /></Key>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem className="min-h-11 cursor-pointer" onSelect={() => onOpen('paste')}>Paste an email</DropdownMenuItem>
-          <DropdownMenuItem className="min-h-11 cursor-pointer" onSelect={() => onOpen('find')}>Find people at a company</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <PasteDialog open={open === 'paste'} onClose={() => onOpen(null)} onSaved={onSaved} />
-      <FindDialog open={open === 'find'} onClose={() => onOpen(null)} />
+      <PasteDialog open={open === 'paste'} onClose={onClose} onSaved={onSaved} />
+      <FindDialog open={open === 'find'} onClose={onClose} />
     </>
   )
 }

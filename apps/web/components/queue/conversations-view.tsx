@@ -5,15 +5,19 @@
 // sent. A name opens the Person sheet; people live in Network. Nothing leaves without the person's click.
 
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
+import { MoreHorizontal } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Key } from '@/components/ui/key'
 import { LogoTile, RoleTitle } from '@/components/roles/role-tile'
-import { ConversationMenu, type MenuDialog } from './conversation-menu'
+import type { MenuDialog } from './conversation-menu'
 import { OutreachCard, type OutreachRow } from './outreach-card'
 import { PersonSheet, type SheetPerson } from './person-sheet'
 import { ReplyRow } from './reply-row'
 import type { ConversationsData, ReplyRow as Reply } from '@/lib/network/conversations'
 import type { DueNudge } from '@/lib/network/nudges'
+
+const MenuDialogs = dynamic(() => import('./conversation-menu').then((m) => m.MenuDialogs), { ssr: false })
 
 export interface ConversationsViewProps {
   data: ConversationsData
@@ -63,6 +67,11 @@ export function ConversationsView({ data, outreach, due, gmailConnected, limit, 
   const [sendingAll, setSendingAll] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const [dialog, setDialog] = useState<MenuDialog>(null)
+  const [menu, setMenu] = useState(false)
+  const choose = (d: MenuDialog) => {
+    setMenu(false)
+    setDialog(d)
+  }
 
   const drafts = outreach.filter((m) => m.kind !== 'follow_up' && (m.status === 'pending_review' || m.status === 'approved' || m.status === 'failed'))
   const followDrafts = new Map(outreach.filter((m) => m.kind === 'follow_up' && m.status === 'pending_review').map((m) => [m.to_email, m]))
@@ -95,13 +104,23 @@ export function ConversationsView({ data, outreach, due, gmailConnected, limit, 
 
   return (
     <div className="space-y-10">
-      <div className="flex justify-end"><ConversationMenu open={dialog} onOpen={setDialog} onSaved={onChanged} /></div>
+      <div className="flex justify-end">
+        <details className="relative" open={menu} onToggle={(e) => setMenu(e.currentTarget.open)}>
+          <summary aria-label="Conversations menu" className="r-key r-key-raised grid min-h-11 min-w-11 cursor-pointer list-none place-items-center">
+            <MoreHorizontal className="h-4 w-4" aria-hidden />
+          </summary>
+          <div className="r-sheet absolute right-0 z-20 mt-2 w-60 p-1">
+            <button type="button" className="block min-h-11 w-full px-3 text-left hover:underline" onClick={() => choose('paste')}>Paste an email</button>
+            <button type="button" className="block min-h-11 w-full px-3 text-left hover:underline" onClick={() => choose('find')}>Find people at a company</button>
+          </div>
+        </details>
+      </div>
       {!gmailConnected && (
         <section className="r-sheet space-y-3 p-6">
           <p className="r-body">Connect Gmail to see replies here, or paste an email. Cello reads job mail, and the headers of your threads with people at employers&apos; own addresses. It never sends without your click.</p>
           <div className="flex flex-wrap gap-2">
             <Key asChild><Link href="/settings?tab=connections">Connect Gmail</Link></Key>
-            <Key variant="raised" onClick={() => setDialog('paste')}>Paste an email</Key>
+            <Key variant="raised" onClick={() => choose('paste')}>Paste an email</Key>
           </div>
         </section>
       )}
@@ -169,6 +188,7 @@ export function ConversationsView({ data, outreach, due, gmailConnected, limit, 
       </Group>
 
       <PersonSheet person={sheet} onClose={() => setSheet(null)} />
+      {dialog && <MenuDialogs open={dialog} onClose={() => setDialog(null)} onSaved={onChanged} />}
     </div>
   )
 }
