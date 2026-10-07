@@ -7,6 +7,7 @@
 
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages'
 import { MemorySaver } from '@langchain/langgraph'
 import type { AgentContext } from '@/lib/agents/context'
@@ -52,13 +53,15 @@ const textOf = (m: BaseMessage | undefined): string => (!m ? '' : typeof m.conte
 
 const callsOf = (response: AIMessage): ParsedCall[] => (response.tool_calls ?? []).map((c) => ({ name: c.name, args: (c.args ?? {}) as Record<string, unknown> }))
 
-function orchestrator(model: FreeChatModel) {
+export function orchestrator(model: BaseChatModel) {
   const ctx = context()
   const agent = createCelloAgent({
     kind: 'orchestrator',
     ctx,
     saver: new MemorySaver(),
     model,
+    // The Researcher is built with the orchestrator; without its own model it would reach for the key-gated door.
+    researcherModel: model,
     fallbacks: [],
     skillsDir: SKILLS_DIR,
     profileCard: CARD,
