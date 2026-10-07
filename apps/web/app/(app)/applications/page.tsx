@@ -4,10 +4,14 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Key } from '@/components/ui/key'
-import { AddApplicationDialog, type NewApplication } from '@/components/pipeline/add-application-dialog'
+import dynamic from 'next/dynamic'
+import type { NewApplication } from '@/components/pipeline/add-application-dialog'
 import { ApplicationsView, ConfirmFound, type AppRow } from '@/components/pipeline/applications-view'
 import type { FoundItem } from '@/lib/applications/found'
 import { FindingsView } from '@/components/insights/findings'
+
+// The dialog loads when it is first opened, so the page's first load stays small.
+const AddApplicationDialog = dynamic(() => import('@/components/pipeline/add-application-dialog').then((m) => m.AddApplicationDialog), { ssr: false })
 
 // Applications: the list and the board of what has been sent or found, and Results (what is working).
 export default function ApplicationsPage() {
@@ -119,7 +123,7 @@ export default function ApplicationsPage() {
       ) : (
         <ApplicationsView rows={rows} onMove={move} found={found} onConfirmFound={confirm} />
       )}
-      <AddApplicationDialog open={adding} onClose={() => setAdding(false)} onAdd={add} />
+      {adding && <AddApplicationDialog open={adding} onClose={() => setAdding(false)} onAdd={add} />}
     </div>
   )
 }
