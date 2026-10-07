@@ -58,7 +58,7 @@ export async function setFollow(companyId: string, change: { follow?: boolean; p
   if (!user) return { ok: false, sentence: SIGN_IN }
   if (!UUID.test(companyId)) return { ok: false, sentence: 'Cello does not have that company.' }
   // Stopping a follow takes the pin off too: a pin is only ever on a followed company.
-  return followCompanies(db as unknown as SupabaseClient, user.id, [companyId], { follow: change.follow, pin: change.follow === false ? false : change.pin })
+  return followCompanies(db as unknown as Parameters<typeof followCompanies>[0], user.id, [companyId], { follow: change.follow, pin: change.follow === false ? false : change.pin })
 }
 
 /** Follow an employer (saveCompany follows it) by the address the person gave, when its site could not be read: the guessed name, the domain and the careers link, shown as "cannot read". */
