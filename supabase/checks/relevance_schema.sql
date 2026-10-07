@@ -11,6 +11,10 @@
 \set ON_ERROR_STOP 1
 begin;
 
+-- This check builds per-person copies of one posting to fold them; the contract's unique index would refuse
+-- them, so it is dropped here (the transaction rolls back).
+drop index if exists public.jobs_employer_posting_key;
+
 create temp table fx as
 select gen_random_uuid() as a, gen_random_uuid() as b, gen_random_uuid() as c,
        gen_random_uuid() as emp,
@@ -41,18 +45,18 @@ begin
   end if;
 end $$;
 
--- Roles: both people hold the same posting; A also holds one B does not.
-insert into public.jobs (id, company_id, title, description, url, external_id, job_function, seniority, country, discovered_at)
-select ja1, co_a, 'Platform Engineer', 'd', 'https://overlap.example/jobs/req-1', 'req-1', 'engineering', 'senior', 'US', now() - interval '2 days' from fx
-union all select ja2, co_a, 'Staff Engineer', 'd', 'https://overlap.example/jobs/req-2', 'req-2', 'engineering', 'staff', 'US', now() - interval '2 days' from fx
-union all select jb1, co_b, 'Platform Engineer', 'd', 'https://overlap.example/jobs/req-1', 'req-1', 'engineering', 'senior', 'US', now() from fx;
+-- Roles (stored shared, as upsert_shared_jobs does): both people hold the same posting; A also holds one B does not.
+insert into public.jobs (id, company_id, employer_id, title, description, url, external_id, job_function, seniority, country, discovered_at, source)
+select ja1, co_a, emp, 'Platform Engineer', 'd', 'https://overlap.example/jobs/req-1', 'req-1', 'engineering', 'senior', 'US', now() - interval '2 days', 'greenhouse' from fx
+union all select ja2, co_a, emp, 'Staff Engineer', 'd', 'https://overlap.example/jobs/req-2', 'req-2', 'engineering', 'staff', 'US', now() - interval '2 days', 'greenhouse' from fx
+union all select jb1, co_b, emp, 'Platform Engineer', 'd', 'https://overlap.example/jobs/req-1', 'req-1', 'engineering', 'senior', 'US', now(), 'greenhouse' from fx;
 
 do $$
 declare f record;
 begin
   select * into f from fx;
   if (select posting_key from public.jobs where id = f.ja1) <> 'req-1' or (select employer_id from public.jobs where id = f.jb1) is distinct from f.emp then
-    raise exception 'a new job must get its employer and posting key';
+    raise exception 'a new job must get its posting key';
   end if;
 end $$;
 
@@ -323,7 +327,7 @@ select pg_temp.must_be_denied('authenticated', $q$select public.add_person_roles
 select pg_temp.must_be_denied('anon', 'select 1 from public.person_roles');
 select pg_temp.must_be_denied('anon', 'select 1 from public.person_jobs');
 select pg_temp.must_be_denied('anon', 'select 1 from public.company_directory');
-select pg_temp.must_be_denied('authenticated', 'select 1 from public.company_directory');
+-- (the contract migration lets a signed-in person read company_directory; relevance_contract.sql checks that)
 select pg_temp.must_be_denied('authenticated', 'select 1 from public.seen_postings');
 select pg_temp.must_be_denied('authenticated', $q$insert into public.person_roles (user_id, job_id) values (gen_random_uuid(), gen_random_uuid())$q$);
 select pg_temp.must_be_denied('authenticated', $q$insert into public.person_counts (user_id, day, kind, n) values (gen_random_uuid(), current_date, 'outside_targets', 1)$q$);

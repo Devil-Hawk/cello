@@ -159,6 +159,35 @@ create trigger companies_link_employer
   before insert or update of domain, metadata on public.companies
   for each row execute function public.companies_link_employer();
 
+-- The name of a person-added or traced employer is the one it was verified under, and no second one takes a name
+-- another verified employer holds (anyone can open a provider account under any name). Seed and yc rows are lists:
+-- namesakes from them stay. An insert is skipped, not refused, so the backfill below never aborts.
+-- ponytail: a real rebrand of a person-added employer is renamed by hand.
+create or replace function public.company_directory_name_claim()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.source not in ('seed', 'yc') and new.name_norm <> ''
+       and exists (select 1 from public.company_directory d where d.name_norm = new.name_norm and d.verified_at is not null and d.id <> new.id) then
+      return null;
+    end if;
+  elsif old.source not in ('seed', 'yc') then
+    new.name := old.name;
+    new.name_norm := old.name_norm;
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.company_directory_name_claim() from public, anon, authenticated;
+
+drop trigger if exists company_directory_name_claim on public.company_directory;
+create trigger company_directory_name_claim
+  before insert or update of name, name_norm on public.company_directory
+  for each row execute function public.company_directory_name_claim();
+
 -- One employer per verified board, from what truth's verifier recorded. A company whose board was
 -- only guessed (no verified_by) is not an employer yet.
 insert into public.company_directory (name, name_norm, domain, ats_provider, ats_token, careers_url, verified_by, verified_at, source)
@@ -217,8 +246,13 @@ alter table public.jobs add column if not exists legit_label text check (legit_l
 -- The unique index (employer, posting key) arrives with the contract migration, once the copies are folded.
 create index if not exists jobs_employer_posting_idx on public.jobs (employer_id, posting_key) where employer_id is not null;
 
+-- A row is shared only when the employer's own board wrote it (its source is the board's provider and the
+-- company's pointer is the directory's token). Mail placeholders, aggregator and site rows stay the person's own.
 update public.jobs j
-   set employer_id = c.employer_id,
+   set employer_id = case when exists (
+         select 1 from public.company_directory d
+          where d.id = c.employer_id and d.ats_provider = j.source and d.ats_token = c.metadata -> 'ats' ->> 'token'
+       ) then c.employer_id end,
        posting_key = coalesce(nullif(j.external_id, ''), md5(j.url))
   from public.companies c
  where c.id = j.company_id
@@ -235,8 +269,12 @@ begin
   if new.posting_key is null then
     new.posting_key := coalesce(nullif(new.external_id, ''), md5(new.url));
   end if;
+  -- Only a row the employer's own board wrote is shared; everything else stays the person's own.
   if new.employer_id is null and new.company_id is not null then
-    select c.employer_id into new.employer_id from public.companies c where c.id = new.company_id;
+    select c.employer_id into new.employer_id
+      from public.companies c
+      join public.company_directory d on d.id = c.employer_id
+     where c.id = new.company_id and d.ats_provider is not null and d.ats_provider = new.source;
   end if;
   return new;
 end;
@@ -289,6 +327,13 @@ create table if not exists public.person_roles (
   checked_at timestamptz,
   primary key (user_id, job_id)
 );
+
+-- A person's own score, its details and the new flag: derived from their resume and key, so never shared.
+-- Only the service role writes them (the grants below keep a signed-in person to saved_at and hidden_reason).
+alter table public.person_roles
+  add column if not exists match_score integer,
+  add column if not exists match_details jsonb,
+  add column if not exists is_new boolean not null default true;
 
 create index if not exists person_roles_job_idx on public.person_roles (job_id);
 create index if not exists person_roles_saved_idx on public.person_roles (job_id) where saved_at is not null;
@@ -345,8 +390,8 @@ create policy "jobs via person_roles" on public.jobs for select to authenticated
   using (exists (select 1 from public.person_roles pr where pr.job_id = jobs.id and pr.user_id = (select auth.uid())));
 
 -- One person_roles row for every role a person already has, beside the old reads.
-insert into public.person_roles (user_id, job_id, visible_since, targets_version, checked_at)
-select c.user_id, j.id, coalesce(j.discovered_at, now()), 0, j.last_seen_at
+insert into public.person_roles (user_id, job_id, visible_since, targets_version, checked_at, match_score, match_details, is_new)
+select c.user_id, j.id, coalesce(j.discovered_at, now()), 0, j.last_seen_at, j.match_score, j.match_details, j.is_new
   from public.jobs j
   join public.companies c on c.id = j.company_id
 on conflict (user_id, job_id) do nothing;
@@ -537,6 +582,10 @@ $$;
 -- repointed to the survivor (applications, drafts, kits and the rest), the way the evict migration
 -- finds them. A copy whose repoint would break a per-person unique key is left where it is and
 -- counted. Safe to run again.
+--
+-- It first takes the employer off every row the employer's board did not write (a mail placeholder, an
+-- aggregator or a site row): two people's copies of those are two people's own and must not merge. This
+-- runs once, in 055000, before any site-employer row is shared; a site employer's rows carry no provider.
 create or replace function public.fold_shared_postings()
 returns jsonb
 language plpgsql
@@ -556,6 +605,14 @@ declare
   skipped integer := 0;
   repointed integer := 0;
 begin
+  update public.jobs j set employer_id = null
+   where j.employer_id is not null
+     and j.source is distinct from (select d.ats_provider from public.company_directory d where d.id = j.employer_id);
+  delete from public.person_roles pr
+   using public.jobs j
+   where j.id = pr.job_id and j.employer_id is null and j.company_id is not null and pr.saved_at is null
+     and not exists (select 1 from public.companies c where c.id = j.company_id and c.user_id = pr.user_id);
+
   select array_agg(c.conrelid::regclass::text order by c.oid), array_agg(a.attname::text order by c.oid)
     into fk_tbl, fk_col
     from pg_catalog.pg_constraint c
@@ -577,12 +634,15 @@ begin
     groups := groups + 1;
     foreach loser in array g.ids[2:array_length(g.ids, 1)] loop
       -- every owner of a copy gets the survivor, with what was theirs
-      insert into public.person_roles (user_id, job_id, visible_since, targets_version, saved_at, hidden_reason, checked_at)
-      select pr.user_id, g.winner, pr.visible_since, pr.targets_version, pr.saved_at, pr.hidden_reason, pr.checked_at
+      insert into public.person_roles (user_id, job_id, visible_since, targets_version, saved_at, hidden_reason, checked_at, match_score, match_details, is_new)
+      select pr.user_id, g.winner, pr.visible_since, pr.targets_version, pr.saved_at, pr.hidden_reason, pr.checked_at, pr.match_score, pr.match_details, pr.is_new
         from public.person_roles pr
        where pr.job_id = loser
       on conflict (user_id, job_id) do update
         set saved_at = coalesce(public.person_roles.saved_at, excluded.saved_at),
+            match_details = case when public.person_roles.match_score is null then excluded.match_details else public.person_roles.match_details end,
+            match_score = coalesce(public.person_roles.match_score, excluded.match_score),
+            is_new = public.person_roles.is_new and excluded.is_new,
             visible_since = least(public.person_roles.visible_since, excluded.visible_since);
       insert into public.person_roles (user_id, job_id, visible_since)
       select c.user_id, g.winner, coalesce(j.discovered_at, now())
