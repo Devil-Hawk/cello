@@ -16,9 +16,15 @@ vi.mock('@/lib/supabase/server', () => ({
         }
         return b
       }
+      if (table === 'routines') return { select: () => ({ in: () => Promise.resolve({ data: [{ command: 'roles.check', next_due_at: '2026-10-08T18:00:00Z', enabled: true }], error: null }) }) }
+      if (table === 'job_heartbeats') return { select: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) }
       return { select: () => Promise.resolve({ count: 2, error: null }) }
     },
   }),
+}))
+
+vi.mock('@/lib/harness/supabase-admin', () => ({
+  createAdminClient: () => ({ rpc: async () => ({ data: false, error: null }), from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }) }),
 }))
 
 import { GET } from './route'
@@ -40,6 +46,13 @@ describe('GET /api/ingestion/status', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('cache-control')).toBe('no-store')
     expect(await res.json()).toMatchObject({ state: 'never', hasCompanies: true })
+  })
+
+  it('carries the clock: the next check from the routine, and background work off without the server rows', async () => {
+    const body = await (await GET()).json()
+    expect(body.nextCheckAt).toBe('2026-10-08T18:00:00Z')
+    expect(body.checks).toMatchObject({ backgroundReady: false, backgroundText: 'Background work is off on this server.' })
+    expect(body.checks.rolesCheck).toMatchObject({ command: 'roles.check', nextDueAt: '2026-10-08T18:00:00Z' })
   })
 
   it('says it could not read, without the database message', async () => {
