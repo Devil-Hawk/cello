@@ -124,6 +124,7 @@ import {
 } from '../harness/copilot-tools'
 import { isStepAgentType, type StepAgentType } from '../harness/copilot-tool-catalog'
 import type { AdminClient } from '../harness/types'
+import { formatRoleLine } from '../jobs/role-search'
 
 // --- Wire-adjacent types (also imported by app/api/copilot/route.ts's adapter) ---
 
@@ -479,11 +480,15 @@ Operating rules:
   item, or once the batch's own cap is smaller than what's left to do (its result says so).
 - DO THE WORK YOURSELF, ONE TOOL AT A TIME, RIGHT HERE — the way you'd work in a coding
   session, not by handing off to a separate run the user has to go watch elsewhere. You have
-  direct tools for the things people actually ask for: source_jobs to pull fresh postings,
+  direct tools for the things people actually ask for: search_roles to find roles,
   score_jobs to rank a batch against the resume, optimize_resume / tailor_cv /
   draft_outreach to act on one job. Call one, read what it found, decide the
-  next step. A request like "find fresh roles and score them" is TWO ordinary tool calls
-  (source_jobs then score_jobs) in this conversation — not a reason to hand off.
+  next step. A request like "find roles and score them" is TWO ordinary tool calls
+  (search_roles then score_jobs) in this conversation, not a reason to hand off.
+  Finding roles: call search_roles (title, place, postedWithinDays, company, limit as asked).
+  If it lists notChecked companies, call refresh_companies once, then search_roles again.
+  Its answer is the reply. Never offer adjacent titles or other sources; use adjacent:true
+  only when the person asked for adjacent titles.
 - HOLD THE GOAL, DON'T JUST REACT TO THE LAST RESULT. Every planning call ends with a
   restatement of your standing objective for this turn (see "[standing objective]" at the
   bottom of your context) — judge your next move against THAT, not against the shape of the
@@ -504,7 +509,8 @@ Operating rules:
   offer "research X first" as one of several options in a question, that is the tell that you
   should just call research_company on X right now instead of asking — an offer to do the work
   is not the work; do it, then report what you found.
-- BROADEN ON EMPTY. A tool coming back with nothing usable (source_jobs inserted 0, score_jobs
+- BROADEN ON EMPTY, except a role search: search_roles answers an empty result itself. A tool
+  coming back with nothing usable (score_jobs
   had nothing scoreable, search_kb found no hits, or a filter you applied leaves zero results)
   is not a stopping point — it's a signal to relax the narrowest constraint and try again, the
   way a good recruiter would: an exact title -> an adjacent one (e.g. "AI Engineer" ->
@@ -520,8 +526,8 @@ Operating rules:
 - trigger_run is NOT the default escape hatch for anything multi-step. It plans and executes
   a whole DAG in the background, on a separate surface — reserve it for something genuinely
   bigger than a handful of tool calls: an explicit unattended or repeating campaign the user
-  asked for (e.g. "keep sourcing and drafting applications for anything above 90 while I'm
-  away") or a plan with many interdependent stages you can't reasonably narrate step by step
+  asked for (e.g. "tailor and draft applications for everything I have scored above 90, then
+  summarize") or a plan with many interdependent stages you can't reasonably narrate step by step
   here. If the only reason you're reaching for it is that the ask involves more than one
   tool, use the direct tools instead. research_company/research_companies are the other "run"
   tools — slow because they fetch live pages, so use them deliberately, but each is still one
@@ -557,7 +563,7 @@ function objectiveReminder(objective: string, trace: TraceEntry[]): string {
     `Steps taken so far this turn: ${recap}.\n` +
     'Decide your NEXT action by checking it against that objective, not just the last tool ' +
     "result: which part is still unmet, and which tool closes the gap? If a step came back " +
-    'empty or thin, broaden and retry (adjacent titles, wider location/freshness) before you ' +
+    'empty or thin, except a role search (search_roles answers an empty result itself), broaden and retry (a wider location/freshness) before you ' +
     'consider anything else. If a fact is missing but a tool could find it (visa sponsorship, ' +
     'funding stage, which jobs fit the resume), go get it — do not ask for it. If you can only ' +
     'partially satisfy the objective after genuinely trying, deliver that partial result with a ' +
@@ -587,6 +593,27 @@ function buildMessages(convo: ChatMessage[], trace: TraceEntry[], objective: str
   return messages
 }
 
+/** The reply search_roles wrote, from the last of its calls that worked; the model's own prose never stands in for it. */
+export function latestRoleAnswer(trace: TraceEntry[]): string | undefined {
+  for (let i = trace.length - 1; i >= 0; i--) {
+    const t = trace[i]
+    if (t.tool !== 'search_roles' || t.status !== 'ok') continue
+    const answer = (t.observation as { answer?: unknown } | null)?.answer
+    return typeof answer === 'string' && answer ? answer : undefined
+  }
+  return undefined
+}
+
+/**
+ * A turn that ends right after a role search ends with that search's answer:
+ * the model's prose is dropped. ponytail: commentary the model wrote beside a
+ * finding is lost with it; add a one-line suffix if it is asked for.
+ */
+function roleAnswerLast(trace: TraceEntry[]): string | undefined {
+  const last = trace[trace.length - 1]
+  return last?.tool === 'search_roles' ? latestRoleAnswer([last]) : undefined
+}
+
 /** Deterministic recap when no more LLM calls can be afforded — verbatim
  *  from the pre-port route (see its header for the "report what was FOUND,
  *  not what ran" rationale). */
@@ -594,6 +621,9 @@ export function fallbackSummary(trace: TraceEntry[]): string {
   if (trace.length === 0) {
     return "I ran out of time before I could do anything useful. Narrowing the request — one company, one role, or one job at a time — will get further."
   }
+
+  const answer = latestRoleAnswer(trace)
+  if (answer) return `${answer}\n\nI ran out of time for this turn. Ask again to go further.`
 
   const asRecord = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' ? (v as Record<string, unknown>) : null)
 
@@ -607,7 +637,16 @@ export function fallbackSummary(trace: TraceEntry[]): string {
       continue
     }
     if (obs && Array.isArray(obs.jobs)) {
-      lines.push(`- found ${(obs.count as number) ?? obs.jobs.length} matching job(s)`)
+      const roles = (obs.jobs as Record<string, unknown>[]).slice(0, 10).map((j) =>
+        formatRoleLine({
+          title: typeof j.title === 'string' ? j.title : null,
+          company: typeof j.company === 'string' ? j.company : null,
+          url: typeof j.url === 'string' ? j.url : null,
+          location: typeof j.location === 'string' ? j.location : null,
+          postedAt: typeof j.postedAt === 'string' ? j.postedAt : null,
+        })
+      )
+      lines.push(...(roles.length > 0 ? roles : [`- ${t.tool}: no roles`]))
     } else if (obs && typeof obs.runId === 'string') {
       backgroundRuns.push(String(obs.runId))
       lines.push(`- started a full agent run (${String(obs.status ?? 'running')})`)
@@ -950,8 +989,9 @@ async function plan(state: CopilotStateType, config: LangGraphRunnableConfig): P
     // normal dispatch->finalize->loadContext turn boundary — see DEADLINE
     // HANDLING at the top of this file for why this deliberately does not
     // call interrupt() itself.
-    let message: string | undefined
-    if (remaining() > 2_000) {
+    // A role search already holds its answer: no model call to write it again.
+    let message: string | undefined = latestRoleAnswer(state.trace)
+    if (!message && remaining() > 2_000) {
       try {
         const res = await callLlm(
           apiKeys,
@@ -1040,7 +1080,7 @@ async function dispatch(state: CopilotStateType, config: LangGraphRunnableConfig
 
   // --- final --------------------------------------------------------------
   if (action.action === 'final' || (!action.tool && !action.question && typeof action.message === 'string')) {
-    return { finalMessage: scrubJargon(action.message ?? '(no answer)'), trace: state.trace, wireEvents: [] }
+    return { finalMessage: roleAnswerLast(state.trace) ?? scrubJargon(action.message ?? '(no answer)'), trace: state.trace, wireEvents: [] }
   }
 
   // --- structured multi-question ask form ----------------------------------
@@ -1110,7 +1150,7 @@ async function dispatch(state: CopilotStateType, config: LangGraphRunnableConfig
                 'Not yet — the objective names a funding-stage/visa fact and you have not called ' +
                 'research_company, research_companies, or get_dossier this turn, with research budget ' +
                 'still available. Look it up for the specific companies still in play (use the companyId ' +
-                'values already returned by source_jobs/list_jobs — research_companies takes several at ' +
+                'values already returned by search_roles/list_jobs, research_companies takes several at ' +
                 'once) instead of asking or guessing, then decide with what you find. Only ask again if ' +
                 'something genuinely stays ambiguous after that.',
             },
@@ -1217,7 +1257,7 @@ async function dispatch(state: CopilotStateType, config: LangGraphRunnableConfig
 
   // --- unparseable / empty action ---------------------------------------------
   if (typeof action.message === 'string') {
-    return { finalMessage: scrubJargon(action.message), trace: state.trace, wireEvents: [] }
+    return { finalMessage: roleAnswerLast(state.trace) ?? scrubJargon(action.message), trace: state.trace, wireEvents: [] }
   }
   return {
     trace: [...state.trace, { tool: '(none)', args: {}, observation: { error: 'model returned no valid action' }, ok: false, status: 'error' }],

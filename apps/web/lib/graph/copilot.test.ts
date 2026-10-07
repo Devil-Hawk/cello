@@ -76,7 +76,9 @@ vi.mock('../harness/copilot-tools', async (importOriginal) => {
   }
 })
 
-const { copilotGraph, buildInputOrResume, systemPrompt } = await import('./copilot')
+const { copilotGraph, buildInputOrResume, systemPrompt, fallbackSummary, latestRoleAnswer } = await import('./copilot')
+const { isValidTool } = await import('../harness/copilot-tool-catalog')
+type TraceEntry = import('./copilot').TraceEntry
 type CopilotTurnConfigT = import('./copilot').CopilotTurnConfig
 
 // Real LangGraph internal — pinned identically to lib/graph/invoke.ts's own
@@ -313,5 +315,88 @@ describe('dispatch: ask_form maps option.description to wire field "detail"', ()
     const option = r.__interrupt__?.[0]?.value?.questions?.[0]?.options?.[0]
     expect(option).toEqual({ label: 'Backend', detail: 'server-side roles' })
     expect(option).not.toHaveProperty('description')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// (f) a role search answers with the stored roles, in code, and never reaches a feed
+// ---------------------------------------------------------------------------
+
+describe('a find request', () => {
+  const answer = [
+    'Searched Anthropic, Stripe and Meta: 412 open roles inside your targets, 1 Forward Deployed Engineer roles in SF.',
+    '- [Forward Deployed Engineer, Applied AI](https://job-boards.greenhouse.io/anthropic/jobs/1), Anthropic, San Francisco, CA, posted 2026-09-30',
+    'No Forward Deployed Engineer roles in SF at Stripe or Meta. Following another company on [Companies](/companies) brings its board in.',
+  ].join('\n')
+
+  it('ends with the compact answer from search_roles, never the model prose, and never calls source_jobs', async () => {
+    callLlmMock
+      .mockResolvedValueOnce(llmAction({ action: 'tool', tool: 'search_roles', args: { title: 'FDE', place: 'SF', limit: 5 }, thought: 'search stored roles' }))
+      .mockResolvedValueOnce(llmAction({ action: 'final', message: 'Want me to broaden to Solutions Engineer?' }))
+    dispatchToolMock.mockResolvedValueOnce({ jobs: [{ jobId: 'j1', title: 'Forward Deployed Engineer, Applied AI' }], count: 1, answer } as never)
+
+    const result = await copilotGraph.invoke(
+      { pendingIncomingMessage: 'Find me 5 FDE roles in SF', turnConfig: baseTurnConfig() },
+      graphConfig('thread-find-roles-1', new MemorySaver())
+    )
+
+    expect((result as { finalMessage?: string }).finalMessage).toBe(answer)
+    expect(dispatchToolMock.mock.calls.map((c) => c[1])).toEqual(['search_roles'])
+  })
+
+  it('source_jobs is not a tool, and the prompt does not name it', () => {
+    expect(isValidTool('source_jobs')).toBe(false)
+    expect(isValidTool('search_roles')).toBe(true)
+    expect(isValidTool('refresh_companies')).toBe(true)
+    expect(systemPrompt(undefined, '', '', '', '', '', '', '')).not.toContain('source_jobs')
+  })
+
+  it('the new prompt sentences have no em dash, exclamation mark or offer', () => {
+    const sys = systemPrompt(undefined, '', '', '', '', '', '', '')
+    const finding = sys.slice(sys.indexOf('Finding roles:'), sys.indexOf('only when the person asked for adjacent titles.'))
+    expect(finding.length).toBeGreaterThan(0)
+    expect(finding).not.toMatch(/—|!|want me to/i)
+  })
+})
+
+describe('when the turn runs short', () => {
+  const searched: TraceEntry[] = [
+    { tool: 'search_roles', args: {}, observation: { jobs: [], answer: 'Searched Meta: 3 open roles, 0 roles.' }, ok: true, status: 'ok' },
+  ]
+
+  it('a role search answers with its own answer', () => {
+    const out = fallbackSummary(searched)
+    expect(out).toContain('Searched Meta: 3 open roles, 0 roles.')
+    expect(out).not.toMatch(/matching job/i)
+  })
+
+  it('latestRoleAnswer skips a failed search and reads the last one that worked', () => {
+    expect(latestRoleAnswer([...searched, { tool: 'search_roles', args: {}, observation: { error: 'x' }, ok: false, status: 'error' }])).toBe(
+      'Searched Meta: 3 open roles, 0 roles.'
+    )
+    expect(latestRoleAnswer([])).toBeUndefined()
+  })
+
+  it('a list of jobs prints one line each, never a count of matching jobs', () => {
+    const out = fallbackSummary([
+      {
+        tool: 'list_jobs',
+        args: {},
+        observation: { count: 20, jobs: [{ title: 'Data Engineer', company: 'Stripe', location: 'Remote', postedAt: '2026-09-01T00:00:00Z' }] },
+        ok: true,
+        status: 'ok',
+      },
+    ])
+    expect(out).toContain('- Data Engineer, Stripe, Remote, posted 2026-09-01')
+    expect(out).not.toMatch(/matching job/i)
+  })
+})
+
+describe('systemPrompt: role-finding copy', () => {
+  it('no line that mentions search_roles or refresh_companies carries an em dash', () => {
+    const sys = systemPrompt(undefined, '', '', '', '', '', '', '')
+    const lines = sys.split('\n').filter((l) => /search_roles|refresh_companies/.test(l))
+    expect(lines.length).toBeGreaterThan(0)
+    expect(lines.filter((l) => l.includes('—'))).toEqual([])
   })
 })

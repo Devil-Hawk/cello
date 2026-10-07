@@ -15,6 +15,8 @@
 // exercises tool paths that need no LLM key at all — explain_match,
 // get_application, list_runs, web_search).
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const { webSearchMock, generateDossierMock } = vi.hoisted(() => ({
@@ -792,5 +794,52 @@ describe('dispatchTool in Langfuse', () => {
     const buffer = new SpanBuffer('me', null, undefined, { isDemo: false }) // Langfuse unconfigured
     const { rows } = await traced(buffer, baseCtx(admin), 'list_contacts', {})
     expect(rows[0].lf).toBeUndefined()
+  })
+})
+
+describe('search_roles: a failed read is never an empty answer', () => {
+  // Any filter call returns the same builder; awaiting it resolves a PostgREST error.
+  const failing = (): unknown =>
+    new Proxy(
+      {},
+      {
+        get: (_t, prop) =>
+          prop === 'then'
+            ? (ok: (v: unknown) => unknown) => Promise.resolve({ data: null, count: null, error: { message: 'bad request' } }).then(ok)
+            : () => failing(),
+      }
+    )
+
+  it('says the roles could not be read instead of reporting 0 open roles', async () => {
+    const base = fakeAdmin({
+      companies: [{ id: 'co-1', name: 'Anthropic', user_id: 'me' }],
+      profiles: [{ id: 'me', preferences: {} }],
+    }) as unknown as { from: (t: string) => unknown }
+    const admin = { from: (t: string) => (t === 'jobs' ? failing() : base.from(t)) } as unknown as AdminClient
+    const result = (await dispatchTool(baseCtx(admin), 'search_roles', { title: 'forward deployed engineer', place: 'SF' })) as Record<string, unknown>
+    expect(result.error).toMatch(/Could not read the stored roles/)
+    expect(JSON.stringify(result)).not.toMatch(/0 open roles|No .* roles in/)
+  })
+
+  it('says the followed companies could not be read when that select fails', async () => {
+    const admin = { from: () => failing() } as unknown as AdminClient
+    const result = (await dispatchTool(baseCtx(admin), 'search_roles', { title: 'fde' })) as Record<string, unknown>
+    expect(result.error).toMatch(/Could not read your followed companies/)
+  })
+})
+
+describe('trigger_run: the run is marked as started from the Copilot', () => {
+  it('writes the marker the run graph reads to leave the sourcer out', () => {
+    expect(readFileSync(join(__dirname, 'copilot-tools.ts'), 'utf8')).toMatch(/budget_tokens: COPILOT_RUN_BUDGET, result: COPILOT_RUN_MARKER/)
+  })
+})
+
+describe('new copy has no em dashes', () => {
+  it('no line of the role tools or the score_jobs notes carries one', () => {
+    const lines = readFileSync(join(__dirname, 'copilot-tools.ts'), 'utf8')
+      .split('\n')
+      .filter((l) => /search_roles|refresh_companies|follow companies|Open-web search results/.test(l))
+    expect(lines.length).toBeGreaterThan(3)
+    expect(lines.filter((l) => l.includes('—'))).toEqual([])
   })
 })

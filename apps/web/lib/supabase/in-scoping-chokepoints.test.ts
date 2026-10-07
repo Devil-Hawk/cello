@@ -123,12 +123,13 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     reason: 'knockouts can never exceed the MAX_JOBS (30) batch it was collected from in the same run.',
   },
   'apps/web/lib/harness/copilot-tools.ts': {
-    calls: [".in('id', jobIds)", ".in('id', companyIds)", ".in('id', trgmIds)", ".in('id', contactIds)"],
+    calls: [".in('id', jobIds)", ".in('id', companyIds)", ".in('id', trgmIds)", ".in('id', contactIds)", ".in('company_id', trackedIds)"],
     reason:
       "loadJobBriefs: jobIds is always ≤20 ids (every caller slices/caps before calling); companyIds is the " +
       'deduped company_id set of those ≤20 job rows. listJobs\' trgmIds and listContacts\' contactIds are both ' +
       "search_*_by_*_trgm()'s p_limit-bounded RPC result (clampLimit'd to ≤15/≤25, hard RPC ceiling 50 — see " +
-      '20260816000009_job_search.sql), never an owned-id set.',
+      '20260816000009_job_search.sql), never an owned-id set. search_roles\' trackedIds is the person\'s own ' +
+      'followed companies (their user_id-scoped watchlist rows); ownership is still enforced by the companies!inner join.',
   },
   'apps/web/lib/strategy/datasource.ts': {
     calls: [".in('id', chunk)"],
