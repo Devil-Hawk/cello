@@ -19,9 +19,11 @@ import type { ChatResult } from '@langchain/core/outputs'
 import { z } from 'zod'
 import { celloChatModel } from '@/lib/agents/model'
 
-// gemma-4-31b was rate limited upstream on almost every call while these were written, so poolside's laguna takes its place.
-export const GENERATORS = ['qwen/qwen3.8-27b:free', 'poolside/laguna-s-2.1:free', 'nvidia/nemotron-3-super-120b-a12b:free'] as const
-/** A different family from the generators it judges (qwen and laguna). */
+// gemma-4-31b was rate limited upstream on almost every call while these were written, so its smaller sibling and poolside's laguna take its place.
+// AGENT_EVAL_GENERATORS (comma separated) swaps a model that answers 429 without a commit; every id still goes through assertFree.
+export const GENERATORS: readonly string[] =
+  process.env.AGENT_EVAL_GENERATORS?.split(',').map((s) => s.trim()).filter(Boolean) ?? ['google/gemma-4-26b-a4b-it:free', 'poolside/laguna-s-2.1:free', 'nvidia/nemotron-3-super-120b-a12b:free']
+/** A different family from the generators it judges (gemma and laguna). */
 export const JUDGE = 'nvidia/nemotron-3-super-120b-a12b:free'
 
 export const OUT_DIR = process.env.AGENT_EVAL_OUT ?? path.join(os.homedir(), 'cello-scratch', 'evals', 'agent')

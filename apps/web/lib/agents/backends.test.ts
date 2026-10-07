@@ -36,7 +36,7 @@ function setup(opts: { role: 'orchestrator' | 'researcher' }) {
   writeFileSync(path.join(skills, 'role-fit', 'SKILL.md'), '---\nname: role-fit\ndescription: Judge fit.\n---\n# Role fit\nSay Strong, Possible or Stretch.\n')
   const backend = celloBackend({ admin, userId: USER, skillsDir: skills })
   const build = (script: ConstructorParameters<typeof ScriptedChatModel>[0]['script']) => {
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script })
     const agent = createDeepAgent({
       model,
       backend,

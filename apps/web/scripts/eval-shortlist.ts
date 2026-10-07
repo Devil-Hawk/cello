@@ -44,7 +44,7 @@ import thresholds from './eval-shortlist/thresholds.json'
 const DIR = path.join(process.cwd(), 'scripts/eval-shortlist')
 // What Cello's prompts run on (Alibaba). A different family from the person (Nvidia) and from the
 // second chance judge (Google, or Cohere while Google's free pool is rate limited).
-const GENERATOR = (process.env.EVAL_GENERATOR_MODELS ?? 'qwen/qwen3.8-27b:free,apodex/apodex-1.1-mini:free').split(',')
+const GENERATOR = (process.env.EVAL_GENERATOR_MODELS ?? 'poolside/laguna-s-2.1:free,apodex/apodex-1.1-mini:free').split(',')
 // The simulated person and the first chance judge.
 const ORACLE = (process.env.EVAL_ORACLE_MODELS ?? 'nvidia/nemotron-3-super-120b-a12b:free').split(',')
 // The second chance judge.

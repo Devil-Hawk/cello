@@ -45,7 +45,7 @@ const ctx = (over: Partial<AgentContext> = {}): AgentContext => ({
 
 type Built = { options: { middleware: { name: string; tools?: { name: string; schema: unknown }[] }[]; tools: { name: string }[]; systemPrompt: string } }
 
-function build(over: Record<string, unknown> = {}, model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('ok')] })) {
+function build(over: Record<string, unknown> = {}, model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('ok')] })) {
   const input = { kind: 'orchestrator' as const, ctx: ctx(), saver: new MemorySaver(), model, fallbacks: [], skillsDir: skills(), ...over }
   return { agent: createCelloAgent(input as never) as unknown as Built, model }
 }
@@ -134,8 +134,8 @@ describe('delegation is one level deep', () => {
   const task = callTools([{ name: 'task', args: { description: '{"subject":"Acme","kind":"company"}', subagent_type: 'general-purpose' } }])
 
   async function delegate(researcherScript: ConstructorParameters<typeof ScriptedChatModel>[0]['script'], repeatLast = false) {
-    const researcherModel = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: researcherScript, repeatLast })
-    const orchestratorModel = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [task, say('Acme makes robots, per its own site.')] })
+    const researcherModel = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: researcherScript, repeatLast })
+    const orchestratorModel = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [task, say('Acme makes robots, per its own site.')] })
     const agent = createCelloAgent({
       kind: 'orchestrator',
       ctx: ctx(),

@@ -74,7 +74,7 @@ function deps(w: W, model: ScriptedChatModel, extra: Record<string, unknown> = {
   }
 }
 
-const model = (...lines: string[]) => new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: lines.map((l) => say(l)) })
+const model = (...lines: string[]) => new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: lines.map((l) => say(l)) })
 const task = (w: W) => w.admin.tables.scheduled_tasks[0]
 const roots = (w: W) => w.admin.tables.agent_tasks.filter((t) => t.parent_id === null)
 

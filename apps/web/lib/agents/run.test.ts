@@ -78,7 +78,7 @@ const root = (w: W) => w.admin.tables.agent_tasks.filter((t) => t.parent_id === 
 describe('a normal turn', () => {
   it('streams metadata first, then the agent events, and ends done with the answer', async () => {
     const w = world()
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('Here are two roles.')] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('Here are two roles.')] })
     const { events, result } = await run(w, model)
     expect(events[0]).toEqual({ event: 'metadata', data: { run_id: 'trace-1', thread_id: 't1', conversation_id: 'c1' } })
     const names = new Set(events.map((e) => e.event.split('|')[0]))
@@ -91,7 +91,7 @@ describe('a normal turn', () => {
 
   it('records one root task, working then done, and releases the lease', async () => {
     const w = world()
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('Done.')] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('Done.')] })
     const { lease, close } = await run(w, model)
     expect(root(w)).toHaveLength(1)
     expect(root(w)[0]).toMatchObject({ agent: 'cello', status: 'done', title: 'find me roles', summary: 'Done.', thread_id: 't1' })
@@ -104,7 +104,7 @@ describe('a normal turn', () => {
 
   it('is saved to the checkpointer, so the next message continues the conversation', async () => {
     const w = world()
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('First answer.'), say('Second answer.')] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('First answer.'), say('Second answer.')] })
     await run(w, model)
     await run(w, model, { mode: { kind: 'input', text: 'and in Austin?' } })
     const second = model.calls[1].map((m) => String(m.content))
@@ -118,7 +118,7 @@ describe('a normal turn', () => {
     const w = world()
     const echo = tool(async () => 'ok', { name: 'find_roles', description: 'x', schema: z.object({}).passthrough() })
     void echo
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [() => callTools([{ name: 'my_profile', args: { response_format: 'concise', limit: 1 } }])], repeatLast: true })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [() => callTools([{ name: 'my_profile', args: { response_format: 'concise', limit: 1 } }])], repeatLast: true })
     w.admin.tables.profiles = [{ id: 'u1', full_name: 'Dana', resume_text: '', preferences: {} }]
     const { result } = await run(w, model)
     expect(model.calls).toHaveLength(24)
@@ -130,7 +130,7 @@ describe('a normal turn', () => {
 describe('slices', () => {
   it('past the deadline it saves, hands over once, keeps the task working, and the next request finishes it without repeating work', async () => {
     const w = world()
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('Finished after the handover.')] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('Finished after the handover.')] })
     w.ctx.deadlineAt = Date.now() - 1000
     const first = await run(w, model)
     expect(first.result.outcome).toBe('slice')
@@ -153,7 +153,7 @@ describe('slices', () => {
 
   it('a continue on a thread that already finished does nothing and calls no model', async () => {
     const w = world()
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('All done.')] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('All done.')] })
     await run(w, model)
     const again = await run(w, model, { mode: { kind: 'continue' } })
     expect(again.result).toMatchObject({ outcome: 'done', finalText: 'All done.' })
@@ -174,7 +174,7 @@ describe('slices', () => {
       },
       { name: 'slow_tool', description: 'x', schema: z.object({}) }
     )
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [callTools([{ name: 'slow_tool' }]), say('Finished.')] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [callTools([{ name: 'slow_tool' }]), say('Finished.')] })
     const first = await run(w, model, {}, { extraTools: [slow] })
     expect(first.result.outcome).toBe('failed')
     expect(model.calls).toHaveLength(1)
@@ -192,7 +192,7 @@ describe('questions', () => {
   it('a question that blocks the task is waiting, not failed, and the answer resumes it', async () => {
     const w = world()
     const ask = tool(async () => String(interrupt({ kind: 'question', text: 'Which city?' })), { name: 'ask_person', description: 'x', schema: z.object({}) })
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [callTools([{ name: 'ask_person' }]), say('Searching Austin.')] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [callTools([{ name: 'ask_person' }]), say('Searching Austin.')] })
     const first = await run(w, model, {}, { extraTools: [ask] })
     expect(first.result.outcome).toBe('waiting')
     expect(root(w)[0].status).toBe('waiting')
@@ -206,7 +206,7 @@ describe('approval results', () => {
   it('are told to the conversation at the start of the next turn, marked so they are never the persons words', async () => {
     const w = world()
     w.admin.tables.approvals.push({ id: 'ap1', user_id: 'u1', thread_id: 't1', action: 'send_email', status: 'done', posted_at: null, outcome: { what: 'Email sent to Dana Lee', when: '2026-10-05T16:41:00Z' }, error: null })
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('Noted.')] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('Noted.')] })
     await run(w, model, { mode: { kind: 'input', text: 'what happened to my email?' } })
     const sent = model.calls[0]
     const eventIdx = sent.findIndex((m) => String(m.content).startsWith('<event>'))
@@ -216,7 +216,7 @@ describe('approval results', () => {
     expect(String(sent.at(-1)?.content)).toBe('what happened to my email?')
     expect(w.admin.tables.approvals[0].posted_at).toBeTruthy()
     // A second turn does not tell it again.
-    const model2 = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('Ok.')] })
+    const model2 = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('Ok.')] })
     await run(w, model2, { mode: { kind: 'input', text: 'thanks' } })
     expect(model2.calls[0].filter((m) => String(m.content).startsWith('<event>'))).toHaveLength(1)
   })
@@ -231,7 +231,7 @@ describe('approval results', () => {
 describe('errors', () => {
   it('a reached budget is said in the persons words with the date it resets', async () => {
     const w = world()
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [new BudgetCapError(10, 10)] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [new BudgetCapError(10, 10)] })
     const { result, events } = await run(w, model)
     expect(result.outcome).toBe('failed')
     expect(result.error).toEqual({ code: 'budget', message: budgetCopy() })
@@ -254,7 +254,7 @@ describe('errors', () => {
 
   it('anything else is the plain generic sentence, never the raw error, and the task still ends', async () => {
     const w = world()
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [new Error('unexpected shape: password=hunter2')] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [new Error('unexpected shape: password=hunter2')] })
     const { result, events } = await run(w, model)
     expect(result.error).toEqual({ code: 'failed', message: AGENT_COPY.generic })
     expect(JSON.stringify(events)).not.toContain('hunter2')

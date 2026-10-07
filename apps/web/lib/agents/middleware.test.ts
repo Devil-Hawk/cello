@@ -78,7 +78,7 @@ describe('CelloSpend', () => {
   })
 
   it('a free model reserves on the free rung, which costs nothing', async () => {
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('ok')] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('ok')] })
     await run(createAgent({ model, tools: [echo], middleware: [celloSpend(ctx())] }))
     expect(spend.reserveSpend).toHaveBeenCalledWith({}, expect.objectContaining({ rung: 'R3', step: 'agent-turn' }))
   })
@@ -86,7 +86,7 @@ describe('CelloSpend', () => {
   it('falls back to a free model when the cap is reached, and the turn completes', async () => {
     capReached()
     const paid = new ScriptedChatModel({ model: 'vendor/paid-model', script: [say('should not be used')] })
-    const free = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('answered on the free model')] })
+    const free = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('answered on the free model')] })
     const agent = createAgent({
       model: paid,
       tools: [echo],
@@ -101,7 +101,7 @@ describe('CelloSpend', () => {
   it('a demo has no free fallback, so the cap error reaches the person', async () => {
     capReached()
     const paid = new ScriptedChatModel({ model: 'vendor/paid-model', script: [say('nope')] })
-    const free = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('should not run')] })
+    const free = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('should not run')] })
     const agent = createAgent({
       model: paid,
       tools: [echo],
@@ -127,7 +127,7 @@ describe('CelloSpend', () => {
 describe('call limits', () => {
   it('the orchestrator stops at 24 model calls', async () => {
     const model = new ScriptedChatModel({
-      model: 'qwen/qwen3.8-27b:free',
+      model: 'google/gemma-4-26b-a4b-it:free',
       script: [() => callTools([{ name: 'echo' }])],
       repeatLast: true,
     })
@@ -143,7 +143,7 @@ describe('call limits', () => {
 
   it('the researcher stops at 8 model calls', async () => {
     const model = new ScriptedChatModel({
-      model: 'qwen/qwen3.8-27b:free',
+      model: 'google/gemma-4-26b-a4b-it:free',
       script: [() => callTools([{ name: 'echo' }])],
       repeatLast: true,
     })
@@ -163,7 +163,7 @@ describe('call limits', () => {
       schema: z.object({ description: z.string().default('x') }),
     })
     const model = new ScriptedChatModel({
-      model: 'qwen/qwen3.8-27b:free',
+      model: 'google/gemma-4-26b-a4b-it:free',
       script: [
         callTools(Array.from({ length: 6 }, () => ({ name: 'task' }))),
         say('done'),
@@ -192,7 +192,7 @@ describe('CelloUntrusted', () => {
       description: 'Role.',
       schema: z.object({ id: z.string().default('r1') }),
     })
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [callTools([{ name: 'get_role' }]), say('ok')] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [callTools([{ name: 'get_role' }]), say('ok')] })
     const result = await run(createAgent({ model, tools: [getRole], middleware: [celloUntrusted()] }))
     const toolMsg = result.messages.find((m: unknown) => ToolMessage.isInstance(m)) as ToolMessage
     const text = String(toolMsg.content)
@@ -207,7 +207,7 @@ describe('CelloUntrusted', () => {
   })
 
   it('leaves trusted tool results alone', async () => {
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [callTools([{ name: 'echo' }]), say('ok')] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [callTools([{ name: 'echo' }]), say('ok')] })
     const result = await run(createAgent({ model, tools: [echo], middleware: [celloUntrusted()] }))
     const toolMsg = result.messages.find((m: unknown) => ToolMessage.isInstance(m)) as ToolMessage
     expect(toolMsg.content).toBe('echo:hi')
@@ -219,7 +219,7 @@ describe('CelloUntrusted', () => {
       description: 'x',
       schema: z.object({}),
     })
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [callTools([{ name: 'mcp__notes__search' }]), say('ok')] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [callTools([{ name: 'mcp__notes__search' }]), say('ok')] })
     const result = await run(createAgent({ model, tools: [mcp], middleware: [celloUntrusted()] }))
     const toolMsg = result.messages.find((m: unknown) => ToolMessage.isInstance(m)) as ToolMessage
     expect(String(toolMsg.content)).toContain('<untrusted_data source="mcp__notes__search">')
@@ -240,7 +240,7 @@ describe('CelloDemoRules', () => {
 
   it('refuses a send for a demo without removing the tool', async () => {
     const model = new ScriptedChatModel({
-      model: 'qwen/qwen3.8-27b:free',
+      model: 'google/gemma-4-26b-a4b-it:free',
       script: [callTools([{ name: 'request_approval', args: { action: 'send_email' } }]), say('ok')],
     })
     const result = await run(createAgent({ model, tools: [approval], middleware: [celloDemoRules({ isDemo: true })] }))
@@ -251,7 +251,7 @@ describe('CelloDemoRules', () => {
 
   it('lets a real account queue the same approval', async () => {
     const model = new ScriptedChatModel({
-      model: 'qwen/qwen3.8-27b:free',
+      model: 'google/gemma-4-26b-a4b-it:free',
       script: [callTools([{ name: 'request_approval', args: { action: 'send_email' } }]), say('ok')],
     })
     const result = await run(createAgent({ model, tools: [approval], middleware: [celloDemoRules({ isDemo: false })] }))
@@ -264,7 +264,7 @@ describe('CelloDeadline', () => {
   it('interrupts with a slice marker past the deadline and resumes in the next request', async () => {
     const saver = new MemorySaver()
     const config = { configurable: { thread_id: 't-slice' }, recursionLimit: 200 }
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('finished')] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('finished')] })
 
     const first = createAgent({ model, tools: [echo], middleware: [celloDeadline(Date.now() - 1000)], checkpointer: saver })
     const paused = (await first.invoke({ messages: [new HumanMessage('go')] }, config)) as { __interrupt__?: { value: unknown }[] }
