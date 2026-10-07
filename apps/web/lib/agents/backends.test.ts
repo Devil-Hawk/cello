@@ -28,13 +28,15 @@ const USER = 'u1'
 const textOf = (m: ToolMessage): string =>
   typeof m.content === 'string' ? m.content : m.content.map((b) => (b as { text?: string }).text ?? '').join('')
 
-function setup(opts: { role: 'orchestrator' | 'researcher' }) {
+function setup(opts: { role: 'orchestrator' | 'researcher'; hiddenSkills?: string[] }) {
   const admin: FakeAdmin = makeFakeAdmin({}, { artifacts: { defaults: () => ({ current_version: 1, updated_at: '2026-10-05T00:00:00Z' }) } })
   admin.rpcHandlers.artifact_add_version = async () => 2
   const skills = mkdtempSync(path.join(tmpdir(), 'cello-skills-'))
   mkdirSync(path.join(skills, 'role-fit'))
   writeFileSync(path.join(skills, 'role-fit', 'SKILL.md'), '---\nname: role-fit\ndescription: Judge fit.\n---\n# Role fit\nSay Strong, Possible or Stretch.\n')
-  const backend = celloBackend({ admin, userId: USER, skillsDir: skills })
+  mkdirSync(path.join(skills, 'cover-letter'))
+  writeFileSync(path.join(skills, 'cover-letter', 'SKILL.md'), '---\nname: cover-letter\ndescription: Write a letter.\n---\n# Cover letter\nStrong openers only.\n')
+  const backend = celloBackend({ admin, userId: USER, skillsDir: skills, hiddenSkills: opts.hiddenSkills })
   const build = (script: ConstructorParameters<typeof ScriptedChatModel>[0]['script']) => {
     const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script })
     const agent = createDeepAgent({
@@ -165,6 +167,21 @@ describe('/skills/', () => {
     expect(list.files?.map((f) => f.path)).toContain('/skills/role-fit/')
     expect((await backend.read('/skills/role-fit/SKILL.md')).content).toContain('Strong, Possible or Stretch')
     expect((await backend.write('/skills/x/SKILL.md', 'x')).error).toMatch(/read-only/i)
+  })
+
+  it('does not serve a skill that is switched off, on any path that reads it', async () => {
+    const { backend, run } = setup({ role: 'orchestrator', hiddenSkills: ['cover-letter'] })
+    const gone = '/skills/cover-letter/SKILL.md'
+    expect((await backend.ls('/skills/')).files?.map((f) => f.path)).toEqual(['/skills/role-fit/'])
+    expect((await backend.read(gone)).error).toMatch(/not found/)
+    expect((await backend.readRaw(gone)).error).toMatch(/not found/)
+    const [dl] = await backend.downloadFiles([gone])
+    expect(dl.content).toBeNull()
+    expect(dl.error).toBe('file_not_found')
+    expect((await backend.grep('Strong', '/skills/')).matches?.map((m) => m.path)).toEqual(['/skills/role-fit/SKILL.md'])
+    expect((await backend.glob('**/SKILL.md', '/skills/')).files?.map((f) => f.path)).toEqual(['/skills/role-fit/SKILL.md'])
+    const [msg] = await run([callTools([{ name: 'read_file', args: { file_path: gone } }]), say('done')])
+    expect(textOf(msg)).toMatch(/not found/i)
   })
 })
 

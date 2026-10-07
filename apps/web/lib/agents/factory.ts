@@ -18,7 +18,7 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { composeSystemPrompt, loadModeDoc } from '@/lib/harness/prompts'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { PERMISSIONS, celloBackend } from './backends'
+import { PERMISSIONS, SKILLS_OFF, celloBackend } from './backends'
 import type { AgentContext } from './context'
 import { guardStack, type GuardStackOptions } from './middleware'
 import { celloChatModel } from './model'
@@ -32,9 +32,14 @@ import { RESEARCHER_TOOL_NAMES } from './tools/registry'
 /** Skills the Researcher is given by code, not by its own choice. */
 export const RESEARCHER_SKILLS = ['company-research', 'visa-sponsorship'] as const
 
-function skillBodies(names: readonly string[], skillsDir: string): string {
+// The trigger bar measures the orchestrator's choice; the Researcher gets its skills by code, so only a skill
+// that missed its output checks is taken from it.
+const OFF_FOR_RESEARCHER = Object.keys(SKILLS_OFF).filter((k) => SKILLS_OFF[k].includes('checks'))
+
+function skillBodies(names: readonly string[], skillsDir: string, hidden: readonly string[]): string {
   const parts: string[] = []
   for (const name of names) {
+    if (hidden.includes(name)) continue
     try {
       const text = readFileSync(path.join(skillsDir, name, 'SKILL.md'), 'utf8')
       // The body after the frontmatter: the procedure the specialist follows.
@@ -56,6 +61,8 @@ export interface CelloAgentInput {
   researcherModel?: BaseChatModel
   fallbacks?: GuardStackOptions['fallbacks']
   skillsDir?: string
+  /** A test and eval seam: replaces the skills that are switched off, so an eval can still measure one. */
+  hiddenSkills?: readonly string[]
   /** Tools from the person's own MCP servers, already checked and prefixed. */
   extraTools?: StructuredToolInterface[]
   /** A short card about the person, appended to the system prompt. Stable across a conversation. */
@@ -79,7 +86,7 @@ export function researcherSpec(input: CelloAgentInput, name: string = 'researche
   return {
     name,
     description: RESEARCHER_DESCRIPTION,
-    systemPrompt: composeSystemPrompt({ mode: loadModeDoc('researcher'), stableContext: skillBodies(RESEARCHER_SKILLS, skillsDir) }),
+    systemPrompt: composeSystemPrompt({ mode: loadModeDoc('researcher'), stableContext: skillBodies(RESEARCHER_SKILLS, skillsDir, input.hiddenSkills ?? OFF_FOR_RESEARCHER) }),
     model: input.researcherModel ?? (standalone ? input.model : undefined) ?? celloChatModel({ apiKeys: ctx.apiKeys, purpose: 'researcher' }),
     tools: [...researchPrimitives(ctx), ...toAgentTools({ ...ctx, readOnly: true }, { names: RESEARCHER_TOOL_NAMES })] as never,
     middleware: guards(input, 'researcher'),
@@ -115,7 +122,7 @@ export function createCelloAgent(input: CelloAgentInput & { kind: 'orchestrator'
     tools: [...toAgentTools(ctx), ...(input.extraTools ?? [])] as never,
     subagents: specialists(input),
     skills: ['/skills/'],
-    backend: celloBackend({ admin: ctx.admin, userId: ctx.userId, skillsDir }),
+    backend: celloBackend({ admin: ctx.admin, userId: ctx.userId, skillsDir, hiddenSkills: input.hiddenSkills }),
     permissions: PERMISSIONS.orchestrator,
     middleware: guards(input, 'orchestrator'),
     checkpointer: input.saver,

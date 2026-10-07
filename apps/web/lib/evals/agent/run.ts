@@ -64,6 +64,7 @@ export function orchestrator(model: BaseChatModel) {
     researcherModel: model,
     fallbacks: [],
     skillsDir: SKILLS_DIR,
+    hiddenSkills: [], // a skill that is switched off is still measured, so it can earn its way back
     profileCard: CARD,
   }) as unknown as { invoke: (input: unknown, config: unknown) => Promise<{ messages: BaseMessage[] }> }
   return { agent, ctx }
@@ -160,6 +161,6 @@ export interface ResearcherRunResult extends ResearcherResult {
 export async function runResearcherCase(modelId: string, subject: string, kind: 'company' | 'person' | 'topic'): Promise<ResearcherRunResult> {
   const model = new FreeChatModel({ model: modelId })
   const ctx = context()
-  const result = await runResearcher(ctx, { subject, kind }, { build: (input) => createCelloAgent({ ...input, model, fallbacks: [], skillsDir: SKILLS_DIR }) as never })
+  const result = await runResearcher(ctx, { subject, kind }, { build: (input) => createCelloAgent({ ...input, model, fallbacks: [], skillsDir: SKILLS_DIR, hiddenSkills: [] }) as never })
   return { ...result, modelCalls: model.calls.length }
 }

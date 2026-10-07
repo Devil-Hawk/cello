@@ -261,30 +261,56 @@ export class MemoriesBackend implements BackendProtocolV2 {
 
 // --- skills -------------------------------------------------------------------------
 
-/** apps/web/skills as read-only files. */
+/**
+ * Skills that are switched off: they missed their own bar in the last recorded S19 run
+ * (lib/evals/agent/reports/skills-s19.md), so no path serves them to a model. The value is the bars
+ * each one missed; "cannot read" counts as both. A skill comes back by earning its bars in a new run
+ * and leaving this list. lib/agents/skills-off.test.ts fails if this list and the report disagree.
+ */
+export const SKILLS_OFF: Readonly<Record<string, readonly ('trigger' | 'checks')[]>> = {}
+
+/** apps/web/skills as read-only files, without the skills that are switched off. */
 export class ReadOnlySkills implements BackendProtocolV2 {
   private readonly fs: FilesystemBackend
-  constructor(rootDir: string = path.join(process.cwd(), 'skills')) {
+  constructor(
+    rootDir: string = path.join(process.cwd(), 'skills'),
+    private readonly hidden: readonly string[] = Object.keys(SKILLS_OFF),
+  ) {
     this.fs = new FilesystemBackend({ rootDir, virtualMode: true })
   }
-  ls(dir: string) {
-    return this.fs.ls(dir)
+  /** Paths arrive with "/skills" already stripped, so the first segment is the skill folder. */
+  private off(p: string): boolean {
+    return this.hidden.includes(p.split('/').filter(Boolean)[0] ?? '')
   }
-  read(filePath: string, offset?: number, limit?: number) {
-    return this.fs.read(filePath, offset, limit)
+  private gone(p: string) {
+    return { error: `File '${p}' not found` }
   }
-  readRaw(filePath: string) {
-    return this.fs.readRaw(filePath)
+  async ls(dir: string) {
+    const r = await this.fs.ls(dir)
+    return r.files ? { ...r, files: r.files.filter((f) => !this.off(f.path)) } : r
   }
-  grep(pattern: string, dir?: string | null, glob?: string | null, maxCount?: number | null) {
-    return this.fs.grep(pattern, dir ?? undefined, glob, maxCount)
+  async read(filePath: string, offset?: number, limit?: number) {
+    return this.off(filePath) ? this.gone(filePath) : this.fs.read(filePath, offset, limit)
   }
-  glob(pattern: string, dir?: string) {
-    return this.fs.glob(pattern, dir)
+  async readRaw(filePath: string) {
+    return this.off(filePath) ? this.gone(filePath) : this.fs.readRaw(filePath)
+  }
+  async grep(pattern: string, dir?: string | null, glob?: string | null, maxCount?: number | null) {
+    const r = await this.fs.grep(pattern, dir ?? undefined, glob, maxCount)
+    return r.matches ? { ...r, matches: r.matches.filter((m) => !this.off(m.path)) } : r
+  }
+  async glob(pattern: string, dir?: string) {
+    const r = await this.fs.glob(pattern, dir)
+    return r.files ? { ...r, files: r.files.filter((f) => !this.off(f.path)) } : r
   }
   // The skills middleware loads every SKILL.md through downloadFiles.
   async downloadFiles(paths: string[]) {
-    return this.fs.downloadFiles ? this.fs.downloadFiles(paths) : paths.map((p) => ({ path: p, content: null, error: 'file_not_found' as const }))
+    const gone = (p: string) => ({ path: p, content: null, error: 'file_not_found' as const })
+    const open = paths.filter((p) => !this.off(p))
+    const got = open.length && this.fs.downloadFiles ? await this.fs.downloadFiles(open) : open.map(gone)
+    // The backend answers in the order asked, so the answers go back into the positions of the paths that were let through.
+    let i = 0
+    return paths.map((p) => (this.off(p) ? gone(p) : got[i++]))
   }
   async write() {
     return { error: READ_ONLY_SKILLS }
@@ -303,12 +329,14 @@ export interface CelloBackendDeps {
   admin: AdminClient
   userId: string
   skillsDir?: string
+  /** A test and eval seam: replaces SKILLS_OFF, so an eval can still measure a skill that is off. */
+  hiddenSkills?: readonly string[]
 }
 
 export function celloBackend(deps: CelloBackendDeps): CompositeBackend {
   return new CompositeBackend(new StateBackend(), {
     '/memories/': new MemoriesBackend(deps),
     '/artifacts/': new ArtifactsBackend(deps),
-    '/skills/': new ReadOnlySkills(deps.skillsDir),
+    '/skills/': new ReadOnlySkills(deps.skillsDir, deps.hiddenSkills),
   })
 }
