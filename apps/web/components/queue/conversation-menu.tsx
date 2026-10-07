@@ -86,7 +86,7 @@ function FindDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     if (!open || companies) return
     void (async () => {
       try {
-        const { data } = await trackedOnly(createClient().from('companies').select('id, name').order('name').limit(300))
+        const { data } = await trackedOnly(createClient().from('companies').select('id, name')).order('name').limit(300)
         setCompanies((data ?? []) as { id: string; name: string }[])
       } catch {
         setCompanies([])

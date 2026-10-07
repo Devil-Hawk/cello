@@ -46,7 +46,7 @@ describe('the order', () => {
   it('reads replies, drafts, follow-ups, recruiters, people to write to, then sent', () => {
     expect(GROUP_TITLES).toEqual(['Replies waiting on you', 'Drafts to approve', 'Follow-ups due', 'New from recruiters', 'People to write to', 'Sent'])
     const out = html({
-      data: { replies: [reply(1)], recruiters: [reply(2, { kind: 'recruiter', applicationId: null, role: null })], writeTo: [{ id: 'w1', name: 'Quinn', title: null, employer: 'Ramp', why: 'In your network, and you have not written to them yet.' }], gmailConnected: true },
+      data: { replies: [reply(1)], recruiters: [reply(2, { kind: 'recruiter', applicationId: null, role: null })], writeTo: [{ id: 'w1', name: 'Quinn', title: null, employer: 'Ramp', email: null, why: 'In your network, and you have not written to them yet.' }], gmailConnected: true },
       due: [due],
     })
     const at = (s: string) => out.indexOf(s)
