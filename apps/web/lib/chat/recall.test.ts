@@ -20,11 +20,14 @@ const rows = () =>
     artifacts: [{ id: 'a1', user_id: 'u1', type: 'comparison', title: 'Comparison of 6 AI roles', chat_turn_id: 't1' }],
   })
 
+/** The hits that rest on what the person typed; a matching chat also brings what it made, tested apart. */
+const said = async (...args: Parameters<typeof recall>) => (await recall(...args)).filter((h) => h.kind !== 'made')
+
 describe('recall', () => {
   it('finds a fact typed in the 40th turn from a new chat, reads it from its row and names its source', async () => {
     const store = inMemoryStore()
     await writeTurnMemories(store, 'u1', turn({ turnId: 't40', typed: 'I will only take roles that pay at least 200k' }))
-    const hits = await recall(rows(), store, 'u1', 'which roles pay at least 200k, like I said')
+    const hits = (await said(rows(), store, 'u1', 'which roles pay at least 200k, like I said'))
     expect(hits).toHaveLength(1)
     expect(hits[0]).toMatchObject({
       kind: 'said',
@@ -40,8 +43,8 @@ describe('recall', () => {
     await writeTurnMemories(store, 'u1', turn({ turnId: 't40', typed: 'I will only take roles that pay at least 200k' }))
     await writeTurnMemories(store, 'u2', turn({ chatId: 'c2', turnId: 'u2t', typed: 'I will only take roles that pay at least 200k' }))
     const db = rows()
-    expect((await recall(db, store, 'u1', 'roles that pay at least 200k')).map((h) => h.chat?.id)).toEqual(['c1'])
-    expect((await recall(db, store, 'u2', 'roles that pay at least 200k')).map((h) => h.chat?.id)).toEqual(['c2'])
+    expect((await said(db, store, 'u1', 'roles that pay at least 200k')).map((h) => h.chat?.id)).toEqual(['c1'])
+    expect((await said(db, store, 'u2', 'roles that pay at least 200k')).map((h) => h.chat?.id)).toEqual(['c2'])
   })
 
   it('drops a hit whose row is gone, and a memory that points at another person\'s row', async () => {
@@ -50,17 +53,17 @@ describe('recall', () => {
     // A forged memory for u1 that names u2's turn.
     await writeTurnMemories(store, 'u1', turn({ chatId: 'c2', turnId: 'u2t', typed: 'roles that pay at least 200k' }))
     const db = rows()
-    expect((await recall(db, store, 'u1', 'roles that pay at least 200k')).map((h) => h.turnId)).toEqual(['t40'])
+    expect((await said(db, store, 'u1', 'roles that pay at least 200k')).map((h) => h.turnId)).toEqual(['t40'])
     db.tables.chat_turns = db.tables.chat_turns.filter((t) => t.id !== 't40')
-    expect(await recall(db, store, 'u1', 'roles that pay at least 200k')).toEqual([])
+    expect(await said(db, store, 'u1', 'roles that pay at least 200k')).toEqual([])
   })
 
   it('drops hits under the similarity floor and memories of other kinds', async () => {
     const store = inMemoryStore()
     await writeTurnMemories(store, 'u1', turn({ turnId: 't40', typed: 'I will only take roles that pay at least 200k' }))
     await store.add('u1', { fact: 'roles that pay at least 200k', scope: 'taste', refs: { chat_id: 'c1', turn_id: 't40' }, isDemo: false })
-    expect(await recall(rows(), store, 'u1', 'pay and many other unrelated words about weather')).toEqual([])
-    expect(await recall(rows(), store, 'u1', 'roles that pay at least 200k')).toHaveLength(1)
+    expect(await said(rows(), store, 'u1', 'pay and many other unrelated words about weather')).toEqual([])
+    expect(await said(rows(), store, 'u1', 'roles that pay at least 200k')).toHaveLength(1)
   })
 
   it('finds yesterday\'s comparison by words when the embedder is down', async () => {
@@ -79,6 +82,16 @@ describe('recall', () => {
       chat: { id: 'c1', title: 'AI roles at fintechs' },
       link: { kind: 'made', table: 'artifacts', id: 'a1', role: 'recalled', source: { chat_id: 'c1', turn_id: 't1' } },
     })
+  })
+
+  it('brings what a matching chat made, with the made text from its current version', async () => {
+    const store = inMemoryStore()
+    await writeTurnMemories(store, 'u1', turn({ turnId: 't1', typed: 'Compare the six AI roles at fintechs' }))
+    const db = rows()
+    db.tables.artifacts[0].current_version = 1
+    db.tables.artifact_versions = [{ artifact_id: 'a1', version: 1, content_text: 'Start with Ramp. | Role | Pay |' }]
+    const hits = await recall(db, store, 'u1', 'Compare the six AI roles at fintechs')
+    expect(hits.find((h) => h.kind === 'made')).toMatchObject({ text: 'Comparison of 6 AI roles. Start with Ramp. | Role | Pay |', link: { kind: 'made', id: 'a1', role: 'recalled', source: { chat_id: 'c1', turn_id: 't1' } } })
   })
 
   it('says nothing found when the embedder is down and the query has no words', async () => {

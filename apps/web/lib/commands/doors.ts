@@ -77,8 +77,8 @@ export function ruleDoor(input: { userId: string; ruleId: string; signal?: Abort
   return { door: 'rule', userId: input.userId, ruleId: input.ruleId, signal: input.signal, admin }
 }
 
-export function chatDoor(input: { userId: string; typed?: string; signal?: AbortSignal }): CommandContext {
-  return { door: 'chat', userId: input.userId, typed: input.typed, signal: input.signal, admin }
+export function chatDoor(input: { userId: string; typed?: string; chat?: { chatId: string; turnId: string }; signal?: AbortSignal }): CommandContext {
+  return { door: 'chat', userId: input.userId, typed: input.typed, chat: input.chat, signal: input.signal, admin }
 }
 
 export function assistantDoor(input: { userId: string; signal?: AbortSignal }): CommandContext {

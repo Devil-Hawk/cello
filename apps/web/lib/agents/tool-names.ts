@@ -34,6 +34,14 @@ export const UNTRUSTED_TOOL_NAMES: ReadonlySet<string> = new Set([
   'search_knowledge',
   'web_search',
   'read_page',
+  // Chat's commands (lib/chat/agent.ts): their results hold postings, names and earlier chats.
+  'roles_find',
+  'roles_get',
+  'roles_compare',
+  'companies_get',
+  'people_find',
+  'chat_recall',
+  'documents_draft',
   // What a specialist hands back about text it read. The orchestrator treats it as data too.
   'task',
 ])

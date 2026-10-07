@@ -53,6 +53,8 @@ export interface CommandContext {
   signal?: AbortSignal
   /** What the person typed this turn, for the Chat door. */
   typed?: string
+  /** The chat and the person's turn a Chat command runs for: what it makes and starts is recorded against them. */
+  chat?: { chatId: string; turnId: string }
   /** A service-role client, built only when a command asks for one. */
   admin: () => AdminClient
   /** Replaces the database counter in tests. */

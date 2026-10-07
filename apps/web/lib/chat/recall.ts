@@ -15,6 +15,9 @@ import type { TurnLink } from './types'
  */
 export const SIMILARITY_FLOOR = 0.35
 
+/** How much of a made thing a recalled hit carries. */
+export const MADE_TEXT_MAX = 400
+
 export interface RecallHit {
   kind: 'said' | 'made' | 'decided' | 'chat'
   /** From the row: the typed line, the made thing's title, the chat's title; the decision's sentence. */
@@ -50,11 +53,14 @@ async function hydrate(db: AdminClient, userId: string, c: Candidate): Promise<R
   const where = chat ? { chat_id: chat.id as string, turn_id: (turn?.id as string | undefined) ?? '' } : undefined
 
   if (c.kind === 'made') {
-    const made = c.artifactId ? await one(db, 'artifacts', 'id, type, title', userId, c.artifactId) : null
+    const made = c.artifactId ? await one(db, 'artifacts', 'id, type, title, current_version', userId, c.artifactId) : null
     if (!made) return null
+    // What the made thing says now, from its row: a comparison opens with its summary, so a recalled one can answer.
+    const { data: version } = await db.from('artifact_versions').select('content_text').eq('artifact_id', made.id as string).eq('version', made.current_version as number).maybeSingle()
+    const body = String((version as { content_text: string } | null)?.content_text ?? '').trim()
     return {
       kind: 'made',
-      text: String(made.title),
+      text: body ? `${made.title}. ${body.slice(0, MADE_TEXT_MAX)}` : String(made.title),
       chat: chat ? { id: chat.id as string, title: String(chat.title) } : null,
       turnId: (turn?.id as string | undefined) ?? null,
       made: { id: made.id as string, type: String(made.type) },
@@ -77,11 +83,11 @@ async function hydrate(db: AdminClient, userId: string, c: Candidate): Promise<R
 
 const WORDS = /\w{3,}/g
 
-/** Meaning first; words when the store cannot search. */
+/** Meaning first; words when the store cannot search or finds nothing. */
 async function candidates(db: AdminClient, store: ChatMemoryStore, userId: string, query: string, limit: number, floor: number): Promise<Candidate[]> {
   try {
     const found = await store.search(userId, query, { limit: limit * 3 })
-    return found
+    const byMeaning = found
       .filter((m) => isChatMemory(m) && (m.score === undefined || m.score >= floor))
       .map((m): Candidate => ({
         kind: m.metadata?.scope === 'chat.said' ? 'said' : m.metadata?.scope === 'chat.made' ? 'made' : 'decided',
@@ -90,17 +96,19 @@ async function candidates(db: AdminClient, store: ChatMemoryStore, userId: strin
         artifactId: m.metadata?.scope === 'chat.made' ? ((m.metadata?.id as string | undefined) ?? null) : null,
         sentence: m.memory,
       }))
+    if (byMeaning.length > 0) return byMeaning
   } catch {
-    const terms = [...new Set(query.toLowerCase().match(WORDS) ?? [])].slice(0, 8)
-    if (terms.length === 0) return []
-    const { data } = await db.rpc('chat_recall_words', { p_user: userId, p_query: terms.join(' or '), p_limit: limit })
-    return ((data as { kind: string; chat_id: string | null; turn_id: string | null; artifact_id: string | null }[] | null) ?? []).map((r): Candidate => ({
-      kind: r.kind === 'turn' ? 'said' : r.kind === 'chat' ? 'chat' : 'made',
-      chatId: r.chat_id,
-      turnId: r.turn_id,
-      artifactId: r.artifact_id,
-    }))
+    // The store cannot search: words below.
   }
+  const terms = [...new Set(query.toLowerCase().match(WORDS) ?? [])].slice(0, 8)
+  if (terms.length === 0) return []
+  const { data } = await db.rpc('chat_recall_words', { p_user: userId, p_query: terms.join(' or '), p_limit: limit })
+  return ((data as { kind: string; chat_id: string | null; turn_id: string | null; artifact_id: string | null }[] | null) ?? []).map((r): Candidate => ({
+    kind: r.kind === 'turn' ? 'said' : r.kind === 'chat' ? 'chat' : 'made',
+    chatId: r.chat_id,
+    turnId: r.turn_id,
+    artifactId: r.artifact_id,
+  }))
 }
 
 /** Up to `limit` hits, best first, each read from its row. Another person's memories are never searched or read. */
@@ -113,6 +121,16 @@ export async function recall(
 ): Promise<RecallHit[]> {
   const limit = opts.limit ?? 5
   const found = await candidates(db, store, userId, query, limit, opts.floor ?? SIMILARITY_FLOOR)
+  // A chat that matches also brings what it made (a comparison, a kept answer), so the answer can name it.
+  const madeHere: Candidate[] = []
+  for (const chatId of [...new Set(found.filter((c) => c.kind !== 'made' && c.chatId).map((c) => c.chatId as string))].slice(0, 3)) {
+    const { data: turns } = await db.from('chat_turns').select('id').eq('chat_id', chatId).eq('user_id', userId).eq('kind', 'person').limit(200)
+    const turnIds = ((turns as { id: string }[] | null) ?? []).map((t) => t.id)
+    if (turnIds.length === 0) continue
+    const { data: made } = await db.from('artifacts').select('id, chat_turn_id').eq('user_id', userId).in('type', ['comparison', 'answer']).in('chat_turn_id', turnIds.slice(0, 200)).order('created_at', { ascending: false }).limit(3)
+    for (const m of (made as { id: string; chat_turn_id: string }[] | null) ?? []) madeHere.push({ kind: 'made', chatId, turnId: m.chat_turn_id, artifactId: m.id })
+  }
+  found.unshift(...madeHere)
   const hits: RecallHit[] = []
   const seen = new Set<string>()
   for (const c of found) {
