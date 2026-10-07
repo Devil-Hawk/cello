@@ -102,16 +102,6 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       'RATIONALE_SAMPLE_SIZE) — capped at 6 before this call ever runs, regardless of how many verdict ids ' +
       "a candidate's own SQL aggregation carries.",
   },
-  'apps/web/lib/clock/routines/roles-check.ts': {
-    calls: [
-      ".in('job_id', ids)",
-      ".in('job_id', drop)",
-      ".in('job_id', hide)",
-      ".in('job_id', show)",
-      ".in('job_id', left)",
-    ],
-    reason: 'every list is a subset of one REJUDGE_PAGE (100) page of the person\'s own held roles, never an owned-id set.',
-  },
   'apps/web/lib/harness/agents/enricher.ts': {
     calls: [".in('id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",
@@ -133,13 +123,13 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     reason: 'knockouts can never exceed the MAX_JOBS (30) batch it was collected from in the same run.',
   },
   'apps/web/lib/harness/copilot-tools.ts': {
-    calls: [".in('id', jobIds)", ".in('id', companyIds)", ".in('id', trgmIds)", ".in('id', contactIds)", ".in('company_id', trackedIds)"],
+    calls: [".in('id', jobIds)", ".in('id', companyIds)", ".in('id', trgmIds)", ".in('id', contactIds)", ".in('viewer_company_id', trackedIds)"],
     reason:
       "loadJobBriefs: jobIds is always ≤20 ids (every caller slices/caps before calling); companyIds is the " +
       'deduped company_id set of those ≤20 job rows. listJobs\' trgmIds and listContacts\' contactIds are both ' +
       "search_*_by_*_trgm()'s p_limit-bounded RPC result (clampLimit'd to ≤15/≤25, hard RPC ceiling 50 — see " +
       '20260816000009_job_search.sql), never an owned-id set. search_roles\' trackedIds is the person\'s own ' +
-      'followed companies (their user_id-scoped watchlist rows); ownership is still enforced by the companies!inner join.',
+      'followed companies (their user_id-scoped watchlist rows); ownership is the viewer_id fence of person_jobs.',
   },
   'apps/web/lib/strategy/datasource.ts': {
     calls: [".in('id', chunk)"],

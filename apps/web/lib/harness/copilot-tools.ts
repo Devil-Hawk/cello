@@ -975,11 +975,11 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
   // ponytail: the id list rides in the URL; a person following hundreds of companies needs a chunked read.
   const trackedIds = tracked.map((c) => c.id)
   const base = (scoped: boolean, columns: string, opts?: { count?: 'exact'; head?: boolean }) => {
-    let q: any = openRolesOnly(ownedJobsQuery(ctx.admin, ctx.userId, columns, opts)).in('company_id', trackedIds)
+    let q: any = openRolesOnly(ownedJobsQuery(ctx.admin, ctx.userId, columns, opts)).in('viewer_company_id', trackedIds)
     if (scoped && hasTargets) q = applyRoleTargets(q, targeting, excludedIds)
     return q
   }
-  const { count, error: countError } = await base(true, 'id, companies!inner(user_id)', { count: 'exact', head: true })
+  const { count, error: countError } = await base(true, 'id', { count: 'exact', head: true })
   if (countError) return cannotRead('the stored roles', countError)
 
   type RoleRow = {
@@ -989,12 +989,12 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
     location: string | null
     is_remote: boolean | null
     posted_at: string | null
-    company_id: string
+    viewer_company_id: string
     match_score: number | null
     is_new: boolean | null
   }
   const find = async (scoped: boolean): Promise<RoleRow[]> => {
-    let q = base(scoped, 'id, title, url, location, is_remote, posted_at, company_id, match_score, is_new, companies!inner(user_id)')
+    let q = base(scoped, 'id, title, url, location, is_remote, posted_at, viewer_company_id, match_score, is_new')
     if (titleM) q = q.or(titleM.keywords.map((k) => `title.ilike.${quote(`%${k}%`)}`).join(','))
     if (placeM) {
       q = q.or(
@@ -1028,8 +1028,8 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
   const jobs = picked.map((r) => ({
     jobId: r.id,
     title: r.title,
-    company: nameById.get(r.company_id) ?? null,
-    companyId: r.company_id,
+    company: nameById.get(r.viewer_company_id) ?? null,
+    companyId: r.viewer_company_id,
     matchScore: r.match_score,
     fresh: r.is_new === true,
     location: r.location,

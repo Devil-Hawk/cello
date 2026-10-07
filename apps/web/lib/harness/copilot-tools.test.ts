@@ -822,7 +822,7 @@ describe('search_roles: a failed read is never an empty answer', () => {
       companies: [{ id: 'co-1', name: 'Anthropic', user_id: 'me' }],
       profiles: [{ id: 'me', preferences: {} }],
     }) as unknown as { from: (t: string) => unknown }
-    const admin = { from: (t: string) => (t === 'jobs' ? failing() : base.from(t)) } as unknown as AdminClient
+    const admin = { from: (t: string) => (t === 'person_jobs' ? failing() : base.from(t)) } as unknown as AdminClient
     const result = (await dispatchTool(baseCtx(admin), 'search_roles', { title: 'forward deployed engineer', place: 'SF' })) as Record<string, unknown>
     expect(result.error).toMatch(/Could not read the stored roles/)
     expect(JSON.stringify(result)).not.toMatch(/0 open roles|No .* roles in/)
