@@ -42,6 +42,11 @@ const SCAN_ROOTS = ['apps/web/app', 'apps/web/lib']
  * reason is why that specific variable can never reach an unbounded size.
  */
 const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
+  'apps/web/lib/harness/copilot-tools.ts': {
+    calls: [".in('company_id', trackedIds)"],
+    reason:
+      "search_roles: the person's own followed companies (their user_id-scoped watchlist rows); ownership is still enforced by the companies!inner join.",
+  },
   'apps/web/lib/targeting/roles.ts': {
     calls: [
       ".in('job_function', t.functions)",
