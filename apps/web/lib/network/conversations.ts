@@ -18,7 +18,7 @@ export interface ReplyRow {
   applicationId: string | null
   /** The application's role, when the thread has one. */
   role: { id: string; title: string; company: string } | null
-  contact: { name: string; title: string | null; employer: string | null } | null
+  contact: { name: string; title: string | null; employer: string | null; email: string | null } | null
 }
 
 export interface WriteToRow {
@@ -26,6 +26,7 @@ export interface WriteToRow {
   name: string
   title: string | null
   employer: string | null
+  email: string | null
   why: string
 }
 
@@ -66,13 +67,13 @@ export async function readConversations(db: SupabaseClient, userId: string, now 
   const contactIds = [...new Set(waiting.map((r) => r.contact_id).filter((x): x is string => !!x))]
   const appIds = [...new Set(waiting.map((r) => r.application_id).filter((x): x is string => !!x))]
   const [{ data: contacts }, { data: apps }] = await Promise.all([
-    contactIds.length ? db.from('contact_touch').select('contact_id, name, title, employer_id, agency_name').eq('user_id', userId).in('contact_id', contactIds.slice(0, 100)) : { data: [] },
+    contactIds.length ? db.from('contact_touch').select('contact_id, name, title, email, employer_id, agency_name').eq('user_id', userId).in('contact_id', contactIds.slice(0, 100)) : { data: [] },
     appIds.length ? db.from('applications').select('id, jobs(id, title, companies(name))').eq('user_id', userId).in('id', appIds.slice(0, 100)) : { data: [] },
   ])
   const employerIds = [...new Set(((contacts ?? []) as { employer_id: string | null }[]).map((c) => c.employer_id).filter((x): x is string => !!x))]
   const employers = new Map<string, string>()
   if (employerIds.length) for (const e of ((await db.from('company_directory').select('id, name').in('id', employerIds.slice(0, 100))).data ?? []) as { id: string; name: string }[]) employers.set(e.id, e.name)
-  const contactOf = new Map(((contacts ?? []) as { contact_id: string; name: string; title: string | null; employer_id: string | null; agency_name: string | null }[]).map((c) => [c.contact_id, { name: c.name, title: c.title, employer: (c.employer_id ? employers.get(c.employer_id) : null) ?? (c.agency_name ? `Agency: ${c.agency_name}` : null) }]))
+  const contactOf = new Map(((contacts ?? []) as { contact_id: string; name: string; title: string | null; email: string | null; employer_id: string | null; agency_name: string | null }[]).map((c) => [c.contact_id, { name: c.name, title: c.title, email: c.email, employer: (c.employer_id ? employers.get(c.employer_id) : null) ?? (c.agency_name ? `Agency: ${c.agency_name}` : null) }]))
   const roleOf = new Map(((apps ?? []) as unknown as { id: string; jobs: { id: string; title: string; companies: { name: string } | null } | null }[]).map((a) => [a.id, a.jobs ? { id: a.jobs.id, title: a.jobs.title, company: a.jobs.companies?.name ?? '' } : null]))
 
   const shape = (r: (typeof rows)[number]): ReplyRow => ({
@@ -96,17 +97,18 @@ export async function readConversations(db: SupabaseClient, userId: string, now 
   // people to write to: in the network, nothing exchanged yet
   const { data: quiet } = await db
     .from('contact_touch')
-    .select('contact_id, name, title, kind, employer_id, agency_name, address_kind')
+    .select('contact_id, name, title, email, kind, employer_id, agency_name, address_kind')
     .eq('user_id', userId)
     .eq('sent_n', 0)
     .eq('received_n', 0)
     .is('last_contact_at', null)
     .order('created_at', { ascending: false })
     .limit(5)
-  const writeTo = ((quiet ?? []) as { contact_id: string; name: string; title: string | null; employer_id: string | null; agency_name: string | null }[]).map((c) => ({
+  const writeTo = ((quiet ?? []) as { contact_id: string; name: string; title: string | null; email: string | null; employer_id: string | null; agency_name: string | null }[]).map((c) => ({
     id: c.contact_id,
     name: c.name,
     title: c.title,
+    email: c.email,
     employer: c.agency_name ? `Agency: ${c.agency_name}` : (c.employer_id ? (employers.get(c.employer_id) ?? null) : null),
     why: 'In your network, and you have not written to them yet.',
   }))

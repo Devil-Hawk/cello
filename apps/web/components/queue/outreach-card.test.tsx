@@ -85,7 +85,7 @@ describe('a template draft', () => {
     ['unusable_output', "The model&#x27;s answer could not be used. Draft again, or edit this one before sending."],
   ] as const)('says so in the card, with the next step, for %s', (template_reason, text) => {
     const html = render({ used_llm: false, template_reason })
-    expect(html).toContain('Standard template, not a written draft')
+    expect(html).toContain('Plain template, not a written draft')
     expect(html).toContain(text.replace("'", '&#x27;'))
     // In the DOM as text, not a title attribute a phone never shows.
     expect(html).not.toMatch(/title="[^"]*template/i)
@@ -96,7 +96,7 @@ describe('a template draft', () => {
   })
 
   it.each([[true], [null], [undefined]])('shows no notice when used_llm is %s', (used_llm) => {
-    expect(render({ used_llm })).not.toContain('Standard template')
+    expect(render({ used_llm })).not.toContain('Plain template')
   })
 
   it('does not offer a paid check on text no model wrote', () => {

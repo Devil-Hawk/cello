@@ -14,6 +14,7 @@ export default function ConversationsPage() {
   const [due, setDue] = useState<DueNudge[]>([])
   const [error, setError] = useState<string | null>(null)
   const [cap, setCap] = useState(10)
+  const [focusDraft, setFocusDraft] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -36,6 +37,7 @@ export default function ConversationsPage() {
 
   useEffect(() => {
     void load()
+    setFocusDraft(new URLSearchParams(window.location.search).get('draft'))
   }, [load])
 
   async function handled(messageId: string) {
@@ -61,7 +63,7 @@ export default function ConversationsPage() {
       ) : data === null ? (
         <p className="r-meta">Reading.</p>
       ) : (
-        <ConversationsView data={data} outreach={outreach} due={due} gmailConnected={data.gmailConnected} limit={{ cap, sentToday }} onHandled={handled} onChanged={load} />
+        <ConversationsView data={data} outreach={outreach} due={due} gmailConnected={data.gmailConnected} limit={{ cap, sentToday }} onHandled={handled} onChanged={load} focusDraft={focusDraft} />
       )}
     </div>
   )

@@ -3,9 +3,9 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { ConversationsView, GROUP_TITLES, approveAllIds, type ConversationsViewProps } from './conversations-view'
+import { ConversationsView, GROUP_TITLES, approveAllIds, sendDrafts, type ConversationsViewProps } from './conversations-view'
 import { ReplyRow } from './reply-row'
-import { PersonSheet } from './person-sheet'
+import { PersonSheet, SheetActions, markContacted } from './person-sheet'
 import type { OutreachRow } from './outreach-card'
 import type { ReplyRow as Reply } from '@/lib/network/conversations'
 import type { DueNudge } from '@/lib/network/nudges'
@@ -23,7 +23,7 @@ const reply = (i: number, over: Partial<Reply> = {}): Reply => ({
   kind: 'interview',
   applicationId: `a${i}`,
   role: { id: `r${i}`, title: 'Staff Machine Learning Engineer, Applied Research and Platform', company: 'Petrichor Labs' },
-  contact: { name: `Marcus ${i}`, title: 'Recruiter', employer: 'Petrichor Labs' },
+  contact: { name: `Marcus ${i}`, title: 'Recruiter', employer: 'Petrichor Labs', email: `marcus${i}@petrichor.ai` },
   ...over,
 })
 
@@ -73,10 +73,16 @@ describe('a reply', () => {
     expect((out.match(/class="r-name/g) ?? []).length).toBeGreaterThanOrEqual(3)
     expect(out).not.toMatch(/truncate|line-clamp/)
   })
-  it('offers Read all, Write my own reply, Open in Gmail and I have handled this, and nothing that sends', () => {
+  it('offers Read all, Write my own reply, Draft reply, Open in Gmail and I have handled this, and nothing that sends', () => {
     const out = renderToStaticMarkup(<ReplyRow r={reply(1)} onHandled={() => undefined} onPerson={() => undefined} />)
-    for (const label of ['Read all', 'Write my own reply', 'Open in Gmail', 'I have handled this']) expect(out).toContain(label)
+    for (const label of ['Read all', 'Write my own reply', 'Draft reply', 'Open in Gmail', 'I have handled this']) expect(out).toContain(label)
     expect(out).not.toMatch(/Approve|Send now|Send</)
+  })
+  it('offers no Draft reply without an address, and no Gmail links on a pasted email', () => {
+    expect(renderToStaticMarkup(<ReplyRow r={reply(1, { contact: { name: 'M', title: null, employer: null, email: null } })} onHandled={() => undefined} onPerson={() => undefined} />)).not.toContain('Draft reply')
+    const pasted = renderToStaticMarkup(<ReplyRow r={reply(1, { threadId: 'paste:abc' })} onHandled={() => undefined} onPerson={() => undefined} />)
+    expect(pasted).not.toMatch(/Open in Gmail|Read all|Write my own reply/)
+    expect(pasted).toContain('I have handled this')
   })
   it('shows the first lines and Cello’s read of the kind', () => {
     const out = renderToStaticMarkup(<ReplyRow r={reply(1)} onHandled={() => undefined} onPerson={() => undefined} />).replace(/<!-- -->/g, '')
@@ -98,5 +104,50 @@ describe('states', () => {
 describe('the Person sheet', () => {
   it('renders nothing while closed', () => {
     expect(renderToStaticMarkup(<PersonSheet person={null} onClose={() => undefined} />)).toBe('')
+  })
+  const person = { id: 'c1', name: 'Marcus Reed', title: 'Recruiter', employer: 'Petrichor Labs', email: 'marcus@petrichor.ai' }
+  it('offers Email, Mark contacted today and Open, which goes to the person’s page', () => {
+    const out = renderToStaticMarkup(<SheetActions person={person} note={null} onMark={() => undefined} />)
+    expect(out).toContain('href="mailto:marcus@petrichor.ai"')
+    expect(out).toContain('Mark contacted today')
+    expect(out).toMatch(/href="\/network\/c1"[^>]*>Open</)
+  })
+  it('shows no Email when the address is not known', () => {
+    expect(renderToStaticMarkup(<SheetActions person={{ ...person, email: null }} note={null} onMark={() => undefined} />)).not.toContain('Email')
+  })
+  it('marks the person contacted through people.mark_contacted and says what happened', async () => {
+    const call = vi.fn(async () => ({}))
+    expect(await markContacted('c1', call as never)).toBe('Marked as contacted today.')
+    expect(call).toHaveBeenCalledWith('/api/network', 'people.mark_contacted', { id: 'c1' })
+    expect(await markContacted('c1', (async () => { throw new Error('That person is not in your network.') }) as never)).toBe('That person is not in your network.')
+  })
+  it('opens from a reply with the contact’s email', () => {
+    const out = renderToStaticMarkup(<SheetActions person={{ ...person, email: reply(3).contact?.email }} note={null} onMark={() => undefined} />)
+    expect(out).toContain('mailto:marcus3@petrichor.ai')
+  })
+})
+
+describe('Approve and send all sends once per draft', () => {
+  it('posts each draft once, in order, and stops at the first refusal', async () => {
+    const post = vi.fn(async (id: string) => ({ ok: id !== 'd3' }))
+    expect(await sendDrafts(['d1', 'd2', 'd3', 'd4'], post)).toBe(2)
+    expect(post.mock.calls.map((c) => c[0])).toEqual(['d1', 'd2', 'd3'])
+    const all = vi.fn(async () => ({ ok: true }))
+    expect(await sendDrafts(['d1', 'd2', 'd3'], all)).toBe(3)
+    expect(all).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('the menu and the draft link', () => {
+  it('has a menu key, and offers Paste an email beside Connect Gmail when Gmail is off', () => {
+    expect(html({})).toContain('aria-label="Conversations menu"')
+    const off = html({ gmailConnected: false })
+    expect(off).toContain('Connect Gmail to see replies here, or paste an email.')
+    expect(off).toContain('Paste an email')
+  })
+  it('marks the draft a link asked for', () => {
+    const out = html({ outreach: [draft(1), draft(2)], focusDraft: 'd2' })
+    expect(out).toMatch(/id="draft-d2" class="[^"]*ring-2/)
+    expect(out).not.toMatch(/id="draft-d1" class="[^"]*ring-2/)
   })
 })

@@ -17,19 +17,32 @@ export interface SheetPerson {
   email?: string | null
 }
 
+/** Mark contacted today, as the sentence the sheet shows: what was saved, or why it was not. */
+export async function markContacted(id: string, call: typeof callCommand = callCommand): Promise<string> {
+  try {
+    await call('/api/network', 'people.mark_contacted', { id })
+    return 'Marked as contacted today.'
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Could not save that.'
+  }
+}
+
+/** The three actions and their note, without the dialog around them. */
+export function SheetActions({ person, note, onMark }: { person: SheetPerson; note: string | null; onMark: () => void }) {
+  return (
+    <>
+      <div className="flex flex-wrap gap-2">
+        {person.email && <Key asChild><a href={`mailto:${person.email}`}>Email</a></Key>}
+        <Key variant="raised" onClick={onMark}>Mark contacted today</Key>
+        <Key asChild variant="raised"><Link href={`/network/${person.id}`}>Open</Link></Key>
+      </div>
+      {note && <p className="r-meta" role="status">{note}</p>}
+    </>
+  )
+}
+
 export function PersonSheet({ person, onClose }: { person: SheetPerson | null; onClose: () => void }) {
   const [note, setNote] = useState<string | null>(null)
-
-  async function mark() {
-    if (!person) return
-    try {
-      await callCommand('/api/network', 'people.mark_contacted', { id: person.id })
-      setNote('Marked as contacted today.')
-    } catch (e) {
-      setNote(e instanceof Error ? e.message : 'Could not save that.')
-    }
-  }
-
   return (
     <Dialog open={!!person} onOpenChange={(open) => !open && (setNote(null), onClose())}>
       <DialogContent>
@@ -37,12 +50,7 @@ export function PersonSheet({ person, onClose }: { person: SheetPerson | null; o
           <>
             <DialogTitle>{person.name}</DialogTitle>
             <DialogDescription>{[person.title, person.employer].filter(Boolean).join(' at ') || 'Employer not known'}</DialogDescription>
-            <div className="flex flex-wrap gap-2">
-              {person.email && <Key asChild><a href={`mailto:${person.email}`}>Email</a></Key>}
-              <Key variant="raised" onClick={mark}>Mark contacted today</Key>
-              <Key asChild variant="raised"><Link href={`/network/${person.id}`}>Open</Link></Key>
-            </div>
-            {note && <p className="r-meta" role="status">{note}</p>}
+            <SheetActions person={person} note={note} onMark={async () => setNote(await markContacted(person.id))} />
           </>
         )}
       </DialogContent>

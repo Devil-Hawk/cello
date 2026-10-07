@@ -1,7 +1,8 @@
 // The people commands refuse what the rule and the person's own rows forbid, before anything is written.
 
 import { describe, expect, it, vi } from 'vitest'
-import { networkSetRule, peopleAdd, peopleEdit, peopleImport } from './people'
+import { conversationsPaste, networkSetRule, peopleAdd, peopleEdit, peopleImport } from './people'
+import type { CommandContext } from '../define'
 
 vi.mock('@/lib/measures/owner', () => ({ isOwner: () => false }))
 
@@ -31,5 +32,27 @@ describe('people input', () => {
   it('refuses a forged owner and an unknown field', () => {
     expect(peopleEdit.input.safeParse({ id: 'c1', user_id: 'someone-else' }).success).toBe(false)
     expect(peopleImport.input.safeParse({ rows: [] }).success).toBe(false)
+  })
+})
+
+describe('conversations.paste', () => {
+  it('needs the email’s text, and refuses a forged owner', () => {
+    expect(conversationsPaste.input.safeParse({ subject: 'Hi', body: '' }).success).toBe(false)
+    expect(conversationsPaste.input.safeParse({ subject: 'Hi', body: 'Can you talk?', user_id: 'x' }).success).toBe(false)
+    expect(conversationsPaste.input.safeParse({ from: 'M@Petrichor.ai', subject: 'Hi', body: 'Can you talk?' }).data?.from).toBe('m@petrichor.ai')
+  })
+  it('stores the first lines as the person’s own mail, tied to a known contact, never the whole body', async () => {
+    const insert = vi.fn(async () => ({ error: null }))
+    const chain: Record<string, unknown> = {}
+    for (const k of ['select', 'eq', 'ilike', 'limit']) chain[k] = () => chain
+    chain.maybeSingle = async () => ({ data: { id: 'c1' } })
+    const ctx = { userId: 'u1', supabase: { from: () => chain }, admin: () => ({ from: () => ({ insert }) }) } as unknown as CommandContext
+    const body = Array.from({ length: 12 }, (_, n) => `line ${n}`).join('\n')
+    const out = await conversationsPaste.run(ctx, { from: 'marcus@petrichor.ai', subject: 'Tuesday', body })
+    expect(out).toEqual({ ok: true, matched: true })
+    const row = insert.mock.calls[0][0] as Record<string, unknown>
+    expect(row).toMatchObject({ user_id: 'u1', contact_id: 'c1', direction: 'in', kind: 'reply', origin: 'person', trust: 'person', from_domain: 'petrichor.ai' })
+    expect(String(row.gmail_message_id)).toMatch(/^paste:/)
+    expect(String(row.excerpt).split('\n')).toHaveLength(6)
   })
 })

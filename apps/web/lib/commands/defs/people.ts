@@ -547,7 +547,41 @@ export const conversationsHandled = personCommand({
   },
 })
 
-export const conversationsCommands: AnyCommand[] = [conversationsHandled]
+// "Paste an email": mail the person has outside Gmail, stored as the same kind of row a read would make (the first
+// lines only, never the body), as the person's own: origin and trust say so. It waits in Conversations like a reply.
+export const conversationsPaste = personCommand({
+  id: 'conversations.paste',
+  label: 'Paste an email',
+  input: z.strictObject({ from: z.string().trim().toLowerCase().email().max(200).optional(), subject: text(200), body: text(20000).min(1) }),
+  measure: 'S8',
+  async run(ctx, i) {
+    const { excerptOf } = await import('@/lib/gmail/messages')
+    let contactId: string | null = null
+    if (i.from) {
+      const { data } = await db(ctx).from('contacts').select('id').eq('user_id', ctx.userId).ilike('email', i.from.replace(/[\\%_]/g, '\\$&')).limit(1).maybeSingle()
+      contactId = (data as { id: string } | null)?.id ?? null
+    }
+    const key = `paste:${crypto.randomUUID()}`
+    const { error } = await ctx.admin().from('messages').insert({
+      user_id: ctx.userId,
+      gmail_message_id: key,
+      thread_id: key,
+      contact_id: contactId,
+      direction: 'in',
+      sent_at: new Date().toISOString(),
+      from_domain: i.from ? i.from.split('@')[1] : null,
+      subject: i.subject,
+      excerpt: excerptOf(i.body),
+      kind: 'reply',
+      origin: 'person',
+      trust: 'person',
+    })
+    if (error) throw new Error('Could not save that email.')
+    return { ok: true, matched: !!contactId }
+  },
+})
+
+export const conversationsCommands: AnyCommand[] = [conversationsHandled, conversationsPaste]
 
 export const peopleCommands: AnyCommand[] = [
   peopleList,
