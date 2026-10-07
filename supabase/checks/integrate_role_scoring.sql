@@ -178,6 +178,18 @@ begin
 end;
 $$;
 
+-- Naming a job the person does not hold records nothing, and copies none of its text.
+do $$
+declare f record; n integer;
+begin
+  select * into f from fx;
+  delete from public.person_roles where user_id = f.user_b and job_id = f.live_job;
+  insert into public.applications (user_id, job_id, stage, source) values (f.user_b, f.live_job, 'applied', 'triage');
+  select count(*) into n from public.role_reactions where user_id = f.user_b;
+  if n <> 0 then raise exception 'an application for a job with no person_roles row snapshotted it'; end if;
+end;
+$$;
+
 -- The chance distillation counts through person_roles.
 do $$
 declare f record; n integer;
