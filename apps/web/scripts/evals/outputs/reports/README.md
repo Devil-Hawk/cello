@@ -26,7 +26,7 @@ the code in this branch (after) and the frozen release/1 code in `../legacy`
   unsupported claims on 3 of 4 items, one call returned no content), so no cover
   letter row is recorded.
 
-The writer-backed numbers (outreach and cover letters from model drafts, prep,
+The writer-backed numbers (outreach and cover letters from model drafts,
 research, the follow-up line) have not been measured. On 2026-10-06, after the
 free pool reset, `google/gemma-4-31b-it:free` and `gemma-4-26b-a4b-it:free`
 answered HTTP 429 "temporarily rate-limited upstream" (Google AI Studio's shared
