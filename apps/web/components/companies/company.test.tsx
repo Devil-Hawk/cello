@@ -253,6 +253,24 @@ describe('the first screen', () => {
     expect(html).not.toContain('Follow reads its site')
     expect(html).not.toContain(`Search Fixture Employer 001`)
     expect(emailLine(null)).toBe("Cello has not found this employer's job site yet.")
+    expect(text(html)).not.toContain('Read in rotation')
+  })
+
+  it('says a followed employer with no job site cannot be read and offers Stop following, not Add its careers page', () => {
+    const data = fixtureCompany({ state: 'email', employerId: null, open: null, forYou: 0, kept: [], field: null, facts: [], following: true, check: null, lastReadAt: null })
+    const t = text(view(data))
+    expect(t).toContain("Cello cannot read Fixture Employer 001's site: it asks for a human check.")
+    expect(t).toContain('Open their careers site')
+    expect(t).toContain('Stop following')
+    expect(t).not.toContain('Add its careers page')
+  })
+
+  it('leads with the next step with this employer as the primary button, and draws nothing when there is none', () => {
+    const data = fixtureCompany({ nextStep: { sentence: 'Marcus asked for your availability 2 days ago.', label: 'Draft reply', href: '/applications/a1' } })
+    const html = view(data)
+    expect(text(html)).toContain('Marcus asked for your availability 2 days ago.')
+    expect(html).toMatch(/<a [^>]*href="\/applications\/a1"[^>]*>Draft reply<\/a>/)
+    expect(text(view())).not.toContain('Draft reply')
   })
 })
 

@@ -18,9 +18,11 @@ import type { FitRequirement, RoleFitView } from '@/lib/fit/types'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { PROVIDER_SUBMIT_FACTS } from '@/lib/ats-apply/capability'
 import { loadTargets } from '@/lib/ingest/reader/targets'
+import { loadNeedsYou, type NeedsYouRow } from '@/lib/needs-you'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { getRoleType } from '@/lib/jobs/role-types/taxonomy'
 import { companyHref } from '@/lib/routes/companies'
+import { recordHref } from '@/lib/routes/roles'
 import { resolveConstraints } from '@/lib/scoring/constraints'
 import { OnJobs } from '@/lib/scoring/person-roles-query'
 import { fromReaderRequirements } from '@/lib/scoring/posting-requirements'
@@ -119,7 +121,12 @@ export interface CompanyData {
   remove: { applications: number; conversations: number; people: number; notes: boolean } | null
   needsSponsorship: boolean
   typeOptions: { id: string; label: string }[]
+  /** The first row of Needs you that is about this employer: what waits on the person here, and where its button goes. */
+  nextStep: { sentence: string; label: string; href: string } | null
 }
+
+/** Where a Needs you button goes: a route as it stands, else the page of what the row is about (the same rule Today uses). */
+const stepHref = (r: NeedsYouRow) => (r.button.command.startsWith('/') ? r.button.command : r.target.kind === 'role' ? recordHref(r.target.id) : r.target.kind === 'application' ? '/pipeline' : '/today')
 
 const day = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
 const labelOf = (id: string) => getRoleType(id)?.label ?? null
@@ -185,12 +192,13 @@ export async function readCompany(db: Db, userId: string, r: Extract<Resolved, {
   const employer = r.kind === 'directory' ? r.employer : null
   const own = r.own
   const employerId = employer?.id ?? null
-  const [profile, counts, checks, stats, kept] = await Promise.all([
+  const [profile, counts, checks, stats, kept, needs] = await Promise.all([
     db.from('profiles').select('preferences').eq('id', userId).maybeSingle(),
     db.rpc('role_counts', { p_by: 'employer' }),
     checksStatus(db, admin, new Date(nowMs)).catch(() => null),
     employerId && admin ? admin.from('employer_stats').select('role_type, open_count, opened_30d, opened_90d, closed_count, median_lifetime_days, stated_pay, read_at').eq('employer_id', employerId).limit(500) : Promise.resolve({ data: [] }),
     keptRoles(db, employerId, own?.id ?? null, { limit: 5 }),
+    loadNeedsYou(db, userId, new Date(nowMs)).catch(() => null),
   ])
   const prefs = (profile.data as { preferences?: unknown } | null)?.preferences ?? null
   const targeting = resolveTargeting(prefs)
@@ -272,7 +280,13 @@ export async function readCompany(db: Db, userId: string, r: Extract<Resolved, {
     remove,
     needsSponsorship,
     typeOptions: typeOptionsFor(prefs),
+    nextStep: nextStepOf(needs?.rows ?? [], [employerId, own?.id]),
   }
+}
+
+function nextStepOf(rows: readonly NeedsYouRow[], ids: (string | null | undefined)[]): CompanyData['nextStep'] {
+  const r = rows.find((x) => x.companyId !== null && ids.includes(x.companyId))
+  return r ? { sentence: r.sentence, label: r.button.label, href: stepHref(r) } : null
 }
 
 // ---------------------------------------------------------------------------

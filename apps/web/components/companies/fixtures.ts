@@ -112,6 +112,7 @@ export function fixtureCompany(over: Partial<CompanyData> = {}): CompanyData {
     remove: { applications: 2, conversations: 1, people: 3, notes: false },
     needsSponsorship: false,
     typeOptions: fixtureTypeOptions,
+    nextStep: null,
     ...over,
   }
 }

@@ -121,6 +121,7 @@ const CLAUSE: Record<string, string> = {
   stale: 'no new role on its board in 120 days',
   other_owner: 'its board now belongs to another employer',
   not_linked: 'its board no longer links to it',
+  human_check: 'it asks for a human check',
 }
 
 /** "Cello cannot read Apple's site: its job board is gone." */

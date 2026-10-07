@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ liveRoles: vi.fn(), previewPosting: vi.fn(), admin: { current: null as unknown } }))
+const mocks = vi.hoisted(() => ({ liveRoles: vi.fn(), previewPosting: vi.fn(), admin: { current: null as unknown }, needs: vi.fn() }))
+
+vi.mock('@/lib/needs-you', () => ({ loadNeedsYou: mocks.needs }))
 
 vi.mock('@/lib/clock/status', () => ({ checksStatus: async () => ({ rolesCheck: null }) }))
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => mocks.admin.current }))
@@ -132,6 +134,18 @@ describe('hiring in the field', () => {
 })
 
 describe('readCompany', () => {
+  beforeEach(() => mocks.needs.mockResolvedValue({ rows: [], count: 0 }))
+
+  it('carries the first Needs you row about this employer and no row about another', async () => {
+    const step = (companyId: string, sentence: string) => ({ companyId, sentence, target: { kind: 'application', id: 'a1' }, button: { label: 'Open', command: `/applications/a1` } })
+    mocks.needs.mockResolvedValue({ rows: [step('other-company', 'Not yours.'), step(OWN, 'Marcus asked for your availability 2 days ago.')], count: 2 })
+    const { db } = fakeDb((t) => (t === 'profiles' ? { preferences: {} } : []))
+    const data = await readCompany(db, 'u1', { kind: 'directory', employer: employer() as never, own: own() })
+    expect(data.nextStep).toEqual({ sentence: 'Marcus asked for your availability 2 days ago.', label: 'Open', href: '/applications/a1' })
+    mocks.needs.mockResolvedValue({ rows: [step('other-company', 'Not yours.')], count: 1 })
+    expect((await readCompany(db, 'u1', { kind: 'directory', employer: employer() as never, own: own() })).nextStep).toBeNull()
+  })
+
   it('reads the first screen from stored rows and writes nothing', async () => {
     const { db, writes, rpcCalls } = fakeDb((t) => (t === 'profiles' ? { preferences: {} } : []), { role_counts: [{ key: EMP, n: 12 }] })
     const data = await readCompany(db, 'u1', { kind: 'directory', employer: employer() as never, own: null })

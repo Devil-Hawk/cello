@@ -31,7 +31,7 @@ const day = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 
 export function CompanyView({ data, query, live, now = Date.now() }: CompanyViewProps) {
   const open = data.state === 'directory'
   const site = data.careersUrl ?? (data.domain ? `https://${data.domain}` : null)
-  const checks = checksLine({ following: data.following, lastReadAt: data.lastReadAt, check: data.check }, now)
+  const checks = open ? checksLine({ following: data.following, lastReadAt: data.lastReadAt, check: data.check }, now) : null
   const searching = query.q !== null
   const listOpen = open && (searching || query.all)
   const lines = data.field ? fieldLines(data.field, data.name) : []
@@ -53,11 +53,22 @@ export function CompanyView({ data, query, live, now = Date.now() }: CompanyView
           </div>
         </div>
 
+        {data.nextStep && (
+          <div className="space-y-2">
+            <p className="r-body">{data.nextStep.sentence}</p>
+            <Key asChild variant="ink">
+              <Link href={data.nextStep.href} prefetch={false}>
+                {data.nextStep.label}
+              </Link>
+            </Key>
+          </div>
+        )}
+
         {open && (
           <>
             <RowActions item={{ id: data.id, companyId: data.companyId, name: data.name, following: data.following, pinned: data.pinned, cannotRead: data.cannotRead }} manage />
             {data.following && data.kept[0] && (
-              <Key asChild variant="ink">
+              <Key asChild variant={data.nextStep ? 'raised' : 'ink'}>
                 <Link href={recordHref(data.kept[0].id)}>Apply</Link>
               </Key>
             )}
@@ -107,9 +118,25 @@ export function CompanyView({ data, query, live, now = Date.now() }: CompanyView
           <h2 id="email" className="sr-only">
             Its job site
           </h2>
-          <p className="r-body">{emailLine(data.appliedAt)}</p>
-          <p className="r-meta">Add its careers page to follow it and see its roles.</p>
-          <AddOrFind />
+          {data.following ? (
+            <>
+              <p className="r-body">
+                {cannotReadSite(data.name, 'human_check')}{' '}
+                {site && (
+                  <a href={site} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">
+                    Open their careers site
+                  </a>
+                )}
+              </p>
+              {data.companyId && <RowActions item={{ id: data.id, companyId: data.companyId, name: data.name, following: true, pinned: data.pinned, cannotRead: 'human_check' }} manage />}
+            </>
+          ) : (
+            <>
+              <p className="r-body">{emailLine(data.appliedAt)}</p>
+              <p className="r-meta">Add its careers page to follow it and see its roles.</p>
+              <AddOrFind />
+            </>
+          )}
         </section>
       )}
 
