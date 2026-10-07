@@ -10,6 +10,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 import { Key } from '@/components/ui/key'
 import { ago } from '@/lib/network/format'
+import { readType } from '@/lib/artifacts/types'
 import type { ApplicationAttempt, AttemptOutcome } from '@/lib/applications/types'
 import { act } from './data'
 import { changedLines } from './logic'
@@ -32,7 +33,7 @@ export interface DocsBundle {
   attempts: ApplicationAttempt[]
 }
 
-const TYPE_LABEL: Record<string, string> = { resume: 'Resume', cover_letter: 'Cover letter', outreach_email: 'Message', dossier: 'Company notes', shortlist: 'Shortlist' }
+const TYPE_LABEL: Record<string, string> = { resume: 'Resume', cover_letter: 'Cover letter', message: 'Message', research: 'Company notes', shortlist: 'Shortlist' }
 
 const OUTCOME: Record<AttemptOutcome, string> = {
   sent: 'The site confirmed it',
@@ -124,7 +125,7 @@ export function DocumentsPanel({ bundle, busy, note, onNotSent }: { bundle: Docs
             ) : (
               <li key={d.id} className="py-3">
                 <p className="r-name">{d.title}</p>
-                <p className="r-meta">{TYPE_LABEL[d.type] ?? d.type}, {ago(d.created_at)}</p>
+                <p className="r-meta">{TYPE_LABEL[readType(d.type) ?? d.type] ?? d.type}, {ago(d.created_at)}</p>
                 {d.version?.content_text && (
                   <details className="r-meta">
                     <summary className="min-h-11 cursor-pointer leading-[44px]">Read it</summary>

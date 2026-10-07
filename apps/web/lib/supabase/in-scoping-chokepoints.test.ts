@@ -56,6 +56,10 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     calls: [".in('status', from)"],
     reason: 'from is a list of approval statuses, at most the five values of the status enum: a fixed set, and the row is already fenced by id and user_id.',
   },
+  'apps/web/lib/network/sync.ts': {
+    calls: [".in('thread_id', ids)", ".in('gmail_message_id', mids)"],
+    reason: "ids is sliced to THREADS_PER_TICK (50) one line above its use; mids are one Gmail thread's message ids, already fenced by user_id.",
+  },
   'apps/web/lib/access/demo-wipe.ts': {
     calls: [".in('user_id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",
