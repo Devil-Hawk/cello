@@ -92,7 +92,12 @@ export async function createReceipt(
   if (error) throw new Error(`createReceipt failed: ${error.message}`)
   const receipt = toApplicationReceipt(data as ApplicationReceiptRow)
 
-  const { data: job } = await client.from('jobs').select('company_id').eq('id', application.job_id).maybeSingle()
+  const { data: job } = await client
+    .from('person_jobs')
+    .select('company_id:viewer_company_id')
+    .eq('viewer_id', userId)
+    .eq('id', application.job_id)
+    .maybeSingle()
 
   await recordInteraction(client, {
     userId,

@@ -160,9 +160,10 @@ export async function backfillActivities(admin: Admin, apply: boolean, limit: nu
     const appById = new Map(((apps ?? []) as { id: string; user_id: string; job_id: string | null }[]).map((a) => [a.id, a]))
     const jobIds = [...new Set([...appById.values()].map((a) => a.job_id).filter((j): j is string => !!j))]
     const { data: jobs, error: jobsError } =
-      jobIds.length > 0 ? await admin.from('jobs').select('id, company_id').in('id', jobIds) : { data: [], error: null }
+      jobIds.length > 0 ? await admin.from('person_jobs').select('id, viewer_id, company_id:viewer_company_id').in('id', jobIds) : { data: [], error: null }
     if (jobsError) throw new Error(`load jobs for activities page: ${jobsError.message}`)
-    const companyByJob = new Map(((jobs ?? []) as { id: string; company_id: string | null }[]).map((j) => [j.id, j.company_id]))
+    // A shared role has one jobs row; the company is the person's own, so the key is (person, job).
+    const companyByJob = new Map(((jobs ?? []) as { id: string; viewer_id: string; company_id: string | null }[]).map((j) => [`${j.viewer_id}|${j.id}`, j.company_id]))
 
     for (const r of rows) {
       if (limit && counts.eligible >= limit) break
@@ -180,7 +181,7 @@ export async function backfillActivities(admin: Admin, apply: boolean, limit: nu
         const kind: InteractionKind = r.type === 'interview_scheduled' ? 'interview' : 'stage_change'
         await recordInteraction(admin, {
           userId: app.user_id,
-          companyId: app.job_id ? companyByJob.get(app.job_id) ?? null : null,
+          companyId: app.job_id ? companyByJob.get(`${app.user_id}|${app.job_id}`) ?? null : null,
           jobId: app.job_id,
           applicationId: r.application_id,
           kind,
@@ -276,9 +277,10 @@ export async function backfillReceipts(admin: Admin, apply: boolean, limit: numb
     const jobByApp = new Map(((apps ?? []) as { id: string; job_id: string | null }[]).map((a) => [a.id, a.job_id]))
     const jobIds = [...new Set([...jobByApp.values()].filter((j): j is string => !!j))]
     const { data: jobs, error: jobsError } =
-      jobIds.length > 0 ? await admin.from('jobs').select('id, company_id').in('id', jobIds) : { data: [], error: null }
+      jobIds.length > 0 ? await admin.from('person_jobs').select('id, viewer_id, company_id:viewer_company_id').in('id', jobIds) : { data: [], error: null }
     if (jobsError) throw new Error(`load jobs for receipts page: ${jobsError.message}`)
-    const companyByJob = new Map(((jobs ?? []) as { id: string; company_id: string | null }[]).map((j) => [j.id, j.company_id]))
+    // A shared role has one jobs row; the company is the person's own, so the key is (person, job).
+    const companyByJob = new Map(((jobs ?? []) as { id: string; viewer_id: string; company_id: string | null }[]).map((j) => [`${j.viewer_id}|${j.id}`, j.company_id]))
 
     for (const r of rows) {
       if (limit && counts.eligible >= limit) break
@@ -287,7 +289,7 @@ export async function backfillReceipts(admin: Admin, apply: boolean, limit: numb
         const jobId = jobByApp.get(r.application_id) ?? null
         await recordInteraction(admin, {
           userId: r.user_id,
-          companyId: jobId ? companyByJob.get(jobId) ?? null : null,
+          companyId: jobId ? companyByJob.get(`${r.user_id}|${jobId}`) ?? null : null,
           jobId,
           applicationId: r.application_id,
           kind: 'application_submitted',

@@ -37,9 +37,9 @@ export function supabaseRequirementsRows(db: Db, userId: string, dryRun = false)
   return {
     async pending(limit) {
       const { data, error } = await db
-        .from('jobs')
-        .select('id, title, description, location, salary_range, requirements, companies!inner(user_id)')
-        .eq('companies.user_id', userId)
+        .from('person_jobs')
+        .select('id, title, description, location, salary_range, requirements')
+        .eq('viewer_id', userId)
         .eq('requirements->>skills_resolved', 'false')
         .is('requirements->>model_checked_at', null)
         .or('still_open.is.null,still_open.eq.true')

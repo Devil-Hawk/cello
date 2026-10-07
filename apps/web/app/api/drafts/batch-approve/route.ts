@@ -61,6 +61,7 @@ import {
 import { parseMatchDetails, type MatchDetails } from '@/components/jobs/match-types'
 import { logApiError } from '@/lib/observability/log'
 import { unjudgedCvTailorDraftIds } from '@/lib/evals/verdicts'
+import { viewerCompanyMetadata } from '@/lib/jobs/person-jobs'
 import {
   BATCH_APPROVE_CAP,
   BATCH_ROUND_BUDGET_MS,
@@ -77,7 +78,6 @@ export const maxDuration = 60
 
 interface CompanyRel {
   name?: string | null
-  metadata?: unknown
 }
 
 interface JobRel {
@@ -89,6 +89,8 @@ interface JobRel {
   match_score: number | null
   match_details: unknown
   companies?: CompanyRel | CompanyRel[] | null
+  /** The employer's directory row: names a role this person holds without a company of their own. */
+  employer?: CompanyRel | CompanyRel[] | null
 }
 
 interface DraftRowRaw {
@@ -109,7 +111,7 @@ function one<T>(value: T | T[] | null | undefined): T | null {
 
 const DRAFT_SELECT =
   'id, job_id, status, resume_summary, cover_letter, answers, created_at, ' +
-  'jobs(id, title, url, description, location, match_score, match_details, companies(name, metadata))'
+  'jobs(id, title, url, description, location, match_score, match_details, companies(name), employer:company_directory(name))'
 
 /** answers.deferredToHuman, defensively — the column is free-form jsonb. */
 function storedDeferred(answers: unknown): string[] {
@@ -167,7 +169,7 @@ function clip(text: string | null | undefined, max: number): string | null {
 
 function buildReviewItem(draft: DraftRowRaw, decision: BatchDecision): ReviewItem {
   const job = one(draft.jobs)
-  const company = one(job?.companies)
+  const company = one(job?.companies) ?? one(job?.employer)
   const details = parseMatchDetails(job?.match_details as MatchDetails | string | null)
   return {
     draftId: draft.id,
@@ -230,10 +232,11 @@ export async function GET() {
 
   const drafts = (data ?? []) as unknown as DraftRowRaw[]
   const unjudged = await unjudgedCvTailorDraftIds(admin, user.id, drafts.map((d) => d.id))
+  const metadata = await viewerCompanyMetadata(admin, user.id, drafts.map((d) => d.job_id))
   const items = drafts.map((draft) => {
     const job = one(draft.jobs)
-    const company = one(job?.companies)
-    const credentials = resolveApplyCredentials(company?.metadata, profile?.preferences)
+    const company = one(job?.companies) ?? one(job?.employer)
+    const credentials = resolveApplyCredentials(metadata.get(draft.job_id), profile?.preferences)
     const decision = decideBatchEligibility({
       jobUrl: job?.url ?? null,
       jobDescription: job?.description ?? null,
@@ -557,7 +560,7 @@ async function approveOne(params: ApproveOneParams): Promise<ItemResult> {
 
     const draft = data as unknown as DraftRowRaw
     const job = one(draft.jobs)
-    const company = one(job?.companies)
+    const company = one(job?.companies) ?? one(job?.employer)
     const companyName = company?.name?.trim() || null
     const jobTitle = job?.title?.trim() || null
     const named: ItemResult = { ...base, companyName, jobTitle }
@@ -595,7 +598,8 @@ async function approveOne(params: ApproveOneParams): Promise<ItemResult> {
     //    said. An item the client should not have offered is refused here, and
     //    refused WITHOUT touching the row, so it stays in the queue for the
     //    individual attention it needs.
-    const credentials = resolveApplyCredentials(company?.metadata, preferences)
+    const metadata = await viewerCompanyMetadata(admin, userId, [draft.job_id])
+    const credentials = resolveApplyCredentials(metadata.get(draft.job_id), preferences)
     const unjudged = await unjudgedCvTailorDraftIds(admin, userId, [draftId])
     const decision = decideBatchEligibility({
       jobUrl: job.url,

@@ -22,6 +22,7 @@ import {
 import { BudgetMeterCard, type BudgetSummary } from '@/components/dashboard/budget-meter-card'
 import type { PipelineStage } from '@/lib/format'
 import { openRolesOnly } from '@/lib/jobs/freshness'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 interface Stats {
   companiesCount: number
@@ -221,8 +222,8 @@ export default function DashboardPage() {
         // manual company_id join needed. posted_at, NOT discovered_at: the
         // scraper stamps discovered_at with one `now` for the whole batch, so
         // filtering on it makes "24h" match everything.
-        openRolesOnly(supabase.from('jobs').select('*', { count: 'exact', head: true }).gte('posted_at', dayAgo)),
-        openRolesOnly(supabase.from('jobs').select('*', { count: 'exact', head: true }).is('match_score', null)),
+        openRolesOnly(personJobs(supabase).select('*', { count: 'exact', head: true }).gte('posted_at', dayAgo)),
+        openRolesOnly(personJobs(supabase).select('*', { count: 'exact', head: true }).is('match_score', null)),
         supabase.from('applications').select('id, stage').eq('user_id', user.id),
         supabase
           .from('follow_ups')

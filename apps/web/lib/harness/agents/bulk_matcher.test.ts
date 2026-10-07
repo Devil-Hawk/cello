@@ -37,18 +37,18 @@ const TITLE_ONLY_JOB = {
   country: 'US',
   is_remote: true,
   quality_score: 82,
-  companies: { name: 'Real Test Co' },
+  viewer_company_name: 'Real Test Co',
 }
 
 /** Minimal in-memory fake of the exact PostgREST chain shapes bulk_matcher's
- *  explicit-id path uses: fetchJobsByIds's ownedJobsQuery `.from('jobs')
- *  .select().eq('companies.user_id', ...).in('id', ...)` and persistScores's
+ *  explicit-id path uses: fetchJobsByIds's ownedJobsQuery `.from('person_jobs')
+ *  .select().eq('viewer_id', ...).in('id', ...)` and persistScores's
  *  `.from('jobs').update().eq()`. Not a general Supabase mock — just enough
  *  surface for this one code path, so this stays a fake, not a
  *  reimplementation of the query builder.
  *
  *  eqCalls records every `.eq(col, value)` the query actually built, so a
- *  test can assert the ownership filter (`companies.user_id`) was really
+ *  test can assert the ownership filter (`viewer_id`) was really
  *  applied — not just that the query happened to return the right rows
  *  because the fixture only ever contains one company. */
 function fakeAdmin(jobs: typeof TITLE_ONLY_JOB[]): {
@@ -130,10 +130,10 @@ describe('runBulkMatch — description-less jobs are scored, never silently fail
     })
 
     // OWNERSHIP SCOPING: the explicit-id path must still scope through the
-    // companies FK join (ownedJobsQuery), not trust the caller-supplied
+    // person_roles (ownedJobsQuery), not trust the caller-supplied
     // jobIds alone — this is the query-shape half of the fix in the commit
     // that removed the .in('company_id', companyIds) array from this path.
-    expect(eqCalls).toContainEqual(['companies.user_id', userId])
+    expect(eqCalls).toContainEqual(['viewer_id', userId])
 
     // Never a bare "failed" — scored, not dropped, just because description is empty.
     expect(result.scored).toBe(1)

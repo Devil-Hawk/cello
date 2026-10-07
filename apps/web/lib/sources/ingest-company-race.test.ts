@@ -98,7 +98,7 @@ function fakeAdmin(): AdminClient {
       if (table === 'company_merge_candidates') {
         return { select: () => query(() => [], 'select') }
       }
-      if (table === 'jobs') {
+      if (table === 'jobs' || table === 'person_jobs') {
         return {
           select() {
             const builder = {

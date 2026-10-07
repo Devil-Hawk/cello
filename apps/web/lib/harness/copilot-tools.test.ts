@@ -59,7 +59,7 @@ type Row = Record<string, unknown>
 class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
   private rows: Row[]
   // Full table set, so an embedded-relation filter (ownedJobsQuery's own
-  // `.eq('companies.user_id', userId)`) can join company_id -> companies
+  // `.eq('viewer_id', userId)`) can join company_id -> companies
   // the way PostgREST's `companies!inner(...)` embed actually does — a plain
   // `r['companies.user_id']` lookup would just be undefined for every row.
   constructor(
@@ -72,6 +72,12 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
     return this
   }
   eq(col: string, val: unknown) {
+    // person_jobs.viewer_id: the person whose company stored the (unshared) fixture role.
+    if (col === 'viewer_id') {
+      const byId = new Map((this.allTables.companies ?? []).map((c) => [c.id, c]))
+      this.rows = this.rows.filter((r) => byId.get(r.company_id as string)?.user_id === val)
+      return this
+    }
     if (col.startsWith('companies.')) {
       const field = col.slice('companies.'.length)
       const byId = new Map((this.allTables.companies ?? []).map((c) => [c.id, c]))
@@ -145,7 +151,8 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
 function fakeAdmin(tables: Record<string, Row[]>, rpc: Record<string, Row[]> = {}): AdminClient {
   const admin = {
     from(table: string) {
-      return new FakeQuery([...(tables[table] ?? [])], tables)
+      // person_jobs is the view over jobs
+      return new FakeQuery([...(tables[table === 'person_jobs' ? 'jobs' : table] ?? [])], tables)
     },
     async rpc(fn: string) {
       return { data: rpc[fn] ?? [], error: null }
@@ -815,7 +822,7 @@ describe('search_roles: a failed read is never an empty answer', () => {
       companies: [{ id: 'co-1', name: 'Anthropic', user_id: 'me' }],
       profiles: [{ id: 'me', preferences: {} }],
     }) as unknown as { from: (t: string) => unknown }
-    const admin = { from: (t: string) => (t === 'jobs' ? failing() : base.from(t)) } as unknown as AdminClient
+    const admin = { from: (t: string) => (t === 'person_jobs' ? failing() : base.from(t)) } as unknown as AdminClient
     const result = (await dispatchTool(baseCtx(admin), 'search_roles', { title: 'forward deployed engineer', place: 'SF' })) as Record<string, unknown>
     expect(result.error).toMatch(/Could not read the stored roles/)
     expect(JSON.stringify(result)).not.toMatch(/0 open roles|No .* roles in/)

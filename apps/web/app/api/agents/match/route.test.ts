@@ -29,7 +29,7 @@ vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({}) }
 
 const rows: Record<string, unknown> = {
   profiles: { resume_text: 'Senior engineer.' },
-  jobs: { id: 'job-1', title: 'Staff Engineer', description: 'd', location: null, company_id: 'co-1', companies: { name: 'Acme' } },
+  person_jobs: { id: 'job-1', title: 'Staff Engineer', description: 'd', location: null, company_id: 'co-1', viewer_company_name: 'Acme' },
 }
 const supabase = {
   auth: { getUser: async () => ({ data: { user: { id: 'u1' } }, error: null }) },

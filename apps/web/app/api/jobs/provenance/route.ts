@@ -27,13 +27,15 @@ import {
 } from '@/lib/sources/provenance'
 import type { ApplyProviderId } from '@/lib/ats-apply/types'
 import { openRolesOnly } from '@/lib/jobs/freshness'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 export const dynamic = 'force-dynamic'
 
-const FULL_COLUMNS =
-  'id, url, source, description, discovered_at, posted_at, company_id, last_verified_at, still_open, companies(name, domain, metadata)'
-const BASE_COLUMNS =
-  'id, url, source, description, discovered_at, posted_at, company_id, companies(name, domain, metadata)'
+// Read through person_jobs: company_id is the person's own company (a shared role's own company_id is
+// whoever stored it first) and the company's fields come with the row, so nothing is embedded.
+const COMPANY = 'company_id:viewer_company_id, viewer_company_name, viewer_company_domain, viewer_company_metadata'
+const FULL_COLUMNS = `id, url, source, description, discovered_at, posted_at, ${COMPANY}, last_verified_at, still_open`
+const BASE_COLUMNS = `id, url, source, description, discovered_at, posted_at, ${COMPANY}`
 
 // Summary-mode-only columns: everything FULL_COLUMNS has EXCEPT `description`
 // and the per-row `companies(...)` embed. Measured against this table's real
@@ -49,8 +51,8 @@ const BASE_COLUMNS =
 // size — matching the lean-aggregate pattern /api/jobs/insights-summary
 // already uses for the sibling score-histogram/source charts.
 const SUMMARY_COLUMNS =
-  'id, url, source, discovered_at, posted_at, company_id, last_verified_at, still_open'
-const SUMMARY_COLUMNS_BASE = 'id, url, source, discovered_at, posted_at, company_id'
+  'id, url, source, discovered_at, posted_at, company_id:viewer_company_id, last_verified_at, still_open'
+const SUMMARY_COLUMNS_BASE = 'id, url, source, discovered_at, posted_at, company_id:viewer_company_id'
 
 /** Rows read per page when walking the whole table for the summary. */
 const SUMMARY_PAGE = 1000
@@ -76,7 +78,11 @@ interface JobRow {
   company_id: string
   last_verified_at?: string | null
   still_open?: boolean | null
-  companies: CompanyEmbed | CompanyEmbed[] | null
+  viewer_company_name?: string | null
+  viewer_company_domain?: string | null
+  viewer_company_metadata?: unknown
+  /** Summary mode attaches the company from its one fetch of the person's companies. */
+  companies?: CompanyEmbed | null
 }
 
 function companySuggested(metadata: unknown): boolean {
@@ -95,9 +101,9 @@ function companyAtsProvider(metadata: unknown): ApplyProviderId | null {
 }
 
 function embeddedCompany(row: JobRow): CompanyEmbed | null {
-  const c = row.companies
-  if (!c) return null
-  return Array.isArray(c) ? (c[0] ?? null) : c
+  if (row.companies) return row.companies
+  if (row.viewer_company_name === undefined) return null
+  return { name: row.viewer_company_name ?? null, domain: row.viewer_company_domain ?? null, metadata: row.viewer_company_metadata }
 }
 
 function toInput(row: JobRow): JobProvenanceInput {
@@ -137,11 +143,11 @@ export async function GET(request: NextRequest) {
 
   // ---- single job -----------------------------------------------------
   if (jobId) {
-    let { data, error } = await supabase.from('jobs').select(FULL_COLUMNS).eq('id', jobId).maybeSingle()
+    let { data, error } = await personJobs(supabase).select(FULL_COLUMNS).eq('id', jobId).maybeSingle()
     let columnsAvailable = true
     if (error && isMissingColumnError(error)) {
       columnsAvailable = false
-      ;({ data, error } = await supabase.from('jobs').select(BASE_COLUMNS).eq('id', jobId).maybeSingle())
+      ;({ data, error } = await personJobs(supabase).select(BASE_COLUMNS).eq('id', jobId).maybeSingle())
     }
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     if (!data) return NextResponse.json({ error: 'Job not found' }, { status: 404 })
@@ -175,12 +181,12 @@ export async function GET(request: NextRequest) {
 
     let from = 0
     for (; from < SUMMARY_MAX_ROWS; from += SUMMARY_PAGE) {
-      let { data, error } = await openRolesOnly(supabase.from('jobs').select(SUMMARY_COLUMNS))
+      let { data, error } = await openRolesOnly(personJobs(supabase).select(SUMMARY_COLUMNS))
         .order('id', { ascending: true })
         .range(from, from + SUMMARY_PAGE - 1)
       if (error && isMissingColumnError(error)) {
         columnsAvailable = false
-        ;({ data, error } = (await openRolesOnly(supabase.from('jobs').select(SUMMARY_COLUMNS_BASE))
+        ;({ data, error } = (await openRolesOnly(personJobs(supabase).select(SUMMARY_COLUMNS_BASE))
           .order('id', { ascending: true })
           .range(from, from + SUMMARY_PAGE - 1)) as unknown as { data: typeof data; error: typeof error })
       }
@@ -211,7 +217,7 @@ export async function GET(request: NextRequest) {
     // trim().length check against this table's full production data (0
     // mismatches across all 21,157 rows) — this is not an approximation.
     const { count: descriptionComplete, error: descCountError } = await openRolesOnly(
-      supabase.from('jobs').select('id', { count: 'exact', head: true })
+      personJobs(supabase).select('id', { count: 'exact', head: true })
     ).ilike('description', '_'.repeat(MIN_DESCRIPTION_CHARS) + '%')
     if (descCountError) return NextResponse.json({ error: descCountError.message }, { status: 500 })
     breakdown.descriptionComplete = descriptionComplete ?? 0
@@ -223,13 +229,11 @@ export async function GET(request: NextRequest) {
     const examples: Partial<Record<EmployerClass, JobProvenance & { jobUrl: string | null; companyName: string | null }>> = {}
     const exampleIds = [...exampleJobIds.values()]
     if (exampleIds.length > 0) {
-      let { data: exampleRows, error: exampleError } = await supabase
-        .from('jobs')
+      let { data: exampleRows, error: exampleError } = await personJobs(supabase)
         .select(FULL_COLUMNS)
         .in('id', exampleIds)
       if (exampleError && isMissingColumnError(exampleError)) {
-        ;({ data: exampleRows, error: exampleError } = (await supabase
-          .from('jobs')
+        ;({ data: exampleRows, error: exampleError } = (await personJobs(supabase)
           .select(BASE_COLUMNS)
           .in('id', exampleIds)) as unknown as { data: typeof exampleRows; error: typeof exampleError })
       }
@@ -249,10 +253,10 @@ export async function GET(request: NextRequest) {
   const offset = Math.max(0, Number(searchParams.get('offset')) || 0)
 
   const build = (columns: string) => {
-    let query = openRolesOnly(supabase.from('jobs').select(columns, { count: 'exact' }))
+    let query = openRolesOnly(personJobs(supabase).select(columns, { count: 'exact' }))
       .order('discovered_at', { ascending: false })
       .range(offset, offset + limit - 1)
-    if (companyId) query = query.eq('company_id', companyId)
+    if (companyId) query = query.eq('viewer_company_id', companyId)
     return query
   }
 

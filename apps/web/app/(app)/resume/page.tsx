@@ -53,6 +53,7 @@ import {
   type ResumeDocument,
   type ResumeSource,
 } from '@/lib/resume/types'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 /** Rows in the "tailor for a job" list. Enough to choose from, not a second
  *  jobs page — /jobs is one link away at the foot of that card. */
@@ -126,7 +127,7 @@ async function loadTailorTargets(
   const [appsRes, docsRes] = await Promise.all([
     supabase
       .from('applications')
-      .select('job_id, updated_at, jobs(id, title, companies(name))')
+      .select('job_id, updated_at, jobs(id, title, companies(name), employer:company_directory(name))')
       .eq('user_id', userId)
       .order('updated_at', { ascending: false })
       .limit(TAILOR_LIMIT),
@@ -150,31 +151,31 @@ async function loadTailorTargets(
 
   const targets = new Map<string, TailorTarget>()
   for (const row of (appsRes.data ?? []) as unknown as {
-    jobs: { id: string; title: string; companies: { name: string | null } | null } | null
+    jobs: { id: string; title: string; companies: { name: string | null } | null; employer: { name: string | null } | null } | null
   }[]) {
     const job = Array.isArray(row.jobs) ? row.jobs[0] : row.jobs
     if (!job?.id || targets.has(job.id)) continue
     targets.set(job.id, {
       jobId: job.id,
       title: job.title,
-      company: relatedName(job.companies),
+      company: relatedName(job.companies ?? job.employer),
       tailoredVersion: tailored.get(job.id) ?? null,
     })
   }
 
   const missing = [...tailored.keys()].filter((id) => !targets.has(id)).slice(0, TAILOR_LIMIT)
   if (missing.length > 0) {
-    const { data } = await supabase.from('jobs').select('id, title, companies(name)').in('id', missing)
+    const { data } = await personJobs(supabase).select('id, title, viewer_company_name').in('id', missing)
     for (const job of (data ?? []) as unknown as {
       id: string
       title: string
-      companies: { name: string | null } | null
+      viewer_company_name: string | null
     }[]) {
       if (targets.has(job.id)) continue
       targets.set(job.id, {
         jobId: job.id,
         title: job.title,
-        company: relatedName(job.companies),
+        company: job.viewer_company_name,
         tailoredVersion: tailored.get(job.id) ?? null,
       })
     }
