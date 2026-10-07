@@ -94,7 +94,7 @@ describe('a reply', () => {
 describe('states', () => {
   it('asks to connect Gmail when it is not connected', () => {
     const out = html({ gmailConnected: false })
-    expect(out).toContain('Connect Gmail to see replies here.')
+    expect(out).toContain('Connect Gmail to see replies here, or paste an email.')
     expect(out).toContain('It never sends without your click.')
   })
   it('says nobody is waiting when nothing is', () => expect(html({})).toContain('Nobody is waiting on you.'))

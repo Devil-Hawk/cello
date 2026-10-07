@@ -42,7 +42,7 @@ describe('conversations.paste', () => {
     expect(conversationsPaste.input.safeParse({ from: 'M@Petrichor.ai', subject: 'Hi', body: 'Can you talk?' }).data?.from).toBe('m@petrichor.ai')
   })
   it('stores the first lines as the person’s own mail, tied to a known contact, never the whole body', async () => {
-    const insert = vi.fn(async () => ({ error: null }))
+    const insert = vi.fn(async (_row: Record<string, unknown>) => ({ error: null }))
     const chain: Record<string, unknown> = {}
     for (const k of ['select', 'eq', 'ilike', 'limit']) chain[k] = () => chain
     chain.maybeSingle = async () => ({ data: { id: 'c1' } })
@@ -50,7 +50,7 @@ describe('conversations.paste', () => {
     const body = Array.from({ length: 12 }, (_, n) => `line ${n}`).join('\n')
     const out = await conversationsPaste.run(ctx, { from: 'marcus@petrichor.ai', subject: 'Tuesday', body })
     expect(out).toEqual({ ok: true, matched: true })
-    const row = insert.mock.calls[0][0] as Record<string, unknown>
+    const row = insert.mock.calls[0][0]
     expect(row).toMatchObject({ user_id: 'u1', contact_id: 'c1', direction: 'in', kind: 'reply', origin: 'person', trust: 'person', from_domain: 'petrichor.ai' })
     expect(String(row.gmail_message_id)).toMatch(/^paste:/)
     expect(String(row.excerpt).split('\n')).toHaveLength(6)
