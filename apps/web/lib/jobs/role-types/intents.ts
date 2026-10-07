@@ -1,4 +1,4 @@
-// Main's 14 role intents (lib/jobs/role-taxonomy.ts) as role type ids: where an intent maps to two
+// Main's 16 role intents (lib/jobs/role-taxonomy.ts) as role type ids: where an intent maps to two
 // types, the caller takes both. A test fails when an old id has no row or maps to an id not in the module.
 
 export const INTENT_ROLE_TYPES = {
@@ -16,6 +16,8 @@ export const INTENT_ROLE_TYPES = {
   'security-engineer': ['security-engineer'],
   'qa-engineer': ['quality-engineer'],
   'product-manager': ['product-manager'],
+  fde: ['forward-deployed-engineer'],
+  'analytics-engineer': ['analytics-engineer'],
 } as const satisfies Record<string, readonly string[]>
 
 export type IntentId = keyof typeof INTENT_ROLE_TYPES
