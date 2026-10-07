@@ -204,7 +204,7 @@ describe('a row', () => {
     expect(html).toContain('href="/roles?group=company&amp;company=')
     expect(html).toContain('href="/roles/10000000-0000-4000-8000-000000000001"')
     // Each title and the company share the one class, so neither is quieter than the other.
-    expect(html.match(/<a [^>]*class="r-name inline-flex min-h-11 items-center hover:underline"[^>]*>AI Engineer</g)!.length).toBeGreaterThanOrEqual(1)
+    expect(html.match(/<a [^>]*class="r-name hover:underline"[^>]*>AI Engineer</g)!.length).toBeGreaterThanOrEqual(1)
     expect(html).toContain('lg:hidden')
     expect(html).toContain('hidden lg:block')
   })
