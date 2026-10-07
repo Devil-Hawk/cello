@@ -36,8 +36,12 @@ begin
   assert (select count(*) from public.chat_turns where kind = 'status' and chat_id = c) = 1, 'one status turn for one move';
 
   insert into public.pipeline_events (user_id, application_id, kind, actor, sentence, from_state, to_state, idempotency_key)
-  values (u, app, 'step.finished', 'cello', 'Nothing moved.', 'applying', 'applying', 'chat-check-2');
+  values (u, app, 'step.started', 'cello', 'Nothing moved.', 'applying', 'applying', 'chat-check-2');
   assert (select count(*) from public.chat_turns where kind = 'status' and chat_id = c) = 1, 'none when the state did not change';
+
+  insert into public.pipeline_events (user_id, application_id, kind, actor, sentence, from_state, to_state, idempotency_key)
+  values (u, app, 'step.finished', 'cello', 'The posting is open.', 'applying', 'applying', 'chat-check-3');
+  assert (select count(*) from public.chat_turns where kind = 'status' and chat_id = c) = 2, 'a finished step is a line even when the state did not change';
 end $$;
 
 rollback;
