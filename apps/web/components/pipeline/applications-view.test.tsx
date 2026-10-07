@@ -130,7 +130,7 @@ describe('Confirm these applications', () => {
 })
 
 describe('the board', () => {
-  it('has a drag handle for a laptop on each card, hidden on a phone, and none on Closed', () => {
+  it('has a drag handle for a laptop on each card, hidden on a phone', () => {
     const board = html({ mode: 'board' })
     expect(board).toContain('Drag Role 5 to another stage')
     expect((board.match(/md:inline-flex/g) ?? []).length).toBeGreaterThan(0)
