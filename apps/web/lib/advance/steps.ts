@@ -1,11 +1,11 @@
 // The steps that take an application from Preparing to Ready, each a small piece of code that either
-// carries on or says why the application waits (and on whom). Nothing here calls a model yet: tailoring
-// arrives with K17's Writer, and until then the base resume is the document.
+// carries on or says why the application waits (and on whom). Only `tailor` calls a model (the Writer).
 //
 //   check_open   the posting is still open
 //   dedupe       nothing sent already, no live twin
 //   read_form    a Greenhouse form's questions, matched to saved answers; one open row per question
 //   resume       the document that goes with it
+//   tailor       the Writer's tailored version of it, which waits for the person's approval
 //
 // No preparation for interviews: Cello does not do that.
 
@@ -14,6 +14,8 @@ import { detectApplyTarget } from '@/lib/ats-apply/detect'
 import { assertAllowedHost, fetchJson } from '@/lib/ats'
 import { resolveFieldValues, type FormField } from '@/lib/answers'
 import type { NeedsReason } from '@/lib/pipeline/types'
+import { createHash } from 'node:crypto'
+import { getLatestVersion } from '@/lib/resume/store'
 import { currentResume } from './documents'
 
 export interface StepApp {
@@ -37,6 +39,8 @@ export interface StepCtx {
   app: StepApp
   job: StepJob
   fetchForm: (url: string) => Promise<unknown>
+  /** Writes the tailored resume for this role (the Writer). Null when it could not. Tests pass their own. */
+  tailorResume?: (app: StepApp) => Promise<{ artifact_id: string; version: number } | null>
 }
 
 export type StepOutcome =
@@ -136,11 +140,43 @@ export const resume: Step = {
   doing: 'Using your base resume',
   async run({ admin, app }) {
     const doc = await currentResume(admin, app.user_id)
-    // ponytail: base resume only. K17's Writer tailors it and the person approves the tailored version.
     if (!doc) return { kind: 'wait', reason: 'approve_resume', detail: { cause: 'no_resume' }, line: 'Add your resume first.' }
     return { kind: 'continue', line: 'Using your base resume.', payload: { resume_document_id: doc.id } }
   },
 }
 
+/** The Writer, on the person's keys, for this role. */
+async function writeTailored(admin: SupabaseClient, app: StepApp): Promise<{ artifact_id: string; version: number } | null> {
+  const { loadApiKeys } = await import('@/lib/harness/keys')
+  const { runWriter } = await import('@/lib/workflows/writer')
+  const { newDeadline } = await import('@/lib/agents/context')
+  const apiKeys = await loadApiKeys(admin as never, app.user_id)
+  const out = await runWriter(
+    { ctx: { admin: admin as never, userId: app.user_id, userEmail: '', apiKeys, isDemo: apiKeys.isDemo !== false, threadId: '', conversationId: null, autonomy: 'ask', traceId: '', deadlineAt: newDeadline() } },
+    { type: 'resume', job_id: app.job_id }
+  )
+  return out.artifact_id && out.version && out.status !== 'failed' ? { artifact_id: out.artifact_id, version: out.version } : null
+}
+
+export const tailor: Step = {
+  id: 'tailor',
+  doing: 'Tailoring your resume',
+  async run({ admin, app, tailorResume }) {
+    // The version for this role: written once, then only read. The person approves exactly this text.
+    let doc = await getLatestVersion(admin, app.user_id, app.job_id)
+    if (!doc) {
+      const made = await (tailorResume ?? ((a) => writeTailored(admin, a)))(app).catch(() => null)
+      if (!made) return { kind: 'continue', line: 'Cello could not tailor your resume, so your base resume goes with it.' }
+      doc = await getLatestVersion(admin, app.user_id, app.job_id)
+      if (!doc) return { kind: 'continue', line: 'Cello could not tailor your resume, so your base resume goes with it.' }
+    }
+    const hash = createHash('sha256').update(doc.content).digest('hex').slice(0, 32)
+    const { data } = await admin.from('pipeline_events').select('id').eq('application_id', app.id).eq('user_id', app.user_id).eq('kind', 'approval.decided').contains('payload', { hash }).limit(1)
+    const detail = { artifact_id: doc.artifact_id, version: doc.version, hash }
+    if (data && data.length > 0) return { kind: 'continue', line: `You approved version ${doc.version} of the tailored resume.`, payload: detail }
+    return { kind: 'wait', reason: 'approve_resume', detail, line: `Needs you: approve version ${doc.version} of the tailored resume.` }
+  },
+}
+
 /** Preparing to Ready, in this order. */
-export const STEPS: readonly Step[] = [checkOpen, dedupe, readForm, resume]
+export const STEPS: readonly Step[] = [checkOpen, dedupe, readForm, resume, tailor]

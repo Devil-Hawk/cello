@@ -22,6 +22,7 @@ export interface AdvanceOptions {
   now?: () => number
   steps?: readonly Step[]
   fetchForm?: StepCtx['fetchForm']
+  tailorResume?: StepCtx['tailorResume']
 }
 
 interface Row {
@@ -85,6 +86,7 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
     app: { id: app.id, user_id: app.user_id, job_id: app.job_id, posting_url_hash: app.posting_url_hash },
     job: { url: app.jobs.url, title: app.jobs.title, company_id: app.jobs.company_id, closed_at: app.jobs.closed_at, still_open: app.jobs.still_open, companyName: app.jobs.companies?.name ?? null },
     fetchForm: opts.fetchForm ?? defaultFetchForm,
+    tailorResume: opts.tailorResume,
   }
   const key = (step: string) => `step:${app.id}:${step}:${app.attempt}`
 

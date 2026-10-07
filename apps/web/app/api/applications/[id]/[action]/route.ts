@@ -4,6 +4,8 @@
 // refused again in SQL for any other actor.
 
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
+import { advanceOne } from '@/lib/advance'
 import * as commands from '@/lib/pipeline/commands'
 import { isCtx, reply, sessionCtx } from '@/lib/pipeline/session'
 import { CLOSED_REASONS, STAGES, type ClosedReason, type Stage } from '@/lib/pipeline/types'
@@ -21,7 +23,13 @@ const ACTIONS: Record<string, (c: commands.Ctx, id: string, b: Body) => Promise<
   resume: async (c, id) => reply(await commands.resumeOne(c, id)),
   skip: async (c, id) => reply(await commands.skip(c, id)),
   'run-again': async (c, id) => reply(await commands.runAgain(c, id)),
-  approve: async (c, id, b) => (typeof b.hash === 'string' && b.hash ? reply(await commands.approveDocument(c, id, b.hash)) : bad('Say which resume version you approve.')),
+  approve: async (c, id, b) => {
+    if (typeof b.hash !== 'string' || !b.hash) return bad('Say which resume version you approve.')
+    const moved = await commands.approveDocument(c, id, b.hash)
+    // The next steps run now, so the person does not wait for the minute sweeper.
+    if (moved.ok) waitUntil(advanceOne(c.admin, id).catch(() => null))
+    return reply(moved)
+  },
   'apply-anyway': async (c, id) => reply(await commands.applyAnyway(c, id)),
   'allow-send': async (c, id) => reply(await commands.allowSend(c, id)),
   stage: async (c, id, b) => (STAGES.includes(b.stage as Stage) ? reply(await commands.setStage(c, id, b.stage as Stage)) : bad('That is not a stage.')),
