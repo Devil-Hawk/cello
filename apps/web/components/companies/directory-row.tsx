@@ -70,7 +70,7 @@ export function DirectoryRow({ item, manage, check, now, detailsHref, open, deta
       <div className="r-row flex flex-wrap items-start gap-x-3 gap-y-2 px-2 py-3">
         <LogoTile name={item.name} domain={item.domain} logoUrl={item.logoUrl} companyId={item.id} size={48} state={item.cannotRead ? 'flat' : 'default'} />
         <div className="min-w-0 flex-1 basis-48">
-          <Link href={companyHref(item.id)} prefetch={false} className="r-name hover:underline">
+          <Link href={companyHref(item.id)} prefetch={false} className="r-name inline-flex min-h-11 items-center hover:underline">
             {item.name}
           </Link>
           {item.domain && <p className="r-meta">{item.domain}</p>}
@@ -97,8 +97,8 @@ export function DirectoryRow({ item, manage, check, now, detailsHref, open, deta
           )}
           {reading && <p className="r-meta">{reading}</p>}
           {item.filings && <p className="r-meta">{FILINGS_LINE}</p>}
-          <p className="mt-1">
-            <Link href={detailsHref} scroll={false} className="r-meta underline underline-offset-4">
+          <p>
+            <Link href={detailsHref} scroll={false} className="r-meta inline-flex min-h-11 min-w-11 items-center underline underline-offset-4">
               {open ? 'Hide details' : 'Details'}
             </Link>
           </p>
