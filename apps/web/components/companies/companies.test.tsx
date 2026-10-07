@@ -328,11 +328,10 @@ describe('what the page never says', () => {
     expect(files.some((f) => rel(f) === 'app/(app)/companies/read.ts')).toBe(true)
   })
 
-  it('has no claim that an employer does not sponsor, no dream, and no word for a sent receipt', () => {
+  it('has no claim that an employer does not sponsor, no dream (the retired-word scan covers the sent word)', () => {
     for (const f of files) {
       expect(src(f), rel(f)).not.toMatch(/does not sponsor|doesn't sponsor|will not sponsor/i)
       expect(src(f), rel(f)).not.toMatch(/\bdream\b/i)
-      expect(src(f), rel(f)).not.toMatch(/receipt/i)
     }
   })
 
