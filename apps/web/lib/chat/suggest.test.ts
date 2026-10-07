@@ -40,7 +40,7 @@ describe('suggest', () => {
     const out = await suggest(db, 'u1', { name: 'Ankit', timeZone: 'UTC', now: NOW })
     expect(out.greeting).toBe('Morning, Ankit.')
     // j1 already has an application, so the apply is for the next one.
-    expect(out.suggestions.map((s) => s.text)).toEqual(['Apply to the Company 2 role', 'Compare my 6', 'Find new roles'])
+    expect(out.suggestions.map((s) => s.text)).toEqual(['Apply to the Company 2 role', 'Compare my six', 'Find new roles'])
     expect(out.suggestions[0].objects).toEqual([{ kind: 'role', ref: 'j2' }])
     expect(out.suggestions[1].objects).toHaveLength(6)
   })
@@ -62,7 +62,7 @@ describe('suggest', () => {
     const out = await suggest(db, 'u1', { now: NOW })
     expect(out.suggestions[0].text.length).toBeLessThanOrEqual(40)
     expect(out.suggestions[0].text.endsWith('…')).toBe(true)
-    expect(out.suggestions[1]).toMatchObject({ text: 'Compare my 12' })
+    expect(out.suggestions[1]).toMatchObject({ text: 'Compare my twelve' })
     expect(out.suggestions[1].objects).toHaveLength(12)
   })
 

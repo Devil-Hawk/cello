@@ -16,6 +16,9 @@ const DAY = 86_400_000
 /** Priorities in 4.13's order. Lanes that add candidates use the same scale. */
 export const PRIORITY = { reply: 100, needsYou: 90, apply: 80, compare: 70, followUp: 60, whatsNew: 50, find: 30, tailor: 20, working: 10 } as const
 
+/** 2 to 12 in words, as the design words it: "Compare my six". */
+const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']
+
 const cut = (text: string) => (text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 1).trimEnd()}…` : text)
 
 export function greeting(name: string | null | undefined, now: Date, timeZone: string): string {
@@ -60,7 +63,7 @@ async function core(db: AdminClient, userId: string, now: Date): Promise<Suggest
   }
   if (interested.length >= 3) {
     const n = Math.min(interested.length, 12)
-    out.push({ kind: 'compare', text: cut(`Compare my ${n}`), priority: PRIORITY.compare, objects: interested.slice(0, n).map((r) => ({ kind: 'role', ref: r.job_id })) })
+    out.push({ kind: 'compare', text: cut(`Compare my ${WORDS[n]}`), priority: PRIORITY.compare, objects: interested.slice(0, n).map((r) => ({ kind: 'role', ref: r.job_id })) })
   }
   out.push({ kind: 'find', text: 'Find new roles', priority: PRIORITY.find }, { kind: 'tailor', text: 'Tailor my resume for a role', priority: PRIORITY.tailor })
   if (started.size >= 5) out.push({ kind: 'working', text: 'What is working in my search?', priority: PRIORITY.working })
