@@ -773,8 +773,9 @@ begin
   if coalesce(array_length(p_external_ids, 1), 0) = 0 then
     return '{}';
   end if;
-  -- The cron (service role, or a direct psql session with no JWT) may evict for any company; a signed-in user only their own.
-  if coalesce(auth.jwt()->>'role', 'service_role') <> 'service_role'
+  -- A signed-in role (the session role or the claim) must own the company; the cron and a direct psql session still pass
+  -- (the fail-closed rule of 20261008032005, kept here).
+  if (current_setting('role', true) = 'authenticated' or auth.jwt()->>'role' = 'authenticated')
      and not exists (select 1 from public.companies c where c.id = p_company_id and c.user_id = auth.uid()) then
     raise exception 'not your company' using errcode = '42501';
   end if;
@@ -805,8 +806,9 @@ begin
   if p_company_id is null or coalesce(p_source, '') = '' then
     raise exception 'company and source are required' using errcode = '22023';
   end if;
-  -- The cron (service role, or a direct psql session with no JWT) may clear any company; a signed-in user only their own.
-  if coalesce(auth.jwt()->>'role', 'service_role') <> 'service_role'
+  -- A signed-in role (the session role or the claim) must own the company; the cron and a direct psql session still pass
+  -- (the fail-closed rule of 20261008032005, kept here).
+  if (current_setting('role', true) = 'authenticated' or auth.jwt()->>'role' = 'authenticated')
      and not exists (select 1 from public.companies c where c.id = p_company_id and c.user_id = auth.uid()) then
     raise exception 'not your company' using errcode = '42501';
   end if;
