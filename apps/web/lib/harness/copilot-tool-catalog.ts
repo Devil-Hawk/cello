@@ -105,9 +105,9 @@ export const COPILOT_TOOLS: ToolSpec[] = [
     kind: 'read',
     signature: 'web_search {"query":string,"limit"?:number}',
     desc:
-      'Search the open web for anything Cello does not already know — a company fact, a recent event, docs for ' +
+      'Search the open web for anything Cello does not already know: a company fact, a recent event, docs for ' +
       'an unfamiliar tool, checking a claim. Free by default (DuckDuckGo); automatically upgrades to Exa if the ' +
-      'user has configured that BYOK key in Settings. Returns raw titles/URLs/snippets from THIRD-PARTY pages — ' +
+      'user has configured that BYOK key in Settings. Returns raw titles/URLs/snippets from THIRD-PARTY pages: ' +
       'unverified, not facts, and never a job lead on its own: for roles, use search_roles, which reads the ' +
       'roles stored for the companies the person follows. Read-only: this cannot browse further, take any ' +
       'action, or change anything.',
@@ -139,9 +139,9 @@ export const COPILOT_TOOLS: ToolSpec[] = [
     desc:
       'Score a SMALL batch of the user\'s unscored jobs against their resume and persist match_score + ' +
       'match_details (the same two-tier triage the rest of the product uses), inline in this conversation. ' +
-      'COSTS REAL MONEY PER JOB — limit defaults to 10 and is capped at 15; do not raise it without the user ' +
+      'COSTS REAL MONEY PER JOB: limit defaults to 10 and is capped at 15; do not raise it without the user ' +
       'asking, and do not call this repeatedly in one turn to route around the cap. Omit BOTH jobIds and query ' +
-      'ONLY when the ask is genuinely "score whatever is unscored" — it then falls back to oldest-first. When ' +
+      'ONLY when the ask is genuinely "score whatever is unscored", it then falls back to oldest-first. When ' +
       'the user names criteria that narrow which jobs matter (a role, seniority, company trait), prefer passing ' +
       'the specific jobIds you already identified from list_jobs/search_roles; if you have not (or the pool is ' +
       'larger than what you listed), pass query (e.g. "AI Engineer") instead and it ranks the user\'s unscored ' +
@@ -149,11 +149,11 @@ export const COPILOT_TOOLS: ToolSpec[] = [
       'top matches. Either way, do not let this default to oldest-first when the ask was about which roles fit, ' +
       'not which are oldest. If nothing unscored matches the query it automatically broadens to the newest ' +
       'unscored jobs and says so (relevance.broadened) rather than scoring nothing. The response\'s jobResults ' +
-      'gives a per-job status/reason (scored/excluded/no-verdict/not-found) for every id considered — a job ' +
+      'gives a per-job status/reason (scored/excluded/no-verdict/not-found) for every id considered, a job ' +
       'with no description is still scored from its title (lower confidence, never a bare "failed"), and an ' +
       'excluded job says exactly why (quality/targeting) instead of silently vanishing from the count. Use this ' +
       'instead of trigger_run for an ordinary "score/match my jobs" ask, and it is also how you answer "which ' +
-      'of my jobs suit my resume" — score them, don\'t ask.',
+      'of my jobs suit my resume", score them, don\'t ask.',
     agent: 'matcher',
   },
   {
@@ -194,14 +194,14 @@ export const COPILOT_TOOLS: ToolSpec[] = [
     signature: 'research_companies {"companyIds":string[],"limit"?:number}',
     desc:
       'Batch version of research_company: research several companies AT ONCE, fanned out internally with bounded ' +
-      'concurrency, in a single tool call — this is how you verify/research a list of companies without burning a ' +
+      'concurrency, in a single tool call, this is how you verify/research a list of companies without burning a ' +
       'turn per company. Pass every companyId the ask needs checked (use the companyId already returned by ' +
       'list_jobs/search_roles, never invent one). COSTS REAL MONEY PER COMPANY, so batch size defaults to 5 and is ' +
       'capped at 8 regardless of how many ids you pass; call again for the rest rather than raising limit past the ' +
-      'cap. Returns one result row per company id with its own status/reason — a company that could not be found ' +
+      'cap. Returns one result row per company id with its own status/reason, a company that could not be found ' +
       'or researched never silently disappears from the response, and one bad id never fails the whole batch. For ' +
       'a zero-cost visa-sponsorship-only signal across many companies (no dossier needed), check_sponsorship is ' +
-      'cheaper and instant — reach for this when the ask needs the rest of a dossier (funding, culture, comp) too.',
+      'cheaper and instant, reach for this when the ask needs the rest of a dossier (funding, culture, comp) too.',
     agent: 'company_researcher',
   },
   {
@@ -210,7 +210,7 @@ export const COPILOT_TOOLS: ToolSpec[] = [
     signature: 'trigger_run {"goal":string}',
     desc:
       'Plan + execute a full autonomous multi-agent DAG server-side, in the background, for a goal genuinely ' +
-      'bigger than a few direct tool calls — an explicit unattended or repeating campaign the user asked for ' +
+      'bigger than a few direct tool calls, an explicit unattended or repeating campaign the user asked for ' +
       '(e.g. "tailor and draft applications for everything I have scored above 90, then summarize"). NOT the default ' +
       'for ordinary "find/score/tailor/draft" requests: those have their own direct tools (search_roles, ' +
       'score_jobs, tailor_cv, draft_outreach, research_company), call those yourself, one at a ' +
