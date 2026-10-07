@@ -34,14 +34,14 @@ export const AvatarKey = forwardRef<HTMLButtonElement, AvatarKeyProps>(function 
   )
 })
 
-type PopupProps = { user: ShellUser; onSignOut: () => void }
+type PopupProps = { user: ShellUser; onSignOut: () => void; dots?: { network?: boolean } }
 
 // It opens everything that is not a key in the bar: Profile, Network, Chat,
 // Settings, the old pages that have no new home yet, then Sign out. The menu's
 // code (Radix) loads the first time the avatar is pressed, so no page carries it
 // in its first load; the key stays where it is until the menu takes its place.
-export function AccountMenu({ user, onSignOut }: PopupProps) {
+export function AccountMenu({ user, onSignOut, dots }: PopupProps) {
   const [Popup, setPopup] = useState<ComponentType<PopupProps> | null>(null)
-  if (Popup) return <Popup user={user} onSignOut={onSignOut} />
+  if (Popup) return <Popup user={user} onSignOut={onSignOut} dots={dots} />
   return <AvatarKey user={user} onClick={() => void import('./account-menu-popup').then((m) => setPopup(() => m.default))} />
 }

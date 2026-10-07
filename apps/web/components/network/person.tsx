@@ -47,6 +47,9 @@ export function PersonPage({ person: p, memories, rule, draftId, applications, c
   const [title, setTitle] = useState(p.title ?? '')
   const [tieId, setTieId] = useState('')
   const [editMem, setEditMem] = useState<{ id: string; text: string } | null>(null)
+  const [bodies, setBodies] = useState<Record<string, string>>({})
+  const [opened, setOpened] = useState<string | null>(null)
+  const [readErr, setReadErr] = useState<{ id: string; text: string; reconnect: boolean } | null>(null)
 
   async function run(command: string, input: Record<string, unknown>, done?: string, after?: () => void) {
     setNote(null)
@@ -56,6 +59,25 @@ export function PersonPage({ person: p, memories, rule, draftId, applications, c
       after ? after() : router.refresh()
     } catch (e) {
       setNote(e instanceof Error ? e.message : 'Could not do that. Nothing changed.')
+    }
+  }
+
+  // "Read all" and a memory's "Open the message": the body is fetched from Gmail when asked for and never stored
+  async function readAll(id: string) {
+    setOpened(id)
+    setReadErr(null)
+    document.getElementById(`msg-${id}`)?.scrollIntoView({ block: 'center' })
+    if (bodies[id] !== undefined) return
+    try {
+      const res = await fetch(`/api/conversations/${id}/body`)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setReadErr({ id, text: data.error ?? 'Could not read it.', reconnect: data.code === 'reconnect' })
+        return
+      }
+      setBodies((b) => ({ ...b, [id]: String(data.text ?? '') }))
+    } catch {
+      setReadErr({ id, text: 'Could not read it.', reconnect: false })
     }
   }
 
@@ -124,10 +146,16 @@ export function PersonPage({ person: p, memories, rule, draftId, applications, c
         ) : (
           <ul className="divide-y divide-[var(--r-line)]">
             {p.exchanges.map((m) => (
-              <li key={m.id} className="py-2">
+              <li key={m.id} id={`msg-${m.id}`} className={`py-2${opened === m.id ? ' rounded-[12px] ring-2 ring-[var(--r-ink)]' : ''}`}>
                 <p className="r-name">{m.subject || 'No subject'}</p>
                 <p className="r-meta">{m.direction === 'out' ? 'You wrote' : `${p.name.split(' ')[0]} wrote`} {ago(m.sentAt)}</p>
-                {m.excerpt && <p className="r-body whitespace-pre-line">{m.excerpt}</p>}
+                {bodies[m.id] !== undefined ? <p className="r-body whitespace-pre-line">{bodies[m.id]}</p> : m.excerpt && <p className="r-body whitespace-pre-line">{m.excerpt}</p>}
+                {readErr?.id === m.id && (
+                  <p className="r-meta" role="alert">
+                    {readErr.text} {readErr.reconnect && <Link href="/settings?tab=connections" className="underline">Reconnect</Link>}
+                  </p>
+                )}
+                {m.threadId && !m.threadId.startsWith('paste:') && bodies[m.id] === undefined && <Key variant="ghost" onClick={() => readAll(m.id)}>Read all</Key>}
               </li>
             ))}
           </ul>
@@ -178,6 +206,7 @@ export function PersonPage({ person: p, memories, rule, draftId, applications, c
               <blockquote className="r-body border-l-2 pl-3">&quot;{m.quote}&quot;</blockquote>
               {!m.stored && <p className="r-meta">The message is no longer stored.</p>}
               <div className="mt-2 flex flex-wrap gap-2">
+                {m.rowId && <Key variant="raised" onClick={() => readAll(m.rowId as string)}>Open the message</Key>}
                 <Key variant="raised" onClick={() => run('people.forget', { memory_id: m.id })}>Not right</Key>
                 <Key variant="ghost" onClick={() => setEditMem({ id: m.id, text: m.text })}>Edit</Key>
               </div>

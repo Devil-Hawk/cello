@@ -15,6 +15,7 @@ import { callCommand } from '@/lib/network/client'
 import { KIND_LABEL, lastInTouch, replyEvidence } from '@/lib/network/format'
 import type { PersonRow } from '@/lib/network/people'
 import type { DueNudge } from '@/lib/network/nudges'
+import { DueDot } from './dot'
 import { RuleEditor } from './rule'
 import { NetworkMap } from './map'
 
@@ -91,7 +92,7 @@ function FollowUpRow({ d, onChange }: { d: DueNudge; onChange: () => void }) {
   )
 }
 
-export function PersonLine({ p }: { p: PersonRow }) {
+export function PersonLine({ p, due = false }: { p: PersonRow; due?: boolean }) {
   const evidence = replyEvidence(p.sentN, p.receivedN)
   return (
     <li className="r-row flex flex-wrap items-start gap-x-3 gap-y-1 py-3">
@@ -99,6 +100,7 @@ export function PersonLine({ p }: { p: PersonRow }) {
       <div className="min-w-0 flex-1 basis-56">
         <p className="r-name">
           <Link href={`/network/${p.id}`} className="hover:underline">{p.name}</Link>
+          {due && <DueDot className="ml-2" />}
         </p>
         <p className="r-body">{employerLine(p)}</p>
         {p.addressKind === 'personal' && <p className="r-meta">Personal address</p>}
@@ -122,6 +124,7 @@ export function PersonLine({ p }: { p: PersonRow }) {
 export function NetworkView(props: NetworkViewProps) {
   const router = useRouter()
   const { people, due, query } = props
+  const dueIds = new Set(due.map((d) => d.contactId))
   const [adding, setAdding] = useState(false)
   const [importing, setImporting] = useState(false)
   const [rules, setRules] = useState(false)
@@ -258,11 +261,11 @@ export function NetworkView(props: NetworkViewProps) {
               [...groups].map(([name, ps]) => (
                 <div key={name} className="r-sheet px-4 py-2">
                   <h3 className="r-name pt-2">{name}</h3>
-                  <ul className="divide-y divide-[var(--r-line)]">{ps.map((p) => <PersonLine key={p.id} p={p} />)}</ul>
+                  <ul className="divide-y divide-[var(--r-line)]">{ps.map((p) => <PersonLine key={p.id} p={p} due={dueIds.has(p.id)} />)}</ul>
                 </div>
               ))
             ) : (
-              <ul className="r-sheet divide-y divide-[var(--r-line)] px-4">{people.map((p) => <PersonLine key={p.id} p={p} />)}</ul>
+              <ul className="r-sheet divide-y divide-[var(--r-line)] px-4">{people.map((p) => <PersonLine key={p.id} p={p} due={dueIds.has(p.id)} />)}</ul>
             )}
             {props.pages > 1 && (
               <nav aria-label="Pages" className="flex items-center gap-3">

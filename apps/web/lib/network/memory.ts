@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { getMemoryStore } from '@/lib/memory/mem0-store'
 import type { MemoryItem, MemoryStore } from '@/lib/memory/types'
 import { loadApiKeys } from '@/lib/harness/keys'
+import { CALLABLE, availableRungs, pickRung } from '@/lib/models/ladder'
 import { defineModelStep } from '@/lib/steps'
 import { fetchGmailThread, getHeader } from '@/lib/gmail/gmail-api'
 
@@ -114,7 +115,8 @@ export interface RecalledMemory {
   messageId: string
   date: string | null
   origin: 'model' | 'person'
-  /** False when the message row is gone: the saved quote still shows. */
+  /** The messages row the memory cites, for opening the message; null when the row is gone and the saved quote still shows. */
+  rowId: string | null
   stored: boolean
 }
 
@@ -131,8 +133,8 @@ export async function recall(
   if (by.employerId) filters.employer_id = by.employerId
   const items = (await store.getAll(userId, { filters, limit })).slice(0, limit)
   const ids = items.map((m) => String(m.metadata?.message_id ?? '')).filter(Boolean)
-  const { data } = ids.length ? await admin.from('messages').select('gmail_message_id').eq('user_id', userId).in('gmail_message_id', ids.slice(0, 50)) : { data: [] }
-  const present = new Set(((data ?? []) as { gmail_message_id: string }[]).map((r) => r.gmail_message_id))
+  const { data } = ids.length ? await admin.from('messages').select('id, gmail_message_id').eq('user_id', userId).in('gmail_message_id', ids.slice(0, 50)) : { data: [] }
+  const rows = new Map(((data ?? []) as { id: string; gmail_message_id: string }[]).map((r) => [r.gmail_message_id, r.id]))
   return items.map((m: MemoryItem) => ({
     id: m.id,
     kind: String(m.metadata?.kind ?? ''),
@@ -141,7 +143,8 @@ export async function recall(
     messageId: String(m.metadata?.message_id ?? ''),
     date: m.createdAt ?? null,
     origin: m.metadata?.origin === 'person' ? 'person' : 'model',
-    stored: present.has(String(m.metadata?.message_id ?? '')),
+    rowId: rows.get(String(m.metadata?.message_id ?? '')) ?? null,
+    stored: rows.has(String(m.metadata?.message_id ?? '')),
   }))
 }
 
@@ -172,4 +175,13 @@ export async function forgetPerson(admin: SupabaseClient, userId: string, contac
   for (const m of items) await store.delete(userId, m.id)
   for (const id of new Set(items.map((m) => String(m.metadata?.message_id ?? '')))) await uncite(admin, userId, id, store)
   return items.length
+}
+
+/** Whether a rung can run the memory step for this person, so the page says so instead of showing an empty list. */
+export async function canRemember(admin: SupabaseClient, userId: string): Promise<boolean> {
+  const keys = await loadApiKeys(admin as never, userId)
+  const available = availableRungs(keys)
+  if (!keys.models) return available.some((r) => CALLABLE.has(r))
+  const { id, minRung, below } = personMemoryStep.meta
+  return pickRung({ id, minRung, below }, keys.models, available, keys).rung !== null
 }

@@ -10,13 +10,14 @@ export interface ShellProps {
   user: ShellUser
   onSignOut: () => void
   needsYou?: number
+  dots?: { network?: boolean }
   children: ReactNode
 }
 
 // The whole signed-in chrome as one pure component: a skip link, the bar (or
 // the phone's head and tabs), the page, and the quick chat slot. Auth, the
 // first-run redirect and the page transition stay in app/(app)/layout.tsx.
-export function Shell({ pathname, user, onSignOut, needsYou, children }: ShellProps) {
+export function Shell({ pathname, user, onSignOut, needsYou, dots, children }: ShellProps) {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-r-ground font-r text-r-ink">
       {/* Keyboard-only skip link: the first tab stop, past the bar to the page. */}
@@ -26,8 +27,8 @@ export function Shell({ pathname, user, onSignOut, needsYou, children }: ShellPr
       >
         Skip to main content
       </a>
-      <Bar pathname={pathname} user={user} onSignOut={onSignOut} needsYou={needsYou} />
-      <PhoneHead user={user} onSignOut={onSignOut} />
+      <Bar pathname={pathname} user={user} onSignOut={onSignOut} needsYou={needsYou} dots={dots} />
+      <PhoneHead user={user} onSignOut={onSignOut} dots={dots} />
       {/* No max-width here: width is the page's decision, so the kanban board and
           the jobs table keep the full width until their pages move over. */}
       <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto focus:outline-none focus-visible:ring-0">

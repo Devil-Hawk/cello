@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchClientSafePreferences } from '@/lib/preferences/client-safe'
 import { Shell } from '@/components/layout/shell'
+import { callCommand } from '@/lib/network/client'
 import { welcome } from '@/lib/routes'
 import { AppMotionConfig, motion, transitionFast } from '@/components/ui/motion'
 import { Button } from '@/components/ui/button'
@@ -29,6 +30,7 @@ export default function DashboardLayout({
   // Bumping retryToken re-runs the effect below without a full page reload.
   const [authError, setAuthError] = useState<string | null>(null)
   const [retryToken, setRetryToken] = useState(0)
+  const [networkDot, setNetworkDot] = useState(false)
   useEffect(() => {
     async function getUser() {
       try {
@@ -96,6 +98,15 @@ export default function DashboardLayout({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router, supabase, retryToken])
 
+  // The Network dot: someone is due a follow-up. Read once signed in, and again as the person moves between the pages
+  // where they act on it, so it clears after a follow-up and never blocks a page.
+  const actedOn = pathname.startsWith('/network') || pathname.startsWith('/conversations') ? pathname : ''
+  const signedIn = !!user
+  useEffect(() => {
+    if (!signedIn) return
+    callCommand<{ due: unknown[] }>('/api/network', 'network.nudges', {}).then((r) => setNetworkDot(r.due.length > 0)).catch(() => undefined)
+  }, [signedIn, actedOn])
+
   function retryAuthCheck() {
     setAuthError(null)
     setIsLoading(true)
@@ -149,7 +160,7 @@ export default function DashboardLayout({
 
   return (
     <AppMotionConfig>
-      <Shell pathname={pathname} user={userInfo} onSignOut={handleSignOut}>
+      <Shell pathname={pathname} user={userInfo} onSignOut={handleSignOut} dots={{ network: networkDot }}>
         {/* Keyed by pathname: a short, non-blocking enter on every route change.
             No exit animation (no AnimatePresence) so a slow page can never leave
             the previous one half-faded. */}

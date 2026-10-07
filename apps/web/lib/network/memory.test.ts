@@ -3,11 +3,12 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { MemoryItem, MemoryStore } from '@/lib/memory/types'
-import { forgetPerson, normalise, recall, remember, verified } from './memory'
+import { canRemember, forgetPerson, normalise, recall, remember, verified } from './memory'
+import { loadApiKeys } from '@/lib/harness/keys'
 
 vi.mock('@/lib/memory/mem0-store', () => ({ getMemoryStore: () => ({}) }))
 vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: vi.fn() }))
-vi.mock('@/lib/steps', () => ({ defineModelStep: () => ({ call: vi.fn(), meta: {} }) }))
+vi.mock('@/lib/steps', () => ({ defineModelStep: (d: unknown) => ({ call: vi.fn(), meta: d }) }))
 vi.mock('@/lib/gmail/gmail-api', () => ({ fetchGmailThread: vi.fn(), getHeader: vi.fn() }))
 
 function fakeStore() {
@@ -33,7 +34,7 @@ function fakeStore() {
 function fakeAdmin(rows: string[] = []) {
   const ops: string[] = []
   const chain = (op: string): any => {
-    const c: any = { eq: () => c, in: () => c, then: (f: (v: unknown) => unknown) => f({ data: rows.map((id) => ({ gmail_message_id: id })), error: null }) }
+    const c: any = { eq: () => c, in: () => c, then: (f: (v: unknown) => unknown) => f({ data: rows.map((id) => ({ id: `row-${id}`, gmail_message_id: id })), error: null }) }
     ops.push(op)
     return c
   }
@@ -105,9 +106,9 @@ describe('recall and forgetting', () => {
     const { store } = fakeStore()
     await store.add('u1', { fact: 'Marcus will answer by Friday.', scope: 'network', isDemo: false, refs: { kind: 'person.promised', contact_id: 'c1', message_id: 'gone', quote: 'answer by Friday', origin: 'model' } })
     const got = await recall(fakeAdmin([]).admin, 'u1', { contactId: 'c1' }, 50, store)
-    expect(got[0]).toMatchObject({ quote: 'answer by Friday', stored: false })
+    expect(got[0]).toMatchObject({ quote: 'answer by Friday', stored: false, rowId: null })
     const kept = await recall(fakeAdmin(['gone']).admin, 'u1', { contactId: 'c1' }, 50, store)
-    expect(kept[0].stored).toBe(true)
+    expect(kept[0]).toMatchObject({ stored: true, rowId: 'row-gone' })
   })
 
   it('deleting a person deletes their memories and never the mail rows', async () => {
@@ -120,5 +121,18 @@ describe('recall and forgetting', () => {
     expect(ops.some((o) => o === 'delete messages')).toBe(false)
     // the cited flag is cleared, because no other memory cites that message
     expect(ops).toContain('update messages')
+  })
+})
+
+describe('canRemember', () => {
+  it('is false with no model set up, and true once a free or paid one is', async () => {
+    vi.mocked(loadApiKeys).mockResolvedValue({} as never)
+    expect(await canRemember({} as never, 'u1')).toBe(false)
+    vi.mocked(loadApiKeys).mockResolvedValue({ openrouter: 'k' } as never)
+    expect(await canRemember({} as never, 'u1')).toBe(true)
+  })
+  it('is false when the person’s ceiling is under the step’s lowest rung', async () => {
+    vi.mocked(loadApiKeys).mockResolvedValue({ openrouter: 'k', models: { ceiling: 'R0', order: [], creditBought: false } } as never)
+    expect(await canRemember({} as never, 'u1')).toBe(false)
   })
 })

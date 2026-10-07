@@ -10,12 +10,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { accountRoutes, older } from '@/lib/routes'
+import { DueDot } from '@/components/network/dot'
+import { accountRoutes, network, older } from '@/lib/routes'
 import { AvatarKey, type ShellUser } from './account-menu'
 
 // The menu itself. It loads the first time the avatar is pressed (account-menu.tsx),
 // so the menu's code is not part of any page's first load, and it opens on arrival.
-export default function AccountMenuPopup({ user, onSignOut }: { user: ShellUser; onSignOut: () => void }) {
+export default function AccountMenuPopup({ user, onSignOut, dots }: { user: ShellUser; onSignOut: () => void; dots?: { network?: boolean } }) {
   return (
     <DropdownMenu defaultOpen>
       <DropdownMenuTrigger asChild>
@@ -29,7 +30,7 @@ export default function AccountMenuPopup({ user, onSignOut }: { user: ShellUser;
         <DropdownMenuSeparator />
         {accountRoutes().map((r) => (
           <DropdownMenuItem key={r.href + r.label} asChild className="min-h-11 cursor-pointer">
-            <Link href={r.href}>{r.label}</Link>
+            <Link href={r.href}>{r.label}{r.href === network.href && dots?.network ? <DueDot className="ml-2" /> : null}</Link>
           </DropdownMenuItem>
         ))}
         {older.length > 0 && <DropdownMenuSeparator />}

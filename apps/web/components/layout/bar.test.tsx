@@ -8,9 +8,9 @@ import { Shell } from './shell'
 
 const user = { email: 'sam@example.com', fullName: 'Sam Rivera', avatarUrl: null }
 
-function render(pathname: string, needsYou?: number): string {
+function render(pathname: string, needsYou?: number, dots?: { network?: boolean }): string {
   return renderToStaticMarkup(
-    <Shell pathname={pathname} user={user} onSignOut={() => undefined} needsYou={needsYou}>
+    <Shell pathname={pathname} user={user} onSignOut={() => undefined} needsYou={needsYou} dots={dots}>
       <p>page</p>
     </Shell>,
   )
@@ -38,6 +38,16 @@ describe('the bar', () => {
   it('shows Today with its copper numeral only when there is a count', () => {
     expect(textOf(render('/dashboard', 3))).toContain('Today 3')
     expect(textOf(render('/dashboard'))).not.toMatch(/Today \d/)
+  })
+
+  it('puts the Follow-up due dot on Network only, and only when one is due', () => {
+    const bar = (html: string) => html.slice(html.indexOf('aria-label="Primary"'), html.indexOf('</nav>', html.indexOf('aria-label="Primary"')))
+    const on = bar(render('/roles', undefined, { network: true }))
+    expect(on.match(/aria-label="Follow-up due"/g)).toHaveLength(1)
+    expect(on.indexOf('Network')).toBeLessThan(on.indexOf('aria-label="Follow-up due"'))
+    expect(on.indexOf('aria-label="Follow-up due"')).toBeLessThan(on.indexOf('Applications'))
+    expect(bar(render('/roles', undefined, { network: false }))).not.toContain('Follow-up due')
+    expect(bar(render('/roles'))).not.toContain('Follow-up due')
   })
 
   it('has five phone tabs', () => {
