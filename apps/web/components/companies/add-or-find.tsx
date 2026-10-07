@@ -139,7 +139,7 @@ export function AddOrFind({ onAdded, autoFocus, initial }: AddOrFindProps) {
             spellCheck={false}
             placeholder="Name, or a careers page or job board link"
             aria-label="Add or find a company"
-            className="r-field w-full pl-10"
+            className="r-field w-full !pl-10"
           />
         </label>
         {typed.kind === 'link' && <Key type="submit">Check and follow</Key>}
