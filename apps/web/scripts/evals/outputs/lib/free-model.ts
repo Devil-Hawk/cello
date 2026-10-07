@@ -8,8 +8,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-export const WRITER_MODEL = 'google/gemma-4-31b-it:free'
-export const PRODUCTION_JUDGE_MODEL = 'poolside/laguna-s-2.1:free'
+// The env overrides are for a day when the default writer or judge is rate-limited upstream; the report records which ran.
+export const WRITER_MODEL = process.env.EVAL_WRITER_MODEL || 'google/gemma-4-31b-it:free'
+export const PRODUCTION_JUDGE_MODEL = process.env.EVAL_JUDGE_MODEL || 'poolside/laguna-s-2.1:free'
 export const YARDSTICK_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free'
 
 const ENDPOINT = 'https://openrouter.ai/api/v1'
