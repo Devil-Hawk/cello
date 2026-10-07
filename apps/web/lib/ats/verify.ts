@@ -225,6 +225,8 @@ export interface VerifyInput extends BoardRef {
   /** Out-param: set true when the provider could not be asked (timeout, 5xx), so a null is not a verdict. */
   evidence?: { unreachable: boolean }
   now?: number
+  /** The provider's record of the board's owner, when the caller already asked for it (null: it keeps none). Default: ask. */
+  identify?: ((token: string) => Promise<BoardIdentity>) | null
 }
 
 /**
@@ -256,7 +258,7 @@ export async function verifyBoard(input: VerifyInput): Promise<Exclude<VerifiedB
 
   // 3. The provider's own record of the board.
   if (input.knownEmployer) return null
-  const identify = IDENTIFY[provider]
+  const identify = input.identify !== undefined ? input.identify : IDENTIFY[provider]
   if (!identify) return null
   let identity: BoardIdentity
   try {

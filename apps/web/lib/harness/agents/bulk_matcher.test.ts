@@ -43,7 +43,7 @@ const TITLE_ONLY_JOB = {
 /** Minimal in-memory fake of the exact PostgREST chain shapes bulk_matcher's
  *  explicit-id path uses: fetchJobsByIds's ownedJobsQuery `.from('person_jobs')
  *  .select().eq('viewer_id', ...).in('id', ...)` and persistScores's
- *  `.from('jobs').update().eq()`. Not a general Supabase mock — just enough
+ *  `.from('person_roles').update().eq().eq()`. Not a general Supabase mock — just enough
  *  surface for this one code path, so this stays a fake, not a
  *  reimplementation of the query builder.
  *
@@ -55,9 +55,12 @@ function fakeAdmin(jobs: typeof TITLE_ONLY_JOB[]): {
   admin: AdminClient
   persisted: Map<string, { score: number; matchDetails: unknown }>
   eqCalls: [string, unknown][]
+  /** Every table an update went to, with the filters it was given. */
+  updates: { table: string; eq: Record<string, unknown> }[]
 } {
   const persisted = new Map<string, { score: number; matchDetails: unknown }>()
   const eqCalls: [string, unknown][] = []
+  const updates: { table: string; eq: Record<string, unknown> }[] = []
 
   function selectBuilder() {
     let idFilter: string[] | null = null
@@ -78,10 +81,13 @@ function fakeAdmin(jobs: typeof TITLE_ONLY_JOB[]): {
     return builder
   }
 
-  function updateBuilder(patch: { match_score: number; match_details: unknown }) {
+  function updateBuilder(table: string, patch: { match_score: number; match_details: unknown }) {
+    const seen: Record<string, unknown> = {}
+    updates.push({ table, eq: seen })
     const builder = {
-      eq(_col: string, jobId: string) {
-        persisted.set(jobId, { score: patch.match_score, matchDetails: patch.match_details })
+      eq(col: string, value: unknown) {
+        seen[col] = value
+        if (col === 'job_id') persisted.set(value as string, { score: patch.match_score, matchDetails: patch.match_details })
         return builder
       },
       then(resolve: (v: { error: null }) => void) {
@@ -92,14 +98,14 @@ function fakeAdmin(jobs: typeof TITLE_ONLY_JOB[]): {
   }
 
   const admin = {
-    from(_table: string) {
+    from(table: string) {
       return {
         select: () => selectBuilder(),
-        update: (patch: { match_score: number; match_details: unknown }) => updateBuilder(patch),
+        update: (patch: { match_score: number; match_details: unknown }) => updateBuilder(table, patch),
       }
     },
   }
-  return { admin: admin as unknown as AdminClient, persisted, eqCalls }
+  return { admin: admin as unknown as AdminClient, persisted, eqCalls, updates }
 }
 
 /** Deterministic tier-1-shaped fake LLM — no network, zero cost. Scores below
@@ -115,7 +121,7 @@ async function fakeLlm(opts: LlmRunOptions): Promise<LlmResult> {
 
 describe('runBulkMatch — description-less jobs are scored, never silently failed', () => {
   it('scores a real title-only (empty-description) job from its title alone, with a reason that says so', async () => {
-    const { admin, eqCalls } = fakeAdmin([TITLE_ONLY_JOB])
+    const { admin, eqCalls, updates } = fakeAdmin([TITLE_ONLY_JOB])
     const userId = 'user-real-1'
 
     const result = await runBulkMatch({
@@ -134,6 +140,9 @@ describe('runBulkMatch — description-less jobs are scored, never silently fail
     // jobIds alone — this is the query-shape half of the fix in the commit
     // that removed the .in('company_id', companyIds) array from this path.
     expect(eqCalls).toContainEqual(['viewer_id', userId])
+
+    // The score is the person's own: it goes on their role row, never on the shared job.
+    expect(updates).toEqual([{ table: 'person_roles', eq: { user_id: userId, job_id: TITLE_ONLY_JOB.id } }])
 
     // Never a bare "failed" — scored, not dropped, just because description is empty.
     expect(result.scored).toBe(1)

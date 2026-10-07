@@ -21,6 +21,10 @@
 // in Supabase/Next types.
 //
 // Same input => same output, forever — pure functions over static data.
+//
+// Role types (lib/jobs/role-types) are the maintained taxonomy now: each intent here stands for one or two
+// of its ids (INTENT_ROLE_TYPES, re-exported below). This module keeps resolving a free-text query and
+// holds the keyword sets; K15b retires it.
 
 // ---------------------------------------------------------------------------
 // Keyword compiler
@@ -456,3 +460,5 @@ export function keywordsForIntent(
   if (opts.includeAdjacent) out.push(...intent.adjacentKeywords)
   return out
 }
+
+export { INTENT_ROLE_TYPES, roleTypesForIntent } from './role-types/intents'

@@ -21,6 +21,8 @@ export interface PendingJob {
   description: string
   location: string | null
   salaryRange: string | null
+  /** jobs.description_md: the Markdown every model item's quote must be found in. */
+  descriptionMd?: string | null
   requirements: unknown
 }
 
@@ -38,7 +40,7 @@ export function supabaseRequirementsRows(db: Db, userId: string, dryRun = false)
     async pending(limit) {
       const { data, error } = await db
         .from('person_jobs')
-        .select('id, title, description, location, salary_range, requirements')
+        .select('id, title, description, description_md, location, salary_range, requirements')
         .eq('viewer_id', userId)
         .eq('requirements->>skills_resolved', 'false')
         .is('requirements->>model_checked_at', null)
@@ -54,6 +56,7 @@ export function supabaseRequirementsRows(db: Db, userId: string, dryRun = false)
         description: String(r.description ?? ''),
         location: (r.location as string | null) ?? null,
         salaryRange: (r.salary_range as string | null) ?? null,
+        descriptionMd: (r.description_md as string | null) ?? null,
         requirements: r.requirements,
       }))
     },
@@ -102,8 +105,8 @@ export async function runRequirementsPass(
     const parsed = RequirementsSchema.safeParse(job.requirements)
     const base = parsed.success
       ? parsed.data
-      : parseRequirements({ title: job.title, description: job.description, location: job.location, salaryRange: job.salaryRange })
-    const next = await completeRequirements(base, { title: job.title, description: job.description }, call)
+      : parseRequirements({ title: job.title, description: job.description, descriptionMd: job.descriptionMd, location: job.location, salaryRange: job.salaryRange })
+    const next = await completeRequirements(base, { title: job.title, description: job.description, descriptionMd: job.descriptionMd }, call)
     if (!next.model_checked_at) return
     out.read++
     if (next.skills_resolved && !base.skills_resolved) out.resolved++

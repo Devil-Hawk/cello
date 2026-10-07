@@ -55,6 +55,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { VisaSignal } from '@/lib/dossier/store'
 import { isTrackedCompany } from '@/lib/companies/watchlist'
 import { openRolesOnly } from '@/lib/jobs/freshness'
+import { personJobs } from '@/lib/jobs/person-jobs'
 import { applyRoleTargets, excludedCompanyIds, hasRoleTargets } from '@/lib/targeting/roles'
 import { TargetScopeSwitch, type TargetScope } from '@/components/jobs/target-scope-switch'
 
@@ -122,10 +123,27 @@ const BATCH_LIMIT = 200
  *  still covers 4,000 jobs, far past any real in-targeting backlog. */
 const MAX_BATCH_ROUNDS = 20
 
+// Read through person_jobs: the score, the new flag and the company are this person's own, never the shared role's.
 const JOB_SELECT_COLUMNS =
-  'id, company_id, title, url, location, salary_range, posted_at, discovered_at, ' +
+  'id, company_id:viewer_company_id, title, url, location, salary_range, posted_at, discovered_at, ' +
   'match_score, match_details, is_new, job_function, seniority, language, country, ' +
-  'is_remote, quality_score, description, job_type, companies(name, logo_url, domain)'
+  'is_remote, quality_score, description, job_type, viewer_company_name, viewer_company_domain'
+
+/** A row of person_jobs as JOB_SELECT_COLUMNS reads it. */
+type JobView = Omit<Job, 'companies'> & { viewer_company_name: string | null; viewer_company_domain: string | null }
+
+/** The row the list and the modal render: the person's own company, with the logo from their own companies. */
+function withOwnCompany(row: JobView, companyList: { id: string; logo_url: string | null }[]): Job {
+  const { viewer_company_name, viewer_company_domain, ...rest } = row
+  return {
+    ...rest,
+    companies: {
+      name: viewer_company_name ?? '',
+      domain: viewer_company_domain,
+      logo_url: companyList.find((c) => c.id === row.company_id)?.logo_url ?? null,
+    },
+  }
+}
 
 /**
  * Plain-language "$X of your $Y monthly AI budget left", from the same route the
@@ -372,7 +390,7 @@ function JobsPageInner() {
   // 86" — and used to link at bare /jobs, dropping the user into an unfiltered
   // list of 11,843 rows to find it by title from memory. Resolving the id needs
   // its own fetch because the row is very unlikely to be in the first page.
-  const [deepLinkedJob, setDeepLinkedJob] = useState<Job | null>(null)
+  const [deepLinkedJob, setDeepLinkedJob] = useState<JobView | null>(null)
 
   // Focus restore for the job detail modal, owned HERE rather than inside the
   // modal. The modal does have an onCloseAutoFocus handler, but it can never
@@ -439,13 +457,12 @@ function JobsPageInner() {
     let cancelled = false
     ;(async () => {
       try {
-        const { data, error } = await supabase
-          .from('jobs')
+        const { data, error } = await personJobs(supabase)
           .select(JOB_SELECT_COLUMNS)
           .eq('id', deepLinkJobId)
           .maybeSingle()
         if (cancelled || error || !data) return
-        setDeepLinkedJob(data as unknown as Job)
+        setDeepLinkedJob(data as unknown as JobView)
       } catch {
         // Non-fatal: if the row cannot be fetched the modal simply does not
         // open, and the user still has the full list. Never blank the page.
@@ -643,11 +660,10 @@ function JobsPageInner() {
       let q = openRolesOnly(start)
 
       if (selectedCompany !== 'all') {
-        q = q.eq('company_id', selectedCompany)
+        q = q.eq('viewer_company_id', selectedCompany)
       }
-      // No 'all companies' filter: jobs RLS already scopes every row to the
-      // user's own companies (EXISTS companies.id = jobs.company_id AND
-      // companies.user_id = auth.uid()). The old .in('company_id', companyIds)
+      // No 'all companies' filter: person_jobs RLS already scopes every row to the
+      // roles the person holds (their person_roles row). The old .in('company_id', companyIds)
       // here re-sent every company id in the querystring, which passed the
       // gateway's URL limit until the account grew past ~600 companies and then
       // failed every load with a bare 400. The empty-companies early return
@@ -678,7 +694,7 @@ function JobsPageInner() {
       return q
     }
 
-    let query = withFacets(untyped.from('jobs').select(JOB_SELECT_COLUMNS, { count: 'exact' }), scope)
+    let query = withFacets(personJobs(supabase).select(JOB_SELECT_COLUMNS, { count: 'exact' }), scope)
 
     // Sort on posted_at (never discovered_at, a single per-batch timestamp).
     // best_match puts scored jobs above unscored via nullsFirst:false instead
@@ -701,7 +717,7 @@ function JobsPageInner() {
     const [{ data, count, error }, other] = await Promise.all([
       query.range(from, to),
       roleTargets
-        ? withFacets(untyped.from('jobs').select('id', { count: 'exact', head: true }), otherSide)
+        ? withFacets(personJobs(supabase).select('id', { count: 'exact', head: true }), otherSide)
         : Promise.resolve(null),
     ])
 
@@ -716,7 +732,7 @@ function JobsPageInner() {
       // clearing them — a failed refetch shouldn't blank out a list the user
       // was already looking at.
     } else if (data) {
-      const rows = data as unknown as Job[]
+      const rows = (data as unknown as JobView[]).map((r) => withOwnCompany(r, companies))
       setJobs((prev) => (append ? [...prev, ...rows] : rows))
       setTotalCount(count ?? 0)
       const here = count ?? 0
@@ -1032,7 +1048,7 @@ function JobsPageInner() {
   // while it's open instead of leaving it showing a stale score forever.
   const selectedJob = selectedJobId
     ? (jobs.find((j) => j.id === selectedJobId) ??
-       (deepLinkedJob?.id === selectedJobId ? deepLinkedJob : null))
+       (deepLinkedJob?.id === selectedJobId ? withOwnCompany(deepLinkedJob, companies) : null))
     : null
 
   if (isLoading) {

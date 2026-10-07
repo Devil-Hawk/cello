@@ -186,9 +186,6 @@ interface OwnedJob {
  *  Every id-lookup failure below names the exact id it was given AND the
  *  tool that returns real ones, so a model that fabricated (or mistyped) an
  *  id can self-correct in the SAME next turn instead of guessing again. */
-function jobNotFoundError(jobId: string): string {
-  return `No job found with id "${jobId}". Call list_jobs to get real jobIds — never invent one.`
-}
 function jobNotOwnedError(jobId: string): string {
   return `Job "${jobId}" is not in your tracked companies. Call list_jobs to get real jobIds — never invent one.`
 }
@@ -199,25 +196,17 @@ function companyNotFoundError(companyId: string): string {
   )
 }
 
-/** Load a job and verify the user owns it (via companies.user_id). */
+/** Load a job the person holds (person_jobs: their own role row, score and company), or say it is not theirs. */
 async function loadOwnedJob(
   ctx: CopilotToolContext,
   jobId: string,
   columns: string
 ): Promise<{ job: OwnedJob; companyName: string } | { error: string }> {
-  const { data } = await ctx.admin.from('jobs').select(columns).eq('id', jobId).maybeSingle()
-  if (!data) return { error: jobNotFoundError(jobId) }
-  const job = data as unknown as OwnedJob
-  const companyId = job.company_id
-  if (!companyId) return { error: 'Job has no company' }
-  const { data: company } = await ctx.admin
-    .from('companies')
-    .select('id, name')
-    .eq('id', companyId)
-    .eq('user_id', ctx.userId)
-    .maybeSingle()
-  if (!company) return { error: jobNotOwnedError(jobId) }
-  return { job, companyName: (company as { name: string }).name }
+  const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, `${columns}, viewer_company_id, viewer_company_name`).eq('id', jobId).maybeSingle()
+  if (!data) return { error: jobNotOwnedError(jobId) }
+  const { viewer_company_id, viewer_company_name, ...rest } = data as unknown as OwnedJob & { viewer_company_id: string | null; viewer_company_name: string | null }
+  // the company is the person's own, never the one that stored the shared role first
+  return { job: { ...rest, company_id: viewer_company_id }, companyName: viewer_company_name ?? 'the company' }
 }
 
 async function loadOwnedCompany(
@@ -268,35 +257,31 @@ interface JobBriefRow {
  *  bulk_matcher's candidate selection filters by this user's companyIds). */
 async function loadJobBriefs(ctx: CopilotToolContext, jobIds: string[]): Promise<JobBriefRow[]> {
   if (jobIds.length === 0) return []
-  const { data: jobs } = await ctx.admin
-    .from('jobs')
-    .select('id, title, company_id, match_score, is_new, location, posted_at')
-    .in('id', jobIds)
+  // the person's own role rows: their score, new flag and company, never the shared row's or the first storer's
+  const { data: jobs } = await ownedJobsQuery(
+    ctx.admin,
+    ctx.userId,
+    'id, title, viewer_company_id, viewer_company_name, match_score, is_new, location, posted_at'
+  ).in('id', jobIds)
   type Row = {
     id: string
     title: string | null
-    company_id: string | null
+    viewer_company_id: string | null
+    viewer_company_name: string | null
     match_score: number | null
     is_new: boolean | null
     location: string | null
     posted_at: string | null
   }
-  const rows = (jobs as Row[]) ?? []
-  const companyIds = [...new Set(rows.map((r) => r.company_id).filter((id): id is string => Boolean(id)))]
-  const { data: companies } =
-    companyIds.length > 0
-      ? await ctx.admin.from('companies').select('id, name').in('id', companyIds)
-      : { data: [] as { id: string; name: string }[] }
-  const nameById = new Map(((companies as { id: string; name: string }[]) ?? []).map((c) => [c.id, c.name]))
-  const byId = new Map(rows.map((r) => [r.id, r]))
+  const byId = new Map(((jobs as unknown as Row[]) ?? []).map((r) => [r.id, r]))
   return jobIds
     .map((id) => byId.get(id))
     .filter((r): r is Row => Boolean(r))
     .map((r) => ({
       jobId: r.id,
       title: r.title,
-      company: r.company_id ? nameById.get(r.company_id) ?? null : null,
-      companyId: r.company_id,
+      company: r.viewer_company_name,
+      companyId: r.viewer_company_id,
       matchScore: r.match_score,
       fresh: r.is_new === true,
       location: r.location,
@@ -563,7 +548,6 @@ const JOB_TITLE_FTS_MIN_LENGTH = 4
 type JobListRow = {
   id: string
   title: string | null
-  company_id: string | null
   viewer_company_id: string | null
   viewer_company_name: string | null
   match_score: number | null
@@ -594,7 +578,7 @@ async function listJobs(ctx: CopilotToolContext, args: Args) {
   const ids = (dreamOnly ? companyRows.filter((c) => c.is_dream_company) : companyRows).map((c) => c.id)
   if (ids.length === 0) return { jobs: [], note: dreamOnly ? 'No dream companies tracked yet.' : 'No companies tracked yet.' }
 
-  const SELECT = 'id, title, company_id, viewer_company_id, viewer_company_name, match_score, is_new, location, posted_at'
+  const SELECT = 'id, title, viewer_company_id, viewer_company_name, match_score, is_new, location, posted_at'
   // Ownership is the viewer_id fence. Only dreamOnly narrows by company ids, which are few; the plain list
   // needs none (hundreds of ids would pass the request URL length limit).
   const baseQuery = () => {
@@ -645,7 +629,7 @@ async function listJobs(ctx: CopilotToolContext, args: Args) {
       jobId: j.id,
       title: j.title,
       company: j.viewer_company_name ?? null,
-      companyId: j.viewer_company_id ?? j.company_id,
+      companyId: j.viewer_company_id ?? null,
       matchScore: j.match_score,
       fresh: j.is_new === true,
       location: j.location,
@@ -1411,11 +1395,8 @@ async function researchOneCompany(
   if ('error' in owned) return { status: 'error', companyId, company: null, reason: owned.error }
   const { company } = owned
   try {
-    const { data: jobsData } = await ctx.admin
-      .from('jobs')
-      .select('salary_range, title')
-      .eq('company_id', companyId)
-    const jobs = (jobsData as { salary_range: string | null; title: string | null }[]) ?? []
+    const { data: jobsData } = await ownedJobsQuery(ctx.admin, ctx.userId, 'salary_range, title').eq('viewer_company_id', companyId)
+    const jobs = (jobsData as unknown as { salary_range: string | null; title: string | null }[]) ?? []
     const result = await generateDossier({
       company: { id: company.id, name: company.name, domain: company.domain },
       jobs,

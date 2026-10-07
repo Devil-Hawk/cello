@@ -9,7 +9,7 @@
 import type { AtsJob, AtsProvider, DetectInput } from './types'
 import { isValidToken } from './types'
 import { assertAllowedHost, fetchJson } from './http'
-import { htmlToPlainText } from './html'
+import { htmlToPlainText, rawHtmlOf } from './html'
 
 const API_HOSTS = new Set(['apply.workable.com'])
 
@@ -142,6 +142,7 @@ async function fetchJobs(token: string): Promise<AtsJob[]> {
       externalId: url,
       location: formatLocation(j),
       description: htmlToPlainText(j.description),
+      descriptionHtml: rawHtmlOf(j.description),
       postedAt: toIso(j.published_on) ?? toIso(j.created_at),
     })
   }

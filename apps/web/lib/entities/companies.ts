@@ -262,8 +262,13 @@ export async function scanMergeCandidates(db: SupabaseClient, userId: string): P
  * already-resolved id (resolveCompanyId first) if they need the canonical
  * company's count, not a duplicate's.
  */
-export async function trackedRoleCount(db: SupabaseClient, companyId: string): Promise<number> {
-  const { count, error } = await db.from('person_jobs').select('id', { count: 'exact', head: true }).eq('viewer_company_id', companyId)
+export async function trackedRoleCount(db: SupabaseClient, viewerId: string, companyId: string): Promise<number> {
+  // viewer_id fence: a service-role caller counts only this person's roles, never another follower's.
+  const { count, error } = await db
+    .from('person_jobs')
+    .select('id', { count: 'exact', head: true })
+    .eq('viewer_id', viewerId)
+    .eq('viewer_company_id', companyId)
   if (error) {
     console.error(`[entities] trackedRoleCount failed for company=${companyId}: ${error.message}`)
     return 0

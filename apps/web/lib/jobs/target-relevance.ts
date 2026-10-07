@@ -232,19 +232,42 @@ export function filterToTargets<T extends RelevanceInput>(
 //
 // The kind of role is today's: the person's job functions through targetVerdict and their target
 // titles through assessTargetRelevance. Role types (lib/jobs/role-types) take its place once the
-// owner turns role_types_live on.
+// owner turns role_types_live on (`typeStep.live`): the person's own word for the title first, else the
+// posting's type, kept only when it is one they chose. A role whose type no tier could tell is kept
+// hidden when its title shares a word with a chosen type's label or synonym, and counted otherwise.
 
 export type RoleDecision = { keep: true; hidden: boolean } | { keep: false; reason: OutsideReason }
+
+/** What the type step needs to know about a person (K5c). */
+export interface TypeStep {
+  /** The role types the person chose (at most 8). */
+  chosen: readonly string[]
+  /** The person's own word for a normalised title (role_type_synonyms). */
+  synonyms: Readonly<Record<string, string>>
+  /** The words of the chosen types' labels and synonyms, for a title no tier could type. */
+  words: ReadonlySet<string>
+  /** role_types_live: the type step decides in place of the title score. Off: it is only counted beside the old filter. */
+  live: boolean
+}
 
 export interface PersonTargets {
   targeting: Targeting
   /** The role titles the person typed, most specific first. */
   titles: readonly string[]
+  typeStep?: TypeStep
+}
+
+/** The role's type in the person's eyes, and what that means for keeping it. */
+export function typeVerdict(role: { title_norm?: string | null; role_type?: string | null }, step: TypeStep): 'keep' | 'other' | 'unknown' | 'near' {
+  const type = (role.title_norm ? step.synonyms[role.title_norm] : undefined) ?? role.role_type
+  if (type) return step.chosen.includes(type) ? 'keep' : 'other'
+  const shares = (role.title_norm ?? '').split(' ').some((w) => w.length > 2 && step.words.has(w))
+  return shares ? 'near' : 'unknown'
 }
 
 /** The person has stated something a role can be judged on. With nothing stated, nothing is filtered. */
 export function hasPersonTargets(t: PersonTargets): boolean {
-  return hasRoleTargets(t.targeting) || t.titles.some((x) => x.trim().length > 0)
+  return hasRoleTargets(t.targeting) || t.titles.some((x) => x.trim().length > 0) || (t.typeStep?.chosen.length ?? 0) > 0
 }
 
 /**
@@ -253,7 +276,7 @@ export function hasPersonTargets(t: PersonTargets): boolean {
  * so a person can still find it and it is never silently lost.
  */
 export function judgeForPerson(
-  role: RoleFields & { postedAt?: string | null },
+  role: RoleFields & { postedAt?: string | null; title_norm?: string | null; role_type?: string | null },
   t: PersonTargets,
   companyName?: string | null,
   prepared: ParsedTitle[] = prepareTargets(t.titles)
@@ -267,6 +290,12 @@ export function judgeForPerson(
   if (only({ excludedCompanies: tg.excludedCompanies, excludedKeywords: tg.excludedKeywords }) === 'outside') return { keep: false, reason: 'excluded' }
   const level = only({ seniority: tg.seniority })
   if (level === 'outside') return { keep: false, reason: 'level' }
+  if (t.typeStep?.live && t.typeStep.chosen.length > 0) {
+    const v = typeVerdict(role, t.typeStep)
+    if (v === 'other') return { keep: false, reason: 'type' }
+    if (v === 'unknown') return { keep: false, reason: 'untyped' }
+    return { keep: true, hidden: v === 'near' || place === 'unclassified' || level === 'unclassified' }
+  }
   const fn = only({ functions: tg.functions })
   if (fn === 'outside') return { keep: false, reason: 'title' }
   if (prepared.length > 0 && !assessTargetRelevance({ title: role.title, jobFunction: role.job_function }, prepared).keep) return { keep: false, reason: 'title' }

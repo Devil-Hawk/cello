@@ -6,7 +6,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { EMPTY_TARGETING, type Targeting } from '@/lib/targeting'
-import { JOB_FUNCTIONS, SENIORITY_LEVELS, type JobFunction, type Seniority } from '@/lib/jobs/classify'
+import { SENIORITY_LEVELS, type Seniority } from '@/lib/jobs/classify'
+import { getRoleType } from '@/lib/jobs/role-types/taxonomy'
+import { listRoleTypes, MAX_ROLE_TYPES } from '@/lib/jobs/role-types/list'
 
 export interface TargetingTabProps {
   initialTargeting: Targeting
@@ -85,21 +87,6 @@ function ImpactNote({
   )
 }
 
-const FUNCTION_LABELS: Record<JobFunction, string> = {
-  engineering: 'Engineering',
-  data: 'Data',
-  product: 'Product',
-  design: 'Design',
-  sales: 'Sales',
-  marketing: 'Marketing',
-  support: 'Support',
-  operations: 'Operations',
-  finance: 'Finance',
-  hr: 'HR',
-  legal: 'Legal',
-  other: 'Other',
-}
-
 const SENIORITY_LABELS: Record<Seniority, string> = {
   intern: 'Intern',
   junior: 'Junior',
@@ -115,6 +102,87 @@ const SENIORITY_LABELS: Record<Seniority, string> = {
 
 function toggleValue<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value]
+}
+
+/**
+ * The role types a person is looking for: type to search labels and synonyms, at most 8, each removable.
+ * Related types are offered under the chosen ones and never added without a click. Level is its own field.
+ */
+function RoleTypeChooser({ chosen, onChange }: { chosen: string[]; onChange: (next: string[]) => void }) {
+  const [query, setQuery] = useState('')
+  const full = chosen.length >= MAX_ROLE_TYPES
+  const matches = query.trim() ? listRoleTypes(query, { exclude: chosen, limit: 6 }) : []
+  const related = [...new Map(chosen.flatMap((id) => getRoleType(id)?.related ?? []).filter((id) => !chosen.includes(id)).map((id): [string, string] => [id, getRoleType(id)?.label ?? id])).entries()].slice(0, 6)
+
+  function add(id: string) {
+    if (full || chosen.includes(id)) return
+    onChange([...chosen, id])
+    setQuery('')
+  }
+
+  return (
+    <div>
+      <Input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            if (matches[0]) add(matches[0].id)
+          }
+        }}
+        placeholder={full ? `You have chosen ${MAX_ROLE_TYPES}. Remove one to add another.` : 'Search role types, such as forward deployed or data engineer'}
+        aria-label="Search role types"
+        disabled={full}
+      />
+      {matches.length > 0 && (
+        <ul className="mt-2 divide-y rounded-card border bg-card" role="listbox" aria-label="Role types that match">
+          {matches.map((m) => (
+            <li key={m.id}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={false}
+                onClick={() => add(m.id)}
+                className="flex w-full items-baseline justify-between gap-3 px-3 py-2 text-left text-body hover:bg-muted"
+              >
+                <span className="text-foreground">{m.label}</span>
+                <span className="truncate text-caption text-muted-foreground">{m.synonyms.slice(0, 2).join(', ')}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {query.trim() && matches.length === 0 && !full && <p className="mt-2 text-caption text-muted-foreground">No role type matches that. Try another word.</p>}
+      {chosen.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Chosen role types">
+          {chosen.map((id) => (
+            <span key={id} className="inline-flex items-center gap-1 rounded-full border border-primary bg-accent-soft px-2.5 py-0.5 text-caption text-accent-deep">
+              {getRoleType(id)?.label ?? id}
+              <button type="button" onClick={() => onChange(chosen.filter((x) => x !== id))} aria-label={`Remove ${getRoleType(id)?.label ?? id}`} className="hover:text-foreground">
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <p className="mt-2 text-caption text-muted-foreground tabular-nums">
+        {chosen.length} of {MAX_ROLE_TYPES} chosen
+      </p>
+      {related.length > 0 && !full && (
+        <div className="mt-2">
+          <p className="text-caption text-muted-foreground">Related to what you chose</p>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {related.map(([id, label]) => (
+              <button key={id} type="button" onClick={() => add(id)} className="rounded-full border border-border bg-card px-3 py-1 text-caption text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 /** Small "add a chip, press enter or click +" text list editor. */
@@ -256,13 +324,23 @@ export function TargetingTab({ initialTargeting, onStatus }: TargetingTabProps) 
     setTargeting((prev) => ({ ...prev, [key]: value }))
   }
 
+  // The coarse functions filter follows the chosen types' families, as the route saves it, so the impact line is the real one.
+  function setRoleTypes(next: string[]) {
+    setTargeting((prev) => ({
+      ...prev,
+      role_types: next,
+      functions: next.length > 0 ? [...new Set(next.flatMap((id) => getRoleType(id)?.family ?? []))] : (prev.role_types?.length ?? 0) > 0 ? [] : prev.functions,
+    }))
+  }
+
   async function save() {
     setIsSaving(true)
     try {
       const response = await fetch('/api/settings/targeting', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(targeting),
+        // saving is the review: the person has seen what Cello mapped
+        body: JSON.stringify({ ...targeting, role_types_review: false }),
       })
       const result = await response.json()
       if (result.error) {
@@ -297,29 +375,15 @@ export function TargetingTab({ initialTargeting, onStatus }: TargetingTabProps) 
       </div>
 
       <Field
-        title="Job functions"
-        hint="Which functions to target. Empty = any function."
+        title="Role types"
+        hint="The kinds of job you want, up to 8. Level is chosen apart, below. Empty = any kind of job."
       >
-        <div className="flex flex-wrap gap-2">
-          {JOB_FUNCTIONS.map((fn) => {
-            const active = targeting.functions.includes(fn)
-            return (
-              <button
-                key={fn}
-                type="button"
-                onClick={() => set('functions', toggleValue(targeting.functions, fn))}
-                className={cn(
-                  'rounded-full border px-3 py-1 text-caption transition-colors',
-                  active
-                    ? 'border-primary bg-accent-soft text-accent-deep'
-                    : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground'
-                )}
-              >
-                {FUNCTION_LABELS[fn]}
-              </button>
-            )
-          })}
-        </div>
+        {targeting.role_types_review && (targeting.role_types?.length ?? 0) > 0 && (
+          <p className="mb-3 rounded-card border bg-sunken px-3 py-2 text-caption text-foreground" role="status">
+            Cello turned your old choices into these role types. Remove the ones you do not want.
+          </p>
+        )}
+        <RoleTypeChooser chosen={targeting.role_types ?? []} onChange={setRoleTypes} />
         <ImpactNote
           active={targeting.functions.length > 0}
           status={impactStatus}
@@ -329,8 +393,8 @@ export function TargetingTab({ initialTargeting, onStatus }: TargetingTabProps) 
       </Field>
 
       <Field
-        title="Seniority"
-        hint="Which seniority levels to target. Empty = any level."
+        title="Level"
+        hint="Which levels to target, whatever the role type. Empty = any level."
       >
         <div className="flex flex-wrap gap-2">
           {SENIORITY_LEVELS.map((level) => {

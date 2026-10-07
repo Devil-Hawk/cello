@@ -19,6 +19,7 @@ import {
 } from '@/components/companies/refresh'
 import { formatShortDate } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 
 /**
@@ -85,12 +86,13 @@ export default function CompaniesPage() {
       // jobs_count below counts open roles only: recent and not closed.
       const { data, error } = await openRolesOnly(
         trackedOnly(
-          supabase
+          // untyped: the generated Database type has no person_roles, where the person's own score lives
+          (supabase as unknown as SupabaseClient)
             .from('companies')
             .select(
               `
         *,
-        jobs:jobs(match_score)
+        jobs:jobs(person_roles(match_score))
       `
             )
             .eq('user_id', user.id)
@@ -106,9 +108,9 @@ export default function CompaniesPage() {
       setCompanies(
         (data ?? [])
           .map((company) => {
-            const jobs = company.jobs ?? []
+            const jobs = (company.jobs ?? []) as { person_roles?: { match_score: number | null }[] }[]
             const scores = jobs
-              .map((j) => j.match_score)
+              .map((j) => j.person_roles?.[0]?.match_score)
               .filter((s): s is number => typeof s === 'number')
             return {
               ...company,

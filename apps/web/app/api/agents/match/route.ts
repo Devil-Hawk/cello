@@ -40,7 +40,8 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  return withTrace(createAdminClient(), user.id, { name: 'match-job' }, async () => {
+  const admin = createAdminClient()
+  return withTrace(admin, user.id, { name: 'match-job' }, async () => {
 
     const body = await request.json().catch(() => ({}))
     const jobId = typeof (body as { jobId?: unknown })?.jobId === 'string' ? (body as { jobId: string }).jobId : null
@@ -117,10 +118,13 @@ export async function POST(request: NextRequest) {
       )
       const matchDetails = buildMatchDetails(verdict)
 
-      await supabase
-        .from('jobs')
+      // The score is the scorer's own, from their resume and key: it goes on their role row, never on the shared one.
+      // The service role writes it; a signed-in person cannot (migration 20261008060013).
+      await admin
+        .from('person_roles')
         .update({ match_score: verdict.score, match_details: matchDetails as unknown as Json })
-        .eq('id', jobId)
+        .eq('user_id', user.id)
+        .eq('job_id', jobId)
 
       setTraceOutput({ score: verdict.score, seniorityFit: verdict.seniorityFit })
       return NextResponse.json(matchDetails)

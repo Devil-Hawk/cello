@@ -25,7 +25,19 @@ vi.mock('@/lib/harness/agents/matcher', () => ({
 vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: async () => ({ openrouter: 'k' }) }))
 vi.mock('@/lib/harness/llm', () => ({ callLlm: vi.fn(), MissingKeyError: class extends Error {} }))
 vi.mock('@/lib/harness/llm-key-message', () => ({ canRunLlm: () => true, missingOpenRouterMessage: () => 'no key' }))
-vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({}) }))
+// Who wrote the score, and where: a role is a shared row, so the score goes on the scorer's own person_roles row, by the service role.
+const writes: { by: 'admin' | 'user'; table: string; values: unknown; eq?: Record<string, unknown> }[] = []
+const admin = {
+  from: (table: string) => ({
+    update: (values: unknown) => {
+      const w = { by: 'admin' as const, table, values, eq: {} as Record<string, unknown> }
+      writes.push(w)
+      const chain = { eq: (column: string, value: unknown) => ((w.eq[column] = value), chain), then: (resolve: (v: unknown) => void) => resolve({ error: null }) }
+      return chain
+    },
+  }),
+}
+vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => admin }))
 
 const rows: Record<string, unknown> = {
   profiles: { resume_text: 'Senior engineer.' },
@@ -34,7 +46,7 @@ const rows: Record<string, unknown> = {
 const supabase = {
   auth: { getUser: async () => ({ data: { user: { id: 'u1' } }, error: null }) },
   from: (table: string) => {
-    const chain = { select: () => chain, eq: () => chain, update: () => chain, single: async () => ({ data: rows[table] ?? null, error: null }) }
+    const chain = { select: () => chain, eq: () => chain, update: (values: unknown) => (writes.push({ by: 'user', table, values }), chain), single: async () => ({ data: rows[table] ?? null, error: null }) }
     return chain
   },
 }
@@ -47,6 +59,7 @@ const post = () =>
 
 beforeEach(() => {
   scoreMock.mockReset()
+  writes.length = 0
   traced.input.length = traced.output.length = traced.meta.length = traced.error.length = 0
 })
 
@@ -59,6 +72,15 @@ describe('POST /api/agents/match in Langfuse', () => {
     expect(traced.meta).toEqual([{ job_id: 'job-1' }])
     expect(traced.output).toEqual([{ score: 85, seniorityFit: 'Strong fit for senior IC' }])
     expect(traced.error).toEqual([])
+  })
+
+  it('saves the score with the admin client, never the person\'s own session', async () => {
+    scoreMock.mockResolvedValue({ verdict: { score: 85, seniorityFit: 'Strong fit for senior IC' } })
+    await post()
+    expect(writes).toEqual([
+      { by: 'admin', table: 'person_roles', values: { match_score: 85, match_details: { score: 85 } }, eq: { user_id: 'u1', job_id: 'job-1' } },
+    ])
+    expect(writes.some((w) => w.table === 'jobs')).toBe(false)
   })
 
   it('a handled scoring failure answers 500 and marks the root failed', async () => {

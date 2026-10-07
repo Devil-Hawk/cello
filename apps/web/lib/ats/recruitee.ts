@@ -7,7 +7,7 @@
 import type { AtsJob, AtsProvider, DetectInput } from './types'
 import { isValidToken } from './types'
 import { assertAllowedHostSuffix, fetchJson } from './http'
-import { htmlSectionsToPlainText } from './html'
+import { htmlSectionsToPlainText, rawHtmlOf } from './html'
 
 // Every customer gets {company}.recruitee.com, so the allowlist is a suffix
 // rather than a fixed host — see assertAllowedHostSuffix for why that is
@@ -143,6 +143,7 @@ async function fetchJobs(token: string): Promise<AtsJob[]> {
       // `description` and the "what we expect from you" list in
       // `requirements`. Both are what a candidate reads, so both are kept.
       description: htmlSectionsToPlainText([offer.description, offer.requirements]),
+      descriptionHtml: rawHtmlOf(offer.description, offer.requirements),
       postedAt: toIso(offer.published_at) ?? toIso(offer.created_at),
       salary: formatSalary(offer),
     })

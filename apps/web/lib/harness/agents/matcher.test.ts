@@ -38,7 +38,7 @@ vi.mock('@/lib/observability/log', () => ({
   logHarnessError: (...args: unknown[]) => logHarnessErrorMock(...args),
 }))
 
-const { scoreJobWithLlm, verifyMatchVerdict } = await import('./matcher')
+const { scoreJobWithLlm, scoreJobBatch, verifyMatchVerdict, toScorable } = await import('./matcher')
 
 const FAKE_ADMIN = {} as AdminClient
 
@@ -100,6 +100,17 @@ describe('scoreJobWithLlm — buildMatchContext wiring', () => {
     await scoreJobWithLlm(llm, 'A completely different resume.', job, FAKE_ADMIN, 'user-1')
     expect(calls[0]!.promptRef).toMatchObject({ name: 'matcher', hash: expect.stringMatching(/^[0-9a-f]{8}$/) })
     expect(calls[0]!.promptRef).toEqual(calls[1]!.promptRef)
+  })
+
+  it("never falls back to another person's company for a directory-held role", async () => {
+    const calls: LlmRunOptions[] = []
+    // viewer_company_id null = the viewer holds the role from the directory; company_id (if a row carried it) is the first storer's.
+    const row = { id: 'job-1', title: 'Backend Engineer', description: 'x', location: 'Remote', viewer_company_id: null, company_id: 'co-of-person-a' }
+    const scorable = toScorable(row as never)
+    expect(scorable.companyId).toBeNull()
+    await scoreJobWithLlm(fakeLlm(calls), RESUME, scorable, FAKE_ADMIN, 'person-b')
+    expect(calls[0]!.prompt).not.toContain('co-of-person-a')
+    expect(calls[0]!.prompt).not.toContain('CONTEXT FOR')
   })
 
   it('adds no context block when the job has no company', async () => {
@@ -249,5 +260,41 @@ describe('verifyMatchVerdict — writeVerdict / floor-before-spend / catch branc
     const admin = opts.admin as unknown as FakeVerdictAdmin
     expect(admin.inserted).toHaveLength(1)
     expect(judgeMatchQualityMock).not.toHaveBeenCalled()
+  })
+})
+
+// --- scoreJobBatch — the score is the scorer's own, never the shared role's ---
+
+describe('scoreJobBatch — where the score is written', () => {
+  const JOB = {
+    id: 'job-1', title: 'Backend Engineer', description: 'Do the work.', location: 'Remote', url: 'https://x.example/1',
+    is_new: true, match_score: null, posted_at: null, job_function: null, seniority: null, language: null, country: null, is_remote: null,
+    quality_score: 80, viewer_company_id: 'co-1', viewer_company_name: 'Acme',
+  }
+
+  it("writes to the scorer's own person_roles row, by user and job, and never updates jobs", async () => {
+    const updates: { table: string; eq: Record<string, unknown> }[] = []
+    const admin = {
+      from(table: string) {
+        if (table === 'person_jobs') {
+          const chain: Record<string, unknown> = {}
+          for (const m of ['eq', 'in', 'is', 'order', 'limit', 'or']) chain[m] = () => chain
+          chain.then = (resolve: (v: unknown) => void) => resolve({ data: [JOB], error: null })
+          return { select: () => chain }
+        }
+        if (table === 'eval_verdicts') return { insert: async () => ({ error: null }) }
+        return {
+          update: () => {
+            const seen: Record<string, unknown> = {}
+            updates.push({ table, eq: seen })
+            const chain = { eq: (c: string, v: unknown) => ((seen[c] = v), chain), then: (resolve: (v: unknown) => void) => resolve({ error: null }) }
+            return chain
+          },
+        }
+      },
+    } as unknown as AdminClient
+    const result = await scoreJobBatch(baseOpts({ admin, userId: 'user-9', companyIds: ['co-1'], jobIds: ['job-1'] }))
+    expect(result.scored).toHaveLength(1)
+    expect(updates).toEqual([{ table: 'person_roles', eq: { user_id: 'user-9', job_id: 'job-1' } }])
   })
 })

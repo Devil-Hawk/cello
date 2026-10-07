@@ -11,7 +11,7 @@
 import type { AtsJob, AtsProvider, DetectInput, FetchContext } from './types'
 import { isValidToken } from './types'
 import { assertAllowedHost, fetchJson } from './http'
-import { htmlSectionsToPlainText } from './html'
+import { htmlSectionsToPlainText, rawHtmlOf } from './html'
 import { mapWithConcurrency } from './concurrency'
 
 const API_HOST = 'api.smartrecruiters.com'
@@ -96,10 +96,12 @@ function formatLocation(posting: SmartRecruitersPosting): string | undefined {
 // Object.keys() so the same posting always produces the same string.
 const SECTION_ORDER = ['companyDescription', 'jobDescription', 'qualifications', 'additionalInformation'] as const
 
-function descriptionFrom(detail: SmartRecruitersPosting): string | undefined {
+/** The posting's body: the capped plain text and the employer's HTML, from the same sections. */
+function descriptionFrom(detail: SmartRecruitersPosting): { text?: string; html?: string } | undefined {
   const sections = detail.jobAd?.sections
   if (!sections || typeof sections !== 'object') return undefined
-  return htmlSectionsToPlainText(SECTION_ORDER.map((key) => sections[key]?.text))
+  const fragments = SECTION_ORDER.map((key) => sections[key]?.text)
+  return { text: htmlSectionsToPlainText(fragments), html: rawHtmlOf(...fragments) }
 }
 
 function detect(input: DetectInput): { token: string } | null {
@@ -145,7 +147,7 @@ async function fetchPage(token: string, offset: number): Promise<SmartRecruiters
   return Array.isArray(json?.content) ? json.content : []
 }
 
-async function fetchDescription(token: string, id: string): Promise<string | undefined> {
+async function fetchDescription(token: string, id: string): Promise<{ text?: string; html?: string } | undefined> {
   const apiUrl = `https://${API_HOST}/v1/companies/${token}/postings/${encodeURIComponent(id)}`
   assertAllowedHost(apiUrl, API_HOSTS)
   try {
@@ -192,9 +194,12 @@ async function fetchJobs(token: string, ctx?: FetchContext): Promise<AtsJob[]> {
     .slice(0, DESCRIPTION_BUDGET)
   const descriptions = await mapWithConcurrency(ids, DESCRIPTION_CONCURRENCY, (id) => fetchDescription(token, id))
   ids.forEach((id, i) => {
-    const description = descriptions[i]
+    const body = descriptions[i]
     const job = byId.get(id)
-    if (description && job) job.description = description
+    if (body?.text && job) {
+      job.description = body.text
+      if (body.html) job.descriptionHtml = body.html
+    }
   })
 
   return jobs

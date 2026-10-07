@@ -72,7 +72,6 @@ const RESUME_LIMIT = 8000
 
 interface JobRow {
   id: string
-  company_id: string | null
   title: string
   description: string | null
   location: string | null
@@ -141,7 +140,7 @@ export function toScorable(job: JobRow): ScorableJob {
     description: job.description,
     location: job.location,
     companyName: companyName(job),
-    companyId: job.viewer_company_id ?? job.company_id,
+    companyId: job.viewer_company_id ?? null,
   }
 }
 
@@ -357,7 +356,7 @@ function passesQualityAndTargeting(job: JobRow, targeting: Targeting): boolean {
 }
 
 const SELECT_COLUMNS =
-  'id, company_id, title, description, location, url, is_new, match_score, posted_at, ' +
+  'id, title, description, location, url, is_new, match_score, posted_at, ' +
   'job_function, seniority, language, country, is_remote, quality_score, viewer_company_id, viewer_company_name'
 
 async function fetchJobsByIds(admin: AdminClient, ids: string[], userId: string): Promise<JobRow[]> {
@@ -840,10 +839,12 @@ export async function scoreJobBatch(opts: ScoreBatchOptions): Promise<ScoreBatch
     try {
       const { verdict } = await scoreJobWithLlm(opts.llm, opts.resume, toScorable(job), opts.admin, opts.userId)
       const matchDetails = buildMatchDetails(verdict)
+      // the person's own role row: a score from their resume is never written to the shared role
       await opts.admin
-        .from('jobs')
+        .from('person_roles')
         .update({ match_score: verdict.score, match_details: matchDetails })
-        .eq('id', job.id)
+        .eq('user_id', opts.userId)
+        .eq('job_id', job.id)
       scored.push({
         jobId: job.id,
         isNew: job.is_new,
