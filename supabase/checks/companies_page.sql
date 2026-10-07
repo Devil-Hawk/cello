@@ -56,12 +56,15 @@ select (select a from fx), id from public.jobs where external_id ~ '^(a|b|g|d|u)
 insert into public.person_roles (user_id, job_id)
 select (select b from fx), id from public.jobs where external_id like 'x-%';
 
+-- companies_watching_guard (K13) lets only companies_follow set watching, so the fixture opens the same gate that function does.
+select set_config('cello.follow_writer', 'on', true);
 -- A follows Beta and Gamma (Gamma pinned) and one employer Cello has no row for; a company made from email is not followed.
 insert into public.companies (id, user_id, name, domain, career_url, employer_id, watching, is_dream_company, metadata)
 select ca2, a, 'Beta Works', 'beta-works.example', 'https://beta-works.example/careers', e2, true, false, '{}'::jsonb from fx
 union all select ca3, a, 'Gamma Works', 'gamma-works.example', 'https://gamma-works.example/careers', e3, true, true, '{}'::jsonb from fx
 union all select ca_solo, a, 'Solo Person', null, '', null, true, false, '{}'::jsonb from fx
 union all select ca_mail, a, 'Mail Only', null, '', null, false, false, '{}'::jsonb from fx;
+select set_config('cello.follow_writer', 'off', true);
 
 -- 1. Hiring, as A: four employers in order, none unverified.
 select set_config('request.jwt.claims', json_build_object('role', 'authenticated', 'sub', a)::text, true) from fx;
