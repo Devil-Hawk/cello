@@ -57,6 +57,7 @@ export interface GuardContext {
   apiKeys: DecryptedApiKeys
   isDemo: boolean
   traceId: string
+  chatTurnId?: string
 }
 
 // --- spend --------------------------------------------------------------------------
@@ -93,7 +94,7 @@ function usageOf(message: unknown): { promptTokens: number; completionTokens: nu
  * A call that throws after reserving settles as failed: the provider's refusal
  * is charged nothing, and any other failure stays reserved for the sweeper.
  */
-export function celloSpend(ctx: Pick<GuardContext, 'admin' | 'userId' | 'traceId'>) {
+export function celloSpend(ctx: Pick<GuardContext, 'admin' | 'userId' | 'traceId' | 'chatTurnId'>) {
   return createMiddleware({
     name: 'CelloSpend',
     wrapModelCall: async (request, handler) => {
@@ -106,6 +107,7 @@ export function celloSpend(ctx: Pick<GuardContext, 'admin' | 'userId' | 'traceId
         promptTokens: countTokensApproximately(messages),
         maxTokens: maxTokensOf(request.model),
         traceId: ctx.traceId,
+        chatTurnId: ctx.chatTurnId,
       })
       try {
         const response = await handler(request)

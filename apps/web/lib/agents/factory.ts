@@ -11,7 +11,7 @@
 // task tool (Deep Agents gives it to the top agent only), so delegation is one level deep,
 // and the factory test checks that.
 
-import { createDeepAgent, createSubAgent, type AnySubAgent, type SubAgent } from 'deepagents'
+import { createDeepAgent, createSubAgent, type AnySubAgent, type CreateDeepAgentParams, type SubAgent } from 'deepagents'
 import type { BaseCheckpointSaver } from '@langchain/langgraph'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
@@ -65,7 +65,7 @@ export interface CelloAgentInput {
 function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher') {
   const { ctx } = input
   return guardStack({
-    ctx: { admin: ctx.admin, userId: ctx.userId, apiKeys: ctx.apiKeys, isDemo: ctx.isDemo, traceId: ctx.traceId },
+    ctx: { admin: ctx.admin, userId: ctx.userId, apiKeys: ctx.apiKeys, isDemo: ctx.isDemo, traceId: ctx.traceId, chatTurnId: ctx.chatTurnId },
     agent,
     deadlineAt: ctx.deadlineAt,
     fallbacks: input.fallbacks,
@@ -103,9 +103,25 @@ export function specialists(input: CelloAgentInput): AnySubAgent[] {
 export function createCelloAgent(input: CelloAgentInput & { kind: 'orchestrator' }): ReturnType<typeof createDeepAgent>
 /** The Researcher as a loop of its own, for a deep research call. Not a task-tool agent: it has no delegation at all. */
 export function createCelloAgent(input: CelloAgentInput & { kind: 'researcher' }): ReturnType<typeof createSubAgent>
-export function createCelloAgent(input: CelloAgentInput & { kind: 'orchestrator' | 'researcher' }) {
+/** Chat's loop: Chat's commands as tools, the Researcher, and a final answer in the shape lib/chat/answer.ts checks. */
+export function createCelloAgent(input: CelloAgentInput & { kind: 'chat'; tools: StructuredToolInterface[]; responseFormat: CreateDeepAgentParams['responseFormat'] }): ReturnType<typeof createDeepAgent>
+export function createCelloAgent(input: CelloAgentInput & { kind: 'orchestrator' | 'researcher' | 'chat'; tools?: StructuredToolInterface[]; responseFormat?: unknown }) {
   const { ctx } = input
   if (input.kind === 'researcher') return createSubAgent(researcherSpec(input, 'researcher', true))
+  if (input.kind === 'chat') {
+    return createDeepAgent({
+      name: 'cello-chat',
+      model: input.model ?? celloChatModel({ apiKeys: ctx.apiKeys, purpose: 'orchestrator', serverFallback: !ctx.isDemo }),
+      systemPrompt: composeSystemPrompt({ mode: loadModeDoc('chat'), stableContext: input.profileCard }),
+      tools: (input.tools ?? []) as never,
+      subagents: [researcherSpec(input, 'general-purpose', false)],
+      backend: celloBackend({ admin: ctx.admin, userId: ctx.userId, skillsDir: input.skillsDir }),
+      permissions: PERMISSIONS.orchestrator,
+      middleware: guards(input, 'orchestrator'),
+      checkpointer: input.saver,
+      responseFormat: input.responseFormat as never,
+    })
+  }
 
   const skillsDir = input.skillsDir
   return createDeepAgent({

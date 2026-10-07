@@ -21,6 +21,8 @@ export interface ReserveInput {
   promptTokens: number
   maxTokens: number
   traceId?: string
+  /** Written on the ledger row so a Chat turn can add up its own cost. */
+  chatTurnId?: string
 }
 
 export interface Reservation {
@@ -63,6 +65,7 @@ export async function reserve(input: ReserveInput): Promise<Reservation> {
     step: 'agent-turn',
     traceId: input.traceId,
   })
+  if (input.chatTurnId && spend.id) await input.admin.from('llm_spend').update({ chat_turn_id: input.chatTurnId }).eq('id', spend.id)
   return { spend, admin: input.admin }
 }
 

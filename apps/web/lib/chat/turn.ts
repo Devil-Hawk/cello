@@ -14,12 +14,13 @@ import type { AdminClient } from '@/lib/harness/types'
 import type { Ran } from '@/lib/models/choice'
 import { settleAnswer, type ModelAnswer, type Settled, type TurnResult } from './answer'
 import { activeTiles, ledgerKey } from './attach'
+import { recalledThing, resultOf } from './recalled'
 import { buildDisclosure, type Disclosure } from './disclosure'
 import { writeTurnMemories, type ChatMemoryStore, type TurnMemories } from './memory'
 import { getObject } from './objects'
 import type { RecallHit } from './recall'
 import { screenMessage } from './screen'
-import { refId, type ObjectReader, type Refusal } from './types'
+import { refId, type ObjectReader, type Refusal, type TurnLink } from './types'
 
 export interface AgentInput {
   chatId: string
@@ -60,7 +61,7 @@ const TYPED_MAX = 20_000
 
 export async function runChatTurn(
   deps: TurnDeps,
-  input: { userId: string; chatId: string; typed: string; quoted?: { text: string; turn_id: string } | null; recalled?: RecallHit[] }
+  input: { userId: string; chatId: string; typed: string; quoted?: { text: string; turn_id: string } | null; recalled?: RecallHit[]; /** The person's turn, when an edit already stored it. */ turnId?: string }
 ): Promise<TurnResultOut> {
   const { db } = deps
   const { userId, chatId } = input
@@ -73,13 +74,16 @@ export async function runChatTurn(
   if (!chat) return { ok: false, error: 'That chat was not found.', fix: 'Open it from your chats.' }
 
   // 1. The typed words first. A selection quoted from an answer is kept apart and is never these words.
-  const { data: person, error } = await db
-    .from('chat_turns')
-    .insert({ user_id: userId, chat_id: chatId, kind: 'person', typed, origin: 'person', quoted: input.quoted ?? null })
-    .select('id')
-    .single()
-  if (error || !person) return { ok: false, error: 'Could not save your message.', fix: 'Try again.' }
-  const turnId = (person as { id: string }).id
+  let turnId = input.turnId
+  if (!turnId) {
+    const { data: person, error } = await db
+      .from('chat_turns')
+      .insert({ user_id: userId, chat_id: chatId, kind: 'person', typed, origin: 'person', quoted: input.quoted ?? null })
+      .select('id')
+      .single()
+    if (error || !person) return { ok: false, error: 'Could not save your message.', fix: 'Try again.' }
+    turnId = (person as { id: string }).id
+  }
   if (!(chat as { title: string }).title) await db.from('chats').update({ title: typed.replace(/\s+/g, ' ').slice(0, TITLE_MAX) }).eq('id', chatId).eq('user_id', userId)
 
   // 2. The screen message, reading each tile once.
@@ -95,8 +99,10 @@ export async function runChatTurn(
   const screen = await screenMessage(db, userId, chatId, { quoted: input.quoted, recalled: input.recalled, get })
 
   // 3. The agent answers; the parts are checked against what its tools returned.
-  const returned = new Set<string>()
-  let results: TurnResult[] = []
+  // What was recalled from earlier chats is evidence like a tool's result, and it carries its source.
+  const recalledResults = (input.recalled ?? []).flatMap((h) => recalledThing(h)).map(resultOf)
+  const returned = new Set<string>(recalledResults.flatMap((r) => (r.object ? [ledgerKey(r.object.kind, r.object.ref)] : [])))
+  let results: TurnResult[] = recalledResults
   let last: AgentOutput | null = null
   const ask = async (feedback: string | null) => {
     const out = await deps.agent({ chatId, turnId, screen, typed, feedback, returned })
@@ -125,7 +131,7 @@ export async function runChatTurn(
       origin: 'model',
       prov: { step: 'chat', turn_id: turnId },
       parts: settled.parts,
-      links: settled.links,
+      links: [...settled.links, ...(out?.made ?? []).filter((m) => !settled.links.some((l) => l.kind === 'made' && l.id === m.id)).map((m): TurnLink => ({ kind: 'made', table: 'artifacts', id: m.id, role: 'made' }))],
       ran: out?.ran ?? null,
       disclosure,
     })

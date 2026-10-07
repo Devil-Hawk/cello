@@ -28,6 +28,8 @@ export interface AgentContext {
   rootTaskId?: string | null
   autonomy: Autonomy
   rules?: AutonomyRules
+  /** The person's Chat turn this request answers: the turn's model calls are written against it (its cost line). */
+  chatTurnId?: string
   /** One Langfuse trace per request or scheduled occurrence. */
   traceId: string
   signal?: AbortSignal

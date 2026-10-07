@@ -16,6 +16,8 @@ import { ATTACH_KINDS, TABLE_OF, type AttachKind, type ObjectRef, type Part, typ
 export const AnswerSchema = z.object({
   /** The one role or company this turn turns on. Code checks it like `about` and builds its card. */
   subject: z.object({ kind: z.enum(['role', 'company']), id: z.string().max(200) }).optional(),
+  /** The roles and companies the answer shows as cards (a search's results). Each is checked like the subject. */
+  cards: z.array(z.object({ kind: z.enum(['role', 'company']), id: z.string().max(200) })).max(12).optional(),
   parts: z
     .array(
       z.object({
@@ -142,11 +144,19 @@ export function checkAnswer(answer: ModelAnswer, input: CheckInput): Checked {
     parts.push({ about, text })
   })
 
-  const s = answer.subject
-  const subject: ObjectRef | null = s && known.has(`${s.kind}:${s.id}`) ? { kind: s.kind, ref: s.id } : null
-  if (subject) named.set(key(subject), subject)
+  // The subject's card leads; the cards a search shows follow the words. Known things only, once each.
+  const cardOf = (c: { kind: 'role' | 'company'; id: string } | undefined, seen: Set<string>) => {
+    const k = c && `${c.kind}:${c.id}`
+    if (!c || !k || !known.has(k) || seen.has(k)) return []
+    seen.add(k)
+    named.set(k, { kind: c.kind, ref: c.id })
+    return [{ card: { kind: c.kind, ref: c.id } }]
+  }
+  const seen = new Set<string>()
+  const lead = cardOf(answer.subject, seen)
+  const rest = (answer.cards ?? []).flatMap((c) => cardOf(c, seen))
   return {
-    parts: subject ? [{ card: subject }, ...parts] : parts,
+    parts: [...lead, ...parts, ...rest],
     failures,
     links: [...named.values()].map((o): TurnLink => {
       const source = recalled.get(key(o))
