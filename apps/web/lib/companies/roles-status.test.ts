@@ -38,14 +38,14 @@ describe('rolesStatus', () => {
       metadata: { source_check: { checked_at: '2026-10-05T01:41:00Z', readable: false, reason: 'no_supported_board' } },
       career_url: 'https://www.metacareers.com/jobs/',
     }
-    const line = rolesStatusLine(rolesStatus(company, 0, { now }))
+    const line = rolesStatusLine(rolesStatus(company, 0, { now, nextCheckAt: at('2026-10-05T12:41:00Z') }))
     expect(line.text).toBe("Cello can't read this careers site: its careers page is not on a job board Cello can read yet")
     expect(line.href).toBe('https://www.metacareers.com/jobs/')
   })
 
   it('has a generic reason for a code it does not know, and no link without a careers URL', () => {
     const company = { metadata: { source_check: { checked_at: '2026-10-05T01:41:00Z', readable: false, reason: 'future_code' } }, career_url: '' }
-    const line = rolesStatusLine(rolesStatus(company, 0, { now }))
+    const line = rolesStatusLine(rolesStatus(company, 0, { now, nextCheckAt: at('2026-10-05T12:41:00Z') }))
     expect(line.text).toBe("Cello can't read this careers site: it could not be read")
     expect(line.href).toBeUndefined()
   })
@@ -57,7 +57,7 @@ describe('rolesStatus', () => {
 
   it('a site larger than one check reads says Cello is still reading it, never "no open roles"', () => {
     const company = { metadata: { source_check: { checked_at: '2026-10-05T10:00:00Z', readable: false, reason: 'budget' } }, career_url: 'https://jobs.example/' }
-    const line = rolesStatusLine(rolesStatus(company, 0, { now }))
+    const line = rolesStatusLine(rolesStatus(company, 0, { now, nextCheckAt: at('2026-10-05T12:41:00Z') }))
     expect(line.text).toBe('This site is large and Cello is still reading it. Next check around 12:41 UTC')
     expect(line.text).not.toContain('no open roles')
   })
@@ -65,7 +65,7 @@ describe('rolesStatus', () => {
   it('a page that was reached but not read because no free model was available says it is waiting, never "no open roles"', () => {
     for (const reason of ['model_unavailable', 'model_limit']) {
       const company = { metadata: { source_check: { checked_at: '2026-10-05T10:00:00Z', readable: false, reason } }, career_url: 'https://jobs.example/' }
-      const line = rolesStatusLine(rolesStatus(company, 0, { now }))
+      const line = rolesStatusLine(rolesStatus(company, 0, { now, nextCheckAt: at('2026-10-05T12:41:00Z') }))
       expect(line.text).toBe('Waiting for a free reading slot. Next check around 12:41 UTC')
       expect(line.text).not.toContain('no open roles')
     }
