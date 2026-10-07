@@ -190,6 +190,23 @@ begin
 end;
 $$;
 
+-- Retiring the match score clears it on the person's own row too (needs K5a's match_score column).
+select exists (
+  select 1 from information_schema.columns
+  where table_schema = 'public' and table_name = 'person_roles' and column_name = 'match_score'
+) as has_pr_match_score \gset
+\if :has_pr_match_score
+update public.person_roles set match_score = 70 where user_id = (select user_a from fx) and job_id = (select live_job from fx);
+\ir ../migrations/20261009000201_retire_match_score.sql
+do $$
+begin
+  if exists (select 1 from public.person_roles where match_score is not null or match_details is not null) then
+    raise exception 'retiring the match score left one on a person_roles row';
+  end if;
+end;
+$$;
+\endif
+
 \else
 \echo lane-stub: K5a person_roles absent, person_roles checks skipped
 \endif
