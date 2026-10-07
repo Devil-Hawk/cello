@@ -181,8 +181,6 @@ export const HIRING_EMPTY = 'No employer has a role for you right now.'
 export const FAILED_LINE = 'Could not load companies.'
 export const NO_MATCH_LINE = 'No company matches these filters.'
 export const FOLLOWING_EMPTY = 'You do not follow a company yet. Find one above, or follow one from All.'
-export const PIN_NEEDS_FOLLOW = 'Pin only the companies you follow.'
-export const PIN_LIMIT = 'You can pin up to 5 companies.'
 export const RATE_LINE = 'You opened many pages just now. Try again in a few minutes.'
 
 /** While the seed is still being checked. Null once nothing is pending. */

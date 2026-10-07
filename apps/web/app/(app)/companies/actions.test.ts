@@ -33,7 +33,7 @@ vi.mock('@/lib/harness/llm-key-message', () => ({ canRunLlm: () => true }))
 
 import { FREE_CHECKS_PER_DAY } from '@/lib/fit'
 import { RATE_LINE, closedLine } from '@/components/companies/company-logic'
-import { followAnyway, keepPreview, previewChance, removeCompany, takeCheck } from './actions'
+import { followAnyway, keepPreview, setFollow, previewChance, removeCompany, takeCheck } from './actions'
 
 const EMP = '00000000-0000-4000-8000-0000000000e1'
 const OWN = '00000000-0000-4000-8000-0000000000c1'
@@ -106,6 +106,25 @@ describe('followAnyway', () => {
     m.user = null
     expect(await followAnyway('https://jobs.example.com/careers')).toEqual({ ok: false, sentence: 'Sign in again to do that.' })
     expect(m.saveCompany).not.toHaveBeenCalled()
+  })
+})
+
+describe('following goes through companies_follow only', () => {
+  it('followAnyway saves once (saveCompany follows) and writes nothing else', async () => {
+    m.saveCompany.mockResolvedValue({ id: OWN })
+    const r = await followAnyway('https://jobs.example.com/careers')
+    expect(r).toMatchObject({ ok: true, companyId: OWN })
+    expect(m.saveCompany).toHaveBeenCalledTimes(1)
+    expect(session.writes).toEqual([])
+    expect(session.rpcCalls).toEqual([])
+  })
+
+  it('stopping a follow also unpins, and the database answers with the sentence', async () => {
+    session = fakeDb({}, () => ({ ok: false, sentence: 'You can pin up to 5 companies.' }))
+    m.session = session.db
+    expect(await setFollow(OWN, { follow: false })).toEqual({ ok: false, sentence: 'You can pin up to 5 companies.' })
+    expect(session.rpcCalls).toEqual([{ name: 'companies_follow', args: { p_ids: [OWN], p_on: false, p_user: 'u1', p_pin: false } }])
+    expect(session.writes).toEqual([])
   })
 })
 

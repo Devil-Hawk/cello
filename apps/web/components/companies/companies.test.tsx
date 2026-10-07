@@ -342,6 +342,6 @@ describe('what the page never says', () => {
 
   it('writes a follow only through the one follow function', () => {
     const writers = files.filter((f) => /from\(\s*['"`]companies['"`]\s*\)\s*\.(update|insert|upsert)\(|\bwatching\s*:\s*(true|false|change)/.test(src(f))).map(rel)
-    expect(writers).toEqual(['app/(app)/companies/follow.stub.ts'])
+    expect(writers).toEqual([])
   })
 })

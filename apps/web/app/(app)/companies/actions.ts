@@ -12,6 +12,7 @@ import { employerDomain, parseLink } from '@/lib/companies/add-link'
 import { getEmployer } from '@/lib/companies/directory'
 import { nameFromDomain } from '@/lib/companies/page-name'
 import { previewPosting } from '@/lib/companies/preview'
+import { followCompanies, type FollowResult } from '@/lib/companies/watchlist'
 import { rpcSlotStore } from '@/lib/commands/slots'
 import { FREE_CHECKS_PER_DAY, evidenceLive, startOfUtcDay, stripOf } from '@/lib/fit'
 import { codeVerdicts } from '@/lib/fit/code'
@@ -26,7 +27,6 @@ import { classifyJob } from '@/lib/jobs/classify'
 import { createClient } from '@/lib/supabase/server'
 import { checkedAgainLine, type Found } from '@/components/companies/logic'
 import { RATE_LINE, REMOVE_REFUSED, closedLine } from '@/components/companies/company-logic'
-import { followCompanies, type FollowResult } from './follow.stub'
 import { findPosting, ownFor, previewRequirements } from './[id]/read'
 import { findCompanies } from './read'
 
@@ -57,10 +57,11 @@ export async function setFollow(companyId: string, change: { follow?: boolean; p
   const { db, user } = await person()
   if (!user) return { ok: false, sentence: SIGN_IN }
   if (!UUID.test(companyId)) return { ok: false, sentence: 'Cello does not have that company.' }
-  return followCompanies(db, user.id, [companyId], { follow: change.follow, pin: change.pin })
+  // Stopping a follow takes the pin off too: a pin is only ever on a followed company.
+  return followCompanies(db, user.id, [companyId], { follow: change.follow, pin: change.follow === false ? false : change.pin })
 }
 
-/** Follow an employer by the address the person gave, when its site could not be read: the guessed name, the domain and the careers link, shown as "cannot read". */
+/** Follow an employer (saveCompany follows it) by the address the person gave, when its site could not be read: the guessed name, the domain and the careers link, shown as "cannot read". */
 export async function followAnyway(link: string): Promise<{ ok: true; companyId: string; name: string } | { ok: false; sentence: string }> {
   const { db, user } = await person()
   if (!user) return { ok: false, sentence: SIGN_IN }
@@ -72,8 +73,7 @@ export async function followAnyway(link: string): Promise<{ ok: true; companyId:
   const name = nameFromDomain(domain)
   const saved = await saveCompany(db, user.id, { name, domain, careerUrl: url.href, logoUrl: null, isDream: false })
   if (saved.error !== undefined) return { ok: false, sentence: saved.error.startsWith('You already track') ? saved.error : 'Could not save that. Try again.' }
-  const followed = await followCompanies(db, user.id, [saved.id], { follow: true })
-  return followed.ok ? { ok: true, companyId: saved.id, name } : { ok: false, sentence: followed.sentence }
+  return { ok: true, companyId: saved.id, name }
 }
 
 /** Check now (one company) and Check all now: one an hour each, so a button cannot be a loop. */
