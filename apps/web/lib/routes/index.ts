@@ -25,11 +25,14 @@ export const barRoutes: PageRoute[] = [today, roles, companies, network, applica
 /** The phone's tabs: four pages, then Chat once it is in the bar, else Conversations. */
 export const phoneTabs: PageRoute[] = [today, roles, companies, applications, chat.bar ? chat : conversations]
 
+/** Chat is its own key and tab only for a person it is open for; the others keep the old Chat page in their menu. */
+const oldChat: PageRoute = { label: 'Chat', href: '/copilot', shipped: false, bar: false }
+
 /** The account menu: every page that is not a key in the bar, once per address. */
-export function accountRoutes(): PageRoute[] {
+export function accountRoutes(chatOpen = false): PageRoute[] {
   const seen = new Set<string>()
   // Settings before Your search: while both point at /settings, Settings is the one that shows.
-  return [profile, network, chat, settings, search].filter((r) => {
+  return [profile, network, ...(chatOpen ? [] : [oldChat]), settings, search].filter((r) => {
     if (r.bar || seen.has(r.href)) return false
     seen.add(r.href)
     return true

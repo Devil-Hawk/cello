@@ -68,8 +68,8 @@ describe('the bar', () => {
     expect(labels.indexOf('Roles')).toBeLessThan(labels.indexOf('Companies'))
   })
 
-  it('has no Chat key until it ships, and no duplicate pages', () => {
-    expect(chat.bar).toBe(false)
+  it('has a Chat key, shown only to a person it is open for, and no duplicate pages', () => {
+    expect(chat.bar).toBe(true)
     expect(barRoutes.map((r) => r.label)).not.toContain('Chat')
     expect(new Set(barRoutes.map((r) => r.href)).size).toBe(barRoutes.length)
   })

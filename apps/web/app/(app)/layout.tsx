@@ -24,6 +24,8 @@ export default function DashboardLayout({
   const supabase = createClient()
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  // Chat shows in the bar only for a person it is open for; its API answers 404 for anyone else.
+  const [chatOpen, setChatOpen] = useState(false)
   // Set only when the auth check itself throws (network error, Supabase
   // outage, ...) — distinct from "no user" (a real signed-out redirect).
   // Bumping retryToken re-runs the effect below without a full page reload.
@@ -39,6 +41,7 @@ export default function DashboardLayout({
         }
         setUser(user)
         setAuthError(null)
+        void fetch('/api/chat?limit=1', { cache: 'no-store' }).then((r) => setChatOpen(r.ok), () => undefined)
 
         // First-login flow: brand-new users (never onboarded, no companies yet)
         // land on Welcome. Best-effort — never blocks rendering.
@@ -145,6 +148,7 @@ export default function DashboardLayout({
     email: user.email || '',
     fullName: user.user_metadata?.full_name || user.user_metadata?.name || null,
     avatarUrl: user.user_metadata?.avatar_url || null,
+    chatOpen,
   }
 
   return (
