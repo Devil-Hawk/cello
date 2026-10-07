@@ -1,5 +1,5 @@
--- Proves migrations 20261009000400-403 (feedback ids, feedback events, job
--- dismissed feedback, ops health). It applies them TWICE inside the
+-- Proves migrations 20261009000400-404 (feedback ids, feedback events, job
+-- dismissed feedback, ops health, server-only trace columns). It applies them TWICE inside the
 -- transaction (so idempotency is exercised), runs the assertions as the real
 -- client roles, and rolls back. The parts that read a role's trace from
 -- public.person_roles (the employer and role work, K5a) run once that table exists.
@@ -16,6 +16,8 @@ begin;
 \ir ../migrations/20261009000402_job_dismissed_feedback.sql
 \ir ../migrations/20261009000403_ops_health.sql
 \ir ../migrations/20261009000403_ops_health.sql
+\ir ../migrations/20261009000404_feedback_ids_server_only.sql
+\ir ../migrations/20261009000404_feedback_ids_server_only.sql
 
 -- Fixed ids: client roles cannot read a postgres-owned temp table.
 --   owner  bbbbbbbb-0000-0000-0000-000000000001
@@ -165,6 +167,30 @@ insert into public.applications (id, user_id, job_id, stage)
 values ('bbbbbbbb-5555-0000-0000-000000000001', 'bbbbbbbb-0000-0000-0000-000000000001', 'bbbbbbbb-2222-0000-0000-000000000001', 'discovered');
 update public.applications set stage = 'applied' where id = 'bbbbbbbb-5555-0000-0000-000000000001';
 update public.applications set stage = 'interview' where id = 'bbbbbbbb-5555-0000-0000-000000000001';
+
+-- The person cannot pick the trace a row is scored on, nor rewrite what the model first wrote.
+do $$
+declare
+  stmt text;
+begin
+  foreach stmt in array array[
+    $q$update public.outreach_messages set trace_id = repeat('9', 32) where id = 'bbbbbbbb-3333-0000-0000-000000000004'$q$,
+    $q$update public.outreach_messages set generated_body = '' where id = 'bbbbbbbb-3333-0000-0000-000000000002'$q$,
+    $q$insert into public.outreach_messages (user_id, to_email, subject, body, trace_id) values ('bbbbbbbb-0000-0000-0000-000000000001', 'z@example.invalid', 's', 'b', repeat('9', 32))$q$,
+    $q$update public.application_drafts set trace_id = repeat('9', 32) where id = 'bbbbbbbb-4444-0000-0000-000000000001'$q$,
+    $q$update public.application_drafts set generated_cover_letter = '' where id = 'bbbbbbbb-4444-0000-0000-000000000001'$q$
+  ] loop
+    begin
+      execute stmt;
+      raise exception 'authenticated should have been refused: %', stmt;
+    exception when insufficient_privilege then
+      null;
+    end;
+  end loop;
+  -- The columns the person does own still work.
+  update public.outreach_messages set body = 'My own edit' where id = 'bbbbbbbb-3333-0000-0000-000000000004';
+  assert (select body from public.outreach_messages where id = 'bbbbbbbb-3333-0000-0000-000000000004') = 'My own edit';
+end $$;
 
 -- The person can read their own events, never another person's, and cannot write.
 do $$
