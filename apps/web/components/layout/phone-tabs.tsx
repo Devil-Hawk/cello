@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { Briefcase, Building2, KanbanSquare, LayoutDashboard, MessageSquare, type LucideIcon } from 'lucide-react'
-import { phoneTabs, today, isCurrent } from '@/lib/routes'
+import { chat, conversations, phoneTabs, today, isCurrent } from '@/lib/routes'
 
 const ICON: Record<string, LucideIcon> = {
   Today: LayoutDashboard,
@@ -14,13 +14,13 @@ const ICON: Record<string, LucideIcon> = {
 // The phone's bottom plinth: five tabs, the current one a key. It is a normal
 // flex child at the foot of the column (not fixed), so the page above it never
 // scrolls underneath it. The tab height is 44px or more.
-export function PhoneTabs({ pathname, needsYou }: { pathname: string; needsYou?: number }) {
+export function PhoneTabs({ pathname, needsYou, chatOpen = false }: { pathname: string; needsYou?: number; chatOpen?: boolean }) {
   return (
     <nav
       aria-label="Bottom navigation"
       className="r-plinth-tabs flex shrink-0 gap-1 px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] md:hidden"
     >
-      {phoneTabs.map((r) => {
+      {phoneTabs.map((r) => (r === chat && !chatOpen ? conversations : r)).map((r) => {
         const Icon = ICON[r.label] ?? LayoutDashboard
         return (
           <Link

@@ -3,12 +3,14 @@
 // The Chat page: the rail on the left, the conversation in the middle with its compose box fixed at the bottom, and
 // the side panel on the right only while a made thing is open. Everything it shows is read from rows through
 // /api/chat: tiles with names, answers as the parts code passed, cards from stored rows, the tasks line from agent_tasks.
-// ponytail: tasks are polled every 2 s while one is working; Realtime replaces the poll when the stream route lands.
+// ponytail: the page reads the chat every 2 s while a turn is being answered or a task is working; Realtime and useStream replace the poll.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Menu, X } from 'lucide-react'
 import { Markdown } from '@/components/chat/markdown'
+import { MadeBlock } from '@/components/chat/made-block'
+import { SourcesAndTools } from '@/components/chat/sources-and-tools'
 import { ModelPicker, type PickScope } from '@/components/chat/model-picker'
 import { Composer } from '@/components/chat/composer'
 import { AnswerParts, type Named } from '@/components/chat/parts'
@@ -18,7 +20,7 @@ import { SidePanel } from '@/components/chat/side-panel'
 import { StatusTurn } from '@/components/chat/status-turn'
 import { TasksLine, type TaskRow, type TaskStatus } from '@/components/chat/tasks-line'
 import { Tiles, type TileData } from '@/components/chat/tiles'
-import { disclosureLine, type Disclosure } from '@/lib/chat/disclosure'
+import type { Disclosure } from '@/lib/chat/disclosure'
 import type { Found } from '@/lib/chat/find'
 import { chatHref } from '@/lib/chat/links'
 import type { ChatPageData } from '@/lib/chat/page-data'
@@ -39,8 +41,6 @@ export interface ChatViewProps {
   initialAbout?: { kind: string; ref: string }
 }
 
-// ponytail: Send is switched on by the stream route of the engine package; until then the compose box says so.
-const SEND_NOTICE = 'Chat cannot send yet. Every page and button works without it.'
 const POLL_MS = 2000
 const PAGE = 50
 /** "@" and then the start of a name, at the end of what is typed. */
@@ -61,11 +61,15 @@ async function getJson<T>(url: string): Promise<T | null> {
 }
 
 async function send(url: string, method: string, body?: unknown): Promise<boolean> {
+  return (await sendJson(url, method, body)).ok
+}
+
+async function sendJson<T = Record<string, unknown>>(url: string, method: string, body?: unknown): Promise<{ ok: boolean; body: (T & { message?: string; fix?: string }) | null }> {
   try {
     const res = await fetch(url, { method, headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
-    return res.ok
+    return { ok: res.ok, body: (await res.json().catch(() => null)) as (T & { message?: string; fix?: string }) | null }
   } catch {
-    return false
+    return { ok: false, body: null }
   }
 }
 
@@ -102,6 +106,12 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
   const [settings, setSettings] = useState<SettingsView | null>(null)
   // A choice made before the chat exists, or for one message: used by the next send. ponytail: stored on the chat when the first turn creates it.
   const [pending, setPending] = useState<ModelChoice | null>(null)
+  // "Just this message": used by the next send only.
+  const [once, setOnce] = useState<ModelChoice | null>(null)
+  const [sending, setSending] = useState(false)
+  // After the person approves, the next steps run in the background: read the chat for a minute to show them.
+  const [watchUntil, setWatchUntil] = useState(0)
+  const answered = useRef<Set<string> | null>(null)
   const [estimate, setEstimate] = useState<string | null>(null)
   const poll = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -125,7 +135,10 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
   }, [rows])
 
   const loadScheduled = useCallback(async () => {
-    const body = await getJson<{ tasks: { id: string; name: string; card: { schedule: string; last: string | null; next: string | null } }[] }>('/api/scheduled-tasks')
+    // Scheduled tasks are closed until they ship: the route answers 404, which is truly "nothing scheduled".
+    const res = await fetch('/api/scheduled-tasks', { cache: 'no-store' }).catch(() => null)
+    if (res?.status === 404) return setScheduled([])
+    const body = res?.ok ? ((await res.json().catch(() => null)) as { tasks: { id: string; name: string; card: { schedule: string; last: string | null; next: string | null } }[] } | null) : null
     setScheduled(body ? body.tasks.map((t) => ({ id: t.id, name: t.name, detail: [t.card.schedule, t.card.last, t.card.next].filter(Boolean).join(' \u00b7 ') })) : null)
   }, [])
 
@@ -149,6 +162,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
     setPage(null)
     setMissing(false)
     setPanel(null)
+    answered.current = null
     void loadPage()
   }, [loadPage])
 
@@ -159,7 +173,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
     void loadSettings()
   }, [loadSettings])
 
-  const choice: ModelChoice | null = pending ?? (settings?.ran ? { rung: settings.ran.rung, model: settings.ran.model, effort: settings.ran.effort } : null)
+  const choice: ModelChoice | null = once ?? pending ?? (settings?.ran ? { rung: settings.ran.rung, model: settings.ran.model, effort: settings.ran.effort } : null)
   useEffect(() => {
     if (!choice) return setEstimate(null)
     void getJson<{ text: string }>(`/api/chat/estimate?rung=${choice.rung}&model=${encodeURIComponent(choice.model)}&effort=${choice.effort}`).then((e) => setEstimate(e?.text ?? null))
@@ -167,7 +181,8 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
 
   async function pick(next: ModelChoice, scope: PickScope) {
     // One message, or this chat before it exists: held until the first turn is sent. A default needs no chat.
-    if (scope === 'once' || (!chatId && scope === 'chat')) return setPending(next)
+    if (scope === 'once') return setOnce(next)
+    if (!chatId && scope === 'chat') return setPending(next)
     const ok = await send('/api/chat/settings', 'POST', { ...(chatId ? { chat: chatId } : {}), choice: next, as_default: scope === 'default' })
     if (ok) setPending(null)
     else setNote('Cello could not save that choice. It is above what you allow, or the save failed.')
@@ -175,14 +190,34 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
   }
 
   const tasks = useMemo(() => (page?.tasks ?? []).map(toTaskRow), [page])
-  const running = tasks.some(alive)
+  // A turn is being answered while the last thing in the chat is the person's own message.
+  const lastTurn = page?.turns.filter((t) => !t.superseded_at && t.kind !== 'status').at(-1)
+  const awaiting = lastTurn?.kind === 'person' && Date.now() - Date.parse(lastTurn.created_at) < 6 * 60_000
+  const running = tasks.some(alive) || awaiting || sending
+  const watching = running || Date.now() < watchUntil
   useEffect(() => {
-    if (!running) return
+    if (!watching || !chatId) return
     poll.current = setInterval(() => void loadPage(), POLL_MS)
     return () => {
       if (poll.current) clearInterval(poll.current)
     }
-  }, [running, loadPage])
+  }, [watching, chatId, loadPage])
+
+  // A comparison that arrives while the person is here opens beside the chat; one already there does not.
+  useEffect(() => {
+    if (!page) return
+    const cello = page.turns.filter((t) => t.kind === 'cello')
+    if (answered.current === null) {
+      answered.current = new Set(cello.map((t) => t.id))
+      return
+    }
+    for (const t of cello) {
+      if (answered.current.has(t.id)) continue
+      answered.current.add(t.id)
+      const made = (t.links ?? []).map((l) => (l.kind === 'made' && l.role !== 'recalled' ? page.made[l.id] : undefined)).find((m) => m?.type === 'comparison')
+      if (made) setPanel(made.id)
+    }
+  }, [page])
 
   // A chip is read under the person's rights before it is shown; one that is not theirs never appears.
   useEffect(() => {
@@ -241,6 +276,46 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
 
   const at = AT_WORD.exec(draft)
 
+  // Send: a new chat is made first (holding the chips), then the words go to it and the page follows the answer.
+  async function sendMessage() {
+    const typed = draft.trim()
+    if (!typed || sending) return
+    setSending(true)
+    setNote(null)
+    let id = chatId
+    if (!id) {
+      const made = await sendJson<{ id: string }>('/api/chat', 'POST', { chips: chips.map((c) => ({ kind: c.kind, id: c.ref })), ...(pending ? { choice: pending } : {}) })
+      if (!made.ok || !made.body?.id) {
+        setSending(false)
+        return setNote('Cello could not start the chat. Try again.')
+      }
+      id = made.body.id
+    } else {
+      for (const c of chips) await send(`/api/chat/${encodeURIComponent(id)}/attachments`, 'POST', { kind: c.kind, ref: refOf(c.kind, c.ref) })
+    }
+    const sent = await sendJson(`/api/chat/${encodeURIComponent(id)}/turns`, 'POST', { typed, ...(quoted ? { quoted } : {}), ...(once ? { choice: once } : {}) })
+    if (!sent.ok) {
+      setSending(false)
+      return setNote(sent.body?.message ?? 'Cello could not send that. Try again.')
+    }
+    setDraft('')
+    setChips([])
+    setQuoted(null)
+    setOnce(null)
+    setPending(null)
+    if (id !== chatId) router.push(`/chat/${id}`)
+    else await loadPage()
+    setSending(false)
+    void loadChats()
+  }
+
+  // A suggestion puts its words in the compose box and its things beside them as chips; nothing is sent until Send.
+  async function useSuggestion(s: { text: string; objects: { kind: string; ref: string }[] }) {
+    setDraft(s.text)
+    const named = await Promise.all(s.objects.map((o) => getJson<{ kind: string; ref: string; name: string }>(`/api/chat/object?kind=${encodeURIComponent(o.kind)}&ref=${encodeURIComponent(o.ref)}`)))
+    setChips(named.filter((o): o is { kind: string; ref: string; name: string } => o !== null))
+  }
+
   async function signOut() {
     await createClient().auth.signOut()
     router.push('/login')
@@ -257,7 +332,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
   }
 
   return (
-    <div className="flex h-[calc(100dvh-9.5rem)] min-h-[24rem] overflow-hidden rounded-card border border-border bg-background md:h-[calc(100dvh-5rem)]">
+    <div className="flex h-[calc(100dvh-9.5rem)] min-h-[24rem] overflow-hidden rounded-card border border-border bg-background md:h-[calc(100dvh-9.25rem)]">
       <div className={`${railOpen ? 'fixed inset-y-0 left-0 z-40 w-72 bg-background shadow-pop' : 'hidden'} md:static md:block md:w-64 md:shrink-0 md:border-r md:border-border md:shadow-none`}>
         <Rail
           chats={rows.map((c): RailChat => ({ id: c.id, title: c.title, pinned: Boolean(c.pinned_at) }))}
@@ -316,7 +391,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
                   {(suggested?.suggestions ?? []).map((s) => (
                     // A tap puts the words in the compose box. Nothing is sent until Send.
                     <li key={s.text}>
-                      <button type="button" className="rounded-full border border-border bg-card px-3 py-1.5 text-caption text-foreground hover:bg-muted" onClick={() => setDraft(s.text)}>
+                      <button type="button" className="rounded-full border border-border bg-card px-3 py-1.5 text-caption text-foreground hover:bg-muted" onClick={() => void useSuggestion(s)}>
                         {s.text}
                       </button>
                     </li>
@@ -339,7 +414,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
                             disabled={!editing.text.trim()}
                             className="rounded-control border border-border bg-card px-2 py-1 text-foreground hover:bg-muted disabled:opacity-40"
                             onClick={() =>
-                              // ponytail: this forks the chat and keeps the old version; the answer for the new one comes from the stream route.
+                              // This forks the chat and keeps the old version; the page then follows the new answer.
                               void send(`/api/chat/${chatId}/edit`, 'POST', { turn_id: t.id, typed: editing.text }).then((ok) => {
                                 if (!ok) setNote('Cello could not save that edit.')
                                 setEditing(null)
@@ -380,11 +455,22 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
                   </div>
                 ) : t.kind === 'cello' ? (
                   <div key={t.id} className="space-y-1" data-answer-turn={t.id}>
-                    {t.parts.length > 0 ? <AnswerParts parts={t.parts} names={names} tileCount={active.length} cards={page?.cards ?? []} onOpen={openThing} /> : t.answer ? <Markdown content={t.answer} /> : null}
-                    {t.disclosure ? <p className="text-caption text-muted-foreground">{disclosureLine(t.disclosure as Disclosure)}</p> : null}
+                    {t.parts.length > 0 ? <AnswerParts parts={t.parts} names={names} tileCount={active.length} cards={page?.cards ?? []} onOpen={openThing} recalled={page?.recalled} onAddChat={(id) => void addThing({ kind: 'chat', id, name: '', detail: null })} /> : t.answer ? <Markdown content={t.answer} /> : null}
+                    {(t.links ?? []).flatMap((l) => (l.kind === 'made' && l.role !== 'recalled' && page?.made[l.id] ? [page.made[l.id]] : [])).map((m) => (
+                      <MadeBlock key={m.id} made={m} onOpen={setPanel} />
+                    ))}
+                    {t.disclosure ? <SourcesAndTools d={t.disclosure as Disclosure} /> : null}
                   </div>
                 ) : (
-                  <StatusTurn key={t.id} line={t.event_id ? page?.statuses[t.event_id] : undefined} />
+                  <StatusTurn
+                    key={t.id}
+                    line={t.event_id ? page?.statuses[t.event_id] : undefined}
+                    onReview={setPanel}
+                    onApproved={() => {
+                      setWatchUntil(Date.now() + 90_000)
+                      void loadPage()
+                    }}
+                  />
                 )
               )
             )}
@@ -392,7 +478,8 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
             {turnTasks.length > 0 && (
               <TasksLine
                 tasks={turnTasks.map(toTaskRow)}
-                running={running}
+                running={tasks.some(alive)}
+                defaultOpen
                 seconds={seconds(turnTasks)}
                 onStop={() => lastPersonTurn && void send(`/api/chat/${chatId}/stop`, 'POST', { turn_id: lastPersonTurn.id }).then(loadPage)}
                 onStopTask={(id) => void send(`/api/chat/${chatId}/stop`, 'POST', { task_id: id }).then(loadPage)}
@@ -402,7 +489,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
         </div>
 
         <div className="mx-auto w-full max-w-3xl px-4 pb-3">
-          <Composer value={draft} onChange={setDraft} onSend={() => undefined} onStop={() => undefined} running={false} notice={SEND_NOTICE} quoted={quoted}
+          <Composer value={draft} onChange={setDraft} onSend={() => void sendMessage()} onStop={() => lastPersonTurn && void send(`/api/chat/${chatId}/stop`, 'POST', { turn_id: lastPersonTurn.id }).then(loadPage)} running={running} quoted={quoted}
             onRemoveQuote={() => setQuoted(null)}
             controls={settings ? <ModelPicker key={`${choice?.rung}:${choice?.model}:${choice?.effort}`} choice={choice} rungs={settings.rungs} estimate={estimate} onPick={(c, scope) => void pick(c, scope)} /> : null}
             above={

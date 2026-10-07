@@ -44,7 +44,7 @@ const DONE_WORDS: Record<string, [string, string, string]> = {
 /** "Worked 0:41: researched 3 companies, drafted 1 draft." from the rows, never from the model. */
 export function workedSummary(tasks: TaskRow[], seconds: number): string {
   const counts = new Map<string, number>()
-  for (const t of tasks) if (t.status === 'done' || t.status === 'partial') counts.set(t.command ?? '', (counts.get(t.command ?? '') ?? 0) + 1)
+  for (const t of tasks) if (t.command !== 'chat.turn' && (t.status === 'done' || t.status === 'partial')) counts.set(t.command ?? '', (counts.get(t.command ?? '') ?? 0) + 1)
   const parts = [...counts].map(([command, n]) => {
     const words = DONE_WORDS[command]
     return words ? `${words[0]} ${n} ${n === 1 ? words[1] : words[2]}` : `finished ${n} ${n === 1 ? 'task' : 'tasks'}`

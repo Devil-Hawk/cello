@@ -33,6 +33,10 @@ export interface AnswerPartsProps {
   cards: Card[]
   /** Opens a made thing, or a record, in the side panel. */
   onOpen?: (kind: AttachKind, ref: string) => void
+  /** `kind:id` of a thing recalled from an earlier chat, to the chat it came from: a part that uses it shows the source line. */
+  recalled?: Record<string, { chatId: string; title: string; at: string }>
+  /** Adds the earlier chat to this one as a tile. */
+  onAddChat?: (chatId: string) => void
 }
 
 export function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
@@ -82,7 +86,35 @@ function Lead({ about, names, onOpen }: { about: { kind: AttachKind; ref: string
   )
 }
 
-export function AnswerParts({ parts, names, tileCount, cards, onOpen }: AnswerPartsProps) {
+const CELLO_LINK = /cello:([a-z]+)\/([^)\s]+)/gi
+const shortDate = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+
+/** "From your chat 'Compare my six', Oct 6" for each earlier chat a part's links point into. */
+function SourceLines({ text, recalled, onAddChat }: { text: string; recalled: NonNullable<AnswerPartsProps['recalled']>; onAddChat?: (chatId: string) => void }) {
+  const from = new Map<string, NonNullable<AnswerPartsProps['recalled']>[string]>()
+  for (const m of text.matchAll(CELLO_LINK)) {
+    const hit = recalled[`${m[1].toLowerCase()}:${m[2]}`]
+    if (hit) from.set(hit.chatId, hit)
+  }
+  return (
+    <>
+      {[...from.values()].map((s) => (
+        <p key={s.chatId} className="mt-1 flex flex-wrap items-center gap-x-3 text-caption text-muted-foreground" data-source>
+          <span>
+            From your chat <Link href={`/chat/${encodeURIComponent(s.chatId)}`} className="text-foreground underline underline-offset-2">{`\u201c${s.title || 'Untitled chat'}\u201d`}</Link>, {shortDate(s.at)}
+          </span>
+          {onAddChat && (
+            <button type="button" className="underline underline-offset-2 hover:text-foreground" onClick={() => onAddChat(s.chatId)}>
+              Add to this chat
+            </button>
+          )}
+        </p>
+      ))}
+    </>
+  )
+}
+
+export function AnswerParts({ parts, names, tileCount, cards, onOpen, recalled, onAddChat }: AnswerPartsProps) {
   const shown = new Set<string>()
   return (
     <div className="space-y-4">
@@ -99,6 +131,7 @@ export function AnswerParts({ parts, names, tileCount, cards, onOpen }: AnswerPa
           <section key={i} className="group">
             {tileCount > 1 && part.about.length > 0 && <Lead about={part.about} names={names} onOpen={onOpen} />}
             <Markdown content={rewriteCelloLinks(part.text)} />
+            {recalled && <SourceLines text={part.text} recalled={recalled} onAddChat={onAddChat} />}
             <div className="mt-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100">
               <CopyButton text={part.text} />
             </div>

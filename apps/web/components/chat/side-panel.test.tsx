@@ -30,11 +30,15 @@ describe('PanelView', () => {
     expect(html({ thing: { id: 'a2', type: 'research', title: 'Research' } })).not.toContain('>Edit<')
   })
 
-  it('offers Add to chat and Use in a new chat only when the page gives them', () => {
-    expect(html()).not.toContain('Add to chat')
-    const out = html({ onAddToChat: noop, onUseInNewChat: noop })
-    expect(out).toContain('>Add to chat<')
+  it('offers Attach, Keep and Use in a new chat only when the page gives them, and Download always', () => {
+    expect(html()).not.toContain('>Attach<')
+    expect(html()).not.toContain('>Keep<')
+    expect(html()).toContain('>Download<')
+    const out = html({ onAddToChat: noop, onUseInNewChat: noop, onKeep: noop })
+    expect(out).toContain('>Attach<')
+    expect(out).toContain('>Keep<')
     expect(out).toContain('>Use in a new chat<')
+    expect(html({ onKeep: noop, kept: true })).toContain('>Kept<')
   })
 
   it('shows the person\'s draft in a field while editing, with Save as a new version', () => {

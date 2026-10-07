@@ -40,7 +40,7 @@ export function Bar({ pathname, user, onSignOut, needsYou }: BarProps) {
           ))}
         </nav>
         <span className="flex-1" />
-        {chat.bar && (
+        {chat.bar && user.chatOpen && (
           <Key asChild variant="raised" current={isCurrent(pathname, chat.href)}>
             <Link href={chat.href}>{chat.label}</Link>
           </Key>

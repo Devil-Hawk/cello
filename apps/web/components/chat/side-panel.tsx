@@ -3,8 +3,8 @@
 // The side panel: a made thing opens beside the conversation from a turn or a tile. It shows the title and kind, every
 // version ("Version 3 of 3") with who wrote it, and the text. Edit saves the person's own version through
 // /api/artifacts/[id]; the version Cello wrote stays. The conversation narrows beside it and is never covered.
-// Add to chat and Use in a new chat work on any made thing. ponytail: Compare, Ask for a change, Save answer, Download and
-// Delete arrive with the documents package (K17), the editor (PG8a) and the pipeline's sent-version rule (K13).
+// Keep, Attach (to this chat), Download and Use in a new chat work on any made thing. ponytail: Compare, Ask for a change
+// and Delete arrive with the editor (PG8a) and the pipeline's sent-version rule (K13).
 
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
@@ -61,10 +61,23 @@ export interface PanelViewProps {
   onAddToChat?: () => void
   /** Opens a new chat with the thing attached. */
   onUseInNewChat?: () => void
+  /** Keeps the version on screen (chat.keep). Left out where there is no chat to keep it from. */
+  onKeep?: () => void
+  kept?: boolean
   error?: string | null
 }
 
-export function PanelView({ thing, versions, selected, onSelect, editing, onEdit, onSave, onCancel, onClose, onAddToChat, onUseInNewChat, error }: PanelViewProps) {
+/** The text of a version as a file the person saves. */
+function download(title: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${title.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'cello'}.md`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+export function PanelView({ thing, versions, selected, onSelect, editing, onEdit, onSave, onCancel, onClose, onAddToChat, onUseInNewChat, onKeep, kept, error }: PanelViewProps) {
   const current = versions.find((v) => v.version === selected) ?? versions[0]
   const latest = versions[0]?.version ?? 0
   const field = EDITABLE_FIELD[readType(thing.type) ?? thing.type]
@@ -118,11 +131,19 @@ export function PanelView({ thing, versions, selected, onSelect, editing, onEdit
                 </Button>
               )}
               <CopyButton text={current.content_text} />
-              {onAddToChat && (
-                <Button size="sm" variant="outline" onClick={onAddToChat}>
-                  Add to chat
+              {onKeep && (
+                <Button size="sm" variant="outline" disabled={kept} onClick={onKeep}>
+                  {kept ? 'Kept' : 'Keep'}
                 </Button>
               )}
+              {onAddToChat && (
+                <Button size="sm" variant="outline" onClick={onAddToChat}>
+                  Attach
+                </Button>
+              )}
+              <Button size="sm" variant="outline" onClick={() => download(thing.title, current.content_text)}>
+                Download
+              </Button>
               {onUseInNewChat && (
                 <Button size="sm" variant="outline" onClick={onUseInNewChat}>
                   Use in a new chat
@@ -142,6 +163,7 @@ export function SidePanel({ artifactId, onClose, onAddToChat, onUseInNewChat }: 
   const [selected, setSelected] = useState(0)
   const [editing, setEditing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [kept, setKept] = useState(false)
 
   async function load() {
     try {
@@ -158,6 +180,7 @@ export function SidePanel({ artifactId, onClose, onAddToChat, onUseInNewChat }: 
   }
   useEffect(() => {
     setEditing(false)
+    setKept(false)
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [artifactId])
@@ -177,6 +200,10 @@ export function SidePanel({ artifactId, onClose, onAddToChat, onUseInNewChat }: 
       onClose={onClose}
       onAddToChat={onAddToChat}
       onUseInNewChat={onUseInNewChat}
+      kept={kept}
+      onKeep={() =>
+        void fetch('/api/chat/keep', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ artifact_id: artifactId }) }).then((r) => (r.ok ? setKept(true) : setError('Cello could not keep that. Try again.')))
+      }
       onEdit={() => setEditing(true)}
       onCancel={() => setEditing(false)}
       onSave={async ({ markdown }) => {

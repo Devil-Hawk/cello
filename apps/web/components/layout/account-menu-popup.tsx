@@ -27,7 +27,7 @@ export default function AccountMenuPopup({ user, onSignOut }: { user: ShellUser;
           <p className="text-caption text-muted-foreground">{user.email}</p>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {accountRoutes().map((r) => (
+        {accountRoutes(user.chatOpen).map((r) => (
           <DropdownMenuItem key={r.href + r.label} asChild className="min-h-11 cursor-pointer">
             <Link href={r.href}>{r.label}</Link>
           </DropdownMenuItem>

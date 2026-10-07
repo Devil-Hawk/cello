@@ -7,6 +7,8 @@ export interface ShellUser {
   email: string
   fullName: string | null
   avatarUrl: string | null
+  /** Chat is open for this person: its key shows in the bar and the tabs. */
+  chatOpen?: boolean
 }
 
 export interface AvatarKeyProps extends ButtonHTMLAttributes<HTMLButtonElement> {

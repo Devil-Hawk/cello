@@ -27,7 +27,9 @@ export interface ModelPickerProps {
 /** "Free models, Standard": the rung and the effort in the person's words. */
 export function choiceWords(choice: ModelChoice | null, rungs: RungInfo[]): string {
   if (!choice) return 'Choose a model'
-  const rung = rungs.find((r) => r.rung === choice.rung)?.label ?? 'Model'
+  const info = rungs.find((r) => r.rung === choice.rung)
+  // The model's own name, so the line says what will answer: "Free models: laguna-s-2.1, Standard".
+  const rung = info && info.models.length > 0 ? `${info.label}: ${info.models.find((m) => m.id === choice.model)?.label ?? choice.model}` : (info?.label ?? 'Model')
   const effort = EFFORT_WORDS[choice.effort as PickableEffort]
   return effort ? `${rung}, ${effort}` : rung
 }

@@ -14,9 +14,9 @@ const noop = () => undefined
 
 describe('ModelPicker', () => {
   it('says the choice in words with its cost', () => {
-    expect(choiceWords(choice, rungs)).toBe('Free models, Standard')
+    expect(choiceWords(choice, rungs)).toBe('Free models: qwen3.8-27b, Standard')
     const out = renderToStaticMarkup(<ModelPicker choice={choice} rungs={rungs} estimate="Free" onPick={noop} />)
-    expect(out).toContain('Free models, Standard')
+    expect(out).toContain('Free models: qwen3.8-27b, Standard')
     expect(out).toContain('· Free')
   })
 
