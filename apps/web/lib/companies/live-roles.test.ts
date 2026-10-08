@@ -64,6 +64,7 @@ function listing() {
 
 function fakeDb(held: string[]) {
   const touched: string[] = []
+  const ors: string[] = []
   const rpcs: { name: string; args: Record<string, unknown> }[] = []
   const db = {
     from(table: string) {
@@ -71,6 +72,7 @@ function fakeDb(held: string[]) {
       const b = {
         select: () => b,
         eq: () => b,
+        or: (filter: string) => (ors.push(filter), b),
         limit: () => b,
         then: (resolve: (v: unknown) => void) => resolve({ data: held.map((id) => ({ id: `job-${id}`, external_id: id })), error: null }),
       }
@@ -78,7 +80,7 @@ function fakeDb(held: string[]) {
     },
     rpc: async (name: string, args: Record<string, unknown>) => (rpcs.push({ name, args }), { data: null, error: null }),
   }
-  return { db: db as never, touched, rpcs }
+  return { db: db as never, touched, rpcs, ors }
 }
 
 beforeEach(() => {
@@ -197,3 +199,57 @@ describe('liveRoles with role types chosen and the switch on', () => {
   })
 })
 
+
+
+describe('liveRoles, narrowed before it is paged', () => {
+  it('finds the roles a word names wherever they sit in the list, and leaves the counted line as the whole read', async () => {
+    const { db } = fakeDb([])
+    const all = await liveRoles({ db, userId: 'u1', company, targets })
+    const out = await liveRoles({ db, userId: 'u1', company, targets, match: { words: 'account' } })
+    expect(out.matched).toBe(15)
+    expect(out.page).toBe(0)
+    expect(out.pages).toBe(1)
+    expect(out.rows).toHaveLength(15)
+    expect(out.rows.every((r) => r.reason === 'title')).toBe(true)
+    expect({ kept: out.kept, counts: out.counts, total: out.total }).toEqual({ kept: all.kept, counts: all.counts, total: all.total })
+    expect(out.kept + Object.values(out.counts).reduce((a, b) => a + b, 0)).toBe(out.total)
+  })
+
+  it('needs every word, ignores case and the way a title is spelled, and matches nothing for a word that is not there', async () => {
+    const { db } = fakeDb([])
+    expect((await liveRoles({ db, userId: 'u1', company, targets, match: { words: 'PLATFORM engineer' } })).matched).toBe(45)
+    expect((await liveRoles({ db, userId: 'u1', company, targets, match: { words: 'platform sales' } })).matched).toBe(0)
+    const none = await liveRoles({ db, userId: 'u1', company, targets, match: { words: 'forward' } })
+    expect(none).toMatchObject({ matched: 0, rows: [], pages: 1, page: 0 })
+    expect(none.total).toBe(60)
+  })
+
+  it('narrows by role type, by place and by one posting key', async () => {
+    const { db } = fakeDb([])
+    const first = (await liveRoles({ db, userId: 'u1', company, targets })).rows[0]
+    const typed = await liveRoles({ db, userId: 'u1', company, targets, match: { type: first.role_type ?? 'none' } })
+    expect(typed.rows.every((r) => r.role_type === (first.role_type ?? 'none'))).toBe(true)
+    expect((await liveRoles({ db, userId: 'u1', company, targets, match: { place: 'remo' } })).matched).toBe(60)
+    expect((await liveRoles({ db, userId: 'u1', company, targets, match: { place: 'paris' } })).matched).toBe(0)
+    const one = await liveRoles({ db, userId: 'u1', company, targets, match: { key: 'keep-1' } })
+    expect(one.rows).toHaveLength(1)
+    expect(one.rows[0].key).toBe('keep-1')
+    expect((await liveRoles({ db, userId: 'u1', company, targets, match: { key: 'https://other.example/jobs/1' } })).rows).toEqual([])
+  })
+
+  it('gives each row its posting key and its level', async () => {
+    const { db } = fakeDb([])
+    const out = await liveRoles({ db, userId: 'u1', company, targets })
+    expect(out.rows.every((r) => r.key.length > 0 && ['junior', 'senior'].includes(r.level))).toBe(true)
+  })
+
+  it('finds the roles a person holds by the employer when they have no row of their own for it', async () => {
+    const { db, ors } = fakeDb(['held-0'])
+    const out = await liveRoles({ db, userId: 'u1', company: { ...company, id: 'emp-1' }, targets })
+    expect(ors).toEqual(['viewer_company_id.eq.emp-1,employer_id.eq.emp-1'])
+    expect(out.rows[0].jobId).toBe('job-held-0')
+    const without = fakeDb([])
+    await liveRoles({ db: without.db, userId: 'u1', company: { ...company, employer_id: null }, targets })
+    expect(without.ors).toEqual([])
+  })
+})
