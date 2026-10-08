@@ -24,9 +24,9 @@ const memoriesFor: ScreenMessageHook = async (db, userId, objects) => {
   const lines: string[] = []
   for (const o of objects) {
     let by: { contactId?: string; employerId?: string } | null = null
-    if (o.kind === 'person') by = { contactId: o.ref }
+    if (o.kind === 'person') by = { contactId: o.id }
     else if (o.kind === 'company') {
-      const { data } = await db.from('companies').select('employer_id').eq('id', o.ref).eq('user_id', userId).maybeSingle()
+      const { data } = await db.from('companies').select('employer_id').eq('id', o.id).eq('user_id', userId).maybeSingle()
       const employerId = (data as { employer_id?: string | null } | null)?.employer_id
       if (employerId) by = { employerId }
     }

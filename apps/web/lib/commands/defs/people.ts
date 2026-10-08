@@ -177,8 +177,8 @@ export const peopleMarkContacted = personCommand({
   },
 })
 
-export const peopleFind = personCommand({
-  id: 'people.find',
+export const peopleSource = personCommand({
+  id: 'people.source',
   label: 'Find people',
   input: z.strictObject({ company_id: id, role_id: id.optional() }),
   measure: 'S18',
@@ -591,7 +591,7 @@ export const peopleCommands: AnyCommand[] = [
   peopleDelete,
   peopleImport,
   peopleMarkContacted,
-  peopleFind,
+  peopleSource,
   peopleTie,
   peopleProfile,
   peopleConfirmProfile,

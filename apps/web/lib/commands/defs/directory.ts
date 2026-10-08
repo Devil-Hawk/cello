@@ -8,12 +8,12 @@ import { defineCommand, type AnyCommand } from '../define'
 import { codeText, untrustedText } from '../text'
 
 // ---------------------------------------------------------------------------
-// companies.get: one employer, as the Chat card shows it
+// companies.employer: one employer, as the Chat card shows it
 // ---------------------------------------------------------------------------
 
 export const companiesGet = defineCommand({
-  id: 'companies.get',
-  label: 'Company',
+  id: 'companies.employer',
+  label: 'Read an employer',
   input: z.strictObject({ id: z.string().uuid() }),
   output: z.object({
     id: codeText(40),

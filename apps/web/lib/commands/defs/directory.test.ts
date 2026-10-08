@@ -20,7 +20,7 @@ function ctx(tables: { company_directory: unknown; kept?: number; companies?: un
   return { userId: 'u1', admin: () => ({ from: chain }) } as never
 }
 
-describe('companies.get', () => {
+describe('companies.employer', () => {
   it('gives the open count, the roles kept and whether the person follows', async () => {
     const out = await companiesGet.run(ctx({ company_directory: employer(), kept: 3, companies: [{ id: 'c1' }] }), { id: EMP })
     expect(out).toEqual({ id: EMP, name: 'Stripe', domain: 'stripe.com', logo_url: null, open: 636, kept: 3, following: true, cannot_read: null })

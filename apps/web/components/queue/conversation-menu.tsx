@@ -88,7 +88,7 @@ function FindDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
     setBusy(true)
     setNote(null)
     try {
-      const r = await callCommand<{ company: string; headline: string; inserted: number }>('/api/network', 'people.find', { company_id: id })
+      const r = await callCommand<{ company: string; headline: string; inserted: number }>('/api/network', 'people.source', { company_id: id })
       setNote(`${r.headline} Added ${r.inserted} to your network.`)
     } catch (e) {
       setNote(e instanceof Error ? e.message : 'Could not look for people.')
