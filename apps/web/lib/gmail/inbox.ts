@@ -14,6 +14,7 @@ import { logApiError } from '@/lib/observability/log'
 import { getGmailAccessToken } from './token'
 import { hasGmailPermission } from './permissions'
 import { runGmailSyncCore } from './sync-core'
+import { runNetwork } from '@/lib/network/run'
 import type { SyncState } from './types'
 
 export const MAX_USERS_PER_TICK = 10
@@ -32,6 +33,7 @@ export interface InboxUserResult {
 
 interface ProfileRow {
   id: string
+  email?: string | null
   preferences: Record<string, unknown> | null
 }
 
@@ -60,6 +62,8 @@ export async function syncInbox(admin: SupabaseClient, profile: ProfileRow): Pro
       `gmail sync for ${profile.id}`,
     )
     await beat(admin, profile.id, { succeeded_at: new Date().toISOString(), failure: null, duration_ms: Date.now() - started.getTime(), found: { read: result.processed, applications: result.createdApplications.length } }).catch(() => undefined)
+    // People from the headers of the same mail, each part under its own budget and heartbeat; never holds the read.
+    await runNetwork(admin, { userId: profile.id, email: profile.email ?? '', accessToken: tokenResult.accessToken, isDemo: apiKeys.isDemo !== false }).catch(() => undefined)
     return { userId: profile.id, processed: result.processed, isFirstSync: result.isFirstSync }
   } catch (e) {
     logApiError('gmail/inbox', e, { userId: profile.id })
@@ -70,7 +74,7 @@ export async function syncInbox(admin: SupabaseClient, profile: ProfileRow): Pro
 
 /** Everyone whose "monitor" grant is on and whose refresh token is stored, read a few at a time. */
 export async function syncAllInboxes(admin: SupabaseClient): Promise<{ ok: true; eligibleUsers: number; processed: number; results: InboxUserResult[] } | { ok: false; error: string }> {
-  const { data: profiles, error } = await admin.from('profiles').select('id, preferences')
+  const { data: profiles, error } = await admin.from('profiles').select('id, email, preferences')
   if (error) return { ok: false, error: error.message }
   // A live grant with no stored refresh token (a session-only connect) has nothing to act on here.
   const eligible = ((profiles ?? []) as ProfileRow[]).filter((p) => {

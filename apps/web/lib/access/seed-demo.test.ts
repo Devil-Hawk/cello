@@ -202,6 +202,8 @@ describe('buildDemoWorkspace — shape', () => {
       'applications',
       'activities',
       'contacts',
+      'messages',
+      'contact_applications',
       'follow_ups',
       'agent_runs',
       'trace_spans',

@@ -8,6 +8,7 @@
 
 import type { AdminClient } from '@/lib/harness/types'
 import { suggestCandidates as extra, type SuggestCandidate } from './extend'
+import { suggestFor } from './extend/network'
 
 const SHOW = 3
 const MAX_TEXT = 40
@@ -77,7 +78,7 @@ export interface Suggestions {
 
 export async function suggest(db: AdminClient, userId: string, opts: { name?: string | null; timeZone?: string; now?: Date } = {}): Promise<Suggestions> {
   const now = opts.now ?? new Date()
-  const ranked = [...(await core(db, userId, now)), ...extra].sort((a, b) => b.priority - a.priority)
+  const ranked = [...(await core(db, userId, now)), ...extra, ...(await suggestFor(db, userId, now))].sort((a, b) => b.priority - a.priority)
   const kinds = new Set<string>()
   const used = new Set<string>()
   const picked: Suggestions['suggestions'] = []

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { CheckCircle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { MODELS, DEFAULT_MODEL_ID, resolveModelId, type ModelId } from '@/lib/models'
+import { MODELS, resolveModelId, type ModelId } from '@/lib/models'
 import { REASONING_EFFORTS, type ReasoningEffort } from '@/lib/harness/types'
 
 export interface ModelTabProps {
@@ -127,10 +127,10 @@ export function ModelTab({ initialModel, onStatus }: ModelTabProps) {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="font-display text-section text-foreground">Model</h2>
+        <h2 className="font-display text-section text-foreground">Default model and effort</h2>
         <p className="mt-1 text-caption text-muted-foreground">
-          Choose the model that powers matching, drafting, research, and the copilot. This uses your
-          OpenRouter key. When unset, Cello uses {DEFAULT_MODEL_ID}.
+          Choose the model that powers matching, drafting, research and Chat. This uses your
+          OpenRouter key. Chat&apos;s picker can use a different one for a single conversation.
         </p>
       </div>
 
@@ -174,9 +174,6 @@ export function ModelTab({ initialModel, onStatus }: ModelTabProps) {
                 </span>
                 <span className="mt-0.5 block text-caption text-muted-foreground">
                   {model.description}
-                </span>
-                <span className="mt-1 block font-mono text-caption text-muted-foreground/70">
-                  {model.id}
                 </span>
               </span>
             </button>

@@ -530,10 +530,10 @@ export function OutreachCard({
       )}
       {sendError && (
         <p className="mt-3 text-caption text-pipeline-rejected" role="alert">
-          {sendError.message}{' '}
+          {sendError.reauth ? 'Not sent: Gmail needs you to sign in again.' : sendError.message}{' '}
           {sendError.reauth && (
             <Link href="/settings?tab=connections" className="font-medium underline">
-              Open Gmail settings
+              Reconnect
             </Link>
           )}
         </p>

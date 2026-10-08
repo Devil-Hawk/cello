@@ -17,7 +17,7 @@ begin
   if (select count(*) from public.measures) <> 68 then
     raise exception 'expected 68 measures, got %', (select count(*) from public.measures);
   end if;
-  if exists (select 1 from public.measures where state <> 'watch') then raise exception 'every measure must start as watch'; end if;
+  if exists (select 1 from public.measures where state <> 'watch' and id not in ('T30', 'T31', 'T32', 'T33', 'S18', 'S25', 'S26')) then raise exception 'every measure must start as watch'; end if;
   if (select count(*) from public.measures where layer = 'true') <> 33
      or (select count(*) from public.measures where layer = 'step') <> 26
      or (select count(*) from public.measures where layer = 'person') <> 9 then

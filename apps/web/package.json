@@ -27,6 +27,7 @@
     "@anthropic-ai/sdk": "^0.72.1",
     "@cello/shared": "workspace:*",
     "@dnd-kit/core": "^6.1.0",
+    "@date-fns/tz": "^1.2.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@googleapis/gmail": "18.0.0",
     "@langchain/anthropic": "1.5.12",
@@ -73,6 +74,10 @@
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
     "croner": "^9",
+    "d3-force": "^3.0.0",
+    "d3-selection": "^3.0.0",
+    "d3-zoom": "^3.0.0",
+    "date-fns": "^4.1.0",
     "deepagents": "1.14.1",
     "diff": "^9.0.0",
     "docx": "^9.5.1",
@@ -112,6 +117,9 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/d3-force": "^3.0.10",
+    "@types/d3-selection": "^3.0.11",
+    "@types/d3-zoom": "^3.0.8",
     "@types/html-to-text": "^9.0.4",
     "@types/mdast": "^4.0.4",
     "@types/node": "^20.11.0",

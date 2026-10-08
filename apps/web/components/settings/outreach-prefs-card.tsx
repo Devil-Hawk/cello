@@ -1,9 +1,7 @@
 'use client'
 
-// The outreach policy: how many emails a day may leave, how long to wait before
-// the one follow-up, and whether sending needs a click. The send route, the
-// queue banner and the follow-up window all read these values; this card is the
-// only place they can be changed.
+// The outreach policy: how many emails a day may leave and whether sending needs a click. The send route
+// and the queue banner read these values. When a follow-up is due is Network's rule (4.9a), not set here.
 
 import { useEffect, useState } from 'react'
 import { Loader2, Mail } from 'lucide-react'
@@ -14,13 +12,11 @@ import { Input } from '@/components/ui/input'
 interface Prefs {
   autoSend: boolean
   dailyCap: number
-  followUpDays: number
 }
 
 export function OutreachPrefsCard({ onStatus }: { onStatus: (status: 'success' | 'error', message: string) => void }) {
   const [saved, setSaved] = useState<Prefs | null>(null)
   const [dailyCap, setDailyCap] = useState('')
-  const [followUpDays, setFollowUpDays] = useState('')
   const [autoSend, setAutoSend] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -33,7 +29,6 @@ export function OutreachPrefsCard({ onStatus }: { onStatus: (status: 'success' |
         if (!live) return
         setSaved(d.prefs)
         setDailyCap(String(d.prefs.dailyCap))
-        setFollowUpDays(String(d.prefs.followUpDays))
         setAutoSend(d.prefs.autoSend)
       })
       .catch(() => live && setLoadFailed(true))
@@ -44,7 +39,7 @@ export function OutreachPrefsCard({ onStatus }: { onStatus: (status: 'success' |
 
   const dirty =
     saved !== null &&
-    (autoSend !== saved.autoSend || dailyCap !== String(saved.dailyCap) || followUpDays !== String(saved.followUpDays))
+    (autoSend !== saved.autoSend || dailyCap !== String(saved.dailyCap))
 
   async function save() {
     setSaving(true)
@@ -52,7 +47,7 @@ export function OutreachPrefsCard({ onStatus }: { onStatus: (status: 'success' |
       const res = await fetch('/api/settings/outreach', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ autoSend, dailyCap: Number(dailyCap), followUpDays: Number(followUpDays) }),
+        body: JSON.stringify({ autoSend, dailyCap: Number(dailyCap) }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -85,7 +80,7 @@ export function OutreachPrefsCard({ onStatus }: { onStatus: (status: 'success' |
         </div>
       ) : (
         <div className="mt-3 space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4">
             <label className="block">
               <span className="text-caption font-medium text-foreground">Emails per day, at most</span>
               <Input
@@ -98,21 +93,6 @@ export function OutreachPrefsCard({ onStatus }: { onStatus: (status: 'success' |
                 className="mt-1"
               />
               <span className="mt-1 block text-caption text-muted-foreground">1 to 50. Counted per UTC day.</span>
-            </label>
-            <label className="block">
-              <span className="text-caption font-medium text-foreground">Days before a follow-up</span>
-              <Input
-                type="number"
-                inputMode="numeric"
-                min={1}
-                max={60}
-                value={followUpDays}
-                onChange={(e) => setFollowUpDays(e.target.value)}
-                className="mt-1"
-              />
-              <span className="mt-1 block text-caption text-muted-foreground">
-                1 to 60. One follow-up per email, only if there is no reply.
-              </span>
             </label>
           </div>
 

@@ -4,7 +4,7 @@
 
 import type { TemplateReason } from './types'
 
-export const TEMPLATE_NOTICE_TITLE = 'Standard template, not a written draft'
+export const TEMPLATE_NOTICE_TITLE = 'Plain template, not a written draft'
 
 const BODIES: Record<TemplateReason, string> = {
   missing_key: 'No model key is set. Add an OpenRouter key in Settings and draft again, or edit this one before sending.',

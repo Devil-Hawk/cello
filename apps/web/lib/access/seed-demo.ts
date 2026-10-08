@@ -53,6 +53,8 @@ import {
   DEMO_RESUME,
   demoUuid,
   externalIdFor,
+  DEMO_MESSAGES,
+  DEMO_TIES,
   jobBySlug,
   jobUrl,
   monogramLogo,
@@ -350,6 +352,28 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
     }
   })
 
+  // --- network: header rows of mail with the contacts, and one tie ----------
+  const messageRows = DEMO_MESSAGES.map((m) => ({
+    id: id(`message:${m.key}`),
+    user_id: demoUserId,
+    gmail_message_id: `demo-${m.key}`,
+    thread_id: `demo-thread-${m.threadKey}`,
+    application_id: m.applicationJobSlug ? applicationIdByJobSlug.get(m.applicationJobSlug)! : null,
+    contact_id: contactIdBySlug.get(m.contactSlug)!,
+    direction: m.direction,
+    sent_at: daysBefore(now, m.daysAgo),
+    from_domain: 'example.com',
+    subject: m.subject,
+    excerpt: m.excerpt,
+  }))
+  const tieRows = DEMO_TIES.map((t) => ({
+    id: id(`tie:${t.contactSlug}:${t.applicationJobSlug}`),
+    user_id: demoUserId,
+    contact_id: contactIdBySlug.get(t.contactSlug)!,
+    application_id: applicationIdByJobSlug.get(t.applicationJobSlug)!,
+    origin: 'code',
+  }))
+
   // --- follow-ups ----------------------------------------------------------
   const followUpRows = DEMO_FOLLOW_UPS.map((followUp) => ({
     id: id(`follow_up:${followUp.key}`),
@@ -547,6 +571,8 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
       { table: 'applications', rows: applicationRows, required: true },
       { table: 'activities', rows: activityRows, required: false },
       { table: 'contacts', rows: contactRows, required: false },
+      { table: 'messages', rows: messageRows, required: false },
+      { table: 'contact_applications', rows: tieRows, required: false },
       { table: 'follow_ups', rows: followUpRows, required: false },
       { table: 'agent_runs', rows: agentRunRows, required: false },
       { table: 'trace_spans', rows: agentStepRows, required: false, conflictColumn: 'span_id' },

@@ -95,14 +95,3 @@ export function resolveOutreachPreferences(
     followUpDays,
   }
 }
-
-/** A recruiter/hiring-manager contact mined from the user's OWN Gmail. */
-export interface MinedContact {
-  name: string
-  email: string
-  companyId: string
-  companyName: string
-  title: string | null
-  relationship: string // recruiter | hiring_manager | contact
-  lastContactAt: string // ISO
-}

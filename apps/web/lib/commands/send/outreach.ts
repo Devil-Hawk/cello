@@ -62,7 +62,7 @@ export async function sendOutreach(
     return reply(
       {
         error:
-          'Sending through Gmail is turned off. Turn on "Send approved messages" in Settings, or copy the message and send it yourself.',
+          'Sending through Gmail is turned off. Turn on "Send from my Gmail" in Settings, or copy the message and send it yourself.',
         needsPermission: 'send',
       },
       403

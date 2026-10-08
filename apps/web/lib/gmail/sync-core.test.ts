@@ -248,7 +248,9 @@ describe('runGmailSyncCore: calendar invite', () => {
     start.setUTCMinutes(0, 0, 0)
     const stamp = start.toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '')
     const calendar = ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', `DTSTART:${stamp}`, 'SUMMARY:Interview', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n')
-    mailbox = [{ ...FIXED_MESSAGE, payload: { ...FIXED_MESSAGE.payload, calendar } }]
+    // The mail says interview in words too, so the model's sort is believed and the signed mail counts.
+    const headers = FIXED_MESSAGE.payload.headers.map((h) => (h.name === 'subject' ? { ...h, value: 'Your technical interview is scheduled' } : h))
+    mailbox = [{ ...FIXED_MESSAGE, payload: { ...FIXED_MESSAGE.payload, headers, calendar } }]
     callOpenRouterMock.mockReset().mockResolvedValue({
       content: JSON.stringify({
         isJobRelated: true,
@@ -257,7 +259,7 @@ describe('runGmailSyncCore: calendar invite', () => {
         jobTitle: 'Backend Engineer',
         status: 'interview',
         // A status needs a quote the email really holds.
-        evidence: 'Thank you for applying to Acme Corp',
+        evidence: 'technical interview',
         careerPageUrl: null,
         interviewDateTime: new Date(start.getTime() + 3 * 24 * 3600 * 1000).toISOString(),
         confidence: 0.95,
@@ -527,7 +529,7 @@ describe('runGmailSyncCore: mail that cannot be verified', () => {
     fakeDb.tables.set('jobs', [])
     mailbox = [unsigned('spoof-2', 'Acme Corp <careers@acme.com>', 'Thank you for applying to Acme Corp', 'mx.google.com; dkim=fail header.d=acme.com')]
     callOpenRouterMock.mockResolvedValue({
-      content: JSON.stringify({ isJobRelated: true, employerName: 'Acme Corp', employerDomain: 'acme.com', jobTitle: 'Backend Engineer', status: 'applied', careerPageUrl: null, interviewDateTime: null, confidence: 0.95, reasoning: null }),
+      content: JSON.stringify({ isJobRelated: true, employerName: 'Acme Corp', employerDomain: 'acme.com', jobTitle: 'Backend Engineer', status: 'applied', evidence: 'Thank you for applying', careerPageUrl: null, interviewDateTime: null, confidence: 0.95, reasoning: null }),
       tokensUsed: 600, promptTokens: 500, completionTokens: 100, model: 'google/gemini-2.0-flash-001',
     })
     const result = await run()
