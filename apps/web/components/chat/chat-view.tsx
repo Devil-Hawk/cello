@@ -310,7 +310,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
   }
 
   // A suggestion puts its words in the compose box and its things beside them as chips; nothing is sent until Send.
-  async function useSuggestion(s: { text: string; objects: { kind: string; ref: string }[] }) {
+  async function takeSuggestion(s: { text: string; objects: { kind: string; ref: string }[] }) {
     setDraft(s.text)
     const named = await Promise.all(s.objects.map((o) => getJson<{ kind: string; ref: string; name: string }>(`/api/chat/object?kind=${encodeURIComponent(o.kind)}&ref=${encodeURIComponent(o.ref)}`)))
     setChips(named.filter((o): o is { kind: string; ref: string; name: string } => o !== null))
@@ -391,7 +391,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
                   {(suggested?.suggestions ?? []).map((s) => (
                     // A tap puts the words in the compose box. Nothing is sent until Send.
                     <li key={s.text}>
-                      <button type="button" className="rounded-full border border-border bg-card px-3 py-1.5 text-caption text-foreground hover:bg-muted" onClick={() => void useSuggestion(s)}>
+                      <button type="button" className="rounded-full border border-border bg-card px-3 py-1.5 text-caption text-foreground hover:bg-muted" onClick={() => void takeSuggestion(s)}>
                         {s.text}
                       </button>
                     </li>
