@@ -21,6 +21,7 @@ import { formatShortDate } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { openRolesOnly } from '@/lib/jobs/freshness'
+import { lastCheckedMs } from '@/lib/companies/roles-status'
 
 /**
  * Highest best-match-score first, unscored companies last (never coerced to
@@ -260,11 +261,12 @@ export default function CompaniesPage() {
 
   const dreamCount = companies.filter((c) => c.is_dream_company).length
   const totalJobs = companies.reduce((acc, c) => acc + (c.jobs_count || 0), 0)
-  const lastChecked = companies.reduce<string | null>(
-    (latest, c) =>
-      c.last_scraped_at && (!latest || c.last_scraped_at > latest) ? c.last_scraped_at : latest,
-    null
-  )
+  // The later of the last scrape and the reader's own check, as the company page and the clock read it.
+  const lastCheckedAt = companies.reduce<number | null>((latest, c) => {
+    const t = lastCheckedMs(c)
+    return t !== null && (latest === null || t > latest) ? t : latest
+  }, null)
+  const lastChecked = lastCheckedAt === null ? null : new Date(lastCheckedAt).toISOString()
 
   return (
     <div className="space-y-6">
