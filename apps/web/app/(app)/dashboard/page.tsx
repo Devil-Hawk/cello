@@ -1,6 +1,7 @@
 'use client'
 
 import { trackedOnly } from '@/lib/companies/watchlist'
+import { lastCheckedMs } from '@/lib/companies/roles-status'
 import { LogoMark } from '@/components/brand/logo'
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
@@ -212,12 +213,9 @@ export default function DashboardPage() {
         trackedOnly(
           supabase
             .from('companies')
-            .select('last_scraped_at')
+            .select('last_scraped_at, metadata')
             .eq('user_id', user.id)
-            .not('last_scraped_at', 'is', null)
-        )
-          .order('last_scraped_at', { ascending: false })
-          .limit(1),
+        ),
         // RLS restricts jobs to rows whose company belongs to this user — no
         // manual company_id join needed. posted_at, NOT discovered_at: the
         // scraper stamps discovered_at with one `now` for the whole batch, so
@@ -315,7 +313,8 @@ export default function DashboardPage() {
       })
       setFollowUps({ overdueCount, upcomingCount })
       setRecentCompanies(recentRes.data || [])
-      setLastScrapedAt(lastScrapedRes.data?.[0]?.last_scraped_at ?? null)
+      const checkedMs = (lastScrapedRes.data ?? []).map((c) => lastCheckedMs(c)).filter((t): t is number => t !== null)
+      setLastScrapedAt(checkedMs.length ? new Date(Math.max(...checkedMs)).toISOString() : null)
       setIsLoading(false)
     } catch (error) {
       console.error('Dashboard fetch error:', error)
