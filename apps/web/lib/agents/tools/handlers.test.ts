@@ -334,6 +334,12 @@ describe('remember', () => {
     expect(m.ingestInsight).not.toHaveBeenCalled()
   })
 
+  it('a scheduled task cannot save memory, even with a quote taken from its own brief', async () => {
+    const out = await call('remember', { fact: 'Only wants X.', user_quote: 'I only want X' }, ctxFor(makeFakeAdmin(), { scheduledTaskId: 'task-1' }), { messages: [said('I only want X')] })
+    expect(isToolFix(out)).toBe(true)
+    expect(m.ingestInsight).not.toHaveBeenCalled()
+  })
+
   it('a refusal from the preference store is an error with a fix', async () => {
     m.ingestInsight.mockRejectedValue(new Error('A preference this long is not allowed.'))
     const out = await call('remember', { fact: 'Prefers x.', user_quote: 'I prefer x' }, ctxFor(), { messages: [said('I prefer x')] })

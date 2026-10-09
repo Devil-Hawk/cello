@@ -137,6 +137,8 @@ export const remember = defineTool({
   mcp: false,
   async handler(ctx, a, meta) {
     if (meta.channel !== 'agent') return toolFix('Memory is saved only inside a Cello conversation.', 'Ask the person to tell Cello directly.')
+    // A task instruction may have been written by the model from a chat turn, so a quote from it is not the person's own words.
+    if (ctx.scheduledTaskId) return toolFix('A scheduled task cannot save memory.', 'Put what you learned in your result for the person to confirm in a conversation.')
     if (!quoteIsTheirs(a.user_quote, meta.messages)) {
       return toolFix('That quote is not in anything the person wrote in this conversation.', 'Ask the person to say it, or confirm it in their own words, then call remember with their exact words.')
     }
