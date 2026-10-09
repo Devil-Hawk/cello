@@ -81,12 +81,15 @@ export class HttpError extends Error {
   readonly status: number
   /** How long the server asked us to wait, in ms, from its Retry-After header. */
   readonly retryAfterMs: number | null
+  /** Where a 3xx we did not follow said to go (redirect: 'manual' only). It is read, never fetched. */
+  readonly location: string | null
 
-  constructor(message: string, status: number, retryAfterMs: number | null = null) {
+  constructor(message: string, status: number, retryAfterMs: number | null = null, location: string | null = null) {
     super(message)
     this.name = 'HttpError'
     this.status = status
     this.retryAfterMs = retryAfterMs
+    this.location = location
   }
 
   /** Seconds view of {@link retryAfterMs}, kept for callers written against the
@@ -935,7 +938,8 @@ async function requestOnce(
       throw new HttpError(
         `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''} for ${url}`,
         res.status,
-        retryAfterMs
+        retryAfterMs,
+        res.status >= 300 && res.status < 400 ? res.headers.get('location') : null
       )
     }
 

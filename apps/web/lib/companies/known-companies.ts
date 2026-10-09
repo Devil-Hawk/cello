@@ -100,8 +100,9 @@ export const KNOWN_COMPANIES: Record<string, KnownCompany> = {
   'vercel.com': { name: 'Vercel', board: { provider: 'greenhouse', token: 'vercel' } },
   'supabase.com': { name: 'Supabase', board: { provider: 'ashby', token: 'supabase' } },
   'cloudflare.com': { name: 'Cloudflare', board: { provider: 'greenhouse', token: 'cloudflare' } },
-  'datadog.com': { name: 'Datadog', board: { provider: 'greenhouse', token: 'datadog' } },
+  // datadoghq.com first: it is the address the company uses (datadog.com sends people there), so a name lookup returns it.
   'datadoghq.com': { name: 'Datadog', board: { provider: 'greenhouse', token: 'datadog' } },
+  'datadog.com': { name: 'Datadog', board: { provider: 'greenhouse', token: 'datadog' } },
   // Greenhouse's own name for the board is digitalocean98; every posting link is on digitalocean.com (checked 2026-10-05).
   'digitalocean.com': { name: 'DigitalOcean', board: { provider: 'greenhouse', token: 'digitalocean98' } },
   'elastic.co': { name: 'Elastic', board: { provider: 'greenhouse', token: 'elastic' } },
@@ -206,6 +207,14 @@ export function isKnownEmployer(input: {
   if (input.name && lookupKnownCompanyByName(input.name)) return true
   const host = hostOf(input.careerUrl)
   return !!host && Object.keys(KNOWN_COMPANIES).some((d) => d === host || hostOf(KNOWN_COMPANIES[d].careerUrl) === host)
+}
+
+/** The known employer a hand-checked board belongs to, with its domain; null for any board that is not curated. */
+export function knownByBoard(board: { provider: AtsProviderId; token: string }): { name: string; domain: string } | null {
+  for (const [domain, info] of Object.entries(KNOWN_COMPANIES)) {
+    if (info.board && info.board.provider === board.provider && info.board.token.toLowerCase() === board.token.toLowerCase()) return { name: info.name, domain }
+  }
+  return null
 }
 
 /**

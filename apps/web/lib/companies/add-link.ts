@@ -11,6 +11,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { detectFromUrl } from '../ats/detect'
+import { sameEmployerName } from '../ats/verify'
 import { isDemoProfile } from '../access/guardrails'
 import { readJobPostings } from '../ingest/jsonld'
 import { readSite, type SiteDeps, type SiteInput, type SiteRead } from '../ingest/reader'
@@ -19,7 +20,7 @@ import { makeSiteFetcher } from '../ingest/reader/site-fetch'
 import { NO_TARGETS } from '../ingest/reader/targets'
 import { getEmployer, type DirectoryRow } from './directory'
 import { followEmployer } from './follow'
-import { isKnownEmployer, lookupKnownCompanyByDomain } from './known-companies'
+import { isKnownEmployer, knownByBoard, lookupKnownCompanyByDomain } from './known-companies'
 import { nameFromDomain } from './page-name'
 import {
   checkBoard,
@@ -274,10 +275,12 @@ async function verifyLink(db: Db, url: URL, domain: string | null, directToken: 
   if (read.board) {
     const ok = passed.get(`${read.board.provider}:${read.board.token}`)
     if (ok) {
+      // A pasted board that is a known employer's hand-checked board is that employer's: its curated domain is the evidence a name alone lacks.
+      const curated = domain ? null : knownByBoard(read.board)
       return writeEmployer(db, {
-        name: ok.name,
+        name: curated && sameEmployerName(curated.name, ok.name) ? curated.name : ok.name,
         // the host of the pasted link, never the board's own declared home (whoever owns a board can edit that)
-        domain,
+        domain: domain ?? (curated && sameEmployerName(curated.name, ok.name) ? curated.domain : null),
         careersUrl: directToken ? null : url.href,
         provider: read.board.provider,
         token: read.board.token,

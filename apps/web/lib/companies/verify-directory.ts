@@ -20,7 +20,7 @@ import { HttpError } from '../ats/http'
 import type { AtsJob, AtsProviderId, FetchContext } from '../ats/types'
 import { IDENTIFY, sameEmployerName, verifyBoard, type BoardIdentity, type BoardRef } from '../ats/verify'
 import { normalizeCompanyName } from '../entities/companies'
-import { faviconForDomain, isKnownEmployer, lookupKnownCompanyByDomain, lookupKnownCompanyByName } from './known-companies'
+import { faviconForDomain, isKnownEmployer, knownBoard, lookupKnownCompanyByDomain, lookupKnownCompanyByName } from './known-companies'
 
 type Db = SupabaseClient<any, any, any>
 
@@ -65,7 +65,7 @@ export interface BoardCheckInput {
 }
 
 export type BoardCheck =
-  | { ok: true; verifiedBy: 'careers_page_link' | 'board_links_home' | 'provider_name' | 'seed_checked' | 'careers_url'; jobs: AtsJob[]; domain: string | null; name: string }
+  | { ok: true; verifiedBy: 'careers_page_link' | 'board_links_home' | 'provider_name' | 'seed_checked' | 'careers_url' | 'known_board'; jobs: AtsJob[]; domain: string | null; name: string }
   | { ok: false; reason: FailReason; identity?: BoardIdentity | null; jobs?: AtsJob[] }
 
 const hostOf = (url: string): string | null => {
@@ -134,6 +134,9 @@ export async function checkBoard(input: BoardCheckInput, deps: VerifyDeps = real
   const verifiedBy = await verifyBoard({ provider, token, jobs, company: { name, domain }, pageBoards: page, knownEmployer: known, now: deps.now(), identify: owner ? async () => owner : null })
   // The provider's own name for the board is the best name for the employer; the given one is the fallback.
   if (verifiedBy) return { ok: true, verifiedBy, jobs, domain, name: identity?.name || name || domain }
+  // A known employer's hand-checked board (known-companies.ts), reached by its own domain or careers address: that is the evidence.
+  const curated = knownBoard({ domain, careerUrl: input.careerUrl })
+  if (curated && curated.provider === provider && curated.token.toLowerCase() === token.toLowerCase()) return { ok: true, verifiedBy: 'known_board', jobs, domain, name: identity?.name || name || domain }
   if (known || (name && identity?.name && !sameEmployerName(identity.name, name))) return { ok: false, reason: 'other_owner', identity, jobs }
   return { ok: false, reason: 'not_linked', identity, jobs }
 }

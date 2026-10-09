@@ -113,6 +113,22 @@ describe('companies.add by link', () => {
     expect(tables.companies).toHaveLength(0)
   })
 
+  it("Ramp: pasting jobs.ashbyhq.com/ramp, a known employer's hand-checked board, is added under ramp.com", async () => {
+    const { client, tables } = world()
+    const d = deps({ boards: [{ provider: 'ashby', token: 'ramp', via: 'url' }], identity: { name: 'Ramp', homeUrls: ['https://ramp.com'] } })
+    const r = await addCompany(client, 'u1', { link: 'https://jobs.ashbyhq.com/ramp' }, d.value)
+    expect(r).toMatchObject({ ok: true, employer: { name: 'Ramp', domain: 'ramp.com' } })
+    expect(tables.company_directory[0]).toMatchObject({ ats_provider: 'ashby', ats_token: 'ramp', domain: 'ramp.com' })
+  })
+
+  it('a pasted board named Ramp that is not the hand-checked one is still refused', async () => {
+    const { client, tables } = world()
+    const d = deps({ boards: [{ provider: 'ashby', token: 'ramp-network', via: 'url' }], identity: { name: 'Ramp', homeUrls: [] } })
+    const r = await addCompany(client, 'u1', { link: 'https://jobs.ashbyhq.com/ramp-network' }, d.value)
+    expect(r).toMatchObject({ ok: false, reason: 'other_owner' })
+    expect(tables.company_directory ?? []).toHaveLength(0)
+  })
+
   it('a pasted board no one big has the name of is taken on the person say-so while it is alive', async () => {
     const { client, tables } = world()
     const d = deps({ boards: [{ provider: 'personio', token: 'tiny-co', via: 'url' }], identity: null })

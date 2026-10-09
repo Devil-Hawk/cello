@@ -63,6 +63,18 @@ describe('checkBoard: the employer a board belongs to', () => {
     expect(r).toMatchObject({ ok: false, reason: 'other_owner' })
   })
 
+  it('Datadog: its own domain and its hand-checked Greenhouse board verify it even when the board declares no home we could read', async () => {
+    const r = await checkBoard({ name: 'Datadog', domain: 'datadoghq.com', careerUrl: 'https://careers.datadoghq.com', provider: 'greenhouse', token: 'datadog' }, world({ identity: { name: 'Datadog', homeUrls: [], incomplete: true } }))
+    expect(r).toMatchObject({ ok: true, verifiedBy: 'known_board', name: 'Datadog', domain: 'datadoghq.com' })
+  })
+
+  it('Ramp: its Ashby board declares ramp.com, and a namesake board of the same name does not pass for it', async () => {
+    const own = await checkBoard({ name: 'Ramp', domain: 'ramp.com', provider: 'ashby', token: 'ramp' }, world({ identity: { name: 'Ramp', homeUrls: ['https://ramp.com'] } }))
+    expect(own).toMatchObject({ ok: true, name: 'Ramp', domain: 'ramp.com' })
+    const squat = await checkBoard({ name: 'Ramp', domain: 'ramp.com', provider: 'ashby', token: 'ramp-network' }, world({ identity: { name: 'Ramp', homeUrls: [] } }))
+    expect(squat).toMatchObject({ ok: false, reason: 'other_owner' })
+  })
+
   it('a seed row with no domain on a provider that names no owner is not linked', async () => {
     const r = await checkBoard({ name: 'amazon', domain: null, provider: 'personio', token: 'amazon' }, world())
     expect(r).toMatchObject({ ok: false, reason: 'not_linked' })

@@ -504,3 +504,34 @@ describe('healStoredBoard', () => {
     await expect(healStoredBoard(store, co, { provider: 'personio', token: 'amazon', source: 'probe' }, jobs)).rejects.toThrow('rpc missing')
   })
 })
+
+// Recorded from the live boards on 2026-10-08: the two shapes a known employer's own board declares its home in.
+describe('a known employer whose board declares its own home', () => {
+  const company = (name: string, domain: string) => ({ name, domain })
+
+  it("Datadog: its Greenhouse board page redirects to careers.datadoghq.com, which is the home the board declares", async () => {
+    route((url) => {
+      if (url === 'https://boards-api.greenhouse.io/v1/boards/datadog') return json({ name: 'Datadog' })
+      if (url === 'https://job-boards.greenhouse.io/datadog') return new Response(null, { status: 302, headers: { location: 'https://careers.datadoghq.com/' } })
+    })
+    const { IDENTIFY } = await import('./verify')
+    expect(await IDENTIFY.greenhouse!('datadog')).toEqual({ name: 'Datadog', homeUrls: ['https://careers.datadoghq.com/'] })
+    expect(await verifyBoard({ provider: 'greenhouse', token: 'datadog', jobs: [{ title: 'Engineer', url: 'u', externalId: '1', postedAt: MONTH_AGO }], company: company('Datadog', 'datadoghq.com'), knownEmployer: true })).toBe('board_links_home')
+  })
+
+  it('Ramp: its Ashby board declares ramp.com, so the board is Ramp\'s', async () => {
+    route((url) => (url === 'https://jobs.ashbyhq.com/ramp' ? html('<script>{"name":"Ramp","publicWebsite":"https://ramp.com"}</script>') : undefined))
+    const jobs = [{ title: 'Engineer', url: 'u', externalId: '1', postedAt: MONTH_AGO }]
+    expect(await verifyBoard({ provider: 'ashby', token: 'ramp', jobs, company: company('Ramp', 'ramp.com'), knownEmployer: true })).toBe('board_links_home')
+  })
+
+  it('a namesake is still refused: another home, another name, or no home at all', async () => {
+    const jobs = [{ title: 'Engineer', url: 'u', externalId: '1', postedAt: MONTH_AGO }]
+    route((url) => (url === 'https://jobs.ashbyhq.com/ramp-network' ? html('<script>{"name":"Ramp","publicWebsite":"https://rampnetwork.com"}</script>') : undefined))
+    expect(await verifyBoard({ provider: 'ashby', token: 'ramp-network', jobs, company: company('Ramp', 'ramp.com'), knownEmployer: true })).toBeNull()
+    route((url) => (url === 'https://jobs.ashbyhq.com/ramp-staffing' ? html('<script>{"name":"Ramp Staffing","publicWebsite":"https://ramp.com"}</script>') : undefined))
+    expect(await verifyBoard({ provider: 'ashby', token: 'ramp-staffing', jobs, company: company('Ramp', 'ramp.com'), knownEmployer: true })).toBeNull()
+    route((url) => (url === 'https://jobs.ashbyhq.com/ramp-two' ? html('<script>{"name":"Ramp","publicWebsite":""}</script>') : undefined))
+    expect(await verifyBoard({ provider: 'ashby', token: 'ramp-two', jobs, company: company('Ramp', 'ramp.com'), knownEmployer: true })).toBeNull()
+  })
+})

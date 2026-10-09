@@ -16,7 +16,8 @@
 //   A home the board declares for itself that is NOT the company's domain rejects it outright.
 //   A real board that offers none of this is not guessed: curate it in known-companies.ts.
 // A known employer (known-companies.ts) is never matched by name or domain label: a
-// namesake's board passes those, so it needs the page link or its curated board.
+// namesake's board passes those, so it needs the page link, its curated board, or a board that
+// both declares the employer's own domain as its home and carries the employer's name.
 // Boards read off the careers URL itself ('careers_url') and boards the person
 // set by hand ('manual') are trusted and never come through here.
 //
@@ -174,11 +175,17 @@ export const IDENTIFY: Partial<Record<AtsProviderId, (token: string) => Promise<
     const page = assertAllowedHost(`https://job-boards.greenhouse.io/${t}`, GH_PAGE_HOSTS)
     // job-boards.greenhouse.io drops connections under load, so its page is best effort: only
     // "no such page" is an answer, a failure leaves the identity incomplete (see verifyBoard).
+    // A board that has its own address (Datadog's is careers.datadoghq.com) answers its Greenhouse page with a redirect
+    // to it: where it points is the home the board declares. It is read from the header and never fetched.
     let logo: string | undefined
     let incomplete = false
     try {
-      logo = /"logo":\{"href":"([^"]+)"/.exec(await fetchText(page, HTML))?.[1]
+      logo = /"logo":\{"href":"([^"]+)"/.exec(await fetchText(page, { ...HTML, redirect: 'manual' }))?.[1]
     } catch (e) {
+      if (e instanceof HttpError && e.location && e.status >= 300 && e.status < 400) {
+        const home = hostOf(new URL(e.location, page).href)
+        if (home && !onProviderHost(`https://${home}`)) return { name: str(d?.name), homeUrls: [`https://${home}/`] }
+      }
       incomplete = !(e instanceof HttpError && (e.status === 404 || e.status === 410))
     }
     return { name: str(d?.name), homeUrls: logo ? [logo] : [], incomplete }
@@ -257,7 +264,6 @@ export async function verifyBoard(input: VerifyInput): Promise<Exclude<VerifiedB
   }
 
   // 3. The provider's own record of the board.
-  if (input.knownEmployer) return null
   const identify = input.identify !== undefined ? input.identify : IDENTIFY[provider]
   if (!identify) return null
   let identity: BoardIdentity
@@ -270,11 +276,22 @@ export async function verifyBoard(input: VerifyInput): Promise<Exclude<VerifiedB
     }
     return null
   }
-  const verdict = verifyByIdentity(identity, token, jobs, company)
+  const verdict = input.knownEmployer ? verifyKnownByIdentity(identity, company) : verifyByIdentity(identity, token, jobs, company)
   // Part of what the provider says could not be read and the rest did not verify the board:
   // that is no verdict either, so a stored board is kept and looked at again.
   if (!verdict && identity.incomplete && input.evidence) input.evidence.unreachable = true
   return verdict
+}
+
+/**
+ * A known employer is never matched by name or by a domain label alone (a namesake's board passes those). What does
+ * tie a board to it is both at once: the board declares the employer's own domain as its home (Ramp's Ashby board
+ * says ramp.com, Datadog's Greenhouse page redirects to careers.datadoghq.com) and the provider names the same employer.
+ * A namesake under another name, or one that declares another home, still fails.
+ */
+function verifyKnownByIdentity(identity: BoardIdentity, company: { name: string | null; domain: string | null }): 'board_links_home' | null {
+  const declared = identity.homeUrls.filter((u) => !onProviderHost(u))
+  return declared.some((u) => onCompanyDomain(u, company.domain)) && sameEmployerName(identity.name, company.name) ? 'board_links_home' : null
 }
 
 function verifyByIdentity(
