@@ -75,7 +75,10 @@ export function chatModelFor(via: RungVia, model: string, keys: DecryptedApiKeys
       ? model.startsWith('anthropic/')
         ? { max_tokens: Math.min(ANTHROPIC_THINKING_BUDGET[effort], Math.max(1024, maxTokens - 1)) }
         : { effort }
-      : undefined
+      : // An explicit "none" is the caller turning thinking off (a free reasoning model otherwise spends its whole budget on it).
+        opts.reasoning?.effort === 'none' && !model.startsWith('anthropic/')
+        ? { effort: 'none' }
+        : undefined
     return new ChatOpenRouter({
       ...common,
       temperature,
