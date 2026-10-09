@@ -31,6 +31,13 @@ export const LEGACY_STEPS: Record<string, ModelStep> = Object.fromEntries(
     legacy('draft-outreach-message', 'S6', 'K17'),
     legacy('draft-follow-up', 'S6', 'K17'),
     legacy('draft-application-follow-up', 'S6', 'K17'),
+    // The Writer names its call by what it writes (lib/workflows/writer.ts: `write-${type}`).
+    legacy('write-resume', 'S5', 'K17'),
+    legacy('write-cover_letter', 'S5', 'K17'),
+    legacy('write-message', 'S6', 'K17'),
+    legacy('write-follow_up', 'S6', 'K17'),
+    legacy('write-reply', 'S6', 'K17'),
+    legacy('write-note', 'S6', 'K17'),
     legacy('write-digest', 'T12', 'K20'),
     // Reading the web and the record.
     legacy('source-jobs', 'T1', 'K6'),

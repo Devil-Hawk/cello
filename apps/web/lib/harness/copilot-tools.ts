@@ -18,7 +18,7 @@
 // lightweight in-file StepContext), and harnessRunGraph (via invokeGraphForUser)
 // for whole-DAG goals.
 
-import { legacyStep } from '../steps'
+import { stepRunner } from '@/lib/models/ask'
 import { invokeGraphForUser, type CompiledGraphLike } from '@/lib/graph/invoke'
 import { harnessRunGraph, markRunPausedOnInterrupt } from '@/lib/graph/runs'
 import { summarizeRunOutcome } from '@/lib/graph/run-summary'
@@ -164,7 +164,9 @@ export function clampLimit(v: unknown, def: number, max: number): number {
  *  abort (see boundSignal) instead of just the whole-request one. */
 export function makeRunner(ctx: CopilotToolContext, signal: AbortSignal | undefined, name: string): LlmRunner {
   // `name` is the Langfuse generation name: what the model call is for.
-  return (opts) => legacyStep(name).call(ctx.apiKeys, opts, { signal: signal ?? ctx.signal })
+  // Through the free rotation: a free model that fails or answers in the wrong shape is followed by the next free one.
+  const run = stepRunner(name, ctx.apiKeys, signal ?? ctx.signal)
+  return (opts) => run(opts)
 }
 
 /** Combine the request's own abort signal (client disconnect / Stop button)

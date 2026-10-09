@@ -24,16 +24,19 @@ const looksLikeJson = (s: string) => {
  * day's free cap once. When every free model fails the error says what each said; nothing is made up.
  */
 export function stepRunner(stepId: string, keys: DecryptedApiKeys, signal?: AbortSignal, valid?: (text: string) => boolean): LlmRunner {
+  // One piece of work is one use of the day's free cap, however many calls it makes (a tailoring is score, rewrite, rescore).
+  let counted = false
   return async (opts) => {
     const free = keys.models?.ceiling !== 'R4'
     const first = keys.model && isFreeModel(keys.model) ? [keys.model] : []
     const models = free ? [...new Set([...first, ...freeModels()])].slice(0, 4) : [undefined]
     const failures: string[] = []
     let last: unknown = new Error('No model answered.')
-    let attempted = false
+    let attempted = counted
     for (const model of models) {
       try {
         // A free reasoning model spends its whole budget thinking and returns nothing, so thinking is off on a free rung.
+        counted = true
         const out = await legacyStep(stepId).call(model ? { ...keys, model } : keys, free ? { ...opts, reasoning: { effort: 'none' } } : opts, { signal, ...(attempted ? { slots: { take: async () => true } } : {}) })
         if (!out.content.trim()) throw new Error(`${out.model} returned nothing`)
         if ((opts.json || opts.jsonSchema) && !looksLikeJson(out.content)) throw new Error(`${out.model} did not answer in JSON`)

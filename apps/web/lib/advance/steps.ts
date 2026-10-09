@@ -155,6 +155,7 @@ async function writeTailored(admin: SupabaseClient, app: StepApp): Promise<{ art
     { ctx: { admin: admin as never, userId: app.user_id, userEmail: '', apiKeys, isDemo: apiKeys.isDemo !== false, threadId: '', conversationId: null, autonomy: 'ask', traceId: '', deadlineAt: newDeadline() } },
     { type: 'resume', job_id: app.job_id }
   )
+  if (out.status === 'failed' || !out.artifact_id) console.warn('advance: the Writer could not tailor the resume:', out.error, out.fix)
   return out.artifact_id && out.version && out.status !== 'failed' ? { artifact_id: out.artifact_id, version: out.version } : null
 }
 
