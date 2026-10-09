@@ -10,6 +10,7 @@ import { ChangeType } from '../change-type'
 import { chanceWord, metaLine, typeLevel } from '../logic'
 import { ReadMark } from '../read-mark'
 import { postReaction } from '../reactions'
+import { startApplication } from '../start-application'
 import { LogoTile, RoleTitle } from '../role-tile'
 import { applyTypeChanges } from '../type-change'
 import type { RoleItem } from '../types'
@@ -41,7 +42,8 @@ export function RecordHead({ role: read, url, status, typeOptions, hasRequiremen
   const role = applyTypeChanges([read], typed.changes)[0]
   const { state, dispatch, now } = useReactionState()
   const { keys, panel } = useRoleReactions({ id: role.id, reaction: role.reaction?.reaction ?? null, state, dispatch, now, surface: 'record' })
-  const [step, setStep] = useState<'idle' | 'asked' | 'applied'>(status ? 'applied' : 'idle')
+  const [step, setStep] = useState<'idle' | 'asked' | 'started' | 'applied'>(status ? 'applied' : 'idle')
+  const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // The chance as read, replaced by the check the person asks for here.
   const [checked, setChecked] = useState<RoleFit | null>(null)
@@ -50,6 +52,15 @@ export function RecordHead({ role: read, url, status, typeOptions, hasRequiremen
   const chance = chanceWord(checked ? (checked.chance?.label ?? null) : role.chance)
   const says = checked?.want?.reason ?? role.read
   const tl = typeLevel(role)
+
+  async function apply() {
+    setError(null)
+    setStarting(true)
+    const r = await startApplication(role.id)
+    setStarting(false)
+    if (r.ok) setStep('started')
+    else setError(r.sentence)
+  }
 
   async function applied() {
     setError(null)
@@ -108,20 +119,35 @@ export function RecordHead({ role: read, url, status, typeOptions, hasRequiremen
       {hasPosting && !hasRequirements && <p className="r-body">The posting does not list requirements, so Cello cannot check your chances.</p>}
       <FitStrip />
 
-      {(step === 'applied' || status) && <p className="r-title">{status ?? 'You applied.'}</p>}
+      {(step === 'applied' || status) && (
+        <p className="r-title">
+          {status ?? 'You applied.'}{' '}
+          <Link href="/applications" className="r-body underline underline-offset-4">
+            See it in Applications
+          </Link>
+        </p>
+      )}
+      {step === 'started' && <p className="r-title">Application started. Cello prepares it from your resume and stops before anything is sent.</p>}
 
       <div className="flex flex-wrap items-center gap-3">
-        {step === 'idle' && url && (
-          <Key
-            asChild
-            onClick={() => {
-              setStep('asked')
-            }}
-          >
-            <a href={url} target="_blank" rel="noopener noreferrer">
-              Apply <ExternalLink className="ml-2 h-4 w-4" aria-hidden />
-            </a>
+        {step === 'idle' && (
+          <Key onClick={apply} disabled={starting}>
+            {starting ? 'Starting' : 'Apply'}
           </Key>
+        )}
+        {step === 'started' && (
+          <>
+            <Key asChild>
+              <Link href="/applications">See it in Applications</Link>
+            </Key>
+            {url && (
+              <Key asChild variant="raised">
+                <a href={url} target="_blank" rel="noopener noreferrer">
+                  Open the posting <ExternalLink className="ml-2 h-4 w-4" aria-hidden />
+                </a>
+              </Key>
+            )}
+          </>
         )}
         {step === 'asked' && (
           <div className="flex flex-wrap items-center gap-3" role="group" aria-label="Did you apply">
@@ -137,7 +163,7 @@ export function RecordHead({ role: read, url, status, typeOptions, hasRequiremen
           <Link href={`/resume/${role.id}`}>Tailor resume</Link>
         </Key>
       </div>
-      {step === 'idle' && url && <p className="r-meta">Cello prepares this from your resume. You send it.</p>}
+      {step === 'idle' && <p className="r-meta">Cello prepares this from your resume. You send it.</p>}
       {panel}
       {error && (
         <p role="alert" className="r-meta">

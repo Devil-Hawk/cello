@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Key } from '@/components/ui/key'
+import { RowApply } from './row-apply'
 import { LogoTile, RoleTitle } from '@/components/roles/role-tile'
 import { RoleRow } from '@/components/roles/role-row'
 import { metaLine, postedAgo } from '@/components/roles/logic'
@@ -50,6 +51,7 @@ function LiveRow({ item, company, query, now }: { item: LiveItem; company: OpenR
         <p className="r-meta mt-1">{meta(item, now) || null}</p>
         {item.reason ? <p className="r-meta">{item.reason}</p> : <p className="r-meta">Kept for you</p>}
       </div>
+      <RowApply jobId={item.jobId ?? null} employerId={company.id} postingKey={item.key} title={item.title} />
     </div>
   )
 }
@@ -137,7 +139,7 @@ export function OpenRoles({ company, query, live, now = Date.now() }: OpenRolesP
           <input name="place" defaultValue={query.place ?? ''} maxLength={60} className="r-field" placeholder="Remote, Paris" />
         </label>
         <Key type="submit" variant="raised">
-          Apply
+          Filter
         </Key>
         {(query.type || query.place) && (
           <Key asChild variant="ghost">

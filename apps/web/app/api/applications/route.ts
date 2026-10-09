@@ -3,6 +3,7 @@
 // records one the person made themselves.
 
 import { NextRequest, NextResponse } from 'next/server'
+import { advanceOne } from '@/lib/advance'
 import { addByHand } from '@/lib/pipeline/add'
 import { start } from '@/lib/pipeline/commands'
 import { groupOf } from '@/lib/pipeline/groups'
@@ -33,7 +34,17 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: 'Send JSON.' }, { status: 400 })
   }
-  if (typeof body.jobId === 'string') return reply(await start(c, body.jobId))
+  if (typeof body.jobId === 'string') {
+    const moved = await start(c, body.jobId)
+    if (moved.ok) {
+      // Preparing (read the posting, tailor the resume) goes on after the answer, and it stops at "approve" before anything is sent.
+      // ponytail: fire and forget on a server that stays up; on serverless the minute sweeper picks the application up instead.
+      const { data: app } = await c.admin.from('applications').select('id').eq('user_id', c.userId).eq('job_id', body.jobId).maybeSingle()
+      const id = (app as { id: string } | null)?.id
+      if (id) void advanceOne(c.admin, id).catch(() => undefined)
+    }
+    return reply(moved)
+  }
   if (body.add && typeof body.add === 'object') {
     const a = body.add
     const text = (k: string) => (typeof a[k] === 'string' ? (a[k] as string) : null)

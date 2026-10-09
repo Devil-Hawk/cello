@@ -110,7 +110,7 @@ function Row({ r }: { r: AppRow }) {
       <div className="min-w-0 flex-1 basis-56">
         <RoleTitle id={r.job_id} title={r.jobs?.title ?? 'A role'} company={company(r)} />
         <p className="r-meta mt-1">
-          {[sentence || (r.closed_reason ? CLOSED_LABEL[r.closed_reason] : null) || (r.stage === 'applied' ? 'Applied.' : null), r.last_event_at ? `Last activity ${ago(r.last_event_at)}` : null, cost].filter(Boolean).join('. ')}
+          {[sentence || (r.closed_reason ? CLOSED_LABEL[r.closed_reason] : null) || (r.stage === 'applied' ? 'Applied.' : null), r.last_event_at ? `Last activity ${ago(r.last_event_at)}` : null, cost].filter((x): x is string => Boolean(x)).map((x) => x.replace(/\.+$/, '')).join('. ')}
         </p>
         {r.found_state === 'to_confirm' && <p className="r-meta">Found in your email. Confirm it is yours.</p>}
       </div>

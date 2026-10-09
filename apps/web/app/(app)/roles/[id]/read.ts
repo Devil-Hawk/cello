@@ -15,6 +15,7 @@ import { resolveTargeting } from '@/lib/targeting'
 import { NOT_FOR_ME_REASONS } from '@/components/roles/reactions'
 import { toItem, typeOptionsFor, type ListRow } from '../read'
 import { pastedLine, sponsorshipLines, statusSentence, webUrl, whyKept, whyType } from '@/components/roles/record/logic'
+import { statusSentence as appStatus } from '@/lib/pipeline/states'
 import type { RecordData, RecordHistoryItem, RecordPerson } from '@/components/roles/record/record-view'
 import type { PassReason, Reaction } from '@/lib/scoring/types'
 
@@ -40,7 +41,7 @@ export async function readRecord(db: Db, userId: string, id: string): Promise<Re
 
   const [reaction, application, profile, counts, apps, passes, contacts] = await Promise.all([
     db.from('role_reactions').select('reaction, reason').eq('job_id', id).maybeSingle(),
-    db.from('applications').select('stage, applied_at').eq('job_id', id).maybeSingle(),
+    db.from('applications').select('stage, applied_at, state, step, needs_reason, needs_detail').eq('job_id', id).maybeSingle(),
     db.from('profiles').select('preferences').eq('id', userId).maybeSingle(),
     db.rpc('role_counts', { p_by: 'employer' }),
     job.company_id
@@ -72,7 +73,7 @@ export async function readRecord(db: Db, userId: string, id: string): Promise<Re
     }
   }
 
-  const app = application.data as { stage: string; applied_at: string | null } | null
+  const app = application.data as { stage: string; applied_at: string | null; state: string | null; step: string | null; needs_reason: string | null; needs_detail: Record<string, unknown> | null } | null
   const r = reaction.data as { reaction: Reaction; reason: PassReason | null } | null
   const history: RecordHistoryItem[] = [
     ...(((apps.data ?? []) as unknown as { stage: string; applied_at: string | null; created_at: string; jobs: { title: string } | { title: string }[] }[]).map((a) => {
@@ -101,7 +102,8 @@ export async function readRecord(db: Db, userId: string, id: string): Promise<Re
     checkedAt: row.checked_at,
     place: job.location ?? null,
     remote: job.is_remote ?? null,
-    status: statusSentence(app ? { stage: app.stage, appliedAt: app.applied_at } : null),
+    // An application Cello is preparing (state set) says where it stands; one the person sent says when.
+    status: app?.state ? appStatus({ state: app.state as never, step: app.step, needsReason: app.needs_reason as never, needsDetail: app.needs_detail }, role.company) : statusSentence(app ? { stage: app.stage, appliedAt: app.applied_at } : null),
     why: whyKept({ roleType: role.type, jobFunction: job.job_function ?? null, seniority: job.seniority ?? null, isRemote: job.is_remote ?? null, country: job.country ?? null }, { ...targets, roleTypes: targets.role_types ?? [] }),
     typeWhy: whyType(role.type, (job.type_prov ?? null) as TypeProv | null),
     pasted: pastedLine(role.pasted, role.type, targets.role_types ?? []),
