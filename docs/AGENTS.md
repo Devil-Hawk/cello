@@ -91,7 +91,7 @@ Fan-out (`lib/agents/fanout.ts`) runs at most four branches at once, each with i
 
 ## Skills
 
-Nine skills live in `apps/web/skills/<name>/SKILL.md`: role-fit, tailor-resume, cover-letter, cold-outreach, follow-up, company-research, visa-sponsorship, negotiation, search-strategy. The orchestrator sees each name and description and reads the file when it applies. Each folder has an `evals.json` (three trigger cases and an output case with plain checks). A skill's `description` must be a quoted string: an unquoted colon makes the loader skip the skill.
+Nine skills live in `apps/web/skills/<name>/SKILL.md`: role-fit, tailor-resume, cover-letter, cold-outreach, follow-up, company-research, visa-sponsorship, negotiation, search-strategy. The orchestrator sees each name and description and reads the file when it applies. Each folder has an `evals.json` (three trigger cases and an output case with plain checks). A skill's `description` must be a quoted string: an unquoted colon makes the loader skip the skill. Each skill has its own trigger and output bars in `lib/evals/agent/thresholds.json`. A skill that missed a bar in the last recorded run is listed in `SKILLS_OFF` (`lib/agents/backends.ts`) and is not listed or readable on any path: the skills middleware, `ls`, `read_file`, `glob` and `grep` do not show it, and the Researcher is given company-research and visa-sponsorship by code unless one missed its output checks. Evals still measure an off skill, so it comes back by meeting both bars in a new run and leaving `SKILLS_OFF`; `lib/agents/skills-off.test.ts` fails if the list and the report disagree. Today all nine are off, so the orchestrator is served no skills.
 
 ## Memory and files
 
@@ -192,7 +192,23 @@ Before (the earlier Copilot, its own prompt and 19 tools, same 30 messages, qwen
 
 Per model: qwen 77%, nemotron 60%, laguna 17%. Laguna is a reasoning model and 24 of its 30 answers were cut off before any JSON at the 700 token cap used for that run, so the majority was in effect decided by qwen and nemotron, who were both right on 17 of 30. The cap is now 2500 for the earlier Copilot's prompt; that run was not finished (see below), so treat 60% as a floor.
 
-Not measured yet: the new orchestrator on the same cases, the injection set, the researcher set and the skill checks. OpenRouter's free allowance for this account is 1000 requests a day across all `:free` models, and rate-limited retries on two of the models used it up while the baseline ran. It resets at 2026-10-06 00:00 UTC. The commands above are ready; run the old mode again first (the token cap changed), then the new one, and write both into this table. The prompts for the orchestrator, the Researcher and the nine skills are therefore the first versions and have not been tuned against these numbers.
+Skills (S19, 2026-10-07, report in `lib/evals/agent/reports/skills-s19.md`; trigger votes from nemotron-3-super, nemotron-3-ultra and nemotron-3.5-lightning because the gemma and laguna models answered 429, so they may move with other models; output checks on the first two):
+
+| skill | trigger (bar 0.8) | output checks (bar 0.9) | result |
+|---|---|---|---|
+| cold-outreach | 33% | 80% | failing (trigger, checks), off |
+| company-research | 33% | 100% | failing (trigger), off |
+| cover-letter | 33% | 83% | failing (trigger, checks), off |
+| follow-up | 33% | 100% | failing (trigger), off |
+| negotiation | 67% | 88% | failing (trigger, checks), off |
+| role-fit | 33% | 100% | failing (trigger), off |
+| search-strategy | 33% | 100% | failing (trigger), off |
+| tailor-resume | 33% | 100% | failing (trigger), off |
+| visa-sponsorship | 33% | 100% | failing (trigger), off |
+
+Overall trigger 37% (10/27), output checks 83% (66/80). Most of each 33% is the should-not-load case; the should-load cases were mostly loaded by none of the three models.
+
+Not measured yet: the new orchestrator on the same cases, the injection set and the researcher set. OpenRouter's free allowance for this account is 1000 requests a day across all `:free` models, and rate-limited retries on two of the models used it up while the baseline ran. The commands above are ready; run the old mode again first (the token cap changed), then the new one, and write both into this table. The prompts for the orchestrator, the Researcher and the nine skills are therefore the first versions and have not been tuned against these numbers.
 
 ## Environment
 
