@@ -45,6 +45,14 @@ begin
   return n;
 end $$;
 
+-- What a signed-in person's write to a posting changes: refused outright (insufficient privilege, 20261009000701) or zero rows.
+create function pg_temp.as_user_changes(uid uuid, q text) returns bigint language plpgsql as $$
+begin
+  return pg_temp.as_user(uid, q);
+exception when insufficient_privilege then
+  return 0;
+end $$;
+
 -- 1. The fold. The unique index would refuse the copies, so it is dropped for the setup and made again after.
 drop index public.jobs_employer_posting_key;
 
@@ -218,7 +226,7 @@ begin
   -- the employer's name is reachable for everyone through jobs.employer_id
   if pg_temp.as_user(e, format('select count(*) from public.jobs j join public.company_directory d on d.id = j.employer_id where j.id = %L', jn)) <> 1 then raise exception 'the employer is readable through jobs.employer_id'; end if;
   -- a signed-in update of a shared role changes nothing: writes go through the service role
-  if pg_temp.as_user(f.a, format('with u as (update public.jobs set match_score = 88 where id = %L returning 1) select count(*) from u', jn)) <> 0 then raise exception 'a person must not update a shared role'; end if;
+  if pg_temp.as_user_changes(f.a, format('with u as (update public.jobs set match_score = 88 where id = %L returning 1) select count(*) from u', jn)) <> 0 then raise exception 'a person must not update a shared role'; end if;
   if (select match_score from public.jobs where id = jn) is not null then raise exception 'the shared role is unchanged'; end if;
 end $$;
 
@@ -230,12 +238,13 @@ begin
   insert into public.jobs (id, company_id, employer_id, title, description, url, external_id) values (jw, f.co_a, f.emp, 'Held by two', 'd', 'https://shared.example/jobs/held', 'held-1');
   insert into public.person_roles (user_id, job_id) values (f.a, jw), (f.b, jw) on conflict do nothing;
   if (select company_id from public.jobs where id = jw) is distinct from f.co_a then raise exception 'the role is stored under A''s own company'; end if;
-  if pg_temp.as_user(f.a, format('with u as (update public.jobs set url = ''https://evil.example/phish'', title = ''Hacked'' where id = %L returning 1) select count(*) from u', jw)) <> 0 then raise exception 'the first storer must not update a role another person holds'; end if;
+  if pg_temp.as_user_changes(f.a, format('with u as (update public.jobs set url = ''https://evil.example/phish'', title = ''Hacked'' where id = %L returning 1) select count(*) from u', jw)) <> 0 then raise exception 'the first storer must not update a role another person holds'; end if;
   if (select url from public.jobs where id = jw) <> 'https://shared.example/jobs/held' then raise exception 'the shared apply link is unchanged'; end if;
-  -- a role with no employer is nobody else's: its own company still writes it
+  -- a role with no employer is nobody else's, and a person still cannot write it: postings are written by the server (20261009000701)
   insert into public.jobs (id, company_id, title, description, url, external_id) values (jl, f.co_a, 'Legacy', 'd', 'https://legacy.example/1', 'legacy-1');
   update public.jobs set employer_id = null where id = jl;
-  if pg_temp.as_user(f.a, format('with u as (update public.jobs set title = ''Legacy two'' where id = %L returning 1) select count(*) from u', jl)) <> 1 then raise exception 'a person still updates a role with no employer'; end if;
+  if pg_temp.as_user_changes(f.a, format('with u as (update public.jobs set title = ''Legacy two'' where id = %L returning 1) select count(*) from u', jl)) <> 0 then raise exception 'a person updated a role with no employer'; end if;
+  if (select title from public.jobs where id = jl) <> 'Legacy' then raise exception 'the legacy role is unchanged'; end if;
 end $$;
 
 -- 6c. A signed-in person cannot put a role into what others read: not by insert at a company linked to an employer,
