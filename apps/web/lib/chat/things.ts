@@ -18,7 +18,7 @@ export const ThingSchema = z.object({
   /** yyyy-mm-dd */
   posted: codeText(10).nullable(),
   /** More lines about the thing: why it was kept, what it lacks. */
-  notes: z.array(untrustedText(300)).max(12),
+  notes: z.array(untrustedText(4000)).max(12),
   /** Set on a thing recalled from an earlier chat: the chat and turn it came from. */
   recalled: z.object({ chat_id: codeText(100), turn_id: codeText(100) }).optional(),
 })
