@@ -140,7 +140,7 @@ function OptimizationReport({ report }: { report: ResumeOptimizerResult }) {
             ))}
           </ul>
         ) : (
-          <p className="text-caption text-muted-foreground">Your resume already puts what this posting asks for first, so nothing was moved.</p>
+          <p className="text-caption text-muted-foreground">Nothing was moved or reworded. Cello changes only what your resume already says, and none of it matched this posting better.</p>
         )}
         {(report.warnings ?? []).map((w) => (
           <p key={w} className="mt-1 text-caption text-muted-foreground">
