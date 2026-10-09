@@ -167,13 +167,19 @@ export const scheduleTask = defineTool({
       if (a.task_id) {
         const existing = await getScheduledTask(ctx.admin, ctx.userId, a.task_id)
         if (!existing) return toolFix(`No scheduled task with id ${a.task_id}.`, 'Call schedule_task without task_id to create one.')
+        // A task that acts on its own rules is the person's to change; model text may only pause it.
+        const selfActing = existing.autonomy === 'act' || existing.rules?.allow_send_email === true || existing.rules?.allow_submit === true
+        const pauseOnly = a.status === 'paused' && [a.name, a.instruction, a.every, a.at, a.weekday, a.hours, a.timezone].every((v) => v === undefined)
+        if (selfActing && !pauseOnly) {
+          return toolFix('Only the person can change a task that acts on its own rules; edit it in Scheduled tasks.', 'Tell the person what to change there, or pause it with status paused.')
+        }
         const schedule: ScheduleSpec | undefined = a.every ? { every: a.every, at: a.at, weekday: a.weekday, hours: a.hours, timezone: a.timezone ?? existing.timezone } : undefined
         const updated = await updateScheduledTask(ctx.admin, ctx.userId, a.task_id, {
           name: a.name,
           instruction: a.instruction,
           schedule,
           // Never raise autonomy on an existing task from here: only keep or lower it.
-          autonomy: asked === 'act' ? undefined : a.autonomy,
+          autonomy: asked === 'act' || selfActing ? undefined : a.autonomy,
           status: a.status,
         })
         if (!updated) return toolFix('Could not change that task.', 'Try again.')
