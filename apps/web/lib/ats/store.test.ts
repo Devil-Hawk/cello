@@ -16,10 +16,10 @@ function recorder() {
 }
 
 const writes = async (store: ReturnType<typeof makeSupabaseAtsStore>) => {
-  await store.evictJobs('c', ['x'])
+  await store.evictJobs!('c', ['x'])
   await store.upsertJobs([{ company_id: 'c', external_id: 'x' }] as never)
   await store.updateJobs([{ companyId: 'c', externalId: 'x', fields: { title: 't' } }] as never)
-  await store.recordSightings('c', ['x'], ['s'] as never)
+  await store.recordSightings!('c', ['x'], ['s'] as never)
   await store.clearBoardJobs('c', 's' as never)
 }
 
