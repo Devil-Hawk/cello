@@ -69,7 +69,7 @@ export async function loadChatPage(db: AdminClient, userId: string, chatId: stri
   const madeKeys = madeRows.map((m) => m.id)
   const texts = madeRows.length ? (((await db.from('artifact_versions').select('artifact_id, version, content_text').in('artifact_id', madeKeys.slice(0, 100))).data as { artifact_id: string; version: number; content_text: string }[] | null) ?? []) : []
   const made: Record<string, MadeInfo> = Object.fromEntries(
-    madeRows.map((m) => [m.id, { id: m.id, type: m.type, title: m.title, version: m.current_version, preview: (texts.find((v) => v.artifact_id === m.id && v.version === m.current_version)?.content_text ?? '').slice(0, 400) }])
+    madeRows.map((m) => [m.id, { id: m.id, type: m.type, title: m.title, version: m.current_version, preview: (texts.find((v) => v.artifact_id === m.id && v.version === m.current_version)?.content_text ?? '').slice(0, 700) }])
   )
   const chats = new Map(((earlier?.data as { id: string; title: string; created_at: string }[] | null) ?? []).map((c) => [c.id, c]))
   const recalled: ChatPageData['recalled'] = {}
