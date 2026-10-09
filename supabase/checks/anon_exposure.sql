@@ -148,12 +148,11 @@ select pg_temp.must_run('authenticated', user_id, 'select count(*) from public.a
 -- (which calls is_service_role_request()) with trigger functions revoked.
 select pg_temp.must_run('authenticated', user_id,
   format($q$update public.profiles set full_name = 'Check' where id = %L$q$, user_id)) from fx;
--- Own-company job writes work through the own-company policies alone.
+-- Own-company job inserts work through the own-company policies alone. Postings are not
+-- updated from a session (20261009000701): the server changes them.
 select pg_temp.must_run('authenticated', user_id,
   format($q$insert into public.jobs (company_id, title, description, url, external_id)
             values (%L, 'mine', 'x', 'https://x', 'auth-check')$q$, company_id)) from fx;
-select pg_temp.must_run('authenticated', user_id,
-  format($q$update public.jobs set title = 'mine 2' where company_id = %L$q$, company_id)) from fx;
 
 -- ...but the open policies are gone: a user cannot write into someone else's
 -- company, and cannot move a job there.
@@ -167,6 +166,8 @@ begin
               values (%L, 'poison', 'x', 'https://x', 'auth-poison')$q$, f.other_company));
   perform pg_temp.must_be_denied('authenticated',
     format($q$update public.jobs set company_id = %L where company_id = %L$q$, f.other_company, f.company_id));
+  perform pg_temp.must_be_denied('authenticated',
+    format($q$update public.jobs set title = 'mine 2' where company_id = %L$q$, f.company_id));
 end $$;
 
 -- Signing a user up still creates the profile. The auth service role cannot be
