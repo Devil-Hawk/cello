@@ -4,6 +4,14 @@ Trigger accuracy: 37% (10/27). Output checks: 83% (66/80). Models: nvidia/nemotr
 
 Run: 2026-10-07 at 39cd479c, `skills.eval.test.ts` with `AGENT_EVAL_GATE=0`, `AGENT_EVAL_GENERATORS=nvidia/nemotron-3-super-120b-a12b:free,nvidia/nemotron-3-ultra-550b-a55b:free,nvidia/nemotron-3.5-lightning:free`. 88 requests, 30 cache hits, 19 retries. Trigger votes come from those three nemotron models only: the default generators (gemma-4-26b, laguna-s-2.1) and gemma-4-31b answered HTTP 429, so these numbers may move with other models. The 33% on most skills is the should-not-load case alone: only negotiation-t2 was loaded and right (2/3); company-research-t1, search-strategy-t1 and visa-sponsorship-t1 were loaded by 1/3 (wrong). The `off` column in the json is false because it was written before the switch-off.
 
+**Provisional: voters were nemotron only.** `SKILLS_OFF` is derived from `skills-s19.json`, so a complete run replaces this report and the switched-off set follows from it. Retry with three voters that answer (ids ending `:free` with tools support from `https://openrouter.ai/api/v1/models`), key exported from `~/.cello-secrets.env`:
+
+```
+cd apps/web && RUN_AGENT_EVALS=1 AGENT_EVAL_GATE=0 AGENT_EVAL_LABEL=s19 AGENT_EVAL_GENERATORS=<a>,<b>,<c> nice -n 19 pnpm exec vitest run lib/evals/agent/skills.eval.test.ts
+```
+
+Copy the new `skills-s19-<stamp>.{json,md}` from `~/cello-scratch/evals/agent/` over these two files and update the per-skill table in `docs/AGENTS.md`. The new json names its voters and each trigger case's first calls, so a 0/3 can be read back.
+
 **All nine skills are failing** and are switched off (`SKILLS_OFF` in `lib/agents/backends.ts`): cold-outreach, cover-letter and negotiation missed trigger and checks; company-research, follow-up, role-fit, search-strategy, tailor-resume and visa-sponsorship missed trigger. The engine therefore serves no skills (a skill is served on none of: the skills middleware, `ls`/`read_file`/`glob`/`grep` on `/skills`). The Researcher still gets company-research and visa-sponsorship by code, since their output checks are 100% and only a missed `checks` bar takes a skill from it. A skill earns its way back with a new run that meets both of its bars (`lib/evals/agent/thresholds.json`); evals still measure switched-off skills.
 
 | skill | trigger | bar | output checks | bar | errors | result |
