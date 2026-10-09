@@ -193,7 +193,8 @@ export async function writeEmployer(db: Db, w: EmployerWrite, now: () => number 
   type Row = { id: string; source: string; ats_provider: string | null; ats_token: string | null }
   let existing: Row | null = null
   if (w.provider && w.token) {
-    const { data } = await db.from('company_directory').select('id, source, ats_provider, ats_token').eq('ats_provider', w.provider).eq('ats_token', w.token).maybeSingle()
+    // A board token is the same board in any case (jobs.ashbyhq.com/Linear and /linear), so the lookup ignores it: two rows for one board would be two employers.
+    const { data } = await db.from('company_directory').select('id, source, ats_provider, ats_token').eq('ats_provider', w.provider).ilike('ats_token', w.token.replace(/[\\%_]/g, (c) => `\\${c}`)).limit(1).maybeSingle()
     existing = (data as Row | null) ?? null
   }
   let byDomain = false

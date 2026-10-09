@@ -121,6 +121,15 @@ describe('companies.add by link', () => {
     expect(tables.company_directory[0]).toMatchObject({ ats_provider: 'ashby', ats_token: 'ramp', domain: 'ramp.com' })
   })
 
+  it("Stripe: stripe.com/jobs shows no board link, so the hand-checked Greenhouse board is read, not a 2-role window of the page", async () => {
+    const { client, tables } = world()
+    const d = deps({ boards: [], identity: { name: 'Stripe', homeUrls: [] }, site: { tier: 'listing', jobs: [job(1, 1), job(2, 2)] } })
+    const r = await addCompany(client, 'u1', { link: 'stripe.com/jobs' }, d.value)
+    expect(r).toMatchObject({ ok: true, employer: { name: 'Stripe', domain: 'stripe.com', openCount: 2 } })
+    expect(tables.company_directory[0]).toMatchObject({ ats_provider: 'greenhouse', ats_token: 'stripe', verified_by: 'known_board', read_tier: 'board' })
+    expect(d.read).not.toHaveBeenCalled()
+  })
+
   it('a pasted board named Ramp that is not the hand-checked one is still refused', async () => {
     const { client, tables } = world()
     const d = deps({ boards: [{ provider: 'ashby', token: 'ramp-network', via: 'url' }], identity: { name: 'Ramp', homeUrls: [] } })

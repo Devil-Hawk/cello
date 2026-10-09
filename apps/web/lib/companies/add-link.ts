@@ -20,7 +20,7 @@ import { makeSiteFetcher } from '../ingest/reader/site-fetch'
 import { NO_TARGETS } from '../ingest/reader/targets'
 import { getEmployer, type DirectoryRow } from './directory'
 import { followEmployer } from './follow'
-import { isKnownEmployer, knownByBoard, lookupKnownCompanyByDomain } from './known-companies'
+import { isKnownEmployer, knownBoard, knownByBoard, lookupKnownCompanyByDomain } from './known-companies'
 import { nameFromDomain } from './page-name'
 import {
   checkBoard,
@@ -270,7 +270,12 @@ async function verifyLink(db: Db, url: URL, domain: string | null, directToken: 
     return { provider: candidate.provider, token: candidate.token, via: candidate.via, jobs: check.jobs, verifiedBy: check.verifiedBy }
   }
 
-  const read = await deps.read({ company: { name: guess ?? '', domain, careerUrl: url.href }, targets: NO_TARGETS }, readBoard)
+  // A known employer's hand-checked board is tried first: its careers page is often a script that shows no link to it (stripe.com/jobs).
+  const curated = domain ? knownBoard({ domain, careerUrl: url.href }) : null
+  const curatedRead = curated ? await readBoard({ provider: curated.provider, token: curated.token, via: 'link' }, []) : null
+  const read: SiteRead = curatedRead
+    ? { tier: 'board', jobs: curatedRead.jobs, board: curatedRead, complete: false, reason: null, tried: [], checked: [], requests: 1 }
+    : await deps.read({ company: { name: guess ?? '', domain, careerUrl: url.href }, targets: NO_TARGETS }, readBoard)
 
   if (read.board) {
     const ok = passed.get(`${read.board.provider}:${read.board.token}`)
