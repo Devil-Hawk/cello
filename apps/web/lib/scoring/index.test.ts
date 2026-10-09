@@ -99,11 +99,25 @@ const MINE = {
   jobs: JOB_ROW,
 }
 
+/** The same role as the person reads it through person_jobs: the posting, their own company for it, and their verdict. */
+const asView = ({ user_id, job_id, jobs: _jobs, ...rest }: typeof MINE) => ({
+  ...rest,
+  viewer_id: user_id,
+  id: job_id,
+  title: JOB_ROW.title,
+  location: JOB_ROW.location,
+  url: JOB_ROW.url,
+  posted_at: JOB_ROW.posted_at,
+  description: JOB_ROW.description,
+  viewer_company_name: 'Acme',
+})
+
 let db: ReturnType<typeof fakeDb>
 beforeEach(() => {
   db = fakeDb({
     jobs: [{ ...JOB_ROW, is_new: true }, { ...JOB_ROW, id: 'other', is_new: true }],
     person_roles: [MINE, { ...MINE, user_id: 'someone-else', job_id: 'other', jobs: { ...JOB_ROW, id: 'other' } }],
+    person_jobs: [asView(MINE), asView({ ...MINE, user_id: 'someone-else', job_id: 'other' })],
     role_reactions: [],
     applications: [],
   })
@@ -149,7 +163,7 @@ describe('triageRole', () => {
     expect(db.tables.person_roles.find((r) => r.user_id === 'someone-else')).toMatchObject({ hidden_reason: null })
     expect(db.writes.filter((w) => w.table === 'jobs')).toEqual([])
 
-    const mine = fakeDb({ person_roles: [MINE], role_reactions: [], applications: [{ id: 'a1', user_id: 'u', job_id: 'job1', stage: 'discovered', source: 'manual' }] })
+    const mine = fakeDb({ person_roles: [MINE], person_jobs: [asView(MINE)], role_reactions: [], applications: [{ id: 'a1', user_id: 'u', job_id: 'job1', stage: 'discovered', source: 'manual' }] })
     await triageRole({ db: mine, userId: 'u', jobId: 'job1', reaction: 'not_for_me', surface: 'roles' })
     expect(mine.tables.applications).toHaveLength(1)
   })

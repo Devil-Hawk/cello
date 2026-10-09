@@ -28,7 +28,7 @@ import { ContactNetworkPanel } from '@/components/contacts/contact-network-panel
 import { TargetScopeSwitch, type TargetScope } from '@/components/jobs/target-scope-switch'
 import { formatShortDate, knownParts, postedThisWeek } from '@/lib/format'
 import { ChanceChip } from '@/components/fit/chance-chip'
-import { FIT_EMBED, parseFit, type FitRow } from '@/lib/scoring/read'
+import { parseFit, type FitRow } from '@/lib/scoring/read'
 import { createClient } from '@/lib/supabase/client'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { lastCheckedMs, partialReadNote, rolesStatus, rolesStatusLine } from '@/lib/companies/roles-status'
@@ -36,6 +36,7 @@ import { openRolesOnly } from '@/lib/jobs/freshness'
 import { fetchClientSafePreferences } from '@/lib/preferences/client-safe'
 import { EMPTY_TARGETING, resolveTargeting, type Targeting } from '@/lib/targeting'
 import { hasRoleTargets, targetVerdict } from '@/lib/targeting/roles'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 interface Company {
   id: string
@@ -61,7 +62,7 @@ interface Job {
   job_type: string | null
   posted_at: string | null
   discovered_at: string
-  // The person's own verdict on the role (lib/scoring/read.ts FIT_EMBED).
+  // The person's own verdict on the role: person_jobs carries its columns beside the posting's.
   person_roles?: FitRow | FitRow[] | null
   is_new: boolean
   job_function?: string | null
@@ -107,7 +108,7 @@ export default function CompanyDetailPage() {
 
       // Open roles only: posted in the last 180 days (or undated) and not closed.
       const [{ data: jobsData }, prefs] = await Promise.all([
-        openRolesOnly(supabase.from('jobs').select('*, ' + FIT_EMBED).eq('company_id', companyId)).order('discovered_at', {
+        openRolesOnly(personJobs(supabase).select('*').eq('viewer_company_id', companyId)).order('discovered_at', {
           ascending: false,
         }),
         fetchClientSafePreferences(supabase as unknown as SupabaseClient),

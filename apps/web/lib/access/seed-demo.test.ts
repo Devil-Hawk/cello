@@ -309,9 +309,26 @@ describe('buildDemoWorkspace — shape', () => {
     expect(mine.rows.map((r) => r.job_id).sort()).toEqual(jobs.map((r) => r.id).sort())
   })
 
+  it("puts the verdict and the new flag on the demo user's role rows, never on the shared jobs", () => {
+    const jobs = batch(workspace.batches, 'jobs').rows
+    for (const row of jobs) {
+      expect(row).not.toHaveProperty('match_score')
+      expect(row).not.toHaveProperty('match_details')
+      expect(row).not.toHaveProperty('is_new')
+    }
+    const roles = batch(workspace.batches, 'person_roles')
+    expect(roles.overwrite).toBe(true)
+    expect(roles.conflictColumn).toBe('user_id,job_id')
+    expect(roles.rows).toHaveLength(jobs.length)
+    expect(new Set(roles.rows.map((r) => r.user_id))).toEqual(new Set([DEMO_USER]))
+    expect(new Set(roles.rows.map((r) => r.job_id))).toEqual(new Set(jobs.map((r) => r.id)))
+  })
+
   it('spreads posted_at over the last three weeks, with a few flagged new', () => {
     const jobs = batch(workspace.batches, 'jobs').rows
+    const roles = batch(workspace.batches, 'person_roles').rows
     let newCount = 0
+    for (const row of roles) if (row.is_new === true) newCount += 1
     for (const row of jobs) {
       const ageDays = (NOW.getTime() - Date.parse(row.posted_at as string)) / 86_400_000
       expect(ageDays).toBeGreaterThan(0)
@@ -320,7 +337,6 @@ describe('buildDemoWorkspace — shape', () => {
       expect(Date.parse(row.discovered_at as string)).toBeGreaterThanOrEqual(
         Date.parse(row.posted_at as string)
       )
-      if (row.is_new === true) newCount += 1
     }
     expect(newCount).toBeGreaterThan(0)
     expect(newCount).toBeLessThan(jobs.length)
@@ -679,5 +695,14 @@ describe('seedDemoWorkspace', () => {
     expect(result.warnings[0]).toContain('company_dossiers')
     // The rest of the demo still landed.
     expect(fake.rowsIn('jobs')).toHaveLength(40)
+  })
+
+  it("writes the verdicts to the demo user's role rows, and none to the shared jobs", async () => {
+    const fake = fakeAdmin()
+    await seedDemoWorkspace(fake.admin, DEMO_USER, { now: NOW })
+    expect(fake.rowsIn('jobs').some((r) => 'match_score' in r || 'match_details' in r || 'is_new' in r)).toBe(false)
+    const roles = fake.rowsIn('person_roles')
+    expect(roles).toHaveLength(40)
+    expect(roles.filter((r) => r.chance != null).length).toBeGreaterThan(0)
   })
 })

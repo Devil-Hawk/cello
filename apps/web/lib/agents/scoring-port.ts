@@ -15,6 +15,7 @@
 import { makeRunner } from '@/lib/harness/copilot-tools'
 import { canRunLlm } from '@/lib/harness/llm-key-message'
 import { isStalePosting } from '@/lib/jobs/freshness'
+import { ownedJobsQuery } from '@/lib/jobs/owned-query'
 import { hasRelevanceTerms, parseRelevanceQuery, rankJobsByRelevance } from '@/lib/jobs/relevance'
 import { assessJobs, FIT_COLUMNS, parseFit, PASS_REASONS, ScoringInputError, triageRole, type PassReason } from '@/lib/scoring'
 import { fitHighlights, fitToColumns, type FitRow } from '@/lib/scoring/read'
@@ -63,29 +64,22 @@ export interface ShortlistOutput {
   skippedReason?: string
 }
 
-interface Posting {
+/** One row of person_jobs: the role, the person's own company for it, and their verdict on it. */
+interface RoleRow extends FitRow {
   id: string
   title: string | null
-  company_id: string | null
   location: string | null
   posted_at: string | null
   url: string | null
   is_new: boolean | null
   still_open: boolean | null
   salary_range?: string | null
-  companies?: { name?: string | null; is_dream_company?: boolean | null } | { name?: string | null; is_dream_company?: boolean | null }[] | null
+  viewer_company_id: string | null
+  viewer_company_name: string | null
 }
 
-/** A person_roles row: their verdict, with the posting embedded. */
-interface RoleRow extends FitRow {
-  job_id: string
-  jobs: Posting | Posting[] | null
-}
-
-const POSTING = 'id, title, company_id, location, posted_at, url, is_new, still_open, companies!inner(name, user_id, is_dream_company)'
+const ROLE_SELECT = `id, title, location, posted_at, url, is_new, still_open, viewer_company_id, viewer_company_name, ${FIT_COLUMNS}`
 const POOL_MAX = 300
-
-const first = <T>(rel: T | T[] | null | undefined): T | null => (Array.isArray(rel) ? (rel[0] ?? null) : (rel ?? null))
 
 function sentence(text: string, max = 200): string {
   const t = text.replace(/\s+/g, ' ').trim()
@@ -93,19 +87,18 @@ function sentence(text: string, max = 200): string {
 }
 
 export function toPick(row: RoleRow, exploration = false): RolePick | null {
-  const job = first(row.jobs)
-  if (!job) return null
-  const fit = parseFit({ id: job.id, ...row })
+  if (!row.id) return null
+  const fit = parseFit(row)
   const chance = fit.chance && fit.chance.label !== 'cannot_assess' ? fit.chance.label : null
   const reason = chance === null ? NOT_ASSESSED : sentence(fit.want?.reason ?? fitHighlights(row.chance_detail, 1)[0] ?? '') || NOT_ASSESSED
   return {
-    jobId: job.id,
-    title: job.title,
-    company: first(job.companies)?.name ?? null,
-    companyId: job.company_id,
-    location: job.location,
-    postedAt: job.posted_at,
-    url: job.url,
+    jobId: row.id,
+    title: row.title,
+    company: row.viewer_company_name,
+    companyId: row.viewer_company_id,
+    location: row.location,
+    postedAt: row.posted_at,
+    url: row.url,
     chance,
     reason,
     gaps: (fit.chance?.gaps ?? []).slice(0, 4).map((g) => sentence(g, 120)),
@@ -123,31 +116,29 @@ function byRank(a: RoleRow, b: RoleRow): number {
   const rb = RANK[chanceOf(b) ?? 'none']
   if (ra !== rb) return rb - ra
   if ((b.want_p ?? -1) !== (a.want_p ?? -1)) return (b.want_p ?? -1) - (a.want_p ?? -1)
-  return (first(b.jobs)?.posted_at ?? '').localeCompare(first(a.jobs)?.posted_at ?? '')
+  return (b.posted_at ?? '').localeCompare(a.posted_at ?? '')
 }
 
 async function loadPool(input: ShortlistInput): Promise<RoleRow[]> {
-  let query = input.admin
-    .from('person_roles')
-    .select(`job_id, ${FIT_COLUMNS}, jobs!inner(${POSTING})`)
-    .eq('user_id', input.userId)
-    .is('hidden_reason', null)
-    .eq('jobs.is_new', true)
-    .eq('jobs.companies.user_id', input.userId)
-  if (input.dreamOnly) query = query.eq('jobs.companies.is_dream_company', true)
+  // The person's own role rows: their company and their verdict are on them. The viewer fence is the ownership.
+  let query = ownedJobsQuery(input.admin, input.userId, ROLE_SELECT).is('hidden_reason', null).eq('is_new', true)
+  if (input.dreamOnly) {
+    const { data: dream } = await input.admin.from('companies').select('id').eq('user_id', input.userId).eq('is_dream_company', true)
+    const ids = ((dream as { id: string }[] | null) ?? []).map((c) => c.id)
+    if (ids.length === 0) return []
+    // ponytail: the first 200 dream companies; a person with more would need chunkedIn.
+    query = query.in('viewer_company_id', ids.slice(0, 200))
+  }
   const { data } = await query.order('want_p', { ascending: false, nullsFirst: false }).limit(POOL_MAX)
   // ponytail: open roles are filtered here after the cut of 300, not in the query. Move it into the query if a pool ever runs short of open roles.
-  let rows = ((data as unknown as RoleRow[] | null) ?? []).filter((r) => {
-    const job = first(r.jobs)
-    return job !== null && job.still_open !== false && !isStalePosting(job.posted_at)
-  })
+  let rows = ((data as unknown as RoleRow[] | null) ?? []).filter((r) => r.still_open !== false && !isStalePosting(r.posted_at))
   if (input.location) {
     const want = input.location.toLowerCase()
-    rows = rows.filter((r) => (first(r.jobs)?.location ?? '').toLowerCase().includes(want))
+    rows = rows.filter((r) => (r.location ?? '').toLowerCase().includes(want))
   }
-  if (input.remoteOnly) rows = rows.filter((r) => /remote/i.test(first(r.jobs)?.location ?? ''))
+  if (input.remoteOnly) rows = rows.filter((r) => /remote/i.test(r.location ?? ''))
   if (input.query && hasRelevanceTerms(parseRelevanceQuery(input.query))) {
-    const flat = rows.map((r) => ({ row: r, title: first(r.jobs)?.title ?? null }))
+    const flat = rows.map((r) => ({ row: r, title: r.title }))
     rows = rankJobsByRelevance(flat, input.query)
       .filter((r) => r.relevance.score > 0)
       .map((r) => r.job.row)
@@ -170,12 +161,12 @@ export async function shortlistFor(input: ShortlistInput): Promise<ShortlistOutp
         userId: input.userId,
         apiKeys: input.apiKeys,
         llm: makeRunner({ admin: input.admin, userId: input.userId, userEmail: '', apiKeys: input.apiKeys, signal: input.signal }, input.signal, 'assess-roles'),
-        jobIds: missing.map((r) => r.job_id),
+        jobIds: missing.map((r) => r.id),
         limit: missing.length,
       })
       assessedNow = result.assessed
       skippedReason = result.skippedReason
-      if (result.fits.size > 0) pool = pool.map((r) => (result.fits.has(r.job_id) ? { ...r, ...fitToColumns(result.fits.get(r.job_id)!) } : r))
+      if (result.fits.size > 0) pool = pool.map((r) => (result.fits.has(r.id) ? { ...r, ...fitToColumns(result.fits.get(r.id)!) } : r))
     }
   }
 
@@ -186,8 +177,8 @@ export async function shortlistFor(input: ShortlistInput): Promise<ShortlistOutp
 
   // One labelled exploration slot: the best role below the cut at a company not already shown.
   if (sorted.length > limit && limit >= 4) {
-    const shown = new Set(top.map((r) => first(r.jobs)?.company_id))
-    const explore = sorted.slice(limit).find((r) => chanceOf(r) !== null && !shown.has(first(r.jobs)?.company_id))
+    const shown = new Set(top.map((r) => r.viewer_company_id))
+    const explore = sorted.slice(limit).find((r) => chanceOf(r) !== null && !shown.has(r.viewer_company_id))
     const pick = explore ? toPick(explore, true) : null
     if (pick) picks[picks.length - 1] = pick
   }
@@ -244,20 +235,14 @@ export interface RoleView extends RolePick {
 }
 
 export async function roleView(admin: AdminClient, userId: string, jobId: string): Promise<RoleView | null> {
-  const { data } = await admin
-    .from('person_roles')
-    .select(`job_id, ${FIT_COLUMNS}, jobs!inner(${POSTING}, salary_range)`)
-    .eq('user_id', userId)
-    .eq('job_id', jobId)
-    .eq('jobs.companies.user_id', userId)
-    .maybeSingle()
+  const { data } = await ownedJobsQuery(admin, userId, `${ROLE_SELECT}, salary_range`).eq('id', jobId).maybeSingle()
   const row = data as unknown as RoleRow | null
   const pick = row ? toPick(row) : null
   if (!row || !pick) return null
-  const fit = parseFit({ id: jobId, ...row })
+  const fit = parseFit(row)
   return {
     ...pick,
-    salary: first(row.jobs)?.salary_range ?? null,
+    salary: row.salary_range ?? null,
     requirements: {
       covered: fitHighlights(row.chance_detail, 10).map((s) => sentence(s, 140)),
       missing: (fit.chance?.gaps ?? []).slice(0, 6).map((s) => sentence(s, 140)),

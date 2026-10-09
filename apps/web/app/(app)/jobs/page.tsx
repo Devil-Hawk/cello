@@ -4,7 +4,7 @@ import { LogoMark } from '@/components/brand/logo'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Briefcase, Building2, Loader2, Plus, SearchX, Sparkles, Target, X } from 'lucide-react'
+import { Briefcase, Building2, Loader2, Plus, SearchX, Target, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
@@ -40,8 +40,7 @@ import {
 import { JobRow, type JobRowJob } from '@/components/jobs/job-row'
 import { RefreshJobsButton } from '@/components/jobs/refresh-button'
 import { JobDetailModal } from '@/components/jobs/job-detail-modal'
-import { FIT_COLUMNS, FIT_EMBED, chanceLabel, fitToColumns, type FitRow } from '@/lib/scoring/read'
-import { OnJobs } from '@/lib/scoring/person-roles-query'
+import { FIT_COLUMNS, chanceLabel, fitToColumns, type FitRow } from '@/lib/scoring/read'
 import type { RoleFit } from '@/lib/scoring/types'
 import { ProvenanceSummaryBar } from '@/components/jobs/provenance-summary-bar'
 import { JOB_FUNCTIONS, QUALITY_REJECT_THRESHOLD, SENIORITY_LEVELS } from '@/lib/jobs/classify'
@@ -58,6 +57,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { VisaSignal } from '@/lib/dossier/store'
 import { isTrackedCompany } from '@/lib/companies/watchlist'
 import { openRolesOnly } from '@/lib/jobs/freshness'
+import { personJobs } from '@/lib/jobs/person-jobs'
 import { applyRoleTargets, excludedCompanyIds, hasRoleTargets } from '@/lib/targeting/roles'
 import { TargetScopeSwitch, type TargetScope } from '@/components/jobs/target-scope-switch'
 
@@ -125,25 +125,28 @@ const BATCH_LIMIT = 200
  *  still covers 4,000 jobs, far past any real in-targeting backlog. */
 const MAX_BATCH_ROUNDS = 20
 
-// The posting's own columns. The person's verdict on it is not one of them: it lives
-// on their person_roles row. A list starts at that row (so it can be ordered by what
-// the person wants) and embeds the posting; a single role starts at the posting and
-// embeds the row.
-const JOB_COLUMNS =
-  'id, company_id, title, url, location, salary_range, posted_at, discovered_at, ' +
+// Read through person_jobs: the company, the new flag and the verdict are this person's own, never the shared role's.
+const JOB_SELECT_COLUMNS =
+  'id, company_id:viewer_company_id, title, url, location, salary_range, posted_at, discovered_at, ' +
   'is_new, job_function, seniority, language, country, ' +
-  'is_remote, quality_score, description, job_type, companies(name, logo_url, domain)'
-const JOB_SELECT_COLUMNS = JOB_COLUMNS + ', ' + FIT_EMBED
-const LIST_SELECT_COLUMNS = FIT_COLUMNS + ', jobs!inner(' + JOB_COLUMNS + ')'
+  'is_remote, quality_score, description, job_type, viewer_company_name, viewer_company_domain, ' +
+  FIT_COLUMNS
 
-/** A person_roles list row, as LIST_SELECT_COLUMNS returns it: the verdict columns beside the embedded posting. */
-type ListRow = { jobs: Job | Job[] | null } & Record<string, unknown>
+/** A row of person_jobs as JOB_SELECT_COLUMNS reads it: the verdict columns sit beside the posting's. */
+type JobView = Omit<Job, 'companies' | 'person_roles'> & FitRow & { viewer_company_name: string | null; viewer_company_domain: string | null }
 
-/** The posting with the person's verdict embedded, the shape every job component reads. */
-function toJob(row: ListRow): Job | null {
-  const { jobs, ...verdict } = row
-  const job = Array.isArray(jobs) ? jobs[0] : jobs
-  return job ? { ...job, person_roles: verdict as FitRow } : null
+/** The row the list and the modal render: the person's own company, with the logo from their own companies, and their verdict as `person_roles`. */
+function withOwnCompany(row: JobView, companyList: { id: string; logo_url: string | null }[]): Job {
+  const { viewer_company_name, viewer_company_domain, assessed_at, blocked_reasons, want_p, want_reason, want_detail, chance, chance_detail, ...rest } = row
+  return {
+    ...rest,
+    person_roles: { assessed_at, blocked_reasons, want_p, want_reason, want_detail, chance, chance_detail },
+    companies: {
+      name: viewer_company_name ?? '',
+      domain: viewer_company_domain,
+      logo_url: companyList.find((c) => c.id === row.company_id)?.logo_url ?? null,
+    },
+  }
 }
 
 /**
@@ -391,7 +394,7 @@ function JobsPageInner() {
   // 86" — and used to link at bare /jobs, dropping the user into an unfiltered
   // list of 11,843 rows to find it by title from memory. Resolving the id needs
   // its own fetch because the row is very unlikely to be in the first page.
-  const [deepLinkedJob, setDeepLinkedJob] = useState<Job | null>(null)
+  const [deepLinkedJob, setDeepLinkedJob] = useState<JobView | null>(null)
 
   // Focus restore for the job detail modal, owned HERE rather than inside the
   // modal. The modal does have an onCloseAutoFocus handler, but it can never
@@ -458,13 +461,12 @@ function JobsPageInner() {
     let cancelled = false
     ;(async () => {
       try {
-        const { data, error } = await supabase
-          .from('jobs')
+        const { data, error } = await personJobs(supabase)
           .select(JOB_SELECT_COLUMNS)
           .eq('id', deepLinkJobId)
           .maybeSingle()
         if (cancelled || error || !data) return
-        setDeepLinkedJob(data as unknown as Job)
+        setDeepLinkedJob(data as unknown as JobView)
       } catch {
         // Non-fatal: if the row cannot be fetched the modal simply does not
         // open, and the user still has the full list. Never blank the page.
@@ -658,49 +660,46 @@ function JobsPageInner() {
     // the other side of the switch, so both counts follow the same facets.
     // Open roles only: posted in the last 180 days (or undated) and not closed.
     const excludedIds = targeting ? excludedCompanyIds(companies, targeting) : []
-    // The list starts at the person's own rows (person_roles) so it can be ordered by
-    // what they want; the posting's columns are filtered through the embed (OnJobs).
-    // A role they said is not for them stays out of the list.
-    const withFacets = (query: JobsQuery, side: TargetScope): JobsQuery => {
-      query.is('hidden_reason', null)
-      const start = new OnJobs(query)
-      openRolesOnly(start)
+    const withFacets = (start: JobsQuery, side: TargetScope): JobsQuery => {
+      // A role they said is not for them stays out of the list.
+      let q = openRolesOnly(start).is('hidden_reason', null)
 
       if (selectedCompany !== 'all') {
-        start.eq('company_id', selectedCompany)
+        q = q.eq('viewer_company_id', selectedCompany)
       }
-      // No 'all companies' filter: RLS already scopes every row to the person's own
-      // person_roles rows. The old .in('company_id', companyIds) re-sent every
-      // company id in the querystring, which passed the gateway's URL limit until
-      // the account grew past ~600 companies and then failed every load with a bare
-      // 400. The empty-companies early return above keeps the zero-companies UX
-      // identical.
+      // No 'all companies' filter: person_jobs RLS already scopes every row to the
+      // roles the person holds (their person_roles row). The old .in('company_id', companyIds)
+      // here re-sent every company id in the querystring, which passed the
+      // gateway's URL limit until the account grew past ~600 companies and then
+      // failed every load with a bare 400. The empty-companies early return
+      // above keeps the zero-companies UX identical.
 
       if (freshness !== 'all') {
         const cutoffIso = new Date(Date.now() - FRESHNESS_HOURS[freshness] * 60 * 60 * 1000).toISOString()
-        if (includeUndated) start.or('posted_at.gte.' + cutoffIso + ',posted_at.is.null')
-        else start.gte('posted_at', cutoffIso)
+        q = includeUndated
+          ? q.or(`posted_at.gte.${cutoffIso},posted_at.is.null`)
+          : q.gte('posted_at', cutoffIso)
       }
 
-      if (jobFunction !== 'all') start.eq('job_function', jobFunction)
-      if (seniority !== 'all') start.eq('seniority', seniority)
-      if (remoteOnly) start.eq('is_remote', true)
-      if (country.trim().length === 2) start.eq('country', country.trim().toUpperCase())
-      if (language !== 'all') start.eq('language', language)
+      if (jobFunction !== 'all') q = q.eq('job_function', jobFunction)
+      if (seniority !== 'all') q = q.eq('seniority', seniority)
+      if (remoteOnly) q = q.eq('is_remote', true)
+      if (country.trim().length === 2) q = q.eq('country', country.trim().toUpperCase())
+      if (language !== 'all') q = q.eq('language', language)
       if (hideLowQuality) {
         // NULL quality_score means "not classified yet" — never hide those,
         // only rows the classifier has actually scored below the threshold.
-        start.or('quality_score.gte.' + QUALITY_REJECT_THRESHOLD + ',quality_score.is.null')
+        q = q.or(`quality_score.gte.${QUALITY_REJECT_THRESHOLD},quality_score.is.null`)
       }
       if (debouncedLocationQuery.trim()) {
-        start.ilike('location', '%' + debouncedLocationQuery.trim() + '%')
+        q = q.ilike('location', `%${debouncedLocationQuery.trim()}%`)
       }
-      if (unscoredOnly) query.is('assessed_at', null)
-      if (side === 'matching' && targeting) applyRoleTargets(start, targeting, excludedIds)
-      return start.query
+      if (unscoredOnly) q = q.is('assessed_at', null)
+      if (side === 'matching' && targeting) q = applyRoleTargets(q, targeting, excludedIds)
+      return q
     }
 
-    let query = withFacets(untyped.from('person_roles').select(LIST_SELECT_COLUMNS, { count: 'exact' }), scope)
+    let query = withFacets(personJobs(supabase).select(JOB_SELECT_COLUMNS, { count: 'exact' }), scope)
 
     // Sort on posted_at (never discovered_at, a single per-batch timestamp).
     // best_match puts the roles the person is likely to want above unassessed ones via
@@ -708,12 +707,12 @@ function JobsPageInner() {
     if (sortBy === 'best_match') {
       query = query
         .order('want_p', { ascending: false, nullsFirst: false })
-        .order('jobs(posted_at)', { ascending: false, nullsFirst: false })
+        .order('posted_at', { ascending: false, nullsFirst: false })
     } else {
-      query = query.order('jobs(posted_at)', { ascending: false, nullsFirst: false })
+      query = query.order('posted_at', { ascending: false, nullsFirst: false })
     }
     // Deterministic tiebreaker so range() pagination never skips/repeats rows.
-    query = query.order('job_id', { ascending: true })
+    query = query.order('id', { ascending: true })
 
     const from = pageIndex * PAGE_SIZE
     const to = from + PAGE_SIZE - 1
@@ -723,7 +722,7 @@ function JobsPageInner() {
     const [{ data, count, error }, other] = await Promise.all([
       query.range(from, to),
       roleTargets
-        ? withFacets(untyped.from('person_roles').select('job_id, jobs!inner(id)', { count: 'exact', head: true }), otherSide)
+        ? withFacets(personJobs(supabase).select('id', { count: 'exact', head: true }), otherSide)
         : Promise.resolve(null),
     ])
 
@@ -738,7 +737,7 @@ function JobsPageInner() {
       // clearing them — a failed refetch shouldn't blank out a list the user
       // was already looking at.
     } else if (data) {
-      const rows = (data as unknown as ListRow[]).map(toJob).filter((j): j is Job => j !== null)
+      const rows = (data as unknown as JobView[]).map((r) => withOwnCompany(r, companies))
       setJobs((prev) => (append ? [...prev, ...rows] : rows))
       setTotalCount(count ?? 0)
       const here = count ?? 0
@@ -1043,7 +1042,7 @@ function JobsPageInner() {
   // while it's open instead of leaving it showing a stale score forever.
   const selectedJob = selectedJobId
     ? (jobs.find((j) => j.id === selectedJobId) ??
-       (deepLinkedJob?.id === selectedJobId ? deepLinkedJob : null))
+       (deepLinkedJob?.id === selectedJobId ? withOwnCompany(deepLinkedJob, companies) : null))
     : null
 
   if (isLoading) {
@@ -1112,7 +1111,7 @@ function JobsPageInner() {
                   </>
                 ) : (
                   <>
-                    <Sparkles className="h-4 w-4" />
+                    <LogoMark className="h-4 w-4" />
                     {allScored ? 'All roles checked' : 'Check my roles'}
                   </>
                 )}

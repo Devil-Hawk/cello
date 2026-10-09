@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CompanyLogo, getCompanyLogoSrc } from '@/components/companies/company-logo'
 import { formatShortDate, matchTone } from '@/lib/format'
-import { partialReadNote, rolesStatus, rolesStatusLine } from '@/lib/companies/roles-status'
+import { lastCheckedMs, partialReadNote, rolesStatus, rolesStatusLine } from '@/lib/companies/roles-status'
 
 export interface CompanySummary {
   id: string
@@ -50,8 +50,9 @@ export function CompanyRow({
   const meta: string[] = []
   if (company.domain) meta.push(company.domain)
   meta.push(statusLine.text)
-  if (status.kind === 'roles' && company.last_scraped_at) {
-    meta.push(`Checked ${formatShortDate(company.last_scraped_at)}`)
+  const checkedMs = lastCheckedMs(company)
+  if (status.kind === 'roles' && checkedMs !== null) {
+    meta.push(`Checked ${formatShortDate(new Date(checkedMs).toISOString())}`)
   }
 
   // undefined (field not yet requested by some caller) collapses to the same

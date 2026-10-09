@@ -60,6 +60,7 @@ import { renderResumeVersionPdf } from '@/lib/resume/pdf'
 import { renderResumeVersionDocx } from '@/lib/resume/docx'
 import { recordDemoEvent } from '@/lib/access/session'
 import type { DecryptedApiKeys, LlmRunner } from '@/lib/harness/types'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -380,9 +381,8 @@ async function handleGenerate(
   // RLS-scoped read (matches /api/resume/optimize's pattern) — jobs aren't
   // per-user rows, but this keeps the lookup typed against @cello/shared's
   // generated Database type instead of the untyped admin client.
-  const { data: job } = await supabase
-    .from('jobs')
-    .select('id, title, description, companies(name)')
+  const { data: job } = await personJobs(supabase)
+    .select('id, title, description, viewer_company_name')
     .eq('id', jobId)
     .single()
   if (!job) {
@@ -390,8 +390,7 @@ async function handleGenerate(
     return bad('Job not found', 404)
   }
 
-  const companyRel = (job as { companies?: { name?: string } | { name?: string }[] | null }).companies
-  const companyName = Array.isArray(companyRel) ? companyRel[0]?.name : companyRel?.name
+  const companyName = (job as { viewer_company_name?: string | null }).viewer_company_name
   setTraceInput({ jobTitle: job.title, companyName: companyName ?? null })
 
   const apiKeys = await loadApiKeys(admin, userId)

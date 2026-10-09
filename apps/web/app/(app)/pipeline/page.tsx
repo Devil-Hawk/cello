@@ -145,7 +145,7 @@ function PipelinePageInner() {
 
       const { data, error } = await supabase
         .from('applications')
-        .select('*, jobs(id, title, url, person_roles(chance), companies(name, domain, logo_url))')
+        .select('*, jobs(id, title, url, person_roles(chance), companies(name, domain, logo_url), employer:company_directory(name, domain, logo_url))')
         .eq('user_id', user.id)
         .order('updated_at', { ascending: false })
 
@@ -155,7 +155,15 @@ function PipelinePageInner() {
         return
       }
 
-      setApplications(data as unknown as ApplicationWithJob[])
+      // A role stored under no company of this person's (the directory sweep, or another follower's) names its employer through the directory.
+      const rows = data as unknown as (ApplicationWithJob & {
+        jobs: { employer?: ApplicationWithJob['jobs']['companies'] | null } | null
+      })[]
+      setApplications(
+        rows.map((a) =>
+          a.jobs ? { ...a, jobs: { ...a.jobs, companies: a.jobs.companies ?? a.jobs.employer } } : a
+        ) as ApplicationWithJob[]
+      )
     } catch (e) {
       // A thrown failure never produces a Supabase `{ error }` object, so
       // checking only that left a hard load failure rendering the

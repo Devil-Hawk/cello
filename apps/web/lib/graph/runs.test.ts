@@ -764,3 +764,58 @@ describe('harnessRunGraph — plannerTask strips untrusted autoSubmit (runtime p
     expect((persistedPlan.steps[0].input as { autoSubmit?: boolean }).autoSubmit).toBe(false) // stripped before it was ever persisted
   })
 })
+
+describe('harnessRunGraph: a run started from the Copilot never reaches the sourcer', () => {
+  it('drops the sourcer from the planned steps, runs the rest, and persists a plan without it', async () => {
+    const admin = new FakeAdmin()
+    setAdmin(admin)
+    const runId = 'run-copilot-plan'
+    seedRun(admin, runId, null, { goal: 'keep sourcing and drafting applications', result: { origin: 'copilot' } })
+
+    planGoalMock.mockResolvedValue({
+      fallback: true,
+      tokensUsed: 0,
+      plan: {
+        goal: 'keep sourcing and drafting applications',
+        steps: [
+          { label: 'source-jobs', agent_type: 'sourcer', input: {}, dependsOn: [] },
+          { label: 'score-jobs', agent_type: 'matcher', input: {}, dependsOn: ['source-jobs'] },
+        ],
+      },
+    })
+    impls.sourcer = vi.fn(async () => ({ output: { jobIds: [], found: 0, inserted: 0 }, tokensUsed: 1 }))
+    impls.matcher = vi.fn(async () => ({ output: { matches: [], topJobIds: [] }, tokensUsed: 1 }))
+
+    const outcome = await harnessRunGraph.invoke({ runId }, makeConfig('t-copilot-plan', 'user-1', new MemorySaver()))
+
+    expect(outcome.status).toBe('completed')
+    expect(impls.sourcer).not.toHaveBeenCalled()
+    expect(impls.matcher).toHaveBeenCalledTimes(1)
+    expect((admin.getRow('agent_runs', runId)!.plan as Plan).steps.map((s) => s.agent_type)).toEqual(['matcher'])
+  })
+
+  it('refuses a replan that adds a sourcer step', async () => {
+    const admin = new FakeAdmin()
+    setAdmin(admin)
+    const runId = 'run-copilot-replan'
+    seedRun(
+      admin,
+      runId,
+      { goal: 'test goal', steps: [{ label: 'score', agent_type: 'matcher', input: {}, dependsOn: [] }] },
+      { result: { origin: 'copilot' } }
+    )
+    impls.matcher = vi.fn(async (): Promise<AgentResult> => ({
+      output: { matches: [], topJobIds: [] },
+      tokensUsed: 1,
+      replanRequest: { reason: 'find more jobs', steps: [{ label: 'more', agent_type: 'sourcer', input: {}, dependsOn: [] }] },
+    }))
+    impls.sourcer = vi.fn(async () => ({ output: { jobIds: [], found: 0, inserted: 0 }, tokensUsed: 1 }))
+
+    const outcome = await harnessRunGraph.invoke({ runId }, makeConfig('t-copilot-replan', 'user-1', new MemorySaver()))
+
+    expect(impls.sourcer).not.toHaveBeenCalled()
+    expect(outcome.replanEvents).toEqual([
+      expect.objectContaining({ fromLabel: 'score', accepted: false, addedLabels: [] }),
+    ])
+  })
+})

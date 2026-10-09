@@ -161,6 +161,8 @@ export interface DemoBatch {
    *  identity is `span_id` (matching that table's own vocabulary — see its
    *  migration's header). */
   conflictColumn?: string
+  /** Replace a row that is already there. The default keeps what the demo user has since changed. */
+  overwrite?: boolean
 }
 
 export interface DemoWorkspace {
@@ -251,8 +253,13 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
     }
   })
 
-  // The demo person's own row for each role, carrying the verdict.
-  const personRoleRows = jobRows.map((r) => ({ user_id: demoUserId, job_id: r.id, ...fitByJobId.get(r.id)! }))
+  // The demo person's own row for each role: the verdict and the new flag are theirs, never the shared posting's.
+  const personRoleRows = jobRows.map((r) => ({ user_id: demoUserId, job_id: r.id, is_new: r.is_new, ...fitByJobId.get(r.id)! }))
+  const sharedJobRows = jobRows.map((job) => {
+    const shared: Record<string, unknown> = { ...job }
+    delete shared.is_new
+    return shared
+  })
 
   // Today's shortlist: the five roles the demo person wants most that are not a
   // stretch, then one exploration pick (a role they are least sure about), each with
@@ -521,8 +528,9 @@ export function buildDemoWorkspace(demoUserId: string, now: Date = new Date()): 
     // and the drafts that point at it.
     batches: [
       { table: 'companies', rows: companyRows, required: true },
-      { table: 'jobs', rows: jobRows, required: true },
-      { table: 'person_roles', rows: personRoleRows, required: true, conflictColumn: 'user_id,job_id' },
+      { table: 'jobs', rows: sharedJobRows, required: true },
+      // the jobs insert already gave the demo user a role row each (its company is theirs); this puts their verdict on it
+      { table: 'person_roles', rows: personRoleRows, required: true, conflictColumn: 'user_id,job_id', overwrite: true },
       ...(shortlistRows.length > 0 ? [{ table: 'shortlist_items', rows: shortlistRows, required: false, conflictColumn: 'user_id,for_date,job_id' }] : []),
       { table: 'applications', rows: applicationRows, required: true },
       { table: 'activities', rows: activityRows, required: false },
@@ -663,7 +671,7 @@ export async function seedDemoWorkspace(
     // "Seed what is missing" is the correct idempotent behaviour here.
     const { error } = await admin
       .from(batch.table)
-      .upsert(batch.rows, { onConflict: batch.conflictColumn ?? 'id', ignoreDuplicates: true })
+      .upsert(batch.rows, { onConflict: batch.conflictColumn ?? 'id', ignoreDuplicates: !batch.overwrite })
 
     if (!error) continue
 

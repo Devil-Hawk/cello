@@ -106,7 +106,7 @@ describe('buildMatchContext', () => {
   it('composes dossier + role count + interactions + insights when all are on file', async () => {
     const admin = fakeAdmin({
       company_dossiers: [{ company_id: COMPANY, user_id: USER, summary: 'A payments infra startup, Series B.' }],
-      jobs: [{ company_id: COMPANY }, { company_id: COMPANY }],
+      person_jobs: [{ viewer_id: USER, viewer_company_id: COMPANY }, { viewer_id: USER, viewer_company_id: COMPANY }, { viewer_id: 'user-2', viewer_company_id: COMPANY }],
       interactions: [{ user_id: USER, company_id: COMPANY, occurred_at: '2026-01-01T00:00:00Z', kind: 'outreach_sent', title: 'Cold email' }],
       insights: [{ user_id: USER, status: 'active', kind: 'strategy', company_id: COMPANY, statement: 'They respond best to concise emails.', updated_at: '2026-01-01' }],
     })
@@ -118,7 +118,7 @@ describe('buildMatchContext', () => {
   })
 
   it('degrades to the pieces that exist when others are missing (no dossier, no history)', async () => {
-    const admin = fakeAdmin({ jobs: [{ company_id: COMPANY }] })
+    const admin = fakeAdmin({ person_jobs: [{ viewer_id: USER, viewer_company_id: COMPANY }] })
     const block = await buildMatchContext(admin, USER, COMPANY)
     expect(block).toContain('Tracked open roles at this company: 1.')
     expect(block).not.toContain('COMPANY RESEARCH')

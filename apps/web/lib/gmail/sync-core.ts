@@ -218,9 +218,10 @@ async function runGmailSyncPass(params: GmailSyncCoreParams): Promise<GmailSyncC
     // tracks. Match the email to a specific job by title similarity — never
     // fall back to "whatever job comes back first". ---
     const { data: companyJobs } = await db
-      .from('jobs')
+      .from('person_jobs')
       .select('id, title')
-      .eq('company_id', matchedCompany.id)
+      .eq('viewer_id', userId)
+      .eq('viewer_company_id', matchedCompany.id)
       .limit(500)
 
     const jobMatch = findBestJobMatch(parsed.jobTitle, companyJobs || [])

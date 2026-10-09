@@ -28,8 +28,8 @@ export interface FindNewRolesStatus {
   jobsUpdated: number
   jobsClosed: number
   failed: FailedCompany[]
-  /** The next scheduled check (the cron in .github/workflows/scrape.yml), ISO. */
-  nextCheckAt: string
+  /** When the clock says the next check is (the routine's next_due_at), ISO. Null when the clock has not scheduled one. */
+  nextCheckAt: string | null
   /** The user has at least one company, so a first check is coming. */
   hasCompanies: boolean
 }
@@ -48,25 +48,12 @@ export const FAILURE_TEXT: Record<FailureReason, string> = {
   unreachable: 'Its careers site did not answer',
   role_pages: 'Its role pages cannot be read without a browser',
   render_failed: "Cello's browser could not read its careers page",
+  budget: 'Its site is large, and one check reads only part of it. The next check reads more',
   time: 'Not reached this time',
 }
 
 /** A check that says it is running for longer than this has died. */
 export const STALE_RUNNING_MS = 2 * 60 * 60 * 1000
-
-/** The schedule is 41 minutes past 00, 06, 12 and 18 UTC. */
-const CRON_HOURS = [0, 6, 12, 18]
-const CRON_MINUTE = 41
-
-export function nextCheckAfter(now: Date): Date {
-  for (let dayOffset = 0; dayOffset <= 1; dayOffset++) {
-    for (const hour of CRON_HOURS) {
-      const t = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + dayOffset, hour, CRON_MINUTE)
-      if (t > now.getTime()) return new Date(t)
-    }
-  }
-  return new Date(now.getTime() + 6 * 60 * 60 * 1000)
-}
 
 interface RunRow {
   status: string
@@ -82,7 +69,8 @@ interface RunRow {
 
 const KNOWN: ReadonlySet<string> = new Set(Object.keys(FAILURE_TEXT))
 
-export async function readFindNewRoles(client: Db, now: Date = new Date()): Promise<FindNewRolesStatus> {
+/** `nextCheckAt` is the clock's: lib/clock/status.ts reads it from the person's roles.check routine. */
+export async function readFindNewRoles(client: Db, now: Date = new Date(), nextCheckAt: string | null = null): Promise<FindNewRolesStatus> {
   const [runResult, countResult] = await Promise.all([
     client
       .from('ingestion_runs')
@@ -96,7 +84,6 @@ export async function readFindNewRoles(client: Db, now: Date = new Date()): Prom
   if (runResult.error) throw new Error('ingestion_runs')
   const row = runResult.data as RunRow | null
   const hasCompanies = (countResult.count ?? 0) > 0
-  const nextCheckAt = nextCheckAfter(now).toISOString()
 
   if (!row) {
     return {

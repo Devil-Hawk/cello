@@ -1,6 +1,7 @@
 'use client'
 
 import { trackedOnly } from '@/lib/companies/watchlist'
+import { lastCheckedMs } from '@/lib/companies/roles-status'
 import { LogoMark } from '@/components/brand/logo'
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
@@ -24,6 +25,7 @@ import { OwnerHealthCard } from '@/components/dashboard/health-card'
 import type { PipelineStage } from '@/lib/format'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { unassessedCountQuery } from '@/lib/scoring/role-counts'
+import { personJobs } from '@/lib/jobs/person-jobs'
 
 interface Stats {
   companiesCount: number
@@ -213,17 +215,14 @@ export default function DashboardPage() {
         trackedOnly(
           supabase
             .from('companies')
-            .select('last_scraped_at')
+            .select('last_scraped_at, metadata')
             .eq('user_id', user.id)
-            .not('last_scraped_at', 'is', null)
-        )
-          .order('last_scraped_at', { ascending: false })
-          .limit(1),
+        ),
         // RLS restricts jobs to rows whose company belongs to this user — no
         // manual company_id join needed. posted_at, NOT discovered_at: the
         // scraper stamps discovered_at with one `now` for the whole batch, so
         // filtering on it makes "24h" match everything.
-        openRolesOnly(supabase.from('jobs').select('*', { count: 'exact', head: true }).gte('posted_at', dayAgo)),
+        openRolesOnly(personJobs(supabase).select('*', { count: 'exact', head: true }).gte('posted_at', dayAgo)),
         unassessedCountQuery(untypedSupabase),
         supabase.from('applications').select('id, stage').eq('user_id', user.id),
         supabase
@@ -316,7 +315,8 @@ export default function DashboardPage() {
       })
       setFollowUps({ overdueCount, upcomingCount })
       setRecentCompanies(recentRes.data || [])
-      setLastScrapedAt(lastScrapedRes.data?.[0]?.last_scraped_at ?? null)
+      const checkedMs = (lastScrapedRes.data ?? []).map((c) => lastCheckedMs(c)).filter((t): t is number => t !== null)
+      setLastScrapedAt(checkedMs.length ? new Date(Math.max(...checkedMs)).toISOString() : null)
       setIsLoading(false)
     } catch (error) {
       console.error('Dashboard fetch error:', error)

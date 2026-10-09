@@ -15,6 +15,8 @@
 // exercises tool paths that need no LLM key at all — explain_match,
 // get_application, list_runs, web_search).
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const { webSearchMock, generateDossierMock } = vi.hoisted(() => ({
@@ -57,7 +59,7 @@ type Row = Record<string, unknown>
 class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
   private rows: Row[]
   // Full table set, so an embedded-relation filter (ownedJobsQuery's own
-  // `.eq('companies.user_id', userId)`) can join company_id -> companies
+  // `.eq('viewer_id', userId)`) can join company_id -> companies
   // the way PostgREST's `companies!inner(...)` embed actually does — a plain
   // `r['companies.user_id']` lookup would just be undefined for every row.
   constructor(
@@ -159,6 +161,17 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
 function fakeAdmin(tables: Record<string, Row[]>, rpc: Record<string, Row[]> = {}): AdminClient {
   const admin = {
     from(table: string) {
+      // person_jobs: rows given as such, else the view over jobs where the role's company is the viewer's own
+      if (table === 'person_jobs' && !tables.person_jobs) {
+        const owner = new Map((tables.companies ?? []).map((c) => [c.id, c]))
+        const view = (tables.jobs ?? []).map((j) => {
+          const c = owner.get(j.company_id as string)
+          // the viewer's own verdict (their person_roles row) sits flat beside the posting, as the view returns it
+          const mine = ([] as Row[]).concat((j.person_roles as Row[] | Row | undefined) ?? []).find((p) => p.user_id === c?.user_id) ?? {}
+          return { ...j, ...mine, viewer_id: c?.user_id, viewer_company_id: c?.id ?? null, viewer_company_name: c?.name ?? null }
+        })
+        return new FakeQuery(view, tables)
+      }
       return new FakeQuery([...(tables[table] ?? [])], tables)
     },
     async rpc(fn: string) {
@@ -332,6 +345,25 @@ describe('dispatchTool — job ownership enforced transitively via companies.use
     expect(JSON.stringify(result)).not.toContain('secret reason')
   })
 
+  it("a second follower of a shared role reads their own company and score, not the first storer's", async () => {
+    const admin = fakeAdmin({
+      // the role is stored under the other person's company, but 'me' holds it too
+      jobs: [{ id: 'job-1', title: 'Shared Role', company_id: 'co-theirs' }],
+      companies: [
+        { id: 'co-theirs', name: 'Theirs', user_id: 'someone-else' },
+        { id: 'co-mine', name: 'Mine', user_id: 'me' },
+      ],
+      person_jobs: [
+        { id: 'job-1', viewer_id: 'someone-else', title: 'Shared Role', company_id: 'co-theirs', viewer_company_id: 'co-theirs', viewer_company_name: 'Theirs', chance: 'strong', want_p: 0.91, want_reason: 'Theirs only' },
+        { id: 'job-1', viewer_id: 'me', title: 'Shared Role', company_id: 'co-theirs', viewer_company_id: 'co-mine', viewer_company_name: 'Mine', chance: 'stretch', want_p: 0.42, want_reason: 'Mine' },
+      ],
+    })
+    const result = await dispatchTool(baseCtx(admin), 'explain_match', { jobId: 'job-1' })
+    expect(result).toMatchObject({ matched: true, fit: { chance: { label: 'stretch' } }, company: 'Mine', companyId: 'co-mine' })
+    expect(JSON.stringify(result)).not.toContain('Theirs')
+    expect(JSON.stringify(result)).not.toContain('0.91')
+  })
+
   it('the identical job IS reachable once it belongs to the caller', async () => {
     const admin = fakeAdmin({
       jobs: [{ id: 'job-1', title: 'My Role', company_id: 'co-1', person_roles: [verdict({ chance: 'strong', want_p: 0.77, want_reason: 'Good fit.' })] }],
@@ -356,7 +388,7 @@ describe('dispatchTool — job ownership enforced transitively via companies.use
     expect(result).toMatchObject({ error: expect.stringContaining('list_jobs') })
   })
 
-  it('a job with no company_id at all is rejected rather than treated as ownerless/public', async () => {
+  it('a role nobody holds (no company, no role row) is rejected rather than treated as ownerless/public', async () => {
     const admin = fakeAdmin({
       jobs: [{ id: 'job-3', title: 'Orphan Role', company_id: null, chance: 'stretch' }],
       companies: [],
@@ -364,7 +396,7 @@ describe('dispatchTool — job ownership enforced transitively via companies.use
     const ctx = baseCtx(admin)
 
     const result = await dispatchTool(ctx, 'explain_match', { jobId: 'job-3' })
-    expect(result).toEqual({ error: 'Job has no company' })
+    expect(result).toMatchObject({ error: expect.stringContaining('job-3') })
   })
 
   it('get_dossier (agent: company_researcher) enforces ownership too, and does not leak whether a dossier exists for a company that is not the caller\'s', async () => {
@@ -656,19 +688,25 @@ describe('dispatchTool — research_companies (batch: caps, partial failure, bou
 // ---------------------------------------------------------------------------
 describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
   const co = { id: 'co-1', name: 'Acme', user_id: 'me', is_dream_company: false }
-  // The person's own rows, each with its posting embedded, as the list query returns them.
+  // The person's own rows, as the list query returns them: the posting, their company for it, their chance and want.
   const posting = (id: string, title: string, chance: string, want_p: number) => ({
-    user_id: 'me',
-    job_id: id,
+    viewer_id: 'me',
+    id,
+    title,
+    company_id: 'co-1',
+    viewer_company_id: 'co-1',
+    viewer_company_name: 'Acme',
     hidden_reason: null,
     chance,
     want_p,
-    jobs: { id, title, company_id: 'co-1', is_new: false, location: null, posted_at: null },
+    is_new: false,
+    location: null,
+    posted_at: null,
   })
-  const person_roles = [posting('job-1', 'Staff Backend Engineer', 'strong', 0.8), posting('job-2', 'Product Designer', 'possible', 0.6)]
+  const person_jobs = [posting('job-1', 'Staff Backend Engineer', 'strong', 0.8), posting('job-2', 'Product Designer', 'possible', 0.6)]
 
   it('a real word query (>=4 chars) matches via FTS (textSearch), no rpc needed', async () => {
-    const admin = fakeAdmin({ companies: [co], person_roles })
+    const admin = fakeAdmin({ companies: [co], person_jobs })
     const ctx = baseCtx(admin)
 
     const result = (await dispatchTool(ctx, 'list_jobs', { query: 'backend' })) as { jobs: { jobId: string }[] }
@@ -677,8 +715,21 @@ describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
     expect(result.jobs[0].jobId).toBe('job-1')
   })
 
+  it("a role held from the directory returns no company id, never the first storer's", async () => {
+    const admin = fakeAdmin({
+      companies: [co],
+      person_jobs: [
+        { id: 'job-9', viewer_id: 'me', title: 'Directory Role', company_id: 'co-of-person-a', viewer_company_id: null, viewer_company_name: null, chance: null, is_new: false, location: null, posted_at: null },
+      ],
+    })
+    const result = (await dispatchTool(baseCtx(admin), 'list_jobs', {})) as { jobs: { jobId: string; companyId: string | null }[] }
+    expect(result.jobs).toHaveLength(1)
+    expect(result.jobs[0].companyId).toBeNull()
+    expect(JSON.stringify(result)).not.toContain('co-of-person-a')
+  })
+
   it('a short query (<4 chars) skips FTS and goes straight to the trgm rpc', async () => {
-    const admin = fakeAdmin({ companies: [co], person_roles }, { search_jobs_by_title_trgm: [{ job_id: 'job-2', score: 0.9 }] })
+    const admin = fakeAdmin({ companies: [co], person_jobs }, { search_jobs_by_title_trgm: [{ job_id: 'job-2', score: 0.9 }] })
     const ctx = baseCtx(admin)
 
     const result = (await dispatchTool(ctx, 'list_jobs', { query: 'dsn' })) as { jobs: { jobId: string }[] }
@@ -691,7 +742,7 @@ describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
     // "enginer" matches no title via the FTS stand-in (textSearch is a
     // straight substring match), but the trgm rpc fixture stands in for
     // Postgres finding job-1 by similarity anyway.
-    const admin = fakeAdmin({ companies: [co], person_roles }, { search_jobs_by_title_trgm: [{ job_id: 'job-1', score: 0.5 }] })
+    const admin = fakeAdmin({ companies: [co], person_jobs }, { search_jobs_by_title_trgm: [{ job_id: 'job-1', score: 0.5 }] })
     const ctx = baseCtx(admin)
 
     const result = (await dispatchTool(ctx, 'list_jobs', { query: 'enginer' })) as { jobs: { jobId: string }[] }
@@ -830,5 +881,52 @@ describe('dispatchTool in Langfuse', () => {
     const buffer = new SpanBuffer('me', null, undefined, { isDemo: false }) // Langfuse unconfigured
     const { rows } = await traced(buffer, baseCtx(admin), 'list_contacts', {})
     expect(rows[0].lf).toBeUndefined()
+  })
+})
+
+describe('search_roles: a failed read is never an empty answer', () => {
+  // Any filter call returns the same builder; awaiting it resolves a PostgREST error.
+  const failing = (): unknown =>
+    new Proxy(
+      {},
+      {
+        get: (_t, prop) =>
+          prop === 'then'
+            ? (ok: (v: unknown) => unknown) => Promise.resolve({ data: null, count: null, error: { message: 'bad request' } }).then(ok)
+            : () => failing(),
+      }
+    )
+
+  it('says the roles could not be read instead of reporting 0 open roles', async () => {
+    const base = fakeAdmin({
+      companies: [{ id: 'co-1', name: 'Anthropic', user_id: 'me' }],
+      profiles: [{ id: 'me', preferences: {} }],
+    }) as unknown as { from: (t: string) => unknown }
+    const admin = { from: (t: string) => (t === 'person_jobs' ? failing() : base.from(t)) } as unknown as AdminClient
+    const result = (await dispatchTool(baseCtx(admin), 'search_roles', { title: 'forward deployed engineer', place: 'SF' })) as Record<string, unknown>
+    expect(result.error).toMatch(/Could not read the stored roles/)
+    expect(JSON.stringify(result)).not.toMatch(/0 open roles|No .* roles in/)
+  })
+
+  it('says the followed companies could not be read when that select fails', async () => {
+    const admin = { from: () => failing() } as unknown as AdminClient
+    const result = (await dispatchTool(baseCtx(admin), 'search_roles', { title: 'fde' })) as Record<string, unknown>
+    expect(result.error).toMatch(/Could not read your followed companies/)
+  })
+})
+
+describe('trigger_run: the run is marked as started from the Copilot', () => {
+  it('writes the marker the run graph reads to leave the sourcer out', () => {
+    expect(readFileSync(join(__dirname, 'copilot-tools.ts'), 'utf8')).toMatch(/budget_tokens: COPILOT_RUN_BUDGET, result: COPILOT_RUN_MARKER/)
+  })
+})
+
+describe('new copy has no em dashes', () => {
+  it('no line of the role tools or the score_jobs notes carries one', () => {
+    const lines = readFileSync(join(__dirname, 'copilot-tools.ts'), 'utf8')
+      .split('\n')
+      .filter((l) => /search_roles|refresh_companies|follow companies|Open-web search results/.test(l))
+    expect(lines.length).toBeGreaterThan(3)
+    expect(lines.filter((l) => l.includes('—'))).toEqual([])
   })
 })

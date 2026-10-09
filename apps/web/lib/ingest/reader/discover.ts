@@ -64,7 +64,8 @@ export function eightfoldBoards(html: string, pageUrl: string, companyDomain: st
   if (!/eightfold/i.test(html) || !companyDomain) return []
   const host = new URL(pageUrl).hostname.toLowerCase()
   const root = companyDomain.toLowerCase().replace(/^www\./, '')
-  const domains = [...html.matchAll(EIGHTFOLD_DOMAIN)].map((m) => m[1].toLowerCase())
+  // The page's own host is never the tenant's domain (Microsoft's page also names apply.careers.microsoft.com, which answers nothing; microsoft.com does).
+  const domains = [...html.matchAll(EIGHTFOLD_DOMAIN)].map((m) => m[1].toLowerCase()).filter((d) => d !== host)
   // The config must name the company's own domain: a vendor page for a customer is not this company's.
   // A company added by its careers address (its domain is that host) counts when the host carries the name
   // the config names (explore.jobs.netflix.net names netflix.com).

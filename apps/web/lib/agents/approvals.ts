@@ -22,6 +22,7 @@ import { scoreTrace } from '@/lib/observability/langfuse'
 import { addVersion, getArtifact, type ArtifactContent } from './artifacts'
 import type { AgentContext, Autonomy, AutonomyRules } from './context'
 import { DEMO_SEND_REFUSAL } from './middleware'
+import { ownedJobsQuery } from '@/lib/jobs/owned-query'
 
 export type ApprovalAction = 'send_email' | 'submit_application'
 export type ApprovalStatus = 'pending' | 'executing' | 'done' | 'failed' | 'skipped'
@@ -222,7 +223,7 @@ async function materializeApplication(
   }
   const jobId = input.jobId ?? artifact.job_id
   if (!jobId) return { ok: false, error: 'There is no role to apply to.', fix: 'Pass job_id, or use a document that was written for a role.' }
-  const { data: owned } = await admin.from('jobs').select('id, companies!inner(user_id)').eq('id', jobId).eq('companies.user_id', userId).maybeSingle()
+  const { data: owned } = await ownedJobsQuery(admin, userId, 'id').eq('id', jobId).maybeSingle()
   if (!owned) return { ok: false, error: `No role with id ${jobId}.`, fix: 'Call find_roles and use an id it returned.' }
 
   const field = artifact.type === 'cover_letter' ? 'cover_letter' : 'resume_summary'

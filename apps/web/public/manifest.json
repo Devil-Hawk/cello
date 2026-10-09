@@ -1,11 +1,11 @@
 {
-  "name": "Cello — career engine for leads and opportunities",
+  "name": "Cello",
   "short_name": "Cello",
-  "description": "Find, rank and apply to real openings. An open agent harness for job search.",
+  "description": "Cello finds roles that fit you and keeps track of your search. Nothing is sent without your click.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0D0F14",
-  "theme_color": "#0D0F14",
+  "background_color": "#ECEBE7",
+  "theme_color": "#ECEBE7",
   "icons": [
     {
       "src": "/icon.svg",

@@ -50,6 +50,7 @@ interface JobRow {
   match_score: number | null
   is_new: boolean | null
   company_id: string
+  viewer_company_name: string | null
   discovered_at: string | null
 }
 
@@ -101,12 +102,12 @@ export async function legacyComposeDigest(
   // 2) Top fresh/high-match jobs across the user's tracked companies.
   let topJobs: DigestTopJob[] = []
   if (companyIds.length > 0) {
-    // Ownership via the companies FK join (ownedJobsQuery), not an
+    // Ownership via the viewer fence of person_jobs (ownedJobsQuery), not an
     // .in('company_id', companyIds) array — that breaks past ~600 companies.
     const { data: jobData } = await ownedJobsQuery(
       admin,
       userId,
-      'id, title, url, match_score, is_new, company_id, discovered_at, companies!inner(user_id)'
+      'id, title, url, match_score, is_new, company_id, discovered_at, viewer_company_name'
     )
       .order('match_score', { ascending: false, nullsFirst: false })
       .order('discovered_at', { ascending: false })
@@ -115,7 +116,7 @@ export async function legacyComposeDigest(
     topJobs = jobs.map((j) => ({
       jobId: j.id,
       title: j.title,
-      companyName: companyName.get(j.company_id) ?? null,
+      companyName: j.viewer_company_name ?? companyName.get(j.company_id) ?? null,
       matchScore: j.match_score,
       url: j.url,
     }))

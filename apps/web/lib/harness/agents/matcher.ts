@@ -45,7 +45,7 @@ function collectJobIds(inputIds: string[] | undefined, deps: Record<string, unkn
 export interface CandidateDiagnosis {
   jobId: string
   title: string | null
-  /** False when the id does not resolve to a job in one of the person's tracked companies. */
+  /** False when the id does not resolve to a role the person holds. */
   found: boolean
   /** True when the job's description is empty. Not a failure: the role is still assessed, and its chance reads "not assessed yet". */
   hasDescription: boolean
@@ -62,13 +62,13 @@ export interface CandidateDiagnosis {
  */
 export async function diagnoseCandidateJobs(admin: AdminClient, jobIds: string[], userId: string): Promise<CandidateDiagnosis[]> {
   if (jobIds.length === 0) return []
-  const { data, error } = await ownedJobsQuery(admin, userId, 'id, title, description, companies!inner(user_id)').in('id', jobIds)
+  const { data, error } = await ownedJobsQuery(admin, userId, 'id, title, description').in('id', jobIds)
   if (error) console.error('[harness] matcher: diagnose query failed', error)
   const byId = new Map(((data as unknown as { id: string; title: string; description: string | null }[] | null) ?? []).map((r) => [r.id, r]))
   return jobIds.map((jobId) => {
     const row = byId.get(jobId)
     if (!row) {
-      return { jobId, title: null, found: false, hasDescription: false, willAttemptScoring: false, reason: "not found among your tracked companies' jobs" }
+      return { jobId, title: null, found: false, hasDescription: false, willAttemptScoring: false, reason: 'not found among the roles you hold' }
     }
     return { jobId, title: row.title, found: true, hasDescription: Boolean((row.description ?? '').trim()), willAttemptScoring: true, reason: null }
   })

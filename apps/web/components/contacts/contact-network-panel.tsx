@@ -34,7 +34,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Mail, Sparkles, Users } from 'lucide-react'
+import { Loader2, Mail, Users } from 'lucide-react'
+import { LogoMark } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Panel } from '@/components/ui/panel'
@@ -62,7 +63,7 @@ const UNKNOWN_ROLE: RoleContext = { jobFunction: null, jobTitle: null, openRoleC
 function SourceButton({ sourcing, onClick }: { sourcing: boolean; onClick: () => void }) {
   return (
     <Button size="sm" variant="outline" onClick={onClick} disabled={sourcing}>
-      {sourcing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+      {sourcing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogoMark className="h-3.5 w-3.5" />}
       {sourcing ? 'Finding…' : 'Find contacts'}
     </Button>
   )

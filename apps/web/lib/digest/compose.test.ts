@@ -10,8 +10,9 @@ const NOW = Date.parse('2026-10-06T12:00:00Z')
 const day = (n: number) => new Date(NOW - n * 86_400_000).toISOString()
 const USER = 'user-1'
 
+/** A role as the person reads it (person_jobs): the posting, their own company for it, and their want and chance. */
 function role(user: string, job: { id: string; title: string; url: string | null; discovered_at: string; company_id: string }, chance: string, want_p: number, want_reason: string | null) {
-  return { user_id: user, job_id: job.id, hidden_reason: null, chance, want_p, want_reason, jobs: { ...job, still_open: true } }
+  return { viewer_id: user, id: job.id, title: job.title, url: job.url, discovered_at: job.discovered_at, viewer_company_name: job.company_id === 'co-1' ? 'Linear' : 'Secret Inc', still_open: true, hidden_reason: null, chance, want_p, want_reason }
 }
 
 function tables() {
@@ -22,14 +23,14 @@ function tables() {
       { id: 'co-x', user_id: 'someone-else', name: 'Secret Inc' },
     ],
     profiles: [{ id: USER, preferences: { outreach: { followUpDays: 5 } } }],
-    // The role a person is shown is their own row (their want and chance on it) with the posting embedded.
-    person_roles: [
+    // The role a person is shown is their own row: the posting, their company for it, and their want and chance.
+    person_jobs: [
       role(USER, { id: 'j-new', title: 'Staff Engineer', url: 'https://linear.app/1', discovered_at: day(1), company_id: 'co-1' }, 'strong', 0.9, 'Maps to your ledger work.'),
       role(USER, { id: 'j-applied', title: 'Applied Role', url: null, discovered_at: day(1), company_id: 'co-1' }, 'strong', 0.95, null),
       role(USER, { id: 'j-old', title: 'Old Role', url: null, discovered_at: day(30), company_id: 'co-1' }, 'strong', 0.99, null),
       role('someone-else', { id: 'j-other', title: 'Not Yours', url: null, discovered_at: day(1), company_id: 'co-x' }, 'strong', 0.99, null),
+      { ...role(USER, { id: 'j-title', title: 'Senior Backend Engineer', url: null, discovered_at: day(40), company_id: 'co-1' }, 'possible', 0.5, null) },
     ],
-    jobs: [{ id: 'j-title', title: 'Senior Backend Engineer' }],
     applications: [
       { id: 'a1', user_id: USER, job_id: 'j-applied', stage: 'interview', updated_at: day(2), applied_at: day(20), jobs: { id: 'j-applied', title: 'Applied Role', company_id: 'co-1' } },
       { id: 'a2', user_id: 'someone-else', job_id: 'j-other', stage: 'applied', updated_at: day(30), applied_at: day(30), jobs: { id: 'j-other', title: 'Not Yours', company_id: 'co-x' } },

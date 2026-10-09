@@ -41,7 +41,15 @@ function makeFakeDb() {
   }
 
   function from(name: string) {
-    const rows = table(name)
+    // person_jobs is the view over jobs: the viewer is the person whose company stored the (unshared) role.
+    const rows =
+      name === 'person_jobs'
+        ? table('jobs').map((r) => ({
+            ...r,
+            viewer_id: table('companies').find((c) => c.id === r.company_id)?.user_id,
+            viewer_company_id: r.company_id,
+          }))
+        : table(name)
     let working: Row[] = rows
     let mode: 'select' | 'insert' | 'update' = 'select'
     let updatePatch: Row | null = null

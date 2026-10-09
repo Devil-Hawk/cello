@@ -93,7 +93,8 @@ export interface SiteFetcher {
   allowed(url: string): Promise<boolean>
   /** The sitemaps its robots.txt names. */
   sitemapsOf(origin: string): Promise<string[]>
-  spent(): { requests: number; bytes: number }
+  /** What this read has cost so far; `exhausted` once a request was refused for want of budget, so a read that stopped short is never mistaken for a site with nothing on it. */
+  spent(): { requests: number; bytes: number; exhausted?: boolean }
 }
 
 const CHALLENGE = /just a moment|cf-chl|challenge-platform|captcha|attention required|access denied|verify you are (a )?human|px-captcha/i
@@ -141,6 +142,7 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
   const safe = options.assertSafe ?? assertSsrfSafe
   const startedAt = now()
   const used = { requests: 0, bytes: 0 }
+  let exhausted = false
   const lastByHost = new Map<string, number>()
   /** A host's own Crawl-delay from its robots.txt (seconds there, ms here, at most 10 s so one site cannot stall a read): the gap is the larger of it and ours. */
   const crawlDelayMs = new Map<string, number>()
@@ -151,6 +153,7 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
 
   function spend(): void {
     if (used.requests >= budget.requests || used.bytes >= budget.bytes || now() - startedAt >= budget.ms) {
+      exhausted = true
       throw new ReaderError('budget')
     }
     used.requests++
@@ -245,16 +248,19 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
   const api: SiteFetcher = {
     mode,
     allowed,
-    spent: () => ({ ...used }),
+    spent: () => ({ ...used, exhausted }),
 
     async sitemapsOf(origin) {
       const robots = await robotsFor(`${origin}/`)
-      if (robots === 'allow' || robots === 'unreachable') return []
-      return robots.getSitemaps()
+      if (robots === 'unreachable') return []
+      // A site whose robots.txt names no sitemap may still publish one at the standard address (Kaiser Permanente does).
+      const named = robots === 'allow' ? [] : robots.getSitemaps()
+      return named.length ? named : [`${origin}/sitemap.xml`]
     },
 
     async get(url, opts = {}) {
       let current = url
+      let askedOnce = false
       for (let hop = 0; hop <= MAX_HOPS; hop++) {
         await mustBeAllowed(current)
         spend()
@@ -274,6 +280,14 @@ export function makeSiteFetcher(options: SiteFetcherOptions = {}): SiteFetcher {
           if (opts.follow && !opts.follow(next)) throw new ReaderError('unreachable')
           current = next
           if (LOGIN_PATH.test(new URL(current).pathname)) throw new ReaderError('login_required')
+          continue
+        }
+        // A host that says "slow down" (Microsoft answers its first request of the day so) is asked once more, after its own Retry-After at most 5 s.
+        if (res.status === 429 && !askedOnce) {
+          askedOnce = true
+          void res.body?.cancel().catch(() => {})
+          const after = Number(res.headers.get('retry-after'))
+          await sleep(Math.min(Number.isFinite(after) && after > 0 ? after * 1000 : 3000, 5000))
           continue
         }
         let text = ''

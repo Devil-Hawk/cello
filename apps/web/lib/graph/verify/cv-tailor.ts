@@ -62,10 +62,11 @@ interface JobFacts {
   companyId: string | null
 }
 
-async function loadJobFacts(admin: AdminClient, jobId: string): Promise<JobFacts> {
-  const { data } = await admin.from('jobs').select('description, company_id').eq('id', jobId).single()
-  const row = (data ?? {}) as { description?: string | null; company_id?: string | null }
-  return { description: row.description ?? null, companyId: row.company_id ?? null }
+async function loadJobFacts(admin: AdminClient, userId: string, jobId: string): Promise<JobFacts> {
+  // The person's own role row: the company is theirs, not the one that stored the shared role first.
+  const { data } = await admin.from('person_jobs').select('description, viewer_company_id').eq('viewer_id', userId).eq('id', jobId).single()
+  const row = (data ?? {}) as { description?: string | null; viewer_company_id?: string | null }
+  return { description: row.description ?? null, companyId: row.viewer_company_id ?? null }
 }
 
 async function loadResumeText(admin: AdminClient, userId: string): Promise<string> {
@@ -172,7 +173,7 @@ export async function verifyCvTailorDraft(args: CvTailorVerifyArgs): Promise<CvT
     // (c) CLAIMS JUDGE, ruling 2c. Every statement in the summary and letter
     // must trace to a numbered resume line, job line or company fact; a judge
     // from a different model family than the writer reads the same lines.
-    const [job, resumeText] = await Promise.all([loadJobFacts(args.admin, args.jobId), loadResumeText(args.admin, userId)])
+    const [job, resumeText] = await Promise.all([loadJobFacts(args.admin, userId, args.jobId), loadResumeText(args.admin, userId)])
     const facts = await companyFacts(args.admin, userId, job.companyId)
 
     let verdict: EvalResult

@@ -24,6 +24,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
+import { viewerRoles, type ViewerRole } from '@/lib/jobs/person-jobs'
 import { buildQueueItem, toQueueVerdict, type QueueDraftRow, type QueueProfileRow } from '@/lib/notifications/queue'
 
 export const dynamic = 'force-dynamic'
@@ -33,7 +34,6 @@ const MAX_LIMIT = 200
 
 interface CompanyRel {
   name?: string | null
-  metadata?: unknown
 }
 
 interface JobRel {
@@ -41,7 +41,8 @@ interface JobRel {
   url?: string | null
   description?: string | null
   location?: string | null
-  companies?: CompanyRel | CompanyRel[] | null
+  /** The employer's directory row: names a role this person holds without a company of their own. */
+  employer?: CompanyRel | CompanyRel[] | null
 }
 
 interface DraftRowRaw {
@@ -58,9 +59,9 @@ function one<T>(value: T | T[] | null | undefined): T | null {
   return value ?? null
 }
 
-function toQueueDraftRow(row: DraftRowRaw): QueueDraftRow {
+// The company is the viewer's own (their role row), else the directory's: never the company that stored the role first.
+function toQueueDraftRow(row: DraftRowRaw, viewer: ViewerRole | undefined): QueueDraftRow {
   const job = one(row.jobs)
-  const company = one(job?.companies)
   return {
     id: row.id,
     jobId: row.job_id,
@@ -73,8 +74,8 @@ function toQueueDraftRow(row: DraftRowRaw): QueueDraftRow {
           url: job.url ?? null,
           description: job.description ?? null,
           location: job.location ?? null,
-          companyName: company?.name ?? null,
-          companyMetadata: company?.metadata ?? null,
+          companyName: viewer?.viewer_company_name ?? one(job?.employer)?.name ?? null,
+          companyMetadata: viewer?.viewer_company_metadata ?? null,
         }
       : null,
   }
@@ -101,7 +102,7 @@ export async function GET(request: NextRequest) {
     admin
       .from('application_drafts')
       .select(
-        'id, job_id, resume_summary, answers, created_at, jobs(title, url, description, location, companies(name, metadata))'
+        'id, job_id, resume_summary, answers, created_at, jobs(title, url, description, location, employer:company_directory(name))'
       )
       .eq('user_id', user.id)
       .eq('status', 'pending_review')
@@ -135,7 +136,8 @@ export async function GET(request: NextRequest) {
   }
 
   const rows = (draftsRes.data ?? []) as unknown as DraftRowRaw[]
-  const items = rows.map((row) => buildQueueItem(toQueueDraftRow(row), profile))
+  const viewer = await viewerRoles(admin, user.id, rows.map((r) => r.job_id))
+  const items = rows.map((row) => buildQueueItem(toQueueDraftRow(row, viewer.get(row.job_id)), profile))
 
   // Verdict badges (smallest honest UI — pass/fail/unjudged, reusing the
   // outreach queue's existing badge idiom): one eval_verdicts lookup for

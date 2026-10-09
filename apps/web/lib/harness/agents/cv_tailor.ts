@@ -84,13 +84,11 @@ interface JobRow {
   location: string | null
   url: string | null
   company_id: string | null
-  companies?: { name?: string | null } | { name?: string | null }[] | null
+  viewer_company_name?: string | null
 }
 
 function companyName(job: JobRow): string {
-  const c = job.companies
-  if (Array.isArray(c)) return c[0]?.name ?? 'the company'
-  return c?.name ?? 'the company'
+  return job.viewer_company_name ?? 'the company'
 }
 
 export const cv_tailor: AgentFn = async (ctx) => {
@@ -98,8 +96,9 @@ export const cv_tailor: AgentFn = async (ctx) => {
 
   // Load the job + its company name.
   const { data: jobData, error: jobErr } = await ctx.admin
-    .from('jobs')
-    .select('id, title, description, location, url, company_id, companies(name)')
+    .from('person_jobs')
+    .select('id, title, description, location, url, company_id:viewer_company_id, viewer_company_name')
+    .eq('viewer_id', ctx.userId)
     .eq('id', input.jobId)
     .single()
   if (jobErr || !jobData) {

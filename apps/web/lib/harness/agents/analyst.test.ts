@@ -28,12 +28,12 @@ const JOB_ROW = {
     'We need a senior engineer who knows Node.js and PostgreSQL.\nYou will own the queueing stack, which uses Kafka.\n' +
     'You will design APIs, review code, and mentor junior engineers on a team that ships weekly. The role reports to the head of platform. ' +
     'We value clear writing and careful testing, and the work touches billing, ledgers and reconciliation every day.',
-  company_id: 'company-1',
-  companies: { name: 'Acme Corp', notes: null },
+  viewer_company_id: 'company-1',
+  viewer_company_name: 'Acme Corp',
 }
 
 /** Minimal fake of the exact chain shapes analyst.ts issues:
- *  `.from('jobs').select(...).eq('id', jobId).single()` and
+ *  `.from('person_jobs').select(...).eq('id', jobId).single()` and
  *  `.from('profiles').select(...).eq('id', userId).single()`. */
 function fakeAdmin(opts: { resumeText?: string | null } = {}): AdminClient {
   // 'resumeText' in opts (not `opts.resumeText ?? default`) so an explicit
@@ -45,8 +45,9 @@ function fakeAdmin(opts: { resumeText?: string | null } = {}): AdminClient {
       const builder = {
         select: () => builder,
         eq: () => builder,
+        maybeSingle: async () => ({ data: { notes: null }, error: null }),
         single: async () => {
-          if (table === 'jobs') return { data: JOB_ROW, error: null }
+          if (table === 'person_jobs') return { data: JOB_ROW, error: null }
           if (table === 'profiles') return { data: { resume_text: resumeText }, error: null }
           throw new Error(`fakeAdmin: unexpected table "${table}"`)
         },

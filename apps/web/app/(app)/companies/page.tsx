@@ -2,7 +2,8 @@
 
 import { trackedOnly } from '@/lib/companies/watchlist'
 import { useEffect, useState } from 'react'
-import { Building2, FileWarning, Plus, RefreshCw, Search, Sparkles, Star } from 'lucide-react'
+import { Building2, FileWarning, Plus, RefreshCw, Search, Star } from 'lucide-react'
+import { LogoMark } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -18,8 +19,10 @@ import {
 } from '@/components/companies/refresh'
 import { formatShortDate } from '@/lib/format'
 import { createClient } from '@/lib/supabase/client'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { openRolesOnly } from '@/lib/jobs/freshness'
-import { fitRowOf } from '@/lib/scoring/read'
+import { fitRowOf, type FitSource } from '@/lib/scoring/read'
+import { lastCheckedMs } from '@/lib/companies/roles-status'
 
 /**
  * Most strong roles first, companies with nothing assessed last (never coerced
@@ -83,7 +86,8 @@ export default function CompaniesPage() {
       // jobs_count below counts open roles only: recent and not closed.
       const { data, error } = await openRolesOnly(
         trackedOnly(
-          supabase
+          // untyped: the generated Database type has no person_roles, where the person's own score lives
+          (supabase as unknown as SupabaseClient)
             .from('companies')
             .select(
               `
@@ -104,7 +108,7 @@ export default function CompaniesPage() {
       setCompanies(
         (data ?? [])
           .map((company) => {
-            const jobs = company.jobs ?? []
+            const jobs = (company.jobs ?? []) as FitSource[]
             // The person's own verdict on each role: their person_roles row, embedded.
             const verdicts = jobs.map((j) => fitRowOf(j))
             const assessed = verdicts.filter((v) => typeof v.chance === 'string')
@@ -257,11 +261,12 @@ export default function CompaniesPage() {
 
   const dreamCount = companies.filter((c) => c.is_dream_company).length
   const totalJobs = companies.reduce((acc, c) => acc + (c.jobs_count || 0), 0)
-  const lastChecked = companies.reduce<string | null>(
-    (latest, c) =>
-      c.last_scraped_at && (!latest || c.last_scraped_at > latest) ? c.last_scraped_at : latest,
-    null
-  )
+  // The later of the last scrape and the reader's own check, as the company page and the clock read it.
+  const lastCheckedAt = companies.reduce<number | null>((latest, c) => {
+    const t = lastCheckedMs(c)
+    return t !== null && (latest === null || t > latest) ? t : latest
+  }, null)
+  const lastChecked = lastCheckedAt === null ? null : new Date(lastCheckedAt).toISOString()
 
   return (
     <div className="space-y-6">
@@ -288,7 +293,7 @@ export default function CompaniesPage() {
                 title="Fix company names using known directory"
                 aria-label={isFixingNames ? 'Fixing company names…' : 'Fix company names using known directory'}
               >
-                <Sparkles className={`h-4 w-4 ${isFixingNames ? 'animate-spin' : ''}`} aria-hidden />
+                <LogoMark className="h-4 w-4" loading={isFixingNames} />
               </Button>
             </>
           )}

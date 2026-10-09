@@ -154,6 +154,18 @@ begin
 end;
 $$;
 
+-- The view carries the verdict beside the role, and only the viewer's own.
+do $$
+declare f record; n integer;
+begin
+  select * into f from fx;
+  select count(*) into n from public.person_jobs where chance is not null or want_p is not null;
+  if n <> 0 then raise exception 'person B reads a verdict through person_jobs that is not theirs'; end if;
+  select count(*) into n from public.person_jobs where id = f.live_job and viewer_id = f.user_b;
+  if n <> 1 then raise exception 'person B does not read their own role through person_jobs'; end if;
+end;
+$$;
+
 -- A session cannot write a verdict (42501), but can hide the role for itself.
 do $$
 declare f record;
@@ -171,6 +183,18 @@ begin
 end;
 $$;
 reset role;
+
+-- The view hands the owner of the verdict their own chance and want.
+do $$
+declare f record;
+begin
+  select * into f from fx;
+  if (select chance from public.person_jobs where viewer_id = f.user_a and id = f.live_job) is distinct from 'strong'
+     or (select want_p from public.person_jobs where viewer_id = f.user_a and id = f.live_job) is distinct from 0.7::real then
+    raise exception 'person_jobs does not carry the person''s own verdict';
+  end if;
+end;
+$$;
 
 -- A changed posting clears chance and assessed_at for both people and keeps want.
 do $$

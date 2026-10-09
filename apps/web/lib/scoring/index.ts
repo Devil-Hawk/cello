@@ -174,18 +174,14 @@ export interface ShortlistView {
   learning: { nReactions: number; mode: LearningMode }
 }
 
-type JobSummary = {
+/** One row of person_jobs: the role, the person's own company for it, and their verdict on it. */
+interface PersonRoleForView extends FitRow {
   id: string
   title: string
   location: string | null
   url: string | null
   posted_at: string | null
-  companies: { name: string | null } | { name: string | null }[] | null
-}
-
-interface PersonRoleForView extends FitRow {
-  job_id: string
-  jobs: JobSummary | JobSummary[] | null
+  viewer_company_name: string | null
 }
 
 /** A day's saved list with each role's verdict and the person's own reaction. Reads only; never calls a model. */
@@ -209,11 +205,11 @@ export async function readShortlist(db: Db, userId: string, forDate: string): Pr
   if (rows.length === 0) return { ...base, status: 'not_built', picks: [] }
 
   const { data: mine } = await db
-    .from('person_roles')
-    .select('job_id, ' + FIT_COLUMNS + ', jobs!inner(id, title, location, url, posted_at, companies(name))')
-    .eq('user_id', userId)
-    .in('job_id', rows.map((r) => r.job_id))
-  const byJob = new Map(((mine as unknown as PersonRoleForView[] | null) ?? []).map((m) => [m.job_id, m]))
+    .from('person_jobs')
+    .select('id, title, location, url, posted_at, viewer_company_name, ' + FIT_COLUMNS)
+    .eq('viewer_id', userId)
+    .in('id', rows.map((r) => r.job_id))
+  const byJob = new Map(((mine as unknown as PersonRoleForView[] | null) ?? []).map((m) => [m.id, m]))
   const reacted = new Map(((reactions.data as { job_id: string; reaction: Reaction; reason: PassReason | null }[] | null) ?? []).map((r) => [r.job_id, r]))
   return {
     ...base,
@@ -221,15 +217,13 @@ export async function readShortlist(db: Db, userId: string, forDate: string): Pr
     counts: { ...base.counts, newRoles: rows.length },
     picks: rows.map((r) => {
       const m = byJob.get(r.job_id)
-      const j = m ? (Array.isArray(m.jobs) ? m.jobs[0] : m.jobs) : null
-      const c = j ? (Array.isArray(j.companies) ? j.companies[0] : j.companies) : null
       const re = reacted.get(r.job_id)
       return {
         position: r.position,
         kind: r.pick_kind,
         explanation: r.explanation,
-        job: j ? { id: j.id, title: j.title, company: c?.name ?? '', location: j.location, url: j.url, postedAt: j.posted_at } : null,
-        fit: m && j ? parseFit({ id: j.id, ...m }) : null,
+        job: m ? { id: m.id, title: m.title, company: m.viewer_company_name ?? '', location: m.location, url: m.url, postedAt: m.posted_at } : null,
+        fit: m ? parseFit(m) : null,
         reaction: re ? { reaction: re.reaction, reason: re.reason } : null,
       }
     }),
@@ -356,12 +350,12 @@ export function triageMessage(reaction: Reaction, reason: PassReason | null | un
 }
 
 interface PersonRoleSnapshotRow extends FitRow {
-  job_id: string
+  id: string
   hidden_reason: string | null
-  jobs:
-    | { id: string; title: string; location: string | null; description: string | null; companies: { name: string | null } | { name: string | null }[] | null }
-    | { id: string; title: string; location: string | null; description: string | null; companies: { name: string | null } | { name: string | null }[] | null }[]
-    | null
+  title: string
+  location: string | null
+  description: string | null
+  viewer_company_name: string | null
 }
 
 /** What Cello predicted for the role before the person reacted, so the blend can be fitted on how its signals really did. */
@@ -378,17 +372,17 @@ export async function triageRole(args: TriageArgs): Promise<TriageResult> {
   if (reason && reaction !== 'not_for_me') throw new ScoringInputError('A reason belongs to a pass only.')
   if (reason && !(PASS_REASONS as readonly string[]).includes(reason)) throw new ScoringInputError('That reason is not one Cello knows.')
 
+  // The person's own role row (person_jobs): the company named in the snapshot is theirs, never the one that stored the role first.
   const { data, error } = await db
-    .from('person_roles')
-    .select('job_id, hidden_reason, ' + FIT_COLUMNS + ', jobs!inner(id, title, location, description, companies(name))')
-    .eq('user_id', userId)
-    .eq('job_id', jobId)
+    .from('person_jobs')
+    .select('id, hidden_reason, title, location, description, viewer_company_name, ' + FIT_COLUMNS)
+    .eq('viewer_id', userId)
+    .eq('id', jobId)
     .maybeSingle()
   if (error || !data) throw new ScoringInputError('That role was not found.')
   const mine = data as unknown as PersonRoleSnapshotRow
-  const job = Array.isArray(mine.jobs) ? mine.jobs[0] : mine.jobs
-  if (!job) throw new ScoringInputError('That role was not found.')
-  const company = (Array.isArray(job.companies) ? job.companies[0]?.name : job.companies?.name) ?? ''
+  const job = mine
+  const company = mine.viewer_company_name ?? ''
 
   const row = {
     user_id: userId,

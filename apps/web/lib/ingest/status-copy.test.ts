@@ -74,6 +74,14 @@ describe('statusCopy', () => {
     )
   })
 
+  it('says nothing about a next check the clock has not scheduled', () => {
+    const none = { nextCheckAt: null }
+    expect(statusCopy(status(none), NOW).next).toBeNull()
+    expect(statusCopy(status({ ...none, state: 'never' }), NOW).long).toBe('Not checked yet. You can refresh now.')
+    expect(statusCopy(status({ ...none, state: 'failed' }), NOW).long).toBe('The last check did not finish.')
+    expect(detailsLines(status({ ...none, state: 'partial' }), 1).footer).toBe('These are checked again at the next check.')
+  })
+
   it('never uses engineering words or an em dash', () => {
     const states: FindNewRolesStatus['state'][] = ['never', 'checking', 'done', 'partial', 'failed']
     for (const state of states) {

@@ -28,14 +28,9 @@ function makeFakeDb(receiptRow: Row, jobRow: Row | null) {
           }),
         }
       }
-      if (table === 'jobs') {
-        return {
-          select: () => ({
-            eq: () => ({
-              maybeSingle: async () => ({ data: jobRow, error: null }),
-            }),
-          }),
-        }
+      if (table === 'person_jobs') {
+        const q = { select: () => q, eq: () => q, maybeSingle: async () => ({ data: jobRow, error: null }) }
+        return q
       }
       throw new Error(`unexpected table ${table}`)
     },

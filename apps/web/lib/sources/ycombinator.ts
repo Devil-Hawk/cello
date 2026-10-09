@@ -13,7 +13,7 @@ import { getJson, rankAndLimit, sanitizeLeads, truncate } from './util'
 const HOSTS = new Set(['yc-oss.github.io'])
 const HIRING_URL = 'https://yc-oss.github.io/api/companies/hiring.json'
 
-interface YcCompany {
+export interface YcCompany {
   name?: string
   slug?: string
   website?: string
@@ -22,6 +22,10 @@ interface YcCompany {
   long_description?: string
   tags?: string[]
   industry?: string
+  industries?: string[]
+  regions?: string[]
+  team_size?: number | null
+  small_logo_thumb_url?: string
   isHiring?: boolean
   status?: string
   url?: string // public YC profile, e.g. https://www.ycombinator.com/companies/<slug>
@@ -62,17 +66,25 @@ function toLead(c: YcCompany): JobLead | null {
   }
 }
 
+/**
+ * The full hiring list as YC publishes it, or [] when the mirror is down. The
+ * company directory (lib/companies/directory.ts) reads the same list so one
+ * fetch shape serves both the job source and type-ahead.
+ */
+export async function fetchYcHiringCompanies(): Promise<YcCompany[]> {
+  try {
+    const rows = await getJson<YcCompany[]>(HIRING_URL, HOSTS, { timeoutMs: 20_000 })
+    return Array.isArray(rows) ? rows : []
+  } catch {
+    return []
+  }
+}
+
 export const ycombinator: SourceAdapter = {
   id: 'ycombinator',
   label: 'Y Combinator',
   async fetchLeads(q: SourceQuery): Promise<JobLead[]> {
-    let rows: YcCompany[]
-    try {
-      rows = await getJson<YcCompany[]>(HIRING_URL, HOSTS, { timeoutMs: 20_000 })
-    } catch {
-      return []
-    }
-    if (!Array.isArray(rows)) return []
+    const rows = await fetchYcHiringCompanies()
     const leads: JobLead[] = []
     for (const c of rows) {
       const lead = toLead(c)

@@ -37,10 +37,26 @@ interface DraftFixture {
     url: string | null
     description: string | null
     location: string | null
-    person_roles: { chance: string | null; want_p: number | null; want_reason: string | null }[]
-    companies: { name: string; metadata: unknown }
+    /** What an embed of companies(...) would return: the company of whoever stored the role first. The route must not ask for it. */
+    companies?: { name: string; metadata: unknown }
+    employer?: { name: string }
   }
 }
+
+/** One row of person_jobs: the viewer's own company, score, details and verdict for a role. */
+interface ViewerFixture {
+  id: string
+  viewer_id: string
+  viewer_company_name: string | null
+  viewer_company_metadata: unknown
+  match_score: number | null
+  match_details: unknown
+  chance?: string | null
+  want_p?: number | null
+}
+
+/** Every select string the route sent to the service-role client. */
+let selects: Array<{ table: string; select: string }> = []
 
 let state: {
   user: { id: string; email: string } | null
@@ -48,6 +64,7 @@ let state: {
   drafts: DraftFixture[]
   /** applications rows keyed by job_id. */
   applications: Record<string, { id: string; applied_at: string | null }>
+  personJobs: ViewerFixture[]
 }
 
 const GREENHOUSE_URL = 'https://boards.greenhouse.io/acme/jobs/4001'
@@ -66,8 +83,7 @@ function draft(over: Partial<DraftFixture> & { id: string; job_id: string }): Dr
       url: GREENHOUSE_URL,
       description: 'Build services. Ship them.',
       location: 'Remote',
-      person_roles: [{ chance: 'strong', want_p: 0.88, want_reason: 'Strong Go overlap.' }],
-      companies: { name: 'Acme', metadata: {} },
+      employer: { name: 'Acme' },
       ...(over.jobs ?? {}),
     },
   }
@@ -112,9 +128,15 @@ function filterValue(chain: Record<string, unknown>, column: string): unknown {
 const admin = {
   from(table: string) {
     return {
-      select() {
+      select(selectArg?: string) {
+        selects.push({ table, select: selectArg ?? '' })
         const chain = builder(() => {
           if (table === 'profiles') return { data: state.profile, error: null }
+          if (table === 'person_jobs') {
+            const viewer = filterValue(chain, 'viewer_id')
+            const ids = (filterValue(chain, 'id') as string[] | undefined) ?? []
+            return { data: state.personJobs.filter((r) => r.viewer_id === viewer && ids.includes(r.id)), error: null }
+          }
           if (table === 'applications') {
             const jobId = filterValue(chain, 'job_id') as string | undefined
             return { data: jobId ? (state.applications[jobId] ?? null) : null, error: null }
@@ -216,7 +238,9 @@ beforeEach(() => {
     },
     drafts: [draft({ id: 'd1', job_id: 'job-1' })],
     applications: {},
+    personJobs: [],
   }
+  selects = []
 })
 
 // --- The human gate ---------------------------------------------------------
@@ -298,8 +322,7 @@ describe('POST — every item is re-validated from the database, not from the pa
           url: GREENHOUSE_URL,
           description: 'Will you now or in the future require visa sponsorship?',
           location: 'Remote',
-          person_roles: [{ chance: 'strong', want_p: 0.88, want_reason: null }],
-          companies: { name: 'Acme', metadata: {} },
+          employer: { name: 'Acme' },
         },
       }),
     ]
@@ -411,6 +434,60 @@ describe('POST — the run is bounded and resumable', () => {
 
 // --- The manifest -----------------------------------------------------------
 
+describe("GET and POST — a shared role is named and scored by the viewer's own row, never the first storer's", () => {
+  // the role is stored under another person's company 'Theirs'; this viewer holds it as 'Mine', with their own score
+  const theirs = () =>
+    draft({
+      id: 'd1',
+      job_id: 'job-1',
+      jobs: {
+        id: 'job-1',
+        title: 'Senior Backend Engineer',
+        url: GREENHOUSE_URL,
+        description: 'Build services. Ship them.',
+        location: 'Remote',
+        companies: { name: 'Theirs', metadata: {} },
+        employer: { name: 'Directory Co' },
+      },
+    })
+  const mine = (): ViewerFixture => ({
+    id: 'job-1',
+    viewer_id: 'user-1',
+    viewer_company_name: 'Mine',
+    viewer_company_metadata: {},
+    match_score: 41,
+    match_details: { summary: 'My own reading.' },
+    chance: 'possible',
+    want_p: 0.7,
+  })
+
+  it('the manifest carries the viewer\'s company and score and none of the first storer\'s', async () => {
+    state.drafts = [theirs()]
+    state.personJobs = [mine()]
+    const text = JSON.stringify(await (await GET()).json())
+    expect(text).toContain('Mine')
+    const manifest = JSON.parse(text)
+    expect([...manifest.items, ...manifest.needsAttention][0]).toMatchObject({ chance: 'possible', want: 0.7 })
+    expect(text).not.toContain('Theirs')
+    expect(selects.filter((s) => s.table === 'application_drafts').every((s) => !s.select.includes('companies('))).toBe(true)
+  })
+
+  it('an approval result names the viewer\'s company', async () => {
+    state.drafts = [theirs()]
+    state.personJobs = [mine()]
+    const text = JSON.stringify(await (await POST(post(batch()))).json())
+    expect(text).toContain('Mine')
+    expect(text).not.toContain('Theirs')
+  })
+
+  it('without a company of their own the directory employer names the role', async () => {
+    state.drafts = [theirs()]
+    const text = JSON.stringify(await (await GET()).json())
+    expect(text).toContain('Directory Co')
+    expect(text).not.toContain('Theirs')
+  })
+})
+
 describe('GET — the manifest splits what may be batched from what may not', () => {
   it('puts a knock-out posting in needsAttention and never in the approvable list', async () => {
     state.drafts = [
@@ -424,8 +501,7 @@ describe('GET — the manifest splits what may be batched from what may not', ()
           url: 'https://jobs.lever.co/acme/2222-3333-4444',
           description: 'Requires an active security clearance.',
           location: 'DC',
-          person_roles: [{ chance: 'possible', want_p: 0.7, want_reason: null }],
-          companies: { name: 'Beta', metadata: {} },
+          employer: { name: 'Beta' },
         },
       }),
     ]

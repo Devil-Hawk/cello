@@ -223,12 +223,10 @@ class FakeQueryBuilder implements PromiseLike<{ data: unknown; error: unknown; c
 
   private matches(row: FakeRow): boolean {
     const eqOk = this.filters.every(({ col, op, val }) => {
-      // Fakes the FK-join filter ownedJobsQuery builds (`companies!inner`
-      // embedded, filtered by `.eq('companies.user_id', ...)`) — this
-      // FakeQueryBuilder has no real embed support, so this is the one
-      // column PostgREST would resolve through a join instead of a plain
-      // row field.
-      if (col === 'companies.user_id') {
+      // Fakes the person_jobs view ownedJobsQuery reads: `viewer_id` is the person whose
+      // company stored the (unshared) fixture role — a column PostgREST would take from
+      // person_roles, not a plain row field.
+      if (col === 'viewer_id') {
         const company = this.tables.get('companies')?.rows.get(row.company_id as string)
         return company?.user_id === val
       }
@@ -292,7 +290,9 @@ class FakeAdmin {
     return this.tables.get(name)!
   }
   from(name: string) {
-    return new FakeQueryBuilder(this.tableFor(name), name, this.tables)
+    // person_jobs is the view over jobs
+    const table = name === 'person_jobs' ? 'jobs' : name
+    return new FakeQueryBuilder(this.tableFor(table), table, this.tables)
   }
   seed(tableName: string, row: FakeRow): void {
     this.tableFor(tableName).rows.set(row.id, { ...row })
@@ -325,14 +325,16 @@ function seedCompanies(admin: FakeAdmin, userId: string, count: number): void {
   }
 }
 
-// The person's own row for a role: their verdict beside the embedded posting, as the query returns it.
+// The person's own row for a role as person_jobs returns it: the posting's columns, their company and their verdict.
 function seedPersonRole(
   admin: FakeAdmin,
   userId: string,
   posting: { id: string; title: string; description: string; location: string; url: string; company_id: string },
   verdict: { chance: string; want_p: number; blocked_reasons: unknown[] }
 ) {
-  admin.seed('person_roles', { id: `${userId}:${posting.id}`, user_id: userId, job_id: posting.id, hidden_reason: null, ...verdict, jobs: posting })
+  void userId // the fake takes the viewer from the company's owner
+  const row = admin.allRows('jobs').find((r) => r.id === posting.id)!
+  Object.assign(row, { viewer_company_id: posting.company_id, hidden_reason: null, ...verdict })
 }
 
 // userId defaults to makeProfile()'s own default ('user-1') — every existing

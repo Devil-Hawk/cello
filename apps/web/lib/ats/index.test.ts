@@ -200,7 +200,7 @@ describe('refreshCompany: stored jobs', () => {
     expect(upserted).toHaveLength(0)
     expect(result.updated).toBe(2)
     for (const u of updated) {
-      expect(Object.keys(u.fields).sort()).toEqual(['description', 'requirements', 'requirements_extracted_at'])
+      expect(Object.keys(u.fields).sort()).toEqual(['apply_url', 'description', 'description_md', 'description_md5', 'description_source', 'description_state', 'requirements', 'requirements_extracted_at'])
     }
   })
 
@@ -208,7 +208,9 @@ describe('refreshCompany: stored jobs', () => {
     listJobs(JOB_A)
     const first = makeStore()
     await refreshCompany(first.store, COMPANY)
-    const md5 = createHash('md5').update(first.upserted[0].description).digest('hex')
+    // the hash is the md5 of the stored Markdown, which is what the first read wrote
+    const md5 = createHash('md5').update(first.upserted[0].description_md as string).digest('hex')
+    expect(first.upserted[0].description_md5).toBe(md5)
 
     listJobs(JOB_A)
     const { store, updated } = makeStore([
@@ -226,6 +228,14 @@ describe('refreshCompany: stored jobs', () => {
     ])
     await refreshCompany(store, COMPANY)
     expect(updated).toEqual([])
+  })
+
+  it('a stored role whose place fills in gets its country', async () => {
+    listJobs({ absolute_url: 'https://acme.com/jobs/a', title: 'Data Engineer', location: { name: 'Sunnyvale, CA, USA' }, content: BODY })
+    const md5 = createHash('md5').update('Minimum requirements').digest('hex')
+    const { store, updated } = makeStore([stored('https://acme.com/jobs/a', { title: 'Data Engineer', location: null, descriptionMd5: md5 })])
+    await refreshCompany(store, COMPANY)
+    expect(updated[0].fields).toMatchObject({ location: 'Sunnyvale, CA, USA', country: 'US' })
   })
 
   it('tells the provider which stored jobs already have a description', async () => {

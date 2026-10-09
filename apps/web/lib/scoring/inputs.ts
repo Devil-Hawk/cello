@@ -6,6 +6,7 @@ import { callEmbedding, EMBEDDING_MODEL, isEmbeddingFallback } from '@/lib/harne
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { QUALITY_REJECT_THRESHOLD } from '@/lib/jobs/classify'
 import { openRolesOnly } from '@/lib/jobs/freshness'
+import { ownedJobsQuery } from '@/lib/jobs/owned-query'
 import { prioritiseByTargetTitles } from '@/lib/jobs/target-relevance'
 import { getMemoryStore } from '@/lib/memory/mem0-store'
 import { resolveTargeting, type Targeting } from '@/lib/targeting'
@@ -101,17 +102,11 @@ interface CandidateRow {
   country: string | null
   is_remote: boolean | null
   job_function: string | null
-  companies: { name: string | null } | { name: string | null }[] | null
+  /** The person's own company for the role (person_jobs), never the one that stored it first. */
+  viewer_company_name: string | null
 }
 
-interface PersonRoleRow {
-  job_id: string
-  jobs: CandidateRow | CandidateRow[] | null
-}
-
-const JOB_COLUMNS = 'id, title, description, location, salary_range, seniority, country, is_remote, job_function, companies(name)'
-const CANDIDATE_SELECT = 'job_id, jobs!inner(' + JOB_COLUMNS + ')'
-const JOBS = { referencedTable: 'jobs' } as const
+const JOB_COLUMNS = 'id, title, description, location, salary_range, seniority, country, is_remote, job_function, viewer_company_name'
 
 function quote(v: string): string {
   return /[,()"]/.test(v) ? '"' + v.replace(/"/g, '\\"') + '"' : v
@@ -123,11 +118,10 @@ function facet(column: string, values: string[]): string {
 }
 
 export function toRoleFacts(row: CandidateRow): RoleFacts {
-  const c = Array.isArray(row.companies) ? row.companies[0] : row.companies
   return {
     id: row.id,
     title: row.title,
-    company: c?.name ?? '',
+    company: row.viewer_company_name ?? '',
     location: row.location,
     description: row.description,
     salaryRange: row.salary_range,
@@ -138,13 +132,8 @@ export function toRoleFacts(row: CandidateRow): RoleFacts {
   }
 }
 
-function factsOf(rows: PersonRoleRow[] | null): RoleFacts[] {
-  const out: RoleFacts[] = []
-  for (const row of rows ?? []) {
-    const job = Array.isArray(row.jobs) ? row.jobs[0] : row.jobs
-    if (job) out.push(toRoleFacts(job))
-  }
-  return out
+function factsOf(rows: CandidateRow[] | null): RoleFacts[] {
+  return (rows ?? []).map(toRoleFacts)
 }
 
 export interface CandidateOptions {
@@ -166,22 +155,21 @@ export interface CandidateOptions {
  */
 export async function candidateRoles(admin: AdminClient, userId: string, targeting: Targeting, titles: readonly string[], opts: CandidateOptions): Promise<RoleFacts[]> {
   if (opts.jobIds && opts.jobIds.length > 0) {
-    const { data, error } = await admin.from('person_roles').select(CANDIDATE_SELECT).eq('user_id', userId).in('job_id', opts.jobIds.slice(0, 200))
+    const { data, error } = await ownedJobsQuery(admin, userId, JOB_COLUMNS).in('id', opts.jobIds.slice(0, 200))
     if (error) throw new Error('could not read roles: ' + error.message)
-    return factsOf(data as unknown as PersonRoleRow[] | null)
+    return factsOf(data as unknown as CandidateRow[] | null)
   }
   const pool = Math.min(400, Math.max(opts.limit * 4, 80))
-  let query = openRolesOnly(admin.from('person_roles').select(CANDIDATE_SELECT).eq('user_id', userId).is('hidden_reason', null), JOBS).or(
-    'quality_score.is.null,quality_score.gte.' + QUALITY_REJECT_THRESHOLD,
-    JOBS
+  let query = openRolesOnly(ownedJobsQuery(admin, userId, JOB_COLUMNS).is('hidden_reason', null)).or(
+    'quality_score.is.null,quality_score.gte.' + QUALITY_REJECT_THRESHOLD
   )
   if (opts.onlyUnassessed) query = query.is('assessed_at', null)
-  if (targeting.functions.length > 0) query = query.or(facet('job_function', targeting.functions), JOBS)
-  if (targeting.seniority.length > 0) query = query.or(facet('seniority', targeting.seniority), JOBS)
-  if (targeting.languages.length > 0) query = query.or(facet('language', targeting.languages), JOBS)
-  const { data, error } = await query.order('jobs(posted_at)', { ascending: false, nullsFirst: false }).limit(pool)
+  if (targeting.functions.length > 0) query = query.or(facet('job_function', targeting.functions))
+  if (targeting.seniority.length > 0) query = query.or(facet('seniority', targeting.seniority))
+  if (targeting.languages.length > 0) query = query.or(facet('language', targeting.languages))
+  const { data, error } = await query.order('posted_at', { ascending: false, nullsFirst: false }).limit(pool)
   if (error) throw new Error('could not read roles: ' + error.message)
-  let rows = factsOf(data as unknown as PersonRoleRow[] | null)
+  let rows = factsOf(data as unknown as CandidateRow[] | null)
 
   if (!opts.includeReacted && rows.length > 0) {
     const reacted = new Set<string>()
@@ -200,12 +188,12 @@ export async function candidateRoles(admin: AdminClient, userId: string, targeti
  */
 export async function countUnassessed(admin: AdminClient, userId: string, targeting: Targeting): Promise<{ inRecall: number; total: number }> {
   const head = { count: 'exact' as const, head: true }
-  const base = () => admin.from('person_roles').select('job_id, jobs!inner(id)', head).eq('user_id', userId).is('hidden_reason', null).is('assessed_at', null)
+  const base = () => ownedJobsQuery(admin, userId, 'id', head).is('hidden_reason', null).is('assessed_at', null)
   const total = await base()
-  let q = openRolesOnly(base(), JOBS).or('quality_score.is.null,quality_score.gte.' + QUALITY_REJECT_THRESHOLD, JOBS)
-  if (targeting.functions.length > 0) q = q.or(facet('job_function', targeting.functions), JOBS)
-  if (targeting.seniority.length > 0) q = q.or(facet('seniority', targeting.seniority), JOBS)
-  if (targeting.languages.length > 0) q = q.or(facet('language', targeting.languages), JOBS)
+  let q = openRolesOnly(base()).or('quality_score.is.null,quality_score.gte.' + QUALITY_REJECT_THRESHOLD)
+  if (targeting.functions.length > 0) q = q.or(facet('job_function', targeting.functions))
+  if (targeting.seniority.length > 0) q = q.or(facet('seniority', targeting.seniority))
+  if (targeting.languages.length > 0) q = q.or(facet('language', targeting.languages))
   const inRecall = await q
   return { inRecall: inRecall.count ?? 0, total: total.count ?? 0 }
 }

@@ -3,7 +3,7 @@
 import { LogoMark } from '@/components/brand/logo'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { AlertTriangle, Bell, CalendarClock, FileWarning, Sparkles } from 'lucide-react'
+import { Star, AlertTriangle, Bell, CalendarClock, FileWarning } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -28,7 +28,7 @@ interface InterviewActivity {
   application_id: string
   applications: {
     id: string
-    jobs: { title: string; companies: { name: string | null } | null } | null
+    jobs: { title: string; companies: { name: string | null } | null; employer: { name: string | null } | null } | null
   } | null
 }
 
@@ -125,7 +125,7 @@ export default function NotificationsPage() {
         supabase
           .from('activities')
           .select(
-            'id, type, title, occurred_at, application_id, applications(id, jobs(title, companies(name)))'
+            'id, type, title, occurred_at, application_id, applications(id, jobs(title, companies(name), employer:company_directory(name)))'
           )
           .ilike('type', '%interview%')
           .order('occurred_at', { ascending: false })
@@ -233,7 +233,7 @@ export default function NotificationsPage() {
           title={activity.title}
           subtitle={[
             activity.applications?.jobs?.title,
-            activity.applications?.jobs?.companies?.name,
+            activity.applications?.jobs?.companies?.name ?? activity.applications?.jobs?.employer?.name,
             formatRelativeTime(activity.occurred_at),
           ]
             .filter(Boolean)
@@ -247,7 +247,7 @@ export default function NotificationsPage() {
   if (hotJobs.length > 0) {
     sections.push({
       key: 'hot-jobs',
-      icon: Sparkles,
+      icon: Star,
       title: 'New roles worth a look',
       description: 'Unreviewed roles you are likely to want, with a real chance',
       tone: 'opportunity',
@@ -256,7 +256,7 @@ export default function NotificationsPage() {
           key={job.id}
           tone="opportunity"
           title={job.title}
-          subtitle={[job.companies?.name ?? 'Unknown company', formatRelativeTime(job.posted_at ?? job.discovered_at)].join(
+          subtitle={[job.viewer_company_name ?? 'Unknown company', formatRelativeTime(job.posted_at ?? job.discovered_at)].join(
             ' · '
           )}
           // Opens THIS job, not the list. This row names a specific role and

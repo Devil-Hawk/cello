@@ -7,19 +7,19 @@ import { loadOutreachSources } from './sources'
 
 const check = (who: string) => ({ requirement: who, status: 'met', evidence: { line: 1, quote: `${who} quote` } })
 const roles = [
-  { user_id: 'other', chance_detail: { checks: [check('Other')] } },
-  { user_id: 'me', chance_detail: { checks: [check('Mine')] } },
+  { viewer_id: 'other', chance_detail: { checks: [check('Other')] } },
+  { viewer_id: 'me', chance_detail: { checks: [check('Mine')] } },
 ]
 
-// A service client returns every holder's person_roles row unless the query filters the embed by user.
+// A service client returns every holder's role row unless the query filters on the viewer.
 function client() {
   const eqs: Record<string, unknown> = {}
   const q: Record<string, unknown> = {}
   q.select = () => q
   q.eq = (col: string, val: unknown) => ((eqs[col] = val), q)
   q.single = async () => {
-    const rows = 'person_roles.user_id' in eqs ? roles.filter((r) => r.user_id === eqs['person_roles.user_id']) : roles
-    return { data: { id: 'j1', title: 'Engineer', description: 'd', company_id: null, person_roles: rows } }
+    const rows = 'viewer_id' in eqs ? roles.filter((r) => r.viewer_id === eqs['viewer_id']) : roles
+    return { data: { id: 'j1', title: 'Engineer', description: 'd', viewer_company_id: null, ...rows[0] } }
   }
   return { from: () => q } as never
 }

@@ -23,17 +23,15 @@ const LIVENESS_TIMEOUT_MS = 8000
 
 interface JobRow {
   id: string
-  company_id: string
+  company_id: string | null
   title: string | null
   url: string | null
   external_id: string | null
-  companies?: { name: string | null } | { name: string | null }[] | null
+  viewer_company_name?: string | null
 }
 
 function companyName(job: JobRow): string {
-  const c = job.companies
-  if (Array.isArray(c)) return c[0]?.name ?? ''
-  return c?.name ?? ''
+  return job.viewer_company_name ?? ''
 }
 
 async function userCompanyIds(admin: AdminClient, userId: string): Promise<string[]> {
@@ -97,9 +95,9 @@ export const verifier: AgentFn = async (ctx) => {
     return { output: { verified: true, issues: [] }, tokensUsed: 0 }
   }
 
-  // Ownership scoped via the companies FK join (see ownedJobsQuery), not an
+  // Ownership scoped by ownedJobsQuery's viewer_id fence, not an
   // .in('company_id', companyIds) array — that breaks past ~600 companies.
-  const SELECT_COLUMNS = 'id, company_id, title, url, external_id, companies!inner(name)'
+  const SELECT_COLUMNS = 'id, company_id, title, url, external_id, viewer_company_name'
   let jobs: JobRow[]
   if (jobIds.length > 0) {
     const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, SELECT_COLUMNS).in(
@@ -151,8 +149,9 @@ export const verifier: AgentFn = async (ctx) => {
         .join(',')
       if (orFilter) {
         const { data: collisions } = await ctx.admin
-          .from('jobs')
+          .from('person_jobs')
           .select('id')
+          .eq('viewer_id', ctx.userId)
           .eq('company_id', job.company_id)
           .or(orFilter)
           .neq('id', job.id)
@@ -176,9 +175,9 @@ export const verifier: AgentFn = async (ctx) => {
     }
   }
 
-  // Knock out failed jobs so the matcher skips triage for them.
+  // Knock out failed jobs so the matcher skips triage for them. The flag is this person's: their own role row.
   if (knockouts.length > 0) {
-    await ctx.admin.from('jobs').update({ is_new: false }).in('id', knockouts)
+    await ctx.admin.from('person_roles').update({ is_new: false }).eq('user_id', ctx.userId).in('job_id', knockouts)
   }
 
   return { output: { verified: knockouts.length === 0, issues }, tokensUsed: 0 }

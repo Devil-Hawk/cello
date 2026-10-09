@@ -180,6 +180,7 @@ import { buildGoalStrategyContext } from '../context/assemble'
 import { verifyCvTailorDraft, CvTailorContainmentError } from './verify/cv-tailor'
 import { writeVerdict } from '../evals/verdicts'
 import { logHarnessError } from '../observability/log'
+import { personJobs } from '../jobs/person-jobs'
 
 // --- tunables (verbatim from the pre-port file, same comments) -------------
 const MAX_USERS_PER_TICK = 10
@@ -863,9 +864,7 @@ interface CandidateJob {
   /** True when the role is on today's shortlist or the person tapped Interested on it. */
   wanted?: boolean
 }
-
 /** The posting columns of a candidate: the person's verdict is beside them, on their own row. */
-type PostingRow = Pick<CandidateJob, 'id' | 'title' | 'description' | 'location' | 'url' | 'company_id'>
 
 async function loadCompanies(admin: AdminClient, userId: string): Promise<CompanyInput[]> {
   const { data } = await trackedOnly(
@@ -915,21 +914,18 @@ function isEligible(job: CandidateJob): boolean {
 }
 
 async function loadCandidateJobs(admin: AdminClient, userId: string, excluded: Set<string>): Promise<CandidateJob[]> {
-  // The person's own rows (person_roles) carry the verdict, so the list starts there
-  // and embeds the posting. Order by recency so freshly discovered jobs are always in
-  // the window, not crowded out by a backlog of older postings. A role they hid is not
-  // a candidate.
-  const { data } = await admin
-    .from('person_roles')
-    .select('chance, want_p, blocked_reasons, jobs!inner(id, title, description, location, url, company_id)')
-    .eq('user_id', userId)
+  // The person's own role rows (person_jobs) carry the verdict and their company beside the posting.
+  // Order by recency so freshly discovered jobs are always in the window, not crowded out by a
+  // backlog of older postings. A role they hid is not a candidate.
+  const { data } = await personJobs(admin)
+    .select('id, title, description, location, url, viewer_company_id, chance, want_p, blocked_reasons')
+    .eq('viewer_id', userId)
     .is('hidden_reason', null)
-    .order('jobs(discovered_at)', { ascending: false })
+    .order('discovered_at', { ascending: false })
     .limit(CANDIDATE_JOB_LIMIT)
-  const rows = ((data ?? []) as unknown as { chance: string | null; want_p: number | null; blocked_reasons: unknown; jobs: PostingRow | PostingRow[] | null }[]).flatMap((r) => {
-    const job = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs
-    return job ? [{ ...job, chance: r.chance, want_p: r.want_p, blocked_reasons: r.blocked_reasons }] : []
-  })
+  const rows = ((data ?? []) as unknown as (Omit<CandidateJob, 'company_id' | 'wanted'> & { viewer_company_id: string | null })[]).map(
+    ({ viewer_company_id, ...job }) => ({ ...job, company_id: viewer_company_id })
+  )
   const wanted = await loadWantedJobIds(admin, userId)
   return rows.filter((j) => j.url && !excluded.has(j.id)).map((j) => ({ ...j, wanted: wanted.has(j.id) }))
 }

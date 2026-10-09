@@ -167,7 +167,7 @@ async function fetchCompanySizeCandidates(admin: AdminClient, userId: string): P
   const buckets = new Map<string, { positive: number; negative: number; verdictIds: string[] }>()
   for (const row of rows) {
     const canonicalId = await resolveCompanyId(admin, row.company_id)
-    const roleCount = await trackedRoleCount(admin, canonicalId)
+    const roleCount = await trackedRoleCount(admin, userId, canonicalId)
     const band = isSmallCompany(roleCount) ? 'small' : 'large'
     const acc = buckets.get(band) ?? { positive: 0, negative: 0, verdictIds: [] }
     acc.positive += Number(row.positive_count)

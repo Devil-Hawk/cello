@@ -374,7 +374,7 @@ beforeEach(() => {
       title: CONTENT.personTitle,
       company_id: null,
     },
-    jobs: {
+    person_jobs: {
       id: 'job-1',
       title: 'Staff Platform Engineer',
       description: 'Own the deployment pipeline',
@@ -693,7 +693,7 @@ const PRODUCERS: Producer[] = [
   {
     name: 'resume generate — job not found',
     arrange: () =>
-      installRouteSession({ profiles: DEMO_WORKSPACE_PROFILE /* no `jobs` row */ }),
+      installRouteSession({ profiles: DEMO_WORKSPACE_PROFILE /* no `person_jobs` row */ }),
     run: () => resumePost(post('/api/resume/documents', { action: 'generate', jobId: 'job-1' })),
     status: 404,
     action: 'resume.tailor',

@@ -71,7 +71,7 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       'the request body — never server-derived from the full owned-company set, so it never replays the ~600+ ' +
       'company incident.',
   },
-  'apps/web/app/api/harness/cron/route.ts': {
+  'apps/web/lib/clock/routines/harness.ts': {
     calls: [".in('thread_id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",
   },
@@ -103,6 +103,20 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       'RATIONALE_SAMPLE_SIZE) — capped at 6 before this call ever runs, regardless of how many verdict ids ' +
       "a candidate's own SQL aggregation carries.",
   },
+  'apps/web/lib/clock/routines/roles-check.ts': {
+    calls: [
+      ".in('job_id', ids)",
+      ".in('job_id', drop)",
+      ".in('job_id', hide)",
+      ".in('job_id', show)",
+      ".in('job_id', left)",
+    ],
+    reason: 'every list is a subset of one REJUDGE_PAGE (100) page of the person\'s own held roles, never an owned-id set.',
+  },
+  'apps/web/lib/jobs/role-types/sync.ts': {
+    calls: [".in('id', retired)"],
+    reason: 'retired is the ids of role types the module no longer has: a handful, never user data.',
+  },
   'apps/web/lib/harness/agents/enricher.ts': {
     calls: [".in('id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",
@@ -120,24 +134,25 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       "it reaches here; ownership is enforced separately by ownedJobsQuery's FK join.",
   },
   'apps/web/lib/scoring/index.ts': {
-    calls: [".in('job_id', rows.map((r)"],
-    reason: "rows is one day's saved shortlist (at most a handful of picks), one job id per row; the query is on the person's own person_roles rows (filtered by user_id).",
+    calls: [".in('id', rows.map((r)"],
+    reason: "rows is one day's saved shortlist (at most a handful of picks), one job id per row; the query is on the person's own role rows (person_jobs, filtered by viewer_id).",
   },
   'apps/web/lib/scoring/supabase-store.ts': {
     calls: [".in('job_id', part)"],
     reason: 'part is one slice of at most IN_CHUNK (100) ids, cut by chunks() on every call; the query is on the person\'s own person_roles rows (filtered by user_id).',
   },
   'apps/web/lib/harness/agents/verifier.ts': {
-    calls: [".in('id', knockouts)"],
+    calls: [".in('job_id', knockouts)"],
     reason: 'knockouts can never exceed the MAX_JOBS (30) batch it was collected from in the same run.',
   },
   'apps/web/lib/harness/copilot-tools.ts': {
-    calls: [".in('id', jobIds)", ".in('job_id', jobIds)", ".in('id', companyIds)", ".in('id', trgmIds)", ".in('id', contactIds)"],
+    calls: [".in('id', jobIds)", ".in('id', trgmIds)", ".in('id', contactIds)", ".in('viewer_company_id', trackedIds)"],
     reason:
-      "loadJobBriefs: jobIds is always ≤20 ids (every caller slices/caps before calling), for the jobs and for the person's own person_roles rows; companyIds is the " +
-      'deduped company_id set of those ≤20 job rows. listJobs\' trgmIds and listContacts\' contactIds are both ' +
+      "loadJobBriefs: jobIds is always ≤20 ids (every caller slices/caps before calling). " +
+      'listJobs\' trgmIds and listContacts\' contactIds are both ' +
       "search_*_by_*_trgm()'s p_limit-bounded RPC result (clampLimit'd to ≤15/≤25, hard RPC ceiling 50 — see " +
-      '20260816000009_job_search.sql), never an owned-id set.',
+      '20260816000009_job_search.sql), never an owned-id set. search_roles\' trackedIds is the person\'s own ' +
+      'followed companies (their user_id-scoped watchlist rows); ownership is the viewer_id fence of person_jobs.',
   },
   'apps/web/lib/strategy/datasource.ts': {
     calls: [".in('id', chunk)"],

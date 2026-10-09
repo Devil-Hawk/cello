@@ -1,5 +1,11 @@
-// Scheduled "Find new roles" check: one process, one pass, every user's due
-// companies. Run in GitHub Actions with `cd apps/web && npx tsx scripts/ingest.ts`.
+// The rendered tier of "Find new roles": one process, one pass, the companies the database clock
+// named. The clock (agent_sweep, lib/clock) dispatches .github/workflows/scrape.yml with a list of
+// company ids when a site can only be read in a browser; a person's own check, with plain
+// requests, is the roles.check routine. Run in GitHub Actions with
+// `cd apps/web && npx tsx scripts/ingest.ts`.
+//
+// The run writes its own heartbeat (roles.render) through start_heartbeat and finish_heartbeat, so
+// the clock does not dispatch again while it runs and the pages can say when it last ran.
 //
 // Per company: the job board's API when it has one, else the one reader
 // (lib/ingest/reader): the site's own search, its sitemaps, its server-rendered
@@ -12,7 +18,7 @@
 //   SUPABASE_URL, SUPABASE_SERVICE_KEY   service role
 //   OPENROUTER_API_KEY                   platform key; only ':free' models are ever asked
 // Optional:
-//   COMPANY_ID            check only this company (a UUID), even if it is not due
+//   COMPANY_IDS           check only these companies (a comma list of at most 50 UUIDs), even if not due
 //   INGEST_USER_ID        check only this user's companies (local testing)
 //   INGEST_FORCE=1        treat every selected company as due
 //   INGEST_DRY_RUN=1      read and count, write nothing
@@ -34,8 +40,9 @@ import { trackedOnly } from '../lib/companies/watchlist'
 import { DEFAULT_MODEL_CALLS, freeModelKeys, makeIngestModelCall, newModelBudget, type ModelCall } from '../lib/ingest/model'
 import { supabaseRequirementsRows } from '../lib/ingest/requirements-pass'
 import { hasSource, ingestUser, isDue, makeSupabaseRunsStore, type DueCompany } from '../lib/ingest/run'
+import { finishHeartbeat, startHeartbeat } from '../lib/clock/heartbeat'
+import { parseCompanyIds } from '../lib/clock/company-ids'
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const PAGE_SIZE = 1000
 
 function errorKind(error: unknown): string {
@@ -48,12 +55,14 @@ function log(event: string, fields: Record<string, unknown> = {}): void {
 
 async function main(): Promise<void> {
   const dryRun = process.env.INGEST_DRY_RUN === '1'
-  const only = process.env.COMPANY_ID?.trim() || ''
+  const idsText = process.env.COMPANY_IDS?.trim() || ''
+  const only = idsText ? parseCompanyIds(idsText) : null
   const onlyUser = process.env.INGEST_USER_ID?.trim() || ''
-  if (only && !UUID.test(only)) {
-    console.error('ingest: COMPANY_ID must be a UUID')
+  if (idsText && !only) {
+    console.error('ingest: COMPANY_IDS must be a comma list of 1 to 50 UUIDs')
     process.exit(1)
   }
+  const onlySet = new Set(only ?? [])
   const openrouterKey = process.env.OPENROUTER_API_KEY?.trim() || undefined
   const calls = Number(process.env.INGEST_MODEL_CALLS) > 0 ? Number(process.env.INGEST_MODEL_CALLS) : DEFAULT_MODEL_CALLS
   const deadlineMin = Number(process.env.INGEST_DEADLINE_MIN) > 0 ? Number(process.env.INGEST_DEADLINE_MIN) : 40
@@ -67,6 +76,9 @@ async function main(): Promise<void> {
     console.error(`ingest: no database credentials (${errorKind(error)})`)
     process.exit(1)
   }
+
+  // The clock's record of this run. Not written on a dry run.
+  if (!dryRun) await startHeartbeat(admin, 'roles.render', null).catch(() => undefined)
 
   const all: DueCompany[] = []
   try {
@@ -85,7 +97,7 @@ async function main(): Promise<void> {
 
   const now = Date.now()
   // A company with neither a careers page nor a stored board has nothing to read.
-  const selected = all.filter((c) => (!only || c.id === only) && (!onlyUser || c.user_id === onlyUser) && hasSource(c))
+  const selected = all.filter((c) => (!only || onlySet.has(c.id)) && (!onlyUser || c.user_id === onlyUser) && hasSource(c))
   const due = selected.filter((c) => Boolean(only) || process.env.INGEST_FORCE === '1' || isDue(c, now))
   const byUser = new Map<string, DueCompany[]>()
   for (const c of due) byUser.set(c.user_id, [...(byUser.get(c.user_id) ?? []), c])
@@ -96,6 +108,7 @@ async function main(): Promise<void> {
   const fetchPage = pageFetcherFromEnv(process.env.INGEST_PAGE_FETCHER)
   const runs = makeSupabaseRunsStore(admin, dryRun)
 
+  const totals = { companies: 0, failed: 0, found: 0, new: 0, users_failed: 0 }
   for (const [userId, companies] of byUser) {
     const budget = newModelBudget(calls)
     const targets = await loadTargets(admin, userId)
@@ -129,6 +142,10 @@ async function main(): Promise<void> {
         )
       )
       const p = summary.patch
+      totals.companies += p.companies_checked
+      totals.failed += p.companies_failed
+      totals.found += p.jobs_found
+      totals.new += p.jobs_new
       log('user', {
         userId,
         status: p.status,
@@ -146,11 +163,21 @@ async function main(): Promise<void> {
         ms: p.duration_ms,
       })
     } catch (error) {
+      totals.users_failed++
       log('user_error', { userId, error: errorKind(error) })
     }
   }
 
   log('done', { durationMs: Date.now() - startedAt, users: byUser.size })
+  if (!dryRun) {
+    await finishHeartbeat(admin, 'roles.render', null, {
+      // Every person's read failing is a failed run; a few unreadable companies are a count.
+      ok: byUser.size === 0 || totals.users_failed < byUser.size,
+      failure: 'every_user_failed',
+      found: { read: totals.companies, cannot_read: totals.failed, roles: totals.found, new: totals.new },
+      durationMs: Date.now() - startedAt,
+    }).catch(() => undefined)
+  }
   // Handles left open by the page fetcher or the trace exporter must not hold the job.
   process.exit(0)
 }

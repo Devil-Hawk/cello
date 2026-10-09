@@ -17,13 +17,16 @@ type Db = SupabaseClient<any, any, any>
 
 const PAGE_SIZE = 1000
 const UPDATE_CONCURRENCY = 4
-/** md5('') : jobs.description_md5 of a row with no description. */
-const EMPTY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e'
 /** Longer than any refresh of one company takes; a crashed holder frees itself. */
 const LOCK_LEASE_MINUTES = 15
 
 export interface AtsStoreOptions {
-  /** Service-role client for the per-company lock (not callable by a signed-in user) and for every write to jobs (a posting is shared, so no session changes it). */
+  /**
+   * Service-role client. It takes the per-company lock (not callable by a signed-in user) and writes the roles an
+   * employer's followers share: a signed-in client cannot, since one follower would be writing what the others read.
+   * It also writes every row of `jobs`: a posting is changed by the server only, so no signed-in session does.
+   * Without it every write goes through `client`, which is right only for the service role itself.
+   */
   lockClient?: Db
   /** Who holds the lock; unique per process so a second process cannot release the first one's lock. */
   holder?: string
@@ -43,14 +46,15 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
   const writer = lock ?? client
 
   return {
-    async listJobs(companyId: string): Promise<ExistingJob[]> {
+    async listJobs(companyId: string, employerId?: string | null): Promise<ExistingJob[]> {
       const rows: ExistingJob[] = []
       // Pagination within a company is always sequential.
       for (let from = 0; ; from += PAGE_SIZE) {
         const { data, error } = await client
           .from('jobs')
           .select('external_id, title, location, salary_range, description_md5, source, still_open, url, last_seen_at, job_function, seniority, country, language, is_remote, posted_at')
-          .eq('company_id', companyId)
+          // A role is one row per posting, shared by everyone who follows its employer.
+          .eq(employerId ? 'employer_id' : 'company_id', employerId ?? companyId)
           .order('external_id')
           .range(from, from + PAGE_SIZE - 1)
         fail(error)
@@ -77,7 +81,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
             title: row.title,
             location: row.location,
             salaryRange: row.salary_range,
-            descriptionMd5: !row.description_md5 || row.description_md5 === EMPTY_MD5 ? null : row.description_md5,
+            descriptionMd5: row.description_md5 || null,
             source: row.source,
             open: row.still_open !== false,
             url: row.url,
@@ -104,35 +108,62 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
 
     async upsertJobs(rows): Promise<void> {
       if (dry) return
-      const { error } = await writer
-        .from('jobs')
-        .upsert(rows as never, { onConflict: 'company_id,external_id', ignoreDuplicates: false })
+      const shared = rows.filter((r) => r.employer_id)
+      const own = rows.filter((r) => !r.employer_id)
+      if (shared.length > 0) {
+        // One row per (employer, posting): the first follower's company stays, later reads update it.
+        const { error } = await writer.rpc('upsert_shared_jobs', { p_rows: shared })
+        // Before the contract migration the function does not exist yet: the company's own row is written as it always was.
+        if (error?.code === 'PGRST202') own.push(...shared)
+        else fail(error)
+      }
+      if (own.length > 0) {
+        const { error } = await writer.from('jobs').upsert(own as never, { onConflict: 'company_id,external_id', ignoreDuplicates: false })
+        fail(error)
+      }
+    },
+
+    async keepForPerson({ userId, companyId, externalIds, hiddenIds, targetsVersion, via }): Promise<void> {
+      if (dry || externalIds.length === 0) return
+      const { error } = await client.rpc('sync_person_roles', {
+        p_user: userId,
+        p_company: companyId,
+        p_external_ids: externalIds,
+        p_targets_version: targetsVersion,
+        p_hidden: hiddenIds,
+        ...(via && via !== 'check' ? { p_via: via } : {}),
+      })
+      fail(error)
+    },
+
+    async setCounts(userId, rows): Promise<void> {
+      if (dry) return
+      const { error } = await client.rpc('set_person_counts', { p_user: userId, p_rows: rows })
       fail(error)
     },
 
     async updateJobs(updates: JobUpdate[]): Promise<number> {
       if (dry) return updates.length
       const changed = await mapWithConcurrency(updates, UPDATE_CONCURRENCY, async (u) => {
-        const { data, error } = await writer
+        const byKey = writer
           .from('jobs')
           .update(u.fields as never)
-          .eq('company_id', u.companyId)
+          .eq(u.employerId ? 'employer_id' : 'company_id', u.employerId ?? u.companyId)
           .eq('external_id', u.externalId)
-          .select('id')
+        // A shared row keeps its first storer's company_id: a write keyed by company never reaches one.
+        const { data, error } = await (u.employerId ? byKey : byKey.is('employer_id', null)).select('id')
         fail(error)
         return (data as unknown[] | null)?.length ?? 0
       })
       return changed.reduce((sum, n) => sum + n, 0)
     },
 
-    async recordSightings(companyId, externalIds, sources): Promise<SightingResult> {
+    async recordSightings(companyId, externalIds, sources, employerId): Promise<SightingResult> {
       if (dry) return { seen: 0, reopened: 0, missed: 0, closed: 0 }
-      const { data, error } = await writer.rpc('record_job_sightings', {
-        p_company_id: companyId,
-        p_external_ids: externalIds,
-        p_sources: sources,
-        p_close_after: 2,
-      })
+      // A linked company's read stamps and closes the employer's shared roles, by employer; the company's own rows stay by company.
+      const { data, error } = employerId
+        ? await writer.rpc('record_employer_sightings', { p_employer: employerId, p_external_ids: externalIds, p_sources: sources, p_close_after: 2 })
+        : await writer.rpc('record_job_sightings', { p_company_id: companyId, p_external_ids: externalIds, p_sources: sources, p_close_after: 2 })
       fail(error)
       const r = (data ?? {}) as Partial<SightingResult>
       return { seen: r.seen ?? 0, reopened: r.reopened ?? 0, missed: r.missed ?? 0, closed: r.closed ?? 0 }

@@ -164,12 +164,14 @@ def fetch_rendered(url: str, timeout_ms: int = 30_000) -> str | None:
     try:
         from playwright.sync_api import sync_playwright
 
-        from .polite import USER_AGENT
+        from .polite import USER_AGENT, guard_browser
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             try:
-                page = browser.new_context(user_agent=USER_AGENT).new_page()
+                context = browser.new_context(user_agent=USER_AGENT)
+                guard_browser(context)
+                page = context.new_page()
                 # Career pages commonly fill the list after their first XHR
                 # settles, so waiting for network idle rather than DOMContentLoaded
                 # is what distinguishes a rendered board from the shell we started with.

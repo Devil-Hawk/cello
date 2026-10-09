@@ -65,7 +65,7 @@ import { personio } from '../ats/personio'
 import { eightfold } from '../ats/eightfold'
 import type { JobLead } from '../sources/types'
 import type { Targeting } from '../targeting'
-import type { RoleIntentDef } from '../jobs/role-taxonomy'
+import type { RoleIntentDef } from '../jobs/role-types'
 import { employerDomainFromUrl } from '../sources/util'
 
 // ---------------------------------------------------------------------------

@@ -62,13 +62,16 @@ EVERYTHING HERE IS OFFLINE-TESTABLE
 from __future__ import annotations
 
 import calendar
+import ipaddress
 import logging
 import random as _random
 import re
+import socket
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
+from typing import Any
 from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
@@ -366,6 +369,10 @@ def parse_robots(text: str, user_agent_token: str = USER_AGENT_TOKEN) -> RobotsR
     )
 
 
+_ROBOTS_MAX_HOPS = 4
+_ROBOTS_MAX_BYTES = 500_000
+
+
 def _default_fetcher(url: str, timeout: float = 10.0) -> tuple[int, str]:
     """Fetch a URL with httpx, lazily imported.
 
@@ -380,17 +387,31 @@ def _default_fetcher(url: str, timeout: float = 10.0) -> tuple[int, str]:
         logger.warning("httpx unavailable; cannot read %s", url)
         return (0, "")
 
+    # Redirects are followed by hand: robots.txt is a request to a host the person
+    # typed, so every hop (and the first address) must be public before it is asked.
     try:
-        response = httpx.get(
-            url,
-            timeout=timeout,
-            follow_redirects=True,
-            headers={"User-Agent": USER_AGENT},
-        )
+        with httpx.Client(
+            timeout=timeout, follow_redirects=False, headers={"User-Agent": USER_AGENT}
+        ) as client:
+            current = url
+            for _ in range(_ROBOTS_MAX_HOPS + 1):
+                if not is_public(current):
+                    return (0, "")
+                with client.stream("GET", current) as response:
+                    location = response.headers.get("location")
+                    if response.is_redirect and location:
+                        current = str(httpx.URL(current).join(location))
+                        continue
+                    body = b""
+                    for chunk in response.iter_bytes():
+                        body += chunk
+                        if len(body) >= _ROBOTS_MAX_BYTES:
+                            break
+                    text = body[:_ROBOTS_MAX_BYTES].decode(response.encoding or "utf-8", "replace")
+                    return (response.status_code, text)
     except Exception as exc:  # noqa: BLE001 — any failure degrades to "no answer"
         logger.info("could not read %s: %s", url, exc)
-        return (0, "")
-    return (response.status_code, response.text)
+    return (0, "")
 
 
 @dataclass
@@ -456,6 +477,62 @@ class RobotsCache:
 
     def clear(self) -> None:
         self._entries.clear()
+
+
+def is_public(url: str) -> bool:
+    """Is `url` an http(s) address whose host resolves only to public addresses?
+
+    The same rule as lib/security/untrusted.ts on the TypeScript side: loopback,
+    link-local (the cloud metadata address), private and reserved ranges are not
+    read, however a hostname got there.
+    """
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return False
+    try:
+        infos = socket.getaddrinfo(parts.hostname, parts.port or 443, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return False
+    return bool(infos) and all(ipaddress.ip_address(info[4][0]).is_global for info in infos)
+
+
+def robots_allowed(url: str, robots: RobotsCache | None = None) -> bool:
+    """Does the site's robots.txt let Cello read `url`?"""
+    parts = urlsplit(url)
+    path = parts.path or "/"
+    if parts.query:
+        path += "?" + parts.query
+    return (robots or RobotsCache()).for_url(url).allows(path)
+
+
+def guard_browser(context: Any) -> None:
+    """Hold every request a Playwright browser context makes to the plain fetch's rules.
+
+    The address a page is asked for is checked before the browser is started, but
+    the browser then follows redirects, scripts and clicks on its own. Each request
+    must be a public http(s) address; each page load (a navigation) must also pass
+    robots.txt. Anything else is aborted, so a redirect to an internal host never
+    answers. `context` is a Playwright BrowserContext (typed Any: Playwright is optional).
+    """
+    robots = RobotsCache()
+    public: dict[str, bool] = {}  # per origin: a page loads dozens of assets from a few hosts
+
+    def handler(route: Any) -> None:
+        try:
+            request = route.request
+            url = request.url
+            parts = urlsplit(url)
+            origin = f"{parts.scheme}://{parts.netloc}"
+            if origin not in public:
+                public[origin] = is_public(url)
+            ok = public[origin] and (
+                not request.is_navigation_request() or robots_allowed(url, robots)
+            )
+        except Exception:  # noqa: BLE001 - a request that cannot be judged is refused
+            ok = False
+        route.continue_() if ok else route.abort()
+
+    context.route("**/*", handler)
 
 
 # ---------------------------------------------------------------------------

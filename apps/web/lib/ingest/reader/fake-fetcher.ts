@@ -33,7 +33,8 @@ export function fakeFetcher(routes: Record<string, Route>, mode: 'inline' | 'sch
     allowed,
     spent: () => ({ requests: calls.length, bytes: 0 }),
     async sitemapsOf(origin) {
-      return robotsOf(`${origin}/`)?.getSitemaps() ?? []
+      const named = robotsOf(`${origin}/`)?.getSitemaps() ?? []
+      return named.length ? named : [`${origin}/sitemap.xml`]
     },
     async get(url): Promise<SiteResponse> {
       let current = norm(url)

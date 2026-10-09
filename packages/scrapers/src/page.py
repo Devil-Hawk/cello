@@ -33,18 +33,17 @@ its Actions logs, and an exception message can hold the page's address.
 from __future__ import annotations
 
 import contextlib
-import ipaddress
 import json
 import logging
-import socket
 import sys
-from urllib.parse import urlsplit
 
 import httpx
 
 from . import render
 from .browser_tier import fetch_with_browser_fallback
-from .polite import USER_AGENT, RobotsCache
+from .polite import USER_AGENT
+from .polite import is_public as _is_public
+from .polite import robots_allowed as _allowed
 from .render import fetch_rendered, fetch_with_render_fallback
 
 _USER_AGENT = USER_AGENT
@@ -56,23 +55,6 @@ _MAX_HOPS = 4
 
 class UnsafeRedirect(Exception):  # noqa: N818 - named for what happened, tests and the runner import it
     """A redirect hop that is not a public http(s) address, or that robots.txt closes."""
-
-
-def _is_public(url: str) -> bool:
-    """Is `url` an http(s) address whose host resolves only to public addresses?
-
-    The same rule as lib/security/untrusted.ts on the TypeScript side: loopback,
-    link-local (the cloud metadata address), private and reserved ranges are not
-    read, however a hostname got there.
-    """
-    parts = urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        return False
-    try:
-        infos = socket.getaddrinfo(parts.hostname, parts.port or 443, proto=socket.IPPROTO_TCP)
-    except OSError:
-        return False
-    return bool(infos) and all(ipaddress.ip_address(info[4][0]).is_global for info in infos)
 
 
 def _static_get(url: str) -> tuple[str, str]:
@@ -97,15 +79,6 @@ def _static_get(url: str) -> tuple[str, str]:
     raise UnsafeRedirect("too many redirects")
 
 
-def _allowed(url: str, robots: RobotsCache | None = None) -> bool:
-    """Does the site's robots.txt let Cello read `url`?"""
-    parts = urlsplit(url)
-    path = parts.path or "/"
-    if parts.query:
-        path += "?" + parts.query
-    return (robots or RobotsCache()).for_url(url).allows(path)
-
-
 def fetch_page(url: str, force_render: bool = False) -> dict[str, object]:
     """Fetch `url`; always returns the output dict, never raises.
 
@@ -114,6 +87,8 @@ def fetch_page(url: str, force_render: bool = False) -> dict[str, object]:
     heuristic says (a page can have plenty of text and still build its list in
     the browser).
     """
+    if not _is_public(url):
+        return {"ok": False, "error": "UnsafeUrl"}
     if not _allowed(url):
         return {"ok": False, "error": "RobotsDisallowed"}
     static_html: str | None = None
@@ -122,6 +97,9 @@ def fetch_page(url: str, force_render: bool = False) -> dict[str, object]:
     render_error: str | None = None
     try:
         static_html, final_url = _static_get(url)
+    except UnsafeRedirect:
+        # A hop the plain fetch refused is never handed to the browser.
+        return {"ok": False, "error": "UnsafeRedirect"}
     except Exception as exc:  # noqa: BLE001 - reported by class name only
         first_error = exc
 

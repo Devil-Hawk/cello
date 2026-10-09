@@ -57,8 +57,9 @@ import {
   classifyTitleForIntent,
   keywordsForIntent,
   resolveRoleIntent,
+  roleTypesForIntent,
   type RoleIntentDef,
-} from '../../jobs/role-taxonomy'
+} from '../../jobs/role-types'
 import { discoverJobsViaWebSearch } from '../../search/job-discovery'
 
 const STOPWORDS = new Set([
@@ -369,7 +370,7 @@ export const sourcer: AgentFn = async (ctx) => {
   const notes =
     `sources[${sourceSummary}] leads=${found} newCompanies=${createdCompanies} inserted=${inserted}` +
     (errors.length ? ` errors=${errors.length}` : '') +
-    (intent ? ` intent=${intent.id}` : ' intent=none') +
+    (intent ? ` intent=${intent.id} types=${roleTypesForIntent(intent.id).join('+')}` : ' intent=none') +
     ` | ${roundLog.join(' | ')}`
 
   return {

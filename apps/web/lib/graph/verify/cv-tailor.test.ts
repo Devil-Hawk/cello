@@ -66,7 +66,7 @@ const { verifyCvTailorDraft, CvTailorContainmentError } = await import('./cv-tai
 const { MissingKeyError } = await import('../../harness/llm')
 const { BudgetCapError } = await import('../../harness/spend')
 
-// --- fake admin: only `jobs` and `profiles`, both single-row reads ---------
+// --- fake admin: only `person_jobs` and `profiles`, both single-row reads ---------
 
 function fakeAdmin() {
   const query = (data: unknown) => ({
@@ -76,7 +76,7 @@ function fakeAdmin() {
   })
   return {
     from: (table: string) => {
-      if (table === 'jobs') return query({ title: 'Staff Engineer', description: 'Build things.', companies: { name: 'Acme' } })
+      if (table === 'person_jobs') return query({ title: 'Staff Engineer', description: 'Build things.', viewer_company_name: 'Acme' })
       if (table === 'profiles') return query({ resume_text: 'Senior engineer with 8 years of Go.' })
       throw new Error(`fake admin: unhandled table "${table}"`)
     },

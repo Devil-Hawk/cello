@@ -6,7 +6,7 @@ import { makeSupabaseAtsStore } from '@/lib/ats/store'
 import { staticFetchPage } from '@/lib/ingest/fetch-page'
 import { ingestCompany, type DueCompany, type FailureReason } from '@/lib/ingest/run'
 import { loadTargets } from '@/lib/ingest/reader/targets'
-import { firstTickAtOrAfter } from '@/lib/companies/roles-status'
+import { checksStatus } from '@/lib/clock/status'
 
 // The in-app twin of the scheduled check, for one company: the job board when it
 // has one, else the one reader (lib/ingest/reader). It is the same code the
@@ -35,6 +35,7 @@ const REASON_MESSAGE: Record<FailureReason, string> = {
   unreachable: 'Its careers site did not answer. Try again in a few minutes.',
   role_pages: 'Its site lists roles, but their pages cannot be read without a browser. Cello will not report them as no roles.',
   render_failed: "Cello's browser could not read its careers page just now. The next scheduled check tries again.",
+  budget: 'Its site is large. Cello read as much as one check allows and the next scheduled check reads more.',
   time: 'Not reached this time.',
 }
 
@@ -95,11 +96,18 @@ export async function POST(request: NextRequest) {
     rendered: 'its careers page',
     model: 'its careers page',
   }
-  const nextTick = new Date(firstTickAtOrAfter(Date.now())).toISOString().slice(11, 16)
+  // The next check is the clock's own record, never a guess; without one the sentence leaves the time out.
+  let nextCheck: string | null = null
+  if (outcome.reading) {
+    const checks = await checksStatus(supabase, admin).catch(() => null)
+    nextCheck = checks?.rolesCheck?.nextDueAt ? new Date(checks.rolesCheck.nextDueAt).toISOString().slice(11, 16) : null
+  }
   const message = outcome.message
     ? outcome.message
     : outcome.reading
-      ? `Cello is reading this site. Next check around ${nextTick} UTC.`
+      ? nextCheck
+        ? `Cello is reading this site. Next check around ${nextCheck} UTC.`
+        : 'Cello is reading this site.'
       : failure
         ? REASON_MESSAGE[failure]
         : result.found > 0

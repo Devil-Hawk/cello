@@ -25,7 +25,7 @@ function world() {
         { id: 'k1', user_id: 'u1', name: 'Dana Lee', email: 'dana@stripe.com', company_id: 'c1' },
         { id: 'k2', user_id: 'u1', name: 'No Email', email: null, company_id: 'c1' },
       ],
-      jobs: [{ id: 'j1', company_id: 'c1', title: 'PM', companies: { user_id: 'u1' } }],
+      person_jobs: [{ id: 'j1', viewer_id: 'u1', company_id: 'c1', title: 'PM' }],
       outreach_messages: [],
       application_drafts: [],
       approvals: [],

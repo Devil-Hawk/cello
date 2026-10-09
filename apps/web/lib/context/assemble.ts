@@ -115,7 +115,7 @@ export async function buildMatchContext(admin: AdminClient, userId: string, comp
       console.error(`[context] assemble: getDossierByCompany failed for company=${companyId}: ${errMsg(e)}`)
       return null
     }),
-    trackedRoleCount(admin, companyId),
+    trackedRoleCount(admin, userId, companyId),
     timelineFor(admin, userId, { companyId }, MATCH_INTERACTIONS_LIMIT).catch((e: unknown) => {
       console.error(`[context] assemble: timelineFor failed for company=${companyId}: ${errMsg(e)}`)
       return [] as InteractionRow[]

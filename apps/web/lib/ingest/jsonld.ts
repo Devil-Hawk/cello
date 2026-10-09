@@ -82,11 +82,15 @@ function salaryOf(node: Json): string | undefined {
   return `${currency} ${range}${PERIOD[unit] ? ` / ${PERIOD[unit]}` : ''}`
 }
 
-function descriptionOf(raw: unknown): string | undefined {
+/** The description as HTML: what the employer declared, with markup a site escaped once more (&lt;p&gt;) made real again. */
+function descriptionHtmlOf(raw: unknown): string | undefined {
   if (typeof raw !== 'string' || !raw.trim()) return undefined
-  // Some sites escape the markup once more, so the tags arrive as &lt;p&gt;.
-  const html = !raw.includes('<') && /&lt;\w/.test(raw) ? cheerio.load(`<i>${raw}</i>`)('i').text() : raw
-  return htmlToPlainText(html)
+  return !raw.includes('<') && /&lt;\w/.test(raw) ? cheerio.load(`<i>${raw}</i>`)('i').text() : raw
+}
+
+function descriptionOf(raw: unknown): string | undefined {
+  const html = descriptionHtmlOf(raw)
+  return html ? htmlToPlainText(html) : undefined
 }
 
 function slug(s: string): string {
@@ -113,6 +117,30 @@ function isoDate(v: unknown): string | undefined {
   return Number.isNaN(t) ? undefined : new Date(t).toISOString()
 }
 
+/** JSON.parse, and on failure once more with raw line breaks and tabs inside strings escaped (Kaiser Permanente's posting data has them; strict JSON does not allow them). */
+function parseLoose(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch (first) {
+    let out = ''
+    let inString = false
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i]
+      if (inString && c === '\\') out += c + (text[++i] ?? '')
+      else if (c === '"') {
+        inString = !inString
+        out += c
+      } else if (inString && c < ' ') out += c === '\n' ? '\\n' : c === '\r' ? '\\r' : c === '\t' ? '\\t' : ' '
+      else out += c
+    }
+    try {
+      return JSON.parse(out)
+    } catch {
+      throw first
+    }
+  }
+}
+
 /**
  * The postings a page declares. A posting without its own url gets the page's
  * URL with a fragment from its title, so two of them stay two jobs instead of
@@ -129,7 +157,7 @@ export function readJobPostings(html: string, pageUrl: string): AtsJob[] {
   const nodes: Json[] = []
   $('script[type="application/ld+json"]').each((_, el) => {
     try {
-      collect(JSON.parse($(el).contents().text().trim()), nodes)
+      collect(parseLoose($(el).contents().text().trim()) as Json, nodes)
     } catch {
       /* one bad block must not hide the others */
     }
@@ -162,6 +190,7 @@ export function readJobPostings(html: string, pageUrl: string): AtsJob[] {
     seen.add(externalId)
     const location = locationOf(node)
     const description = descriptionOf(node.description)
+    const descriptionHtml = descriptionHtmlOf(node.description)
     const salary = salaryOf(node)
     const postedAt = isoDate(node.datePosted)
     const validThrough = isoDate(node.validThrough)
@@ -173,6 +202,7 @@ export function readJobPostings(html: string, pageUrl: string): AtsJob[] {
       externalId,
       ...(location ? { location } : {}),
       ...(description ? { description } : {}),
+      ...(descriptionHtml ? { descriptionHtml, descriptionSource: 'jsonld' as const } : {}),
       ...(salary ? { salary } : {}),
       ...(postedAt ? { postedAt } : {}),
       ...(validThrough ? { validThrough } : {}),

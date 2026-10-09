@@ -508,7 +508,7 @@ describe('isDue', () => {
     expect(isDue({ last_scraped_at: ago(5), is_dream_company: false, scrape_frequency: null, metadata: reading }, now)).toBe(true)
     const checked = { source_check: { checked_at: ago(5), readable: false, reason: 'bot_check' } }
     expect(isDue({ last_scraped_at: null, is_dream_company: false, scrape_frequency: null, metadata: checked }, now)).toBe(false)
-    for (const reason of ['render_failed', 'read_failed']) {
+    for (const reason of ['render_failed', 'read_failed', 'budget']) {
       const failed = { source_check: { checked_at: ago(5), readable: false, reason } }
       expect(isDue({ last_scraped_at: ago(5), is_dream_company: false, scrape_frequency: null, metadata: failed }, now)).toBe(true)
     }

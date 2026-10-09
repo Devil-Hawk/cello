@@ -10,6 +10,7 @@
 // seen), and only a few pages per refresh. Pages already read are remembered
 // (`checked`), so the next pass reads only what is new.
 
+import * as cheerio from 'cheerio'
 import type { AtsJob } from '../../ats/types'
 import { mapWithConcurrency } from '../../ats/concurrency'
 import { normalizeJobUrl } from '../snapshot'
@@ -32,15 +33,22 @@ const SITEMAP_WORDS = /job|career|position|opening|vacanc/i
 /** Pages fetched per refresh: the budget decides how fast a big site is covered. */
 export const DETAIL_PER_READ = { inline: 10, scheduled: 60 } as const
 
+/** The `<url>` or `<sitemap>` entries of a sitemap, read as XML: entities decoded, CDATA and namespaces handled. */
 function locs(xml: string, tag: 'url' | 'sitemap'): SitemapEntry[] {
   const out: SitemapEntry[] = []
-  for (const m of xml.matchAll(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'g'))) {
-    const url = /<loc>\s*([^<\s]+)\s*<\/loc>/.exec(m[1])?.[1]?.replace(/&amp;/g, '&')
-    if (!url) continue
-    const lastmod = /<lastmod>\s*([^<\s]+)\s*<\/lastmod>/.exec(m[1])?.[1]
-    out.push({ url, ...(lastmod ? { lastmod } : {}) })
-    if (out.length >= MAX_ENTRIES) break
+  let $: cheerio.CheerioAPI
+  try {
+    $ = cheerio.load(xml, { xml: true })
+  } catch {
+    return out
   }
+  $(tag).each((_, el) => {
+    if (out.length >= MAX_ENTRIES) return false
+    const url = $(el).children('loc').first().text().trim()
+    if (!url || /\s/.test(url)) return
+    const lastmod = $(el).children('lastmod').first().text().trim()
+    out.push({ url, ...(lastmod && !/\s/.test(lastmod) ? { lastmod } : {}) })
+  })
   return out
 }
 
@@ -56,7 +64,12 @@ const numericId = (url: string): number => {
 
 /** The words in a URL's last path segment ("4721503005-art-director" -> "art director"); empty when it is only an id. */
 const slugWords = (url: string): string => {
-  const last = new URL(url).pathname.split('/').filter(Boolean).pop() ?? ''
+  const parts = new URL(url).pathname.split('/').filter(Boolean)
+  // /job/oakland/medical-assistant/641/101619510336 puts the slug before the ids: skip trailing all-number segments, and take that segment only when it is a slug (has a hyphen), never a bare word like "jobs".
+  let at = parts.length - 1
+  while (at > 0 && /^\d+$/.test(parts[at])) at--
+  const seg = parts[at] ?? ''
+  const last = at === parts.length - 1 || seg.includes('-') ? seg : ''
   return wordsOf(decodeURIComponent(last).replace(/\d+/g, ' ')).join(' ')
 }
 
@@ -89,7 +102,9 @@ export async function readSitemapEntries(origin: string, f: SiteFetcher): Promis
   const jobby = named.filter((u) => SITEMAP_WORDS.test(u))
   // On a careers host (careers.walmart.com) every sitemap is about jobs; on a company's main site only the job ones are.
   const careersHost = /career|(^|\.)jobs?\./i.test(new URL(origin).hostname)
-  const wanted = careersHost && !jobby.length ? named : jobby
+  // A lone /sitemap.xml that robots.txt did not name (the standard address, offered when it names none) is the whole site's list: job words in its file name cannot be asked of it, isPostingUrl picks out the roles.
+  const standardOnly = all.length === 1 && all[0] === `${new URL(origin).origin}/sitemap.xml`
+  const wanted = (careersHost || standardOnly) && !jobby.length ? named : jobby
   const queue = wanted.slice(0, MAX_SITEMAPS)
   const entries: SitemapEntry[] = []
   // Anything left unread (a sitemap past the limit, a gzipped one, entries past the cap) means the list is not the whole list.

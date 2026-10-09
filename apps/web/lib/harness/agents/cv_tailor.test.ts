@@ -27,7 +27,7 @@ function ctx(llmContent: unknown, over: { description?: string | null; companyId
   const query = (data: unknown) => ({ select: () => query(data), eq: () => query(data), single: async () => ({ data, error: null }) })
   const admin = {
     from: (table: string) =>
-      table === 'jobs'
+      table === 'person_jobs'
         ? query({
             id: 'job-1',
             title: 'Senior Backend Engineer',
@@ -35,7 +35,7 @@ function ctx(llmContent: unknown, over: { description?: string | null; companyId
             location: 'Remote',
             url: null,
             company_id: over.companyId === undefined ? 'co-1' : over.companyId,
-            companies: { name: 'Ramp' },
+            viewer_company_name: 'Ramp',
           })
         : query({ resume_text: RESUME }),
   }

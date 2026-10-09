@@ -102,4 +102,13 @@ describe('readJobPostings', () => {
     expect(readJobPostings(page(tag({ '@type': 'Organization', name: 'Acme' })), PAGE)).toEqual([])
     expect(readJobPostings('<html></html>', PAGE)).toEqual([])
   })
+
+  it('reads posting data with raw line breaks and tabs inside a string (Kaiser Permanente)', () => {
+    const raw = '{"@type":"JobPosting","title":"Medical Assistant","description":"<p>Line one</p>\n\t<p>Line two</p>","datePosted":"2026-10-6"}'
+    expect(() => JSON.parse(raw)).toThrow()
+    const jobs = readJobPostings(page(tag(raw)), PAGE)
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0].title).toBe('Medical Assistant')
+    expect(jobs[0].description).toContain('Line two')
+  })
 })

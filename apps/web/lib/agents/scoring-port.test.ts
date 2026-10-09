@@ -9,10 +9,9 @@ import { makeFakeAdmin, type FakeAdmin } from './testing/fake-admin'
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString()
 
-/** One person_roles row: the person's own verdict on a role, with the posting embedded. */
+/** One role as the person reads it (person_jobs): the posting, their own company for it, and their verdict on it. */
 const role = (id: string, over: Record<string, unknown> = {}, posting: Record<string, unknown> = {}) => ({
   user_id: 'u1',
-  job_id: id,
   hidden_reason: null,
   assessed_at: null,
   blocked_reasons: [],
@@ -21,20 +20,19 @@ const role = (id: string, over: Record<string, unknown> = {}, posting: Record<st
   want_detail: null,
   chance: null,
   chance_detail: null,
-  jobs: {
-    id,
-    title: `Role ${id}`,
-    company_id: `c-${id}`,
-    location: 'Seattle, WA',
-    posted_at: daysAgo(Number(id.replace(/\D/g, '')) || 1),
-    url: `https://x.test/${id}`,
-    description: 'Build things.',
-    is_new: true,
-    still_open: true,
-    salary_range: null,
-    companies: { user_id: 'u1', name: `Company ${id}`, is_dream_company: false },
-    ...posting,
-  },
+  id,
+  title: `Role ${id}`,
+  viewer_company_id: `c-${id}`,
+  viewer_company_name: `Company ${id}`,
+  dream: false,
+  location: 'Seattle, WA',
+  posted_at: daysAgo(Number(id.replace(/\D/g, '')) || 1),
+  url: `https://x.test/${id}`,
+  description: 'Build things.',
+  is_new: true,
+  still_open: true,
+  salary_range: null,
+  ...posting,
   ...over,
 })
 
@@ -52,8 +50,27 @@ const assessed = (id: string, chance: string, want: number, over: Record<string,
     posting
   )
 
+/** The view the shortlist reads, the person_roles rows a reaction writes, and the companies a dream filter looks up. */
 function setup(rows: Record<string, unknown>[]): FakeAdmin {
-  return makeFakeAdmin({ person_roles: rows, role_reactions: [], applications: [] })
+  return makeFakeAdmin({
+    person_jobs: rows.map(({ user_id, ...r }) => ({ viewer_id: user_id, ...r })),
+    person_roles: rows.map((r) => ({
+      user_id: r.user_id,
+      job_id: r.id,
+      hidden_reason: r.hidden_reason,
+      assessed_at: r.assessed_at,
+      blocked_reasons: r.blocked_reasons,
+      want_p: r.want_p,
+      want_reason: r.want_reason,
+      want_detail: r.want_detail,
+      chance: r.chance,
+      chance_detail: r.chance_detail,
+    })),
+    companies: rows.map((r) => ({ id: r.viewer_company_id, user_id: r.user_id, is_dream_company: r.dream === true })),
+    jobs: rows.map((r) => ({ id: r.id, title: r.title })),
+    role_reactions: [],
+    applications: [],
+  })
 }
 
 const base = { userId: 'u1', apiKeys: { openrouter: 'k', userId: 'u1' } }
@@ -91,7 +108,7 @@ describe('shortlistFor', () => {
     const admin = setup([
       assessed('j1', 'strong', 0.9, {}, { location: 'Austin, TX' }),
       assessed('j2', 'strong', 0.8),
-      assessed('j3', 'strong', 0.7, {}, { location: 'Remote', companies: { user_id: 'u1', name: 'Dream Co', is_dream_company: true } }),
+      assessed('j3', 'strong', 0.7, {}, { location: 'Remote', viewer_company_name: 'Dream Co', dream: true }),
     ])
     expect((await shortlistFor({ ...base, admin, limit: 5, location: 'seattle' })).picks.map((p) => p.jobId)).toEqual(['j2'])
     expect((await shortlistFor({ ...base, admin, limit: 5, remoteOnly: true })).picks.map((p) => p.jobId)).toEqual(['j3'])
@@ -99,7 +116,7 @@ describe('shortlistFor', () => {
   })
 
   it("never shows another person's roles", async () => {
-    const admin = setup([assessed('j1', 'strong', 0.9, { user_id: 'someone-else' }), assessed('j2', 'strong', 0.9, {}, { companies: { user_id: 'someone-else', name: 'X', is_dream_company: false } })])
+    const admin = setup([assessed('j1', 'strong', 0.9, { user_id: 'someone-else' }), assessed('j2', 'strong', 0.9, { user_id: 'someone-else', hidden_reason: null })])
     expect((await shortlistFor({ ...base, admin, limit: 5 })).picks).toEqual([])
   })
 

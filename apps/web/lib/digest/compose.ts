@@ -11,7 +11,7 @@
 // own companies).
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { OnJobs } from '@/lib/scoring/person-roles-query'
+import { personJobs } from '@/lib/jobs/person-jobs'
 import { resolveOutreachPreferences } from '@/lib/outreach/types'
 import { buildDigest, type DigestState } from './build'
 import type { ComposedDigest } from './types'
@@ -49,7 +49,7 @@ export async function loadDigestState(admin: SupabaseClient, userId: string, now
   const jobIds = [...new Set(outreach.map((m) => str(m.job_id)).filter((v): v is string => !!v))]
   const titleOf = new Map<string, string>()
   if (jobIds.length > 0) {
-    const { data: titles } = await admin.from('jobs').select('id, title').in('id', jobIds.slice(0, 500))
+    const { data: titles } = await personJobs(admin).select('id, title').eq('viewer_id', userId).in('id', jobIds.slice(0, 500))
     for (const t of (titles as { id: string; title: string }[] | null) ?? []) titleOf.set(t.id, t.title)
   }
   const who = (m: Row) => str(m.to_name) ?? str(m.to_email)
@@ -64,41 +64,32 @@ export async function loadDigestState(admin: SupabaseClient, userId: string, now
   // Roles discovered recently, and everything the user has applied to.
   const { data: appData } = await admin
     .from('applications')
-    .select('id, job_id, stage, updated_at, applied_at, jobs(id, title, company_id)')
+    .select('id, job_id, stage, updated_at, applied_at, jobs(id, title, company_id, employer:company_directory(name))')
     .eq('user_id', userId)
-  const apps = (appData as unknown as (Row & { jobs: { id: string; title: string; company_id: string } | null })[] | null) ?? []
+  const apps = (appData as unknown as (Row & { jobs: { id: string; title: string; company_id: string | null; employer: { name: string | null } | null } | null })[] | null) ?? []
   const appliedJobIds = new Set(apps.map((a) => str(a.job_id)).filter((v): v is string => !!v))
 
-  // The roles this person was shown in the last week: their own rows (their want and
-  // their chance are on them) with the posting embedded.
-  const on = new OnJobs(
-    admin
-      .from('person_roles')
-      .select('chance, want_p, want_reason, jobs!inner(id, title, url, still_open, discovered_at, company_id)')
-      .eq('user_id', userId)
-      .is('hidden_reason', null)
-  )
-  on.gte('discovered_at', new Date(now - NEW_ROLE_DAYS * DAY_MS).toISOString())
-  const { data: roleData } = await on.query.order('want_p', { ascending: false, nullsFirst: false }).limit(40)
-  type PostingRow = { id: string; title: string; url: string | null; still_open: boolean | null; discovered_at: string | null; company_id: string }
-  const roles: DigestState['roles'] = ((roleData as unknown as { chance: string | null; want_p: number | null; want_reason: string | null; jobs: PostingRow | PostingRow[] | null }[] | null) ?? []).flatMap((r) => {
-    const j = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs
-    if (!j) return []
-    return [
-      {
-        id: j.id,
-        title: j.title,
-        company: companyName.get(j.company_id) ?? null,
-        url: str(j.url),
-        chance: r.chance,
-        want: typeof r.want_p === 'number' ? r.want_p : null,
-        reason: str(r.want_reason),
-        discoveredAt: str(j.discovered_at) ?? new Date(now).toISOString(),
-        stillOpen: typeof j.still_open === 'boolean' ? j.still_open : null,
-        hasApplication: appliedJobIds.has(j.id),
-      },
-    ]
-  })
+  // The roles this person was shown in the last week: their own rows (their company, their want and their chance).
+  const { data: roleData } = await personJobs(admin)
+    .select('id, title, url, still_open, discovered_at, viewer_company_name, chance, want_p, want_reason')
+    .eq('viewer_id', userId)
+    .is('hidden_reason', null)
+    .gte('discovered_at', new Date(now - NEW_ROLE_DAYS * DAY_MS).toISOString())
+    .order('want_p', { ascending: false, nullsFirst: false })
+    .limit(40)
+  type RoleRow = { id: string; title: string; url: string | null; still_open: boolean | null; discovered_at: string | null; viewer_company_name: string | null; chance: string | null; want_p: number | null; want_reason: string | null }
+  const roles: DigestState['roles'] = ((roleData as unknown as RoleRow[] | null) ?? []).map((r) => ({
+    id: r.id,
+    title: r.title,
+    company: r.viewer_company_name,
+    url: str(r.url),
+    chance: r.chance,
+    want: typeof r.want_p === 'number' ? r.want_p : null,
+    reason: str(r.want_reason),
+    discoveredAt: str(r.discovered_at) ?? new Date(now).toISOString(),
+    stillOpen: typeof r.still_open === 'boolean' ? r.still_open : null,
+    hasApplication: appliedJobIds.has(r.id),
+  }))
 
   return {
     companyCount: companies.length,
@@ -123,7 +114,7 @@ export async function loadDigestState(admin: SupabaseClient, userId: string, now
       id: a.id as string,
       stage: a.stage as string,
       title: a.jobs?.title ?? 'Untitled role',
-      company: a.jobs?.company_id ? companyName.get(a.jobs.company_id) ?? null : null,
+      company: (a.jobs?.company_id ? companyName.get(a.jobs.company_id) : null) ?? a.jobs?.employer?.name ?? null,
       appliedAt: str(a.applied_at),
       updatedAt: (str(a.updated_at) ?? new Date(now).toISOString()),
     })),

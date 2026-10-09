@@ -9,7 +9,6 @@ import type { AdminClient } from '../harness/types'
 import type { JobLead } from './types'
 
 const COMPANY_ID = 'company-1'
-const EMPTY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e'
 
 interface Update {
   fields: Record<string, unknown>
@@ -35,7 +34,7 @@ function fakeAdmin(existing: { id: string; external_id: string; url: string; des
           },
         }
       }
-      if (table === 'jobs') {
+      if (table === 'jobs' || table === 'person_jobs') {
         return {
           select() {
             const b = {
@@ -96,7 +95,7 @@ function lead(over: Partial<JobLead> = {}): JobLead {
 describe('ingestLeads: jobs that are already stored', () => {
   it('fills a stored job that has no description and leaves one that has a description alone', async () => {
     const { admin, updates } = fakeAdmin([
-      { id: 'job-empty', external_id: 'remoteok-1', url: 'https://example.com/jobs/1', description_md5: EMPTY_MD5 },
+      { id: 'job-empty', external_id: 'remoteok-1', url: 'https://example.com/jobs/1', description_md5: null },
       { id: 'job-full', external_id: 'remoteok-2', url: 'https://example.com/jobs/2', description_md5: 'abc123' },
     ])
     const res = await ingestLeads(admin, 'user-1', [
@@ -110,7 +109,7 @@ describe('ingestLeads: jobs that are already stored', () => {
     // The guard that keeps a board's text from being overwritten.
     expect(fill[0].eq).toContainEqual(['description', ''])
     expect(fill[0].fields.description).toContain('Own the payments service.')
-    expect(fill[0].fields.requirements).toMatchObject({ version: 1 })
+    expect(fill[0].fields.requirements).toMatchObject({ version: 2 })
     expect(updates.some((u) => (u.eq as unknown[]).some((e) => JSON.stringify(e) === JSON.stringify(['id', 'job-full'])))).toBe(false)
   })
 
@@ -133,7 +132,7 @@ describe('ingestLeads: jobs that are already stored', () => {
     await ingestLeads(admin, 'user-1', [lead()])
     expect(inserted).toHaveLength(1)
     expect(typeof inserted[0].last_seen_at).toBe('string')
-    expect(inserted[0].requirements).toMatchObject({ version: 1, skills_resolved: true })
+    expect(inserted[0].requirements).toMatchObject({ version: 2, skills_resolved: true })
     expect(inserted[0].requirements_extracted_at).toBeTruthy()
   })
 })
