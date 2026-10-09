@@ -114,7 +114,8 @@ export async function runChatTurn(
   let settled: Settled
   try {
     settled = await settleAnswer(ask, () => ({ attached, results }))
-  } catch {
+  } catch (e) {
+    console.error('chat answer failed', e)
     return { ok: false, turnId, error: 'Cello could not finish this. Nothing was changed.', fix: 'Try again.' }
   }
   const out = last as AgentOutput | null

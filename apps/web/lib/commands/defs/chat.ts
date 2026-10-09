@@ -34,6 +34,7 @@ export const rolesFind = defineCommand({
     words: z.string().max(100).optional(),
     interested: z.boolean().optional(),
     limit: z.number().int().min(1).max(MAX_FOUND).default(5),
+    order: z.enum(['newest', 'ranked']).optional(),
   }),
   output: z.object({ sentence: codeText(400), matched: z.number().int(), things }),
   callers: ['chat'],

@@ -10,6 +10,7 @@ import { freeModels } from '@/lib/models/free'
 import { chatAgent } from './agent'
 import { recall, type RecallHit } from './recall'
 import { readSettings } from './settings'
+import { routedAgent } from './route'
 import { recallInWordsOn } from './shown'
 import { runChatTurn } from './turn'
 import { finishWorker, isStopped, openWorker, STOP_POLL_MS } from './workers'
@@ -36,13 +37,16 @@ export async function runStoredTurn(db: AdminClient, userId: string, chatId: str
   const stop = new AbortController()
   const timer = setInterval(() => void isStopped(db, root).then((yes) => yes && stop.abort()), STOP_POLL_MS)
   try {
+    const loop = chatAgent({ db, userId, keys, isDemo: keys.isDemo !== false, ran: view.ran, signal: stop.signal })
+    const names = async () => (((await db.from('companies').select('name').eq('user_id', userId).limit(200)).data as { name: string }[] | null) ?? []).map((c) => c.name)
     const out = await runChatTurn(
-      { db, agent: chatAgent({ db, userId, keys, isDemo: keys.isDemo !== false, ran: view.ran, signal: stop.signal }), store: getMemoryStore(), isDemo: keys.isDemo !== false },
+      { db, agent: routedAgent({ db, userId, keys, ran: view.ran, signal: stop.signal }, loop, names), store: getMemoryStore(), isDemo: keys.isDemo !== false },
       { userId, chatId, typed, quoted: turn.quoted ?? null, recalled, turnId: turn.id }
     )
     if (!out.ok) await leaveLine(db, userId, chatId, stop.signal.aborted ? 'Stopped. Nothing was changed.' : `${out.error} ${out.fix}`)
     await finishWorker(db, root, { status: stop.signal.aborted ? 'stopped' : out.ok ? 'done' : 'failed' })
-  } catch {
+  } catch (e) {
+    console.error('chat turn failed', e)
     await leaveLine(db, userId, chatId, stop.signal.aborted ? 'Stopped. Nothing was changed.' : 'Cello could not finish this. Nothing was changed. Try again.')
     await finishWorker(db, root, { status: stop.signal.aborted ? 'stopped' : 'failed' })
   } finally {

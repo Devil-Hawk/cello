@@ -44,6 +44,8 @@ export interface FindRolesInput {
   /** Only the roles the person marked Interested. */
   interested?: boolean
   limit: number
+  /** newest posting first (a search), or the Roles page's own ranking: the stored want, then the newest (a "top three"). */
+  order?: 'newest' | 'ranked'
 }
 
 interface Row {
@@ -58,7 +60,6 @@ interface Row {
   employer_id: string | null
 }
 
-const RANK = { strong: 3, possible: 2, stretch: 1 } as const
 const day = (iso: string | null) => (iso ? iso.slice(0, 10) : null)
 const WORDS = /[\p{L}\p{N}+#.]{2,}/gu
 
@@ -93,19 +94,20 @@ export async function findRoles(db: AdminClient, userId: string, input: FindRole
   const ids = rows.map((r) => r.id).slice(0, 300)
   const employerIds = [...new Set(rows.filter((r) => !r.viewer_company_name && r.employer_id).map((r) => r.employer_id as string))].slice(0, 100)
   const [chances, employers] = await Promise.all([
-    ids.length ? db.from('person_roles').select('job_id, chance').eq('user_id', userId).in('job_id', ids.slice(0, 300)) : null,
+    ids.length ? db.from('person_roles').select('job_id, chance, want_p').eq('user_id', userId).in('job_id', ids.slice(0, 300)) : null,
     employerIds.length ? db.from('company_directory').select('id, name').in('id', employerIds.slice(0, 100)) : null,
   ])
-  const chanceOf = new Map(((chances?.data as { job_id: string; chance: string | null }[] | null) ?? []).map((c) => [c.job_id, c.chance]))
+  const stored = (chances?.data as { job_id: string; chance: string | null; want_p: number | null }[] | null) ?? []
+  const chanceOf = new Map(stored.map((c) => [c.job_id, c.chance]))
+  const wantOf = new Map(stored.map((c) => [c.job_id, c.want_p ?? -1]))
   const employerName = new Map(((employers?.data as { id: string; name: string }[] | null) ?? []).map((e) => [e.id, e.name]))
   const chanceFor = (id: string): Thing['chance'] => {
     const c = chanceOf.get(id)
     return c === 'strong' || c === 'possible' || c === 'stretch' ? c : null
   }
-  const score = (id: string) => RANK[chanceFor(id) ?? 'stretch'] - (chanceFor(id) === null ? 1 : 0)
-
-  // Best chance first, then the newest posting.
-  const ranked = [...rows].sort((a, b) => score(b.id) - score(a.id) || (b.posted_at ?? '').localeCompare(a.posted_at ?? ''))
+  const newest = (a: Row, b: Row) => (b.posted_at ?? '').localeCompare(a.posted_at ?? '')
+  // ponytail: ranked reads only the first 300 matches' want, which is the page the Roles list shows first as well.
+  const ranked = [...rows].sort(input.order === 'ranked' ? (a, b) => (wantOf.get(b.id) ?? -1) - (wantOf.get(a.id) ?? -1) || newest(a, b) : newest)
   const things: Thing[] = ranked.slice(0, limit).map((r) => ({
     kind: 'role',
     id: r.id,
