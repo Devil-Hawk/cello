@@ -87,7 +87,7 @@ describe('createCelloAgent', () => {
     const dir = skills()
     mkdirSync(path.join(dir, 'role-fit'))
     writeFileSync(path.join(dir, 'role-fit', 'SKILL.md'), '---\nname: role-fit\ndescription: Judge how well a role fits the person.\n---\n# Role fit\nSay Strong, Possible or Stretch.\n')
-    const { agent, model } = build({ skillsDir: dir })
+    const { agent, model } = build({ skillsDir: dir, hiddenSkills: [] })
     await (agent as unknown as { invoke: (i: unknown, c: unknown) => Promise<unknown> }).invoke({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: 't-skills' } })
     const content = model.calls[0][0].content
     const system = typeof content === 'string' ? content : content.map((b) => (b as { text?: string }).text ?? '').join('')
@@ -95,8 +95,8 @@ describe('createCelloAgent', () => {
     expect(system).toContain('Judge how well a role fits the person.')
   })
 
-  it('shows the orchestrator all nine real skills, by name and description', async () => {
-    const { agent, model } = build({ skillsDir: path.join(process.cwd(), 'skills') })
+  it('shows the orchestrator all nine real skills, by name and description, when none is switched off', async () => {
+    const { agent, model } = build({ skillsDir: path.join(process.cwd(), 'skills'), hiddenSkills: [] })
     await (agent as unknown as { invoke: (i: unknown, c: unknown) => Promise<unknown> }).invoke({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: 't-real-skills' } })
     const content = model.calls[0][0].content
     const system = typeof content === 'string' ? content : content.map((b) => (b as { text?: string }).text ?? '').join('')

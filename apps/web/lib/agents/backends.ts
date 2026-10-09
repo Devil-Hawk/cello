@@ -267,7 +267,18 @@ export class MemoriesBackend implements BackendProtocolV2 {
  * each one missed; "cannot read" counts as both. A skill comes back by earning its bars in a new run
  * and leaving this list. lib/agents/skills-off.test.ts fails if this list and the report disagree.
  */
-export const SKILLS_OFF: Readonly<Record<string, readonly ('trigger' | 'checks')[]>> = {}
+export const SKILLS_OFF: Readonly<Record<string, readonly ('trigger' | 'checks')[]>> = {
+  // S19, 2026-10-07, nemotron-3-super, nemotron-3-ultra and nemotron-3.5-lightning (the others answered 429).
+  'cold-outreach': ['trigger', 'checks'],
+  'cover-letter': ['trigger', 'checks'],
+  negotiation: ['trigger', 'checks'],
+  'company-research': ['trigger'],
+  'follow-up': ['trigger'],
+  'role-fit': ['trigger'],
+  'search-strategy': ['trigger'],
+  'tailor-resume': ['trigger'],
+  'visa-sponsorship': ['trigger'],
+}
 
 /** apps/web/skills as read-only files, without the skills that are switched off. */
 export class ReadOnlySkills implements BackendProtocolV2 {

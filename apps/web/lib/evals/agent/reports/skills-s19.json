@@ -1,0 +1,537 @@
+{
+  "label": "s19",
+  "summary": {
+    "trigger": 0.37037037037037035,
+    "checks": 0.825
+  },
+  "perSkill": [
+    {
+      "skill": "cold-outreach",
+      "trigger": 0.3333333333333333,
+      "checks": 0.8,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger",
+        "checks"
+      ],
+      "off": false
+    },
+    {
+      "skill": "company-research",
+      "trigger": 0.3333333333333333,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger"
+      ],
+      "off": false
+    },
+    {
+      "skill": "cover-letter",
+      "trigger": 0.3333333333333333,
+      "checks": 0.8333333333333334,
+      "errors": 1,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger",
+        "checks"
+      ],
+      "off": false
+    },
+    {
+      "skill": "follow-up",
+      "trigger": 0.3333333333333333,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger"
+      ],
+      "off": false
+    },
+    {
+      "skill": "negotiation",
+      "trigger": 0.6666666666666666,
+      "checks": 0.875,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger",
+        "checks"
+      ],
+      "off": false
+    },
+    {
+      "skill": "role-fit",
+      "trigger": 0.3333333333333333,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger"
+      ],
+      "off": false
+    },
+    {
+      "skill": "search-strategy",
+      "trigger": 0.3333333333333333,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger"
+      ],
+      "off": false
+    },
+    {
+      "skill": "tailor-resume",
+      "trigger": 0.3333333333333333,
+      "checks": 1,
+      "errors": 1,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger"
+      ],
+      "off": false
+    },
+    {
+      "skill": "visa-sponsorship",
+      "trigger": 0.3333333333333333,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger"
+      ],
+      "off": false
+    }
+  ],
+  "triggerRows": [
+    {
+      "skill": "cold-outreach",
+      "id": "cold-outreach-t1",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "cold-outreach",
+      "id": "cold-outreach-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "cold-outreach",
+      "id": "cold-outreach-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false
+    },
+    {
+      "skill": "company-research",
+      "id": "company-research-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "company-research",
+      "id": "company-research-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "company-research",
+      "id": "company-research-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false
+    },
+    {
+      "skill": "cover-letter",
+      "id": "cover-letter-t1",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "cover-letter",
+      "id": "cover-letter-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "cover-letter",
+      "id": "cover-letter-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false
+    },
+    {
+      "skill": "follow-up",
+      "id": "follow-up-t1",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "follow-up",
+      "id": "follow-up-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "follow-up",
+      "id": "follow-up-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false
+    },
+    {
+      "skill": "negotiation",
+      "id": "negotiation-t1",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "negotiation",
+      "id": "negotiation-t2",
+      "should": true,
+      "loadedBy": 2,
+      "ok": true,
+      "errored": false
+    },
+    {
+      "skill": "negotiation",
+      "id": "negotiation-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false
+    },
+    {
+      "skill": "role-fit",
+      "id": "role-fit-t1",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "role-fit",
+      "id": "role-fit-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "role-fit",
+      "id": "role-fit-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false
+    },
+    {
+      "skill": "search-strategy",
+      "id": "search-strategy-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "search-strategy",
+      "id": "search-strategy-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "search-strategy",
+      "id": "search-strategy-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false
+    },
+    {
+      "skill": "tailor-resume",
+      "id": "tailor-resume-t1",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "tailor-resume",
+      "id": "tailor-resume-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "tailor-resume",
+      "id": "tailor-resume-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false
+    },
+    {
+      "skill": "visa-sponsorship",
+      "id": "visa-sponsorship-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "visa-sponsorship",
+      "id": "visa-sponsorship-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false
+    },
+    {
+      "skill": "visa-sponsorship",
+      "id": "visa-sponsorship-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false
+    }
+  ],
+  "outs": [
+    {
+      "skill": "cold-outreach",
+      "id": "cold-outreach-o1",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free",
+      "passed": 4,
+      "total": 5,
+      "errored": false,
+      "failures": [
+        "makes an ask"
+      ]
+    },
+    {
+      "skill": "cold-outreach",
+      "id": "cold-outreach-o1",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "passed": 4,
+      "total": 5,
+      "errored": false,
+      "failures": [
+        "no em dashes"
+      ]
+    },
+    {
+      "skill": "company-research",
+      "id": "company-research-o1",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "company-research",
+      "id": "company-research-o1",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "cover-letter",
+      "id": "cover-letter-o1",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free",
+      "passed": 0,
+      "total": 6,
+      "errored": true,
+      "failures": [
+        "error: empty completion, provider returned error"
+      ]
+    },
+    {
+      "skill": "cover-letter",
+      "id": "cover-letter-o1",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "passed": 5,
+      "total": 6,
+      "errored": false,
+      "failures": [
+        "long enough"
+      ]
+    },
+    {
+      "skill": "follow-up",
+      "id": "follow-up-o1",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "follow-up",
+      "id": "follow-up-o1",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "negotiation",
+      "id": "negotiation-o1",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free",
+      "passed": 3,
+      "total": 4,
+      "errored": false,
+      "failures": [
+        "says it has no reliable market data"
+      ]
+    },
+    {
+      "skill": "negotiation",
+      "id": "negotiation-o1",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "role-fit",
+      "id": "role-fit-o1",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free",
+      "passed": 5,
+      "total": 5,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "role-fit",
+      "id": "role-fit-o1",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "passed": 5,
+      "total": 5,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "search-strategy",
+      "id": "search-strategy-o1",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "search-strategy",
+      "id": "search-strategy-o1",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "tailor-resume",
+      "id": "tailor-resume-o1",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free",
+      "passed": 0,
+      "total": 4,
+      "errored": true,
+      "failures": [
+        "error: empty completion, provider returned error"
+      ]
+    },
+    {
+      "skill": "tailor-resume",
+      "id": "tailor-resume-o1",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "visa-sponsorship",
+      "id": "visa-sponsorship-o1",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "visa-sponsorship",
+      "id": "visa-sponsorship-o1",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    }
+  ],
+  "requests": {
+    "requests": 88,
+    "cacheHits": 30,
+    "retries": 19
+  }
+}

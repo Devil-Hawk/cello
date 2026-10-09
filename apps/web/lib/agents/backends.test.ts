@@ -36,7 +36,7 @@ function setup(opts: { role: 'orchestrator' | 'researcher'; hiddenSkills?: strin
   writeFileSync(path.join(skills, 'role-fit', 'SKILL.md'), '---\nname: role-fit\ndescription: Judge fit.\n---\n# Role fit\nSay Strong, Possible or Stretch.\n')
   mkdirSync(path.join(skills, 'cover-letter'))
   writeFileSync(path.join(skills, 'cover-letter', 'SKILL.md'), '---\nname: cover-letter\ndescription: Write a letter.\n---\n# Cover letter\nStrong openers only.\n')
-  const backend = celloBackend({ admin, userId: USER, skillsDir: skills, hiddenSkills: opts.hiddenSkills })
+  const backend = celloBackend({ admin, userId: USER, skillsDir: skills, hiddenSkills: opts.hiddenSkills ?? [] })
   const build = (script: ConstructorParameters<typeof ScriptedChatModel>[0]['script']) => {
     const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script })
     const agent = createDeepAgent({
