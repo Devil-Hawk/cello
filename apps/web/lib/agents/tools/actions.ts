@@ -52,6 +52,8 @@ export const pipeline = defineTool({
       if (Array.isArray(out.recent)) out.recent = out.recent.slice(0, a.response_format === 'detailed' ? a.limit : Math.min(a.limit, 8))
       return out
     }
+    // A task instruction may have been written by the model from a chat turn, so a scheduled run does not change applications.
+    if (ctx.scheduledTaskId) return toolFix(`A scheduled task cannot ${a.action} an application.`, 'Put your suggestion in your result for the person to confirm in a conversation.')
     if (!a.application_id) return toolFix(`${a.action} needs an application_id.`, 'Call pipeline with action list and use an applicationId from it.')
     const { data } = await ctx.admin.from('applications').select('id, job_id, stage, applied_at').eq('id', a.application_id).eq('user_id', ctx.userId).maybeSingle()
     const app = data as { id: string; job_id: string; stage: string; applied_at: string | null } | null
