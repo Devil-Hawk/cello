@@ -7,7 +7,7 @@
 import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { GripVertical } from 'lucide-react'
 import { RoleTitle } from '@/components/roles/role-tile'
-import { COLUMNS, MOVE_TO, company, type AppRow } from './applications-view'
+import { COLUMNS, MOVE_TO, company, companyId, type AppRow } from './applications-view'
 
 function BoardCard({ r, onMove }: { r: AppRow; onMove: (id: string, stage: string) => void }) {
   // Drag is for a laptop; the handle is hidden on a phone, where Move to does the same
@@ -17,7 +17,7 @@ function BoardCard({ r, onMove }: { r: AppRow; onMove: (id: string, stage: strin
       <button type="button" aria-label={`Drag ${r.jobs?.title ?? 'this application'} to another stage`} className="absolute right-1 top-1 hidden min-h-11 min-w-11 touch-none cursor-grab items-center justify-center md:inline-flex" {...attributes} {...listeners}>
         <GripVertical className="h-4 w-4" aria-hidden />
       </button>
-      <RoleTitle id={r.job_id} title={r.jobs?.title ?? 'A role'} company={company(r)} />
+      <RoleTitle id={r.job_id} title={r.jobs?.title ?? 'A role'} company={company(r)} companyId={companyId(r)} />
       <label className="block">
         <span className="r-meta block">Move to</span>
         <select className="r-field min-h-11 w-full" value={r.stage} onChange={(e) => onMove(r.id, e.target.value)}>

@@ -12,7 +12,7 @@ import { isCtx, reply, sessionCtx } from '@/lib/pipeline/session'
 export const dynamic = 'force-dynamic'
 
 const COLUMNS =
-  'id, job_id, stage, state, step, needs_reason, needs_detail, next_at, applied_at, interview_at, instruction, found_state, closed_reason, cost_usd, last_event_at, created_at, source, jobs(title, url, location, companies(name))'
+  'id, job_id, stage, state, step, needs_reason, needs_detail, next_at, applied_at, interview_at, instruction, found_state, closed_reason, cost_usd, last_event_at, created_at, source, jobs(title, url, location, company_id, employer_id, companies(name), company_directory(name))'
 
 export async function GET() {
   const c = await sessionCtx()

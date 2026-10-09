@@ -34,7 +34,7 @@ export interface AppRow {
   cost_usd: number | null
   found_state: 'to_confirm' | 'confirmed' | null
   group: ApplicationGroup | null
-  jobs: { title: string; url: string | null; companies: { name: string } | null } | null
+  jobs: { title: string; url: string | null; company_id?: string | null; employer_id?: string | null; companies: { name: string } | null; company_directory?: { name: string } | null } | null
 }
 
 export const GROUPS: { id: ApplicationGroup; label: string }[] = [
@@ -98,7 +98,9 @@ export function applyFilters(rows: AppRow[], f: Filters): AppRow[] {
   )
 }
 
-export const company = (r: AppRow) => r.jobs?.companies?.name ?? ''
+export const company = (r: AppRow) => r.jobs?.companies?.name ?? r.jobs?.company_directory?.name ?? ''
+/** The page of the employer a role is at: the directory row when there is one. */
+export const companyId = (r: AppRow) => r.jobs?.employer_id ?? r.jobs?.company_id ?? undefined
 const SOURCE_LABEL: Record<string, string> = { gmail_sync: 'From your email', manual: 'Added by you', other: 'Other' }
 
 function Row({ r }: { r: AppRow }) {
@@ -108,7 +110,7 @@ function Row({ r }: { r: AppRow }) {
     <li className="r-row flex flex-wrap items-start gap-x-3 gap-y-2 py-3">
       <LogoTile name={company(r) || 'Company'} size={40} state={r.group === 'closed' ? 'flat' : r.group === 'needs_you' ? 'ring' : 'default'} />
       <div className="min-w-0 flex-1 basis-56">
-        <RoleTitle id={r.job_id} title={r.jobs?.title ?? 'A role'} company={company(r)} />
+        <RoleTitle id={r.job_id} title={r.jobs?.title ?? 'A role'} company={company(r)} companyId={companyId(r)} />
         <p className="r-meta mt-1">
           {[sentence || (r.closed_reason ? CLOSED_LABEL[r.closed_reason] : null) || (r.stage === 'applied' ? 'Applied.' : null), r.last_event_at ? `Last activity ${ago(r.last_event_at)}` : null, cost].filter((x): x is string => Boolean(x)).map((x) => x.replace(/\.+$/, '')).join('. ')}
         </p>

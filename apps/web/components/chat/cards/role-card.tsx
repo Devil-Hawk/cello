@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { CompanyLogo } from '@/components/companies/company-logo'
 import { buttonVariants } from '@/components/ui/button'
 import { chatHref } from '@/lib/chat/links'
+import { companyHref } from '@/lib/routes/companies'
 import type { RoleCard as RoleCardData } from '@/lib/chat/cards'
 import { cn } from '@/lib/utils'
 
@@ -36,7 +37,16 @@ export function RoleCard({ card, onOpen }: { card: RoleCardData; onOpen?: (kind:
       <CompanyLogo src={card.logoUrl} name={card.company ?? card.title} />
       <div className="min-w-0 flex-1">
         <p className={cn(NAME_CLASS, 'break-words')}>{card.title}</p>
-        {card.company && <p className={cn(NAME_CLASS, 'break-words')}>{card.company}</p>}
+        {card.company &&
+          (card.companyId ? (
+            <p className={cn(NAME_CLASS, 'break-words')}>
+              <Link href={companyHref(card.companyId)} prefetch={false} className="hover:underline">
+                {card.company}
+              </Link>
+            </p>
+          ) : (
+            <p className={cn(NAME_CLASS, 'break-words')}>{card.company}</p>
+          ))}
         {facts.length > 0 && <p className="mt-1 text-caption text-muted-foreground">{facts.join(' · ')}</p>}
       </div>
       {href ? (
