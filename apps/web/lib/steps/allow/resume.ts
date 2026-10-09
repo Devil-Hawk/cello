@@ -8,12 +8,4 @@ export const allow: AllowEntry[] = [
     file: 'app/api/resume/upload/route.ts',
     reason: 'Reformats an imported resume with callLlm; resume moves it behind the Writer. The photo read is the resume.photo step.',
   },
-  {
-    file: 'app/api/resume/documents/route.ts',
-    reason: 'Generates a resume document; resume moves it behind the Writer.',
-  },
-  {
-    file: 'app/api/resume/optimize/route.ts',
-    reason: 'Optimizes a resume; resume moves it behind the Writer.',
-  },
 ]

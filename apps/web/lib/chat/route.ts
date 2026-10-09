@@ -199,10 +199,11 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
             },
             (t) => checkNote(t, { company: intent.company, title: job.title, ask: intent.ask, evidence: [resume, facts, name] }) !== null,
             deps.signal,
-            errors
+            errors,
+            'draft-outreach-message'
           )
       )
-      if (!got) return done(say(`Cello could not write a note that passed its checks. ${errors.slice(0, 2).join(' ')} Try again in a minute, or pick another free model.`))
+      if (!got) return done(say(`Cello could not write a note that passed its checks. ${errors.slice(0, 1).join(' ')} Try again in a minute, or pick another free model.`))
       usedModel = got.model
       const note = checkNote(got.text, { company: intent.company, title: job.title, ask: intent.ask, evidence: [resume, facts, name] }) as { subject: string; body: string }
       const made = await createArtifact(deps.db, { userId: deps.userId, type: 'message', title: `Note to ${intent.company}`, author: 'cello', content: { subject: note.subject, body: note.body, to_name: null, to_email: null, kind: 'initial' }, jobId: job.id, about: [{ kind: 'job', ref: job.id }] })

@@ -60,7 +60,7 @@ export async function keptCount(companyId: string): Promise<{ kept: number; open
   if (!user || !UUID.test(companyId)) return null
   const { data: own } = await db.from('companies').select('employer_id').eq('id', companyId).eq('user_id', user.id).maybeSingle()
   if (!own) return null
-  const employerId = (own as { employer_id: string | null }).employer_id
+  const employerId = (own as unknown as { employer_id: string | null }).employer_id
   const on = new OnJobs(db.from('person_roles').select('job_id, jobs!inner(id)', { count: 'exact', head: true }).is('hidden_reason', null))
   openRolesOnly(on)
   on.or(employerId ? `employer_id.eq.${employerId},company_id.eq.${companyId}` : `company_id.eq.${companyId}`)

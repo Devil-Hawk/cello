@@ -28,6 +28,8 @@ export interface ScraperTriggerResult {
   inserted: number
   /** Only a browser can read the site, and the scheduled check will. */
   reading: boolean
+  /** Another read of this company is running; this one did nothing. */
+  busy: boolean
   message: string
 }
 

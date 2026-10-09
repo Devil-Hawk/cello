@@ -1,59 +1,35 @@
-// One model completion that a person would accept: the chosen model first, then the other free ones, each asked
-// again only when its answer fails the caller's own check (empty, thinking aloud, not the shape asked for).
-// A reasoning model spends its tokens thinking and can return nothing at a small budget, so reasoning is off and the
-// budget generous. Every attempt goes through callLlm, so it is reserved, settled and written to llm_spend.
+// A model completion that a person would accept, through a declared step (lib/steps): the ladder picks the way in and the
+// ceiling holds. On a free rung the chosen model is asked first, then the other free ones, and an answer is taken only when
+// it passes the caller's own check (not empty, not thinking aloud, in the shape asked for: JSON, or what `valid` says).
+// A reasoning model spends its tokens thinking and can return nothing, so thinking is off on a free rung.
 //
-// ponytail: three attempts, in order; a better order (fastest first) waits until the free list has timings.
+// ponytail: up to four attempts, in the list's order; a better order (fastest first) waits until the free list has timings.
 
-import { callLlm } from '@/lib/harness/llm'
 import type { DecryptedApiKeys, LlmRunner, LlmRunOptions } from '@/lib/harness/types'
 import { legacyStep } from '@/lib/steps/legacy'
 import { FreeCapError } from './caps'
 import { freeModels, isFreeModel } from './free'
 
-export interface Asked {
-  text: string
-  model: string
-}
-
-/** Null when no model's answer passed `valid`; `errors` collects what each attempt said, for the caller to show. */
-export async function askModel(
-  keys: DecryptedApiKeys,
-  chosen: string,
-  opts: Omit<LlmRunOptions, 'model'>,
-  valid: (text: string) => boolean,
-  signal?: AbortSignal,
-  errors: string[] = []
-): Promise<Asked | null> {
-  const tried = [chosen, ...freeModels().filter((m) => m !== chosen)].slice(0, 4)
-  for (const model of tried) {
-    try {
-      const out = await callLlm(keys, { maxTokens: 1500, temperature: 0.3, reasoning: { effort: 'none' }, ...opts, model }, signal)
-      const text = out.content.trim()
-      if (valid(text)) return { text, model }
-      console.warn('askModel: answer rejected', model, JSON.stringify(text).slice(0, 400))
-      errors.push(`${model}: ${text ? 'did not follow the instructions' : 'returned nothing'} (finish ${out.finishReason ?? '?'}, ${out.completionTokens} tokens, ${out.reasoningTokens ?? 0} reasoning)`)
-    } catch (e) {
-      if (signal?.aborted) throw e
-      errors.push(`${model}: ${String(e instanceof Error ? e.message : e).slice(0, 160)}`)
-    }
+const looksLikeJson = (s: string) => {
+  try {
+    JSON.parse(s.trim())
+    return true
+  } catch {
+    return /[[{][\s\S]*[\]}]/.test(s)
   }
-  return null
 }
 
 /**
- * A model runner for an old caller (the resume optimizer, the Writer) that goes through its declared step, so the ladder
- * picks the model and the ceiling holds, and that, on a free rung, tries the next free model when one throws or does not
- * answer in the shape asked for (JSON, when the caller asked for JSON). The error of the last attempt stands when all fail.
+ * A runner for a declared step that tries the next free model when one throws or does not answer acceptably, and counts the
+ * day's free cap once. When every free model fails the error says what each said; nothing is made up.
  */
-export function stepRunner(stepId: string, keys: DecryptedApiKeys, signal?: AbortSignal): LlmRunner {
+export function stepRunner(stepId: string, keys: DecryptedApiKeys, signal?: AbortSignal, valid?: (text: string) => boolean): LlmRunner {
   return async (opts) => {
     const free = keys.models?.ceiling !== 'R4'
     const first = keys.model && isFreeModel(keys.model) ? [keys.model] : []
     const models = free ? [...new Set([...first, ...freeModels()])].slice(0, 4) : [undefined]
     const failures: string[] = []
     let last: unknown = new Error('No model answered.')
-    // The day's free cap counts the step once, not once per model tried.
     let attempted = false
     for (const model of models) {
       try {
@@ -61,6 +37,7 @@ export function stepRunner(stepId: string, keys: DecryptedApiKeys, signal?: Abor
         const out = await legacyStep(stepId).call(model ? { ...keys, model } : keys, free ? { ...opts, reasoning: { effort: 'none' } } : opts, { signal, ...(attempted ? { slots: { take: async () => true } } : {}) })
         if (!out.content.trim()) throw new Error(`${out.model} returned nothing`)
         if ((opts.json || opts.jsonSchema) && !looksLikeJson(out.content)) throw new Error(`${out.model} did not answer in JSON`)
+        if (valid && !valid(out.content.trim())) throw new Error(`${out.model} did not follow the instructions`)
         return out
       } catch (e) {
         if (signal?.aborted || e instanceof FreeCapError) throw e
@@ -69,16 +46,31 @@ export function stepRunner(stepId: string, keys: DecryptedApiKeys, signal?: Abor
         failures.push(`${model ?? 'the chosen model'}: ${String(e instanceof Error ? e.message : e).replace(/\s+/g, ' ').slice(0, 140)}`)
       }
     }
-    // Every free model failed: say so with what each said, never a made-up result.
     throw models.length > 1 ? new Error(`No free model could do this just now. ${failures.join(' | ')}`) : last
   }
 }
 
-const looksLikeJson = (s: string) => {
+export interface Asked {
+  text: string
+  model: string
+}
+
+/** One completion from the chosen model (then the other free ones) that passes `valid`; null, with the reasons in `errors`, when none does. */
+export async function askModel(
+  keys: DecryptedApiKeys,
+  chosen: string,
+  opts: Omit<LlmRunOptions, 'model'>,
+  valid: (text: string) => boolean,
+  signal?: AbortSignal,
+  errors: string[] = [],
+  step = 'write-summary'
+): Promise<Asked | null> {
   try {
-    JSON.parse(s.trim())
-    return true
-  } catch {
-    return /[[{][\s\S]*[\]}]/.test(s)
+    const out = await stepRunner(step, { ...keys, model: chosen }, signal, valid)({ maxTokens: 1500, temperature: 0.3, ...opts })
+    return { text: out.content.trim(), model: out.model }
+  } catch (e) {
+    if (signal?.aborted || e instanceof FreeCapError) throw e
+    errors.push(String(e instanceof Error ? e.message : e).slice(0, 400))
+    return null
   }
 }
