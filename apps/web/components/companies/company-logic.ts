@@ -104,8 +104,8 @@ export function countedLine(r: { kept: number; total: number; counts: Record<str
   return parts.length > 0 ? `${others.toLocaleString('en-US')} others: ${parts.join(', ')}` : `${others.toLocaleString('en-US')} others`
 }
 
-/** "636 open, 12 for you." */
-export const headlineLine = (total: number, kept: number) => `${total.toLocaleString('en-US')} open, ${kept.toLocaleString('en-US')} for you.`
+/** "12 kept of 636 open." */
+export const headlineLine = (total: number, kept: number) => `${kept.toLocaleString('en-US')} kept of ${total.toLocaleString('en-US')} open.`
 
 export const windowLine = (total: number) => `Cello read ${total.toLocaleString('en-US')} roles. This employer lists more than it shows at once.`
 

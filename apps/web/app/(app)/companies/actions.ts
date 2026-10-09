@@ -28,6 +28,8 @@ import { createClient } from '@/lib/supabase/server'
 import { checkedAgainLine, type Found } from '@/components/companies/logic'
 import { RATE_LINE, REMOVE_REFUSED, closedLine } from '@/components/companies/company-logic'
 import { findPosting, ownFor, previewRequirements } from './[id]/read'
+import { openRolesOnly } from '@/lib/jobs/freshness'
+import { OnJobs } from '@/lib/scoring/person-roles-query'
 import { findCompanies } from './read'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -50,6 +52,23 @@ export async function findCompaniesAction(query: string): Promise<Found | { erro
   } catch {
     return { error: 'Could not search companies. Try again.' }
   }
+}
+
+/** How many open roles are kept for the person at one of their own companies, after a read: the number the page says beside "open". */
+export async function keptCount(companyId: string): Promise<{ kept: number; open: number | null } | null> {
+  const { db, user } = await person()
+  if (!user || !UUID.test(companyId)) return null
+  const { data: own } = await db.from('companies').select('employer_id').eq('id', companyId).eq('user_id', user.id).maybeSingle()
+  if (!own) return null
+  const employerId = (own as { employer_id: string | null }).employer_id
+  const on = new OnJobs(db.from('person_roles').select('job_id, jobs!inner(id)', { count: 'exact', head: true }).is('hidden_reason', null))
+  openRolesOnly(on)
+  on.or(employerId ? `employer_id.eq.${employerId},company_id.eq.${companyId}` : `company_id.eq.${companyId}`)
+  const { count, error } = await on.query
+  if (error) return null
+  // "Open" is the employer's own count (the board's listing), the same number the Company page says.
+  const employer = employerId ? await getEmployer(createAdminClient(), employerId).catch(() => null) : null
+  return { kept: count ?? 0, open: employer?.open_count ?? null }
 }
 
 /** Stop following, or pin and unpin, one of the person's own companies. */

@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { Key } from '@/components/ui/key'
 import { LogoTile } from '@/components/roles/role-tile'
-import { followAnyway, findCompaniesAction } from '@/app/(app)/companies/actions'
+import { followAnyway, findCompaniesAction, keptCount } from '@/app/(app)/companies/actions'
 import { companyHref } from '@/lib/routes/companies'
 import {
   addOutcome,
@@ -27,7 +27,8 @@ import {
   type AddState,
   type Found,
 } from './logic'
-import { refreshCompanyJobs } from './refresh'
+import { refreshCompanyJobs, type CompanyRefreshOutcome } from './refresh'
+import { headlineLine } from './company-logic'
 
 export interface AddOrFindProps {
   /** Called once an employer was followed, so the page behind can read again. */
@@ -38,6 +39,14 @@ export interface AddOrFindProps {
 }
 
 type By = { employerId: string } | { candidateId: string } | { link: string }
+
+/** What the line says once the reader has run: the count it found, or why it could not list roles yet. */
+function readLine(name: string, read: CompanyRefreshOutcome | null, counts: { kept: number; open: number | null } | null): string {
+  if (!read) return `Added ${name}. Cello could not read its roles just now; the next check will.`
+  if (!read.success) return `Added ${name}. ${read.message}`
+  if (read.reading || read.busy) return `Added ${name}. ${read.message}`
+  return `Added ${name}. ${counts === null ? `${read.found.toLocaleString('en-US')} open.` : headlineLine(counts.open ?? read.found, counts.kept)}`
+}
 
 export function AddOrFind({ onAdded, autoFocus, initial }: AddOrFindProps) {
   const router = useRouter()
@@ -80,9 +89,20 @@ export function AddOrFind({ onAdded, autoFocus, initial }: AddOrFindProps) {
         dispatch({ type: 'result', state: { kind: 'failed', line: 'Could not reach Cello. Try again.', reason: 'network', actions: [] } })
         return
       }
+      if (body.ok && !body.already) {
+        // Added: the reader runs now, and the line says what it found when it is done.
+        const outcome = addOutcome(body, ctx)
+        setFound(null)
+        dispatch({ type: 'verify', line: `Added ${body.employer.name}. Checking its roles now.` })
+        const read = await refreshCompanyJobs(body.companyId).catch(() => null)
+        const counts = read?.success && !read.busy ? await keptCount(body.companyId).catch(() => null) : null
+        dispatch({ type: 'result', state: { ...outcome, line: readLine(body.employer.name, read, counts) } as AddState })
+        onAdded?.()
+        router.refresh()
+        return
+      }
       dispatch({ type: 'result', state: addOutcome(body, ctx) })
       if (body.ok) {
-        if (!body.already) void refreshCompanyJobs(body.companyId)
         setFound(null)
         onAdded?.()
         router.refresh()
@@ -229,6 +249,11 @@ export function AddOrFind({ onAdded, autoFocus, initial }: AddOrFindProps) {
       {none && name && (
         <div className="space-y-2">
           <p className="r-body">{unknownLine(name)}</p>
+          {/^[^\s/]+\.[a-z]{2,}$/i.test(name) && (
+            <Key variant="raised" onClick={() => run({ link: name }, { link: name })}>
+              Check {name} and follow
+            </Key>
+          )}
           <Key variant="raised" onClick={() => doAction({ kind: 'paste', label: 'Paste their careers page' })}>
             Paste their careers page
           </Key>

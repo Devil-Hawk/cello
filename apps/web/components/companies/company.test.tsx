@@ -66,7 +66,7 @@ describe('the address', () => {
 describe('the counted line', () => {
   it('adds up: the kept and the others are what the employer listed', () => {
     expect(countedLine({ kept: 12, total: 636, counts: { type: 380, untyped: 20, place: 150, level: 74 } })).toBe('624 others: 380 other role types, 20 type unknown, 150 place, 74 level')
-    expect(headlineLine(636, 12)).toBe('636 open, 12 for you.')
+    expect(headlineLine(636, 12)).toBe('12 kept of 636 open.')
     for (const n of [1, 12, 13, 26, 636, 5000]) {
       const l = fixtureLive(n)
       const others = l.total - l.kept
@@ -98,13 +98,13 @@ describe('All open roles', () => {
   it('shows 25 rows of 5,000 and the counted line of the whole read', () => {
     const html = all(5000)
     expect(html.match(/class="r-row /g)).toHaveLength(25)
-    expect(text(html)).toContain('5,000 open, 12 for you.')
+    expect(text(html)).toContain('12 kept of 5,000 open.')
     expect(text(html)).toContain('4,988 others:')
   })
 
-  it('says 636 open, 12 for you, and gives the counted line under the rows', () => {
+  it('says 12 kept of 636 open, and gives the counted line under the rows', () => {
     const t = text(all(636))
-    expect(t).toContain('636 open, 12 for you.')
+    expect(t).toContain('12 kept of 636 open.')
     expect(t).toMatch(/624 others: \d+ other role types, \d+ type unknown, \d+ place, \d+ level/)
   })
 
@@ -189,7 +189,7 @@ describe('the first screen', () => {
     const html = view()
     const t = text(html)
     expect(t).toContain('Kept for you, 12')
-    expect(t).toContain('636 open, 12 for you. Show all open roles')
+    expect(t).toContain('12 kept of 636 open. Show all open roles')
     expect(html).toContain(`href="/companies/${id}?all=1"`)
     expect(html).toContain("Search Fixture Employer 001&#x27;s roles")
     expect(t).not.toMatch(/\bdream\b/i)

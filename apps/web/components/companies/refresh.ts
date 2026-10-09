@@ -58,10 +58,11 @@ export async function triggerScraperFallback(companyId: string): Promise<Scraper
       jobsFound: data.jobsFound || 0,
       inserted: data.inserted || 0,
       reading: Boolean(data.reading),
+      busy: Boolean(data.busy),
       message: data.message || data.error || (data.success ? 'Scrape complete' : 'Scrape failed'),
     }
   } catch {
-    return { success: false, jobsFound: 0, inserted: 0, reading: false, message: 'Failed to connect to scraper' }
+    return { success: false, jobsFound: 0, inserted: 0, reading: false, busy: false, message: 'Failed to connect to scraper' }
   }
 }
 
@@ -74,6 +75,7 @@ export interface CompanyRefreshOutcome {
   via: 'ats' | 'scraper'
   /** Only a browser can read the site, and the scheduled check will. */
   reading: boolean
+  busy: boolean
   message: string
 }
 
@@ -84,5 +86,5 @@ export interface CompanyRefreshOutcome {
  */
 export async function refreshCompanyJobs(companyId: string): Promise<CompanyRefreshOutcome> {
   const r = await triggerScraperFallback(companyId)
-  return { success: r.success, found: r.jobsFound, inserted: r.inserted, via: 'scraper', reading: r.reading, message: r.message }
+  return { success: r.success, found: r.jobsFound, inserted: r.inserted, via: 'scraper', reading: r.reading, busy: r.busy, message: r.message }
 }

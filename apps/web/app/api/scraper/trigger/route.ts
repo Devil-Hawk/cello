@@ -83,6 +83,7 @@ export async function POST(request: NextRequest) {
       company: company.name,
       jobsFound: 0,
       inserted: 0,
+      busy: true,
       reason: null,
       message: `${company.name} is already being checked; its roles will appear in a few minutes.`,
     })

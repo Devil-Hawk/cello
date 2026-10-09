@@ -8,7 +8,8 @@ import { Pin } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { Key } from '@/components/ui/key'
-import { setFollow, takeCheck } from '@/app/(app)/companies/actions'
+import { keptCount, setFollow, takeCheck } from '@/app/(app)/companies/actions'
+import { headlineLine } from './company-logic'
 import { addOutcome, failLine, type AddResponse, type CompanyItem } from './logic'
 import { refreshCompanyJobs } from './refresh'
 
@@ -71,7 +72,9 @@ export function RowActions({ item, manage = false }: RowActionsProps) {
       if (!r.ok) setNote(r.sentence)
       else {
         setNote('Cello is reading its site now.')
-        await refreshCompanyJobs(item.companyId)
+        const read = await refreshCompanyJobs(item.companyId)
+        const counts = read.success && !read.reading && !read.busy ? await keptCount(item.companyId).catch(() => null) : null
+        setNote(read.success && !read.reading && !read.busy ? `Checked just now. ${counts === null ? `${read.found.toLocaleString('en-US')} open.` : headlineLine(counts.open ?? read.found, counts.kept)}` : read.message)
         router.refresh()
       }
     } catch {
