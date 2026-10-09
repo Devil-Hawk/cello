@@ -44,16 +44,18 @@ describe.skipIf(!RUN_LIVE)(`skills (${LABEL})`, () => {
         try {
           const out = await firstAction(model, t.message)
           const loaded = skillsRead(out.calls).includes(skill)
-          return { skill, id: t.id, model, ok: loaded === t.load, loaded }
+          // What the model did first, so a miss can be read back (a path variant, an ls first) and not only counted.
+          const first = out.calls.map((c) => `${c.name} ${String(c.args.file_path ?? c.args.path ?? '')}`.trim())
+          return { skill, id: t.id, model, ok: loaded === t.load, loaded, first }
         } catch (e) {
-          return { skill, id: t.id, model, ok: false, loaded: false, error: e instanceof Error ? e.message.slice(0, 100) : String(e) }
+          return { skill, id: t.id, model, ok: false, loaded: false, first: [] as string[], error: e instanceof Error ? e.message.slice(0, 100) : String(e) }
         }
       })
       const triggerRows = evals.flatMap((e) =>
         e.trigger.map((t) => {
           const rs = trig.filter((r) => r.id === t.id)
           const errored = rs.filter((r) => 'error' in r).length * 2 > rs.length
-          return { skill: e.skill, id: t.id, should: t.load, loadedBy: rs.filter((r) => r.loaded).length, ok: majority(rs.map((r) => r.ok)), errored }
+          return { skill: e.skill, id: t.id, should: t.load, loadedBy: rs.filter((r) => r.loaded).length, ok: majority(rs.map((r) => r.ok)), errored, firstCalls: Object.fromEntries(rs.map((r) => [r.model, r.first])) }
         })
       )
 
@@ -102,7 +104,7 @@ describe.skipIf(!RUN_LIVE)(`skills (${LABEL})`, () => {
         '|---|---|---|---|',
         ...outs.map((r) => `| ${r.skill} | ${r.model.split('/')[1].split(':')[0]} | ${r.errored ? 'cannot read' : `${r.passed}/${r.total}`} | ${r.failures.join('; ') || 'none'} |`),
       ].join('\n')
-      const paths = writeReport(`skills-${LABEL}`, { label: LABEL, summary, perSkill, triggerRows, outs }, md)
+      const paths = writeReport(`skills-${LABEL}`, { label: LABEL, voters: GENERATORS, summary, perSkill, triggerRows, outs }, md)
       console.log(`\n${md}\n\nrequests: ${JSON.stringify(stats)}\nreport: ${paths.md}`)
 
       if (process.env.AGENT_EVAL_GATE !== '0') {

@@ -21,6 +21,8 @@ import {
   type FilesystemPermission,
   type GrepMatch,
 } from 'deepagents'
+import s19 from '@/lib/evals/agent/reports/skills-s19.json'
+import thresholds from '@/lib/evals/agent/thresholds.json'
 import type { AdminClient } from '@/lib/harness/types'
 import { ARTIFACT_TYPES, artifactIdFromPath, artifactPath, getArtifact, listArtifacts, type ArtifactRow, type ArtifactType } from './artifacts'
 
@@ -262,23 +264,18 @@ export class MemoriesBackend implements BackendProtocolV2 {
 // --- skills -------------------------------------------------------------------------
 
 /**
- * Skills that are switched off: they missed their own bar in the last recorded S19 run
- * (lib/evals/agent/reports/skills-s19.md), so no path serves them to a model. The value is the bars
- * each one missed; "cannot read" counts as both. A skill comes back by earning its bars in a new run
- * and leaving this list. lib/agents/skills-off.test.ts fails if this list and the report disagree.
+ * Skills that are switched off: they missed their own bar in the recorded S19 run
+ * (lib/evals/agent/reports/skills-s19.json, written by skills.eval.test.ts), so no path serves them to a model.
+ * Read from that report, never typed: a skill is off only because a recorded run put it below its bar. The value is
+ * the bars it missed; "cannot read" (null) counts as missing. A skill comes back by earning its bars in a new run.
  */
-export const SKILLS_OFF: Readonly<Record<string, readonly ('trigger' | 'checks')[]>> = {
-  // S19, 2026-10-07, nemotron-3-super, nemotron-3-ultra and nemotron-3.5-lightning (the others answered 429).
-  'cold-outreach': ['trigger', 'checks'],
-  'cover-letter': ['trigger', 'checks'],
-  negotiation: ['trigger', 'checks'],
-  'company-research': ['trigger'],
-  'follow-up': ['trigger'],
-  'role-fit': ['trigger'],
-  'search-strategy': ['trigger'],
-  'tailor-resume': ['trigger'],
-  'visa-sponsorship': ['trigger'],
-}
+type Bar = 'trigger' | 'checks'
+const BARS = thresholds.skills as Record<string, Record<Bar, number>>
+export const SKILLS_OFF: Readonly<Record<string, readonly Bar[]>> = Object.fromEntries(
+  (s19.perSkill as { skill: string; trigger: number | null; checks: number | null }[])
+    .map((r) => [r.skill, (['trigger', 'checks'] as const).filter((b) => r[b] === null || r[b]! < BARS[r.skill][b])] as const)
+    .filter(([, missed]) => missed.length),
+)
 
 /** apps/web/skills as read-only files, without the skills that are switched off. */
 export class ReadOnlySkills implements BackendProtocolV2 {
