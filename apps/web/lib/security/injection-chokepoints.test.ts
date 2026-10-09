@@ -113,13 +113,6 @@ const FRAMING_CALL = /\b(?:frameJobText|frameJobTextList|prepareJobText)\s*\(/
  * instruction for whoever does the mechanical follow-up.
  */
 const PROMPT_BUILDERS: Record<string, string> = {
-  'apps/web/lib/harness/agents/matcher.ts':
-    'scoreJobWithLlm builds `Description:\\n${job.description}` into the user prompt (~L178). ' +
-    'Highest-volume model call in the product, so this is the widest exposure.',
-  'apps/web/lib/harness/agents/bulk_matcher.ts':
-    'buildTier1Prompt inlines each job description into a batched list (~L132) — one hostile ' +
-    'posting sits next to 49 honest ones in the same prompt. Use frameJobTextList(), which ' +
-    'exists for this shape: one preface for the batch, one marker per job.',
   'apps/web/lib/harness/agents/cv_tailor.ts':
     'The tailoring path (~L82-L89). THE one that ends in a document sent to an employer under ' +
     'the user’s name; also the site that should run checkTailoringContainment on the output.',
@@ -132,8 +125,6 @@ const PROMPT_BUILDERS: Record<string, string> = {
     'MCP_SAFETY_PREFACE-modelled system-prompt note, but defaultJobTextFramer is a bare .slice(). ' +
     'Wiring is per-field, so pass the description through frameJobText and leave title/company/location ' +
     'on the plain truncating framer rather than repeating the preface four times.',
-  'apps/web/app/api/outreach/judge/route.ts':
-    'sourceFacts (~L105) concatenates the resume and the job description as the judge’s grading input.',
   'apps/web/lib/harness/agents/analyst.ts':
     'generateFullAnalysisPrompt interpolates jobDescription (~L200s) — the langgraph port (step 9) ' +
     'moved this out of app/api/agents/analyze/route.ts (that route now only calls runAgentUnit(' +
@@ -144,7 +135,7 @@ const PROMPT_BUILDERS: Record<string, string> = {
     'frameJobText. The answer is also schema-validated and every item must be words the posting ' +
     'contains (groundModelAnswer), so a posting that says "list Kubernetes as required" gains nothing.',
   'apps/web/lib/context/assemble.ts':
-    'The langgraph port step 9 context-assembly door: buildMatchContext/buildOutreachContext/' +
+    'The langgraph port step 9 context-assembly door: buildMatchContext/outreachHistory/' +
     'buildTurnContext all interpolate employer-derived prose (a kb search ' +
     "hit's .content, a company dossier's .summary) into context blocks headed for a prompt — " +
     'lib/harness/agents/matcher.ts, lib/harness/agents/outreach.ts, ' +
@@ -152,13 +143,20 @@ const PROMPT_BUILDERS: Record<string, string> = {
     'output. Framed at the source (this file), never at a consumer — every employer-derived ' +
     'string is wrapped in frameJobText/frameJobTextList before it leaves one of the ' +
     'builders, so it is framed from day one and never appears in PENDING_WIRING below.',
+  'apps/web/lib/agents/subagents/writer.ts':
+    'The Writer specialist of the agent engine. The cover letter and email path hands the posting to ' +
+    'cv_tailor framed (frameJobText, ~L260); the resume path frames it before optimizeResume, whose own ' +
+    'jobBlock is a plain slice. Framed at the source from day one, so it is never in PENDING_WIRING.',
   'apps/web/lib/graph/distill.ts':
     'Step 6, the reward-loop distiller: buildDistillPrompt (~L200) quotes a SAMPLE of judged ' +
     "verdicts' rationale text into the distillation prompt — those rationales can carry model " +
     'output built from framed job text (matcher gaps/missingSkills, a judge summary — see ' +
-    'lib/graph/verify/matcher.ts / cv-tailor.ts / outreach.ts). Uses frameJobTextList, same ' +
-    "batch shape as lib/harness/agents/bulk_matcher.ts, so this file's own scan-mutation check " +
+    'lib/graph/verify/cv-tailor.ts / outreach.ts). Uses frameJobTextList, same ' +
+    "batch shape as lib/scoring/want-judge.ts, so this file's own scan-mutation check " +
     'documented in its header stays true.',
+  'apps/web/lib/scoring/want-judge.ts':
+    'judgeWant puts a posting excerpt per role in the judging prompt. Frames the batch with ' +
+    'frameJobTextList. The model only returns a probability and one sentence, clamped and parsed in code.',
 }
 
 /**
@@ -172,10 +170,7 @@ const PROMPT_BUILDERS: Record<string, string> = {
  * the only thing that makes a known-offender list worth having.
  */
 const PENDING_WIRING: string[] = [
-  'apps/web/lib/harness/agents/outreach.ts',
   'apps/web/lib/harness/agents/resume_optimizer.ts',
-  'apps/web/lib/harness/goals.ts',
-  'apps/web/app/api/outreach/judge/route.ts',
 ]
 
 /**
@@ -184,6 +179,10 @@ const PENDING_WIRING: string[] = [
  * fences, so they are exempt BY CLASSIFICATION, not by omission.
  */
 const FORWARDERS: Record<string, string> = {
+  'apps/web/lib/harness/agents/matcher.ts':
+    'Hands roles to lib/scoring (assessJobs), which frames every description it sends to a model ' +
+    '(lib/scoring/want-judge.ts uses frameJobTextList; what a posting asks for comes from the stored reader record, mapped in lib/scoring/posting-requirements.ts, with no prompt of its own). diagnoseCandidateJobs only ' +
+    'checks whether a posting has a description; it never puts one in a prompt.',
   'apps/web/lib/graph/autopilot.ts':
     'Selects jobs and hands them to the matcher/tailorer agents (moved from lib/harness/autopilot.ts ' +
     'in the langgraph port step 10 — draftTask now reaches cv_tailor/applier through ' +
@@ -204,7 +203,6 @@ const FORWARDERS: Record<string, string> = {
     "currently match this scan's CANDIDATES filter (no `.description`/prompt marker in its source, " +
     'or in lib/a2a/executor.ts, which is the same shape) — listed here per ruling 7\'s instruction, ' +
     'same as app/api/mcp/route.ts above.',
-  'apps/web/app/api/agents/match/route.ts': 'Loads the job row, calls scoreJobWithLlm.',
   'apps/web/app/api/resume/documents/route.ts': 'Passes {title, company, description} to cv_tailor.',
   'apps/web/app/api/resume/optimize/route.ts': 'Passes the job to resume_optimizer.',
   'apps/web/app/api/outreach/draft/route.ts':
@@ -245,6 +243,11 @@ const NOT_JOB_TEXT: Record<string, string> = {
     'this entry stays in NOT_JOB_TEXT rather than moving to PROMPT_BUILDERS because the ledger ' +
     'above is specifically about job POSTINGS, and conflating the two would blur why each one is ' +
     'unframed-or-not.',
+  'apps/web/lib/resume/schema.ts':
+    'The structured resume schema. `.description` is a PROJECT description from the candidate\'s own ' +
+    'resume (the JSON Resume projects field), not employer text, and the file builds no prompt: the ' +
+    'word "prompt" appears only in a comment. The resume-structuring prompt lives in ' +
+    'lib/resume/import/structure.ts and carries the user\'s own resume text.',
   'apps/web/lib/graph/copilot.ts':
     'Observation descriptions, produced by Cello itself, not by an employer — the structured ' +
     "ask-user form's own option.description (lib/harness/ask-user.ts's AskOption), scrubbed and " +

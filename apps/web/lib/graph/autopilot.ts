@@ -6,8 +6,8 @@
 //
 // A scheduled worker that runs on every cron tick while the user is away. Each
 // tick, per user who has OPTED IN, it: sources fresh jobs (official ATS APIs),
-// scores them against the resume, and for jobs above the user's threshold it
-// tailors them and builds a `pending_review` application_draft with a
+// assesses them (what the person wants, their chance against the resume), and
+// for roles worth it it tailors them and builds a `pending_review` application_draft with a
 // prefilled handoff link — the SAME human-approve-queue path applier.ts uses
 // by default for any run. It NEVER submits.
 //
@@ -40,8 +40,10 @@
 //                 informational rate signal in the digest (see remainingCap
 //                 below); no longer gates a real submission since this file
 //                 never submits.
-//   QUALITY GATE  only tailor + draft jobs with match_score >=
-//                 preferences.autopilot.minScore (default 90).
+//   QUALITY GATE  only tailor + draft roles the person has shown they want (on
+//                 today's shortlist, or tapped Interested) that are not blocked by
+//                 a fact they stated and whose chance is Strong or Possible,
+//                 most wanted first.
 //   OFFICIAL APIS Handoff links target Greenhouse/Lever/Ashby apply pages only.
 //   HONEST CAPS   logs when it hits caps / exhausts matches instead of looping.
 //
@@ -89,10 +91,11 @@
 //   sourceTask  refreshes the user's tracked companies via the official ATS
 //               APIs (lib/ats). Runs at most once per tick — module-level,
 //               like lib/graph/runs.ts's plannerTask.
-//   scoreTask   scores unscored candidates via the shared matcher path
-//               (lib/harness/agents/matcher.ts#scoreJobBatch) — the exact code
-//               path the harness's on-demand match route and cron digest use,
-//               so autopilot can never silently diverge in match quality.
+//   scoreTask   assesses unassessed candidates via the shared matcher path
+//               (lib/harness/agents/matcher.ts#scoreJobBatch, which goes through
+//               lib/scoring) and makes sure today's shortlist exists, the exact
+//               code path the cron digest uses, so autopilot can never silently
+//               diverge in how roles are judged.
 //               Module-level, once per tick.
 //   judgeTask   the goal path's keep/discard judgement
 //               (lib/harness/goals.ts#judgeCandidates). Module-level, once per
@@ -145,11 +148,11 @@ import { staticFetchPage } from '../ingest/fetch-page'
 import { loadTargets } from '../ingest/reader/targets'
 import { ingestCompany, type DueCompany } from '../ingest/run'
 import { trackedOnly } from '../companies/watchlist'
-import { resolveTargeting, type Targeting } from '../targeting'
 import { loadApiKeys } from '../harness/keys'
-import { callLlm } from '../harness/llm'
+import { callLlm, MissingKeyError } from '../harness/llm'
 import { canRunLlm } from '../harness/llm-key-message'
-import { scoreJobBatch, ownedJobsQuery } from '../harness/agents/matcher'
+import { scoreJobBatch } from '../harness/agents/matcher'
+import { runDailyShortlist } from '../scoring'
 import { BudgetCapError } from '../harness/spend'
 import { createAdminClient } from '../harness/supabase-admin'
 import {
@@ -177,18 +180,18 @@ import { buildGoalStrategyContext } from '../context/assemble'
 import { verifyCvTailorDraft, CvTailorContainmentError } from './verify/cv-tailor'
 import { writeVerdict } from '../evals/verdicts'
 import { logHarnessError } from '../observability/log'
+import { personJobs } from '../jobs/person-jobs'
 
 // --- tunables (verbatim from the pre-port file, same comments) -------------
 const MAX_USERS_PER_TICK = 10
 const USER_CONCURRENCY = 2
 const DEFAULT_DAILY_CAP = 15
-const DEFAULT_MIN_SCORE = 90
 const DEFAULT_BUDGET_TOKENS = 150_000
 /** Cap drafts CREATED per user per tick (throttle even for handoffs). */
 const MAX_ACTIONS_PER_TICK = 8
 /** Cap companies refreshed per tick to bound wall-clock time. */
 const MAX_COMPANIES_REFRESH = 20
-/** Cap unscored jobs we score per tick. */
+/** Cap unassessed jobs we assess per tick. */
 const MAX_SCORE_PER_TICK = 60
 /** Candidate jobs pulled per user. */
 const CANDIDATE_JOB_LIMIT = 150
@@ -198,7 +201,6 @@ export { MAX_USERS_PER_TICK, USER_CONCURRENCY }
 export interface AutopilotConfig {
   enabled: boolean
   dailyCap: number
-  minScore: number
   budgetTokens: number
 }
 
@@ -262,7 +264,6 @@ export function parseAutopilotConfig(preferences: Record<string, unknown> | null
   return {
     enabled: raw.enabled === true, // must be explicitly true
     dailyCap: num(raw.dailyCap, DEFAULT_DAILY_CAP, 1, 100),
-    minScore: num(raw.minScore, DEFAULT_MIN_SCORE, 0, 100),
     budgetTokens: num(raw.budgetTokens, DEFAULT_BUDGET_TOKENS, 10_000, 1_000_000),
   }
 }
@@ -304,17 +305,9 @@ const sourceTask = task('source', async (args: SourceTaskArgs): Promise<SourceTa
 
 interface ScoreTaskArgs {
   userId: string
-  companyIds: string[]
-  resume: string
-  targeting: Targeting
   limit: number
   /** Tick's remaining token allowance — bounds THIS task's own local meter. */
   budgetRemaining: number
-  /** The tick's minScore — doubles as scoreJobBatch's judgeMatchQuality
-   *  sampling threshold (Step 4, item 3): every score crossing it is a real
-   *  action-selection candidate and joins the judge sample. */
-  minScore: number
-  /** Threaded into scoreJobBatch's own runId — see ScoreBatchOptions.runId. */
   runId: string
 }
 interface ScoreTaskResult {
@@ -348,19 +341,15 @@ const scoreTask = task('score', async (args: ScoreTaskArgs): Promise<ScoreTaskRe
   const admin = createAdminClient()
   const apiKeys = await loadApiKeys(admin, args.userId)
   const { llm, signal, used } = meteredLlm(apiKeys, args.budgetRemaining, 'score-job-batch')
-  const batch = await scoreJobBatch({
-    admin,
-    userId: args.userId,
-    companyIds: args.companyIds,
-    resume: args.resume,
-    targeting: args.targeting,
-    llm,
-    limit: args.limit,
-    signal,
-    apiKeys,
-    judgeThreshold: args.minScore,
-    runId: args.runId,
-  })
+  const batch = await scoreJobBatch({ admin, userId: args.userId, llm, limit: args.limit, signal, apiKeys })
+  // Today's shortlist is picked once a day; this is a no-op when it is already there.
+  if (!batch.skippedReason || batch.skippedReason === 'no-roles') {
+    try {
+      await runDailyShortlist({ admin, userId: args.userId, apiKeys, llm, skipIfBuilt: true })
+    } catch (err) {
+      if (!(err instanceof MissingKeyError) && !(err instanceof BudgetExceededError)) throw err
+    }
+  }
   return {
     scored: batch.scored.length,
     failedCount: batch.failedCount,
@@ -454,6 +443,7 @@ export async function prepareApplicationDraft(unitConfig: UnitConfig, canTailor:
   const admin = createAdminClient()
   let resumeSummary: string | undefined
   let coverLetter: string | undefined
+  let coverLetterMeta: Awaited<ReturnType<typeof verifyCvTailorDraft>>['coverLetterMeta']
   let tokensUsed = 0
   // Set only for the two outcomes that persist WITH a verdict to flag
   // (ruling 2c: 'judge-failed' -> status 'failed'; 'unjudged' -> requires
@@ -473,6 +463,7 @@ export async function prepareApplicationDraft(unitConfig: UnitConfig, canTailor:
       tokensUsed += outcome.tokensUsed
       resumeSummary = outcome.resumeSummary
       coverLetter = outcome.coverLetter
+      coverLetterMeta = outcome.coverLetterMeta
       if (outcome.kind === 'judge-failed') {
         flaggedVerdict = { verdict: 'fail', rationale: outcome.verdict.summary, judgeSpanId: outcome.verdict.spanId }
       } else if (outcome.kind === 'unjudged') {
@@ -497,7 +488,7 @@ export async function prepareApplicationDraft(unitConfig: UnitConfig, canTailor:
   const autoSubmit = false
   try {
     const applyOut = await runAgentUnit('applier', {
-      input: { jobId, resumeSummary, coverLetter, autoSubmit },
+      input: { jobId, resumeSummary, coverLetter, coverLetterMeta, autoSubmit },
       admin,
       config: unitConfig,
       label: `apply:${jobId}`,
@@ -519,7 +510,7 @@ export async function prepareApplicationDraft(unitConfig: UnitConfig, canTailor:
         runId: unitConfig.configurable.runId,
         subjectKind: 'cv_tailor_draft',
         subjectId: out.draftId,
-        judge: 'factuality',
+        judge: 'groundedness',
         verdict: flaggedVerdict.verdict,
         rationale: flaggedVerdict.rationale,
         judgeSpanId: flaggedVerdict.judgeSpanId,
@@ -561,7 +552,7 @@ function makeDraftTask(jobId: string) {
 // --- shared source+score phase (both tick paths run this identically) -------
 
 function toGoalCandidate(job: CandidateJob): GoalCandidate {
-  return { id: job.id, title: job.title, description: job.description, location: job.location, matchScore: job.match_score }
+  return { id: job.id, title: job.title, description: job.description, location: job.location, chance: job.chance, want: job.want_p }
 }
 
 /**
@@ -580,7 +571,6 @@ async function sourceAndScore(
   runId: string,
   userId: string,
   profile: ProfileRow,
-  minScore: number,
   budgetRemaining: number,
   digest: AutopilotUserResult
 ): Promise<{ candidates: CandidateJob[]; tokensUsed: number }> {
@@ -601,19 +591,17 @@ async function sourceAndScore(
   // --- DEDUPE: jobs already drafted or applied -------------------------------
   const excluded = await loadExcludedJobIds(admin, userId)
 
-  // --- SCORE: same shared code path as the harness matcher agent
+  // --- ASSESS: same shared code path as the harness matcher agent
   // (lib/harness/agents/matcher.ts) — this is what keeps autopilot and the
-  // daily-digest cron from double-scoring or diverging in match quality.
-  // Both filter `match_score is null` at the DB level, so whichever tick
-  // gets to a job first claims it; both prefilter on quality/targeting
-  // before spending a token.
+  // daily-digest cron from double-assessing or diverging in how roles are
+  // judged. Both take roles with no assessment yet, so whichever tick gets to
+  // a role first claims it.
   const companyIds = companies.map((c) => c.id)
-  const targeting = resolveTargeting(profile.preferences)
 
   await journalStepStart(admin, { runId, label: 'autopilot-match', agentType: 'matcher', input: { companyCount: companyIds.length } })
   const scoreResult: ScoreTaskResult =
     companyIds.length > 0
-      ? await scoreTask({ userId, companyIds, resume: profile.resume_text ?? '', targeting, limit: MAX_SCORE_PER_TICK, budgetRemaining, minScore, runId })
+      ? await scoreTask({ userId, limit: MAX_SCORE_PER_TICK, budgetRemaining, runId })
       : { scored: 0, failedCount: 0, candidatesConsidered: 0, skippedReason: 'no-companies', tokensUsed: 0 }
   digest.scored = scoreResult.scored
   await journalStepFinish(admin, {
@@ -626,12 +614,11 @@ async function sourceAndScore(
       failed: scoreResult.failedCount,
       candidatesConsidered: scoreResult.candidatesConsidered,
       skippedReason: scoreResult.skippedReason,
-      threshold: minScore,
     },
     tokensUsed: scoreResult.tokensUsed,
   })
 
-  // Load ALL candidates (now including whatever was just scored above).
+  // Load ALL candidates (now including whatever was just assessed above).
   const candidates = companyIds.length > 0 ? await loadCandidateJobs(admin, userId, excluded) : []
   return { candidates, tokensUsed: scoreResult.tokensUsed }
 }
@@ -722,7 +709,7 @@ async function runGoalTick(
   let g = await persistGoal(admin, userId, startTick(goal))
 
   // 3) Source + score, exactly as the untargeted sweep does.
-  const sourced = await sourceAndScore(admin, runId, userId, profile, tickConfig.minScore, tickConfig.budgetTokens - spent, digest)
+  const sourced = await sourceAndScore(admin, runId, userId, profile, tickConfig.budgetTokens - spent, digest)
   spent += sourced.tokensUsed
 
   let budgetHit = false
@@ -870,8 +857,14 @@ interface CandidateJob {
   location: string | null
   url: string | null
   company_id: string | null
-  match_score: number | null
+  /** Strong | possible | stretch | cannot_assess, or null before the role is assessed. */
+  chance: string | null
+  want_p: number | null
+  blocked_reasons: unknown
+  /** True when the role is on today's shortlist or the person tapped Interested on it. */
+  wanted?: boolean
 }
+/** The posting columns of a candidate: the person's verdict is beside them, on their own row. */
 
 async function loadCompanies(admin: AdminClient, userId: string): Promise<CompanyInput[]> {
   const { data } = await trackedOnly(
@@ -886,82 +879,55 @@ async function loadCompanies(admin: AdminClient, userId: string): Promise<Compan
   }))
 }
 
+/**
+ * Roles autopilot must not draft for: ones that already have a draft, and ones
+ * with an application the person is working. An application that triage itself
+ * created when they tapped Interested (still at discovered) is the opposite of a
+ * reason to skip: it is the signal that they want the role.
+ */
 async function loadExcludedJobIds(admin: AdminClient, userId: string): Promise<Set<string>> {
   const excluded = new Set<string>()
   const { data: drafts } = await admin.from('application_drafts').select('job_id').eq('user_id', userId)
   for (const r of (drafts ?? []) as { job_id: string }[]) if (r.job_id) excluded.add(r.job_id)
-  const { data: apps } = await admin.from('applications').select('job_id').eq('user_id', userId)
-  for (const r of (apps ?? []) as { job_id: string }[]) if (r.job_id) excluded.add(r.job_id)
+  const { data: apps } = await admin.from('applications').select('job_id, stage, source').eq('user_id', userId)
+  for (const r of (apps ?? []) as { job_id: string; stage: string; source: string | null }[]) {
+    if (r.job_id && !(r.source === 'triage' && r.stage === 'discovered')) excluded.add(r.job_id)
+  }
   return excluded
 }
 
-/**
- * Which of these already-scored jobIds carry a verified-or-deterministically-
- * clean match_score verdict (lib/graph/verify/matcher.ts's deterministic
- * check or judgeMatchQuality sample) — Step 4, item 3's literal wording, a
- * true ALLOWLIST: a scored job needs a RECORDED non-'fail' eval_verdicts row
- * to be eligible, not merely the absence of a failing one.
- *
- * Every job scored going forward always gets a deterministic verdict (see
- * verifyMatchVerdict — unconditional in scoreJobBatch), so this is never a
- * gap for anything scored by this stage. The two gaps that predate it —
- * production scores from before the verify stage shipped, and demo/seed
- * jobs that write match_score directly (lib/access/fixtures/jobs.ts) — are
- * each closed by an explicit, honestly-labeled backfill instead of a runtime
- * exception: 20260818000004_backfill_match_verdicts.sql grandfathers real
- * pre-stage scores as 'pass', and lib/access/seed-demo.ts#buildDemoWorkspace
- * seeds a matching 'pass' row (judge='deterministic', provenance noted in
- * its rationale) alongside every demo job's match_score. A genuinely
- * unverified score — one that predates this stage's deploy AND wasn't
- * migrated — is excluded, which is the allowlist working as designed.
- */
-async function loadVerifiedJobIds(admin: AdminClient, userId: string, jobIds: string[]): Promise<Set<string>> {
-  if (jobIds.length === 0) return new Set()
-  // Every row for these subjects, not pre-filtered by verdict — a job can
-  // carry TWO rows (the unconditional deterministic check, plus a sampled
-  // judgeMatchQuality closed_qa row), and a `.neq('verdict', 'fail')`
-  // filter would wrongly admit a job whose deterministic row passed but
-  // whose SAMPLED judge row failed, just because the passing row also
-  // matched. Allowlist membership needs "at least one row, none of them
-  // failing" computed per subject, not per row.
-  const { data } = await admin
-    .from('eval_verdicts')
-    .select('subject_id, verdict')
-    .eq('user_id', userId)
-    .eq('subject_kind', 'match_score')
-    .in('subject_id', jobIds)
-  const rows = (data ?? []) as { subject_id: string; verdict: string }[]
-  const seen = new Set<string>()
-  const failed = new Set<string>()
-  for (const r of rows) {
-    seen.add(r.subject_id)
-    if (r.verdict === 'fail') failed.add(r.subject_id)
-  }
-  return new Set([...seen].filter((id) => !failed.has(id)))
+/** The roles the person has shown they want: on today's shortlist, or Interested. */
+async function loadWantedJobIds(admin: AdminClient, userId: string): Promise<Set<string>> {
+  const today = new Date().toISOString().slice(0, 10)
+  const wanted = new Set<string>()
+  const { data: list } = await admin.from('shortlist_items').select('job_id').eq('user_id', userId).eq('for_date', today)
+  for (const r of (list ?? []) as { job_id: string }[]) wanted.add(r.job_id)
+  const { data: liked } = await admin.from('role_reactions').select('job_id').eq('user_id', userId).eq('reaction', 'interested').not('job_id', 'is', null)
+  for (const r of (liked ?? []) as { job_id: string }[]) wanted.add(r.job_id)
+  return wanted
+}
+
+/** Eligible to draft for: wanted, not blocked by a stated fact, and a chance that is Strong or Possible. */
+function isEligible(job: CandidateJob): boolean {
+  const blocked = Array.isArray(job.blocked_reasons) && job.blocked_reasons.length > 0
+  return job.wanted === true && !blocked && (job.chance === 'strong' || job.chance === 'possible')
 }
 
 async function loadCandidateJobs(admin: AdminClient, userId: string, excluded: Set<string>): Promise<CandidateJob[]> {
-  // Order by recency so freshly discovered (unscored) jobs are always in the
-  // window, not crowded out by a backlog of already-scored older postings.
-  // Ownership via the companies FK join (ownedJobsQuery), not an
-  // .in('company_id', companyIds) array — that breaks past ~600 companies.
-  const { data } = await ownedJobsQuery(
-    admin,
-    userId,
-    'id, title, description, location, url, company_id, match_score'
-  )
+  // The person's own role rows (person_jobs) carry the verdict and their company beside the posting.
+  // Order by recency so freshly discovered jobs are always in the window, not crowded out by a
+  // backlog of older postings. A role they hid is not a candidate.
+  const { data } = await personJobs(admin)
+    .select('id, title, description, location, url, viewer_company_id, chance, want_p, blocked_reasons')
+    .eq('viewer_id', userId)
+    .is('hidden_reason', null)
     .order('discovered_at', { ascending: false })
     .limit(CANDIDATE_JOB_LIMIT)
-  const rows = (data ?? []) as unknown as CandidateJob[]
-  const scoredIds = rows.filter((j) => j.match_score !== null).map((j) => j.id)
-  const verified = await loadVerifiedJobIds(admin, userId, scoredIds)
-  // Unscored jobs (match_score === null) pass this filter — they carry
-  // nothing yet for a verdict to attach to, and the caller's own quality
-  // gate (match_score >= minScore) excludes them from action-selection
-  // downstream regardless (see runGoalTick/the untargeted sweep's `eligible`
-  // filter). This predicate only ever needs to say no to an ALREADY-scored
-  // job with no recorded pass.
-  return rows.filter((j) => j.url && !excluded.has(j.id) && (j.match_score === null || verified.has(j.id)))
+  const rows = ((data ?? []) as unknown as (Omit<CandidateJob, 'company_id' | 'wanted'> & { viewer_company_id: string | null })[]).map(
+    ({ viewer_company_id, ...job }) => ({ ...job, company_id: viewer_company_id })
+  )
+  const wanted = await loadWantedJobIds(admin, userId)
+  return rows.filter((j) => j.url && !excluded.has(j.id)).map((j) => ({ ...j, wanted: wanted.has(j.id) }))
 }
 
 async function finishRun(admin: AdminClient, runId: string, spent: number, digest: AutopilotUserResult): Promise<void> {
@@ -1083,18 +1049,18 @@ export const autopilotTickGraph = entrypoint(
       let remainingCap = tickConfig.dailyCap - (submitted24h ?? 0)
 
       // --- SOURCE + SCORE + load candidates (shared with the goal path) ------
-      const sourced = await sourceAndScore(admin, runId, userId, profile, tickConfig.minScore, tickConfig.budgetTokens - spent, digest)
+      const sourced = await sourceAndScore(admin, runId, userId, profile, tickConfig.budgetTokens - spent, digest)
       spent += sourced.tokensUsed
 
-      // --- QUALITY GATE: eligible = score >= minScore, best first ------------
+      // --- QUALITY GATE: wanted, not blocked, a real chance; most wanted first --
       const eligible = sourced.candidates
-        .filter((j) => (j.match_score ?? -1) >= tickConfig.minScore)
-        .sort((a, b) => (b.match_score ?? 0) - (a.match_score ?? 0))
+        .filter(isEligible)
+        .sort((a, b) => (b.want_p ?? 0) - (a.want_p ?? 0))
         .slice(0, MAX_ACTIONS_PER_TICK)
       digest.eligible = eligible.length
 
       if (eligible.length === 0) {
-        digest.message = `No new eligible matches (>= ${tickConfig.minScore}). Discovered ${digest.discovered}, scored ${digest.scored}.`
+        digest.message = `No new roles worth drafting for. Discovered ${digest.discovered}, assessed ${digest.scored}.`
         await finishRun(admin, runId, spent, digest)
         return digest
       }

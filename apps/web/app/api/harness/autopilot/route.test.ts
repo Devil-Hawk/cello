@@ -179,7 +179,7 @@ describe('POST /api/harness/autopilot — checkpointed input carries no secrets'
         email: 'ada@example.com',
         resume_text: 'Resume text.',
         preferences: {
-          autopilot: { enabled: true, dailyCap: 5, minScore: 80, budgetTokens: 50_000, atsKeys: { greenhouse: 'PLAINTEXT' } },
+          autopilot: { enabled: true, dailyCap: 5, budgetTokens: 50_000, atsKeys: { greenhouse: 'PLAINTEXT' } },
           targeting: { remoteOnly: true },
           searchGoals: [{ id: 'g1', statement: 'Find a staff role' }],
           api_keys: { openrouter: 'CIPHERTEXT' },
@@ -199,7 +199,7 @@ describe('POST /api/harness/autopilot — checkpointed input carries no secrets'
     }
     expect(input.profile.id).toBe('user-secret')
     expect(input.profile.resume_text).toBe('Resume text.')
-    expect(input.profile.preferences.autopilot).toEqual({ enabled: true, dailyCap: 5, minScore: 80, budgetTokens: 50_000 })
+    expect(input.profile.preferences.autopilot).toEqual({ enabled: true, dailyCap: 5, budgetTokens: 50_000 })
     expect(input.profile.preferences.targeting).toEqual({ remoteOnly: true })
     expect(input.profile.preferences.searchGoals).toEqual([{ id: 'g1', statement: 'Find a staff role' }])
   })

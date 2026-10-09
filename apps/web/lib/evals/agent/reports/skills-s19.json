@@ -1,0 +1,874 @@
+{
+  "label": "s19",
+  "voters": [
+    "dots-studio/dots-3-note-preview:free",
+    "cohere/north-mini-code:free",
+    "apodex/apodex-1.1-mini:free"
+  ],
+  "summary": {
+    "trigger": 0.4074074074074074,
+    "checks": 0.725
+  },
+  "perSkill": [
+    {
+      "skill": "cold-outreach",
+      "trigger": 0.3333333333333333,
+      "checks": 0.7,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger",
+        "checks"
+      ],
+      "off": true
+    },
+    {
+      "skill": "company-research",
+      "trigger": 0.3333333333333333,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger"
+      ],
+      "off": true
+    },
+    {
+      "skill": "cover-letter",
+      "trigger": 0.3333333333333333,
+      "checks": null,
+      "errors": 2,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger",
+        "checks"
+      ],
+      "off": true
+    },
+    {
+      "skill": "follow-up",
+      "trigger": 0.3333333333333333,
+      "checks": 0.875,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger",
+        "checks"
+      ],
+      "off": true
+    },
+    {
+      "skill": "negotiation",
+      "trigger": 0.6666666666666666,
+      "checks": 0.75,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger",
+        "checks"
+      ],
+      "off": true
+    },
+    {
+      "skill": "role-fit",
+      "trigger": 0.3333333333333333,
+      "checks": 0.8,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger",
+        "checks"
+      ],
+      "off": true
+    },
+    {
+      "skill": "search-strategy",
+      "trigger": 0.6666666666666666,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger"
+      ],
+      "off": true
+    },
+    {
+      "skill": "tailor-resume",
+      "trigger": 0.3333333333333333,
+      "checks": 0.75,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger",
+        "checks"
+      ],
+      "off": true
+    },
+    {
+      "skill": "visa-sponsorship",
+      "trigger": 0.3333333333333333,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger"
+      ],
+      "off": true
+    }
+  ],
+  "triggerRows": [
+    {
+      "skill": "cold-outreach",
+      "id": "cold-outreach-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "read_file /skills/cold-outreach/SKILL.md"
+        ],
+        "cohere/north-mini-code:free": [
+          "find_roles"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "find_roles"
+        ]
+      }
+    },
+    {
+      "skill": "cold-outreach",
+      "id": "cold-outreach-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "my_profile",
+          "find_roles"
+        ],
+        "cohere/north-mini-code:free": [
+          "research"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "find_roles"
+        ]
+      }
+    },
+    {
+      "skill": "cold-outreach",
+      "id": "cold-outreach-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "read_file /skills/follow-up/SKILL.md"
+        ],
+        "cohere/north-mini-code:free": [
+          "pipeline"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "my_profile",
+          "search_knowledge"
+        ]
+      }
+    },
+    {
+      "skill": "company-research",
+      "id": "company-research-t1",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "research"
+        ],
+        "cohere/north-mini-code:free": [
+          "research"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "research"
+        ]
+      }
+    },
+    {
+      "skill": "company-research",
+      "id": "company-research-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "search_knowledge",
+          "research"
+        ],
+        "cohere/north-mini-code:free": [
+          "research"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "research"
+        ]
+      }
+    },
+    {
+      "skill": "company-research",
+      "id": "company-research-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "read_file /skills/visa-sponsorship/SKILL.md"
+        ],
+        "cohere/north-mini-code:free": [
+          "research"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "read_file /skills/visa-sponsorship/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill": "cover-letter",
+      "id": "cover-letter-t1",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "find_roles",
+          "my_profile"
+        ],
+        "cohere/north-mini-code:free": [
+          "find_roles"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "my_profile",
+          "find_roles"
+        ]
+      }
+    },
+    {
+      "skill": "cover-letter",
+      "id": "cover-letter-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "pipeline",
+          "my_profile"
+        ],
+        "cohere/north-mini-code:free": [
+          "find_roles"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "pipeline",
+          "my_profile"
+        ]
+      }
+    },
+    {
+      "skill": "cover-letter",
+      "id": "cover-letter-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "my_profile"
+        ],
+        "cohere/north-mini-code:free": [
+          "my_profile"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "my_profile",
+          "find_roles"
+        ]
+      }
+    },
+    {
+      "skill": "follow-up",
+      "id": "follow-up-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "read_file /skills/follow-up/SKILL.md"
+        ],
+        "cohere/north-mini-code:free": [
+          "pipeline"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "my_profile",
+          "search_knowledge"
+        ]
+      }
+    },
+    {
+      "skill": "follow-up",
+      "id": "follow-up-t2",
+      "should": true,
+      "loadedBy": 1,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "read_file /skills/follow-up/SKILL.md"
+        ],
+        "cohere/north-mini-code:free": [
+          "pipeline"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "pipeline"
+        ]
+      }
+    },
+    {
+      "skill": "follow-up",
+      "id": "follow-up-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "my_profile",
+          "search_knowledge"
+        ],
+        "cohere/north-mini-code:free": [
+          "research"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "find_roles"
+        ]
+      }
+    },
+    {
+      "skill": "negotiation",
+      "id": "negotiation-t1",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "my_profile",
+          "pipeline",
+          "search_knowledge"
+        ],
+        "cohere/north-mini-code:free": [
+          "my_profile"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "my_profile",
+          "search_knowledge"
+        ]
+      }
+    },
+    {
+      "skill": "negotiation",
+      "id": "negotiation-t2",
+      "should": true,
+      "loadedBy": 2,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "read_file /skills/negotiation/SKILL.md",
+          "my_profile"
+        ],
+        "cohere/north-mini-code:free": [
+          "research"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "my_profile",
+          "read_file /skills/negotiation/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill": "negotiation",
+      "id": "negotiation-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "find_roles"
+        ],
+        "cohere/north-mini-code:free": [
+          "find_roles"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "find_roles"
+        ]
+      }
+    },
+    {
+      "skill": "role-fit",
+      "id": "role-fit-t1",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "find_roles"
+        ],
+        "cohere/north-mini-code:free": [
+          "find_roles"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "my_profile",
+          "find_roles"
+        ]
+      }
+    },
+    {
+      "skill": "role-fit",
+      "id": "role-fit-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "find_roles"
+        ],
+        "cohere/north-mini-code:free": [
+          "find_roles"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "my_profile",
+          "find_roles"
+        ]
+      }
+    },
+    {
+      "skill": "role-fit",
+      "id": "role-fit-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "pipeline"
+        ],
+        "cohere/north-mini-code:free": [
+          "pipeline"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "pipeline"
+        ]
+      }
+    },
+    {
+      "skill": "search-strategy",
+      "id": "search-strategy-t1",
+      "should": true,
+      "loadedBy": 2,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "read_file /skills/search-strategy/SKILL.md"
+        ],
+        "cohere/north-mini-code:free": [
+          "my_profile"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "read_file /skills/search-strategy/SKILL.md",
+          "my_profile"
+        ]
+      }
+    },
+    {
+      "skill": "search-strategy",
+      "id": "search-strategy-t2",
+      "should": true,
+      "loadedBy": 1,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "my_profile",
+          "read_file /skills/search-strategy/SKILL.md"
+        ],
+        "cohere/north-mini-code:free": [
+          "my_profile"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "my_profile",
+          "pipeline"
+        ]
+      }
+    },
+    {
+      "skill": "search-strategy",
+      "id": "search-strategy-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "find_roles"
+        ],
+        "cohere/north-mini-code:free": [
+          "find_roles"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "find_roles"
+        ]
+      }
+    },
+    {
+      "skill": "tailor-resume",
+      "id": "tailor-resume-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "read_file /skills/tailor-resume/SKILL.md",
+          "find_roles"
+        ],
+        "cohere/north-mini-code:free": [
+          "find_roles"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "find_roles",
+          "my_profile"
+        ]
+      }
+    },
+    {
+      "skill": "tailor-resume",
+      "id": "tailor-resume-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [],
+        "cohere/north-mini-code:free": [
+          "my_profile"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "my_profile",
+          "pipeline"
+        ]
+      }
+    },
+    {
+      "skill": "tailor-resume",
+      "id": "tailor-resume-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "find_roles",
+          "my_profile"
+        ],
+        "cohere/north-mini-code:free": [
+          "find_roles"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "my_profile",
+          "find_roles"
+        ]
+      }
+    },
+    {
+      "skill": "visa-sponsorship",
+      "id": "visa-sponsorship-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "search_knowledge"
+        ],
+        "cohere/north-mini-code:free": [
+          "research"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "read_file /skills/visa-sponsorship/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill": "visa-sponsorship",
+      "id": "visa-sponsorship-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "my_profile"
+        ],
+        "cohere/north-mini-code:free": [
+          "my_profile"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "my_profile"
+        ]
+      }
+    },
+    {
+      "skill": "visa-sponsorship",
+      "id": "visa-sponsorship-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "dots-studio/dots-3-note-preview:free": [
+          "research"
+        ],
+        "cohere/north-mini-code:free": [
+          "research"
+        ],
+        "apodex/apodex-1.1-mini:free": [
+          "research"
+        ]
+      }
+    }
+  ],
+  "outs": [
+    {
+      "skill": "cold-outreach",
+      "id": "cold-outreach-o1",
+      "model": "dots-studio/dots-3-note-preview:free",
+      "passed": 3,
+      "total": 5,
+      "errored": false,
+      "failures": [
+        "makes an ask",
+        "no em dashes"
+      ]
+    },
+    {
+      "skill": "cold-outreach",
+      "id": "cold-outreach-o1",
+      "model": "cohere/north-mini-code:free",
+      "passed": 4,
+      "total": 5,
+      "errored": false,
+      "failures": [
+        "makes an ask"
+      ]
+    },
+    {
+      "skill": "company-research",
+      "id": "company-research-o1",
+      "model": "dots-studio/dots-3-note-preview:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "company-research",
+      "id": "company-research-o1",
+      "model": "cohere/north-mini-code:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "cover-letter",
+      "id": "cover-letter-o1",
+      "model": "dots-studio/dots-3-note-preview:free",
+      "passed": 0,
+      "total": 6,
+      "errored": true,
+      "failures": [
+        "error: JSON error injected into SSE stream"
+      ]
+    },
+    {
+      "skill": "cover-letter",
+      "id": "cover-letter-o1",
+      "model": "cohere/north-mini-code:free",
+      "passed": 0,
+      "total": 6,
+      "errored": true,
+      "failures": [
+        "error: empty completion, provider returned error"
+      ]
+    },
+    {
+      "skill": "follow-up",
+      "id": "follow-up-o1",
+      "model": "dots-studio/dots-3-note-preview:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "follow-up",
+      "id": "follow-up-o1",
+      "model": "cohere/north-mini-code:free",
+      "passed": 3,
+      "total": 4,
+      "errored": false,
+      "failures": [
+        "gives an easy next step"
+      ]
+    },
+    {
+      "skill": "negotiation",
+      "id": "negotiation-o1",
+      "model": "dots-studio/dots-3-note-preview:free",
+      "passed": 3,
+      "total": 4,
+      "errored": false,
+      "failures": [
+        "no em dashes"
+      ]
+    },
+    {
+      "skill": "negotiation",
+      "id": "negotiation-o1",
+      "model": "cohere/north-mini-code:free",
+      "passed": 3,
+      "total": 4,
+      "errored": false,
+      "failures": [
+        "says it has no reliable market data"
+      ]
+    },
+    {
+      "skill": "role-fit",
+      "id": "role-fit-o1",
+      "model": "dots-studio/dots-3-note-preview:free",
+      "passed": 5,
+      "total": 5,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "role-fit",
+      "id": "role-fit-o1",
+      "model": "cohere/north-mini-code:free",
+      "passed": 3,
+      "total": 5,
+      "errored": false,
+      "failures": [
+        "names the gap",
+        "cites the matching resume line"
+      ]
+    },
+    {
+      "skill": "search-strategy",
+      "id": "search-strategy-o1",
+      "model": "dots-studio/dots-3-note-preview:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "search-strategy",
+      "id": "search-strategy-o1",
+      "model": "cohere/north-mini-code:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "tailor-resume",
+      "id": "tailor-resume-o1",
+      "model": "dots-studio/dots-3-note-preview:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "tailor-resume",
+      "id": "tailor-resume-o1",
+      "model": "cohere/north-mini-code:free",
+      "passed": 2,
+      "total": 4,
+      "errored": false,
+      "failures": [
+        "does not claim a skill the resume lacks",
+        "lists the unsupported requirement as a gap"
+      ]
+    },
+    {
+      "skill": "visa-sponsorship",
+      "id": "visa-sponsorship-o1",
+      "model": "dots-studio/dots-3-note-preview:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "visa-sponsorship",
+      "id": "visa-sponsorship-o1",
+      "model": "cohere/north-mini-code:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    }
+  ],
+  "requests": {
+    "requests": 26,
+    "cacheHits": 89,
+    "retries": 16
+  }
+}

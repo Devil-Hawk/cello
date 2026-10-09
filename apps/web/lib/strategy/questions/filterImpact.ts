@@ -3,7 +3,7 @@
 // IMPORTANT HONESTY NOTE — read before trusting this file's numbers: this
 // product has NO dedicated compensation or visa-sponsorship targeting field.
 // lib/targeting.ts's Targeting interface has functions/seniority/countries/
-// remoteOnly/languages/minScore/excludedCompanies/excludedKeywords — nothing
+// remoteOnly/languages/excludedCompanies/excludedKeywords, nothing
 // for comp or sponsorship specifically. The only way a user could approximate
 // a comp/sponsorship filter today is via excludedKeywords (e.g. adding
 // "unpaid" or "no sponsorship" as a keyword) — see compSponsorshipNote below,
@@ -56,14 +56,6 @@ export function analyzeFilterImpact(counts: JobScopeCounts, targeting: Targeting
       dimension: targeting.excludedKeywords.length > 0 ? 'excludedKeywords' : 'excludedCompanies',
       configured: true,
       jobsExcludedByThisAlone: counts.excludedByKeywords ?? 0,
-    })
-  }
-
-  if (targeting.minScore !== null) {
-    dimensions.push({
-      dimension: 'minScore (not enforced)',
-      configured: true,
-      jobsExcludedByThisAlone: counts.excludedByMinScoreHypothetical ?? 0,
     })
   }
 

@@ -1251,7 +1251,7 @@ vi.mock('@/lib/outreach/store', () => ({
   insertOutreach: async (_client: unknown, row: Record<string, unknown>) => ({ id: 'msg-1', ...row }),
 }))
 vi.mock('@/lib/resume/store', () => ({
-  createMarkdownVersion: async () => ({ id: 'doc-1', version: 4, title: null }),
+  createResumeVersion: async () => ({ id: 'doc-1', version: 4, title: null }),
   deleteVersion: async () => {},
   getBaseResume: async () => null,
   getVersionById: async () => ({ id: 'doc-1', version: 4, title: null }),
@@ -1264,8 +1264,9 @@ vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: async () => ({ openrouter: '
 // exist for the module to resolve) — importOriginal keeps it real while still
 // overriding userCompanyIds, same pattern trail-producers.test.ts already uses
 // for @/lib/harness/agents/outreach below.
-vi.mock('@/lib/harness/agents/matcher', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/harness/agents/matcher')>()),
+vi.mock('@/lib/scoring/inputs', () => ({ countUnassessed: async () => ({ inRecall: 0, total: 0 }) }))
+vi.mock('@/lib/jobs/owned-query', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/jobs/owned-query')>()),
   userCompanyIds: async () => ['company-1'],
 }))
 vi.mock('@/lib/harness/agents/bulk_matcher', () => ({
@@ -1298,8 +1299,12 @@ vi.mock('@/lib/graph/verify/outreach', () => ({
     subject: draft.subject,
     body: draft.body,
     tokensUsed: draft.tokensUsed,
+    source: draft.tokensUsed > 0 ? 'model' : 'template',
+    templateReason: draft.tokensUsed > 0 ? undefined : 'missing_key',
     verdicts: [],
-    failedVerdict: false,
+    checks: { ok: true, checks: [] },
+    failed: false,
+    judgeUnavailable: false,
   }),
 }))
 

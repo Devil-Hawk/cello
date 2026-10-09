@@ -69,6 +69,26 @@ export interface SummaryStatus {
   detail?: string
 }
 
+/** Where an excerpt the research read came from. */
+export type ExcerptKind = 'wikipedia' | 'github' | 'home' | 'about' | 'careers' | 'news'
+
+/** A numbered source (S1, S2...) a research statement can cite, with its page. */
+export interface DossierSource {
+  id: string
+  kind: ExcerptKind
+  title: string
+  url: string
+}
+
+export type CitedField = 'summary' | 'whatTheyWant' | 'funding' | 'headcountTrend' | 'culture' | 'techStack' | 'uncertainty'
+
+/** One statement from the research and the source ids that back it. */
+export interface DossierCitation {
+  field: CitedField
+  text: string
+  sources: string[]
+}
+
 export interface DossierSignals {
   funding?: string | null
   headcountTrend?: string | null
@@ -83,6 +103,14 @@ export interface DossierSignals {
   summarySource?: 'ai' | 'wikipedia' | null
   /** Set whenever `summary` is null — see MissingSummaryReason. Never left unexplained. */
   summaryUnavailable?: SummaryStatus | null
+  /** The numbered sources the statements below cite. Absent on research from before sources were numbered. */
+  sourceList?: DossierSource[]
+  /** Each shown statement with the sources that back it. Absent on older research. */
+  citations?: DossierCitation[]
+  /** What the research was based on, and whether Wikipedia was all there was. */
+  evidence?: { kinds: ExcerptKind[]; wikipediaOnly: boolean }
+  /** Statements left out because no source backed them. */
+  dropped?: number
   /** Raw, un-normalized signals kept for the no-key (partial) path. */
   raw?: Record<string, unknown>
 }

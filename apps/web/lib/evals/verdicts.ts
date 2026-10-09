@@ -32,7 +32,6 @@ import type { AdminClient } from '../harness/types'
 
 /** Matches the `subject_kind` CHECK constraint on public.eval_verdicts. */
 export type VerdictSubjectKind =
-  | 'match_score'
   | 'cv_tailor_draft'
   | 'outreach_draft'
   | 'plan'
@@ -40,7 +39,7 @@ export type VerdictSubjectKind =
   | 'distillation'
 
 /** Matches the `judge` CHECK constraint. containment/deterministic need no model call. */
-export type VerdictJudge = 'factuality' | 'closed_qa' | 'containment' | 'deterministic'
+export type VerdictJudge = 'factuality' | 'closed_qa' | 'containment' | 'deterministic' | 'groundedness' | 'specificity'
 
 /** Matches the `verdict` CHECK constraint — REFUSE-OVER-GUESS's three typed refusals
  *  (insufficient-data/insufficient-budget/unjudged) sit alongside pass/fail/error. */

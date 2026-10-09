@@ -1,0 +1,120 @@
+{
+  "feature": "reply",
+  "label": "before",
+  "writer": "google/gemma-4-31b-it:free",
+  "judge": "no judge: labelled replies",
+  "metrics": [
+    {
+      "name": "pattern accuracy",
+      "value": 0.42857142857142855,
+      "n": 14,
+      "failures": [
+        "r01",
+        "r02",
+        "r03",
+        "r04",
+        "r05",
+        "r06",
+        "r11",
+        "r12"
+      ]
+    },
+    {
+      "name": "auto-replies not counted as replies",
+      "value": 0,
+      "n": 2,
+      "failures": [
+        "r11",
+        "r12"
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": "r01",
+      "label": "positive",
+      "pattern": "neutral",
+      "model": "neutral"
+    },
+    {
+      "id": "r02",
+      "label": "positive",
+      "pattern": "neutral",
+      "model": "neutral"
+    },
+    {
+      "id": "r03",
+      "label": "positive",
+      "pattern": "neutral",
+      "model": "neutral"
+    },
+    {
+      "id": "r04",
+      "label": "positive",
+      "pattern": "neutral",
+      "model": "neutral"
+    },
+    {
+      "id": "r05",
+      "label": "negative",
+      "pattern": "neutral",
+      "model": "neutral"
+    },
+    {
+      "id": "r06",
+      "label": "negative",
+      "pattern": "neutral",
+      "model": "neutral"
+    },
+    {
+      "id": "r07",
+      "label": "negative",
+      "pattern": "negative",
+      "model": "negative"
+    },
+    {
+      "id": "r08",
+      "label": "neutral",
+      "pattern": "neutral",
+      "model": "neutral"
+    },
+    {
+      "id": "r09",
+      "label": "neutral",
+      "pattern": "neutral",
+      "model": "neutral"
+    },
+    {
+      "id": "r10",
+      "label": "neutral",
+      "pattern": "neutral",
+      "model": "neutral"
+    },
+    {
+      "id": "r11",
+      "label": "auto",
+      "pattern": "neutral",
+      "model": "neutral"
+    },
+    {
+      "id": "r12",
+      "label": "auto",
+      "pattern": "neutral",
+      "model": "neutral"
+    },
+    {
+      "id": "r13",
+      "label": "bounce",
+      "pattern": "bounce",
+      "model": "bounce"
+    },
+    {
+      "id": "r14",
+      "label": "bounce",
+      "pattern": "bounce",
+      "model": "bounce"
+    }
+  ],
+  "at": "2026-10-05T13:34:39.720Z",
+  "requests": 0
+}

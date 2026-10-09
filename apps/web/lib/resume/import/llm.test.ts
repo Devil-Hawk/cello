@@ -1,17 +1,9 @@
-// The LLM leg — exercised with a stub `complete` function, since the real one
-// needs an API key this machine does not have. What is actually under test is
-// the part that matters: the check that decides whether a model's answer is a
-// REFORMAT of the user's resume or a different resume, and the guarantee that
-// every failure lands on the deterministic path instead of on nothing.
+// The faithfulness check on model output: is it a REFORMAT of the user's resume
+// or a different resume? That check is what stands between a model and the
+// user's document, so it is tested against real attacks.
 
-import { describe, expect, it, vi } from 'vitest'
-import {
-  RESUME_MARKDOWN_PROMPT,
-  buildReformatPrompt,
-  checkReformatFaithfulness,
-  reformatToMarkdown,
-  stripCodeFence,
-} from './llm'
+import { describe, expect, it } from 'vitest'
+import { checkReformatFaithfulness, stripCodeFence } from './llm'
 
 const SOURCE = `Jane Q. Doe
 jane.doe@example.com | 555-0100 | Seattle, WA
@@ -48,25 +40,6 @@ jane.doe@example.com | 555-0100 | Seattle, WA
 ## EDUCATION
 
 B.S. Computer Science, University of Washington, 2015`
-
-describe('RESUME_MARKDOWN_PROMPT', () => {
-  it('tells the model it is reformatting, not writing', () => {
-    expect(RESUME_MARKDOWN_PROMPT).toMatch(/REFORMATTING, not writing/)
-    expect(RESUME_MARKDOWN_PROMPT).toMatch(/Do NOT invent/)
-    expect(RESUME_MARKDOWN_PROMPT).toMatch(/Do NOT delete content/)
-  })
-
-  it('names the exact Markdown subset the templates render', () => {
-    for (const token of ['`# `', '`## `', '`**bold**`', '`- `']) {
-      expect(RESUME_MARKDOWN_PROMPT).toContain(token)
-    }
-    expect(RESUME_MARKDOWN_PROMPT).toMatch(/No tables/)
-  })
-
-  it('carries the resume text into the prompt', () => {
-    expect(buildReformatPrompt(SOURCE)).toContain(SOURCE)
-  })
-})
 
 describe('checkReformatFaithfulness', () => {
   it('passes a real reformat', () => {
@@ -117,47 +90,6 @@ describe('stripCodeFence', () => {
   })
 })
 
-describe('reformatToMarkdown', () => {
-  it('falls back to deterministic inference when there is no model', async () => {
-    const result = await reformatToMarkdown(SOURCE)
-    expect(result.method).toBe('heuristic')
-    expect(result.warnings).toEqual([])
-    expect(result.markdown).toContain('## EXPERIENCE')
-  })
-
-  it('uses a faithful model answer', async () => {
-    const complete = vi.fn().mockResolvedValue('```markdown\n' + FAITHFUL + '\n```')
-    const result = await reformatToMarkdown(SOURCE, complete)
-    expect(complete).toHaveBeenCalledOnce()
-    expect(result.method).toBe('llm')
-    expect(result.markdown).toBe(FAITHFUL)
-  })
-
-  it('discards an unfaithful answer, says why, and still returns structure', async () => {
-    const complete = vi.fn().mockResolvedValue(
-      '# Jane Q. Doe\n\n## SUMMARY\n\nVisionary transformational leader driving synergistic paradigm shifts across hyperscale organisations worldwide.'
-    )
-    const result = await reformatToMarkdown(SOURCE, complete)
-    expect(result.method).toBe('heuristic')
-    expect(result.warnings[0]).toMatch(/discarded/)
-    expect(result.warnings[0]).toMatch(/nothing was invented/)
-    expect(result.markdown).toContain('- Built the refunds API used by 40 internal teams.')
-  })
-
-  it('falls back when the model call throws', async () => {
-    const complete = vi.fn().mockRejectedValue(new Error('402 payment required'))
-    const result = await reformatToMarkdown(SOURCE, complete)
-    expect(result.method).toBe('heuristic')
-    expect(result.warnings[0]).toMatch(/unavailable/)
-    expect(result.markdown).toContain('## EXPERIENCE')
-  })
-
-  it('falls back when the model returns nothing', async () => {
-    const result = await reformatToMarkdown(SOURCE, vi.fn().mockResolvedValue('   '))
-    expect(result.method).toBe('heuristic')
-    expect(result.warnings[0]).toMatch(/returned nothing/)
-  })
-})
 
 // ---------------------------------------------------------------------------
 // Fabrication attacks
@@ -254,14 +186,5 @@ Python, PostgreSQL, Docker`
     const report = checkReformatFaithfulness('Jane Okafor\nEngineer at Globex', '# Jane Okafor\n\nEngineer at Google')
     expect(report.ok).toBe(false)
     expect(report.invented).toContain('Google')
-  })
-
-  it('falls back to the deterministic layout instead of storing the lie', async () => {
-    const fabricated = `# Jane Okafor\n\n**Initech LLC - Principal Architect - 2013 - 2016**\n`
-    const result = await reformatToMarkdown(SOURCE_RESUME, async () => fabricated)
-
-    expect(result.method).toBe('heuristic')
-    expect(result.markdown).not.toContain('Initech')
-    expect(result.warnings.join(' ')).toMatch(/not in your document/i)
   })
 })

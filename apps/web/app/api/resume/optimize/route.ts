@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     // Resume text (source of truth — never fabricated against).
     const { data: profile } = await admin
       .from('profiles')
-      .select('resume_text')
+      .select('resume_text, full_name, email')
       .eq('id', user.id)
       .single()
     const resumeText = (profile?.resume_text as string | null) ?? ''
@@ -115,6 +115,10 @@ export async function POST(request: NextRequest) {
     try {
       const result = await optimizeResume({
         resumeText,
+        nameCtx: {
+          fullName: (profile?.full_name as string | null) ?? null,
+          email: (profile?.email as string | null) ?? null,
+        },
         job: { title: job.title, company: companyName ?? null, description: job.description },
         llm,
       })

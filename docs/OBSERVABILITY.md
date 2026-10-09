@@ -384,3 +384,71 @@ replacement for the structured log line.
 at the small set of catch blocks where it's wired in today (the harness
 run/cron routes, Gmail sync, and the ATS submit-approval route) — `extra`
 is IDs/enums only, by the same rule.
+
+## Outcome scores and the daily health check
+
+### Outcome scores (Langfuse)
+
+What people do with Cello's output is sent to Langfuse as scores on the trace and
+generation that produced it, named after the behaviour:
+
+| Score | Type | Meaning |
+|---|---|---|
+| `draft_approved` | boolean | A draft (outreach or application) was approved or sent |
+| `draft_edited` | numeric 0..1 | Word-level edit distance from what the model wrote to what was approved |
+| `draft_skipped` | boolean | The person skipped or rejected a draft |
+| `job_applied` | boolean | The person applied to a job Cello assessed |
+| `job_dismissed` | boolean | The person passed on a role (comment is the reason) |
+| `outreach_replied` | boolean | A contact replied (comment is positive, neutral, negative or bounce) |
+| `interview_scheduled` | boolean | The application reached a screen or interview |
+
+Database triggers queue each event in `feedback_events`; the daily health routine sends
+them (`exportFeedback` in `lib/quality/feedback.ts`). Rows that hold model output keep
+the trace and observation id (`trace_id`, `observation_id`) so an outcome that arrives
+days later, such as a reply, still lands on the call that caused it. A role's trace is
+on the person's own `person_roles` row, because the assessment is theirs. Events older
+than 28 days are dropped, because Langfuse keeps traces for 30.
+
+### Health check
+
+The daily health routine stores one report in `ops_health_checks` (`lib/quality/health.ts`):
+the database size and its biggest tables, how fresh each routine is from `job_heartbeats`
+(the only heartbeat), and the sources that failed their last three role checks. The
+issues in it are computed in code, each with a next step:
+
+- the database is over 350 MB (the free plan stops at 500 MB)
+- a routine was due more than an hour ago and has not succeeded since
+- a source failed its last three role checks in a row
+
+Something the check cannot read is reported as not reporting, never as zero. The account
+whose id is `OWNER_USER_ID` sees the latest report on the dashboard beside the AI budget;
+for anyone else nothing renders and `/api/ops/health` answers 404. Reports older than
+90 days are deleted.
+
+### Two alerts to create in Langfuse
+
+Create these in Langfuse under Alerts (the Hobby plan allows two). Settings:
+https://langfuse.com/docs/observability/features/alerts
+
+1. **Errors**
+   - Data source: Observations
+   - Metric: count
+   - Filters: level is ERROR, environment is production
+   - Window: 1 day
+   - Operator: greater than. Warning threshold 5, alert threshold 15
+   - No data: notify after 3 days. Renotify: off
+   - Action: a Slack channel or a webhook
+2. **Drafts need more editing**
+   - Data source: Scores (numeric)
+   - Metric: average of `draft_edited`
+   - Filters: environment is production
+   - Window: 7 days
+   - Operator: greater than. Warning threshold 0.30, alert threshold 0.45
+   - No data: keep previous severity. Renotify: off
+   - Action: the same channel
+
+### Settings
+
+| Variable | What it does |
+|---|---|
+| `OWNER_USER_ID` | The one account that sees the health report on the dashboard |

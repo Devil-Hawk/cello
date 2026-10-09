@@ -1,300 +1,142 @@
-// Tests for lib/harness/agents/matcher.ts: scoreJobWithLlm's buildMatchContext
-// wiring (langgraph port step 9), and verifyMatchVerdict's own writeVerdict /
-// floor-before-spend / catch-branch integration (Step 4 item 3) — the real
-// wired call site, not just lib/graph/verify/matcher.test.ts's pure-helper
-// coverage of checkMatchVerdictDeterministic/needsJudgeSample.
+// Tests for lib/harness/agents/matcher.ts: the background door onto lib/scoring.
 //
-// CACHE-PREFIX STABILITY (matcher.ts's own CACHE STRUCTURE comment): the
-// resume + rubric live in `system` with cachePrefix:true because they are
-// byte-identical across every job a user scores — that only bills at a
-// fraction of full price if the provider's cache actually hits, which
-// requires `system` to be byte-for-byte unchanged call to call. buildMatchContext
-// is per-COMPANY, so it must never leak into `system` — this file proves that
-// directly against the real function, not by trusting the comment.
+// What matters here is what the matcher no longer does: it writes no score, and it
+// creates no application on its own (a role reaches Pipeline when the person taps
+// Interested). It hands the work to lib/scoring and reports what came back.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AdminClient } from '../types'
-import type { LlmRunOptions, LlmResult } from '../types'
-import { EMPTY_TARGETING } from '@/lib/targeting'
-import { BudgetCapError } from '@/lib/harness/spend'
+import type { AdminClient, StepContext } from '../types'
 import { MissingKeyError } from '../llm'
-import type { ScoreBatchOptions, LlmVerdict } from './matcher'
-import type { EvalResult } from '@/lib/evals/harness'
+import type { RoleFit } from '@/lib/scoring/types'
 
-vi.mock('@/lib/context/assemble', () => ({
-  buildMatchContext: vi.fn(async (_admin: unknown, _userId: string, companyId: string | null) =>
-    companyId ? `CONTEXT FOR ${companyId}` : ''
-  ),
+const assessJobs = vi.fn()
+const runDailyShortlist = vi.fn()
+vi.mock('@/lib/scoring', () => ({
+  assessJobs: (...a: unknown[]) => assessJobs(...a),
+  runDailyShortlist: (...a: unknown[]) => runDailyShortlist(...a),
 }))
 
-const judgeMatchQualityMock = vi.fn<[unknown, unknown, unknown], Promise<EvalResult>>()
-vi.mock('@/lib/evals/judge', () => ({
-  meteredJudgeClient: vi.fn(() => ({})),
-  judgeMatchQuality: (client: unknown, input: unknown, opts: unknown) => judgeMatchQualityMock(client, input, opts),
-}))
+const { scoreJobBatch, matcher, diagnoseCandidateJobs } = await import('./matcher')
 
-const logHarnessErrorMock = vi.fn()
-vi.mock('@/lib/observability/log', () => ({
-  logHarnessError: (...args: unknown[]) => logHarnessErrorMock(...args),
-}))
+const LLM = vi.fn()
 
-const { scoreJobWithLlm, scoreJobBatch, verifyMatchVerdict, toScorable } = await import('./matcher')
-
-const FAKE_ADMIN = {} as AdminClient
-
-function fakeLlm(calls: LlmRunOptions[]) {
-  return async (opts: LlmRunOptions): Promise<LlmResult> => {
-    calls.push(opts)
-    return {
-      content: JSON.stringify({ score: 80 }),
-      tokensUsed: 100,
-      promptTokens: 90,
-      completionTokens: 10,
-      model: 'fake/test-model',
-    }
+function fit(jobId: string, over: Partial<RoleFit> = {}): RoleFit {
+  return {
+    jobId,
+    assessedAt: '2026-10-06T08:00:00Z',
+    blocked: [],
+    want: { p: 0.7, reason: 'Payments work like what you liked.', tier: 'high', calibrated: false, nReactions: 4 },
+    chance: {
+      label: 'possible',
+      checks: [
+        { requirement: '4+ years backend', mustHave: true, status: 'met', evidence: { line: 3, quote: 'Backend engineer, Brightpay, 2020-2024' } },
+        { requirement: 'Kubernetes', mustHave: false, status: 'not_met', evidence: null },
+      ],
+      gaps: ['Nice to have: Kubernetes'],
+      confirm: [],
+      note: null,
+    },
+    ...over,
   }
 }
 
-const RESUME = 'Experienced backend engineer.'
+function assessed(fits: RoleFit[], over: Record<string, unknown> = {}) {
+  return { assessed: fits.filter((f) => f.blocked.length === 0).length, blocked: fits.filter((f) => f.blocked.length > 0).length, failed: 0, remaining: 3, fits: new Map(fits.map((f) => [f.jobId!, f])), ...over }
+}
+
+/** An admin client that fails the test if the matcher writes to it. */
+const NO_WRITES = new Proxy({}, { get: () => () => { throw new Error('the matcher must not write') } }) as unknown as AdminClient
 
 beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe('scoreJobWithLlm — buildMatchContext wiring', () => {
-  it('interpolates buildMatchContext into `prompt`, never into `system` — the cached prefix stays byte-identical across companies', async () => {
-    const calls: LlmRunOptions[] = []
-    const llm = fakeLlm(calls)
-
-    await scoreJobWithLlm(
-      llm,
-      RESUME,
-      { id: 'job-1', title: 'Backend Engineer', description: 'Do the work.', location: 'Remote', companyId: 'company-a' },
-      FAKE_ADMIN,
-      'user-1'
-    )
-    await scoreJobWithLlm(
-      llm,
-      RESUME,
-      { id: 'job-2', title: 'Backend Engineer', description: 'Do the work.', location: 'Remote', companyId: 'company-b' },
-      FAKE_ADMIN,
-      'user-1'
-    )
-
-    expect(calls).toHaveLength(2)
-    // The cached prefix: byte-identical for the same resume regardless of company.
-    expect(calls[0]!.system).toBe(calls[1]!.system)
-    expect(calls[0]!.system).not.toContain('CONTEXT FOR')
-
-    // The per-company context lands in `prompt`, and differs company to company.
-    expect(calls[0]!.prompt).toContain('CONTEXT FOR company-a')
-    expect(calls[1]!.prompt).toContain('CONTEXT FOR company-b')
-    expect(calls[0]!.prompt).not.toBe(calls[1]!.prompt)
+describe('scoreJobBatch', () => {
+  it('hands the work to the scoring system and reports chance, want and cited highlights, never a score', async () => {
+    assessJobs.mockResolvedValue(assessed([fit('j1')]))
+    const out = await scoreJobBatch({ admin: NO_WRITES, userId: 'u', llm: LLM, limit: 25 })
+    expect(assessJobs).toHaveBeenCalledWith(expect.objectContaining({ userId: 'u', limit: 25, llm: LLM }))
+    expect(out.scored).toEqual([
+      { jobId: 'j1', blocked: [], chance: 'possible', want: 0.7, wantReason: 'Payments work like what you liked.', highlights: ['4+ years backend: Backend engineer, Brightpay, 2020-2024'], gaps: ['Nice to have: Kubernetes'] },
+    ])
+    expect(out.scored[0]).not.toHaveProperty('score')
+    expect(out.remaining).toBe(3)
   })
 
-  it('carries a matcher prompt version that does not depend on the resume', async () => {
-    const calls: LlmRunOptions[] = []
-    const llm = fakeLlm(calls)
-    const job = { id: 'job-1', title: 'Backend Engineer', description: 'x', location: 'Remote', companyId: null }
-    await scoreJobWithLlm(llm, RESUME, job, FAKE_ADMIN, 'user-1')
-    await scoreJobWithLlm(llm, 'A completely different resume.', job, FAKE_ADMIN, 'user-1')
-    expect(calls[0]!.promptRef).toMatchObject({ name: 'matcher', hash: expect.stringMatching(/^[0-9a-f]{8}$/) })
-    expect(calls[0]!.promptRef).toEqual(calls[1]!.promptRef)
+  it('reports a filtered role with the stated fact it breaks', async () => {
+    const blocked = fit('j2', { blocked: [{ kind: 'location', text: 'It is based in Germany, and you said you work in the United States.' }], want: null, chance: null })
+    assessJobs.mockResolvedValue(assessed([blocked]))
+    const out = await scoreJobBatch({ admin: NO_WRITES, userId: 'u', llm: LLM, limit: 5 })
+    expect(out.blockedCount).toBe(1)
+    expect(out.scored[0]).toMatchObject({ jobId: 'j2', blocked: ['It is based in Germany, and you said you work in the United States.'], chance: null, want: null })
   })
 
-  it("never falls back to another person's company for a directory-held role", async () => {
-    const calls: LlmRunOptions[] = []
-    // viewer_company_id null = the viewer holds the role from the directory; company_id (if a row carried it) is the first storer's.
-    const row = { id: 'job-1', title: 'Backend Engineer', description: 'x', location: 'Remote', viewer_company_id: null, company_id: 'co-of-person-a' }
-    const scorable = toScorable(row as never)
-    expect(scorable.companyId).toBeNull()
-    await scoreJobWithLlm(fakeLlm(calls), RESUME, scorable, FAKE_ADMIN, 'person-b')
-    expect(calls[0]!.prompt).not.toContain('co-of-person-a')
-    expect(calls[0]!.prompt).not.toContain('CONTEXT FOR')
+  it('passes a reason for doing nothing through, and never fails silently', async () => {
+    assessJobs.mockResolvedValue({ assessed: 0, blocked: 0, failed: 0, remaining: 0, skippedReason: 'no-resume', fits: new Map() })
+    expect((await scoreJobBatch({ admin: NO_WRITES, userId: 'u', llm: LLM, limit: 5 })).skippedReason).toBe('no-resume')
+    assessJobs.mockResolvedValue({ assessed: 0, blocked: 0, failed: 4, remaining: 4, fits: new Map() })
+    expect((await scoreJobBatch({ admin: NO_WRITES, userId: 'u', llm: LLM, limit: 5 })).skippedReason).toBe('all 4 assessment(s) failed')
   })
 
-  it('adds no context block when the job has no company', async () => {
-    const calls: LlmRunOptions[] = []
-    const llm = fakeLlm(calls)
-    await scoreJobWithLlm(
-      llm,
-      RESUME,
-      { id: 'job-3', title: 'Backend Engineer', description: 'Do the work.', location: 'Remote', companyId: null },
-      FAKE_ADMIN,
-      'user-1'
-    )
-    expect(calls[0]!.prompt).not.toContain('CONTEXT FOR')
+  it('maps a missing key to a reason instead of throwing, and lets other errors through', async () => {
+    assessJobs.mockRejectedValue(new MissingKeyError('no key'))
+    expect((await scoreJobBatch({ admin: NO_WRITES, userId: 'u', llm: LLM, limit: 5 })).skippedReason).toBe('no-llm-key')
+    assessJobs.mockRejectedValue(new Error('database down'))
+    await expect(scoreJobBatch({ admin: NO_WRITES, userId: 'u', llm: LLM, limit: 5 })).rejects.toThrow('database down')
+  })
+
+  it('does nothing when already aborted', async () => {
+    const c = new AbortController()
+    c.abort()
+    const out = await scoreJobBatch({ admin: NO_WRITES, userId: 'u', llm: LLM, limit: 5, signal: c.signal })
+    expect(out.skippedReason).toBe('aborted')
+    expect(assessJobs).not.toHaveBeenCalled()
   })
 })
 
-// --- verifyMatchVerdict — Step 4 item 3's real wired integration -----------
+describe('matcher step', () => {
+  const ctx = (input: unknown = {}, deps: Record<string, unknown> = {}) =>
+    ({ userId: 'u', input, deps, admin: NO_WRITES, apiKeys: { openrouter: 'k' }, llm: LLM, signal: new AbortController().signal }) as unknown as StepContext
 
-class FakeVerdictAdmin {
-  inserted: Record<string, unknown>[] = []
-  from(table: string) {
-    if (table !== 'eval_verdicts') throw new Error(`FakeVerdictAdmin: unexpected table "${table}"`)
-    return {
-      insert: (row: Record<string, unknown>) => {
-        this.inserted.push(row)
-        return Promise.resolve({ error: null })
-      },
+  it('assesses, picks the day\'s list once, and creates no application', async () => {
+    assessJobs.mockResolvedValue(assessed([fit('j1'), fit('j2', { chance: { label: 'strong', checks: [], gaps: [], confirm: [], note: null } })]))
+    runDailyShortlist.mockResolvedValue({ status: 'ok', picks: [{ jobId: 'j2' }, { jobId: 'j1' }] })
+    const out = await matcher(ctx())
+    expect(runDailyShortlist).toHaveBeenCalledWith(expect.objectContaining({ userId: 'u', skipIfBuilt: true }))
+    const o = out.output as { matches: { jobId: string; chance: string; want: number }[]; topJobIds: string[] }
+    expect(o.matches.map((m) => [m.jobId, m.chance])).toEqual([['j1', 'possible'], ['j2', 'strong']])
+    expect(o.matches.every((m) => m.want > 0 && m.want <= 1)).toBe(true)
+    expect(o.topJobIds).toEqual(['j2', 'j1'])
+  })
+
+  it('assesses exactly the roles a dependency step found', async () => {
+    assessJobs.mockResolvedValue(assessed([fit('a')]))
+    runDailyShortlist.mockResolvedValue({ status: 'ok', picks: [] })
+    await matcher(ctx({ jobIds: ['a'] }, { sourcer: { jobIds: ['b'] } }))
+    expect(assessJobs).toHaveBeenCalledWith(expect.objectContaining({ jobIds: expect.arrayContaining(['a', 'b']) }))
+  })
+
+  it('does not pick a list when assessing could not run', async () => {
+    assessJobs.mockResolvedValue({ assessed: 0, blocked: 0, failed: 0, remaining: 0, skippedReason: 'no-resume', fits: new Map() })
+    const out = await matcher(ctx())
+    expect(runDailyShortlist).not.toHaveBeenCalled()
+    expect((out.output as { skippedReason: string }).skippedReason).toBe('no-resume')
+  })
+})
+
+describe('diagnoseCandidateJobs', () => {
+  it('says which requested roles will be assessed and explains the ones that will not', async () => {
+    const chain = {
+      select: () => chain,
+      eq: () => chain,
+      in: async () => ({ data: [{ id: 'a', title: 'Backend Engineer', description: 'x' }, { id: 'b', title: 'Designer', description: '' }], error: null }),
     }
-  }
-}
-
-const GOOD_VERDICT: LlmVerdict = {
-  score: 80,
-  skillsMatch: 80,
-  experienceMatch: 80,
-  locationMatch: 80,
-  strengths: ['Backend experience'],
-  gaps: [],
-  seniorityFit: 'Senior',
-  summary: 'Strong match.',
-  matchedSkills: ['backend'],
-  missingSkills: [],
-}
-
-function baseOpts(overrides: Partial<ScoreBatchOptions> = {}): ScoreBatchOptions {
-  return {
-    admin: new FakeVerdictAdmin() as unknown as AdminClient,
-    userId: 'user-1',
-    companyIds: [],
-    resume: RESUME,
-    targeting: EMPTY_TARGETING,
-    llm: fakeLlm([]),
-    limit: 1,
-    ...overrides,
-  }
-}
-
-describe('verifyMatchVerdict — writeVerdict / floor-before-spend / catch branches', () => {
-  beforeEach(() => {
-    judgeMatchQualityMock.mockReset()
-    logHarnessErrorMock.mockReset()
-  })
-
-  it('always writes the deterministic postcondition, and skips the judge without a key (floor before spend)', async () => {
-    const opts = baseOpts() // no apiKeys at all
-    await verifyMatchVerdict(opts, 'job-1', GOOD_VERDICT, 'framed job text mentioning Backend experience')
-
-    const admin = opts.admin as unknown as FakeVerdictAdmin
-    expect(admin.inserted).toHaveLength(1)
-    expect(admin.inserted[0]).toMatchObject({ judge: 'deterministic', verdict: 'pass', subject_id: 'job-1' })
-    expect(judgeMatchQualityMock).not.toHaveBeenCalled()
-  })
-
-  it('writes a failing deterministic verdict for fabricated evidence, still without touching the judge', async () => {
-    const opts = baseOpts()
-    const fabricated: LlmVerdict = { ...GOOD_VERDICT, gaps: ['Ten years of quantum computing experience'] }
-    await verifyMatchVerdict(opts, 'job-2', fabricated, 'framed job text mentioning Backend experience')
-
-    const admin = opts.admin as unknown as FakeVerdictAdmin
-    expect(admin.inserted).toHaveLength(1)
-    expect(admin.inserted[0].judge).toBe('deterministic')
-    expect(admin.inserted[0].verdict).toBe('fail')
-  })
-
-  it('samples a threshold-crossing score and persists a passing closed_qa verdict', async () => {
-    judgeMatchQualityMock.mockResolvedValueOnce({
-      name: 'match quality',
-      verdict: 'pass',
-      score: 0.9,
-      threshold: 0.7,
-      n: 1,
-      summary: 'Internally consistent.',
-    })
-    const opts = baseOpts({ apiKeys: { openrouter: 'fake-key' } as never, judgeThreshold: 50, runId: 'run-1' })
-    await verifyMatchVerdict(opts, 'job-3', GOOD_VERDICT, 'framed job text mentioning Backend experience')
-
-    const admin = opts.admin as unknown as FakeVerdictAdmin
-    expect(admin.inserted).toHaveLength(2)
-    expect(admin.inserted[1]).toMatchObject({ judge: 'closed_qa', verdict: 'pass', run_id: 'run-1' })
-    expect(judgeMatchQualityMock).toHaveBeenCalledTimes(1)
-  })
-
-  it('judge budget-refusal writes a typed unjudged verdict, never a substituted score (invariant 7)', async () => {
-    judgeMatchQualityMock.mockRejectedValueOnce(new BudgetCapError(10, 10))
-    const opts = baseOpts({ apiKeys: { openrouter: 'fake-key' } as never, judgeThreshold: 50 })
-    await verifyMatchVerdict(opts, 'job-4', GOOD_VERDICT, 'framed job text mentioning Backend experience')
-
-    const admin = opts.admin as unknown as FakeVerdictAdmin
-    expect(admin.inserted).toHaveLength(2)
-    expect(admin.inserted[1]).toMatchObject({ judge: 'closed_qa', verdict: 'unjudged' })
-    expect(logHarnessErrorMock).not.toHaveBeenCalled() // an expected refusal, not a failure worth an operator's attention
-  })
-
-  it('judge missing-key refusal writes unjudged the same way as a budget refusal', async () => {
-    judgeMatchQualityMock.mockRejectedValueOnce(new MissingKeyError('no key'))
-    const opts = baseOpts({ apiKeys: { openrouter: 'fake-key' } as never, judgeThreshold: 50 })
-    await verifyMatchVerdict(opts, 'job-5', GOOD_VERDICT, 'framed job text mentioning Backend experience')
-
-    const admin = opts.admin as unknown as FakeVerdictAdmin
-    expect(admin.inserted[1]).toMatchObject({ judge: 'closed_qa', verdict: 'unjudged' })
-  })
-
-  it('an unexpected judge failure never throws and never writes a row silently — it logs via logHarnessError', async () => {
-    judgeMatchQualityMock.mockRejectedValueOnce(new Error('ECONNRESET'))
-    const opts = baseOpts({ apiKeys: { openrouter: 'fake-key' } as never, judgeThreshold: 50, runId: 'run-9' })
-    await expect(verifyMatchVerdict(opts, 'job-6', GOOD_VERDICT, 'framed job text mentioning Backend experience')).resolves.toBeUndefined()
-
-    const admin = opts.admin as unknown as FakeVerdictAdmin
-    // No closed_qa row — an unexpected failure isn't a typed refusal, it's a
-    // real problem an operator needs to see, not a fabricated verdict row.
-    expect(admin.inserted).toHaveLength(1)
-    expect(admin.inserted[0].judge).toBe('deterministic')
-    expect(logHarnessErrorMock).toHaveBeenCalledTimes(1)
-    const [ctx, err] = logHarnessErrorMock.mock.calls[0] as [Record<string, unknown>, Error]
-    expect(ctx).toMatchObject({ runId: 'run-9', agentType: 'matcher', phase: 'judge', userId: 'user-1' })
-    expect(err.message).toBe('ECONNRESET')
-  })
-
-  it('does not sample a below-threshold score outside the deterministic 10%, and skips the judge entirely', async () => {
-    // 'job-below-1' hashes outside shouldSampleForJudge's 10% window (FNV-1a
-    // is deterministic — computed directly, not asserted against another
-    // file's fixtures) and GOOD_VERDICT.score (80) sits below a threshold of
-    // 95, so neither of needsJudgeSample's two ways in fires.
-    const opts = baseOpts({ apiKeys: { openrouter: 'fake-key' } as never, judgeThreshold: 95 })
-    await verifyMatchVerdict(opts, 'job-below-1', GOOD_VERDICT, 'framed job text mentioning Backend experience')
-
-    const admin = opts.admin as unknown as FakeVerdictAdmin
-    expect(admin.inserted).toHaveLength(1)
-    expect(judgeMatchQualityMock).not.toHaveBeenCalled()
-  })
-})
-
-// --- scoreJobBatch — the score is the scorer's own, never the shared role's ---
-
-describe('scoreJobBatch — where the score is written', () => {
-  const JOB = {
-    id: 'job-1', title: 'Backend Engineer', description: 'Do the work.', location: 'Remote', url: 'https://x.example/1',
-    is_new: true, match_score: null, posted_at: null, job_function: null, seniority: null, language: null, country: null, is_remote: null,
-    quality_score: 80, viewer_company_id: 'co-1', viewer_company_name: 'Acme',
-  }
-
-  it("writes to the scorer's own person_roles row, by user and job, and never updates jobs", async () => {
-    const updates: { table: string; eq: Record<string, unknown> }[] = []
-    const admin = {
-      from(table: string) {
-        if (table === 'person_jobs') {
-          const chain: Record<string, unknown> = {}
-          for (const m of ['eq', 'in', 'is', 'order', 'limit', 'or']) chain[m] = () => chain
-          chain.then = (resolve: (v: unknown) => void) => resolve({ data: [JOB], error: null })
-          return { select: () => chain }
-        }
-        if (table === 'eval_verdicts') return { insert: async () => ({ error: null }) }
-        return {
-          update: () => {
-            const seen: Record<string, unknown> = {}
-            updates.push({ table, eq: seen })
-            const chain = { eq: (c: string, v: unknown) => ((seen[c] = v), chain), then: (resolve: (v: unknown) => void) => resolve({ error: null }) }
-            return chain
-          },
-        }
-      },
-    } as unknown as AdminClient
-    const result = await scoreJobBatch(baseOpts({ admin, userId: 'user-9', companyIds: ['co-1'], jobIds: ['job-1'] }))
-    expect(result.scored).toHaveLength(1)
-    expect(updates).toEqual([{ table: 'person_roles', eq: { user_id: 'user-9', job_id: 'job-1' } }])
+    const admin = { from: () => chain } as unknown as AdminClient
+    const out = await diagnoseCandidateJobs(admin, ['a', 'b', 'c'], 'u')
+    expect(out).toEqual([
+      { jobId: 'a', title: 'Backend Engineer', found: true, hasDescription: true, willAttemptScoring: true, reason: null },
+      { jobId: 'b', title: 'Designer', found: true, hasDescription: false, willAttemptScoring: true, reason: null },
+      { jobId: 'c', title: null, found: false, hasDescription: false, willAttemptScoring: false, reason: 'not found among the roles you hold' },
+    ])
   })
 })

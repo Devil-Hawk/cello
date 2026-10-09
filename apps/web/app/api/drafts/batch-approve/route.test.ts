@@ -43,7 +43,7 @@ interface DraftFixture {
   }
 }
 
-/** One row of person_jobs: the viewer's own company, score and details for a role. */
+/** One row of person_jobs: the viewer's own company, score, details and verdict for a role. */
 interface ViewerFixture {
   id: string
   viewer_id: string
@@ -51,6 +51,8 @@ interface ViewerFixture {
   viewer_company_metadata: unknown
   match_score: number | null
   match_details: unknown
+  chance?: string | null
+  want_p?: number | null
 }
 
 /** Every select string the route sent to the service-role client. */
@@ -455,6 +457,8 @@ describe("GET and POST — a shared role is named and scored by the viewer's own
     viewer_company_metadata: {},
     match_score: 41,
     match_details: { summary: 'My own reading.' },
+    chance: 'possible',
+    want_p: 0.7,
   })
 
   it('the manifest carries the viewer\'s company and score and none of the first storer\'s', async () => {
@@ -462,7 +466,8 @@ describe("GET and POST — a shared role is named and scored by the viewer's own
     state.personJobs = [mine()]
     const text = JSON.stringify(await (await GET()).json())
     expect(text).toContain('Mine')
-    expect(text).toContain('My own reading.')
+    const manifest = JSON.parse(text)
+    expect([...manifest.items, ...manifest.needsAttention][0]).toMatchObject({ chance: 'possible', want: 0.7 })
     expect(text).not.toContain('Theirs')
     expect(selects.filter((s) => s.table === 'application_drafts').every((s) => !s.select.includes('companies('))).toBe(true)
   })

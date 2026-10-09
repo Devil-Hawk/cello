@@ -14,6 +14,8 @@
 //   Never mutate `content` in place — create a new version so the studio can
 //   diff and roll back.
 
+import type { Resume } from './schema'
+
 /**
  * Provenance of a version. Enforced in TypeScript only — the column has no CHECK
  * constraint, so adding a value here needs no migration.
@@ -30,52 +32,35 @@ export function isResumeSource(value: unknown): value is ResumeSource {
   return typeof value === 'string' && (RESUME_SOURCES as readonly string[]).includes(value)
 }
 
-/** One structured section of a resume, when `content_json` is populated. */
-export interface ResumeSection {
-  /** e.g. "Experience", "Skills", "Education". */
-  heading: string
-  /** Body lines / bullets, in order. May be empty. */
-  bullets: string[]
-}
-
 /**
- * Optional structured mirror of `content`, stored in `content_json`.
- * ALWAYS nullable — `content` (plain text) is the source of truth and the thing
- * an ATS receives. Every read path must tolerate a null `content_json`.
+ * The jsonb stored in `content_json`.
  *
- * FORMATTING LIVES HERE, AND IT NEEDED NO MIGRATION
- *   `markdown` and `templateId` are ordinary keys under the free-form index
- *   signature above, inside the existing jsonb column. Nothing in the schema
- *   changed, and every existing row — which has content_json = null — keeps
- *   working: it simply has no markdown and no chosen template yet.
+ * ONE AUTHORED FIELD, EVERYTHING ELSE DERIVED (read this before writing any)
+ *   `resume` is AUTHORED: a JSON Resume compatible document validated by
+ *   ResumeSchema (./schema.ts). It is the only thing anything writes by intent.
+ *   `markdown` is DERIVED: resumeToMarkdown(resume), with fixed heading levels
+ *   (# name, ## section, ### entry). It is a cache for the preview and exports.
+ *   `templateId` is DERIVED: resume.meta.cello.templateId, kept here for
+ *   readers that only look at content_json.
+ *   `content` (the column, not this object) is DERIVED: resumeToPlainText(resume).
+ *   It stays plain text because it is what an ATS and every apply path read, and
+ *   a database trigger mirrors the latest base version's `content` into
+ *   profiles.resume_text.
+ *   Nothing may write these separately. The only writer is createResumeVersion()
+ *   in ./store.ts, which derives all of them from one validated Resume.
  *
- * WHICH ONE IS AUTHORED AND WHICH IS DERIVED (read this before writing either)
- *   `content_json.markdown` is AUTHORED. It is what the user types in the
- *   studio and what the templates render.
- *   `content` is DERIVED: it is `markdownToPlainText(markdown)` from
- *   lib/resume/markdown.ts, and it stays plain text forever because it is what
- *   an ATS and every apply path consume.
- *   NEVER edit the two independently. Writing `content` by hand while leaving
- *   `markdown` alone (or vice versa) makes the exported PDF and the text the
- *   employer's parser reads describe different resumes, which is exactly the
- *   silent-corruption failure this contract exists to prevent. Write both
- *   together — see toResumeContentJson() below.
- *   A row with `content` but no `markdown` is legal and means "plain text,
- *   never formatted"; treat the plain text as the initial Markdown.
+ * LEGACY ROWS (written before `resume` existed) have only `markdown`/`templateId`
+ * or are null. They are converted on read by resolveResume() in ./resolve.ts, so
+ * no reader sees the difference.
  */
 export interface ResumeContentJson {
-  sections?: ResumeSection[]
-  /**
-   * The AUTHORED, formatted resume. Markdown parsed by remark (headings 1-3,
-   * paragraphs, ordered/unordered lists, rules, and inline bold/italic/code/
-   * links). Absent on every row written before formatting shipped.
-   */
+  resume?: Resume
+  /** Derived. Canonical fixed-level Markdown of `resume`. */
   markdown?: string
   /**
-   * Id of the chosen template from lib/resume/templates.ts. Unknown or absent
-   * ids degrade to DEFAULT_TEMPLATE_ID via getTemplate() — a stored id must
-   * never be able to break a render, so this stays a plain string rather than
-   * a union that a retired template would make unassignable.
+   * Derived. Id of the chosen template from lib/resume/templates.ts. Unknown or
+   * absent ids degrade to DEFAULT_TEMPLATE_ID via getTemplate(), so this stays a
+   * plain string rather than a union a retired template would make unassignable.
    */
   templateId?: string
   /** Free-form room for future structure without another migration. */
@@ -83,9 +68,9 @@ export interface ResumeContentJson {
 }
 
 /**
- * The authored Markdown for a version, or null when there is none.
- * Tolerates a null/undefined content_json and a non-string stored value —
- * this reads user data out of a jsonb column, so nothing is guaranteed.
+ * The derived Markdown for a version, or null when there is none. Tolerates a
+ * null/undefined content_json and a non-string stored value: this reads user
+ * data out of a jsonb column, so nothing is guaranteed.
  */
 export function getResumeMarkdown(
   contentJson: ResumeContentJson | null | undefined
@@ -96,7 +81,7 @@ export function getResumeMarkdown(
 
 /**
  * The stored template id, or null. Callers pass the result straight to
- * getTemplate(), which owns the fallback — do NOT default it here, or two call
+ * getTemplate(), which owns the fallback: do NOT default it here, or two call
  * sites will eventually disagree about what the default is.
  */
 export function getResumeTemplateId(
@@ -104,33 +89,6 @@ export function getResumeTemplateId(
 ): string | null {
   const value = contentJson?.templateId
   return typeof value === 'string' && value.length > 0 ? value : null
-}
-
-/**
- * The Markdown to open in the editor for a version. Falls back to the derived
- * plain text, because every resume stored before this feature is plain text and
- * plain text is valid Markdown — it lowers to paragraphs with its line
- * structure intact.
- */
-export function resolveResumeMarkdown(doc: {
-  content: string
-  content_json: ResumeContentJson | null
-}): string {
-  return getResumeMarkdown(doc.content_json) ?? doc.content ?? ''
-}
-
-/**
- * Build the content_json for a new version without clobbering other keys an
- * earlier version may have set (e.g. `sections`). Pair it with the plain text
- * from markdownToPlainText(markdown) when calling createVersion() — writing one
- * without the other is the divergence described on ResumeContentJson.
- */
-export function toResumeContentJson(
-  markdown: string,
-  templateId: string,
-  base?: ResumeContentJson | null
-): ResumeContentJson {
-  return { ...(base ?? {}), markdown, templateId }
 }
 
 /** Row shape of public.resume_documents (hand-declared; not in Database type). */
@@ -155,24 +113,12 @@ export interface ResumeDocument {
   updated_at: string
 }
 
-/**
- * Everything needed to append a new version. `version` is deliberately absent —
- * createVersion() computes it as max(version) + 1 for the bucket.
- */
-export interface NewResumeVersion {
-  userId: string
-  /** null (or omitted) targets the BASE resume bucket. */
-  jobId?: string | null
-  draftId?: string | null
-  title?: string | null
-  content: string
-  contentJson?: ResumeContentJson | null
-  atsScore?: number | null
-  source?: ResumeSource | null
-}
-
 /** Patchable fields on an existing version (metadata only, never `content`). */
 export interface ResumeVersionPatch {
   title?: string | null
   atsScore?: number | null
 }
+
+// The resume pages that predate the structured resume read a version through this name. The one
+// reader lives in ./resolve; it imports the helpers above, which are functions, so the cycle is safe.
+export { resolveResumeMarkdown } from './resolve'

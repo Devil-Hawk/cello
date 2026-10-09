@@ -25,10 +25,11 @@
 import { runAgentUnit, type UnitConfig } from '../unit'
 import { claimsFor, matchClaim } from '../../resume/claims'
 import { loadApiKeys } from '../../harness/keys'
-import { meteredJudgeClient, judgeGroundedness } from '../../evals/judge'
-import { MissingKeyError } from '../../harness/llm'
+import { judgeClaims, judgeRunner } from '../../evals/claims-judge'
+import { MissingKeyError } from '../../harness/providers'
 import { BudgetCapError } from '../../harness/spend'
-import { frameJobText } from '../../security/job-text'
+import { jobLines, resumeLines } from '../../resume/lines'
+import { companyFacts } from '../../dossier/facts'
 import { logHarnessError } from '../../observability/log'
 import type { AdminClient } from '../../harness/types'
 import type { TailoringContainmentReport } from '../../security/job-text'
@@ -57,25 +58,15 @@ export class CvTailorContainmentError extends Error {
 }
 
 interface JobFacts {
-  title: string
-  company: string
   description: string | null
+  companyId: string | null
 }
 
 async function loadJobFacts(admin: AdminClient, userId: string, jobId: string): Promise<JobFacts> {
-  const { data } = await admin
-    .from('person_jobs')
-    .select('title, description, viewer_company_name')
-    .eq('viewer_id', userId)
-    .eq('id', jobId)
-    .single()
-  const row = (data ?? {}) as {
-    title?: string | null
-    description?: string | null
-    viewer_company_name?: string | null
-  }
-  const company = row.viewer_company_name ?? 'the company'
-  return { title: row.title ?? '(untitled role)', company, description: row.description ?? null }
+  // The person's own role row: the company is theirs, not the one that stored the shared role first.
+  const { data } = await admin.from('person_jobs').select('description, viewer_company_id').eq('viewer_id', userId).eq('id', jobId).single()
+  const row = (data ?? {}) as { description?: string | null; viewer_company_id?: string | null }
+  return { description: row.description ?? null, companyId: row.viewer_company_id ?? null }
 }
 
 async function loadResumeText(admin: AdminClient, userId: string): Promise<string> {
@@ -93,6 +84,16 @@ interface DraftContent {
   resumeSummary: string
   coverLetter: string
   keywords: string[]
+  /** Why the letter is the length it is, and the code checks on it (see cv_tailor.ts). */
+  coverLetterMeta?: {
+    tier: 'full' | 'focused' | 'brief'
+    words: number
+    evidence: { job: string; resume: string }[]
+    companyFact: { text: string; url: string } | null
+    hasJobPost?: boolean
+    hasCompanyFacts?: boolean
+    checks: { id: string; ok: boolean; message: string }[]
+  }
 }
 
 /**
@@ -146,6 +147,15 @@ export async function verifyCvTailorDraft(args: CvTailorVerifyArgs): Promise<CvT
       continue
     }
 
+    // (a2) The code checks on the letter (its length against the evidence tier,
+    // filler phrases, long dashes) share the same retry budget. On the last
+    // attempt the draft is kept and the card shows what still fails.
+    const failedChecks = (output.coverLetterMeta?.checks ?? []).filter((c) => !c.ok)
+    if (failedChecks.length > 0 && attempt < MAX_RETRIES) {
+      correctiveContext = `The cover letter failed these checks: ${failedChecks.map((c) => c.message).join(' ')} Fix them and keep every statement traceable to the resume.`
+      continue
+    }
+
     // (b) matchClaim SUPPLEMENTS evidence, never overrides — see
     // lib/resume/claims.ts's header ("no `ok` field anywhere in it"). Purely
     // informational: folded into the judge verdict's rationale below, never
@@ -160,21 +170,19 @@ export async function verifyCvTailorDraft(args: CvTailorVerifyArgs): Promise<CvT
             .join('; ')}.`
         : ''
 
-    // (c) FACTUAL-GROUNDING JUDGE — ruling 2c.
+    // (c) CLAIMS JUDGE, ruling 2c. Every statement in the summary and letter
+    // must trace to a numbered resume line, job line or company fact; a judge
+    // from a different model family than the writer reads the same lines.
     const [job, resumeText] = await Promise.all([loadJobFacts(args.admin, userId, args.jobId), loadResumeText(args.admin, userId)])
-    const sourceFacts =
-      `CANDIDATE RESUME:\n${resumeText}\n\nJOB FACTS:\nTitle: ${job.title}\nCompany: ${job.company}\n` +
-      `Description:\n${frameJobText(job.description, { maxChars: JUDGE_JD_CHARS, emptyPlaceholder: '(no description provided)' })}`
+    const facts = await companyFacts(args.admin, userId, job.companyId)
 
     let verdict: EvalResult
     try {
       const apiKeys = await loadApiKeys(args.admin, userId)
-      const client = meteredJudgeClient(args.admin, userId, apiKeys)
-      verdict = await judgeGroundedness(
-        client,
-        { draft: `${output.resumeSummary}\n\n${output.coverLetter}`, sourceFacts },
-        { userId }
-      )
+      verdict = await judgeClaims(judgeRunner(apiKeys, 'judge-claims'), {
+        text: `${output.resumeSummary}\n\n${output.coverLetter}`,
+        sources: [...resumeLines(resumeText), ...jobLines(job.description), ...facts],
+      })
     } catch (err) {
       // Ruling 2c + invariant 7: the judge not producing a score — for ANY
       // reason, expected (budget cap / no key) or not (a real Factuality()
@@ -193,6 +201,10 @@ export async function verifyCvTailorDraft(args: CvTailorVerifyArgs): Promise<CvT
       return { kind: 'unjudged', ...output, tokensUsed }
     }
 
+    // An answer the judge could not read is not a verdict on the draft: persist
+    // it unjudged, which requires a human review, rather than retry or pass it.
+    if (verdict.verdict === 'insufficient-data') return { kind: 'unjudged', ...output, tokensUsed }
+
     if (verdict.verdict === 'pass') {
       return { kind: 'verified', ...output, tokensUsed, verdict: { ...verdict, summary: verdict.summary + evidenceNote } }
     }
@@ -200,7 +212,7 @@ export async function verifyCvTailorDraft(args: CvTailorVerifyArgs): Promise<CvT
     if (attempt === MAX_RETRIES) {
       return { kind: 'judge-failed', ...output, tokensUsed, verdict: { ...verdict, summary: verdict.summary + evidenceNote } }
     }
-    correctiveContext = `A factual-grounding review flagged your previous draft: ${verdict.summary} Revise so every claim traces to the resume or the job facts above.`
+    correctiveContext = `A review of your previous draft found statements no source line backs. ${verdict.summary} Remove them or rewrite them to what the resume lines say.`
   }
 
   // Unreachable — every branch of the loop above returns or throws.

@@ -1,0 +1,94 @@
+{
+  "maxRequestsPerRun": 150,
+  "runAll": [
+    "prompts/_policy.md",
+    "lib/harness/prompts.ts",
+    "scripts/evals/gate.json",
+    "scripts/evals/run-gate.ts"
+  ],
+  "suites": [
+    {
+      "name": "quality",
+      "scripts": ["scripts/evals/quality/run.ts"],
+      "args": ["--quick", "--check"],
+      "paths": [
+        "prompts/planner.md",
+        "prompts/analyst.md",
+        "prompts/distill.md",
+        "prompts/memory_extract.md",
+        "prompts/company_verify.md",
+        "prompts/goal_judge.md",
+        "lib/harness/planner.ts",
+        "lib/harness/goals.ts",
+        "lib/harness/agents/analyst.ts",
+        "lib/graph/distill.ts",
+        "lib/memory/",
+        "app/api/companies/verify/",
+        "lib/quality/",
+        "scripts/evals/quality/"
+      ]
+    },
+    {
+      "name": "outputs",
+      "scripts": [
+        "scripts/evals/outputs/cover-letter.ts",
+        "scripts/evals/outputs/digest.ts",
+        "scripts/evals/outputs/dossier.ts",
+        "scripts/evals/outputs/follow-upper.ts",
+        "scripts/evals/outputs/gmail.ts",
+        "scripts/evals/outputs/judges.ts",
+        "scripts/evals/outputs/outreach.ts",
+        "scripts/evals/outputs/reply.ts"
+      ],
+      "args": ["--quick"],
+      "paths": [
+        "prompts/outreach.md",
+        "prompts/follow_upper.md",
+        "prompts/cv_tailor.md",
+        "prompts/company_researcher.md",
+        "prompts/visa.md",
+        "prompts/_voice.md",
+        "lib/writing/",
+        "lib/evals/",
+        "lib/outreach/",
+        "lib/harness/agents/outreach.ts",
+        "lib/harness/agents/follow_upper.ts",
+        "lib/harness/agents/cv_tailor.ts",
+        "lib/harness/agents/company_researcher.ts",
+        "scripts/evals/outputs/"
+      ]
+    },
+    {
+      "name": "agent",
+      "scripts": ["scripts/evals/agent/run-*.ts"],
+      "args": ["--quick"],
+      "paths": [
+        "prompts/orchestrator.md",
+        "prompts/researcher.md",
+        "skills/",
+        "lib/agents/",
+        "lib/graph/copilot.ts",
+        "lib/harness/copilot-tools.ts",
+        "scripts/evals/agent/"
+      ]
+    },
+    {
+      "name": "company",
+      "scripts": ["scripts/evals/company-resolve.ts"],
+      "args": [],
+      "paths": ["prompts/company_resolve.md", "lib/companies/", "scripts/evals/company-resolve*"]
+    },
+    {
+      "name": "scoring",
+      "scripts": ["scripts/eval-shortlist.ts"],
+      "args": ["--max-requests", "40", "--rounds", "1"],
+      "paths": ["prompts/role_*.md", "prompts/matcher.md", "lib/scoring/", "lib/harness/agents/matcher.ts", "lib/harness/agents/bulk_matcher.ts", "scripts/eval-shortlist.ts", "scripts/eval-shortlist/"]
+    },
+    {
+      "name": "ingestion",
+      "scripts": ["scripts/eval-ingest.ts"],
+      "args": ["--quick"],
+      "paths": ["prompts/requirements.md", "prompts/page_reader.md", "lib/ingest/", "scripts/eval-ingest.ts", "scripts/eval-ingest/"]
+    }
+  ]
+}

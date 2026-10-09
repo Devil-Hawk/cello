@@ -5,6 +5,7 @@ import { Loader2, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { DealbreakersSection } from './dealbreakers-section'
 import { EMPTY_TARGETING, type Targeting } from '@/lib/targeting'
 import { SENIORITY_LEVELS, type Seniority } from '@/lib/jobs/classify'
 import { getRoleType } from '@/lib/jobs/role-types/taxonomy'
@@ -28,8 +29,6 @@ interface TargetingImpact {
   excludedByDimension: Record<string, number>
   /** Combined impact of excludedCompanies + excludedKeywords together (the datasource can't attribute a match to one list or the other). Null when both are empty. */
   excludedByKeywords: number | null
-  /** What targeting.minScore WOULD exclude if anything enforced it. Null when minScore is unset. See the Field below — nothing reads this today. */
-  excludedByMinScoreHypothetical: number | null
 }
 
 type ImpactStatus = 'loading' | 'ready' | 'error'
@@ -276,9 +275,6 @@ function Field({
 export function TargetingTab({ initialTargeting, onStatus }: TargetingTabProps) {
   const [targeting, setTargeting] = useState<Targeting>(initialTargeting)
   const [saved, setSaved] = useState<Targeting>(initialTargeting)
-  const [minScoreInput, setMinScoreInput] = useState<string>(
-    initialTargeting.minScore === null ? '' : String(initialTargeting.minScore)
-  )
   const [isSaving, setIsSaving] = useState(false)
 
   // Cost-of-filter preview for the CURRENT pending (possibly unsaved) state.
@@ -348,7 +344,6 @@ export function TargetingTab({ initialTargeting, onStatus }: TargetingTabProps) 
       } else {
         setTargeting(result.targeting)
         setSaved(result.targeting)
-        setMinScoreInput(result.targeting.minScore === null ? '' : String(result.targeting.minScore))
         onStatus('success', 'Targeting preferences saved')
       }
     } catch {
@@ -359,7 +354,6 @@ export function TargetingTab({ initialTargeting, onStatus }: TargetingTabProps) 
 
   function resetAll() {
     setTargeting(EMPTY_TARGETING)
-    setMinScoreInput('')
   }
 
   return (
@@ -367,10 +361,9 @@ export function TargetingTab({ initialTargeting, onStatus }: TargetingTabProps) 
       <div>
         <h2 className="font-display text-section text-foreground">Job targeting</h2>
         <p className="mt-1 text-caption text-muted-foreground">
-          You chose to configure targeting yourself — nothing here is pre-filled with an opinionated
+          You chose to configure targeting yourself. Nothing here is pre-filled with an opinionated
           guess. Leave a field empty and it constrains nothing. These settings drive three things:
-          which jobs get ingested as relevant, what the jobs list shows by default, and how
-          auto-triage (match scoring, the digest, and excluded-job filtering) treats a job.
+          which roles Cello checks first, what the jobs list shows by default, and how the digest treats a role.
         </p>
       </div>
 
@@ -466,30 +459,6 @@ export function TargetingTab({ initialTargeting, onStatus }: TargetingTabProps) 
       </Field>
 
       <Field
-        title="Minimum match score"
-        hint="Hide jobs scored below this out of 100. Leave blank for no minimum. Only meaningful once jobs have a match_score."
-      >
-        <Input
-          type="number"
-          min={0}
-          max={100}
-          value={minScoreInput}
-          onChange={(e) => {
-            const raw = e.target.value
-            setMinScoreInput(raw)
-            if (raw.trim() === '') {
-              set('minScore', null)
-              return
-            }
-            const n = Number(raw)
-            if (Number.isFinite(n)) set('minScore', Math.max(0, Math.min(100, Math.round(n))))
-          }}
-          placeholder="No minimum"
-          className="max-w-[10rem]"
-        />
-      </Field>
-
-      <Field
         title="Excluded companies"
         hint="Company names to never surface, anywhere. Empty = exclude nothing. Press Enter or + to add."
       >
@@ -521,6 +490,10 @@ export function TargetingTab({ initialTargeting, onStatus }: TargetingTabProps) 
         <Button type="button" variant="ghost" onClick={resetAll} disabled={isSaving}>
           Clear all
         </Button>
+      </div>
+
+      <div className="border-t pt-6">
+        <DealbreakersSection onStatus={onStatus} />
       </div>
     </div>
   )

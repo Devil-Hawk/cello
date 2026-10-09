@@ -14,7 +14,7 @@ import { GradientMesh } from '@/components/ui/gradient-mesh'
 import { cn, formatRelativeTime } from '@/lib/utils'
 
 /**
- * Jobs scored per click of the "Score now" trigger — mirrors BATCH_LIMIT in
+ * Roles checked per click of the "Check now" trigger, mirrors BATCH_LIMIT in
  * app/(app)/dashboard/page.tsx and app/(app)/jobs/page.tsx (both currently
  * 25), which is what's actually sent to POST /api/agents/match/batch. Not a
  * prop: this component isn't wired to a shared constant, so this is
@@ -35,21 +35,21 @@ interface PulseRibbonProps {
   companiesCount: number
   /** Jobs with posted_at within the last 24h — NOT discovered_at. */
   jobsPosted24h: number
-  /** Jobs with match_score IS NULL — nothing has scored them yet. */
+  /** Roles with no assessment yet: nothing has checked them against the resume. */
   unscoredCount: number
   /** Applications in an active (non-terminal) pipeline stage. */
   inPipelineCount: number
   /** Most recent companies.last_scraped_at across the user's tracked companies. */
   lastScrapedAt: string | null
   /**
-   * Wired to POST /api/agents/match/batch. When present, the Unscored tile
-   * gets a "Score now" trigger next to the count instead of only linking to
-   * /jobs (which scores nothing on its own). Omit to keep the tile a plain
+   * Wired to POST /api/agents/match/batch. When present, the Not assessed yet tile
+   * gets a "Check now" trigger next to the count instead of only linking to
+   * /jobs (which assesses nothing on its own). Omit to keep the tile a plain
    * link — never partially wire this in a way that fails silently.
    */
   onCalculateBatch?: () => void
   isCalculatingBatch?: boolean
-  /** Non-null reason "Score now" can't run right now (missing resume/key, status check failed). */
+  /** Non-null reason "Check now" can't run right now (missing resume/key, status check failed). */
   calculateDisabledReason?: string | null
   /** Wired to retry the account-status fetch when calculateDisabledReason is the "couldn't check" case. */
   onRetryStatus?: () => void
@@ -117,7 +117,7 @@ export function PulseRibbon({
     // ?unscored=1, not bare /jobs: this is the largest number in the product,
     // and it used to link at the default recency feed, which shows scored and
     // unscored rows mixed together and answers nothing about the backlog.
-    { label: 'Unscored', value: unscoredCount, href: '/jobs?unscored=1', warn: unscoredCount > 0 },
+    { label: 'Not assessed yet', value: unscoredCount, href: '/jobs?unscored=1', warn: unscoredCount > 0 },
     { label: 'In pipeline', value: inPipelineCount, href: '/pipeline' },
   ]
 
@@ -166,7 +166,7 @@ export function PulseRibbon({
             last ? 'sm:border-r-0' : 'sm:border-r'
           )
 
-          const isUnscoredTile = vital.label === 'Unscored'
+          const isUnscoredTile = vital.label === 'Not assessed yet'
 
           // The Unscored tile gets a "Score now" trigger alongside its count
           // — nested inside a Link's <a> would be invalid HTML, so this tile
@@ -183,7 +183,7 @@ export function PulseRibbon({
                 // hoverable/focusable so the reason tooltip stays reachable
                 // instead of the control silently doing nothing.
                 aria-disabled={isCalculatingBatch || isBlocked}
-                aria-label="Score unscored jobs now"
+                aria-label="Check your roles now"
                 className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[0.6875rem] font-medium text-muted-foreground transition-colors hover:bg-raised hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {isCalculatingBatch ? (
@@ -191,7 +191,7 @@ export function PulseRibbon({
                 ) : (
                   <LogoMark className="h-3 w-3" />
                 )}
-                {isCalculatingBatch ? 'Scoring…' : 'Score now'}
+                {isCalculatingBatch ? 'Checking' : 'Check now'}
               </button>
             )
 
@@ -251,8 +251,7 @@ export function PulseRibbon({
                             // guarding this file forbids adding a new fetch
                             // for it. This line is still true without it.
                             <p className="text-caption text-muted-foreground">
-                              Scores up to {BATCH_LIMIT} jobs per click — uses a metered AI call per
-                              job.
+                              Checks up to {BATCH_LIMIT} roles per click, with metered AI calls.
                             </p>
                           )}
                         </TooltipContent>

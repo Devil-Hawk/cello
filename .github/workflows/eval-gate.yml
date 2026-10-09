@@ -1,0 +1,90 @@
+name: Eval gate
+
+# Runs the prompt and model-output suites on pull requests that touch prompts or
+# AI code, on free OpenRouter models only. A suite fails the check when its
+# numbers drop below the thresholds.json kept next to it in the repository.
+#
+# Pull requests from forks get no secrets. The gate then says so in the job
+# summary and passes, instead of failing for a reason the author cannot fix.
+# Never switch this to pull_request_target: that would hand the key to code from
+# a fork.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/web/prompts/**'
+      - 'apps/web/skills/**'
+      - 'apps/web/lib/harness/**'
+      - 'apps/web/lib/evals/**'
+      - 'apps/web/lib/graph/**'
+      - 'apps/web/lib/memory/**'
+      - 'apps/web/lib/agents/**'
+      - 'apps/web/lib/scoring/**'
+      - 'apps/web/lib/writing/**'
+      - 'apps/web/lib/companies/**'
+      - 'apps/web/lib/ingest/**'
+      - 'apps/web/lib/quality/**'
+      - 'apps/web/app/api/companies/verify/**'
+      - 'apps/web/scripts/evals/**'
+      - 'apps/web/scripts/eval-*.ts'
+      - 'apps/web/scripts/eval-*/**'
+      - '.github/workflows/eval-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  PNPM_VERSION: '8'
+
+jobs:
+  evals:
+    name: Evals on free models
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # Free-model answers are cached on disk, so a rerun of the same prompts costs nothing.
+      - name: Cache eval answers
+        uses: actions/cache@v4
+        with:
+          path: apps/web/.cache
+          key: eval-answers-${{ hashFiles('apps/web/prompts/**', 'apps/web/scripts/evals/**') }}
+          restore-keys: |
+            eval-answers-
+
+      - name: Run the evals
+        working-directory: apps/web
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npx --yes tsx scripts/evals/run-gate.ts --base "origin/${{ github.base_ref }}"
+          else
+            npx --yes tsx scripts/evals/run-gate.ts --all
+          fi

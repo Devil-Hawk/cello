@@ -1,45 +1,64 @@
-// Cold-outreach draft "brain".
+// Cold-outreach draft writer.
 //
-// OWNER: contacts + cold-outreach workstream (P5). This module is intentionally
-// framework-free (no next/* imports) and takes an injected LlmRunner so it runs
-// in BOTH a request handler (app/api/outreach/*) and the cron/harness context.
+// Framework-free (no next/* imports) and takes an injected LlmRunner, so it runs
+// in a request handler (app/api/outreach/*), in the harness, and in the evals.
 //
-// `outreach` is NOT a registered agent_type in the harness registry — the DAG
-// executor never calls it. It is the shared, testable drafting core used by the
-// outreach API routes (and available for future harness wiring).
+// `outreach` is NOT a registered agent_type in the harness registry: the DAG
+// executor never calls it. It is the shared drafting core used by the outreach
+// routes and the review in lib/graph/verify/outreach.ts.
 //
-// GUARDRAILS baked into the prompt: the email must be SHORT, genuinely
-// personalized (one concrete, TRUE reason the user fits — pulled from resume +
-// match highlights), reference the specific role, and NEVER fabricate
-// experience or credentials. It is signed with the user's real identity; there
-// is no spoofing anywhere in this path.
+// What the writer sees is what the judges see: the resume and the job post are
+// numbered (R1.., J1..), company research is D1.. with links, earlier contact is
+// H1... A draft is signed with the sender's real name; there is no spoofing in
+// this path, and no draft is written without one (the routes refuse first).
+//
+// A draft is either written by the model or it is the standard template, and the
+// result says which and why. The template is a usable starting point, never
+// presented as written work.
 
 import type { LlmRunner } from '../types'
 import { composeSystemPrompt, loadModeDoc, promptRef } from '../prompts'
+import { MissingKeyError } from '../providers'
+import { BudgetCapError } from '../spend'
+import { formatLines, jobLines, resumeLines, type NumberedLine } from '@/lib/resume/lines'
+import { frameJobText } from '@/lib/security/job-text'
+
+import type { TemplateReason } from '@/lib/outreach/types'
+export type { TemplateReason }
+
+export interface SourceLine {
+  id: string
+  text: string
+  url?: string
+}
 
 export interface OutreachDraftInput {
-  /** The sender's real name (used in the sign-off — never spoofed). */
+  /** The sender's real name, used for the sign-off. */
   userName: string
   /** The sender's real email (identity shown to the recipient). */
   userEmail: string
-  jobTitle: string
-  companyName: string
+  /** Null when the draft is about the company, not one posted role. */
+  jobTitle: string | null
+  companyName: string | null
   contactName?: string | null
   contactTitle?: string | null
-  /** The user's own resume text — the ONLY source of truth for fit claims. */
+  /** The user's own resume text: the only source for claims about the sender. */
   resumeText?: string | null
-  /** Matcher highlights ("skills matched") to anchor the concrete reason. */
+  /** The matcher's notes on what fits. Hints, not sources. */
   matchHighlights?: string[]
   jobDescription?: string | null
-  /** Pre-assembled relationship context — buildOutreachContext
-   *  (lib/context/assemble.ts): chronological history + provenance-constrained
-   *  phrasing rules + reply-pattern insights. Cello's own records and its own
-   *  instruction lines, not employer text, so nothing here needs frameJobText. */
-  relationshipContext?: string | null
-  /** 'initial' cold email or a single polite 'follow_up'. */
+  /** Researched company facts (D1..), each with the page it came from. */
+  facts?: SourceLine[]
+  /** Real earlier contact with this person or company (H1..). */
+  history?: SourceLine[]
+  /** What has worked in this user's past outreach. */
+  patterns?: string[]
+  /** 'initial' cold email or the single 'follow_up'. */
   kind?: 'initial' | 'follow_up'
-  /** Set by lib/graph/verify/outreach.ts's ONE bounded regeneration when the
-   *  groundedness/specificity judge failed the first draft. */
+  /** For a follow-up: the email that got no answer. */
+  previousEmail?: { subject: string; body: string; sentAt?: string | null } | null
+  daysSinceSent?: number | null
+  /** Set by the one regeneration in lib/graph/verify/outreach.ts: a numbered list of what to fix. */
   correctiveContext?: string | null
 }
 
@@ -47,135 +66,157 @@ export interface OutreachDraftResult {
   subject: string
   body: string
   tokensUsed: number
+  source?: 'model' | 'template'
+  /** Why the text is the template. Set when source is 'template'. */
+  templateReason?: TemplateReason
 }
 
-const MAX_RESUME_CHARS = 4000
-const MAX_JD_CHARS = 1500
+/** The numbered sources a draft is written from and judged against. */
+export interface OutreachSources {
+  resume: NumberedLine[]
+  job: NumberedLine[]
+  facts: SourceLine[]
+  history: SourceLine[]
+}
+
+export function outreachSources(input: Pick<OutreachDraftInput, 'resumeText' | 'jobDescription' | 'facts' | 'history'>): OutreachSources {
+  return {
+    resume: resumeLines(input.resumeText),
+    job: jobLines(input.jobDescription),
+    facts: input.facts ?? [],
+    history: input.history ?? [],
+  }
+}
 
 function firstName(name?: string | null): string {
-  if (!name) return 'there'
-  const trimmed = name.trim()
-  if (!trimmed) return 'there'
-  return trimmed.split(/\s+/)[0]
+  const first = (name ?? '').trim().split(/\s+/)[0]
+  return first || 'there'
 }
 
-function clampWords(text: string, maxWords: number): string {
-  const words = text.trim().split(/\s+/)
-  if (words.length <= maxWords) return text.trim()
-  return words.slice(0, maxWords).join(' ')
-}
-
-/** Deterministic, never-fabricating fallback used when no LLM key / LLM fails. */
-export function fallbackOutreachDraft(input: OutreachDraftInput): OutreachDraftResult {
-  const greeting = `Hi ${firstName(input.contactName)},`
-  const reason =
-    input.matchHighlights && input.matchHighlights.length > 0
-      ? `In particular, my background in ${input.matchHighlights.slice(0, 2).join(' and ')} lines up closely with what the role calls for.`
-      : `I believe my background is a strong match for what the role calls for.`
-  const follow =
-    input.kind === 'follow_up'
-      ? `\n\nI wanted to gently follow up on my note below in case it slipped through — no worries at all if the timing isn't right.`
-      : ''
-  const body = [
-    greeting,
-    '',
-    `I came across the ${input.jobTitle} role at ${input.companyName} and wanted to reach out directly. ${reason}${follow}`,
-    '',
-    `Would you be open to a brief chat, or could you point me to the right person? Happy to share more on how I can contribute.`,
-    '',
-    `Thanks for your time,`,
-    input.userName,
-    input.userEmail,
-  ].join('\n')
-  const subject =
-    input.kind === 'follow_up'
-      ? `Following up: ${input.jobTitle} at ${input.companyName}`
-      : `${input.jobTitle} at ${input.companyName} — quick note`
-  return { subject, body, tokensUsed: 0 }
+function followUpSubject(previous?: string | null): string | null {
+  const s = (previous ?? '').trim()
+  if (!s) return null
+  return /^re:/i.test(s) ? s : `Re: ${s}`
 }
 
 /**
- * Draft a short, genuinely personalized cold-outreach email via the injected
- * LLM. Falls back to a safe template on any error. NEVER fabricates: the prompt
- * constrains the model to the user's real resume + match highlights.
- *
- * The resume (stable across every draft this user asks for in a session) lives
- * in `system` with `cachePrefix: true`; only the per-role/contact facts go in
- * `prompt`. That's what makes the resume block a cache hit on the 2nd, 3rd, ...
- * draft instead of a full-price re-send every time.
+ * The standard template. It makes no claim about the sender, names the role and
+ * company when they are known, asks once, and is signed with the real name, so
+ * it passes every check a written draft has to pass.
  */
-export async function generateOutreachDraft(
-  llm: LlmRunner,
-  input: OutreachDraftInput
-): Promise<OutreachDraftResult> {
-  const kind = input.kind ?? 'initial'
-  const hasResume = !!(input.resumeText && input.resumeText.trim())
+export function fallbackOutreachDraft(input: OutreachDraftInput, reason: TemplateReason = 'missing_key'): OutreachDraftResult {
+  const greeting = `Hi ${firstName(input.contactName)},`
+  const company = input.companyName?.trim() || null
+  const title = input.jobTitle?.trim() || null
+  const interest =
+    title && company
+      ? `I am interested in the ${title} role at ${company}.`
+      : company
+        ? `I am interested in working at ${company}.`
+        : title
+          ? `I am interested in the ${title} role.`
+          : 'I am interested in working with your team.'
+  const ask =
+    input.kind === 'follow_up'
+      ? 'Would you be open to pointing me to the right person?'
+      : 'Would you be open to a short chat, or could you point me to the right person?'
+  const lead = input.kind === 'follow_up' ? interest.replace('I am interested in', 'I am still interested in') : interest
+  const body = [greeting, '', `${lead} ${ask}`, '', 'Thanks,', input.userName].join('\n')
+  const subject =
+    (input.kind === 'follow_up' ? followUpSubject(input.previousEmail?.subject) : null) ??
+    (title && company ? `${title} at ${company}` : company ? `Interested in ${company}` : 'Introduction')
+  return { subject, body, tokensUsed: 0, source: 'template', templateReason: reason }
+}
 
-  // _shared.md + _voice.md + prompts/outreach.md (the house-style mode
-  // document — see docs/PROMPT-GENERATOR.md) already state both the
-  // resume-present/resume-absent and initial/follow-up decision rules; only
-  // the resume block itself (when present) is call-specific stable context.
+function sourceBlock(tag: string, lines: SourceLine[]): string {
+  return `<${tag}>\n${lines.map((l) => `${l.id}: ${l.text}${l.url ? ` (${l.url})` : ''}`).join('\n')}\n</${tag}>`
+}
+
+function templateReasonFor(err: unknown): TemplateReason {
+  if (err instanceof MissingKeyError) return 'missing_key'
+  if (err instanceof BudgetCapError) return 'spend_cap'
+  return 'provider_error'
+}
+
+/**
+ * Draft one outreach email with the injected model, or return the standard
+ * template with the reason when no model draft could be made. Never throws.
+ *
+ * The resume (stable across every draft a user asks for) sits in `system` with
+ * `cachePrefix`, so it is a cache hit from the second draft on; the role,
+ * contact and job post go in `prompt`.
+ */
+export async function generateOutreachDraft(llm: LlmRunner, input: OutreachDraftInput): Promise<OutreachDraftResult> {
+  const kind = input.kind ?? 'initial'
+  const src = outreachSources(input)
+
   const system = composeSystemPrompt({
     mode: loadModeDoc('outreach'),
-    stableContext: hasResume
-      ? `CANDIDATE RESUME (the ONLY source of truth for fit claims):\n${(input.resumeText ?? '').slice(0, MAX_RESUME_CHARS)}`
-      : undefined,
+    stableContext: src.resume.length ? `<resume>\n${formatLines(src.resume)}\n</resume>` : '<resume>\nNo resume on file.\n</resume>',
   })
 
-  const promptParts = [
-    kind === 'follow_up'
-      ? 'Email kind: FOLLOW-UP to an unanswered initial email. Apply the follow-up decision rule.'
-      : 'Email kind: INITIAL cold outreach. Apply the initial decision rule.',
-    `Sender: ${input.userName} <${input.userEmail}>`,
-    `Target role: ${input.jobTitle}`,
-    `Target company: ${input.companyName}`,
+  const role =
+    input.jobTitle && input.companyName
+      ? `${input.jobTitle} at ${input.companyName}`
+      : input.companyName
+        ? `No specific role. Write to the team at ${input.companyName} about working there.`
+        : input.jobTitle ?? 'No specific role or company is known.'
+  const prompt = [
+    kind === 'follow_up' ? 'Kind: follow_up' : 'Kind: initial',
+    `Sender: ${input.userName}`,
+    `Role: ${role}`,
     input.contactName
       ? `Recipient: ${input.contactName}${input.contactTitle ? `, ${input.contactTitle}` : ''}`
-      : 'Recipient name unknown — use a neutral greeting ("Hi there,").',
-    input.matchHighlights && input.matchHighlights.length > 0
-      ? `Verified match highlights (true, from the matcher — pick the single strongest): ${input.matchHighlights.join('; ')}`
-      : hasResume
-        ? 'No match highlights supplied — find the one strongest true fit yourself from the resume.'
-        : 'No match highlights and no resume supplied — keep the reason general (interest in the role/company), not a fabricated skill claim.',
-    input.jobDescription
-      ? `Role description (context only, may inform the one reason you pick):\n${input.jobDescription.slice(0, MAX_JD_CHARS)}`
-      : 'No role description supplied — do not invent role specifics beyond the title.',
-    input.relationshipContext ? input.relationshipContext : '',
-    input.correctiveContext
-      ? `CORRECTIVE INSTRUCTION (a prior draft was rejected — fix this before returning): ${input.correctiveContext}`
+      : 'Recipient: unknown. Greet with "Hi there,".',
+    src.job.length
+      ? `<job_post>\n${frameJobText(formatLines(src.job), { label: 'JOB POST', maxChars: 9000 })}\n</job_post>`
+      : 'No job post on file.',
+    src.facts.length ? `<company_facts>\n${frameJobText(src.facts.map((f) => `${f.id}: ${f.text}${f.url ? ` (${f.url})` : ''}`).join('\n'), { label: 'COMPANY FACTS', maxChars: 4000 })}\n</company_facts>` : 'No company research on file.',
+    src.history.length ? sourceBlock('history', src.history) : 'No earlier contact on record. This is a first contact.',
+    kind === 'follow_up' && input.previousEmail
+      ? `<previous_email>\nSubject: ${input.previousEmail.subject}\n${input.previousEmail.body}\n</previous_email>\nSent ${input.daysSinceSent != null ? `${input.daysSinceSent} days ago` : 'earlier'}.`
       : '',
-  ].filter(Boolean)
+    input.matchHighlights?.length
+      ? `Fit notes (hints only; every claim must still trace to an R line): ${input.matchHighlights.join('; ')}`
+      : '',
+    input.patterns?.length ? `What has worked in this person's past outreach (apply if it fits, never state as fact about this recipient):\n${input.patterns.map((p) => `- ${p}`).join('\n')}` : '',
+    input.correctiveContext ? `Fix these before you answer:\n${input.correctiveContext}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 
   try {
     const res = await llm({
       system,
       promptRef: promptRef('outreach'),
-      prompt: promptParts.join('\n\n'),
+      prompt,
       json: true,
       maxTokens: 1200,
       temperature: 0.6,
       reasoning: { effort: 'medium' },
       cachePrefix: true,
     })
-    let parsed: { subject?: unknown; body?: unknown }
+    let parsed: { subject?: unknown; body?: unknown } = {}
     try {
       parsed = JSON.parse(res.content)
     } catch {
       const match = res.content.match(/\{[\s\S]*\}/)
-      parsed = match ? JSON.parse(match[0]) : {}
+      try {
+        parsed = match ? JSON.parse(match[0]) : {}
+      } catch {
+        parsed = {}
+      }
     }
     const subject = typeof parsed.subject === 'string' && parsed.subject.trim() ? parsed.subject.trim() : null
     const body = typeof parsed.body === 'string' && parsed.body.trim() ? parsed.body.trim() : null
-    if (!subject || !body) {
-      const fb = fallbackOutreachDraft(input)
-      return { ...fb, tokensUsed: res.tokensUsed }
-    }
+    if (!subject || !body) return { ...fallbackOutreachDraft(input, 'unusable_output'), tokensUsed: res.tokensUsed }
     return {
-      subject: clampWords(subject, 18),
+      subject: (kind === 'follow_up' ? followUpSubject(input.previousEmail?.subject) : null) ?? subject,
       body,
       tokensUsed: res.tokensUsed,
+      source: 'model',
     }
-  } catch {
-    return fallbackOutreachDraft(input)
+  } catch (err) {
+    return fallbackOutreachDraft(input, templateReasonFor(err))
   }
 }

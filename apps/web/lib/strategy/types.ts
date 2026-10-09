@@ -97,20 +97,21 @@ export interface SourceFunnelData {
   buckets: OutcomeBucket[]
 }
 
-export interface ScoreBandBucket extends OutcomeBucket {
-  min: number
-  max: number
+export interface ChanceBucket extends OutcomeBucket {
+  chance: 'strong' | 'possible' | 'stretch'
 }
 
-export interface MatchScoreAccuracyData {
+export interface ChanceAccuracyData {
   totalApplications: number
-  totalScored: number
-  bands: ScoreBandBucket[]
+  /** Applications whose role carries a Strong, Possible or Stretch call. */
+  totalAssessed: number
+  /** In the order Strong, Possible, Stretch. */
+  buckets: ChanceBucket[]
   /**
-   * 'validates' — reply rate rises with score band (rubric predicts responses).
-   * 'refutes' — reply rate does NOT rise with score band, or is flat/inverted.
-   * Only set when at least two bands individually cross the per-bucket minimum
-   * (see thresholds.ts) — otherwise this whole question stays insufficient_data.
+   * 'validates', reply rate falls as the chance call weakens (Strong >= Possible >= Stretch, with Strong above Stretch).
+   * 'refutes', it does not: flat or inverted.
+   * Only set when at least two chance groups individually cross the per-bucket
+   * minimum (see thresholds.ts); otherwise this whole question stays insufficient_data.
    */
   verdict: 'validates' | 'refutes' | 'inconclusive'
 }
@@ -159,7 +160,7 @@ export interface ApplicationTimingData {
 }
 
 export interface FilterDimensionImpact {
-  dimension: 'functions' | 'seniority' | 'countries' | 'remoteOnly' | 'languages' | 'excludedCompanies' | 'excludedKeywords' | 'minScore (not enforced)'
+  dimension: 'functions' | 'seniority' | 'countries' | 'remoteOnly' | 'languages' | 'excludedCompanies' | 'excludedKeywords'
   configured: boolean
   /** Jobs excluded by THIS dimension alone, holding every other dimension open. */
   jobsExcludedByThisAlone: number
@@ -204,7 +205,7 @@ export interface StrategyReport {
   /** Total applications this user has, regardless of whether any question could use them. */
   totalApplications: number
   sourceFunnel: QuestionResult<SourceFunnelData>
-  matchScoreAccuracy: QuestionResult<MatchScoreAccuracyData>
+  chanceAccuracy: QuestionResult<ChanceAccuracyData>
   resumeVariants: QuestionResult<ResumeVariantData>
   outreachImpact: QuestionResult<OutreachImpactData>
   rejectionPatterns: QuestionResult<RejectionPatternsData>

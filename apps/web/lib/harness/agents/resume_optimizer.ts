@@ -5,8 +5,16 @@
 //   - missingKeywords[]      job keywords absent from the resume
 //   - formatIssues[]         concrete ATS-format problems (tables, headers, etc.)
 //   - suggestedRewrite       an improved resume that ONLY surfaces/rephrases
-//                            content already true in the original (NEVER fabricates)
+//                            content already true in the original (NEVER fabricates),
+//                            as plain text
+//   - resume                 the same rewrite as a structured Resume (what gets saved)
 //   - rescore                a fresh ATS score of the suggestedRewrite (the loop)
+//
+// THE REWRITE IS A PATCH. The model returns only what it changes (summary,
+// skills, highlights per entry index) as strict JSON; lib/resume/tailor.ts
+// merges it into the structured base in code, so employers, titles, dates,
+// education and the template cannot change, and every suggestion is measured
+// against the base text and dropped (with a warning) if it is not in it.
 //
 // This is NOT a harness DAG agent (not in the agent_type enum) — it's a reusable
 // module for an API route / the copilot. It accepts either a budget-aware
@@ -20,15 +28,24 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { DecryptedApiKeys, LlmRunner, LlmResult, LlmRunOptions } from '../types'
 import { callLlm, parseJsonLoose, TruncatedResponseError } from '../llm'
 import { composeSystemPrompt, loadModeDoc, promptRef } from '../prompts'
-import { createVersion } from '@/lib/resume/store'
+import { createResumeVersion } from '@/lib/resume/store'
+import { resumeToPlainText } from '@/lib/resume/render'
+import { resolveResume } from '@/lib/resume/resolve'
+import {
+  TailorPatchSchema,
+  llmJsonSchema,
+  type NameContext,
+  type Resume,
+  type TailorPatch,
+} from '@/lib/resume/schema'
+import { applyTailorPatch } from '@/lib/resume/tailor'
 import type { ResumeDocument, ResumeSource } from '@/lib/resume/types'
 
 const RESUME_LIMIT = 12000
 const DESC_LIMIT = 6000
-// Ceiling on the rewritten resume. A full 1-2 page resume in plain text runs
-// roughly 3,000-9,000 chars (~800-2,400 tokens); 4096 leaves headroom for a
-// denser multi-page resume without silently truncating it mid-document (the
-// old 2200 cap did exactly that — see lib/resume/render.ts consumers).
+// Ceiling on the tailoring patch. A patch carries a summary, skills and the
+// highlights of every entry, which is most of a resume's bullets; 4096 leaves
+// headroom for a dense multi-page one, and a clipped answer retries at double.
 const REWRITE_MAX_TOKENS = 4096
 
 export interface ResumeOptimizerJob {
@@ -46,7 +63,12 @@ export interface AtsScore {
 }
 
 export interface ResumeOptimizerResult extends AtsScore {
+  /** resumeToPlainText(resume): the ATS text of the tailored resume. */
   suggestedRewrite: string
+  /** The merged, validated document, so savers never re-parse text. */
+  resume: Resume
+  /** Suggestions dropped because they were not in the base resume. */
+  warnings: string[]
   /** Fresh ATS score of `suggestedRewrite`. */
   rescore: AtsScore
   tokensUsed: number
@@ -54,6 +76,14 @@ export interface ResumeOptimizerResult extends AtsScore {
 
 export interface OptimizeResumeArgs {
   resumeText: string
+  /**
+   * The structured base, when the caller has one. Without it the base is
+   * derived deterministically from `resumeText` (no LLM call), so a caller with
+   * only profiles.resume_text still gets a structured merge.
+   */
+  base?: Resume
+  /** Profile name and email, for the name fallback when deriving the base. */
+  nameCtx?: NameContext
   job: ResumeOptimizerJob
   /** Preferred: budget-aware runner (harness). */
   llm?: LlmRunner
@@ -155,46 +185,89 @@ async function scoreResume(
   }
 }
 
-function rewritePrompt(job: ResumeOptimizerJob, missingKeywords: string[], formatIssues: string[]): string {
+/** "work[0]: Senior Engineer, Acme": the addressable entries the patch refers to. */
+function entryIndex(base: Resume): string {
+  const lines = [
+    ...base.work.map((w, i) => `work[${i}]: ${[w.position, w.name].filter(Boolean).join(', ')}`),
+    ...base.projects.map((p, i) => `projects[${i}]: ${p.name}`),
+  ]
+  return lines.join('\n') || '(no entries)'
+}
+
+function rewritePrompt(
+  job: ResumeOptimizerJob,
+  missingKeywords: string[],
+  formatIssues: string[],
+  base: Resume
+): string {
   return (
     `TARGET JOB:\n${jobBlock(job)}\n\n` +
-    `Keywords the job wants that may be under-surfaced — incorporate ONLY those the ORIGINAL RESUME ` +
+    `Keywords the job wants that may be under-surfaced; incorporate ONLY those the ORIGINAL RESUME ` +
     `already supports: ${missingKeywords.join(', ') || '(none)'}\n` +
     `Format issues to fix: ${formatIssues.join('; ') || '(none)'}\n\n` +
-    `Rewrite the resume now.`
+    `ENTRIES (refer to them by index):\n${entryIndex(base)}\n\n` +
+    `Return the patch now: only the fields you change.`
   )
+}
+
+function issuePaths(error: { issues: Array<{ path: PropertyKey[]; message: string }> }): string {
+  return error.issues
+    .slice(0, 12)
+    .map((i) => `${i.path.map(String).join('.') || '(root)'}: ${i.message}`)
+    .join('; ')
 }
 
 async function rewriteResume(
   run: LlmRunner,
-  resumeText: string,
+  base: Resume,
   job: ResumeOptimizerJob,
   missingKeywords: string[],
   formatIssues: string[]
-): Promise<{ rewrite: string; tokensUsed: number }> {
-  const base: LlmRunOptions = {
-    system: resumeSystem(resumeText),
+): Promise<{ patch: TailorPatch; tokensUsed: number }> {
+  const opts: LlmRunOptions = {
+    system: resumeSystem(resumeToPlainText(base)),
     promptRef: promptRef('resume_optimizer'),
-    prompt: rewritePrompt(job, missingKeywords, formatIssues),
+    prompt: rewritePrompt(job, missingKeywords, formatIssues, base),
+    json: true,
+    jsonSchema: { name: 'tailor_patch', schema: llmJsonSchema(TailorPatchSchema) },
     maxTokens: REWRITE_MAX_TOKENS,
     temperature: 0.3,
     // The honesty constraint is a judgement call applied across a whole
-    // document, not mechanical formatting — this is where reasoning quality
+    // document, not mechanical formatting: this is where reasoning quality
     // matters most in this file.
     reasoning: { effort: 'medium' },
     cachePrefix: true,
   }
-  let res = await run(base)
-  // This call isn't json:true, so llm.ts's TruncatedResponseError never fires
-  // here — check finishReason directly. Reasoning tokens bill as output and
-  // share REWRITE_MAX_TOKENS with the rewrite itself, so a verbose reasoning
-  // pass can now clip the cap in a way the old (reasoning-free) call could
-  // not; retry once wider rather than silently saving a resume cut off
-  // mid-sentence.
-  if (res.finishReason === 'length') {
-    res = await run({ ...base, maxTokens: REWRITE_MAX_TOKENS * 2 })
+  let tokensUsed = 0
+  let problem: string | null = null
+  // One re-ask with the Zod issue paths, then fail: no partial or unstructured
+  // version is ever saved.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const call: LlmRunOptions = problem
+      ? { ...opts, prompt: `${opts.prompt}\n\nYour previous answer was invalid: ${problem}\nReturn the corrected JSON.` }
+      : opts
+    let res: LlmResult
+    try {
+      res = await run(call)
+    } catch (err) {
+      // Reasoning tokens bill as output and share the cap, so a verbose pass
+      // can clip it; retry once wider rather than failing the whole run.
+      if (!(err instanceof TruncatedResponseError)) throw err
+      res = await run({ ...call, maxTokens: REWRITE_MAX_TOKENS * 2 })
+    }
+    tokensUsed += res.tokensUsed
+    let raw: unknown
+    try {
+      raw = parseJsonLoose(res.content)
+    } catch {
+      problem = '(root): not valid JSON'
+      continue
+    }
+    const parsed = TailorPatchSchema.safeParse(raw)
+    if (parsed.success) return { patch: parsed.data, tokensUsed }
+    problem = issuePaths(parsed.error)
   }
-  return { rewrite: res.content.trim(), tokensUsed: res.tokensUsed }
+  throw new Error('Could not produce a valid tailored resume; nothing was saved')
 }
 
 /**
@@ -216,17 +289,26 @@ export async function optimizeResume(args: OptimizeResumeArgs): Promise<ResumeOp
 
   let tokensUsed = 0
 
-  const original = await scoreResume(run, resumeText, args.job)
+  // The structured base. Scoring, the rewrite and the rescore all read its
+  // rendered text, so the before and after scores compare like with like.
+  const base =
+    args.base ?? resolveResume({ content: resumeText, content_json: null }, args.nameCtx)
+  const basePlain = resumeToPlainText(base)
+
+  const original = await scoreResume(run, basePlain, args.job)
   tokensUsed += original.tokensUsed
 
-  const { rewrite, tokensUsed: rewriteTokens } = await rewriteResume(
+  const { patch, tokensUsed: rewriteTokens } = await rewriteResume(
     run,
-    resumeText,
+    base,
     args.job,
     original.score.missingKeywords,
     original.score.formatIssues
   )
   tokensUsed += rewriteTokens
+
+  const { resume, warnings } = applyTailorPatch(base, patch)
+  const rewrite = resumeToPlainText(resume)
 
   const rescored = await scoreResume(run, rewrite, args.job)
   tokensUsed += rescored.tokensUsed
@@ -234,6 +316,8 @@ export async function optimizeResume(args: OptimizeResumeArgs): Promise<ResumeOp
   return {
     ...original.score,
     suggestedRewrite: rewrite,
+    resume,
+    warnings,
     rescore: rescored.score,
     tokensUsed,
   }
@@ -255,7 +339,7 @@ export interface OptimizeAndSaveResult extends ResumeOptimizerResult {
 }
 
 /**
- * Run optimizeResume() and persist `suggestedRewrite` as a new
+ * Run optimizeResume() and persist the structured `resume` as a new
  * `resume_documents` version (source 'tailored' by default) via the shared
  * resume store, scored with the post-rewrite ATS score. This is what turns the
  * one-shot optimizer preview into a saved, versioned, editable resume — see
@@ -263,11 +347,11 @@ export interface OptimizeAndSaveResult extends ResumeOptimizerResult {
  */
 export async function optimizeResumeAndSave(args: OptimizeAndSaveArgs): Promise<OptimizeAndSaveResult> {
   const result = await optimizeResume(args)
-  const document = await createVersion(args.client, {
+  const document = await createResumeVersion(args.client, {
     userId: args.userId,
     jobId: args.jobId,
     title: args.title ?? null,
-    content: result.suggestedRewrite,
+    resume: result.resume,
     atsScore: result.rescore.atsScore,
     source: args.source ?? 'tailored',
   })

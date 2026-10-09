@@ -8,13 +8,16 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import {
   PROMPT_DOC_NAMES,
+  applyPolicy,
   assertPromptDocsResolve,
   composeSystemPrompt,
+  getPolicyDoc,
   getSharedDoc,
   getVoiceDoc,
   loadDoc,
   loadModeDoc,
   promptRef,
+  withPolicy,
 } from './prompts'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -26,7 +29,8 @@ describe('assertPromptDocsResolve', () => {
   })
 
   it('covers _shared, _voice, and every migrated agent doc today', () => {
-    expect(PROMPT_DOC_NAMES).toEqual([
+    expect([...PROMPT_DOC_NAMES]).toEqual(expect.arrayContaining([
+      '_policy',
       '_shared',
       '_voice',
       'cv_tailor',
@@ -36,7 +40,16 @@ describe('assertPromptDocsResolve', () => {
       'company_researcher',
       'planner',
       'visa',
-    ])
+      'judge_claims',
+      'judge_specificity',
+      'analyst',
+      'distill',
+      'memory_extract',
+      'company_verify',
+      'goal_judge',
+      'orchestrator',
+      'researcher',
+    ]))
   })
 })
 
@@ -46,7 +59,7 @@ describe('getSharedDoc', () => {
     expect(doc.length).toBeGreaterThan(500)
     expect(doc).toContain('Sources of Truth (EXCLUSIVE)')
     expect(doc).toContain('profiles.resume_text')
-    expect(doc).toContain('Shared Fit-Score Bands')
+    expect(doc).toContain('ATS Score Bands')
   })
 
   it('is memoized (same string instance on repeat calls)', () => {
@@ -117,5 +130,64 @@ describe('promptRef (the Langfuse prompt version)', () => {
 
   it('fails loudly for a document that does not exist, like every other loader here', () => {
     expect(() => promptRef('no_such_doc')).toThrow(/could not read prompt document/)
+  })
+})
+
+describe('the prompt policy', () => {
+  it('has the six numbered rules and no em dash', () => {
+    const doc = getPolicyDoc()
+    for (let n = 1; n <= 6; n++) expect(doc).toContain(`\n${n}. `)
+    expect(doc).not.toContain('\u2014')
+  })
+
+  it('composeSystemPrompt starts with the policy', () => {
+    for (const includeVoice of [true, false]) {
+      expect(composeSystemPrompt({ mode: 'MODE', includeVoice }).startsWith(getPolicyDoc())).toBe(true)
+    }
+  })
+
+  it('withPolicy puts it in front once and is idempotent', () => {
+    const once = withPolicy('Do the task.')
+    expect(once.startsWith(getPolicyDoc())).toBe(true)
+    expect(once.endsWith('Do the task.')).toBe(true)
+    expect(withPolicy(once)).toBe(once)
+    expect(withPolicy(composeSystemPrompt({ mode: 'MODE' })).split(getPolicyDoc()).length).toBe(2)
+    expect(withPolicy(undefined)).toBe(getPolicyDoc())
+  })
+
+  it('applyPolicy covers system, a library system message, and a prompt-only call', () => {
+    const a = applyPolicy({ system: 'S', prompt: 'p' })
+    expect(a.policy).toBe('added')
+    expect(a.opts.system).toContain(getPolicyDoc())
+
+    const composed = applyPolicy({ system: composeSystemPrompt({ mode: 'M' }), prompt: 'p' })
+    expect(composed.policy).toBe('composed')
+
+    const msgs = [
+      { role: 'system' as const, content: 'extract facts' },
+      { role: 'user' as const, content: 'hi' },
+    ]
+    const b = applyPolicy({ messages: msgs })
+    expect(b.opts.system).toBeUndefined()
+    expect(b.opts.messages?.[0].content).toContain(getPolicyDoc())
+    expect(b.opts.messages?.[1]).toEqual(msgs[1])
+    expect(msgs[0].content).toBe('extract facts')
+
+    const c = applyPolicy({ prompt: 'only a prompt' })
+    expect(c.opts.system).toBe(getPolicyDoc())
+  })
+})
+
+describe('the rewritten prompt documents', () => {
+  const REWRITTEN = ['planner', 'analyst', 'distill', 'memory_extract', 'company_verify', 'goal_judge'] as const
+
+  it.each(REWRITTEN)('%s states its job, inputs, output, rules and examples, and no em dash', (name) => {
+    const doc = loadModeDoc(name)
+    for (const heading of ['## Job', '## Inputs', '## Output', '## Rules', '## Examples']) expect(doc, heading).toContain(`\n${heading}\n`)
+    expect(doc).not.toContain('\u2014')
+  })
+
+  it.each(REWRITTEN)('%s does not paste the policy text (it is added once, centrally)', (name) => {
+    expect(loadModeDoc(name)).not.toContain('Facts about the person come only from')
   })
 })

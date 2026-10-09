@@ -111,7 +111,12 @@ const DIRECT_MODEL_CLIENT_MARKERS = [
  */
 const ALLOWED_DIRECT_USER_KEY: Record<string, string> = {
   'app/api/scraper/trigger/route.ts': "user's own OpenAI/Anthropic key",
-  'app/api/resume/upload/route.ts': "user's own Anthropic/OpenAI key",
+  // The agent's chat model door. It makes no call by itself: CelloSpend wraps every call the agent makes,
+  // so each one reserves before and settles after through lib/agents/spend-port.ts (checked below).
+  'lib/agents/model.ts': 'a model built here is only used inside the agent, behind CelloSpend',
+  // Live evals on free models only (assertFree), opt-in, never reached from the product.
+  'lib/evals/agent/free.eval.ts': 'free models only; the harness refuses any id that does not end in :free',
+  'lib/resume/import/vision.ts': "user's own OpenRouter or Anthropic key, for reading a photo; a demo is refused before it runs",
 }
 
 /**
@@ -224,12 +229,15 @@ describe('every path to a model is behind the spend cap', () => {
     expect(offenders, `recordSpend / record_llm_spend must not come back:\n  ${offenders.join('\n  ')}`).toEqual([])
   })
 
-  it('the engine spend middleware, when present, reserves and settles', () => {
+  it('the engine spend middleware, when present, reserves and settles through the one seam', () => {
     const middleware = path.join(process.cwd(), 'lib/agents/middleware.ts')
     if (!existsSync(middleware)) return
+    const seam = readFileSync(path.join(process.cwd(), 'lib/agents/spend-port.ts'), 'utf8')
+    expect(seam).toContain('reserveSpend(')
+    expect(seam).toContain('settleSpend(')
     const src = readFileSync(middleware, 'utf8')
-    expect(src).toContain('reserveSpend(')
-    expect(src).toContain('settleSpend(')
+    expect(src).toContain('reserve(')
+    expect(src).toContain('settle(')
   })
 
   it.each(CALL_LLM_WRAPPERS)(
@@ -341,13 +349,12 @@ describe('every path to a model is behind the spend cap', () => {
 
   it('the judge route specifically is guarded — it is why this test exists', () => {
     const src = readFileSync(path.join(API_ROOT, 'outreach/judge/route.ts'), 'utf8')
-    // A read-only early refusal before any request is built, PLUS the metered
-    // client every request actually goes through. Reserving and settling live
-    // only inside meteredJudgeClient's fetch wrapper (see that CALL_LLM_
-    // WRAPPERS entry above), so this route carries no reserve text of its own;
-    // duplicating it here would double-bill the same call.
-    expect(src).toContain('assertWithinBudget')
-    expect(src).toContain('meteredJudgeClient(')
+    // The two judges reach the model through lib/evals/claims-judge.ts#judgeRunner,
+    // which is callLlm: the cap is checked before the request and the real spend
+    // recorded after it, so this route carries no budget code of its own (a
+    // second recordSpend here would double-bill the same two calls).
+    expect(src).toContain('judgeRunner(')
+    expect(readFileSync(path.join(API_ROOT, '../../lib/evals/claims-judge.ts'), 'utf8')).toContain('callLlm(')
     // A cap hit is an answer, not a crash: the user is told they are out of
     // allowance rather than shown a generic failure.
     expect(src).toContain('BudgetCapError')

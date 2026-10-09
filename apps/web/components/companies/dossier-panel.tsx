@@ -7,15 +7,15 @@ import {
   Loader2,
   Newspaper,
   RefreshCw,
-  Search
+  Search,
 } from 'lucide-react'
-import { LogoMark } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { VisaBadge } from '@/components/jobs/visa-badge'
 import { formatShortDate } from '@/lib/format'
+import { dossierView, type ShownStatement } from '@/lib/dossier/present'
 import type {
   CompanyDossierRow,
   CompIntel,
@@ -46,23 +46,51 @@ const MATCH_LABELS: Record<SourceMatchReason, string> = {
  */
 const MISSING_SUMMARY_COPY: Record<MissingSummaryReason, { title: string; body: (detail?: string) => string }> = {
   'no-key': {
-    title: 'No AI summary yet',
-    body: () =>
-      'No OpenRouter API key is configured, so nothing has been synthesized. Add a key in Settings, then refresh.',
+    title: 'No research written yet',
+    body: () => 'No model key is set. Add an OpenRouter key in Settings, then refresh.',
   },
   'no-signals': {
     title: 'Nothing substantial to summarize',
     body: () =>
-      "Public signals were collected, but nothing was solid enough to reason about — no verified Wikipedia page, and the company's own site couldn't be read. Refresh may help if the site was only temporarily unreachable.",
+      "No readable page or verified Wikipedia match turned up for this company. Refresh in a few minutes in case the site was down, or check the company's domain.",
   },
   'generation-failed': {
-    title: 'AI summary failed',
-    body: (detail) => `Generating the summary failed${detail ? ` (${detail})` : ''}. Refresh to try again.`,
+    title: 'The research could not be written',
+    body: (detail) => `The model's answer could not be used${detail ? ` (${detail})` : ''}. Refresh to try again.`,
   },
   stale: {
-    title: 'AI summary not generated yet',
-    body: () => 'This research predates your OpenRouter key. Refresh to generate an AI-written summary now.',
+    title: 'Research not written yet',
+    body: () => 'This research was collected before a model key was set. Refresh to write it now.',
   },
+}
+
+/** Small numbered links after a statement, one per source it cites. */
+function Marks({ marks, urls }: { marks: number[]; urls: Map<number, string> }) {
+  return (
+    <>
+      {marks.map((n) => (
+        <a
+          key={n}
+          href={urls.get(n)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-0.5 align-super text-[10px] font-medium text-accent-deep hover:underline"
+          aria-label={`Source ${n}`}
+        >
+          [{n}]
+        </a>
+      ))}
+    </>
+  )
+}
+
+function Statement({ st, urls }: { st: ShownStatement; urls: Map<number, string> }) {
+  return (
+    <>
+      {st.text}
+      <Marks marks={st.marks} urls={urls} />
+    </>
+  )
 }
 
 function formatUsd(n: number): string {
@@ -73,7 +101,7 @@ function formatUsd(n: number): string {
 function compRangeLabel(comp: CompIntel): string | null {
   if (comp.rangeLow == null) return null
   if (comp.rangeHigh == null) return `~${formatUsd(comp.rangeLow)}`
-  return `${formatUsd(comp.rangeLow)} – ${formatUsd(comp.rangeHigh)}`
+  return `${formatUsd(comp.rangeLow)} to ${formatUsd(comp.rangeHigh)}`
 }
 
 export function DossierPanel({ companyId }: DossierPanelProps) {
@@ -111,7 +139,7 @@ export function DossierPanel({ companyId }: DossierPanelProps) {
         setDossier((data?.dossier as CompanyDossierRow | null) ?? null)
       }
     } catch {
-      setError('Research failed — please try again.')
+      setError('Research failed. Try again.')
     } finally {
       setIsGenerating(false)
     }
@@ -126,6 +154,9 @@ export function DossierPanel({ companyId }: DossierPanelProps) {
   // Only meaningful when there's no summary — the server always sets this
   // alongside a null summary (see MissingSummaryReason), never left to guess.
   const missingSummary = !dossier?.summary ? (signals?.summaryUnavailable ?? null) : null
+  const view = dossierView(signals)
+  const urls = new Map(view.cited.map((c) => [c.n, c.url]))
+  const wikipediaLegacy = signals?.summarySource === 'wikipedia'
 
   return (
     <Card>
@@ -147,9 +178,9 @@ export function DossierPanel({ companyId }: DossierPanelProps) {
           ) : dossier ? (
             <RefreshCw className="h-4 w-4" />
           ) : (
-            <LogoMark className="h-4 w-4" />
+            <Search className="h-4 w-4" />
           )}
-          {isGenerating ? 'Researching…' : dossier ? 'Refresh' : 'Research company'}
+          {isGenerating ? 'Researching' : dossier ? 'Refresh' : 'Research company'}
         </Button>
       </CardHeader>
 
@@ -168,19 +199,45 @@ export function DossierPanel({ companyId }: DossierPanelProps) {
           </div>
         ) : !dossier ? (
           <p className="text-body text-muted-foreground">
-            Assemble a dossier from free public sources — the company&#39;s own site, Wikipedia, recent
-            news, comp range, and a visa-sponsorship signal.
+            Research pulls the company&#39;s own site, Wikipedia and recent news, and links every statement to
+            where it came from.
           </p>
         ) : (
           <>
             {/* Summary — the ACTUAL server-reported reason when there isn't one, never a guess */}
             {dossier.summary ? (
               <div>
-                <p className="whitespace-pre-wrap text-body text-foreground">{dossier.summary}</p>
-                {signals?.summarySource === 'wikipedia' && (
+                {view.hasCitations ? (
+                  <p className="text-body text-foreground">
+                    {view.summary.map((st, k) => (
+                      <span key={k}>
+                        {k > 0 && ' '}
+                        <Statement st={st} urls={urls} />
+                      </span>
+                    ))}
+                  </p>
+                ) : (
+                  <p className="whitespace-pre-wrap text-body text-foreground">{dossier.summary}</p>
+                )}
+                {wikipediaLegacy ? (
                   <p className="mt-1 text-caption text-muted-foreground">
-                    From Wikipedia — not AI-synthesized. Refresh with an OpenRouter key configured for
-                    real reasoning about this company.
+                    From Wikipedia, not research. Refresh to research this company.
+                  </p>
+                ) : !view.hasCitations ? (
+                  <p className="mt-1 text-caption text-muted-foreground">
+                    Written before statements were linked to their sources. Refresh to add the links.
+                  </p>
+                ) : null}
+                {view.evidenceLine && <p className="mt-1 text-caption text-muted-foreground">{view.evidenceLine}</p>}
+                {view.wikipediaOnly && (
+                  <p className="mt-1 text-caption font-medium text-foreground">
+                    Only Wikipedia had anything on this company. Treat this as background, not research.
+                  </p>
+                )}
+                {view.dropped > 0 && (
+                  <p className="mt-1 text-caption text-muted-foreground">
+                    {view.dropped} {view.dropped === 1 ? 'statement was' : 'statements were'} left out because no source backed{' '}
+                    {view.dropped === 1 ? 'it' : 'them'}.
                   </p>
                 )}
               </div>
@@ -223,14 +280,16 @@ export function DossierPanel({ companyId }: DossierPanelProps) {
             {signals?.whatTheyWant && (
               <div>
                 <p className="text-caption font-medium text-foreground">What they likely want</p>
-                <p className="mt-0.5 text-body text-muted-foreground">{signals.whatTheyWant}</p>
+                <p className="mt-0.5 text-body text-muted-foreground">
+                  {view.field('whatTheyWant') ? <Statement st={view.field('whatTheyWant')!} urls={urls} /> : signals.whatTheyWant}
+                </p>
               </div>
             )}
 
             {/* Genuine uncertainty — say the quiet part instead of padding */}
             {signals?.uncertainty && (
               <div>
-                <p className="text-caption font-medium text-foreground">Genuinely uncertain</p>
+                <p className="text-caption font-medium text-foreground">Not certain</p>
                 <p className="mt-0.5 text-body text-muted-foreground">{signals.uncertainty}</p>
               </div>
             )}
@@ -239,7 +298,9 @@ export function DossierPanel({ companyId }: DossierPanelProps) {
             {signals?.culture && (
               <div>
                 <p className="text-caption font-medium text-foreground">Culture</p>
-                <p className="mt-0.5 text-body text-muted-foreground">{signals.culture}</p>
+                <p className="mt-0.5 text-body text-muted-foreground">
+                  {view.field('culture') ? <Statement st={view.field('culture')!} urls={urls} /> : signals.culture}
+                </p>
               </div>
             )}
 
@@ -286,13 +347,43 @@ export function DossierPanel({ companyId }: DossierPanelProps) {
               </div>
             )}
 
-            {/* Sources — each carries WHY it qualified (matchedBy) so a wrong item would be visibly
-                attributable rather than anonymous. An empty list is a valid, expected outcome: it
-                means nothing could be verified as actually about this company, not that the research
-                failed. */}
+            {/* Sources. New research numbers the sources its statements cite; older
+                research lists the sources it collected, each with why it qualified. */}
             <div>
               <p className="text-caption font-medium text-foreground">Sources</p>
-              {sources.length > 0 ? (
+              {view.cited.length > 0 ? (
+                <>
+                  <ol className="mt-1 space-y-1">
+                    {view.cited.map((c) => (
+                      <li key={c.n} className="flex gap-1.5 text-caption text-muted-foreground">
+                        <span className="w-4 shrink-0 font-medium text-foreground">{c.n}.</span>
+                        <a
+                          href={c.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-w-0 items-center gap-1 transition-colors hover:text-foreground"
+                        >
+                          <span className="truncate">{c.title}</span>
+                          <ExternalLink className="h-3 w-3 shrink-0" />
+                        </a>
+                      </li>
+                    ))}
+                  </ol>
+                  {view.other.length > 0 && (
+                    <p className="mt-1.5 text-caption text-muted-foreground">
+                      Also read:{' '}
+                      {view.other.map((o, k) => (
+                        <span key={o.url}>
+                          {k > 0 && ', '}
+                          <a href={o.url} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">
+                            {o.title}
+                          </a>
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                </>
+              ) : sources.length > 0 ? (
                 <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
                   {sources.map((s) => (
                     <a
@@ -304,9 +395,7 @@ export function DossierPanel({ companyId }: DossierPanelProps) {
                       className="inline-flex items-center gap-1 text-caption text-muted-foreground transition-colors hover:text-foreground"
                     >
                       {s.title}
-                      {s.matchedBy && (
-                        <span className="text-muted-foreground">· {MATCH_LABELS[s.matchedBy]}</span>
-                      )}
+                      {s.matchedBy && <span className="text-muted-foreground">· {MATCH_LABELS[s.matchedBy]}</span>}
                       <ExternalLink className="h-3 w-3" />
                     </a>
                   ))}

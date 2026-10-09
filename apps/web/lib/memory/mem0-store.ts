@@ -19,6 +19,7 @@ import type { BaseMessage } from '@langchain/core/messages'
 import { callLlm, callEmbedding, EMBEDDING_DIMS, isEmbeddingFallback } from '../harness/llm'
 import { observe } from '../trace/spans'
 import { loadApiKeys } from '../harness/keys'
+import { loadModeDoc, promptRef } from '../harness/prompts'
 import { createAdminClient } from '../harness/supabase-admin'
 import { parseDbUrl, sslFor } from '../graph/pg'
 import type { DecryptedApiKeys } from '../harness/types'
@@ -94,6 +95,7 @@ const mem0LlmDelegate = {
       maxTokens: 800,
       temperature: 0,
       name: 'extract-memories',
+      promptRef: promptRef('memory_extract'),
     })
     return { content: res.content }
   },
@@ -232,6 +234,11 @@ function buildMemoryConfig(): Partial<MemoryConfig> {
     // audit trail. Upgrade path: a real historyStore only if a future
     // feature needs one.
     disableHistory: true,
+    // What to keep: only what the person said about themselves. Without this
+    // mem0 also extracts from Cello's own replies, so a company Cello suggested
+    // or a salary it quoted from a posting became a "fact" about the person.
+    // See prompts/memory_extract.md.
+    customInstructions: loadModeDoc('memory_extract'),
     // Graph memory (Neo4j) has no field on MemoryConfig in mem0ai@3.1.6 to
     // even turn on — it's a separate opt-in class this file never imports.
     // That IS "graph memory stays OFF": there is nothing here to disable.

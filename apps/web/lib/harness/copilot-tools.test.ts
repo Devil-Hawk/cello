@@ -71,22 +71,38 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
   select(_cols?: string) {
     return this
   }
+  // A column of the posting embedded in a person_roles row (`jobs.title`), or of that posting's company (`jobs.companies.user_id`).
+  private get(r: Row, col: string): unknown {
+    if (col.startsWith('jobs.companies.')) {
+      const field = col.slice('jobs.companies.'.length)
+      const company = (this.allTables.companies ?? []).find((c) => c.id === (r.jobs as Row | undefined)?.company_id)
+      return company?.[field]
+    }
+    if (col.startsWith('jobs.')) return (r.jobs as Row | undefined)?.[col.slice('jobs.'.length)]
+    return r[col]
+  }
   eq(col: string, val: unknown) {
+    // A filter on the embedded person_roles rows keeps only those rows inside each job, as PostgREST does.
+    if (col.startsWith('person_roles.')) {
+      const field = col.slice('person_roles.'.length)
+      this.rows = this.rows.map((r) => ({ ...r, person_roles: ([] as Row[]).concat((r.person_roles as Row[] | Row | undefined) ?? []).filter((p) => p[field] === val) }))
+      return this
+    }
     if (col.startsWith('companies.')) {
       const field = col.slice('companies.'.length)
       const byId = new Map((this.allTables.companies ?? []).map((c) => [c.id, c]))
       this.rows = this.rows.filter((r) => byId.get(r.company_id as string)?.[field] === val)
       return this
     }
-    this.rows = this.rows.filter((r) => r[col] === val)
+    this.rows = this.rows.filter((r) => this.get(r, col) === val)
     return this
   }
   in(col: string, vals: unknown[]) {
-    this.rows = this.rows.filter((r) => vals.includes(r[col]))
+    this.rows = this.rows.filter((r) => vals.includes(this.get(r, col)))
     return this
   }
   is(col: string, val: unknown) {
-    this.rows = this.rows.filter((r) => r[col] === val)
+    this.rows = this.rows.filter((r) => (val === null ? this.get(r, col) == null : this.get(r, col) === val))
     return this
   }
   ilike(col: string, pattern: string) {
@@ -101,7 +117,7 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
   textSearch(col: string, query: string, _opts?: unknown) {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean)
     this.rows = this.rows.filter((r) => {
-      const haystack = String(r[col] ?? r.title ?? '').toLowerCase()
+      const haystack = String(this.get(r, col) ?? this.get(r, col.startsWith('jobs.') ? 'jobs.title' : 'title') ?? '').toLowerCase()
       return words.every((w) => haystack.includes(w))
     })
     return this
@@ -150,7 +166,9 @@ function fakeAdmin(tables: Record<string, Row[]>, rpc: Record<string, Row[]> = {
         const owner = new Map((tables.companies ?? []).map((c) => [c.id, c]))
         const view = (tables.jobs ?? []).map((j) => {
           const c = owner.get(j.company_id as string)
-          return { ...j, viewer_id: c?.user_id, viewer_company_id: c?.id ?? null, viewer_company_name: c?.name ?? null }
+          // the viewer's own verdict (their person_roles row) sits flat beside the posting, as the view returns it
+          const mine = ([] as Row[]).concat((j.person_roles as Row[] | Row | undefined) ?? []).find((p) => p.user_id === c?.user_id) ?? {}
+          return { ...j, ...mine, viewer_id: c?.user_id, viewer_company_id: c?.id ?? null, viewer_company_name: c?.name ?? null }
         })
         return new FakeQuery(view, tables)
       }
@@ -165,6 +183,21 @@ function fakeAdmin(tables: Record<string, Row[]>, rpc: Record<string, Row[]> = {
 
 const BASE_KEYS: DecryptedApiKeys = { openrouter: 'fake-key', userId: 'me' }
 
+/** The person's own row for a role (public.person_roles), as it comes back embedded in a job. */
+function verdict(over: Row = {}): Row {
+  return {
+    user_id: 'me',
+    assessed_at: '2026-10-06T08:00:00Z',
+    blocked_reasons: [],
+    want_p: 0.7,
+    want_reason: 'Payments work.',
+    want_detail: null,
+    chance: 'possible',
+    chance_detail: { checks: [], gaps: [], confirm: [], note: null },
+    ...over,
+  }
+}
+
 function baseCtx(admin: AdminClient, overrides: Partial<CopilotToolContext> = {}): CopilotToolContext {
   return {
     admin,
@@ -178,7 +211,7 @@ function baseCtx(admin: AdminClient, overrides: Partial<CopilotToolContext> = {}
 describe('dispatchTool — agent gating (server-side, not merely prompt-hidden)', () => {
   it('rejects a tool whose spec names an agent NOT in enabledAgents', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', match_score: 91, match_details: { ok: true } }],
+      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', person_roles: [verdict()] }],
       companies: [{ id: 'co-1', name: 'Acme', user_id: 'me' }],
     })
     // explain_match's catalog spec has agent: 'matcher' — exclude it.
@@ -192,7 +225,7 @@ describe('dispatchTool — agent gating (server-side, not merely prompt-hidden)'
 
   it('the SAME tool succeeds once its backing agent IS enabled', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', match_score: 91, match_details: { ok: true } }],
+      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', person_roles: [verdict()] }],
       companies: [{ id: 'co-1', name: 'Acme', user_id: 'me' }],
     })
     const ctx = baseCtx(admin, { enabledAgents: new Set(['matcher']) })
@@ -200,12 +233,13 @@ describe('dispatchTool — agent gating (server-side, not merely prompt-hidden)'
     const result = await dispatchTool(ctx, 'explain_match', { jobId: 'job-1' })
 
     expect(result).not.toHaveProperty('error')
-    expect(result).toMatchObject({ matched: true, score: 91 })
+    expect(result).toMatchObject({ matched: true, fit: { want: { reason: 'Payments work.' }, chance: { label: 'possible' } } })
+    expect(JSON.stringify(result)).not.toMatch(/"score"/)
   })
 
   it('undefined enabledAgents means "all enabled" (default, unchanged behavior)', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', match_score: 91, match_details: { ok: true } }],
+      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', person_roles: [verdict()] }],
       companies: [{ id: 'co-1', name: 'Acme', user_id: 'me' }],
     })
     const ctx = baseCtx(admin) // no enabledAgents field at all
@@ -293,7 +327,7 @@ describe('dispatchTool — always resolves to {error}, never throws', () => {
 describe('dispatchTool — job ownership enforced transitively via companies.user_id', () => {
   it('a job owned by a DIFFERENT user is not reachable via explain_match, even with the correct jobId', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'Secret Role', company_id: 'co-1', match_score: 99, match_details: { top: 'secret' } }],
+      jobs: [{ id: 'job-1', title: 'Secret Role', company_id: 'co-1', person_roles: [verdict({ chance: 'strong', want_p: 0.99, want_reason: 'secret reason' })] }],
       // co-1 belongs to someone else, NOT 'me'.
       companies: [{ id: 'co-1', name: 'Other Person Co', user_id: 'someone-else' }],
     })
@@ -306,9 +340,9 @@ describe('dispatchTool — job ownership enforced transitively via companies.use
     // Precise-id-error requirement: names the tool that returns real ids, so
     // a model that guessed wrong can self-correct in one step.
     expect(result).toMatchObject({ error: expect.stringContaining('list_jobs') })
-    // Nothing about the job's match score/details leaks into the response.
-    expect(JSON.stringify(result)).not.toContain('99')
-    expect(JSON.stringify(result)).not.toContain('secret')
+    // Nothing about the role's assessment leaks into the response.
+    expect(JSON.stringify(result)).not.toContain('0.99')
+    expect(JSON.stringify(result)).not.toContain('secret reason')
   })
 
   it("a second follower of a shared role reads their own company and score, not the first storer's", async () => {
@@ -320,25 +354,25 @@ describe('dispatchTool — job ownership enforced transitively via companies.use
         { id: 'co-mine', name: 'Mine', user_id: 'me' },
       ],
       person_jobs: [
-        { id: 'job-1', viewer_id: 'someone-else', title: 'Shared Role', company_id: 'co-theirs', viewer_company_id: 'co-theirs', viewer_company_name: 'Theirs', match_score: 91, match_details: { highlights: ['Theirs only'] } },
-        { id: 'job-1', viewer_id: 'me', title: 'Shared Role', company_id: 'co-theirs', viewer_company_id: 'co-mine', viewer_company_name: 'Mine', match_score: 42, match_details: { highlights: ['Mine'] } },
+        { id: 'job-1', viewer_id: 'someone-else', title: 'Shared Role', company_id: 'co-theirs', viewer_company_id: 'co-theirs', viewer_company_name: 'Theirs', chance: 'strong', want_p: 0.91, want_reason: 'Theirs only' },
+        { id: 'job-1', viewer_id: 'me', title: 'Shared Role', company_id: 'co-theirs', viewer_company_id: 'co-mine', viewer_company_name: 'Mine', chance: 'stretch', want_p: 0.42, want_reason: 'Mine' },
       ],
     })
     const result = await dispatchTool(baseCtx(admin), 'explain_match', { jobId: 'job-1' })
-    expect(result).toMatchObject({ matched: true, score: 42, company: 'Mine', companyId: 'co-mine' })
+    expect(result).toMatchObject({ matched: true, fit: { chance: { label: 'stretch' } }, company: 'Mine', companyId: 'co-mine' })
     expect(JSON.stringify(result)).not.toContain('Theirs')
-    expect(JSON.stringify(result)).not.toContain('91')
+    expect(JSON.stringify(result)).not.toContain('0.91')
   })
 
   it('the identical job IS reachable once it belongs to the caller', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'My Role', company_id: 'co-1', match_score: 77, match_details: { fit: 'good' } }],
+      jobs: [{ id: 'job-1', title: 'My Role', company_id: 'co-1', person_roles: [verdict({ chance: 'strong', want_p: 0.77, want_reason: 'Good fit.' })] }],
       companies: [{ id: 'co-1', name: 'My Co', user_id: 'me' }],
     })
     const ctx = baseCtx(admin)
 
     const result = await dispatchTool(ctx, 'explain_match', { jobId: 'job-1' })
-    expect(result).toMatchObject({ matched: true, score: 77 })
+    expect(result).toMatchObject({ matched: true, fit: { want: { reason: 'Good fit.' }, chance: { label: 'strong' } } })
   })
 
   it('get_application enforces the same ownership check before returning anything about the job', async () => {
@@ -356,7 +390,7 @@ describe('dispatchTool — job ownership enforced transitively via companies.use
 
   it('a role nobody holds (no company, no role row) is rejected rather than treated as ownerless/public', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-3', title: 'Orphan Role', company_id: null, match_score: 50 }],
+      jobs: [{ id: 'job-3', title: 'Orphan Role', company_id: null, chance: 'stretch' }],
       companies: [],
     })
     const ctx = baseCtx(admin)
@@ -654,13 +688,25 @@ describe('dispatchTool — research_companies (batch: caps, partial failure, bou
 // ---------------------------------------------------------------------------
 describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
   const co = { id: 'co-1', name: 'Acme', user_id: 'me', is_dream_company: false }
-  const jobs = [
-    { id: 'job-1', title: 'Staff Backend Engineer', company_id: 'co-1', match_score: 80, is_new: false, location: null, posted_at: null },
-    { id: 'job-2', title: 'Product Designer', company_id: 'co-1', match_score: 60, is_new: false, location: null, posted_at: null },
-  ]
+  // The person's own rows, as the list query returns them: the posting, their company for it, their chance and want.
+  const posting = (id: string, title: string, chance: string, want_p: number) => ({
+    viewer_id: 'me',
+    id,
+    title,
+    company_id: 'co-1',
+    viewer_company_id: 'co-1',
+    viewer_company_name: 'Acme',
+    hidden_reason: null,
+    chance,
+    want_p,
+    is_new: false,
+    location: null,
+    posted_at: null,
+  })
+  const person_jobs = [posting('job-1', 'Staff Backend Engineer', 'strong', 0.8), posting('job-2', 'Product Designer', 'possible', 0.6)]
 
   it('a real word query (>=4 chars) matches via FTS (textSearch), no rpc needed', async () => {
-    const admin = fakeAdmin({ companies: [co], jobs })
+    const admin = fakeAdmin({ companies: [co], person_jobs })
     const ctx = baseCtx(admin)
 
     const result = (await dispatchTool(ctx, 'list_jobs', { query: 'backend' })) as { jobs: { jobId: string }[] }
@@ -673,7 +719,7 @@ describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
     const admin = fakeAdmin({
       companies: [co],
       person_jobs: [
-        { id: 'job-9', viewer_id: 'me', title: 'Directory Role', company_id: 'co-of-person-a', viewer_company_id: null, viewer_company_name: null, match_score: 50, is_new: false, location: null, posted_at: null },
+        { id: 'job-9', viewer_id: 'me', title: 'Directory Role', company_id: 'co-of-person-a', viewer_company_id: null, viewer_company_name: null, chance: null, is_new: false, location: null, posted_at: null },
       ],
     })
     const result = (await dispatchTool(baseCtx(admin), 'list_jobs', {})) as { jobs: { jobId: string; companyId: string | null }[] }
@@ -683,7 +729,7 @@ describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
   })
 
   it('a short query (<4 chars) skips FTS and goes straight to the trgm rpc', async () => {
-    const admin = fakeAdmin({ companies: [co], jobs }, { search_jobs_by_title_trgm: [{ job_id: 'job-2', score: 0.9 }] })
+    const admin = fakeAdmin({ companies: [co], person_jobs }, { search_jobs_by_title_trgm: [{ job_id: 'job-2', score: 0.9 }] })
     const ctx = baseCtx(admin)
 
     const result = (await dispatchTool(ctx, 'list_jobs', { query: 'dsn' })) as { jobs: { jobId: string }[] }
@@ -696,7 +742,7 @@ describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
     // "enginer" matches no title via the FTS stand-in (textSearch is a
     // straight substring match), but the trgm rpc fixture stands in for
     // Postgres finding job-1 by similarity anyway.
-    const admin = fakeAdmin({ companies: [co], jobs }, { search_jobs_by_title_trgm: [{ job_id: 'job-1', score: 0.5 }] })
+    const admin = fakeAdmin({ companies: [co], person_jobs }, { search_jobs_by_title_trgm: [{ job_id: 'job-1', score: 0.5 }] })
     const ctx = baseCtx(admin)
 
     const result = (await dispatchTool(ctx, 'list_jobs', { query: 'enginer' })) as { jobs: { jobId: string }[] }
@@ -751,13 +797,13 @@ describe('dispatchTool in Langfuse', () => {
 
   it('a built-in tool is a tool observation named for the tool, under the active span, with its args and result', async () => {
     const admin = fakeAdmin({
-      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', match_score: 91, match_details: { ok: true } }],
+      jobs: [{ id: 'job-1', title: 'Engineer', company_id: 'co-1', person_roles: [verdict()] }],
       companies: [{ id: 'co-1', name: 'Acme', user_id: 'me' }],
     })
     const { rows } = await traced(configure(false), baseCtx(admin), 'explain_match', { jobId: 'job-1' })
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ kind: 'tool', name: 'explain_match', parent_span_id: 'root', status: 'ok', attributes: { tool: 'explain_match', error: false } })
-    expect(rows[0].lf).toMatchObject({ name: 'explain_match', type: 'tool', input: { jobId: 'job-1' }, output: { matched: true, score: 91 } })
+    expect(rows[0].lf).toMatchObject({ name: 'explain_match', type: 'tool', input: { jobId: 'job-1' }, output: { matched: true, fit: expect.objectContaining({ chance: expect.objectContaining({ label: 'possible' }) }) } })
   })
 
   it('web_search is a retriever', async () => {

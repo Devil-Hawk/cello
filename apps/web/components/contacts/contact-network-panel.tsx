@@ -44,6 +44,8 @@ import { ToastAction } from '@/components/ui/toast'
 import { toast } from '@/components/ui/use-toast'
 import type { SearchReport } from '@/lib/contacts/sources'
 import type { RoleContext } from '@/lib/contacts/relevance'
+import type { TemplateReason } from '@/lib/outreach/types'
+import { templateNotice } from '@/lib/outreach/template-notice'
 import { RankedContactList, type RankableContact } from './ranked-contacts'
 import { ContactSearchReport } from './search-report'
 import { isPersonalRelationship, RELATIONSHIP_LABELS } from './types'
@@ -90,7 +92,7 @@ export function ContactNetworkPanel({
   const [draftedIds, setDraftedIds] = useState<Set<string>>(new Set())
   // Names of contacts whose draft this session came back as the generic
   // template (no model wrote it). Stays on screen, unlike the toast.
-  const [templateDrafts, setTemplateDrafts] = useState<string[]>([])
+  const [templateDrafts, setTemplateDrafts] = useState<{ name: string; reason: TemplateReason | null }[]>([])
 
   // The ranking inputs — read on mount so contacts sourced on an EARLIER run
   // are ranked too, not just the ones this session happens to find. A failure
@@ -179,16 +181,32 @@ export function ContactNetworkPanel({
         body: JSON.stringify({ contactId: contact.id, jobId }),
       })
       const data = await res.json().catch(() => null)
+      if (data?.needsName) {
+        // Drafts are signed with the profile's full name; there is no guessing one.
+        toast({
+          title: 'Could not draft',
+          description: 'Add your full name in Settings first. Drafts are signed with it.',
+          variant: 'destructive',
+          action: (
+            <ToastAction altText="Open Settings" asChild>
+              <Link href="/settings">Open Settings</Link>
+            </ToastAction>
+          ),
+        })
+        return
+      }
       if (!res.ok || !data) throw new Error(data?.error ?? `Failed to draft outreach (HTTP ${res.status})`)
       setDraftedIds((prev) => new Set(prev).add(contact.id))
-      // usedLlm:false means the drafter fell back to its generic template (no
-      // OpenRouter key, budget spent, or a model error). Saying "Draft ready"
-      // for that made a bland email look like the product's best effort.
+      // usedLlm:false means the drafter fell back to the standard template (no
+      // model key, spending cap reached, a model error). Saying "Draft ready"
+      // for that made a bland email look like the product's best effort, so the
+      // notice names the reason and the next step.
       if (data.usedLlm === false) {
-        setTemplateDrafts((prev) => [...prev, contact.name])
+        const notice = templateNotice(data.templateReason)
+        setTemplateDrafts((prev) => [...prev, { name: contact.name, reason: data.templateReason ?? null }])
         toast({
-          title: 'Draft saved, but it is a generic template',
-          description: `No model wrote the email to ${contact.name}: your OpenRouter key is missing or out of budget, or the model failed. Check Settings, then dismiss it and draft again.`,
+          title: notice.title,
+          description: `The email to ${contact.name} is saved. ${notice.body}`,
           variant: 'destructive',
         })
       } else {
@@ -307,14 +325,13 @@ export function ContactNetworkPanel({
       {templateDrafts.length > 0 && (
         <Panel tone="sunken" divider="none" className="rounded-control" role="alert">
           <p className="text-caption font-medium text-foreground">
-            The draft to {templateDrafts.join(', ')} is a generic template.
+            The draft to {templateDrafts.map((d) => d.name).join(', ')} is the standard template, not a written draft.
           </p>
           <p className="mt-0.5 text-caption text-muted-foreground">
-            No model wrote it. Add or top up your OpenRouter key in{' '}
+            {templateNotice(templateDrafts[templateDrafts.length - 1].reason).body}{' '}
             <Link href="/settings?tab=api-keys" className="font-medium text-accent-deep hover:underline">
-              Settings
+              Open Settings
             </Link>
-            , then dismiss the draft in the queue and draft again.
           </p>
         </Panel>
       )}
@@ -323,8 +340,8 @@ export function ContactNetworkPanel({
         <p className="text-caption text-muted-foreground">
           <Link href="/queue?tab=outreach" className="font-medium text-accent-deep hover:underline">
             Review drafts in the queue
-          </Link>{' '}
-          — nothing sends until you approve it.
+          </Link>
+          . Nothing sends until you approve it.
         </p>
       )}
     </div>

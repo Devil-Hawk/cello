@@ -23,6 +23,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/use-toast'
 import { cn } from '@/lib/utils'
 import { formatShortDate } from '@/lib/format'
+import { checkDraft, type DraftCheck, type LetterTier } from '@/lib/writing/checks'
+import { DraftChecks } from '@/components/writing/draft-checks'
+import { letterNote } from '@/lib/writing/letter-note'
 
 interface JobRel {
   id: string
@@ -43,6 +46,16 @@ export interface DraftRow {
   job_id: string
   resume_summary: string | null
   cover_letter: string | null
+  /** Why the letter is the length it is, set when the letter was written (see cv_tailor). */
+  cover_letter_meta?: {
+    tier: LetterTier
+    words: number
+    evidence: { job: string; resume: string }[]
+    companyFact: { text: string; url: string } | null
+    hasJobPost?: boolean
+    hasCompanyFacts?: boolean
+    checks: DraftCheck[]
+  } | null
   answers: unknown
   status: 'pending_review' | 'filling' | 'approved' | 'submitted' | 'rejected' | 'failed'
   submission_ref: string | null
@@ -345,6 +358,7 @@ export function DraftCard({ draft, onChanged }: { draft: DraftRow; onChanged: ()
             {draft.cover_letter || 'No cover letter generated.'}
           </p>
         )}
+        {draft.cover_letter && !editing && <LetterNote draft={draft} />}
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -398,5 +412,34 @@ export function DraftCard({ draft, onChanged }: { draft: DraftRow; onChanged: ()
         )}
       </div>
     </Card>
+  )
+}
+
+/**
+ * Why the letter is the length it is, what company fact it mentions and where
+ * that came from, and the checks that still fail. Checks are recomputed from the
+ * stored text so an edited letter is held to the same length.
+ */
+function LetterNote({ draft }: { draft: DraftRow }) {
+  const meta = draft.cover_letter_meta
+  if (!meta || !draft.cover_letter) return null
+  const note = letterNote(meta)
+  const checks = checkDraft({ kind: 'cover_letter', body: draft.cover_letter, tier: meta.tier }).checks
+  return (
+    <div className="mt-2 space-y-1.5">
+      <p className="text-caption text-muted-foreground">{note.tier}</p>
+      <p className="text-caption text-muted-foreground">
+        {note.company.text}
+        {note.company.url && (
+          <>
+            {' '}
+            <a href={note.company.url} target="_blank" rel="noreferrer" className="font-medium text-accent-deep hover:underline">
+              Source
+            </a>
+          </>
+        )}
+      </p>
+      <DraftChecks checks={checks} />
+    </div>
   )
 }

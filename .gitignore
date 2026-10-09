@@ -83,3 +83,5 @@ skills-lock.json
 # Eval answers are cached here
 scripts/eval-ingest/.cache/
 apps/web/scripts/eval-ingest/.cache/
+# Free-model answers cached by the eval scripts
+apps/web/.cache/

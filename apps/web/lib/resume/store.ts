@@ -12,18 +12,23 @@
 //   cookie-scoped RLS client also works (reads get filtered twice, harmlessly).
 //
 // APPEND-ONLY BY DESIGN
-//   Content is never updated in place. createVersion() appends a new numbered
-//   snapshot so the resume studio can diff and roll back. Only metadata
-//   (title, ats_score) is patchable, via updateVersionMeta().
+//   Content is never updated in place. createResumeVersion() appends a new
+//   numbered snapshot so the resume studio can diff and roll back. Only
+//   metadata (title, ats_score) is patchable, via updateVersionMeta().
+//
+// THE ONLY WRITER
+//   createResumeVersion() takes a structured Resume, validates it, and derives
+//   every stored field from it (content_json.markdown, templateId, `content`).
+//   The raw row insert is private, so nothing can store a version whose plain
+//   text, Markdown and structure disagree. store.guard.test.ts enforces this.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { markdownToPlainText } from './markdown'
-import { DEFAULT_TEMPLATE_ID } from './templates'
-import { toResumeContentJson } from './types'
+import { resumeToMarkdown, resumeToPlainText } from './render'
+import { ResumeSchema, type Resume } from './schema'
 import type {
-  NewResumeVersion,
   ResumeContentJson,
   ResumeDocument,
+  ResumeSource,
   ResumeVersionPatch,
 } from './types'
 
@@ -32,7 +37,7 @@ const TABLE = 'resume_documents'
 /** Postgres unique-violation SQLSTATE, raised when two writers race on a version. */
 const UNIQUE_VIOLATION = '23505'
 
-/** How many times createVersion() re-reads max(version) after losing a race. */
+/** How many times insertVersionRow() re-reads max(version) after losing a race. */
 const VERSION_RETRIES = 4
 
 /** Hard ceiling on listVersions(), so a bad `limit` can never scan the table. */
@@ -110,6 +115,29 @@ export async function getVersionById(
   return (data as ResumeDocument | null) ?? null
 }
 
+/** The two stored columns derived from one Resume. Also used by the demo seeder. */
+export function deriveResumeColumns(resume: Resume): { content: string; content_json: ResumeContentJson } {
+  return {
+    content: resumeToPlainText(resume),
+    content_json: {
+      resume,
+      markdown: resumeToMarkdown(resume),
+      templateId: resume.meta.cello.templateId,
+    },
+  }
+}
+
+interface InsertRow {
+  userId: string
+  jobId: string | null
+  draftId?: string | null
+  title?: string | null
+  content: string
+  contentJson: ResumeContentJson
+  atsScore?: number | null
+  source?: ResumeSource | null
+}
+
 /**
  * Append a new version to a bucket. `version` is assigned as
  * max(version) + 1 for (user_id, job_id) — callers never supply it.
@@ -120,13 +148,10 @@ export async function getVersionById(
  * with a freshly-read max up to VERSION_RETRIES times. That makes the operation
  * safe without a table lock or a sequence per bucket.
  */
-export async function createVersion(
-  client: SupabaseClient,
-  input: NewResumeVersion
-): Promise<ResumeDocument> {
+async function insertVersionRow(client: SupabaseClient, input: InsertRow): Promise<ResumeDocument> {
   const content = input.content?.trim()
-  if (!content) throw new Error('createVersion failed: content is empty')
-  if (!input.userId) throw new Error('createVersion failed: userId is required')
+  if (!content) throw new Error('createResumeVersion failed: content is empty')
+  if (!input.userId) throw new Error('createResumeVersion failed: userId is required')
 
   const jobId = input.jobId ?? null
 
@@ -141,7 +166,7 @@ export async function createVersion(
       version,
       title: input.title ?? null,
       content,
-      content_json: input.contentJson ?? null,
+      content_json: input.contentJson,
       ats_score: input.atsScore ?? null,
       // Default the provenance from the bucket: no job means this is a base doc.
       source: input.source ?? (jobId ? 'tailored' : 'base'),
@@ -153,56 +178,50 @@ export async function createVersion(
 
     const isRace = (error as { code?: string }).code === UNIQUE_VIOLATION
     if (!isRace || attempt === VERSION_RETRIES) {
-      throw new Error(`createVersion failed: ${error.message}`)
+      throw new Error(`createResumeVersion failed: ${error.message}`)
     }
     // Lost the race — loop and re-read max(version).
   }
 
   // Unreachable: the loop either returns or throws.
-  throw new Error('createVersion failed: exhausted version retries')
+  throw new Error('createResumeVersion failed: exhausted version retries')
 }
 
 /**
- * Append a version from AUTHORED Markdown, deriving everything else.
- *
- * WHY THIS EXISTS RATHER THAN EACH CALLER DOING IT
- *   lib/resume/types.ts is emphatic that `content_json.markdown` is authored and
- *   `content` is `markdownToPlainText(markdown)` — and that writing one without
- *   the other makes the exported PDF and the text an ATS reads describe
- *   different resumes. Every caller that "remembers" to do both is a caller that
- *   can forget. This one does both, in one place, and there is no way to call it
- *   that produces a divergent pair.
- *
- * createVersion()'s append-only semantics are untouched — this is a thin
- * wrapper that computes two fields and delegates.
- *
- * `templateId` is a plain string because it comes from storage or a request
- * body; getTemplate() degrades anything unrecognised at render time, so an
- * unknown id stored here can never break a render. Omit it to get the default.
- *
- * `baseContentJson` carries forward other keys an earlier version set (e.g.
- * `sections`). Omit it for a freshly imported document, where the previous
- * version's structure describes a different resume.
+ * Append a version from a structured Resume. The Resume is validated (throws
+ * before any insert) and everything stored is derived from it, so there is no
+ * way to call this that produces a divergent set of columns. A database
+ * trigger mirrors the latest BASE version's `content` into profiles.resume_text.
  */
-export async function createMarkdownVersion(
+export async function createResumeVersion(
   client: SupabaseClient,
-  input: Omit<NewResumeVersion, 'content' | 'contentJson'> & {
-    markdown: string
-    templateId?: string | null
-    baseContentJson?: ResumeContentJson | null
+  input: {
+    userId: string
+    jobId: string | null
+    resume: Resume
+    source: ResumeSource
+    title?: string | null
+    atsScore?: number | null
+    draftId?: string | null
   }
 ): Promise<ResumeDocument> {
-  const { markdown, templateId, baseContentJson, ...rest } = input
-  return createVersion(client, {
-    ...rest,
-    content: markdownToPlainText(markdown),
-    contentJson: toResumeContentJson(markdown, templateId || DEFAULT_TEMPLATE_ID, baseContentJson),
+  const resume = ResumeSchema.parse(input.resume)
+  const { content, content_json } = deriveResumeColumns(resume)
+  return insertVersionRow(client, {
+    userId: input.userId,
+    jobId: input.jobId,
+    draftId: input.draftId,
+    title: input.title,
+    content,
+    contentJson: content_json,
+    atsScore: input.atsScore,
+    source: input.source,
   })
 }
 
 /**
  * Patch metadata on an existing version. Deliberately cannot touch `content` —
- * a content change is a new version (see createVersion).
+ * a content change is a new version (see createResumeVersion).
  */
 export async function updateVersionMeta(
   client: SupabaseClient,
@@ -230,7 +249,7 @@ export async function updateVersionMeta(
 
 /**
  * Delete one version. Version numbers are NOT renumbered afterwards, so gaps
- * are expected and createVersion() still counts up from the surviving max.
+ * are expected and insertVersionRow() still counts up from the surviving max.
  */
 export async function deleteVersion(
   client: SupabaseClient,

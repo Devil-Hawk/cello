@@ -1,0 +1,29 @@
+[SYNTHETIC RESUME - fictional person, written for an evaluation set. Not a real candidate.]
+
+Marcus Delgado
+Seattle, WA | marcus.delgado@example.com | github.com/example-mdelgado
+
+SUMMARY
+Senior backend engineer with 8 years building high-throughput payment and ledger systems in Go. Runs services on Kubernetes at scale, owns on-call for money-movement paths, and mentors mid-level engineers.
+
+EXPERIENCE
+Senior Software Engineer, Payments Platform - Halcyon Pay (Series D fintech), Seattle, WA | 2021 - present
+- Lead engineer for the card-authorization service (Go, gRPC, Postgres, Kafka); handles 4,000 requests/sec at p99 under 60 ms.
+- Designed an idempotent double-entry ledger that cut reconciliation breaks by 92%.
+- Migrated 30 services from VMs to Kubernetes (EKS) with Helm and Argo CD; reduced deploy time from 40 to 6 minutes.
+- Drove PCI-DSS scope reduction by moving card data behind a tokenization service.
+- Mentor 4 engineers; run the quarterly incident review.
+
+Software Engineer II - Northgate Commerce, Seattle, WA | 2018 - 2021
+- Built the refunds and disputes API (Go, PostgreSQL, Redis), integrated with Visa and Mastercard dispute networks.
+- Introduced OpenTelemetry tracing across 12 services.
+- Wrote the payout scheduler processing 1.2M payouts per night.
+
+Software Engineer - Brightline Logistics, Portland, OR | 2016 - 2018
+- Built REST APIs in Java and later Go for shipment tracking; moved the team to Docker and Kubernetes.
+
+SKILLS
+Go, Java, SQL, PostgreSQL, Kafka, Redis, gRPC, Kubernetes, Docker, Terraform, AWS, Datadog, OpenTelemetry, distributed systems, payments (ISO 8583, ACH, card networks), PCI-DSS
+
+EDUCATION
+B.S. Computer Science, University of Washington, 2016

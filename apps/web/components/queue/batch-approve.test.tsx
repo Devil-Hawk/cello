@@ -39,7 +39,7 @@ function item(over: Partial<BatchReviewItem> & { draftId: string }): BatchReview
     jobUrl: 'https://boards.greenhouse.io/acme/jobs/4001',
     location: 'Remote',
     companyName: 'Acme',
-    matchScore: 88,
+    chance: 'strong',
     matchWhy: 'Strong Go overlap.',
     matchHighlights: ['Go', 'Postgres'],
     matchGaps: ['Kubernetes'],
@@ -109,7 +109,8 @@ describe('BatchReviewList — nothing is selected until the user acts', () => {
     const html = renderList([THREE[0]])
     expect(html).toContain('Senior Backend Engineer')
     expect(html).toContain('Acme')
-    expect(html).toContain('88 match')
+    expect(html).toContain('Strong')
+    expect(html).not.toMatch(/\d+ match/)
     expect(html).toContain('Strong Go overlap.')
     expect(html).toContain('Rewritten toward distributed systems.')
     expect(html).toContain('Cover letter written')

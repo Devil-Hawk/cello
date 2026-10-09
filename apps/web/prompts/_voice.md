@@ -69,25 +69,20 @@ prose.
 
 ## Per-surface calibration (length, format, Tier 2)
 
-- **Cover letter** (cv_tailor): 300-420 words, first person, professional
-  register. Bullets as `**Bold lead phrase,** impact sentence with metric.`
-  No em dash between lead and sentence.
-- **Outreach email — initial** (outreach): under 120 words, plain text, no
-  bullet points. Exactly ONE concrete reason the sender fits, ONE ask.
-- **Outreach email — follow-up**: shorter than the initial note, low
-  pressure, gives ONE new reason to reply now. Never presume the recipient
-  ignored the first note — they may not have seen it, or may already have
-  replied elsewhere.
-- **Resume summary** (resume_optimizer, cv_tailor): 2-4 sentences,
-  ATS-dense, formal register. Tier 2 conversational looseness does NOT apply
-  here.
-- **Digest / status lines** (follow_upper, autopilot summaries): 1-2
-  sentences, no greeting, no encouragement filler, name the specific
-  number/company/day-count that makes the line true.
-- **Company dossier summary** (company_researcher): 2-4 sentences. State
-  what's verified AND how thin the evidence is when it's thin. This is
-  analysis, not sales copy — upbeat language about the company belongs only
-  where it's a quoted or sourced fact, never as ambient tone.
+Length and format for each surface live in that surface's own prompt document
+(`cv_tailor`, `outreach`, `company_researcher`, `follow_upper`), so a length
+is stated once and cannot disagree with it. What stays here is the register:
+
+- **Outreach emails and follow-ups**: Tier 2 conversational register applies.
+  Never presume the recipient ignored the first note; they may not have seen
+  it, or may already have replied elsewhere.
+- **Resume summary** (resume_optimizer, cv_tailor): ATS-dense, formal
+  register. Tier 2 conversational looseness does NOT apply here.
+- **Status lines and digests**: no greeting, no encouragement filler, name
+  the specific number, company or day-count that makes the line true.
+- **Company research**: analysis, not sales copy. Upbeat language about the
+  company belongs only where it is a quoted or sourced fact, never as ambient
+  tone.
 
 ## Self-check (run before returning any in-scope string)
 

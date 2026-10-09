@@ -1,196 +1,187 @@
-// Tests for lib/graph/verify/outreach.ts — ruling 2, item 2: groundedness +
-// specificity, ONE bounded regeneration on failure, ALWAYS persists (never a
-// containment-style fail-closed gate — see this module's own header).
-// runUnitOnce/loadApiKeys/the two judges are all faked at the lowest level.
+// reviewOutreachDraft: the deterministic checks, the claims judge, the specificity
+// judge and the ONE regeneration that names what to fix. The writer and the
+// judges are faked, so these tests are about the control flow and what the
+// judges are shown, not about a model.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { LlmRunner } from '../../harness/types'
 import type { OutreachDraftInput, OutreachDraftResult } from '../../harness/agents/outreach'
-
-interface JudgeVerdict {
-  name: string
-  verdict: 'pass' | 'fail'
-  score: number | null
-  threshold: number
-  n: number
-  summary: string
-}
-
-type OutreachUnitResult = { output: OutreachDraftResult; tokensUsed: number }
-const runUnitOnceMock = vi.fn<[unitType: string, args: unknown], Promise<OutreachUnitResult>>()
-vi.mock('../oneshot', () => ({
-  runUnitOnce: (...args: unknown[]) => (runUnitOnceMock as unknown as (...a: unknown[]) => Promise<OutreachUnitResult>)(...args),
-}))
-
-const loadApiKeysMock = vi.fn(async (): Promise<{ openrouter?: string }> => ({ openrouter: 'fake-key' }))
-vi.mock('../../harness/keys', () => ({
-  loadApiKeys: (...args: unknown[]) => (loadApiKeysMock as unknown as (...a: unknown[]) => ReturnType<typeof loadApiKeysMock>)(...args),
-}))
-
-const judgeGroundednessMock = vi.fn<[client: unknown, input: unknown, opts: unknown], Promise<JudgeVerdict>>()
-const judgeSpecificityMock = vi.fn<[client: unknown, input: unknown, opts: unknown], Promise<JudgeVerdict>>()
-vi.mock('../../evals/judge', () => ({
-  meteredJudgeClient: vi.fn(() => ({})),
-  judgeGroundedness: (...args: unknown[]) => (judgeGroundednessMock as unknown as (...a: unknown[]) => Promise<JudgeVerdict>)(...args),
-  judgeSpecificity: (...args: unknown[]) => (judgeSpecificityMock as unknown as (...a: unknown[]) => Promise<JudgeVerdict>)(...args),
-}))
-
-const logHarnessErrorMock = vi.fn()
-vi.mock('../../observability/log', () => ({
-  logHarnessError: (...args: unknown[]) => logHarnessErrorMock(...args),
-}))
-
-const { verifyOutreachDraft } = await import('./outreach')
-const { MissingKeyError } = await import('../../harness/llm')
-const { BudgetCapError } = await import('../../harness/spend')
-
-function pass(name: string): JudgeVerdict {
-  return { name, verdict: 'pass', score: 0.9, threshold: 0.5, n: 1, summary: 'grounded and specific' }
-}
-function fail(name: string): JudgeVerdict {
-  return { name, verdict: 'fail', score: 0.1, threshold: 0.5, n: 1, summary: `${name} flagged this` }
-}
+import { MissingKeyError } from '../../harness/providers'
+import { BudgetCapError } from '../../harness/spend'
+import { reviewOutreachDraft, type ReviewDeps } from './outreach'
 
 const input: OutreachDraftInput = {
-  userName: 'Alex',
-  userEmail: 'alex@example.com',
-  jobTitle: 'Staff Engineer',
-  companyName: 'Acme',
-  resumeText: 'Senior engineer with 8 years of Go.',
-  jobDescription: 'Build things.',
-}
-const draft: OutreachDraftResult = { subject: 'Hello', body: 'Original body', tokensUsed: 20 }
-
-function baseArgs() {
-  return { admin: {} as never, userId: 'user-1', goal: 'test', input, draft }
+  userName: 'Marcus Delgado',
+  userEmail: 'marcus@example.com',
+  jobTitle: 'Senior Backend Engineer',
+  companyName: 'Ramp',
+  contactName: 'Jane Park',
+  resumeText: 'Marcus Delgado\nDesigned an idempotent double-entry ledger that cut reconciliation breaks by 92%\nMentor 4 engineers',
+  jobDescription: 'You will own the ledger that records every payout.\nWe run Go and Kafka.',
+  kind: 'initial',
 }
 
-beforeEach(() => {
-  vi.clearAllMocks()
-  loadApiKeysMock.mockResolvedValue({ openrouter: 'fake-key' })
+const GOOD = [
+  'Hi Jane,',
+  '',
+  'The post says this role owns the ledger that records every payout. I designed an idempotent double-entry ledger that cut reconciliation breaks by 92%, which is why Ramp caught my eye.',
+  '',
+  'Would you be open to a short chat?',
+  '',
+  'Thanks,',
+  'Marcus Delgado',
+].join('\n')
+
+const draft = (body = GOOD, over: Partial<OutreachDraftResult> = {}): OutreachDraftResult => ({
+  subject: 'Senior Backend Engineer at Ramp',
+  body,
+  tokensUsed: 20,
+  source: 'model',
+  ...over,
 })
 
-describe('verifyOutreachDraft — happy path', () => {
-  it('returns the original draft unchanged when both judges pass, no regeneration', async () => {
-    judgeGroundednessMock.mockResolvedValue(pass('outreach groundedness'))
-    judgeSpecificityMock.mockResolvedValue(pass('outreach specificity'))
+const ok = (text: string, source: string) => ({ claims: [{ text, about: 'sender', source, status: 'supported' }] })
+const specificOk = { specific: true, detail: 'ledger that records every payout', source: 'J1', why: 'ties to J1' }
 
-    const result = await verifyOutreachDraft(baseArgs())
-    expect(result.body).toBe('Original body')
-    expect(result.failedVerdict).toBe(false)
-    expect(result.verdicts).toHaveLength(2)
-    expect(runUnitOnceMock).not.toHaveBeenCalled()
-  })
-})
+function runner(answer: unknown | ((prompt: string) => unknown)): { run: LlmRunner; prompts: string[] } {
+  const prompts: string[] = []
+  const run: LlmRunner = async (opts) => {
+    prompts.push(opts.prompt ?? '')
+    const a = typeof answer === 'function' ? (answer as (p: string) => unknown)(opts.prompt ?? '') : answer
+    return { content: JSON.stringify(a), tokensUsed: 1, promptTokens: 1, completionTokens: 0, model: 'judge' }
+  }
+  return { run, prompts }
+}
 
-describe('verifyOutreachDraft — ONE bounded regeneration on failure', () => {
-  it('regenerates once when a verdict fails, and returns the regenerated content + final verdicts', async () => {
-    judgeGroundednessMock.mockResolvedValueOnce(fail('outreach groundedness')).mockResolvedValueOnce(pass('outreach groundedness'))
-    judgeSpecificityMock.mockResolvedValue(pass('outreach specificity'))
-    runUnitOnceMock.mockResolvedValue({
-      output: { subject: 'Regenerated subject', body: 'Regenerated body', tokensUsed: 15 },
-      tokensUsed: 15,
-    })
+function deps(over: Partial<ReviewDeps> = {}): ReviewDeps & { claims: ReturnType<typeof runner>; specificity: ReturnType<typeof runner> } {
+  const claims = runner(ok('I designed an idempotent double-entry ledger', 'R2'))
+  const specificity = runner(specificOk)
+  return {
+    generate: async () => draft(),
+    claimsRun: claims.run,
+    specificityRun: specificity.run,
+    ...over,
+    claims,
+    specificity,
+  }
+}
 
-    const result = await verifyOutreachDraft(baseArgs())
-    expect(result.body).toBe('Regenerated body')
-    expect(result.failedVerdict).toBe(false)
-    expect(result.tokensUsed).toBe(35) // 20 original + 15 regenerated
-    expect(runUnitOnceMock).toHaveBeenCalledTimes(1) // bounded to ONE regeneration
-    const regenCall = runUnitOnceMock.mock.calls[0][1] as { input: { correctiveContext?: string } }
-    expect(regenCall.input.correctiveContext).toContain('groundedness flagged this')
-  })
-
-  it('still persists a still-failing draft after the one regeneration, flagged failedVerdict:true', async () => {
-    judgeGroundednessMock.mockResolvedValue(fail('outreach groundedness'))
-    judgeSpecificityMock.mockResolvedValue(pass('outreach specificity'))
-    runUnitOnceMock.mockResolvedValue({
-      output: { subject: 'Regenerated subject', body: 'Regenerated body', tokensUsed: 15 },
-      tokensUsed: 15,
-    })
-
-    const result = await verifyOutreachDraft(baseArgs())
-    expect(result.body).toBe('Regenerated body') // NEVER blocks persistence
-    expect(result.failedVerdict).toBe(true)
-    expect(runUnitOnceMock).toHaveBeenCalledTimes(1) // still bounded, no infinite loop
-  })
-})
-
-describe('verifyOutreachDraft: a template never replaces a model draft', () => {
-  it('keeps the original draft and its verdicts when the regeneration fell back to the template (tokensUsed 0)', async () => {
-    judgeGroundednessMock.mockResolvedValue(fail('outreach groundedness'))
-    judgeSpecificityMock.mockResolvedValue(pass('outreach specificity'))
-    runUnitOnceMock.mockResolvedValue({
-      output: { subject: 'Generic template subject', body: 'Generic template body', tokensUsed: 0 },
-      tokensUsed: 0,
-    })
-
-    const result = await verifyOutreachDraft(baseArgs())
-
-    expect(result.body).toBe('Original body')
-    expect(result.subject).toBe('Hello')
-    expect(result.tokensUsed).toBe(20)
-    expect(result.failedVerdict).toBe(true)
-    expect(result.verdicts).toHaveLength(2)
-    expect(judgeGroundednessMock).toHaveBeenCalledTimes(1) // the template was never judged either
-  })
-})
-
-describe('verifyOutreachDraft — judge unavailable', () => {
-  it('a budget-cap refusal returns the original draft with empty verdicts, never a crash', async () => {
-    judgeGroundednessMock.mockRejectedValue(new BudgetCapError(12, 10))
-
-    const result = await verifyOutreachDraft(baseArgs())
-    expect(result.body).toBe('Original body')
-    expect(result.verdicts).toEqual([])
-    expect(result.failedVerdict).toBe(false)
-    expect(result.judgeRefused).toBe('budget-cap')
+describe('a draft that passes', () => {
+  it('is returned unchanged with both verdicts and no regeneration', async () => {
+    const generate = vi.fn(async () => draft())
+    const d = deps({ generate })
+    const review = await reviewOutreachDraft(d, input, draft())
+    expect(generate).not.toHaveBeenCalled()
+    expect(review.body).toBe(GOOD)
+    expect(review.failed).toBe(false)
+    expect(review.verdicts.map((v) => [v.name, v.verdict])).toEqual([
+      ['groundedness', 'pass'],
+      ['specificity', 'pass'],
+    ])
+    expect(review.checks.ok).toBe(true)
   })
 
-  it('a missing judge key returns the original draft with empty verdicts', async () => {
-    judgeGroundednessMock.mockImplementation(() => {
-      throw new MissingKeyError('no key')
-    })
+  it('shows the specificity judge the job text, not just the title', async () => {
+    const d = deps()
+    await reviewOutreachDraft(d, input, draft())
+    expect(d.specificity.prompts[0]).toContain('J1: You will own the ledger that records every payout.')
+    expect(d.specificity.prompts[0]).toContain('Senior Backend Engineer, Ramp')
+  })
 
-    const result = await verifyOutreachDraft(baseArgs())
-    expect(result.verdicts).toEqual([])
-    expect(result.judgeRefused).toBe('missing-key')
+  it('shows the claims judge the same numbered resume the writer saw', async () => {
+    const d = deps()
+    await reviewOutreachDraft(d, input, draft())
+    expect(d.claims.prompts[0]).toContain('R2: Designed an idempotent double-entry ledger that cut reconciliation breaks by 92%')
   })
 })
 
-describe('verifyOutreachDraft — a broke judge cannot take the draft down', () => {
-  it('an unexpected judge error (e.g. a raw OpenRouter 402) never throws: the draft still persists, unjudged, logged', async () => {
-    judgeGroundednessMock.mockRejectedValue(new Error('402 Payment Required'))
-    judgeSpecificityMock.mockResolvedValue(pass('outreach specificity'))
+describe('an unsupported claim', () => {
+  const bad = GOOD.replace('I designed', 'I led a team of 8 and designed')
+  const unsupported = { claims: [{ text: 'I led a team of 8', about: 'sender', source: null, status: 'unsupported' }] }
 
-    const result = await verifyOutreachDraft(baseArgs())
-
-    expect(result.body).toBe('Original body') // NEVER blocks persistence
-    expect(result.verdicts).toEqual([])
-    expect(result.failedVerdict).toBe(false)
-    expect(result.judgeUnavailable).toBe(true)
-    expect(logHarnessErrorMock).toHaveBeenCalledTimes(1)
-    const [ctx] = logHarnessErrorMock.mock.calls[0] as [Record<string, unknown>]
-    expect(ctx).toMatchObject({ agentType: 'outreach', phase: 'judge' })
+  it('triggers one regeneration whose corrective text quotes the claim', async () => {
+    const generate = vi.fn(async (_i: OutreachDraftInput) => draft())
+    const claims = runner((prompt: string) => (prompt.includes('led a team of 8') ? unsupported : ok('I designed an idempotent double-entry ledger', 'R2')))
+    const review = await reviewOutreachDraft(deps({ generate, claimsRun: claims.run }), input, draft(bad))
+    expect(generate).toHaveBeenCalledTimes(1)
+    expect(generate.mock.calls[0][0].correctiveContext).toContain('1. Remove or rewrite "I led a team of 8".')
+    expect(review.body).toBe(GOOD)
+    expect(review.failed).toBe(false)
+    expect(review.tokensUsed).toBe(40)
   })
 
-  it('the same unexpected-error discipline applies to the post-regeneration judge call', async () => {
-    judgeGroundednessMock.mockResolvedValueOnce(fail('outreach groundedness')).mockRejectedValueOnce(new Error('boom'))
-    judgeSpecificityMock.mockResolvedValue(pass('outreach specificity'))
-    runUnitOnceMock.mockResolvedValue({
-      output: { subject: 'Regenerated subject', body: 'Regenerated body', tokensUsed: 15 },
-      tokensUsed: 15,
-    })
+  it('keeps the original when the regeneration is worse', async () => {
+    const worse = GOOD.replace('Thanks,', 'Happy to send my resume too. Could you also introduce me?\n\nThanks,')
+    const generate = vi.fn(async () => draft(worse))
+    const claims = runner(unsupported)
+    const review = await reviewOutreachDraft(deps({ generate, claimsRun: claims.run }), input, draft(bad))
+    expect(generate).toHaveBeenCalledTimes(1)
+    expect(review.body).toBe(bad)
+    expect(review.failed).toBe(true)
+  })
+})
 
-    const result = await verifyOutreachDraft(baseArgs())
-
-    expect(result.body).toBe('Regenerated body') // still the regenerated content
-    expect(result.verdicts).toEqual([])
-    expect(result.judgeUnavailable).toBe(true)
-    expect(logHarnessErrorMock).toHaveBeenCalledTimes(1)
+describe('a failing deterministic check', () => {
+  it('triggers a regeneration when there are two asks', async () => {
+    const twoAsks = GOOD.replace('Thanks,', 'Could you also introduce me to the team?\n\nThanks,')
+    const generate = vi.fn(async (_i: OutreachDraftInput) => draft())
+    const review = await reviewOutreachDraft(deps({ generate }), input, draft(twoAsks))
+    expect(generate).toHaveBeenCalledTimes(1)
+    expect(generate.mock.calls[0][0].correctiveContext).toContain('2 asks. Keep one so the reply is easy.')
+    expect(review.body).toBe(GOOD)
   })
 
-  // MUTATION CHECK (executed, not left to trust): removed the non-refusal
-  // catch above (reverted `throw err` in its place) — this test's first case
-  // went red with an unhandled rejection ("402 Payment Required") instead of
-  // a returned result, reproducing the E2E 500. Reverted immediately.
+  it('names the sign-off when the draft is signed with something else', async () => {
+    const generate = vi.fn(async (_i: OutreachDraftInput) => draft())
+    await reviewOutreachDraft(deps({ generate }), input, draft(GOOD.replace('Marcus Delgado', 'mdelgado')))
+    expect(generate.mock.calls[0][0].correctiveContext).toContain('Signed "mdelgado", not your name "Marcus Delgado".')
+  })
+})
+
+describe('the standard template', () => {
+  const template = draft('Hi Jane,\n\nI am interested in the Senior Backend Engineer role at Ramp. Would you be open to a short chat?\n\nThanks,\nMarcus Delgado', {
+    tokensUsed: 0,
+    source: 'template',
+    templateReason: 'missing_key',
+  })
+
+  it('is checked by code only: no judge runs and nothing is regenerated', async () => {
+    const generate = vi.fn()
+    const d = deps({ generate })
+    const review = await reviewOutreachDraft(d, input, template)
+    expect(generate).not.toHaveBeenCalled()
+    expect(d.claims.prompts).toEqual([])
+    expect(review).toMatchObject({ source: 'template', templateReason: 'missing_key', verdicts: [] })
+    expect(review.checks.ok).toBe(true)
+  })
+
+  it('never replaces a model draft when the regeneration falls back to it', async () => {
+    const twoAsks = GOOD.replace('Thanks,', 'Could you also introduce me to the team?\n\nThanks,')
+    const review = await reviewOutreachDraft(deps({ generate: async () => template }), input, draft(twoAsks))
+    expect(review.body).toBe(twoAsks)
+    expect(review.source).toBe('model')
+  })
+})
+
+describe('when the judges cannot run', () => {
+  it.each([
+    ['a missing key', new MissingKeyError(), 'missing-key'],
+    ['the spending cap', new BudgetCapError(10, 10), 'budget-cap'],
+  ] as const)('reports %s as a typed refusal with no verdicts, and still returns the draft', async (_l, err, refused) => {
+    const throwing: LlmRunner = async () => {
+      throw err
+    }
+    const review = await reviewOutreachDraft(deps({ claimsRun: throwing, specificityRun: throwing }), input, draft())
+    expect(review).toMatchObject({ body: GOOD, verdicts: [], judgeRefused: refused, judgeUnavailable: false })
+  })
+
+  it('logs an unexpected judge error and returns the draft, unjudged', async () => {
+    const onError = vi.fn()
+    const throwing: LlmRunner = async () => {
+      throw new Error('402 payment required')
+    }
+    const review = await reviewOutreachDraft(deps({ claimsRun: throwing }), input, draft(), onError)
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(review).toMatchObject({ body: GOOD, verdicts: [], judgeUnavailable: true })
+  })
 })

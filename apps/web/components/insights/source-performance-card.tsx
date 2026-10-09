@@ -117,25 +117,25 @@ export function SourcePerformanceCard({ summary, loading, error, onRetry }: Sour
       <CardHeader>
         <CardTitle>Source performance</CardTitle>
         <CardDescription>
-          Jobs discovered per source, and how many of them Cello has actually scored.
+          Roles discovered per source, and how many of them Cello has assessed.
           {zeroScored.length > 0 && (
             <>
               {' '}
               {zeroScored.map((r) => r.source).join(', ')} contribut
               {zeroScored.length === 1 ? 'es' : 'e'} volume but {zeroScored.length === 1 ? "hasn't" : "haven't"} been
-              scored at all.
+              assessed at all.
             </>
           )}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <AccessibleFigure
-          caption="Total jobs discovered per source, with the scored subset overlaid."
+          caption="Total roles discovered per source, with the assessed subset overlaid."
           table={{
             columns: [
               { key: 'source', label: 'Source' },
               { key: 'total', label: 'Total jobs', align: 'right' },
-              { key: 'scored', label: 'Scored', align: 'right' },
+              { key: 'scored', label: 'Assessed', align: 'right' },
             ],
             rows: rows.map((r) => [r.source, r.total.toLocaleString(), r.scored.toLocaleString()]),
           }}

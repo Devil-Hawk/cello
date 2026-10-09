@@ -74,7 +74,7 @@ async function main() {
   const genuine = messages.filter((m) => m.profiles?.is_demo !== true && m.reply_classification != null)
 
   const verdicts = await rest<VerdictRow[]>(
-    'eval_verdicts?select=subject_id,score&subject_kind=eq.outreach_draft&judge=eq.factuality&limit=1000'
+    'eval_verdicts?select=subject_id,score&subject_kind=eq.outreach_draft&judge=in.(factuality,groundedness)&limit=1000'
   )
   const verdictByMessage = new Map(verdicts.map((v) => [v.subject_id, v]))
 

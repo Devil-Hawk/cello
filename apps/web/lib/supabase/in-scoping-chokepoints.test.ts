@@ -52,6 +52,10 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     reason:
       "the person's own Settings -> Targeting values (a few slugs or ISO codes each), not an ownership fence or an id list.",
   },
+  'apps/web/lib/agents/approvals.ts': {
+    calls: [".in('status', from)"],
+    reason: 'from is a list of approval statuses, at most the five values of the status enum: a fixed set, and the row is already fenced by id and user_id.',
+  },
   'apps/web/lib/access/demo-wipe.ts': {
     calls: [".in('user_id', chunk)"],
     reason: "chunked-helper internal — chunk is chunkedIn's own per-batch parameter, capped at 100 by construction.",
@@ -89,11 +93,8 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       're-validation (approveOne) always calls this with a single-element array — never an owned-id set.',
   },
   'apps/web/lib/graph/autopilot.ts': {
-    calls: [".in('job_id', jobIds)", ".in('subject_id', jobIds)"],
-    reason:
-      "jobIds is pendingDraftJobIds(goal) — one autopilot goal's own small kept-list, not an owned-id set; the " +
-      "second call (loadFailedVerdictJobIds) filters rows already capped by loadCandidateJobs' own " +
-      'CANDIDATE_JOB_LIMIT (150) query above it.',
+    calls: [".in('job_id', jobIds)"],
+    reason: "jobIds is pendingDraftJobIds(goal): one autopilot goal's own small kept-list, not an owned-id set.",
   },
   'apps/web/lib/graph/distill.ts': {
     calls: [".in('id', ids)"],
@@ -127,10 +128,18 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       'ACTIVE_STAGES is a fixed 3-element const, not user data.',
   },
   'apps/web/lib/harness/agents/matcher.ts': {
-    calls: [".in('id', ids)"],
+    calls: [".in('id', jobIds)"],
     reason:
-      'fetchJobsByIds: every caller caps the id list (score_jobs\' SCORE_JOBS_MAX_LIMIT=15, or selectCandidateJobs\' ' +
-      'poolSize) before it reaches here; ownership is enforced separately by ownedJobsQuery\'s FK join.',
+      "diagnoseCandidateJobs: the caller is score_jobs, whose id list is capped at SCORE_JOBS_MAX_LIMIT=15 before " +
+      "it reaches here; ownership is enforced separately by ownedJobsQuery's FK join.",
+  },
+  'apps/web/lib/scoring/index.ts': {
+    calls: [".in('id', rows.map((r)"],
+    reason: "rows is one day's saved shortlist (at most a handful of picks), one job id per row; the query is on the person's own role rows (person_jobs, filtered by viewer_id).",
+  },
+  'apps/web/lib/scoring/supabase-store.ts': {
+    calls: [".in('job_id', part)"],
+    reason: 'part is one slice of at most IN_CHUNK (100) ids, cut by chunks() on every call; the query is on the person\'s own person_roles rows (filtered by user_id).',
   },
   'apps/web/lib/harness/agents/verifier.ts': {
     calls: [".in('job_id', knockouts)"],

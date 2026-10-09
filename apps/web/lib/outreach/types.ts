@@ -1,5 +1,8 @@
 // Cold-outreach domain types (framework-free — safe in request + cron contexts).
 
+/** Why a draft is the standard template and not a written draft. */
+export type TemplateReason = 'missing_key' | 'spend_cap' | 'provider_error' | 'unusable_output'
+
 export type OutreachStatus =
   | 'pending_review'
   | 'approved'
@@ -13,7 +16,7 @@ export type OutreachKind = 'initial' | 'follow_up'
  * Coarse polarity for an inbound reply, per supabase/migrations/
  * 20260818000003_outreach_reply_outcome.sql's CHECK constraint. Deliberately
  * NOT the job-application stage vocabulary (ApplicationStatus) — see
- * lib/gmail/stage.ts#classifyReply, the single writer of this column.
+ * lib/outreach/reply-classify.ts, the one place a reply is read.
  */
 export type ReplyClassification = 'positive' | 'neutral' | 'negative' | 'bounce'
 
@@ -37,6 +40,14 @@ export interface OutreachMessageRow {
   error: string | null
   /** False when the draft is the generic template (no model wrote it). NULL on rows from before this was recorded. */
   used_llm?: boolean | null
+  /** Why the text is the standard template: set only when used_llm is false. */
+  template_reason?: TemplateReason | null
+  /** Langfuse trace and generation of the model call that wrote this draft, and what it first wrote
+   *  (kept so an edit can be measured). Null for templates and rows from before these existed. */
+  trace_id?: string | null
+  observation_id?: string | null
+  generated_subject?: string | null
+  generated_body?: string | null
   sent_at: string | null
   /** When an inbound reply was matched to this thread. NULL = no reply yet. */
   replied_at: string | null

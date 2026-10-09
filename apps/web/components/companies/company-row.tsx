@@ -21,8 +21,8 @@ export interface CompanySummary {
   metadata?: unknown
   scrape_frequency?: number | null
   jobs_count?: number
-  /** Max `jobs.match_score` across this company's jobs. Null (not 0) when none of its jobs are scored yet. */
-  best_match_score?: number | null
+  /** Roles at this company with a Strong chance that nothing the person stated rules out. Null (not 0) when none of its roles are assessed yet. */
+  strong_roles?: number | null
 }
 
 export interface CompanyRowProps {
@@ -56,10 +56,8 @@ export function CompanyRow({
   }
 
   // undefined (field not yet requested by some caller) collapses to the same
-  // "unscored" badge as an explicit null — only a real number counts as scored.
-  const bestScore =
-    typeof company.best_match_score === 'number' ? company.best_match_score : null
-  const scoreTone = matchTone(bestScore)
+  // "not assessed yet" badge as an explicit null: only a real count means assessed.
+  const strongRoles = typeof company.strong_roles === 'number' ? company.strong_roles : null
 
   return (
     // `relative isolate` exists for the stretched-link overlay below: it makes
@@ -112,8 +110,8 @@ export function CompanyRow({
             {company.is_dream_company && (
               <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />
             )}
-            <Badge tone={scoreTone} className="shrink-0 tabular-nums">
-              {bestScore === null ? 'Not scored' : `${bestScore}% match`}
+            <Badge tone={strongRoles ? 'accent' : 'muted'} className="shrink-0">
+              {strongRoles === null ? 'Not assessed yet' : strongRoles === 0 ? 'No strong roles yet' : `${strongRoles} strong ${strongRoles === 1 ? 'role' : 'roles'}`}
             </Badge>
           </div>
           <p

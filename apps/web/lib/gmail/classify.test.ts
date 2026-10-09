@@ -50,6 +50,7 @@ const AI_JSON = JSON.stringify({
   employerDomain: 'acme.com',
   jobTitle: 'Senior Engineer',
   status: 'applied',
+  evidence: 'Thank you for applying',
   careerPageUrl: null,
   interviewDateTime: null,
   confidence: 0.95,

@@ -1,0 +1,72 @@
+{
+  "feature": "judges",
+  "label": "after",
+  "writer": "google/gemma-4-31b-it:free",
+  "judge": "poolside/laguna-s-2.1:free",
+  "metrics": [
+    {
+      "name": "claims judge accuracy",
+      "value": 0.8333333333333334,
+      "n": 6,
+      "failures": [
+        "g2"
+      ]
+    },
+    {
+      "name": "planted claims caught",
+      "value": 1,
+      "n": 3,
+      "failures": []
+    },
+    {
+      "name": "specificity judge accuracy",
+      "value": 1,
+      "n": 2,
+      "failures": []
+    }
+  ],
+  "items": [
+    {
+      "id": "g1",
+      "label": true,
+      "predicted": true
+    },
+    {
+      "id": "g2",
+      "label": true,
+      "predicted": false
+    },
+    {
+      "id": "p1",
+      "label": false,
+      "predicted": false
+    },
+    {
+      "id": "p2",
+      "label": false,
+      "predicted": false
+    },
+    {
+      "id": "s1",
+      "label": true,
+      "predicted": true
+    },
+    {
+      "id": "s4",
+      "label": false,
+      "predicted": false
+    },
+    {
+      "id": "g4",
+      "label": true,
+      "predicted": true
+    },
+    {
+      "id": "p4",
+      "label": false,
+      "predicted": false
+    }
+  ],
+  "at": "2026-10-06T23:26:23.397Z",
+  "requests": 9
+}

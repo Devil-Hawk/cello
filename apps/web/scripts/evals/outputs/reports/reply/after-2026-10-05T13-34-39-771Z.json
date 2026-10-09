@@ -1,0 +1,108 @@
+{
+  "feature": "reply",
+  "label": "after",
+  "writer": "google/gemma-4-31b-it:free",
+  "judge": "no judge: labelled replies",
+  "metrics": [
+    {
+      "name": "pattern accuracy",
+      "value": 1,
+      "n": 14,
+      "failures": []
+    },
+    {
+      "name": "auto-replies not counted as replies",
+      "value": 1,
+      "n": 2,
+      "failures": []
+    }
+  ],
+  "items": [
+    {
+      "id": "r01",
+      "label": "positive",
+      "pattern": "positive",
+      "model": "positive"
+    },
+    {
+      "id": "r02",
+      "label": "positive",
+      "pattern": "positive",
+      "model": "positive"
+    },
+    {
+      "id": "r03",
+      "label": "positive",
+      "pattern": "positive",
+      "model": "positive"
+    },
+    {
+      "id": "r04",
+      "label": "positive",
+      "pattern": "positive",
+      "model": "positive"
+    },
+    {
+      "id": "r05",
+      "label": "negative",
+      "pattern": "negative",
+      "model": "negative"
+    },
+    {
+      "id": "r06",
+      "label": "negative",
+      "pattern": "negative",
+      "model": "negative"
+    },
+    {
+      "id": "r07",
+      "label": "negative",
+      "pattern": "negative",
+      "model": "negative"
+    },
+    {
+      "id": "r08",
+      "label": "neutral",
+      "pattern": "neutral",
+      "model": "neutral"
+    },
+    {
+      "id": "r09",
+      "label": "neutral",
+      "pattern": "neutral",
+      "model": "neutral"
+    },
+    {
+      "id": "r10",
+      "label": "neutral",
+      "pattern": "neutral",
+      "model": "neutral"
+    },
+    {
+      "id": "r11",
+      "label": "auto",
+      "pattern": "auto",
+      "model": "auto"
+    },
+    {
+      "id": "r12",
+      "label": "auto",
+      "pattern": "auto",
+      "model": "auto"
+    },
+    {
+      "id": "r13",
+      "label": "bounce",
+      "pattern": "bounce",
+      "model": "bounce"
+    },
+    {
+      "id": "r14",
+      "label": "bounce",
+      "pattern": "bounce",
+      "model": "bounce"
+    }
+  ],
+  "at": "2026-10-05T13:34:39.771Z",
+  "requests": 0
+}

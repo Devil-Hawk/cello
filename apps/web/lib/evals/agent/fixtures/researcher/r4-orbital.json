@@ -1,0 +1,28 @@
+{
+  "id": "r4-orbital",
+  "subject": "Orbital Kitchens",
+  "kind": "company",
+  "thin": false,
+  "pages": [
+    {
+      "url": "https://orbitalkitchens.example/about",
+      "title": "About Orbital Kitchens",
+      "text": "Orbital Kitchens runs shared commercial kitchens that restaurants rent to serve delivery orders. Founded in 2020 in Austin, the company operates 26 kitchens in 7 cities."
+    },
+    {
+      "url": "https://news.example/orbital-series-a",
+      "title": "Orbital Kitchens raises $22M",
+      "text": "Austin, June 2024. Orbital Kitchens raised $22 million in a Series A round led by Redwood Table Capital to open kitchens in Phoenix and Atlanta. Founder Luis Ortega said the company has been operating at positive margins in its three oldest kitchens."
+    },
+    {
+      "url": "https://reviews.example/orbital-kitchens",
+      "title": "Orbital Kitchens reviews",
+      "text": "Orbital Kitchens has a 3.1 out of 5 rating from 88 employee reviews. Reviewers say the work is steady but pay is below the local average, and managers change often."
+    }
+  ],
+  "distractor": {
+    "url": "https://directory.example/orbital-kitchen-supply",
+    "title": "Orbital Kitchen Supply",
+    "text": "A restaurant equipment dealer in Ohio. Unrelated."
+  }
+}

@@ -149,4 +149,36 @@ describe('escapeInlineMarkdown', () => {
     expect(escapeInlineMarkdown('# not a heading')).toBe('\\# not a heading')
     expect(escapeInlineMarkdown('2019. Graduated')).toBe('2019\\. Graduated')
   })
+
+  it('escapes block starts that would open a list, a rule, a setext underline or a table', () => {
+    expect(escapeInlineMarkdown('- x')).toBe('\\- x')
+    expect(escapeInlineMarkdown('+ x')).toBe('\\+ x')
+    expect(escapeInlineMarkdown('---')).toBe('\\-\\-\\-')
+    expect(escapeInlineMarkdown('===')).toBe('\\=\\=\\=')
+    expect(escapeInlineMarkdown('| a | b |')).toBe('\\| a | b |')
+    expect(escapeInlineMarkdown('-5% error')).toBe('-5% error')
+  })
+
+  it('protects every line of a multi-line string', () => {
+    expect(escapeInlineMarkdown('one\n# two\n- three')).toBe('one\n\\# two\n\\- three')
+  })
+})
+
+describe('wrapped bullets', () => {
+  it('keeps a bullet continuation inside its bullet', () => {
+    const md = inferResumeMarkdown(
+      'Ada Lovelace\n\nEXPERIENCE\nEngineer, Acme  2019 - 2021\n\u2022 Rebuilt the reporting pipeline, cutting p95 query latency from\n14s to 2.1s.\n\u2022 Mentored four engineers.'
+    )
+    const list = parseResumeMarkdown(md).find((b) => b.type === 'list')
+    expect(list?.type === 'list' && list.items.map((i) => i.lines.map((l) => l.map((r) => r.text).join('')).join(' '))).toEqual([
+      'Rebuilt the reporting pipeline, cutting p95 query latency from 14s to 2.1s.',
+      'Mentored four engineers.',
+    ])
+    expect(md).not.toMatch(/^14s/m)
+  })
+
+  it('does not swallow the next role line', () => {
+    const md = inferResumeMarkdown('Ada Lovelace\n\nEXPERIENCE\n\u2022 Built things\nSecond Role, Initech  2015 - 2018\n\u2022 More things')
+    expect(md).toMatch(/\*\*Second Role/)
+  })
 })

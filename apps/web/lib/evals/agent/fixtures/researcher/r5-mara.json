@@ -1,0 +1,28 @@
+{
+  "id": "r5-mara",
+  "subject": "Mara Okafor",
+  "kind": "person",
+  "thin": false,
+  "pages": [
+    {
+      "url": "https://delphilabs.example/team/mara-okafor",
+      "title": "Mara Okafor, VP Product at Delphi Labs",
+      "text": "Mara Okafor is Vice President of Product at Delphi Labs, where she leads the payments and billing products. She joined in 2023. Before Delphi she was a product manager at Stripe from 2017 to 2022."
+    },
+    {
+      "url": "https://productcon.example/2025/speakers/mara-okafor",
+      "title": "ProductCon 2025: Mara Okafor",
+      "text": "Mara Okafor spoke at ProductCon 2025 on moving a subscription business to usage-based pricing. Her session covered metering, customer communication and how to measure the effect on retention."
+    },
+    {
+      "url": "https://newsletter.example/interview-mara-okafor",
+      "title": "Interview: Mara Okafor on building payments products",
+      "text": "In an interview, Okafor said she moved to Delphi Labs to lead a small team end to end. She described her approach as writing a one-page memo before any build and meeting customers every week."
+    }
+  ],
+  "distractor": {
+    "url": "https://social.example/mara-okafor-fan",
+    "title": "Fan page",
+    "text": "A page about a musician also named Mara Okafor. Unrelated to product management."
+  }
+}

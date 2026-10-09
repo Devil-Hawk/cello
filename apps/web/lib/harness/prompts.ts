@@ -68,6 +68,7 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+import type { LlmRunOptions } from './types'
 
 const PROMPTS_DIR = 'prompts'
 
@@ -81,6 +82,7 @@ const PROMPTS_DIR = 'prompts'
  * covered by `assertPromptDocsResolve()`.
  */
 export const PROMPT_DOC_NAMES = [
+  '_policy',
   '_shared',
   '_voice',
   'cv_tailor',
@@ -90,6 +92,17 @@ export const PROMPT_DOC_NAMES = [
   'company_researcher',
   'planner',
   'visa',
+  'judge_claims',
+  'judge_specificity',
+  'gmail_classify',
+  'reply_classify',
+  'analyst',
+  'distill',
+  'memory_extract',
+  'company_verify',
+  'goal_judge',
+  'orchestrator',
+  'researcher',
 ] as const
 export type PromptDocName = (typeof PROMPT_DOC_NAMES)[number]
 
@@ -171,6 +184,17 @@ export function loadModeDoc(agentName: string): string {
   return readPromptDoc(agentName)
 }
 
+/**
+ * `_policy.md`: the six rules every model call carries (grounding, no
+ * invented facts, thin evidence, citations, untrusted input, privacy). It is
+ * the only place that text lives: composeSystemPrompt puts it first, and
+ * applyPolicy adds it to a call that did not compose it (callLlm's hook, which
+ * registry-models wires in).
+ */
+export function getPolicyDoc(): string {
+  return loadDoc('_policy')
+}
+
 /** `_shared.md` — the Cello sources-of-truth, anti-fabrication rules, and shared scoring bands. */
 export function getSharedDoc(): string {
   return loadDoc('_shared')
@@ -220,11 +244,46 @@ export interface ComposeSystemPromptArgs {
  * separately and pass it as `prompt`.
  */
 export function composeSystemPrompt(args: ComposeSystemPromptArgs): string {
-  const parts = [getSharedDoc()]
+  const parts = [getPolicyDoc(), getSharedDoc()]
   if (args.includeVoice !== false) parts.push(getVoiceDoc())
   parts.push(args.mode)
   if (args.stableContext && args.stableContext.trim()) parts.push(args.stableContext.trim())
   return parts.join('\n\n---\n\n')
+}
+
+const POLICY_SEPARATOR = '\n\n---\n\n'
+
+/**
+ * The system text with the policy in front of it. Idempotent: text that
+ * already carries the policy (anything from composeSystemPrompt) comes back
+ * unchanged. Use it on a model call that does not go through callLlm.
+ */
+export function withPolicy(system?: string): string {
+  const policy = getPolicyDoc()
+  if (!system || !system.trim()) return policy
+  return system.includes(policy) ? system : `${policy}${POLICY_SEPARATOR}${system}`
+}
+
+/**
+ * callLlm's backstop: make sure the request carries the policy exactly once.
+ * It goes into `system`, else into the first system message of `messages`
+ * (a library such as mem0 builds its own), else it becomes `system`.
+ * `policy` says whether the caller composed it already or it was added here,
+ * so the prompts still outside composeSystemPrompt can be counted in traces.
+ */
+export function applyPolicy(opts: LlmRunOptions): { opts: LlmRunOptions; policy: 'composed' | 'added' } {
+  const policy = getPolicyDoc()
+  if (opts.system?.includes(policy)) return { opts, policy: 'composed' }
+  const msgs = opts.messages
+  const at = msgs ? msgs.findIndex((m) => m.role === 'system') : -1
+  if (msgs && at >= 0) {
+    if (msgs[at].content.includes(policy)) return { opts, policy: 'composed' }
+    if (!opts.system) {
+      const next = msgs.map((m, i) => (i === at ? { ...m, content: withPolicy(m.content) } : m))
+      return { opts: { ...opts, messages: next }, policy: 'added' }
+    }
+  }
+  return { opts: { ...opts, system: withPolicy(opts.system) }, policy: 'added' }
 }
 
 /**

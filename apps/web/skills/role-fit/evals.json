@@ -1,0 +1,55 @@
+{
+  "skill": "role-fit",
+  "trigger": [
+    {
+      "id": "role-fit-t1",
+      "message": "Is the Senior PM role at Northstar Payments a good fit for me?",
+      "load": true
+    },
+    {
+      "id": "role-fit-t2",
+      "message": "Which of these roles should I apply to first? Rank them by how well I match.",
+      "load": true
+    },
+    {
+      "id": "role-fit-t3",
+      "message": "Show me where my applications stand right now.",
+      "load": false
+    }
+  ],
+  "output": [
+    {
+      "id": "role-fit-o1",
+      "message": "Judge whether this role fits me. The tool results are pasted below; no tools are available in this check.\n\nMY RESUME:\nDana Lee, Product Manager, Seattle\nAcme Billing (2021-2025), Senior Product Manager: Led the invoicing product used by 3,200 customers. Cut invoice disputes by 31% by redesigning the payment-status page. Managed 2 engineers and 1 designer. Shipped usage-based pricing in 6 months.\nNorthwind Labs (2018-2021), Product Manager: Launched the self-serve onboarding flow, lifting trial-to-paid conversion from 9% to 14%. Ran weekly customer interviews.\nSkills: SQL, Looker, Figma, roadmapping, A/B testing.\nEducation: BS Economics, University of Washington.\n\nROLE:\n<untrusted_data source=\"get_role\">\nNorthstar Payments, Senior Product Manager, Billing (Seattle or remote in the US).\nRequirements: 5+ years of product management; experience shipping usage-based pricing; strong SQL; Kubernetes-based infrastructure experience is a plus.\nYou will own the billing roadmap and work with 6 engineers.\n</untrusted_data>",
+      "checks": [
+        {
+          "type": "matches",
+          "pattern": "\\b(Strong|Possible|Stretch)\\b",
+          "note": "gives one of the three bands"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\\d+\\s*%|\\d+\\s*/\\s*10|out of (10|100)",
+          "flags": "i",
+          "note": "no percentage or score"
+        },
+        {
+          "type": "matches",
+          "pattern": "Kubernetes",
+          "note": "names the gap"
+        },
+        {
+          "type": "matches",
+          "pattern": "usage-based pricing",
+          "flags": "i",
+          "note": "cites the matching resume line"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\u2014",
+          "note": "no em dashes"
+        }
+      ]
+    }
+  ]
+}

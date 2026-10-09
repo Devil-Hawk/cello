@@ -32,7 +32,7 @@ import type { StrategyDataSource } from './datasource'
 import type { Targeting } from '../targeting'
 import type { StrategyReport } from './types'
 import { analyzeSourceFunnel } from './questions/sourceFunnel'
-import { analyzeMatchScoreAccuracy } from './questions/matchScoreAccuracy'
+import { analyzeChanceAccuracy } from './questions/chanceAccuracy'
 import { analyzeResumeVariants } from './questions/resumeVariants'
 import { analyzeOutreachImpact } from './questions/outreachImpact'
 import { analyzeRejectionPatterns } from './questions/rejectionPatterns'
@@ -53,7 +53,7 @@ export async function runStrategyAnalysis(dataSource: StrategyDataSource, userId
   ])
 
   const sourceFunnel = analyzeSourceFunnel(applications, activities)
-  const matchScoreAccuracy = analyzeMatchScoreAccuracy(applications, activities)
+  const chanceAccuracy = analyzeChanceAccuracy(applications, activities)
   const resumeVariants = analyzeResumeVariants(applications, activities, resumeDocuments)
   const outreachImpact = analyzeOutreachImpact(applications, activities, outreachMessages)
   const rejectionPatterns = analyzeRejectionPatterns(applications, activities)
@@ -63,7 +63,7 @@ export async function runStrategyAnalysis(dataSource: StrategyDataSource, userId
 
   const proposals = buildProposals({
     sourceFunnel,
-    matchScoreAccuracy,
+    chanceAccuracy,
     resumeVariants,
     outreachImpact,
     rejectionPatterns,
@@ -76,7 +76,7 @@ export async function runStrategyAnalysis(dataSource: StrategyDataSource, userId
     userId,
     totalApplications: applications.length,
     sourceFunnel,
-    matchScoreAccuracy,
+    chanceAccuracy,
     resumeVariants,
     outreachImpact,
     rejectionPatterns,

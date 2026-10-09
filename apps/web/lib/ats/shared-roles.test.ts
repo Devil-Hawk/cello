@@ -209,8 +209,10 @@ describe('the store', () => {
     await store.recordSightings!('c1', ['a'], ['greenhouse'], 'e1')
     expect(service.calls).toEqual([{ kind: 'rpc', name: 'record_employer_sightings', args: { p_employer: 'e1', p_external_ids: ['a'], p_sources: ['greenhouse'], p_close_after: 2 } }])
     expect(person.calls).toEqual([])
+    // An unlinked company's own rows are written by the server too: a session cannot update a posting.
     await store.recordSightings!('c1', ['a'], ['greenhouse'], null)
-    expect(person.calls.map((c) => c.name)).toEqual(['record_job_sightings'])
+    expect(service.calls.map((c) => c.name)).toEqual(['record_employer_sightings', 'record_job_sightings'])
+    expect(person.calls).toEqual([])
   })
 
   it('falls back to the company\'s own row before the function exists, and fails on any other error', async () => {

@@ -1,0 +1,108 @@
+{
+  "feature": "outreach",
+  "label": "after",
+  "writer": "dots-studio/dots-3-note-preview:free",
+  "judge": "production apodex/apodex-1.1-mini:free, yardstick nvidia/nemotron-3-super-120b-a12b:free",
+  "metrics": [
+    {
+      "name": "all checks pass",
+      "value": 0.75,
+      "n": 4,
+      "failures": [
+        "o01"
+      ]
+    },
+    {
+      "name": "grounded (yardstick)",
+      "value": 0.25,
+      "n": 4,
+      "failures": [
+        "o01",
+        "o05",
+        "f01"
+      ],
+      "note": "judged 4 of 4"
+    },
+    {
+      "name": "specific (yardstick)",
+      "value": 1,
+      "n": 3,
+      "failures": [],
+      "note": "items with job text"
+    },
+    {
+      "name": "template without notice",
+      "value": 0,
+      "n": 0,
+      "kind": "count",
+      "note": "0 templates in 4 drafts"
+    },
+    {
+      "name": "average words",
+      "value": 63,
+      "n": 4,
+      "kind": "count"
+    }
+  ],
+  "items": [
+    {
+      "id": "o01",
+      "kind": "initial",
+      "subject": "Backend Engineer, Payments and Risk at Stripe",
+      "body": "Hi Maya Chen,\n\nThe post calls for backend engineers building large-scale systems that handle billions of money movement requests. I designed an idempotent double-entry ledger at Halcyon Pay that cut reconciliation breaks by 92%, and I currently run a card-authorization service in Go on Kubernetes handling 4,000 requests per second. That is the same domain and scale Stripe's Payments and Risk team is targeting.\n\nWould you be open to a 15-minute chat about how the team approaches it?\n\nThanks,\nMarcus Delgado",
+      "template": false,
+      "failedChecks": [
+        "greeting"
+      ],
+      "unsupported": [
+        {
+          "quote": "I currently run a card-authorization service in Go on Kubernetes handling 4,000 requests per second.",
+          "why": "Resume does not state the card-authorization service runs on Kubernetes; it only mentions leading the service and handling 4,000 requests/sec."
+        },
+        {
+          "quote": "That is the same domain and scale Stripe's Payments and Risk team is targeting.",
+          "why": "Draft claims same scale, but resume shows 4,000 requests/sec while job post describes handling billions of money movement requests, so scale is not the same."
+        }
+      ]
+    },
+    {
+      "id": "o03",
+      "kind": "initial",
+      "subject": "Senior Software Engineer at Coinbase",
+      "body": "Hi Dana,\n\nThe job post names payment success rate as the north star for this role. At Northpoint Pay I designed the idempotency-key scheme used by all 14 money-movement services, so ensuring payments move safely and reliably end to end is exactly the problem I have been solving.\n\nWould you be open to a 15-minute chat about how the Payments team approaches idempotency and retry across its rails?\n\nThanks,\nElena Vasquez",
+      "template": false,
+      "failedChecks": [],
+      "unsupported": []
+    },
+    {
+      "id": "o05",
+      "kind": "initial",
+      "subject": "Data science at Airbnb",
+      "body": "Hi there,\n\nI'm a data scientist with four years in healthcare analytics. I've built 30-day readmission risk models on claims data, created an NLP pipeline to extract diagnoses from clinical notes, and productionized models with MLflow and Airflow on AWS.\n\nI'm interested in bringing that work to Airbnb. Who is the right person on your team to talk to?\n\nThanks,\nPriya Raman",
+      "template": false,
+      "failedChecks": [],
+      "unsupported": [
+        {
+          "quote": "I've built 30-day readmission risk models on claims data",
+          "why": "Resume states a single 30-day readmission risk model was built; claiming multiple models overstates the scope."
+        }
+      ]
+    },
+    {
+      "id": "f01",
+      "kind": "follow_up",
+      "subject": "Re: Backend Engineer, Payments and Risk at Stripe",
+      "body": "Hi Maya,\n\nThe role handles billions of money movement requests. I wrote a payout scheduler at 1.2M payouts a night and a double-entry ledger that cut reconciliation breaks by 92%.\n\nWho owns that area?\n\nThanks,\nMarcus Delgado",
+      "template": false,
+      "failedChecks": [],
+      "unsupported": [
+        {
+          "quote": "I wrote a payout scheduler at 1.2M payouts a night and a double-entry ledger that cut reconciliation breaks by 92%.",
+          "why": "Resume states he designed the ledger, not wrote it; the draft overstates his role."
+        }
+      ]
+    }
+  ],
+  "at": "2026-10-07T17:01:39.076Z",
+  "requests": 34
+}

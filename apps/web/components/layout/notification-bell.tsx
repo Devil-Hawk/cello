@@ -50,10 +50,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { createClient } from '@/lib/supabase/client'
-import { openRolesOnly } from '@/lib/jobs/freshness'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { hotRolesQuery, toHotRoles } from '@/lib/scoring/hot-roles'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import type { ReviewQueueItem } from '@/lib/notifications/queue'
-import { personJobs } from '@/lib/jobs/person-jobs'
 
 type NotificationKind = 'queue' | 'outreach' | 'overdue' | 'interview' | 'job'
 
@@ -187,14 +187,8 @@ async function fetchFeed(): Promise<NotificationItem[]> {
       .ilike('type', '%interview%')
       .order('occurred_at', { ascending: false })
       .limit(LIMITS.interview),
-    openRolesOnly(
-      personJobs(supabase)
-        .select('id, title, match_score, posted_at, discovered_at, viewer_company_name')
-        .eq('is_new', true)
-        .gte('match_score', 70)
-    )
-      .order('match_score', { ascending: false })
-      .limit(LIMITS.jobs),
+    // New, open roles with a real chance for this person, most wanted first (their own person_roles rows).
+    hotRolesQuery(supabase as unknown as SupabaseClient, LIMITS.jobs),
   ])
 
   const failure = followUpsRes.error ?? interviewsRes.error ?? hotJobsRes.error
@@ -241,14 +235,7 @@ async function fetchFeed(): Promise<NotificationItem[]> {
     })
   }
 
-  for (const row of (hotJobsRes.data ?? []) as unknown as {
-    id: string
-    title: string
-    match_score: number | null
-    posted_at: string | null
-    discovered_at: string
-    viewer_company_name: string | null
-  }[]) {
+  for (const row of toHotRoles(hotJobsRes.data)) {
     items.push({
       id: `job:${row.id}`,
       kind: 'job',

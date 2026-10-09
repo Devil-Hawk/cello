@@ -1,0 +1,27 @@
+[SYNTHETIC RESUME - fictional person, written for an evaluation set. Not a real candidate.]
+
+Jordan Okafor
+New York, NY | jordan.okafor@example.com | portfolio: example.com/jordan-okafor
+
+SUMMARY
+Product designer with 5 years designing B2B SaaS workflow and data-heavy products. Comfortable from discovery research through shipped UI, works closely with engineers, and has built a design system from scratch.
+
+EXPERIENCE
+Product Designer - Ledgerly (B2B finance operations SaaS), New York, NY | 2022 - present
+- Own design for the approvals and invoicing workflow used by 2,000 finance teams; redesign cut time-to-approve by 35%.
+- Built the Ledgerly design system in Figma (180 components, tokens, documentation) adopted by 3 product squads.
+- Ran 40+ customer interviews and usability tests; synthesized into quarterly opportunity briefs.
+- Partner with PMs and 6 engineers in weekly ship cycles; prototype in Figma and sometimes React.
+
+Product Designer - Taskbridge (project management SaaS), Remote | 2020 - 2022
+- Designed reporting dashboards and the admin/permissions experience for enterprise accounts.
+- Led accessibility audit to WCAG 2.1 AA; fixed 60 issues.
+
+UX Designer - Pixelhaus Agency, Brooklyn, NY | 2019 - 2020
+- Designed web apps and marketing sites for 8 client projects.
+
+SKILLS
+Figma, FigJam, design systems, prototyping, user research, usability testing, information architecture, data visualization, enterprise UX, accessibility (WCAG), HTML/CSS, basic React, Amplitude, Dovetail
+
+EDUCATION
+B.F.A. Interaction Design, Parsons School of Design, 2019

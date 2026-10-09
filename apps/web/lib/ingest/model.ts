@@ -15,7 +15,7 @@ import { BudgetCapError } from '../harness/spend'
 import type { DecryptedApiKeys } from '../harness/types'
 
 /** Tried in order; the next one is used when the first errors or is rate limited. */
-export const INGEST_MODELS = ['google/gemma-4-31b-it:free', 'qwen/qwen3.8-27b:free'] as const
+export const INGEST_MODELS = ['google/gemma-4-31b-it:free', 'nvidia/nemotron-3-super-120b-a12b:free'] as const
 
 /** Model calls one scheduled check may make for one user, page reading and requirements together. Free accounts get about 50 requests a day. */
 export const DEFAULT_MODEL_CALLS = 40

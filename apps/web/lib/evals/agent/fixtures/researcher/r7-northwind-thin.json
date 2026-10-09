@@ -1,0 +1,18 @@
+{
+  "id": "r7-northwind-thin",
+  "subject": "Northwind Labs",
+  "kind": "company",
+  "thin": true,
+  "pages": [
+    {
+      "url": "https://directory.example/northwind-labs",
+      "title": "Northwind Labs, software, Seattle",
+      "text": "Northwind Labs. Software company. Seattle, WA. Listing claimed by owner. No description provided."
+    }
+  ],
+  "distractor": {
+    "url": "https://forum.example/north-wind-labs-other",
+    "title": "North Wind Labs (a different spelling)",
+    "text": "A small hardware lab in Norway that shares a similar name."
+  }
+}

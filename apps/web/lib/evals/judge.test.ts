@@ -29,7 +29,7 @@ vi.mock('../observability/log', () => ({
 }))
 
 import { MissingKeyError } from '../harness/llm'
-import { meteredJudgeClient, judgeGroundedness, judgeSpecificity, toEvalResult, JUDGE_MODEL } from './judge'
+import { meteredJudgeClient, toEvalResult, JUDGE_MODEL } from './judge'
 
 /** Captures every trace_spans row a flush() inserts; every other table is unexpected. */
 const insertedSpans: Record<string, unknown>[] = []
@@ -283,51 +283,6 @@ describe('meteredJudgeClient', () => {
   // Reverted immediately.
 })
 
-describe('judgeGroundedness + judgeSpecificity share one meteredJudgeClient', () => {
-  // Real autoevals (Factuality/ClosedQA), fake OpenRouter underneath — proves
-  // the ROUTE can rely on the client alone for both budget checkpoints
-  // (reserve + settle) across BOTH of its judge calls, without its own
-  // separate spend call. Discriminates which template rendered by the
-  // "[Criterion]:" marker ClosedQA's prompt carries and Factuality's doesn't.
-  function classifierResponse(text: string): Response {
-    const isClosedQA = text.includes('Criterion')
-    const args = isClosedQA ? { choice: 'Y', reasons: 'specific enough' } : { choice: 'C', reasons: 'fully grounded' }
-    return jsonResponse({
-      model: JUDGE_MODEL,
-      usage: { prompt_tokens: 50, completion_tokens: 10 },
-      choices: [
-        {
-          message: {
-            role: 'assistant',
-            tool_calls: [
-              { id: 'call_1', type: 'function', function: { name: 'select_choice', arguments: JSON.stringify(args) } },
-            ],
-          },
-          finish_reason: 'tool_calls',
-        },
-      ],
-    })
-  }
-
-  it('meters both calls (2 reservations, 2 settles) and both verdicts come back pass', async () => {
-    globalThis.fetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body))
-      return classifierResponse(JSON.stringify(body.messages))
-    }) as unknown as typeof fetch
-
-    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
-    const [groundedness, specificity] = await Promise.all([
-      judgeGroundedness(client, { draft: 'I led the migration.', sourceFacts: 'Led the migration.' }),
-      judgeSpecificity(client, { draft: 'About Acme.', companyAndRole: 'Acme, Engineer' }),
-    ])
-
-    expect(groundedness.verdict).toBe('pass')
-    expect(specificity.verdict).toBe('pass')
-    expect(reserveSpendMock).toHaveBeenCalledTimes(2)
-    expect(settleSpendMock).toHaveBeenCalledTimes(2)
-  })
-})
-
 describe('toEvalResult — score:null', () => {
   it('reports insufficient-data and logs via logHarnessError, attributing the given userId', () => {
     const result = toEvalResult('outreach groundedness', { score: null }, 0.5, 'user-42')
@@ -353,7 +308,7 @@ describe('toEvalResult — score:null', () => {
   })
 })
 
-describe('judge calls in Langfuse', () => {
+describe('judge requests in Langfuse', () => {
   const classifier = (text: string): Response => {
     const isClosedQA = text.includes('Criterion')
     const args = isClosedQA ? { choice: 'Y', reasons: 'specific enough' } : { choice: 'C', reasons: 'fully grounded' }
@@ -373,43 +328,6 @@ describe('judge calls in Langfuse', () => {
     vi.unstubAllEnvs()
   })
 
-  async function judgeBoth(isDemo: boolean) {
-    configure()
-    vi.stubEnv('LANGFUSE_DEMO_SAMPLE_RATE', '1')
-    globalThis.fetch = vi.fn(async (_i: unknown, init?: RequestInit) => classifier(String(init?.body))) as unknown as typeof fetch
-    const buffer = new SpanBuffer('user-1', null, undefined, { isDemo })
-    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
-    const [g, s] = await runInTraceContext({ buffer, parentSpanId: 'root', runId: null }, () =>
-      Promise.all([
-        judgeGroundedness(client, { draft: 'I led the migration.', sourceFacts: 'Led the migration.' }),
-        judgeSpecificity(client, { draft: 'About Acme.', companyAndRole: 'Acme, Engineer' }),
-      ])
-    )
-    const rows = (buffer as unknown as { pending: SpanRecord[] }).pending
-    return { g, s, rows }
-  }
-
-  it('each judge request is a generation named for its judge, with usage, our-table cost, and its span id on the verdict', async () => {
-    const { g, s, rows } = await judgeBoth(false)
-    expect(rows).toHaveLength(2)
-    const byName = (n: string) => rows.find((r) => r.lf?.name === n)!
-    const grounded = byName('judge-groundedness')
-    const specific = byName('judge-specificity')
-    expect(grounded.lf).toMatchObject({
-      type: 'generation',
-      model: JUDGE_MODEL,
-      usage: { input: 1000, output: 200, total: 1200 },
-      cost: { input: 0.001, output: 0.001 },
-    })
-    // concurrent judges on one client: each verdict carries its OWN request's span
-    expect(g.spanId).toBe(grounded.span_id)
-    expect(s.spanId).toBe(specific.span_id)
-    expect(g.spanId).not.toBe(s.spanId)
-    expect(grounded.parent_span_id).toBe('root')
-    // Postgres keeps the llm row shape COV shipped
-    expect(grounded).toMatchObject({ kind: 'llm', name: 'llm' })
-  })
-
   it('the generation carries the sampling parameters the request actually sent (max_tokens after the clamp)', async () => {
     configure()
     globalThis.fetch = vi.fn(async () => classifier('Criterion')) as unknown as typeof fetch
@@ -420,27 +338,5 @@ describe('judge calls in Langfuse', () => {
     )
     const [row] = (buffer as unknown as { pending: SpanRecord[] }).pending
     expect(row.lf?.modelParameters).toEqual({ temperature: 0, max_tokens: 2000 })
-  })
-
-  it('an owner trace carries the judge prompt and its answer; a demo trace carries neither', async () => {
-    const owner = await judgeBoth(false)
-    const lf = owner.rows.find((r) => r.lf?.name === 'judge-groundedness')!.lf!
-    expect(JSON.stringify(lf.input)).toContain('I led the migration')
-    expect(JSON.stringify(lf.output)).toContain('fully grounded')
-
-    const demo = await judgeBoth(true)
-    for (const r of demo.rows) {
-      expect(r.lf?.input).toBeUndefined()
-      expect(r.lf?.output).toBeUndefined()
-      expect(r.lf?.usage).toBeDefined()
-    }
-  })
-
-  it('a Langfuse-off judge call builds no payload but still returns its span id', async () => {
-    globalThis.fetch = vi.fn(async (_i: unknown, init?: RequestInit) => classifier(String(init?.body))) as unknown as typeof fetch
-    const client = meteredJudgeClient(FAKE_ADMIN, 'user-1', { openrouter: 'sk-or-test' })
-    const g = await judgeGroundedness(client, { draft: 'x', sourceFacts: 'y' })
-    expect(g.spanId).toBeTruthy()
-    expect(insertedSpans[0]).not.toHaveProperty('lf')
   })
 })

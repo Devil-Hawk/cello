@@ -63,7 +63,7 @@ export const COPILOT_TOOLS: ToolSpec[] = [
     name: 'explain_match',
     kind: 'read',
     signature: 'explain_match {"jobId":string}',
-    desc: 'Read a job\'s stored match analysis (score, skills matched, gaps, seniority fit). If the job has not been matched yet, says so.',
+    desc: 'Read what Cello concluded about a role: why the person might want it, their chance (Strong, Possible or Stretch) with the resume line behind each requirement that is met, the gaps, and any fact they stated that the role breaks. If the role has not been assessed yet, says so.',
     agent: 'matcher',
   },
   {
@@ -137,23 +137,23 @@ export const COPILOT_TOOLS: ToolSpec[] = [
     kind: 'act',
     signature: 'score_jobs {"query"?:string,"limit"?:number,"jobIds"?:string[]}',
     desc:
-      'Score a SMALL batch of the user\'s unscored jobs against their resume and persist match_score + ' +
-      'match_details (the same two-tier triage the rest of the product uses), inline in this conversation. ' +
-      'COSTS REAL MONEY PER JOB: limit defaults to 10 and is capped at 15; do not raise it without the user ' +
+      'Assess a SMALL batch of the user\'s unassessed roles: roles that break something they stated are filtered ' +
+      'with the reason, the rest are judged on what they want and on their chance against their resume (each ' +
+      'requirement checked on a cited resume line), saved on the role, inline in this conversation. ' +
+      'COSTS REAL MONEY PER ROLE, limit defaults to 10 and is capped at 15; do not raise it without the user ' +
       'asking, and do not call this repeatedly in one turn to route around the cap. Omit BOTH jobIds and query ' +
-      'ONLY when the ask is genuinely "score whatever is unscored", it then falls back to oldest-first. When ' +
-      'the user names criteria that narrow which jobs matter (a role, seniority, company trait), prefer passing ' +
+      'ONLY when the ask is genuinely "assess whatever is unassessed", it then falls back to newest-first. When ' +
+      'the user names criteria that narrow which roles matter (a role, seniority, company trait), prefer passing ' +
       'the specific jobIds you already identified from list_jobs/search_roles; if you have not (or the pool is ' +
-      'larger than what you listed), pass query (e.g. "AI Engineer") instead and it ranks the user\'s unscored ' +
-      'jobs by relevance to that ask itself (title/description word matching, not oldest-first) and scores the ' +
-      'top matches. Either way, do not let this default to oldest-first when the ask was about which roles fit, ' +
-      'not which are oldest. If nothing unscored matches the query it automatically broadens to the newest ' +
-      'unscored jobs and says so (relevance.broadened) rather than scoring nothing. The response\'s jobResults ' +
-      'gives a per-job status/reason (scored/excluded/no-verdict/not-found) for every id considered, a job ' +
-      'with no description is still scored from its title (lower confidence, never a bare "failed"), and an ' +
-      'excluded job says exactly why (quality/targeting) instead of silently vanishing from the count. Use this ' +
-      'instead of trigger_run for an ordinary "score/match my jobs" ask, and it is also how you answer "which ' +
-      'of my jobs suit my resume", score them, don\'t ask.',
+      'larger than what you listed), pass query (e.g. "AI Engineer") instead and it ranks the user\'s unassessed ' +
+      'roles by relevance to that ask itself (title/description word matching, not newest-first) and assesses ' +
+      'the top matches. If nothing unassessed matches the query it automatically broadens to the newest ' +
+      'unassessed roles and says so (relevance.broadened) rather than assessing nothing. The response\'s jobResults ' +
+      'gives a per-role status/reason (assessed/blocked/excluded/not-assessed/not-found) for every id considered. A ' +
+      'role with no description reads "cannot assess" until the posting lists requirements (never a bare ' +
+      '"failed"), and a blocked role says which stated fact it breaks. Chance is Strong, Possible or Stretch, never ' +
+      'a number: do not invent one. Use this instead of trigger_run for an ordinary "check my roles" ask, and it ' +
+      'is also how you answer "which of my roles suit my resume": assess them, don\'t ask.',
     agent: 'matcher',
   },
   {
@@ -334,7 +334,7 @@ export function mcpToolName(serverName: string, toolName: string): string {
 
 export const AGENT_CATALOG_UI: AgentCatalogEntry[] = [
   { id: 'sourcer', label: 'Sourcer', description: "Discover/refresh open jobs from the user's tracked companies (official ATS APIs)." },
-  { id: 'matcher', label: 'Matcher', description: 'Score jobs against the resume and explain the fit (skills matched, gaps, seniority).' },
+  { id: 'matcher', label: 'Matcher', description: 'Decide which roles to show: filter on what the person stated, rank by what they want, and check their chance against the resume.' },
   { id: 'enricher', label: 'Enricher', description: 'Add comp, seniority, and insider-connection signal from contacts/Gmail.' },
   { id: 'cv_tailor', label: 'CV Tailor', description: 'Tailor a resume summary + cover letter for a specific job (true content only).' },
   { id: 'applier', label: 'Applier', description: 'Build an application draft + handoff/submit via official ATS APIs (human-approve by default).' },

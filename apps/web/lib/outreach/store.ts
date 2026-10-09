@@ -5,8 +5,9 @@
 // client for writes) with the row shape declared in ./types.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { OutreachMessageRow, OutreachStatus, ReplyClassification } from './types'
+import type { OutreachMessageRow, OutreachStatus, ReplyClassification, TemplateReason } from './types'
 import { recordInteraction } from '../interactions/store'
+import { traceRefFor } from '../trace/spans'
 
 const TABLE = 'outreach_messages'
 
@@ -25,13 +26,21 @@ export interface NewOutreach {
   parent_id?: string | null
   /** False when the text is the deterministic template, not a model draft. */
   used_llm?: boolean
+  /** Why the text is the template. Set only when used_llm is false. */
+  template_reason?: TemplateReason | null
 }
 
 export async function insertOutreach(
   client: SupabaseClient,
   row: NewOutreach
 ): Promise<OutreachMessageRow> {
-  const { data, error } = await client.from(TABLE).insert(row).select('*').single()
+  // A model draft remembers the call that wrote it and what it first said, so
+  // an approval, an edit or a reply later can be scored on that call. A
+  // template, or a trace that was not exported, stamps nothing.
+  const fromModel = row.used_llm !== false
+  const ref = fromModel ? traceRefFor(row.kind === 'follow_up' ? 'draft-follow-up' : 'draft-outreach-message') : null
+  const stamped = ref ? { ...row, ...ref, generated_subject: row.subject, generated_body: row.body } : row
+  const { data, error } = await client.from(TABLE).insert(stamped).select('*').single()
   // The Postgres code rides along so a caller can tell the unique-index race
   // (23505) from a real fault without parsing the message.
   if (error) throw Object.assign(new Error(`insertOutreach failed: ${error.message}`), { code: error.code })

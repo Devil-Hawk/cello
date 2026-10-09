@@ -8,15 +8,18 @@
 //     for the given job, and persists the rewrite as a new tailored version.
 //     Same three-serial-LLM-call shape as /api/resume/optimize, hence the
 //     same maxDuration = 300.
-//   'save' { jobId: string | null, markdown | content, templateId?, title?, source }
-//     Append a new version (createVersion) — the user's manual edit / a
-//     freshly-uploaded base resume. jobId: null targets the base bucket.
-//     `markdown` is the AUTHORED document; the stored plain text is DERIVED
-//     from it here via markdownToPlainText, and the template id is stored
-//     alongside it in content_json. A caller that sends only `content` (the
-//     pre-formatting clients) is treated as sending plain-text Markdown, which
-//     round-trips byte-for-byte — see lib/resume/types.ts's ResumeContentJson
-//     doc comment for why these two strings may never be authored separately.
+//   'save' { jobId: string | null, resume | markdown | content, templateId?, title?, source }
+//     Append a new version (createResumeVersion): the user's edit, or the
+//     import review sheet's "Save as my resume". jobId: null targets the base
+//     bucket. The stored thing is a structured Resume (lib/resume/schema.ts);
+//     everything else (markdown, plain text, the profiles.resume_text mirror)
+//     is derived from it. Two bodies are accepted:
+//       `resume`   a Resume, validated as given. The import review sheet.
+//       `markdown` (or legacy `content`) the Markdown editor. It is converted
+//                  with markdownToResume, so no raw-Markdown version is ever
+//                  stored, and the response returns the CANONICAL markdown plus
+//                  `tidied` so the editor can show what the structure did.
+//     Stage 2 of the resume work deletes the `markdown` body with the editor.
 //   'delete' { id }
 //     Remove one version the user owns.
 //
@@ -40,14 +43,18 @@ import { optimizeResumeAndSave } from '@/lib/harness/agents/resume_optimizer'
 import { callLlm, MissingKeyError } from '@/lib/harness/llm'
 import { canRunLlm, missingOpenRouterMessage } from '@/lib/harness/llm-key-message'
 import {
-  createMarkdownVersion,
+  createResumeVersion,
   deleteVersion,
   getBaseResume,
   getVersionById,
   listVersions,
 } from '@/lib/resume/store'
-import { isResumeSource, type ResumeContentJson, type ResumeSource } from '@/lib/resume/types'
+import { isResumeSource, type ResumeSource } from '@/lib/resume/types'
 import { markdownToPlainText } from '@/lib/resume/markdown'
+import { textToResume } from '@/lib/resume/from-markdown'
+import { resolveResume } from '@/lib/resume/resolve'
+import { resumeToMarkdown } from '@/lib/resume/render'
+import { ResumeSchema, type NameContext, type Resume } from '@/lib/resume/schema'
 import { DEFAULT_TEMPLATE_ID, isTemplateId } from '@/lib/resume/templates'
 import { renderResumeVersionPdf } from '@/lib/resume/pdf'
 import { renderResumeVersionDocx } from '@/lib/resume/docx'
@@ -119,6 +126,14 @@ async function recordDemoFailure(
 }
 
 // --- shared helpers ----------------------------------------------------
+
+/** The profile fields the name fallback chain reads. */
+function nameContextOf(profile: { full_name?: unknown; email?: unknown } | null | undefined): NameContext {
+  return {
+    fullName: typeof profile?.full_name === 'string' ? profile.full_name : null,
+    email: typeof profile?.email === 'string' ? profile.email : null,
+  }
+}
 
 function bad(message: string, status = 400, extra?: Record<string, unknown>) {
   return NextResponse.json({ error: message, ...extra }, { status })
@@ -260,19 +275,21 @@ export async function GET(request: NextRequest) {
 interface GenerateBody {
   action: 'generate'
   jobId: string
+  /** Template for a first tailored resume that has no saved base to inherit from. */
+  templateId?: string
 }
 
 interface SaveBody {
   action: 'save'
   jobId: string | null
-  /** The AUTHORED resume. Preferred; `content` is the legacy spelling. */
+  /** A structured Resume. Preferred. */
+  resume?: unknown
+  /** The Markdown editor's text, converted with markdownToResume. */
   markdown?: string
   /** Legacy: plain text. Treated as Markdown (plain text is valid Markdown). */
   content?: string
   /** Template to render this version with. Unknown ids fall back to the default. */
   templateId?: string
-  /** Extra structured keys to preserve (e.g. `sections`). */
-  contentJson?: ResumeContentJson | null
   title?: string | null
   source: string
 }
@@ -348,10 +365,14 @@ async function handleGenerate(
 
   const { data: profile } = await admin
     .from('profiles')
-    .select('resume_text')
+    .select('resume_text, full_name, email')
     .eq('id', userId)
     .single()
-  const resumeText = ((profile?.resume_text as string | null) ?? '').trim()
+  const nameCtx = nameContextOf(profile)
+  const baseRow = await getBaseResume(admin, userId)
+  // profiles.resume_text mirrors the latest base version (a trigger), so the
+  // row is the fallback only for a database that has not applied it yet.
+  const resumeText = (((profile?.resume_text as string | null) ?? '') || baseRow?.content || '').trim()
   if (!resumeText) {
     await recordDemoFailure(supabase, 'resume.tailor', 'no_resume', headers)
     return bad('No resume on file. Upload your resume in Settings first.', 400, { needsResume: true })
@@ -378,6 +399,14 @@ async function handleGenerate(
     return bad(missingOpenRouterMessage(apiKeys), 400, { needsKey: true })
   }
 
+  // The structured base the tailored version is merged into. A pre-versioning
+  // user has only profiles.resume_text: derive the structure from it, and take
+  // the template from the request, since there is no saved one to inherit.
+  const base: Resume = baseRow
+    ? resolveResume(baseRow, nameCtx)
+    : resolveResume({ content: resumeText, content_json: null }, nameCtx)
+  if (!baseRow && isTemplateId(body.templateId)) base.meta.cello.templateId = body.templateId
+
   const { llm, passIndex } = trackedLlm(apiKeys)
   // ONLY THE FALLIBLE WORK IS IN THE TRY, and here is exactly what that buys —
   // stated precisely, because the earlier version of this comment credited the
@@ -400,6 +429,8 @@ async function handleGenerate(
   try {
     generated = await optimizeResumeAndSave({
       resumeText,
+      base,
+      nameCtx,
       job: { title: job.title as string, company: companyName ?? null, description: job.description as string | null },
       llm,
       client: admin,
@@ -456,43 +487,49 @@ async function handleSave(
   body: Partial<SaveBody>,
   headers: Headers
 ) {
-  // ONE authored string in, both stored strings derived from it. A caller that
-  // sends only `content` predates formatting and is sending plain text, which
-  // is valid Markdown and round-trips through markdownToPlainText unchanged —
-  // so treating it as the Markdown keeps those clients working AND keeps
-  // content_json.markdown in step with content, which is the invariant
-  // lib/resume/types.ts exists to protect.
-  const markdown =
-    (typeof body.markdown === 'string' ? body.markdown : typeof body.content === 'string' ? body.content : '').trim()
-  if (!markdown) return bad('markdown (or content) is required')
-
-  const content = markdownToPlainText(markdown)
-  if (!content.trim()) return bad('markdown contains no readable text')
-
   if (!isResumeSource(body.source)) {
     return bad("source must be one of 'base', 'tailored', 'edited'")
   }
 
   const jobId = typeof body.jobId === 'string' && body.jobId ? body.jobId : null
   const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim() : null
-  // An unknown id is not an error — getTemplate() degrades it at render time —
-  // but there is no reason to persist a typo, so it lands on the default here.
-  const templateId = isTemplateId(body.templateId) ? body.templateId : DEFAULT_TEMPLATE_ID
-  const base =
-    body.contentJson && typeof body.contentJson === 'object' ? (body.contentJson as ResumeContentJson) : null
+
+  // Which resume is being saved: a structured one as given, or the editor's
+  // Markdown converted. Either way what is stored is a validated Resume.
+  const markdownIn =
+    typeof body.markdown === 'string' ? body.markdown : typeof body.content === 'string' ? body.content : ''
+  let resume: Resume
+  let fromMarkdown = false
+  if (body.resume !== undefined) {
+    const parsed = ResumeSchema.safeParse(body.resume)
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0]
+      return bad(`The resume is not valid: ${issue?.path.join('.') || 'resume'} ${issue?.message ?? ''}`.trim())
+    }
+    resume = parsed.data
+    if (isTemplateId(body.templateId)) resume.meta.cello.templateId = body.templateId
+  } else {
+    if (!markdownIn.trim()) return bad('resume (or markdown) is required')
+    if (!markdownToPlainText(markdownIn).trim()) return bad('markdown contains no readable text')
+    const { data: profile } = await admin.from('profiles').select('full_name, email').eq('id', userId).maybeSingle()
+    resume = textToResume(markdownIn, nameContextOf(profile))
+    // An unknown id is not an error (getTemplate() degrades it), but there is
+    // no reason to persist a typo, so it lands on the default.
+    resume.meta.cello.templateId = isTemplateId(body.templateId) ? body.templateId : DEFAULT_TEMPLATE_ID
+    resume.meta.cello.structuredBy = 'heuristic'
+    fromMarkdown = true
+  }
 
   // Only the fallible work in the try — see handleGenerate for why.
   let document
   try {
-    // createMarkdownVersion derives `content` and content_json itself, so this
-    // route has no way to write a plain text that disagrees with the Markdown.
-    document = await createMarkdownVersion(admin, {
+    // createResumeVersion derives every stored column from the Resume, so this
+    // route has no way to write a plain text that disagrees with the structure.
+    document = await createResumeVersion(admin, {
       userId,
       jobId,
       title,
-      markdown,
-      templateId,
-      baseContentJson: base,
+      resume,
       source: body.source,
     })
   } catch (err) {
@@ -512,7 +549,14 @@ async function handleSave(
     headers,
   })
 
-  return NextResponse.json({ document })
+  const canonical = resumeToMarkdown(resume)
+  return NextResponse.json({
+    document,
+    // What the structure made of the text: the editor shows this instead of
+    // what was typed, so a reload never surprises the user.
+    markdown: canonical,
+    tidied: fromMarkdown && canonical.trim() !== markdownIn.trim(),
+  })
 }
 
 async function handleDelete(

@@ -35,7 +35,9 @@ import { generateOutreachDraft, fallbackOutreachDraft, type OutreachDraftInput }
 import { generateDossier, type CompanyResearcherResult } from './agents/company_researcher'
 import { cv_tailor } from './agents/cv_tailor'
 import { runBulkMatch, type BulkMatchResult } from './agents/bulk_matcher'
-import { userCompanyIds, diagnoseCandidateJobs, ownedJobsQuery, type CandidateDiagnosis } from './agents/matcher'
+import { FIT_COLUMNS, fitHighlights, parseFit } from '@/lib/scoring/read'
+import { diagnoseCandidateJobs, type CandidateDiagnosis } from './agents/matcher'
+import { ownedJobsQuery, userCompanyIds } from '../jobs/owned-query'
 import { canRunLlm, missingOpenRouterMessage } from './llm-key-message'
 import { resolveTargeting } from '@/lib/targeting'
 import { formatKbContext, searchKb } from '@/lib/kb/store'
@@ -117,15 +119,14 @@ const COPILOT_RUN_BUDGET = 90_000
  *  so a slow third-party server degrades one tool call, not the whole turn. */
 const MCP_CALL_TIMEOUT_MS = 20_000
 
-/** score_jobs batch size. Deliberately small: every job scored is a real LLM
- *  spend (bulk_matcher's tier-1 triage, plus tier-2 for anything promising) —
+/** score_jobs batch size. Deliberately small: every role assessed is real LLM
+ *  spend (judging what the person wants, then checking their chance),
  *  this is the "bound it hard" the copilot's inline scoring tool needs that
  *  trigger_run's own COPILOT_RUN_BUDGET doesn't give per-call granularity for. */
 const SCORE_JOBS_DEFAULT_LIMIT = 10
 const SCORE_JOBS_MAX_LIMIT = 15
-/** Wall-clock ceiling for one score_jobs call (tier-1 triage plus any tier-2
- *  deep-pass calls for winners), same defense as MCP_CALL_TIMEOUT_MS, just
- *  sized for LLM latency instead of HTTP fan-out. */
+/** Wall-clock ceiling for one score_jobs call, same defense as
+ *  MCP_CALL_TIMEOUT_MS, just sized for LLM latency instead of HTTP fan-out. */
 const SCORE_JOBS_TIMEOUT_MS = 70_000
 
 /** web_search result size — a general lookup, not a firehose. */
@@ -142,11 +143,11 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-function str(v: unknown): string {
+export function str(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
 }
 
-function clampLimit(v: unknown, def: number, max: number): number {
+export function clampLimit(v: unknown, def: number, max: number): number {
   const n = typeof v === 'number' ? v : parseInt(String(v ?? ''), 10)
   if (!Number.isFinite(n) || n <= 0) return def
   return Math.min(Math.floor(n), max)
@@ -156,7 +157,7 @@ function clampLimit(v: unknown, def: number, max: number): number {
  *  per-user model preference wins via callLlm; see harness contract C1).
  *  `signal` overrides ctx.signal when the caller wants a tighter, tool-scoped
  *  abort (see boundSignal) instead of just the whole-request one. */
-function makeRunner(ctx: CopilotToolContext, signal: AbortSignal | undefined, name: string): LlmRunner {
+export function makeRunner(ctx: CopilotToolContext, signal: AbortSignal | undefined, name: string): LlmRunner {
   // `name` is the Langfuse generation name: what the model call is for.
   return (opts) => callLlm(ctx.apiKeys, { ...opts, name: opts.name ?? name }, signal ?? ctx.signal)
 }
@@ -165,19 +166,25 @@ function makeRunner(ctx: CopilotToolContext, signal: AbortSignal | undefined, na
  *  with a hard per-call timeout, so a single tool call can't sit past `ms`
  *  even while the surrounding HTTP request is still within budget. Falls back
  *  to a bare timeout when there is no base signal (e.g. a synthetic context). */
-function boundSignal(base: AbortSignal | undefined, ms: number): AbortSignal {
+export function boundSignal(base: AbortSignal | undefined, ms: number): AbortSignal {
   const timeout = AbortSignal.timeout(ms)
   return base ? AbortSignal.any([base, timeout]) : timeout
 }
 
-interface OwnedJob {
+export interface OwnedJob {
   id: string
   title: string | null
   description?: string | null
   location?: string | null
   company_id: string | null
-  match_score?: number | null
-  match_details?: unknown
+  // The person's own verdict on the job (their person_roles row), merged in by loadOwnedJob when it is asked for.
+  chance?: string | null
+  chance_detail?: unknown
+  assessed_at?: string | null
+  want_p?: number | null
+  want_reason?: string | null
+  want_detail?: unknown
+  blocked_reasons?: unknown
 }
 
 /** Precise, actionable "no such id" messages — named after the ALSO OBSERVED
@@ -196,20 +203,22 @@ function companyNotFoundError(companyId: string): string {
   )
 }
 
-/** Load a job the person holds (person_jobs: their own role row, score and company), or say it is not theirs. */
-async function loadOwnedJob(
+/** Load a job the person holds (person_jobs: their own role row, with their company and, with `fit`, their verdict on it), or say it is not theirs. */
+export async function loadOwnedJob(
   ctx: CopilotToolContext,
   jobId: string,
-  columns: string
+  columns: string,
+  opts: { fit?: boolean } = {}
 ): Promise<{ job: OwnedJob; companyName: string } | { error: string }> {
-  const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, `${columns}, viewer_company_id, viewer_company_name`).eq('id', jobId).maybeSingle()
+  const cols = opts.fit ? columns + ', ' + FIT_COLUMNS : columns
+  const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, `${cols}, viewer_company_id, viewer_company_name`).eq('id', jobId).maybeSingle()
   if (!data) return { error: jobNotOwnedError(jobId) }
   const { viewer_company_id, viewer_company_name, ...rest } = data as unknown as OwnedJob & { viewer_company_id: string | null; viewer_company_name: string | null }
   // the company is the person's own, never the one that stored the shared role first
   return { job: { ...rest, company_id: viewer_company_id }, companyName: viewer_company_name ?? 'the company' }
 }
 
-async function loadOwnedCompany(
+export async function loadOwnedCompany(
   ctx: CopilotToolContext,
   companyId: string
 ): Promise<{ company: { id: string; name: string; domain: string | null } } | { error: string }> {
@@ -223,13 +232,13 @@ async function loadOwnedCompany(
   return { company: data as { id: string; name: string; domain: string | null } }
 }
 
-async function loadResume(ctx: CopilotToolContext): Promise<string> {
+export async function loadResume(ctx: CopilotToolContext): Promise<string> {
   const { data } = await ctx.admin.from('profiles').select('resume_text').eq('id', ctx.userId).single()
   return String((data?.resume_text as string | null) ?? '').trim()
 }
 
 /** Compact job row shared by list_jobs, search_roles and score_jobs, this
- *  exact shape (jobId/title/company/matchScore/fresh/location/postedAt) is
+ *  exact shape (jobId/title/company/chance/fresh/location/postedAt) is
  *  what components/copilot/observation-view.tsx's JobsTable renders, so
  *  every tool that hands the model a set of jobs renders the same way.
  *  companyId is included so the model can go straight from a job list to
@@ -238,12 +247,13 @@ async function loadResume(ctx: CopilotToolContext): Promise<string> {
  *  before this field existed there was no legal way for the model to obtain
  *  one for a company it only knew from a jobs list, which meant "research
  *  this company" silently dead-ended into a companyId it had to invent. */
-interface JobBriefRow {
+export interface JobBriefRow {
   jobId: string
   title: string | null
   company: string | null
   companyId: string | null
-  matchScore: number | null
+  /** strong | possible | stretch | cannot_assess, or null before the role is assessed. Never a number. */
+  chance: string | null
   fresh: boolean
   location: string | null
   postedAt: string | null
@@ -255,20 +265,20 @@ interface JobBriefRow {
  *  here — every caller already sourced these ids from an owned/company-scoped
  *  query (ingestLeads only ever creates rows under this user's companies;
  *  bulk_matcher's candidate selection filters by this user's companyIds). */
-async function loadJobBriefs(ctx: CopilotToolContext, jobIds: string[]): Promise<JobBriefRow[]> {
+export async function loadJobBriefs(ctx: CopilotToolContext, jobIds: string[]): Promise<JobBriefRow[]> {
   if (jobIds.length === 0) return []
-  // the person's own role rows: their score, new flag and company, never the shared row's or the first storer's
+  // the person's own role rows: their verdict, new flag and company, never the shared row's or the first storer's
   const { data: jobs } = await ownedJobsQuery(
     ctx.admin,
     ctx.userId,
-    'id, title, viewer_company_id, viewer_company_name, match_score, is_new, location, posted_at'
+    'id, title, viewer_company_id, viewer_company_name, chance, is_new, location, posted_at'
   ).in('id', jobIds)
   type Row = {
     id: string
     title: string | null
     viewer_company_id: string | null
     viewer_company_name: string | null
-    match_score: number | null
+    chance: string | null
     is_new: boolean | null
     location: string | null
     posted_at: string | null
@@ -282,7 +292,7 @@ async function loadJobBriefs(ctx: CopilotToolContext, jobIds: string[]): Promise
       title: r.title,
       company: r.viewer_company_name,
       companyId: r.viewer_company_id,
-      matchScore: r.match_score,
+      chance: r.chance,
       fresh: r.is_new === true,
       location: r.location,
       postedAt: r.posted_at,
@@ -290,14 +300,13 @@ async function loadJobBriefs(ctx: CopilotToolContext, jobIds: string[]): Promise
 }
 
 /** Cheapest possible candidate pick for score_jobs when the model didn't pass
- *  explicit jobIds and gave no query: newest-first unscored jobs across the
- *  user's companies. Quality/targeting filtering still happens exactly once,
- *  inside runBulkMatch's own selectCandidateJobs (shared with every other
- *  caller) — this is just picking a bounded id list to hand it, not
- *  re-deciding what counts as scoreable. */
+ *  explicit jobIds and gave no query: newest-first unassessed jobs across the
+ *  user's companies. What the person ruled out is decided once, inside the
+ *  assessment itself, so this only picks a bounded id list to hand it. */
 async function pickUnscoredJobIds(ctx: CopilotToolContext, limit: number): Promise<string[]> {
   const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, 'id')
-    .is('match_score', null)
+    .is('hidden_reason', null)
+    .is('assessed_at', null)
     .order('posted_at', { ascending: false, nullsFirst: false })
     .limit(limit)
   return ((data as { id: string }[] | null) ?? []).map((r) => r.id)
@@ -309,6 +318,8 @@ async function pickUnscoredJobIds(ctx: CopilotToolContext, limit: number): Promi
  *  into memory for one tool call. */
 const RELEVANCE_POOL_MULTIPLIER = 15
 const RELEVANCE_POOL_MAX = 300
+
+type PoolJob = { id: string; title: string | null; description: string | null }
 
 export interface ScoringCandidatePick {
   jobIds: string[]
@@ -348,10 +359,11 @@ async function pickScoringCandidateIds(
 
   const poolSize = Math.min(RELEVANCE_POOL_MAX, Math.max(limit * RELEVANCE_POOL_MULTIPLIER, 100))
   const { data } = await ownedJobsQuery(ctx.admin, ctx.userId, 'id, title, description')
-    .is('match_score', null)
+    .is('hidden_reason', null)
+    .is('assessed_at', null)
     .order('posted_at', { ascending: false, nullsFirst: false })
     .limit(poolSize)
-  const rows = (data as unknown as { id: string; title: string | null; description: string | null }[] | null) ?? []
+  const rows = (data as unknown as PoolJob[] | null) ?? []
 
   const ranked = rankJobsByRelevance(rows, parsed)
   const matched = ranked.filter((r) => r.relevance.score > 0)
@@ -545,16 +557,19 @@ async function dispatchToolInner(ctx: CopilotToolContext, tool: string, args: Ar
  *  20260816000009_job_search.sql's header for why title search needs both. */
 const JOB_TITLE_FTS_MIN_LENGTH = 4
 
-type JobListRow = {
+type ListedJob = {
   id: string
   title: string | null
   viewer_company_id: string | null
   viewer_company_name: string | null
-  match_score: number | null
+  chance: string | null
+  want_p: number | null
   is_new: boolean | null
   location: string | null
   posted_at: string | null
 }
+
+type JobListRow = ListedJob & { chance: string | null; want_p: number | null }
 
 /** trgm-similarity job ids for `query`, ranked best-first, scoped to this
  *  user via the RPC's own p_user_id predicate (the admin client bypasses RLS,
@@ -564,7 +579,7 @@ async function searchJobIdsByTitleTrgm(ctx: CopilotToolContext, query: string, l
   return ((data as { job_id: string }[] | null) ?? []).map((r) => r.job_id)
 }
 
-async function listJobs(ctx: CopilotToolContext, args: Args) {
+export async function listJobs(ctx: CopilotToolContext, args: Args) {
   const query = str(args.query).trim()
   const dreamOnly = args.dreamOnly === true
   const fresh = args.fresh === true
@@ -578,11 +593,11 @@ async function listJobs(ctx: CopilotToolContext, args: Args) {
   const ids = (dreamOnly ? companyRows.filter((c) => c.is_dream_company) : companyRows).map((c) => c.id)
   if (ids.length === 0) return { jobs: [], note: dreamOnly ? 'No dream companies tracked yet.' : 'No companies tracked yet.' }
 
-  const SELECT = 'id, title, viewer_company_id, viewer_company_name, match_score, is_new, location, posted_at'
+  const SELECT = 'id, title, viewer_company_id, viewer_company_name, chance, want_p, is_new, location, posted_at'
   // Ownership is the viewer_id fence. Only dreamOnly narrows by company ids, which are few; the plain list
-  // needs none (hundreds of ids would pass the request URL length limit).
+  // needs none (hundreds of ids would pass the request URL length limit). A role they hid stays out.
   const baseQuery = () => {
-    let q = openRolesOnly(ownedJobsQuery(ctx.admin, ctx.userId, SELECT))
+    let q = openRolesOnly(ownedJobsQuery(ctx.admin, ctx.userId, SELECT)).is('hidden_reason', null)
     // ponytail: the first 200 dream companies; a person with more would need chunkedIn.
     if (dreamOnly) q = q.in('viewer_company_id', ids.slice(0, 200))
     if (fresh) q = q.eq('is_new', true)
@@ -591,7 +606,7 @@ async function listJobs(ctx: CopilotToolContext, args: Args) {
 
   let rows: JobListRow[] = []
   if (query && query.length < JOB_TITLE_FTS_MIN_LENGTH) {
-    // Short query — trgm only, ranked by similarity (no match_score/posted_at
+    // Short query: trgm only, ranked by similarity (no want/posted_at
     // reorder: relevance to the typed text IS the ranking the user asked for).
     const trgmIds = await searchJobIdsByTitleTrgm(ctx, query, limit)
     if (trgmIds.length > 0) {
@@ -602,14 +617,13 @@ async function listJobs(ctx: CopilotToolContext, args: Args) {
   } else {
     let q = baseQuery()
     if (query) q = q.textSearch('tsv', query, { type: 'websearch', config: 'english' })
-    q = q
-      .order('match_score', { ascending: false, nullsFirst: false })
+    const { data } = await q
+      .order('want_p', { ascending: false, nullsFirst: false })
       .order('posted_at', { ascending: false, nullsFirst: false })
       .limit(limit)
-    const { data } = await q
     rows = (data as unknown as JobListRow[]) ?? []
 
-    // websearch_to_tsquery found nothing — most likely a typo or a term the
+    // websearch_to_tsquery found nothing: most likely a typo or a term the
     // stemmer/stopword list didn't help with. Fall back to trgm rather than
     // reporting an empty result for a query that IS in the data, just
     // misspelled.
@@ -630,13 +644,13 @@ async function listJobs(ctx: CopilotToolContext, args: Args) {
       title: j.title,
       company: j.viewer_company_name ?? null,
       companyId: j.viewer_company_id ?? null,
-      matchScore: j.match_score,
+      chance: j.chance,
       fresh: j.is_new === true,
       location: j.location,
       postedAt: j.posted_at,
     })),
-    note: rows.some((j) => j.match_score == null)
-      ? 'Some jobs show matchScore null — they have not been scored against the resume yet. Use trigger_run to match them.'
+    note: rows.some((j) => j.chance == null)
+      ? 'Some jobs show chance null: they have not been assessed yet. Use score_jobs or trigger_run to assess them.'
       : undefined,
   }
 }
@@ -654,16 +668,16 @@ async function listRuns(ctx: CopilotToolContext) {
 async function explainMatch(ctx: CopilotToolContext, args: Args) {
   const jobId = str(args.jobId)
   if (!jobId) return { error: 'jobId is required' }
-  const res = await loadOwnedJob(ctx, jobId, 'id, title, company_id, match_score, match_details')
+  const res = await loadOwnedJob(ctx, jobId, 'id, title, company_id', { fit: true })
   if ('error' in res) return res
   const { job, companyName } = res
-  if (job.match_score == null && job.match_details == null) {
+  if (job.chance == null && job.want_p == null && !job.assessed_at) {
     return {
       title: job.title,
       company: companyName,
       companyId: job.company_id,
       matched: false,
-      note: 'This job has not been matched against the resume yet. Use trigger_run with a matching goal to score it.',
+      note: 'This role has not been assessed yet. Use score_jobs, or trigger_run with a matching goal, to assess it.',
     }
   }
   return {
@@ -671,12 +685,12 @@ async function explainMatch(ctx: CopilotToolContext, args: Args) {
     company: companyName,
     companyId: job.company_id,
     matched: true,
-    score: job.match_score,
-    details: job.match_details,
+    // Why the person might want it, their chance with the resume line behind each met requirement, and any stated fact it breaks.
+    fit: parseFit({ ...job, id: jobId }),
   }
 }
 
-async function getApplication(ctx: CopilotToolContext, args: Args) {
+export async function getApplication(ctx: CopilotToolContext, args: Args) {
   const jobId = str(args.jobId)
   if (jobId) {
     const owned = await loadOwnedJob(ctx, jobId, 'id, title, company_id')
@@ -727,7 +741,7 @@ async function getApplication(ctx: CopilotToolContext, args: Args) {
 
 const CONTACT_LIST_COLUMNS = 'id, name, email, title, relationship, company_id, last_contact_at'
 
-async function listContacts(ctx: CopilotToolContext, args: Args) {
+export async function listContacts(ctx: CopilotToolContext, args: Args) {
   const query = str(args.query).trim()
   if (!query) {
     const { data } = await ctx.admin
@@ -752,7 +766,7 @@ async function listContacts(ctx: CopilotToolContext, args: Args) {
   return { count: rows.length, contacts: rows, note: rows.length === 0 ? 'No contacts saved yet.' : undefined }
 }
 
-async function getDossier(ctx: CopilotToolContext, args: Args) {
+export async function getDossier(ctx: CopilotToolContext, args: Args) {
   const companyId = str(args.companyId)
   if (!companyId) return { error: 'companyId is required' }
   const owned = await loadOwnedCompany(ctx, companyId)
@@ -847,7 +861,7 @@ async function doRememberPreference(ctx: CopilotToolContext, args: Args) {
   }
 }
 
-async function doSearchKb(ctx: CopilotToolContext, args: Args) {
+export async function doSearchKb(ctx: CopilotToolContext, args: Args) {
   const query = str(args.query)
   if (!query) return { error: 'query is required' }
   const limit = clampLimit(args.limit, 8, 20)
@@ -885,7 +899,7 @@ async function doSearchKb(ctx: CopilotToolContext, args: Args) {
  * third-party search results, never take an action — see the catalog entry's
  * "cannot browse further, take any action, or change anything".
  */
-async function doWebSearch(ctx: CopilotToolContext, args: Args) {
+export async function doWebSearch(ctx: CopilotToolContext, args: Args) {
   const query = str(args.query)
   if (!query) return { error: 'query is required' }
   const limit = clampLimit(args.limit, WEB_SEARCH_DEFAULT_LIMIT, WEB_SEARCH_MAX_LIMIT)
@@ -974,11 +988,11 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
     is_remote: boolean | null
     posted_at: string | null
     viewer_company_id: string
-    match_score: number | null
+    chance: string | null
     is_new: boolean | null
   }
   const find = async (scoped: boolean): Promise<RoleRow[]> => {
-    let q = base(scoped, 'id, title, url, location, is_remote, posted_at, viewer_company_id, match_score, is_new')
+    let q = base(scoped, 'id, title, url, location, is_remote, posted_at, viewer_company_id, chance, is_new')
     if (titleM) q = q.or(titleM.keywords.map((k) => `title.ilike.${quote(`%${k}%`)}`).join(','))
     if (placeM) {
       q = q.or(
@@ -1014,7 +1028,7 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
     title: r.title,
     company: nameById.get(r.viewer_company_id) ?? null,
     companyId: r.viewer_company_id,
-    matchScore: r.match_score,
+    chance: r.chance,
     fresh: r.is_new === true,
     location: r.location,
     postedAt: r.posted_at,
@@ -1092,23 +1106,22 @@ async function doRefreshCompanies(ctx: CopilotToolContext) {
 interface ScoreJobsReportRow {
   jobId: string
   title: string | null
-  status: 'scored' | 'excluded' | 'no-verdict' | 'not-found'
-  tier: 1 | 2 | null
-  score: number | null
+  status: 'assessed' | 'blocked' | 'excluded' | 'not-assessed' | 'not-found'
+  chance: string | null
   reason: string
   /** True when the job has no description on file. NOT itself a failure —
-   *  see `reason`, which says so explicitly when status is 'scored'. */
+   *  the chance reads "cannot assess" until the posting has requirements. */
   titleOnly: boolean
 }
 
 /**
- * score_jobs: score a bounded batch of unscored jobs inline instead of
+ * score_jobs: assess a bounded batch of unassessed roles inline instead of
  * handing the user off to trigger_run. Calls the SAME bulk matcher
- * (lib/harness/agents/bulk_matcher.ts's runBulkMatch, the two-tier
- * triage-then-deep-pass matcher every other scoring path in the product
- * uses) — nothing about matching itself is reimplemented here. HARD BOUNDED:
+ * (lib/harness/agents/bulk_matcher.ts's runBulkMatch, which goes through
+ * lib/scoring like every other path in the product), nothing about matching
+ * itself is reimplemented here. HARD BOUNDED:
  * SCORE_JOBS_DEFAULT_LIMIT/MAX_LIMIT keep one call's spend small, because
- * every job scored is real LLM cost.
+ * every role assessed is real LLM cost.
  *
  * Candidate selection, when the model didn't pass explicit jobIds: a `query`
  * ranks the user's unscored jobs by relevance (lib/jobs/relevance.ts — whole-
@@ -1147,20 +1160,16 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
       scored: 0,
       failed: 0,
       candidatesConsidered: 0,
-      note: 'No unscored jobs found for your tracked companies. refresh_companies reads the boards of followed companies.',
+      note: 'No unassessed jobs found for your tracked companies. refresh_companies reads the boards of followed companies.',
     }
   }
 
-  const { data: profile } = await ctx.admin.from('profiles').select('preferences').eq('id', ctx.userId).single()
-  const targeting = resolveTargeting((profile?.preferences as Record<string, unknown> | null) ?? null)
   const signal = boundSignal(ctx.signal, SCORE_JOBS_TIMEOUT_MS)
 
-  // Diagnose the exact requested batch against ownership + quality/targeting
-  // BEFORE scoring, so every job id gets a concrete answer even if
-  // selectCandidateJobs (inside runBulkMatch) silently drops it from the
-  // candidate list — this is what replaces a bare "2 failed" with a real
-  // per-job reason (see ScoreJobsReportRow).
-  const diagnosis = await diagnoseCandidateJobs(ctx.admin, jobIds, ctx.userId, targeting)
+  // Diagnose the exact requested batch against ownership BEFORE assessing, so
+  // every job id gets a concrete answer even if it never reaches the model:
+  // this is what replaces a bare "2 failed" with a real per-job reason.
+  const diagnosis = await diagnoseCandidateJobs(ctx.admin, jobIds, ctx.userId)
   const diagnosisById = new Map<string, CandidateDiagnosis>(diagnosis.map((d) => [d.jobId, d]))
 
   let result: BulkMatchResult
@@ -1168,15 +1177,13 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
     result = await runBulkMatch({
       admin: ctx.admin,
       userId: ctx.userId,
-      companyIds,
-      resume: resumeText,
-      targeting,
       llm: makeRunner(ctx, signal, 'score-job-batch'),
       limit,
       jobIds,
+      apiKeys: ctx.apiKeys,
     })
   } catch (e) {
-    return { error: `Scoring failed: ${errMsg(e)}` }
+    return { error: `Assessing failed: ${errMsg(e)}` }
   }
 
   // Defense in depth: canRunLlm already gated entry above, but a backend that
@@ -1194,8 +1201,7 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
         jobId,
         title: d?.title ?? null,
         status: !d || !d.found ? 'not-found' : 'excluded',
-        tier: null,
-        score: null,
+        chance: null,
         reason: d?.reason ?? 'not found among your tracked companies\' jobs',
         titleOnly: d ? !d.hasDescription : false,
       }
@@ -1207,9 +1213,8 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
       return {
         jobId,
         title: d.title,
-        status: 'no-verdict',
-        tier: null,
-        score: null,
+        status: 'not-assessed',
+        chance: null,
         reason: 'not attempted this call — likely dropped by a concurrent limit; retry score_jobs for this id',
         titleOnly: !d.hasDescription,
       }
@@ -1218,8 +1223,7 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
       jobId,
       title: d.title,
       status: outcome.status,
-      tier: outcome.tier,
-      score: outcome.score,
+      chance: outcome.chance,
       reason: outcome.reason,
       titleOnly: outcome.titleOnly,
     }
@@ -1236,11 +1240,11 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
     relevance: relevanceInfo,
     note:
       relevanceInfo?.broadened
-        ? `Nothing unscored matched "${relevanceInfo.query}" in the ${relevanceInfo.poolSize} most recent unscored ` +
-          'jobs, so this broadened to the newest unscored jobs instead of scoring nothing, consider refresh_companies ' +
+        ? `Nothing unassessed matched "${relevanceInfo.query}" in the ${relevanceInfo.poolSize} most recent unassessed ` +
+          'jobs, so this broadened to the newest unassessed jobs instead of assessing nothing, consider refresh_companies ' +
           'if you want fresher candidates for this ask.'
         : result.scored === 0 && result.candidatesConsidered === 0
-          ? 'Nothing scoreable in this batch. Run refresh_companies, or widen targeting in Settings.'
+          ? 'Nothing to assess in this batch. Run refresh_companies, or widen targeting in Settings.'
           : undefined,
   }
 }
@@ -1321,12 +1325,12 @@ async function doDraftOutreach(ctx: CopilotToolContext, args: Args) {
   let matchHighlights: string[] = []
 
   if (jobId) {
-    const res = await loadOwnedJob(ctx, jobId, 'id, title, description, company_id, match_details')
+    const res = await loadOwnedJob(ctx, jobId, 'id, title, description, company_id', { fit: true })
     if ('error' in res) return res
     jobTitle = res.job.title ?? jobTitle
     jobDescription = res.job.description ?? null
     companyName = res.companyName
-    matchHighlights = highlightsFrom(res.job.match_details)
+    matchHighlights = fitHighlights(res.job.chance_detail)
   }
 
   let contactName: string | null = null
@@ -1373,7 +1377,7 @@ async function doDraftOutreach(ctx: CopilotToolContext, args: Args) {
  *  propagates as a thrown exception. This is what lets research_companies
  *  (the batch tool below) give every requested id its own row instead of one
  *  bad company failing the whole call. */
-type ResearchCompanyOutcome =
+export type ResearchCompanyOutcome =
   | ({ status: 'researched'; company: string; reason: string } & CompanyResearcherResult)
   | { status: 'error'; companyId: string; company: string | null; reason: string }
 
@@ -1386,7 +1390,7 @@ type ResearchCompanyOutcome =
  * research_companies report one bad company without losing the rest of the
  * batch (see doResearchCompanies).
  */
-async function researchOneCompany(
+export async function researchOneCompany(
   ctx: CopilotToolContext,
   companyId: string,
   signal?: AbortSignal
@@ -1664,20 +1668,3 @@ export async function mcpToolsPromptBlock(admin: AdminClient, userId: string): P
 }
 
 // --- helpers -----------------------------------------------------------------
-
-interface MatchDetails {
-  highlights?: unknown
-  skillsMatch?: { matched?: unknown }
-}
-
-function highlightsFrom(matchDetails: unknown): string[] {
-  const md = (matchDetails ?? {}) as MatchDetails
-  const out: string[] = []
-  if (Array.isArray(md.highlights)) {
-    for (const h of md.highlights) if (typeof h === 'string') out.push(h)
-  }
-  if (out.length === 0 && md.skillsMatch && Array.isArray(md.skillsMatch.matched)) {
-    for (const s of md.skillsMatch.matched) if (typeof s === 'string') out.push(s)
-  }
-  return out.slice(0, 6)
-}

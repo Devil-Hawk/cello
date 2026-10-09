@@ -42,10 +42,11 @@
 //   has no such cap and is written regardless. The sampling knobs, the
 //   per-trace caps and the demo defaults below keep Langfuse inside the cap.
 
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import type { LangfuseClient } from '@langfuse/client'
 import type { LangfuseSpanProcessor } from '@langfuse/otel'
-import type { Span } from '@opentelemetry/api'
+import { context, ROOT_CONTEXT, trace, type Span } from '@opentelemetry/api'
+import type { BaseCallbackHandler } from '@langchain/core/callbacks/base'
 import type { ReadableSpan, SpanExporter } from '@opentelemetry/sdk-trace-base'
 import { capPayload } from '../graph/journal'
 import type { LfPayload, LfType, PendingScore, SpanBuffer, SpanRecord } from '../trace/spans'
@@ -407,6 +408,33 @@ export function selectRows(rows: SpanRecord[], cap: number = MAX_OBSERVATIONS_PE
   return { rows: kept, dropped: rows.length - kept.length }
 }
 
+// --- observation ids -----------------------------------------------------------------
+
+/**
+ * The Langfuse observation id for a trace_spans span: the first 16 hex digits
+ * of the span's UUID. The replay hands this id to the tracer (see
+ * `pendingObservationId`), so any row written in the same request can name the
+ * generation that produced it, and a score sent days later still lands on it.
+ */
+export function observationIdFor(spanId: string): string {
+  const hex = spanId.replace(/-/g, '').toLowerCase()
+  if (/^[0-9a-f]{16,}$/.test(hex) && /[1-9a-f]/.test(hex.slice(0, 16))) return hex.slice(0, 16)
+  return createHash('sha256').update(spanId).digest('hex').slice(0, 16)
+}
+
+/** Set just before each startObservation (a synchronous call) and consumed by
+ *  the provider's id generator. Unset means a random id, as before. */
+let pendingObservationId: string | undefined
+
+const idGenerator = {
+  generateTraceId: () => randomBytes(16).toString('hex'),
+  generateSpanId: () => {
+    const id = pendingObservationId
+    pendingObservationId = undefined
+    return id ?? randomBytes(8).toString('hex')
+  },
+}
+
 // --- init (lazy, Node only, one per instance) ----------------------------------------
 
 /** What a score needs of the client (a test replaces it with a recorder). */
@@ -461,6 +489,7 @@ async function init(): Promise<Lf> {
   })
   const provider = new BasicTracerProvider({
     sampler: new AlwaysOnSampler(),
+    idGenerator,
     spanProcessors: [processor],
     // A meaningful service name instead of unknown_service:/usr/local/bin/node.
     resource: resourceFromAttributes({ 'service.name': 'cello-web' }),
@@ -509,11 +538,13 @@ async function send(buffer: SpanBuffer, all: SpanRecord[], allScores: PendingSco
       : { traceId: traceHex, spanId: traceHex.slice(16), traceFlags: 1 }
     // Top-level startObservation, NOT parent.startObservation(): the child
     // method drops startTime (5.11.1).
+    pendingObservationId = observationIdFor(r.span_id)
     const obs = lf.startObservation(safeName(r.lf?.name ?? r.name), toAttributes(r, budget, capture), {
       asType: typeOf(r),
       startTime: new Date(r.start_time),
       parentSpanContext,
     })
+    pendingObservationId = undefined
     obs.otelSpan.setAttributes(traceAttrs)
     byId.set(r.span_id, obs)
     return obs
@@ -550,6 +581,60 @@ export function toScore(s: PendingScore, traceHex: string, observationId: string
     comment,
     environment: tracingEnvironment(),
     metadata: safeMetadata(s.metadata),
+  }
+}
+
+// --- outcome scores ------------------------------------------------------------------
+
+/** What a person did with something Cello produced (lib/quality/feedback.ts),
+ *  sent as a score on the trace and generation that produced it. */
+export interface OutcomeScore {
+  /** Deterministic, so a resend updates the same score. */
+  id: string
+  /** 32 hex. */
+  traceId: string
+  /** 16 hex, when known. */
+  observationId?: string
+  /** Named after the behaviour: draft_approved, draft_edited, ... */
+  name: string
+  value: number
+  dataType: 'BOOLEAN' | 'NUMERIC'
+  comment?: string
+}
+
+/**
+ * Send outcome scores. True when Langfuse accepted the batch for sending,
+ * false when it is not configured or the send failed (the caller keeps its rows
+ * pending and tries again later). Waits for the flush, up to FLUSH_DEADLINE_MS
+ * longer than a replay would, because a cron has nothing else to do.
+ */
+export async function sendScores(scores: OutcomeScore[]): Promise<boolean> {
+  if (scores.length === 0) return true
+  if (!langfuseConfigured()) return false
+  try {
+    const lf = await getLangfuse()
+    if (!lf) return false
+    const env = tracingEnvironment()
+    for (const sc of scores) {
+      lf.client.score.create({
+        id: sc.id,
+        traceId: sc.traceId,
+        ...(sc.observationId ? { observationId: sc.observationId } : {}),
+        name: clean(sc.name, 100),
+        value: sc.value,
+        dataType: sc.dataType,
+        ...(sc.comment ? { comment: clean(sc.comment, 200) } : {}),
+        environment: env,
+      })
+    }
+    await Promise.race([
+      lf.client.flush(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('score flush timed out')), 10_000).unref()),
+    ])
+    return true
+  } catch (err) {
+    console.warn(`[langfuse] score send failed: ${redactString(String(err).slice(0, 300))}`)
+    return false
   }
 }
 
@@ -618,5 +703,112 @@ export function exportTrace(buffer: SpanBuffer, rows: SpanRecord[]): Promise<voi
   } catch (err) {
     console.warn(`[langfuse] export skipped: ${redactString(String(err).slice(0, 300))}`)
     return Promise.resolve()
+  }
+}
+
+// --- agents -----------------------------------------------------------------------------
+//
+// The agent loops (lib/agents) run on LangChain, which reports through callbacks. Langfuse's
+// CallbackHandler turns those into observations: one per agent, subagent, model call and tool.
+// They go through the same isolated provider as everything above, and they are made children of
+// the request's trace (the id the SpanBuffer uses), so a request or a scheduled occurrence is ONE
+// trace with the session set to the conversation. Model calls that are not agent loops (callLlm)
+// still arrive through the replay above, under the same trace.
+
+export interface AgentCallbackInput {
+  /** The request's trace id (SpanBuffer.traceId). */
+  traceId: string
+  sessionId?: string | null
+  userId: string
+  isDemo: boolean
+  /** A short name for the trace, e.g. 'agent-turn' or 'scheduled-task'. */
+  name: string
+}
+
+/** The OTel parent every agent observation hangs under: the same synthetic root the replay uses. */
+function traceParent(traceId: string) {
+  const hex = traceId.replace(/-/g, '')
+  return { traceId: hex, spanId: hex.slice(16), traceFlags: 1, isRemote: true }
+}
+
+let contextManagerReady: Promise<void> | undefined
+
+/**
+ * Observations are parented through OpenTelemetry's active context, which needs a context manager.
+ * Sentry installs one when it is configured; otherwise this registers the standard one. Registering
+ * is a no-op when one exists.
+ */
+async function ensureContextManager(): Promise<void> {
+  contextManagerReady ??= import('@opentelemetry/context-async-hooks').then(({ AsyncLocalStorageContextManager }) => {
+    context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable())
+  })
+  await contextManagerReady
+}
+
+/**
+ * The callbacks to hand an agent invocation. Empty when Langfuse is off, the trace is sampled out,
+ * or the person's content may not be captured (only an allowlisted owner's may): the handler sends
+ * prompts and results, so it must not exist when content capture is off.
+ */
+export async function agentCallbacks(input: AgentCallbackInput): Promise<BaseCallbackHandler[]> {
+  try {
+    if (!langfuseConfigured() || !traceSampled(input.traceId, input.isDemo) || !contentCaptureFor(input.userId, input.isDemo)) return []
+    const lf = await getLangfuse()
+    if (!lf) return []
+    await ensureContextManager()
+    const { CallbackHandler } = await import('@langfuse/langchain')
+    return [
+      new CallbackHandler({
+        userId: input.userId,
+        ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        tags: ['agent', input.isDemo ? 'demo' : 'owner'],
+        traceMetadata: { feature: 'agent', name: safeName(input.name) },
+      }),
+    ]
+  } catch (err) {
+    console.warn(`[langfuse] agent callbacks skipped: ${redactString(String(err).slice(0, 300))}`)
+    return []
+  }
+}
+
+/** Run `fn` with the request's trace as the parent of every agent observation made inside it. */
+export function withAgentSpanContext<T>(traceId: string, fn: () => Promise<T>): Promise<T> {
+  const ctx = trace.setSpanContext(ROOT_CONTEXT, traceParent(traceId))
+  return context.with(ctx, fn)
+}
+
+/** Send what the agent observations recorded. Resolves at once under a Vercel request context. */
+export function flushAgentSpans(): Promise<void> {
+  if (!langfuseConfigured()) return Promise.resolve()
+  return deliver(async () => {
+    const lf = await getLangfuse()
+    if (lf) await lf.processor.forceFlush()
+  })
+}
+
+/**
+ * A person's reaction as a score on the trace that produced the thing they reacted to:
+ * draft_approved, draft_skipped, draft_edited, job_applied, job_dismissed. The id is
+ * deterministic, so repeating a reaction updates the score instead of adding another.
+ */
+export async function scoreTrace(traceId: string, name: string, value: number, comment?: string): Promise<void> {
+  try {
+    if (!langfuseConfigured()) return
+    const lf = await getLangfuse()
+    if (!lf) return
+    const hex = traceId.replace(/-/g, '')
+    const scoreName = clean(name, 100)
+    lf.client.score.create({
+      id: createHash('sha256').update(`${hex}|${scoreName}`).digest('hex').slice(0, 32),
+      traceId: hex,
+      name: scoreName,
+      value,
+      dataType: 'NUMERIC',
+      ...(comment ? { comment: clean(comment, 300) } : {}),
+      environment: tracingEnvironment(),
+    })
+    await lf.client.flush()
+  } catch (err) {
+    console.warn(`[langfuse] score skipped: ${redactString(String(err).slice(0, 300))}`)
   }
 }
