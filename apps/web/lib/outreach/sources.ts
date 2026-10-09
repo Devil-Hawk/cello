@@ -44,6 +44,8 @@ export async function loadOutreachSources(args: OutreachSourceArgs): Promise<Loa
       .from('jobs')
       .select('id, title, description, company_id, person_roles(chance_detail)')
       .eq('id', args.jobId)
+      // A no-op under row-level security; under the service client (the Writer) it keeps another follower's verdict out of this draft.
+      .eq('person_roles.user_id', userId)
       .single()
     if (job) {
       jobTitle = job.title || null
