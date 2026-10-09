@@ -31,6 +31,7 @@ export async function askModel(
       const out = await callLlm(keys, { maxTokens: 1500, temperature: 0.3, reasoning: { effort: 'none' }, ...opts, model }, signal)
       const text = out.content.trim()
       if (valid(text)) return { text, model }
+      console.warn('askModel: answer rejected', model, JSON.stringify(text).slice(0, 400))
       errors.push(`${model}: ${text ? 'did not follow the instructions' : 'returned nothing'} (finish ${out.finishReason ?? '?'}, ${out.completionTokens} tokens, ${out.reasoningTokens ?? 0} reasoning)`)
     } catch (e) {
       if (signal?.aborted) throw e

@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Key } from '@/components/ui/key'
+import { ChatModel } from './chat-model'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
 export type Door = 'R1' | 'R2' | 'R3' | 'R4'
@@ -102,6 +103,7 @@ export function ModelsPanel({ view, error, onSave, children }: { view: ModelsVie
           </label>
         </div>
         {error && <p className="r-meta" role="alert">{error}</p>}
+        <ChatModel />
         {children}
       </div>
     </TooltipProvider>

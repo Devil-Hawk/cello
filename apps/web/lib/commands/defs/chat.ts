@@ -100,7 +100,7 @@ export const rolesCompare = defineCommand({
     const table = [
       '| Role | Company | Place | Chance | Pay as stated | Posted |',
       '| --- | --- | --- | --- | --- | --- |',
-      ...roles.map((r) => `| ${[r.title, r.company, r.place, r.chance, r.pay, r.posted].map(cell).join(' | ')} |`),
+      ...roles.map((r) => `| ${[r.title, r.company, r.place, r.chance ?? 'not checked yet', r.pay, r.posted].map(cell).join(' | ')} |`),
     ].join('\n')
     const title = `Compare ${roles.length} roles`
     const made = await createArtifact(ctx.admin(), { userId: ctx.userId, type: 'comparison', title, author: 'cello', content: { text: table, role_ids: roles.map((r) => r.id) }, about: roles.map((r) => ({ kind: 'job' as const, ref: r.id })) })

@@ -63,8 +63,11 @@ interface Deps {
   signal?: AbortSignal
 }
 
+/** A model's text on one line, with a dash between two numbers (a pay range copied from the table) said as "to": the copy has no dashes. */
+const plain = (t: string) => t.replace(/\s+/g, ' ').replace(/(\d)\s*[\u2013\u2014]\s*(\d)/g, '$1 to $2').trim()
+
 /** Two plain sentences on which of the roles to do first, from the stored table only; the first model that obeys wins. */
-async function twoSentences(deps: Deps, table: string): Promise<string | null> {
+async function twoSentences(deps: Deps, table: string): Promise<{ text: string; model: string } | null> {
   const got = await askModel(
     deps.keys,
     deps.ran.model,
@@ -74,12 +77,12 @@ async function twoSentences(deps: Deps, table: string): Promise<string | null> {
       prompt: `Roles:\n${table}`,
     },
     (t) => {
-      const text = t.replace(/\s+/g, ' ')
+      const text = plain(t)
       return text.split(/(?<=[.?])\s+/).filter(Boolean).length === 2 && !/[\u2014\u2013!|*#]/.test(text) && unsupported(text, [table]).length === 0
     },
     deps.signal
   )
-  return got ? got.text.replace(/\s+/g, ' ') : null
+  return got ? { text: plain(got.text), model: got.model } : null
 }
 
 /** Code's own two sentences, for when no model obeyed: from the stored facts only, a stated pay first. */
@@ -125,6 +128,8 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
     const sources: NonNullable<AgentOutput['sources']> = []
     const results: TurnResult[] = []
     const madeIds: string[] = []
+    // The model that answered: the chosen one, unless it failed and the next free one stood in (then the turn says so).
+    let usedModel = deps.ran.model
     const call = async (id: string, args: Record<string, unknown>): Promise<{ sentence?: string; things: Thing[] }> => {
       const def = getCommand(id)
       if (!def) throw new Error(`No command ${id}`)
@@ -144,7 +149,8 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
       // The model calls of this turn (the summary, the Writer) are tied to it, so its cost and model are on its own rows.
       await deps.db.from('llm_spend').update({ chat_turn_id: input.turnId }).eq('user_id', deps.userId).is('chat_turn_id', null).gte('created_at', startedAt)
       const made = madeIds.length ? (((await deps.db.from('artifacts').select('id, type, title, created_at').eq('user_id', deps.userId).in('id', madeIds)).data as { id: string; type: string; title: string; created_at: string }[] | null) ?? []) : []
-      return { answer, results, ran: deps.ran, tools, sources, made }
+      const ran: Ran = usedModel === deps.ran.model ? deps.ran : { ...deps.ran, model: usedModel, steppedDown: { wanted: { rung: deps.ran.rung, model: deps.ran.model, effort: deps.ran.effort }, why: 'model' } }
+      return { answer, results, ran, tools, sources, made }
     }
 
     try {
@@ -162,7 +168,9 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
         const cmp = await call('roles.compare', { ids: top.things.map((t) => t.id) })
         const table = cmp.things.find((t) => t.kind === 'made')?.notes.find((n) => n.startsWith('|')) ?? ''
         const roles = cmp.things.filter((t) => t.kind === 'role')
-        const summary = (await twoSentences(deps, table)) ?? fallbackSentences(roles)
+        const said = await twoSentences(deps, table)
+        if (said) usedModel = said.model
+        const summary = said?.text ?? fallbackSentences(roles)
         return done({ parts: [{ about: [], text: cmp.sentence ?? 'Compared your top roles.' }, { about: [], text: summary }] })
       }
 
@@ -195,6 +203,7 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
           )
       )
       if (!got) return done(say(`Cello could not write a note that passed its checks. ${errors.slice(0, 2).join(' ')} Try again in a minute, or pick another free model.`))
+      usedModel = got.model
       const note = checkNote(got.text, { company: intent.company, title: job.title, ask: intent.ask, evidence: [resume, facts, name] }) as { subject: string; body: string }
       const made = await createArtifact(deps.db, { userId: deps.userId, type: 'message', title: `Note to ${intent.company}`, author: 'cello', content: { subject: note.subject, body: note.body, to_name: null, to_email: null, kind: 'initial' }, jobId: job.id, about: [{ kind: 'job', ref: job.id }] })
       await deps.db.from('artifacts').update({ chat_turn_id: input.turnId }).eq('id', made.id).eq('user_id', deps.userId)

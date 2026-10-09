@@ -155,7 +155,7 @@ export function Rail({ chats, hasMore, onLoadMore, earlier = [], scheduled = nul
         </section>
       )}
 
-      <section aria-labelledby="rail-recents" className="min-h-0 flex-1">
+      <section aria-labelledby="rail-recents" className="min-h-0 flex-1 overflow-y-auto">
         <h2 id="rail-recents" className="mb-1 px-2 text-label uppercase tracking-wide text-muted-foreground">
           Recents
         </h2>
