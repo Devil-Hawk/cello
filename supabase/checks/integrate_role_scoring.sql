@@ -4,6 +4,9 @@
 --   * a person can only see and change their own reactions, and the reaction
 --     reasons, surfaces and snapshot length are the ones the page uses;
 --   * no per person verdict column is left on jobs;
+--   * a signed-in session, even the owner of the company row a posting hangs off,
+--     cannot update the posting or evict it, and no function it can run writes jobs
+--     with elevated rights (migration 20261009000701);
 -- and, once public.person_roles exists (the employer and role work, K5a):
 --   * one person's verdict on a shared role is invisible to another person;
 --   * a session cannot write a verdict column, but can hide a role for itself;
@@ -96,6 +99,38 @@ $$;
 reset role;
 
 grant select on fx to authenticated;
+
+-- Postings are server-only: no privilege lets a session change an existing row.
+do $$
+declare f record; c text; bad text;
+begin
+  select * into f from fx;
+  assert not has_table_privilege('authenticated', 'public.jobs', 'UPDATE'), 'authenticated has table UPDATE on jobs';
+  assert not has_any_column_privilege('authenticated', 'public.jobs', 'UPDATE'), 'authenticated has a column UPDATE on jobs';
+  select string_agg(p.proname, ', ') into bad from pg_proc p
+  where p.pronamespace = 'public'::regnamespace and p.prosecdef and p.prorettype <> 'trigger'::regtype
+    and p.prosrc ~* '(update|delete\s+from|insert\s+into)\s+public\.jobs\y'
+    and has_function_privilege('authenticated', p.oid, 'execute');
+  if bad is not null then raise exception 'a signed-in session can run a definer function that writes jobs: %', bad; end if;
+
+  perform set_config('request.jwt.claims', json_build_object('sub', f.user_a, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  foreach c in array array['description', 'requirements', 'title', 'url', 'requirements_extracted_at', 'employer_id'] loop
+    continue when not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jobs' and column_name = c);
+    begin
+      execute format('update public.jobs set %1$I = %1$I where id = $1', c) using f.live_job;
+      raise exception 'the owner of the company row rewrote %', c;
+    exception when insufficient_privilege then null;
+    end;
+  end loop;
+  begin
+    perform public.evict_company_jobs(f.company_a, array['sc-2']);
+    raise exception 'the owner of the company row evicted a posting';
+  exception when insufficient_privilege then null;
+  end;
+  reset role;
+end;
+$$;
 select to_regclass('public.person_roles') is not null as has_person_roles \gset
 \if :has_person_roles
 
@@ -153,6 +188,28 @@ begin
     raise exception 'a changed description kept the old verdict';
   end if;
   if a.want_p is null or b.want_p is null then raise exception 'the want was cleared along with the chance'; end if;
+end;
+$$;
+
+-- A session's attempt to rewrite the posting leaves every follower's verdict alone.
+do $$
+declare f record; b record;
+begin
+  select * into f from fx;
+  update public.person_roles set chance = 'possible', assessed_at = now() where user_id = f.user_b and job_id = f.live_job;
+  perform set_config('request.jwt.claims', json_build_object('sub', f.user_a, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  begin
+    update public.jobs set description = 'x' where id = f.live_job;
+    raise exception 'a session rewrote the description';
+  exception when insufficient_privilege then null;
+  end;
+  reset role;
+  select * into b from public.person_roles where user_id = f.user_b and job_id = f.live_job;
+  if b.chance is distinct from 'possible' or b.assessed_at is null then raise exception 'a refused update still cleared a verdict'; end if;
+  if (select description from public.jobs where id = f.live_job) is distinct from 'a different description' then
+    raise exception 'the description changed';
+  end if;
 end;
 $$;
 
