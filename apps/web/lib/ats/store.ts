@@ -23,7 +23,7 @@ const EMPTY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e'
 const LOCK_LEASE_MINUTES = 15
 
 export interface AtsStoreOptions {
-  /** Service-role client used only for the per-company lock (the lock functions are not callable by a signed-in user). */
+  /** Service-role client for the per-company lock (not callable by a signed-in user) and for every write to jobs (a posting is shared, so no session changes it). */
   lockClient?: Db
   /** Who holds the lock; unique per process so a second process cannot release the first one's lock. */
   holder?: string
@@ -39,6 +39,8 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
   const holder = opts.holder ?? `ingest-${Math.random().toString(36).slice(2)}`
   const dry = opts.dryRun === true
   const lock = opts.lockClient
+  // Postings are written by the server only; without a service client the caller already is the server.
+  const writer = lock ?? client
 
   return {
     async listJobs(companyId: string): Promise<ExistingJob[]> {
@@ -95,14 +97,14 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
 
     async evictJobs(companyId, externalIds): Promise<string[]> {
       if (dry) return externalIds
-      const { data, error } = await client.rpc('evict_company_jobs', { p_company_id: companyId, p_external_ids: externalIds })
+      const { data, error } = await writer.rpc('evict_company_jobs', { p_company_id: companyId, p_external_ids: externalIds })
       fail(error)
       return Array.isArray(data) ? (data as string[]) : []
     },
 
     async upsertJobs(rows): Promise<void> {
       if (dry) return
-      const { error } = await client
+      const { error } = await writer
         .from('jobs')
         .upsert(rows as never, { onConflict: 'company_id,external_id', ignoreDuplicates: false })
       fail(error)
@@ -111,7 +113,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
     async updateJobs(updates: JobUpdate[]): Promise<number> {
       if (dry) return updates.length
       const changed = await mapWithConcurrency(updates, UPDATE_CONCURRENCY, async (u) => {
-        const { data, error } = await client
+        const { data, error } = await writer
           .from('jobs')
           .update(u.fields as never)
           .eq('company_id', u.companyId)
@@ -125,7 +127,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
 
     async recordSightings(companyId, externalIds, sources): Promise<SightingResult> {
       if (dry) return { seen: 0, reopened: 0, missed: 0, closed: 0 }
-      const { data, error } = await client.rpc('record_job_sightings', {
+      const { data, error } = await writer.rpc('record_job_sightings', {
         p_company_id: companyId,
         p_external_ids: externalIds,
         p_sources: sources,
@@ -163,7 +165,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
 
     async clearBoardJobs(companyId, source) {
       if (dry) return { deleted: 0, closed: 0 }
-      return clearBoardJobsRpc(client, companyId, source)
+      return clearBoardJobsRpc(writer, companyId, source)
     },
 
     async updateCompanyLastScraped(companyId: string): Promise<void> {
