@@ -25,6 +25,8 @@ interface AtsScore {
 interface OptimizerResult extends AtsScore {
   suggestedRewrite: string
   rescore: AtsScore
+  changes?: string[]
+  warnings?: string[]
 }
 
 const SCORE_TEXT: Record<string, string> = {
@@ -267,6 +269,25 @@ export function ResumeOptimizerPanel({
                 {delta}
               </Badge>
             )}
+          </div>
+
+          {/* What changed, and why: what moved or was reworded, and anything that was not applied */}
+          <div>
+            <div className="mb-1.5 text-label uppercase text-muted-foreground">What changed</div>
+            {(result.changes ?? []).length > 0 ? (
+              <ul className="list-disc space-y-1 pl-4 text-caption text-foreground">
+                {(result.changes ?? []).map((c) => (
+                  <li key={c}>{c}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-caption text-muted-foreground">Nothing in your resume needed to move for this posting.</p>
+            )}
+            {(result.warnings ?? []).map((w) => (
+              <p key={w} className="mt-1 text-caption text-muted-foreground">
+                {w}
+              </p>
+            ))}
           </div>
 
           {/* Missing keywords */}

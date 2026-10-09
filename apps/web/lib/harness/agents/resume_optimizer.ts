@@ -38,7 +38,7 @@ import {
   type Resume,
   type TailorPatch,
 } from '@/lib/resume/schema'
-import { applyTailorPatch } from '@/lib/resume/tailor'
+import { applyTailorPatch, rankBulletsForJob } from '@/lib/resume/tailor'
 import type { ResumeDocument, ResumeSource } from '@/lib/resume/types'
 
 const RESUME_LIMIT = 12000
@@ -69,6 +69,8 @@ export interface ResumeOptimizerResult extends AtsScore {
   resume: Resume
   /** Suggestions dropped because they were not in the base resume. */
   warnings: string[]
+  /** What moved or was reworded, and why, in words (from the patch that was kept). */
+  changes: string[]
   /** Fresh ATS score of `suggestedRewrite`. */
   rescore: AtsScore
   tokensUsed: number
@@ -187,9 +189,11 @@ async function scoreResume(
 
 /** "work[0]: Senior Engineer, Acme": the addressable entries the patch refers to. */
 function entryIndex(base: Resume): string {
+  // Each entry with its own bullets, so a patch for work[0] can only be about work[0]'s bullets.
+  const bullets = (hs: string[]) => hs.map((h) => `    - ${h}`).join('\n')
   const lines = [
-    ...base.work.map((w, i) => `work[${i}]: ${[w.position, w.name].filter(Boolean).join(', ')}`),
-    ...base.projects.map((p, i) => `projects[${i}]: ${p.name}`),
+    ...base.work.map((w, i) => `work[${i}]: ${[w.position, w.name].filter(Boolean).join(', ')}\n${bullets(w.highlights)}`),
+    ...base.projects.map((p, i) => `projects[${i}]: ${p.name}\n${bullets(p.highlights)}`),
   ]
   return lines.join('\n') || '(no entries)'
 }
@@ -206,6 +210,10 @@ function rewritePrompt(
     `already supports: ${missingKeywords.join(', ') || '(none)'}\n` +
     `Format issues to fix: ${formatIssues.join('; ') || '(none)'}\n\n` +
     `ENTRIES (refer to them by index):\n${entryIndex(base)}\n\n` +
+    `How to tailor: (1) For every work entry, return its own bullets with the ones most relevant to the TARGET JOB first, ` +
+    `rewording a bullet only to use the job's vocabulary where the bullet already says the same thing. Keep every bullet of ` +
+    `that entry, add none, and never move a bullet to another entry. (2) Reword the summary so its first sentence speaks to this ` +
+    `role, using only facts already in the resume. (3) In skills, move the keywords the job asks for and the resume already has to the front.\n\n` +
     `Return the patch now: only the fields you change.`
   )
 }
@@ -307,7 +315,12 @@ export async function optimizeResume(args: OptimizeResumeArgs): Promise<ResumeOp
   )
   tokensUsed += rewriteTokens
 
-  const { resume, warnings } = applyTailorPatch(base, patch)
+  const patched = applyTailorPatch(base, patch)
+  const { warnings } = patched
+  // Then, in code, the bullets that match the posting best lead each job.
+  const ranked = rankBulletsForJob(patched.resume, args.job)
+  const resume = ranked.resume
+  const changes = [...patched.changes, ...ranked.changes]
   const rewrite = resumeToPlainText(resume)
 
   const rescored = await scoreResume(run, rewrite, args.job)
@@ -318,6 +331,7 @@ export async function optimizeResume(args: OptimizeResumeArgs): Promise<ResumeOp
     suggestedRewrite: rewrite,
     resume,
     warnings,
+    changes,
     rescore: rescored.score,
     tokensUsed,
   }

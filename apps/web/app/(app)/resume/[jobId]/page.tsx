@@ -131,6 +131,24 @@ function OptimizationReport({ report }: { report: ResumeOptimizerResult }) {
         </div>
       )}
 
+      <div>
+        <div className="mb-1.5 text-label uppercase text-muted-foreground">What changed</div>
+        {(report.changes ?? []).length > 0 ? (
+          <ul className="list-disc space-y-1 pl-4 text-caption text-foreground">
+            {(report.changes ?? []).map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-caption text-muted-foreground">Your resume already puts what this posting asks for first, so nothing was moved.</p>
+        )}
+        {(report.warnings ?? []).map((w) => (
+          <p key={w} className="mt-1 text-caption text-muted-foreground">
+            {w}
+          </p>
+        ))}
+      </div>
+
       {report.missingKeywords.length > 0 && (
         <div>
           <div className="mb-1.5 text-label uppercase text-muted-foreground">Missing keywords</div>

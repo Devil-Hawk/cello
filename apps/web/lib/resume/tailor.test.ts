@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyTailorPatch } from './tailor'
+import { applyTailorPatch, keepsEntry, rankBulletsForJob } from './tailor'
 import { ResumeSchema, type TailorPatch } from './schema'
 import { CANONICAL_RESUME } from './test-fixtures'
 
@@ -14,6 +14,16 @@ const base = ResumeSchema.parse({
 
 const empty: TailorPatch = { summary: '', skills: [], work: [], projects: [] }
 const patch = (over: Partial<TailorPatch>): TailorPatch => ({ ...empty, ...over })
+
+describe('keepsEntry', () => {
+  const before = ['Rebuilt the ingestion pipeline behind a dual-write migration.', 'Cut compute spend 48% by right-sizing the streaming tier.', 'Mentored four engineers.']
+  it('lets an entry reorder and reword its own bullets', () => {
+    expect(keepsEntry(before, [before[1], 'Rebuilt the ingestion pipeline with a dual-write migration.', before[2]])).toBe(true)
+  })
+  it('refuses another entry\'s bullets in place of its own', () => {
+    expect(keepsEntry(before, ['An open-source CLI that diffs two Postgres query plans.', 'A Go library for typed feature flags.'])).toBe(false)
+  })
+})
 
 describe('applyTailorPatch', () => {
   it('rewrites a summary and highlights that stay inside the base', () => {
@@ -126,5 +136,21 @@ describe('applyTailorPatch', () => {
     it('keeps the base skills when the patch has none', () => {
       expect(applyTailorPatch(base, empty).resume.skills).toEqual(base.skills)
     })
+  })
+})
+
+describe('rankBulletsForJob', () => {
+  const resume = ResumeSchema.parse({
+    ...base,
+    work: [{ ...base.work[0], highlights: ['Mentored four engineers.', 'Cut compute spend by right-sizing the streaming tier.', 'Rebuilt the streaming ingestion pipeline and the streaming query tier.'] }],
+  })
+  it('moves the bullet that shares the most words with the posting to the top, and says why', () => {
+    const r = rankBulletsForJob(resume, { title: 'Streaming Engineer', description: 'Own the streaming pipeline. The streaming tier and the pipeline tier are yours.' })
+    expect(r.resume.work[0].highlights[0]).toMatch(/^Rebuilt the streaming/)
+    expect([...r.resume.work[0].highlights].sort()).toEqual([...resume.work[0].highlights].sort())
+    expect(r.changes[0]).toMatch(/shares .*streaming.* with the posting/)
+  })
+  it('leaves an entry alone when nothing matches better', () => {
+    expect(rankBulletsForJob(resume, { title: 'Pastry Chef', description: '' }).changes).toEqual([])
   })
 })

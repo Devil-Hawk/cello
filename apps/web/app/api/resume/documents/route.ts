@@ -40,7 +40,8 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { loadApiKeys } from '@/lib/harness/keys'
 import { optimizeResumeAndSave } from '@/lib/harness/agents/resume_optimizer'
-import { callLlm, MissingKeyError } from '@/lib/harness/llm'
+import { MissingKeyError } from '@/lib/harness/llm'
+import { stepRunner } from '@/lib/models/ask'
 import { canRunLlm, missingOpenRouterMessage } from '@/lib/harness/llm-key-message'
 import {
   createResumeVersion,
@@ -342,10 +343,12 @@ export async function POST(request: NextRequest) {
 const PASS_LABELS = ['score original resume', 'generate ATS rewrite', 'rescore rewrite'] as const
 
 function trackedLlm(apiKeys: DecryptedApiKeys): { llm: LlmRunner; passIndex: () => number } {
+  const run = stepRunner('optimize-resume', apiKeys)
   let started = 0
   const llm: LlmRunner = (opts) => {
     started += 1
-    return callLlm(apiKeys, { ...opts, name: opts.name ?? 'generate-resume-document' })
+    // Through the declared step: the ladder picks the model (a free one under a free ceiling), never a paid default.
+    return run({ ...opts, name: opts.name ?? 'optimize-resume' })
   }
   return { llm, passIndex: () => started }
 }
