@@ -192,21 +192,21 @@ Before (the earlier Copilot, its own prompt and 19 tools, same 30 messages, qwen
 
 Per model: qwen 77%, nemotron 60%, laguna 17%. Laguna is a reasoning model and 24 of its 30 answers were cut off before any JSON at the 700 token cap used for that run, so the majority was in effect decided by qwen and nemotron, who were both right on 17 of 30. The cap is now 2500 for the earlier Copilot's prompt; that run was not finished (see below), so treat 60% as a floor.
 
-Skills (S19, 2026-10-07, report in `lib/evals/agent/reports/skills-s19.md`; trigger votes from nemotron-3-super, nemotron-3-ultra and nemotron-3.5-lightning because the gemma and laguna models answered 429, so they may move with other models; output checks on the first two):
+Skills (S19, 2026-10-09 at 51ac7510, report in `lib/evals/agent/reports/skills-s19.md`; trigger votes from dots-3-note-preview, north-mini-code and apodex-1.1-mini; output checks on the first two, and cover-letter's could not be read because both errored on its two cases):
 
 | skill | trigger (bar 0.8) | output checks (bar 0.9) | result |
 |---|---|---|---|
-| cold-outreach | 33% | 80% | failing (trigger, checks), off |
+| cold-outreach | 33% | 70% | failing (trigger, checks), off |
 | company-research | 33% | 100% | failing (trigger), off |
-| cover-letter | 33% | 83% | failing (trigger, checks), off |
-| follow-up | 33% | 100% | failing (trigger), off |
-| negotiation | 67% | 88% | failing (trigger, checks), off |
-| role-fit | 33% | 100% | failing (trigger), off |
-| search-strategy | 33% | 100% | failing (trigger), off |
-| tailor-resume | 33% | 100% | failing (trigger), off |
+| cover-letter | 33% | cannot read | failing (trigger, checks), off |
+| follow-up | 33% | 88% | failing (trigger, checks), off |
+| negotiation | 67% | 75% | failing (trigger, checks), off |
+| role-fit | 33% | 80% | failing (trigger, checks), off |
+| search-strategy | 67% | 100% | failing (trigger), off |
+| tailor-resume | 33% | 75% | failing (trigger, checks), off |
 | visa-sponsorship | 33% | 100% | failing (trigger), off |
 
-Overall trigger 37% (10/27), output checks 83% (66/80). Most of each 33% is the should-not-load case; the should-load cases were mostly loaded by none of the three models.
+Overall trigger 41% (11/27), output checks 73% (58/80). Most of each 33% is the should-not-load case; the should-load cases were mostly loaded by none of the three models.
 
 Not measured yet: the new orchestrator on the same cases, the injection set and the researcher set. OpenRouter's free allowance for this account is 1000 requests a day across all `:free` models, and rate-limited retries on two of the models used it up while the baseline ran. The commands above are ready; run the old mode again first (the token cap changed), then the new one, and write both into this table. The prompts for the orchestrator, the Researcher and the nine skills are therefore the first versions and have not been tuned against these numbers.
 
