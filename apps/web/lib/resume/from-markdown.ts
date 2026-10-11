@@ -510,6 +510,11 @@ export function markdownToResume(markdown: string, ctx: MarkdownToResumeContext 
       const meta = isMeta(l)
       const nextLine = b.lines[li + 1]
       if (startedHere && meta && entry && !hasDates(entry)) return applyMeta(t)
+      // "Title, Company" in one paragraph and "**Place | Dates**" in the next: the second is the first's meta, not
+      // an entry of its own. An entry with a title but no dates and no content yet is waiting for exactly this line.
+      // ponytail: a title-only entry followed by a bold title that carries dates is read as meta; fix with a
+      // title/place split if a resume ever lays out jobs that way.
+      if (entry && meta && dateish(t) && !hasDates(entry) && !entryHasContent(entry)) return applyMeta(t)
       if (allBold(l)) {
         startedHere = true
         return startEntry(t)
@@ -519,10 +524,14 @@ export function markdownToResume(markdown: string, ctx: MarkdownToResumeContext 
         return applyMeta(t)
       }
       const lastLine = li === b.lines.length - 1
+      // A project is a short name on its own line, then its description: "Tidewater", "An open-source CLI that ...".
+      const nameOnly = t.length <= 40 && t.split(/\s+/).length <= 4 && !/[.!?:,;]$/.test(t)
       const startsEntry =
         !entry ||
         (nextLine && isMeta(nextLine)) ||
-        (lastLine && next?.type === 'list' && entryHasContent(entry))
+        (lastLine && next?.type === 'paragraph' && isMeta(next.lines[0]) && dateish(text(next.lines[0]))) ||
+        (lastLine && next?.type === 'list' && entryHasContent(entry)) ||
+        (kind === 'projects' && lastLine && nameOnly && next?.type === 'paragraph' && entryHasContent(entry))
       if (!startsEntry) {
         if (entry && !hasDates(entry) && meta) return applyMeta(t)
         // PDF text puts the location on its own line under the title and date.

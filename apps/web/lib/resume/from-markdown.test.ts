@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { inferResumeMarkdown } from './import/infer'
 import { markdownToPlainText } from './markdown'
 import { markdownToResume, textToResume } from './from-markdown'
-import { resumeFactText, resumeToMarkdown } from './render'
+import { resumeFactText, resumeToMarkdown, resumeToPlainText } from './render'
 import { ResumeSchema } from './schema'
 import { CANONICAL_RESUME, DOCX_STYLE_MD, PASTE_TEXT, PDF_INFER_MD } from './test-fixtures'
 
@@ -197,5 +197,101 @@ describe('markdownToResume', () => {
     const r = markdownToResume('# Ada\n\n## Summary\n\nOne.\n\nTwo.')
     r.basics.summary = 'Line one\nline two\n\nSecond paragraph'
     expect(resumeToMarkdown(r)).toContain('Line one line two\n\nSecond paragraph')
+  })
+})
+
+// The demo profile's resume_text, as stored: "Title, Company", a blank line, "Place | Dates", then bullets.
+const DEMO_PLAIN = `Riley Marsh
+
+Senior Backend / Platform Engineer
+riley.marsh@demo.example.com | (206) 555-0142 | Seattle, WA (open to remote, US) | riley-marsh.example.com
+
+Summary
+
+Backend and platform engineer with eight years building high-throughput data services. Most recently led the ingestion and query tier for a multi-tenant analytics product serving 4B events/day, cutting p99 read latency from 1.9s to 310ms while halving infrastructure spend. Comfortable owning a system end to end: schema design, service code, rollout, on-call, and the cost line.
+
+Experience
+
+Staff Software Engineer, Cobalt Harbor Systems
+
+Seattle, WA | Mar 2022 - Present
+- Rebuilt the event ingestion pipeline (Kafka to a columnar store) behind a dual-write migration, moving 4B events/day with zero customer-visible downtime and no backfill gaps.
+- Designed the sharded query planner that took p99 dashboard reads from 1.9s to 310ms; published the load-shedding policy the whole platform group adopted.
+- Cut compute spend 48% by right-sizing the streaming tier and introducing tiered storage for cold partitions, roughly $1.1M/year.
+- Ran the on-call rotation for six services and drove incident review; MTTR fell from 74 to 22 minutes over four quarters.
+- Mentored four engineers, two of whom were promoted to senior.
+
+Senior Software Engineer, Trellis Point Analytics
+
+Remote | Jun 2019 - Feb 2022
+- Owned the metrics API used by every customer-facing dashboard: Go services on Kubernetes, Postgres and ClickHouse behind them, 12k RPS at peak.
+- Introduced contract tests and a staged rollout pipeline that took change failure rate from 18% to under 4%.
+- Led the SOC 2 workstream for the data plane: audit logging, key rotation, and tenant isolation review across nine services.
+- Built the internal query-cost attribution tool that made per-tenant unit economics visible to product for the first time.
+
+Software Engineer, Halden & Reeve
+
+Portland, OR | Aug 2017 - May 2019
+- Shipped the billing reconciliation service that closed a recurring six-figure revenue leak from unmatched invoice lines.
+- Migrated a monolithic Rails scheduler to a queue-backed Python worker fleet, cutting nightly batch runtime from 6h to 40m.
+- First engineer on the internal API gateway; wrote the auth middleware still in use today.
+
+Projects
+
+Tidewater
+
+An open-source CLI that diffs two Postgres query plans and explains the regression in plain language. 2.1k stars.
+
+Slate
+
+A tiny Go library for typed feature flags with compile-time exhaustiveness checks, used in production at two former employers.
+
+Skills
+
+Languages: Go, Python, TypeScript, SQL, some Rust
+Data: Postgres, ClickHouse, Kafka, Spark, dbt, Iceberg
+Platform: Kubernetes, Terraform, AWS (EKS, S3, RDS, MSK), GitHub Actions
+Practice: distributed systems design, performance and cost work, incident command, technical mentoring
+
+Education
+
+B.S. Computer Science, Cascade Ridge University
+
+Portland, OR | 2013 - 2017
+- Senior project: a fault-injection harness for stream processors.`
+
+describe('title, blank line, Place | Dates, bullets (the demo resume_text)', () => {
+  const r = textToResume(DEMO_PLAIN)
+
+  it('reads each job as its own title, company, place and dates', () => {
+    expect(r.work.map((w) => [w.position, w.name, w.location, w.startDate, w.highlights.length])).toEqual([
+      ['Staff Software Engineer', 'Cobalt Harbor Systems', 'Seattle, WA', '2022-03', 5],
+      ['Senior Software Engineer', 'Trellis Point Analytics', 'Remote', '2019-06', 4],
+      ['Software Engineer', 'Halden & Reeve', 'Portland, OR', '2017-08', 3],
+    ])
+    expect(r.work[0].current).toBe(true)
+  })
+
+  it('keeps every bullet under its own employer after parse then render', () => {
+    const md = resumeToMarkdown(r)
+    const plain = resumeToPlainText(r)
+    for (const w of r.work) {
+      for (const h of w.highlights) expect(plain).toContain(h)
+    }
+    // Each employer's heading sits directly above its own first bullet, in the order the person wrote.
+    const bulletsIn = (name: string) => r.work.find((w) => w.name === name)!.highlights
+    expect(bulletsIn('Cobalt Harbor Systems')[0]).toMatch(/^Rebuilt the event ingestion pipeline/)
+    expect(bulletsIn('Trellis Point Analytics')[0]).toMatch(/^Owned the metrics API/)
+    expect(bulletsIn('Halden & Reeve')[0]).toMatch(/^Shipped the billing reconciliation/)
+    expect(md.indexOf('Cobalt Harbor Systems')).toBeLessThan(md.indexOf('Rebuilt the event ingestion'))
+    expect(md.indexOf('Rebuilt the event ingestion')).toBeLessThan(md.indexOf('Trellis Point Analytics'))
+    expect(md.indexOf('Trellis Point Analytics')).toBeLessThan(md.indexOf('Owned the metrics API'))
+    expect(md.indexOf('Halden & Reeve')).toBeLessThan(md.indexOf('Shipped the billing reconciliation'))
+  })
+
+  it('reads the school and the projects as themselves', () => {
+    expect(r.education.map((e) => [e.institution, e.location, e.startDate])).toEqual([['Cascade Ridge University', 'Portland, OR', '2013']])
+    expect(r.projects.map((p) => p.name)).toEqual(['Tidewater', 'Slate'])
+    expect(r.projects[0].description).toMatch(/^An open-source CLI/)
   })
 })
