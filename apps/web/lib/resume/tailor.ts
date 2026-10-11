@@ -138,10 +138,11 @@ export function applyTailorPatch(base: Resume, patch: TailorPatch): { resume: Re
       ).values(),
     ]
     if (keywords.length === 0) return
-    let name = g.name.trim()
-    if (name && !baseGroupNames.has(name.toLowerCase()) && !hasToken(basePlain, name)) {
+    const name = g.name.trim()
+    // A group the base does not have ("Projects: Tidewater, Slate") is not a skill group: its keywords are dropped with it.
+    if (name && !baseGroupNames.has(name.toLowerCase())) {
       dropped.push(name)
-      name = ''
+      return
     }
     // An unnamed or invented group lands on the base group at its position.
     const at = name
