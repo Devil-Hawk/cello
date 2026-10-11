@@ -66,6 +66,12 @@ interface Deps {
 /** A model's text on one line, with a dash between two numbers (a pay range copied from the table) said as "to": the copy has no dashes. */
 const plain = (t: string) => t.replace(/\s+/g, ' ').replace(/(\d)\s*[\u2013\u2014]\s*(\d)/g, '$1 to $2').trim()
 
+/**
+ * Words that rank one role against the others. A model's sentence cannot use them: code checks numbers and dates against
+ * the table, but not an ordering claim, so a sentence that makes one is refused and code's own checked sentences stand in.
+ */
+export const RANKING_WORDS = /\b(most|least|freshest|newest|oldest|latest|earliest|highest|lowest|best|better|worse|worst|top|recent|recently|strongest|weakest|more|fewer|less|than|ranks?|ranked)\b/i
+
 /** Two plain sentences on which of the roles to do first, from the stored table only; the first model that obeys wins. */
 async function twoSentences(deps: Deps, table: string): Promise<{ text: string; model: string } | null> {
   const got = await askModel(
@@ -73,24 +79,31 @@ async function twoSentences(deps: Deps, table: string): Promise<{ text: string; 
     deps.ran.model,
     {
       system:
-        'You advise a job seeker. Reply with exactly two plain sentences and nothing else. Sentence one: which role to apply to first and why, citing the pay, place or posting date from the table. Sentence two: which role to look at next and why, from the table too. Use only facts in the table and never invent any. Do not use dashes, exclamation marks, lists or markdown.',
+        'You advise a job seeker. Reply with exactly two plain sentences and nothing else. Sentence one: which role to apply to first and why, citing the pay, place or posting date from the table. Sentence two: which role to look at next and why, from the table too. Use only facts in the table and never invent any. Do not compare the roles with each other: say what each role states, never that one is the most, newest, best or highest of them. Do not use dashes, exclamation marks, lists or markdown.',
       prompt: `Roles:\n${table}`,
     },
     (t) => {
       const text = plain(t)
-      return text.split(/(?<=[.?])\s+/).filter(Boolean).length === 2 && !/[\u2014\u2013!|*#]/.test(text) && unsupported(text, [table]).length === 0
+      return text.split(/(?<=[.?])\s+/).filter(Boolean).length === 2 && !/[\u2014\u2013!|*#]/.test(text) && !RANKING_WORDS.test(text) && unsupported(text, [table]).length === 0
     },
     deps.signal
   )
   return got ? { text: plain(got.text), model: got.model } : null
 }
 
-/** Code's own two sentences, for when no model obeyed: from the stored facts only, a stated pay first. */
-function fallbackSentences(roles: Thing[]): string {
-  const [a, b] = [...roles].sort((x, y) => Number(Boolean(y.pay)) - Number(Boolean(x.pay)))
+/**
+ * Code's own two sentences, for when no model obeyed. Every claim in them is read off the stored rows: the order is the
+ * stated chance, then a stated pay, then the newest posting, and "the newest" is said only when the date proves it.
+ */
+export function fallbackSentences(roles: Thing[]): string {
+  const rank = (r: Thing) => ({ strong: 3, possible: 2, stretch: 1 })[r.chance ?? 'stretch'] * (r.chance ? 1 : 0)
+  const [a, b] = [...roles].sort((x, y) => rank(y) - rank(x) || Number(Boolean(y.pay)) - Number(Boolean(x.pay)) || (y.posted ?? '').localeCompare(x.posted ?? ''))
   const at = (r: Thing) => `${r.title} at ${r.company ?? 'that employer'}`
-  const why = a.pay ? `it is the one that states its pay, ${a.pay}` : a.posted ? `it was posted ${a.posted}, the freshest of the three` : 'it ranks first on your Roles list'
-  return `Apply to ${at(a)} first, because ${why}. Look at ${at(b)} next${b.place ? `, which is in ${b.place}` : ''}.`
+  const newestOfAll = (r: Thing) => Boolean(r.posted) && roles.every((o) => o === r || (o.posted ?? '') < (r.posted as string))
+  const facts = (r: Thing) =>
+    [r.chance && `you have a ${r.chance} chance there`, r.pay && `it states its pay, ${r.pay}`, r.posted && `it was posted ${r.posted}${newestOfAll(r) ? `, the newest of these ${roles.length}` : ''}`].filter((f): f is string => Boolean(f))
+  const why = (r: Thing) => facts(r).join(' and ') || 'it is the first on the list'
+  return plain(`Apply to ${at(a)} first, because ${why(a)}. Look at ${at(b)} next${b.place ? ` (${b.place})` : ''}, because ${why(b)}.`)
 }
 
 /** A note a careful person would send: the subject and body, or null when the model's text breaks a rule. Exported for its test. */
@@ -171,7 +184,14 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
         const said = await twoSentences(deps, table)
         if (said) usedModel = said.model
         const summary = said?.text ?? fallbackSentences(roles)
-        return done({ parts: [{ about: [], text: cmp.sentence ?? 'Compared your top roles.' }, { about: [], text: summary }] })
+        // "Top" is only true when a ranking is stored for these roles; otherwise they are the newest, and the answer says so.
+        const { count: ranked } = await deps.db.from('person_roles').select('job_id', { count: 'exact', head: true }).eq('user_id', deps.userId).in('job_id', roles.map((r) => r.id)).not('want_p', 'is', null)
+        const n = roles.length
+        const opening = ranked
+          ? `Compared your top ${n} roles by your stored ranking in a table.`
+          : `Compared your ${n} newest roles in a table. None of your roles has a stored ranking yet, so these are the newest, not a top ${n}.`
+        results.push({ object: null, text: opening })
+        return done({ parts: [{ about: [], text: opening }, { about: [], text: summary }] })
       }
 
       // draft

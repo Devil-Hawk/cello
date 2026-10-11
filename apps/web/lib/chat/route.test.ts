@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { checkNote, routeIntent } from './route'
+import type { Thing } from './things'
+import { checkNote, fallbackSentences, RANKING_WORDS, routeIntent } from './route'
 
 describe('routeIntent', () => {
   it('reads a find with a type, a place and a count', () => {
@@ -32,5 +33,26 @@ describe('checkNote', () => {
     expect(checkNote(good.replace('timeline', 'plans'), input)).toBeNull()
     expect(checkNote(good.replace(' The work looks close to what I do best.', ''), input)).toBeNull()
     expect(checkNote(good.replace('eight years', '12 years'), input)).toBeNull()
+  })
+})
+
+describe('the Compare sentences', () => {
+  const role = (title: string, company: string, posted: string, over: Partial<Thing> = {}): Thing => ({ kind: 'role', id: title, title, company, place: 'Remote, US', pay: null, chance: null, posted, notes: [], ...over })
+  // The first run of chat 6b7864ff: Solutions Architect AI was posted 2026-10-08, the same day as the Deployment Strategist.
+  const roles = [role('Solutions Architect, AI', 'Stripe', '2026-10-08'), role('Deployment Strategist', 'Retell AI', '2026-10-08'), role('Machine Learning Engineer, Radar', 'Stripe', '2026-10-07')]
+
+  it('refuses a model sentence that ranks one role over the others', () => {
+    expect(RANKING_WORDS.test('Look at the Machine Learning Engineer, Radar role next, making it the most recently listed role after the Deployment Strategist.')).toBe(true)
+    expect(RANKING_WORDS.test('Look at the Machine Learning Engineer, Radar role at Stripe next, which was posted on 2026-10-07.')).toBe(false)
+  })
+  it('says "the newest" only when the dates prove it', () => {
+    const text = fallbackSentences(roles)
+    expect(text).not.toMatch(/newest/)
+    expect(fallbackSentences([role('A', 'X', '2026-10-09'), role('B', 'Y', '2026-10-08')])).toMatch(/posted 2026-10-09, the newest of these 2/)
+  })
+  it('puts the role with a stated chance and pay first, and says why from the rows', () => {
+    const text = fallbackSentences([role('A', 'X', '2026-10-09'), role('B', 'Y', '2026-10-01', { chance: 'strong', pay: '$150k to $190k' })])
+    expect(text).toMatch(/^Apply to B at Y first, because you have a strong chance there and it states its pay, \$150k to \$190k/)
+    expect(text).not.toMatch(/[\u2014\u2013!]/)
   })
 })
