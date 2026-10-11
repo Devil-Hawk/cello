@@ -419,7 +419,7 @@ export default function ResumeStudioPage() {
       setOptimization({ forId: doc.id, report: optimizationResult })
       toast(
         optimizationResult.unchanged
-          ? { title: 'Nothing to change', description: 'Your resume already leads with what this posting asks for, so this version is the same as your base.' }
+          ? { title: 'Nothing to change', description: 'Nothing in your resume matched this posting better, so this version is the same as your base.' }
           : {
               title: 'Tailored version generated',
               description: `ATS score ${optimizationResult.atsScore} → ${optimizationResult.rescore.atsScore}. Review the diff before saving edits.`,

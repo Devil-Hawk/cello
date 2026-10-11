@@ -371,7 +371,7 @@ export async function optimizeResumeAndSave(args: OptimizeAndSaveArgs): Promise<
   const document = await createResumeVersion(args.client, {
     userId: args.userId,
     jobId: args.jobId,
-    title: result.unchanged ? `${args.title ?? 'Resume'} (unchanged)` : (args.title ?? null),
+    title: result.unchanged ? `${args.title ?? `Resume for ${args.job.title}`} (unchanged)` : (args.title ?? null),
     resume: result.resume,
     atsScore: result.rescore.atsScore,
     source: args.source ?? 'tailored',
