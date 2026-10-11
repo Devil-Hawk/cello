@@ -186,3 +186,17 @@ describe('a model whose wording drifted still sets the order', () => {
     expect(out.warnings.join(' ')).not.toMatch(/dropped because they did not keep/)
   })
 })
+
+describe('the reworded summary', () => {
+  const b = ResumeSchema.parse({ ...base, basics: { ...base.basics, summary: 'Backend engineer with eight years building data services and leading small teams.' } })
+  it('is refused when it takes the posting title as the person\'s own', () => {
+    const out = applyTailorPatch(b, patch({ summary: 'Deployment Strategist with eight years building data services.' }), { title: 'Deployment Strategist' })
+    expect(out.resume.basics.summary).toBe(b.basics.summary)
+    expect(out.warnings.join(' ')).toMatch(/as your own title/)
+  })
+  it('is refused when it takes on the posting\'s vocabulary, and kept when it only rewords', () => {
+    expect(applyTailorPatch(b, patch({ summary: 'Backend engineer delivering customer-facing solutions, implementations and consulting engagements.' })).resume.basics.summary).toBe(b.basics.summary)
+    const kept = 'Backend engineer with eight years leading small teams that build data services.'
+    expect(applyTailorPatch(b, patch({ summary: kept })).resume.basics.summary).toBe(kept)
+  })
+})

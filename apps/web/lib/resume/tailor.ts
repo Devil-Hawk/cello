@@ -92,7 +92,16 @@ function overlap(a: string, b: string): number {
   return [...words(a)].filter((w) => y.has(w)).length
 }
 
-export function applyTailorPatch(base: Resume, patch: TailorPatch): { resume: Resume; warnings: string[]; changes: string[] } {
+/**
+ * Words (six letters or more) of a reworded summary that the base never uses, by their first five letters. A summary may
+ * borrow a word or two from the posting, never take on its vocabulary wholesale: three or more is a different person.
+ */
+export function newWords(basePlain: string, text: string): string[] {
+  const stems = new Set((basePlain.toLowerCase().match(/[a-z]{4,}/g) ?? []).map((w) => w.slice(0, 5)))
+  return [...new Set((text.toLowerCase().match(/[a-z]{6,}/g) ?? []).filter((w) => !stems.has(w.slice(0, 5))))]
+}
+
+export function applyTailorPatch(base: Resume, patch: TailorPatch, job?: { title: string }): { resume: Resume; warnings: string[]; changes: string[] } {
   const basePlain = resumeToPlainText(base)
   const out: Resume = structuredClone(base)
   const dropped: string[] = []
@@ -103,6 +112,11 @@ export function applyTailorPatch(base: Resume, patch: TailorPatch): { resume: Re
   const summary = patch.summary.trim()
   if (summary) {
     const bad = invented(basePlain, summary)
+    // Calling the person by the posting's own title ("Deployment strategist with eight years...") is a claim, not tailoring.
+    const title = job?.title.trim().toLowerCase()
+    if (title && title.length > 3 && summary.toLowerCase().includes(title) && !basePlain.toLowerCase().includes(title)) bad.push(`"${job!.title}" as your own title`)
+    const novel = newWords(basePlain, summary)
+    if (novel.length > 2) bad.push(...novel.slice(0, 4))
     if (bad.length) dropped.push(...bad)
     else if (summary !== (base.basics.summary ?? '').trim()) {
       out.basics.summary = summary
@@ -123,7 +137,7 @@ export function applyTailorPatch(base: Resume, patch: TailorPatch): { resume: Re
       const bad = invented(basePlain, highlights.join('\n'))
       const label = [entry.position, entry.name].filter(Boolean).join(', ') || `entry ${p.index + 1}`
       if (bad.length) dropped.push(...bad)
-      else if (!keepsEntry(entry.highlights, highlights)) {
+      else if (!keepsEntry(entry.highlights, highlights) || newWords(basePlain, highlights.join(' ')).length > 3) {
         // The model's wording drifted too far to trust, but its ORDER still says what leads for this posting: keep the
         // person's own words and take only the order, each base bullet used once and unmatched ones after.
         const order = orderOnly(entry.highlights, highlights)

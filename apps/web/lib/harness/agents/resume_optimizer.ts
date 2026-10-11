@@ -317,7 +317,7 @@ export async function optimizeResume(args: OptimizeResumeArgs): Promise<ResumeOp
   )
   tokensUsed += rewriteTokens
 
-  const patched = applyTailorPatch(base, patch)
+  const patched = applyTailorPatch(base, patch, args.job)
   const { warnings } = patched
   // Then, in code, the bullets that match the posting best lead each job.
   const ranked = rankBulletsForJob(patched.resume, args.job)
