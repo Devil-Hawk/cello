@@ -161,7 +161,7 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
     const done = async (answer: ModelAnswer): Promise<AgentOutput> => {
       // The model calls of this turn (the summary, the Writer) are tied to it, so its cost and model are on its own rows.
       await deps.db.from('llm_spend').update({ chat_turn_id: input.turnId }).eq('user_id', deps.userId).is('chat_turn_id', null).gte('created_at', startedAt)
-      const made = madeIds.length ? (((await deps.db.from('artifacts').select('id, type, title, created_at').eq('user_id', deps.userId).in('id', madeIds)).data as { id: string; type: string; title: string; created_at: string }[] | null) ?? []) : []
+      const made = madeIds.length ? (((await deps.db.from('artifacts').select('id, type, title, created_at').eq('user_id', deps.userId).in('id', madeIds.slice(0, 20))).data as { id: string; type: string; title: string; created_at: string }[] | null) ?? []) : []
       const ran: Ran = usedModel === deps.ran.model ? deps.ran : { ...deps.ran, model: usedModel, steppedDown: { wanted: { rung: deps.ran.rung, model: deps.ran.model, effort: deps.ran.effort }, why: 'model' } }
       return { answer, results, ran, tools, sources, made }
     }
@@ -185,7 +185,7 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
         if (said) usedModel = said.model
         const summary = said?.text ?? fallbackSentences(roles)
         // "Top" is only true when a ranking is stored for these roles; otherwise they are the newest, and the answer says so.
-        const { count: ranked } = await deps.db.from('person_roles').select('job_id', { count: 'exact', head: true }).eq('user_id', deps.userId).in('job_id', roles.map((r) => r.id)).not('want_p', 'is', null)
+        const { count: ranked } = await deps.db.from('person_roles').select('job_id', { count: 'exact', head: true }).eq('user_id', deps.userId).in('job_id', roles.map((r) => r.id).slice(0, 12)).not('want_p', 'is', null)
         const n = roles.length
         const opening = ranked
           ? `Compared your top ${n} roles by your stored ranking in a table.`
