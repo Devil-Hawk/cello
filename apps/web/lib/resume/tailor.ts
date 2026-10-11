@@ -72,6 +72,26 @@ export function entriesDiffer(base: Resume, out: Resume): string | null {
   return null
 }
 
+/** The base bullets in the order the model's bullets point to, or null when that is the base order or nothing matched. */
+function orderOnly(before: string[], after: string[]): string[] | null {
+  const left = [...before.keys()]
+  const picked: number[] = []
+  for (const a of after) {
+    const best = left.filter((i) => similar(a, before[i])).sort((x, y) => overlap(a, before[y]) - overlap(a, before[x]))[0]
+    if (best !== undefined) {
+      picked.push(best)
+      left.splice(left.indexOf(best), 1)
+    }
+  }
+  const order = [...picked, ...left]
+  return picked.length > 0 && order.some((v, i) => v !== i) ? order.map((i) => before[i]) : null
+}
+
+function overlap(a: string, b: string): number {
+  const y = words(b)
+  return [...words(a)].filter((w) => y.has(w)).length
+}
+
 export function applyTailorPatch(base: Resume, patch: TailorPatch): { resume: Resume; warnings: string[]; changes: string[] } {
   const basePlain = resumeToPlainText(base)
   const out: Resume = structuredClone(base)
@@ -103,8 +123,15 @@ export function applyTailorPatch(base: Resume, patch: TailorPatch): { resume: Re
       const bad = invented(basePlain, highlights.join('\n'))
       const label = [entry.position, entry.name].filter(Boolean).join(', ') || `entry ${p.index + 1}`
       if (bad.length) dropped.push(...bad)
-      else if (!keepsEntry(entry.highlights, highlights)) swapped.push(label)
-      else if (highlights.join('\n') !== entry.highlights.join('\n')) {
+      else if (!keepsEntry(entry.highlights, highlights)) {
+        // The model's wording drifted too far to trust, but its ORDER still says what leads for this posting: keep the
+        // person's own words and take only the order, each base bullet used once and unmatched ones after.
+        const order = orderOnly(entry.highlights, highlights)
+        if (order) {
+          entry.highlights = order
+          changes.push(`${label}: bullets reordered, the most relevant first. Your wording was kept as written.`)
+        } else swapped.push(label)
+      } else if (highlights.join('\n') !== entry.highlights.join('\n')) {
         const moved = highlights.some((h, i) => !similar(h, entry.highlights[i] ?? ''))
         changes.push(`${label}: ${moved ? 'bullets reordered, the most relevant first, and reworded to match the posting' : 'bullets reworded to match the posting'}. Nothing was added that your resume does not say.`)
         entry.highlights = highlights

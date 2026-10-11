@@ -174,3 +174,15 @@ describe('entriesDiffer, the guard on a finished version', () => {
     expect(entriesDiffer(base, lost)).toMatch(/work has \d entries/)
   })
 })
+
+describe('a model whose wording drifted still sets the order', () => {
+  it("keeps the person's own words and takes the order", () => {
+    const mine = base.work[0].highlights
+    // Reversed, with a bullet of its own thrown in: not a trustworthy rewrite, but its order still says what leads.
+    const drifted = [...mine].reverse().concat('Baked sourdough loaves for the whole office every morning.')
+    const out = applyTailorPatch(base, patch({ work: [{ index: 0, highlights: drifted }] }))
+    expect(out.resume.work[0].highlights).toEqual([...mine].reverse())
+    expect(out.changes.join(' ')).toMatch(/bullets reordered, the most relevant first. Your wording was kept/)
+    expect(out.warnings.join(' ')).not.toMatch(/dropped because they did not keep/)
+  })
+})
