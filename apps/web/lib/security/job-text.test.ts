@@ -744,3 +744,17 @@ describe('hyphenated compounds cannot support a claim through one half', () => {
     expect(findUnsupportedClaims(resume, 'Led the payments platform team at Stripe.')).toEqual([])
   })
 })
+
+describe('figures in a tailored resume are read as the resume wrote them', () => {
+  const resume = 'Riley Marsh\n(206) 555-0142 | Seattle, WA\n- Cut p99 read latency from 1.9s to 310ms, saving roughly $1.1M/year.\n- Ran 12k RPS at peak and cut a 6h batch to 40m.'
+  it('does not flag the resume\'s own text handed back', () => {
+    expect(checkTailoringContainment(resume, resume).ok).toBe(true)
+  })
+  it('still flags a figure the resume does not hold, even inside a longer one', () => {
+    const r = checkTailoringContainment(resume, 'Cut p99 read latency to 31ms, saving $11M/year across 48 services.')
+    expect(r.ok).toBe(false)
+    expect(r.unsupported.map((u) => u.text)).toEqual(expect.arrayContaining(['31', '11', '48']))
+    // "1.1" is in the resume but "11" is not: a dot or a digit touching a figure makes it another number.
+    expect(checkTailoringContainment(resume, 'Saved $11M/year.').ok).toBe(false)
+  })
+})

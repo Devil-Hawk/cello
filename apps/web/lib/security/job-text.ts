@@ -1126,6 +1126,14 @@ export function findUnsupportedClaims(
   const haystack = normalizeWords(`${resume ?? ''}\n${(opts.allow ?? []).join('\n')}`)
   const jobHaystack = normalizeWords(opts.jobText ?? '')
   const supported = (raw: string) => containsPhrase(haystack, raw)
+  // A figure is read as the resume wrote it: "555" is in "(206) 555-0142", "99" in "p99", "1.9" in "1.9s". normalizeWords
+  // joins a hyphen and splits a dot, which hides all three. A digit run only counts when no other digit or dot touches it
+  // ("48" is not in "148" or "4.8"), so this never lets a different number through.
+  const figureInResume = (raw: string) => {
+    const figure = raw.replace(/[.,;:%'\u2019-]+$/, '')
+    return /^\d/.test(figure) && new RegExp(`(?<![\\d.,])${figure.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\d]|[.,]\\d)`).test(resumeRaw)
+  }
+  const resumeRaw = `${resume ?? ''}\n${(opts.allow ?? []).join('\n')}`
   const inJobText = (raw: string) => (opts.jobText ?? '').trim().length > 0 && containsPhrase(jobHaystack, raw)
 
   const seen = new Set<string>()
@@ -1193,7 +1201,7 @@ export function findUnsupportedClaims(
       // grammar, not by being a proper noun. Skipped unless it is shouting or
       // carries a digit, both of which are capitalisation the writer chose.
       if (match.index === 0 && !/\d/.test(raw) && raw !== raw.toUpperCase()) continue
-      if (supported(raw)) continue
+      if (supported(raw) || figureInResume(raw)) continue
       push(raw, 'fact', sentence)
     }
   }
