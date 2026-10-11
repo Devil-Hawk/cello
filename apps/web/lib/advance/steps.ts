@@ -175,7 +175,9 @@ export const tailor: Step = {
     const { data } = await admin.from('pipeline_events').select('id').eq('application_id', app.id).eq('user_id', app.user_id).eq('kind', 'approval.decided').contains('payload', { hash }).limit(1)
     const detail = { artifact_id: doc.artifact_id, version: doc.version, hash }
     if (data && data.length > 0) return { kind: 'continue', line: `You approved version ${doc.version} of the tailored resume.`, payload: detail }
-    return { kind: 'wait', reason: 'approve_resume', detail, line: `Needs you: approve version ${doc.version} of the tailored resume.` }
+    // A tailoring that changed nothing is not called tailored: the person approves their own resume, as it is.
+    const unchanged = Boolean(doc.title?.endsWith('(unchanged)'))
+    return { kind: 'wait', reason: 'approve_resume', detail, line: unchanged ? `Needs you: approve version ${doc.version} of your resume. Nothing in it needed changing for this role.` : `Needs you: approve version ${doc.version} of the tailored resume.` }
   },
 }
 
