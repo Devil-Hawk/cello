@@ -57,7 +57,10 @@ export function VersionList({ versions, selectedId, onSelect, className }: Versi
           >
             <div className="flex items-center justify-between gap-2">
               <span className="text-caption font-medium text-foreground">v{v.version}</span>
-              <Badge tone={SOURCE_TONE[source]}>{SOURCE_LABEL[source]}</Badge>
+              {/* A tailoring that changed nothing is saved as "(unchanged)" and must not read as Tailored. */}
+              <Badge tone={source === 'tailored' && v.title?.endsWith('(unchanged)') ? 'muted' : SOURCE_TONE[source]}>
+                {source === 'tailored' && v.title?.endsWith('(unchanged)') ? 'Unchanged' : SOURCE_LABEL[source]}
+              </Badge>
             </div>
             {v.title && <div className="truncate text-caption text-muted-foreground">{v.title}</div>}
             <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">

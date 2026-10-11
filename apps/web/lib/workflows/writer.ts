@@ -270,7 +270,7 @@ export function buildWriterGraph(deps: WriterDeps) {
           draft: {
             text: out.suggestedRewrite,
             content: { text: out.suggestedRewrite, ats_score: out.rescore.atsScore, matched_keywords: out.matchedKeywords, missing_keywords: out.missingKeywords, format_issues: out.formatIssues },
-            title: `Resume for ${job?.title ?? 'a role'} at ${company}`,
+            title: `Resume for ${job?.title ?? 'a role'} at ${company}${out.unchanged ? ' (unchanged)' : ''}`,
             artifactType: 'resume' as const,
             resume: out.resume,
             atsScore: out.rescore.atsScore,

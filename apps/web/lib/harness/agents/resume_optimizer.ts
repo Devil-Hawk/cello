@@ -38,7 +38,7 @@ import {
   type Resume,
   type TailorPatch,
 } from '@/lib/resume/schema'
-import { applyTailorPatch, rankBulletsForJob } from '@/lib/resume/tailor'
+import { applyTailorPatch, entriesDiffer, rankBulletsForJob } from '@/lib/resume/tailor'
 import type { ResumeDocument, ResumeSource } from '@/lib/resume/types'
 
 const RESUME_LIMIT = 12000
@@ -71,6 +71,8 @@ export interface ResumeOptimizerResult extends AtsScore {
   warnings: string[]
   /** What moved or was reworded, and why, in words (from the patch that was kept). */
   changes: string[]
+  /** True when the tailored text is the base's text: nothing moved or changed. */
+  unchanged: boolean
   /** Fresh ATS score of `suggestedRewrite`. */
   rescore: AtsScore
   tokensUsed: number
@@ -322,6 +324,10 @@ export async function optimizeResume(args: OptimizeResumeArgs): Promise<ResumeOp
   const resume = ranked.resume
   const changes = [...patched.changes, ...ranked.changes]
   const rewrite = resumeToPlainText(resume)
+  const broke = entriesDiffer(base, resume)
+  if (broke) throw new Error(`Could not produce a tailored resume that keeps your experience as written (${broke}); nothing was saved`)
+  // Same text as the base: nothing to show as Tailored.
+  const unchanged = rewrite === basePlain
 
   const rescored = await scoreResume(run, rewrite, args.job)
   tokensUsed += rescored.tokensUsed
@@ -332,6 +338,7 @@ export async function optimizeResume(args: OptimizeResumeArgs): Promise<ResumeOp
     resume,
     warnings,
     changes,
+    unchanged,
     rescore: rescored.score,
     tokensUsed,
   }
@@ -364,7 +371,7 @@ export async function optimizeResumeAndSave(args: OptimizeAndSaveArgs): Promise<
   const document = await createResumeVersion(args.client, {
     userId: args.userId,
     jobId: args.jobId,
-    title: args.title ?? null,
+    title: result.unchanged ? `${args.title ?? 'Resume'} (unchanged)` : (args.title ?? null),
     resume: result.resume,
     atsScore: result.rescore.atsScore,
     source: args.source ?? 'tailored',

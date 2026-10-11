@@ -51,6 +51,27 @@ export function keepsEntry(before: string[], after: string[]): boolean {
   return after.every((a) => before.some((b) => similar(a, b))) && kept >= Math.ceil(before.length / 2)
 }
 
+/**
+ * The guard on a finished version: its jobs, schools and projects are the base's, in the same order, each still holding
+ * only its own bullets. Null when it holds, else what broke. A version that fails is never saved or shown as Tailored.
+ */
+export function entriesDiffer(base: Resume, out: Resume): string | null {
+  const sections = ['work', 'education', 'projects'] as const
+  for (const key of sections) {
+    const a = base[key] as unknown as Array<Record<string, unknown>>
+    const b = out[key] as unknown as Array<Record<string, unknown>>
+    if (a.length !== b.length) return `${key} has ${b.length} entries and the base has ${a.length}`
+    for (let i = 0; i < a.length; i++) {
+      for (const f of ['name', 'position', 'institution', 'location', 'startDate', 'endDate', 'dateLabel', 'current']) {
+        if ((a[i][f] ?? '') !== (b[i][f] ?? '')) return `${key} entry ${i + 1} changed its ${f}`
+      }
+      const bullets = (e: Record<string, unknown>) => ((e.highlights ?? e.courses ?? []) as string[])
+      if (!keepsEntry(bullets(a[i]), bullets(b[i]))) return `${key} entry ${i + 1} no longer holds its own bullets`
+    }
+  }
+  return null
+}
+
 export function applyTailorPatch(base: Resume, patch: TailorPatch): { resume: Resume; warnings: string[]; changes: string[] } {
   const basePlain = resumeToPlainText(base)
   const out: Resume = structuredClone(base)

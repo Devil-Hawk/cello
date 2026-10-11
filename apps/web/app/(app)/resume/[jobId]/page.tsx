@@ -417,10 +417,14 @@ export default function ResumeStudioPage() {
       setCompareLabel(beforeLabel)
       setViewMode('diff')
       setOptimization({ forId: doc.id, report: optimizationResult })
-      toast({
-        title: 'Tailored version generated',
-        description: `ATS score ${optimizationResult.atsScore} → ${optimizationResult.rescore.atsScore}. Review the diff before saving edits.`,
-      })
+      toast(
+        optimizationResult.unchanged
+          ? { title: 'Nothing to change', description: 'Your resume already leads with what this posting asks for, so this version is the same as your base.' }
+          : {
+              title: 'Tailored version generated',
+              description: `ATS score ${optimizationResult.atsScore} → ${optimizationResult.rescore.atsScore}. Review the diff before saving edits.`,
+            }
+      )
     } catch (err) {
       console.error('[resume-studio] generate failed', err)
       const message = err instanceof Error ? err.message : 'Resume generation failed.'

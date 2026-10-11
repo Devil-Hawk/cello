@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyTailorPatch, keepsEntry, rankBulletsForJob } from './tailor'
+import { applyTailorPatch, entriesDiffer, keepsEntry, rankBulletsForJob } from './tailor'
 import { ResumeSchema, type TailorPatch } from './schema'
 import { CANONICAL_RESUME } from './test-fixtures'
 
@@ -152,5 +152,25 @@ describe('rankBulletsForJob', () => {
   })
   it('leaves an entry alone when nothing matches better', () => {
     expect(rankBulletsForJob(resume, { title: 'Pastry Chef', description: '' }).changes).toEqual([])
+  })
+})
+
+describe('entriesDiffer, the guard on a finished version', () => {
+  it('passes the base as it is and a reordering of its own bullets', () => {
+    expect(entriesDiffer(base, base)).toBeNull()
+    const moved = structuredClone(base)
+    moved.work[0].highlights.reverse()
+    expect(entriesDiffer(base, moved)).toBeNull()
+  })
+  it('refuses bullets moved under another employer, a changed employer or a lost job', () => {
+    const swapped = structuredClone(base)
+    ;[swapped.work[0].highlights, swapped.work[1].highlights] = [swapped.work[1].highlights, swapped.work[0].highlights]
+    expect(entriesDiffer(base, swapped)).toMatch(/no longer holds its own bullets/)
+    const renamed = structuredClone(base)
+    renamed.work[1].name = 'Somewhere Else'
+    expect(entriesDiffer(base, renamed)).toMatch(/changed its name/)
+    const lost = structuredClone(base)
+    lost.work.pop()
+    expect(entriesDiffer(base, lost)).toMatch(/work has \d entries/)
   })
 })
