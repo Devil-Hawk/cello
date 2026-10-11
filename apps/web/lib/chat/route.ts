@@ -185,7 +185,8 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
         if (said) usedModel = said.model
         const summary = said?.text ?? fallbackSentences(roles)
         // "Top" is only true when a ranking is stored for these roles; otherwise they are the newest, and the answer says so.
-        const { count: ranked } = await deps.db.from('person_roles').select('job_id', { count: 'exact', head: true }).eq('user_id', deps.userId).in('job_id', roles.map((r) => r.id).slice(0, 12)).not('want_p', 'is', null)
+        const roleIds = roles.map((r) => r.id)
+        const { count: ranked } = await deps.db.from('person_roles').select('job_id', { count: 'exact', head: true }).eq('user_id', deps.userId).in('job_id', roleIds.slice(0, 12)).not('want_p', 'is', null)
         const n = roles.length
         const opening = ranked
           ? `Compared your top ${n} roles by your stored ranking in a table.`
