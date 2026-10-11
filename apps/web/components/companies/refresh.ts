@@ -26,8 +26,6 @@ export interface ScraperTriggerResult {
   success: boolean
   jobsFound: number
   inserted: number
-  /** How the roles were read: 'board' is the employer's own full listing, anything else a window of it. */
-  tier: string | null
   /** Only a browser can read the site, and the scheduled check will. */
   reading: boolean
   /** Another read of this company is running; this one did nothing. */
@@ -61,13 +59,12 @@ export async function triggerScraperFallback(companyId: string): Promise<Scraper
       success: Boolean(data.success),
       jobsFound: data.jobsFound || 0,
       inserted: data.inserted || 0,
-      tier: typeof data.tier === 'string' ? data.tier : null,
       reading: Boolean(data.reading),
       busy: Boolean(data.busy),
       message: data.message || data.error || (data.success ? 'Scrape complete' : 'Scrape failed'),
     }
   } catch {
-    return { success: false, jobsFound: 0, inserted: 0, tier: null, reading: false, busy: false, message: 'Failed to connect to scraper' }
+    return { success: false, jobsFound: 0, inserted: 0, reading: false, busy: false, message: 'Failed to connect to scraper' }
   }
 }
 
@@ -77,8 +74,6 @@ export interface CompanyRefreshOutcome {
   found: number
   /** Newly stored jobs. */
   inserted: number
-  /** 'board' when the employer's own full board listing was read. */
-  tier: string | null
   via: 'ats' | 'scraper'
   /** Only a browser can read the site, and the scheduled check will. */
   reading: boolean
@@ -93,5 +88,5 @@ export interface CompanyRefreshOutcome {
  */
 export async function refreshCompanyJobs(companyId: string): Promise<CompanyRefreshOutcome> {
   const r = await triggerScraperFallback(companyId)
-  return { success: r.success, found: r.jobsFound, inserted: r.inserted, tier: r.tier, via: 'scraper', reading: r.reading, busy: r.busy, message: r.message }
+  return { success: r.success, found: r.jobsFound, inserted: r.inserted, via: 'scraper', reading: r.reading, busy: r.busy, message: r.message }
 }

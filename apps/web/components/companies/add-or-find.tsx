@@ -28,7 +28,7 @@ import {
   type Found,
 } from './logic'
 import { refreshCompanyJobs, type CompanyRefreshOutcome } from './refresh'
-import { headlineLine, openAfterRead } from './company-logic'
+import { headlineLine } from './company-logic'
 
 export interface AddOrFindProps {
   /** Called once an employer was followed, so the page behind can read again. */
@@ -45,7 +45,7 @@ function readLine(name: string, read: CompanyRefreshOutcome | null, counts: { ke
   if (!read) return `Added ${name}. Cello could not read its roles just now; the next check will.`
   if (!read.success) return `Added ${name}. ${read.message}`
   if (read.reading || read.busy) return `Added ${name}. ${read.message}`
-  return `Added ${name}. ${counts === null ? `${read.found.toLocaleString('en-US')} open.` : headlineLine(openAfterRead(read, counts), counts.kept)}`
+  return `Added ${name}. ${counts === null ? `${read.found.toLocaleString('en-US')} open.` : headlineLine(counts.open ?? read.found, counts.kept)}`
 }
 
 export function AddOrFind({ onAdded, autoFocus, initial }: AddOrFindProps) {

@@ -105,13 +105,6 @@ export function countedLine(r: { kept: number; total: number; counts: Record<str
 }
 
 /** "12 kept of 636 open." */
-/**
- * The "of N open" after a read: what the read itself listed when it was the employer's whole board, else the directory's last
- * count. The directory is refreshed by the sweep, so right after a read it can be a day older than the board.
- */
-export const openAfterRead = (read: { found: number; tier: string | null }, counts: { open: number | null }) =>
-  read.tier === 'board' && read.found > 0 ? read.found : (counts.open ?? read.found)
-
 export const headlineLine = (total: number, kept: number) => `${kept.toLocaleString('en-US')} kept of ${total.toLocaleString('en-US')} open.`
 
 export const windowLine = (total: number) => `Cello read ${total.toLocaleString('en-US')} roles. This employer lists more than it shows at once.`
