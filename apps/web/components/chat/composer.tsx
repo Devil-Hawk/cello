@@ -22,6 +22,8 @@ export interface ComposerProps {
   above?: ReactNode
   /** The row of controls under the field (Attach, the model picker). */
   controls?: ReactNode
+  /** A muted line under the controls, for what the page knows about the last answer (it stepped down). */
+  status?: string | null
   placeholder?: string
 }
 
@@ -97,7 +99,7 @@ function Dictate({ value, onChange }: { value: string; onChange: (value: string)
   )
 }
 
-export function Composer({ value, onChange, onSend, onStop, running, quoted, onRemoveQuote, notice, above, controls, placeholder = 'Ask Cello to find, compare, write or apply' }: ComposerProps) {
+export function Composer({ value, onChange, onSend, onStop, running, quoted, onRemoveQuote, notice, above, controls, status, placeholder = 'Ask Cello to find, compare, write or apply' }: ComposerProps) {
   const canSend = !running && value.trim().length > 0 && !notice
   const lines = Math.min(MAX_LINES, Math.max(1, value.split('\n').length))
   const field = useRef<HTMLTextAreaElement>(null)
@@ -162,6 +164,7 @@ export function Composer({ value, onChange, onSend, onStop, running, quoted, onR
           </button>
         )}
       </div>
+      {status && <p className="mt-1 px-1 text-caption text-muted-foreground">{status}</p>}
     </div>
   )
 }

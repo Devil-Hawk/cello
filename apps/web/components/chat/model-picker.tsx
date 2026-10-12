@@ -1,10 +1,11 @@
 'use client'
 
-// The model picker under the compose box: shows the current choice ("Free models, Standard") and opens the ladder.
+// The model picker under the compose box: shows the current choice ("Free models: laguna-s-2.1, Standard · Free") and
+// opens the ladder; on a phone the summary is the model's name alone and the rung, effort and cost wait in the ladder.
 // Rungs above the person's highest, or not set up, are greyed with the reason. A choice applies to this chat from the
 // next turn; "Just this message" applies once; "Use for new chats" also sets the person's default. The cost line is
 // code's estimate, and "Cost not known before sending" when the model has no price. When the last answer did not come from
-// the chosen model, one line says what answered and why the choice did not.
+// the chosen model, steppedDownWords says what answered and why the choice did not; the page shows it under the composer.
 
 import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
@@ -24,8 +25,6 @@ export interface ModelPickerProps {
   rungs: RungInfo[]
   /** The line next to Send, from models.estimate. */
   estimate?: string | null
-  /** What the newest answer ran on (its ledger rows), so the picker can say when it stepped down. */
-  lastRan?: Ran | null
   onPick: (choice: ModelChoice, scope: PickScope) => void
 }
 
@@ -38,6 +37,9 @@ export function steppedDownWords(lastRan: Ran | null | undefined, choice: ModelC
   return `Your last answer came from ${modelLabel(lastRan.model, rungs)}: ${modelLabel(down.wanted.model, rungs)} ${STEP_DOWN_WORDS[down.why]}.`
 }
 
+/** The model's own name alone ("laguna-s-2.1"), for the phone's summary. */
+export const modelName = (choice: ModelChoice | null, rungs: RungInfo[]) => (choice ? modelLabel(choice.model, rungs) : 'Choose a model')
+
 /** "Free models, Standard": the rung and the effort in the person's words. */
 export function choiceWords(choice: ModelChoice | null, rungs: RungInfo[]): string {
   if (!choice) return 'Choose a model'
@@ -48,9 +50,8 @@ export function choiceWords(choice: ModelChoice | null, rungs: RungInfo[]): stri
   return effort ? `${rung}, ${effort}` : rung
 }
 
-export function ModelPicker({ choice, rungs, estimate, lastRan, onPick }: ModelPickerProps) {
+export function ModelPicker({ choice, rungs, estimate, onPick }: ModelPickerProps) {
   const [draft, setDraft] = useState<ModelChoice | null>(choice)
-  const stepped = steppedDownWords(lastRan, choice, rungs)
   const rung = rungs.find((r) => r.rung === draft?.rung)
   // Deeper and Deepest are for models on the person's own key.
   const efforts = (Object.keys(EFFORT_WORDS) as PickableEffort[]).filter((e) => draft?.rung === 'R4' || (e !== 'xhigh' && e !== 'max'))
@@ -63,13 +64,17 @@ export function ModelPicker({ choice, rungs, estimate, lastRan, onPick }: ModelP
 
   return (
     <details className="relative">
-      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-1 rounded-control px-2 py-1 text-caption text-muted-foreground hover:bg-muted hover:text-foreground">
-        <span>{choiceWords(choice, rungs)}</span>
-        {estimate && <span className="text-muted-foreground">· {estimate}</span>}
-        <ChevronDown className="h-3 w-3" aria-hidden />
-        {stepped && <span className="basis-full text-muted-foreground">{stepped}</span>}
+      <summary className="flex cursor-pointer list-none items-center gap-1 rounded-control px-2 py-1 text-caption text-muted-foreground hover:bg-muted hover:text-foreground">
+        <span className="truncate sm:hidden">{modelName(choice, rungs)}</span>
+        <span className="hidden sm:inline">{choiceWords(choice, rungs)}</span>
+        {estimate && <span className="hidden text-muted-foreground sm:inline">· {estimate}</span>}
+        <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />
       </summary>
       <div className="absolute bottom-full left-0 z-30 mb-1 w-72 max-w-[calc(100vw-2rem)] space-y-3 rounded-card border border-border bg-card p-3 shadow-pop" role="group" aria-label="Model">
+        <p className="text-caption text-muted-foreground sm:hidden">
+          {choiceWords(choice, rungs)}
+          {estimate && ` · ${estimate}`}
+        </p>
         <ul className="space-y-1">
           {rungs.map((r) => (
             <li key={r.rung}>

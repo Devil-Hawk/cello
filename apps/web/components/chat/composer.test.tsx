@@ -28,6 +28,12 @@ describe('Composer', () => {
     expect(out).toMatch(/<textarea[^>]*><\/textarea>/)
   })
 
+  it('shows the status line under the controls, outside anything clickable', () => {
+    const out = html({ status: 'Your last answer came from laguna-s-2.1: gemma did not answer.' })
+    expect(out).toMatch(/<\/div><p class="mt-1 px-1 text-caption text-muted-foreground">Your last answer came from laguna-s-2.1: gemma did not answer.<\/p><\/div>$/)
+    expect(html()).not.toContain('mt-1 px-1 text-caption')
+  })
+
   it('draws no microphone until the browser is known to have speech to text', () => {
     expect(html()).not.toContain('Dictate')
   })

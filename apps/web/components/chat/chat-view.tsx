@@ -11,7 +11,7 @@ import { Menu, X } from 'lucide-react'
 import { Markdown } from '@/components/chat/markdown'
 import { MadeBlock } from '@/components/chat/made-block'
 import { SourcesAndTools } from '@/components/chat/sources-and-tools'
-import { ModelPicker, type PickScope } from '@/components/chat/model-picker'
+import { ModelPicker, steppedDownWords, type PickScope } from '@/components/chat/model-picker'
 import { Composer } from '@/components/chat/composer'
 import { AnswerParts, type Named } from '@/components/chat/parts'
 import { Finder } from '@/components/chat/finder'
@@ -493,7 +493,8 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
         <div className="mx-auto w-full max-w-3xl px-4 pb-3">
           <Composer value={draft} onChange={setDraft} onSend={() => void sendMessage()} onStop={() => lastPersonTurn && void send(`/api/chat/${chatId}/stop`, 'POST', { turn_id: lastPersonTurn.id }).then(loadPage)} running={running} quoted={quoted}
             onRemoveQuote={() => setQuoted(null)}
-            controls={settings ? <ModelPicker key={`${choice?.rung}:${choice?.model}:${choice?.effort}`} choice={choice} rungs={settings.rungs} estimate={estimate} lastRan={lastRan} onPick={(c, scope) => void pick(c, scope)} /> : null}
+            controls={settings ? <ModelPicker key={`${choice?.rung}:${choice?.model}:${choice?.effort}`} choice={choice} rungs={settings.rungs} estimate={estimate} onPick={(c, scope) => void pick(c, scope)} /> : null}
+            status={settings ? steppedDownWords(lastRan, choice, settings.rungs) || null : null}
             above={
               <>
                 {at && (

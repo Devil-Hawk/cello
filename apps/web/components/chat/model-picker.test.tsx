@@ -18,6 +18,9 @@ describe('ModelPicker', () => {
     const out = renderToStaticMarkup(<ModelPicker choice={choice} rungs={rungs} estimate="Free" onPick={noop} />)
     expect(out).toContain('Free models: qwen3.8-27b, Standard')
     expect(out).toContain('· Free')
+    // The phone's summary is the model's name alone; the rung, effort and cost wait in the opened ladder.
+    expect(out).toMatch(/<summary[^>]*><span class="truncate sm:hidden">qwen3.8-27b<\/span>/)
+    expect(out).toMatch(/class="[^"]*sm:hidden"[^>]*>Free models: qwen3.8-27b, Standard · Free</)
   })
 
   it('greys a rung above the highest, with the reason, and one that is not set up', () => {
@@ -36,14 +39,12 @@ describe('ModelPicker', () => {
     expect(renderToStaticMarkup(<ModelPicker choice={{ rung: 'R4', model: 'anthropic/claude-sonnet-5', effort: 'high' }} rungs={rungs} onPick={noop} />)).toContain('Deepest')
   })
 
-  it('says the last answer stepped down', () => {
+  it('says the last answer stepped down, in words the page shows outside the picker', () => {
     const lastRan = { rung: 'R3' as const, model: 'laguna/laguna-s-2.1:free', effort: 'medium' as const, steppedDown: { wanted: choice, why: 'model' as const } }
-    const line = 'Your last answer came from laguna-s-2.1: qwen3.8-27b did not answer.'
-    expect(steppedDownWords(lastRan, choice, rungs)).toBe(line)
-    expect(renderToStaticMarkup(<ModelPicker choice={choice} rungs={rungs} lastRan={lastRan} onPick={noop} />)).toContain(line)
+    expect(steppedDownWords(lastRan, choice, rungs)).toBe('Your last answer came from laguna-s-2.1: qwen3.8-27b did not answer.')
     // Once the person picks what answered, or the choice answered itself, there is nothing to say.
     expect(steppedDownWords(lastRan, { ...choice, model: lastRan.model }, rungs)).toBe('')
     expect(steppedDownWords({ ...choice }, choice, rungs)).toBe('')
-    expect(renderToStaticMarkup(<ModelPicker choice={choice} rungs={rungs} lastRan={null} onPick={noop} />)).not.toContain('Your last answer')
+    expect(steppedDownWords(null, choice, rungs)).toBe('')
   })
 })
