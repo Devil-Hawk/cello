@@ -67,6 +67,8 @@ interface Deps {
   signal?: AbortSignal
 }
 
+export const NO_SENTENCE_LINE = 'No free model wrote a sentence that passed the checks. Try again in a minute, or pick another free model.'
+
 /** A model's text on one line, with a dash between two numbers (a pay range copied from the table) said as "to": the copy has no dashes. */
 const plain = (t: string) => t.replace(/\s+/g, ' ').replace(/(\d)\s*[\u2013\u2014]\s*(\d)/g, '$1 to $2').trim()
 

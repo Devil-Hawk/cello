@@ -43,8 +43,12 @@ export interface CelloChatModelOptions {
 export function celloChatModel(opts: CelloChatModelOptions): ChatOpenRouter {
   const key = opts.apiKeys.openrouter?.trim()
   if (!key) throw new MissingKeyError('No OpenRouter API key configured')
-  const model = opts.model ?? resolveModelId(opts.apiKeys.model)
   const free = freeFallbackModels()
+  const chosen = opts.model ?? resolveModelId(opts.apiKeys.model)
+  // The highest the person allows holds at this door too: under Free models no role, the orchestrator, a subagent or a
+  // fallback, is ever built on a paid id, whatever the stored model or the server default says.
+  const held = opts.apiKeys.models !== undefined && opts.apiKeys.models.ceiling !== 'R4' && !isFreeModel(chosen)
+  const model = held ? (opts.apiKeys.model && isFreeModel(opts.apiKeys.model) ? opts.apiKeys.model : free[0]) : chosen
   return new ChatOpenRouter({
     model,
     apiKey: key,

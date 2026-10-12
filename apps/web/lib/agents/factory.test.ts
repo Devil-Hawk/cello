@@ -177,3 +177,17 @@ describe('delegation is one level deep', () => {
     expect(String(taskResult(out.messages).content)).toContain('Acme makes robots.')
   })
 })
+
+describe('no subagent runs above the highest the person allows', () => {
+  const free = { openrouter: 'k', userId: 'u1', model: 'anthropic/claude-sonnet-5', models: { ceiling: 'R3' as const, order: [], creditBought: false } }
+
+  it('the Researcher built for a Free person is on a free model, not the server default', () => {
+    const s = researcherSpec({ ctx: ctx({ apiKeys: free }), fallbacks: [], skillsDir: skills() }, 'general-purpose')
+    expect((s.model as unknown as { model: string }).model).toMatch(/:free$/)
+  })
+
+  it("the Researcher runs on the turn's model when one was resolved for it", () => {
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [] })
+    expect(researcherSpec({ ctx: ctx(), model, fallbacks: [], skillsDir: skills() }, 'general-purpose').model).toBe(model)
+  })
+})
