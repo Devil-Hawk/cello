@@ -40,7 +40,7 @@ export function toolName(def: AnyCommand): string {
   return def.id.replace(/\./g, '_')
 }
 
-/** MCP keeps the 18 tools hosts already use under their old names (Q6). */
+/** MCP keeps the tools hosts already use under their old names (Q6). */
 export const LEGACY_PREFIX = 'legacy.'
 
 export function mcpToolName(def: AnyCommand): string {

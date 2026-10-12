@@ -105,32 +105,32 @@ export const COPILOT_TOOLS: ToolSpec[] = [
     kind: 'read',
     signature: 'web_search {"query":string,"limit"?:number}',
     desc:
-      'Search the open web for anything Cello does not already know — a company fact, a recent event, docs for ' +
+      'Search the open web for anything Cello does not already know: a company fact, a recent event, docs for ' +
       'an unfamiliar tool, checking a claim. Free by default (DuckDuckGo); automatically upgrades to Exa if the ' +
-      'user has configured that BYOK key in Settings. Returns raw titles/URLs/snippets from THIRD-PARTY pages — ' +
-      'unverified, not facts, and never a job lead on its own: for discovering NEW job postings (beyond Cello\'s ' +
-      'own tracked sources), use source_jobs instead — it already falls back to this same search as a last ' +
-      'resort and VERIFIES every hit against a live posting before it is ever treated as a job. Read-only: this ' +
-      'cannot browse further, take any action, or change anything.',
+      'user has configured that BYOK key in Settings. Returns raw titles/URLs/snippets from THIRD-PARTY pages: ' +
+      'unverified, not facts, and never a job lead on its own: for roles, use search_roles, which reads the ' +
+      'roles stored for the companies the person follows. Read-only: this cannot browse further, take any ' +
+      'action, or change anything.',
   },
   {
-    name: 'source_jobs',
-    kind: 'act',
-    signature: 'source_jobs {"query"?:string,"limit"?:number}',
+    name: 'search_roles',
+    kind: 'read',
+    signature: 'search_roles {"title"?:string,"place"?:string,"postedWithinDays"?:number,"company"?:string,"limit"?:number,"adjacent"?:boolean}',
     desc:
-      'Search 11 keyless job-aggregator APIs (TheMuse, Arbeitnow, RemoteOK, HN "Who is hiring", Y Combinator, and ' +
-      'more) for fresh postings, auto-track any new companies they name as suggestions, and insert what is new — ' +
-      'right here, no separate run to go watch. If those free sources still come up short after broadening ' +
-      '(adjacent titles, relaxed location/seniority), this automatically falls back to the harness\'s own ' +
-      'web_search tool as a last resort — site:-scoped queries against real ATS boards, every hit verified ' +
-      'against a live posting before it becomes a job — and reports that in notes. query narrows by role/keyword ' +
-      '(omit it to derive keywords from the resume); limit caps results (default 20, max 40). No LLM calls, so ' +
-      'it works even with no key configured. Use this instead of trigger_run for an ordinary "find more jobs" ' +
-      "ask. If a query inserts 0 new jobs, that's a signal to broaden and call it again with an adjacent query " +
-      '(a synonym title, a wider net) before concluding nothing is out there — do not stop at one empty pass. ' +
-      'Returned rows include companyId — use it directly with get_dossier/research_company for any company ' +
-      'worth checking.',
-    agent: 'sourcer',
+      'Find roles in the companies the person follows: the same stored roles the Jobs page shows, inside their ' +
+      'targets. title takes a role or its short form (FDE, ML engineer); place takes a city, a state code or ' +
+      'remote; adjacent:true adds adjacent titles (Solutions Engineer for FDE) and is used only when the person ' +
+      'asks for them. Returns at most limit roles (default 10, max 25) with title, company, place, posted date ' +
+      'and link, plus answer: the reply to give for a find request. Lists followed companies not checked in the ' +
+      'last 6 hours under notChecked.',
+  },
+  {
+    name: 'refresh_companies',
+    kind: 'run',
+    signature: 'refresh_companies {}',
+    desc:
+      'Read the job boards and careers sites of followed companies not checked in the last 6 hours, at most 5 per ' +
+      'call, and report what was read. Call it before search_roles when search_roles lists companies under notChecked.',
   },
   {
     name: 'score_jobs',
@@ -144,7 +144,7 @@ export const COPILOT_TOOLS: ToolSpec[] = [
       'asking, and do not call this repeatedly in one turn to route around the cap. Omit BOTH jobIds and query ' +
       'ONLY when the ask is genuinely "assess whatever is unassessed", it then falls back to newest-first. When ' +
       'the user names criteria that narrow which roles matter (a role, seniority, company trait), prefer passing ' +
-      'the specific jobIds you already identified from list_jobs/source_jobs; if you have not (or the pool is ' +
+      'the specific jobIds you already identified from list_jobs/search_roles; if you have not (or the pool is ' +
       'larger than what you listed), pass query (e.g. "AI Engineer") instead and it ranks the user\'s unassessed ' +
       'roles by relevance to that ask itself (title/description word matching, not newest-first) and assesses ' +
       'the top matches. If nothing unassessed matches the query it automatically broadens to the newest ' +
@@ -194,14 +194,14 @@ export const COPILOT_TOOLS: ToolSpec[] = [
     signature: 'research_companies {"companyIds":string[],"limit"?:number}',
     desc:
       'Batch version of research_company: research several companies AT ONCE, fanned out internally with bounded ' +
-      'concurrency, in a single tool call — this is how you verify/research a list of companies without burning a ' +
+      'concurrency, in a single tool call, this is how you verify/research a list of companies without burning a ' +
       'turn per company. Pass every companyId the ask needs checked (use the companyId already returned by ' +
-      'list_jobs/source_jobs — never invent one). COSTS REAL MONEY PER COMPANY, so batch size defaults to 5 and is ' +
+      'list_jobs/search_roles, never invent one). COSTS REAL MONEY PER COMPANY, so batch size defaults to 5 and is ' +
       'capped at 8 regardless of how many ids you pass; call again for the rest rather than raising limit past the ' +
-      'cap. Returns one result row per company id with its own status/reason — a company that could not be found ' +
+      'cap. Returns one result row per company id with its own status/reason, a company that could not be found ' +
       'or researched never silently disappears from the response, and one bad id never fails the whole batch. For ' +
       'a zero-cost visa-sponsorship-only signal across many companies (no dossier needed), check_sponsorship is ' +
-      'cheaper and instant — reach for this when the ask needs the rest of a dossier (funding, culture, comp) too.',
+      'cheaper and instant, reach for this when the ask needs the rest of a dossier (funding, culture, comp) too.',
     agent: 'company_researcher',
   },
   {
@@ -210,9 +210,9 @@ export const COPILOT_TOOLS: ToolSpec[] = [
     signature: 'trigger_run {"goal":string}',
     desc:
       'Plan + execute a full autonomous multi-agent DAG server-side, in the background, for a goal genuinely ' +
-      'bigger than a few direct tool calls — an explicit unattended or repeating campaign the user asked for ' +
-      '(e.g. "keep sourcing and drafting applications for anything above 90 while I\'m away"). NOT the default ' +
-      'for ordinary "find/score/tailor/draft" requests: those have their own direct tools (source_jobs, ' +
+      'bigger than a few direct tool calls, an explicit unattended or repeating campaign the user asked for ' +
+      '(e.g. "tailor and draft applications for everything I have scored above 90, then summarize"). NOT the default ' +
+      'for ordinary "find/score/tailor/draft" requests: those have their own direct tools (search_roles, ' +
       'score_jobs, tailor_cv, draft_outreach, research_company), call those yourself, one at a ' +
       'time, and only reach for this when the ask cannot reasonably be narrated as a handful of tool calls in ' +
       'this conversation.',

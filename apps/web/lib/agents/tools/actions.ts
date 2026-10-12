@@ -52,6 +52,8 @@ export const pipeline = defineTool({
       if (Array.isArray(out.recent)) out.recent = out.recent.slice(0, a.response_format === 'detailed' ? a.limit : Math.min(a.limit, 8))
       return out
     }
+    // A task instruction may have been written by the model from a chat turn, so a scheduled run does not change applications.
+    if (ctx.scheduledTaskId) return toolFix(`A scheduled task cannot ${a.action} an application.`, 'Put your suggestion in your result for the person to confirm in a conversation.')
     if (!a.application_id) return toolFix(`${a.action} needs an application_id.`, 'Call pipeline with action list and use an applicationId from it.')
     const { data } = await ctx.admin.from('applications').select('id, job_id, stage, applied_at').eq('id', a.application_id).eq('user_id', ctx.userId).maybeSingle()
     const app = data as { id: string; job_id: string; stage: string; applied_at: string | null } | null
@@ -167,13 +169,19 @@ export const scheduleTask = defineTool({
       if (a.task_id) {
         const existing = await getScheduledTask(ctx.admin, ctx.userId, a.task_id)
         if (!existing) return toolFix(`No scheduled task with id ${a.task_id}.`, 'Call schedule_task without task_id to create one.')
+        // A task that acts on its own rules is the person's to change; model text may only pause it.
+        const selfActing = existing.autonomy === 'act' || existing.rules?.allow_send_email === true || existing.rules?.allow_submit === true
+        const pauseOnly = a.status === 'paused' && [a.name, a.instruction, a.every, a.at, a.weekday, a.hours, a.timezone].every((v) => v === undefined)
+        if (selfActing && !pauseOnly) {
+          return toolFix('Only the person can change a task that acts on its own rules; edit it in Scheduled tasks.', 'Tell the person what to change there, or pause it with status paused.')
+        }
         const schedule: ScheduleSpec | undefined = a.every ? { every: a.every, at: a.at, weekday: a.weekday, hours: a.hours, timezone: a.timezone ?? existing.timezone } : undefined
         const updated = await updateScheduledTask(ctx.admin, ctx.userId, a.task_id, {
           name: a.name,
           instruction: a.instruction,
           schedule,
           // Never raise autonomy on an existing task from here: only keep or lower it.
-          autonomy: asked === 'act' ? undefined : a.autonomy,
+          autonomy: asked === 'act' || selfActing ? undefined : a.autonomy,
           status: a.status,
         })
         if (!updated) return toolFix('Could not change that task.', 'Try again.')

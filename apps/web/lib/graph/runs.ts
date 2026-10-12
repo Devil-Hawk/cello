@@ -110,6 +110,7 @@ import {
 } from '../harness/dynamic'
 import { loadApiKeys } from '../harness/keys'
 import { planGoal } from '../harness/planner'
+import { isCopilotRun, withoutSourcer } from '../harness/copilot-run'
 import { applyReplan } from '../harness/replan'
 import { stripUntrustedSubmit } from '../harness/schemas'
 import { BudgetCapError } from '../harness/spend'
@@ -395,15 +396,17 @@ export const harnessRunGraph = entrypoint(
     const deadline = Date.now() + MAX_RUN_MS
 
     // 1) Planning ------------------------------------------------------------
+    // A Copilot-started run never plans the sourcer (see lib/harness/copilot-run.ts).
+    const copilotRun = isCopilotRun(runRow.result)
     let plan: Plan
     if (runRow.plan && Array.isArray(runRow.plan.steps) && runRow.plan.steps.length > 0) {
       // Chain-compiled (or already-planned on a resumed run): BYPASSES
       // plannerTask entirely, exactly like runAgentRun's own "plan already
       // present" branch.
-      plan = runRow.plan
+      plan = copilotRun ? withoutSourcer(runRow.plan) : runRow.plan
     } else {
       const planResult = await plannerTask({ domainRunId, goal: runRow.goal, userId: runRow.user_id })
-      plan = planResult.plan
+      plan = copilotRun ? withoutSourcer(planResult.plan) : planResult.plan
       spent += planResult.tokensUsed
       await admin.from('agent_runs').update({ plan: plan as unknown as AgentRunRow['plan'] }).eq('id', domainRunId)
     }
@@ -714,6 +717,10 @@ export const harnessRunGraph = entrypoint(
       const outcome = applyReplan(currentSteps, request, { remainingBudgetTokens })
       if (!outcome.ok) {
         await journalReplanEvent(fromLabel, false, outcome.reason, [], replanLabel)
+        return
+      }
+      if (copilotRun && outcome.addedSteps.some((s) => s.agent_type === 'sourcer')) {
+        await journalReplanEvent(fromLabel, false, 'the sourcer is not available to runs started from the Copilot', [], replanLabel)
         return
       }
       for (const newStep of outcome.addedSteps) {

@@ -24,6 +24,7 @@ export interface AtsStoreOptions {
   /**
    * Service-role client. It takes the per-company lock (not callable by a signed-in user) and writes the roles an
    * employer's followers share: a signed-in client cannot, since one follower would be writing what the others read.
+   * It also writes every row of `jobs`: a posting is changed by the server only, so no signed-in session does.
    * Without it every write goes through `client`, which is right only for the service role itself.
    */
   lockClient?: Db
@@ -41,6 +42,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
   const holder = opts.holder ?? `ingest-${Math.random().toString(36).slice(2)}`
   const dry = opts.dryRun === true
   const lock = opts.lockClient
+  // Postings are written by the server only; without a service client the caller already is the server.
   const writer = lock ?? client
 
   return {
@@ -161,7 +163,7 @@ export function makeSupabaseAtsStore(client: Db, opts: AtsStoreOptions = {}): At
       // A linked company's read stamps and closes the employer's shared roles, by employer; the company's own rows stay by company.
       const { data, error } = employerId
         ? await writer.rpc('record_employer_sightings', { p_employer: employerId, p_external_ids: externalIds, p_sources: sources, p_close_after: 2 })
-        : await client.rpc('record_job_sightings', { p_company_id: companyId, p_external_ids: externalIds, p_sources: sources, p_close_after: 2 })
+        : await writer.rpc('record_job_sightings', { p_company_id: companyId, p_external_ids: externalIds, p_sources: sources, p_close_after: 2 })
       fail(error)
       const r = (data ?? {}) as Partial<SightingResult>
       return { seen: r.seen ?? 0, reopened: r.reopened ?? 0, missed: r.missed ?? 0, closed: r.closed ?? 0 }

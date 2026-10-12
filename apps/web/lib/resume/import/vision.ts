@@ -115,6 +115,6 @@ export async function transcribeWithAnthropic(apiKey: string, input: TranscribeI
   )
   const textBlock = response.content.find((b) => b.type === 'text')
   const text = textBlock && textBlock.type === 'text' ? stripCodeFence(textBlock.text) : ''
-  if (!text) throw new Error('No text response from Claude')
+  if (!text) throw new Error('No text response from the model')
   return text
 }

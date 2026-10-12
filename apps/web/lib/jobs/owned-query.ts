@@ -1,6 +1,6 @@
-// A role is one shared row; a person holds it through their person_roles row. These
-// are the two ways server code resolves that ownership, shared by the matcher,
-// the batch routes and the scoring store so none of them reimplements it.
+// A person holds a role through their person_roles row, not through the company that stored it
+// first. These are the two ways server code resolves ownership, shared by the matcher, the batch
+// routes and the scoring store so none of them reimplements it.
 
 import type { AdminClient } from '@/lib/harness/types'
 
@@ -19,11 +19,11 @@ export async function userCompanyIds(admin: AdminClient, userId: string): Promis
  * The roles userId holds (a person_roles row), through the person_jobs view instead of an
  * `.in('company_id', companyIds)` querystring array, which broke every load once an account passed
  * ~600 companies (the array crossed the request URL length limit). A role is one shared row, so
- * ownership is the person's person_roles row, not the company that stored it first. Server-side
- * against an admin client that bypasses RLS.
+ * ownership is the person's person_roles row, not the company that stored it first. Done
+ * server-side against an admin client that bypasses RLS.
  *
- * Never embed `companies!inner(...)` in `columns`: a role the sweep stored has company_id null, and an
- * inner join drops it. The viewer_id filter is the fence; a name comes from viewer_company_name.
+ * Never embed `companies!inner(...)` in `columns`: a role the sweep stored has company_id null, and an inner
+ * join drops it. The viewer_id filter is the fence; a name comes from viewer_company_name.
  */
 export function ownedJobsQuery(admin: AdminClient, userId: string, columns: string, opts?: { count?: 'exact'; head?: boolean }) {
   return admin.from('person_jobs').select(columns, opts).eq('viewer_id', userId)

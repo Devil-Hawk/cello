@@ -1,4 +1,4 @@
-// POST /api/mcp, Cello as an MCP server: the same 18 first-party copilot
+// POST /api/mcp, Cello as an MCP server: the same first-party copilot
 // tools (lib/harness/copilot-tool-catalog.ts's COPILOT_TOOLS, the registry
 // dispatchTool switches on), reachable by any MCP host, behind the same
 // guards the copilot's own graph enforces before it ever runs one.
@@ -16,7 +16,7 @@
 //
 // THE TOOLS ARE REGISTRY COMMANDS: this route builds no tool logic of its own.
 // It serves mcpView() (lib/commands/views.ts): the commands the assistant door
-// may call, plus today's 18 first-party copilot tools under their old names
+// may call, plus today's first-party copilot tools under their old names
 // (lib/commands/defs/legacy-mcp.ts, Q6), so hosts that already use them keep
 // working. Every call runs through runCommand with an assistant-door context,
 // so the door, the limits and the output check apply here exactly as they do

@@ -104,7 +104,7 @@ describe('readSavedConversation', () => {
 
   it('returns the messages in the shape the hook reads, and nothing for a thread that does not exist', async () => {
     const saver = new MemorySaver()
-    await agentFor(saver, new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [say('Hello there.')] })).invoke({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: 't1' } })
+    await agentFor(saver, new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('Hello there.')] })).invoke({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: 't1' } })
     const saved = await readSavedConversation(saver, 't1')
     expect(saved.values.messages.map((m) => (m as { type: string; content: string }).type)).toEqual(['human', 'ai'])
     expect((saved.values.messages[1] as { content: string }).content).toBe('Hello there.')
@@ -117,7 +117,7 @@ describe('readSavedConversation', () => {
   it('shows the question Cello is waiting on, but not a handover to a fresh request', async () => {
     const saver = new MemorySaver()
     const ask = tool(async () => String(interrupt({ kind: 'question', text: 'Which city?' })), { name: 'ask_person', description: 'Ask the person.', schema: z.object({}) })
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [callTools([{ name: 'ask_person' }])] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [callTools([{ name: 'ask_person' }])] })
     await agentFor(saver, model, [ask]).invoke({ messages: [new HumanMessage('find roles')] }, { configurable: { thread_id: 't1' } })
     const saved = await readSavedConversation(saver, 't1')
     expect(saved.interrupts).toEqual([{ value: { kind: 'question', text: 'Which city?' } }])
@@ -125,7 +125,7 @@ describe('readSavedConversation', () => {
     // A slice interrupt is not shown to the person.
     const slicer = tool(async () => String(interrupt({ kind: 'slice' })), { name: 'slice_now', description: 'x', schema: z.object({}) })
     const saver2 = new MemorySaver()
-    await agentFor(saver2, new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [callTools([{ name: 'slice_now' }])] }), [slicer]).invoke({ messages: [new HumanMessage('go')] }, { configurable: { thread_id: 't2' } })
+    await agentFor(saver2, new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [callTools([{ name: 'slice_now' }])] }), [slicer]).invoke({ messages: [new HumanMessage('go')] }, { configurable: { thread_id: 't2' } })
     expect((await readSavedConversation(saver2, 't2')).interrupts).toEqual([])
   })
 })

@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { ROLE_TAXONOMY } from '../role-taxonomy'
 import { INTENT_ROLE_TYPES, ROLE_TYPE_IDS, roleTypesForIntent } from './index'
 
-describe('main\'s 14 intents map into the taxonomy', () => {
+describe('main\'s 16 intents map into the taxonomy', () => {
   it('every old intent id has a row, and every row is an old intent id', () => {
     expect(Object.keys(INTENT_ROLE_TYPES).sort()).toEqual(ROLE_TAXONOMY.map((i) => i.id).sort())
-    expect(ROLE_TAXONOMY).toHaveLength(14)
+    expect(ROLE_TAXONOMY).toHaveLength(16)
   })
 
   it('every mapped id is a role type of the module', () => {

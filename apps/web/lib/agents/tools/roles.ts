@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { scoreTrace } from '@/lib/observability/langfuse'
 import { recordReaction, roleView, shortlistFor, type RolePick } from '../scoring-port'
 import { runScout } from '../subagents/scout'
+import { quoteIsTheirs } from './memory'
 import { clip, defineTool, keyFor, readFields, toolFix, writeFields, type CelloTool } from './common'
 
 function shape(p: RolePick, detailed: boolean) {
@@ -125,17 +126,25 @@ export const triageRole = defineTool({
   name: 'triage_role',
   description:
     'Record the person\'s reaction to a role: interested, not_for_me or applied, with their reason if they gave one. ' +
-    'This teaches Cello what they want and moves the role in the pipeline. Use it only when the person says how they feel about a role, never to guess for them.',
+    'This teaches Cello what they want and moves the role in the pipeline. Use it only when the person says how they feel about a role, never to guess for them. ' +
+    'In a conversation, user_quote is the exact words the person wrote that say it, and it only works when that quote is in the conversation.',
   schema: z.object({
     id: z.string().min(1).describe('The role id from find_roles.'),
     reaction: z.enum(['interested', 'not_for_me', 'applied']).describe('How the person feels: interested, not_for_me, or applied if they already applied.'),
     reason: z.string().max(300).optional().describe('Why, in the person\'s words, when they said.'),
+    user_quote: z.string().max(400).optional().describe('In a conversation: the exact words the person wrote that say how they feel about this role.'),
     ...writeFields,
   }),
   kind: 'write',
   untrusted: false,
   mcp: true,
-  async handler(ctx, a) {
+  async handler(ctx, a, meta) {
+    // A task instruction may have been written by the model from a chat turn, so a reaction it records is not the person's.
+    if (ctx.scheduledTaskId) return toolFix('A scheduled task cannot record how the person feels about a role.', 'Put your suggestion in your result for the person to confirm in a conversation.')
+    // Over MCP the person's own assistant is calling and there is no conversation to check.
+    if (meta.channel === 'agent' && !quoteIsTheirs(a.user_quote ?? '', meta.messages)) {
+      return toolFix('That quote is not in anything the person wrote in this conversation.', 'Ask the person how they feel about the role, then call triage_role with their exact words in user_quote.')
+    }
     const out = await recordReaction({ admin: ctx.admin, userId: ctx.userId, jobId: a.id, reaction: a.reaction, reason: a.reason })
     if (!out.ok) return toolFix(out.error, out.fix)
     if (a.reaction === 'applied') void scoreTrace(ctx.traceId, 'job_applied', 1, clip(a.reason, 200) ?? undefined)

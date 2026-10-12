@@ -94,7 +94,7 @@ describe('the response', () => {
 describe('a real agent stream through the wire', () => {
   it('values, messages and custom events survive, and the messages join into the answer', async () => {
     const lookup = tool(async () => 'ok', { name: 'lookup', description: 'x', schema: z.object({}) })
-    const model = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [callTools([{ name: 'lookup' }]), say('There are two roles.')] })
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [callTools([{ name: 'lookup' }]), say('There are two roles.')] })
     const agent = createAgent({ model, tools: [lookup], checkpointer: new MemorySaver() })
     const response = toSseResponse(async (emit) => {
       emit({ event: 'metadata', data: { run_id: 'r', thread_id: 't' } })

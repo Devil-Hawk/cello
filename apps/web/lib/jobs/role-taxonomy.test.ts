@@ -51,6 +51,13 @@ describe('resolveRoleIntent', () => {
     expect(resolveRoleIntent('   ')).toBeNull()
   })
 
+  it('resolves forward deployed and analytics engineers', () => {
+    expect(resolveRoleIntent('FDE')?.id).toBe('fde')
+    expect(resolveRoleIntent('Forward Deployed Engineer')?.id).toBe('fde')
+    expect(resolveRoleIntent('analytics engineer')?.id).toBe('analytics-engineer')
+    expect(resolveRoleIntent('data engineer')?.id).toBe('data-engineer')
+  })
+
   it('every taxonomy entry is reachable via getRoleIntent', () => {
     for (const intent of ROLE_TAXONOMY) {
       expect(getRoleIntent(intent.id)).toBe(intent)

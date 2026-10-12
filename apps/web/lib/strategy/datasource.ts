@@ -23,7 +23,6 @@ import { userCompanyIds, ownedJobsQuery } from '../harness/agents/matcher'
 import { chunkedIn } from '../supabase/chunked-in'
 import { QUALITY_REJECT_THRESHOLD } from '../jobs/classify'
 import type { Targeting } from '../targeting'
-import { fitRowOf } from '../scoring/read'
 
 export interface ApplicationRow {
   id: string
@@ -109,9 +108,9 @@ interface RawJob {
   posted_at: string | null
   job_function: string | null
   seniority: string | null
+  /** This person's own chance on the role (their person_roles row, through person_jobs). */
+  chance?: string | null
   viewer_company_name?: string | null
-  /** This person's own row for the role (the chance is theirs, not the posting's). */
-  person_roles?: { chance: string | null }[] | { chance: string | null } | null
 }
 
 function rawJobCompanyName(job: RawJob): string {
@@ -151,14 +150,11 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
       const jobs = await chunkedIn(jobIds, async (chunk) => {
         const { data, error } = await admin
           .from('person_jobs')
-          .select('id, company_id:viewer_company_id, source, posted_at, job_function, seniority, viewer_company_name')
+          .select('id, company_id:viewer_company_id, source, posted_at, chance, job_function, seniority, viewer_company_name')
           .eq('viewer_id', userId)
           .in('id', chunk)
         if (error) console.error('[strategy] getApplications: jobs query failed', error)
-        // The chance is the person's own, on their person_roles row for the role.
-        const { data: mine } = await admin.from('person_roles').select('job_id, chance').eq('user_id', userId).in('job_id', chunk)
-        const chanceOf = new Map(((mine as { job_id: string; chance: string | null }[] | null) ?? []).map((r) => [r.job_id, r.chance]))
-        return ((data as RawJob[] | null) ?? []).map((j) => ({ ...j, person_roles: { chance: chanceOf.get(j.id) ?? null } }))
+        return (data as RawJob[] | null) ?? []
       })
       const jobById = new Map<string, RawJob>(jobs.map((j) => [j.id, j]))
 
@@ -177,7 +173,7 @@ export function createSupabaseStrategyDataSource(admin: AdminClient, userId: str
             companyName: rawJobCompanyName(job),
             jobSource: job.source,
             jobPostedAt: job.posted_at,
-            chance: fitRowOf(job).chance ?? null,
+            chance: job.chance ?? null,
             jobFunction: job.job_function,
             seniority: job.seniority,
             closedReason: a.closed_reason ?? null,

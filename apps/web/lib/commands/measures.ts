@@ -1,10 +1,9 @@
-// The measure ids a command may name (blueprint 13.1): T1 to T33 are true
-// numbers, S1 to S26 are step sets, P1 to P9 are person measures.
-// If K7's measure seed exports the list at the base, import that instead.
+// The measure ids a command may name (blueprint 13.1): the ids of K7's register
+// (T are true numbers, S step sets, P person measures).
 
-const range = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => `${prefix}${i + 1}`)
+import { REGISTER } from '@/lib/measures/register'
 
-export const MEASURE_IDS: readonly string[] = [...range('T', 33), ...range('S', 26), ...range('P', 9)]
+export const MEASURE_IDS: readonly string[] = REGISTER.map((m) => m.id)
 
 export function isMeasureId(id: string): boolean {
   return MEASURE_IDS.includes(id)

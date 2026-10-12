@@ -10,7 +10,7 @@ import type { AdminClient } from '@/lib/harness/types'
 import type { OutreachDraftInput, SourceLine } from '@/lib/harness/agents/outreach'
 import { outreachHistory } from '@/lib/context/assemble'
 import { companyFacts } from '@/lib/dossier/facts'
-import { fitHighlights, fitRowOf, type FitRow } from '@/lib/scoring/read'
+import { fitHighlights } from '@/lib/scoring/read'
 import { personJobs } from '@/lib/jobs/person-jobs'
 
 export interface OutreachSourceArgs {
@@ -41,17 +41,19 @@ export async function loadOutreachSources(args: OutreachSourceArgs): Promise<Loa
   let jobDescription: string | null = null
   let matchHighlights: string[] = []
   if (args.jobId) {
+    // The person's own role row: the company is theirs, and so is the verdict.
     const { data: job } = await personJobs(supabase)
-      .select('id, title, description, company_id:viewer_company_id')
+      .select('id, title, description, viewer_company_id, chance_detail')
       .eq('id', args.jobId)
+      // A no-op under row-level security; under the service client (the Writer) it keeps another follower's verdict out of this draft.
+      .eq('viewer_id', userId)
       .single()
     if (job) {
       jobTitle = job.title || null
       jobDescription = job.description ?? null
-      companyId = job.company_id ?? companyId
+      companyId = job.viewer_company_id ?? companyId
       // Only what the resume really shows, each with the line that shows it: nothing the model could invent.
-      const { data: verdict } = await supabase.from('person_roles').select('chance_detail').eq('job_id', args.jobId).eq('user_id', userId).maybeSingle()
-      matchHighlights = fitHighlights(fitRowOf((verdict ?? {}) as FitRow).chance_detail)
+      matchHighlights = fitHighlights(job.chance_detail)
     }
   }
 

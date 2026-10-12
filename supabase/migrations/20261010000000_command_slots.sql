@@ -23,8 +23,12 @@ create table if not exists public.command_slots (
   bucket text not null check (char_length(bucket) <= 60),
   window_start timestamptz not null,
   n integer not null default 0,
+  created_at timestamptz not null default now(),
   primary key (user_id, channel, bucket, window_start)
 );
+
+-- The clock's prune (20261008040000_clock.sql) deletes rows by created_at.
+alter table public.command_slots add column if not exists created_at timestamptz not null default now();
 
 alter table public.command_slots enable row level security;
 revoke all on public.command_slots from public, anon, authenticated;

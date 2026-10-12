@@ -2,7 +2,7 @@
 // person_roles (the person_jobs view, migration 20261008050001) and person-roles-scan.test.ts fails on
 // any other `.from('jobs').select(`.
 
-/** The scoring package (K8a) rewrote both readers: nothing is excused here. */
+/** Both files that once read `jobs` for the scoring package now read person_jobs; the list stays so the stale check below keeps its shape. */
 export const K8A_READERS: readonly string[] = []
 
 /** The store reads its own employer's rows to diff a refresh, and the retype routine reads the roles no one has typed yet; neither is a person's read. */

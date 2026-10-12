@@ -424,6 +424,7 @@ export const application_follow_up: AgentFn = async (ctx) => {
         .from('companies')
         .select('name')
         .eq('id', job.company_id)
+        .eq('user_id', ctx.userId)
         .single()
       const name = (companyData as { name?: string | null } | null)?.name
       if (name) companyName = name

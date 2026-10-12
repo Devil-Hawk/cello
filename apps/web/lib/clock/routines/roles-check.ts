@@ -13,6 +13,7 @@ import { trackedOnly } from '../../companies/watchlist'
 import { staticFetchPage } from '../../ingest/fetch-page'
 import { newModelBudget } from '../../ingest/model'
 import { loadTargets, type ReaderTargets } from '../../ingest/reader/targets'
+import { viewerRoles } from '../../jobs/person-jobs'
 import { hasPersonTargets, judgeForPerson, prepareTargets } from '../../jobs/target-relevance'
 import { hasSource, ingestUser, isDue, makeSupabaseRunsStore, type DueCompany, type UserDeps, type UserSummary } from '../../ingest/run'
 import type { RoutineContext, RoutineOutcome } from '../routines'
@@ -121,7 +122,6 @@ interface HeldJob {
   company_id: string | null
   title_norm: string | null
   role_type: string | null
-  companies: { name: string | null } | { name: string | null }[] | null
   /** The employer's directory name: a role the sweep stored has no company_id, so no companies row to name it. */
   employer: { name: string | null } | { name: string | null }[] | null
 }
@@ -150,7 +150,7 @@ export async function rejudgeHeldRoles(
 
   while (now() < deadlineAt) {
     const { data, error } = await mine()
-      .select('job_id, saved_at, hidden_reason, jobs(title, job_function, seniority, country, language, is_remote, posted_at, employer_id, company_id, title_norm, role_type, companies(name), employer:company_directory(name))')
+      .select('job_id, saved_at, hidden_reason, jobs(title, job_function, seniority, country, language, is_remote, posted_at, employer_id, company_id, title_norm, role_type, employer:company_directory(name))')
       .eq('user_id', userId)
       .lt('targets_version', version)
       .order('job_id')
@@ -161,6 +161,8 @@ export async function rejudgeHeldRoles(
     const ids = rows.map((r) => r.job_id)
     const { data: apps } = await admin.from('applications').select('job_id').eq('user_id', userId).in('job_id', ids)
     const applied = new Set(((apps ?? []) as { job_id: string }[]).map((a) => a.job_id))
+    // the person's own company names a role, never the one that stored it first (an excluded-company keyword reads this name)
+    const viewer = await viewerRoles(admin, userId, ids)
 
     const drop: string[] = []
     const hide: string[] = []
@@ -168,12 +170,11 @@ export async function rejudgeHeldRoles(
     for (const r of rows) {
       const job = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs
       if (!job || !stated) continue
-      const company = Array.isArray(job.companies) ? job.companies[0] : job.companies
       const employer = Array.isArray(job.employer) ? job.employer[0] : job.employer
       const verdict = judgeForPerson(
         { title: job.title, job_function: job.job_function, seniority: job.seniority, country: job.country, language: job.language, is_remote: job.is_remote, postedAt: job.posted_at, title_norm: job.title_norm, role_type: job.role_type },
         person,
-        company?.name ?? employer?.name ?? null,
+        viewer.get(r.job_id)?.viewer_company_name ?? employer?.name ?? null,
         prepared
       )
       if (verdict.keep) {

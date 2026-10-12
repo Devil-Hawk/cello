@@ -256,7 +256,7 @@ export default function NotificationsPage() {
           key={job.id}
           tone="opportunity"
           title={job.title}
-          subtitle={[job.companies?.name ?? 'Unknown company', formatRelativeTime(job.posted_at ?? job.discovered_at)].join(
+          subtitle={[job.viewer_company_name ?? 'Unknown company', formatRelativeTime(job.posted_at ?? job.discovered_at)].join(
             ' · '
           )}
           // Opens THIS job, not the list. This row names a specific role and

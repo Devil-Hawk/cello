@@ -14,8 +14,8 @@ export function freeRunner(model: string, log?: { calls: number; tokens: number 
       prompt: opts.prompt,
       messages: opts.messages,
       json: opts.json,
-      // Free reasoning models spend part of the cap thinking, so give the same headroom a paid call gets.
-      maxTokens: Math.max(maxTokens, 1200) + (opts.reasoning && opts.reasoning.effort !== 'none' ? 1500 : 0),
+      // Every free model on the list reasons, and effort "none" is not honoured, so they all get the thinking headroom.
+      maxTokens: Math.max(maxTokens, 1200) + 2500,
       temperature: opts.temperature ?? 0.4,
     })
     if (log) {

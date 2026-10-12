@@ -89,7 +89,7 @@ describe('scoring', () => {
 describe('free models only', () => {
   it('refuses a model that is not free, so an eval cannot spend money', () => {
     expect(() => assertFree('anthropic/claude-3.5-sonnet')).toThrow(/not a :free model/)
-    expect(() => assertFree('qwen/qwen3.8-27b:free')).not.toThrow()
+    expect(() => assertFree('google/gemma-4-26b-a4b-it:free')).not.toThrow()
     for (const m of [...GENERATORS, JUDGE]) expect(m.endsWith(':free')).toBe(true)
   })
 

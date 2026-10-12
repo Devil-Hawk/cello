@@ -18,8 +18,17 @@ interface DraftFixture {
     url: string | null
     description: string | null
     location: string | null
-    companies: { name: string; metadata: unknown } | null
+    /** What an embed of companies(...) would return: the company of whoever stored the role first. The route must not ask for it. */
+    companies?: { name: string; metadata: unknown } | null
+    employer?: { name: string } | null
   } | null
+}
+
+interface ViewerFixture {
+  id: string
+  viewer_id: string
+  viewer_company_name: string | null
+  viewer_company_metadata: unknown
 }
 
 interface VerdictFixture {
@@ -36,7 +45,11 @@ let state: {
   drafts: DraftFixture[]
   evalVerdicts: VerdictFixture[]
   outreach: Record<string, unknown>[]
+  personJobs: ViewerFixture[]
 }
+
+/** Every select string the route sent to the service-role client. */
+let selects: { table: string; select: string }[] = []
 
 const GREENHOUSE_URL = 'https://boards.greenhouse.io/acme/jobs/4001'
 
@@ -53,7 +66,7 @@ function draft(over: Partial<DraftFixture> & { id: string }): DraftFixture {
       url: GREENHOUSE_URL,
       description: 'Build services. Ship them.',
       location: 'Remote',
-      companies: { name: 'Acme', metadata: {} },
+      employer: { name: 'Acme' },
     },
     ...over,
   }
@@ -100,6 +113,8 @@ function chain(table: string, opts?: { count?: string; head?: boolean }) {
             ? (state.outreach as Record<string, unknown>[]).filter(matchesEq)
           : table === 'eval_verdicts'
             ? (state.evalVerdicts as unknown as Record<string, unknown>[]).filter((v) => matchesEq(v) && matchesIn(v))
+          : table === 'person_jobs'
+            ? (state.personJobs as unknown as Record<string, unknown>[]).filter((v) => matchesEq(v) && matchesIn(v))
             : []
       if (orderBy) {
         const { column, ascending } = orderBy
@@ -129,7 +144,8 @@ function chain(table: string, opts?: { count?: string; head?: boolean }) {
 const admin = {
   from(table: string) {
     return {
-      select(_selectArg: string, opts?: { count?: string; head?: boolean }) {
+      select(selectArg: string, opts?: { count?: string; head?: boolean }) {
+        selects.push({ table, select: selectArg })
         return chain(table, opts)
       },
     }
@@ -161,7 +177,9 @@ beforeEach(() => {
     drafts: [],
     evalVerdicts: [],
     outreach: [],
+    personJobs: [],
   }
+  selects = []
 })
 
 describe('GET /api/notifications/queue', () => {
@@ -224,6 +242,24 @@ describe('GET /api/notifications/queue', () => {
     expect(body.items[0]).toMatchObject({ draftId: 'd1', companyName: 'Acme', title: 'Senior Backend Engineer' })
     expect(typeof body.items[0].reason).toBe('string')
     expect(body.items[0].reason.length).toBeGreaterThan(0)
+  })
+
+  it("names a role by the viewer's own company, never by the company that stored the shared role first", async () => {
+    // the role is stored under another person's company 'Theirs'; this viewer follows the employer as 'Mine'
+    state.drafts = [draft({ id: 'd1', jobs: { title: 'Role', url: GREENHOUSE_URL, description: 'd', location: null, companies: { name: 'Theirs', metadata: { apply: 'theirs-secret' } }, employer: { name: 'Directory Co' } } })]
+    state.personJobs = [{ id: 'job-d1', viewer_id: 'user-1', viewer_company_name: 'Mine', viewer_company_metadata: {} }]
+    const response = await GET(get())
+    const text = JSON.stringify(await response.json())
+    expect(text).toContain('Mine')
+    expect(text).not.toContain('Theirs')
+    expect(text).not.toContain('theirs-secret')
+    expect(selects.filter((s) => s.table === 'application_drafts').every((s) => !s.select.includes('companies('))).toBe(true)
+  })
+
+  it("falls back to the directory employer when the viewer holds no company for the role", async () => {
+    state.drafts = [draft({ id: 'd1' })]
+    const body = await (await GET(get())).json()
+    expect(body.items[0].companyName).toBe('Acme')
   })
 
   it('never returns another user\'s drafts', async () => {

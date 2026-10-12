@@ -63,7 +63,7 @@ interface JobFacts {
 }
 
 async function loadJobFacts(admin: AdminClient, userId: string, jobId: string): Promise<JobFacts> {
-  // The company is this person's own for the role (viewer_company_id), so the research facts are theirs.
+  // The person's own role row: the company is theirs, not the one that stored the shared role first.
   const { data } = await admin.from('person_jobs').select('description, viewer_company_id').eq('viewer_id', userId).eq('id', jobId).single()
   const row = (data ?? {}) as { description?: string | null; viewer_company_id?: string | null }
   return { description: row.description ?? null, companyId: row.viewer_company_id ?? null }

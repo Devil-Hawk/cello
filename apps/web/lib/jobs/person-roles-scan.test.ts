@@ -64,6 +64,24 @@ describe('person roles scan', () => {
     expect(found, 'read viewer_company_name or viewer_company_metadata from the view').toEqual([])
   })
 
+  it('has no companies( embed under jobs( in a file that uses the service role: it follows jobs.company_id, the first storer\'s company', () => {
+    // ponytail: heuristic on the client's name; a session client is covered by row level security on companies
+    const admin = /createAdminClient|ctx\.admin| AdminClient|RoutineContext/
+    const embed = /\bjobs\s*\((?:[^()]|\([^()]*\))*companies\s*\(/
+    const bad = (text: string) => admin.test(text) && embed.test(strip(text))
+    expect(bad("const admin = createAdminClient(); admin.from('x').select('jobs(id, companies(name))')")).toBe(true)
+    expect(bad("const admin = createAdminClient(); admin.from('x').select('jobs(id, person_roles(a), companies(name))')")).toBe(true)
+    expect(bad("const admin = createAdminClient(); admin.from('x').select('jobs(id, employer:company_directory(name))')")).toBe(false)
+    expect(bad("supabase.from('x').select('jobs(id, companies(name))')")).toBe(false)
+    const found: string[] = []
+    for (const root of ROOTS) {
+      for (const file of walk(path.join(WEB, root))) {
+        if (bad(readFileSync(file, 'utf8'))) found.push(path.relative(WEB, file).split(path.sep).join('/'))
+      }
+    }
+    expect(found, "name the role by viewerRoles(...) (the viewer's own company), else the directory employer").toEqual([])
+  })
+
   it('has no inner join to companies: a role the sweep stored has company_id null, and the join drops it', () => {
     const found: string[] = []
     for (const root of ROOTS) {

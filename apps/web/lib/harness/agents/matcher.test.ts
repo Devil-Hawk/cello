@@ -136,7 +136,7 @@ describe('diagnoseCandidateJobs', () => {
     expect(out).toEqual([
       { jobId: 'a', title: 'Backend Engineer', found: true, hasDescription: true, willAttemptScoring: true, reason: null },
       { jobId: 'b', title: 'Designer', found: true, hasDescription: false, willAttemptScoring: true, reason: null },
-      { jobId: 'c', title: null, found: false, hasDescription: false, willAttemptScoring: false, reason: "not found among your tracked companies' jobs" },
+      { jobId: 'c', title: null, found: false, hasDescription: false, willAttemptScoring: false, reason: 'not found among the roles you hold' },
     ])
   })
 })

@@ -17,7 +17,7 @@ export const GENERATOR = process.env.EVAL_GENERATOR_MODEL ?? 'google/gemma-4-31b
 /** A different family from the generator, so a model never grades its own writing. */
 export const JUDGE = process.env.EVAL_JUDGE_MODEL ?? 'nvidia/nemotron-3-super-120b-a12b:free'
 /** Second labeler for the goal judge's reference labels. */
-export const LABELER2 = process.env.EVAL_LABELER2_MODEL ?? 'qwen/qwen3.8-27b:free'
+export const LABELER2 = process.env.EVAL_LABELER2_MODEL ?? 'poolside/laguna-s-2.1:free'
 
 const BASE_URL = process.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1'
 const MIN_GAP_MS = Number(process.env.EVAL_MIN_GAP_MS ?? 3200)

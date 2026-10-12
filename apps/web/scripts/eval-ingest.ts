@@ -32,7 +32,7 @@ import { legacyPageReaderPrompt, parseLegacyAnswer } from './eval-ingest/legacy'
 import { scorePages, scoreRequirements, type PageRun, type ReqRun } from './eval-ingest/score'
 
 const DIR = path.join(__dirname, 'eval-ingest')
-const GENERATORS = ['google/gemma-4-31b-it:free', 'qwen/qwen3.8-27b:free']
+const GENERATORS = ['google/gemma-4-31b-it:free', 'poolside/laguna-s-2.1:free']
 const JUDGE = 'nvidia/nemotron-3-super-120b-a12b:free'
 
 function arg(name: string): string | undefined {

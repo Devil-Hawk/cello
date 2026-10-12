@@ -307,6 +307,8 @@ grant select, insert, update, delete on public.role_reactions, public.shortlist_
 -- applied (or any later stage) records it as a reaction, so the learning does
 -- not depend on every screen remembering to do it. The reaction carries what
 -- Cello predicted for the role to that person at that moment.
+-- Only a role the person already holds (a person_roles row) is snapshotted: the
+-- function runs as its owner, so it must not read a job the person cannot see.
 -- ---------------------------------------------------------------------------
 -- lane-stub: K5a person_roles
 do $stub$
@@ -336,9 +338,9 @@ begin
                     'chance', pr.chance)
              end
       from public.jobs j
-      left join public.person_roles pr on pr.job_id = j.id and pr.user_id = new.user_id
+      join public.person_roles pr on pr.job_id = j.id and pr.user_id = new.user_id
       left join public.company_directory d on d.id = j.employer_id
-      left join public.companies c on c.id = j.company_id
+      left join public.companies c on c.id = j.company_id and c.user_id = new.user_id
       where j.id = new.job_id
       on conflict (user_id, job_id)
       do update set reaction = 'applied', reason = null, updated_at = now();

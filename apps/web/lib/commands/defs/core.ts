@@ -215,7 +215,17 @@ export const checksStatus = defineCommand({
   measure: 'T5',
   async run(ctx) {
     const { readFindNewRoles } = await import('@/lib/ingest/status')
-    const s = await readFindNewRoles(readClient(ctx))
+    // The next check is the clock's, as /api/ingestion/status reads it.
+    const { checksStatus: readChecks } = await import('@/lib/clock/status')
+    const client = readClient(ctx)
+    let admin = null
+    try {
+      admin = ctx.admin()
+    } catch {
+      /* no service role on this deployment: background work reads as off */
+    }
+    const checks = await readChecks(client, admin)
+    const s = await readFindNewRoles(client, new Date(), checks.rolesCheck?.nextDueAt ?? null)
     return {
       state: s.state,
       started_at: s.startedAt,

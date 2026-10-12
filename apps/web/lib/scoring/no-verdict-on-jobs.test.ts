@@ -48,10 +48,10 @@ function balanced(text: string, open: number): { body: string; end: number } {
   return { body: text.slice(open), end: text.length }
 }
 
-/** Every query chain that starts on the jobs table: `.from('jobs')` or `ownedJobsQuery(...)`, with the calls chained after it. */
+/** Every query chain that starts on the jobs table: `.from('jobs')`, with the calls chained after it. person_jobs (what ownedJobsQuery reads) is the person's own role row and carries their verdict by design. */
 export function jobsChains(text: string): string[] {
   const out: string[] = []
-  const starts = [...text.matchAll(/\.from\(\s*['"]jobs['"]\s*\)|\bownedJobsQuery\(/g)]
+  const starts = [...text.matchAll(/\.from\(\s*['"]jobs['"]\s*\)/g)]
   for (const m of starts) {
     let i = (m.index ?? 0) + m[0].length
     let chain = m[0]
@@ -89,10 +89,11 @@ describe('jobsChains', () => {
     expect(jobsChains(own)).toEqual([])
   })
 
-  it('follows a chain across lines and into an ownership helper', () => {
+  it('follows a chain across lines, and leaves the person_jobs view alone', () => {
     const multi = "await admin\n  .from('jobs')\n  .select('id')\n  .update({ want_p: 0.5 })\n  .eq('id', x)"
     expect(jobsChains(multi).some((c) => /want_p/.test(c))).toBe(true)
-    expect(jobsChains("ownedJobsQuery(admin, u, 'id, chance_detail')").some((c) => /chance_detail/.test(c))).toBe(true)
+    expect(jobsChains("ownedJobsQuery(admin, u, 'id, chance_detail')")).toEqual([])
+    expect(jobsChains("admin.from('person_jobs').select('id, chance')")).toEqual([])
   })
 })
 

@@ -127,7 +127,7 @@ interface RoleFilterBuilder<T> {
   or(filters: string): T
 }
 
-const quote = (v: string) => (/[,()"]/.test(v) ? `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : v)
+export const quote = (v: string) => (/[,()"]/.test(v) ? `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : v)
 
 /** Restrict a jobs query to roles whose verdict is 'inside'. Same rule as targetVerdict. */
 export function applyRoleTargets<T extends RoleFilterBuilder<T>>(
