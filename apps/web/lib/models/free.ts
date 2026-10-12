@@ -3,7 +3,7 @@
 // factory (K24a) and the two lists never drift.
 
 export const DEFAULT_FREE_MODELS = [
-  'qwen/qwen3.8-27b:free',
+  'google/gemma-4-31b-it:free',
   'poolside/laguna-s-2.1:free',
   'nvidia/nemotron-3-super-120b-a12b:free',
 ] as const
