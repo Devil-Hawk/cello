@@ -37,6 +37,7 @@ import { addVersion, createArtifact, findArtifactByKey, getArtifact, type Artifa
 import { ARTIFACT_WRITE_TYPES } from '@/lib/agents/backends'
 import { activity, asSubAgentRunnable, invokeSpecialist, lastHumanText, parseBrief, summaryMessage, type Fix } from '@/lib/agents/subagents/common'
 import { reviewDraft, type DraftKind, type JudgeDeps, type ReviewResult } from './reviewer'
+import { reasonOf } from '@/lib/models/caps'
 
 export const WriterBriefSchema = z.object({
   /** message is a first note to someone; follow_up, reply and note are the other kinds of message. */
@@ -354,16 +355,20 @@ export function buildWriterGraph(deps: WriterDeps) {
       if (/refused to return tailored content/.test(message) && attempts < 2) {
         return { attempts, draft: null, corrective: message.replace(/^cv_tailor: refused to return tailored content \u2014 /, '') }
       }
+      // A cap or a missing key is said in code's plain words; trying again would only use another slot.
+      const reason = reasonOf(e)
       return {
         attempts,
         draft: null,
         result: fail({
           error: /refused to return tailored content/.test(message)
             ? 'Cello could not write a letter that stays inside your resume.'
-            : `The draft could not be written: ${message.slice(0, 200)}`,
+            : `The draft could not be written: ${(reason ?? message).slice(0, 200)}`,
           fix: /refused to return tailored content/.test(message)
             ? `Tell the person what was refused and ask whether the resume needs updating. Reason: ${message.replace(/^cv_tailor: refused to return tailored content \u2014 /, '').slice(0, 300)}`
-            : 'Try again, or tell the person it did not work.',
+            : reason
+              ? 'Tell the person this reason in one sentence. Do not try again.'
+              : 'Try again, or tell the person it did not work.',
         }),
       }
     }
