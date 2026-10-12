@@ -223,6 +223,18 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
       if (!resume || !name) return done(say('Cello needs your resume to write a note in your voice. Add it on Your record, then ask again.'))
       const facts = `Role: ${job.title} at ${intent.company}${job.place ? `, ${job.place}` : ''}. Posted ${job.posted ?? 'a date not stated'}.`
       const errors: string[] = []
+      const evidence = [resume, facts, name]
+      // ponytail: the model writes one sentence, a strength from the resume; code writes the rest, so a free model that cannot hold
+      // a four-to-six sentence shape still gives a note that does. Upgrade: let the model write the whole note once free models hold the shape.
+      const shape = { company: intent.company, title: job.title, ask: intent.ask, evidence }
+      const asked = intent.ask.trim().replace(/[.?!]+$/, '')
+      const askLine = asked ? `Could you tell me ${/^(if|whether|how|when|what|who|where)\b/i.test(asked) ? '' : 'about '}${asked}?` : 'Could you tell me where the role stands?'
+      const compose = (strength: string) =>
+        `Subject: ${job.title} at ${intent.company}\n\nHello,\n\nI am writing about the ${job.title} role at ${intent.company}. ${strength} I would be glad to share more about that experience. ${askLine} Thank you for your time.\n\nThank you,\n${name}`
+      const okStrength = (t: string) => {
+        const one = plain(t)
+        return one.split(/(?<=[.?])\s+/).filter(Boolean).length === 1 && /^(I|My)\b/.test(one) && one.length <= 260 && checkNote(compose(one), shape) !== null
+      }
       const got = await withWorker(
         { db: deps.db, userId: deps.userId, threadId: input.chatId, chatId: input.chatId, turnId: input.turnId, model: deps.ran.model, rung: deps.ran.rung },
         { command: 'documents.draft', title: 'Writing a message' },
@@ -231,11 +243,11 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
             deps.keys,
             deps.ran.model,
             {
-              maxTokens: 1800,
-              system: `Write a short professional note from a job seeker to a recruiter. Output the first line as "Subject: ..." then a blank line, then the note: a greeting line (Hello,), four to six sentences, then a sign-off line (Thank you,) and the sender's name on the next line. Name the company and the role. Ask only the one thing requested${intent.ask ? `: ${intent.ask}` : ''}. The recruiter's name is unknown, so do not use one. Say nothing about what the company does, builds, values or is focused on: you know only its name and the role, so the name is all you may say about it. Do not imply earlier contact (no \"continued interest\", \"again\", \"following up\"). Mention at most one strength, and only one that is in the resume excerpt; never invent an employer, number, date or skill. No brackets, no placeholders, no dashes, no exclamation marks.`,
+              maxTokens: 400,
+              system: `You help a job seeker write to a recruiter. Reply with exactly one plain sentence in the first person, starting with "I" or "My", that names one strength of the sender and one concrete thing from the resume excerpt that shows it. Use only what the resume excerpt says; never invent an employer, number, date or skill. Say nothing about the company. No dashes, brackets, exclamation marks, quotes or lists.`,
               prompt: `Sender: ${name}\n${facts}\n\nResume excerpt:\n${resume}`,
             },
-            (t) => checkNote(t, { company: intent.company, title: job.title, ask: intent.ask, evidence: [resume, facts, name] }) !== null,
+            okStrength,
             deps.signal,
             errors,
             'draft-outreach-message'
@@ -243,7 +255,7 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
       )
       if (!got) return done(say(`Cello could not write a note that passed its checks. ${errors.slice(0, 1).join(' ')} Try again in a minute, or pick another free model.`))
       usedModel = got.model
-      const note = checkNote(got.text, { company: intent.company, title: job.title, ask: intent.ask, evidence: [resume, facts, name] }) as { subject: string; body: string }
+      const note = checkNote(compose(plain(got.text)), shape) as { subject: string; body: string }
       const made = await createArtifact(deps.db, { userId: deps.userId, type: 'message', title: `Note to ${intent.company}`, author: 'cello', content: { subject: note.subject, body: note.body, to_name: null, to_email: null, kind: 'initial' }, jobId: job.id, about: [{ kind: 'job', ref: job.id }] })
       await deps.db.from('artifacts').update({ chat_turn_id: input.turnId }).eq('id', made.id).eq('user_id', deps.userId)
       tools.push({ label: 'Write a draft' })
