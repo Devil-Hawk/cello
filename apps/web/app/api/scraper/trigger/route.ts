@@ -93,7 +93,8 @@ export async function POST(request: NextRequest) {
   // The employer's "of N open" is what its whole board just listed; the sweep's older number is replaced now, not a day later.
   // ponytail: a listing too old to count as open is still on the board, so the board's "N open" counts it (as the live page does); found does not.
   const listed = outcome.tier === 'board' ? (result.listed ?? result.found) : result.found
-  if (company.employer_id && outcome.tier === 'board' && !failure && listed > 0) await storeOpenCount(company.employer_id, listed)
+  const employerId = (company as DueCompany).employer_id
+  if (employerId && outcome.tier === 'board' && !failure && listed > 0) await storeOpenCount(employerId, listed)
 
   const TIER_WORDS: Record<string, string> = {
     board: 'its job board',
