@@ -278,6 +278,7 @@ export async function loadApiKeys(admin: AdminClient, userId: string): Promise<D
       out[provider] = isEncrypted(value) ? decrypt(value) : value
     } catch (err) {
       console.error(`harness: failed to decrypt ${provider} key for ${userId}`, err)
+      ;(out.unreadable ??= []).push(provider)
     }
   }
 
