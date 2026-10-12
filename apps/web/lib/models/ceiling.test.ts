@@ -24,7 +24,7 @@ import { CeilingError, chatModelFor } from './factory'
 import { availableRungs, pickRung, personModels } from './ladder'
 
 const PAID = 'anthropic/claude-sonnet-5'
-const FREE = 'qwen/qwen3.8-27b:free'
+const FREE = 'google/gemma-4-31b-it:free'
 const person = (ceiling: PersonModels['ceiling'], order: Rung[] = ['R4', 'R3', 'R2', 'R1']): PersonModels => ({ ceiling, order, creditBought: false })
 const withModels = (keys: DecryptedApiKeys, models: PersonModels): DecryptedApiKeys => ({ ...keys, models })
 const step = (minRung: Rung): StepRef => ({ id: 'chance', minRung, below: 'Roles are ordered by title match and date.' })

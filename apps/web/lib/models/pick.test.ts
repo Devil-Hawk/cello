@@ -14,7 +14,7 @@ const callLlmMock = vi.fn()
 vi.mock('../harness/llm', () => ({ callLlm: (...args: unknown[]) => callLlmMock(...args) }))
 
 const RESULT: LlmResult = { content: 'ok', tokensUsed: 2, promptTokens: 1, completionTokens: 1, model: 'x' }
-const FREE = 'qwen/qwen3.8-27b:free'
+const FREE = 'google/gemma-4-31b-it:free'
 
 const chance = defineModelStep({ id: 'chance', kind: 'step', measure: 'S3', minRung: 'R2', below: 'Roles are ordered by title match and date.' })
 const draft = defineModelStep({ id: 'draft-follow-up', kind: 'step', measure: 'S6', minRung: 'R2', below: 'Write my own.' })
