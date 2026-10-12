@@ -27,9 +27,9 @@ export function CheckAllMenu({ ids }: { ids: readonly string[] }) {
   }
 
   return (
-    <details className="relative">
+    <details>
       <summary className="r-key r-key-raised min-h-11 min-w-11 cursor-pointer list-none font-r">Menu</summary>
-      <div className="r-sheet-lead absolute right-0 top-full z-30 mt-2 w-[min(92vw,320px)] space-y-2 p-3">
+      <div className="r-sheet-lead absolute right-0 top-full z-30 mt-2 w-[min(100%,320px)] space-y-2 p-3">
         {running ? (
           <div className="flex flex-wrap items-center gap-3">
             <span role="status" className="r-body">

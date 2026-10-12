@@ -130,9 +130,9 @@ export function RolesView({ query, items: read, picks, total, newToday, groupCou
 
   return (
     <div className="mx-auto max-w-[1200px] space-y-6 pb-16">
-      <header className="flex flex-wrap items-end justify-between gap-3">
+      <header className="relative flex flex-wrap items-end justify-between gap-3">
         <h1 className="r-display">Roles</h1>
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
           <Key variant="raised" onClick={() => setPasting(true)}>
             Paste a link
           </Key>

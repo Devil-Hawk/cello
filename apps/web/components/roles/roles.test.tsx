@@ -263,6 +263,15 @@ describe('role types', () => {
     expect(html).toMatch(/<div class="relative flex flex-wrap items-center gap-x-6/)
   })
 
+  it('hangs the Check chances menu from the header, so it stays on screen when the header wraps', () => {
+    const html = view({ items: fixtureRoles(2, 2), total: 2, hasModel: true })
+    expect(html).toMatch(/<header class="relative flex flex-wrap/)
+    expect(html).toMatch(/<div class="ml-auto flex items-center gap-2">/)
+    const panel = (html.match(/<summary[^>]*>Menu<\/summary><div class="([^"]*)"/)?.[1] ?? '').split(/\s+/)
+    expect(panel).toEqual(expect.arrayContaining(['absolute', 'right-0', 'top-full', 'w-[min(100%,320px)]']))
+    expect(html).not.toMatch(/<details class="relative"><summary[^>]*>Menu/)
+  })
+
   it('says how many roles are being checked, from the count it is given, and nothing when none are', () => {
     expect(uncheckedLine(12)).toBe('12 more are being checked. Until then they are listed by title and date.')
     expect(uncheckedLine(1)).toBe('1 more is being checked. Until then it is listed by title and date.')
