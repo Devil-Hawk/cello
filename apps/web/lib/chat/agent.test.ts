@@ -48,3 +48,24 @@ describe('a tool refused with a reason code knows', () => {
     expect(out.answer.parts).toHaveLength(1)
   })
 })
+
+describe('the loop dying after a refusal', () => {
+  it('ends the turn with the refusal, not a generic line', async () => {
+    const crashing = ({ tools }: { tools: unknown[] }) => ({
+      invoke: async () => {
+        await (tools as Tool[]).find((t) => t.name === 'documents_draft')!.invoke({ type: 'message', job_id: 'j1', instructions: 'ask about the timeline' })
+        throw new Error('InvalidUpdateError: Can receive only one value per step. Use an Annotation.Root with a reducer.')
+      },
+    })
+    await expect(chatAgent(deps(crashing))(input)).rejects.toMatchObject({ name: 'CommandRefusal', status: 502, message: CAP })
+  })
+
+  it('a crash with nothing refused is thrown as it is', async () => {
+    const crashing = () => ({
+      invoke: async () => {
+        throw new Error('boom')
+      },
+    })
+    await expect(chatAgent(deps(crashing))(input)).rejects.toThrow('boom')
+  })
+})

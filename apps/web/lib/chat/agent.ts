@@ -7,7 +7,7 @@ import { HumanMessage, type BaseMessage } from '@langchain/core/messages'
 import { tool } from '@langchain/core/tools'
 import { createCelloAgent } from '@/lib/agents/factory'
 import type { AgentContext } from '@/lib/agents/context'
-import { agentView, chatDoor, runCommand, toolName } from '@/lib/commands'
+import { agentView, chatDoor, CommandRefusal, runCommand, toolName } from '@/lib/commands'
 import type { AnyCommand } from '@/lib/commands'
 import { isBudgetCapError } from '@/lib/agents/spend-port'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
@@ -122,7 +122,14 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
       }) as unknown as NonNullable<ReturnType<NonNullable<ChatAgentDeps['build']>>>)
 
     const next: BaseMessage[] = history ? [new HumanMessage(input.feedback ?? '')] : [...(input.screen ? [new HumanMessage(input.screen)] : []), new HumanMessage(input.typed)]
-    const out = await agent.invoke({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, recursionLimit: 80 })
+    let out: Awaited<ReturnType<typeof agent.invoke>>
+    try {
+      out = await agent.invoke({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, recursionLimit: 80 })
+    } catch (e) {
+      // The loop itself died after a tool was refused: the refusal is the reason the person reads, not "try again".
+      if (refusals.length && !reasonOf(e) && !deps.signal?.aborted) throw new CommandRefusal(502, refusals.join(' '), 'failed')
+      throw e
+    }
     history = out.messages
 
     const parsed = AnswerSchema.safeParse(out.structuredResponse)
