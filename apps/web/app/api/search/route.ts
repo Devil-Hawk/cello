@@ -8,7 +8,7 @@
 // the last resort — see lib/search/index.ts for the client this route is a
 // thin wrapper over, and Settings → Search for where those keys are managed.
 //
-// Rate-limited in-process (lib/search/rate-limit.ts): DuckDuckGo is free but
+// Rate-limited by command slots (lib/search/rate-limit.ts): DuckDuckGo is free but
 // shared, the others are metered, so this must not be callable in an
 // unbounded loop. Mirrors the GET /api/kb/search route's shape (auth -> parse
 // params -> call the pure client -> normalize the JSON envelope).
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  if (!allowSearchRequest(user.id)) {
+  if (!(await allowSearchRequest(user.id))) {
     return NextResponse.json({ error: 'Too many searches — wait a moment and try again.' }, { status: 429 })
   }
 

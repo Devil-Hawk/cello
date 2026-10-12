@@ -32,3 +32,26 @@ export function isSameOriginRequest(headers: Headers): boolean {
   const host = (headers.get('x-forwarded-host') ?? headers.get('host') ?? '').split(',')[0].trim()
   return host !== '' && originHost.toLowerCase() === host.toLowerCase()
 }
+
+/** True when the browser says another site made this request. The softer
+ *  sibling of isSameOriginRequest, for routes a non-browser client also calls:
+ *  a request with neither header is not a browser acting across sites, so it
+ *  passes. Browsers always send Sec-Fetch-Site, so a hostile page cannot hide.
+ *
+ *  'same-site' counts as cross-site on purpose: a sibling subdomain is not us. */
+export function isCrossSiteRequest(headers: Headers): boolean {
+  const site = headers.get('sec-fetch-site')
+  if (site !== null) return site !== 'same-origin' && site !== 'none'
+
+  const origin = headers.get('origin')
+  if (!origin) return false
+
+  let originHost: string
+  try {
+    originHost = new URL(origin).host
+  } catch {
+    return true
+  }
+  const host = (headers.get('x-forwarded-host') ?? headers.get('host') ?? '').split(',')[0].trim()
+  return host === '' ? false : originHost.toLowerCase() !== host.toLowerCase()
+}
