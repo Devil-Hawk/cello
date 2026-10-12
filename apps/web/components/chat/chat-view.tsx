@@ -308,28 +308,27 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     const typed = draft.trim()
     if (!typed || sending) return
     setSending(true)
+    // The line moves from the compose box to the conversation at once; it comes back to the box if the send fails.
     setJustSent(typed)
+    setDraft('')
     stuck.current = true
     setNote(null)
+    const failed = (note: string) => {
+      setSending(false)
+      setJustSent(null)
+      setDraft(typed)
+      setNote(note)
+    }
     let id = chatId
     if (!id) {
       const made = await sendJson<{ id: string }>('/api/chat', 'POST', { chips: chips.map((c) => ({ kind: c.kind, id: c.ref })), ...(pending ? { choice: pending } : {}) })
-      if (!made.ok || !made.body?.id) {
-        setSending(false)
-        setJustSent(null)
-        return setNote('Cello could not start the chat. Try again.')
-      }
+      if (!made.ok || !made.body?.id) return failed('Cello could not start the chat. Try again.')
       id = made.body.id
     } else {
       for (const c of chips) await send(`/api/chat/${encodeURIComponent(id)}/attachments`, 'POST', { kind: c.kind, ref: refOf(c.kind, c.ref) })
     }
     const sent = await sendJson(`/api/chat/${encodeURIComponent(id)}/turns`, 'POST', { typed, ...(quoted ? { quoted } : {}), ...(once ? { choice: once } : {}) })
-    if (!sent.ok) {
-      setSending(false)
-      setJustSent(null)
-      return setNote(sent.body?.message ?? 'Cello could not send that. Try again.')
-    }
-    setDraft('')
+    if (!sent.ok) return failed(sent.body?.message ?? 'Cello could not send that. Try again.')
     setChips([])
     setQuoted(null)
     setOnce(null)
@@ -530,7 +529,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
               </div>
             )}
 
-            {chatId && (work.length > 0 || running) && (
+            {(work.length > 0 || running) && (
               <TasksLine
                 tasks={work.map(toTaskRow)}
                 running={running}
