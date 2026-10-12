@@ -91,7 +91,9 @@ export async function POST(request: NextRequest) {
   }
 
   // The employer's "of N open" is what its whole board just listed; the sweep's older number is replaced now, not a day later.
-  if (company.employer_id && outcome.tier === 'board' && !failure && result.found > 0) await storeOpenCount(company.employer_id, result.found)
+  // ponytail: a listing too old to count as open is still on the board, so the board's "N open" counts it (as the live page does); found does not.
+  const listed = outcome.tier === 'board' ? (result.listed ?? result.found) : result.found
+  if (company.employer_id && outcome.tier === 'board' && !failure && listed > 0) await storeOpenCount(company.employer_id, listed)
 
   const TIER_WORDS: Record<string, string> = {
     board: 'its job board',
@@ -115,8 +117,8 @@ export async function POST(request: NextRequest) {
         : 'Cello is reading this site.'
       : failure
         ? REASON_MESSAGE[failure]
-        : result.found > 0
-          ? `Found ${result.found} jobs at ${company.name} through ${TIER_WORDS[outcome.tier ?? 'board'] ?? 'its careers page'}`
+        : listed > 0
+          ? `Found ${listed} jobs at ${company.name} through ${TIER_WORDS[outcome.tier ?? 'board'] ?? 'its careers page'}`
           : outcome.skipped
             ? 'This company has no careers page to read. Add its careers URL.'
             : `No open roles found at ${company.name}.`
@@ -124,7 +126,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     success: !failure,
     company: company.name,
-    jobsFound: result.found,
+    jobsFound: listed,
     inserted: result.inserted,
     updated: result.updated,
     closed: result.closed,

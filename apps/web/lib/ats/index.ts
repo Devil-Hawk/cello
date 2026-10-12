@@ -243,6 +243,8 @@ export interface CompanyRefreshResult {
   companyName: string
   provider: AtsProviderId | null
   found: number
+  /** Postings the source listed, including ones too old to count as open roles: the employer's own "N open". */
+  listed?: number
   inserted: number
   /** Stored jobs whose description, title, location or pay changed at the source. */
   updated: number
@@ -688,7 +690,9 @@ export async function syncJobs(
   // are not sighted either, so a stored one of them misses and closes instead of being kept open by the listing.
   const notOpen = new Set<string>()
   let tooOld = 0
-  const clean = sanitizeJobs(listed).filter((job) => {
+  const sane = sanitizeJobs(listed)
+  result.listed = sane.length
+  const clean = sane.filter((job) => {
     if (!isStalePosting(job.postedAt)) return true
     notOpen.add(job.externalId)
     tooOld++

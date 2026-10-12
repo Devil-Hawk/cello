@@ -354,6 +354,8 @@ describe('refreshCompany: postings older than 180 days are not stored', () => {
     const result = await refreshCompany(store, COMPANY)
 
     expect(result.found).toBe(1)
+    // The board still lists both: its own "N open" counts the old one too.
+    expect(result.listed).toBe(2)
     expect(upserted.map((r) => r.external_id)).toEqual(['https://acme.com/jobs/new'])
   })
 })
