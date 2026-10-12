@@ -40,7 +40,7 @@ export function RoleCard({ card, onOpen }: { card: RoleCardData; onOpen?: (kind:
         {card.company &&
           (card.companyId ? (
             <p className={cn(NAME_CLASS, 'break-words')}>
-              <Link href={companyHref(card.companyId)} prefetch={false} className="hover:underline">
+              <Link href={companyHref(card.companyId)} prefetch={false} className="-mx-1 px-1 py-3.5 hover:underline">
                 {card.company}
               </Link>
             </p>

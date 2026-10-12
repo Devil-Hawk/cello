@@ -135,7 +135,7 @@ export function Composer({ value, onChange, onSend, onStop, running, quoted, onR
         rows={lines}
         value={value}
         placeholder={placeholder}
-        className="block w-full resize-none bg-transparent px-1 py-1 text-body text-foreground placeholder:text-muted-foreground focus:outline-none"
+        className="block min-h-11 w-full resize-none bg-transparent px-1 py-2.5 text-body text-foreground placeholder:text-muted-foreground focus:outline-none"
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
           // Escape is the document's (above), so it is not handled twice.

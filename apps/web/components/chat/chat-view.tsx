@@ -364,7 +364,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
 
       <main className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2 md:hidden">
-          <button type="button" aria-label="Open the list of chats" className="-my-1.5 inline-flex h-11 w-11 items-center justify-center rounded-control hover:bg-muted" onClick={() => setRailOpen(true)}>
+          <button type="button" aria-label="Open the list of chats" className="-my-1.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-control hover:bg-muted" onClick={() => setRailOpen(true)}>
             <Menu className="h-4 w-4" aria-hidden />
           </button>
           <span className="truncate text-body font-medium text-foreground">{page?.chat.title || 'New chat'}</span>
@@ -446,7 +446,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
                             </span>
                           )}
                           {chatId && !t.superseded_at && (
-                            <button type="button" className="min-h-11 hover:text-foreground md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100" onClick={() => setEditing({ id: t.id, text: t.typed ?? '' })}>
+                            <button type="button" className="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-foreground md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100" onClick={() => setEditing({ id: t.id, text: t.typed ?? '' })}>
                               Edit
                             </button>
                           )}

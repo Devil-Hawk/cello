@@ -71,7 +71,7 @@ export function TasksLine({ tasks, running, seconds, onStop, onStopTask, default
     <div className="rounded-control border border-border bg-card px-3 py-2 text-caption" role="status" aria-live="polite">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-foreground">{running ? `Cello is working: ${finished} of ${tasks.length} done. ${clock(seconds)}` : workedSummary(tasks, seconds)}</span>
-        <button type="button" className="min-h-11 text-muted-foreground underline underline-offset-2 hover:text-foreground" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <button type="button" className="min-h-11 min-w-11 text-muted-foreground underline underline-offset-2 hover:text-foreground" aria-expanded={open} onClick={() => setOpen(!open)}>
           {open ? 'Hide' : 'Show'}
         </button>
         {running && (
@@ -88,7 +88,7 @@ export function TasksLine({ tasks, running, seconds, onStop, onStopTask, default
               <span className={cn('text-muted-foreground', t.status === 'failed' && 'text-foreground')}>{STATUS_WORDS[t.status]}</span>
               {t.reads > 0 && <span className="text-muted-foreground">{t.reads} {t.reads === 1 ? 'page' : 'pages'} read</span>}
               {alive(t.status) && (
-                <button type="button" className="min-h-11 text-muted-foreground underline underline-offset-2 hover:text-foreground" aria-label={`Stop: ${t.title}`} onClick={() => onStopTask(t.id)}>
+                <button type="button" className="min-h-11 min-w-11 text-muted-foreground underline underline-offset-2 hover:text-foreground" aria-label={`Stop: ${t.title}`} onClick={() => onStopTask(t.id)}>
                   Stop
                 </button>
               )}
