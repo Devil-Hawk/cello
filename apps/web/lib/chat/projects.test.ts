@@ -11,8 +11,8 @@ const seed = () =>
   makeFakeAdmin(
     {
       applications: [
-        { id: 'app1', user_id: 'u1', stage: 'applied', applied_at: null, jobs: { title: 'Senior Backend Engineer, Payments', companies: { name: 'Vantage Loom' } } },
-        { id: 'app2', user_id: 'u2', stage: 'applied', applied_at: null, jobs: { title: 'Other', companies: { name: 'Other Co' } } },
+        { id: 'app1', user_id: 'u1', stage: 'applied', applied_at: null, jobs: { title: 'Senior Backend Engineer, Payments', employer: { name: 'Vantage Loom' } } },
+        { id: 'app2', user_id: 'u2', stage: 'applied', applied_at: null, jobs: { title: 'Other', employer: { name: 'Other Co' } } },
       ],
       projects: [],
       chats: [

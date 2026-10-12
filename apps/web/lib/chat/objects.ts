@@ -4,6 +4,7 @@
 import { roleView } from '@/lib/agents/scoring-port'
 import { getArtifact } from '@/lib/agents/artifacts'
 import type { AdminClient } from '@/lib/harness/types'
+import { viewerRoles } from '@/lib/jobs/person-jobs'
 import type { ChatObject, ObjectReader } from './types'
 
 const first = <T>(rel: T | T[] | null | undefined): T | null => (Array.isArray(rel) ? (rel[0] ?? null) : (rel ?? null))
@@ -68,14 +69,16 @@ export const getObject: ObjectReader = async (db, userId, kind, ref) => {
       return { kind, id: ref.id, title: String(row.name), company: String(row.name), facts: lines(str(row.domain) && `Site: ${str(row.domain)}`), body: null }
     }
     case 'application': {
-      const row = await own(db, 'applications', 'id, stage, applied_at, jobs(title, companies(name))', userId, ref.id)
+      const row = await own(db, 'applications', 'id, stage, applied_at, job_id, jobs(title, employer:company_directory(name))', userId, ref.id)
       if (!row) return null
-      const job = first(row.jobs as { title?: string; companies?: { name?: string } | { name?: string }[] } | null)
+      const job = first(row.jobs as { title?: string; employer?: { name?: string } | { name?: string }[] } | null)
+      // The company is the person's own for the role (their person_jobs row), else the directory employer: never the first storer's.
+      const mine = row.job_id ? (await viewerRoles(db, userId, [String(row.job_id)])).get(String(row.job_id)) : undefined
       return {
         kind,
         id: ref.id,
         title: job?.title ?? 'Application',
-        company: first(job?.companies)?.name ?? null,
+        company: mine?.viewer_company_name ?? first(job?.employer)?.name ?? null,
         facts: lines(`Stage: ${row.stage}`, day(str(row.applied_at)) && `Applied: ${day(str(row.applied_at))}`),
         body: null,
       }

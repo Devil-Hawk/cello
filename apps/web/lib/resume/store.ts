@@ -27,6 +27,7 @@
 //   A trigger on artifact_versions mirrors the newest BASE version's text into profiles.resume_text.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { viewerRoles, type ViewerRole } from '@/lib/jobs/person-jobs'
 import { resumeToMarkdown, resumeToPlainText } from './render'
 import { ResumeSchema, type Resume } from './schema'
 import type { ResumeContentJson, ResumeDocument, ResumeSource, ResumeVersionPatch } from './types'
@@ -290,7 +291,8 @@ export async function deleteVersion(client: SupabaseClient, userId: string, id: 
 
 type Named = { name?: string | null } | { name?: string | null }[] | null | undefined
 const one = <T>(x: T | T[] | null | undefined): T | null => (Array.isArray(x) ? (x[0] ?? null) : (x ?? null))
-const companyOf = (job: { companies?: Named } | null): string | null => one(job?.companies)?.name ?? null
+/** The company is the person's own for the role (their person_jobs row), else the directory employer: never the company that stored a shared role first. */
+const companyOf = (mine: Map<string, ViewerRole>, job: { id: string; employer?: Named } | null): string | null => (job ? mine.get(job.id)?.viewer_company_name ?? one(job.employer)?.name ?? null : null)
 
 /**
  * Every resume version the person has, newest first, for Profile: each with the role it was made
@@ -299,11 +301,11 @@ const companyOf = (job: { companies?: Named } | null): string | null => one(job?
 export async function listAllResumeVersions(client: SupabaseClient, userId: string) {
   const buckets = await client
     .from('artifacts')
-    .select(`${ARTIFACT_COLUMNS}, jobs(title, companies(name))`)
+    .select(`${ARTIFACT_COLUMNS}, jobs(id, title, employer:company_directory(name))`)
     .eq('user_id', userId)
     .eq('type', 'resume')
   if (buckets.error) throw new Error(`listAllResumeVersions failed: ${buckets.error.message}`)
-  type Bucket = BucketRow & { jobs?: { title: string; companies?: Named } | { title: string; companies?: Named }[] | null }
+  type Bucket = BucketRow & { jobs?: { id: string; title: string; employer?: Named } | { id: string; title: string; employer?: Named }[] | null }
   const byId = new Map(((buckets.data ?? []) as unknown as Bucket[]).map((b) => [b.id, b]))
   if (byId.size === 0) return []
 
@@ -311,21 +313,20 @@ export async function listAllResumeVersions(client: SupabaseClient, userId: stri
     client.from('artifact_versions').select(VERSION_COLUMNS).in('artifact_id', [...byId.keys()]).order('created_at', { ascending: false }).limit(MAX_LIST_LIMIT * 5),
     client
       .from('application_drafts')
-      .select('resume_document_id, submitted_at, updated_at, jobs(companies(name))')
+      .select('resume_document_id, submitted_at, updated_at, jobs(id, employer:company_directory(name))')
       .eq('user_id', userId)
       .eq('status', 'submitted')
       .not('resume_document_id', 'is', null),
   ])
   if (versions.error) throw new Error(`listAllResumeVersions failed: ${versions.error.message}`)
 
+  type DraftRow = { resume_document_id: string; submitted_at: string | null; updated_at: string; jobs: { id: string; employer?: Named } | { id: string; employer?: Named }[] | null }
+  const draftRows = (drafts.data ?? []) as unknown as DraftRow[]
+  const jobIds = [...new Set([...byId.values()].map((b) => one(b.jobs)?.id).concat(draftRows.map((d) => one(d.jobs)?.id)).filter((id): id is string => typeof id === 'string'))]
+  const mine = await viewerRoles(client, userId, jobIds)
   const sent = new Map<string, { at: string; company: string | null }>()
-  for (const d of (drafts.data ?? []) as unknown as {
-    resume_document_id: string
-    submitted_at: string | null
-    updated_at: string
-    jobs: { companies?: Named } | { companies?: Named }[] | null
-  }[]) {
-    sent.set(d.resume_document_id, { at: d.submitted_at ?? d.updated_at, company: companyOf(one(d.jobs)) })
+  for (const d of draftRows) {
+    sent.set(d.resume_document_id, { at: d.submitted_at ?? d.updated_at, company: companyOf(mine, one(d.jobs)) })
   }
 
   return ((versions.data ?? []) as VersionRow[]).flatMap((v) => {
@@ -333,6 +334,6 @@ export async function listAllResumeVersions(client: SupabaseClient, userId: stri
     if (!bucket) return []
     const doc = toDocument(bucket, v)
     const job = one(bucket.jobs)
-    return [{ ...doc, role: job ? { title: job.title, company: companyOf(job) } : null, sent: sent.get(doc.id) ?? null }]
+    return [{ ...doc, role: job ? { title: job.title, company: companyOf(mine, job) } : null, sent: sent.get(doc.id) ?? null }]
   })
 }

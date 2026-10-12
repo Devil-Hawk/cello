@@ -30,17 +30,20 @@ const personRole = (over: Record<string, unknown> = {}, job: Record<string, unkn
   jobs: posting(job),
   ...over,
 })
-const seed = (job: Record<string, unknown> = {}) =>
-  makeFakeAdmin({
-    person_roles: [personRole({}, job)],
+const seed = (job: Record<string, unknown> = {}) => {
+  const mine = personRole({}, job)
+  return makeFakeAdmin({
+    person_roles: [mine],
     companies: [{ id: 'c1', user_id: 'u1', name: 'Ramp', logo_url: 'https://ramp.test/logo.png', domain: 'ramp.test', watching: true }],
     applications: [{ id: 'a1', user_id: 'u1', job_id: 'j1', stage: 'applied', jobs: { company_id: 'c1' } }],
     person_jobs: [
-      { id: 'j1', viewer_id: 'u1', viewer_company_id: 'c1', still_open: true },
+      // the view: the posting, the person's own company for it and their verdict, flat on one row
+      { ...(mine.jobs as Record<string, unknown>), ...mine, jobs: undefined, viewer_id: 'u1', viewer_company_id: 'c1', viewer_company_name: 'Ramp' },
       { id: 'j2', viewer_id: 'u1', viewer_company_id: 'c1', still_open: true },
       { id: 'j3', viewer_id: 'u1', viewer_company_id: 'c1', still_open: false },
     ],
   })
+}
 
 describe('readCard', () => {
   it('builds a role card from the stored rows only', async () => {
