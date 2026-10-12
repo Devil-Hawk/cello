@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { RungInfo } from '@/lib/chat/settings'
-import { choiceWords, ModelPicker, steppedDownWords } from './model-picker'
+import { choiceWords, closesLadder, ModelPicker, steppedDownWords } from './model-picker'
 
 const FREE = 'qwen/qwen3.8-27b:free'
 const rungs: RungInfo[] = [
@@ -46,5 +46,23 @@ describe('ModelPicker', () => {
     expect(steppedDownWords(lastRan, { ...choice, model: lastRan.model }, rungs)).toBe('')
     expect(steppedDownWords({ ...choice }, choice, rungs)).toBe('')
     expect(steppedDownWords(null, choice, rungs)).toBe('')
+  })
+})
+
+describe('closesLadder', () => {
+  const inside = {} as Node
+  const outside = {} as Node
+  const open = { open: true, contains: (n: Node | null) => n === inside }
+
+  it('closes an open ladder on Escape or a pointer outside it, and leaves it on anything else', () => {
+    expect(closesLadder({ key: 'Escape' }, open)).toBe(true)
+    expect(closesLadder({ target: outside }, open)).toBe(true)
+    expect(closesLadder({ target: inside }, open)).toBe(false)
+    expect(closesLadder({ key: 'Enter' }, open)).toBe(false)
+  })
+
+  it('leaves a closed ladder alone, so Escape still reaches the page', () => {
+    expect(closesLadder({ key: 'Escape' }, { ...open, open: false })).toBe(false)
+    expect(closesLadder({ key: 'Escape' }, null)).toBe(false)
   })
 })

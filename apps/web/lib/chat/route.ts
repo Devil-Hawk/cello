@@ -271,7 +271,7 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
       return done(say(`Wrote version ${made.version} of a note to ${intent.company} about ${job.title}. Nothing was sent.`))
     } catch (e) {
       // A cap, a missing key or a refusal: the person reads the real reason, in code's words.
-      const reason = reasonOf(e)
+      const reason = reasonOf(e, 'chat')
       if (reason) return done(say(reason))
       throw e
     }

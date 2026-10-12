@@ -7,7 +7,7 @@
 // code's estimate, and "Cost not known before sending" when the model has no price. When the last answer did not come from
 // the chosen model, steppedDownWords says what answered and why the choice did not; the page shows it under the composer.
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import type { RungInfo } from '@/lib/chat/settings'
 import type { ModelChoice, Ran } from '@/lib/models/choice'
@@ -37,6 +37,10 @@ export function steppedDownWords(lastRan: Ran | null | undefined, choice: ModelC
   return `Your last answer came from ${modelLabel(lastRan.model, rungs)}: ${modelLabel(down.wanted.model, rungs)} ${STEP_DOWN_WORDS[down.why]}.`
 }
 
+/** What closes an open ladder: Escape from inside it, or a pointer pressed outside it. A closed one is left alone, so Escape still reaches the page. */
+export const closesLadder = (e: { key?: string; target?: unknown }, box: { open: boolean; contains(n: Node | null): boolean } | null): boolean =>
+  Boolean(box?.open && (e.key === 'Escape' || (e.key === undefined && !box.contains(e.target as Node | null))))
+
 /** The model's own name alone ("laguna-s-2.1"), for the phone's summary. */
 export const modelName = (choice: ModelChoice | null, rungs: RungInfo[]) => (choice ? modelLabel(choice.model, rungs) : 'Choose a model')
 
@@ -62,8 +66,29 @@ export function ModelPicker({ choice, rungs, estimate, onPick }: ModelPickerProp
     setDraft({ rung: r.rung, model, effort: draft?.effort ?? 'medium' })
   }
 
+  const box = useRef<HTMLDetailsElement>(null)
+  const [open, setOpen] = useState(false)
+  // While the ladder is open, a pointer pressed outside it closes it, as the rail's menu does.
+  useEffect(() => {
+    if (!open) return
+    const away = (e: PointerEvent) => closesLadder({ target: e.target }, box.current) && box.current?.removeAttribute('open')
+    document.addEventListener('pointerdown', away)
+    return () => document.removeEventListener('pointerdown', away)
+  }, [open])
+
   return (
-    <details className="relative">
+    <details
+      ref={box}
+      className="relative"
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+      onKeyDown={(e) => {
+        // Escape closes the ladder and puts the focus back on its summary; the page's Escape (Stop) is not reached.
+        if (!closesLadder({ key: e.key }, box.current) || !box.current) return
+        e.stopPropagation()
+        box.current.open = false
+        box.current.querySelector('summary')?.focus()
+      }}
+    >
       <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-control px-2 py-1 text-caption text-muted-foreground hover:bg-muted hover:text-foreground">
         <span className="truncate sm:hidden">{modelName(choice, rungs)}</span>
         <span className="hidden sm:inline">{choiceWords(choice, rungs)}</span>

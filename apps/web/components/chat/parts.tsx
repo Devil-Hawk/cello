@@ -128,11 +128,13 @@ export function AnswerParts({ parts, names, tileCount, cards, onOpen, recalled, 
           return card.kind === 'role' ? <RoleCard key={i} card={card} onOpen={onOpen && ((_, ref) => onOpen('role', ref))} /> : <CompanyCard key={i} card={card} onOpen={onOpen && ((_, ref) => onOpen('company', ref))} />
         }
         return (
-          <section key={i} className="group">
+          // Copy sits beside the part's last line, in the room the right padding keeps for it: it takes no height, so parts
+          // stay as far apart as their text, and its 44px hit area stands.
+          <section key={i} className="group relative pr-11">
             {tileCount > 1 && part.about.length > 0 && <Lead about={part.about} names={names} onOpen={onOpen} />}
             <Markdown content={rewriteCelloLinks(part.text)} />
             {recalled && <SourceLines text={part.text} recalled={recalled} onAddChat={onAddChat} />}
-            <div className="mt-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100">
+            <div className="absolute -bottom-2.5 right-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100">
               <CopyButton text={part.text} />
             </div>
           </section>

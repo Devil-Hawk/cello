@@ -6,7 +6,7 @@
 // ponytail: the page reads the chat every 2 s while a turn is being answered or a task is working; Realtime and useStream replace the poll.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { Menu, X } from 'lucide-react'
 import { Markdown } from '@/components/chat/markdown'
 import { MadeBlock } from '@/components/chat/made-block'
@@ -81,9 +81,15 @@ const seconds = (rows: ChatPageData['tasks']) => {
   return starts.length ? Math.max(0, Math.round((Math.max(...ends) - Math.min(...starts)) / 1000)) : 0
 }
 
-export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewProps) {
+export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: ChatViewProps) {
   const router = useRouter()
-  const [rows, setRows] = useState<ListRow[]>([])
+  // The chat shown. A first send keeps this view mounted and moves the address with pushState, so the sent line, the rail and
+  // the picker stay on screen; the address is the source of truth after that (Back, New chat and the rail's links change it).
+  const pathId = usePathname()?.match(/^\/chat\/([^/]+)/)?.[1] ?? null
+  const [chatId, setChatId] = useState(routeId)
+  useEffect(() => setChatId(pathId ? decodeURIComponent(pathId) : null), [pathId])
+  // Null until the first list has been read: the rail says nothing rather than "Your chats stay here" while it loads.
+  const [rows, setRows] = useState<ListRow[] | null>(null)
   const [more, setMore] = useState(false)
   const [earlier, setEarlier] = useState<EarlierChat[]>([])
   // Null until it has been read, and when it cannot be: the rail then says nothing rather than "Nothing scheduled".
@@ -109,6 +115,11 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
   // "Just this message": used by the next send only.
   const [once, setOnce] = useState<ModelChoice | null>(null)
   const [sending, setSending] = useState(false)
+  // What was just sent, shown as the person's turn until the chat's rows hold it: the line never vanishes after Enter.
+  const [justSent, setJustSent] = useState<string | null>(null)
+  const scroller = useRef<HTMLDivElement>(null)
+  // True while the person is at the newest content: a new turn or row keeps them there, and never pulls them back from older turns.
+  const stuck = useRef(true)
   // After the person approves, the next steps run in the background: read the chat for a minute to show them.
   const [watchUntil, setWatchUntil] = useState(0)
   const answered = useRef<Set<string> | null>(null)
@@ -124,13 +135,13 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
 
   // The next page of Recents, from the last chat listed. ponytail: pages by last_turn_at, so two chats with the very same instant could straddle a page.
   const loadMore = useCallback(async () => {
-    const last = [...rows].reverse().find((c) => !c.pinned_at)
+    const last = [...(rows ?? [])].reverse().find((c) => !c.pinned_at)
     if (paging.current || !last) return
     paging.current = true
     const body = await getJson<{ chats: ListRow[] }>(`/api/chat?limit=${PAGE}&before=${encodeURIComponent(last.last_turn_at)}`)
     paging.current = false
     if (!body) return setMore(false)
-    setRows((have) => [...have, ...body.chats.filter((c) => !have.some((h) => h.id === c.id))])
+    setRows((have) => [...(have ?? []), ...body.chats.filter((c) => !have?.some((h) => h.id === c.id))])
     setMore(body.chats.length >= PAGE)
   }, [rows])
 
@@ -162,6 +173,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
     setMissing(false)
     setPanel(null)
     answered.current = null
+    stuck.current = true
     void loadPage()
   }, [loadPage])
 
@@ -194,7 +206,12 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
   // What the newest answer ran on, from its disclosure (the ledger's model, disclosure.ts), for the picker's step-down line.
   const lastRan = (page?.turns.filter((t) => !t.superseded_at && t.kind === 'cello').at(-1)?.disclosure as Disclosure | null | undefined)?.ran ?? null
   const awaiting = lastTurn?.kind === 'person' && Date.now() - Date.parse(lastTurn.created_at) < 6 * 60_000
-  const running = tasks.some(alive) || awaiting || sending
+  // The sent line stands in for the person's turn until the rows hold it.
+  const pendingLine = justSent !== null && !page?.turns.some((t) => t.kind === 'person' && t.typed === justSent) ? justSent : null
+  useEffect(() => {
+    if (justSent !== null && pendingLine === null) setJustSent(null)
+  }, [justSent, pendingLine])
+  const running = tasks.some(alive) || awaiting || sending || pendingLine !== null
   const watching = running || Date.now() < watchUntil
   useEffect(() => {
     if (!watching || !chatId) return
@@ -226,7 +243,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
     void getJson<{ kind: string; ref: string; name: string }>(`/api/chat/object?kind=${encodeURIComponent(initialAbout.kind)}&ref=${encodeURIComponent(initialAbout.ref)}`).then((o) => o && setChips([o]))
   }, [initialAbout])
 
-  const empty = !chatId || (page !== null && page.turns.length === 0)
+  const empty = (!chatId || (page !== null && page.turns.length === 0)) && pendingLine === null
   useEffect(() => {
     if (!empty || suggested) return
     void getJson<Suggestions>(`/api/chat/suggest?tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`).then(setSuggested)
@@ -238,6 +255,15 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
   const seen = useMemo(() => visibleTurns(page?.turns ?? [], picks), [page, picks])
   const lastPersonTurn = [...seen.turns].reverse().find((t) => t.kind === 'person')
   const turnTasks = page?.tasks.filter((t) => t.turn_id === lastPersonTurn?.id) ?? []
+  // The turn's own row (chat.turn) is the loop, not work: it is listed nowhere, so the counts here and in Sources and tools agree.
+  // While a new line is pending the rows are the earlier turn's, so none are shown.
+  const work = pendingLine === null ? turnTasks.filter((t) => t.command !== 'chat.turn') : []
+
+  // A chat opens at its newest turn, and a new turn or row keeps the person there unless they have scrolled up to read.
+  useEffect(() => {
+    const el = scroller.current
+    if (el && stuck.current) el.scrollTop = el.scrollHeight
+  }, [chatId, page?.turns.length, tasks.length, pendingLine])
 
   // Selecting text in one of Cello's answers offers "Ask Cello": the selection becomes a quote above the compose box,
   // kept apart from what the person types. It never counts as their words.
@@ -282,30 +308,36 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
     const typed = draft.trim()
     if (!typed || sending) return
     setSending(true)
+    // The line moves from the compose box to the conversation at once; it comes back to the box if the send fails.
+    setJustSent(typed)
+    setDraft('')
+    stuck.current = true
     setNote(null)
+    const failed = (note: string) => {
+      setSending(false)
+      setJustSent(null)
+      setDraft(typed)
+      setNote(note)
+    }
     let id = chatId
     if (!id) {
       const made = await sendJson<{ id: string }>('/api/chat', 'POST', { chips: chips.map((c) => ({ kind: c.kind, id: c.ref })), ...(pending ? { choice: pending } : {}) })
-      if (!made.ok || !made.body?.id) {
-        setSending(false)
-        return setNote('Cello could not start the chat. Try again.')
-      }
+      if (!made.ok || !made.body?.id) return failed('Cello could not start the chat. Try again.')
       id = made.body.id
     } else {
       for (const c of chips) await send(`/api/chat/${encodeURIComponent(id)}/attachments`, 'POST', { kind: c.kind, ref: refOf(c.kind, c.ref) })
     }
     const sent = await sendJson(`/api/chat/${encodeURIComponent(id)}/turns`, 'POST', { typed, ...(quoted ? { quoted } : {}), ...(once ? { choice: once } : {}) })
-    if (!sent.ok) {
-      setSending(false)
-      return setNote(sent.body?.message ?? 'Cello could not send that. Try again.')
-    }
-    setDraft('')
+    if (!sent.ok) return failed(sent.body?.message ?? 'Cello could not send that. Try again.')
     setChips([])
     setQuoted(null)
     setOnce(null)
     setPending(null)
-    if (id !== chatId) router.push(`/chat/${id}`)
-    else await loadPage()
+    if (id !== chatId) {
+      // The view stays mounted with the sent line on it; the address moves to the chat and the rows are read from there.
+      window.history.pushState(null, '', `/chat/${encodeURIComponent(id)}`)
+      setChatId(id)
+    } else await loadPage()
     setSending(false)
     void loadChats()
   }
@@ -336,7 +368,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
     <div className="flex h-[calc(100dvh-9.5rem)] min-h-[24rem] overflow-hidden rounded-card border border-border bg-background md:h-[calc(100dvh-9.25rem)]">
       <div className={`${railOpen ? 'fixed inset-y-0 left-0 z-40 w-72 bg-background shadow-pop' : 'hidden'} md:static md:block md:w-64 md:shrink-0 md:border-r md:border-border md:shadow-none`}>
         <Rail
-          chats={rows.map((c): RailChat => ({ id: c.id, title: c.title, pinned: Boolean(c.pinned_at) }))}
+          chats={rows?.map((c): RailChat => ({ id: c.id, title: c.title, pinned: Boolean(c.pinned_at) })) ?? null}
           hasMore={more}
           onLoadMore={() => void loadMore()}
           earlier={earlier}
@@ -370,7 +402,16 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
           <span className="truncate text-body font-medium text-foreground">{page?.chat.title || 'New chat'}</span>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto" onMouseUp={onSelect} onScroll={() => setSelection(null)}>
+        <div
+          ref={scroller}
+          className="min-h-0 flex-1 overflow-y-auto"
+          onMouseUp={onSelect}
+          onScroll={(e) => {
+            const el = e.currentTarget
+            stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+            setSelection(null)
+          }}
+        >
           <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-4">
             <Tiles tiles={tiles} onAdd={() => setAdding((v) => !v)} onOpen={(t) => openThing(t.kind, t.ref)} onRemove={(t) => void send(`/api/chat/${chatId}/attachments?tile=${encodeURIComponent(t.id)}`, 'DELETE').then(loadPage)} />
             {adding && (
@@ -385,7 +426,11 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
               </p>
             )}
 
-            {empty ? (
+            {chatId && !page && pendingLine === null ? (
+              <p role="status" className="text-caption text-muted-foreground">
+                Opening the chat
+              </p>
+            ) : empty ? (
               <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4 text-center">
                 <h1 className="font-display text-title text-foreground">{suggested?.greeting ?? 'What are we working on?'}</h1>
                 <ul className="flex flex-wrap justify-center gap-2">
@@ -476,10 +521,18 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
               )
             )}
 
-            {turnTasks.length > 0 && (
+            {pendingLine !== null && (
+              <div className="ml-auto max-w-[85%]">
+                <div className="rounded-card bg-muted px-3 py-2 text-body text-foreground">
+                  <p className="whitespace-pre-wrap break-words">{pendingLine}</p>
+                </div>
+              </div>
+            )}
+
+            {(work.length > 0 || running) && (
               <TasksLine
-                tasks={turnTasks.map(toTaskRow)}
-                running={tasks.some(alive)}
+                tasks={work.map(toTaskRow)}
+                running={running}
                 defaultOpen
                 seconds={seconds(turnTasks)}
                 onStop={() => lastPersonTurn && void send(`/api/chat/${chatId}/stop`, 'POST', { turn_id: lastPersonTurn.id }).then(loadPage)}

@@ -65,7 +65,7 @@ describe('a free key without credit', () => {
     for (let i = 0; i < 5; i++) await draft.call(free({ userId: 'user-1' }), { prompt: 'hi' }, { slots })
     const error = await draft.call(free({ userId: 'user-1' }), { prompt: 'hi' }, { slots }).catch((e) => e)
     expect(error).toBeInstanceOf(FreeCapError)
-    expect(error.message).toBe('Free models allow 5 drafts a day. Add credit or choose another way to run.')
+    expect(error.message).toBe('Free models allow 5 drafts a day. Add credit in Settings, under Models, or choose another model.')
     expect(callLlmMock).toHaveBeenCalledTimes(5)
     // Another person has their own day, and a step with no daily cap is not counted.
     await draft.call(free({ userId: 'user-2' }), { prompt: 'hi' }, { slots })

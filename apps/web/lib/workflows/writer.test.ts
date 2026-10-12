@@ -404,7 +404,7 @@ describe('the draft routes run the Writer', () => {
     mocks.outreach.mockRejectedValue(new FreeCapError('drafts'))
     const result = await runWriter(deps, { type: 'message', job_id: 'j1', contact_id: 'k1' })
     expect(result.status).toBe('failed')
-    expect(result.error).toBe('The draft could not be written: Free models allow 5 drafts a day. Add credit or choose another way to run.')
+    expect(result.error).toBe('The draft could not be written: Free models allow 5 drafts a day. Add credit in Settings, under Models, or choose another model.')
     expect(result.fix).toMatch(/Do not try again/)
     expect(await listArtifacts(admin, 'u1')).toHaveLength(0)
   })

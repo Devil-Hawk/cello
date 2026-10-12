@@ -45,14 +45,21 @@ const KIND_OF_STEP: Record<string, DailyKind> = {
 
 const WHAT: Record<DailyKind, string> = { drafts: '5 drafts', chance: '24 role checks', research: '1 research subject' }
 
+/** After a cap, what the person can press: Settings for credit, the picker for another model. A row holds the plain words; the chat's answer renders Markdown, so there the action is a link. */
+export const CAP_FIX = {
+  plain: 'Add credit in Settings, under Models, or choose another model.',
+  chat: '[Add credit in Settings](/settings#models) or choose another model under the compose box.',
+} as const
+
 export class FreeCapError extends Error {
   constructor(readonly kind: DailyKind) {
-    super(`Free models allow ${WHAT[kind]} a day. Add credit or choose another way to run.`)
+    super(`Free models allow ${WHAT[kind]} a day. ${CAP_FIX.plain}`)
     this.name = 'FreeCapError'
   }
 }
 
 export const NO_MODEL_LINE = 'Cello has no model to run on. Add a key or pick Free models in Settings, under Models.'
+const NO_MODEL_CHAT = 'Cello has no model to run on. Add a key or pick Free models in [Settings, under Models](/settings#models).'
 
 /** The failures whose message is already a plain sentence a person can read. */
 const SAID_PLAINLY = new Set(['FreeCapError', 'BelowRungError', 'CeilingError', 'BudgetCapError', 'CommandRefusal'])
@@ -61,13 +68,15 @@ const SAID_PLAINLY = new Set(['FreeCapError', 'BelowRungError', 'CeilingError', 
  * The real reason behind a failure code knows about (a free cap, a spend cap, the ceiling, a missing key, a refusal),
  * however many layers wrapped it; null for anything else, so the caller keeps its own generic line. One function for
  * every catch between a model call and the person, so no catch replaces the reason with "could not finish".
+ * For the chat's answer (`as: 'chat'`, rendered as Markdown) the action after a cap or a missing key is a link.
  */
-export function reasonOf(e: unknown): string | null {
+export function reasonOf(e: unknown, as: 'plain' | 'chat' = 'plain'): string | null {
   const root = rootCause(e) as { name?: unknown; message?: unknown } | null
   const name = typeof root?.name === 'string' ? root.name : ''
   const message = typeof root?.message === 'string' ? root.message.trim() : ''
-  if (name === 'MissingKeyError') return NO_MODEL_LINE
-  return SAID_PLAINLY.has(name) && message ? message : null
+  if (name === 'MissingKeyError') return as === 'chat' ? NO_MODEL_CHAT : NO_MODEL_LINE
+  if (!SAID_PLAINLY.has(name) || !message) return null
+  return as === 'chat' ? message.replace(CAP_FIX.plain, CAP_FIX.chat) : message
 }
 
 /**
