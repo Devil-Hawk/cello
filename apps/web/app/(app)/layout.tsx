@@ -167,9 +167,11 @@ export default function DashboardLayout({
       <Shell pathname={pathname} user={userInfo} onSignOut={handleSignOut} dots={{ network: networkDot }}>
         {/* Keyed by pathname: a short, non-blocking enter on every route change.
             No exit animation (no AnimatePresence) so a slow page can never leave
-            the previous one half-faded. */}
+            the previous one half-faded. Chat keeps one key across its addresses
+            (/chat and /chat/<id>): a first send moves the address with pushState
+            and the view stays mounted with the sent line, the rail and the picker. */}
         <motion.div
-          key={pathname}
+          key={/^\/chat(\/|$)/.test(pathname) ? '/chat' : pathname}
           initial={{ opacity: 0, y: 4 }}
           animate={{ opacity: 1, y: 0 }}
           transition={transitionFast}
