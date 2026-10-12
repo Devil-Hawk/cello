@@ -252,13 +252,14 @@ describe('role types', () => {
     expect(html).toContain('Filters (3)')
   })
 
-  it('hangs the filter panel from the toolbar on a phone and never fixes it to the screen', () => {
+  it('hangs the filter panel from the toolbar row at every width and never fixes it to the screen', () => {
     const html = view({ items: fixtureRoles(2, 2), total: 2 })
     const form = (html.match(/<form action="\/roles"[^>]*class="([^"]*)"/)?.[1] ?? '').split(/\s+/)
-    expect(form).toEqual(expect.arrayContaining(['absolute', 'inset-x-0', 'top-full', 'sm:left-0', 'sm:w-[360px]', 'sm:max-h-[80vh]']))
-    // fixed, or any unprefixed height cap or screen inset, is what put Apply below a phone screen
-    expect(form.filter((c) => c === 'fixed' || /^(max-h-|inset-\d|top-\d|bottom-\d)/.test(c))).toEqual([])
-    expect(html).toContain('<details class="sm:relative">')
+    expect(form).toEqual(expect.arrayContaining(['absolute', 'inset-x-0', 'top-full', 'sm:left-auto', 'sm:w-[360px]', 'sm:max-h-[80vh]']))
+    // fixed, a left anchor, or any unprefixed height cap or screen inset, is what put the panel off the screen or Apply below it
+    expect(form.filter((c) => c === 'fixed' || c === 'sm:left-0' || c === 'sm:inset-x-auto' || /^(max-h-|inset-\d|top-\d|bottom-\d)/.test(c))).toEqual([])
+    // the button is the row's last item at its right end, and the row, not the button, is the anchor
+    expect(html).toContain('<details class="ml-auto">')
     expect(html).toMatch(/<div class="relative flex flex-wrap items-center gap-x-6/)
   })
 
