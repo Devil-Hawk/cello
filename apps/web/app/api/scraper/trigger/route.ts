@@ -6,6 +6,7 @@ import { makeSupabaseAtsStore } from '@/lib/ats/store'
 import { staticFetchPage } from '@/lib/ingest/fetch-page'
 import { ingestCompany, type DueCompany, type FailureReason } from '@/lib/ingest/run'
 import { loadTargets } from '@/lib/ingest/reader/targets'
+import { storeOpenCount } from '@/lib/companies/live-roles'
 import { checksStatus } from '@/lib/clock/status'
 
 // The in-app twin of the scheduled check, for one company: the job board when it
@@ -88,6 +89,9 @@ export async function POST(request: NextRequest) {
       message: `${company.name} is already being checked; its roles will appear in a few minutes.`,
     })
   }
+
+  // The employer's "of N open" is what its whole board just listed; the sweep's older number is replaced now, not a day later.
+  if (company.employer_id && outcome.tier === 'board' && !failure && result.found > 0) await storeOpenCount(company.employer_id, result.found)
 
   const TIER_WORDS: Record<string, string> = {
     board: 'its job board',

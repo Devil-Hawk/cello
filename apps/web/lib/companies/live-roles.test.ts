@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EMPTY_TARGETING } from '../targeting'
 
-const { fetchMock, memo } = vi.hoisted(() => ({ fetchMock: vi.fn(), memo: new Map<string, unknown>() }))
+const { fetchMock, memo, adminRpcs } = vi.hoisted(() => ({ fetchMock: vi.fn(), memo: new Map<string, unknown>(), adminRpcs: [] as { name: string; args: Record<string, unknown> }[] }))
+
+// The open count is written with the service role, never the person's client.
+vi.mock('../harness/supabase-admin', () => ({ createAdminClient: () => ({ rpc: async (name: string, args: Record<string, unknown>) => (adminRpcs.push({ name, args }), { data: null, error: null }) }) }))
 
 // next/cache outside a request has no cache: a memo keyed like the real one (key parts and arguments).
 vi.mock('next/cache', () => ({
@@ -85,6 +88,7 @@ function fakeDb(held: string[]) {
 
 beforeEach(() => {
   memo.clear()
+  adminRpcs.length = 0
   fetchMock.mockReset()
   fetchMock.mockImplementation(async () => listing().map((r) => r.job))
 })
@@ -128,15 +132,16 @@ describe('liveRoles', () => {
     const { db, touched, rpcs } = fakeDb([])
     await liveRoles({ db, userId: 'u1', company, targets })
     expect(touched).toEqual(['person_jobs'])
-    expect(rpcs).toEqual([{ name: 'set_employer_open_count', args: { p_employer: 'emp-1', p_count: 60 } }])
+    expect(rpcs).toEqual([])
+    expect(adminRpcs).toEqual([{ name: 'set_employer_open_count', args: { p_employer: 'emp-1', p_count: 60 } }])
   })
 
   it('writes no open count for an employer that is not in the directory', async () => {
-    const { db, rpcs } = fakeDb([])
+    const { db } = fakeDb([])
     fetchMock.mockImplementation(async () => [])
     const out = await liveRoles({ db, userId: 'u1', company: { ...company, employer_id: null }, targets })
     expect(out).toMatchObject({ total: 0, kept: 0, rows: [], pages: 1 })
-    expect(rpcs).toEqual([])
+    expect(adminRpcs).toEqual([])
   })
 
   it('says why nothing was read, and does not throw, when the employer cannot be reached', async () => {

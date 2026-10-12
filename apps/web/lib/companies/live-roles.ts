@@ -15,6 +15,7 @@ import { hasPersonTargets, judgeForPerson, prepareTargets, type OutsideReason } 
 import { readSite, type Tier } from '../ingest/reader'
 import { getRoleType, typeTitle } from '../jobs/role-types'
 import { makeSiteFetcher } from '../ingest/reader/site-fetch'
+import { createAdminClient } from '../harness/supabase-admin'
 import { searchTerms, type ReaderTargets } from '../ingest/reader/targets'
 
 type Db = SupabaseClient<any, any, any>
@@ -186,6 +187,21 @@ function matchesOne(l: Listed, m: LiveMatch | undefined): boolean {
   return true
 }
 
+/**
+ * The employer's "of N open", written by the service role (the function is granted to it alone). A failure is logged, never
+ * swallowed, so a count that stays old shows up in the server log. Returns whether it was stored.
+ */
+export async function storeOpenCount(employerId: string, count: number): Promise<boolean> {
+  try {
+    const { error } = await createAdminClient().rpc('set_employer_open_count', { p_employer: employerId, p_count: count })
+    if (error) console.error('open count not stored', employerId, error.message)
+    return !error
+  } catch (e) {
+    console.error('open count not stored', employerId, e instanceof Error ? e.message : e)
+    return false
+  }
+}
+
 /** Every role the employer lists, judged for this person, paged. Writes only the employer's open count. */
 export async function liveRoles(input: { db: Db; userId: string; company: LiveCompany; targets: ReaderTargets; page?: number; match?: LiveMatch }): Promise<LiveRoles> {
   const { db, userId, company, targets } = input
@@ -232,7 +248,7 @@ export async function liveRoles(input: { db: Db; userId: string; company: LiveCo
 
   // The employer's "of N open" is the last whole read; a window is not a count.
   if (company.employer_id && got.tier === 'board' && got.complete) {
-    await db.rpc('set_employer_open_count', { p_employer: company.employer_id, p_count: got.listed.length }).then(() => undefined, () => undefined)
+    await storeOpenCount(company.employer_id, got.listed.length)
   }
 
   return {
