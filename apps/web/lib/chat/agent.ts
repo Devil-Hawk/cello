@@ -84,7 +84,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
             return JSON.stringify(out)
           } catch (e) {
             if (isBudgetCapError(e)) throw e
-            const reason = reasonOf(e)
+            const reason = reasonOf(e, 'chat')
             const message = reason ?? 'That did not work.'
             // Code's own line: evidence for what the model says about it, so the check keeps that part.
             results.push({ object: null, text: message })

@@ -118,7 +118,7 @@ export async function runChatTurn(
   } catch (e) {
     console.error('chat answer failed', e)
     // A cap or a missing key is said as it is; only an unknown failure gets the generic line.
-    const reason = reasonOf(e)
+    const reason = reasonOf(e, 'chat')
     return { ok: false, turnId, error: reason ?? 'Cello could not finish this. Nothing was changed.', fix: reason ? '' : 'Try again.' }
   }
   const out = last as AgentOutput | null

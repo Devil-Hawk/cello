@@ -49,7 +49,7 @@ export async function runStoredTurn(db: AdminClient, userId: string, chatId: str
     await finishWorker(db, root, { status: stop.signal.aborted ? 'stopped' : out.ok ? 'done' : 'failed' })
   } catch (e) {
     console.error('chat turn failed', e)
-    await leaveLine(db, userId, chatId, stop.signal.aborted ? 'Stopped. Nothing was changed.' : (reasonOf(e) ?? 'Cello could not finish this. Nothing was changed. Try again.'))
+    await leaveLine(db, userId, chatId, stop.signal.aborted ? 'Stopped. Nothing was changed.' : (reasonOf(e, 'chat') ?? 'Cello could not finish this. Nothing was changed. Try again.'))
     await finishWorker(db, root, { status: stop.signal.aborted ? 'stopped' : 'failed' })
   } finally {
     clearInterval(timer)
