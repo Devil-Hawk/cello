@@ -8,6 +8,7 @@
     "cover-letter": { "trigger": 0.8, "checks": 0.9 },
     "follow-up": { "trigger": 0.8, "checks": 0.9 },
     "negotiation": { "trigger": 0.8, "checks": 0.9 },
+    "reply": { "trigger": 0.8, "checks": 0.9 },
     "role-fit": { "trigger": 0.8, "checks": 0.9 },
     "search-strategy": { "trigger": 0.8, "checks": 0.9 },
     "tailor-resume": { "trigger": 0.8, "checks": 0.9 },

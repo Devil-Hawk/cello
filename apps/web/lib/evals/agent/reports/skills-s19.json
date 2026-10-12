@@ -85,6 +85,21 @@
       "off": true
     },
     {
+      "skill": "reply",
+      "trigger": null,
+      "checks": null,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger",
+        "checks"
+      ],
+      "off": true
+    },
+    {
       "skill": "role-fit",
       "trigger": 0.3333333333333333,
       "checks": 0.8,
