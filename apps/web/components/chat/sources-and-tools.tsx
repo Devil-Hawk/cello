@@ -5,7 +5,7 @@
 
 import { disclosureLine, type Disclosure } from '@/lib/chat/disclosure'
 import { EFFORT_WORDS, STEP_DOWN_WORDS } from '@/components/chat/model-picker'
-import { clock } from '@/components/chat/tasks-line'
+import { clock, STATUS_WORDS, type TaskStatus } from '@/components/chat/tasks-line'
 
 const FREE = (model: string) => model.replace(/^[^/]*\//, '').replace(/:free$/, '')
 
@@ -37,7 +37,7 @@ export function SourcesAndTools({ d }: { d: Disclosure }) {
         {d.workers.length > 0 && (
           <div className="flex gap-2">
             <dt className="w-16 shrink-0">Tasks</dt>
-            <dd className="text-foreground">{d.workers.map((w) => `${w.title} (${w.status}${w.reads ? `, ${w.reads} read` : ''})`).join('; ')}</dd>
+            <dd className="text-foreground">{d.workers.map((w) => `${w.title} (${STATUS_WORDS[w.status as TaskStatus] ?? w.status}${w.reads ? `, ${w.reads} read` : ''})`).join('; ')}</dd>
           </div>
         )}
         <div className="flex gap-2">
