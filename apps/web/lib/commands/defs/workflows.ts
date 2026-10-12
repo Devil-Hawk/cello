@@ -52,10 +52,14 @@ export const documentsDraft = defineCommand({
       signal: ctx.signal,
       deadlineAt: newDeadline(),
     }
-    const out = ctx.chat
-      ? await withWorker({ db, userId: ctx.userId, threadId: ctx.chat.chatId, chatId: ctx.chat.chatId, turnId: ctx.chat.turnId }, { command: 'documents.draft', title: `Writing a ${input.type.replace('_', ' ')}` }, () => runWriter({ ctx: agent }, { type: input.type, job_id: input.job_id, contact_id: input.contact_id, instructions: input.instructions, reply_to: replyTo }))
-      : await runWriter({ ctx: agent }, { type: input.type, job_id: input.job_id, contact_id: input.contact_id, instructions: input.instructions, reply_to: replyTo })
-    if (out.status === 'failed' || !out.artifact_id || !out.version) throw new CommandRefusal(502, out.error ?? 'The draft could not be written.', 'failed')
+    // The Writer reports a cap or a missing key as a failed result, not a throw; the check sits inside the worker's work so
+    // the task row ends failed with that reason as its summary, and the page never counts it as a draft.
+    const work = async () => {
+      const out = await runWriter({ ctx: agent }, { type: input.type, job_id: input.job_id, contact_id: input.contact_id, instructions: input.instructions, reply_to: replyTo })
+      if (out.status === 'failed' || !out.artifact_id || !out.version) throw new CommandRefusal(502, out.error ?? 'The draft could not be written.', 'failed')
+      return { ...out, artifact_id: out.artifact_id, version: out.version }
+    }
+    const out = ctx.chat ? await withWorker({ db, userId: ctx.userId, threadId: ctx.chat.chatId, chatId: ctx.chat.chatId, turnId: ctx.chat.turnId }, { command: 'documents.draft', title: `Writing a ${input.type.replace('_', ' ')}` }, work) : await work()
     if (ctx.chat) await db.from('artifacts').update({ chat_turn_id: ctx.chat.turnId }).eq('id', out.artifact_id).eq('user_id', ctx.userId)
     const saved = await getArtifact(db, ctx.userId, out.artifact_id, { version: out.version })
     const title = out.title ?? saved?.artifact.title ?? 'Draft'
