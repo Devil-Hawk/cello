@@ -42,3 +42,17 @@ describe('celloChatModel', () => {
     expect(m.models?.every(isFreeModel)).toBe(true)
   })
 })
+
+describe('the highest the person allows', () => {
+  const free = { ceiling: 'R3' as const, order: [], creditBought: false }
+
+  it('under Free models no role gets a paid id: the server default and a stored paid id both become the free choice', () => {
+    expect(celloChatModel({ apiKeys: { openrouter: 'k', models: free }, purpose: 'researcher' }).model).toMatch(/:free$/)
+    expect(celloChatModel({ apiKeys: { openrouter: 'k', model: 'anthropic/claude-sonnet-5', models: free }, purpose: 'orchestrator' }).model).toMatch(/:free$/)
+    expect(celloChatModel({ apiKeys: { openrouter: 'k', model: 'google/gemma-4-31b-it:free', models: free }, purpose: 'orchestrator' }).model).toBe('google/gemma-4-31b-it:free')
+  })
+
+  it('a person who allows paid models keeps their choice', () => {
+    expect(celloChatModel({ apiKeys: { openrouter: 'k', model: 'anthropic/claude-sonnet-5', models: { ...free, ceiling: 'R4' } }, purpose: 'orchestrator' }).model).toBe('anthropic/claude-sonnet-5')
+  })
+})

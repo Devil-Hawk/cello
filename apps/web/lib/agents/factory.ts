@@ -57,7 +57,7 @@ export interface CelloAgentInput {
   saver?: BaseCheckpointSaver
   /** Test seams. */
   model?: BaseChatModel
-  /** The model the Researcher gets when it is reached through the orchestrator. */
+  /** The Researcher's own model. Without one it runs on `model`, the turn's resolved choice, so no subagent is ever on a model the person did not allow. */
   researcherModel?: BaseChatModel
   fallbacks?: GuardStackOptions['fallbacks']
   skillsDir?: string
@@ -80,14 +80,14 @@ function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher') {
 }
 
 /** The Researcher as a declarative spec: its own prompt, model, read-only tools, guard stack and permissions. */
-export function researcherSpec(input: CelloAgentInput, name: string = 'researcher', standalone = true): SubAgent {
+export function researcherSpec(input: CelloAgentInput, name: string = 'researcher'): SubAgent {
   const { ctx } = input
   const skillsDir = input.skillsDir ?? path.join(process.cwd(), 'skills')
   return {
     name,
     description: RESEARCHER_DESCRIPTION,
     systemPrompt: composeSystemPrompt({ mode: loadModeDoc('researcher'), stableContext: skillBodies(RESEARCHER_SKILLS, skillsDir, input.hiddenSkills ?? OFF_FOR_RESEARCHER) }),
-    model: input.researcherModel ?? (standalone ? input.model : undefined) ?? celloChatModel({ apiKeys: ctx.apiKeys, purpose: 'researcher' }),
+    model: input.researcherModel ?? input.model ?? celloChatModel({ apiKeys: ctx.apiKeys, purpose: 'researcher' }),
     tools: [...researchPrimitives(ctx), ...toAgentTools({ ...ctx, readOnly: true }, { names: RESEARCHER_TOOL_NAMES })] as never,
     middleware: guards(input, 'researcher'),
     permissions: PERMISSIONS.researcher,
@@ -103,7 +103,7 @@ export function researcherSpec(input: CelloAgentInput, name: string = 'researche
  */
 export function specialists(input: CelloAgentInput): AnySubAgent[] {
   const deps = { ctx: input.ctx }
-  return [scoutSubAgent(deps), writerSubAgent(deps), researcherSpec(input, 'general-purpose', false)]
+  return [scoutSubAgent(deps), writerSubAgent(deps), researcherSpec(input, 'general-purpose')]
 }
 
 /** The orchestrator: the only agent the person talks to. */
@@ -114,14 +114,14 @@ export function createCelloAgent(input: CelloAgentInput & { kind: 'researcher' }
 export function createCelloAgent(input: CelloAgentInput & { kind: 'chat'; tools: StructuredToolInterface[]; responseFormat: CreateDeepAgentParams['responseFormat'] }): ReturnType<typeof createDeepAgent>
 export function createCelloAgent(input: CelloAgentInput & { kind: 'orchestrator' | 'researcher' | 'chat'; tools?: StructuredToolInterface[]; responseFormat?: unknown }) {
   const { ctx } = input
-  if (input.kind === 'researcher') return createSubAgent(researcherSpec(input, 'researcher', true))
+  if (input.kind === 'researcher') return createSubAgent(researcherSpec(input, 'researcher'))
   if (input.kind === 'chat') {
     return createDeepAgent({
       name: 'cello-chat',
       model: input.model ?? celloChatModel({ apiKeys: ctx.apiKeys, purpose: 'orchestrator', serverFallback: !ctx.isDemo }),
       systemPrompt: composeSystemPrompt({ mode: loadModeDoc('chat'), stableContext: input.profileCard }),
       tools: (input.tools ?? []) as never,
-      subagents: [researcherSpec(input, 'general-purpose', false)],
+      subagents: [researcherSpec(input, 'general-purpose')],
       backend: celloBackend({ admin: ctx.admin, userId: ctx.userId, skillsDir: input.skillsDir }),
       permissions: PERMISSIONS.orchestrator,
       middleware: guards(input, 'orchestrator'),
