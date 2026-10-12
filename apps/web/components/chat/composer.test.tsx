@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { Composer, type ComposerProps } from './composer'
+import { Composer, keyAction, type ComposerProps } from './composer'
 
 const noop = () => undefined
 const html = (over: Partial<ComposerProps> = {}) => renderToStaticMarkup(<Composer value="" onChange={noop} onSend={noop} onStop={noop} running={false} {...over} />)
@@ -38,5 +38,16 @@ describe('Composer', () => {
     const blocked = html({ value: 'hello', notice: 'Chat needs a model. Every page and button works without one.' })
     expect(blocked).toContain('Chat needs a model.')
     expect(blocked).toMatch(/aria-label="Send"[^>]*disabled=""/)
+  })
+
+  it('Enter sends and Shift+Enter breaks the line in the field; Escape stops a running turn from the field or the page, not from another field', () => {
+    expect(keyAction({ key: 'Enter' }, 'field', false)).toBe('send')
+    expect(keyAction({ key: 'Enter', shiftKey: true }, 'field', false)).toBeNull()
+    expect(keyAction({ key: 'Enter', isComposing: true }, 'field', false)).toBeNull()
+    expect(keyAction({ key: 'Enter' }, 'page', false)).toBeNull()
+    expect(keyAction({ key: 'Escape' }, 'field', true)).toBe('stop')
+    expect(keyAction({ key: 'Escape' }, 'page', true)).toBe('stop')
+    expect(keyAction({ key: 'Escape' }, 'other-field', true)).toBeNull()
+    expect(keyAction({ key: 'Escape' }, 'field', false)).toBeNull()
   })
 })
