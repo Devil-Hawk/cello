@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
-import { addRead, finishWorker, MAX_READS, openWorker, requestStop, requestStopWorker, runWorkers, type WorkerScope } from './workers'
+import { addRead, finishWorker, MAX_READS, openWorker, requestStop, requestStopWorker, runWorkers, withWorker, type WorkerScope } from './workers'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const caps = { steps: 10, ms: 30_000, tokens: 10_000 }
@@ -140,5 +140,23 @@ describe('addRead', () => {
     const reads = db.tables.agent_tasks[0].reads as { label: string }[]
     expect(reads).toHaveLength(MAX_READS)
     expect(reads[0].label).toBe('read 0')
+  })
+})
+
+describe('withWorker', () => {
+  it('finishes the row failed with the thrown reason as its summary, and done when the work returns', async () => {
+    const { db, scope } = setup()
+    const cap = 'The draft could not be written: Free models allow 5 drafts a day. Add credit or choose another way to run.'
+    await expect(
+      withWorker(scope, { command: 'documents.draft', title: 'Writing a message' }, async () => {
+        throw new Error(cap)
+      })
+    ).rejects.toThrow(cap)
+    expect(await withWorker(scope, { command: 'documents.draft', title: 'Writing a note' }, async () => 'ok')).toBe('ok')
+    const [failed, done] = db.tables.agent_tasks
+    expect(failed).toMatchObject({ command: 'documents.draft', title: 'Writing a message', status: 'failed', summary: cap })
+    expect(failed.finished_at).toBeTruthy()
+    expect(done).toMatchObject({ title: 'Writing a note', status: 'done' })
+    expect(done.summary).toBeUndefined()
   })
 })
