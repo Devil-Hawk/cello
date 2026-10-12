@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
+import type { DecryptedApiKeys } from '@/lib/harness/types'
 import type { Thing } from './things'
-import { checkNote, fallbackSentences, noteText, RANKING_WORDS, routeIntent } from './route'
+import { checkNote, fallbackSentences, NO_SENTENCE_LINE, noteText, RANKING_WORDS, routedAgent, routeIntent } from './route'
 
 describe('routeIntent', () => {
   it('reads a find with a type, a place and a count', () => {
@@ -70,5 +72,23 @@ describe('noteText', () => {
     expect(text.split('\n').filter((l) => /thank/i.test(l))).toHaveLength(1)
     expect(text.endsWith('Thank you,\nRiley Marsh')).toBe(true)
     expect(checkNote(text, { company: 'Retell AI', title: 'Deployment Strategist', ask: 'the timeline', evidence: ['Eight years building data services.'] })).not.toBeNull()
+  })
+})
+
+const ROLE = { kind: 'role' as const, id: 'j1', title: 'Product Solutions Architect', company: 'Datadog', place: 'New York', pay: null, chance: null, posted: '2026-10-01', notes: [] }
+vi.mock('@/lib/models/ask', () => ({ askModel: async () => null }))
+vi.mock('@/lib/commands', async (orig) => ({ ...(await orig<typeof import('@/lib/commands')>()), runCommand: async () => ({ sentence: 'Found 1 role.', things: [ROLE] }) }))
+
+describe('the routed draft when no model sentence passes the checks', () => {
+  it('ends the worker row failed with a plain reason, makes nothing, and says that reason', async () => {
+    const db = makeFakeAdmin({ profiles: [{ id: 'u1', full_name: 'Riley Marsh', resume_text: 'Led FinOps at Acme for three years and cut cloud spend by a third.' }], agent_tasks: [], artifacts: [] })
+    const deps = { db, userId: 'u1', keys: { userId: 'u1' } as DecryptedApiKeys, ran: { rung: 'R3' as const, model: 'x:free', effort: 'low' as const } }
+    const agent = routedAgent(deps, async () => { throw new Error('the loop must not run') }, async () => ['Datadog'])
+    const out = await agent({ chatId: 'c1', turnId: 't1', screen: null, typed: 'Draft a short note to Datadog asking about the timeline', feedback: null, returned: new Set() })
+    expect(out.answer.parts.map((p) => p.text)).toEqual([NO_SENTENCE_LINE])
+    expect(out.made).toEqual([])
+    expect(db.tables.artifacts).toHaveLength(0)
+    expect(db.tables.agent_tasks).toHaveLength(1)
+    expect(db.tables.agent_tasks[0]).toMatchObject({ command: 'documents.draft', title: 'Writing a message', status: 'failed', summary: NO_SENTENCE_LINE })
   })
 })

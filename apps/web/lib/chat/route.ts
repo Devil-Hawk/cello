@@ -7,7 +7,7 @@
 // pattern here when a real phrasing falls through.
 
 import { createArtifact } from '@/lib/agents/artifacts'
-import { chatDoor, getCommand, runCommand } from '@/lib/commands'
+import { chatDoor, CommandRefusal, getCommand, runCommand } from '@/lib/commands'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { askModel } from '@/lib/models/ask'
 import { reasonOf } from '@/lib/models/caps'
@@ -31,6 +31,9 @@ const NUM_WORD = '\\d+|one|two|three|four|five|six|seven|eight|nine|ten'
 const FIND = new RegExp(`\\b(?:find|show|search(?: for)?|look(?:ing)? for|get|list|any)\\b(?:\\s+me)?\\s+(?:(?:the|some|any|all|my|new|open)\\s+)*(?:(${NUM_WORD})\\s+)?(.*?)\\s*\\b(?:roles?|jobs?|positions?|openings?)\\b(?:\\s+(in|near|around|based in|at|from)\\s+(.+?))?\\s*[.?!]*$`, 'i')
 const COMPARE = new RegExp(`\\bcompare\\b.*\\b(?:top|best|first)\\s+(${NUM_WORD})\\b|\\bcompare\\b.*\\bmy\\s+(${NUM_WORD})\\s+(?:top|best)\\b`, 'i')
 const DRAFT = /\b(?:draft|write|compose)\b.*\b(?:note|message|email|follow[- ]?up)\b/i
+
+/** The person's line when no free model wrote a sentence that passed the checks. The provider's own words stay in the ledger. */
+export const NO_SENTENCE_LINE = 'No free model wrote a sentence that passed the checks. Try again in a minute, or pick another free model.'
 
 /** What a typed line asks for, when it is one of the three; null otherwise. `companies` are the person's stored names. */
 export function routeIntent(typed: string, companies: string[] = []): Intent | null {
@@ -225,7 +228,6 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
       const name = me?.full_name?.trim() || null
       if (!resume || !name) return done(say('Cello needs your resume to write a note in your voice. Add it on Your record, then ask again.'))
       const facts = `Role: ${job.title} at ${intent.company}${job.place ? `, ${job.place}` : ''}. Posted ${job.posted ?? 'a date not stated'}.`
-      const errors: string[] = []
       const evidence = [resume, facts, name]
       // ponytail: the model writes one sentence, a strength from the resume; code writes the rest, so a free model that cannot hold
       // a four-to-six sentence shape still gives a note that does. Upgrade: let the model write the whole note once free models hold the shape.
@@ -240,8 +242,8 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
       const got = await withWorker(
         { db: deps.db, userId: deps.userId, threadId: input.chatId, chatId: input.chatId, turnId: input.turnId, model: deps.ran.model, rung: deps.ran.rung },
         { command: 'documents.draft', title: 'Writing a message' },
-        () =>
-          askModel(
+        async () => {
+          const sentence = await askModel(
             deps.keys,
             deps.ran.model,
             {
@@ -251,11 +253,15 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
             },
             okStrength,
             deps.signal,
-            errors,
+            undefined,
             'draft-outreach-message'
           )
+          // No model's sentence passed the checks: the worker's row ends failed with this plain reason (the catch below says it
+          // too); what each model answered stays in the spend ledger and the trace, never in the line the person reads.
+          if (!sentence) throw new CommandRefusal(502, NO_SENTENCE_LINE, 'failed')
+          return sentence
+        }
       )
-      if (!got) return done(say(`Cello could not write a note that passed its checks. ${errors.slice(0, 1).join(' ')} Try again in a minute, or pick another free model.`))
       const note = checkNote(compose(plain(got.text)), shape) as { subject: string; body: string }
       const made = await createArtifact(deps.db, { userId: deps.userId, type: 'message', title: `Note to ${intent.company}`, author: 'cello', content: { subject: note.subject, body: note.body, to_name: null, to_email: null, kind: 'initial' }, jobId: job.id, about: [{ kind: 'job', ref: job.id }] })
       await deps.db.from('artifacts').update({ chat_turn_id: input.turnId }).eq('id', made.id).eq('user_id', deps.userId)
