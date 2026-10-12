@@ -106,6 +106,22 @@ export function fallbackSentences(roles: Thing[]): string {
   return plain(`Apply to ${at(a)} first, because ${why(a)}. Look at ${at(b)} next${b.place ? ` (${b.place})` : ''}, because ${why(b)}.`)
 }
 
+// Cello holds a role, a place and a date, not what an employer does or values, so a note may not claim either.
+// It may not imply earlier contact either: there was none.
+const COMPANY_CLAIM = /\b(drawn to|impressed|admire[sd]?|excited (by|about)|passionate about|mission|vision|focus(es|ed)? on|known for|leading|innovative|cutting[- ]edge|reputation|your (platform|product|products|technology|customers|approach|culture|values))\b/i
+const EARLIER_CONTACT = /\b(continued|continuing|again|follow(ing)? up|as discussed|previous(ly)?|earlier|last (week|time)|our (last|previous|earlier)|since we)\b/i
+
+/** True when a sentence says something about the company beyond its name, or hints that the two have already spoken. */
+function claimsMore(sentence: string, company: string): boolean {
+  const c = company.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return (
+    COMPANY_CLAIM.test(sentence) ||
+    EARLIER_CONTACT.test(sentence) ||
+    new RegExp(`\\b${c}\\s+(is|are|builds|provides|offers|specializes|helps|develops|makes|has)\\b`, 'i').test(sentence) ||
+    new RegExp(`\\b${c}'s\\s+(?!(hiring|interview|recruiting|process|timeline|team|open|role|posting)\\b)`, 'i').test(sentence)
+  )
+}
+
 /** A note a careful person would send: the subject and body, or null when the model's text breaks a rule. Exported for its test. */
 export function checkNote(text: string, input: { company: string; title: string; ask: string; evidence: string[] }): { subject: string; body: string } | null {
   const m = text.match(/^\s*Subject:\s*(.+?)\s*\n+([\s\S]+)$/i)
@@ -124,6 +140,7 @@ export function checkNote(text: string, input: { company: string; title: string;
   if (titleWords.length && !titleWords.every((w) => lower.includes(w))) return null
   const askWords = input.ask.toLowerCase().match(/[a-z]{5,}/g) ?? []
   if (askWords.length && !askWords.some((w) => lower.includes(w.replace(/s$/, '')))) return null
+  if (sentences.some((x) => claimsMore(x, input.company))) return null
   if (unsupported(body, input.evidence).length) return null
   return { subject, body }
 }
@@ -215,7 +232,7 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
             deps.ran.model,
             {
               maxTokens: 1800,
-              system: `Write a short professional note from a job seeker to a recruiter. Output the first line as "Subject: ..." then a blank line, then the note: a greeting line (Hello,), four to six sentences, then a sign-off line (Thank you,) and the sender's name on the next line. Name the company and the role. Ask only the one thing requested${intent.ask ? `: ${intent.ask}` : ''}. The recruiter's name is unknown, so do not use one. Mention at most one strength, and only one that is in the resume excerpt; never invent an employer, number, date or skill. No brackets, no placeholders, no dashes, no exclamation marks.`,
+              system: `Write a short professional note from a job seeker to a recruiter. Output the first line as "Subject: ..." then a blank line, then the note: a greeting line (Hello,), four to six sentences, then a sign-off line (Thank you,) and the sender's name on the next line. Name the company and the role. Ask only the one thing requested${intent.ask ? `: ${intent.ask}` : ''}. The recruiter's name is unknown, so do not use one. Say nothing about what the company does, builds, values or is focused on: you know only its name and the role, so the name is all you may say about it. Do not imply earlier contact (no \"continued interest\", \"again\", \"following up\"). Mention at most one strength, and only one that is in the resume excerpt; never invent an employer, number, date or skill. No brackets, no placeholders, no dashes, no exclamation marks.`,
               prompt: `Sender: ${name}\n${facts}\n\nResume excerpt:\n${resume}`,
             },
             (t) => checkNote(t, { company: intent.company, title: job.title, ask: intent.ask, evidence: [resume, facts, name] }) !== null,

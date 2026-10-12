@@ -34,6 +34,13 @@ describe('checkNote', () => {
     expect(checkNote(good.replace(' The work looks close to what I do best.', ''), input)).toBeNull()
     expect(checkNote(good.replace('eight years', '12 years'), input)).toBeNull()
   })
+  it('refuses a claim about what the company does and a hint of earlier contact', () => {
+    const said = (sentence: string) => checkNote(good.replace(' The work looks close to what I do best.', ` ${sentence}`), input)
+    expect(said('The work looks close to what I do best.')).not.toBeNull()
+    expect(said("I am particularly drawn to Retell AI's focus on scalable infrastructure and real-time data processing.")).toBeNull()
+    expect(said('Retell AI builds voice agents for call centers.')).toBeNull()
+    expect(said('I remain keen, with continued interest in the role.')).toBeNull()
+  })
 })
 
 describe('the Compare sentences', () => {
