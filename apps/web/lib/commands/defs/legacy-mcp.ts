@@ -1,4 +1,4 @@
-// Today's MCP tools as registry commands (Q6). Cello has always served the 18
+// Today's MCP tools as registry commands (Q6). Cello has always served its
 // first-party copilot tools to MCP hosts under their own names; hosts that
 // already use them keep working. Each tool is one command, `legacy.<tool>`,
 // callable only through the assistant door, and mcpView lists it under its old
@@ -23,7 +23,8 @@ const MEASURE: Record<string, string> = {
   research_company: 'S13',
   research_companies: 'S13',
   web_search: 'T1',
-  source_jobs: 'T1',
+  search_roles: 'T3',
+  refresh_companies: 'T5',
   search_kb: 'S12',
   get_application: 'T10',
   list_runs: 'T10',
@@ -34,7 +35,7 @@ const MEASURE: Record<string, string> = {
   remember_preference: 'S16',
 }
 
-const FIXED_EGRESS = new Set(['web_search', 'source_jobs', 'research_company', 'research_companies', 'trigger_run'])
+const FIXED_EGRESS = new Set(['web_search', 'refresh_companies', 'research_company', 'research_companies', 'trigger_run'])
 
 const MAX_TEXT = 200_000
 
