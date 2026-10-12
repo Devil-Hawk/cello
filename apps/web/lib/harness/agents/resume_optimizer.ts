@@ -148,6 +148,12 @@ function scorePrompt(job: ResumeOptimizerJob): string {
  */
 const SCORE_MAX_TOKENS = 1600
 
+/** A keyword is "covered" only when the resume text says it (case-insensitive); the model's own list is not evidence. */
+export function keywordsIn(words: string[], resumeText: string): string[] {
+  const hay = resumeText.toLowerCase()
+  return words.filter((w) => w.trim() && hay.includes(w.trim().toLowerCase()))
+}
+
 async function scoreResume(
   run: LlmRunner,
   resumeText: string,
@@ -181,7 +187,7 @@ async function scoreResume(
   return {
     score: {
       atsScore: clampPct(raw.atsScore),
-      matchedKeywords: strArray(raw.matchedKeywords),
+      matchedKeywords: keywordsIn(strArray(raw.matchedKeywords), resumeText),
       missingKeywords: strArray(raw.missingKeywords),
       formatIssues: strArray(raw.formatIssues),
     },

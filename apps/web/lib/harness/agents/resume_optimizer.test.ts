@@ -5,7 +5,7 @@ vi.mock('@/lib/resume/store', () => ({
   createResumeVersion: (...args: unknown[]) => createResumeVersion(...args),
 }))
 
-import { optimizeResume, optimizeResumeAndSave } from './resume_optimizer'
+import { keywordsIn, optimizeResume, optimizeResumeAndSave } from './resume_optimizer'
 import { ResumeOptimizerOutput } from '../schemas'
 import { resumeToPlainText } from '@/lib/resume/render'
 import { ResumeSchema } from '@/lib/resume/schema'
@@ -106,5 +106,12 @@ describe('optimizeResumeAndSave', () => {
     expect(input).toMatchObject({ userId: 'u1', jobId: 'j1', source: 'tailored', atsScore: 70 })
     expect(input.resume).toEqual(r.resume)
     expect(input.content).toBeUndefined()
+  })
+})
+
+describe('keywordsIn', () => {
+  it('keeps a matched keyword only when the resume text contains it', () => {
+    const resume = 'Built a Kafka pipeline in Go. Wrote session tokens with OAuth.'
+    expect(keywordsIn(['kafka', 'JWTs', 'X.509 certificates', 'secrets management', 'oauth'], resume)).toEqual(['kafka', 'oauth'])
   })
 })
