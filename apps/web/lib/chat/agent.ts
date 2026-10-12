@@ -59,6 +59,8 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
   const results: TurnResult[] = []
   const found: Thing[] = []
   const madeIds = new Set<string>()
+  // A cap, a missing key or a refusal a tool met this turn, in code's words, so the person reads it even when the model leaves it out.
+  const refusals: string[] = []
 
   return async (input) => {
     const ctxFor = () => chatDoor({ userId: deps.userId, typed: input.typed, chat: { chatId: input.chatId, turnId: input.turnId }, signal: deps.signal })
@@ -82,7 +84,11 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
             return JSON.stringify(out)
           } catch (e) {
             if (isBudgetCapError(e)) throw e
-            const message = reasonOf(e) ?? 'That did not work.'
+            const reason = reasonOf(e)
+            const message = reason ?? 'That did not work.'
+            // Code's own line: evidence for what the model says about it, so the check keeps that part.
+            results.push({ object: null, text: message })
+            if (reason && !refusals.includes(reason)) refusals.push(reason)
             return JSON.stringify({ error: message, fix: 'Tell the person what could not be done, in one sentence.' })
           }
         },
@@ -124,6 +130,10 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
     let answer: ModelAnswer = parsed.success ? parsed.data : { parts: textOf(last).trim() ? [{ about: [], text: textOf(last).trim().slice(0, 4000) }] : [] }
     // A search's roles are shown as cards whether or not the model remembered to list them: the rows are code's.
     if (found.length && !answer.cards?.length) answer = { ...answer, cards: found.slice(0, 12).map((t) => ({ kind: t.kind as 'role', id: t.id })) }
+    // The real reason a tool refused is said by code when the model's parts do not carry it (acceptance H2).
+    const said = answer.parts.map((p) => p.text.toLowerCase()).join('\n')
+    const unsaid = refusals.filter((r) => !said.includes(r.toLowerCase()))
+    if (unsaid.length) answer = { ...answer, parts: [...answer.parts, ...unsaid.map((text) => ({ about: [], text }))] }
 
     const made = madeIds.size
       ? (((await deps.db.from('artifacts').select('id, type, title, created_at').eq('user_id', deps.userId).in('id', [...madeIds])).data as { id: string; type: string; title: string; created_at: string }[] | null) ?? [])
