@@ -43,7 +43,8 @@ import type { AgentContext } from '@/lib/agents/context'
 import { writeMessage } from '@/lib/outreach/write'
 import { buildWriterGraph, runWriter, type WriterDeps } from './writer'
 import type { FakeAdmin } from '@/lib/agents/testing/fake-admin'
-import { getArtifact } from '@/lib/agents/artifacts'
+import { getArtifact, listArtifacts } from '@/lib/agents/artifacts'
+import { FreeCapError } from '@/lib/models/caps'
 import { artifactWorld } from '@/lib/artifacts/testing'
 import { CANONICAL_RESUME } from '@/lib/resume/test-fixtures'
 import { resumeToPlainText } from '@/lib/resume/render'
@@ -396,6 +397,16 @@ describe('the draft routes run the Writer', () => {
     expect(page.admin.tables.artifact_versions[0].content).toEqual(direct.admin.tables.artifact_versions[0].content)
     expect(b.written.review).toMatchObject({ subject: 'Billing at Acme', body: BODY, source: 'model', failed: false })
     expect(b.written.review.checks.checks.every((c) => c.ok)).toBe(true)
+  })
+
+  it('a message under the free daily cap fails with the cap as the reason, and makes nothing', async () => {
+    const { deps, admin } = setup()
+    mocks.outreach.mockRejectedValue(new FreeCapError('drafts'))
+    const result = await runWriter(deps, { type: 'message', job_id: 'j1', contact_id: 'k1' })
+    expect(result.status).toBe('failed')
+    expect(result.error).toBe('The draft could not be written: Free models allow 5 drafts a day. Add credit or choose another way to run.')
+    expect(result.fix).toMatch(/Do not try again/)
+    expect(await listArtifacts(admin, 'u1')).toHaveLength(0)
   })
 
   it('with no key a message is the standard template and says why, instead of refusing', async () => {
