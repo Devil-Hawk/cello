@@ -135,9 +135,8 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
   }, [rows])
 
   const loadScheduled = useCallback(async () => {
-    // Scheduled tasks are closed until they ship: the route answers 404, which is truly "nothing scheduled".
+    // While scheduled tasks are closed the route answers an empty list, which is truly "nothing scheduled".
     const res = await fetch('/api/scheduled-tasks', { cache: 'no-store' }).catch(() => null)
-    if (res?.status === 404) return setScheduled([])
     const body = res?.ok ? ((await res.json().catch(() => null)) as { tasks: { id: string; name: string; card: { schedule: string; last: string | null; next: string | null } }[] } | null) : null
     setScheduled(body ? body.tasks.map((t) => ({ id: t.id, name: t.name, detail: [t.card.schedule, t.card.last, t.card.next].filter(Boolean).join(' \u00b7 ') })) : null)
   }, [])
