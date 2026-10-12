@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { makeFakeAdmin, type FakeAdmin } from '@/lib/agents/testing/fake-admin'
+import { FreeCapError } from '@/lib/models/caps'
 import type { ModelAnswer } from './answer'
 import { inMemoryStore } from './memory.fake'
 import { runChatTurn, type AgentInput, type AgentOutput, type TurnDeps } from './turn'
@@ -104,6 +105,13 @@ describe('runChatTurn', () => {
     const db = seed()
     const out = await send(deps(db, async () => Promise.reject(new Error('provider down'))))
     expect(out).toMatchObject({ ok: false, error: 'Cello could not finish this. Nothing was changed.' })
+    expect(db.tables.chat_turns.map((t) => t.kind)).toEqual(['person'])
+  })
+
+  it('says the free draft cap when a draft hits it, not that it could not finish', async () => {
+    const db = seed()
+    const out = await send(deps(db, async () => Promise.reject(new FreeCapError('drafts'))), 'Draft a note to Datadog asking about the timeline')
+    expect(out).toMatchObject({ ok: false, error: new FreeCapError('drafts').message, fix: '' })
     expect(db.tables.chat_turns.map((t) => t.kind)).toEqual(['person'])
   })
 

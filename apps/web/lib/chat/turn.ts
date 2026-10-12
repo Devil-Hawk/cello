@@ -11,6 +11,7 @@
 // A model that fails after step 1 leaves the person's turn in place and no answer: "Nothing was changed."
 
 import type { AdminClient } from '@/lib/harness/types'
+import { reasonOf } from '@/lib/models/caps'
 import type { Ran } from '@/lib/models/choice'
 import { settleAnswer, type ModelAnswer, type Settled, type TurnResult } from './answer'
 import { activeTiles, ledgerKey } from './attach'
@@ -116,7 +117,9 @@ export async function runChatTurn(
     settled = await settleAnswer(ask, () => ({ attached, results }))
   } catch (e) {
     console.error('chat answer failed', e)
-    return { ok: false, turnId, error: 'Cello could not finish this. Nothing was changed.', fix: 'Try again.' }
+    // A cap or a missing key is said as it is; only an unknown failure gets the generic line.
+    const reason = reasonOf(e)
+    return { ok: false, turnId, error: reason ?? 'Cello could not finish this. Nothing was changed.', fix: reason ? '' : 'Try again.' }
   }
   const out = last as AgentOutput | null
 
