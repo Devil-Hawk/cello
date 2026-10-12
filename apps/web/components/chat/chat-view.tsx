@@ -364,7 +364,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
 
       <main className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2 md:hidden">
-          <button type="button" aria-label="Open the list of chats" className="inline-flex h-8 w-8 items-center justify-center rounded-control hover:bg-muted" onClick={() => setRailOpen(true)}>
+          <button type="button" aria-label="Open the list of chats" className="-my-1.5 inline-flex h-11 w-11 items-center justify-center rounded-control hover:bg-muted" onClick={() => setRailOpen(true)}>
             <Menu className="h-4 w-4" aria-hidden />
           </button>
           <span className="truncate text-body font-medium text-foreground">{page?.chat.title || 'New chat'}</span>
@@ -375,7 +375,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
             <Tiles tiles={tiles} onAdd={() => setAdding((v) => !v)} onOpen={(t) => openThing(t.kind, t.ref)} onRemove={(t) => void send(`/api/chat/${chatId}/attachments?tile=${encodeURIComponent(t.id)}`, 'DELETE').then(loadPage)} />
             {adding && (
               <div className="rounded-card border border-border bg-card p-2">
-                <input autoFocus aria-label="Find something to add" value={addWords} onChange={(e) => setAddWords(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setAdding(false)} placeholder="Search your roles, companies, applications, people, chats and things Cello made" className="mb-1 h-8 w-full rounded-control border border-input bg-background px-2 text-body" />
+                <input autoFocus aria-label="Find something to add" value={addWords} onChange={(e) => setAddWords(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setAdding(false)} placeholder="Search your roles, companies, applications, people, chats and things Cello made" className="mb-1 h-11 w-full rounded-control border border-input bg-background px-2 text-body" />
                 <Finder query={addWords} onPick={(f) => void addThing(f)} />
               </div>
             )}
@@ -392,7 +392,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
                   {(suggested?.suggestions ?? []).map((s) => (
                     // A tap puts the words in the compose box. Nothing is sent until Send.
                     <li key={s.text}>
-                      <button type="button" className="rounded-full border border-border bg-card px-3 py-1.5 text-caption text-foreground hover:bg-muted" onClick={() => void takeSuggestion(s)}>
+                      <button type="button" className="min-h-11 rounded-full border border-border bg-card px-3 py-1.5 text-caption text-foreground hover:bg-muted" onClick={() => void takeSuggestion(s)}>
                         {s.text}
                       </button>
                     </li>
@@ -407,13 +407,13 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
                       <div className="space-y-1">
                         <textarea aria-label="Edit your message" value={editing.text} rows={3} onChange={(e) => setEditing({ id: t.id, text: e.target.value })} className="w-full rounded-control border border-input bg-card p-2 text-body" />
                         <div className="flex justify-end gap-2 text-caption">
-                          <button type="button" className="rounded-control px-2 py-1 text-muted-foreground hover:bg-muted" onClick={() => setEditing(null)}>
+                          <button type="button" className="min-h-11 rounded-control px-2 py-1 text-muted-foreground hover:bg-muted" onClick={() => setEditing(null)}>
                             Cancel
                           </button>
                           <button
                             type="button"
                             disabled={!editing.text.trim()}
-                            className="rounded-control border border-border bg-card px-2 py-1 text-foreground hover:bg-muted disabled:opacity-40"
+                            className="min-h-11 rounded-control border border-border bg-card px-2 py-1 text-foreground hover:bg-muted disabled:opacity-40"
                             onClick={() =>
                               // This forks the chat and keeps the old version; the page then follows the new answer.
                               void send(`/api/chat/${chatId}/edit`, 'POST', { turn_id: t.id, typed: editing.text }).then((ok) => {
@@ -436,17 +436,17 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
                         <div className="mt-0.5 flex items-center justify-end gap-2 text-caption text-muted-foreground">
                           {seen.slots[t.id] && (
                             <span className="flex items-center gap-1">
-                              <button type="button" aria-label="Previous version" disabled={seen.slots[t.id].index <= 1} className="px-1 hover:text-foreground disabled:opacity-40" onClick={() => setPicks({ ...picks, [seen.slots[t.id].root]: seen.slots[t.id].index - 2 })}>
+                              <button type="button" aria-label="Previous version" disabled={seen.slots[t.id].index <= 1} className="inline-flex min-h-11 min-w-11 items-center justify-center px-1 hover:text-foreground disabled:opacity-40" onClick={() => setPicks({ ...picks, [seen.slots[t.id].root]: seen.slots[t.id].index - 2 })}>
                                 {'\u2039'}
                               </button>
                               Version {seen.slots[t.id].index} of {seen.slots[t.id].count}
-                              <button type="button" aria-label="Next version" disabled={seen.slots[t.id].index >= seen.slots[t.id].count} className="px-1 hover:text-foreground disabled:opacity-40" onClick={() => setPicks({ ...picks, [seen.slots[t.id].root]: seen.slots[t.id].index })}>
+                              <button type="button" aria-label="Next version" disabled={seen.slots[t.id].index >= seen.slots[t.id].count} className="inline-flex min-h-11 min-w-11 items-center justify-center px-1 hover:text-foreground disabled:opacity-40" onClick={() => setPicks({ ...picks, [seen.slots[t.id].root]: seen.slots[t.id].index })}>
                                 {'\u203a'}
                               </button>
                             </span>
                           )}
                           {chatId && !t.superseded_at && (
-                            <button type="button" className="hover:text-foreground md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100" onClick={() => setEditing({ id: t.id, text: t.typed ?? '' })}>
+                            <button type="button" className="min-h-11 hover:text-foreground md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100" onClick={() => setEditing({ id: t.id, text: t.typed ?? '' })}>
                               Edit
                             </button>
                           )}
@@ -510,9 +510,9 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
                 {chips.length > 0 ? (
                 <ul className="mb-2 flex flex-wrap gap-2" aria-label="Will be attached when you send">
                   {chips.map((c) => (
-                    <li key={`${c.kind}:${c.ref}`} className="flex items-center gap-1 rounded-control border border-border bg-muted py-0.5 pl-2 pr-1 text-caption text-foreground">
+                    <li key={`${c.kind}:${c.ref}`} className="flex min-h-11 items-center gap-1 rounded-control border border-border bg-muted py-0.5 pl-2 pr-1 text-caption text-foreground">
                       <span className="max-w-[14rem] truncate" title={c.name}>{c.name}</span>
-                      <button type="button" aria-label={`Remove ${c.name}`} className="inline-flex h-5 w-5 items-center justify-center rounded-control text-muted-foreground hover:bg-card hover:text-foreground" onClick={() => setChips(chips.filter((x) => x !== c))}>
+                      <button type="button" aria-label={`Remove ${c.name}`} className="inline-flex h-11 w-11 items-center justify-center rounded-control text-muted-foreground hover:bg-card hover:text-foreground" onClick={() => setChips(chips.filter((x) => x !== c))}>
                         <X className="h-3 w-3" aria-hidden />
                       </button>
                     </li>
@@ -528,7 +528,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
       {selection && (
         <button
           type="button"
-          className="fixed z-50 -translate-x-1/2 -translate-y-full rounded-control border border-border bg-card px-2 py-1 text-caption text-foreground shadow-pop hover:bg-muted"
+          className="fixed z-50 min-h-11 -translate-x-1/2 -translate-y-full rounded-control border border-border bg-card px-2 py-1 text-caption text-foreground shadow-pop hover:bg-muted"
           style={{ left: selection.x, top: Math.max(selection.y - 6, 8) }}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {

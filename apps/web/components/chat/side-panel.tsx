@@ -88,7 +88,7 @@ export function PanelView({ thing, versions, selected, onSelect, editing, onEdit
           <p className="text-label uppercase tracking-wide text-muted-foreground">{typeWord(thing.type)}</p>
           <h2 className="break-words text-body font-semibold text-foreground">{thing.title}</h2>
         </div>
-        <button type="button" aria-label="Close" className="inline-flex h-8 w-8 items-center justify-center rounded-control text-muted-foreground hover:bg-muted hover:text-foreground" onClick={onClose}>
+        <button type="button" aria-label="Close" className="-my-1.5 -mr-1.5 inline-flex h-11 w-11 items-center justify-center rounded-control text-muted-foreground hover:bg-muted hover:text-foreground" onClick={onClose}>
           <X className="h-4 w-4" aria-hidden />
         </button>
       </header>
@@ -96,7 +96,7 @@ export function PanelView({ thing, versions, selected, onSelect, editing, onEdit
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-caption text-muted-foreground">
           <label className="flex items-center gap-1">
             <span className="sr-only">Version</span>
-            <select value={current.version} onChange={(e) => onSelect(Number(e.target.value))} className="rounded-control border border-input bg-card px-1 py-0.5 text-caption text-foreground">
+            <select value={current.version} onChange={(e) => onSelect(Number(e.target.value))} className="min-h-11 rounded-control border border-input bg-card px-1 py-0.5 text-caption text-foreground">
               {versions.map((v) => (
                 <option key={v.version} value={v.version}>
                   Version {v.version} of {latest}
@@ -120,32 +120,32 @@ export function PanelView({ thing, versions, selected, onSelect, editing, onEdit
       {current && (
         <footer className="flex flex-wrap items-center gap-2 border-t border-border p-3">
           {editing ? (
-            <Button size="sm" variant="ghost" onClick={onCancel}>
+            <Button size="sm" variant="ghost" className="min-h-11" onClick={onCancel}>
               Cancel
             </Button>
           ) : (
             <>
               {field && selected === latest && (
-                <Button size="sm" variant="outline" onClick={onEdit}>
+                <Button size="sm" variant="outline" className="min-h-11" onClick={onEdit}>
                   Edit
                 </Button>
               )}
               <CopyButton text={current.content_text} />
               {onKeep && (
-                <Button size="sm" variant="outline" disabled={kept} onClick={onKeep}>
+                <Button size="sm" variant="outline" className="min-h-11" disabled={kept} onClick={onKeep}>
                   {kept ? 'Kept' : 'Keep'}
                 </Button>
               )}
               {onAddToChat && (
-                <Button size="sm" variant="outline" onClick={onAddToChat}>
+                <Button size="sm" variant="outline" className="min-h-11" onClick={onAddToChat}>
                   Attach
                 </Button>
               )}
-              <Button size="sm" variant="outline" onClick={() => download(thing.title, current.content_text)}>
+              <Button size="sm" variant="outline" className="min-h-11" onClick={() => download(thing.title, current.content_text)}>
                 Download
               </Button>
               {onUseInNewChat && (
-                <Button size="sm" variant="outline" onClick={onUseInNewChat}>
+                <Button size="sm" variant="outline" className="min-h-11" onClick={onUseInNewChat}>
                   Use in a new chat
                 </Button>
               )}

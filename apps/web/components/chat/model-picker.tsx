@@ -64,7 +64,7 @@ export function ModelPicker({ choice, rungs, estimate, onPick }: ModelPickerProp
 
   return (
     <details className="relative">
-      <summary className="flex cursor-pointer list-none items-center gap-1 rounded-control px-2 py-1 text-caption text-muted-foreground hover:bg-muted hover:text-foreground">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-control px-2 py-1 text-caption text-muted-foreground hover:bg-muted hover:text-foreground">
         <span className="truncate sm:hidden">{modelName(choice, rungs)}</span>
         <span className="hidden sm:inline">{choiceWords(choice, rungs)}</span>
         {estimate && <span className="hidden text-muted-foreground sm:inline">· {estimate}</span>}
@@ -82,7 +82,7 @@ export function ModelPicker({ choice, rungs, estimate, onPick }: ModelPickerProp
                 type="button"
                 disabled={Boolean(r.why)}
                 aria-pressed={draft?.rung === r.rung}
-                className={cn('flex w-full flex-col items-start rounded-control px-2 py-1.5 text-left text-caption hover:bg-muted disabled:pointer-events-none disabled:opacity-50', draft?.rung === r.rung && 'bg-muted')}
+                className={cn('flex min-h-11 w-full flex-col items-start justify-center rounded-control px-2 py-1.5 text-left text-caption hover:bg-muted disabled:pointer-events-none disabled:opacity-50', draft?.rung === r.rung && 'bg-muted')}
                 onClick={() => pickRung(r)}
               >
                 <span className="text-foreground">{r.label}</span>
@@ -94,7 +94,7 @@ export function ModelPicker({ choice, rungs, estimate, onPick }: ModelPickerProp
         {rung && rung.models.length > 1 && (
           <label className="block text-caption text-muted-foreground">
             Model
-            <select className="mt-1 block w-full rounded-control border border-input bg-background px-2 py-1 text-foreground" value={draft?.model} onChange={(e) => draft && setDraft({ ...draft, model: e.target.value })}>
+            <select className="mt-1 block min-h-11 w-full rounded-control border border-input bg-background px-2 py-1 text-foreground" value={draft?.model} onChange={(e) => draft && setDraft({ ...draft, model: e.target.value })}>
               {rung.models.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label}
@@ -106,7 +106,7 @@ export function ModelPicker({ choice, rungs, estimate, onPick }: ModelPickerProp
         {draft && (
           <label className="block text-caption text-muted-foreground">
             Effort
-            <select className="mt-1 block w-full rounded-control border border-input bg-background px-2 py-1 text-foreground" value={draft.effort} onChange={(e) => setDraft({ ...draft, effort: e.target.value as ModelChoice['effort'] })}>
+            <select className="mt-1 block min-h-11 w-full rounded-control border border-input bg-background px-2 py-1 text-foreground" value={draft.effort} onChange={(e) => setDraft({ ...draft, effort: e.target.value as ModelChoice['effort'] })}>
               {efforts.map((e) => (
                 <option key={e} value={e}>
                   {EFFORT_WORDS[e]}
@@ -116,13 +116,13 @@ export function ModelPicker({ choice, rungs, estimate, onPick }: ModelPickerProp
           </label>
         )}
         <div className="flex flex-wrap gap-2">
-          <button type="button" disabled={!draft?.model} className="rounded-control bg-primary px-2 py-1 text-caption text-primary-foreground disabled:opacity-40" onClick={() => draft && onPick(draft, 'chat')}>
+          <button type="button" disabled={!draft?.model} className="min-h-11 rounded-control bg-primary px-2 py-1 text-caption text-primary-foreground disabled:opacity-40" onClick={() => draft && onPick(draft, 'chat')}>
             Use in this chat
           </button>
-          <button type="button" disabled={!draft?.model} className="rounded-control border border-border px-2 py-1 text-caption text-foreground hover:bg-muted disabled:opacity-40" onClick={() => draft && onPick(draft, 'once')}>
+          <button type="button" disabled={!draft?.model} className="min-h-11 rounded-control border border-border px-2 py-1 text-caption text-foreground hover:bg-muted disabled:opacity-40" onClick={() => draft && onPick(draft, 'once')}>
             Just this message
           </button>
-          <button type="button" disabled={!draft?.model} className="rounded-control border border-border px-2 py-1 text-caption text-foreground hover:bg-muted disabled:opacity-40" onClick={() => draft && onPick(draft, 'default')}>
+          <button type="button" disabled={!draft?.model} className="min-h-11 rounded-control border border-border px-2 py-1 text-caption text-foreground hover:bg-muted disabled:opacity-40" onClick={() => draft && onPick(draft, 'default')}>
             Use for new chats
           </button>
         </div>

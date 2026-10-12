@@ -33,11 +33,11 @@ export function MadeBlock({ made, onOpen }: { made: MadeInfo; onOpen: (id: strin
       <p className="mt-1 break-words text-body font-semibold text-foreground">{made.title}</p>
       {made.type !== 'comparison' && made.preview && <p className="mt-1 line-clamp-6 whitespace-pre-line break-words text-caption text-muted-foreground">{made.preview.replace(/\n{2,}/g, '\n')}</p>}
       <div className="mt-2 flex gap-2">
-        <Button size="sm" variant="outline" onClick={() => void copy()}>
+        <Button size="sm" variant="outline" className="min-h-11" onClick={() => void copy()}>
           {copied ? <Check className="mr-1 h-4 w-4" aria-hidden /> : <Copy className="mr-1 h-4 w-4" aria-hidden />}
           {copied ? 'Copied' : 'Copy'}
         </Button>
-        <Button size="sm" variant="outline" onClick={() => onOpen(made.id)}>
+        <Button size="sm" variant="outline" className="min-h-11" onClick={() => onOpen(made.id)}>
           Open
         </Button>
       </div>

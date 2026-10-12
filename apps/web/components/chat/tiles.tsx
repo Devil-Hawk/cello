@@ -53,7 +53,7 @@ export function Tiles({ tiles, onRemove, onOpen, onAdd }: TilesProps) {
               <span className="min-w-0 truncate" title={t.name}>{t.name}</span>
             </>
           )
-          const cls = 'flex min-w-0 items-center gap-1.5 text-caption text-foreground hover:underline'
+          const cls = 'flex min-h-11 min-w-0 items-center gap-1.5 text-caption text-foreground hover:underline'
           return (
             <li key={t.id} className="flex max-w-full items-center gap-1 rounded-control border border-border bg-card py-1 pl-2 pr-1 sm:max-w-[16rem]" data-tile={t.kind}>
               {href ? (
@@ -69,7 +69,7 @@ export function Tiles({ tiles, onRemove, onOpen, onAdd }: TilesProps) {
               <button
                 type="button"
                 aria-label={`Remove ${t.name}`}
-                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-control text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => onRemove(t)}
               >
                 <X className="h-3.5 w-3.5" aria-hidden />
@@ -79,7 +79,7 @@ export function Tiles({ tiles, onRemove, onOpen, onAdd }: TilesProps) {
         })}
         {onAdd && !full && (
           <li>
-            <button type="button" className={cn('inline-flex items-center gap-1 rounded-control border border-dashed border-border px-2 py-1 text-caption text-muted-foreground hover:bg-muted hover:text-foreground')} onClick={onAdd}>
+            <button type="button" className={cn('inline-flex min-h-11 items-center gap-1 rounded-control border border-dashed border-border px-2 py-1 text-caption text-muted-foreground hover:bg-muted hover:text-foreground')} onClick={onAdd}>
               <Plus className="h-4 w-4" aria-hidden />
               Add
             </button>

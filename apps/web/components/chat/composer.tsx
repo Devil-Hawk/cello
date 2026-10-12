@@ -75,7 +75,7 @@ function Dictate({ value, onChange }: { value: string; onChange: (value: string)
       type="button"
       aria-label={listening ? 'Stop dictating' : 'Dictate'}
       aria-pressed={listening}
-      className={`inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-muted ${listening ? 'bg-muted text-foreground' : 'text-muted-foreground'}`}
+      className={`inline-flex h-11 w-11 items-center justify-center rounded-full hover:bg-muted ${listening ? 'bg-muted text-foreground' : 'text-muted-foreground'}`}
       onClick={() => {
         if (listening) return rec.current?.stop()
         const Ctor = recognitionCtor()
@@ -124,7 +124,7 @@ export function Composer({ value, onChange, onSend, onStop, running, quoted, onR
             <p className="text-label uppercase tracking-wide">Cello's earlier words</p>
             <p className="line-clamp-3 break-words text-foreground">{quoted.text}</p>
           </div>
-          <button type="button" aria-label="Remove the quote" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control hover:bg-card" onClick={onRemoveQuote}>
+          <button type="button" aria-label="Remove the quote" className="-my-2 -mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-control hover:bg-card" onClick={onRemoveQuote}>
             <X className="h-3.5 w-3.5" aria-hidden />
           </button>
         </div>
@@ -149,7 +149,7 @@ export function Composer({ value, onChange, onSend, onStop, running, quoted, onR
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{controls}</div>
         <Dictate value={value} onChange={onChange} />
         {running ? (
-          <button type="button" aria-label="Stop" className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90" onClick={onStop}>
+          <button type="button" aria-label="Stop" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90" onClick={onStop}>
             <Square className="h-4 w-4" aria-hidden />
           </button>
         ) : (
@@ -157,7 +157,7 @@ export function Composer({ value, onChange, onSend, onStop, running, quoted, onR
             type="button"
             aria-label="Send"
             disabled={!canSend}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40"
             onClick={onSend}
           >
             <ArrowUp className="h-4 w-4" aria-hidden />

@@ -46,7 +46,7 @@ export function CopyButton({ text, label = 'Copy' }: { text: string; label?: str
       type="button"
       aria-label={label}
       title={label}
-      className="inline-flex h-7 w-7 items-center justify-center rounded-control text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="inline-flex h-11 w-11 items-center justify-center rounded-control text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={() => {
         void navigator.clipboard?.writeText(text).then(
           () => {
@@ -70,7 +70,7 @@ function Lead({ about, names, onOpen }: { about: { kind: AttachKind; ref: string
         const name = names.find((n) => n.kind === a.kind && n.ref === a.ref)?.name
         const href = chatHref(a.kind, a.ref)
         const label = name ?? 'No longer listed'
-        const cls = 'rounded-control bg-muted px-2 py-0.5'
+        const cls = 'inline-flex min-h-11 items-center rounded-control bg-muted px-2 py-0.5'
         if (!name) return <span key={`${a.kind}:${a.ref}`} className={`${cls} text-muted-foreground`}>{label}</span>
         return href ? (
           <Link key={`${a.kind}:${a.ref}`} href={href} className={`${cls} hover:underline`}>
@@ -104,7 +104,7 @@ function SourceLines({ text, recalled, onAddChat }: { text: string; recalled: No
             From your chat <Link href={`/chat/${encodeURIComponent(s.chatId)}`} className="text-foreground underline underline-offset-2">{`\u201c${s.title || 'Untitled chat'}\u201d`}</Link>, {shortDate(s.at)}
           </span>
           {onAddChat && (
-            <button type="button" className="underline underline-offset-2 hover:text-foreground" onClick={() => onAddChat(s.chatId)}>
+            <button type="button" className="min-h-11 underline underline-offset-2 hover:text-foreground" onClick={() => onAddChat(s.chatId)}>
               Add to this chat
             </button>
           )}

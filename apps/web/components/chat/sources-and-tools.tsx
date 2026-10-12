@@ -22,8 +22,9 @@ export function SourcesAndTools({ d }: { d: Disclosure }) {
   const sources = [...new Map(d.sources.map((s) => [`${s.title}|${s.host}`, s])).values()]
   return (
     <details className="text-caption text-muted-foreground">
-      <summary className="cursor-pointer list-none hover:text-foreground">
-        <span className="underline underline-offset-2">Sources and tools</span> · {disclosureLine(d)}
+      <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-x-1 hover:text-foreground">
+        <span className="underline underline-offset-2">Sources and tools</span>
+        <span>· {disclosureLine(d)}</span>
       </summary>
       <dl className="mt-2 space-y-1 rounded-control border border-border bg-card p-3">
         <div className="flex gap-2">

@@ -60,7 +60,7 @@ function Row({ chat, active, onRename, onPin, onArchive, onDelete }: { chat: Rai
           autoFocus
           aria-label="Chat title"
           maxLength={80}
-          className="m-1 min-w-0 flex-1 rounded-control border border-input bg-card px-2 py-1 text-body"
+          className="m-1 min-h-11 min-w-0 flex-1 rounded-control border border-input bg-card px-2 py-1 text-body"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => setRenaming(false)}
@@ -73,7 +73,7 @@ function Row({ chat, active, onRename, onPin, onArchive, onDelete }: { chat: Rai
           }}
         />
       ) : (
-        <Link href={`/chat/${chat.id}`} className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-body text-foreground" aria-current={active ? 'page' : undefined}>
+        <Link href={`/chat/${chat.id}`} className="flex min-h-11 min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 text-body text-foreground" aria-current={active ? 'page' : undefined}>
           {chat.pinned && <Pin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />}
           <span className="truncate">{label(chat.title)}</span>
         </Link>
@@ -83,13 +83,14 @@ function Row({ chat, active, onRename, onPin, onArchive, onDelete }: { chat: Rai
           <button
             type="button"
             aria-label={`Options for ${label(chat.title)}`}
-            className="mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-control text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
           >
             <MoreHorizontal className="h-4 w-4" aria-hidden />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem
+            className="min-h-11"
             onSelect={() => {
               setDraft(chat.title)
               setRenaming(true)
@@ -97,9 +98,10 @@ function Row({ chat, active, onRename, onPin, onArchive, onDelete }: { chat: Rai
           >
             Rename
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onPin(chat.id, !chat.pinned)}>{chat.pinned ? 'Unpin' : 'Pin'}</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onArchive(chat.id)}>Archive</DropdownMenuItem>
+          <DropdownMenuItem className="min-h-11" onSelect={() => onPin(chat.id, !chat.pinned)}>{chat.pinned ? 'Unpin' : 'Pin'}</DropdownMenuItem>
+          <DropdownMenuItem className="min-h-11" onSelect={() => onArchive(chat.id)}>Archive</DropdownMenuItem>
           <DropdownMenuItem
+            className="min-h-11"
             onSelect={() => {
               if (window.confirm('Delete this chat? What Cello made in it stays.')) onDelete(chat.id)
             }}
@@ -122,7 +124,7 @@ export function Rail({ chats, hasMore, onLoadMore, earlier = [], scheduled = nul
   }, [query, hasMore, chats.length]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <nav aria-label="Chat" className="flex h-full w-full flex-col gap-4 overflow-y-auto p-3">
-      <button type="button" onClick={onNew} className="inline-flex h-9 items-center gap-2 rounded-control border border-input bg-card px-3 text-body font-medium text-foreground hover:bg-muted">
+      <button type="button" onClick={onNew} className="inline-flex h-11 items-center gap-2 rounded-control border border-input bg-card px-3 text-body font-medium text-foreground hover:bg-muted">
         <Plus className="h-4 w-4" aria-hidden />
         New chat
       </button>
@@ -144,7 +146,7 @@ export function Rail({ chats, hasMore, onLoadMore, earlier = [], scheduled = nul
                     <span className="block text-muted-foreground">{s.detail}</span>
                   </span>
                   {onRunNow && (
-                    <button type="button" aria-label={`Do it now: ${s.name}`} className="shrink-0 rounded-control border border-border bg-card px-2 py-0.5 text-foreground hover:bg-muted" onClick={() => onRunNow(s.id)}>
+                    <button type="button" aria-label={`Do it now: ${s.name}`} className="min-h-11 shrink-0 rounded-control border border-border bg-card px-2 py-0.5 text-foreground hover:bg-muted" onClick={() => onRunNow(s.id)}>
                       Do it now
                     </button>
                   )}
@@ -161,13 +163,13 @@ export function Rail({ chats, hasMore, onLoadMore, earlier = [], scheduled = nul
         </h2>
         <label className="relative mb-1 block">
           <span className="sr-only">Search your chats</span>
-          <Search className="pointer-events-none absolute left-2 top-2 h-4 w-4 text-muted-foreground" aria-hidden />
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
           <input
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search"
-            className="h-8 w-full rounded-control border border-input bg-card pl-8 pr-2 text-caption text-foreground placeholder:text-muted-foreground"
+            className="h-11 w-full rounded-control border border-input bg-card pl-8 pr-2 text-caption text-foreground placeholder:text-muted-foreground"
           />
         </label>
         {chats.length === 0 ? (
@@ -182,7 +184,7 @@ export function Rail({ chats, hasMore, onLoadMore, earlier = [], scheduled = nul
           </ul>
         )}
         {hasMore && !query.trim() && (
-          <button type="button" className="mt-1 w-full rounded-control px-2 py-1.5 text-left text-caption text-muted-foreground hover:bg-muted hover:text-foreground" onClick={onLoadMore}>
+          <button type="button" className="mt-1 min-h-11 w-full rounded-control px-2 py-1.5 text-left text-caption text-muted-foreground hover:bg-muted hover:text-foreground" onClick={onLoadMore}>
             Load more
           </button>
         )}
@@ -192,7 +194,7 @@ export function Rail({ chats, hasMore, onLoadMore, earlier = [], scheduled = nul
             <ul className="space-y-0.5">
               {earlier.map((c) => (
                 <li key={c.id}>
-                  <Link href={`/copilot?conversationId=${encodeURIComponent(c.id)}`} className="block truncate rounded-control px-2 py-1.5 text-body text-foreground hover:bg-muted/60">
+                  <Link href={`/copilot?conversationId=${encodeURIComponent(c.id)}`} className="flex min-h-11 items-center truncate rounded-control px-2 py-1.5 text-body text-foreground hover:bg-muted/60">
                     {label(c.title)}
                   </Link>
                 </li>
@@ -203,12 +205,12 @@ export function Rail({ chats, hasMore, onLoadMore, earlier = [], scheduled = nul
       </section>
 
       <div className="flex items-center gap-1">
-        <Link href="/settings" className="flex min-w-0 flex-1 items-center gap-2 rounded-control px-2 py-2 text-body text-foreground hover:bg-muted">
+        <Link href="/settings" className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-control px-2 py-2 text-body text-foreground hover:bg-muted">
           <Settings className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
           <span className="truncate">{person.name || 'Settings'}</span>
         </Link>
         {onSignOut && (
-          <button type="button" aria-label="Sign out" title="Sign out" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-muted-foreground hover:bg-muted hover:text-foreground" onClick={onSignOut}>
+          <button type="button" aria-label="Sign out" title="Sign out" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-control text-muted-foreground hover:bg-muted hover:text-foreground" onClick={onSignOut}>
             <LogOut className="h-4 w-4" aria-hidden />
           </button>
         )}
