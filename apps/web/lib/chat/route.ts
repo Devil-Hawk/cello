@@ -7,9 +7,10 @@
 // pattern here when a real phrasing falls through.
 
 import { createArtifact } from '@/lib/agents/artifacts'
-import { chatDoor, CommandRefusal, getCommand, runCommand } from '@/lib/commands'
+import { chatDoor, getCommand, runCommand } from '@/lib/commands'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { askModel } from '@/lib/models/ask'
+import { reasonOf } from '@/lib/models/caps'
 import type { Ran } from '@/lib/models/choice'
 import { unsupported, type ModelAnswer, type TurnResult } from './answer'
 import { resolveRoleType } from './find-roles'
@@ -145,6 +146,11 @@ export function checkNote(text: string, input: { company: string; title: string;
   return { subject, body }
 }
 
+/** The note code writes around the model's one sentence: a greeting, the role, the strength, the ask, one thanks, the name. */
+export function noteText(n: { title: string; company: string; strength: string; askLine: string; name: string }): string {
+  return `Subject: ${n.title} at ${n.company}\n\nHello,\n\nI am writing about the ${n.title} role at ${n.company}. ${n.strength} I would be glad to share more about that experience. ${n.askLine}\n\nThank you,\n${n.name}`
+}
+
 export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise<AgentOutput>, companyNames: () => Promise<string[]>): (input: AgentInput) => Promise<AgentOutput> {
   return async (input) => {
     // Tiles attached, a retry after a failed part, or a quoted selection: the loop's work, not a typed ask.
@@ -229,8 +235,7 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
       const shape = { company: intent.company, title: job.title, ask: intent.ask, evidence }
       const asked = intent.ask.trim().replace(/[.?!]+$/, '')
       const askLine = asked ? `Could you tell me ${/^(if|whether|how|when|what|who|where)\b/i.test(asked) ? '' : 'about '}${asked}?` : 'Could you tell me where the role stands?'
-      const compose = (strength: string) =>
-        `Subject: ${job.title} at ${intent.company}\n\nHello,\n\nI am writing about the ${job.title} role at ${intent.company}. ${strength} I would be glad to share more about that experience. ${askLine} Thank you for your time.\n\nThank you,\n${name}`
+      const compose = (strength: string) => noteText({ title: job.title, company: intent.company, strength, askLine, name })
       const okStrength = (t: string) => {
         const one = plain(t)
         return one.split(/(?<=[.?])\s+/).filter(Boolean).length === 1 && /^(I|My)\b/.test(one) && one.length <= 260 && checkNote(compose(one), shape) !== null
@@ -263,7 +268,9 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
       results.push(resultOf(madeThing(made.id, `Note to ${intent.company}`, [`Message, version ${made.version}`, note.subject, note.body])))
       return done(say(`Wrote version ${made.version} of a note to ${intent.company} about ${job.title}. Nothing was sent.`))
     } catch (e) {
-      if (e instanceof CommandRefusal) return done(say(`${e.message}`))
+      // A cap, a missing key or a refusal: the person reads the real reason, in code's words.
+      const reason = reasonOf(e)
+      if (reason) return done(say(reason))
       throw e
     }
   }

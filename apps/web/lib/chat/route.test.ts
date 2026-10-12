@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Thing } from './things'
-import { checkNote, fallbackSentences, RANKING_WORDS, routeIntent } from './route'
+import { checkNote, fallbackSentences, noteText, RANKING_WORDS, routeIntent } from './route'
 
 describe('routeIntent', () => {
   it('reads a find with a type, a place and a count', () => {
@@ -61,5 +61,14 @@ describe('the Compare sentences', () => {
     const text = fallbackSentences([role('A', 'X', '2026-10-09'), role('B', 'Y', '2026-10-01', { chance: 'strong', pay: '$150k to $190k' })])
     expect(text).toMatch(/^Apply to B at Y first, because you have a strong chance there and it states its pay, \$150k to \$190k/)
     expect(text).not.toMatch(/[\u2014\u2013!]/)
+  })
+})
+
+describe('noteText', () => {
+  it('signs a note once', () => {
+    const text = noteText({ title: 'Deployment Strategist', company: 'Retell AI', strength: 'I have eight years building data services.', askLine: 'Could you tell me about the timeline?', name: 'Riley Marsh' })
+    expect(text.split('\n').filter((l) => /thank/i.test(l))).toHaveLength(1)
+    expect(text.endsWith('Thank you,\nRiley Marsh')).toBe(true)
+    expect(checkNote(text, { company: 'Retell AI', title: 'Deployment Strategist', ask: 'the timeline', evidence: ['Eight years building data services.'] })).not.toBeNull()
   })
 })
