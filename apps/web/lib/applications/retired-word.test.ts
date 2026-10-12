@@ -19,6 +19,8 @@ const ALLOWED = [
   'apps/web/components/pipeline/log-application-dialog.tsx',
   'apps/web/components/dashboard/gmail-sync-card.tsx',
   'apps/web/lib/outreach/store.ts',
+  // asserts the word is absent from the role search tool's text, so it names it
+  'apps/web/lib/jobs/role-search.test.ts',
   'apps/web/lib/ingest/reader/__fixtures__/google-robots.txt',
   // ours, kept for one release so the dialogs above keep working
   'apps/web/lib/applications/receipts.ts',
