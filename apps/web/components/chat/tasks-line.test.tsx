@@ -32,8 +32,16 @@ describe('TasksLine', () => {
     expect(out).not.toContain('>Stop<')
   })
 
-  it('shows nothing when there are no tasks', () => {
-    expect(line([])).toBe('')
+  it('shows nothing when there are no tasks and the turn is over', () => {
+    expect(line([], { running: false })).toBe('')
+  })
+
+  it('says only that Cello is working, with Stop and nothing to show, while a turn runs with no work rows', () => {
+    const out = line([], { running: true, seconds: 7 })
+    expect(text(out)).toContain('Cello is working. 0:07')
+    expect(out).toContain('>Stop<')
+    expect(out).not.toContain('>Show<')
+    expect(out).not.toContain('of 0 done')
   })
 })
 

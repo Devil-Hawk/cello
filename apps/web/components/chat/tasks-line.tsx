@@ -4,7 +4,7 @@
 // 0:42" with Show and Stop; Show lists each task with what it is doing, what it has read, its state and its own Stop.
 // When the turn ends the line folds to what was done. After a reload the rows rebuild it: nothing here is kept in memory.
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 
 export type TaskStatus = 'queued' | 'working' | 'waiting' | 'done' | 'partial' | 'failed' | 'stopped'
@@ -65,23 +65,31 @@ export interface TasksLineProps {
 
 export function TasksLine({ tasks, running, seconds, onStop, onStopTask, defaultOpen = false }: TasksLineProps) {
   const [open, setOpen] = useState(defaultOpen)
-  if (tasks.length === 0) return null
+  const list = useRef<HTMLUListElement>(null)
+  // The list comes into view when it opens, rather than sitting under the compose box.
+  useEffect(() => {
+    if (open) list.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [open])
+  // A turn with no work rows has a line only while it runs: "Cello is working" with Stop, and nothing to show.
+  if (tasks.length === 0 && !running) return null
   const finished = tasks.filter((t) => !alive(t.status) && t.status !== 'waiting').length
   return (
     <div className="rounded-control border border-border bg-card px-3 py-2 text-caption" role="status" aria-live="polite">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-foreground">{running ? `Cello is working: ${finished} of ${tasks.length} done. ${clock(seconds)}` : workedSummary(tasks, seconds)}</span>
-        <button type="button" className="min-h-11 min-w-11 text-muted-foreground underline underline-offset-2 hover:text-foreground" aria-expanded={open} onClick={() => setOpen(!open)}>
-          {open ? 'Hide' : 'Show'}
-        </button>
+        <span className="text-foreground">{running ? (tasks.length ? `Cello is working: ${finished} of ${tasks.length} done. ${clock(seconds)}` : `Cello is working. ${clock(seconds)}`) : workedSummary(tasks, seconds)}</span>
+        {tasks.length > 0 && (
+          <button type="button" className="min-h-11 min-w-11 text-muted-foreground underline underline-offset-2 hover:text-foreground" aria-expanded={open} onClick={() => setOpen(!open)}>
+            {open ? 'Hide' : 'Show'}
+          </button>
+        )}
         {running && (
           <button type="button" className="min-h-11 rounded-control border border-input px-2 py-0.5 text-foreground hover:bg-muted" onClick={onStop}>
             Stop
           </button>
         )}
       </div>
-      {open && (
-        <ul className="mt-2 space-y-1.5">
+      {open && tasks.length > 0 && (
+        <ul ref={list} className="mt-2 space-y-1.5">
           {tasks.map((t) => (
             <li key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5" data-task={t.status}>
               <span className="min-w-0 flex-1 break-words text-foreground">{t.title}</span>

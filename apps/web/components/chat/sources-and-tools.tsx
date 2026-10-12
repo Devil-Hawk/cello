@@ -21,7 +21,8 @@ export function SourcesAndTools({ d }: { d: Disclosure }) {
   const tools = [...new Set(d.tools.map((t) => t.label))]
   const sources = [...new Map(d.sources.map((s) => [`${s.title}|${s.host}`, s])).values()]
   return (
-    <details className="text-caption text-muted-foreground">
+    // Opened on the newest answer, the rows come into view rather than sitting under the compose box.
+    <details className="text-caption text-muted-foreground" onToggle={(e) => e.currentTarget.open && e.currentTarget.scrollIntoView?.({ block: 'nearest' })}>
       <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-x-1 hover:text-foreground">
         <span className="underline underline-offset-2">Sources and tools</span>
         <span>· {disclosureLine(d)}</span>
