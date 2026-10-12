@@ -23,12 +23,12 @@ export function CompanyCard({ card, onOpen }: { card: CompanyCardData; onOpen?: 
         <p className="mt-1 text-caption text-muted-foreground">{facts.join(' · ')}</p>
       </div>
       {href ? (
-        <Link href={href} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+        <Link href={href} className={buttonVariants({ variant: 'outline', size: 'sm', className: 'min-h-11' })}>
           Open
         </Link>
       ) : (
         onOpen && (
-          <button type="button" className={buttonVariants({ variant: 'outline', size: 'sm' })} onClick={() => onOpen('company', card.id)}>
+          <button type="button" className={buttonVariants({ variant: 'outline', size: 'sm', className: 'min-h-11' })} onClick={() => onOpen('company', card.id)}>
             Open
           </button>
         )

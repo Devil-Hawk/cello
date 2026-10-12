@@ -22,10 +22,25 @@ export interface ComposerProps {
   above?: ReactNode
   /** The row of controls under the field (Attach, the model picker). */
   controls?: ReactNode
+  /** A muted line under the controls, for what the page knows about the last answer (it stepped down). */
+  status?: string | null
   placeholder?: string
 }
 
 const MAX_LINES = 8
+
+export type KeyAction = 'send' | 'stop' | null
+
+/**
+ * Enter sends and Shift+Enter breaks the line, in the field only; Escape stops a running turn from anywhere on the page
+ * but another field (the rail's rename and the Add finder keep their own Escape). A key finishing an IME composition does nothing.
+ */
+export function keyAction(e: { key: string; shiftKey?: boolean; isComposing?: boolean }, where: 'field' | 'page' | 'other-field', running: boolean): KeyAction {
+  if (e.isComposing) return null
+  if (e.key === 'Escape') return running && where !== 'other-field' ? 'stop' : null
+  if (e.key === 'Enter' && !e.shiftKey && where === 'field') return 'send'
+  return null
+}
 
 // The browser's own speech to text. Where it is missing (Firefox, some phones) the microphone is not drawn.
 // ponytail: the browser's service hears the audio; "This browser" and a local model replace it with K22c.
@@ -60,7 +75,7 @@ function Dictate({ value, onChange }: { value: string; onChange: (value: string)
       type="button"
       aria-label={listening ? 'Stop dictating' : 'Dictate'}
       aria-pressed={listening}
-      className={`inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-muted ${listening ? 'bg-muted text-foreground' : 'text-muted-foreground'}`}
+      className={`inline-flex h-11 w-11 items-center justify-center rounded-full hover:bg-muted ${listening ? 'bg-muted text-foreground' : 'text-muted-foreground'}`}
       onClick={() => {
         if (listening) return rec.current?.stop()
         const Ctor = recognitionCtor()
@@ -84,9 +99,21 @@ function Dictate({ value, onChange }: { value: string; onChange: (value: string)
   )
 }
 
-export function Composer({ value, onChange, onSend, onStop, running, quoted, onRemoveQuote, notice, above, controls, placeholder = 'Ask Cello to find, compare, write or apply' }: ComposerProps) {
+export function Composer({ value, onChange, onSend, onStop, running, quoted, onRemoveQuote, notice, above, controls, status, placeholder = 'Ask Cello to find, compare, write or apply' }: ComposerProps) {
   const canSend = !running && value.trim().length > 0 && !notice
   const lines = Math.min(MAX_LINES, Math.max(1, value.split('\n').length))
+  const field = useRef<HTMLTextAreaElement>(null)
+  // Escape stops the turn wherever the focus is: Send takes it away from the field when it becomes Stop.
+  useEffect(() => {
+    if (!running) return
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target instanceof Element ? e.target : null
+      const where = t === field.current ? 'field' : t?.matches('input, textarea, select, [contenteditable]') ? 'other-field' : 'page'
+      if (keyAction(e, where, true) === 'stop') onStop()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [running, onStop])
   return (
     <div className="rounded-card border border-input bg-card p-2 shadow-card">
       {notice && <p className="mb-2 px-1 text-caption text-muted-foreground">{notice}</p>}
@@ -97,21 +124,22 @@ export function Composer({ value, onChange, onSend, onStop, running, quoted, onR
             <p className="text-label uppercase tracking-wide">Cello's earlier words</p>
             <p className="line-clamp-3 break-words text-foreground">{quoted.text}</p>
           </div>
-          <button type="button" aria-label="Remove the quote" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control hover:bg-card" onClick={onRemoveQuote}>
+          <button type="button" aria-label="Remove the quote" className="-my-2 -mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-control hover:bg-card" onClick={onRemoveQuote}>
             <X className="h-3.5 w-3.5" aria-hidden />
           </button>
         </div>
       )}
       <textarea
+        ref={field}
         aria-label="Message"
         rows={lines}
         value={value}
         placeholder={placeholder}
-        className="block w-full resize-none bg-transparent px-1 py-1 text-body text-foreground placeholder:text-muted-foreground focus:outline-none"
+        className="block min-h-11 w-full resize-none bg-transparent px-1 py-2.5 text-body text-foreground placeholder:text-muted-foreground focus:outline-none"
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
-          // Enter sends, Shift+Enter breaks the line, and a key that is finishing an IME composition does neither.
-          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+          // Escape is the document's (above), so it is not handled twice.
+          if (keyAction({ key: e.key, shiftKey: e.shiftKey, isComposing: e.nativeEvent.isComposing }, 'field', running) === 'send') {
             e.preventDefault()
             if (canSend) onSend()
           }
@@ -121,7 +149,7 @@ export function Composer({ value, onChange, onSend, onStop, running, quoted, onR
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{controls}</div>
         <Dictate value={value} onChange={onChange} />
         {running ? (
-          <button type="button" aria-label="Stop" className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90" onClick={onStop}>
+          <button type="button" aria-label="Stop" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90" onClick={onStop}>
             <Square className="h-4 w-4" aria-hidden />
           </button>
         ) : (
@@ -129,13 +157,14 @@ export function Composer({ value, onChange, onSend, onStop, running, quoted, onR
             type="button"
             aria-label="Send"
             disabled={!canSend}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40"
             onClick={onSend}
           >
             <ArrowUp className="h-4 w-4" aria-hidden />
           </button>
         )}
       </div>
+      {status && <p className="mt-1 px-1 text-caption text-muted-foreground">{status}</p>}
     </div>
   )
 }

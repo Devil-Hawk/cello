@@ -50,12 +50,13 @@ export async function buildDisclosure(
   turnId: string,
   input: { ran: Ran | null; tools: Disclosure['tools']; sources: Disclosure['sources']; startedAt: Date; endedAt: Date }
 ): Promise<Disclosure> {
-  const { data } = await db.from('agent_tasks').select('title, status, reads, branch_index').eq('user_id', userId).eq('turn_id', turnId).order('created_at', { ascending: true })
-  const rows = (data as { title: string; status: string; reads: unknown[] | null }[] | null) ?? []
+  const { data } = await db.from('agent_tasks').select('title, status, reads, branch_index, command').eq('user_id', userId).eq('turn_id', turnId).order('created_at', { ascending: true })
+  const rows = (data as { title: string; status: string; reads: unknown[] | null; command: string | null }[] | null) ?? []
   return {
     ran: input.ran,
     tools: input.tools,
-    workers: rows.map((r) => ({ title: r.title, status: r.status, reads: r.reads?.length ?? 0 })),
+    // The turn's own row ("Cello is working", chat.turn) is still open while this is written and is not a task the turn used.
+    workers: rows.filter((r) => r.command !== 'chat.turn').map((r) => ({ title: r.title, status: r.status, reads: r.reads?.length ?? 0 })),
     sources: input.sources,
     seconds: Math.max(0, Math.round((input.endedAt.getTime() - input.startedAt.getTime()) / 1000)),
     costUsd: await turnCost(db, userId, turnId),

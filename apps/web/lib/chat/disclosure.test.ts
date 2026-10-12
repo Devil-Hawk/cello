@@ -24,9 +24,10 @@ describe('turnCost', () => {
 })
 
 describe('buildDisclosure', () => {
-  it('lists the turn\'s workers with their read counts and the time between start and end', async () => {
+  it('lists the turn\'s workers with their read counts and the time between start and end, never the turn\'s own row', async () => {
     const db = makeFakeAdmin({
       agent_tasks: [
+        { user_id: 'u1', turn_id: 't1', title: 'Cello is working', command: 'chat.turn', status: 'working', reads: [], created_at: '2026-10-06T09:59:59Z' },
         { user_id: 'u1', turn_id: 't1', title: 'Research Ramp', status: 'done', reads: [{}, {}, {}], created_at: '2026-10-06T10:00:00Z' },
         { user_id: 'u1', turn_id: 't1', title: 'Research Linear', status: 'stopped', reads: [], created_at: '2026-10-06T10:00:01Z' },
         { user_id: 'u1', turn_id: 't2', title: 'Other turn', status: 'done', reads: [{}], created_at: '2026-10-06T10:00:02Z' },

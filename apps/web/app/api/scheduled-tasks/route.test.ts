@@ -1,4 +1,5 @@
-// /api/scheduled-tasks, its [id] route and Run now: closed (404) while SCHEDULED_TASKS_ON is false, and
+// /api/scheduled-tasks, its [id] route and Run now: closed while SCHEDULED_TASKS_ON is false (an empty list
+// to read, 404 to anything else), and
 // once open, who may call them, what they refuse, and that the person (not a model) is the only one
 // who can set "act within my rules".
 
@@ -141,16 +142,18 @@ describe('POST /api/scheduled-tasks/[id]/run', () => {
 describe('while scheduled tasks are closed', () => {
   const at = (id: string) => ({ params: { id } })
 
-  it('every method answers 404 and touches nothing', async () => {
+  it('reading gives an empty list, every other method answers 404, and nothing is touched', async () => {
     flag.on = false
+    const list = await GET()
+    expect(list.status).toBe(200)
+    expect(await list.json()).toEqual({ tasks: [] })
     const answers = [
-      await GET(),
       await POST(req('POST', valid)),
       await PATCH(req('PATCH', { status: 'paused' }), at('t1')),
       await DELETE(req('DELETE'), at('t1')),
       await run(req('POST'), at('t1')),
     ]
-    expect(answers.map((r) => r.status)).toEqual([404, 404, 404, 404, 404])
+    expect(answers.map((r) => r.status)).toEqual([404, 404, 404, 404])
     expect(admin.log).toEqual([])
     expect(state.fire).not.toHaveBeenCalled()
   })

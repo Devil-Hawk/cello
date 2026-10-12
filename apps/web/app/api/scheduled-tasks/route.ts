@@ -1,7 +1,7 @@
 // /api/scheduled-tasks
 //
 // GET   the person's Scheduled tasks, each with the lines its card shows (schedule, last result,
-//       next time).
+//       next time); an empty list while scheduling is closed, so the rail reads it without a 404.
 // POST  { name, instruction, schedule: { every, at?, weekday?, hours?, timezone }, autonomy?, rules? }
 //
 // The schedule is structured on purpose: code turns it into the cron string and the next time it
@@ -18,7 +18,7 @@ import { CreateTaskBody, SCHEDULED_TASKS_ON } from '@/lib/agents/schedule-schema
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  if (!SCHEDULED_TASKS_ON) return new NextResponse(null, { status: 404 })
+  if (!SCHEDULED_TASKS_ON) return NextResponse.json({ tasks: [] })
   const supabase = await createClient()
   const {
     data: { user },

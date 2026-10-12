@@ -39,7 +39,7 @@ export function Finder({ query, onPick }: { query: string; onPick: (found: Found
     <ul className="max-h-60 overflow-y-auto" aria-label="Matches">
       {found.map((f) => (
         <li key={`${f.kind}:${f.id}`}>
-          <button type="button" className="flex w-full min-w-0 items-baseline gap-2 rounded-control px-2 py-1.5 text-left text-body text-foreground hover:bg-muted" onClick={() => onPick(f)}>
+          <button type="button" className="flex min-h-11 w-full min-w-0 items-baseline gap-2 rounded-control px-2 py-1.5 text-left text-body text-foreground hover:bg-muted" onClick={() => onPick(f)}>
             <span className="min-w-0 truncate">{f.name}</span>
             {f.detail && <span className="min-w-0 truncate text-caption text-muted-foreground">{f.detail}</span>}
             <span className="ml-auto shrink-0 text-label text-muted-foreground">{KIND_WORDS[f.kind]}</span>
