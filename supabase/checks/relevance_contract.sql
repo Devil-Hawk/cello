@@ -430,6 +430,8 @@ begin
   alter table public.jobs enable trigger jobs_hold_no_person_values;
 end $$;
 
+-- That migration's person_jobs lists jobs.tsv, which 20261012000200 dropped; give the rollback-only run a column to read.
+alter table public.jobs add column if not exists tsv tsvector;
 \ir ../migrations/20261008060013_person_values_on_person_roles.sql
 \ir ../migrations/20261008060013_person_values_on_person_roles.sql
 

@@ -1455,7 +1455,6 @@ export type Database = {
           source: string | null
           still_open: boolean | null
           title: string
-          tsv: unknown
           url: string
         }
         Insert: {
@@ -1487,7 +1486,6 @@ export type Database = {
           source?: string | null
           still_open?: boolean | null
           title: string
-          tsv?: unknown
           url: string
         }
         Update: {
@@ -1519,7 +1517,6 @@ export type Database = {
           source?: string | null
           still_open?: boolean | null
           title?: string
-          tsv?: unknown
           url?: string
         }
         Relationships: [

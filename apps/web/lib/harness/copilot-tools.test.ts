@@ -110,18 +110,6 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
     this.rows = this.rows.filter((r) => String(r[col] ?? '').toLowerCase().includes(needle))
     return this
   }
-  // Stand-in for websearch_to_tsquery over jobs.tsv: AND-matches every word
-  // of the query against `title`, case-insensitively — enough to exercise
-  // listJobs' "found via FTS" vs "FTS empty, fall back to trgm" branches
-  // without simulating real tsvector stemming/ranking.
-  textSearch(col: string, query: string, _opts?: unknown) {
-    const words = query.toLowerCase().split(/\s+/).filter(Boolean)
-    this.rows = this.rows.filter((r) => {
-      const haystack = String(this.get(r, col) ?? this.get(r, col.startsWith('jobs.') ? 'jobs.title' : 'title') ?? '').toLowerCase()
-      return words.every((w) => haystack.includes(w))
-    })
-    return this
-  }
   // openRolesOnly: the fixtures hold no stale or closed rows (freshness.test.ts covers the filter).
   or(_filters: string, _opts?: unknown) {
     return this
@@ -682,11 +670,10 @@ describe('dispatchTool — research_companies (batch: caps, partial failure, bou
 })
 
 // ---------------------------------------------------------------------------
-// list_jobs / list_contacts: ILIKE retired for FTS + trgm (20260816000009_
-// job_search.sql). One check per branch: FTS match, short-query trgm-direct,
-// FTS-empty trgm-fallback, and list_contacts' own trgm search.
+// list_jobs / list_contacts: title ilike (idx_jobs_title_trgm) + trgm rpc. One check per
+// branch: title match, short-query trgm-direct, no-match trgm-fallback, and list_contacts' own trgm search.
 // ---------------------------------------------------------------------------
-describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
+describe('list_jobs — title ilike + trgm search', () => {
   const co = { id: 'co-1', name: 'Acme', user_id: 'me', is_dream_company: false }
   // The person's own rows, as the list query returns them: the posting, their company for it, their chance and want.
   const posting = (id: string, title: string, chance: string, want_p: number) => ({
@@ -705,11 +692,11 @@ describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
   })
   const person_jobs = [posting('job-1', 'Staff Backend Engineer', 'strong', 0.8), posting('job-2', 'Product Designer', 'possible', 0.6)]
 
-  it('a real word query (>=4 chars) matches via FTS (textSearch), no rpc needed', async () => {
+  it('a real word query (>=4 chars) matches the title, every word in any order, no rpc needed', async () => {
     const admin = fakeAdmin({ companies: [co], person_jobs })
     const ctx = baseCtx(admin)
 
-    const result = (await dispatchTool(ctx, 'list_jobs', { query: 'backend' })) as { jobs: { jobId: string }[] }
+    const result = (await dispatchTool(ctx, 'list_jobs', { query: 'engineer backend' })) as { jobs: { jobId: string }[] }
 
     expect(result.jobs).toHaveLength(1)
     expect(result.jobs[0].jobId).toBe('job-1')
@@ -728,7 +715,7 @@ describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
     expect(JSON.stringify(result)).not.toContain('co-of-person-a')
   })
 
-  it('a short query (<4 chars) skips FTS and goes straight to the trgm rpc', async () => {
+  it('a short query (<4 chars) skips the title match and goes straight to the trgm rpc', async () => {
     const admin = fakeAdmin({ companies: [co], person_jobs }, { search_jobs_by_title_trgm: [{ job_id: 'job-2', score: 0.9 }] })
     const ctx = baseCtx(admin)
 
@@ -738,9 +725,8 @@ describe('list_jobs — FTS + trgm search (ILIKE retired)', () => {
     expect(result.jobs[0].jobId).toBe('job-2')
   })
 
-  it('an FTS miss (typo) falls back to the trgm rpc instead of reporting empty', async () => {
-    // "enginer" matches no title via the FTS stand-in (textSearch is a
-    // straight substring match), but the trgm rpc fixture stands in for
+  it('a title miss (typo) falls back to the trgm rpc instead of reporting empty', async () => {
+    // "enginer" is no title's substring, but the trgm rpc fixture stands in for
     // Postgres finding job-1 by similarity anyway.
     const admin = fakeAdmin({ companies: [co], person_jobs }, { search_jobs_by_title_trgm: [{ job_id: 'job-1', score: 0.5 }] })
     const ctx = baseCtx(admin)

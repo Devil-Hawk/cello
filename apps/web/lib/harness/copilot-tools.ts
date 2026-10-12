@@ -551,10 +551,8 @@ async function dispatchToolInner(ctx: CopilotToolContext, tool: string, args: Ar
 
 // --- read tools --------------------------------------------------------------
 
-/** Below this many characters, websearch_to_tsquery's stemming/stopword
- *  handling has too little to work with (and a 1-3 char query is often a typo
- *  in progress) — go straight to the trgm fallback. See
- *  20260816000009_job_search.sql's header for why title search needs both. */
+/** Below this many characters a query is often a typo in progress, so it goes
+ *  straight to the trgm similarity search instead of a title substring match. */
 const JOB_TITLE_FTS_MIN_LENGTH = 4
 
 type ListedJob = {
@@ -616,17 +614,16 @@ export async function listJobs(ctx: CopilotToolContext, args: Args) {
     }
   } else {
     let q = baseQuery()
-    if (query) q = q.textSearch('tsv', query, { type: 'websearch', config: 'english' })
+    // Every word must appear in the title (idx_jobs_title_trgm serves ilike). %, _, \ and * are wildcards, so drop them.
+    for (const w of query.replace(/[%_\\*]/g, ' ').split(/\s+/).filter(Boolean)) q = q.ilike('title', `%${w}%`)
     const { data } = await q
       .order('want_p', { ascending: false, nullsFirst: false })
       .order('posted_at', { ascending: false, nullsFirst: false })
       .limit(limit)
     rows = (data as unknown as JobListRow[]) ?? []
 
-    // websearch_to_tsquery found nothing: most likely a typo or a term the
-    // stemmer/stopword list didn't help with. Fall back to trgm rather than
-    // reporting an empty result for a query that IS in the data, just
-    // misspelled.
+    // No title contains every word: most likely a typo. Fall back to trgm rather than
+    // reporting an empty result for a query that IS in the data, just misspelled.
     if (query && rows.length === 0) {
       const trgmIds = await searchJobIdsByTitleTrgm(ctx, query, limit)
       if (trgmIds.length > 0) {
