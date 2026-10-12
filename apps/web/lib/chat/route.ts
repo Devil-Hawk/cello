@@ -164,8 +164,6 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
     const sources: NonNullable<AgentOutput['sources']> = []
     const results: TurnResult[] = []
     const madeIds: string[] = []
-    // The model that answered: the chosen one, unless it failed and the next free one stood in (then the turn says so).
-    let usedModel = deps.ran.model
     const call = async (id: string, args: Record<string, unknown>): Promise<{ sentence?: string; things: Thing[] }> => {
       const def = getCommand(id)
       if (!def) throw new Error(`No command ${id}`)
@@ -185,8 +183,8 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
       // The model calls of this turn (the summary, the Writer) are tied to it, so its cost and model are on its own rows.
       await deps.db.from('llm_spend').update({ chat_turn_id: input.turnId }).eq('user_id', deps.userId).is('chat_turn_id', null).gte('created_at', startedAt)
       const made = madeIds.length ? (((await deps.db.from('artifacts').select('id, type, title, created_at').eq('user_id', deps.userId).in('id', madeIds.slice(0, 20))).data as { id: string; type: string; title: string; created_at: string }[] | null) ?? []) : []
-      const ran: Ran = usedModel === deps.ran.model ? deps.ran : { ...deps.ran, model: usedModel, steppedDown: { wanted: { rung: deps.ran.rung, model: deps.ran.model, effort: deps.ran.effort }, why: 'model' } }
-      return { answer, results, ran, tools, sources, made }
+      // The model that answered is read from these rows at the turn's end (disclosure.ts), not claimed here.
+      return { answer, results, ran: deps.ran, tools, sources, made }
     }
 
     try {
@@ -205,7 +203,6 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
         const table = cmp.things.find((t) => t.kind === 'made')?.notes.find((n) => n.startsWith('|')) ?? ''
         const roles = cmp.things.filter((t) => t.kind === 'role')
         const said = await twoSentences(deps, table)
-        if (said) usedModel = said.model
         const summary = said?.text ?? fallbackSentences(roles)
         // "Top" is only true when a ranking is stored for these roles; otherwise they are the newest, and the answer says so.
         const roleIds = roles.map((r) => r.id)
@@ -259,7 +256,6 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
           )
       )
       if (!got) return done(say(`Cello could not write a note that passed its checks. ${errors.slice(0, 1).join(' ')} Try again in a minute, or pick another free model.`))
-      usedModel = got.model
       const note = checkNote(compose(plain(got.text)), shape) as { subject: string; body: string }
       const made = await createArtifact(deps.db, { userId: deps.userId, type: 'message', title: `Note to ${intent.company}`, author: 'cello', content: { subject: note.subject, body: note.body, to_name: null, to_email: null, kind: 'initial' }, jobId: job.id, about: [{ kind: 'job', ref: job.id }] })
       await deps.db.from('artifacts').update({ chat_turn_id: input.turnId }).eq('id', made.id).eq('user_id', deps.userId)

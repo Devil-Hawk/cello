@@ -16,7 +16,7 @@ import type { Ran } from '@/lib/models/choice'
 import { settleAnswer, type ModelAnswer, type Settled, type TurnResult } from './answer'
 import { activeTiles, ledgerKey } from './attach'
 import { recalledThing, resultOf } from './recalled'
-import { buildDisclosure, type Disclosure } from './disclosure'
+import { buildDisclosure, ranFromRows, type Disclosure } from './disclosure'
 import { writeTurnMemories, type ChatMemoryStore, type TurnMemories } from './memory'
 import { getObject } from './objects'
 import type { RecallHit } from './recall'
@@ -123,8 +123,9 @@ export async function runChatTurn(
   }
   const out = last as AgentOutput | null
 
-  // 4. Only what passed is stored, with the turn's disclosure.
-  const disclosure = out?.ran ? await buildDisclosure(db, userId, turnId, { ran: out.ran, tools: out.tools ?? [], sources: out.sources ?? [], startedAt, endedAt: now() }) : null
+  // 4. Only what passed is stored, with the turn's disclosure. The model that answered is the ledger's, not the caller's.
+  const ran = out ? await ranFromRows(db, userId, turnId, out.ran) : null
+  const disclosure = out ? await buildDisclosure(db, userId, turnId, { ran, tools: out.tools ?? [], sources: out.sources ?? [], startedAt, endedAt: now() }) : null
   const { data: answer, error: answerError } = await db
     .from('chat_turns')
     .insert({
@@ -136,7 +137,7 @@ export async function runChatTurn(
       prov: { step: 'chat', turn_id: turnId },
       parts: settled.parts,
       links: [...settled.links, ...(out?.made ?? []).filter((m) => !settled.links.some((l) => l.kind === 'made' && l.id === m.id)).map((m): TurnLink => ({ kind: 'made', table: 'artifacts', id: m.id, role: 'made' }))],
-      ran: out?.ran ?? null,
+      ran,
       disclosure,
     })
     .select('id')
