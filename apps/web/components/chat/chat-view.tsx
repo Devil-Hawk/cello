@@ -192,6 +192,8 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
   const tasks = useMemo(() => (page?.tasks ?? []).map(toTaskRow), [page])
   // A turn is being answered while the last thing in the chat is the person's own message.
   const lastTurn = page?.turns.filter((t) => !t.superseded_at && t.kind !== 'status').at(-1)
+  // What the newest answer ran on, from its disclosure (the ledger's model, disclosure.ts), for the picker's step-down line.
+  const lastRan = (page?.turns.filter((t) => !t.superseded_at && t.kind === 'cello').at(-1)?.disclosure as Disclosure | null | undefined)?.ran ?? null
   const awaiting = lastTurn?.kind === 'person' && Date.now() - Date.parse(lastTurn.created_at) < 6 * 60_000
   const running = tasks.some(alive) || awaiting || sending
   const watching = running || Date.now() < watchUntil
@@ -491,7 +493,7 @@ export function ChatView({ chatId, person, initialAsk, initialAbout }: ChatViewP
         <div className="mx-auto w-full max-w-3xl px-4 pb-3">
           <Composer value={draft} onChange={setDraft} onSend={() => void sendMessage()} onStop={() => lastPersonTurn && void send(`/api/chat/${chatId}/stop`, 'POST', { turn_id: lastPersonTurn.id }).then(loadPage)} running={running} quoted={quoted}
             onRemoveQuote={() => setQuoted(null)}
-            controls={settings ? <ModelPicker key={`${choice?.rung}:${choice?.model}:${choice?.effort}`} choice={choice} rungs={settings.rungs} estimate={estimate} onPick={(c, scope) => void pick(c, scope)} /> : null}
+            controls={settings ? <ModelPicker key={`${choice?.rung}:${choice?.model}:${choice?.effort}`} choice={choice} rungs={settings.rungs} estimate={estimate} lastRan={lastRan} onPick={(c, scope) => void pick(c, scope)} /> : null}
             above={
               <>
                 {at && (

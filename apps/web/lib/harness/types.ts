@@ -52,6 +52,8 @@ export interface DecryptedApiKeys {
   openai?: string
   anthropic?: string
   openrouter?: string
+  /** Providers whose saved key could not be decrypted (the encryption key changed): the person must save it again. */
+  unreadable?: ('openai' | 'anthropic' | 'openrouter')[]
   /**
    * Whose spend this is. Optional so every existing caller still compiles, but
    * when absent the monthly cap CANNOT be enforced for that call — loaders

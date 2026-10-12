@@ -7,9 +7,10 @@
 // pattern here when a real phrasing falls through.
 
 import { createArtifact } from '@/lib/agents/artifacts'
-import { chatDoor, CommandRefusal, getCommand, runCommand } from '@/lib/commands'
+import { chatDoor, getCommand, runCommand } from '@/lib/commands'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { askModel } from '@/lib/models/ask'
+import { reasonOf } from '@/lib/models/caps'
 import type { Ran } from '@/lib/models/choice'
 import { unsupported, type ModelAnswer, type TurnResult } from './answer'
 import { resolveRoleType } from './find-roles'
@@ -145,6 +146,11 @@ export function checkNote(text: string, input: { company: string; title: string;
   return { subject, body }
 }
 
+/** The note code writes around the model's one sentence: a greeting, the role, the strength, the ask, one thanks, the name. */
+export function noteText(n: { title: string; company: string; strength: string; askLine: string; name: string }): string {
+  return `Subject: ${n.title} at ${n.company}\n\nHello,\n\nI am writing about the ${n.title} role at ${n.company}. ${n.strength} I would be glad to share more about that experience. ${n.askLine}\n\nThank you,\n${n.name}`
+}
+
 export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise<AgentOutput>, companyNames: () => Promise<string[]>): (input: AgentInput) => Promise<AgentOutput> {
   return async (input) => {
     // Tiles attached, a retry after a failed part, or a quoted selection: the loop's work, not a typed ask.
@@ -158,8 +164,6 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
     const sources: NonNullable<AgentOutput['sources']> = []
     const results: TurnResult[] = []
     const madeIds: string[] = []
-    // The model that answered: the chosen one, unless it failed and the next free one stood in (then the turn says so).
-    let usedModel = deps.ran.model
     const call = async (id: string, args: Record<string, unknown>): Promise<{ sentence?: string; things: Thing[] }> => {
       const def = getCommand(id)
       if (!def) throw new Error(`No command ${id}`)
@@ -179,8 +183,8 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
       // The model calls of this turn (the summary, the Writer) are tied to it, so its cost and model are on its own rows.
       await deps.db.from('llm_spend').update({ chat_turn_id: input.turnId }).eq('user_id', deps.userId).is('chat_turn_id', null).gte('created_at', startedAt)
       const made = madeIds.length ? (((await deps.db.from('artifacts').select('id, type, title, created_at').eq('user_id', deps.userId).in('id', madeIds.slice(0, 20))).data as { id: string; type: string; title: string; created_at: string }[] | null) ?? []) : []
-      const ran: Ran = usedModel === deps.ran.model ? deps.ran : { ...deps.ran, model: usedModel, steppedDown: { wanted: { rung: deps.ran.rung, model: deps.ran.model, effort: deps.ran.effort }, why: 'model' } }
-      return { answer, results, ran, tools, sources, made }
+      // The model that answered is read from these rows at the turn's end (disclosure.ts), not claimed here.
+      return { answer, results, ran: deps.ran, tools, sources, made }
     }
 
     try {
@@ -199,7 +203,6 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
         const table = cmp.things.find((t) => t.kind === 'made')?.notes.find((n) => n.startsWith('|')) ?? ''
         const roles = cmp.things.filter((t) => t.kind === 'role')
         const said = await twoSentences(deps, table)
-        if (said) usedModel = said.model
         const summary = said?.text ?? fallbackSentences(roles)
         // "Top" is only true when a ranking is stored for these roles; otherwise they are the newest, and the answer says so.
         const roleIds = roles.map((r) => r.id)
@@ -229,8 +232,7 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
       const shape = { company: intent.company, title: job.title, ask: intent.ask, evidence }
       const asked = intent.ask.trim().replace(/[.?!]+$/, '')
       const askLine = asked ? `Could you tell me ${/^(if|whether|how|when|what|who|where)\b/i.test(asked) ? '' : 'about '}${asked}?` : 'Could you tell me where the role stands?'
-      const compose = (strength: string) =>
-        `Subject: ${job.title} at ${intent.company}\n\nHello,\n\nI am writing about the ${job.title} role at ${intent.company}. ${strength} I would be glad to share more about that experience. ${askLine} Thank you for your time.\n\nThank you,\n${name}`
+      const compose = (strength: string) => noteText({ title: job.title, company: intent.company, strength, askLine, name })
       const okStrength = (t: string) => {
         const one = plain(t)
         return one.split(/(?<=[.?])\s+/).filter(Boolean).length === 1 && /^(I|My)\b/.test(one) && one.length <= 260 && checkNote(compose(one), shape) !== null
@@ -254,7 +256,6 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
           )
       )
       if (!got) return done(say(`Cello could not write a note that passed its checks. ${errors.slice(0, 1).join(' ')} Try again in a minute, or pick another free model.`))
-      usedModel = got.model
       const note = checkNote(compose(plain(got.text)), shape) as { subject: string; body: string }
       const made = await createArtifact(deps.db, { userId: deps.userId, type: 'message', title: `Note to ${intent.company}`, author: 'cello', content: { subject: note.subject, body: note.body, to_name: null, to_email: null, kind: 'initial' }, jobId: job.id, about: [{ kind: 'job', ref: job.id }] })
       await deps.db.from('artifacts').update({ chat_turn_id: input.turnId }).eq('id', made.id).eq('user_id', deps.userId)
@@ -263,7 +264,9 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
       results.push(resultOf(madeThing(made.id, `Note to ${intent.company}`, [`Message, version ${made.version}`, note.subject, note.body])))
       return done(say(`Wrote version ${made.version} of a note to ${intent.company} about ${job.title}. Nothing was sent.`))
     } catch (e) {
-      if (e instanceof CommandRefusal) return done(say(`${e.message}`))
+      // A cap, a missing key or a refusal: the person reads the real reason, in code's words.
+      const reason = reasonOf(e)
+      if (reason) return done(say(reason))
       throw e
     }
   }

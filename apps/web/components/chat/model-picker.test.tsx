@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { RungInfo } from '@/lib/chat/settings'
-import { choiceWords, ModelPicker } from './model-picker'
+import { choiceWords, ModelPicker, steppedDownWords } from './model-picker'
 
 const FREE = 'qwen/qwen3.8-27b:free'
 const rungs: RungInfo[] = [
   { rung: 'R2', label: 'This computer', why: 'Not set up.', models: [] },
-  { rung: 'R3', label: 'Free models', why: '', models: [{ id: FREE, label: 'qwen3.8-27b' }] },
+  { rung: 'R3', label: 'Free models', why: '', models: [{ id: FREE, label: 'qwen3.8-27b' }, { id: 'laguna/laguna-s-2.1:free', label: 'laguna-s-2.1' }] },
   { rung: 'R4', label: 'Your own key', why: 'Above your highest. Change in Settings.', models: [{ id: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5' }] },
 ]
 const choice = { rung: 'R3', model: FREE, effort: 'medium' } as const
@@ -34,5 +34,16 @@ describe('ModelPicker', () => {
     expect(out).toContain('Use for new chats')
     expect(out).not.toContain('Deeper')
     expect(renderToStaticMarkup(<ModelPicker choice={{ rung: 'R4', model: 'anthropic/claude-sonnet-5', effort: 'high' }} rungs={rungs} onPick={noop} />)).toContain('Deepest')
+  })
+
+  it('says the last answer stepped down', () => {
+    const lastRan = { rung: 'R3' as const, model: 'laguna/laguna-s-2.1:free', effort: 'medium' as const, steppedDown: { wanted: choice, why: 'model' as const } }
+    const line = 'Your last answer came from laguna-s-2.1: qwen3.8-27b did not answer.'
+    expect(steppedDownWords(lastRan, choice, rungs)).toBe(line)
+    expect(renderToStaticMarkup(<ModelPicker choice={choice} rungs={rungs} lastRan={lastRan} onPick={noop} />)).toContain(line)
+    // Once the person picks what answered, or the choice answered itself, there is nothing to say.
+    expect(steppedDownWords(lastRan, { ...choice, model: lastRan.model }, rungs)).toBe('')
+    expect(steppedDownWords({ ...choice }, choice, rungs)).toBe('')
+    expect(renderToStaticMarkup(<ModelPicker choice={choice} rungs={rungs} lastRan={null} onPick={noop} />)).not.toContain('Your last answer')
   })
 })

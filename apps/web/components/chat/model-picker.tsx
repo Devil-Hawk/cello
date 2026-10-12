@@ -3,17 +3,20 @@
 // The model picker under the compose box: shows the current choice ("Free models, Standard") and opens the ladder.
 // Rungs above the person's highest, or not set up, are greyed with the reason. A choice applies to this chat from the
 // next turn; "Just this message" applies once; "Use for new chats" also sets the person's default. The cost line is
-// code's estimate, and "Cost not known before sending" when the model has no price.
+// code's estimate, and "Cost not known before sending" when the model has no price. When the last answer did not come from
+// the chosen model, one line says what answered and why the choice did not.
 
 import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import type { RungInfo } from '@/lib/chat/settings'
-import type { ModelChoice } from '@/lib/models/choice'
+import type { ModelChoice, Ran } from '@/lib/models/choice'
 import { cn } from '@/lib/utils'
 
 export type PickScope = 'chat' | 'once' | 'default'
 
 export const EFFORT_WORDS = { low: 'Light', medium: 'Standard', high: 'Deep', xhigh: 'Deeper', max: 'Deepest' } as const
+/** Why the chosen model did not run, said after its name. */
+export const STEP_DOWN_WORDS = { model: 'did not answer', above_highest: 'is above your highest', not_set_up: 'is not set up' } as const
 type PickableEffort = keyof typeof EFFORT_WORDS
 
 export interface ModelPickerProps {
@@ -21,7 +24,18 @@ export interface ModelPickerProps {
   rungs: RungInfo[]
   /** The line next to Send, from models.estimate. */
   estimate?: string | null
+  /** What the newest answer ran on (its ledger rows), so the picker can say when it stepped down. */
+  lastRan?: Ran | null
   onPick: (choice: ModelChoice, scope: PickScope) => void
+}
+
+const modelLabel = (id: string, rungs: RungInfo[]) => rungs.flatMap((r) => r.models).find((m) => m.id === id)?.label ?? id.replace(/^[^/]*\//, '').replace(/:free$/, '')
+
+/** "Your last answer came from laguna-s-2.1: gemma-4-31b-it did not answer." Empty when the last answer ran on the choice. */
+export function steppedDownWords(lastRan: Ran | null | undefined, choice: ModelChoice | null, rungs: RungInfo[]): string {
+  const down = lastRan?.steppedDown
+  if (!down || !lastRan || lastRan.model === choice?.model || down.wanted.model === lastRan.model) return ''
+  return `Your last answer came from ${modelLabel(lastRan.model, rungs)}: ${modelLabel(down.wanted.model, rungs)} ${STEP_DOWN_WORDS[down.why]}.`
 }
 
 /** "Free models, Standard": the rung and the effort in the person's words. */
@@ -34,8 +48,9 @@ export function choiceWords(choice: ModelChoice | null, rungs: RungInfo[]): stri
   return effort ? `${rung}, ${effort}` : rung
 }
 
-export function ModelPicker({ choice, rungs, estimate, onPick }: ModelPickerProps) {
+export function ModelPicker({ choice, rungs, estimate, lastRan, onPick }: ModelPickerProps) {
   const [draft, setDraft] = useState<ModelChoice | null>(choice)
+  const stepped = steppedDownWords(lastRan, choice, rungs)
   const rung = rungs.find((r) => r.rung === draft?.rung)
   // Deeper and Deepest are for models on the person's own key.
   const efforts = (Object.keys(EFFORT_WORDS) as PickableEffort[]).filter((e) => draft?.rung === 'R4' || (e !== 'xhigh' && e !== 'max'))
@@ -48,10 +63,11 @@ export function ModelPicker({ choice, rungs, estimate, onPick }: ModelPickerProp
 
   return (
     <details className="relative">
-      <summary className="flex cursor-pointer list-none items-center gap-1 rounded-control px-2 py-1 text-caption text-muted-foreground hover:bg-muted hover:text-foreground">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-1 rounded-control px-2 py-1 text-caption text-muted-foreground hover:bg-muted hover:text-foreground">
         <span>{choiceWords(choice, rungs)}</span>
         {estimate && <span className="text-muted-foreground">· {estimate}</span>}
         <ChevronDown className="h-3 w-3" aria-hidden />
+        {stepped && <span className="basis-full text-muted-foreground">{stepped}</span>}
       </summary>
       <div className="absolute bottom-full left-0 z-30 mb-1 w-72 max-w-[calc(100vw-2rem)] space-y-3 rounded-card border border-border bg-card p-3 shadow-pop" role="group" aria-label="Model">
         <ul className="space-y-1">

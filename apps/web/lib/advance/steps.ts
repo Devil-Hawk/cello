@@ -15,6 +15,7 @@ import { assertAllowedHost, fetchJson } from '@/lib/ats'
 import { resolveFieldValues, type FormField } from '@/lib/answers'
 import type { NeedsReason } from '@/lib/pipeline/types'
 import { createHash } from 'node:crypto'
+import { reasonOf } from '@/lib/models/caps'
 import { getLatestVersion } from '@/lib/resume/store'
 import { currentResume } from './documents'
 
@@ -39,8 +40,8 @@ export interface StepCtx {
   app: StepApp
   job: StepJob
   fetchForm: (url: string) => Promise<unknown>
-  /** Writes the tailored resume for this role (the Writer). Null when it could not. Tests pass their own. */
-  tailorResume?: (app: StepApp) => Promise<{ artifact_id: string; version: number } | null>
+  /** Writes the tailored resume for this role (the Writer), or says why it could not. Tests pass their own. */
+  tailorResume?: (app: StepApp) => Promise<{ artifact_id: string; version: number } | { error: string } | null>
 }
 
 export type StepOutcome =
@@ -145,8 +146,8 @@ export const resume: Step = {
   },
 }
 
-/** The Writer, on the person's keys, for this role. */
-async function writeTailored(admin: SupabaseClient, app: StepApp): Promise<{ artifact_id: string; version: number } | null> {
+/** The Writer, on the person's keys, for this role; its own reason when it could not write. */
+async function writeTailored(admin: SupabaseClient, app: StepApp): Promise<{ artifact_id: string; version: number } | { error: string }> {
   const { loadApiKeys } = await import('@/lib/harness/keys')
   const { runWriter } = await import('@/lib/workflows/writer')
   const { newDeadline } = await import('@/lib/agents/context')
@@ -155,8 +156,15 @@ async function writeTailored(admin: SupabaseClient, app: StepApp): Promise<{ art
     { ctx: { admin: admin as never, userId: app.user_id, userEmail: '', apiKeys, isDemo: apiKeys.isDemo !== false, threadId: '', conversationId: null, autonomy: 'ask', traceId: '', deadlineAt: newDeadline() } },
     { type: 'resume', job_id: app.job_id }
   )
-  if (out.status === 'failed' || !out.artifact_id) console.warn('advance: the Writer could not tailor the resume:', out.error, out.fix)
-  return out.artifact_id && out.version && out.status !== 'failed' ? { artifact_id: out.artifact_id, version: out.version } : null
+  if (out.artifact_id && out.version && out.status !== 'failed') return { artifact_id: out.artifact_id, version: out.version }
+  console.warn('advance: the Writer could not tailor the resume:', out.error, out.fix)
+  return { error: out.error ?? 'no reason was given' }
+}
+
+/** The step's line when the base resume goes instead, with the reason when one is known (a free cap reaches the person here). */
+function notTailored(why: string | null): StepOutcome {
+  const reason = why?.replace(/^The draft could not be written: /, '').replace(/\.$/, '')
+  return { kind: 'continue', line: reason ? `Cello could not tailor your resume (${reason}), so your base resume goes with it.` : 'Cello could not tailor your resume, so your base resume goes with it.' }
 }
 
 export const tailor: Step = {
@@ -166,10 +174,11 @@ export const tailor: Step = {
     // The version for this role: written once, then only read. The person approves exactly this text.
     let doc = await getLatestVersion(admin, app.user_id, app.job_id)
     if (!doc) {
-      const made = await (tailorResume ?? ((a) => writeTailored(admin, a)))(app).catch(() => null)
-      if (!made) return { kind: 'continue', line: 'Cello could not tailor your resume, so your base resume goes with it.' }
+      const made = await (tailorResume ?? ((a) => writeTailored(admin, a)))(app).catch((e: unknown) => ({ error: reasonOf(e) ?? '' }))
+      if (!made) return notTailored(null)
+      if ('error' in made) return notTailored(made.error || null)
       doc = await getLatestVersion(admin, app.user_id, app.job_id)
-      if (!doc) return { kind: 'continue', line: 'Cello could not tailor your resume, so your base resume goes with it.' }
+      if (!doc) return notTailored(null)
     }
     const hash = createHash('sha256').update(doc.content).digest('hex').slice(0, 32)
     const { data } = await admin.from('pipeline_events').select('id').eq('application_id', app.id).eq('user_id', app.user_id).eq('kind', 'approval.decided').contains('payload', { hash }).limit(1)

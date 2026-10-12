@@ -5,6 +5,7 @@
 import { loadApiKeys } from '@/lib/harness/keys'
 import type { AdminClient } from '@/lib/harness/types'
 import { getMemoryStore } from '@/lib/memory/mem0-store'
+import { NO_MODEL_LINE, reasonOf } from '@/lib/models/caps'
 import { chatLimits } from '@/lib/models/choice'
 import { freeModels } from '@/lib/models/free'
 import { chatAgent } from './agent'
@@ -15,7 +16,7 @@ import { recallInWordsOn } from './shown'
 import { runChatTurn } from './turn'
 import { finishWorker, isStopped, openWorker, STOP_POLL_MS } from './workers'
 
-const NO_MODEL = 'Cello has no model to run on.'
+const PROVIDER_NAMES = { openai: 'OpenAI', anthropic: 'Anthropic', openrouter: 'OpenRouter' } as const
 
 /** A plain line from code where the answer would be: stored as Cello's turn so the page can stop waiting. */
 async function leaveLine(db: AdminClient, userId: string, chatId: string, text: string) {
@@ -27,7 +28,8 @@ export async function runStoredTurn(db: AdminClient, userId: string, chatId: str
   const typed = turn.typed
   const keys = await loadApiKeys(db, userId)
   const view = await readSettings(db, userId, chatId, chatLimits(keys), freeModels())
-  if (!view?.ran) return leaveLine(db, userId, chatId, `${NO_MODEL} Add a key or pick Free models in Settings, under Models.`)
+  // A saved key that cannot be read any more is the reason, not a missing one.
+  if (!view?.ran) return leaveLine(db, userId, chatId, keys.unreadable?.length ? `Cello could not read your saved ${PROVIDER_NAMES[keys.unreadable[0]]} key. Save it again in Settings, under Models.` : NO_MODEL_LINE)
 
   let recalled: RecallHit[] = []
   if (await recallInWordsOn(db)) recalled = await recall(db, getMemoryStore(), userId, typed).catch(() => [])
@@ -43,11 +45,11 @@ export async function runStoredTurn(db: AdminClient, userId: string, chatId: str
       { db, agent: routedAgent({ db, userId, keys, ran: view.ran, signal: stop.signal }, loop, names), store: getMemoryStore(), isDemo: keys.isDemo !== false },
       { userId, chatId, typed, quoted: turn.quoted ?? null, recalled, turnId: turn.id }
     )
-    if (!out.ok) await leaveLine(db, userId, chatId, stop.signal.aborted ? 'Stopped. Nothing was changed.' : `${out.error} ${out.fix}`)
+    if (!out.ok) await leaveLine(db, userId, chatId, stop.signal.aborted ? 'Stopped. Nothing was changed.' : `${out.error} ${out.fix}`.trim())
     await finishWorker(db, root, { status: stop.signal.aborted ? 'stopped' : out.ok ? 'done' : 'failed' })
   } catch (e) {
     console.error('chat turn failed', e)
-    await leaveLine(db, userId, chatId, stop.signal.aborted ? 'Stopped. Nothing was changed.' : 'Cello could not finish this. Nothing was changed. Try again.')
+    await leaveLine(db, userId, chatId, stop.signal.aborted ? 'Stopped. Nothing was changed.' : (reasonOf(e) ?? 'Cello could not finish this. Nothing was changed. Try again.'))
     await finishWorker(db, root, { status: stop.signal.aborted ? 'stopped' : 'failed' })
   } finally {
     clearInterval(timer)

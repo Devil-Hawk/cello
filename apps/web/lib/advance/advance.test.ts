@@ -11,9 +11,11 @@ vi.mock('@/lib/pipeline/transition', () => ({
   transition: vi.fn(async (_admin: unknown, m: any) => (calls.push(m), { ok: true, replay: false, event: { id: 'e', kind: m.event.kind } })),
 }))
 
+vi.mock('@/lib/resume/store', () => ({ getLatestVersion: vi.fn(async () => null) }))
+
 import { advanceOne } from './index'
 import { costLine, rateLimitOf, sumCost, waitAfter } from './cost'
-import { readGreenhouseFields, type Step } from './steps'
+import { readGreenhouseFields, tailor, type Step, type StepCtx } from './steps'
 
 const NOW = Date.parse('2026-10-14T12:00:00Z')
 
@@ -161,5 +163,21 @@ describe('cost', () => {
     expect(rateLimitOf(Object.assign(new Error('slow down'), { status: 429 }))).toBe('minute')
     expect(rateLimitOf(new Error('boom'))).toBeNull()
     expect(waitAfter('minute', new Date(NOW)).nextAt).toBe('2026-10-14T12:01:00.000Z')
+  })
+})
+
+describe('tailor', () => {
+  const ctx = (tailorResume: StepCtx['tailorResume']): StepCtx => ({
+    admin: fakeAdmin({ pipeline_events: [] }),
+    app: { id: 'a1', user_id: 'u1', job_id: 'j1', posting_url_hash: null },
+    job: { url: 'https://example.com/jobs/1', title: 'Engineer', company_id: 'c1', closed_at: null, still_open: true, companyName: 'Acme' },
+    fetchForm: async () => ({}),
+    tailorResume,
+  })
+
+  it('says why tailoring was skipped', async () => {
+    const out = await tailor.run(ctx(async () => ({ error: 'The draft could not be written: Free models allow 5 drafts a day. Add credit or choose another way to run.' })))
+    expect(out).toEqual({ kind: 'continue', line: 'Cello could not tailor your resume (Free models allow 5 drafts a day. Add credit or choose another way to run), so your base resume goes with it.' })
+    expect(await tailor.run(ctx(async () => null))).toEqual({ kind: 'continue', line: 'Cello could not tailor your resume, so your base resume goes with it.' })
   })
 })

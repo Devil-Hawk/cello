@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { makeFakeAdmin, type FakeAdmin } from '@/lib/agents/testing/fake-admin'
+import { FreeCapError } from '@/lib/models/caps'
 import type { ModelAnswer } from './answer'
 import { inMemoryStore } from './memory.fake'
 import { runChatTurn, type AgentInput, type AgentOutput, type TurnDeps } from './turn'
@@ -49,7 +50,8 @@ describe('runChatTurn', () => {
     expect(out.settled.dropped).toBe(0)
     expect(out.settled.parts.map((p) => ('about' in p ? p.about[0].ref : null))).toEqual(ROLES.map((r) => r.id))
     const cello = db.tables.chat_turns.find((t) => t.kind === 'cello')
-    expect(cello).toMatchObject({ origin: 'model', prov: { step: 'chat' }, ran })
+    // No ledger row for this turn: no model answered, whatever the agent claimed.
+    expect(cello).toMatchObject({ origin: 'model', prov: { step: 'chat' }, ran: null, disclosure: { ran: null } })
     expect((cello?.parts as unknown[]).length).toBe(3)
     expect(cello?.answer).toContain('Query role states $215,000.')
   })
@@ -107,6 +109,25 @@ describe('runChatTurn', () => {
     expect(db.tables.chat_turns.map((t) => t.kind)).toEqual(['person'])
   })
 
+  it('stores the model the ledger says answered, with the step-down, not the one the agent chose', async () => {
+    const db = seed()
+    const agent = vi.fn(async (input: AgentInput): Promise<AgentOutput> => {
+      db.tables.llm_spend.push({ user_id: 'u1', chat_turn_id: input.turnId, model: 'y:free', rung: 'R3', status: 'settled', failed_status: null, created_at: '2026-10-12T10:00:00Z' })
+      return { answer: answerFor(['$190,000', '$215,000', '$165,000']), results: resultsOf(), ran }
+    })
+    await send(deps(db, agent))
+    const cello = db.tables.chat_turns.find((t) => t.kind === 'cello')
+    expect(cello?.ran).toEqual({ ...ran, model: 'y:free', steppedDown: { wanted: ran, why: 'model' } })
+    expect((cello?.disclosure as { ran: unknown }).ran).toEqual(cello?.ran)
+  })
+
+  it('says the free draft cap when a draft hits it, not that it could not finish', async () => {
+    const db = seed()
+    const out = await send(deps(db, async () => Promise.reject(new FreeCapError('drafts'))), 'Draft a note to Datadog asking about the timeline')
+    expect(out).toMatchObject({ ok: false, error: new FreeCapError('drafts').message, fix: '' })
+    expect(db.tables.chat_turns.map((t) => t.kind)).toEqual(['person'])
+  })
+
   it('refuses another person\'s chat and empty words without storing anything', async () => {
     const db = seed()
     const agent = vi.fn(async (): Promise<AgentOutput> => ({ answer: { parts: [] }, results: [] }))
@@ -132,7 +153,7 @@ describe('runChatTurn', () => {
     db.tables.llm_spend.push({ user_id: 'u1', chat_turn_id: undefined, estimate_usd: 0, actual_usd: 0 })
     const store = inMemoryStore()
     const agent = async (i: AgentInput): Promise<AgentOutput> => {
-      db.tables.llm_spend.push({ user_id: 'u1', chat_turn_id: i.turnId, estimate_usd: '0.02', actual_usd: '0.02' })
+      db.tables.llm_spend.push({ user_id: 'u1', chat_turn_id: i.turnId, model: ran.model, rung: 'R3', status: 'settled', failed_status: null, estimate_usd: '0.02', actual_usd: '0.02' })
       return { answer: { parts: [] }, results: [], ran, tools: [{ label: 'Open role', object: 'Payments role' }], made: [{ id: 'a9', type: 'comparison', title: 'Comparison of 3 roles', created_at: '2026-10-05T10:00:00Z' }] }
     }
     const out = await send(deps(db, agent, { store }))

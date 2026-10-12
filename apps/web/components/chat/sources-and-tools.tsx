@@ -4,13 +4,20 @@
 // each source, the time and the cost. Written by code from rows at the turn's end (lib/chat/disclosure.ts).
 
 import { disclosureLine, type Disclosure } from '@/lib/chat/disclosure'
-import { EFFORT_WORDS } from '@/components/chat/model-picker'
+import { EFFORT_WORDS, STEP_DOWN_WORDS } from '@/components/chat/model-picker'
 import { clock } from '@/components/chat/tasks-line'
 
 const FREE = (model: string) => model.replace(/^[^/]*\//, '').replace(/:free$/, '')
 
+/** "laguna-s-2.1, Standard (gemma-4-31b-it did not answer)", or that no model ran: the ledger's answer, not the choice. */
+export function modelWords(ran: Disclosure['ran']): string {
+  if (!ran) return 'None. Code answered this.'
+  const effort = EFFORT_WORDS[ran.effort as keyof typeof EFFORT_WORDS] ?? ran.effort
+  const down = ran.steppedDown && ran.steppedDown.wanted.model !== ran.model ? ` (${FREE(ran.steppedDown.wanted.model)} ${STEP_DOWN_WORDS[ran.steppedDown.why]})` : ''
+  return `${FREE(ran.model)}, ${effort}${down}`
+}
+
 export function SourcesAndTools({ d }: { d: Disclosure }) {
-  const effort = EFFORT_WORDS[d.ran.effort as keyof typeof EFFORT_WORDS] ?? d.ran.effort
   const tools = [...new Set(d.tools.map((t) => t.label))]
   const sources = [...new Map(d.sources.map((s) => [`${s.title}|${s.host}`, s])).values()]
   return (
@@ -21,9 +28,7 @@ export function SourcesAndTools({ d }: { d: Disclosure }) {
       <dl className="mt-2 space-y-1 rounded-control border border-border bg-card p-3">
         <div className="flex gap-2">
           <dt className="w-16 shrink-0">Model</dt>
-          <dd className="text-foreground">
-            {FREE(d.ran.model)}, {effort}
-          </dd>
+          <dd className="text-foreground">{modelWords(d.ran)}</dd>
         </div>
         <div className="flex gap-2">
           <dt className="w-16 shrink-0">Tools</dt>

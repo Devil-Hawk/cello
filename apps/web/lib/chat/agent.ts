@@ -7,10 +7,11 @@ import { HumanMessage, type BaseMessage } from '@langchain/core/messages'
 import { tool } from '@langchain/core/tools'
 import { createCelloAgent } from '@/lib/agents/factory'
 import type { AgentContext } from '@/lib/agents/context'
-import { agentView, chatDoor, CommandRefusal, runCommand, toolName } from '@/lib/commands'
+import { agentView, chatDoor, runCommand, toolName } from '@/lib/commands'
 import type { AnyCommand } from '@/lib/commands'
 import { isBudgetCapError } from '@/lib/agents/spend-port'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
+import { reasonOf } from '@/lib/models/caps'
 import { celloChatModel, type Ran } from '@/lib/models/choice'
 import { AnswerSchema, type ModelAnswer, type TurnResult } from './answer'
 import type { AgentInput, AgentOutput } from './turn'
@@ -81,7 +82,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
             return JSON.stringify(out)
           } catch (e) {
             if (isBudgetCapError(e)) throw e
-            const message = e instanceof CommandRefusal ? e.message : 'That did not work.'
+            const message = reasonOf(e) ?? 'That did not work.'
             return JSON.stringify({ error: message, fix: 'Tell the person what could not be done, in one sentence.' })
           }
         },

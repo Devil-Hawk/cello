@@ -7,6 +7,7 @@
 // OpenRouter counts its own. The per-run and per-turn numbers are for the callers that
 // own a run or a turn: the morning pick (K20) counts 15 model steps, Chat (K24) 8 calls.
 
+import { rootCause } from '../agents/spend-port'
 import { rpcSlotStore, type SlotStore } from '../commands/slots'
 import { createAdminClient } from '../harness/supabase-admin'
 import type { DecryptedApiKeys } from '../harness/types'
@@ -49,6 +50,24 @@ export class FreeCapError extends Error {
     super(`Free models allow ${WHAT[kind]} a day. Add credit or choose another way to run.`)
     this.name = 'FreeCapError'
   }
+}
+
+export const NO_MODEL_LINE = 'Cello has no model to run on. Add a key or pick Free models in Settings, under Models.'
+
+/** The failures whose message is already a plain sentence a person can read. */
+const SAID_PLAINLY = new Set(['FreeCapError', 'BelowRungError', 'CeilingError', 'BudgetCapError', 'CommandRefusal'])
+
+/**
+ * The real reason behind a failure code knows about (a free cap, a spend cap, the ceiling, a missing key, a refusal),
+ * however many layers wrapped it; null for anything else, so the caller keeps its own generic line. One function for
+ * every catch between a model call and the person, so no catch replaces the reason with "could not finish".
+ */
+export function reasonOf(e: unknown): string | null {
+  const root = rootCause(e) as { name?: unknown; message?: unknown } | null
+  const name = typeof root?.name === 'string' ? root.name : ''
+  const message = typeof root?.message === 'string' ? root.message.trim() : ''
+  if (name === 'MissingKeyError') return NO_MODEL_LINE
+  return SAID_PLAINLY.has(name) && message ? message : null
 }
 
 /**
