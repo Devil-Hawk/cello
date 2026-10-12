@@ -4,6 +4,9 @@
 --   * a person can only see and change their own reactions, and the reaction
 --     reasons, surfaces and snapshot length are the ones the page uses;
 --   * no per person verdict column is left on jobs;
+--   * a signed-in session, even the owner of the company row a posting hangs off,
+--     cannot update the posting or evict it, and no function it can run writes jobs
+--     with elevated rights (migration 20261009000701);
 -- and, once public.person_roles exists (the employer and role work, K5a):
 --   * one person's verdict on a shared role is invisible to another person;
 --   * a session cannot write a verdict column, but can hide a role for itself;
@@ -96,6 +99,38 @@ $$;
 reset role;
 
 grant select on fx to authenticated;
+
+-- Postings are server-only: no privilege lets a session change an existing row.
+do $$
+declare f record; c text; bad text;
+begin
+  select * into f from fx;
+  assert not has_table_privilege('authenticated', 'public.jobs', 'UPDATE'), 'authenticated has table UPDATE on jobs';
+  assert not has_any_column_privilege('authenticated', 'public.jobs', 'UPDATE'), 'authenticated has a column UPDATE on jobs';
+  select string_agg(p.proname, ', ') into bad from pg_proc p
+  where p.pronamespace = 'public'::regnamespace and p.prosecdef and p.prorettype <> 'trigger'::regtype
+    and p.prosrc ~* '(update|delete\s+from|insert\s+into)\s+public\.jobs\y'
+    and has_function_privilege('authenticated', p.oid, 'execute');
+  if bad is not null then raise exception 'a signed-in session can run a definer function that writes jobs: %', bad; end if;
+
+  perform set_config('request.jwt.claims', json_build_object('sub', f.user_a, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  foreach c in array array['description', 'requirements', 'title', 'url', 'requirements_extracted_at', 'employer_id'] loop
+    continue when not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jobs' and column_name = c);
+    begin
+      execute format('update public.jobs set %1$I = %1$I where id = $1', c) using f.live_job;
+      raise exception 'the owner of the company row rewrote %', c;
+    exception when insufficient_privilege then null;
+    end;
+  end loop;
+  begin
+    perform public.evict_company_jobs(f.company_a, array['sc-2']);
+    raise exception 'the owner of the company row evicted a posting';
+  exception when insufficient_privilege then null;
+  end;
+  reset role;
+end;
+$$;
 select to_regclass('public.person_roles') is not null as has_person_roles \gset
 \if :has_person_roles
 
@@ -119,6 +154,18 @@ begin
 end;
 $$;
 
+-- The view carries the verdict beside the role, and only the viewer's own.
+do $$
+declare f record; n integer;
+begin
+  select * into f from fx;
+  select count(*) into n from public.person_jobs where chance is not null or want_p is not null;
+  if n <> 0 then raise exception 'person B reads a verdict through person_jobs that is not theirs'; end if;
+  select count(*) into n from public.person_jobs where id = f.live_job and viewer_id = f.user_b;
+  if n <> 1 then raise exception 'person B does not read their own role through person_jobs'; end if;
+end;
+$$;
+
 -- A session cannot write a verdict (42501), but can hide the role for itself.
 do $$
 declare f record;
@@ -137,6 +184,18 @@ end;
 $$;
 reset role;
 
+-- The view hands the owner of the verdict their own chance and want.
+do $$
+declare f record;
+begin
+  select * into f from fx;
+  if (select chance from public.person_jobs where viewer_id = f.user_a and id = f.live_job) is distinct from 'strong'
+     or (select want_p from public.person_jobs where viewer_id = f.user_a and id = f.live_job) is distinct from 0.7::real then
+    raise exception 'person_jobs does not carry the person''s own verdict';
+  end if;
+end;
+$$;
+
 -- A changed posting clears chance and assessed_at for both people and keeps want.
 do $$
 declare f record; a record; b record;
@@ -153,6 +212,28 @@ begin
     raise exception 'a changed description kept the old verdict';
   end if;
   if a.want_p is null or b.want_p is null then raise exception 'the want was cleared along with the chance'; end if;
+end;
+$$;
+
+-- A session's attempt to rewrite the posting leaves every follower's verdict alone.
+do $$
+declare f record; b record;
+begin
+  select * into f from fx;
+  update public.person_roles set chance = 'possible', assessed_at = now() where user_id = f.user_b and job_id = f.live_job;
+  perform set_config('request.jwt.claims', json_build_object('sub', f.user_a, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  begin
+    update public.jobs set description = 'x' where id = f.live_job;
+    raise exception 'a session rewrote the description';
+  exception when insufficient_privilege then null;
+  end;
+  reset role;
+  select * into b from public.person_roles where user_id = f.user_b and job_id = f.live_job;
+  if b.chance is distinct from 'possible' or b.assessed_at is null then raise exception 'a refused update still cleared a verdict'; end if;
+  if (select description from public.jobs where id = f.live_job) is distinct from 'a different description' then
+    raise exception 'the description changed';
+  end if;
 end;
 $$;
 
@@ -177,6 +258,37 @@ begin
   if n <> 1 then raise exception 'more than one reaction for one role: %', n; end if;
 end;
 $$;
+
+-- Naming a job the person does not hold records nothing, and copies none of its text.
+do $$
+declare f record; n integer;
+begin
+  select * into f from fx;
+  delete from public.person_roles where user_id = f.user_b and job_id = f.live_job;
+  insert into public.applications (user_id, job_id, stage, source) values (f.user_b, f.live_job, 'applied', 'triage');
+  select count(*) into n from public.role_reactions where user_id = f.user_b;
+  if n <> 0 then raise exception 'an application for a job with no person_roles row snapshotted it'; end if;
+end;
+$$;
+
+-- The chance distillation (distill_chance_by_label) was dropped with the insights store (20261015000001); its count check went with it.
+
+-- Retiring the match score clears it on the person's own row too (needs K5a's match_score column).
+select exists (
+  select 1 from information_schema.columns
+  where table_schema = 'public' and table_name = 'person_roles' and column_name = 'match_score'
+) as has_pr_match_score \gset
+\if :has_pr_match_score
+update public.person_roles set match_score = 70 where user_id = (select user_a from fx) and job_id = (select live_job from fx);
+\ir ../migrations/20261009000201_retire_match_score.sql
+do $$
+begin
+  if exists (select 1 from public.person_roles where match_score is not null or match_details is not null) then
+    raise exception 'retiring the match score left one on a person_roles row';
+  end if;
+end;
+$$;
+\endif
 
 \else
 \echo lane-stub: K5a person_roles absent, person_roles checks skipped
