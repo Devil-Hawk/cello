@@ -80,8 +80,9 @@ const digest: AgentFn = async (ctx) => {
   return { output: result, tokensUsed: 0 }
 }
 
-/** outreach — generateOutreachDraft never throws (it falls back to a
- *  deterministic template internally), so this wrapper has nothing to catch. */
+/** outreach — generateOutreachDraft falls back to a deterministic template
+ *  internally and throws only a FreeCapError, which the executor reports like
+ *  any other cap, so this wrapper has nothing to catch. */
 const outreach: AgentFn = async (ctx) => {
   const input = OutreachInput.parse(ctx.input ?? {})
   const draft = await generateOutreachDraft(ctx.llm, input)

@@ -14,12 +14,14 @@
 //
 // A draft is either written by the model or it is the standard template, and the
 // result says which and why. The template is a usable starting point, never
-// presented as written work.
+// presented as written work. A daily cap on free models is the one exception:
+// it is thrown, so the caller stops and says so instead of handing out templates.
 
 import type { LlmRunner } from '../types'
 import { composeSystemPrompt, loadModeDoc, promptRef } from '../prompts'
 import { MissingKeyError } from '../providers'
 import { BudgetCapError } from '../spend'
+import { FreeCapError } from '@/lib/models/caps'
 import { formatLines, jobLines, resumeLines, type NumberedLine } from '@/lib/resume/lines'
 import { frameJobText } from '@/lib/security/job-text'
 
@@ -140,7 +142,9 @@ function templateReasonFor(err: unknown): TemplateReason {
 
 /**
  * Draft one outreach email with the injected model, or return the standard
- * template with the reason when no model draft could be made. Never throws.
+ * template with the reason when no model draft could be made. Throws only a
+ * FreeCapError: the person's free drafts for the day are used up, and a template
+ * handed out as the answer would hide that (acceptance H2).
  *
  * The resume (stable across every draft a user asks for) sits in `system` with
  * `cachePrefix`, so it is a cache hit from the second draft on; the role,
@@ -217,6 +221,7 @@ export async function generateOutreachDraft(llm: LlmRunner, input: OutreachDraft
       source: 'model',
     }
   } catch (err) {
+    if (err instanceof FreeCapError) throw err
     return fallbackOutreachDraft(input, templateReasonFor(err))
   }
 }

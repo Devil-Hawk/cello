@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { LlmRunner } from '../types'
 import { MissingKeyError } from '../providers'
 import { BudgetCapError } from '../spend'
+import { FreeCapError } from '@/lib/models/caps'
 import { checkDraft } from '@/lib/writing/checks'
 import { fallbackOutreachDraft, generateOutreachDraft, type OutreachDraftInput } from './outreach'
 
@@ -123,6 +124,10 @@ describe('when no model draft can be made, the result says it is the template an
   ] as const)('%s is %s', async (_label, err, reason) => {
     const res = await generateOutreachDraft(failing(err), base)
     expect(res).toMatchObject({ source: 'template', templateReason: reason, tokensUsed: 0 })
+  })
+
+  it('a free daily cap is thrown to the caller, never a template handed out as the answer', async () => {
+    await expect(generateOutreachDraft(failing(new FreeCapError('drafts')), base)).rejects.toThrow('Free models allow 5 drafts a day')
   })
 })
 
