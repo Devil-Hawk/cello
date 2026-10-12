@@ -36,6 +36,8 @@ describe('Rail', () => {
 
   it('says what Scheduled and an empty Recents hold, and shows scheduled work with its detail', () => {
     expect(text(html({ chats: [] }))).toContain('Your chats and what Cello made from them stay here.')
+    // Until the first list is read, Recents says nothing rather than that there are no chats.
+    expect(text(html({ chats: null }))).not.toContain('Your chats and what Cello made from them stay here.')
     expect(text(html())).toContain('Nothing scheduled.')
     expect(text(html({ scheduled: [{ id: 's1', name: 'Find new roles', detail: 'Last read 8:00, found 3' }] }))).toContain('Find new roles Last read 8:00, found 3')
   })

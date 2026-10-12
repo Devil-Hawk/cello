@@ -28,8 +28,8 @@ export interface EarlierChat {
 }
 
 export interface RailProps {
-  /** Pinned chats first, then newest first, as chat.list returns them. */
-  chats: RailChat[]
+  /** Pinned chats first, then newest first, as chat.list returns them. Null until the first list has been read: Recents then says nothing. */
+  chats: RailChat[] | null
   /** More chats are stored than are listed. */
   hasMore?: boolean
   onLoadMore?: () => void
@@ -117,11 +117,11 @@ function Row({ chat, active, onRename, onPin, onArchive, onDelete }: { chat: Rai
 export function Rail({ chats, hasMore, onLoadMore, earlier = [], scheduled = null, onRunNow, onSignOut, activeId, person, onNew, onRename, onPin, onArchive, onDelete }: RailProps) {
   const [query, setQuery] = useState('')
   // ponytail: titles only. Searching what was typed in a chat is chat.recall's words path.
-  const shown = query.trim() ? chats.filter((c) => c.title.toLowerCase().includes(query.trim().toLowerCase())) : chats
+  const shown = query.trim() ? (chats ?? []).filter((c) => c.title.toLowerCase().includes(query.trim().toLowerCase())) : (chats ?? [])
   // A search covers every chat, not only the page listed: while words are typed and more is stored, the next page is fetched.
   useEffect(() => {
     if (query.trim() && hasMore) onLoadMore?.()
-  }, [query, hasMore, chats.length]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [query, hasMore, chats?.length]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <nav aria-label="Chat" className="flex h-full w-full flex-col gap-4 overflow-y-auto p-3">
       <button type="button" onClick={onNew} className="inline-flex h-11 items-center gap-2 rounded-control border border-input bg-card px-3 text-body font-medium text-foreground hover:bg-muted">
@@ -172,7 +172,7 @@ export function Rail({ chats, hasMore, onLoadMore, earlier = [], scheduled = nul
             className="h-11 w-full rounded-control border border-input bg-card pl-8 pr-2 text-caption text-foreground placeholder:text-muted-foreground"
           />
         </label>
-        {chats.length === 0 ? (
+        {chats === null ? null : chats.length === 0 ? (
           <p className="px-2 text-caption text-muted-foreground">Your chats and what Cello made from them stay here.</p>
         ) : shown.length === 0 ? (
           <p className="px-2 text-caption text-muted-foreground">No chat has that in its title.</p>
