@@ -33,7 +33,7 @@ const NOW = new Date('2026-10-14T12:00:00Z')
 const U = 'u1'
 const job = (title: string, company: string) => ({ title, companies: { id: `co-${company}`, name: company, logo_url: null } })
 const app = (id: string, over: Row = {}): Row => ({
-  id, user_id: U, state: null, step: null, needs_reason: null, needs_detail: null, stage: 'applied', closed_reason: null,
+  id, job_id: `job-${id}`, user_id: U, state: null, step: null, needs_reason: null, needs_detail: null, stage: 'applied', closed_reason: null,
   applied_at: '2026-10-13T12:00:00Z', interview_at: null, last_event_at: '2026-10-13T12:00:00Z', found_state: null, jobs: job('Engineer', 'Acme'), ...over,
 })
 
@@ -56,6 +56,8 @@ describe('Needs you', () => {
       expect(r.button.label).toBeTruthy()
       expect(r.button.command).toBeTruthy()
     }
+    // an application has no page of its own: every row opens the role record
+    for (const r of list.rows) expect(r.button.command).toBe(`/roles/job-${r.target.id}`)
     expect(list.rows.find((r) => r.kind === 'your_turn')?.sentence).toContain('Amazon')
   })
 
@@ -67,6 +69,7 @@ describe('Needs you', () => {
     expect(ready).toHaveLength(1)
     expect(ready[0].members).toHaveLength(3)
     expect(ready[0].count).toBe(3)
+    for (const r of [ready[0], ...ready[0].members]) expect(r.button.command).toMatch(/^\/roles\/job-/)
     expect(list.count).toBe(4)
   })
 

@@ -10,6 +10,7 @@ import { listFound } from '@/lib/applications/found'
 import { nextStep } from '@/lib/pipeline/next-step'
 import { readPipelineSettings } from '@/lib/pipeline/settings'
 import { statusSentence } from '@/lib/pipeline/states'
+import { recordHref } from '@/lib/routes/roles'
 import type { ApplicationState, NeedsReason } from '@/lib/pipeline/types'
 import { kinds as networkKinds } from './kinds/network'
 import { NEEDS_YOU_GROUPS, type NeedsYouContext, type NeedsYouGroup, type NeedsYouKind, type NeedsYouKindSource, type NeedsYouList, type NeedsYouRow } from './types'
@@ -43,6 +44,7 @@ const BUTTON_OF_REASON: Record<NeedsReason, string> = {
 
 interface AppRow {
   id: string
+  job_id: string
   state: ApplicationState | null
   step: string | null
   needs_reason: NeedsReason | null
@@ -84,7 +86,7 @@ async function pipelineRows(ctx: NeedsYouContext): Promise<NeedsYouRow[]> {
 
   const { data } = await client
     .from('applications')
-    .select('id, state, step, needs_reason, needs_detail, stage, closed_reason, applied_at, interview_at, last_event_at, found_state, jobs(title, companies(id, name, logo_url))')
+    .select('id, job_id, state, step, needs_reason, needs_detail, stage, closed_reason, applied_at, interview_at, last_event_at, found_state, jobs(title, companies(id, name, logo_url))')
     .eq('user_id', userId)
     .order('last_event_at', { ascending: false, nullsFirst: false })
     .limit(500)
@@ -110,11 +112,11 @@ async function pipelineRows(ctx: NeedsYouContext): Promise<NeedsYouRow[]> {
     const company = a.jobs?.companies?.name ?? 'the company'
     if (a.state === 'needs_you' && a.needs_reason) {
       const sentence = statusSentence({ state: a.state, step: a.step, needsReason: a.needs_reason, needsDetail: a.needs_detail }, company)
-      out.push(row(a, a.needs_reason, GROUP_OF_REASON[a.needs_reason], sentence, { label: BUTTON_OF_REASON[a.needs_reason], command: `/applications/${a.id}` }))
+      out.push(row(a, a.needs_reason, GROUP_OF_REASON[a.needs_reason], sentence, { label: BUTTON_OF_REASON[a.needs_reason], command: recordHref(a.job_id) }))
       continue
     }
     if (a.state === 'ready') {
-      ready.push(row(a, 'ready', 'ready', `${a.jobs?.title ?? 'This role'} at ${company} is ready to send.`, { label: 'Open', command: `/applications/${a.id}/apply` }))
+      ready.push(row(a, 'ready', 'ready', `${a.jobs?.title ?? 'This role'} at ${company} is ready to send.`, { label: 'Open', command: recordHref(a.job_id) }))
       continue
     }
     const inbound = lastIn.get(a.id) ?? null
@@ -132,7 +134,7 @@ async function pipelineRows(ctx: NeedsYouContext): Promise<NeedsYouRow[]> {
     })
     if (next) {
       const group: NeedsYouGroup = next.kind === 'reply' ? 'reply' : next.kind === 'offer_due' ? 'due' : 'follow_up'
-      out.push(row(a, next.kind, group, `${company}: ${next.sentence}`, { label: next.kind === 'reply' ? 'Open' : 'See it', command: `/applications/${a.id}` }, { dueAt: next.dueAt }))
+      out.push(row(a, next.kind, group, `${company}: ${next.sentence}`, { label: next.kind === 'reply' ? 'Open' : 'See it', command: recordHref(a.job_id) }, { dueAt: next.dueAt }))
     }
   }
 
