@@ -32,6 +32,15 @@ const kept = [
   'resume_documents',
   'strategy_proposal_outcomes',
   'user_mcp_servers',
+  // Brought by the scoring, outputs, quality, engine and resume-format replays (integration step 5).
+  'agent_tasks',
+  'approvals',
+  'artifacts',
+  'feedback_events',
+  'role_reactions',
+  'scheduled_tasks',
+  'shortlist_items',
+  'taste_models',
 ]
 
 export const owned: OwnedTable[] = [
