@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { artifactWorld } from '@/lib/artifacts/testing'
-import { createResumeVersion, deleteVersion, deriveResumeColumns, getBaseResume, getLatestVersion, getVersionById, listVersions, updateVersionMeta } from './store'
+import { createResumeVersion, deleteVersion, deriveResumeColumns, getBaseResume, getLatestVersion, getLatestVersionOfArtifact, getVersionById, listVersions, updateVersionMeta } from './store'
 import { resumeToMarkdown, resumeToPlainText } from './render'
 import { CANONICAL_RESUME } from './test-fixtures'
 
@@ -94,6 +94,14 @@ describe('reading and changing a version', () => {
     const doc = await createResumeVersion(client, { userId: 'u', jobId: null, resume: CANONICAL_RESUME, source: 'base' })
     expect((await getVersionById(client, 'u', doc.id))?.id).toBe(doc.id)
     expect(await getVersionById(client, 'someone-else', doc.id)).toBeNull()
+  })
+
+  it('an artifact\'s newest version is read by its id, for its owner only', async () => {
+    const { client } = world({ person_jobs: [{ id: 'j1', viewer_id: 'u', title: 'Backend Engineer' }] })
+    await createResumeVersion(client, { userId: 'u', jobId: 'j1', resume: resume('First'), source: 'tailored' })
+    const second = await createResumeVersion(client, { userId: 'u', jobId: 'j1', resume: resume('Second'), source: 'tailored' })
+    expect(await getLatestVersionOfArtifact(client, 'u', second.artifact_id)).toMatchObject({ id: second.id, version: 2, title: null })
+    expect(await getLatestVersionOfArtifact(client, 'someone-else', second.artifact_id)).toBeNull()
   })
 
   it('metadata can be patched and the text cannot', async () => {
