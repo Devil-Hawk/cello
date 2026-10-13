@@ -89,6 +89,10 @@ export interface DecryptedApiKeys {
    * then a call behaves as it always did: no ceiling is enforced.
    */
   models?: PersonModels
+  /** Which role these keys were made for (keysForRole in lib/models/choice.ts): written on each call's ledger row. */
+  role?: 'chat' | 'researcher' | 'writer' | 'worker'
+  /** The thinking effort the person set for that role, Off included: callLlm sends it, and writes it on the row. */
+  roleEffort?: ReasoningEffort
 }
 
 // --- DB row shapes (hand-declared; mirror the harness migration) -------------

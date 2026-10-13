@@ -112,7 +112,7 @@ describe('runChatTurn', () => {
   it('stores the model the ledger says answered, with the step-down, not the one the agent chose', async () => {
     const db = seed()
     const agent = vi.fn(async (input: AgentInput): Promise<AgentOutput> => {
-      db.tables.llm_spend.push({ user_id: 'u1', chat_turn_id: input.turnId, model: 'y:free', rung: 'R3', status: 'settled', failed_status: null, created_at: '2026-10-12T10:00:00Z' })
+      db.tables.llm_spend.push({ user_id: 'u1', chat_turn_id: input.turnId, role: 'chat', effort: 'low', model: 'y:free', rung: 'R3', status: 'settled', failed_status: null, created_at: '2026-10-12T10:00:00Z' })
       return { answer: answerFor(['$190,000', '$215,000', '$165,000']), results: resultsOf(), ran }
     })
     await send(deps(db, agent))
@@ -153,7 +153,7 @@ describe('runChatTurn', () => {
     db.tables.llm_spend.push({ user_id: 'u1', chat_turn_id: undefined, estimate_usd: 0, actual_usd: 0 })
     const store = inMemoryStore()
     const agent = async (i: AgentInput): Promise<AgentOutput> => {
-      db.tables.llm_spend.push({ user_id: 'u1', chat_turn_id: i.turnId, model: ran.model, rung: 'R3', status: 'settled', failed_status: null, estimate_usd: '0.02', actual_usd: '0.02' })
+      db.tables.llm_spend.push({ user_id: 'u1', chat_turn_id: i.turnId, role: 'chat', effort: 'low', model: ran.model, rung: 'R3', status: 'settled', failed_status: null, estimate_usd: '0.02', actual_usd: '0.02' })
       return { answer: { parts: [] }, results: [], ran, tools: [{ label: 'Open role', object: 'Payments role' }], made: [{ id: 'a9', type: 'comparison', title: 'Comparison of 3 roles', created_at: '2026-10-05T10:00:00Z' }] }
     }
     const out = await send(deps(db, agent, { store }))

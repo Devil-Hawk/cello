@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
-import { buildDisclosure, disclosureLine, ranFromRows, turnCost } from './disclosure'
+import { buildDisclosure, disclosureLine, runsFromRows, turnCost } from './disclosure'
 
 const ran = { rung: 'R3' as const, model: 'x:free', effort: 'low' as const }
 
@@ -58,23 +58,25 @@ describe('disclosureLine', () => {
   })
 })
 
-describe('ranFromRows', () => {
+describe('runsFromRows', () => {
   const chosen = { rung: 'R3' as const, model: 'google/gemma-4-31b-it:free', effort: 'medium' as const }
-  it('names the model that answered from the ledger, and none for a code-only turn', async () => {
+  const row = (over: Record<string, unknown>) => ({ user_id: 'u1', chat_turn_id: 't1', rung: 'R3', status: 'settled', failed_status: null, created_at: '2026-10-12T10:00:00Z', ...over })
+  it('lists each role with the model and effort its rows name, step-downs included', async () => {
     const db = makeFakeAdmin({
       llm_spend: [
-        { user_id: 'u1', chat_turn_id: 't1', model: 'google/gemma-4-31b-it:free', rung: 'R3', status: 'settled', failed_status: 404, created_at: '2026-10-12T10:00:00Z' },
-        { user_id: 'u1', chat_turn_id: 't1', model: 'laguna/laguna-s-2.1:free', rung: 'R3', status: 'settled', failed_status: null, created_at: '2026-10-12T10:00:01Z' },
-        { user_id: 'u1', chat_turn_id: 't1', model: 'x/dropped:free', rung: 'R3', status: 'reserved', failed_status: null, created_at: '2026-10-12T10:00:02Z' },
-        { user_id: 'u1', chat_turn_id: 't2', model: 'other/turn:free', rung: 'R3', status: 'settled', failed_status: null, created_at: '2026-10-12T10:00:03Z' },
+        row({ role: 'chat', model: 'google/gemma-4-31b-it:free', effort: 'medium', failed_status: 404 }),
+        row({ role: 'chat', model: 'laguna/laguna-s-2.1:free', effort: null, created_at: '2026-10-12T10:00:01Z' }),
+        row({ role: 'writer', model: 'qwen/qwen3:free', effort: 'low', created_at: '2026-10-12T10:00:02Z' }),
+        row({ role: 'researcher', model: 'x/dropped:free', effort: 'none', status: 'reserved', created_at: '2026-10-12T10:00:03Z' }),
+        row({ role: null, model: 'a/tool-step:free', created_at: '2026-10-12T10:00:04Z' }),
+        row({ role: 'chat', chat_turn_id: 't2', model: 'other/turn:free' }),
       ],
     })
-    expect(await ranFromRows(db, 'u1', 't1', chosen)).toEqual({ ...chosen, model: 'laguna/laguna-s-2.1:free', steppedDown: { wanted: chosen, why: 'model' } })
-    expect(await ranFromRows(db, 'u1', 't3', chosen)).toBeNull()
-  })
-
-  it('keeps the choice as it is when the chosen model answered', async () => {
-    const db = makeFakeAdmin({ llm_spend: [{ user_id: 'u1', chat_turn_id: 't1', model: chosen.model, rung: 'R3', status: 'settled', failed_status: null, created_at: '2026-10-12T10:00:00Z' }] })
-    expect(await ranFromRows(db, 'u1', 't1', chosen)).toBe(chosen)
+    const writer = { rung: 'R3' as const, model: 'qwen/qwen3:free', effort: 'low' as const }
+    expect(await runsFromRows(db, 'u1', 't1', { chat: chosen, writer })).toEqual([
+      { role: 'chat', rung: 'R3', model: 'laguna/laguna-s-2.1:free', effort: 'none', steppedDown: { wanted: chosen, why: 'model' } },
+      { role: 'writer', rung: 'R3', model: 'qwen/qwen3:free', effort: 'low' },
+    ])
+    expect(await runsFromRows(db, 'u1', 't3', { chat: chosen })).toEqual([])
   })
 })

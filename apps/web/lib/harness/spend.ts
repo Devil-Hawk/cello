@@ -166,6 +166,9 @@ export interface ReserveInput {
   /** Null until commands say which door a call came through. */
   door?: Door
   traceId?: string
+  /** The role that asked and the thinking effort the call runs with, written on the row so a turn can name them (lib/chat/disclosure.ts). */
+  role?: 'chat' | 'researcher' | 'writer' | 'worker'
+  effort?: string | null
 }
 
 /**
@@ -186,6 +189,11 @@ export async function reserveSpend(admin: AdminClient, input: ReserveInput): Pro
     estimateUsd,
   })
 
+  // ponytail: the role and effort go on in a second write, so reserve_llm_spend keeps its signature; fold them into the function if a call's extra round trip ever shows.
+  const tagged = async (r: SpendReservation) => {
+    if (r.id && (input.role || input.effort)) await admin.from('llm_spend').update({ ...(input.role ? { role: input.role } : {}), ...(input.effort ? { effort: input.effort } : {}) }).eq('id', r.id)
+    return r
+  }
   const { data, error } = await admin.rpc('reserve_llm_spend', {
     p_user_id: input.userId,
     p_model: input.model,
@@ -201,13 +209,13 @@ export async function reserveSpend(admin: AdminClient, input: ReserveInput): Pro
       console.error('[spend] could not record a zero-cost call; carrying on without a row', error ?? row)
       return held(null)
     }
-    return held(row.id)
+    return tagged(held(row.id))
   }
   if (error || !row) throw new Error('spend ledger unavailable')
   if (!row.ok || !row.id) {
     throw new BudgetCapError(Number(row.spent_usd ?? 0), Number(row.cap_usd ?? 0), row.scope === 'demo-pool' ? 'demo-pool' : 'user')
   }
-  return held(row.id)
+  return tagged(held(row.id))
 }
 
 export type SpendOutcome =

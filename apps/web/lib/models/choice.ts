@@ -8,14 +8,22 @@
 //
 // Pure functions: the caller supplies which rungs are set up and which model a rung would use, from the
 // ladder (lib/models/ladder.ts, through chatLimits). celloChatModel(choice) builds the model from the result.
+//
+// Each role (the chat loop, the Researcher, the Writer, background work) has its own choice, kept in the same shape:
+// roleChoice reads it, resolveChoice holds it to the highest and to what is set up, keysForRole makes the keys a role's
+// model calls run on, and the factory (lib/models/factory.ts) builds the client, with the effort, for any way in.
 
 import { z } from 'zod'
-import { celloChatModel as openRouterModel, type ModelPurpose } from '@/lib/agents/model'
+import { MAX_TOKENS, tagRun, type ModelPurpose } from '@/lib/agents/model'
 import { estimateCostUsd, hasListedPrice } from '@/lib/harness/spend'
-import { REASONING_EFFORTS, type DecryptedApiKeys, type ReasoningEffort } from '@/lib/harness/types'
+import { REASONING_EFFORTS, type AdminClient, type DecryptedApiKeys, type ReasoningEffort } from '@/lib/harness/types'
 import { ALLOWED_MODELS } from '@/lib/models'
 import type { Ceiling, Rung } from './doors.types'
-import { availableRungs, routeFor } from './ladder'
+import { chatModelFor } from './factory'
+import type { Role } from './roles'
+import { availableRungs, directModel, routeFor } from './ladder'
+
+export { ROLES, ROLE_LABELS, type Role } from './roles'
 
 // The rungs a Chat turn can run on: local, free hosted, paid hosted.
 export const CHOICE_RUNGS = ['R2', 'R3', 'R4'] as const
@@ -123,13 +131,49 @@ export function estimateChoice(choice: Pick<ModelChoice, 'rung' | 'model'>, toke
 }
 
 /**
- * The one constructor for the model a resolved choice runs on (Chat, the Researcher and the declared steps share it).
- * A free rung only ever gets a free id, so a forged paid id cannot spend; the local rung has no LangChain door yet.
- * ponytail: OpenRouter is the only door built; the effort is passed to the call by the loop, not here. R2 and the other
- * providers join this switch with the ladder (K14).
+ * The stored choice for a role, or null. `chat` is the person's Chat model; the others are kept in preferences.role_choices
+ * and fall back to `fallback` (the turn's own choice, so a role the person never set runs where Chat runs), then to the Chat model.
+ * What comes back is still data: resolveChoice holds it to the highest and to what is set up.
  */
-export function celloChatModel(ran: Pick<ModelChoice, 'rung' | 'model'>, apiKeys: DecryptedApiKeys, purpose: ModelPurpose = 'orchestrator') {
-  if (ran.rung === 'R2') throw new Error('This computer cannot run Chat yet. Pick Free models or Your own key.')
+export function roleChoice(prefs: Record<string, unknown>, role: Role, fallback?: unknown): ModelChoice | null {
+  const own = role === 'chat' ? null : (prefs.role_choices as Record<string, unknown> | null | undefined)?.[role]
+  return parseChoice(own) ?? parseChoice(fallback) ?? parseChoice(prefs.chat_choice)
+}
+
+/**
+ * The keys a role's model calls run on: the rung first in the order, the model and the effort the person chose for it, so
+ * the ladder, the factory and the ledger all see the same choice. Without a ceiling on the keys (a script) they are returned as they were.
+ */
+export function keysForRole(keys: DecryptedApiKeys, ran: Pick<Ran, 'rung' | 'model' | 'effort'>, role: Role): DecryptedApiKeys {
+  const models = keys.models ? { ...keys.models, order: [ran.rung, ...keys.models.order.filter((r) => r !== ran.rung)] } : keys.models
+  return { ...keys, role, model: ran.model, roleEffort: ran.effort, ...(models ? { models } : {}) }
+}
+
+/**
+ * The keys a role runs on, for a caller that has only the person (and the chat, when it runs inside one): their setting for
+ * the role, else the chat's model, else Chat's default, held to the highest and to what is set up. Unchanged keys when
+ * nothing can be chosen, so nothing moves for a person who set nothing.
+ */
+export async function roleKeys(db: AdminClient, userId: string, keys: DecryptedApiKeys, role: Role, chatId?: string | null): Promise<DecryptedApiKeys> {
+  const { data } = await db.from('profiles').select('preferences').eq('id', userId).maybeSingle()
+  const prefs = ((data as { preferences: Record<string, unknown> | null } | null)?.preferences ?? {}) as Record<string, unknown>
+  const chat = chatId ? await db.from('chats').select('model_choice').eq('id', chatId).eq('user_id', userId).maybeSingle() : null
+  const ran = resolveChoice([roleChoice(prefs, role, (chat?.data as { model_choice: unknown } | null)?.model_choice)], chatLimits(keys))
+  return ran ? keysForRole(keys, ran, role) : keys
+}
+
+/**
+ * The one constructor for the model a resolved choice runs on (Chat, the Researcher and the declared steps share it): the
+ * way in the rung gives (free models or the person's key through OpenRouter, their OpenAI or Anthropic key, a local server),
+ * built by the model factory with the effort chosen. A free rung only ever gets a free id, so a forged paid id cannot spend;
+ * a model without a thinking setting is simply not sent one.
+ */
+export function celloChatModel(ran: Pick<ModelChoice, 'rung' | 'model' | 'effort'>, apiKeys: DecryptedApiKeys, purpose: ModelPurpose = 'orchestrator') {
   if (ran.rung === 'R3' && !isFree(ran.model)) throw new Error('A free choice was given a model that is not free.')
-  return openRouterModel({ apiKeys, model: ran.model, purpose, serverFallback: ran.rung === 'R4' })
+  const keys = keysForRole(apiKeys, ran, purpose === 'researcher' ? 'researcher' : 'chat')
+  const { via } = routeFor(ran.rung, keys)
+  if (via === 'local-cli') throw new Error('This computer cannot run Chat through a command line tool. Use a local server.')
+  const model = via === 'openai' || via === 'anthropic' ? directModel(via, ran.model) : ran.model
+  const built = chatModelFor(via, model, keys, { maxTokens: MAX_TOKENS[purpose], temperature: 0.2, reasoning: { effort: ran.effort } })
+  return tagRun(built, { rung: ran.rung, via, effort: ran.effort })
 }

@@ -17,11 +17,12 @@ import { openRouterUserTag } from '@/lib/harness/providers/openrouter'
 import type { DecryptedApiKeys } from '@/lib/harness/types'
 import { resolveModelId } from '@/lib/models'
 import { DEFAULT_FREE_MODELS, freeModels, isFreeModel } from '@/lib/models/free'
+import type { RungVia } from '@/lib/models/doors.types'
 
 export type ModelPurpose = 'orchestrator' | 'researcher' | 'eval'
 
 /** Output budget per turn. The orchestrator writes answers; the Researcher writes a short cited summary. */
-const MAX_TOKENS: Record<ModelPurpose, number> = {
+export const MAX_TOKENS: Record<ModelPurpose, number> = {
   orchestrator: 4096,
   researcher: 2048,
   eval: 1024,
@@ -60,4 +61,23 @@ export function celloChatModel(opts: CelloChatModelOptions): ChatOpenRouter {
     // Only free ids, so a server-side fallback can never add spend.
     ...(opts.serverFallback && !isFreeModel(model) && free.length > 0 ? { models: free, route: 'fallback' as const } : {}),
   })
+}
+
+/** What a model was built to run as, so the spend guard can write the true rung, id and effort on the ledger row. */
+export interface RunTag {
+  rung: 'R2' | 'R3' | 'R4'
+  /** The way in: a call on the person's own OpenAI or Anthropic key is named "<via>/<id>" in the ledger, as callLlm names it. */
+  via: RungVia
+  effort: string
+}
+
+const TAG = Symbol.for('cello.runTag')
+
+/** Marks a model built by celloChatModel (lib/models/choice.ts). A fallback model built elsewhere carries no tag. */
+export function tagRun<M extends object>(model: M, tag: RunTag): M {
+  return Object.assign(model, { [TAG]: tag })
+}
+
+export function runTagOf(model: unknown): RunTag | null {
+  return ((model as Record<symbol, RunTag | undefined> | null)?.[TAG] as RunTag | undefined) ?? null
 }

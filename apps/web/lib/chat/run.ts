@@ -45,10 +45,10 @@ export async function runStoredTurn(db: AdminClient, userId: string, chatId: str
   const stop = new AbortController()
   const timer = setInterval(() => void isStopped(db, root).then((yes) => yes && stop.abort()), STOP_POLL_MS)
   try {
-    const loop = chatAgent({ db, userId, keys, isDemo: keys.isDemo !== false, ran: view.ran, mode: mode.mode, signal: stop.signal })
+    const loop = chatAgent({ db, userId, keys, isDemo: keys.isDemo !== false, ran: view.ran, roles: view.roles, mode: mode.mode, signal: stop.signal })
     const names = async () => (((await db.from('companies').select('name').eq('user_id', userId).limit(200)).data as { name: string }[] | null) ?? []).map((c) => c.name)
     const out = await runChatTurn(
-      { db, agent: routedAgent({ db, userId, keys, ran: view.ran, mode: mode.mode, signal: stop.signal }, loop, names), store: getMemoryStore(), isDemo: keys.isDemo !== false },
+      { db, agent: routedAgent({ db, userId, keys, ran: view.ran, roles: view.roles, mode: mode.mode, signal: stop.signal }, loop, names), store: getMemoryStore(), isDemo: keys.isDemo !== false },
       { userId, chatId, typed, quoted: turn.quoted ?? null, recalled, turnId: turn.id, mode }
     )
     if (!out.ok) await leaveLine(db, userId, chatId, stop.signal.aborted ? 'Stopped. Nothing was changed.' : `${out.error} ${out.fix}`.trim())

@@ -4,13 +4,19 @@
 // the sum of the turn's own ledger rows. The model that answered is read from the ledger too, never from the caller:
 // a turn that code answered has no rows and says so, and a step-down names what did not answer.
 
-import type { AdminClient } from '@/lib/harness/types'
+import { REASONING_EFFORTS, type AdminClient, type ReasoningEffort } from '@/lib/harness/types'
 import type { ChoiceRung, Ran } from '@/lib/models/choice'
+import { ROLES, type Role } from '@/lib/models/roles'
 import type { ResolvedMode } from './mode'
 
+/** One role that ran in the turn: the model and the effort its ledger rows name. */
+export type Run = Ran & { role: Role }
+
 export interface Disclosure {
-  /** Null when no model answered: code did. */
+  /** The model that answered as Chat, null when none did: this is the entry of `runs` for the chat loop, kept for older readers. */
   ran: Ran | null
+  /** Every role that made a model call this turn, from the ledger: Chat, Research, Writing, Background work. Empty when code answered. */
+  runs?: Run[]
   /** The mode the turn ran under and why, as code resolved it before the turn (lib/chat/mode.ts). Absent on older turns. */
   mode?: ResolvedMode
   tools: { label: string; object?: string }[]
@@ -31,32 +37,38 @@ export async function turnCost(db: AdminClient, userId: string, turnId: string):
 const RUNGS: readonly ChoiceRung[] = ['R2', 'R3', 'R4']
 
 /**
- * What answered, from the turn's ledger rows: the last settled call with no failed status (a call that failed without an
- * HTTP status is never settled, so it does not count). Null when no model answered. When the answering model is not the
- * one chosen, the chosen one is kept as the step-down's wanted.
+ * What ran, from the turn's ledger rows, one entry per role: the last settled call with no failed status (a call that failed
+ * without an HTTP status is never settled, so it does not count) with the model and the effort the row names. A role whose
+ * answering model is not the one chosen for it keeps the chosen one as the step-down's wanted. Empty when no model ran.
  */
-export async function ranFromRows(db: AdminClient, userId: string, turnId: string, chosen: Ran | undefined): Promise<Ran | null> {
-  const { data } = await db.from('llm_spend').select('model, rung, status, failed_status').eq('user_id', userId).eq('chat_turn_id', turnId).order('created_at', { ascending: true })
-  const rows = (data as { model: string; rung: string | null; status: string; failed_status: number | null }[] | null) ?? []
-  const row = [...rows].reverse().find((r) => r.status === 'settled' && r.failed_status == null)
-  if (!row) return null
-  const rung = RUNGS.find((r) => r === row.rung) ?? chosen?.rung ?? 'R3'
-  // The ledger holds no effort; a free rung runs with thinking off (lib/models/ask.ts), so a turn with no chosen effort says none.
-  if (!chosen) return { rung, model: row.model, effort: 'none' }
-  if (row.model === chosen.model) return chosen
-  return { ...chosen, rung, model: row.model, steppedDown: { wanted: { rung: chosen.rung, model: chosen.model, effort: chosen.effort }, why: 'model' } }
+export async function runsFromRows(db: AdminClient, userId: string, turnId: string, chosen: Partial<Record<Role, Ran>>): Promise<Run[]> {
+  const { data } = await db.from('llm_spend').select('model, rung, role, effort, status, failed_status').eq('user_id', userId).eq('chat_turn_id', turnId).order('created_at', { ascending: true })
+  const rows = (data as { model: string; rung: string | null; role: Role | null; effort: string | null; status: string; failed_status: number | null }[] | null) ?? []
+  const runs: Run[] = []
+  for (const role of ROLES) {
+    const row = [...rows].reverse().find((r) => r.role === role && r.status === 'settled' && r.failed_status == null)
+    if (!row) continue
+    const want = chosen[role]
+    const rung = RUNGS.find((r) => r === row.rung) ?? want?.rung ?? 'R3'
+    // A call that sent no thinking setting ran with thinking off.
+    const effort = (REASONING_EFFORTS as readonly string[]).includes(row.effort ?? '') ? (row.effort as ReasoningEffort) : 'none'
+    const ran: Ran = { rung, model: row.model, effort }
+    runs.push({ role, ...(want && want.model !== row.model ? { ...ran, steppedDown: { wanted: { rung: want.rung, model: want.model, effort: want.effort }, why: 'model' as const } } : ran) })
+  }
+  return runs
 }
 
 export async function buildDisclosure(
   db: AdminClient,
   userId: string,
   turnId: string,
-  input: { ran: Ran | null; mode?: ResolvedMode; tools: Disclosure['tools']; sources: Disclosure['sources']; startedAt: Date; endedAt: Date }
+  input: { ran: Ran | null; runs?: Run[]; mode?: ResolvedMode; tools: Disclosure['tools']; sources: Disclosure['sources']; startedAt: Date; endedAt: Date }
 ): Promise<Disclosure> {
   const { data } = await db.from('agent_tasks').select('title, status, reads, branch_index, command').eq('user_id', userId).eq('turn_id', turnId).order('created_at', { ascending: true })
   const rows = (data as { title: string; status: string; reads: unknown[] | null; command: string | null }[] | null) ?? []
   return {
     ran: input.ran,
+    ...(input.runs ? { runs: input.runs } : {}),
     ...(input.mode ? { mode: input.mode } : {}),
     tools: input.tools,
     // The turn's own row ("Cello is working", chat.turn) is still open while this is written and is not a task the turn used.

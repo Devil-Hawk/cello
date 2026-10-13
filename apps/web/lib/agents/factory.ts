@@ -57,7 +57,7 @@ export interface CelloAgentInput {
   saver?: BaseCheckpointSaver
   /** Test seams. */
   model?: BaseChatModel
-  /** The Researcher's own model. Without one it runs on `model`, the turn's resolved choice, so no subagent is ever on a model the person did not allow. */
+  /** The Researcher's own model, built from the person's choice for it (lib/models/choice.ts). Without one it runs on `model`, the turn's resolved choice, so no subagent is ever on a model the person did not allow. */
   researcherModel?: BaseChatModel
   fallbacks?: GuardStackOptions['fallbacks']
   skillsDir?: string
@@ -72,7 +72,7 @@ export interface CelloAgentInput {
 function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher') {
   const { ctx } = input
   return guardStack({
-    ctx: { admin: ctx.admin, userId: ctx.userId, apiKeys: ctx.apiKeys, isDemo: ctx.isDemo, traceId: ctx.traceId, chatTurnId: ctx.chatTurnId },
+    ctx: { admin: ctx.admin, userId: ctx.userId, apiKeys: ctx.apiKeys, isDemo: ctx.isDemo, traceId: ctx.traceId, chatTurnId: ctx.chatTurnId, role: agent === 'researcher' ? 'researcher' : 'chat' },
     agent,
     deadlineAt: ctx.deadlineAt,
     fallbacks: input.fallbacks,

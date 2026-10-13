@@ -92,3 +92,44 @@ describe('readSettings', () => {
     expect(describeRungs(limits(), [FREE])[1].models).toEqual([{ id: FREE, label: 'qwen3.8-27b' }])
   })
 })
+
+describe('a model for each role', () => {
+  const choice = { rung: 'R3', model: FREE, effort: 'none' }
+  it('keeps a role\'s choice apart from Chat\'s, held to the highest, and follows Chat again on null', async () => {
+    const db = seed()
+    expect(await writeSettings(db, 'u1', null, { role: 'writer', choice }, limits())).toEqual({ ok: true })
+    expect(db.tables.profiles[0].preferences).toEqual({ api_keys: { x: 'kept' }, role_choices: { writer: choice } })
+    const above = { rung: 'R4', model: 'anthropic/claude-sonnet-5', effort: 'medium' }
+    expect(await writeSettings(db, 'u1', null, { role: 'researcher', choice: above }, limits())).toMatchObject({ ok: false })
+    expect(await writeSettings(db, 'u1', null, { role: 'worker' }, limits())).toMatchObject({ ok: false })
+    expect(await writeSettings(db, 'u1', null, { role: 'writer', choice: null }, limits())).toEqual({ ok: true })
+    expect(db.tables.profiles[0].preferences).toEqual({ api_keys: { x: 'kept' }, role_choices: {} })
+  })
+
+  it('reads each role: the person\'s own, else the chat\'s model', async () => {
+    const db = seed()
+    db.tables.chats[0].model_choice = { rung: 'R3', model: 'google/gemma-4-31b-it:free', effort: 'low' }
+    db.tables.profiles[0].preferences = { role_choices: { writer: choice } }
+    const view = await readSettings(db, 'u1', 'c1', limits(), [FREE])
+    expect(view?.roles.writer).toMatchObject({ model: FREE, effort: 'none' })
+    expect(view?.roles.researcher).toMatchObject({ model: 'google/gemma-4-31b-it:free', effort: 'low' })
+    expect(view?.followsChat).toEqual(['researcher', 'worker'])
+  })
+
+  it('never runs any role above the highest, whatever is stored for it', async () => {
+    const db = seed()
+    const paidChoice = { rung: 'R4', model: 'anthropic/claude-sonnet-5', effort: 'high' }
+    db.tables.profiles[0].preferences = { chat_choice: paidChoice, role_choices: { researcher: paidChoice, writer: paidChoice, worker: paidChoice } }
+    const view = await readSettings(db, 'u1', 'c1', limits(), [FREE])
+    for (const ran of Object.values(view?.roles ?? {})) expect(ran).toMatchObject({ rung: 'R3', model: FREE })
+  })
+
+  it('never changes the model: the same roles under either mode', async () => {
+    const db = seed()
+    db.tables.profiles[0].preferences = { role_choices: { writer: choice }, pipeline: { mode: 'hands_off', send: { mode: 'auto' } } }
+    const roles = async () => (await readSettings(db, 'u1', 'c1', limits(), [FREE]))?.roles
+    const ask = await (async () => (await writeSettings(db, 'u1', 'c1', { mode: 'ask' }, limits()), roles()))()
+    const handsOff = await (async () => (await writeSettings(db, 'u1', 'c1', { mode: 'hands_off' }, limits()), roles()))()
+    expect(handsOff).toEqual(ask)
+  })
+})

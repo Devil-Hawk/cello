@@ -49,6 +49,15 @@ describe('callDirect', () => {
     expect(result).toMatchObject({ content: '# Resume', model: 'openai/gpt-5.2', promptTokens: 30, completionTokens: 8, tokensUsed: 38, finishReason: 'stop' })
   })
 
+  it('sends the chosen effort to a model that thinks and none to one that does not', async () => {
+    const thinks = stub('openai')
+    await callDirect('openai', keys({ openai: 'k', model: 'openai/gpt-5.2' }), { prompt: 'hi', reasoning: { effort: 'high' } })
+    expect(JSON.stringify(thinks())).toContain('"high"')
+    const plain = stub('openai')
+    await callDirect('openai', keys({ openai: 'k', model: 'openai/gpt-4o' }), { prompt: 'hi', reasoning: { effort: 'high' } })
+    expect(JSON.stringify(plain())).not.toContain('"high"')
+  })
+
   it('says which key is missing', async () => {
     await expect(callDirect('anthropic', keys({ openai: 'k' }), { prompt: 'hi' })).rejects.toThrow('No Anthropic API key configured')
     await expect(callDirect('openai', keys({ anthropic: 'k' }), { prompt: 'hi' })).rejects.toThrow('No OpenAI API key configured')

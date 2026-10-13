@@ -7,6 +7,7 @@ import { newDeadline, type AgentContext } from '@/lib/agents/context'
 import { madeThing, ThingSchema } from '@/lib/chat/things'
 import { withWorker } from '@/lib/chat/workers'
 import { loadApiKeys } from '@/lib/harness/keys'
+import { roleKeys } from '@/lib/models/choice'
 import { runWriter } from '@/lib/workflows/writer'
 import { CommandRefusal, defineCommand, type AnyCommand } from '../define'
 import { codeText, untrustedText } from '../text'
@@ -38,7 +39,8 @@ export const documentsDraft = defineCommand({
       if (!m) throw new CommandRefusal(404, 'There is no stored message from that person to answer.', 'not_found')
       replyTo = [m.subject && `Subject: ${m.subject}`, m.excerpt].filter(Boolean).join('\n')
     }
-    const apiKeys = await loadApiKeys(db, ctx.userId)
+    // The Writer runs on the model the person chose for writing.
+    const apiKeys = await roleKeys(db, ctx.userId, await loadApiKeys(db, ctx.userId), 'writer', ctx.chat?.chatId)
     const agent: AgentContext = {
       admin: db,
       userId: ctx.userId,

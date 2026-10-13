@@ -12,11 +12,11 @@
 
 import type { AdminClient } from '@/lib/harness/types'
 import { reasonOf } from '@/lib/models/caps'
-import type { Ran } from '@/lib/models/choice'
+import type { Ran, Role } from '@/lib/models/choice'
 import { settleAnswer, type ModelAnswer, type Settled, type TurnResult } from './answer'
 import { activeTiles, ledgerKey } from './attach'
 import { recalledThing, resultOf } from './recalled'
-import { buildDisclosure, ranFromRows, type Disclosure } from './disclosure'
+import { buildDisclosure, runsFromRows, type Disclosure } from './disclosure'
 import { writeTurnMemories, type ChatMemoryStore, type TurnMemories } from './memory'
 import type { ResolvedMode } from './mode'
 import { getObject } from './objects'
@@ -41,6 +41,8 @@ export interface AgentOutput {
   /** What the tools returned this run, each with the thing it was about. */
   results: TurnResult[]
   ran?: Ran
+  /** What each role was meant to run on this turn, so a step-down can be named against it. */
+  roles?: Partial<Record<Role, Ran>>
   tools?: Disclosure['tools']
   sources?: Disclosure['sources']
   made?: TurnMemories['made']
@@ -125,8 +127,13 @@ export async function runChatTurn(
   const out = last as AgentOutput | null
 
   // 4. Only what passed is stored, with the turn's disclosure. The model that answered is the ledger's, not the caller's.
-  const ran = out ? await ranFromRows(db, userId, turnId, out.ran) : null
-  const disclosure = out ? await buildDisclosure(db, userId, turnId, { ran, mode: input.mode, tools: out.tools ?? [], sources: out.sources ?? [], startedAt, endedAt: now() }) : null
+  // A model call a tool made on the turn's behalf (the Writer) is tied to the turn here, so its role, model and cost are on the turn's own rows.
+  // ponytail: by time and role, so another turn of the same person running at once could claim a row; tie the call to its turn at the call when that shows.
+  if (out) await db.from('llm_spend').update({ chat_turn_id: turnId }).eq('user_id', userId).is('chat_turn_id', null).in('role', ['chat', 'researcher', 'writer']).gte('created_at', startedAt.toISOString())
+  const runs = out ? await runsFromRows(db, userId, turnId, out.roles ?? (out.ran ? { chat: out.ran } : {})) : []
+  const chatRun = runs.find((r) => r.role === 'chat')
+  const chatRan: Ran | null = chatRun ? { rung: chatRun.rung, model: chatRun.model, effort: chatRun.effort, ...(chatRun.steppedDown ? { steppedDown: chatRun.steppedDown } : {}) } : null
+  const disclosure = out ? await buildDisclosure(db, userId, turnId, { ran: chatRan, runs, mode: input.mode, tools: out.tools ?? [], sources: out.sources ?? [], startedAt, endedAt: now() }) : null
   const { data: answer, error: answerError } = await db
     .from('chat_turns')
     .insert({
@@ -138,7 +145,7 @@ export async function runChatTurn(
       prov: { step: 'chat', turn_id: turnId },
       parts: settled.parts,
       links: [...settled.links, ...(out?.made ?? []).filter((m) => !settled.links.some((l) => l.kind === 'made' && l.id === m.id)).map((m): TurnLink => ({ kind: 'made', table: 'artifacts', id: m.id, role: 'made' }))],
-      ran,
+      ran: chatRan,
       disclosure,
     })
     .select('id')

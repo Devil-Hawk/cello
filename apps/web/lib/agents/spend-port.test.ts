@@ -6,24 +6,33 @@ import { BudgetCapError, isBudgetCapError, reserve, rootCause, settle } from './
 
 function fakeAdmin(reply: unknown = { ok: true, id: 'res-1' }) {
   const calls: { fn: string; args: Record<string, unknown> }[] = []
+  const updates: Record<string, unknown>[] = []
   const admin = {
+    from: () => ({ update: (row: Record<string, unknown>) => ({ eq: async () => (updates.push(row), { error: null }) }) }),
     rpc: async (fn: string, args: Record<string, unknown>) => {
       calls.push({ fn, args })
       return { data: fn === 'reserve_llm_spend' ? reply : null, error: null }
     },
   } as unknown as AdminClient
-  return { admin, calls }
+  return { admin, calls, updates }
 }
 
 const base = { userId: 'u1', promptTokens: 1000, maxTokens: 2000 }
 
 describe('reserve and settle', () => {
-  it('a paid model reserves its worst case on the paid rung under the agent step', async () => {
+  it('a paid model reserves its worst case on the paid rung under the agent role step', async () => {
     const { admin, calls } = fakeAdmin()
     await reserve({ admin, model: 'anthropic/claude-sonnet-5', ...base })
     expect(calls[0].fn).toBe('reserve_llm_spend')
-    expect(calls[0].args).toMatchObject({ p_user_id: 'u1', p_rung: 'R4', p_step: 'agent-turn' })
+    expect(calls[0].args).toMatchObject({ p_user_id: 'u1', p_rung: 'R4', p_step: 'agent-chat' })
     expect(Number(calls[0].args.p_estimate)).toBeGreaterThan(0)
+  })
+
+  it('writes the role and the effort on the row, and a local model is not priced as a paid one', async () => {
+    const { admin, calls, updates } = fakeAdmin()
+    await reserve({ admin, model: 'llama3', role: 'researcher', effort: 'high', rung: 'R2', ...base })
+    expect(calls[0].args).toMatchObject({ p_step: 'agent-researcher', p_rung: 'R2', p_estimate: 0 })
+    expect(updates).toEqual([{ role: 'researcher', effort: 'high' }])
   })
 
   it('a free model reserves nothing, so a fallback works after the paid cap is reached', async () => {

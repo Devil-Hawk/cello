@@ -11,7 +11,7 @@ import { chatDoor, CommandRefusal, getCommand, runCommand } from '@/lib/commands
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { askModel } from '@/lib/models/ask'
 import { reasonOf } from '@/lib/models/caps'
-import type { Ran } from '@/lib/models/choice'
+import { keysForRole, type Ran, type Role } from '@/lib/models/choice'
 import { unsupported, type ModelAnswer, type TurnResult } from './answer'
 import type { Mode } from './mode'
 import { resolveRoleType } from './find-roles'
@@ -65,6 +65,8 @@ interface Deps {
   userId: string
   keys: DecryptedApiKeys
   ran: Ran
+  /** What each role runs on this turn: the draft's sentence is the Writer's. */
+  roles?: Partial<Record<Role, Ran | null>>
   /** The turn's mode, resolved by code in run.ts; the door carries it to each command. */
   mode?: Mode
   signal?: AbortSignal
@@ -82,7 +84,7 @@ export const RANKING_WORDS = /\b(most|least|freshest|newest|oldest|latest|earlie
 /** Two plain sentences on which of the roles to do first, from the stored table only; the first model that obeys wins. */
 async function twoSentences(deps: Deps, table: string): Promise<{ text: string; model: string } | null> {
   const got = await askModel(
-    deps.keys,
+    keysForRole(deps.keys, deps.ran, 'chat'),
     deps.ran.model,
     {
       system:
@@ -165,6 +167,8 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
     if (!intent) return fallback(input)
 
     const startedAt = new Date().toISOString()
+    // The draft's sentence is the Writer's: the model the person chose for writing, or Chat's when they never did.
+    const writer = deps.roles?.writer ?? deps.ran
     const ctx = chatDoor({ userId: deps.userId, typed: input.typed, chat: { chatId: input.chatId, turnId: input.turnId }, mode: deps.mode, signal: deps.signal })
     const tools: NonNullable<AgentOutput['tools']> = []
     const sources: NonNullable<AgentOutput['sources']> = []
@@ -190,7 +194,7 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
       await deps.db.from('llm_spend').update({ chat_turn_id: input.turnId }).eq('user_id', deps.userId).is('chat_turn_id', null).gte('created_at', startedAt)
       const made = madeIds.length ? (((await deps.db.from('artifacts').select('id, type, title, created_at').eq('user_id', deps.userId).in('id', madeIds.slice(0, 20))).data as { id: string; type: string; title: string; created_at: string }[] | null) ?? []) : []
       // The model that answered is read from these rows at the turn's end (disclosure.ts), not claimed here.
-      return { answer, results, ran: deps.ran, tools, sources, made }
+      return { answer, results, ran: deps.ran, roles: { chat: deps.ran, writer: writer }, tools, sources, made }
     }
 
     try {
@@ -243,12 +247,12 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
         return one.split(/(?<=[.?])\s+/).filter(Boolean).length === 1 && /^(I|My)\b/.test(one) && one.length <= 260 && checkNote(compose(one), shape) !== null
       }
       const got = await withWorker(
-        { db: deps.db, userId: deps.userId, threadId: input.chatId, chatId: input.chatId, turnId: input.turnId, model: deps.ran.model, rung: deps.ran.rung },
+        { db: deps.db, userId: deps.userId, threadId: input.chatId, chatId: input.chatId, turnId: input.turnId, model: writer.model, rung: writer.rung },
         { command: 'documents.draft', title: 'Writing a message' },
         async () => {
           const sentence = await askModel(
-            deps.keys,
-            deps.ran.model,
+            keysForRole(deps.keys, writer, 'writer'),
+            writer.model,
             {
               maxTokens: 400,
               system: `You help a job seeker write to a recruiter. Reply with exactly one plain sentence in the first person, starting with "I" or "My", that names one strength of the sender and one concrete thing from the resume excerpt that shows it. Use only what the resume excerpt says; never invent an employer, number, date or skill. Say nothing about the company. No dashes, brackets, exclamation marks, quotes or lists.`,

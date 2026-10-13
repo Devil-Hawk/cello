@@ -186,6 +186,14 @@ describe('no subagent runs above the highest the person allows', () => {
     expect((s.model as unknown as { model: string }).model).toMatch(/:free$/)
   })
 
+  it('gives the Researcher its own model, apart from the one Chat runs on', () => {
+    const chat = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [] })
+    const research = new ScriptedChatModel({ model: 'qwen/qwen3.8-27b:free', script: [] })
+    const s = researcherSpec({ ctx: ctx(), model: chat, researcherModel: research, fallbacks: [], skillsDir: skills() }, 'general-purpose')
+    expect(s.model).toBe(research)
+    expect(s.model).not.toBe(chat)
+  })
+
   it("the Researcher runs on the turn's model when one was resolved for it", () => {
     const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [] })
     expect(researcherSpec({ ctx: ctx(), model, fallbacks: [], skillsDir: skills() }, 'general-purpose').model).toBe(model)

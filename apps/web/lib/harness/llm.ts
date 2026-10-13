@@ -228,10 +228,14 @@ export async function callLlm(
   // already ask for one: an explicit opts.reasoning (including {effort:
   // 'none'}) always wins over the account-wide default. A metered call always
   // carries a max_tokens, because its reservation is priced from it.
-  const withReasoning: LlmRunOptions =
-    opts.reasoning || !apiKeys.reasoningEffort || apiKeys.reasoningEffort === 'none'
-      ? opts
-      : { ...opts, reasoning: { effort: apiKeys.reasoningEffort } }
+  // A role's own setting (keysForRole) counts, Off included: the person chose it for this work.
+  const withReasoning: LlmRunOptions = opts.reasoning
+    ? opts
+    : apiKeys.roleEffort
+      ? { ...opts, reasoning: { effort: apiKeys.roleEffort } }
+      : !apiKeys.reasoningEffort || apiKeys.reasoningEffort === 'none'
+        ? opts
+        : { ...opts, reasoning: { effort: apiKeys.reasoningEffort } }
   const effectiveOpts: LlmRunOptions =
     metered && withReasoning.maxTokens === undefined ? { ...withReasoning, maxTokens: DEFAULT_MAX_TOKENS } : withReasoning
 
@@ -272,6 +276,8 @@ export async function callLlm(
       step: effectiveOpts.name ?? 'call-llm',
       door: effectiveOpts.door,
       traceId: scope?.buffer.traceId,
+      role: apiKeys.role,
+      effort: effectiveOpts.reasoning?.effort ?? null,
     })
     try {
       const out = await call()
