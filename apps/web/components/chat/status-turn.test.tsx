@@ -12,6 +12,13 @@ describe('StatusTurn', () => {
     expect(out).toContain('>Open<')
   })
 
+  it('centres the Open key on the line like the buttons', () => {
+    const out = renderToStaticMarkup(<StatusTurn line={line} />)
+    const open = out.match(/<a [^>]*href="\/pipeline"[^>]*>/)?.[0] ?? ''
+    expect(open).toContain('inline-flex')
+    expect(open).toContain('items-center')
+  })
+
   it('shows nothing when the event could not be read', () => {
     expect(renderToStaticMarkup(<StatusTurn line={undefined} />)).toBe('')
   })
