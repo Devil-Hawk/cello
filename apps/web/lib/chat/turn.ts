@@ -18,6 +18,7 @@ import { activeTiles, ledgerKey } from './attach'
 import { recalledThing, resultOf } from './recalled'
 import { buildDisclosure, ranFromRows, type Disclosure } from './disclosure'
 import { writeTurnMemories, type ChatMemoryStore, type TurnMemories } from './memory'
+import type { ResolvedMode } from './mode'
 import { getObject } from './objects'
 import type { RecallHit } from './recall'
 import { screenMessage } from './screen'
@@ -62,7 +63,7 @@ const TYPED_MAX = 20_000
 
 export async function runChatTurn(
   deps: TurnDeps,
-  input: { userId: string; chatId: string; typed: string; quoted?: { text: string; turn_id: string } | null; recalled?: RecallHit[]; /** The person's turn, when an edit already stored it. */ turnId?: string }
+  input: { userId: string; chatId: string; typed: string; quoted?: { text: string; turn_id: string } | null; recalled?: RecallHit[]; /** The person's turn, when an edit already stored it. */ turnId?: string; /** The mode code resolved for this turn, for the disclosure. */ mode?: ResolvedMode }
 ): Promise<TurnResultOut> {
   const { db } = deps
   const { userId, chatId } = input
@@ -125,7 +126,7 @@ export async function runChatTurn(
 
   // 4. Only what passed is stored, with the turn's disclosure. The model that answered is the ledger's, not the caller's.
   const ran = out ? await ranFromRows(db, userId, turnId, out.ran) : null
-  const disclosure = out ? await buildDisclosure(db, userId, turnId, { ran, tools: out.tools ?? [], sources: out.sources ?? [], startedAt, endedAt: now() }) : null
+  const disclosure = out ? await buildDisclosure(db, userId, turnId, { ran, mode: input.mode, tools: out.tools ?? [], sources: out.sources ?? [], startedAt, endedAt: now() }) : null
   const { data: answer, error: answerError } = await db
     .from('chat_turns')
     .insert({

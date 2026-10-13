@@ -4,6 +4,7 @@
 // each source, the time and the cost. Written by code from rows at the turn's end (lib/chat/disclosure.ts).
 
 import { disclosureLine, type Disclosure } from '@/lib/chat/disclosure'
+import { modeWords } from '@/lib/chat/mode'
 import { EFFORT_WORDS, STEP_DOWN_WORDS } from '@/components/chat/model-picker'
 import { clock, STATUS_WORDS, type TaskStatus } from '@/components/chat/tasks-line'
 
@@ -32,6 +33,12 @@ export function SourcesAndTools({ d }: { d: Disclosure }) {
           <dt className="w-16 shrink-0">Model</dt>
           <dd className="text-foreground">{modelWords(d.ran)}</dd>
         </div>
+        {d.mode && (
+          <div className="flex gap-2">
+            <dt className="w-16 shrink-0">Mode</dt>
+            <dd className="text-foreground">{modeWords(d.mode)}</dd>
+          </div>
+        )}
         <div className="flex gap-2">
           <dt className="w-16 shrink-0">Tools</dt>
           <dd className="text-foreground">{tools.length ? tools.join(', ') : 'None used'}</dd>

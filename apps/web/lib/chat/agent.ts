@@ -14,6 +14,7 @@ import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { reasonOf } from '@/lib/models/caps'
 import { celloChatModel, type Ran } from '@/lib/models/choice'
 import { AnswerSchema, type ModelAnswer, type TurnResult } from './answer'
+import type { Mode } from './mode'
 import type { AgentInput, AgentOutput } from './turn'
 import { resultOf } from './recalled'
 import type { Thing } from './things'
@@ -27,7 +28,7 @@ const HELP: Record<string, string> = {
   people_find: 'Find one of the person\'s contacts by name. Returns the contact with their company and their latest message to the person. Use it before a reply, to get the contact id.',
   chat_recall: 'Look in the person\'s earlier chats by words. Returns what they said, made or decided there, with the chat it came from.',
   documents_draft: 'Write one draft with the Writer: type reply (to a person, pass contact_id), message, follow_up, note, cover_letter or resume (pass job_id for a role). Saves it as a draft. Never sends.',
-  applications_start: 'Start preparing an application for one stored role by its id. It checks the posting, tailors the resume and waits for the person to approve it. It never sends or submits anything.',
+  applications_start: 'Start preparing an application for one stored role by its id. It checks the posting and tailors the resume. In Ask first it then waits for the person to approve the resume and nothing is sent; in Hands-off, say what its sentence says. Never say you applied, sent or submitted.',
 }
 
 export interface ChatAgentDeps {
@@ -37,6 +38,8 @@ export interface ChatAgentDeps {
   isDemo: boolean
   /** What the turn runs on, resolved by the caller from the person's choice and ceiling. */
   ran: Ran
+  /** The turn's mode, resolved by code in run.ts; the door carries it to each command. */
+  mode?: Mode
   signal?: AbortSignal
   profileCard?: string
   /** Test seam: replaces the compiled agent. */
@@ -63,7 +66,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
   const refusals: string[] = []
 
   return async (input) => {
-    const ctxFor = () => chatDoor({ userId: deps.userId, typed: input.typed, chat: { chatId: input.chatId, turnId: input.turnId }, signal: deps.signal })
+    const ctxFor = () => chatDoor({ userId: deps.userId, typed: input.typed, chat: { chatId: input.chatId, turnId: input.turnId }, mode: deps.mode, signal: deps.signal })
     const defs: AnyCommand[] = agentView()
     const lcTools = defs.map((def) =>
       tool(

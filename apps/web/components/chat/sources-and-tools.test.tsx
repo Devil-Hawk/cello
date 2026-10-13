@@ -23,4 +23,11 @@ describe('SourcesAndTools', () => {
     expect(out).toContain('1 source, 1 tool, 2 tasks. 0:41. Free.')
     expect(modelWords(null)).toBe('None. Code answered this.')
   })
+
+  it('says the mode that ran and why, from the disclosure, and nothing on an older turn without one', () => {
+    expect(renderToStaticMarkup(<SourcesAndTools d={d} />)).not.toContain('>Mode<')
+    const out = renderToStaticMarkup(<SourcesAndTools d={{ ...d, mode: { mode: 'ask', why: 'keyword', blocked: 'send_for_me_off' } }} />)
+    expect(out).toContain('>Mode<')
+    expect(out).toContain('Ask first. Hands-off needs Send for me on.')
+  })
 })

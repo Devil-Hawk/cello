@@ -18,6 +18,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { isCrossSiteRequest } from '@/lib/security/same-origin'
+import type { Mode } from '@/lib/chat/mode'
 import { CommandRefusal, type CommandContext } from './define'
 
 const MINT = Symbol('lib/commands/doors mint key')
@@ -77,8 +78,8 @@ export function ruleDoor(input: { userId: string; ruleId: string; signal?: Abort
   return { door: 'rule', userId: input.userId, ruleId: input.ruleId, signal: input.signal, admin }
 }
 
-export function chatDoor(input: { userId: string; typed?: string; chat?: { chatId: string; turnId: string }; signal?: AbortSignal }): CommandContext {
-  return { door: 'chat', userId: input.userId, typed: input.typed, chat: input.chat, signal: input.signal, admin }
+export function chatDoor(input: { userId: string; typed?: string; chat?: { chatId: string; turnId: string }; mode?: Mode; signal?: AbortSignal }): CommandContext {
+  return { door: 'chat', userId: input.userId, typed: input.typed, chat: input.chat, mode: input.mode, signal: input.signal, admin }
 }
 
 export function assistantDoor(input: { userId: string; signal?: AbortSignal }): CommandContext {

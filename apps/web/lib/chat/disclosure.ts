@@ -6,10 +6,13 @@
 
 import type { AdminClient } from '@/lib/harness/types'
 import type { ChoiceRung, Ran } from '@/lib/models/choice'
+import type { ResolvedMode } from './mode'
 
 export interface Disclosure {
   /** Null when no model answered: code did. */
   ran: Ran | null
+  /** The mode the turn ran under and why, as code resolved it before the turn (lib/chat/mode.ts). Absent on older turns. */
+  mode?: ResolvedMode
   tools: { label: string; object?: string }[]
   workers: { title: string; status: string; reads: number }[]
   sources: { title: string; host: string }[]
@@ -48,12 +51,13 @@ export async function buildDisclosure(
   db: AdminClient,
   userId: string,
   turnId: string,
-  input: { ran: Ran | null; tools: Disclosure['tools']; sources: Disclosure['sources']; startedAt: Date; endedAt: Date }
+  input: { ran: Ran | null; mode?: ResolvedMode; tools: Disclosure['tools']; sources: Disclosure['sources']; startedAt: Date; endedAt: Date }
 ): Promise<Disclosure> {
   const { data } = await db.from('agent_tasks').select('title, status, reads, branch_index, command').eq('user_id', userId).eq('turn_id', turnId).order('created_at', { ascending: true })
   const rows = (data as { title: string; status: string; reads: unknown[] | null; command: string | null }[] | null) ?? []
   return {
     ran: input.ran,
+    ...(input.mode ? { mode: input.mode } : {}),
     tools: input.tools,
     // The turn's own row ("Cello is working", chat.turn) is still open while this is written and is not a task the turn used.
     workers: rows.filter((r) => r.command !== 'chat.turn').map((r) => ({ title: r.title, status: r.status, reads: r.reads?.length ?? 0 })),
