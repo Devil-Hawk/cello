@@ -42,3 +42,13 @@ export const inboxClassifyStep = defineModelStep({
   minRung: 'R1',
   below: 'The email is shown as not sorted yet, with one tap to sort it.',
 })
+
+/** Drafting one answer to an application question from the person's own words (v2-4). The person checks it;
+ *  Send for me never uses it (lib/fill/eligibility.ts). */
+export const answersDraftStep = defineModelStep({
+  id: 'answers.draft',
+  kind: 'step',
+  measure: 'S6',
+  minRung: 'R2',
+  below: 'Cello drafts answers when a model is available. Answer it yourself.',
+})
