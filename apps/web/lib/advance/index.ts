@@ -8,10 +8,11 @@
 // answer, an approval, "Already applied?") or the clock (a rate limit: a minute, or tomorrow).
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { eligibility } from '@/lib/fill/eligibility'
 import { DOORS } from '@/lib/pipeline/actors'
-import { transition, type EventBody, type MoveResult } from '@/lib/pipeline/transition'
+import { autoSendReason, note, transition, type EventBody, type MoveResult } from '@/lib/pipeline/transition'
 import { rateLimitOf, sumCost, waitAfter, type CostRow } from './cost'
-import { STEPS, defaultFetchForm, type Step, type StepCtx } from './steps'
+import { STEPS, defaultFetchForm, startedHandsOff, type Step, type StepCtx } from './steps'
 
 const LEASE_MS = 5 * 60_000
 /** The slice is 240 seconds; start no new step after this. */
@@ -117,6 +118,12 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
       await transition(admin, { applicationId: app.id, from: ['preparing'], to: 'preparing', step: step.doing, event: base('step.finished', done, out.line, { step: step.id, durationMs: ms, payload: out.payload }) })
     }
     const r = await transition(admin, { applicationId: app.id, from: ['preparing'], to: 'ready', step: 'Ready to send', event: base('step.finished', `ready:${app.id}:${app.attempt}`, 'Everything is prepared. It is ready for you to send.', { step: 'ready' }) })
+    // Started in Hands-off: one more line says whether Send for me may take it, in SQL's words (its switch, caps and
+    // rules) or code's (the site is not one Cello sends on yet). A line that moves nothing; the person reads why it waits.
+    if (r.ok && (await startedHandsOff(admin, app))) {
+      const why = (await autoSendReason(admin, app.id)) ?? eligibility({ company: ctx.job.companyName ?? 'The employer', url: ctx.job.url, fields: [] })
+      await note(admin, app.user_id, app.id, base('step.finished', `ready-mode:${app.id}:${app.attempt}`, why ? `It waits for you: ${why}` : 'Send for me will send it from your browser.', { step: 'ready' }))
+    }
     await recordCost(admin, app.id)
     return r
   } catch (e) {

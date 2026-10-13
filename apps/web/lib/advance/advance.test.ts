@@ -7,12 +7,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 type Row = Record<string, any>
 const calls: any[] = []
+const notes: any[] = []
 vi.mock('@/lib/pipeline/transition', () => ({
   transition: vi.fn(async (_admin: unknown, m: any) => (calls.push(m), { ok: true, replay: false, event: { id: 'e', kind: m.event.kind } })),
+  note: vi.fn(async (_admin: unknown, _user: string, _app: string, e: any) => (notes.push(e), { ok: true, replay: false, event: { id: 'n', kind: e.kind } })),
+  autoSendReason: vi.fn(async () => 'Cello sends only Strong matches.'),
 }))
 
 vi.mock('@/lib/resume/store', () => ({ getLatestVersion: vi.fn(async () => null) }))
 
+import { getLatestVersion } from '@/lib/resume/store'
 import { advanceOne } from './index'
 import { costLine, rateLimitOf, sumCost, waitAfter } from './cost'
 import { readGreenhouseFields, tailor, type Step, type StepCtx } from './steps'
@@ -44,6 +48,8 @@ function fakeAdmin(tables: Record<string, Row[]>): any {
           return q
         },
         limit: () => q,
+        order: () => q,
+        contains: (c: string, v: Row) => (filters.push((r) => Object.entries(v).every(([k, x]) => r[c]?.[k] === x)), q),
         maybeSingle: async () => ({ data: run().data[0] ?? null, error: null }),
         then: (res: (v: unknown) => unknown) => res(run()),
       }
@@ -64,6 +70,7 @@ const opts = (steps: Step[]) => ({ now: () => NOW, steps })
 
 beforeEach(() => {
   calls.length = 0
+  notes.length = 0
 })
 
 describe('advanceOne', () => {
@@ -114,6 +121,18 @@ describe('advanceOne', () => {
     const perMinute: Step = { id: 'm', doing: 'Model', run: async () => { throw Object.assign(new Error('429 Too many requests'), { status: 429 }) } }
     await advanceOne(fakeAdmin({ applications: [app()], pipeline_events: [] }), 'a1', opts([perMinute]))
     expect(calls.at(-1)).toMatchObject({ to: 'scheduled', event: { nextAt: '2026-10-14T12:01:00.000Z' } })
+  })
+
+  it('after Ready, a hands-off application says what holds it, and an Ask first one says nothing more', async () => {
+    const off = fakeAdmin({ applications: [app()], pipeline_events: [{ application_id: 'a1', user_id: 'u1', kind: 'application.created', payload: { mode: 'hands_off' } }] })
+    await advanceOne(off, 'a1', opts([ok('one')]))
+    expect(calls.at(-1)).toMatchObject({ to: 'ready' })
+    expect(notes).toEqual([expect.objectContaining({ kind: 'step.finished', sentence: 'It waits for you: Cello sends only Strong matches.', idempotencyKey: 'ready-mode:a1:0' })])
+
+    notes.length = 0
+    const ask = fakeAdmin({ applications: [app()], pipeline_events: [{ application_id: 'a1', user_id: 'u1', kind: 'application.created', payload: { mode: 'ask' } }] })
+    await advanceOne(ask, 'a1', opts([ok('one')]))
+    expect(notes).toEqual([])
   })
 
   it('moves to the one thing it waits on, with the reason named', async () => {
@@ -167,8 +186,8 @@ describe('cost', () => {
 })
 
 describe('tailor', () => {
-  const ctx = (tailorResume: StepCtx['tailorResume']): StepCtx => ({
-    admin: fakeAdmin({ pipeline_events: [] }),
+  const ctx = (tailorResume: StepCtx['tailorResume'], tables: Record<string, Row[]> = { pipeline_events: [] }): StepCtx => ({
+    admin: fakeAdmin(tables),
     app: { id: 'a1', user_id: 'u1', job_id: 'j1', posting_url_hash: null },
     job: { url: 'https://example.com/jobs/1', title: 'Engineer', company_id: 'c1', closed_at: null, still_open: true, companyName: 'Acme' },
     fetchForm: async () => ({}),
@@ -179,5 +198,24 @@ describe('tailor', () => {
     const out = await tailor.run(ctx(async () => ({ error: 'The draft could not be written: Free models allow 5 drafts a day. Add credit or choose another way to run.' })))
     expect(out).toEqual({ kind: 'continue', line: 'Cello could not tailor your resume (Free models allow 5 drafts a day. Add credit or choose another way to run), so your base resume goes with it.' })
     expect(await tailor.run(ctx(async () => null))).toEqual({ kind: 'continue', line: 'Cello could not tailor your resume, so your base resume goes with it.' })
+  })
+
+  const doc = { artifact_id: 'art1', version: 2, content: 'Tailored text', title: 'Resume for Engineer' }
+  const created = (mode: string) => ({ application_id: 'a1', user_id: 'u1', kind: 'application.created', payload: { mode } })
+  const prefs = (pipeline: Record<string, unknown>) => ({ id: 'u1', preferences: { pipeline } })
+
+  it('does not stop for the resume in hands-off with Send for me on and resume review off', async () => {
+    vi.mocked(getLatestVersion).mockResolvedValue(doc as never)
+    const out = await tailor.run(ctx(undefined, { pipeline_events: [created('hands_off')], profiles: [prefs({ send: { mode: 'auto' }, resumeApproval: false })] }))
+    expect(out).toMatchObject({ kind: 'continue', line: 'Hands-off: Cello used version 2 of the tailored resume without asking.', payload: { artifact_id: 'art1', version: 2 } })
+  })
+
+  it('stops for the resume in Ask first, and in hands-off while Send for me is off or each resume is to be shown first', async () => {
+    vi.mocked(getLatestVersion).mockResolvedValue(doc as never)
+    const wait = { kind: 'wait', reason: 'approve_resume', line: 'Needs you: approve version 2 of the tailored resume.' }
+    expect(await tailor.run(ctx(undefined, { pipeline_events: [created('ask')], profiles: [prefs({ send: { mode: 'auto' }, resumeApproval: false })] }))).toMatchObject(wait)
+    expect(await tailor.run(ctx(undefined, { pipeline_events: [created('hands_off')], profiles: [prefs({ send: { mode: 'me' }, resumeApproval: false })] }))).toMatchObject(wait)
+    expect(await tailor.run(ctx(undefined, { pipeline_events: [created('hands_off')], profiles: [prefs({ send: { mode: 'auto' }, resumeApproval: true })] }))).toMatchObject(wait)
+    vi.mocked(getLatestVersion).mockResolvedValue(null)
   })
 })

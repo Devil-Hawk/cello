@@ -16,6 +16,7 @@ import { resolveFieldValues, type FormField } from '@/lib/answers'
 import type { NeedsReason } from '@/lib/pipeline/types'
 import { createHash } from 'node:crypto'
 import { reasonOf } from '@/lib/models/caps'
+import { readPipelineSettings } from '@/lib/pipeline/settings'
 import { getLatestVersion } from '@/lib/resume/store'
 import { currentResume } from './documents'
 
@@ -161,6 +162,20 @@ async function writeTailored(admin: SupabaseClient, app: StepApp): Promise<{ art
   return { error: out.error ?? 'no reason was given' }
 }
 
+/** True when Chat started this application under Hands-off: the first created event carries the mode code chose (lib/chat/mode.ts). */
+export async function startedHandsOff(admin: SupabaseClient, app: Pick<StepApp, 'id' | 'user_id'>): Promise<boolean> {
+  const { data } = await admin.from('pipeline_events').select('payload').eq('application_id', app.id).eq('user_id', app.user_id).eq('kind', 'application.created').order('created_at', { ascending: true }).limit(1).maybeSingle()
+  return (data as { payload: { mode?: unknown } | null } | null)?.payload?.mode === 'hands_off'
+}
+
+/** Hands-off may skip the resume stop only while Send for me is on and the person does not ask to see each resume first. */
+async function skipsResumeReview(admin: SupabaseClient, app: StepApp): Promise<boolean> {
+  if (!(await startedHandsOff(admin, app))) return false
+  const { data } = await admin.from('profiles').select('preferences').eq('id', app.user_id).maybeSingle()
+  const s = readPipelineSettings((data as { preferences: unknown } | null)?.preferences)
+  return s.send.mode === 'auto' && !s.resumeApproval
+}
+
 /** The step's line when the base resume goes instead, with the reason when one is known (a free cap reaches the person here). */
 function notTailored(why: string | null): StepOutcome {
   const reason = why?.replace(/^The draft could not be written: /, '').replace(/\.$/, '')
@@ -184,6 +199,7 @@ export const tailor: Step = {
     const { data } = await admin.from('pipeline_events').select('id').eq('application_id', app.id).eq('user_id', app.user_id).eq('kind', 'approval.decided').contains('payload', { hash }).limit(1)
     const detail = { artifact_id: doc.artifact_id, version: doc.version, hash }
     if (data && data.length > 0) return { kind: 'continue', line: `You approved version ${doc.version} of the tailored resume.`, payload: detail }
+    if (await skipsResumeReview(admin, app)) return { kind: 'continue', line: `Hands-off: Cello used version ${doc.version} of the tailored resume without asking.`, payload: detail }
     // A tailoring that changed nothing is not called tailored: the person approves their own resume, as it is.
     const unchanged = Boolean(doc.title?.endsWith('(unchanged)'))
     return { kind: 'wait', reason: 'approve_resume', detail, line: unchanged ? `Needs you: approve version ${doc.version} of your resume. Nothing in it needed changing for this role.` : `Needs you: approve version ${doc.version} of the tailored resume.` }
