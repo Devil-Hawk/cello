@@ -8,7 +8,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Key } from '@/components/ui/key'
+import { MODE_LABELS, type Mode } from '@/lib/chat/mode'
 import type { PipelineSettings } from '@/lib/pipeline/settings'
+import { cn } from '@/lib/utils'
 
 export interface PipelineView {
   settings: PipelineSettings
@@ -27,7 +29,15 @@ export interface Form {
   resumeApproval: boolean
   quietFrom: string
   quietTo: string
+  /** How Chat works. Hands-off can be chosen only while Send for me is on. */
+  mode: Mode
+  /** Read only here: Send for me is turned on under Your browser. */
+  sendOn: boolean
 }
+
+/** The sentence under Hands-off, and the reason it is greyed while Send for me is off. */
+export const HANDS_OFF_SENTENCE = 'Cello prepares what you ask for and lets Send for me send it from your browser, within Send for me\'s limits.'
+export const SEND_OFF_SENTENCE = 'Turn Send for me on first, under Your browser.'
 
 export const toForm = (v: PipelineView): Form => ({
   pickAt: v.settings.morning.pickAt,
@@ -39,6 +49,8 @@ export const toForm = (v: PipelineView): Form => ({
   resumeApproval: v.settings.resumeApproval,
   quietFrom: v.settings.morning.quietFrom,
   quietTo: v.settings.morning.quietTo,
+  mode: v.settings.mode,
+  sendOn: v.settings.send.mode === 'auto',
 })
 
 /** Only what changed, in the shape the route takes. Pure. */
@@ -53,7 +65,31 @@ export function diff(a: Form, b: Form): Record<string, unknown> {
   if (a.resumeApproval !== b.resumeApproval) patch.resumeApproval = b.resumeApproval
   if (a.quietFrom !== b.quietFrom) patch.quietFrom = b.quietFrom
   if (a.quietTo !== b.quietTo) patch.quietTo = b.quietTo
+  if (a.mode !== b.mode) patch.mode = b.mode
   return patch
+}
+
+const MODES: Mode[] = ['ask', 'hands_off']
+
+/** How Chat works: two choices, Hands-off greyed with the reason while Send for me is off. */
+export function ModeChoice({ mode, sendOn, onChange }: { mode: Mode; sendOn: boolean; onChange: (m: Mode) => void }) {
+  return (
+    <fieldset className="space-y-1">
+      <legend className="r-meta mb-1">How Chat works</legend>
+      {MODES.map((m) => {
+        const off = m === 'hands_off' && !sendOn
+        return (
+          <label key={m} className={cn('flex min-h-11 items-start gap-3 py-1', off && 'opacity-60')}>
+            <input type="radio" name="chat-mode" className="mt-1 h-4 w-4" value={m} checked={mode === m} disabled={off} onChange={() => onChange(m)} />
+            <span>
+              <span className="r-body block">{MODE_LABELS[m]}</span>
+              <span className="r-meta block">{m === 'ask' ? 'Cello finds, researches, drafts and tailors on its own. Applying waits for you.' : `${HANDS_OFF_SENTENCE}${off ? ` ${SEND_OFF_SENTENCE}` : ''}`}</span>
+            </span>
+          </label>
+        )
+      })}
+    </fieldset>
+  )
 }
 
 export function OnItsOwnForm({ form, onChange, onSave, saving, note }: { form: Form; onChange: (f: Form) => void; onSave: () => void; saving?: boolean; note?: string | null }) {
@@ -93,6 +129,7 @@ export function OnItsOwnForm({ form, onChange, onSave, saving, note }: { form: F
           <input type="checkbox" className="h-4 w-4" checked={form.resumeApproval} onChange={(e) => set('resumeApproval', e.target.checked)} />
           <span className="r-body">Show me each resume first</span>
         </label>
+        <ModeChoice mode={form.mode} sendOn={form.sendOn} onChange={(m) => set('mode', m)} />
         <label className="flex min-h-11 items-center gap-3">
           <input type="checkbox" className="h-4 w-4" checked={form.followUps} onChange={(e) => set('followUps', e.target.checked)} />
           <span className="r-body">Draft follow-ups when someone has gone quiet</span>

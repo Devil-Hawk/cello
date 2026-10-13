@@ -41,6 +41,14 @@ describe('applyPatch', () => {
     expect(applyPatch(on, { send: { on: false } }, null, NOW).send).toMatchObject({ mode: 'me', tokenId: 'tok' })
   })
 
+  it('saves the Chat mode and keeps the rest', () => {
+    const out = applyPatch(stored, { mode: 'hands_off' }, null, NOW)
+    expect(out.mode).toBe('hands_off')
+    expect(out.send).toEqual(stored.send)
+    expect(applyPatch(out, { mode: 'ask' }, null, NOW).mode).toBe('ask')
+    expect(PatchSchema.safeParse({ mode: 'act' }).success).toBe(false)
+  })
+
   it('a bad stored value is treated as empty, never thrown over', () => {
     expect(applyPatch('nope', { summary: true }, null, NOW)).toEqual({ summary: true })
   })
