@@ -22,10 +22,9 @@ const WHAT: Record<Role, string> = {
 
 type PickableEffort = keyof typeof EFFORT_WORDS
 
-function RoleModel({ role, view, onSaved }: { role: Role; view: SettingsView; onSaved: () => Promise<void> }) {
+function RoleModel({ role, view, note, setNote, onSaved }: { role: Role; view: SettingsView; note: string | null; setNote: (n: string | null) => void; onSaved: () => Promise<void> }) {
   const ran = view.roles[role]
   const [draft, setDraft] = useState<ModelChoice | null>(ran ? { rung: ran.rung, model: ran.model, effort: ran.effort } : null)
-  const [note, setNote] = useState<string | null>(null)
   const rung = view.rungs.find((r) => r.rung === draft?.rung)
   const follows = view.followsChat.includes(role)
   // Deeper and Deepest are for models on the person's own key.
@@ -104,6 +103,8 @@ function RoleModel({ role, view, onSaved }: { role: Role; view: SettingsView; on
 export function ChatModel() {
   const [view, setView] = useState<SettingsView | null>(null)
   const [note, setNote] = useState<string | null>(null)
+  // Each role's last save note lives here, not in the row, so it stays when the rows start again after a save.
+  const [notes, setNotes] = useState<Partial<Record<Role, string | null>>>({})
   // Bumped after a save so each row starts again from what is stored.
   const [version, setVersion] = useState(0)
 
@@ -122,7 +123,7 @@ export function ChatModel() {
     <div className="space-y-3">
       <h3 className="r-name">Model for each kind of work</h3>
       {ROLES.map((role) => (
-        <RoleModel key={`${role}-${version}`} role={role} view={view} onSaved={load} />
+        <RoleModel key={`${role}-${version}`} role={role} view={view} note={notes[role] ?? null} setNote={(n) => setNotes((s) => ({ ...s, [role]: n }))} onSaved={load} />
       ))}
     </div>
   )
