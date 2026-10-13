@@ -42,8 +42,8 @@ function RoleModel({ role, view, onSaved }: { role: Role; view: SettingsView; on
   }
 
   return (
-    <fieldset className="space-y-2 border-t border-[var(--r-line)] pt-3" aria-labelledby={`${id}-name`}>
-      <legend id={`${id}-name`} className="r-name">{ROLE_LABELS[role]}</legend>
+    <div role="group" className="space-y-2 border-t border-[var(--r-line)] pt-3" aria-labelledby={`${id}-name`}>
+      <h4 id={`${id}-name`} className="r-name">{ROLE_LABELS[role]}</h4>
       <p className="r-meta">
         {WHAT[role]}
         {role !== 'chat' && follows && ' Follows Chat until you choose.'}
@@ -97,7 +97,7 @@ function RoleModel({ role, view, onSaved }: { role: Role; view: SettingsView; on
         )}
       </div>
       {note && <p className="r-meta" role="status">{note}</p>}
-    </fieldset>
+    </div>
   )
 }
 
