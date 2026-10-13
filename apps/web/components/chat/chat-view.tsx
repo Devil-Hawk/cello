@@ -567,7 +567,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
               settings ? (
                 <>
                   <ModelPicker key={`${choice?.rung}:${choice?.model}:${choice?.effort}`} choice={choice} rungs={settings.rungs} estimate={estimate} onPick={(c, scope) => void pick(c, scope)} />
-                  {modeView && <ModePicker chat={modeView.chat} settings={modeView.settings} resolved={modeView.resolved} onPick={(m) => void pickMode(m)} />}
+                  {modeView && <ModePicker chat={modeView.chat} settings={modeView.settings} resolved={modeView.resolved} facts={modeView.facts} onPick={(m) => void pickMode(m)} />}
                 </>
               ) : null
             }

@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { closesLadder } from '@/components/chat/model-picker'
-import { HANDS_OFF_WORD, MODE_LABELS, type Mode, type ResolvedMode } from '@/lib/chat/mode'
+import { HANDS_OFF_WORD, MODE_LABELS, resolveMode, type Mode, type ResolvedMode } from '@/lib/chat/mode'
 import { cn } from '@/lib/utils'
 
 export interface ModePickerProps {
@@ -16,6 +16,8 @@ export interface ModePickerProps {
   settings: Mode
   /** What the next turn without a keyword runs under. */
   resolved: ResolvedMode
+  /** What holds Hands-off: Send for me, Pause and the demo flag, from the settings view. */
+  facts: { sendForMe: boolean; paused: boolean; isDemo: boolean }
   /** Null follows Settings again. */
   onPick: (mode: Mode | null) => void
 }
@@ -34,7 +36,9 @@ const HELP: Record<Mode, string> = {
 /** The summary's words: the mode that runs, and that it was blocked when it was. */
 export const modeSummary = (r: ResolvedMode): string => (r.blocked ? `${MODE_LABELS.ask} (Hands-off blocked)` : MODE_LABELS[r.mode])
 
-export function ModePicker({ chat, settings, resolved, onPick }: ModePickerProps) {
+export function ModePicker({ chat, settings, resolved, facts, onPick }: ModePickerProps) {
+  // Hands-off is greyed whenever it could not run, whatever is chosen now, so a pick never lands on a mode that cannot run.
+  const blocked = resolveMode({ chat: 'hands_off', settings, ...facts }).blocked
   const box = useRef<HTMLDetailsElement>(null)
   const [open, setOpen] = useState(false)
   useEffect(() => {
@@ -67,7 +71,7 @@ export function ModePicker({ chat, settings, resolved, onPick }: ModePickerProps
       <div className="absolute bottom-full left-0 z-30 mb-1 w-72 max-w-[calc(100vw-2rem)] space-y-2 rounded-card border border-border bg-card p-3 shadow-pop" role="group" aria-label="Mode">
         <ul className="space-y-1">
           {(['ask', 'hands_off'] as const).map((m) => {
-            const why = m === 'hands_off' && resolved.blocked ? BLOCKED[resolved.blocked] : ''
+            const why = m === 'hands_off' && blocked ? BLOCKED[blocked] : ''
             return (
               <li key={m}>
                 <button
