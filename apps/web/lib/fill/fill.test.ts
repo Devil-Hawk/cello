@@ -175,7 +175,7 @@ describe('portals and the wire', () => {
 const ID = '11111111-1111-4111-8111-111111111111'
 const app = (over: Row = {}): Row => ({
   id: ID, user_id: 'u1', state: 'ready', posting_url_hash: postingUrlHash(URL_OK), auto_attempted_at: null, lease_holder: null, lease_until: null, needs_reason: null,
-  last_event_at: '2026-10-14T00:00:00Z', form_fields: null, job_id: 'j1', jobs: { url: URL_OK, title: 'Engineer', company_id: 'c1', companies: { name: 'Stripe' } }, ...over,
+  last_event_at: '2026-10-14T00:00:00Z', form_fields: null, job_id: 'j1', resume_artifact_id: null, jobs: { url: URL_OK, title: 'Engineer', company_id: 'c1', companies: { name: 'Stripe' } }, ...over,
 })
 const profile = (over: Row = {}): Row => ({ id: 'u1', full_name: 'Ada Lovelace', email: 'ada@example.com', preferences: { contact: { phone: '555 0100' } }, resume_text: null, is_demo: false, demo_expires_at: null, ...over })
 const FIELDS = [
@@ -223,6 +223,24 @@ describe('POST /api/fill/session', () => {
     expect(db.calls.find((c) => c.note)?.note.payload).toMatchObject({ phase: 'session', fields: expect.arrayContaining([{ key: 'gender', kind: 'select', category: 'eeo' }]) })
     // the question it cannot answer is one open row, not a guess
     expect(db.tables.answer_bank).toHaveLength(1)
+  })
+
+  it('serves the tailored resume the application carries, and the base resume when it carries none', async () => {
+    const bucket = (id: string, is_base: boolean) => ({ id, user_id: 'u1', type: 'resume', is_base, job_id: is_base ? null : 'j1', current_version: 1, created_at: '', updated_at: '' })
+    const version = (id: string, artifact_id: string, title: string) => ({ id, artifact_id, version: 1, author: 'cello', content: { title }, content_text: 'text', created_at: '' })
+    db.tables.artifacts = [bucket('base', true), bucket('tailored', false)]
+    db.tables.artifact_versions = [version('v-base', 'base', 'Ada, base resume'), version('v-tailored', 'tailored', 'Resume for Engineer at Stripe')]
+    await session()
+    expect(db.calls[0].event.payload.files).toEqual([{ name: 'Ada, base resume', id: 'v-base' }])
+    db.calls.length = 0
+    db.tables.applications = [app({ resume_artifact_id: 'tailored' })]
+    await session()
+    expect(db.calls[0].event.payload.files).toEqual([{ name: 'Resume for Engineer at Stripe', id: 'v-tailored' }])
+    // another person's artifact on the row serves nothing of theirs: the base resume goes
+    db.calls.length = 0
+    db.tables.artifacts[1].user_id = 'u2'
+    await session()
+    expect(db.calls[0].event.payload.files).toEqual([{ name: 'Ada, base resume', id: 'v-base' }])
   })
 
   it('finds the application by the page\'s address when the extension names none', async () => {
