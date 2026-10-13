@@ -1,7 +1,7 @@
 // A model completion that a person would accept, through a declared step (lib/steps): the ladder picks the way in and the
 // ceiling holds. On a free rung the chosen model is asked first, then the other free ones, and an answer is taken only when
 // it passes the caller's own check (not empty, not thinking aloud, in the shape asked for: JSON, or what `valid` says).
-// A reasoning model spends its tokens thinking and can return nothing, so thinking is off on a free rung.
+// A reasoning model spends its tokens thinking and can return nothing, so thinking is off on a free rung unless the person set an effort for the role.
 //
 // ponytail: up to four attempts, in the list's order; a better order (fastest first) waits until the free list has timings.
 
@@ -27,7 +27,8 @@ export function stepRunner(stepId: string, keys: DecryptedApiKeys, signal?: Abor
   // One piece of work is one use of the day's free cap, however many calls it makes (a tailoring is score, rewrite, rescore).
   let counted = false
   return async (opts) => {
-    const free = keys.models?.ceiling !== 'R4'
+    // A role's keys name the rung that will run first (keysForRole); without a role, free is whatever the highest allows.
+    const free = keys.role ? keys.models?.order[0] === 'R3' : keys.models?.ceiling !== 'R4'
     const first = keys.model && isFreeModel(keys.model) ? [keys.model] : []
     const models = free ? [...new Set([...first, ...freeModels()])].slice(0, 4) : [undefined]
     const failures: string[] = []
@@ -35,9 +36,9 @@ export function stepRunner(stepId: string, keys: DecryptedApiKeys, signal?: Abor
     let attempted = counted
     for (const model of models) {
       try {
-        // A free reasoning model spends its whole budget thinking and returns nothing, so thinking is off on a free rung.
+        // A free reasoning model spends its whole budget thinking and returns nothing, so thinking is off on a free rung unless the person set an effort.
         counted = true
-        const out = await legacyStep(stepId).call(model ? { ...keys, model } : keys, free ? { ...opts, reasoning: { effort: 'none' } } : opts, { signal, ...(attempted ? { slots: { take: async () => true } } : {}) })
+        const out = await legacyStep(stepId).call(model ? { ...keys, model } : keys, free ? { ...opts, reasoning: { effort: keys.roleEffort ?? 'none' } } : opts, { signal, ...(attempted ? { slots: { take: async () => true } } : {}) })
         if (!out.content.trim()) throw new Error(`${out.model} returned nothing`)
         if ((opts.json || opts.jsonSchema) && !looksLikeJson(out.content)) throw new Error(`${out.model} did not answer in JSON`)
         if (valid && !valid(out.content.trim())) throw new Error(`${out.model} did not follow the instructions`)

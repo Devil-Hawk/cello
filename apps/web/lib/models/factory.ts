@@ -91,8 +91,9 @@ export function chatModelFor(via: RungVia, model: string, keys: DecryptedApiKeys
   }
   if (via === 'openai') {
     if (!keys.openai) throw new MissingKeyError('No OpenAI API key configured')
-    // OpenAI's reasoning models (gpt-5, o-series) refuse a temperature of their own choosing.
-    return new ChatOpenAI({ ...common, ...(OPENAI_REASONING.test(model) ? {} : { temperature }), apiKey: keys.openai, ...(effort ? { reasoning: { effort: openAiEffort(effort) } } : {}) })
+    // OpenAI's reasoning models (gpt-5, o-series) refuse a temperature of their own choosing, and only they take an effort:
+    // any other model is sent none, so a role's effort never makes its call fail.
+    return new ChatOpenAI({ ...common, ...(OPENAI_REASONING.test(model) ? {} : { temperature }), apiKey: keys.openai, ...(effort && OPENAI_REASONING.test(model) ? { reasoning: { effort: openAiEffort(effort) } } : {}) })
   }
   if (via === 'local-server') {
     const baseUrl = keys.provider?.localServerBaseUrl?.trim()
