@@ -10,7 +10,7 @@
 // the paid cap has been reached.
 
 import type { AdminClient } from '@/lib/harness/types'
-import { reserveSpend, rungFor, settleSpend, type SpendOutcome, type SpendReservation } from '@/lib/harness/spend'
+import { reserveSpend, rungFor, settleSpend, type Rung, type SpendOutcome, type SpendReservation } from '@/lib/harness/spend'
 
 export { BudgetCapError } from '@/lib/harness/spend'
 
@@ -23,6 +23,11 @@ export interface ReserveInput {
   traceId?: string
   /** Written on the ledger row so a Chat turn can add up its own cost. */
   chatTurnId?: string
+  /** The role that asked (the row's step is "agent-<role>") and the thinking effort the call ran with. */
+  role?: 'chat' | 'researcher'
+  effort?: string | null
+  /** The rung the model really runs on, when it is not the one its id suggests (a local model, the person's own OpenAI key). */
+  rung?: Rung
 }
 
 export interface Reservation {
@@ -61,9 +66,11 @@ export async function reserve(input: ReserveInput): Promise<Reservation> {
     model: input.model,
     promptTokens: input.promptTokens,
     maxTokens: input.maxTokens,
-    rung: rungFor('openrouter', input.model),
-    step: 'agent-turn',
+    rung: input.rung ?? rungFor('openrouter', input.model),
+    step: `agent-${input.role ?? 'chat'}`,
     traceId: input.traceId,
+    role: input.role ?? 'chat',
+    effort: input.effort,
   })
   if (input.chatTurnId && spend.id) await input.admin.from('llm_spend').update({ chat_turn_id: input.chatTurnId }).eq('id', spend.id)
   return { spend, admin: input.admin }

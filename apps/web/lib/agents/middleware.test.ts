@@ -20,6 +20,7 @@ vi.mock('@/lib/harness/spend', async (orig) => ({
 
 import { BudgetCapError } from '@/lib/harness/spend'
 import { isBudgetCapError } from './spend-port'
+import { tagRun } from './model'
 import { DEMO_SEND_REFUSAL, celloDeadline, celloDemoRules, celloSpend, celloUntrusted, guardStack, quoteUntrusted, sanitizeUntrusted, type GuardContext } from './middleware'
 import { ScriptedChatModel, callTools, say } from './testing/scripted-model'
 
@@ -80,7 +81,19 @@ describe('CelloSpend', () => {
   it('a free model reserves on the free rung, which costs nothing', async () => {
     const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('ok')] })
     await run(createAgent({ model, tools: [echo], middleware: [celloSpend(ctx())] }))
-    expect(spend.reserveSpend).toHaveBeenCalledWith({}, expect.objectContaining({ rung: 'R3', step: 'agent-turn' }))
+    expect(spend.reserveSpend).toHaveBeenCalledWith({}, expect.objectContaining({ rung: 'R3', step: 'agent-chat' }))
+  })
+
+  it('writes the role, the effort and the true rung of a model built for a choice, a local one included', async () => {
+    const local = tagRun(new ScriptedChatModel({ model: 'llama3', script: [say('ok')] }), { rung: 'R2', via: 'local-server', effort: 'high' })
+    await run(createAgent({ model: local, tools: [echo], middleware: [celloSpend(ctx({ role: 'researcher' }))] }))
+    expect(spend.reserveSpend).toHaveBeenCalledWith({}, expect.objectContaining({ rung: 'R2', model: 'llama3', step: 'agent-researcher', role: 'researcher', effort: 'high' }))
+  })
+
+  it('names a call on the person\'s own Anthropic key the way the other calls on it are named', async () => {
+    const claude = tagRun(new ScriptedChatModel({ model: 'claude-sonnet-5', script: [say('ok')] }), { rung: 'R4', via: 'anthropic', effort: 'none' })
+    await run(createAgent({ model: claude, tools: [echo], middleware: [celloSpend(ctx())] }))
+    expect(spend.reserveSpend).toHaveBeenCalledWith({}, expect.objectContaining({ rung: 'R4', model: 'anthropic/claude-sonnet-5', role: 'chat', effort: 'none' }))
   })
 
   it('falls back to a free model when the cap is reached, and the turn completes', async () => {

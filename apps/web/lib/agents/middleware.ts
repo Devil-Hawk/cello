@@ -36,7 +36,7 @@ import { Command, interrupt, isCommand } from '@langchain/langgraph'
 import { scrubStructuralEscapes } from '@/lib/security/job-text'
 import { isTransient } from '@/lib/util/retry'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
-import { celloChatModel, freeFallbackModels, isFreeModel } from './model'
+import { celloChatModel, freeFallbackModels, isFreeModel, runTagOf } from './model'
 import { isBudgetCapError, reserve, rootCause, settle } from './spend-port'
 import { isUntrustedTool, MCP_TOOL_PREFIX } from './tool-names'
 
@@ -58,6 +58,8 @@ export interface GuardContext {
   isDemo: boolean
   traceId: string
   chatTurnId?: string
+  /** The role this loop is: written on every ledger row it makes. */
+  role?: 'chat' | 'researcher'
 }
 
 // --- spend --------------------------------------------------------------------------
@@ -94,11 +96,15 @@ function usageOf(message: unknown): { promptTokens: number; completionTokens: nu
  * A call that throws after reserving settles as failed: the provider's refusal
  * is charged nothing, and any other failure stays reserved for the sweeper.
  */
-export function celloSpend(ctx: Pick<GuardContext, 'admin' | 'userId' | 'traceId' | 'chatTurnId'>) {
+export function celloSpend(ctx: Pick<GuardContext, 'admin' | 'userId' | 'traceId' | 'chatTurnId' | 'role'>) {
   return createMiddleware({
     name: 'CelloSpend',
     wrapModelCall: async (request, handler) => {
-      const model = modelIdOf(request.model)
+      // A model built for the person's choice says which way in it uses and the effort it was given; a fallback
+      // (built in this file's stack) carries no tag, is an OpenRouter free id and was given no thinking setting.
+      const tag = runTagOf(request.model)
+      const id = modelIdOf(request.model)
+      const model = tag && (tag.via === 'openai' || tag.via === 'anthropic') ? `${tag.via}/${id}` : id
       const messages: BaseMessage[] = [request.systemMessage, ...request.messages]
       const reservation = await reserve({
         admin: ctx.admin,
@@ -108,6 +114,9 @@ export function celloSpend(ctx: Pick<GuardContext, 'admin' | 'userId' | 'traceId
         maxTokens: maxTokensOf(request.model),
         traceId: ctx.traceId,
         chatTurnId: ctx.chatTurnId,
+        role: ctx.role,
+        effort: tag?.effort ?? null,
+        rung: tag?.rung,
       })
       try {
         const response = await handler(request)
