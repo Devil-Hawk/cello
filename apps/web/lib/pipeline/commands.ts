@@ -145,9 +145,9 @@ export async function resumeOne(c: Ctx, id: string): Promise<MoveResult> {
 /** Run again, from Not sent only. */
 export const runAgain = (c: Ctx, id: string) => move(c, id, 'preparing', 'step.started', 'Cello started this again.', { from: ['not_sent'], step: 'Starting again' })
 
-/** Approve the tailored resume (person only, in SQL). The hash of the version the person saw is kept on the event; ponytail: nothing compares it with the current version until K17's artifacts serve the document, then a stale hash is refused. */
+/** Approve the tailored resume (person only, in SQL). The hash of the version the person saw is kept on the event, and the tailor step continues only when the newest version still matches it; `what` is how pipeline_auto_send_reason tells this approval from the others of its kind. */
 export async function approveDocument(c: Ctx, id: string, hash: string): Promise<MoveResult> {
-  return move(c, id, 'preparing', 'approval.decided', 'You approved the resume.', { from: ['needs_you'], step: 'Continuing', payload: { decision: 'approved', hash } })
+  return move(c, id, 'preparing', 'approval.decided', 'You approved the resume.', { from: ['needs_you'], step: 'Continuing', payload: { decision: 'approved', what: 'resume', hash } })
 }
 
 /** "Already applied?" answered with Apply anyway; releases the posting for this start. */
