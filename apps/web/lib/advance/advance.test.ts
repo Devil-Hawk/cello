@@ -15,12 +15,22 @@ vi.mock('@/lib/pipeline/transition', () => ({
   autoSendReason: vi.fn(async () => 'Cello sends only Strong matches.'),
 }))
 
-vi.mock('@/lib/resume/store', () => ({ getLatestVersion: vi.fn(async () => null) }))
+vi.mock('@/lib/resume/store', () => ({ getLatestVersion: vi.fn(async () => null), getBaseResume: vi.fn(async () => null) }))
+const openQuestions: { fieldId: string; answerId: string; question: string }[] = []
+vi.mock('@/lib/answers', () => ({ resolveFieldValues: vi.fn(async () => ({ values: {}, open: openQuestions, never: [] })) }))
+const letters: { id: string; version: number; text: string }[] = []
+vi.mock('@/lib/agents/artifacts', () => ({
+  listArtifacts: vi.fn(async () => letters.map((l) => ({ id: l.id }))),
+  getArtifact: vi.fn(async (_a: unknown, _u: string, id: string) => {
+    const l = letters.find((x) => x.id === id)
+    return l ? { artifact: { id: l.id }, version: { version: l.version, content_text: l.text } } : null
+  }),
+}))
 
 import { getLatestVersion } from '@/lib/resume/store'
 import { advanceOne } from './index'
 import { costLine, rateLimitOf, sumCost, waitAfter } from './cost'
-import { readGreenhouseFields, startedHandsOff, tailor, type Step, type StepCtx } from './steps'
+import { coverLetter, draftAnswers, readGreenhouseFields, readGreenhouseFiles, startedHandsOff, tailor, type Step, type StepCtx } from './steps'
 
 const NOW = Date.parse('2026-10-14T12:00:00Z')
 
@@ -143,6 +153,110 @@ describe('advanceOne', () => {
     await advanceOne(fakeAdmin({ applications: [app()], pipeline_events: [] }), 'a1', opts([ok('one'), asks, ok('after')]))
     expect(calls.at(-1)).toMatchObject({ to: 'needs_you', reason: 'answer', detail: { answer_ids: ['q1'] } })
     expect(calls.some((c) => c.event.step === 'after')).toBe(false)
+  })
+})
+
+describe('a step the form asks for', () => {
+  const reads = (): Step => ({ id: 'read_form', doing: 'Reading', run: vi.fn(async () => ({ kind: 'continue' as const, line: 'Read 3 questions; 2 need your answer.', add: [{ step: 'draft_answers' as const, why: 'The form asks 2 questions you have not answered.' }] })) })
+  const drafts = (reason: 'wait' | 'continue') => ({ ...draftAnswers, run: vi.fn(async () => (reason === 'wait' ? { kind: 'wait' as const, reason: 'answer' as const, detail: { answer_ids: ['q1', 'q2'], drafted: 2 }, line: 'Drafted 2 answers for you to check. Cello never sends an answer you did not give.' } : { kind: 'continue' as const, line: 'Every question has an answer.' })) })
+
+  it('puts an added step right after the one that added it, and names the change', async () => {
+    const { withAdded, addedLine } = await import('./index')
+    expect(withAdded([ok('one'), reads(), ok('after')], [{ after: 'read_form', step: 'draft_answers' }]).map((s) => s.id)).toEqual(['one', 'read_form', 'draft_answers', 'after'])
+    expect(withAdded([ok('one')], [{ after: 'gone', step: 'cover_letter' }]).map((s) => s.id)).toEqual(['one', 'cover_letter'])
+    expect(addedLine({ step: 'draft_answers', why: 'The form asks 2 questions you have not answered.' }, 2)).toBe('Added a step: draft 2 answers. The form asks 2 questions you have not answered.')
+    expect(addedLine({ step: 'cover_letter', why: 'The form asks for a cover letter.' })).toBe('Added a step: write a cover letter. The form asks for a cover letter.')
+  })
+
+  it('adds a step for open questions and says why, then waits for the person after drafting answers', async () => {
+    vi.doMock('./steps', async (orig) => ({ ...(await orig<typeof import('./steps')>()), ADDED_STEPS: { draft_answers: drafts('wait'), cover_letter: coverLetter } }))
+    vi.resetModules()
+    const { advanceOne: run } = await import('./index')
+    const admin = fakeAdmin({ applications: [app()], pipeline_events: [] })
+    await run(admin, 'a1', opts([ok('one'), reads(), ok('after')]))
+    expect(notes).toEqual([expect.objectContaining({ kind: 'step.finished', sentence: 'Added a step: draft 2 answers. The form asks 2 questions you have not answered.', idempotencyKey: 'step:a1:read_form:0:added:draft_answers', payload: { changed: 'added', step: 'draft_answers', after: 'read_form', why: 'The form asks 2 questions you have not answered.' } })])
+    expect(calls.at(-1)).toMatchObject({ to: 'needs_you', reason: 'answer', detail: { drafted: 2 } })
+    expect(calls.at(-1).event.sentence).toBe('Drafted 2 answers for you to check. Cello never sends an answer you did not give.')
+    expect(calls.some((c) => c.event.step === 'after')).toBe(false)
+    vi.doUnmock('./steps')
+    vi.resetModules()
+  })
+
+  it('rebuilds the same steps after a retry', async () => {
+    vi.doMock('./steps', async (orig) => ({ ...(await orig<typeof import('./steps')>()), ADDED_STEPS: { draft_answers: drafts('continue'), cover_letter: coverLetter } }))
+    vi.resetModules()
+    const { advanceOne: run } = await import('./index')
+    // the earlier attempt added the step and finished read_form; the retry reads both back and runs the added step without adding it again
+    const events = [
+      { user_id: 'u1', application_id: 'a1', kind: 'step.finished', idempotency_key: 'step:a1:one:1:done', payload: {} },
+      { user_id: 'u1', application_id: 'a1', kind: 'step.finished', idempotency_key: 'step:a1:read_form:1:done', payload: {} },
+      { user_id: 'u1', application_id: 'a1', kind: 'step.finished', idempotency_key: 'step:a1:read_form:1:added:draft_answers', payload: { changed: 'added', step: 'draft_answers', after: 'read_form' }, created_at: '2026-10-14T11:00:00Z' },
+    ]
+    const admin = fakeAdmin({ applications: [app({ attempt: 1 })], pipeline_events: events })
+    const asks = reads()
+    await run(admin, 'a1', opts([ok('one'), asks, ok('after')]))
+    expect(asks.run).not.toHaveBeenCalled()
+    expect(notes).toEqual([])
+    expect(calls.map((c) => `${c.to}:${c.event.step ?? ''}`)).toEqual(['preparing:draft_answers', 'preparing:after', 'ready:ready'])
+    vi.doUnmock('./steps')
+    vi.resetModules()
+  })
+})
+
+describe('the steps a form asks for', () => {
+  const form = { questions: [
+    { label: 'Cover Letter', required: true, fields: [{ name: 'cover_letter', type: 'input_file' }] },
+    { label: 'Why us?', required: true, fields: [{ name: 'q1', type: 'textarea' }] },
+    { label: 'How did you hear about us?', required: true, fields: [{ name: 'q2', type: 'multi_value_single_select', values: [{ label: 'LinkedIn', value: 1 }] }] },
+  ] }
+  const ctx = (over: Partial<StepCtx> = {}, tables: Record<string, Row[]> = {}): StepCtx => ({
+    admin: fakeAdmin({ pipeline_events: [], applications: [{ id: 'a1', user_id: 'u1', form_fields: [{ id: 'q1', label: 'Why us?', required: true, kind: 'long_text' }, { id: 'q2', label: 'How did you hear about us?', required: true, kind: 'select', options: ['LinkedIn'] }] }], ...tables }),
+    app: { id: 'a1', user_id: 'u1', job_id: 'j1', posting_url_hash: null },
+    job: { url: 'https://boards.greenhouse.io/acme/jobs/123', title: 'Engineer', company_id: 'c1', closed_at: null, still_open: true, companyName: 'Acme' },
+    fetchForm: async () => form,
+    ...over,
+  })
+
+  beforeEach(() => {
+    openQuestions.length = 0
+    letters.length = 0
+  })
+
+  it('lists the files a form asks for apart from its questions', () => {
+    expect(readGreenhouseFiles(form)).toEqual([{ label: 'Cover Letter', required: true }])
+  })
+
+  it('read_form adds a step for open long questions and one for a required cover letter, and says why', async () => {
+    openQuestions.push({ fieldId: 'q1', answerId: 'ans1', question: 'Why us?' }, { fieldId: 'q2', answerId: 'ans2', question: 'How did you hear about us?' })
+    const { readForm } = await import('./steps')
+    expect(await readForm.run(ctx())).toEqual({ kind: 'continue', line: 'Read 2 questions; 2 need your answer.', add: [{ step: 'draft_answers', why: 'The form asks 1 question you have not answered.' }, { step: 'cover_letter', why: 'The form asks for a cover letter.' }] })
+    // only a short question open: it waits as before, nothing to draft
+    openQuestions.splice(0, 1)
+    expect(await readForm.run(ctx())).toMatchObject({ kind: 'wait', reason: 'answer', line: '1 question needs your answer.' })
+  })
+
+  it('draft_answers drafts each open long question and waits for the person, with the reason when it could not', async () => {
+    openQuestions.push({ fieldId: 'q1', answerId: 'ans1', question: 'Why us?' }, { fieldId: 'q2', answerId: 'ans2', question: 'How did you hear about us?' })
+    const drafted: string[] = []
+    const out = await draftAnswers.run(ctx({ draftAnswer: async (_a, q) => (drafted.push(q.answerId), { ok: true }) }))
+    expect(drafted).toEqual(['ans1'])
+    expect(out).toEqual({ kind: 'wait', reason: 'answer', detail: { answer_ids: ['ans1', 'ans2'], questions: ['Why us?', 'How did you hear about us?'], drafted: 1 }, line: 'Drafted 1 answer for you to check. Cello never sends an answer you did not give.' })
+    const refused = await draftAnswers.run(ctx({ draftAnswer: async () => ({ ok: false, reason: 'Free models allow 5 drafts a day.' }) }))
+    expect(refused).toMatchObject({ kind: 'wait', reason: 'answer', line: '2 questions need your answer. Cello could not draft them (Free models allow 5 drafts a day).' })
+  })
+
+  it('cover_letter writes once, waits for approval like the resume, and carries on when approved or hands-off', async () => {
+    const writes = vi.fn(async () => (letters.push({ id: 'cl1', version: 1, text: 'Dear Acme' }), { artifact_id: 'cl1', version: 1 }))
+    const hash = createHash('sha256').update('Dear Acme').digest('hex').slice(0, 32)
+    expect(await coverLetter.run(ctx({ writeCoverLetter: writes }))).toEqual({ kind: 'wait', reason: 'approve_resume', detail: { artifact_id: 'cl1', version: 1, hash, what: 'cover_letter' }, line: 'Needs you: approve the cover letter.' })
+    expect(await coverLetter.run(ctx({ writeCoverLetter: writes }))).toMatchObject({ kind: 'wait' })
+    expect(writes).toHaveBeenCalledTimes(1)
+    const approved = { pipeline_events: [{ application_id: 'a1', user_id: 'u1', kind: 'approval.decided', payload: { decision: 'approved', what: 'cover_letter', hash } }] }
+    expect(await coverLetter.run(ctx({ writeCoverLetter: writes }, approved))).toMatchObject({ kind: 'continue', line: 'You approved version 1 of the cover letter.' })
+    const handsOff = { pipeline_events: [{ application_id: 'a1', user_id: 'u1', kind: 'application.created', payload: { mode: 'hands_off' } }], profiles: [{ id: 'u1', preferences: { pipeline: { send: { mode: 'auto' }, resumeApproval: false } } }] }
+    expect(await coverLetter.run(ctx({ writeCoverLetter: writes }, handsOff))).toMatchObject({ kind: 'continue', line: 'Hands-off: version 1 of the cover letter goes with it, without asking you.' })
+    letters.length = 0
+    expect(await coverLetter.run(ctx({ writeCoverLetter: async () => ({ error: 'The draft could not be written: Free models allow 5 drafts a day.' }) }))).toEqual({ kind: 'continue', line: 'Cello could not write the cover letter (Free models allow 5 drafts a day). Write one yourself if the form needs it.' })
   })
 })
 
