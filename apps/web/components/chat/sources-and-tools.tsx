@@ -3,19 +3,28 @@
 // "Sources and tools" under an answer: the quiet line, which opens to the model and effort that ran, each tool, each task,
 // each source, the time and the cost. Written by code from rows at the turn's end (lib/chat/disclosure.ts).
 
-import { disclosureLine, type Disclosure } from '@/lib/chat/disclosure'
+import { disclosureLine, type Disclosure, type Run } from '@/lib/chat/disclosure'
+import { ROLE_LABELS } from '@/lib/models/roles'
 import { modeWords } from '@/lib/chat/mode'
 import { EFFORT_WORDS, STEP_DOWN_WORDS } from '@/components/chat/model-picker'
 import { clock, STATUS_WORDS, type TaskStatus } from '@/components/chat/tasks-line'
 
 const FREE = (model: string) => model.replace(/^[^/]*\//, '').replace(/:free$/, '')
 
-/** "laguna-s-2.1, Standard (gemma-4-31b-it did not answer)", or that no model ran: the ledger's answer, not the choice. */
-export function modelWords(ran: Disclosure['ran']): string {
-  if (!ran) return 'None. Code answered this.'
+/** "laguna-s-2.1, Standard (gemma-4-31b-it did not answer)": the ledger's answer, not the choice. */
+function ranWords(ran: Pick<Run, 'model' | 'effort' | 'steppedDown'>): string {
   const effort = EFFORT_WORDS[ran.effort as keyof typeof EFFORT_WORDS] ?? ran.effort
   const down = ran.steppedDown && ran.steppedDown.wanted.model !== ran.model ? ` (${FREE(ran.steppedDown.wanted.model)} ${STEP_DOWN_WORDS[ran.steppedDown.why]})` : ''
   return `${FREE(ran.model)}, ${effort}${down}`
+}
+
+/** The Model row: each role that ran with its model and effort ("Chat: gemma-4-31b-it, Standard. Writing: laguna-s-2.1, Off."), or that no model ran. */
+export function modelWords(ran: Disclosure['ran'], runs?: Disclosure['runs']): string {
+  const list = runs?.length ? runs : ran ? [{ ...ran, role: 'chat' as const }] : []
+  if (list.length === 0) return 'None. Code answered this.'
+  // One role alone is said as it always was; several are named.
+  if (list.length === 1 && list[0].role === 'chat') return ranWords(list[0])
+  return list.map((r) => `${ROLE_LABELS[r.role]}: ${ranWords(r)}`).join('. ') + '.'
 }
 
 export function SourcesAndTools({ d }: { d: Disclosure }) {
@@ -31,7 +40,7 @@ export function SourcesAndTools({ d }: { d: Disclosure }) {
       <dl className="mt-2 space-y-1 rounded-control border border-border bg-card p-3">
         <div className="flex gap-2">
           <dt className="w-16 shrink-0">Model</dt>
-          <dd className="text-foreground">{modelWords(d.ran)}</dd>
+          <dd className="text-foreground">{modelWords(d.ran, d.runs)}</dd>
         </div>
         {d.mode && (
           <div className="flex gap-2">

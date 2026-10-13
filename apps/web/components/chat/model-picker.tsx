@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils'
 
 export type PickScope = 'chat' | 'once' | 'default'
 
-export const EFFORT_WORDS = { low: 'Light', medium: 'Standard', high: 'Deep', xhigh: 'Deeper', max: 'Deepest' } as const
+export const EFFORT_WORDS = { none: 'Off', low: 'Light', medium: 'Standard', high: 'Deep', xhigh: 'Deeper', max: 'Deepest' } as const
 /** Why the chosen model did not run, said after its name. */
 export const STEP_DOWN_WORDS = { model: 'did not answer', above_highest: 'is above your highest', not_set_up: 'is not set up' } as const
 type PickableEffort = keyof typeof EFFORT_WORDS

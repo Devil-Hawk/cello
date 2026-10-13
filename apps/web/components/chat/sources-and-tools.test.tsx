@@ -24,6 +24,14 @@ describe('SourcesAndTools', () => {
     expect(modelWords(null)).toBe('None. Code answered this.')
   })
 
+  it('names every role that ran with its model and effort, and a step-down', () => {
+    const chat = { role: 'chat' as const, rung: 'R3' as const, model: 'google/gemma-4-31b-it:free', effort: 'low' as const }
+    const writing = { role: 'writer' as const, rung: 'R3' as const, model: 'laguna/laguna-s-2.1:free', effort: 'none' as const, steppedDown: { wanted: { rung: 'R3' as const, model: 'qwen/qwen3:free', effort: 'none' as const }, why: 'model' as const } }
+    expect(modelWords(chat, [chat])).toBe('gemma-4-31b-it, Light')
+    expect(modelWords(chat, [chat, writing])).toBe('Chat: gemma-4-31b-it, Light. Writing: laguna-s-2.1, Off (qwen3 did not answer).')
+    expect(modelWords(null, [])).toBe('None. Code answered this.')
+  })
+
   it('says the mode that ran and why, from the disclosure, and nothing on an older turn without one', () => {
     expect(renderToStaticMarkup(<SourcesAndTools d={d} />)).not.toContain('>Mode<')
     const out = renderToStaticMarkup(<SourcesAndTools d={{ ...d, mode: { mode: 'ask', why: 'keyword', blocked: 'send_for_me_off' } }} />)
