@@ -1,7 +1,8 @@
--- Hands-off (migration 20261125000000): an application Chat started under Hands-off passes the "You did not choose
--- this one" check of pipeline_auto_send_reason, and nothing else about that function changed: without the payload a
--- Chat start still waits for the person; Send for me off, and a role that is not Strong, still refuse in their own words.
--- One transaction, rolled back.
+-- Hands-off (migrations 20261125000000 and 20261126000000): an application Chat started under Hands-off passes the
+-- "You did not choose this one" check of pipeline_auto_send_reason, its attached tailored resume needs no approval
+-- unless the person asks to see each resume first, the newest start's mode is the one read, and nothing else about
+-- that function changed: without the payload a Chat start still waits for the person; Send for me off, a role that
+-- is not Strong, and an attached resume in Ask first still refuse in their own words. One transaction, rolled back.
 --
 --   bash supabase/checks/run.sh supabase/checks/hands_off_send.sql
 
@@ -18,6 +19,7 @@ declare
   tok uuid := 'dddddddd-2222-0000-0000-000000000052';
   j uuid := 'dddddddd-3333-0000-0000-000000000052';
   a uuid;
+  art uuid;
   r jsonb;
   reason text;
 begin
@@ -49,6 +51,36 @@ begin
   update public.pipeline_events set payload = jsonb_build_object('mode', 'hands_off') where application_id = a and kind = 'application.created';
   reason := public.pipeline_auto_send_reason(a);
   if reason is not null then raise exception 'a Hands-off start must be allowed, got: %', reason; end if;
+
+  -- the tailored resume the tailor step attached under Hands-off: allowed without an approval while the person does
+  -- not ask to see each resume first, and asked for when they do, or when the application was started in Ask first
+  insert into public.artifacts (user_id, type, title, job_id) values (u, 'resume', 'Resume for Engineer', j) returning id into art;
+  update public.applications set resume_artifact_id = art where id = a;
+  reason := public.pipeline_auto_send_reason(a);
+  if reason is not null then raise exception 'a Hands-off start with its tailored resume attached must be allowed, got: %', reason; end if;
+  update public.profiles set preferences = jsonb_set(preferences, '{pipeline,resumeApproval}', 'true') where id = u;
+  reason := public.pipeline_auto_send_reason(a);
+  if reason is distinct from 'Approve the resume to let Cello send this.' then raise exception 'each resume shown first: %', reason; end if;
+  -- ...and the person's approval, the one approveDocument writes, satisfies it
+  insert into public.pipeline_events (user_id, application_id, kind, actor, sentence, trust, idempotency_key, payload)
+  values (u, a, 'approval.decided', 'person', 'You approved the resume.', 'person', 'ho-approve:' || a, jsonb_build_object('decision', 'approved', 'what', 'resume', 'hash', 'h1'));
+  reason := public.pipeline_auto_send_reason(a);
+  if reason is not null then raise exception 'an approved resume must be allowed, got: %', reason; end if;
+  delete from public.pipeline_events where idempotency_key = 'ho-approve:' || a;
+  update public.profiles set preferences = jsonb_set(preferences, '{pipeline,resumeApproval}', 'false') where id = u;
+  -- with resumeApproval unset the person is asked, as the tailor step would have asked
+  update public.profiles set preferences = preferences #- '{pipeline,resumeApproval}' where id = u;
+  reason := public.pipeline_auto_send_reason(a);
+  if reason is distinct from 'Approve the resume to let Cello send this.' then raise exception 'resumeApproval unset: %', reason; end if;
+  update public.profiles set preferences = jsonb_set(preferences, '{pipeline,resumeApproval}', 'false') where id = u;
+
+  -- a start again in Ask first is the newest created event: the person chooses again, whatever the first start said
+  insert into public.pipeline_events (user_id, application_id, kind, actor, sentence, trust, idempotency_key, payload, created_at)
+  values (u, a, 'application.created', 'cello', 'Cello started preparing this again.', 'proven', 'ho-again:' || a, jsonb_build_object('mode', 'ask'), now() + interval '1 second');
+  reason := public.pipeline_auto_send_reason(a);
+  if reason is distinct from 'You did not choose this one. Let Cello send this?' then raise exception 'a start again in Ask first must wait for the person, got: %', reason; end if;
+  delete from public.pipeline_events where idempotency_key = 'ho-again:' || a;
+  update public.applications set resume_artifact_id = null where id = a;
 
   -- Send for me off: refused in its own words, whatever the mode said
   update public.profiles set preferences = jsonb_set(preferences, '{pipeline,send,mode}', '"me"') where id = u;

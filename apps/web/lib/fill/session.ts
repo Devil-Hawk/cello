@@ -23,10 +23,12 @@ export interface FillApp {
   last_event_at: string | null
   form_fields: FormField[] | null
   job_id: string
+  /** The tailored resume attached by the tailor step (approved, or let through under Hands-off); null means the base resume goes. */
+  resume_artifact_id: string | null
   jobs: { url: string; title: string; company_id: string; companies: { name: string } | null } | null
 }
 
-const COLUMNS = 'id, user_id, state, posting_url_hash, auto_attempted_at, lease_holder, lease_until, needs_reason, last_event_at, form_fields, job_id, jobs(url, title, company_id, companies(name))'
+const COLUMNS = 'id, user_id, state, posting_url_hash, auto_attempted_at, lease_holder, lease_until, needs_reason, last_event_at, form_fields, job_id, resume_artifact_id, jobs(url, title, company_id, companies(name))'
 
 export async function loadFillApp(admin: SupabaseClient, userId: string, applicationId: string): Promise<FillApp | null> {
   const { data } = await admin.from('applications').select(COLUMNS).eq('id', applicationId).eq('user_id', userId).maybeSingle()
@@ -64,7 +66,7 @@ export async function buildSession(admin: SupabaseClient, app: FillApp, fields: 
     const a = classify(f, job.companies?.name ?? null)
     return { label: f.label, category: a.category, kind: a.kind, required: f.required === true, options: a.options, resolved: r.values[f.id] }
   })
-  const doc = await currentResume(admin, app.user_id)
+  const doc = await currentResume(admin, app.user_id, app.resume_artifact_id)
   return {
     applicationId: app.id,
     company,

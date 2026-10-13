@@ -3,6 +3,7 @@
 // supabase/checks (pipeline_core.sql, pipeline_sweep.sql: fairness of 2 a person, 10 a minute, stale
 // leases); here transition is a recorder.
 
+import { createHash } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 type Row = Record<string, any>
@@ -19,7 +20,7 @@ vi.mock('@/lib/resume/store', () => ({ getLatestVersion: vi.fn(async () => null)
 import { getLatestVersion } from '@/lib/resume/store'
 import { advanceOne } from './index'
 import { costLine, rateLimitOf, sumCost, waitAfter } from './cost'
-import { readGreenhouseFields, tailor, type Step, type StepCtx } from './steps'
+import { readGreenhouseFields, startedHandsOff, tailor, type Step, type StepCtx } from './steps'
 
 const NOW = Date.parse('2026-10-14T12:00:00Z')
 
@@ -31,9 +32,11 @@ function fakeAdmin(tables: Record<string, Row[]>): any {
       let rows = tables[name]
       let mode: 'select' | 'update' = 'select'
       let patch: Row = {}
+      let sort: { c: string; asc: boolean } | null = null
       const filters: ((r: Row) => boolean)[] = []
       const run = () => {
         const hit = rows.filter((r) => filters.every((f) => f(r)))
+        if (sort) hit.sort((a, b) => (a[sort!.c] < b[sort!.c] ? -1 : a[sort!.c] > b[sort!.c] ? 1 : 0) * (sort!.asc ? 1 : -1))
         if (mode === 'update') for (const r of hit) Object.assign(r, patch)
         return { data: hit.map((r) => ({ ...r })), error: null }
       }
@@ -48,7 +51,7 @@ function fakeAdmin(tables: Record<string, Row[]>): any {
           return q
         },
         limit: () => q,
-        order: () => q,
+        order: (c: string, o?: { ascending?: boolean }) => ((sort = { c, asc: o?.ascending !== false }), q),
         contains: (c: string, v: Row) => (filters.push((r) => Object.entries(v).every(([k, x]) => r[c]?.[k] === x)), q),
         maybeSingle: async () => ({ data: run().data[0] ?? null, error: null }),
         then: (res: (v: unknown) => unknown) => res(run()),
@@ -201,13 +204,28 @@ describe('tailor', () => {
   })
 
   const doc = { artifact_id: 'art1', version: 2, content: 'Tailored text', title: 'Resume for Engineer' }
-  const created = (mode: string) => ({ application_id: 'a1', user_id: 'u1', kind: 'application.created', payload: { mode } })
+  const hash = createHash('sha256').update(doc.content).digest('hex').slice(0, 32)
+  const created = (mode: string, created_at = '2026-10-14T11:00:00Z') => ({ application_id: 'a1', user_id: 'u1', kind: 'application.created', payload: { mode }, created_at })
   const prefs = (pipeline: Record<string, unknown>) => ({ id: 'u1', preferences: { pipeline } })
+  const application = () => ({ id: 'a1', user_id: 'u1', resume_artifact_id: null as string | null })
+  const handsOff = { send: { mode: 'auto' }, resumeApproval: false }
 
-  it('does not stop for the resume in hands-off with Send for me on and resume review off', async () => {
+  it('does not stop for the resume in hands-off with Send for me on and resume review off, and attaches the version that goes with it', async () => {
     vi.mocked(getLatestVersion).mockResolvedValue(doc as never)
-    const out = await tailor.run(ctx(undefined, { pipeline_events: [created('hands_off')], profiles: [prefs({ send: { mode: 'auto' }, resumeApproval: false })] }))
-    expect(out).toMatchObject({ kind: 'continue', line: 'Hands-off: Cello used version 2 of the tailored resume without asking.', payload: { artifact_id: 'art1', version: 2 } })
+    const tables = { pipeline_events: [created('hands_off')], profiles: [prefs(handsOff)], applications: [application()] }
+    const out = await tailor.run(ctx(undefined, tables))
+    expect(out).toMatchObject({ kind: 'continue', line: 'Hands-off: version 2 of the tailored resume goes with it, without asking you.', payload: { artifact_id: 'art1', version: 2, hash } })
+    expect(tables.applications[0].resume_artifact_id).toBe('art1')
+  })
+
+  it('attaches the version the person approved, and nothing while it still waits', async () => {
+    vi.mocked(getLatestVersion).mockResolvedValue(doc as never)
+    const waiting = { pipeline_events: [created('ask')], profiles: [prefs(handsOff)], applications: [application()] }
+    expect(await tailor.run(ctx(undefined, waiting))).toMatchObject({ kind: 'wait', reason: 'approve_resume' })
+    expect(waiting.applications[0].resume_artifact_id).toBeNull()
+    const approved = { pipeline_events: [created('ask'), { application_id: 'a1', user_id: 'u1', kind: 'approval.decided', payload: { decision: 'approved', what: 'resume', hash } }], profiles: [prefs(handsOff)], applications: [application()] }
+    expect(await tailor.run(ctx(undefined, approved))).toMatchObject({ kind: 'continue', line: 'You approved version 2 of the tailored resume.', payload: { artifact_id: 'art1', version: 2, hash } })
+    expect(approved.applications[0].resume_artifact_id).toBe('art1')
   })
 
   it('stops for the resume in Ask first, and in hands-off while Send for me is off or each resume is to be shown first', async () => {
@@ -216,6 +234,16 @@ describe('tailor', () => {
     expect(await tailor.run(ctx(undefined, { pipeline_events: [created('ask')], profiles: [prefs({ send: { mode: 'auto' }, resumeApproval: false })] }))).toMatchObject(wait)
     expect(await tailor.run(ctx(undefined, { pipeline_events: [created('hands_off')], profiles: [prefs({ send: { mode: 'me' }, resumeApproval: false })] }))).toMatchObject(wait)
     expect(await tailor.run(ctx(undefined, { pipeline_events: [created('hands_off')], profiles: [prefs({ send: { mode: 'auto' }, resumeApproval: true })] }))).toMatchObject(wait)
+    vi.mocked(getLatestVersion).mockResolvedValue(null)
+  })
+
+  it('reads the mode from the newest start: a start again in Ask first waits, whatever the first start said', async () => {
+    vi.mocked(getLatestVersion).mockResolvedValue(doc as never)
+    const again = [created('hands_off', '2026-10-14T10:00:00Z'), created('ask', '2026-10-14T11:00:00Z')]
+    expect(await tailor.run(ctx(undefined, { pipeline_events: again, profiles: [prefs(handsOff)], applications: [application()] }))).toMatchObject({ kind: 'wait', reason: 'approve_resume' })
+    expect(await startedHandsOff(fakeAdmin({ pipeline_events: again }), { id: 'a1', user_id: 'u1' })).toBe(false)
+    expect(await startedHandsOff(fakeAdmin({ pipeline_events: [...again].reverse() }), { id: 'a1', user_id: 'u1' })).toBe(false)
+    expect(await startedHandsOff(fakeAdmin({ pipeline_events: [created('ask', '2026-10-14T10:00:00Z'), created('hands_off', '2026-10-14T11:00:00Z')] }), { id: 'a1', user_id: 'u1' })).toBe(true)
     vi.mocked(getLatestVersion).mockResolvedValue(null)
   })
 })

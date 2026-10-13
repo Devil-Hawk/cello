@@ -125,6 +125,16 @@ export async function getBaseResume(client: SupabaseClient, userId: string): Pro
   return getLatestVersion(client, userId, null)
 }
 
+/** The newest version of one resume artifact (an application's attached resume), scoped to its owner. */
+export async function getLatestVersionOfArtifact(client: SupabaseClient, userId: string, artifactId: string): Promise<StoredResume | null> {
+  const { data: bucket, error } = await client.from('artifacts').select(ARTIFACT_COLUMNS).eq('id', artifactId).eq('user_id', userId).eq('type', 'resume').maybeSingle()
+  if (error) throw new Error(`resume artifact lookup failed: ${error.message}`)
+  if (!bucket) return null
+  const { data, error: readError } = await client.from('artifact_versions').select(VERSION_COLUMNS).eq('artifact_id', artifactId).order('version', { ascending: false }).limit(1).maybeSingle()
+  if (readError) throw new Error(`getLatestVersionOfArtifact failed: ${readError.message}`)
+  return data ? toDocument(bucket as BucketRow, data as VersionRow) : null
+}
+
 /** One version by id, scoped to its owner. */
 export async function getVersionById(client: SupabaseClient, userId: string, id: string): Promise<StoredResume | null> {
   const { data, error } = await client.from('artifact_versions').select(VERSION_COLUMNS).eq('id', id).maybeSingle()

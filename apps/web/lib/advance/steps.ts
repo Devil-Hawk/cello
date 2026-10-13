@@ -4,8 +4,10 @@
 //   check_open   the posting is still open
 //   dedupe       nothing sent already, no live twin
 //   read_form    a Greenhouse form's questions, matched to saved answers; one open row per question
-//   resume       the document that goes with it
-//   tailor       the Writer's tailored version of it, which waits for the person's approval
+//   resume       the base resume it starts from
+//   tailor       the Writer's tailored version of it, which waits for the person's approval (or goes without one
+//                under Hands-off) and is then attached to the application: applications.resume_artifact_id, the
+//                document the extension is handed (lib/fill/session.ts) and the one the send check reads
 //
 // No preparation for interviews: Cello does not do that.
 
@@ -139,11 +141,11 @@ export const readForm: Step = {
 
 export const resume: Step = {
   id: 'resume',
-  doing: 'Using your base resume',
+  doing: 'Starting from your base resume',
   async run({ admin, app }) {
     const doc = await currentResume(admin, app.user_id)
     if (!doc) return { kind: 'wait', reason: 'approve_resume', detail: { cause: 'no_resume' }, line: 'Add your resume first.' }
-    return { kind: 'continue', line: 'Using your base resume.', payload: { resume_document_id: doc.id } }
+    return { kind: 'continue', line: 'Starting from your base resume.', payload: { resume_document_id: doc.id } }
   },
 }
 
@@ -162,9 +164,9 @@ async function writeTailored(admin: SupabaseClient, app: StepApp): Promise<{ art
   return { error: out.error ?? 'no reason was given' }
 }
 
-/** True when Chat started this application under Hands-off: the first created event carries the mode code chose (lib/chat/mode.ts). */
+/** True when Chat started this application under Hands-off: the newest created event (a start again writes another) carries the mode code chose (lib/chat/mode.ts). */
 export async function startedHandsOff(admin: SupabaseClient, app: Pick<StepApp, 'id' | 'user_id'>): Promise<boolean> {
-  const { data } = await admin.from('pipeline_events').select('payload').eq('application_id', app.id).eq('user_id', app.user_id).eq('kind', 'application.created').order('created_at', { ascending: true }).limit(1).maybeSingle()
+  const { data } = await admin.from('pipeline_events').select('payload').eq('application_id', app.id).eq('user_id', app.user_id).eq('kind', 'application.created').order('created_at', { ascending: false }).limit(1).maybeSingle()
   return (data as { payload: { mode?: unknown } | null } | null)?.payload?.mode === 'hands_off'
 }
 
@@ -198,8 +200,20 @@ export const tailor: Step = {
     const hash = createHash('sha256').update(doc.content).digest('hex').slice(0, 32)
     const { data } = await admin.from('pipeline_events').select('id').eq('application_id', app.id).eq('user_id', app.user_id).eq('kind', 'approval.decided').contains('payload', { hash }).limit(1)
     const detail = { artifact_id: doc.artifact_id, version: doc.version, hash }
-    if (data && data.length > 0) return { kind: 'continue', line: `You approved version ${doc.version} of the tailored resume.`, payload: detail }
-    if (await skipsResumeReview(admin, app)) return { kind: 'continue', line: `Hands-off: Cello used version ${doc.version} of the tailored resume without asking.`, payload: detail }
+    // The version that goes with it: the row the extension's session and the send check read.
+    const artifactId = doc.artifact_id
+    const attach = async () => {
+      const { error } = await admin.from('applications').update({ resume_artifact_id: artifactId }).eq('id', app.id).eq('user_id', app.user_id)
+      if (error) throw new Error(`attaching the tailored resume failed: ${error.message}`)
+    }
+    if (data && data.length > 0) {
+      await attach()
+      return { kind: 'continue', line: `You approved version ${doc.version} of the tailored resume.`, payload: detail }
+    }
+    if (await skipsResumeReview(admin, app)) {
+      await attach()
+      return { kind: 'continue', line: `Hands-off: version ${doc.version} of the tailored resume goes with it, without asking you.`, payload: detail }
+    }
     // A tailoring that changed nothing is not called tailored: the person approves their own resume, as it is.
     const unchanged = Boolean(doc.title?.endsWith('(unchanged)'))
     return { kind: 'wait', reason: 'approve_resume', detail, line: unchanged ? `Needs you: approve version ${doc.version} of your resume. Nothing in it needed changing for this role.` : `Needs you: approve version ${doc.version} of the tailored resume.` }
