@@ -5,7 +5,7 @@
 import { z } from 'zod'
 import type { AdminClient } from '@/lib/harness/types'
 import { ALLOWED_MODELS, getModelInfo } from '@/lib/models'
-import { resolveChoice, validateChoice, withinCeiling, type ChoiceLimits, type ChoiceRung, type ModelChoice, type Ran } from '@/lib/models/choice'
+import { parseChoice, resolveChoice, roleChoice, ROLES, validateChoice, withinCeiling, type ChoiceLimits, type ChoiceRung, type ModelChoice, type Ran, type Role } from '@/lib/models/choice'
 import { isPaused, readPipelineSettings } from '@/lib/pipeline/settings'
 import { resolveMode, type Mode, type ResolvedMode } from './mode'
 import type { Refusal } from './types'
@@ -21,6 +21,8 @@ const Body = z.strictObject({
   mode: z.enum(['ask', 'hands_off']).nullable().optional(),
   /** Also make it the person's choice for new chats. */
   as_default: z.boolean().optional(),
+  /** Which role the choice is for (Settings, Models); without it, Chat. A role other than Chat is the person's own, for every chat. */
+  role: z.enum(ROLES).optional(),
 })
 
 export interface RungInfo {
@@ -51,6 +53,10 @@ export interface SettingsView {
   mode: { chat: Mode | null; settings: Mode; resolved: ResolvedMode; facts: { sendForMe: boolean; paused: boolean; isDemo: boolean } }
   review: boolean
   toolsOff: string[]
+  /** What each role runs on from the next turn, held to the highest and to what is set up; a role the person never set follows this chat's model. */
+  roles: Record<Role, Ran | null>
+  /** The roles that follow Chat because the person never chose a model for them. */
+  followsChat: Role[]
 }
 
 type ChatSettings = { review?: boolean; tools_off?: string[]; mode?: Mode }
@@ -78,8 +84,13 @@ export async function readSettings(db: AdminClient, userId: string, chatId: stri
   const pipeline = readPipelineSettings(prefs)
   const chatMode = settings.mode === 'ask' || settings.mode === 'hands_off' ? settings.mode : null
   const facts = { sendForMe: pipeline.send.mode === 'auto', paused: isPaused(pipeline), isDemo }
+  const ran = resolveChoice([stored, prefs.chat_choice], limits)
+  const chatAsChoice = ran ? { rung: ran.rung, model: ran.model, effort: ran.effort } : null
+  const setRoles = (prefs.role_choices ?? {}) as Record<string, unknown>
   return {
-    ran: resolveChoice([stored, prefs.chat_choice], limits),
+    ran,
+    roles: Object.fromEntries(ROLES.map((r) => [r, r === 'chat' ? ran : resolveChoice([roleChoice(prefs, r, chatAsChoice)], limits)])) as Record<Role, Ran | null>,
+    followsChat: ROLES.filter((r) => r !== 'chat' && !parseChoice(setRoles[r])),
     rungs: describeRungs(limits, freeModels),
     mode: { chat: chatMode, settings: pipeline.mode, resolved: resolveMode({ chat: chatMode, settings: pipeline.mode, ...facts }), facts },
     review: settings.review === true,
@@ -87,12 +98,16 @@ export async function readSettings(db: AdminClient, userId: string, chatId: stri
   }
 }
 
-async function saveDefault(db: AdminClient, userId: string, choice: ModelChoice) {
+async function saveDefault(db: AdminClient, userId: string, choice: ModelChoice | null, role: Role = 'chat') {
   // ponytail: read, merge, write like Settings > Models does; two saves at the same instant keep the last. A save that
   // lands while set_autonomy changed the guarded pipeline object is refused (42501) and read again once.
   for (let tries = 0; ; tries++) {
     const prefs = await readPrefs(db, userId)
-    const { error } = await db.from('profiles').update({ preferences: { ...prefs, chat_choice: choice } }).eq('id', userId)
+    const roles = { ...((prefs.role_choices ?? {}) as Record<string, unknown>) }
+    if (choice) roles[role] = choice
+    else delete roles[role]
+    const next = role === 'chat' ? { ...prefs, chat_choice: choice } : { ...prefs, role_choices: roles }
+    const { error } = await db.from('profiles').update({ preferences: next }).eq('id', userId)
     if (!error || error.code !== '42501' || tries > 0) return
   }
 }
@@ -104,7 +119,19 @@ async function saveDefault(db: AdminClient, userId: string, choice: ModelChoice)
 export async function writeSettings(db: AdminClient, userId: string, chatId: string | null, body: unknown, limits: ChoiceLimits): Promise<{ ok: true } | Refusal | { ok: false; notFound: true }> {
   const parsed = Body.safeParse(body)
   if (!parsed.success) return { ok: false, error: 'That is not a setting.', fix: 'Send a model choice, a mode, Ask before each change, or tool groups.' }
-  const { choice, review, tools_off, mode, as_default } = parsed.data
+  const { choice, review, tools_off, mode, as_default, role } = parsed.data
+  // A role other than Chat is the person's own setting for every chat: a choice held to their highest, or null to follow Chat again.
+  if (role && role !== 'chat') {
+    if (choice === undefined) return { ok: false, error: 'That is not a setting.', fix: 'Send a model choice for the role.' }
+    if (choice === null) {
+      await saveDefault(db, userId, null, role)
+      return { ok: true }
+    }
+    const v = validateChoice(choice, limits.ceiling)
+    if (!v.ok) return v
+    await saveDefault(db, userId, v.choice, role)
+    return { ok: true }
+  }
   let checked: ModelChoice | null = null
   if (choice !== undefined) {
     const v = validateChoice(choice, limits.ceiling)
