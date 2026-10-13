@@ -12,7 +12,7 @@ import type { AnyCommand } from '@/lib/commands'
 import { isBudgetCapError } from '@/lib/agents/spend-port'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { reasonOf } from '@/lib/models/caps'
-import { celloChatModel, type Ran } from '@/lib/models/choice'
+import { celloChatModel, type Ran, type Role } from '@/lib/models/choice'
 import { AnswerSchema, type ModelAnswer, type TurnResult } from './answer'
 import type { Mode } from './mode'
 import type { AgentInput, AgentOutput } from './turn'
@@ -38,6 +38,8 @@ export interface ChatAgentDeps {
   isDemo: boolean
   /** What the turn runs on, resolved by the caller from the person's choice and ceiling. */
   ran: Ran
+  /** What each role runs on this turn (the person's choice for it, or Chat's), from lib/chat/settings.ts. */
+  roles?: Partial<Record<Role, Ran | null>>
   /** The turn's mode, resolved by code in run.ts; the door carries it to each command. */
   mode?: Mode
   signal?: AbortSignal
@@ -121,6 +123,8 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         tools: lcTools as never,
         responseFormat: AnswerSchema as never,
         model: celloChatModel(deps.ran, deps.keys),
+        // The Researcher runs on the model the person chose for research, held to the same highest as Chat.
+        ...(deps.roles?.researcher ? { researcherModel: celloChatModel(deps.roles.researcher, deps.keys, 'researcher') } : {}),
         profileCard: deps.profileCard,
       }) as unknown as NonNullable<ReturnType<NonNullable<ChatAgentDeps['build']>>>)
 
@@ -148,6 +152,6 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
     const made = madeIds.size
       ? (((await deps.db.from('artifacts').select('id, type, title, created_at').eq('user_id', deps.userId).in('id', [...madeIds])).data as { id: string; type: string; title: string; created_at: string }[] | null) ?? [])
       : []
-    return { answer, results: results.splice(0), ran: deps.ran, tools, sources, made }
+    return { answer, results: results.splice(0), ran: deps.ran, roles: { chat: deps.ran, ...(deps.roles?.researcher ? { researcher: deps.roles.researcher } : {}) }, tools, sources, made }
   }
 }

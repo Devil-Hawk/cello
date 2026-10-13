@@ -154,7 +154,9 @@ async function writeTailored(admin: SupabaseClient, app: StepApp): Promise<{ art
   const { loadApiKeys } = await import('@/lib/harness/keys')
   const { runWriter } = await import('@/lib/workflows/writer')
   const { newDeadline } = await import('@/lib/agents/context')
-  const apiKeys = await loadApiKeys(admin as never, app.user_id)
+  const { roleKeys } = await import('@/lib/models/choice')
+  // Nobody is watching: the person's model for background work, which follows Chat when they never chose one.
+  const apiKeys = await roleKeys(admin as never, app.user_id, await loadApiKeys(admin as never, app.user_id), 'worker')
   const out = await runWriter(
     { ctx: { admin: admin as never, userId: app.user_id, userEmail: '', apiKeys, isDemo: apiKeys.isDemo !== false, threadId: '', conversationId: null, autonomy: 'ask', traceId: '', deadlineAt: newDeadline() } },
     { type: 'resume', job_id: app.job_id }
