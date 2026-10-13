@@ -53,7 +53,7 @@ function RoleModel({ role, view, onSaved }: { role: Role; view: SettingsView; on
           <input
             type="radio"
             name={`${id}-rung`}
-            className="h-4 w-4"
+            className="h-4 w-4 shrink-0"
             disabled={Boolean(r.why)}
             checked={draft?.rung === r.rung}
             onChange={() => setDraft({ rung: r.rung, model: r.models[0]?.id ?? draft?.model ?? '', effort: draft?.effort ?? 'medium' })}
