@@ -108,6 +108,8 @@ export const ResumeSchema = z.object({
             .optional(),
           structuredBy: z.enum(['llm', 'heuristic', 'editor', 'tailor']).optional(),
           warnings: z.array(Str).default([]),
+          /** A tailored version only: the stored rows it was built from, each in plain words. */
+          context: z.array(z.object({ table: Str, id: Str, quote: Str.optional(), label: Str })).optional(),
         })
         .prefault({}),
     })

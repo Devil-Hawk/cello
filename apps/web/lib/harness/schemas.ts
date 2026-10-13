@@ -144,6 +144,8 @@ export const CvTailorInput = z.object({
    *  fed into the prompt as corrective instruction. Absent on a first
    *  attempt. */
   correctiveContext: z.string().optional(),
+  /** The whole context of the application (lib/workflows/gather/apply.ts renderContext): quoted data the letter may draw emphasis from. */
+  context: z.string().optional(),
 })
 /** Why the cover letter is the length it is, and what code checked (see cv_tailor.ts). */
 export const CoverLetterMeta = z.object({

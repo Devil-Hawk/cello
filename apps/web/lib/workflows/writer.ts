@@ -28,6 +28,7 @@ import { loadOwnedJob, loadResume, makeRunner } from '@/lib/harness/copilot-tool
 import { createResumeVersion } from '@/lib/resume/store'
 import type { Resume } from '@/lib/resume/schema'
 import { gatherSources } from './gather'
+import { gatherApplyContext, personEvidence, renderContext, sourcesUsed, type ApplyContext } from './gather/apply'
 import { loadOutreachSources } from '@/lib/outreach/sources'
 import { canRunLlm, missingOpenRouterMessage } from '@/lib/harness/llm-key-message'
 import { frameJobText } from '@/lib/security/job-text'
@@ -88,7 +89,12 @@ interface Facts {
   previous: { text: string; version: number } | null
   /** The person's kept writing preferences, a quoted block. '' when none. */
   style: string
+  /** For a role: the whole context of the application (requirements, fit, company, history, answers, profile). */
+  context: ApplyContext | null
 }
+
+/** The resume plus the person's own words outside it: what a claim in a draft may rest on. */
+const ownWords = (facts: Facts): string => (facts.context ? `${facts.resumeText}\n\n${personEvidence(facts.context)}`.trim() : facts.resumeText)
 
 interface Draft {
   /** The body that is reviewed and saved. */
@@ -234,7 +240,9 @@ export function buildWriterGraph(deps: WriterDeps) {
 
     const { data: profile } = await ctx.admin.from('profiles').select('full_name').eq('id', ctx.userId).single()
     const userName = String((profile?.full_name as string | null) ?? '').trim() || gathered.userName || ctx.userEmail.split('@')[0] || 'Me'
-    return { facts: { resumeText, userName, job, contact, previous, style: gathered.style }, brief: { ...brief, type } }
+    // A resume or a letter for a role reads the whole context; a message keeps loadOutreachSources.
+    const context = job && (type === 'resume' || type === 'cover_letter') ? await gatherApplyContext(ctx.admin, ctx.userId, job.id).catch(() => null) : null
+    return { facts: { resumeText, userName, job, contact, previous, style: gathered.style, context }, brief: { ...brief, type } }
   }
 
   // --- draft (a model, through the existing module for this document) ------------------
@@ -265,7 +273,10 @@ export function buildWriterGraph(deps: WriterDeps) {
           job: { title: job?.title ?? 'the role', company, description: job ? frameJobText(job.description, { maxChars: 4500, emptyPlaceholder: '' }) || null : null },
           llm,
           signal: ctx.signal,
+          ...(facts.context ? { context: { block: renderContext(facts.context), evidence: personEvidence(facts.context) } } : {}),
         })
+        // What it was built from, in plain words: the rows whose words the kept lines use, and what steered them.
+        if (facts.context) out.resume.meta.cello.context = sourcesUsed(facts.context, out.suggestedRewrite)
         return {
           attempts,
           draft: {
@@ -284,7 +295,8 @@ export function buildWriterGraph(deps: WriterDeps) {
           runId: 'agent',
           stepLabel: 'write-cover-letter',
           agentType: 'cv_tailor',
-          input: { jobId: job!.id, resumeText: facts.resumeText, ...(instructions ? { correctiveContext: instructions } : {}) },
+          // The person's own words outside the resume count as theirs; the context is quoted data under the instructions.
+          input: { jobId: job!.id, resumeText: ownWords(facts), ...(instructions ? { correctiveContext: instructions } : {}), ...(facts.context ? { context: renderContext(facts.context) } : {}) },
           deps: {},
           admin: ctx.admin,
           apiKeys: ctx.apiKeys,
@@ -387,7 +399,7 @@ export function buildWriterGraph(deps: WriterDeps) {
         kind,
         text: d.text,
         subject: d.subject,
-        resumeText: facts.resumeText,
+        resumeText: ownWords(facts),
         job: facts.job ? { title: facts.job.title, company: facts.job.company, description: facts.job.description } : undefined,
         contactName: facts.contact?.name,
         userName: facts.userName,
