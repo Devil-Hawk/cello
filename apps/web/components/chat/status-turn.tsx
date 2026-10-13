@@ -10,7 +10,7 @@ import Link from 'next/link'
 import { chatHref } from '@/lib/chat/links'
 import type { StatusLine } from '@/lib/chat/status'
 
-const BUTTON = 'min-h-11 rounded-control border border-border bg-card px-2 py-0.5 text-foreground hover:bg-muted disabled:opacity-40'
+const BUTTON = 'inline-flex min-h-11 items-center rounded-control border border-border bg-card px-2 py-0.5 text-foreground hover:bg-muted disabled:opacity-40'
 
 export function StatusTurn({ line, onReview, onApproved }: { line: StatusLine | undefined; onReview?: (artifactId: string) => void; onApproved?: () => void }) {
   const [busy, setBusy] = useState(false)
