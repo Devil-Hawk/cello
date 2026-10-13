@@ -70,6 +70,7 @@ const view: PipelineView = {
     summary: false,
     morning: { pickAt: '06:00', summaryAt: '08:00', quietFrom: '21:00', quietTo: '08:00' },
     pausedAt: null,
+    mode: 'ask',
   },
   weeklyPace: null,
   digest: false,
@@ -93,6 +94,19 @@ describe('the settings that govern it', () => {
 
   it('reads the summary as on when the older digest opt-in is on', () => {
     expect(toForm({ ...view, digest: true }).summary).toBe(true)
+  })
+
+  it('offers Ask first and Hands-off, greying Hands-off with its sentence while Send for me is off', () => {
+    const off = html(<OnItsOwnForm form={form} onChange={() => undefined} onSave={() => undefined} />)
+    expect(off).toContain('How Chat works')
+    expect(off).toContain('Ask first')
+    expect(off).toContain('Hands-off')
+    expect(off).toContain('Turn Send for me on first, under Your browser.')
+    expect(off).toMatch(/disabled=""[^>]*value="hands_off"/)
+    const on = html(<OnItsOwnForm form={{ ...form, sendOn: true, mode: 'hands_off' }} onChange={() => undefined} onSave={() => undefined} />)
+    expect(on).not.toContain('Turn Send for me on first')
+    expect(on).toMatch(/checked=""[^>]*value="hands_off"/)
+    expect(diff(form, { ...form, mode: 'hands_off' })).toEqual({ mode: 'hands_off' })
   })
 })
 

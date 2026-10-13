@@ -83,8 +83,11 @@ async function move(
 // Start
 // ---------------------------------------------------------------------------
 
-/** Apply: Cello prepares this role. A role already sent becomes "Already applied?" for the person and is refused for everyone else. */
-export async function start(c: Ctx, jobId: string): Promise<MoveResult> {
+/**
+ * Apply: Cello prepares this role. A role already sent becomes "Already applied?" for the person and is refused for everyone else.
+ * `payload` goes on the created event: Chat records the mode code chose for the turn there (lib/chat/mode.ts).
+ */
+export async function start(c: Ctx, jobId: string, opts: { payload?: Record<string, unknown> } = {}): Promise<MoveResult> {
   let { data: row } = await c.admin.from('applications').select('id').eq('user_id', c.userId).eq('job_id', jobId).maybeSingle()
   if (!row) {
     const ins = await c.admin.from('applications').insert({ user_id: c.userId, job_id: jobId, source: c.door.actor }).select('id').single()
@@ -107,7 +110,7 @@ export async function start(c: Ctx, jobId: string): Promise<MoveResult> {
     from: [from(a)],
     to: 'preparing',
     step: 'Starting',
-    event: body(c, 'application.created', a, 'Cello started preparing this.'),
+    event: body(c, 'application.created', a, 'Cello started preparing this.', { payload: opts.payload }),
     cap,
   })
   if (!r.ok && r.refusal === 'send_block' && c.door.actor === 'person') {

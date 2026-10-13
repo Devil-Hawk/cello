@@ -9,6 +9,7 @@ import { NO_MODEL_LINE, reasonOf } from '@/lib/models/caps'
 import { chatLimits } from '@/lib/models/choice'
 import { freeModels } from '@/lib/models/free'
 import { chatAgent } from './agent'
+import { resolveMode, stripKeyword } from './mode'
 import { recall, type RecallHit } from './recall'
 import { readSettings } from './settings'
 import { routedAgent } from './route'
@@ -25,11 +26,16 @@ async function leaveLine(db: AdminClient, userId: string, chatId: string, text: 
 }
 
 export async function runStoredTurn(db: AdminClient, userId: string, chatId: string, turn: { id: string; typed: string; quoted?: { text: string; turn_id: string } | null }): Promise<void> {
-  const typed = turn.typed
   const keys = await loadApiKeys(db, userId)
   const view = await readSettings(db, userId, chatId, chatLimits(keys), freeModels())
   // A saved key that cannot be read any more is the reason, not a missing one.
   if (!view?.ran) return leaveLine(db, userId, chatId, keys.unreadable?.length ? `Cello could not read your saved ${PROVIDER_NAMES[keys.unreadable[0]]} key. Save it again in Settings, under Models.` : NO_MODEL_LINE)
+  // The mode is code's decision before anything runs: the keyword in the typed line, the chat's setting or Settings, held
+  // to Send for me, Pause and the demo flag. The keyword is taken out of what the router and the model read; the stored
+  // line keeps it. Only the door carries the mode: no command input and no model can set it.
+  const mode = resolveMode({ typed: turn.typed, chat: view.mode.chat, settings: view.mode.settings, ...view.mode.facts })
+  const typed = stripKeyword(turn.typed)
+  if (!typed) return leaveLine(db, userId, chatId, 'There is nothing to send with the keyword alone. Say what to do.')
 
   let recalled: RecallHit[] = []
   if (await recallInWordsOn(db)) recalled = await recall(db, getMemoryStore(), userId, typed).catch(() => [])
@@ -39,11 +45,11 @@ export async function runStoredTurn(db: AdminClient, userId: string, chatId: str
   const stop = new AbortController()
   const timer = setInterval(() => void isStopped(db, root).then((yes) => yes && stop.abort()), STOP_POLL_MS)
   try {
-    const loop = chatAgent({ db, userId, keys, isDemo: keys.isDemo !== false, ran: view.ran, signal: stop.signal })
+    const loop = chatAgent({ db, userId, keys, isDemo: keys.isDemo !== false, ran: view.ran, mode: mode.mode, signal: stop.signal })
     const names = async () => (((await db.from('companies').select('name').eq('user_id', userId).limit(200)).data as { name: string }[] | null) ?? []).map((c) => c.name)
     const out = await runChatTurn(
-      { db, agent: routedAgent({ db, userId, keys, ran: view.ran, signal: stop.signal }, loop, names), store: getMemoryStore(), isDemo: keys.isDemo !== false },
-      { userId, chatId, typed, quoted: turn.quoted ?? null, recalled, turnId: turn.id }
+      { db, agent: routedAgent({ db, userId, keys, ran: view.ran, mode: mode.mode, signal: stop.signal }, loop, names), store: getMemoryStore(), isDemo: keys.isDemo !== false },
+      { userId, chatId, typed, quoted: turn.quoted ?? null, recalled, turnId: turn.id, mode }
     )
     if (!out.ok) await leaveLine(db, userId, chatId, stop.signal.aborted ? 'Stopped. Nothing was changed.' : `${out.error} ${out.fix}`.trim())
     await finishWorker(db, root, { status: stop.signal.aborted ? 'stopped' : out.ok ? 'done' : 'failed' })

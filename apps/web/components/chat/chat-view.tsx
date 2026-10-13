@@ -12,6 +12,7 @@ import { Markdown } from '@/components/chat/markdown'
 import { MadeBlock } from '@/components/chat/made-block'
 import { SourcesAndTools } from '@/components/chat/sources-and-tools'
 import { ModelPicker, steppedDownWords, type PickScope } from '@/components/chat/model-picker'
+import { ModePicker } from '@/components/chat/mode-picker'
 import { Composer } from '@/components/chat/composer'
 import { AnswerParts, type Named } from '@/components/chat/parts'
 import { Finder } from '@/components/chat/finder'
@@ -25,6 +26,7 @@ import type { Found } from '@/lib/chat/find'
 import { chatHref } from '@/lib/chat/links'
 import type { ChatPageData } from '@/lib/chat/page-data'
 import type { SettingsView } from '@/lib/chat/settings'
+import { resolveMode, type Mode } from '@/lib/chat/mode'
 import type { Suggestions } from '@/lib/chat/suggest'
 import { refId, type AttachKind } from '@/lib/chat/types'
 import { visibleTurns } from '@/lib/chat/versions'
@@ -114,6 +116,8 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   const [pending, setPending] = useState<ModelChoice | null>(null)
   // "Just this message": used by the next send only.
   const [once, setOnce] = useState<ModelChoice | null>(null)
+  // A mode picked before the chat exists: stored on the chat when the first turn creates it. Undefined means no pick.
+  const [pendingMode, setPendingMode] = useState<Mode | null | undefined>(undefined)
   const [sending, setSending] = useState(false)
   // What was just sent, shown as the person's turn until the chat's rows hold it: the line never vanishes after Enter.
   const [justSent, setJustSent] = useState<string | null>(null)
@@ -199,6 +203,19 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     else setNote('Cello could not save that choice. It is above what you allow, or the save failed.')
     await loadSettings()
   }
+
+  async function pickMode(next: Mode | null) {
+    if (!chatId) return setPendingMode(next)
+    const ok = await send('/api/chat/settings', 'POST', { chat: chatId, mode: next })
+    if (!ok) setNote('Cello could not save that mode. Try again.')
+    await loadSettings()
+  }
+  // The mode control's view: the server's, or with the pick held for a chat that does not exist yet.
+  const modeView = useMemo(() => {
+    if (!settings) return null
+    if (pendingMode === undefined || chatId) return settings.mode
+    return { ...settings.mode, chat: pendingMode, resolved: resolveMode({ chat: pendingMode, settings: settings.mode.settings, ...settings.mode.facts }) }
+  }, [settings, pendingMode, chatId])
 
   const tasks = useMemo(() => (page?.tasks ?? []).map(toTaskRow), [page])
   // A turn is being answered while the last thing in the chat is the person's own message.
@@ -321,7 +338,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     }
     let id = chatId
     if (!id) {
-      const made = await sendJson<{ id: string }>('/api/chat', 'POST', { chips: chips.map((c) => ({ kind: c.kind, id: c.ref })), ...(pending ? { choice: pending } : {}) })
+      const made = await sendJson<{ id: string }>('/api/chat', 'POST', { chips: chips.map((c) => ({ kind: c.kind, id: c.ref })), ...(pending ? { choice: pending } : {}), ...(pendingMode !== undefined ? { mode: pendingMode } : {}) })
       if (!made.ok || !made.body?.id) return failed('Cello could not start the chat. Try again.')
       id = made.body.id
     } else {
@@ -333,6 +350,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     setQuoted(null)
     setOnce(null)
     setPending(null)
+    setPendingMode(undefined)
     if (id !== chatId) {
       // The view stays mounted with the sent line on it; the address moves to the chat and the rows are read from there.
       window.history.pushState(null, '', `/chat/${encodeURIComponent(id)}`)
@@ -545,7 +563,14 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
         <div className="mx-auto w-full max-w-3xl px-4 pb-3">
           <Composer value={draft} onChange={setDraft} onSend={() => void sendMessage()} onStop={() => lastPersonTurn && void send(`/api/chat/${chatId}/stop`, 'POST', { turn_id: lastPersonTurn.id }).then(loadPage)} running={running} quoted={quoted}
             onRemoveQuote={() => setQuoted(null)}
-            controls={settings ? <ModelPicker key={`${choice?.rung}:${choice?.model}:${choice?.effort}`} choice={choice} rungs={settings.rungs} estimate={estimate} onPick={(c, scope) => void pick(c, scope)} /> : null}
+            controls={
+              settings ? (
+                <>
+                  <ModelPicker key={`${choice?.rung}:${choice?.model}:${choice?.effort}`} choice={choice} rungs={settings.rungs} estimate={estimate} onPick={(c, scope) => void pick(c, scope)} />
+                  {modeView && <ModePicker chat={modeView.chat} settings={modeView.settings} resolved={modeView.resolved} facts={modeView.facts} onPick={(m) => void pickMode(m)} />}
+                </>
+              ) : null
+            }
             status={settings ? steppedDownWords(lastRan, choice, settings.rungs) || null : null}
             above={
               <>

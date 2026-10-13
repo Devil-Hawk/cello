@@ -39,6 +39,8 @@ const SettingsSchema = z.object({
     .catch({ pickAt: '06:00', summaryAt: '08:00', quietFrom: '21:00', quietTo: '08:00' }),
   /** Set by Pause. Nothing is prepared or sent while it is. */
   pausedAt: z.string().nullable().catch(null),
+  /** How Chat works: Ask first, or Hands-off (an application Chat starts may go to Send for me without a stop). */
+  mode: z.enum(['ask', 'hands_off']).catch('ask'),
 })
 
 export type PipelineSettings = z.infer<typeof SettingsSchema>

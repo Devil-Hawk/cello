@@ -1,6 +1,8 @@
 // applications.start: Chat starts an application for a role the person named. It prepares it (checks the posting,
 // the earlier applications, the base resume, a tailored resume that waits for the person's approval) and stops
-// there. It never fills a form, approves, sends or marks anything sent: those are the person's clicks.
+// there. It never fills a form, approves, sends or marks anything sent: those are the person's clicks. The turn's
+// mode (set by code at the door, never an input) is recorded on the created event: in Hands-off the advancer may
+// use the tailored resume without a stop and Send for me may claim the application, within its own limits.
 
 import { z } from 'zod'
 import { advanceOne } from '@/lib/advance'
@@ -36,7 +38,8 @@ export const applicationsStart = defineCommand({
     if (!job) throw new CommandRefusal(404, 'That role is not in your stored roles.', 'not_found')
     const scope = ctx.chat && { db, userId: ctx.userId, threadId: ctx.chat.chatId, chatId: ctx.chat.chatId, turnId: ctx.chat.turnId }
     const work = async () => {
-      const moved = await start({ admin: db, userId: ctx.userId, door: DOORS.chat }, input.job_id)
+      const mode = ctx.mode ?? 'ask'
+      const moved = await start({ admin: db, userId: ctx.userId, door: DOORS.chat }, input.job_id, { payload: { mode } })
       if (!moved.ok) throw new CommandRefusal(409, moved.sentence, moved.refusal)
       const { data: app } = await db.from('applications').select('id').eq('user_id', ctx.userId).eq('job_id', input.job_id).maybeSingle()
       const applicationId = (app as { id: string } | null)?.id
@@ -48,7 +51,8 @@ export const applicationsStart = defineCommand({
       const state = (after as { state: string | null } | null)?.state ?? 'preparing'
       const { data: events } = await db.from('pipeline_events').select('sentence').eq('application_id', applicationId).eq('user_id', ctx.userId).order('created_at', { ascending: true }).limit(20)
       const steps = ((events as { sentence: string | null }[] | null) ?? []).flatMap((e) => (e.sentence ? [e.sentence.slice(0, 280)] : []))
-      return { sentence: `Started ${(job as { title: string }).title}. It is now ${state.replace('_', ' ')}. Nothing was sent.`, application_id: applicationId, state, steps }
+      const tail = mode === 'hands_off' ? 'Send for me sends it from your browser when it is ready, within its limits.' : 'Nothing was sent.'
+      return { sentence: `Started ${(job as { title: string }).title}. It is now ${state.replace('_', ' ')}. ${tail}`, application_id: applicationId, state, steps }
     }
     return scope ? withWorker(scope, { command: 'applications.start', title: `Preparing ${(job as { title: string }).title}`, object: { kind: 'role', ref: input.job_id } }, work) : work()
   },

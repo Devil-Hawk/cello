@@ -22,6 +22,8 @@ export const PatchSchema = z.strictObject({
   followUps: z.boolean().optional(),
   summary: z.boolean().optional(),
   resumeApproval: z.boolean().optional(),
+  /** How Chat works: Ask first or Hands-off (lib/chat/mode.ts). */
+  mode: z.enum(['ask', 'hands_off']).optional(),
   /** Send for me, from the extension's own browser. `agreed` is the person reading its sentence. */
   send: z.strictObject({ on: z.boolean(), perDay: perDay.optional(), agreed: z.boolean().optional() }).optional(),
 })
@@ -54,6 +56,7 @@ export function applyPatch(stored: unknown, p: Patch, tokenId: string | null, no
   if (p.followUps !== undefined) out.followUps = { ...obj(out.followUps), on: p.followUps }
   if (p.summary !== undefined) out.summary = p.summary
   if (p.resumeApproval !== undefined) out.resumeApproval = p.resumeApproval
+  if (p.mode !== undefined) out.mode = p.mode
 
   if (p.send) {
     const send: Obj = { ...obj(out.send) }

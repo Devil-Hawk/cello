@@ -11,6 +11,7 @@ import type { z } from 'zod'
 import type { AdminClient, Door } from '@/lib/harness/types'
 import type { ExtensionProof, SessionProof } from './doors'
 import type { SlotStore } from './slots'
+import type { Mode } from '@/lib/chat/mode'
 import { allowsNoMeasure } from './no-measure'
 import { isMeasureId } from './measures'
 
@@ -55,6 +56,8 @@ export interface CommandContext {
   typed?: string
   /** The chat and the person's turn a Chat command runs for: what it makes and starts is recorded against them. */
   chat?: { chatId: string; turnId: string }
+  /** The turn's mode (lib/chat/mode.ts), set by code at the Chat door only; no command input carries one. */
+  mode?: Mode
   /** A service-role client, built only when a command asks for one. */
   admin: () => AdminClient
   /** Replaces the database counter in tests. */

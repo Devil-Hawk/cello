@@ -13,6 +13,7 @@ import { askModel } from '@/lib/models/ask'
 import { reasonOf } from '@/lib/models/caps'
 import type { Ran } from '@/lib/models/choice'
 import { unsupported, type ModelAnswer, type TurnResult } from './answer'
+import type { Mode } from './mode'
 import { resolveRoleType } from './find-roles'
 import { resultOf } from './recalled'
 import { madeThing, type Thing } from './things'
@@ -64,6 +65,8 @@ interface Deps {
   userId: string
   keys: DecryptedApiKeys
   ran: Ran
+  /** The turn's mode, resolved by code in run.ts; the door carries it to each command. */
+  mode?: Mode
   signal?: AbortSignal
 }
 
@@ -162,7 +165,7 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
     if (!intent) return fallback(input)
 
     const startedAt = new Date().toISOString()
-    const ctx = chatDoor({ userId: deps.userId, typed: input.typed, chat: { chatId: input.chatId, turnId: input.turnId }, signal: deps.signal })
+    const ctx = chatDoor({ userId: deps.userId, typed: input.typed, chat: { chatId: input.chatId, turnId: input.turnId }, mode: deps.mode, signal: deps.signal })
     const tools: NonNullable<AgentOutput['tools']> = []
     const sources: NonNullable<AgentOutput['sources']> = []
     const results: TurnResult[] = []
