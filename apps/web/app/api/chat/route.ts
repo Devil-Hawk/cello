@@ -1,4 +1,4 @@
-// POST /api/chat {chips, choice?}: starts a chat, holding the chips the person added (each checked as theirs), and answers
+// POST /api/chat {chips, choice?, mode?}: starts a chat, holding the chips the person added (each checked as theirs), and answers
 // with its id. The first message goes to /api/chat/[id]/turns.
 // GET /api/chat: the person's chats for Recents (pinned first, then newest), or with ?earlier=1 their old
 // Copilot conversations. ?archived=1 lists archived chats; ?before= pages from the last row's last_turn_at; ?limit= sizes the page.
@@ -38,6 +38,8 @@ export async function POST(request: NextRequest) {
     const ref = refFromId(c.kind, c.id)
     if (ref) await attach(db, userId, id, { kind: c.kind, ref }, { origin: 'person', door: 'session' })
   }
-  if (body?.choice !== undefined) await writeSettings(db, userId, id, { choice: body.choice }, chatLimits(await loadApiKeys(db, userId)))
+  if (body?.choice !== undefined || body?.mode !== undefined) {
+    await writeSettings(db, userId, id, { ...(body.choice !== undefined ? { choice: body.choice } : {}), ...(body.mode !== undefined ? { mode: body.mode } : {}) }, chatLimits(await loadApiKeys(db, userId)))
+  }
   return NextResponse.json({ id }, { status: 201 })
 }

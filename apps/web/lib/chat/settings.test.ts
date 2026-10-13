@@ -15,6 +15,20 @@ const seed = () =>
   })
 
 describe('writeSettings', () => {
+  it('keeps the chat\'s mode on the chat, clears it with null, and says what the next turn runs under', async () => {
+    const db = seed()
+    expect(await writeSettings(db, 'u1', 'c1', { mode: 'hands_off' }, limits())).toEqual({ ok: true })
+    expect(db.tables.chats[0].settings).toEqual({ mode: 'hands_off' })
+    // Send for me is off, so the chat's Hands-off runs as Ask first and the view says why.
+    expect((await readSettings(db, 'u1', 'c1', limits()))?.mode).toEqual({ chat: 'hands_off', settings: 'ask', resolved: { mode: 'ask', why: 'chat', blocked: 'send_for_me_off' }, facts: { sendForMe: false, paused: false, isDemo: false } })
+    db.tables.profiles[0].preferences = { pipeline: { mode: 'hands_off', send: { mode: 'auto' } } }
+    expect((await readSettings(db, 'u1', 'c1', limits()))?.mode.resolved).toEqual({ mode: 'hands_off', why: 'chat' })
+    expect(await writeSettings(db, 'u1', 'c1', { mode: null }, limits())).toEqual({ ok: true })
+    expect(db.tables.chats[0].settings).toEqual({})
+    expect((await readSettings(db, 'u1', 'c1', limits()))?.mode).toMatchObject({ chat: null, settings: 'hands_off', resolved: { mode: 'hands_off', why: 'settings' }, facts: { sendForMe: true } })
+    expect(await writeSettings(db, 'u1', 'c1', { mode: 'act' }, limits())).toMatchObject({ ok: false })
+  })
+
   it('refuses a choice above the person\'s highest and stores nothing', async () => {
     const db = seed()
     const done = await writeSettings(db, 'u1', 'c1', { choice: { rung: 'R4', model: 'anthropic/claude-sonnet-5', effort: 'medium' } }, limits())
