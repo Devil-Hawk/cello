@@ -11,7 +11,7 @@
 //
 // Two steps are added only when a form asks for them, by the step that learns it (read_form), and the thread says
 // what changed and why (acceptance P3):
-//   draft_answers  Cello's drafts of the open long questions, for the person to check (the `answers.draft` step)
+//   draft_answers  Cello's drafts of the open long questions, for the person to check (the `answer.draft` step)
 //   cover_letter   the Writer's letter, which waits for approval exactly as the tailored resume does
 //
 // No preparation for interviews: Cello does not do that.

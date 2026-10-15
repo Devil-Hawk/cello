@@ -21,7 +21,9 @@ export const LEGACY_STEPS: Record<string, ModelStep> = Object.fromEntries(
     // Memory: replaced by the Learner.
     legacy('plan-strategy', 'S16', 'K15'),
     legacy('analyze-pipeline', 'S16', 'K15'),
-    // Scoring and goal fit: replaced by chance.
+    // Scoring and goal fit: replaced by chance. assess-roles is the runner scoring-port hands assessJobs
+    // (lib/agents/scoring-port.ts); the calls inside name themselves (judge-role-want, check-role-requirements).
+    legacy('assess-roles', 'S3', 'K17'),
     legacy('score-job-match', 'S3', 'K17'),
     legacy('score-job-batch', 'S3', 'K17'),
     legacy('judge-goal-fit', 'S3', 'K17'),

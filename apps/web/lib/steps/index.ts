@@ -44,9 +44,9 @@ export const inboxClassifyStep = defineModelStep({
 })
 
 /** Drafting one answer to an application question from the person's own words (v2-4). The person checks it;
- *  Send for me never uses it (lib/fill/eligibility.ts). */
-export const answersDraftStep = defineModelStep({
-  id: 'answers.draft',
+ *  Send for me never uses it (lib/fill/eligibility.ts). The id is the one the rungs file reserved (answer.draft). */
+export const answerDraftStep = defineModelStep({
+  id: 'answer.draft',
   kind: 'step',
   measure: 'S6',
   minRung: 'R2',
