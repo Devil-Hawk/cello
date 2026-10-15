@@ -37,6 +37,7 @@ const KIND_OF_STEP: Record<string, DailyKind> = {
   'write-follow_up': 'drafts',
   'write-reply': 'drafts',
   'write-note': 'drafts',
+  'answer.draft': 'drafts',
   chance: 'chance',
   'role.evidence': 'chance',
   'research.summary': 'research',

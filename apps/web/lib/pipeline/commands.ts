@@ -24,6 +24,7 @@ interface AppRow {
   state: ApplicationState | null
   state_before_pause: ApplicationState | null
   needs_reason: string | null
+  needs_detail: Record<string, unknown> | null
   stage: string
   last_event_at: string | null
 }
@@ -33,7 +34,7 @@ const refuse = (refusal: string, sentence: string): MoveResult => ({ ok: false, 
 async function load(c: Ctx, id: string): Promise<AppRow | null> {
   const { data } = await c.admin
     .from('applications')
-    .select('id, job_id, state, state_before_pause, needs_reason, stage, last_event_at')
+    .select('id, job_id, state, state_before_pause, needs_reason, needs_detail, stage, last_event_at')
     .eq('id', id)
     .eq('user_id', c.userId)
     .maybeSingle()
@@ -147,7 +148,10 @@ export const runAgain = (c: Ctx, id: string) => move(c, id, 'preparing', 'step.s
 
 /** Approve the tailored resume (person only, in SQL). The hash of the version the person saw is kept on the event, and the tailor step continues only when the newest version still matches it; `what` is how pipeline_auto_send_reason tells this approval from the others of its kind. */
 export async function approveDocument(c: Ctx, id: string, hash: string): Promise<MoveResult> {
-  return move(c, id, 'preparing', 'approval.decided', 'You approved the resume.', { from: ['needs_you'], step: 'Continuing', payload: { decision: 'approved', what: 'resume', hash } })
+  // The document it waits on: the tailored resume, or the cover letter the form asked for (lib/advance/steps.ts).
+  const a = await load(c, id)
+  const what = a?.needs_detail?.what === 'cover_letter' ? 'cover_letter' : 'resume'
+  return move(c, id, 'preparing', 'approval.decided', `You approved the ${what.replace('_', ' ')}.`, { from: ['needs_you'], step: 'Continuing', payload: { decision: 'approved', what, hash } })
 }
 
 /** "Already applied?" answered with Apply anyway; releases the posting for this start. */

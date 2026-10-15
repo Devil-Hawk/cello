@@ -87,6 +87,11 @@ describe('eligibility', () => {
     expect(check([field({ resolved: { value: '7', via: 'exact', origin: 'code' } })])).toContain('resume')
   })
 
+  it('still refuses a drafted answer for Send for me', () => {
+    // what lib/answers/draft.ts writes: origin model, by exact key, confirmed or not
+    expect(check([field({ kind: 'long_text', category: 'motivation', resolved: { value: 'I want to build data services at Acme.', via: 'exact', origin: 'model', answerId: 'd1' } })])).toBe('Answer it yourself to let Cello send this.')
+  })
+
   it('refuses a model-drafted, resume-read or similar answer on an optional field too', () => {
     expect(check([field(), field({ required: false, resolved: { value: 'A paragraph a model drafted', via: 'exact', origin: 'model' } })])).toBe('Answer it yourself to let Cello send this.')
     expect(check([field({ required: false, resolved: { value: '7', via: 'exact', origin: 'code' } })])).toContain('resume')

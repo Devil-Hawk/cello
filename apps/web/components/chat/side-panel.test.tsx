@@ -54,3 +54,20 @@ describe('PanelView', () => {
     expect(Object.keys(EDITABLE_FIELD).sort()).toEqual(['cover_letter', 'message', 'resume'])
   })
 })
+
+describe('Built from', () => {
+  it('lists the rows a tailored resume was built from, in plain words, and nothing for a version without them', () => {
+    const tailored: PanelVersion = {
+      version: 1,
+      author: 'cello',
+      content: { text: 'Riley Marsh', content_json: { resume: { meta: { cello: { context: [{ table: 'answer_bank', id: 'a1', label: 'Your answer to "Why this company?"' }, { table: 'jobs', id: 'j1', label: "The posting's requirements, 4 quoted" }] } } } } },
+      content_text: 'Riley Marsh',
+      created_at: '2026-10-05T09:00:00Z',
+    }
+    const out = html({ thing: { id: 'r1', type: 'resume', title: 'Resume for Engineer' }, versions: [tailored], selected: 1 })
+    expect(out).toContain('Built from')
+    expect(out).toContain('Your answer to &quot;Why this company?&quot;')
+    expect(out).toContain('The posting&#x27;s requirements, 4 quoted')
+    expect(html()).not.toContain('Built from')
+  })
+})

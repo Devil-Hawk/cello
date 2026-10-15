@@ -200,3 +200,25 @@ describe('the reworded summary', () => {
     expect(applyTailorPatch(b, patch({ summary: kept })).resume.basics.summary).toBe(kept)
   })
 })
+
+describe('the person\'s own words outside the resume', () => {
+  const b = ResumeSchema.parse({ ...base, basics: { ...base.basics, summary: 'Backend engineer with eight years building data services and leading small teams.' } })
+  const answer = 'Why this company?\nI spent three years running Kubernetes clusters for a payments team at Northwind and want to do that for healthcare.'
+
+  it('keeps a reword the person\'s saved answer supports', () => {
+    const summary = 'Backend engineer with eight years building data services, three of them running Kubernetes clusters for a payments team at Northwind.'
+    expect(applyTailorPatch(b, patch({ summary })).resume.basics.summary).toBe(b.basics.summary)
+    const out = applyTailorPatch(b, patch({ summary }), undefined, answer)
+    expect(out.resume.basics.summary).toBe(summary)
+    expect(out.warnings).toEqual([])
+  })
+
+  it('drops a skill only the posting names', () => {
+    const out = applyTailorPatch(b, patch({ skills: [{ name: 'Languages', keywords: ['Terraform', 'Go'] }] }), { title: 'Platform Engineer' }, answer)
+    expect(out.resume.skills[0].keywords).toEqual(['Go', 'TypeScript', 'C++'])
+    expect(out.warnings.join(' ')).toMatch(/Terraform/)
+    // the posting's title is still not the person's own
+    const titled = applyTailorPatch(b, patch({ summary: 'Platform Engineer with eight years building data services.' }), { title: 'Platform Engineer' }, answer)
+    expect(titled.resume.basics.summary).toBe(b.basics.summary)
+  })
+})

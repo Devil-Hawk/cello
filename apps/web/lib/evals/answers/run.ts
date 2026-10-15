@@ -79,11 +79,12 @@ export function run(): Report {
     }
   }
 
-  // A value is never a model's: nothing in lib/answers reaches a model, so no value can come from one.
-  // Counted as the files there that import a model call.
+  // A value is never a model's: nothing in lib/answers puts a model's answer on a form. The one file that
+  // reaches a model is the draft (origin model, confirmed_at null; Send for me refuses it), so it is named
+  // here and the gate still fails on any other file that does.
   const dir = path.join(here, '../../answers')
   const modelAnswers = readdirSync(dir)
-    .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+    .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts') && f !== 'draft.ts')
     .filter((f) => /callLlm|lib\/models|from 'ai'|@ai-sdk|openai|anthropic|defineModelStep/i.test(readFileSync(path.join(dir, f), 'utf8').replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, ''))).length
 
   const report: Report = {

@@ -45,6 +45,13 @@ export const EDITABLE_FIELD: Record<string, 'text' | 'body'> = { resume: 'text',
 
 const author = (a: PanelVersion['author']) => (a === 'user' ? 'You wrote this' : 'Cello wrote this')
 
+/** The rows a tailored resume was built from, in the words the Writer stored (lib/workflows/gather/apply.ts). */
+export function builtFrom(content: Record<string, unknown>): string[] {
+  const resume = (content.content_json as { resume?: { meta?: { cello?: { context?: { label?: unknown }[] } } } } | undefined)?.resume
+  const labels = (resume?.meta?.cello?.context ?? []).map((c) => (typeof c.label === 'string' ? c.label : '')).filter(Boolean)
+  return [...new Set(labels)]
+}
+
 export interface PanelViewProps {
   thing: PanelThing
   /** Newest first, as /api/artifacts/[id] returns them. */
@@ -113,7 +120,19 @@ export function PanelView({ thing, versions, selected, onSelect, editing, onEdit
         ) : editing ? (
           <ResumeEditor key={current.version} markdown={field ? String(current.content[field] ?? '') : ''} versionLabel={`Version ${current.version}`} templateId={null} onSave={onSave} />
         ) : (
-          <Markdown content={current.content_text} />
+          <>
+            {builtFrom(current.content).length > 0 && (
+              <section aria-label="Built from" className="mb-3 rounded-control border border-border bg-card p-3 text-caption">
+                <p className="text-label uppercase tracking-wide text-muted-foreground">Built from</p>
+                <ul className="mt-1 space-y-0.5 text-foreground">
+                  {builtFrom(current.content).map((label) => (
+                    <li key={label}>{label}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            <Markdown content={current.content_text} />
+          </>
         )}
         {error && <p className="mt-2 text-caption text-destructive">{error}</p>}
       </div>

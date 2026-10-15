@@ -101,8 +101,13 @@ export function newWords(basePlain: string, text: string): string[] {
   return [...new Set((text.toLowerCase().match(/[a-z]{6,}/g) ?? []).filter((w) => !stems.has(w.slice(0, 5))))]
 }
 
-export function applyTailorPatch(base: Resume, patch: TailorPatch, job?: { title: string }): { resume: Resume; warnings: string[]; changes: string[] } {
-  const basePlain = resumeToPlainText(base)
+/**
+ * `evidence` is the person's own words outside the resume (saved answers, profile facts): a reword they support
+ * is kept. It is never the posting or the company's text, so a skill only the posting names is still dropped.
+ */
+export function applyTailorPatch(base: Resume, patch: TailorPatch, job?: { title: string }, evidence?: string): { resume: Resume; warnings: string[]; changes: string[] } {
+  const resumePlain = resumeToPlainText(base)
+  const basePlain = evidence?.trim() ? `${resumePlain}\n${evidence.trim()}` : resumePlain
   const out: Resume = structuredClone(base)
   const dropped: string[] = []
   const changes: string[] = []
@@ -114,7 +119,7 @@ export function applyTailorPatch(base: Resume, patch: TailorPatch, job?: { title
     const bad = invented(basePlain, summary)
     // Calling the person by the posting's own title ("Deployment strategist with eight years...") is a claim, not tailoring.
     const title = job?.title.trim().toLowerCase()
-    if (title && title.length > 3 && summary.toLowerCase().includes(title) && !basePlain.toLowerCase().includes(title)) bad.push(`"${job!.title}" as your own title`)
+    if (title && title.length > 3 && summary.toLowerCase().includes(title) && !resumePlain.toLowerCase().includes(title)) bad.push(`"${job!.title}" as your own title`)
     const novel = newWords(basePlain, summary)
     if (novel.length > 2) bad.push(...novel.slice(0, 4))
     if (bad.length) dropped.push(...bad)

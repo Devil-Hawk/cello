@@ -7,6 +7,7 @@
 
 import type { DecryptedApiKeys, LlmRunner, LlmRunOptions } from '@/lib/harness/types'
 import { legacyStep } from '@/lib/steps/legacy'
+import type { ModelStep } from '@/lib/steps/define'
 import { FreeCapError } from './caps'
 import { freeModels, isFreeModel } from './free'
 
@@ -23,7 +24,9 @@ const looksLikeJson = (s: string) => {
  * A runner for a declared step that tries the next free model when one throws or does not answer acceptably, and counts the
  * day's free cap once. When every free model fails the error says what each said; nothing is made up.
  */
-export function stepRunner(stepId: string, keys: DecryptedApiKeys, signal?: AbortSignal, valid?: (text: string) => boolean): LlmRunner {
+export function stepRunner(stepId: string | ModelStep, keys: DecryptedApiKeys, signal?: AbortSignal, valid?: (text: string) => boolean): LlmRunner {
+  // A declared step runs as itself; a generation name still finds its legacy step.
+  const step = typeof stepId === 'string' ? legacyStep(stepId) : stepId
   // One piece of work is one use of the day's free cap, however many calls it makes (a tailoring is score, rewrite, rescore).
   let counted = false
   return async (opts) => {
@@ -38,7 +41,7 @@ export function stepRunner(stepId: string, keys: DecryptedApiKeys, signal?: Abor
       try {
         // A free reasoning model spends its whole budget thinking and returns nothing, so thinking is off on a free rung unless the person set an effort.
         counted = true
-        const out = await legacyStep(stepId).call(model ? { ...keys, model } : keys, free ? { ...opts, reasoning: { effort: keys.roleEffort ?? 'none' } } : opts, { signal, ...(attempted ? { slots: { take: async () => true } } : {}) })
+        const out = await step.call(model ? { ...keys, model } : keys, free ? { ...opts, reasoning: { effort: keys.roleEffort ?? 'none' } } : opts, { signal, ...(attempted ? { slots: { take: async () => true } } : {}) })
         if (!out.content.trim()) throw new Error(`${out.model} returned nothing`)
         if ((opts.json || opts.jsonSchema) && !looksLikeJson(out.content)) throw new Error(`${out.model} did not answer in JSON`)
         if (valid && !valid(out.content.trim())) throw new Error(`${out.model} did not follow the instructions`)

@@ -9,6 +9,11 @@
 //                under Hands-off) and is then attached to the application: applications.resume_artifact_id, the
 //                document the extension is handed (lib/fill/session.ts) and the one the send check reads
 //
+// Two steps are added only when a form asks for them, by the step that learns it (read_form), and the thread says
+// what changed and why (acceptance P3):
+//   draft_answers  Cello's drafts of the open long questions, for the person to check (the `answer.draft` step)
+//   cover_letter   the Writer's letter, which waits for approval exactly as the tailored resume does
+//
 // No preparation for interviews: Cello does not do that.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -19,8 +24,12 @@ import type { NeedsReason } from '@/lib/pipeline/types'
 import { createHash } from 'node:crypto'
 import { reasonOf } from '@/lib/models/caps'
 import { readPipelineSettings } from '@/lib/pipeline/settings'
-import { getLatestVersion } from '@/lib/resume/store'
+import { getBaseResume, getLatestVersion } from '@/lib/resume/store'
+import { listArtifacts, getArtifact } from '@/lib/agents/artifacts'
 import { currentResume } from './documents'
+
+/** The steps a step may add, and why, in the words the thread shows. */
+export type AddedStep = { step: 'draft_answers' | 'cover_letter'; why: string }
 
 export interface StepApp {
   id: string
@@ -45,10 +54,14 @@ export interface StepCtx {
   fetchForm: (url: string) => Promise<unknown>
   /** Writes the tailored resume for this role (the Writer), or says why it could not. Tests pass their own. */
   tailorResume?: (app: StepApp) => Promise<{ artifact_id: string; version: number } | { error: string } | null>
+  /** Writes the cover letter for this role (the Writer), or says why it could not. Tests pass their own. */
+  writeCoverLetter?: (app: StepApp) => Promise<{ artifact_id: string; version: number } | { error: string } | null>
+  /** Drafts one open answer (lib/answers/draft.ts). Tests pass their own. */
+  draftAnswer?: (app: StepApp, q: { answerId: string; question: string }) => Promise<{ ok: boolean; reason?: string }>
 }
 
 export type StepOutcome =
-  | { kind: 'continue'; line: string; payload?: Record<string, unknown> }
+  | { kind: 'continue'; line: string; payload?: Record<string, unknown>; add?: AddedStep[] }
   | { kind: 'wait'; reason: NeedsReason; detail?: Record<string, unknown>; line: string }
   | { kind: 'close'; closedReason: 'posting_closed'; line: string }
 
@@ -72,6 +85,12 @@ interface GhQuestion {
   fields?: { name?: string | null; type?: string | null; values?: { label?: string | null; value?: string | number | null }[] | null }[] | null
 }
 
+/** The documents a Greenhouse form asks for as files: a required cover letter adds the step that writes one. */
+export function readGreenhouseFiles(payload: unknown): { label: string; required: boolean }[] {
+  const qs = ((payload as { questions?: GhQuestion[] } | null)?.questions ?? []).filter((q) => q && typeof q.label === 'string')
+  return qs.filter((q) => q.fields?.[0]?.type === 'input_file').map((q) => ({ label: q.label as string, required: q.required === true }))
+}
+
 /** The questions of a Greenhouse `?questions=true` payload as form fields: one per question, its options kept. */
 export function readGreenhouseFields(payload: unknown): FormField[] {
   const qs = ((payload as { questions?: GhQuestion[] } | null)?.questions ?? []).filter((q) => q && typeof q.label === 'string')
@@ -81,7 +100,7 @@ export function readGreenhouseFields(payload: unknown): FormField[] {
     if (!f?.name) continue
     const options = (f.values ?? []).map((v) => String(v.label ?? '')).filter(Boolean)
     const type = f.type ?? 'input_text'
-    if (type === 'input_file') continue // the documents are not questions
+    if (type === 'input_file') continue // the documents are not questions (readGreenhouseFiles lists them)
     out.push({
       id: f.name,
       label: q.label as string,
@@ -97,7 +116,7 @@ export const checkOpen: Step = {
   id: 'check_open',
   doing: 'Checking the posting is still open',
   async run({ job }) {
-    if (job.closed_at || job.still_open === false) return { kind: 'close', closedReason: 'posting_closed', line: 'The posting is closed.' }
+    if (job.closed_at || job.still_open === false) return { kind: 'close', closedReason: 'posting_closed', line: 'The posting is closed. Dropped the remaining steps.' }
     return { kind: 'continue', line: 'The posting is open.' }
   },
 }
@@ -124,18 +143,60 @@ export const readForm: Step = {
     const target = detectApplyTarget(job.url)
     if (!target || target.provider !== 'greenhouse' || !target.jobId) return { kind: 'continue', line: 'Cello will read this form when you open it.' }
     let fields: FormField[]
+    let files: { label: string; required: boolean }[]
     try {
       const host = target.host.includes('.eu.') ? 'boards-api.eu.greenhouse.io' : 'boards-api.greenhouse.io'
-      fields = readGreenhouseFields(await fetchForm(`https://${host}/v1/boards/${target.slug}/jobs/${target.jobId}?questions=true`))
+      const payload = await fetchForm(`https://${host}/v1/boards/${target.slug}/jobs/${target.jobId}?questions=true`)
+      fields = readGreenhouseFields(payload)
+      files = readGreenhouseFiles(payload)
     } catch {
       return { kind: 'continue', line: 'Cello could not read this form ahead of time. It will read it when you open it.' }
     }
     await admin.from('applications').update({ form_fields: fields }).eq('id', app.id).eq('user_id', app.user_id)
     const { open } = await resolveFieldValues(admin, app.user_id, fields, { companyId: job.company_id, companyName: job.companyName, applicationId: app.id })
-    if (open.length > 0) {
+    // What the form asks for that the plan did not have: the steps are added here, and the thread says why.
+    const add: AddedStep[] = []
+    const long = open.filter((o) => fields.find((f) => f.id === o.fieldId)?.kind === 'long_text')
+    if (long.length > 0) add.push({ step: 'draft_answers', why: `The form asks ${long.length} ${long.length === 1 ? 'question' : 'questions'} you have not answered.` })
+    if (files.some((f) => f.required && /cover letter/i.test(f.label))) add.push({ step: 'cover_letter', why: 'The form asks for a cover letter.' })
+    if (open.length > 0 && long.length === 0) {
       return { kind: 'wait', reason: 'answer', detail: { answer_ids: [...new Set(open.map((o) => o.answerId))], questions: open.map((o) => o.question).slice(0, 10) }, line: `${open.length} ${open.length === 1 ? 'question needs' : 'questions need'} your answer.` }
     }
-    return { kind: 'continue', line: `Read ${fields.length} questions; every required one has an answer.` }
+    const line = open.length > 0 ? `Read ${fields.length} questions; ${open.length} ${open.length === 1 ? 'needs' : 'need'} your answer.` : `Read ${fields.length} questions; every required one has an answer.`
+    return { kind: 'continue', line, ...(add.length ? { add } : {}) }
+  },
+}
+
+/** Cello's draft of each open long question, then the stop for the person: every open row, drafted or not. */
+async function draftOpenAnswer(admin: SupabaseClient, app: StepApp, q: { answerId: string; question: string }): Promise<{ ok: boolean; reason?: string }> {
+  const { draftAnswer } = await import('@/lib/answers/draft')
+  const { gatherApplyContext } = await import('@/lib/workflows/gather/apply')
+  const context = await gatherApplyContext(admin as never, app.user_id, app.job_id)
+  const base = await getBaseResume(admin, app.user_id).catch(() => null)
+  const out = await draftAnswer(admin, app.user_id, { question: q.question, answerId: q.answerId, context, resume: base ? { id: base.id, text: base.content } : null, applicationId: app.id })
+  return out.ok ? { ok: true } : { ok: false, reason: out.reason }
+}
+
+export const draftAnswers: Step = {
+  id: 'draft_answers',
+  doing: 'Drafting answers for you to check',
+  async run({ admin, app, job, draftAnswer }) {
+    const { data } = await admin.from('applications').select('form_fields').eq('id', app.id).eq('user_id', app.user_id).maybeSingle()
+    const fields = ((data as { form_fields: FormField[] | null } | null)?.form_fields ?? []) as FormField[]
+    const { open } = await resolveFieldValues(admin, app.user_id, fields, { companyId: job.company_id, companyName: job.companyName, applicationId: app.id })
+    if (open.length === 0) return { kind: 'continue', line: 'Every question has an answer.' }
+    const long = open.filter((o) => fields.find((f) => f.id === o.fieldId)?.kind === 'long_text')
+    let drafted = 0
+    let reason: string | null = null
+    for (const q of long) {
+      const r = await (draftAnswer ?? ((a, qq) => draftOpenAnswer(admin, a, qq)))(app, q).catch((e: unknown) => ({ ok: false, reason: reasonOf(e) ?? undefined }))
+      if (r.ok) drafted++
+      else reason ??= r.reason ?? null
+    }
+    const detail = { answer_ids: [...new Set(open.map((o) => o.answerId))], questions: open.map((o) => o.question).slice(0, 10), drafted }
+    if (drafted > 0) return { kind: 'wait', reason: 'answer', detail, line: `Drafted ${drafted} ${drafted === 1 ? 'answer' : 'answers'} for you to check. Cello never sends an answer you did not give.` }
+    const why = reason ? ` Cello could not draft them (${reason.replace(/\.$/, '')}).` : ''
+    return { kind: 'wait', reason: 'answer', detail, line: `${open.length} ${open.length === 1 ? 'question needs' : 'questions need'} your answer.${why}` }
   },
 }
 
@@ -163,6 +224,22 @@ async function writeTailored(admin: SupabaseClient, app: StepApp): Promise<{ art
   )
   if (out.artifact_id && out.version && out.status !== 'failed') return { artifact_id: out.artifact_id, version: out.version }
   console.warn('advance: the Writer could not tailor the resume:', out.error, out.fix)
+  return { error: out.error ?? 'no reason was given' }
+}
+
+/** The Writer's cover letter for this role, on the person's keys, with the whole context; its own reason when it could not write. */
+async function writeLetter(admin: SupabaseClient, app: StepApp): Promise<{ artifact_id: string; version: number } | { error: string }> {
+  const { loadApiKeys } = await import('@/lib/harness/keys')
+  const { runWriter } = await import('@/lib/workflows/writer')
+  const { newDeadline } = await import('@/lib/agents/context')
+  const { roleKeys } = await import('@/lib/models/choice')
+  const apiKeys = await roleKeys(admin as never, app.user_id, await loadApiKeys(admin as never, app.user_id), 'worker')
+  const out = await runWriter(
+    { ctx: { admin: admin as never, userId: app.user_id, userEmail: '', apiKeys, isDemo: apiKeys.isDemo !== false, threadId: '', conversationId: null, autonomy: 'ask', traceId: '', deadlineAt: newDeadline() } },
+    { type: 'cover_letter', job_id: app.job_id, idempotency_key: `cover_letter:${app.id}` }
+  )
+  if (out.artifact_id && out.version && out.status !== 'failed') return { artifact_id: out.artifact_id, version: out.version }
+  console.warn('advance: the Writer could not write the cover letter:', out.error, out.fix)
   return { error: out.error ?? 'no reason was given' }
 }
 
@@ -222,5 +299,32 @@ export const tailor: Step = {
   },
 }
 
-/** Preparing to Ready, in this order. */
+export const coverLetter: Step = {
+  id: 'cover_letter',
+  doing: 'Writing the cover letter',
+  async run({ admin, app, writeCoverLetter }) {
+    // Written once for this application, then only read: the person approves exactly this text.
+    const current = async () => {
+      const [a] = await listArtifacts(admin as never, app.user_id, { type: 'cover_letter', jobId: app.job_id, limit: 1 })
+      const got = a ? await getArtifact(admin as never, app.user_id, a.id) : null
+      return got ? { artifact_id: got.artifact.id, version: got.version.version, text: got.version.content_text } : null
+    }
+    let doc = await current()
+    if (!doc) {
+      const made = await (writeCoverLetter ?? ((a) => writeLetter(admin, a)))(app).catch((e: unknown) => ({ error: reasonOf(e) ?? '' }))
+      const why = made && 'error' in made ? made.error.replace(/^The draft could not be written: /, '').replace(/\.$/, '') : null
+      doc = made && !('error' in made) ? await current() : null
+      if (!doc) return { kind: 'continue', line: why ? `Cello could not write the cover letter (${why}). Write one yourself if the form needs it.` : 'Cello could not write the cover letter. Write one yourself if the form needs it.' }
+    }
+    const hash = createHash('sha256').update(doc.text).digest('hex').slice(0, 32)
+    const detail = { artifact_id: doc.artifact_id, version: doc.version, hash, what: 'cover_letter' }
+    const { data } = await admin.from('pipeline_events').select('id').eq('application_id', app.id).eq('user_id', app.user_id).eq('kind', 'approval.decided').contains('payload', { hash }).limit(1)
+    if (data && data.length > 0) return { kind: 'continue', line: `You approved version ${doc.version} of the cover letter.`, payload: detail }
+    if (await skipsResumeReview(admin, app)) return { kind: 'continue', line: `Hands-off: version ${doc.version} of the cover letter goes with it, without asking you.`, payload: detail }
+    return { kind: 'wait', reason: 'approve_resume', detail, line: 'Needs you: approve the cover letter.' }
+  },
+}
+
+/** Preparing to Ready, in this order. A step a form asks for is inserted after the step that added it (lib/advance/index.ts). */
 export const STEPS: readonly Step[] = [checkOpen, dedupe, readForm, resume, tailor]
+export const ADDED_STEPS: Record<AddedStep['step'], Step> = { draft_answers: draftAnswers, cover_letter: coverLetter }

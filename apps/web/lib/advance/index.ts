@@ -6,13 +6,17 @@
 //
 // A step either carries on, or moves the application to the one thing it waits on: the person (an
 // answer, an approval, "Already applied?") or the clock (a rate limit: a minute, or tomorrow).
+//
+// The step list is not fixed: a step that learns the form asks for something (answers to draft, a cover letter)
+// adds a step after itself, and the addition is its own step.finished event (payload.changed = 'added') whose
+// sentence the thread shows: what changed and why. A retry reads those events back, so it walks the same list.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { eligibility } from '@/lib/fill/eligibility'
 import { DOORS } from '@/lib/pipeline/actors'
 import { autoSendReason, note, transition, type EventBody, type MoveResult } from '@/lib/pipeline/transition'
 import { rateLimitOf, sumCost, waitAfter, type CostRow } from './cost'
-import { STEPS, defaultFetchForm, startedHandsOff, type Step, type StepCtx } from './steps'
+import { ADDED_STEPS, STEPS, defaultFetchForm, startedHandsOff, type AddedStep, type Step, type StepCtx } from './steps'
 
 const LEASE_MS = 5 * 60_000
 /** The slice is 240 seconds; start no new step after this. */
@@ -24,6 +28,26 @@ export interface AdvanceOptions {
   steps?: readonly Step[]
   fetchForm?: StepCtx['fetchForm']
   tailorResume?: StepCtx['tailorResume']
+  writeCoverLetter?: StepCtx['writeCoverLetter']
+  draftAnswer?: StepCtx['draftAnswer']
+}
+
+/** The plan's steps plus the ones added so far, each after the step that added it. */
+export function withAdded(steps: readonly Step[], added: readonly { after: string; step: AddedStep['step'] }[]): Step[] {
+  const out = [...steps]
+  for (const a of added) {
+    const step = ADDED_STEPS[a.step]
+    if (!step || out.some((s) => s.id === step.id)) continue
+    const at = out.findIndex((s) => s.id === a.after)
+    out.splice(at < 0 ? out.length : at + 1, 0, step)
+  }
+  return out
+}
+
+/** One line for the thread: what was added and why. */
+export function addedLine(a: AddedStep, count?: number): string {
+  const what = a.step === 'cover_letter' ? 'write a cover letter' : `draft ${count ?? ''}${count ? ' ' : ''}${count === 1 ? 'answer' : 'answers'}`
+  return `Added a step: ${what}. ${a.why}`
 }
 
 interface Row {
@@ -88,11 +112,18 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
     job: { url: app.jobs.url, title: app.jobs.title, company_id: app.jobs.company_id, closed_at: app.jobs.closed_at, still_open: app.jobs.still_open, companyName: app.jobs.companies?.name ?? null },
     fetchForm: opts.fetchForm ?? defaultFetchForm,
     tailorResume: opts.tailorResume,
+    writeCoverLetter: opts.writeCoverLetter,
+    draftAnswer: opts.draftAnswer,
   }
   const key = (step: string) => `step:${app.id}:${step}:${app.attempt}`
 
   try {
-    for (const step of opts.steps ?? STEPS) {
+    // The steps added before (this attempt or an earlier one), read back from their own events.
+    const { data: addedRows } = await admin.from('pipeline_events').select('payload').eq('application_id', app.id).eq('user_id', app.user_id).eq('kind', 'step.finished').contains('payload', { changed: 'added' }).order('created_at', { ascending: true }).limit(20)
+    const added = ((addedRows as { payload: { step?: string; after?: string } | null }[] | null) ?? []).flatMap((r) => (r.payload?.step && r.payload.step in ADDED_STEPS && typeof r.payload.after === 'string' ? [{ after: r.payload.after, step: r.payload.step as AddedStep['step'] }] : []))
+    const steps = withAdded(opts.steps ?? STEPS, added)
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i]
       const done = `${key(step.id)}:done`
       // a step that finished before is not run again: its event is its saved result
       const { data: had } = await admin.from('pipeline_events').select('id').eq('user_id', app.user_id).eq('idempotency_key', done).maybeSingle()
@@ -116,6 +147,13 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
         return r
       }
       await transition(admin, { applicationId: app.id, from: ['preparing'], to: 'preparing', step: step.doing, event: base('step.finished', done, out.line, { step: step.id, durationMs: ms, payload: out.payload }) })
+      // A step the form asks for: one event each, in the thread, and it runs next.
+      for (const a of out.add ?? []) {
+        if (steps.some((s) => s.id === a.step)) continue
+        const count = a.step === 'draft_answers' ? Number(/\d+/.exec(a.why)?.[0]) || undefined : undefined
+        await note(admin, app.user_id, app.id, base('step.finished', `${key(step.id)}:added:${a.step}`, addedLine(a, count), { step: step.id, payload: { changed: 'added', step: a.step, after: step.id, why: a.why } }))
+        steps.splice(i + 1, 0, ADDED_STEPS[a.step])
+      }
     }
     const r = await transition(admin, { applicationId: app.id, from: ['preparing'], to: 'ready', step: 'Ready to send', event: base('step.finished', `ready:${app.id}:${app.attempt}`, 'Everything is prepared. It is ready for you to send.', { step: 'ready' }) })
     // Started in Hands-off: one more line says whether Send for me may take it, in SQL's words (its switch, caps and
