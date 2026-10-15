@@ -8,7 +8,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { unsupported } from '@/lib/chat/answer'
 import { loadApiKeys } from '@/lib/harness/keys'
 import { roleKeys } from '@/lib/models/choice'
+import { stepRunner } from '@/lib/models/ask'
 import { reasonOf } from '@/lib/models/caps'
+import type { StepResult } from '@/lib/steps'
 import { findInventedFacts } from '@/lib/resume/import/llm'
 import { answersDraftStep } from '@/lib/steps'
 import type { Evidence } from '@/lib/provenance/types'
@@ -67,7 +69,9 @@ export async function draftAnswer(admin: SupabaseClient, userId: string, input: 
   let prov: { step: string; model: string; rung: string; at: string }
   try {
     const keys = await roleKeys(admin as never, userId, await loadApiKeys(admin as never, userId), 'worker')
-    const res = await answersDraftStep.call(keys, { system: SYSTEM, prompt, maxTokens: 700, temperature: 0.3, name: 'answers.draft' })
+    // Through the free rotation: a free model that writes nothing or thinks aloud is followed by the next free one.
+    const run = stepRunner(answersDraftStep, keys, undefined, (t) => t.length >= 40 && !/^\s*[{[<]/.test(t))
+    const res = (await run({ system: SYSTEM, prompt, maxTokens: 900, temperature: 0.3, name: 'answers.draft' })) as StepResult
     text = res.content.trim().replace(/^["“]|["”]$/g, '').slice(0, MAX_ANSWER)
     prov = res.prov
   } catch (e) {
