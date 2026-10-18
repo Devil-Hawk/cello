@@ -45,10 +45,11 @@ export const EDITABLE_FIELD: Record<string, 'text' | 'body'> = { resume: 'text',
 
 const author = (a: PanelVersion['author']) => (a === 'user' ? 'You wrote this' : 'Cello wrote this')
 
-/** The rows a tailored resume was built from, in the words the Writer stored (lib/workflows/gather/apply.ts). */
+/** The stored rows a tailored resume or cover letter was built from, in the Writer's words. */
 export function builtFrom(content: Record<string, unknown>): string[] {
   const resume = (content.content_json as { resume?: { meta?: { cello?: { context?: { label?: unknown }[] } } } } | undefined)?.resume
-  const labels = (resume?.meta?.cello?.context ?? []).map((c) => (typeof c.label === 'string' ? c.label : '')).filter(Boolean)
+  const direct = Array.isArray(content.context) ? (content.context as { label?: unknown }[]) : []
+  const labels = [...(resume?.meta?.cello?.context ?? []), ...direct].map((c) => (typeof c.label === 'string' ? c.label : '')).filter(Boolean)
   return [...new Set(labels)]
 }
 

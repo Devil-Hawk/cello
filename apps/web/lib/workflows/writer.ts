@@ -28,7 +28,7 @@ import { loadOwnedJob, loadResume, makeRunner } from '@/lib/harness/copilot-tool
 import { createResumeVersion } from '@/lib/resume/store'
 import type { Resume } from '@/lib/resume/schema'
 import { gatherSources } from './gather'
-import { gatherApplyContext, personEvidence, renderContext, sourcesUsed, type ApplyContext } from './gather/apply'
+import { gatherApplyContext, personEvidence, renderContext, sourcesUsed, type ApplyContext, type ContextSource } from './gather/apply'
 import { loadOutreachSources } from '@/lib/outreach/sources'
 import { canRunLlm, missingOpenRouterMessage } from '@/lib/harness/llm-key-message'
 import { frameJobText } from '@/lib/security/job-text'
@@ -91,10 +91,19 @@ interface Facts {
   style: string
   /** For a role: the whole context of the application (requirements, fit, company, history, answers, profile). */
   context: ApplyContext | null
+  /** The exact base-resume version used as evidence. */
+  baseResume: { id: string; version: number } | null
 }
 
 /** The resume plus the person's own words outside it: what a claim in a draft may rest on. */
 const ownWords = (facts: Facts): string => (facts.context ? `${facts.resumeText}\n\n${personEvidence(facts.context)}`.trim() : facts.resumeText)
+
+/** The stored rows a role document read, including the exact base-resume version used as evidence. */
+const builtFrom = (facts: Facts, text: string): ContextSource[] => {
+  const used = facts.context ? sourcesUsed(facts.context, text) : []
+  if (facts.baseResume) used.unshift({ table: 'artifact_versions', id: facts.baseResume.id, label: `Your base resume, version ${facts.baseResume.version}` })
+  return used
+}
 
 interface Draft {
   /** The body that is reviewed and saved. */
@@ -242,7 +251,7 @@ export function buildWriterGraph(deps: WriterDeps) {
     const userName = String((profile?.full_name as string | null) ?? '').trim() || gathered.userName || ctx.userEmail.split('@')[0] || 'Me'
     // A resume or a letter for a role reads the whole context; a message keeps loadOutreachSources.
     const context = job && (type === 'resume' || type === 'cover_letter') ? await gatherApplyContext(ctx.admin, ctx.userId, job.id).catch(() => null) : null
-    return { facts: { resumeText, userName, job, contact, previous, style: gathered.style, context }, brief: { ...brief, type } }
+    return { facts: { resumeText, userName, job, contact, previous, style: gathered.style, context, baseResume: gathered.baseResume }, brief: { ...brief, type } }
   }
 
   // --- draft (a model, through the existing module for this document) ------------------
@@ -275,8 +284,9 @@ export function buildWriterGraph(deps: WriterDeps) {
           signal: ctx.signal,
           ...(facts.context ? { context: { block: renderContext(facts.context), evidence: personEvidence(facts.context) } } : {}),
         })
-        // What it was built from, in plain words: the rows whose words the kept lines use, and what steered them.
-        if (facts.context) out.resume.meta.cello.context = sourcesUsed(facts.context, out.suggestedRewrite)
+        // What it was built from, in plain words: the exact base version, rows whose words remain and what steered them.
+        const sources = builtFrom(facts, out.suggestedRewrite)
+        if (sources.length) out.resume.meta.cello.context = sources
         return {
           attempts,
           draft: {
@@ -309,7 +319,7 @@ export function buildWriterGraph(deps: WriterDeps) {
           attempts,
           draft: {
             text: out.coverLetter,
-            content: { text: out.coverLetter, keywords: out.keywords, resume_summary: out.resumeSummary },
+            content: { text: out.coverLetter, keywords: out.keywords, resume_summary: out.resumeSummary, context: builtFrom(facts, out.coverLetter) },
             title: `Cover letter for ${job!.title ?? 'a role'} at ${company}`,
             artifactType: 'cover_letter' as const,
           },

@@ -21,6 +21,14 @@ export type ArtifactAuthor = 'user' | 'cello'
 // --- content shapes -----------------------------------------------------------------
 
 const text = z.string().max(60_000)
+const contextSource = z.object({
+  table: z.string().max(100),
+  id: z.string().max(200),
+  label: z.string().max(300),
+  quote: z.string().max(4000).optional(),
+  url: z.string().max(4000).optional(),
+  at: z.string().max(100).optional(),
+})
 
 export const ShortlistItemSchema = z.object({
   job_id: z.string(),
@@ -50,6 +58,8 @@ export const ArtifactContentSchemas = {
     text,
     keywords: z.array(z.string()).max(40).optional(),
     resume_summary: z.string().max(2000).optional(),
+    /** Stored rows the Writer used, rendered as "Built from" beside the letter. */
+    context: z.array(contextSource).max(500).optional(),
   }),
   /** Drafted answers for an application form. */
   answers: z.object({ answers: z.unknown() }),

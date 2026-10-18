@@ -60,14 +60,29 @@ describe('Built from', () => {
     const tailored: PanelVersion = {
       version: 1,
       author: 'cello',
-      content: { text: 'Riley Marsh', content_json: { resume: { meta: { cello: { context: [{ table: 'answer_bank', id: 'a1', label: 'Your answer to "Why this company?"' }, { table: 'jobs', id: 'j1', label: "The posting's requirements, 4 quoted" }] } } } } },
+      content: { text: 'Riley Marsh', content_json: { resume: { meta: { cello: { context: [{ table: 'artifact_versions', id: 'v3', label: 'Your base resume, version 3' }, { table: 'answer_bank', id: 'a1', label: 'Your answer to "Why this company?"' }, { table: 'jobs', id: 'j1', label: "The posting's requirements, 4 quoted" }] } } } } },
       content_text: 'Riley Marsh',
       created_at: '2026-10-05T09:00:00Z',
     }
     const out = html({ thing: { id: 'r1', type: 'resume', title: 'Resume for Engineer' }, versions: [tailored], selected: 1 })
     expect(out).toContain('Built from')
+    expect(out).toContain('Your base resume, version 3')
     expect(out).toContain('Your answer to &quot;Why this company?&quot;')
     expect(out).toContain('The posting&#x27;s requirements, 4 quoted')
     expect(html()).not.toContain('Built from')
+  })
+
+  it('shows the same provenance stored directly on a cover letter version', () => {
+    const letter: PanelVersion = {
+      version: 1,
+      author: 'cello',
+      content: { text: 'Dear team', context: [{ table: 'artifact_versions', id: 'v3', label: 'Your base resume, version 3' }, { table: 'jobs', id: 'j1', label: "The posting's requirements, 16 quoted" }] },
+      content_text: 'Dear team',
+      created_at: '2026-10-05T09:00:00Z',
+    }
+    const out = html({ versions: [letter], selected: 1 })
+    expect(out).toContain('Built from')
+    expect(out).toContain('Your base resume, version 3')
+    expect(out).toContain('The posting&#x27;s requirements, 16 quoted')
   })
 })
