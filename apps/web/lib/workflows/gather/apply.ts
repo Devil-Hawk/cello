@@ -8,7 +8,6 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { quoteUntrusted } from '@/lib/agents/middleware'
-import { workFacts } from '@/lib/answers'
 import { buildApplyProfile } from '@/lib/ats-apply'
 import { companyFacts } from '@/lib/dossier/facts'
 import { getDossierByCompany } from '@/lib/dossier/store'
@@ -29,8 +28,11 @@ export interface ContextSource {
 }
 
 export interface ContextItem {
+  /** Display text for the context block. */
   text: string
   source: ContextSource
+  /** Person-owned words only. Employer text and question labels never enter claim evidence. */
+  evidence?: string
 }
 
 export interface ApplyContext {
@@ -46,13 +48,16 @@ export interface ApplyContext {
   answers: ContextItem[]
   /** Facts the person put on their profile. */
   profile: ContextItem[]
+  /** Rows not loaded because prompt consumers accept 6–7k context characters. Rendered, never hidden. */
+  omitted?: { roles?: number; applications?: number; contacts?: number }
 }
 
 const EMPTY: ApplyContext = { requirements: [], fit: [], company: [], history: [], answers: [], profile: [] }
 
-const MAX_REQUIREMENTS = 12
-const MAX_ANSWERS = 12
-const MAX_CONTACTS = 3
+// Prompt consumers cap this block at 6–7k characters. Bound database reads before rendering and say what was left out.
+const MAX_HISTORY_ROWS = 100
+// gatherNetwork can add eight memories per contact, plus the contact itself.
+const MAX_CONTACTS = Math.floor(MAX_HISTORY_ROWS / 9)
 
 const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : null)
 
@@ -65,7 +70,7 @@ export async function gatherApplyContext(admin: AdminClient, userId: string, job
   const companyId = r.viewer_company_id
   const companyName = r.viewer_company_name ?? 'the company'
 
-  const requirements: ContextItem[] = (r.requirements?.items ?? []).slice(0, MAX_REQUIREMENTS).map((i) => ({
+  const requirements: ContextItem[] = (r.requirements?.items ?? []).map((i) => ({
     text: `${i.kind === 'must' ? 'Must' : i.kind === 'nice' ? 'Nice to have' : 'Also'}: ${i.text}`,
     source: { table: 'jobs', id: jobId, quote: i.quote, label: `The posting's requirements` },
   }))
@@ -88,43 +93,66 @@ export async function gatherApplyContext(admin: AdminClient, userId: string, job
   }
 
   const history: ContextItem[] = []
+  const omitted: NonNullable<ApplyContext['omitted']> = {}
   if (companyId) {
-    const { data: roles } = await db.from('person_jobs').select('id, title').eq('viewer_id', userId).eq('viewer_company_id', companyId).neq('id', jobId).limit(50)
-    const titles = new Map(((roles as { id: string; title: string | null }[] | null) ?? []).map((j) => [j.id, j.title]))
+    const { data: roles, count: roleCount } = await db.from('person_jobs').select('id, title', { count: 'exact' }).eq('viewer_id', userId).eq('viewer_company_id', companyId).neq('id', jobId).limit(MAX_HISTORY_ROWS)
+    const roleRows = (roles as { id: string; title: string | null }[] | null) ?? []
+    if ((roleCount ?? roleRows.length) > roleRows.length) omitted.roles = (roleCount ?? roleRows.length) - roleRows.length
+    const titles = new Map(roleRows.map((j) => [j.id, j.title]))
     if (titles.size) {
-      const { data: apps } = await db.from('applications').select('id, job_id, state, stage, applied_at, created_at').eq('user_id', userId).in('job_id', [...titles.keys()]).order('created_at', { ascending: false }).limit(5)
-      for (const a of (apps as { id: string; job_id: string; state: string | null; stage: string; applied_at: string | null; created_at: string }[] | null) ?? []) {
+      const { data: apps, count: applicationCount } = await db.from('applications').select('id, job_id, state, stage, applied_at, created_at', { count: 'exact' }).eq('user_id', userId).in('job_id', [...titles.keys()]).order('created_at', { ascending: false }).limit(MAX_HISTORY_ROWS)
+      const appRows = (apps as { id: string; job_id: string; state: string | null; stage: string; applied_at: string | null; created_at: string }[] | null) ?? []
+      if ((applicationCount ?? appRows.length) > appRows.length) omitted.applications = (applicationCount ?? appRows.length) - appRows.length
+      for (const a of appRows) {
         const when = day(a.applied_at ?? a.created_at)
         history.push({ text: `You applied for ${titles.get(a.job_id) ?? 'a role'} at ${companyName}${when ? ` on ${when}` : ''}; it is ${(a.state ?? a.stage).replace(/_/g, ' ')}.`, source: { table: 'applications', id: a.id, at: a.applied_at ?? a.created_at, label: `Your earlier application at ${companyName}` } })
       }
     }
-    const { data: people } = await db.from('contacts').select('id, name, title').eq('user_id', userId).eq('company_id', companyId).limit(MAX_CONTACTS)
-    for (const c of (people as { id: string; name: string | null; title: string | null }[] | null) ?? []) {
+    const { data: people, count: contactCount } = await db.from('contacts').select('id, name, title', { count: 'exact' }).eq('user_id', userId).eq('company_id', companyId).limit(MAX_CONTACTS)
+    const contactRows = (people as { id: string; name: string | null; title: string | null }[] | null) ?? []
+    if ((contactCount ?? contactRows.length) > contactRows.length) omitted.contacts = (contactCount ?? contactRows.length) - contactRows.length
+    for (const c of contactRows) {
       if (c.name) history.push({ text: `You know ${c.name}${c.title ? `, ${c.title},` : ''} at ${companyName}.`, source: { table: 'contacts', id: c.id, label: `Your contact ${c.name}` } })
       for (const m of await gatherNetwork(userId, c.id)) history.push({ text: `${c.name ?? 'A contact'}: ${m.text}`, source: { table: 'contacts', id: c.id, quote: m.source, label: `What you know about ${c.name ?? 'a contact'}` } })
     }
   }
 
-  const answers: ContextItem[] = (await savedAnswers(userId).catch(() => [])).slice(0, MAX_ANSWERS).map((a) => ({
+  const answers: ContextItem[] = (await savedAnswers(userId).catch(() => [])).map((a) => ({
     text: `${a.question}\n${a.answer}`,
+    evidence: a.answer,
     source: { table: 'answer_bank', id: a.id, quote: a.answer, at: a.updated_at, label: `Your answer to "${a.question.replace(/\s+/g, ' ').trim().slice(0, 60)}"` },
   }))
 
   const profile: ContextItem[] = []
   const { data: profileRow } = await db.from('profiles').select('full_name, email, preferences').eq('id', userId).maybeSingle()
+  const { data: factRows } = await db
+    .from('answer_bank')
+    .select('id, question_key, answer')
+    .eq('user_id', userId)
+    .eq('source', 'profile')
+    .eq('origin', 'person')
+    .in('question_key', ['fact:work_authorized', 'fact:needs_sponsorship'])
+  const factsByKey = new Map(((factRows as { id: string; question_key: string; answer: unknown }[] | null) ?? []).map((f) => [f.question_key, f]))
   if (profileRow) {
     const p = buildApplyProfile(profileRow as Parameters<typeof buildApplyProfile>[0])
-    const facts = await workFacts(db, userId).catch(() => ({ authorized: null, needsSponsorship: null }))
-    const lines = [
-      p.fullName && `Name: ${p.fullName}`,
-      p.location && `Location: ${p.location}`,
-      facts.authorized === true ? 'Authorised to work where the role is' : facts.authorized === false ? 'Not authorised to work where the role is' : null,
-      facts.needsSponsorship === true ? 'Needs visa sponsorship' : facts.needsSponsorship === false ? 'Does not need visa sponsorship' : null,
-    ].filter((l): l is string => Boolean(l))
-    for (const text of lines) profile.push({ text, source: { table: 'profiles', id: userId, label: 'Your profile' } })
+    const authorized = factsByKey.get('fact:work_authorized')
+    const sponsorship = factsByKey.get('fact:needs_sponsorship')
+    const lines: { text: string; fact?: { id: string } }[] = [
+      ...(p.fullName ? [{ text: `Name: ${p.fullName}` }] : []),
+      ...(p.location ? [{ text: `Location: ${p.location}` }] : []),
+      ...(typeof authorized?.answer === 'boolean' ? [{ text: authorized.answer ? 'Authorised to work where the role is' : 'Not authorised to work where the role is', fact: authorized }] : []),
+      ...(typeof sponsorship?.answer === 'boolean' ? [{ text: sponsorship.answer ? 'Needs visa sponsorship' : 'Does not need visa sponsorship', fact: sponsorship }] : []),
+    ]
+    for (const line of lines) {
+      profile.push({
+        text: line.text,
+        evidence: line.text,
+        source: line.fact ? { table: 'answer_bank', id: line.fact.id, label: 'Your saved work authorisation answer' } : { table: 'profiles', id: userId, label: 'Your profile' },
+      })
+    }
   }
 
-  return { requirements, fit, company, history, answers, profile }
+  return { requirements, fit, company, history, answers, profile, ...(Object.keys(omitted).length ? { omitted } : {}) }
 }
 
 /** Every item, numbered, for the sources list a prompt or a document cites. */
@@ -149,12 +177,20 @@ export function renderContext(ctx: ApplyContext): string {
   block('History with this employer', ctx.history, true)
   block("The person's saved answers (their own words)", ctx.answers, false)
   block("The person's profile facts", ctx.profile, false)
+  if (ctx.omitted) {
+    const lines = [
+      ctx.omitted.roles ? `${ctx.omitted.roles} more roles at this employer and their application history` : null,
+      ctx.omitted.applications ? `${ctx.omitted.applications} earlier applications` : null,
+      ctx.omitted.contacts ? `${ctx.omitted.contacts} more contacts` : null,
+    ].filter((line): line is string => Boolean(line))
+    if (lines.length) parts.push(`Left out to keep this bounded:\n${lines.map((line) => `- ${line}`).join('\n')}`)
+  }
   return parts.join('\n\n')
 }
 
-/** The person's own words only: what a claim about the person may rest on. Never employer text. */
+/** The person's own words only: what a claim about the person may rest on. Never employer text or question labels. */
 export function personEvidence(ctx: ApplyContext): string {
-  return [...ctx.answers, ...ctx.profile].map((i) => i.text).join('\n')
+  return [...ctx.answers, ...ctx.profile].map((i) => i.evidence ?? i.text).join('\n')
 }
 
 const STOP = new Set('with that this from your will have they their about into more also been were what such than them these those which while where when over only other must including across years year the and for are you our'.split(' '))
@@ -176,7 +212,7 @@ export function sharesWords(source: string, text: string): boolean {
 export function sourcesUsed(ctx: ApplyContext, text: string): ContextSource[] {
   const out = new Map<string, ContextSource>()
   const add = (s: ContextSource) => out.set(`${s.table}:${s.id}:${s.label}`, s)
-  for (const i of [...ctx.answers, ...ctx.profile]) if (sharesWords(i.text, text)) add(i.source)
+  for (const i of [...ctx.answers, ...ctx.profile]) if (sharesWords(i.evidence ?? i.text, text)) add(i.source)
   if (ctx.requirements.length) add({ ...ctx.requirements[0].source, quote: undefined, label: `The posting's requirements, ${ctx.requirements.length} quoted` })
   if (ctx.company.length) add({ ...ctx.company[0].source, quote: undefined })
   return [...out.values()]
