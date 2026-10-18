@@ -1,7 +1,14 @@
 // The code check on a drafted answer: a fact the person never gave is refused, a company quote not in the research
 // is refused, and a draft inside the person's own words passes.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: vi.fn() }))
+vi.mock('@/lib/models/choice', () => ({ roleKeys: vi.fn() }))
+vi.mock('@/lib/models/ask', () => ({ stepRunner: vi.fn() }))
+vi.mock('@/lib/steps', () => ({ answerDraftStep: {} }))
+vi.mock('@/lib/workflows/gather/apply', () => ({ personEvidence: vi.fn(), renderContext: vi.fn(), sharesWords: vi.fn(), sourcesUsed: vi.fn() }))
+
 import { checkDraft } from './draft'
 
 const own = 'Riley Marsh\nBackend engineer at Northwind, 2019 to 2024.\nLed a team of 6 engineers.\nWhy this company?\nI ran Kubernetes clusters for a payments team at Northwind for three years.'
@@ -16,6 +23,20 @@ describe('checkDraft', () => {
   it('refuses a fact the person never gave', () => {
     expect(checkDraft('I led a team of 40 engineers at Google for twelve years.', own, company, question)).toMatch(/40|Google|twelve/)
     expect(checkDraft('I started at Northwind on 2016-03-01.', own, company, question)).toMatch(/the date mar 1/)
+  })
+
+  it('never uses the form question or employer research as evidence about the person', () => {
+    expect(checkDraft('I worked at Anthropic before this.', own, 'Anthropic has 1,200 employees and raised $4 billion in 2024 from Amazon.', 'Why Anthropic?')).toMatch(/Anthropic/)
+    expect(checkDraft('I managed a team of 1,200 employees and raised $4 billion for Amazon.', own, 'Anthropic has 1,200 employees and raised $4 billion in 2024 from Amazon.', 'Why Anthropic?')).toMatch(/1,200|4|Amazon/)
+  })
+
+  it('fails closed on a generic fabricated personal claim', () => {
+    expect(checkDraft('I am an astronaut who performs surgery on dolphins.', own, company, question)).toMatch(/astronaut|surgery|dolphins/)
+    expect(checkDraft('I am an astronaut.', own, company, question)).toMatch(/astronaut/)
+  })
+
+  it('passes a personal claim supported by the person\'s own source', () => {
+    expect(checkDraft('I ran Kubernetes clusters for a payments team at Northwind for three years.', own, company, question)).toBeNull()
   })
 
   it('refuses quoted company words the research does not hold', () => {
