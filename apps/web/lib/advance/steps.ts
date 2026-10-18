@@ -62,7 +62,7 @@ export interface StepCtx {
 
 export type StepOutcome =
   | { kind: 'continue'; line: string; payload?: Record<string, unknown>; add?: AddedStep[] }
-  | { kind: 'wait'; reason: NeedsReason; detail?: Record<string, unknown>; line: string }
+  | { kind: 'wait'; reason: NeedsReason; detail?: Record<string, unknown>; line: string; add?: AddedStep[] }
   | { kind: 'close'; closedReason: 'posting_closed'; line: string }
 
 export interface Step {
