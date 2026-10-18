@@ -160,7 +160,7 @@ export const readForm: Step = {
     if (long.length > 0) add.push({ step: 'draft_answers', why: `The form asks ${long.length} ${long.length === 1 ? 'question' : 'questions'} you have not answered.` })
     if (files.some((f) => f.required && /cover letter/i.test(f.label))) add.push({ step: 'cover_letter', why: 'The form asks for a cover letter.' })
     if (open.length > 0 && long.length === 0) {
-      return { kind: 'wait', reason: 'answer', detail: { answer_ids: [...new Set(open.map((o) => o.answerId))], questions: open.map((o) => o.question).slice(0, 10) }, line: `${open.length} ${open.length === 1 ? 'question needs' : 'questions need'} your answer.` }
+      return { kind: 'wait', reason: 'answer', detail: { answer_ids: [...new Set(open.map((o) => o.answerId))], questions: open.map((o) => o.question).slice(0, 10) }, line: `${open.length} ${open.length === 1 ? 'question needs' : 'questions need'} your answer.`, ...(add.length ? { add } : {}) }
     }
     const line = open.length > 0 ? `Read ${fields.length} questions; ${open.length} ${open.length === 1 ? 'needs' : 'need'} your answer.` : `Read ${fields.length} questions; every required one has an answer.`
     return { kind: 'continue', line, ...(add.length ? { add } : {}) }

@@ -9,12 +9,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 type Row = Record<string, any>
 const calls: any[] = []
 const notes: any[] = []
+let failNextAdditionNote = false
 vi.mock('@/lib/pipeline/transition', () => ({
   transition: vi.fn(async (_admin: unknown, m: any) => (calls.push(m), { ok: true, replay: false, event: { id: 'e', kind: m.event.kind } })),
-  note: vi.fn(async (_admin: unknown, _user: string, _app: string, e: any) => (notes.push(e), { ok: true, replay: false, event: { id: 'n', kind: e.kind } })),
+  note: vi.fn(async (_admin: unknown, _user: string, _app: string, e: any) => {
+    if (failNextAdditionNote && e.payload?.changed === 'added') {
+      failNextAdditionNote = false
+      return { ok: false, refusal: 'injected', sentence: 'injected' }
+    }
+    notes.push(e)
+    return { ok: true, replay: false, event: { id: 'n', kind: e.kind } }
+  }),
   autoSendReason: vi.fn(async () => 'Cello sends only Strong matches.'),
 }))
 
+vi.mock('@/lib/ats', () => ({ assertAllowedHost: vi.fn(), fetchJson: vi.fn() }))
 vi.mock('@/lib/resume/store', () => ({ getLatestVersion: vi.fn(async () => null), getBaseResume: vi.fn(async () => null) }))
 const openQuestions: { fieldId: string; answerId: string; question: string }[] = []
 vi.mock('@/lib/answers', () => ({ resolveFieldValues: vi.fn(async () => ({ values: {}, open: openQuestions, never: [] })) }))
@@ -84,6 +93,7 @@ const opts = (steps: Step[]) => ({ now: () => NOW, steps })
 beforeEach(() => {
   calls.length = 0
   notes.length = 0
+  failNextAdditionNote = false
 })
 
 describe('advanceOne', () => {
@@ -148,10 +158,11 @@ describe('advanceOne', () => {
     expect(notes).toEqual([])
   })
 
-  it('moves to the one thing it waits on, with the reason named', async () => {
-    const asks: Step = { id: 'read_form', doing: 'Reading', run: async () => ({ kind: 'wait', reason: 'answer', detail: { answer_ids: ['q1'] }, line: '1 question needs your answer.' }) }
+  it('moves to the one thing it waits on, with the reason and additions persisted on that move', async () => {
+    const asks: Step = { id: 'read_form', doing: 'Reading', run: async () => ({ kind: 'wait', reason: 'answer', detail: { answer_ids: ['q1'] }, line: '1 question needs your answer.', add: [{ step: 'cover_letter', why: 'The form asks for a cover letter.' }] }) }
     await advanceOne(fakeAdmin({ applications: [app()], pipeline_events: [] }), 'a1', opts([ok('one'), asks, ok('after')]))
-    expect(calls.at(-1)).toMatchObject({ to: 'needs_you', reason: 'answer', detail: { answer_ids: ['q1'] } })
+    expect(calls.at(-1)).toMatchObject({ to: 'needs_you', reason: 'answer', detail: { answer_ids: ['q1'] }, event: { payload: { answer_ids: ['q1'], additions: [{ step: 'cover_letter', why: 'The form asks for a cover letter.', after: 'read_form' }] } } })
+    expect(notes).toEqual([expect.objectContaining({ payload: { changed: 'added', step: 'cover_letter', after: 'read_form', why: 'The form asks for a cover letter.' } })])
     expect(calls.some((c) => c.event.step === 'after')).toBe(false)
   })
 })
@@ -178,6 +189,30 @@ describe('a step the form asks for', () => {
     expect(calls.at(-1)).toMatchObject({ to: 'needs_you', reason: 'answer', detail: { drafted: 2 } })
     expect(calls.at(-1).event.sentence).toBe('Drafted 2 answers for you to check. Cello never sends an answer you did not give.')
     expect(calls.some((c) => c.event.step === 'after')).toBe(false)
+    vi.doUnmock('./steps')
+    vi.resetModules()
+  })
+
+  it('recovers an added step exactly once when its status event fails', async () => {
+    const draftStep = drafts('continue')
+    vi.doMock('./steps', async (orig) => ({ ...(await orig<typeof import('./steps')>()), ADDED_STEPS: { draft_answers: draftStep, cover_letter: coverLetter } }))
+    vi.resetModules()
+    const { advanceOne: run } = await import('./index')
+    const tables = { applications: [app()], pipeline_events: [] as Row[] }
+    const admin = fakeAdmin(tables)
+    failNextAdditionNote = true
+    await run(admin, 'a1', opts([reads(), ok('after')]))
+    expect(notes).toEqual([])
+    const parent = calls.find((call) => call.event.step === 'read_form' && call.event.kind === 'step.finished')!
+    expect(parent.event.payload.additions).toEqual([{ step: 'draft_answers', why: 'The form asks 2 questions you have not answered.', after: 'read_form' }])
+
+    tables.pipeline_events.push({ user_id: 'u1', application_id: 'a1', kind: 'step.finished', idempotency_key: parent.event.idempotencyKey, payload: parent.event.payload, created_at: '2026-10-14T11:00:00Z' })
+    tables.applications[0].attempt = 1
+    calls.length = 0
+    await run(admin, 'a1', opts([reads(), ok('after')]))
+    expect(notes).toEqual([expect.objectContaining({ payload: { changed: 'added', step: 'draft_answers', after: 'read_form', why: 'The form asks 2 questions you have not answered.' } })])
+    expect(draftStep.run).toHaveBeenCalledTimes(1)
+    expect(calls.filter((call) => call.event.step === 'draft_answers')).toHaveLength(1)
     vi.doUnmock('./steps')
     vi.resetModules()
   })
@@ -230,9 +265,9 @@ describe('the steps a form asks for', () => {
     openQuestions.push({ fieldId: 'q1', answerId: 'ans1', question: 'Why us?' }, { fieldId: 'q2', answerId: 'ans2', question: 'How did you hear about us?' })
     const { readForm } = await import('./steps')
     expect(await readForm.run(ctx())).toEqual({ kind: 'continue', line: 'Read 2 questions; 2 need your answer.', add: [{ step: 'draft_answers', why: 'The form asks 1 question you have not answered.' }, { step: 'cover_letter', why: 'The form asks for a cover letter.' }] })
-    // only a short question open: it waits as before, nothing to draft
+    // only a short question open: it waits as before, but keeps the required cover-letter step
     openQuestions.splice(0, 1)
-    expect(await readForm.run(ctx())).toMatchObject({ kind: 'wait', reason: 'answer', line: '1 question needs your answer.' })
+    expect(await readForm.run(ctx())).toMatchObject({ kind: 'wait', reason: 'answer', line: '1 question needs your answer.', add: [{ step: 'cover_letter', why: 'The form asks for a cover letter.' }] })
   })
 
   it('draft_answers drafts each open long question and waits for the person, with the reason when it could not', async () => {

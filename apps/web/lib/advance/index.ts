@@ -87,6 +87,38 @@ async function release(admin: SupabaseClient, id: string): Promise<void> {
   await admin.from('applications').update({ lease_until: null, lease_holder: null }).eq('id', id).eq('state', 'preparing')
 }
 
+interface RecordedAddition {
+  after: string
+  step: AddedStep['step']
+  why: string
+}
+
+function readAddition(value: unknown): RecordedAddition | null {
+  if (!value || typeof value !== 'object') return null
+  const a = value as Record<string, unknown>
+  return typeof a.after === 'string' && typeof a.step === 'string' && a.step in ADDED_STEPS
+    ? { after: a.after, step: a.step as AddedStep['step'], why: typeof a.why === 'string' ? a.why : '' }
+    : null
+}
+
+const additionKey = (a: Pick<RecordedAddition, 'after' | 'step'>) => `${a.after}:${a.step}`
+
+/** Write the thread line once. The parent event already carries the addition, so a retry can recover a failed note. */
+async function persistAdditionNotes(admin: SupabaseClient, app: Row, attempt: number, additions: readonly RecordedAddition[], recorded: Set<string>, required: boolean): Promise<void> {
+  for (const addition of additions) {
+    const key = additionKey(addition)
+    if (recorded.has(key)) continue
+    const count = addition.step === 'draft_answers' ? Number(/\d+/.exec(addition.why)?.[0]) || undefined : undefined
+    try {
+      const result = await note(admin, app.user_id, app.id, base('step.finished', `step:${app.id}:${addition.after}:${attempt}:added:${addition.step}`, addedLine(addition, count), { step: addition.after, payload: { changed: 'added', ...addition } }))
+      if (!result.ok) throw new Error(`could not record added step ${addition.step}`)
+      recorded.add(key)
+    } catch (error) {
+      if (required) throw error
+    }
+  }
+}
+
 /** The cost of what was done for this application, kept on the row. */
 export async function recordCost(admin: SupabaseClient, applicationId: string): Promise<void> {
   const { data } = await admin.from('pipeline_events').select('cost_usd, free_model').eq('application_id', applicationId).limit(500)
@@ -118,10 +150,31 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
   const key = (step: string) => `step:${app.id}:${step}:${app.attempt}`
 
   try {
-    // The steps added before (this attempt or an earlier one), read back from their own events.
-    const { data: addedRows } = await admin.from('pipeline_events').select('payload').eq('application_id', app.id).eq('user_id', app.user_id).eq('kind', 'step.finished').contains('payload', { changed: 'added' }).order('created_at', { ascending: true }).limit(20)
-    const added = ((addedRows as { payload: { step?: string; after?: string } | null }[] | null) ?? []).flatMap((r) => (r.payload?.step && r.payload.step in ADDED_STEPS && typeof r.payload.after === 'string' ? [{ after: r.payload.after, step: r.payload.step as AddedStep['step'] }] : []))
-    const steps = withAdded(opts.steps ?? STEPS, added)
+    // A completion or wait event carries its additions atomically. The separate added-step event is only the
+    // thread line. If that note failed, recreate it before treating the recovered plan as complete.
+    const { data: eventRows } = await admin.from('pipeline_events').select('payload').eq('application_id', app.id).eq('user_id', app.user_id).order('created_at', { ascending: true }).limit(500)
+    const recorded = new Set<string>()
+    const recovered = new Map<string, RecordedAddition>()
+    for (const row of (eventRows as { payload: Record<string, unknown> | null }[] | null) ?? []) {
+      const payload = row.payload ?? {}
+      if (payload.changed === 'added') {
+        const addition = readAddition(payload)
+        if (addition) recorded.add(additionKey(addition))
+      }
+      for (const value of Array.isArray(payload.additions) ? payload.additions : []) {
+        const addition = readAddition(value)
+        if (addition) recovered.set(additionKey(addition), addition)
+      }
+    }
+    await persistAdditionNotes(admin, app, app.attempt, [...recovered.values()], recorded, true)
+    const additions = new Map<string, RecordedAddition>()
+    for (const addition of recovered.values()) additions.set(additionKey(addition), addition)
+    for (const key of recorded) {
+      if (additions.has(key)) continue
+      const [after, step] = key.split(':')
+      additions.set(key, { after, step: step as AddedStep['step'], why: '' })
+    }
+    const steps = withAdded(opts.steps ?? STEPS, [...additions.values()])
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i]
       const done = `${key(step.id)}:done`
@@ -138,7 +191,11 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
       const ms = now() - t0
 
       if (out.kind === 'wait') {
-        const r = await transition(admin, { applicationId: app.id, from: ['preparing'], to: 'needs_you', reason: out.reason, detail: out.detail ?? null, step: step.doing, event: base(out.reason === 'approve_resume' ? 'approval.requested' : out.reason === 'duplicate' ? 'application.duplicate' : 'question.asked', `${key(step.id)}:wait:${app.last_event_at ?? 'none'}`, out.line, { step: step.id, durationMs: ms, payload: out.detail }) })
+        const added = (out.add ?? []).map((addition) => ({ ...addition, after: step.id }))
+        const payload = { ...(out.detail ?? {}), ...(added.length ? { additions: added } : {}) }
+        const r = await transition(admin, { applicationId: app.id, from: ['preparing'], to: 'needs_you', reason: out.reason, detail: out.detail ?? null, step: step.doing, event: base(out.reason === 'approve_resume' ? 'approval.requested' : out.reason === 'duplicate' ? 'application.duplicate' : 'question.asked', `${key(step.id)}:wait:${app.last_event_at ?? 'none'}`, out.line, { step: step.id, durationMs: ms, payload }) })
+        // The transition atomically persisted the additions before waiting. The retry recreates a missing thread line.
+        if (r.ok) await persistAdditionNotes(admin, app, app.attempt, added, recorded, false)
         await recordCost(admin, app.id)
         return r
       }
@@ -146,13 +203,16 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
         const r = await transition(admin, { applicationId: app.id, from: ['preparing'], to: 'skipped', step: step.doing, event: base('application.skipped', done, out.line, { step: step.id, durationMs: ms, closedReason: out.closedReason }) })
         return r
       }
-      await transition(admin, { applicationId: app.id, from: ['preparing'], to: 'preparing', step: step.doing, event: base('step.finished', done, out.line, { step: step.id, durationMs: ms, payload: out.payload }) })
-      // A step the form asks for: one event each, in the thread, and it runs next.
-      for (const a of out.add ?? []) {
-        if (steps.some((s) => s.id === a.step)) continue
-        const count = a.step === 'draft_answers' ? Number(/\d+/.exec(a.why)?.[0]) || undefined : undefined
-        await note(admin, app.user_id, app.id, base('step.finished', `${key(step.id)}:added:${a.step}`, addedLine(a, count), { step: step.id, payload: { changed: 'added', step: a.step, after: step.id, why: a.why } }))
-        steps.splice(i + 1, 0, ADDED_STEPS[a.step])
+      const added = (out.add ?? []).map((addition) => ({ ...addition, after: step.id }))
+      const payload = { ...(out.payload ?? {}), ...(added.length ? { additions: added } : {}) }
+      const completed = await transition(admin, { applicationId: app.id, from: ['preparing'], to: 'preparing', step: step.doing, event: base('step.finished', done, out.line, { step: step.id, durationMs: ms, payload }) })
+      if (!completed.ok) return completed
+      // The completion and its additions are one event. A failed status note makes this attempt retry; the next
+      // attempt reads the parent payload, writes one missing line and inserts the added step once.
+      await persistAdditionNotes(admin, app, app.attempt, added, recorded, true)
+      for (const addition of added) {
+        if (steps.some((candidate) => candidate.id === addition.step)) continue
+        steps.splice(i + 1, 0, ADDED_STEPS[addition.step])
       }
     }
     const r = await transition(admin, { applicationId: app.id, from: ['preparing'], to: 'ready', step: 'Ready to send', event: base('step.finished', `ready:${app.id}:${app.attempt}`, 'Everything is prepared. It is ready for you to send.', { step: 'ready' }) })
