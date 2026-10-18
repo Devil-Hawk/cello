@@ -41,16 +41,69 @@ export type DraftAnswerResult = { ok: true; answer: string } | { ok: false; reas
 /** Sentence-initial capitals are grammar, not facts: lowercase them before the hard-fact scan. */
 const sentenceCase = (s: string) => s.replace(/(^|[.!?]\s+|\n)([A-Z])([a-z])/g, (_m, a: string, b: string, c: string) => a + b.toLowerCase() + c)
 
+/** Names the employer for directed sentences, without using the question as candidate evidence. */
+function employerNames(question: string, companyText: string): string[] {
+  const names = new Set<string>()
+  for (const m of question.matchAll(/\b(?:why|at|for|join)\s+([A-Z][A-Za-z0-9&.'’-]*(?:\s+[A-Z][A-Za-z0-9&.'’-]*)?)/g)) names.add(m[1].replace(/[?.!,]+$/, ''))
+  const first = companyText.match(/\b([A-Z][A-Za-z0-9&.'’-]{2,}(?:\s+[A-Z][A-Za-z0-9&.'’-]{2,})?)\b/)
+  if (first) names.add(first[1].replace(/[?.!,]+$/, ''))
+  return [...names].filter(Boolean)
+}
+
+/** Employer facts are allowed only in a sentence explicitly about the employer or the candidate's interest in it. */
+function companyDirected(sentence: string, names: readonly string[]): boolean {
+  const lower = sentence.toLowerCase()
+  const target = names.find((name) => lower.includes(name.toLowerCase()))
+  if (!target && /\byour\s+(?:line|mission|values|product|team|company|work)\b/i.test(sentence)) return true
+  if (!target) return false
+  const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  if (new RegExp(`\\b(?:worked|work|employed|joined|interned|contracted|managed|led)\\s+(?:at|for|with)\\s+${escaped}\\b`, 'i').test(sentence)) return false
+  return /\b(?:company|mission|values|product|role|team|work(?:ing)?\s+(?:at|for)|join|interested|excited|drawn|attracted|contribute|want\s+to|would\s+like|because|founded|sells|build)\b/i.test(sentence)
+}
+
+function companySupports(problem: string, companyText: string): boolean {
+  const lower = companyText.toLowerCase()
+  const number = /^the number (.+)$/.exec(problem)?.[1]
+  if (number) return lower.replace(/,/g, '').includes(number)
+  const date = /^the date (.+)$/.exec(problem)?.[1]
+  if (date) return lower.includes(date)
+  const quote = /^the quotation "([^"]+)"$/.exec(problem)?.[1]
+  return Boolean(quote && lower.includes(quote.toLowerCase()))
+}
+
+const sentenceList = (text: string) => text.split(/(?<=[.!?])\s+|\n+|;\s*|,\s+(?:and|but)\s+|\s+(?:and|but)\s+(?=I\b)/i).map((s) => s.trim()).filter(Boolean)
+const words = (text: string) => new Set((text.toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? []).map((w) => w.replace(/[’']/g, '')))
+const COMMON = new Set('about after again also and are because been being bring build can company could do does for from get give going have help here how i in into is it its join just like may more my of on our role should so some that the their them there these they this to want was we were what when with would you your'.split(' '))
+const OPINION = new Set('attracted contribute excited interested motivated opportunity safe drawn eager enjoy learn mission values product reliable work working'.split(' '))
+const PERSONAL_FACT = /\bI\s+(?:was|have|had|built|led|managed|performed|designed|developed|ran|wrote|created|owned|delivered|speciali[sz]e|worked|am\s+(?!(?:excited|interested|motivated|drawn|attracted|eager)\b))/i
+
+/** Generic first-person inventions have no proper noun or number for findInventedFacts to catch. */
+function genericCandidateClaim(sentence: string, own: string, companyText: string, allowCompany: boolean): string | null {
+  if (!PERSONAL_FACT.test(sentence)) return null
+  const ownWords = words(own)
+  const companyWords = allowCompany ? words(companyText) : new Set<string>()
+  const unknown = [...words(sentence)].filter((word) => !COMMON.has(word) && !OPINION.has(word) && !ownWords.has(word) && !companyWords.has(word))
+  return unknown.length ? unknown.slice(0, 3).join(', ') : null
+}
+
 /**
- * The code check: every hard fact (a capitalised name, a figure, a number word) is in the person's own words, the
- * question or the company's research; every number, date and quotation is in one of those too. Null when it holds.
+ * Candidate claims rest only on person-owned words. The question and employer context may steer a response but
+ * never satisfy a claim about the person. Company facts pass only in company-directed sentences without a
+ * candidate fact claim; generic first-person inventions fail closed even when they contain no hard fact token.
  */
 export function checkDraft(draft: string, own: string, companyText: string, question: string): string | null {
-  const haystack = `${own}\n${question}\n${companyText}`
-  const invented = findInventedFacts(haystack, sentenceCase(draft)).filter((w) => !/^(I|I'm|I've|I'd|My|Cello)$/.test(w))
-  const missing = unsupported(draft, [own, companyText, question])
-  const problems = [...new Set([...invented, ...missing])]
-  return problems.length ? `the draft states what your own words do not: ${problems.slice(0, 4).join(', ')}` : null
+  const names = employerNames(question, companyText)
+  const problems: string[] = []
+  for (const sentence of sentenceList(draft)) {
+    const allowCompany = companyDirected(sentence, names) && !PERSONAL_FACT.test(sentence)
+    const candidate = sentenceCase(sentence)
+    const invented = findInventedFacts(own, candidate).filter((word) => !/^(I|I'm|I've|I'd|My|Cello)$/.test(word) && !(allowCompany && companyText.toLowerCase().includes(word.toLowerCase())))
+    const missing = unsupported(candidate, [own]).filter((problem) => !(allowCompany && companySupports(problem, companyText)))
+    problems.push(...invented, ...missing)
+    const generic = genericCandidateClaim(sentence, own, companyText, allowCompany)
+    if (generic) problems.push(generic)
+  }
+  return problems.length ? `the draft states what your own words do not: ${[...new Set(problems)].slice(0, 4).join(', ')}` : null
 }
 
 export async function draftAnswer(admin: SupabaseClient, userId: string, input: DraftAnswerInput): Promise<DraftAnswerResult> {
