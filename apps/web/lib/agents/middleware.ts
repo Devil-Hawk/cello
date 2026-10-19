@@ -35,6 +35,7 @@ import { ToolMessage, type BaseMessage } from '@langchain/core/messages'
 import { Command, interrupt, isCommand } from '@langchain/langgraph'
 import { scrubStructuralEscapes } from '@/lib/security/job-text'
 import { isTransient } from '@/lib/util/retry'
+import { StoppedError } from '@/lib/chat/workers'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { celloChatModel, freeFallbackModels, isFreeModel, runTagOf } from './model'
 import { isBudgetCapError, reserve, rootCause, settle } from './spend-port'
@@ -60,6 +61,8 @@ export interface GuardContext {
   chatTurnId?: string
   /** The role this loop is: written on every ledger row it makes. */
   role?: 'chat' | 'researcher'
+  /** The row's Stop flag, checked before every model and tool call. */
+  stop?: () => Promise<boolean>
 }
 
 // --- spend --------------------------------------------------------------------------
@@ -163,6 +166,25 @@ export function celloDemoRules(ctx: Pick<GuardContext, 'isDemo'>) {
   })
 }
 
+/**
+ * Stop is a row, read before every provider attempt and every tool attempt. This sits inside the retry and
+ * fallback middleware and outside CelloSpend, so a retry or a step-down after Stop reserves nothing and calls
+ * nobody. A StoppedError is never transient, so neither retry middleware tries again.
+ */
+export function celloStop(isStopped: () => Promise<boolean>) {
+  return createMiddleware({
+    name: 'CelloStop',
+    wrapModelCall: async (request, handler) => {
+      if (await isStopped()) throw new StoppedError()
+      return handler(request)
+    },
+    wrapToolCall: async (request, handler) => {
+      if (await isStopped()) throw new StoppedError()
+      return handler(request)
+    },
+  })
+}
+
 // --- untrusted text -----------------------------------------------------------------
 
 const MARKDOWN_IMAGE = /!\[[^\]]*\]\([^)]*\)/g
@@ -249,12 +271,14 @@ export interface GuardStackOptions {
   ctx: GuardContext
   agent: AgentKind
   deadlineAt: number
+  /** The row's Stop flag. */
+  stop?: () => Promise<boolean>
   /** Test seam: fallback models to use instead of the free list. */
   fallbacks?: Parameters<typeof modelFallbackMiddleware>
 }
 
-/** Retry only what is worth retrying: not a cap, not a missing key. */
-const retryable = (err: Error): boolean => !isBudgetCapError(err) && isTransient(rootCause(err))
+/** Retry only what is worth retrying: not a cap, not a missing key, not the person's Stop. */
+const retryable = (err: Error): boolean => !(err instanceof StoppedError) && !isBudgetCapError(err) && isTransient(rootCause(err))
 
 export function guardStack(opts: GuardStackOptions): AgentMiddleware[] {
   const { ctx, agent, deadlineAt } = opts
@@ -265,6 +289,8 @@ export function guardStack(opts: GuardStackOptions): AgentMiddleware[] {
     ? []
     : (opts.fallbacks ?? freeFallbackModels().map((id) => celloChatModel({ apiKeys: ctx.apiKeys, model: id, purpose })))
 
+  // The first middleware is the outermost. Stop sits inside both retry middlewares and the fallback list and
+  // outside CelloSpend: every provider attempt and every tool attempt reads the row first, and none reserves after it.
   const stack: unknown[] = [
     celloDemoRules(ctx),
     modelCallLimitMiddleware({ runLimit: caps.modelCalls, exitBehavior: 'end' }),
@@ -276,9 +302,10 @@ export function guardStack(opts: GuardStackOptions): AgentMiddleware[] {
     celloDeadline(deadlineAt),
     modelFallbackMiddleware(...fallbacks),
     modelRetryMiddleware({ maxRetries: 3, backoffFactor: 2, initialDelayMs: 500, retryOn: retryable, onFailure: 'error' }),
-    celloSpend(ctx),
     celloUntrusted(),
-    toolRetryMiddleware({ maxRetries: 2, backoffFactor: 2, initialDelayMs: 300, retryOn: (err: Error) => isTransient(rootCause(err)) }),
+    toolRetryMiddleware({ maxRetries: 2, backoffFactor: 2, initialDelayMs: 300, retryOn: retryable }),
+    ...(opts.stop ? [celloStop(opts.stop)] : []),
+    celloSpend(ctx),
   ]
   return stack as AgentMiddleware[]
 }
@@ -292,7 +319,8 @@ export const GUARD_ORDER = [
   'CelloDeadline',
   'modelFallbackMiddleware',
   'modelRetryMiddleware',
-  'CelloSpend',
   'CelloUntrusted',
   'toolRetryMiddleware',
+  'CelloStop',
+  'CelloSpend',
 ] as const

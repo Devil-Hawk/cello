@@ -3,11 +3,11 @@
 // The Chat page: the rail on the left, the conversation in the middle with its compose box fixed at the bottom, and
 // the side panel on the right only while a made thing is open. Everything it shows is read from rows through
 // /api/chat: tiles with names, answers as the parts code passed, cards from stored rows, the tasks line from agent_tasks.
-// ponytail: the page reads the chat every 2 s while a turn is being answered or a task is working; Realtime and useStream replace the poll.
+// The page reads the chat through the stream while a turn is answered, and Realtime updates rows after the stream ends.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { Menu, X } from 'lucide-react'
+import { Menu, X, Check, Loader2 } from 'lucide-react'
 import { Markdown } from '@/components/chat/markdown'
 import { MadeBlock } from '@/components/chat/made-block'
 import { SourcesAndTools } from '@/components/chat/sources-and-tools'
@@ -32,6 +32,8 @@ import { refId, type AttachKind } from '@/lib/chat/types'
 import { visibleTurns } from '@/lib/chat/versions'
 import type { ModelChoice } from '@/lib/models/choice'
 import { createClient } from '@/lib/supabase/client'
+import { FetchStreamTransport, useStream } from '@langchain/langgraph-sdk/react'
+import { agentFetch, errorMessage } from '@/lib/agents/client'
 
 export interface ChatViewProps {
   /** The chat to open; null for a new one. */
@@ -43,7 +45,6 @@ export interface ChatViewProps {
   initialAbout?: { kind: string; ref: string }
 }
 
-const POLL_MS = 2000
 const PAGE = 50
 /** "@" and then the start of a name, at the end of what is typed. */
 const AT_WORD = /(^|\s)@([^\s@]{0,40})$/
@@ -124,11 +125,15 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   const scroller = useRef<HTMLDivElement>(null)
   // True while the person is at the newest content: a new turn or row keeps them there, and never pulls them back from older turns.
   const stuck = useRef(true)
-  // After the person approves, the next steps run in the background: read the chat for a minute to show them.
-  const [watchUntil, setWatchUntil] = useState(0)
+  const [live, setLive] = useState<{ words: string; tools: { label: string; phase: 'start' | 'end' }[] } | null>(null)
+  const streamChatId = useRef(routeId)
+  streamChatId.current = chatId
+  // The turn the open stream is answering, from its first event: Stop posts exactly this id, never a row from an earlier read.
+  const streamTurnId = useRef<string | null>(null)
+  // Stop pressed before the stream has named its turn: sent the moment it does.
+  const stopWanted = useRef(false)
   const answered = useRef<Set<string> | null>(null)
   const [estimate, setEstimate] = useState<string | null>(null)
-  const poll = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadChats = useCallback(async () => {
     const body = await getJson<{ chats: ListRow[] }>(`/api/chat?limit=${PAGE}`)
@@ -181,6 +186,78 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     void loadPage()
   }, [loadPage])
 
+  const streamTransport = useMemo(
+    () =>
+      new FetchStreamTransport({
+        apiUrl: '/api/chat/__chat__/stream',
+        fetch: (input: RequestInfo | URL, init?: RequestInit) => agentFetch(typeof input === 'string' ? input.replace('__chat__', encodeURIComponent(streamChatId.current ?? '')) : input, init),
+      }),
+    [],
+  )
+  const onCustomEvent = useCallback(
+    (data: unknown) => {
+      if (!data || typeof data !== 'object') return
+      const event = data as { type?: string; text?: unknown; label?: unknown; phase?: unknown }
+      if (event.type === 'words' && typeof event.text === 'string') return setLive((current) => ({ words: event.text as string, tools: current?.tools ?? [] }))
+      if (event.type === 'tool' && typeof event.label === 'string' && (event.phase === 'start' || event.phase === 'end')) {
+        return setLive((current) => {
+          const tools = [...(current?.tools ?? [])]
+          const index = tools.findIndex((tool) => tool.label === event.label)
+          if (index < 0) tools.push({ label: event.label as string, phase: event.phase as 'start' | 'end' })
+          else tools[index] = { label: event.label as string, phase: event.phase as 'start' | 'end' }
+          return { words: current?.words ?? '', tools }
+        })
+      }
+      if (event.type === 'answer') {
+        setLive(null)
+        streamTurnId.current = null
+        void loadPage()
+      }
+    },
+    [loadPage],
+  )
+  const stream = useStream({
+    transport: streamTransport,
+    // The stream names the turn it answers first of all: Stop targets this turn from the first moment, before any row is read.
+    onMetadataEvent: (data) => {
+      const turnId = (data as unknown as { turn_id?: unknown }).turn_id
+      if (typeof turnId !== 'string') return
+      streamTurnId.current = turnId
+      if (stopWanted.current) {
+        stopWanted.current = false
+        void send(`/api/chat/${encodeURIComponent(streamChatId.current ?? '')}/stop`, 'POST', { turn_id: turnId }).then(() => loadPage())
+      }
+    },
+    onCustomEvent,
+    onError: (error) => {
+      setLive(null)
+      setNote(errorMessage(error))
+    },
+    onFinish: () => {
+      streamTurnId.current = null
+      void loadPage()
+    },
+  })
+
+  useEffect(() => {
+    if (!chatId) return
+    const supabase = createClient()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const refresh = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => void loadPage(), 300)
+    }
+    const channel = supabase
+      .channel(`chat-${chatId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_turns', filter: `chat_id=eq.${chatId}` }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'agent_tasks', filter: `chat_id=eq.${chatId}` }, refresh)
+      .subscribe()
+    return () => {
+      if (timer) clearTimeout(timer)
+      void supabase.removeChannel(channel)
+    }
+  }, [chatId, loadPage])
+
   const loadSettings = useCallback(async () => {
     setSettings(await getJson<SettingsView>(`/api/chat/settings${chatId ? `?chat=${encodeURIComponent(chatId)}` : ''}`))
   }, [chatId])
@@ -228,15 +305,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   useEffect(() => {
     if (justSent !== null && pendingLine === null) setJustSent(null)
   }, [justSent, pendingLine])
-  const running = tasks.some(alive) || awaiting || sending || pendingLine !== null
-  const watching = running || Date.now() < watchUntil
-  useEffect(() => {
-    if (!watching || !chatId) return
-    poll.current = setInterval(() => void loadPage(), POLL_MS)
-    return () => {
-      if (poll.current) clearInterval(poll.current)
-    }
-  }, [watching, chatId, loadPage])
+  const running = tasks.some(alive) || awaiting || sending || pendingLine !== null || stream.isLoading
 
   // A comparison that arrives while the person is here opens beside the chat; one already there does not.
   useEffect(() => {
@@ -325,6 +394,8 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     const typed = draft.trim()
     if (!typed || sending) return
     setSending(true)
+    stopWanted.current = false
+    streamTurnId.current = null
     // The line moves from the compose box to the conversation at once; it comes back to the box if the send fails.
     setJustSent(typed)
     setDraft('')
@@ -344,19 +415,25 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     } else {
       for (const c of chips) await send(`/api/chat/${encodeURIComponent(id)}/attachments`, 'POST', { kind: c.kind, ref: refOf(c.kind, c.ref) })
     }
-    const sent = await sendJson(`/api/chat/${encodeURIComponent(id)}/turns`, 'POST', { typed, ...(quoted ? { quoted } : {}), ...(once ? { choice: once } : {}) })
-    if (!sent.ok) return failed(sent.body?.message ?? 'Cello could not send that. Try again.')
+    const choiceOnce = once
     setChips([])
     setQuoted(null)
     setOnce(null)
     setPending(null)
     setPendingMode(undefined)
+    streamChatId.current = id
     if (id !== chatId) {
-      // The view stays mounted with the sent line on it; the address moves to the chat and the rows are read from there.
-      window.history.pushState(null, '', `/chat/${encodeURIComponent(id)}`)
+      // Keep the page mounted so the stream can append below the person's line.
+      window.history.replaceState(null, '', `/chat/${encodeURIComponent(id)}`)
       setChatId(id)
-    } else await loadPage()
+    }
+    try {
+      await stream.submit({ messages: [{ type: 'human', content: typed }] }, { context: { quoted, choice: choiceOnce } })
+    } catch {
+      return failed('Cello could not send that. Try again.')
+    }
     setSending(false)
+    void loadPage()
     void loadChats()
   }
 
@@ -366,6 +443,19 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     const named = await Promise.all(s.objects.map((o) => getJson<{ kind: string; ref: string; name: string }>(`/api/chat/object?kind=${encodeURIComponent(o.kind)}&ref=${encodeURIComponent(o.ref)}`)))
     setChips(named.filter((o): o is { kind: string; ref: string; name: string } => o !== null))
   }
+
+  // Stop marks the turn's rows on the server (the work itself lives there, not in the stream); the stream's own turn id wins
+  // over the newest row, which can still be the earlier turn right after Send.
+  const stopTurn = useCallback(() => {
+    // While a send is in flight the stream has not named its turn yet: hold the Stop for the metadata event.
+    if (sending && !streamTurnId.current) {
+      stopWanted.current = true
+      return
+    }
+    const turnId = streamTurnId.current ?? lastPersonTurn?.id
+    const id = streamChatId.current ?? chatId
+    if (id && turnId) void send(`/api/chat/${encodeURIComponent(id)}/stop`, 'POST', { turn_id: turnId }).then(() => loadPage())
+  }, [chatId, lastPersonTurn?.id, loadPage, sending])
 
   async function signOut() {
     await createClient().auth.signOut()
@@ -531,7 +621,6 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
                     line={t.event_id ? page?.statuses[t.event_id] : undefined}
                     onReview={setPanel}
                     onApproved={() => {
-                      setWatchUntil(Date.now() + 90_000)
                       void loadPage()
                     }}
                   />
@@ -547,13 +636,35 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
               </div>
             )}
 
+            {live && (live.words || live.tools.length > 0) && (
+              <div className="space-y-2 text-caption text-muted-foreground" aria-live="polite">
+                {live.tools.length > 0 && (
+                  <ul className="space-y-1" aria-label="What Cello is doing">
+                    {live.tools.map((tool) => (
+                      <li key={tool.label} className="flex items-center gap-2">
+                        {tool.phase === 'start' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Check className="h-3.5 w-3.5" aria-hidden />}
+                        <span>{tool.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {live.words && (
+                  <div className="rounded-control border border-border bg-muted/50 px-3 py-2">
+                    <p className="mb-1 text-label uppercase tracking-wide">Writing</p>
+                    <p className="whitespace-pre-wrap break-words text-foreground">{live.words}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+
             {(work.length > 0 || running) && (
               <TasksLine
                 tasks={work.map(toTaskRow)}
                 running={running}
                 defaultOpen
                 seconds={seconds(turnTasks)}
-                onStop={() => lastPersonTurn && void send(`/api/chat/${chatId}/stop`, 'POST', { turn_id: lastPersonTurn.id }).then(loadPage)}
+                onStop={stopTurn}
                 onStopTask={(id) => void send(`/api/chat/${chatId}/stop`, 'POST', { task_id: id }).then(loadPage)}
               />
             )}
@@ -561,7 +672,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
         </div>
 
         <div className="mx-auto w-full max-w-3xl px-4 pb-3">
-          <Composer value={draft} onChange={setDraft} onSend={() => void sendMessage()} onStop={() => lastPersonTurn && void send(`/api/chat/${chatId}/stop`, 'POST', { turn_id: lastPersonTurn.id }).then(loadPage)} running={running} quoted={quoted}
+          <Composer value={draft} onChange={setDraft} onSend={() => void sendMessage()} onStop={stopTurn} running={running} quoted={quoted}
             onRemoveQuote={() => setQuoted(null)}
             controls={
               settings ? (

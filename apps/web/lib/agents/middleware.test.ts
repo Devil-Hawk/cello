@@ -21,7 +21,7 @@ vi.mock('@/lib/harness/spend', async (orig) => ({
 import { BudgetCapError } from '@/lib/harness/spend'
 import { isBudgetCapError } from './spend-port'
 import { tagRun } from './model'
-import { DEMO_SEND_REFUSAL, celloDeadline, celloDemoRules, celloSpend, celloUntrusted, guardStack, quoteUntrusted, sanitizeUntrusted, type GuardContext } from './middleware'
+import { DEMO_SEND_REFUSAL, celloDeadline, celloDemoRules, celloSpend, celloStop, celloUntrusted, guardStack, quoteUntrusted, sanitizeUntrusted, type GuardContext } from './middleware'
 import { ScriptedChatModel, callTools, say } from './testing/scripted-model'
 
 const ctx = (over: Partial<GuardContext> = {}): GuardContext => ({
@@ -273,6 +273,60 @@ describe('CelloDemoRules', () => {
   })
 })
 
+describe('CelloStop', () => {
+  const stack = (stop: () => Promise<boolean>, fallbacks: ScriptedChatModel[] = []) => guardStack({ ctx: ctx(), agent: 'orchestrator', deadlineAt: farFuture(), fallbacks, stop })
+
+  it('starts no model call and no tool call after Stop', async () => {
+    let stopped = false
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [callTools([{ name: 'echo' }]), say('done')] })
+    const agent = createAgent({ model, tools: [echo], middleware: [celloStop(async () => stopped)] })
+
+    stopped = true
+    await expect(run(agent)).rejects.toThrow('Stopped by you')
+    expect(model.calls).toHaveLength(0)
+  })
+
+  it('a Stop after the model asks for a tool runs no tool and no further model call, and reserves nothing more', async () => {
+    let stopped = false
+    let toolRuns = 0
+    const counted = tool(async ({ text }: { text: string }) => (toolRuns++, `echo:${text}`), { name: 'echo', description: 'Echo.', schema: z.object({ text: z.string().default('hi') }) })
+    // The person presses Stop while the first model answer (a tool call) is being produced.
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [() => ((stopped = true), callTools([{ name: 'echo' }])), say('done')] })
+    const agent = createAgent({ model, tools: [counted], middleware: stack(async () => stopped) })
+
+    await expect(run(agent)).rejects.toThrow('Stopped by you')
+    expect(model.calls).toHaveLength(1)
+    expect(toolRuns).toBe(0)
+    expect(spend.reserveSpend).toHaveBeenCalledTimes(1)
+  })
+
+  it('a Stop during a retry and fallback chain ends it before the next provider attempt', async () => {
+    let stopped = false
+    const rateLimited = () => Object.assign(new Error('rate limited'), { status: 429 })
+    // The first attempt is rate limited and marks the row stopped on its way out: no retry, no fallback, no second reservation.
+    const primary = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [() => ((stopped = true), rateLimited()), say('retried')] })
+    const fallback = new ScriptedChatModel({ model: 'nvidia/nemotron:free', script: [say('fell back')] })
+    const agent = createAgent({ model: primary, tools: [echo], middleware: stack(async () => stopped, [fallback]) })
+
+    await expect(run(agent)).rejects.toThrow('Stopped by you')
+    expect(primary.calls).toHaveLength(1)
+    expect(fallback.calls).toHaveLength(0)
+    expect(spend.reserveSpend).toHaveBeenCalledTimes(1)
+    expect(spend.settleSpend).toHaveBeenCalledWith({}, expect.anything(), { failed: expect.objectContaining({ status: 429 }) })
+  })
+
+  it('without Stop the same rate limit still retries and falls back', async () => {
+    const rateLimited = () => Object.assign(new Error('rate limited'), { status: 429 })
+    const primary = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [rateLimited(), rateLimited(), rateLimited(), rateLimited()] })
+    const fallback = new ScriptedChatModel({ model: 'nvidia/nemotron:free', script: [say('fell back')] })
+    const agent = createAgent({ model: primary, tools: [echo], middleware: stack(async () => false, [fallback]) })
+
+    const result = await run(agent, { recursionLimit: 10 })
+    expect(String(result.messages.at(-1)?.content)).toBe('fell back')
+    expect(primary.calls).toHaveLength(4)
+    expect(fallback.calls).toHaveLength(1)
+  }, 30_000)
+})
 describe('CelloDeadline', () => {
   it('interrupts with a slice marker past the deadline and resumes in the next request', async () => {
     const saver = new MemorySaver()

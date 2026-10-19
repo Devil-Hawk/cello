@@ -33,6 +33,8 @@ export interface AgentContext {
   /** One Langfuse trace per request or scheduled occurrence. */
   traceId: string
   signal?: AbortSignal
+  /** The row's Stop flag, checked before each model and tool call. */
+  stop?: () => Promise<boolean>
   /** Epoch ms after which no new work starts and the request hands over to a continuation. */
   deadlineAt: number
 }

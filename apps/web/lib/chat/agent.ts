@@ -3,13 +3,17 @@
 // tool returns becomes a result the answer check reads; the model's final answer is the structured parts of
 // answer.ts, or, when a model cannot give that shape, its last words as one part that is checked the same way.
 
-import { HumanMessage, type BaseMessage } from '@langchain/core/messages'
+import { HumanMessage, isAIMessageChunk, type AIMessageChunk, type BaseMessage, type BaseMessageChunk } from '@langchain/core/messages'
+import { MemorySaver } from '@langchain/langgraph'
 import { tool } from '@langchain/core/tools'
 import { createCelloAgent } from '@/lib/agents/factory'
 import type { AgentContext } from '@/lib/agents/context'
 import { agentView, chatDoor, CommandRefusal, runCommand, toolName } from '@/lib/commands'
 import type { AnyCommand } from '@/lib/commands'
 import { isBudgetCapError } from '@/lib/agents/spend-port'
+import { StoppedError } from './workers'
+import { chunkToEvent } from '@/lib/agents/sse'
+import { liveText } from './live'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { reasonOf } from '@/lib/models/caps'
 import { celloChatModel, type Ran, type Role } from '@/lib/models/choice'
@@ -43,9 +47,14 @@ export interface ChatAgentDeps {
   /** The turn's mode, resolved by code in run.ts; the door carries it to each command. */
   mode?: Mode
   signal?: AbortSignal
+  stop?: () => Promise<boolean>
+  emit?: (event: { event: string; data: unknown }) => void
   profileCard?: string
   /** Test seam: replaces the compiled agent. */
-  build?: (input: { tools: unknown[] }) => { invoke: (input: unknown, config?: Record<string, unknown>) => Promise<{ messages: BaseMessage[]; structuredResponse?: unknown }> }
+  build?: (input: { tools: unknown[] }) => {
+    invoke: (input: unknown, config?: Record<string, unknown>) => Promise<{ messages: BaseMessage[]; structuredResponse?: unknown }>
+    stream?: (input: unknown, config?: Record<string, unknown>) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown>
+  }
 }
 
 const textOf = (m: BaseMessage | undefined): string => (!m ? '' : typeof m.content === 'string' ? m.content : (m.content as { text?: string }[]).map((b) => b.text ?? '').join(''))
@@ -66,6 +75,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
   const madeIds = new Set<string>()
   // A cap, a missing key or a refusal a tool met this turn, in code's words, so the person reads it even when the model leaves it out.
   const refusals: string[] = []
+  const saver = new MemorySaver()
 
   return async (input) => {
     const ctxFor = () => chatDoor({ userId: deps.userId, typed: input.typed, chat: { chatId: input.chatId, turnId: input.turnId }, mode: deps.mode, signal: deps.signal })
@@ -73,6 +83,8 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
     const lcTools = defs.map((def) =>
       tool(
         async (args: Record<string, unknown>) => {
+          if (await deps.stop?.()) throw new StoppedError()
+          deps.emit?.({ event: 'custom', data: { type: 'tool', label: def.label, phase: 'start' } })
           try {
             const out = await runCommand(def, ctxFor(), args)
             const things = thingsOf(out)
@@ -88,13 +100,15 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
             if (sentence) results.push({ object: null, text: sentence })
             return JSON.stringify(out)
           } catch (e) {
-            if (isBudgetCapError(e)) throw e
+            if (e instanceof StoppedError || isBudgetCapError(e)) throw e
             const reason = reasonOf(e, 'chat')
             const message = reason ?? 'That did not work.'
             // Code's own line: evidence for what the model says about it, so the check keeps that part.
             results.push({ object: null, text: message })
             if (reason && !refusals.includes(reason)) refusals.push(reason)
             return JSON.stringify({ error: message, fix: 'Tell the person what could not be done, in one sentence.' })
+          } finally {
+            deps.emit?.({ event: 'custom', data: { type: 'tool', label: def.label, phase: 'end' } })
           }
         },
         { name: toolName(def), description: HELP[toolName(def)] ?? def.label, schema: def.input }
@@ -113,6 +127,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
       traceId: '',
       chatTurnId: input.turnId,
       signal: deps.signal,
+      stop: deps.stop,
       deadlineAt: Date.now() + 240_000,
     }
     const agent =
@@ -126,12 +141,62 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         // The Researcher runs on the model the person chose for research, held to the same highest as Chat.
         ...(deps.roles?.researcher ? { researcherModel: celloChatModel(deps.roles.researcher, deps.keys, 'researcher') } : {}),
         profileCard: deps.profileCard,
+        saver,
       }) as unknown as NonNullable<ReturnType<NonNullable<ChatAgentDeps['build']>>>)
 
     const next: BaseMessage[] = history ? [new HumanMessage(input.feedback ?? '')] : [...(input.screen ? [new HumanMessage(input.screen)] : []), new HumanMessage(input.typed)]
-    let out: Awaited<ReturnType<typeof agent.invoke>>
+    let out: { messages: BaseMessage[]; structuredResponse?: unknown }
     try {
-      out = await agent.invoke({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, recursionLimit: 80 })
+      const stream = (agent as unknown as { stream?: (input: unknown, config?: unknown) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown> }).stream
+      if (deps.emit && stream) {
+        let values: { messages?: BaseMessage[]; structuredResponse?: unknown } | null = null
+        // The root model's answer so far: chunks concatenated as LangChain does, so a structured answer written as a
+        // tool call accumulates its partial arguments and liveText reads the parts written so far.
+        let written: AIMessageChunk | null = null
+        let lastWords = ''
+        let lastWordsAt = 0
+        const sendWords = (force: boolean) => {
+          const words = liveText(written)
+          if (!words || words === lastWords || (!force && Date.now() - lastWordsAt < 150)) return
+          lastWords = words
+          lastWordsAt = Date.now()
+          deps.emit?.({ event: 'custom', data: { type: 'words', text: words } })
+        }
+        // A delegation to the Researcher runs under a "tools:<call id>" namespace: it is shown as a tool row while it runs.
+        const delegations = new Set<string>()
+        const chunks = await (agent as unknown as { stream: (input: unknown, config?: unknown) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown> }).stream({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, configurable: { thread_id: input.turnId }, recursionLimit: 80, streamMode: ['values', 'messages', 'custom'], subgraphs: true })
+        for await (const chunk of chunks) {
+          if (!Array.isArray(chunk) || chunk.length < 3) continue
+          const [namespace, mode, data] = chunk as [readonly string[], string, unknown]
+          deps.emit(chunkToEvent([namespace, mode, data]))
+          // The chat loop's own model runs under "model_request:<id>" and its tools under "tools:<id>"; a subagent is a
+          // model run nested inside a tool call ("tools:<id>" then "model_request:<id>").
+          const delegation = namespace.length >= 2 && namespace[0].startsWith('tools:') ? namespace[0] : null
+          const root = !namespace[0]?.startsWith('tools:')
+          if (delegation && !delegations.has(delegation)) {
+            delegations.add(delegation)
+            deps.emit({ event: 'custom', data: { type: 'tool', label: 'Research', phase: 'start' } })
+          }
+          if (root && delegations.size && mode === 'values') {
+            delegations.clear()
+            deps.emit({ event: 'custom', data: { type: 'tool', label: 'Research', phase: 'end' } })
+          }
+          if (namespace.length === 0 && mode === 'values' && data && typeof data === 'object') values = data as { messages?: BaseMessage[]; structuredResponse?: unknown }
+          if (root && mode === 'messages' && Array.isArray(data) && isAIMessageChunk(data[0] as BaseMessageChunk)) {
+            const piece = data[0] as AIMessageChunk
+            // langchain's AgentNode appends its own "Returning structured response: {...}" message after a structured
+            // answer; it is the loop's bookkeeping, not words the model wrote.
+            if (typeof piece.content === 'string' && piece.content.startsWith('Returning structured response:')) continue
+            // A tool result or a new model turn starts a new message: the id changes and the words start over.
+            written = written && (!piece.id || piece.id === written.id) ? written.concat(piece) : piece
+            sendWords(false)
+          }
+        }
+        sendWords(true)
+        out = { messages: values?.messages ?? [], structuredResponse: values?.structuredResponse }
+      } else {
+        out = await agent.invoke({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, configurable: { thread_id: input.turnId }, recursionLimit: 80 })
+      }
     } catch (e) {
       // The loop itself died after a tool was refused: the refusal is the reason the person reads, not "try again".
       if (refusals.length && !reasonOf(e) && !deps.signal?.aborted) throw new CommandRefusal(502, refusals.join(' '), 'failed')
