@@ -166,11 +166,17 @@ export function celloDemoRules(ctx: Pick<GuardContext, 'isDemo'>) {
   })
 }
 
+/**
+ * Stop is a row, read before every provider attempt and every tool attempt. This sits inside the retry and
+ * fallback middleware and outside CelloSpend, so a retry or a step-down after Stop reserves nothing and calls
+ * nobody. A StoppedError is never transient, so neither retry middleware tries again.
+ */
 export function celloStop(isStopped: () => Promise<boolean>) {
   return createMiddleware({
     name: 'CelloStop',
-    beforeModel: async () => {
+    wrapModelCall: async (request, handler) => {
       if (await isStopped()) throw new StoppedError()
+      return handler(request)
     },
     wrapToolCall: async (request, handler) => {
       if (await isStopped()) throw new StoppedError()
@@ -271,8 +277,8 @@ export interface GuardStackOptions {
   fallbacks?: Parameters<typeof modelFallbackMiddleware>
 }
 
-/** Retry only what is worth retrying: not a cap, not a missing key. */
-const retryable = (err: Error): boolean => !isBudgetCapError(err) && isTransient(rootCause(err))
+/** Retry only what is worth retrying: not a cap, not a missing key, not the person's Stop. */
+const retryable = (err: Error): boolean => !(err instanceof StoppedError) && !isBudgetCapError(err) && isTransient(rootCause(err))
 
 export function guardStack(opts: GuardStackOptions): AgentMiddleware[] {
   const { ctx, agent, deadlineAt } = opts
@@ -283,9 +289,10 @@ export function guardStack(opts: GuardStackOptions): AgentMiddleware[] {
     ? []
     : (opts.fallbacks ?? freeFallbackModels().map((id) => celloChatModel({ apiKeys: ctx.apiKeys, model: id, purpose })))
 
+  // The first middleware is the outermost. Stop sits inside both retry middlewares and the fallback list and
+  // outside CelloSpend: every provider attempt and every tool attempt reads the row first, and none reserves after it.
   const stack: unknown[] = [
     celloDemoRules(ctx),
-    ...(opts.stop ? [celloStop(opts.stop)] : []),
     modelCallLimitMiddleware({ runLimit: caps.modelCalls, exitBehavior: 'end' }),
     toolCallLimitMiddleware({ runLimit: caps.toolCalls, exitBehavior: 'continue' }),
     ...(caps.delegations > 0
@@ -295,9 +302,10 @@ export function guardStack(opts: GuardStackOptions): AgentMiddleware[] {
     celloDeadline(deadlineAt),
     modelFallbackMiddleware(...fallbacks),
     modelRetryMiddleware({ maxRetries: 3, backoffFactor: 2, initialDelayMs: 500, retryOn: retryable, onFailure: 'error' }),
-    celloSpend(ctx),
     celloUntrusted(),
-    toolRetryMiddleware({ maxRetries: 2, backoffFactor: 2, initialDelayMs: 300, retryOn: (err: Error) => isTransient(rootCause(err)) }),
+    toolRetryMiddleware({ maxRetries: 2, backoffFactor: 2, initialDelayMs: 300, retryOn: retryable }),
+    ...(opts.stop ? [celloStop(opts.stop)] : []),
+    celloSpend(ctx),
   ]
   return stack as AgentMiddleware[]
 }
@@ -305,14 +313,14 @@ export function guardStack(opts: GuardStackOptions): AgentMiddleware[] {
 /** The names, in order, for the factory test. */
 export const GUARD_ORDER = [
   'CelloDemoRules',
-  'CelloStop',
   'ModelCallLimitMiddleware',
   'ToolCallLimitMiddleware',
   'ContextEditingMiddleware',
   'CelloDeadline',
   'modelFallbackMiddleware',
   'modelRetryMiddleware',
-  'CelloSpend',
   'CelloUntrusted',
   'toolRetryMiddleware',
+  'CelloStop',
+  'CelloSpend',
 ] as const
