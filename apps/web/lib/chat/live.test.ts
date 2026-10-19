@@ -16,6 +16,13 @@ describe('liveText', () => {
   })
 })
 
+describe('liveText links', () => {
+  it('shows a link to a thing as its words, finished or half written', () => {
+    expect(liveText({ content: 'The [Datadog role](cello:role/abc-1) fits.' })).toBe('The Datadog role fits.')
+    expect(liveText({ content: 'The [Datadog role](cello:role/ab' })).toBe('The [Datadog role')
+  })
+})
+
 describe('chat streaming source', () => {
   it('does not use a timer poll', () => {
     const source = readFileSync(new URL('../../components/chat/chat-view.tsx', import.meta.url), 'utf8')

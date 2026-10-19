@@ -27,8 +27,13 @@ function partialObject(raw: string): unknown {
   }
 }
 
+/** A link to one of Cello's own things reads as its words while the answer is still being written (the check makes the real link). */
+const plainLinks = (text: string): string => text.replace(/\[([^\]]*)\]\(cello:[^)]*\)/g, '$1').replace(/\]?\(?cello:[^\s)]*$/, '')
+
 /** The readable text in an in-flight model message, without exposing tool arguments. */
-export function liveText(message: unknown): string {
+export const liveText = (message: unknown): string => plainLinks(rawLiveText(message))
+
+function rawLiveText(message: unknown): string {
   if (!message || typeof message !== 'object') return ''
   const value = message as { content?: unknown; tool_calls?: { args?: unknown }[] }
   const content = readable(value.content)
