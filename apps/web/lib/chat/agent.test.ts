@@ -27,7 +27,7 @@ function modelSaying(parts: { about: []; text: string }[]) {
 }
 
 const input = { chatId: 'c1', turnId: 't1', screen: null, typed: 'Prepare a short outreach to Datadog', feedback: null, returned: new Set<string>() }
-const deps = (build: ReturnType<typeof modelSaying>) => ({
+const deps = (build: NonNullable<Parameters<typeof chatAgent>[0]['build']>) => ({
   db: {} as AdminClient,
   userId: 'u1',
   keys: { userId: 'u1' },
@@ -78,7 +78,7 @@ describe('streaming a structured answer', () => {
     const final = { parts: [{ about: [], text: 'First sentence' }, { about: [], text: 'Second one' }] }
     const streaming = () => ({
       invoke: async () => ({ messages: [new AIMessage('ok')], structuredResponse: final }),
-      stream: async function* () {
+      stream: async function* (): AsyncGenerator<unknown> {
         for (const piece of pieces) {
           yield [[], 'messages', [piece, {}]]
           await new Promise((r) => setTimeout(r, 60))
