@@ -22,8 +22,9 @@ export async function agentFetch(input: RequestInfo | URL, init?: RequestInit): 
   const body = (await response
     .clone()
     .json()
-    .catch(() => null)) as { message?: unknown } | null
-  const message = typeof body?.message === 'string' && body.message.trim() ? body.message.replace(/[\r\n]+/g, ' ').trim() : FALLBACK
+    .catch(() => null)) as { message?: unknown; fix?: unknown } | null
+  const words = (v: unknown) => (typeof v === 'string' ? v.replace(/[\r\n]+/g, ' ').trim() : '')
+  const message = words(body?.message) ? [words(body?.message), words(body?.fix)].filter(Boolean).join(' ') : FALLBACK
   return new Response(response.body, { status: response.status, statusText: message, headers: response.headers })
 }
 
