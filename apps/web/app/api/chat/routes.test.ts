@@ -1,6 +1,6 @@
 // The Chat routes: who may call them and what they hand on. The library under them has its own tests.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { FetchStreamTransport } from '@langchain/langgraph-sdk/ui'
 import { makeFakeAdmin, type FakeAdmin } from '@/lib/agents/testing/fake-admin'
@@ -83,6 +83,48 @@ describe('streaming', () => {
     expect(events[1].data).toEqual({ type: 'tool', label: 'Find roles', phase: 'start' })
     expect(events[2].data).toEqual({ type: 'words', text: 'Writing one answer.' })
     expect(events[3].data).toEqual({ type: 'answer', turn_id: 't1' })
+  })
+})
+describe('streaming refusals', () => {
+  const send = (id: string, body: unknown) => stream(json(`/api/chat/${id}/stream`, 'POST', body), ctx(id))
+  const human = (content: string) => ({ input: { messages: [{ type: 'human', content }] } })
+
+  afterEach(() => {
+    expect(chatStream.storePersonTurn).not.toHaveBeenCalled()
+    expect(chatStream.runStoredTurn).not.toHaveBeenCalled()
+  })
+
+  it('answers 400 with a sentence for an empty message or one over 20,000 characters', async () => {
+    for (const content of ['', 'x'.repeat(20_001)]) {
+      const res = await send('c1', human(content))
+      expect(res.status).toBe(400)
+      expect(await res.json()).toMatchObject({ message: 'Type something to send, up to 20,000 characters.' })
+    }
+  })
+
+  it('answers 401 with a sentence when signed out', async () => {
+    state.user = null
+    const res = await send('c1', human('hello'))
+    expect(res.status).toBe(401)
+    expect(await res.json()).toMatchObject({ message: 'Sign in to use Chat.' })
+  })
+
+  it('answers 404 with a sentence for a chat that is not theirs, with or without a choice', async () => {
+    chatStream.storePersonTurn.mockResolvedValue(null)
+    for (const context of [{}, { choice: { rung: 'R3', model: 'qwen/qwen3.8-27b:free', effort: 'low' } }]) {
+      const res = await send('c2', { ...human('hello'), context })
+      expect(res.status).toBe(404)
+      expect(await res.json()).toMatchObject({ message: 'That chat was not found.' })
+    }
+    chatStream.storePersonTurn.mockClear()
+  })
+
+  it('answers 400 with its message and fix for a choice above what they allow', async () => {
+    const res = await send('c1', { ...human('hello'), context: { choice: { rung: 'R5', model: 'anthropic/claude-opus-4', effort: 'high' } } })
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.message).toEqual(expect.any(String))
+    expect(body.fix).toEqual(expect.any(String))
   })
 })
 describe('the door', () => {

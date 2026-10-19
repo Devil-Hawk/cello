@@ -45,6 +45,10 @@ describe('agentFetch with the hook transport', () => {
     expect(errorMessage(await failure(http2(500, { message: '   ' })))).toBe(AGENT_COPY.generic)
   })
 
+  it('a refusal that names a fix shows the fix after its message', async () => {
+    expect(errorMessage(await failure(http2(400, { error: 'refused', message: 'That model is above your cap.', fix: 'Pick a cheaper one.' })))).toBe('That model is above your cap. Pick a cheaper one.')
+  })
+
   it('a sentence with a line break cannot break the status line', async () => {
     expect(errorMessage(await failure(http2(409, { message: 'First line.\nSecond line.' })))).toBe('First line. Second line.')
   })
