@@ -17,7 +17,7 @@ import type { Mode } from './mode'
 import { resolveRoleType } from './find-roles'
 import { resultOf } from './recalled'
 import { madeThing, type Thing } from './things'
-import { withWorker } from './workers'
+import { withWorker, StoppedError } from './workers'
 import type { AgentInput, AgentOutput } from './turn'
 
 export type Intent =
@@ -70,6 +70,8 @@ interface Deps {
   /** The turn's mode, resolved by code in run.ts; the door carries it to each command. */
   mode?: Mode
   signal?: AbortSignal
+  stop?: () => Promise<boolean>
+  emit?: (event: { event: string; data: unknown }) => void
 }
 
 /** A model's text on one line, with a dash between two numbers (a pay range copied from the table) said as "to": the copy has no dashes. */
@@ -175,17 +177,23 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
     const results: TurnResult[] = []
     const madeIds: string[] = []
     const call = async (id: string, args: Record<string, unknown>): Promise<{ sentence?: string; things: Thing[] }> => {
+      if (await deps.stop?.()) throw new StoppedError()
       const def = getCommand(id)
       if (!def) throw new Error(`No command ${id}`)
-      const out = (await runCommand(def, ctx, args)) as { sentence?: string; things?: Thing[] }
-      tools.push({ label: def.label })
-      for (const t of out.things ?? []) {
-        results.push(resultOf(t))
-        if (t.kind === 'made') madeIds.push(t.id)
-        else sources.push({ title: t.title, host: t.company ?? 'Your stored roles' })
+      deps.emit?.({ event: 'custom', data: { type: 'tool', label: def.label, phase: 'start' } })
+      try {
+        const out = (await runCommand(def, ctx, args)) as { sentence?: string; things?: Thing[] }
+        tools.push({ label: def.label })
+        for (const t of out.things ?? []) {
+          results.push(resultOf(t))
+          if (t.kind === 'made') madeIds.push(t.id)
+          else sources.push({ title: t.title, host: t.company ?? 'Your stored roles' })
+        }
+        if (out.sentence) results.push({ object: null, text: out.sentence })
+        return { sentence: out.sentence, things: out.things ?? [] }
+      } finally {
+        deps.emit?.({ event: 'custom', data: { type: 'tool', label: def.label, phase: 'end' } })
       }
-      if (out.sentence) results.push({ object: null, text: out.sentence })
-      return { sentence: out.sentence, things: out.things ?? [] }
     }
     // What code says in its own words is its own evidence (it can name a model and its numbers).
     const say = (text: string, cards: Thing[] = []): ModelAnswer => (results.push({ object: null, text }), { parts: [{ about: [], text }], cards: cards.filter((t) => t.kind === 'role').map((t) => ({ kind: 'role' as const, id: t.id })) })

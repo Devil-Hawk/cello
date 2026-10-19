@@ -35,6 +35,7 @@ import { ToolMessage, type BaseMessage } from '@langchain/core/messages'
 import { Command, interrupt, isCommand } from '@langchain/langgraph'
 import { scrubStructuralEscapes } from '@/lib/security/job-text'
 import { isTransient } from '@/lib/util/retry'
+import { StoppedError } from '@/lib/chat/workers'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { celloChatModel, freeFallbackModels, isFreeModel, runTagOf } from './model'
 import { isBudgetCapError, reserve, rootCause, settle } from './spend-port'
@@ -60,6 +61,8 @@ export interface GuardContext {
   chatTurnId?: string
   /** The role this loop is: written on every ledger row it makes. */
   role?: 'chat' | 'researcher'
+  /** The row's Stop flag, checked before every model and tool call. */
+  stop?: () => Promise<boolean>
 }
 
 // --- spend --------------------------------------------------------------------------
@@ -163,6 +166,19 @@ export function celloDemoRules(ctx: Pick<GuardContext, 'isDemo'>) {
   })
 }
 
+export function celloStop(isStopped: () => Promise<boolean>) {
+  return createMiddleware({
+    name: 'CelloStop',
+    beforeModel: async () => {
+      if (await isStopped()) throw new StoppedError()
+    },
+    wrapToolCall: async (request, handler) => {
+      if (await isStopped()) throw new StoppedError()
+      return handler(request)
+    },
+  })
+}
+
 // --- untrusted text -----------------------------------------------------------------
 
 const MARKDOWN_IMAGE = /!\[[^\]]*\]\([^)]*\)/g
@@ -249,6 +265,8 @@ export interface GuardStackOptions {
   ctx: GuardContext
   agent: AgentKind
   deadlineAt: number
+  /** The row's Stop flag. */
+  stop?: () => Promise<boolean>
   /** Test seam: fallback models to use instead of the free list. */
   fallbacks?: Parameters<typeof modelFallbackMiddleware>
 }
@@ -267,6 +285,7 @@ export function guardStack(opts: GuardStackOptions): AgentMiddleware[] {
 
   const stack: unknown[] = [
     celloDemoRules(ctx),
+    ...(opts.stop ? [celloStop(opts.stop)] : []),
     modelCallLimitMiddleware({ runLimit: caps.modelCalls, exitBehavior: 'end' }),
     toolCallLimitMiddleware({ runLimit: caps.toolCalls, exitBehavior: 'continue' }),
     ...(caps.delegations > 0
@@ -286,6 +305,7 @@ export function guardStack(opts: GuardStackOptions): AgentMiddleware[] {
 /** The names, in order, for the factory test. */
 export const GUARD_ORDER = [
   'CelloDemoRules',
+  'CelloStop',
   'ModelCallLimitMiddleware',
   'ToolCallLimitMiddleware',
   'ContextEditingMiddleware',

@@ -71,10 +71,12 @@ export interface CelloAgentInput {
 
 function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher') {
   const { ctx } = input
+  const stop = ctx.stop ?? (() => Promise.resolve(false))
   return guardStack({
-    ctx: { admin: ctx.admin, userId: ctx.userId, apiKeys: ctx.apiKeys, isDemo: ctx.isDemo, traceId: ctx.traceId, chatTurnId: ctx.chatTurnId, role: agent === 'researcher' ? 'researcher' : 'chat' },
+    ctx: { admin: ctx.admin, userId: ctx.userId, apiKeys: ctx.apiKeys, isDemo: ctx.isDemo, traceId: ctx.traceId, chatTurnId: ctx.chatTurnId, role: agent === 'researcher' ? 'researcher' : 'chat', stop },
     agent,
     deadlineAt: ctx.deadlineAt,
+    stop,
     fallbacks: input.fallbacks,
   })
 }
