@@ -128,6 +128,8 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   const [live, setLive] = useState<{ words: string; tools: { label: string; phase: 'start' | 'end' }[] } | null>(null)
   const streamChatId = useRef(routeId)
   streamChatId.current = chatId
+  // The turn the open stream is answering, from its first event: Stop posts exactly this id, never a row from an earlier read.
+  const streamTurnId = useRef<string | null>(null)
   const answered = useRef<Set<string> | null>(null)
   const [estimate, setEstimate] = useState<string | null>(null)
 
@@ -186,7 +188,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     () =>
       new FetchStreamTransport({
         apiUrl: '/api/chat/__chat__/stream',
-        fetch: (input, init) => agentFetch(typeof input === 'string' ? input.replace('__chat__', encodeURIComponent(streamChatId.current ?? '')) : input, init),
+        fetch: (input: RequestInfo | URL, init?: RequestInit) => agentFetch(typeof input === 'string' ? input.replace('__chat__', encodeURIComponent(streamChatId.current ?? '')) : input, init),
       }),
     [],
   )
@@ -206,6 +208,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
       }
       if (event.type === 'answer') {
         setLive(null)
+        streamTurnId.current = null
         void loadPage()
       }
     },
@@ -213,12 +216,20 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   )
   const stream = useStream({
     transport: streamTransport,
+    // The stream names the turn it answers first of all: Stop targets this turn from the first moment, before any row is read.
+    onMetadataEvent: (data) => {
+      const turnId = (data as unknown as { turn_id?: unknown }).turn_id
+      if (typeof turnId === 'string') streamTurnId.current = turnId
+    },
     onCustomEvent,
     onError: (error) => {
       setLive(null)
       setNote(errorMessage(error))
     },
-    onFinish: () => void loadPage(),
+    onFinish: () => {
+      streamTurnId.current = null
+      void loadPage()
+    },
   })
 
   useEffect(() => {
@@ -424,10 +435,13 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     setChips(named.filter((o): o is { kind: string; ref: string; name: string } => o !== null))
   }
 
+  // Stop marks the turn's rows on the server (the work itself lives there, not in the stream); the stream's own turn id wins
+  // over the newest row, which can still be the earlier turn right after Send.
   const stopTurn = useCallback(() => {
-    void stream.stop()
-    if (chatId && lastPersonTurn?.id) void send(`/api/chat/${encodeURIComponent(chatId)}/stop`, 'POST', { turn_id: lastPersonTurn.id }).then(() => loadPage())
-  }, [chatId, lastPersonTurn?.id, loadPage, stream])
+    const turnId = streamTurnId.current ?? lastPersonTurn?.id
+    const id = streamChatId.current ?? chatId
+    if (id && turnId) void send(`/api/chat/${encodeURIComponent(id)}/stop`, 'POST', { turn_id: turnId }).then(() => loadPage())
+  }, [chatId, lastPersonTurn?.id, loadPage])
 
   async function signOut() {
     await createClient().auth.signOut()
