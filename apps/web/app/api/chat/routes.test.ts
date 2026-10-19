@@ -2,9 +2,11 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
+import { FetchStreamTransport } from '@langchain/langgraph-sdk/ui'
 import { makeFakeAdmin, type FakeAdmin } from '@/lib/agents/testing/fake-admin'
 
 const state = vi.hoisted(() => ({ user: { id: 'u1' } as { id: string } | null, db: undefined as unknown }))
+const chatStream = vi.hoisted(() => ({ storePersonTurn: vi.fn(), runStoredTurn: vi.fn() }))
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: async () => ({ data: { user: state.user } }) } }) }))
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => state.db }))
@@ -17,8 +19,10 @@ vi.mock('@/lib/chat/objects', () => ({
 }))
 
 vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: async () => ({ openrouter: 'k', models: { ceiling: 'R3', order: ['R3'], creditBought: false } }) }))
+vi.mock('@/lib/chat/run', () => chatStream)
 
 import { GET as list } from './route'
+import { POST as stream } from './[id]/stream/route'
 import { DELETE as remove, GET as one, PATCH as patch } from './[id]/route'
 import { DELETE as untile, POST as tile } from './[id]/attachments/route'
 import { POST as stop } from './[id]/stop/route'
@@ -53,8 +57,34 @@ beforeEach(() => {
     artifacts: [],
   })
   state.db = db
+  chatStream.storePersonTurn.mockReset().mockResolvedValue({ id: 't1', typed: 'hello', quoted: null })
+  chatStream.runStoredTurn.mockReset().mockImplementation(async (_db: unknown, _userId: string, _chatId: string, _turn: unknown, options: { emit?: (event: unknown) => void }) => {
+    options.emit?.({ event: 'custom', data: { type: 'tool', label: 'Find roles', phase: 'start' } })
+    options.emit?.({ event: 'custom', data: { type: 'words', text: 'Writing one answer.' } })
+    options.emit?.({ event: 'custom', data: { type: 'answer', turn_id: 't1' } })
+  })
 })
 
+describe('streaming', () => {
+  it('stores the typed turn first, then sends tool start, words, and answer events', async () => {
+    const response = await stream(json('/api/chat/c1/stream', 'POST', {
+      input: { messages: [{ type: 'human', content: 'hello' }] },
+      context: { quoted: null, choice: null },
+    }), ctx('c1'))
+    expect(response.status).toBe(200)
+
+    const events: { event: string; data: unknown }[] = []
+    const transport = new FetchStreamTransport({ apiUrl: 'http://test/api/chat/c1/stream', fetch: async () => response })
+    for await (const event of await transport.stream({ input: {}, context: {}, signal: new AbortController().signal } as never)) events.push(event as never)
+
+    expect(chatStream.storePersonTurn).toHaveBeenCalledWith(expect.anything(), 'u1', 'c1', { typed: 'hello', quoted: null })
+    expect(chatStream.runStoredTurn).toHaveBeenCalledWith(expect.anything(), 'u1', 'c1', { id: 't1', typed: 'hello', quoted: null }, expect.objectContaining({ emit: expect.any(Function) }))
+    expect(events.map((event) => event.event)).toEqual(['metadata', 'custom', 'custom', 'custom'])
+    expect(events[1].data).toEqual({ type: 'tool', label: 'Find roles', phase: 'start' })
+    expect(events[2].data).toEqual({ type: 'words', text: 'Writing one answer.' })
+    expect(events[3].data).toEqual({ type: 'answer', turn_id: 't1' })
+  })
+})
 describe('the door', () => {
   it('needs a signed in person', async () => {
     state.user = null

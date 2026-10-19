@@ -16,16 +16,50 @@ import { routedAgent } from './route'
 import { recallInWordsOn } from './shown'
 import { runChatTurn } from './turn'
 import { finishWorker, isStopped, openWorker, STOP_POLL_MS } from './workers'
-
+import type { WireEvent } from '@/lib/agents/sse'
 const PROVIDER_NAMES = { openai: 'OpenAI', anthropic: 'Anthropic', openrouter: 'OpenRouter' } as const
 
-/** A plain line from code where the answer would be: stored as Cello's turn so the page can stop waiting. */
+export interface StoredPersonTurn {
+  id: string
+  typed: string
+  quoted: { text: string; turn_id: string } | null
+}
+
+/** Stores the person's words before streaming or any model work starts. */
+export async function storePersonTurn(
+  db: AdminClient,
+  userId: string,
+  chatId: string,
+  input: { typed: string; quoted?: { text: string; turn_id: string } | null },
+): Promise<StoredPersonTurn | null> {
+  const typed = input.typed.trim()
+  if (!typed || typed.length > 20_000) return null
+  const { data: chat } = await db.from('chats').select('id, title').eq('id', chatId).eq('user_id', userId).maybeSingle()
+  if (!chat) return null
+  const quoted = input.quoted ?? null
+  const { data: made, error } = await db.from('chat_turns').insert({ user_id: userId, chat_id: chatId, kind: 'person', typed, origin: 'person', quoted }).select('id').single()
+  if (error || !made) return null
+  if (!(chat as { title: string | null }).title) await db.from('chats').update({ title: typed.replace(/\s+/g, ' ').slice(0, 80) }).eq('id', chatId).eq('user_id', userId)
+  return { id: (made as { id: string }).id, typed, quoted }
+}
+
+
 async function leaveLine(db: AdminClient, userId: string, chatId: string, text: string) {
   await db.from('chat_turns').insert({ user_id: userId, chat_id: chatId, kind: 'cello', answer: text, origin: 'code', prov: { step: 'chat', rule: 'refusal' }, parts: [{ about: [], text }] })
   await db.from('chats').update({ last_turn_at: new Date().toISOString() }).eq('id', chatId).eq('user_id', userId)
 }
 
-export async function runStoredTurn(db: AdminClient, userId: string, chatId: string, turn: { id: string; typed: string; quoted?: { text: string; turn_id: string } | null }): Promise<void> {
+export interface RunStoredTurnOptions {
+  emit?: (event: WireEvent) => void
+}
+
+export async function runStoredTurn(
+  db: AdminClient,
+  userId: string,
+  chatId: string,
+  turn: { id: string; typed: string; quoted?: { text: string; turn_id: string } | null },
+  options: RunStoredTurnOptions = {},
+): Promise<void> {
   const keys = await loadApiKeys(db, userId)
   const view = await readSettings(db, userId, chatId, chatLimits(keys), freeModels())
   // A saved key that cannot be read any more is the reason, not a missing one.
@@ -45,18 +79,22 @@ export async function runStoredTurn(db: AdminClient, userId: string, chatId: str
   const stop = new AbortController()
   const timer = setInterval(() => void isStopped(db, root).then((yes) => yes && stop.abort()), STOP_POLL_MS)
   try {
-    const loop = chatAgent({ db, userId, keys, isDemo: keys.isDemo !== false, ran: view.ran, roles: view.roles, mode: mode.mode, signal: stop.signal })
+    const loop = chatAgent({ db, userId, keys, isDemo: keys.isDemo !== false, ran: view.ran, roles: view.roles, mode: mode.mode, signal: stop.signal, stop: () => isStopped(db, root), emit: options.emit })
     const names = async () => (((await db.from('companies').select('name').eq('user_id', userId).limit(200)).data as { name: string }[] | null) ?? []).map((c) => c.name)
     const out = await runChatTurn(
-      { db, agent: routedAgent({ db, userId, keys, ran: view.ran, roles: view.roles, mode: mode.mode, signal: stop.signal }, loop, names), store: getMemoryStore(), isDemo: keys.isDemo !== false },
+      { db, agent: routedAgent({ db, userId, keys, ran: view.ran, roles: view.roles, mode: mode.mode, signal: stop.signal, stop: () => isStopped(db, root), emit: options.emit }, loop, names), store: getMemoryStore(), isDemo: keys.isDemo !== false },
       { userId, chatId, typed, quoted: turn.quoted ?? null, recalled, turnId: turn.id, mode }
     )
-    if (!out.ok) await leaveLine(db, userId, chatId, stop.signal.aborted ? 'Stopped. Nothing was changed.' : `${out.error} ${out.fix}`.trim())
-    await finishWorker(db, root, { status: stop.signal.aborted ? 'stopped' : out.ok ? 'done' : 'failed' })
+    const stopped = stop.signal.aborted || (await isStopped(db, root))
+    if (!out.ok) await leaveLine(db, userId, chatId, stopped ? 'Stopped. Nothing was changed.' : `${out.error} ${out.fix}`.trim())
+    await finishWorker(db, root, { status: stopped ? 'stopped' : out.ok ? 'done' : 'failed' })
+    options.emit?.({ event: 'custom', data: { type: 'answer', turn_id: turn.id } })
   } catch (e) {
     console.error('chat turn failed', e)
-    await leaveLine(db, userId, chatId, stop.signal.aborted ? 'Stopped. Nothing was changed.' : (reasonOf(e, 'chat') ?? 'Cello could not finish this. Nothing was changed. Try again.'))
-    await finishWorker(db, root, { status: stop.signal.aborted ? 'stopped' : 'failed' })
+    const stopped = stop.signal.aborted || (await isStopped(db, root))
+    await leaveLine(db, userId, chatId, stopped ? 'Stopped. Nothing was changed.' : (reasonOf(e, 'chat') ?? 'Cello could not finish this. Nothing was changed. Try again.'))
+    await finishWorker(db, root, { status: stopped ? 'stopped' : 'failed' })
+    options.emit?.({ event: 'custom', data: { type: 'answer', turn_id: turn.id } })
   } finally {
     clearInterval(timer)
   }
