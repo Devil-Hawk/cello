@@ -162,14 +162,31 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
           lastWordsAt = Date.now()
           deps.emit?.({ event: 'custom', data: { type: 'words', text: words } })
         }
+        // A delegation to the Researcher runs under a "tools:<call id>" namespace: it is shown as a tool row while it runs.
+        const delegations = new Set<string>()
         const chunks = await (agent as unknown as { stream: (input: unknown, config?: unknown) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown> }).stream({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, configurable: { thread_id: input.turnId }, recursionLimit: 80, streamMode: ['values', 'messages', 'custom'], subgraphs: true })
         for await (const chunk of chunks) {
           if (!Array.isArray(chunk) || chunk.length < 3) continue
           const [namespace, mode, data] = chunk as [readonly string[], string, unknown]
           deps.emit(chunkToEvent([namespace, mode, data]))
+          // The chat loop's own model runs under "model_request:<id>" and its tools under "tools:<id>"; a subagent is a
+          // model run nested inside a tool call ("tools:<id>" then "model_request:<id>").
+          const delegation = namespace.length >= 2 && namespace[0].startsWith('tools:') ? namespace[0] : null
+          const root = !namespace[0]?.startsWith('tools:')
+          if (delegation && !delegations.has(delegation)) {
+            delegations.add(delegation)
+            deps.emit({ event: 'custom', data: { type: 'tool', label: 'Research', phase: 'start' } })
+          }
+          if (root && delegations.size && mode === 'values') {
+            delegations.clear()
+            deps.emit({ event: 'custom', data: { type: 'tool', label: 'Research', phase: 'end' } })
+          }
           if (namespace.length === 0 && mode === 'values' && data && typeof data === 'object') values = data as { messages?: BaseMessage[]; structuredResponse?: unknown }
-          if (namespace.length === 0 && mode === 'messages' && Array.isArray(data) && isAIMessageChunk(data[0] as BaseMessageChunk)) {
+          if (root && mode === 'messages' && Array.isArray(data) && isAIMessageChunk(data[0] as BaseMessageChunk)) {
             const piece = data[0] as AIMessageChunk
+            // langchain's AgentNode appends its own "Returning structured response: {...}" message after a structured
+            // answer; it is the loop's bookkeeping, not words the model wrote.
+            if (typeof piece.content === 'string' && piece.content.startsWith('Returning structured response:')) continue
             // A tool result or a new model turn starts a new message: the id changes and the words start over.
             written = written && (!piece.id || piece.id === written.id) ? written.concat(piece) : piece
             sendWords(false)
