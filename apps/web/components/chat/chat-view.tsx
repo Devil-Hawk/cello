@@ -130,6 +130,8 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   streamChatId.current = chatId
   // The turn the open stream is answering, from its first event: Stop posts exactly this id, never a row from an earlier read.
   const streamTurnId = useRef<string | null>(null)
+  // Stop pressed before the stream has named its turn: sent the moment it does.
+  const stopWanted = useRef(false)
   const answered = useRef<Set<string> | null>(null)
   const [estimate, setEstimate] = useState<string | null>(null)
 
@@ -219,7 +221,12 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     // The stream names the turn it answers first of all: Stop targets this turn from the first moment, before any row is read.
     onMetadataEvent: (data) => {
       const turnId = (data as unknown as { turn_id?: unknown }).turn_id
-      if (typeof turnId === 'string') streamTurnId.current = turnId
+      if (typeof turnId !== 'string') return
+      streamTurnId.current = turnId
+      if (stopWanted.current) {
+        stopWanted.current = false
+        void send(`/api/chat/${encodeURIComponent(streamChatId.current ?? '')}/stop`, 'POST', { turn_id: turnId }).then(() => loadPage())
+      }
     },
     onCustomEvent,
     onError: (error) => {
@@ -387,6 +394,8 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     const typed = draft.trim()
     if (!typed || sending) return
     setSending(true)
+    stopWanted.current = false
+    streamTurnId.current = null
     // The line moves from the compose box to the conversation at once; it comes back to the box if the send fails.
     setJustSent(typed)
     setDraft('')
@@ -438,10 +447,15 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   // Stop marks the turn's rows on the server (the work itself lives there, not in the stream); the stream's own turn id wins
   // over the newest row, which can still be the earlier turn right after Send.
   const stopTurn = useCallback(() => {
+    // While a send is in flight the stream has not named its turn yet: hold the Stop for the metadata event.
+    if (sending && !streamTurnId.current) {
+      stopWanted.current = true
+      return
+    }
     const turnId = streamTurnId.current ?? lastPersonTurn?.id
     const id = streamChatId.current ?? chatId
     if (id && turnId) void send(`/api/chat/${encodeURIComponent(id)}/stop`, 'POST', { turn_id: turnId }).then(() => loadPage())
-  }, [chatId, lastPersonTurn?.id, loadPage])
+  }, [chatId, lastPersonTurn?.id, loadPage, sending])
 
   async function signOut() {
     await createClient().auth.signOut()
