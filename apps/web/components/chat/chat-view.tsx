@@ -46,6 +46,8 @@ export interface ChatViewProps {
 }
 
 const PAGE = 50
+// The stream route refuses anything longer; checking here keeps a chat from being made for a send that cannot go.
+const MAX_SEND = 20_000
 /** "@" and then the start of a name, at the end of what is typed. */
 const AT_WORD = /(^|\s)@([^\s@]{0,40})$/
 
@@ -132,6 +134,8 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   const streamTurnId = useRef<string | null>(null)
   // Stop pressed before the stream has named its turn: sent the moment it does.
   const stopWanted = useRef(false)
+  // Puts a send that never reached the server back as it was (text, chips, picks), and says why. Null once the stream has named its turn.
+  const unsent = useRef<((why: string) => void) | null>(null)
   const answered = useRef<Set<string> | null>(null)
   const [estimate, setEstimate] = useState<string | null>(null)
 
@@ -223,6 +227,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
       const turnId = (data as unknown as { turn_id?: unknown }).turn_id
       if (typeof turnId !== 'string') return
       streamTurnId.current = turnId
+      unsent.current = null
       if (stopWanted.current) {
         stopWanted.current = false
         void send(`/api/chat/${encodeURIComponent(streamChatId.current ?? '')}/stop`, 'POST', { turn_id: turnId }).then(() => loadPage())
@@ -231,7 +236,11 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     onCustomEvent,
     onError: (error) => {
       setLive(null)
-      setNote(errorMessage(error))
+      if (unsent.current) unsent.current(errorMessage(error))
+      else {
+        setNote(errorMessage(error))
+        void loadPage()
+      }
     },
     onFinish: () => {
       streamTurnId.current = null
@@ -393,6 +402,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   async function sendMessage() {
     const typed = draft.trim()
     if (!typed || sending) return
+    if (typed.length > MAX_SEND) return setNote('Type something to send, up to 20,000 characters.')
     setSending(true)
     stopWanted.current = false
     streamTurnId.current = null
@@ -407,6 +417,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
       setDraft(typed)
       setNote(note)
     }
+    const before = { chips, quoted, once, pending, pendingMode }
     let id = chatId
     if (!id) {
       const made = await sendJson<{ id: string }>('/api/chat', 'POST', { chips: chips.map((c) => ({ kind: c.kind, id: c.ref })), ...(pending ? { choice: pending } : {}), ...(pendingMode !== undefined ? { mode: pendingMode } : {}) })
@@ -427,11 +438,33 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
       window.history.replaceState(null, '', `/chat/${encodeURIComponent(id)}`)
       setChatId(id)
     }
+    // A refused or dropped send leaves nothing stored: the text, chips and picks come back, and a chat made for it goes.
+    let refused = false
+    unsent.current = (why) => {
+      unsent.current = null
+      refused = true
+      stopWanted.current = false
+      setLive(null)
+      failed(why)
+      setQuoted(before.quoted)
+      setOnce(before.once)
+      if (id === chatId) return
+      setChips(before.chips)
+      setPending(before.pending)
+      setPendingMode(before.pendingMode)
+      streamChatId.current = null
+      window.history.replaceState(null, '', '/chat')
+      setChatId(null)
+      void send(`/api/chat/${encodeURIComponent(id as string)}`, 'DELETE').then(() => loadChats())
+    }
     try {
       await stream.submit({ messages: [{ type: 'human', content: typed }] }, { context: { quoted, choice: choiceOnce } })
     } catch {
-      return failed('Cello could not send that. Try again.')
+      unsent.current?.('Cello could not send that. Try again.')
     }
+    // The stream ended without naming a turn and without an error: nothing was stored.
+    unsent.current?.('Cello could not send that. Try again.')
+    if (refused) return
     setSending(false)
     void loadPage()
     void loadChats()
