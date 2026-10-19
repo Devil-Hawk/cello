@@ -1,5 +1,5 @@
 // POST /api/chat {chips, choice?, mode?}: starts a chat, holding the chips the person added (each checked as theirs), and answers
-// with its id. The first message goes to /api/chat/[id]/turns.
+// with its id. The first message goes to /api/chat/[id]/stream.
 // GET /api/chat: the person's chats for Recents (pinned first, then newest), or with ?earlier=1 their old
 // Copilot conversations. ?archived=1 lists archived chats; ?before= pages from the last row's last_turn_at; ?limit= sizes the page.
 

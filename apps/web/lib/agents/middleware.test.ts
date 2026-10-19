@@ -21,7 +21,7 @@ vi.mock('@/lib/harness/spend', async (orig) => ({
 import { BudgetCapError } from '@/lib/harness/spend'
 import { isBudgetCapError } from './spend-port'
 import { tagRun } from './model'
-import { DEMO_SEND_REFUSAL, celloDeadline, celloDemoRules, celloSpend, celloUntrusted, guardStack, quoteUntrusted, sanitizeUntrusted, type GuardContext } from './middleware'
+import { DEMO_SEND_REFUSAL, celloDeadline, celloDemoRules, celloSpend, celloStop, celloUntrusted, guardStack, quoteUntrusted, sanitizeUntrusted, type GuardContext } from './middleware'
 import { ScriptedChatModel, callTools, say } from './testing/scripted-model'
 
 const ctx = (over: Partial<GuardContext> = {}): GuardContext => ({
@@ -273,6 +273,17 @@ describe('CelloDemoRules', () => {
   })
 })
 
+describe('CelloStop', () => {
+  it('starts no model call and no tool call after Stop', async () => {
+    let stopped = false
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [callTools([{ name: 'echo' }]), say('done')] })
+    const agent = createAgent({ model, tools: [echo], middleware: [celloStop(async () => stopped)] })
+
+    stopped = true
+    await expect(run(agent)).rejects.toThrow('Stopped by you')
+    expect(model.calls).toHaveLength(0)
+  })
+})
 describe('CelloDeadline', () => {
   it('interrupts with a slice marker past the deadline and resumes in the next request', async () => {
     const saver = new MemorySaver()
