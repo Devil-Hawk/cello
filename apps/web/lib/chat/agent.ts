@@ -3,7 +3,7 @@
 // tool returns becomes a result the answer check reads; the model's final answer is the structured parts of
 // answer.ts, or, when a model cannot give that shape, its last words as one part that is checked the same way.
 
-import { HumanMessage, type BaseMessage } from '@langchain/core/messages'
+import { HumanMessage, isAIMessageChunk, type AIMessageChunk, type BaseMessage, type BaseMessageChunk } from '@langchain/core/messages'
 import { MemorySaver } from '@langchain/langgraph'
 import { tool } from '@langchain/core/tools'
 import { createCelloAgent } from '@/lib/agents/factory'
@@ -150,27 +150,32 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
       const stream = (agent as unknown as { stream?: (input: unknown, config?: unknown) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown> }).stream
       if (deps.emit && stream) {
         let values: { messages?: BaseMessage[]; structuredResponse?: unknown } | null = null
-        let raw = ''
+        // The root model's answer so far: chunks concatenated as LangChain does, so a structured answer written as a
+        // tool call accumulates its partial arguments and liveText reads the parts written so far.
+        let written: AIMessageChunk | null = null
         let lastWords = ''
         let lastWordsAt = 0
+        const sendWords = (force: boolean) => {
+          const words = liveText(written)
+          if (!words || words === lastWords || (!force && Date.now() - lastWordsAt < 150)) return
+          lastWords = words
+          lastWordsAt = Date.now()
+          deps.emit?.({ event: 'custom', data: { type: 'words', text: words } })
+        }
         const chunks = await (agent as unknown as { stream: (input: unknown, config?: unknown) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown> }).stream({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, configurable: { thread_id: input.turnId }, recursionLimit: 80, streamMode: ['values', 'messages', 'custom'], subgraphs: true })
         for await (const chunk of chunks) {
           if (!Array.isArray(chunk) || chunk.length < 3) continue
           const [namespace, mode, data] = chunk as [readonly string[], string, unknown]
           deps.emit(chunkToEvent([namespace, mode, data]))
           if (namespace.length === 0 && mode === 'values' && data && typeof data === 'object') values = data as { messages?: BaseMessage[]; structuredResponse?: unknown }
-          if (namespace.length === 0 && mode === 'messages' && Array.isArray(data)) {
-            const message = data[0]
-            const content = message && typeof message === 'object' ? (message as { content?: unknown }).content : undefined
-            raw += typeof content === 'string' ? content : liveText(message)
-            const words = liveText({ ...(message as object), content: raw })
-            if (words && words !== lastWords && Date.now() - lastWordsAt >= 150) {
-              lastWords = words
-              lastWordsAt = Date.now()
-              deps.emit({ event: 'custom', data: { type: 'words', text: words } })
-            }
+          if (namespace.length === 0 && mode === 'messages' && Array.isArray(data) && isAIMessageChunk(data[0] as BaseMessageChunk)) {
+            const piece = data[0] as AIMessageChunk
+            // A tool result or a new model turn starts a new message: the id changes and the words start over.
+            written = written && (!piece.id || piece.id === written.id) ? written.concat(piece) : piece
+            sendWords(false)
           }
         }
+        sendWords(true)
         out = { messages: values?.messages ?? [], structuredResponse: values?.structuredResponse }
       } else {
         out = await agent.invoke({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, configurable: { thread_id: input.turnId }, recursionLimit: 80 })
