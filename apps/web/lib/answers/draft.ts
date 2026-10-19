@@ -128,7 +128,7 @@ export async function draftAnswer(admin: SupabaseClient, userId: string, input: 
     text = res.content.trim().replace(/^["“]|["”]$/g, '').slice(0, MAX_ANSWER)
     prov = res.prov
   } catch (e) {
-    return { ok: false, reason: reasonOf(e) ?? (e instanceof Error ? e.message.slice(0, 160) : 'The draft could not be written.') }
+    return { ok: false, reason: reasonOf(e) ?? 'The draft could not be written.' }
   }
   if (!text) return { ok: false, reason: 'The model wrote nothing.' }
   const problem = checkDraft(text, own, companyText, input.question)
