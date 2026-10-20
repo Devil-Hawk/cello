@@ -50,7 +50,15 @@ export async function storePersonTurn(
 }
 
 
-async function leaveLine(db: AdminClient, userId: string, chatId: string, text: string) {
+const NOTHING_CHANGED = 'Nothing was changed.'
+const KEPT = 'What was already done is kept.'
+
+/** The line a turn leaves when it ends without an answer. "Nothing was changed" is only true when no worker of the turn finished. */
+async function leaveLine(db: AdminClient, userId: string, chatId: string, text: string, turnId?: string) {
+  if (turnId && text.includes(NOTHING_CHANGED)) {
+    const { count } = await db.from('agent_tasks').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('turn_id', turnId).neq('command', 'chat.turn').in('status', ['done', 'partial'])
+    if ((count ?? 0) > 0) text = text.replace(NOTHING_CHANGED, KEPT)
+  }
   await db.from('chat_turns').insert({ user_id: userId, chat_id: chatId, kind: 'cello', answer: text, origin: 'code', prov: { step: 'chat', rule: 'refusal' }, parts: [{ about: [], text }] })
   await db.from('chats').update({ last_turn_at: new Date().toISOString() }).eq('id', chatId).eq('user_id', userId)
 }
@@ -77,9 +85,15 @@ export async function runStoredTurn(
 ): Promise<boolean> {
   const slices = options.resume?.slices ?? 0
   // A turn that is carried on already has its row: when it cannot run, the row says so instead of working forever.
+  // One request at a time runs a chat. A fresh turn whose chat is busy carries on without the lease (its row keeps the
+  // sweeper away); a turn being carried on stands down before it touches anything, so a live turn is never run twice
+  // and its working rows are never marked failed.
+  const lease = await claimLease(db, chatId).catch(() => null)
+  if (options.resume && !lease) return false
   const bail = async (text: string) => {
-    await leaveLine(db, userId, chatId, text)
+    await leaveLine(db, userId, chatId, text, turn.id)
     if (options.resume) await finishWorker(db, options.resume.rootId, { status: 'failed' })
+    if (lease) await releaseLease(db, lease).catch(() => undefined)
     return true
   }
   const keys = await loadApiKeys(db, userId)
@@ -98,10 +112,8 @@ export async function runStoredTurn(
 
   const scope = { db, userId, threadId: chatId, chatId, turnId: turn.id, model: view.ran.model, rung: view.ran.rung }
   const root = options.resume ? options.resume.rootId : await openWorker(scope, { command: 'chat.turn', title: 'Cello is working' })
-  // One request at a time runs a chat. A fresh turn whose chat is busy carries on without the lease (its row keeps the
-  // sweeper away); a turn being carried on stands down, so a live turn is never run twice.
-  const lease = await claimLease(db, chatId).catch(() => null)
-  if (options.resume && !lease) return false
+  // What was in flight when the request died: finished here (the lease is ours, so nothing live is touched), and its call runs again under the same call key.
+  if (options.resume) await db.from('agent_tasks').update({ status: 'failed', summary: INTERRUPTED, finished_at: new Date().toISOString() }).eq('user_id', userId).eq('turn_id', turn.id).neq('command', 'chat.turn').is('finished_at', null)
   const stopBeat = startHeartbeat(db, root, lease ? () => renewLease(db, lease) : undefined)
   const stop = new AbortController()
   const timer = setInterval(() => void isStopped(db, root).then((yes) => yes && stop.abort()), STOP_POLL_MS)
@@ -123,7 +135,7 @@ export async function runStoredTurn(
         { userId, chatId, typed, quoted: turn.quoted ?? null, recalled, turnId: turn.id, mode }
       )
       const stopped = stop.signal.aborted || (await isStopped(db, root))
-      if (!out.ok) await leaveLine(db, userId, chatId, stopped ? 'Stopped. Nothing was changed.' : `${out.error} ${out.fix}`.trim())
+      if (!out.ok) await leaveLine(db, userId, chatId, stopped ? 'Stopped. Nothing was changed.' : `${out.error} ${out.fix}`.trim(), turn.id)
       await finishWorker(db, root, { status: stopped ? 'stopped' : out.ok ? 'done' : 'failed' })
       options.emit?.({ event: 'custom', data: { type: 'answer', turn_id: turn.id } })
     } catch (e) {
@@ -134,7 +146,7 @@ export async function runStoredTurn(
       } else {
         console.error('chat turn failed', e)
         const stopped = stop.signal.aborted || (await isStopped(db, root))
-        await leaveLine(db, userId, chatId, e instanceof MovedError ? CAP_LINE : stopped ? 'Stopped. Nothing was changed.' : (reasonOf(e, 'chat') ?? 'Cello could not finish this. Nothing was changed. Try again.'))
+        await leaveLine(db, userId, chatId, e instanceof MovedError ? CAP_LINE : stopped ? 'Stopped. Nothing was changed.' : (reasonOf(e, 'chat') ?? 'Cello could not finish this. Nothing was changed. Try again.'), turn.id)
         await finishWorker(db, root, { status: stopped ? 'stopped' : 'failed' })
         options.emit?.({ event: 'custom', data: { type: 'answer', turn_id: turn.id } })
       }
@@ -186,7 +198,5 @@ export async function resumeChatTurn(db: AdminClient, chatId: string, turnId?: s
     }
     return true
   }
-  // What was in flight when the request died: finished here, and its call runs again under the same call key.
-  await db.from('agent_tasks').update({ status: 'failed', summary: INTERRUPTED, finished_at: new Date().toISOString() }).eq('user_id', userId).eq('turn_id', root.turn_id).neq('command', 'chat.turn').is('finished_at', null)
   return runStoredTurn(db, userId, chatId, { id: p.id, typed: p.typed, quoted: p.quoted }, { resume: { rootId: root.id, slices } })
 }

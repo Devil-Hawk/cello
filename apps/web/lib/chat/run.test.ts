@@ -149,6 +149,18 @@ describe('carrying a turn on', () => {
     expect(cello(db)).toHaveLength(0)
   })
 
+  it('leaves the working rows of a live turn alone when it stands down', async () => {
+    const db = seed()
+    handedOver(db)
+    lease.claim.mockResolvedValue(null)
+    db.tables.agent_tasks.push({ id: 'w1', user_id: 'u1', thread_id: 'c1', chat_id: 'c1', turn_id: 't1', command: 'applications.start', title: 'Start', status: 'working', finished_at: null, parent_id: 'root1' })
+    agentThat(answers())
+    expect(await resumeChatTurn(db, 'c1', 't1')).toBe(false)
+    expect(db.tables.agent_tasks.find((r) => r.id === 'w1')).toMatchObject({ status: 'working', finished_at: null })
+    expect(db.tables.agent_tasks.find((r) => r.id === 'w1')?.summary ?? null).toBeNull()
+    expect(rowsOf(db, 'chat.turn')[0]).toMatchObject({ status: 'working' })
+  })
+
   it('stops handing over after the last slice', async () => {
     const db = seed()
     handedOver(db)
@@ -186,5 +198,50 @@ describe('the rollup', () => {
     })
     await runStoredTurn(db, 'u1', 'c1', { id: 't1', typed: 'Draft a note' }, { openPersistence: persistence().open })
     expect(cello(db).filter((t) => t.origin === 'code')).toHaveLength(0)
+  })
+})
+
+describe('the line a turn without an answer leaves', () => {
+  const started = (db: FakeAdmin) =>
+    agentThat(async () => {
+      await finishWorker(db, await openWorker({ db, userId: 'u1', threadId: 'c1', chatId: 'c1', turnId: 't1' }, { command: 'applications.start', title: 'Start' }), { status: 'done' })
+      throw new Error('the model fell over')
+    })
+
+  it('says what was kept after a stop when a worker had finished', async () => {
+    const db = seed()
+    agentThat(async () => {
+      await finishWorker(db, await openWorker({ db, userId: 'u1', threadId: 'c1', chatId: 'c1', turnId: 't1' }, { command: 'applications.start', title: 'Start' }), { status: 'done' })
+      db.tables.agent_tasks.find((r) => r.command === 'chat.turn')!.stop_requested_at = '2026-10-20T10:00:09.000Z'
+      throw new Error('aborted')
+    })
+    await runStoredTurn(db, 'u1', 'c1', { id: 't1', typed: 'Apply to these' }, { openPersistence: persistence().open })
+    expect(cello(db).map((t) => t.answer)).toContain('Stopped. What was already done is kept.')
+  })
+
+  it('says nothing was changed after a stop when nothing finished', async () => {
+    const db = seed()
+    agentThat(async () => {
+      db.tables.agent_tasks.find((r) => r.command === 'chat.turn')!.stop_requested_at = '2026-10-20T10:00:09.000Z'
+      throw new Error('aborted')
+    })
+    await runStoredTurn(db, 'u1', 'c1', { id: 't1', typed: 'Apply to these' }, { openPersistence: persistence().open })
+    expect(cello(db).map((t) => t.answer)).toContain('Stopped. Nothing was changed.')
+  })
+
+  it('does not claim nothing changed when a worker finished before the failure', async () => {
+    const db = seed()
+    started(db)
+    await runStoredTurn(db, 'u1', 'c1', { id: 't1', typed: 'Apply to these' }, { openPersistence: persistence().open })
+    const lines = cello(db).map((t) => String(t.answer))
+    expect(lines).toContain('Cello could not finish this. What was already done is kept. Try again.')
+    expect(lines.some((l) => l.includes('Nothing was changed'))).toBe(false)
+  })
+
+  it('keeps the plain line when no worker finished', async () => {
+    const db = seed()
+    agentThat(async () => Promise.reject(new Error('the model fell over')))
+    await runStoredTurn(db, 'u1', 'c1', { id: 't1', typed: 'Apply to these' }, { openPersistence: persistence().open })
+    expect(cello(db).map((t) => t.answer)).toContain('Cello could not finish this. Nothing was changed. Try again.')
   })
 })
