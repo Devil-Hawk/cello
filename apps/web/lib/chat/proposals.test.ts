@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
-import { confirmProposal, dismissProposal, propose, renderProposal, type ApplyTargets } from './proposals'
+import { ApplyRefusal, confirmProposal, dismissProposal, propose, renderProposal, type ApplyTargets } from './proposals'
 
 const CHAT = '00000000-0000-4000-8000-000000000900'
 const ROLE = '00000000-0000-4000-8000-000000000001'
@@ -71,7 +71,7 @@ describe('confirmProposal', () => {
     const made = await propose(db, 'u1', { ...base, ...search }, all(apply))
     if (!made.ok) throw new Error('propose failed')
     expect(await confirmProposal(db, 'u1', made.id, all(apply))).toEqual({ ok: true })
-    expect(apply).toHaveBeenCalledWith(db, 'u1', { exclude_keywords: ['crypto'] })
+    expect(apply).toHaveBeenCalledWith(db, 'u1', { exclude_keywords: ['crypto'] }, made.id)
     expect(db.tables.proposals[0]).toMatchObject({ status: 'confirmed' })
     expect(db.tables.proposals[0].confirmed_at).toBeTruthy()
     expect(await confirmProposal(db, 'u1', made.id, all(apply))).toMatchObject({ ok: false })
@@ -103,5 +103,53 @@ describe('confirmProposal', () => {
     if (!made.ok) throw new Error('propose failed')
     expect(await dismissProposal(db, 'u1', made.id)).toEqual({ ok: true })
     expect(await dismissProposal(db, 'u1', made.id)).toMatchObject({ ok: false })
+  })
+})
+
+describe('an outside tool call', () => {
+  const call = { kind: 'mcp', payload: { server: 'mail', tool: 'send_email', args: { to: 'a@b.co', body: 'x'.repeat(300), count: 2 } } }
+  const only = (apply = vi.fn()): ApplyTargets => ({ mcp: apply })
+
+  it('renders an outside tool call from the stored payload', async () => {
+    const out = await propose(room(), 'u1', { ...base, ...call }, only())
+    expect(out).toMatchObject({ ok: true, card: `Run "send_email" on mail with: to: a@b.co; body: ${'x'.repeat(200)}...; count: 2` })
+    expect(renderProposal('mcp', { server: 'notes', tool: 'list', args: {} })).toBe('Run "list" on notes.')
+  })
+
+  it('needs no typed quote, and refuses an extra key, a guarded key or args over 4 KB', async () => {
+    const db = room()
+    expect(await propose(db, 'u1', { ...base, ...call }, only())).toMatchObject({ ok: true })
+    expect(await propose(db, 'u1', { ...base, kind: 'mcp', payload: { ...call.payload, extra: 1 } }, only())).toMatchObject({ ok: false })
+    expect(await propose(db, 'u1', { ...base, kind: 'mcp', payload: { ...call.payload, autonomy: 'full' } }, only())).toMatchObject({ ok: false })
+    expect(await propose(db, 'u1', { ...base, kind: 'mcp', payload: { ...call.payload, args: { a: 'x'.repeat(4100) } } }, only())).toMatchObject({ ok: false })
+    expect(db.tables.proposals).toHaveLength(1)
+  })
+
+  it('runs the stored call once on Confirm', async () => {
+    const db = room()
+    const apply = vi.fn()
+    const made = await propose(db, 'u1', { ...base, ...call }, only(apply))
+    if (!made.ok) throw new Error('propose failed')
+    expect(await confirmProposal(db, 'u1', made.id, only(apply))).toEqual({ ok: true })
+    expect(await confirmProposal(db, 'u1', made.id, only(apply))).toMatchObject({ ok: false })
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(apply).toHaveBeenCalledWith(db, 'u1', call.payload, made.id)
+  })
+
+  it('refuses a stored payload with an extra key', async () => {
+    const db = room()
+    db.tables.proposals.push({ id: 'p1', user_id: 'u1', kind: 'mcp', payload: { ...call.payload, extra: 1 }, status: 'open' })
+    const apply = vi.fn()
+    expect(await confirmProposal(db, 'u1', 'p1', only(apply))).toMatchObject({ ok: false })
+    expect(apply).not.toHaveBeenCalled()
+  })
+
+  it('reopens the proposal and returns the words of a refusal', async () => {
+    const db = room()
+    const made = await propose(db, 'u1', { ...base, ...call }, only())
+    if (!made.ok) throw new Error('propose failed')
+    const refusing = vi.fn().mockRejectedValue(new ApplyRefusal('Could not reach mail.', 'Try Confirm again.'))
+    expect(await confirmProposal(db, 'u1', made.id, only(refusing))).toEqual({ ok: false, error: 'Could not reach mail.', fix: 'Try Confirm again.' })
+    expect(db.tables.proposals[0]).toMatchObject({ status: 'open' })
   })
 })

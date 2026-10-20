@@ -164,6 +164,15 @@ describe('runChatTurn', () => {
     expect(cello?.disclosure).toMatchObject({ costUsd: 0.02, tools: [{ label: 'Open role', object: 'Payments role' }], ran })
   })
 
+  it('puts the servers the agent could not reach in the disclosure, and nothing when there were none', async () => {
+    const db = seed()
+    await send(deps(db, async () => ({ answer: { parts: [] }, results: [], unreached: ['notes'] })))
+    await send(deps(db, async () => ({ answer: { parts: [] }, results: [] })))
+    const [first, second] = db.tables.chat_turns.filter((t) => t.kind === 'cello')
+    expect(first.disclosure).toMatchObject({ unreached: ['notes'] })
+    expect(second.disclosure).not.toHaveProperty('unreached')
+  })
+
   it('writes no memory for a demo session, and none when no store is given', async () => {
     const db = seed()
     const store = inMemoryStore()

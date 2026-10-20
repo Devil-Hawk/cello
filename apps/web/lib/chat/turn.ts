@@ -45,6 +45,8 @@ export interface AgentOutput {
   roles?: Partial<Record<Role, Ran>>
   tools?: Disclosure['tools']
   sources?: Disclosure['sources']
+  /** Names of the person's own servers that were left out because they could not be reached. */
+  unreached?: string[]
   made?: TurnMemories['made']
   decided?: TurnMemories['decided']
 }
@@ -133,7 +135,7 @@ export async function runChatTurn(
   const runs = out ? await runsFromRows(db, userId, turnId, out.roles ?? (out.ran ? { chat: out.ran } : {})) : []
   const chatRun = runs.find((r) => r.role === 'chat')
   const chatRan: Ran | null = chatRun ? { rung: chatRun.rung, model: chatRun.model, effort: chatRun.effort, ...(chatRun.steppedDown ? { steppedDown: chatRun.steppedDown } : {}) } : null
-  const disclosure = out ? await buildDisclosure(db, userId, turnId, { ran: chatRan, runs, mode: input.mode, tools: out.tools ?? [], sources: out.sources ?? [], startedAt, endedAt: now() }) : null
+  const disclosure = out ? await buildDisclosure(db, userId, turnId, { ran: chatRan, runs, mode: input.mode, tools: out.tools ?? [], sources: out.sources ?? [], unreached: out.unreached, startedAt, endedAt: now() }) : null
   const { data: answer, error: answerError } = await db
     .from('chat_turns')
     .insert({
