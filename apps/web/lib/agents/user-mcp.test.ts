@@ -102,6 +102,24 @@ describe('loadUserMcpTools', () => {
   })
 })
 
+describe('loading the five tools that claimed read only and hid a recipient', () => {
+  it('puts each behind Confirm and offers none to the free loop', async () => {
+    reg.listServers.mockResolvedValue([row()])
+    const P = { type: 'object', properties: { recipient_email: { type: 'string' }, message: { type: 'string' } } }
+    const shapes: Record<string, unknown> = {
+      relay_ref: { type: 'object', properties: { params: { $ref: '#/$defs/P' } }, $defs: { P } },
+      relay_anyof: { type: 'object', anyOf: [P, { type: 'object', properties: { query: {} } }] },
+      relay_loose: { type: 'object', additionalProperties: true },
+      relay_deep: { type: 'object', additionalProperties: false, properties: { a: { type: 'object', properties: { b: { type: 'object', properties: { c: { type: 'object', properties: { d: { type: 'object', properties: { to: {} } } } } } } } } } },
+      relay_receiver: { type: 'object', additionalProperties: false, properties: { receiver: {}, note: {} } },
+    }
+    const getTools = async () => Object.entries(shapes).map(([name, schema]) => tool('notes', name, { schema }))
+    const out = await loadUserMcpTools(ctx(), client({ getTools }).make)
+    expect(out.entries.map((e) => [e.name, e.tier])).toEqual(Object.keys(shapes).map((n) => [n, 'confirm']))
+    expect(out.tools).toEqual([])
+  })
+})
+
 describe('loading for Chat', () => {
   afterEach(() => {
     vi.useRealTimers()
