@@ -70,6 +70,16 @@ describe('the loop dying after a refusal', () => {
   })
 })
 
+describe('the model-call cap ending the loop', () => {
+  it("says so in Cello's words, not the library's", async () => {
+    const capped = () => ({ invoke: async () => ({ messages: [new AIMessage('Model call limits exceeded: run limit (24/24)')], structuredResponse: undefined }) })
+    const out = await chatAgent(deps(capped))(input)
+    expect(out.answer.parts).toHaveLength(1)
+    expect(out.answer.parts[0].text).toMatch(/Ask again/)
+    expect(out.answer.parts[0].text).not.toMatch(/limits exceeded/i)
+  })
+})
+
 describe('streaming a structured answer', () => {
   it('sends growing words from partial tool-call chunks and flushes the last one', async () => {
     const { AIMessageChunk } = await import('@langchain/core/messages')
