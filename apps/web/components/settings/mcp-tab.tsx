@@ -13,6 +13,7 @@ import {
   WifiOff,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { TouchCheck } from '@/components/ui/touch-check'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
@@ -102,10 +103,7 @@ export function ToolsView({ server, state, saving, onNever, onRetry }: { server:
             {t.description && <p className="break-words text-caption text-muted-foreground">{t.description}</p>}
             <p className="text-caption text-foreground">{TIER_WORDS[t.never ? 'never' : t.tier]}</p>
           </div>
-          <label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center gap-2 text-caption text-foreground">
-            <input type="checkbox" role="switch" className="h-4 w-4" aria-label={`Never use ${t.name}`} checked={t.never} disabled={saving === t.name} onChange={(e) => onNever(t.name, e.target.checked)} />
-            Never use
-          </label>
+          <TouchCheck className="text-caption text-foreground" label="Never use" ariaLabel={`Never use ${t.name}`} checked={t.never} disabled={saving === t.name} onChange={(on) => onNever(t.name, on)} />
         </li>
       ))}
     </ul>
@@ -438,7 +436,7 @@ export function McpTab({ onStatus }: McpTabProps) {
                     <Button
                       variant="outline"
                       size="sm"
-                      className="h-8"
+                      className="h-11 min-w-11"
                       onClick={() => toggleEnabled(s)}
                       disabled={isBusy}
                     >
@@ -447,20 +445,20 @@ export function McpTab({ onStatus }: McpTabProps) {
                     <Button
                       variant="outline"
                       size="sm"
-                      className="h-8"
+                      className="h-11 min-w-11"
                       onClick={() => testSaved(s.id)}
                       disabled={testingId === s.id}
                     >
                       {testingId === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plug className="h-3.5 w-3.5" />}
                       Test
                     </Button>
-                    <Button variant="outline" size="sm" className="h-8" onClick={() => startEdit(s)}>
+                    <Button variant="outline" size="sm" className="h-11 min-w-11" onClick={() => startEdit(s)}>
                       Edit
                     </Button>
                     <Button
                       variant="outline"
                       size="sm"
-                      className="h-8 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-500/10"
+                      className="h-11 min-w-11 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-500/10"
                       onClick={() => remove(s.id)}
                       disabled={isBusy}
                     >
@@ -473,7 +471,7 @@ export function McpTab({ onStatus }: McpTabProps) {
 
                 {result?.ok && result.toolNames && result.toolNames.length > 0 && (
                   <details className="mt-3">
-                    <summary className="flex cursor-pointer select-none items-center gap-1 text-caption text-muted-foreground">
+                    <summary className="flex min-h-11 cursor-pointer select-none items-center gap-1 text-caption text-muted-foreground">
                       <ChevronDown className="h-3.5 w-3.5" /> {result.toolNames.length} tool(s)
                     </summary>
                     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -503,6 +501,7 @@ export function McpTab({ onStatus }: McpTabProps) {
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="my-server"
+                className="min-h-11"
                 disabled={Boolean(form.id)}
               />
               <p className="mt-1 text-caption text-muted-foreground">
@@ -518,7 +517,7 @@ export function McpTab({ onStatus }: McpTabProps) {
                 value={form.transport}
                 onValueChange={(v) => setForm({ ...form, transport: v as Transport })}
               >
-                <SelectTrigger>
+                <SelectTrigger className="min-h-11">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -546,6 +545,7 @@ export function McpTab({ onStatus }: McpTabProps) {
                 value={form.url}
                 onChange={(e) => setForm({ ...form, url: e.target.value })}
                 placeholder={form.transport === 'stdio' ? 'npx -y @scope/server' : 'https://example.com/mcp'}
+                className="min-h-11"
               />
             </div>
 
@@ -582,22 +582,22 @@ export function McpTab({ onStatus }: McpTabProps) {
             )}
 
             <div className="flex flex-wrap gap-2 pt-1">
-              <Button onClick={save} disabled={isSaving}>
+              <Button className="min-h-11" onClick={save} disabled={isSaving}>
                 {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
                 {form.id ? 'Save changes' : 'Add server'}
               </Button>
-              <Button variant="outline" onClick={testDraft} disabled={testingId === 'draft'}>
+              <Button variant="outline" className="min-h-11" onClick={testDraft} disabled={testingId === 'draft'}>
                 {testingId === 'draft' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />}
                 Test connection
               </Button>
-              <Button variant="ghost" onClick={cancelForm} disabled={isSaving}>
+              <Button variant="ghost" className="min-h-11" onClick={cancelForm} disabled={isSaving}>
                 Cancel
               </Button>
             </div>
           </div>
         </div>
       ) : (
-        <Button variant="outline" onClick={startAdd} className="h-9">
+        <Button variant="outline" onClick={startAdd} className="h-11">
           <Plus className="h-4 w-4" />
           Add a server
         </Button>

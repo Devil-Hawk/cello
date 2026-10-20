@@ -24,7 +24,7 @@ export function Bar({ pathname, user, onSignOut, needsYou, dots }: BarProps) {
   return (
     <header className="relative z-40 hidden shrink-0 px-6 py-3 md:block">
       <Plinth className="mx-auto flex h-14 max-w-[1200px] items-center gap-2 pl-3 pr-2">
-        <Link href={today.href} aria-label="Cello, Today" className="mr-2 flex items-center gap-2.5 rounded-[12px]">
+        <Link href={today.href} aria-label="Cello, Today" className="mr-2 flex min-h-11 items-center gap-2.5 rounded-[12px]">
           <Mark size={36} />
           <span className="r-title" aria-hidden>
             Cello

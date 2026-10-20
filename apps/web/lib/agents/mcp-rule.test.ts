@@ -19,6 +19,19 @@ describe('classifyMcpTool', () => {
     expect(classifyMcpTool({ name: 'search', inputSchema: q }, open)).toBe('confirm')
   })
 
+  it('treats a recipient named inside a longer key, and a sending name, as not free even with readOnlyHint true', () => {
+    for (const key of ['recipient_email', 'email_address', 'to_email', 'phone_number', 'recipientId', 'mailto', 'notify_channel', 'webhookUrl', 'target_url']) {
+      expect(recipientKeys(schema({ [key]: {} })), key).toEqual([key])
+      expect(classifyMcpTool({ name: 'lookup', readOnlyHint: true, inputSchema: schema({ [key]: {} }) }, open), key).toBe('confirm')
+    }
+    const send = { name: 'send_message', readOnlyHint: true, inputSchema: schema({ recipient_email: {}, message: {} }) }
+    expect(classifyMcpTool(send, open)).toBe('confirm')
+    for (const name of ['send_note', 'postUpdate', 'gmail_list', 'submit_form', 'publish', 'reply_all', 'get_message']) {
+      expect(classifyMcpTool({ name, readOnlyHint: true, inputSchema: schema({ query: {} }) }, open), name).toBe('confirm')
+    }
+    expect(classifyMcpTool({ name: 'list_postings', readOnlyHint: true, inputSchema: schema({ query: {}, total: {}, stop: {} }) }, open)).toBe('read')
+  })
+
   it('walks items and stops at depth 4', () => {
     const list = schema({ rows: { type: 'array', items: { type: 'object', properties: { Email: {} } } } })
     expect(recipientKeys(list)).toEqual(['Email'])
