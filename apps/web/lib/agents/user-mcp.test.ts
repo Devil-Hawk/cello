@@ -34,7 +34,7 @@ function client(over: Partial<{ getTools: () => Promise<unknown[]>; close: () =>
   return { made, closes, make: make as never }
 }
 
-beforeEach(() => reg.listServers.mockReset())
+beforeEach(() => { reg.listServers.mockReset() })
 
 describe('loadUserMcpTools', () => {
   it('a demo never loads any, and nothing is even read', async () => {
@@ -173,6 +173,13 @@ describe('loading for Chat', () => {
     expect(out.entries.map((e) => e.server)).toEqual(['fast'])
     expect(closes.slow).toHaveBeenCalledTimes(1)
     expect(closes.fast).not.toHaveBeenCalled()
+  })
+
+  it('leaves the turn alone when the list of servers cannot be read', async () => {
+    reg.listServers.mockImplementation(async () => { throw new Error('db down') })
+    const out = await loadUserMcpTools(ctx(), client().make)
+    expect(out.entries).toEqual([])
+    expect(out.skipped).toEqual([{ name: 'your tools', reason: 'could not be read' }])
   })
 
   it('hands the adapter a config its own schema accepts', async () => {
