@@ -5,7 +5,7 @@
 // The folder is read here, in the browser, and only its text is sent. Types are local copies of the route's shapes
 // (app/api/settings/skills/route.ts), so this file imports nothing from lib.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Key } from '@/components/ui/key'
 
 export type SkillTier = 'local' | 'free' | 'paid'
@@ -147,7 +147,7 @@ export function YoursView({ skills, busy, onToggle, onDelete }: { skills: Person
   )
 }
 
-function Sheet({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
+function Sheet({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
     <section aria-labelledby={`${id}-h`} className="r-sheet space-y-3 p-6">
       <h2 id={`${id}-h`} className="r-title">{title}</h2>
