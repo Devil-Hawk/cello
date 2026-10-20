@@ -1,7 +1,7 @@
 import { isValidElement, type ReactElement, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { PlanCardView, planReducer, type PlanCardViewProps } from './plan-card'
+import { focusAfterRemove, PlanCardView, planReducer, type PlanCardViewProps } from './plan-card'
 
 const steps = [
   { id: 's1', title: 'Start an application: Engineer at Ramp' },
@@ -86,5 +86,19 @@ describe('PlanCard', () => {
     const buttons = card(['s1', 's2'], { busy: true }).markup().match(/<button[^>]*>/g) ?? []
     expect(buttons.length).toBeGreaterThan(0)
     for (const b of buttons) expect(b).toContain('disabled=""')
+  })
+})
+
+describe('focusAfterRemove', () => {
+  const ids = ['a', 'b', 'c']
+  it('points at the row that takes the removed one\'s place', () => {
+    expect(focusAfterRemove(ids, 'a')).toBe(0)
+    expect(focusAfterRemove(ids, 'b')).toBe(1)
+  })
+  it('points at the last row when the last one goes', () => {
+    expect(focusAfterRemove(ids, 'c')).toBe(1)
+  })
+  it('says -1 when the list empties', () => {
+    expect(focusAfterRemove(['a'], 'a')).toBe(-1)
   })
 })
