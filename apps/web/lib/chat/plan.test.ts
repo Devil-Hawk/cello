@@ -233,6 +233,29 @@ describe('the plan gate', () => {
     expect(s.rows().filter((r) => r.command === 'chat.plan')).toHaveLength(1)
   })
 
+  it('a step the person removed cannot run later, and is not an addition', async () => {
+    const s = scene()
+    // Two kept; then the model asks again for the applications it was told were removed, alone and in a group.
+    const again = callTools([
+      { name: 'applications_start', args: { job_id: 'j1' }, id: 'again1' },
+      { name: 'applications_start', args: { job_ids: ['j2', 'j3'] }, id: 'again2' },
+      { name: 'documents_draft', args: { contact_id: 'c1', type: 'note' }, id: 'fresh' },
+    ])
+    const model = new ScriptedChatModel({ script: [four(), again, say('done')] })
+    const agent = s.build(model, new MemorySaver())
+    await start(agent)
+    const [a1, a2, d1, t1] = s.steps().map((r) => r.id as string)
+    const out = await resume(agent, { plan_id: s.plan()!.id, keep: [d1, t1] })
+    expect(s.plan()).toMatchObject({ summary: 'Kept 2 of 4' })
+    expect(s.steps().filter((r) => r.status === 'stopped').map((r) => r.id)).toEqual([a1, a2])
+    // j1 was removed (a1); j2 was removed (a2) and rode in a group with j3, so the whole call is refused. The note runs.
+    expect(s.ran).toEqual(['documents_draft {"type":"cover_letter","job_id":"j1"}', 'task {"description":"Acme hiring plans"}', 'documents_draft {"type":"note","contact_id":"c1"}'])
+    const refused = out.messages.filter((m) => String(m.content) === 'The person removed this. Do not do it again.')
+    expect(refused).toHaveLength(2)
+    const added = s.rows().filter((r) => r.command === 'chat.plan.added')
+    expect(added.map((r) => r.title)).toEqual(['Added: Write a note to Dana Lee'])
+  })
+
   it('a resumed slice after approval needs no new plan', async () => {
     const s = scene()
     const saver = new MemorySaver()
