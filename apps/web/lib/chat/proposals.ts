@@ -31,6 +31,10 @@ const SCHEMAS = {
   material: z.strictObject({ text: z.string().max(2000), company_id: z.uuid().optional() }),
   instructions: z.strictObject({ text: z.string().max(300), local_time: z.string().regex(/^\d\d:\d\d$/), every: z.enum(['day', 'week']) }),
   learned: z.strictObject({ text: z.string().max(200), effect: z.enum(['rank.want', 'draft.style']) }),
+  // A call to a tool on a server the person connected. The args are the model's, so the card cuts what it shows.
+  mcp: z
+    .strictObject({ server: z.string().max(40), tool: z.string().max(80), args: z.record(z.string().max(60), z.unknown()) })
+    .refine((o) => JSON.stringify(o.args).length <= 4096, 'Too much'),
 }
 export type ProposalKind = keyof typeof SCHEMAS
 const KINDS = Object.keys(SCHEMAS) as ProposalKind[]
@@ -41,6 +45,17 @@ const GUARDED = new Set(['pipeline', 'following', 'watching', 'send', 'autonomy'
 /** The command a kind is applied through (search.update, answers.answer, ...), supplied by whoever wires Chat. */
 export type ApplyTarget = (db: AdminClient, userId: string, payload: Record<string, unknown>) => Promise<void>
 export type ApplyTargets = Partial<Record<ProposalKind, ApplyTarget>>
+
+/** An apply target throws this when it knows why and what to do: the proposal opens again and the person reads these words. */
+export class ApplyRefusal extends Error {
+  constructor(
+    message: string,
+    readonly fix: string
+  ) {
+    super(message)
+    this.name = 'ApplyRefusal'
+  }
+}
 
 const refuse = (error: string, fix: string): Refusal => ({ ok: false, error, fix })
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
@@ -80,6 +95,14 @@ export function renderProposal(kind: ProposalKind, p: Record<string, unknown>): 
       return `Every ${p.every} at ${p.local_time}: ${p.text}`
     case 'learned':
       return `Remember: ${p.text}`
+    case 'mcp': {
+      const cut = (v: unknown) => {
+        const text = typeof v === 'string' ? v : (JSON.stringify(v) ?? String(v))
+        return text.length > 200 ? `${text.slice(0, 200)}...` : text
+      }
+      const args = Object.entries((p.args as Record<string, unknown> | undefined) ?? {}).map(([k, v]) => `${k}: ${cut(v)}`)
+      return `Run "${p.tool}" on ${p.server}${args.length ? ` with: ${args.join('; ')}` : '.'}`
+    }
   }
 }
 
@@ -95,8 +118,8 @@ export async function propose(
   if (!parsed.ok) return parsed
   if (!targets[parsed.kind]) return refuse('Cello cannot apply that yet.', 'Make the change yourself.')
 
-  // A start rests on roles Cello was shown; every other kind rests on the person's own typed words.
-  if (parsed.kind !== 'start') {
+  // A start rests on roles Cello was shown and a tool call on the card the person confirms; every other kind rests on the person's own typed words.
+  if (parsed.kind !== 'start' && parsed.kind !== 'mcp') {
     const quote = norm(input.quote ?? '')
     const { data } = await db.from('chat_turns').select('typed').eq('chat_id', input.chatId).eq('user_id', userId).eq('kind', 'person').is('superseded_at', null)
     const typed = ((data as { typed: string | null }[] | null) ?? []).map((t) => norm(t.typed ?? ''))
@@ -140,8 +163,9 @@ export async function confirmProposal(db: AdminClient, userId: string, id: strin
   if (((claimed as unknown[] | null) ?? []).length !== 1) return refuse('That proposal is already decided.', 'Open the chat again.')
   try {
     await target(db, userId, parsed.value)
-  } catch {
+  } catch (e) {
     await db.from('proposals').update({ status: 'open', decided_at: null, confirmed_at: null }).eq('id', id).eq('user_id', userId)
+    if (e instanceof ApplyRefusal) return refuse(e.message, e.fix)
     return refuse('The change did not go through.', 'Try Confirm again.')
   }
   return { ok: true }
