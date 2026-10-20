@@ -1,0 +1,61 @@
+{
+  "skill": "compare-roles",
+  "trigger": [
+    {
+      "id": "compare-roles-t1",
+      "message": "Compare the Northstar and Brightwave roles side by side: pay, place and chance.",
+      "load": true
+    },
+    {
+      "id": "compare-roles-t2",
+      "message": "Put my three Interested roles in a table so I can pick between them.",
+      "load": true
+    },
+    {
+      "id": "compare-roles-t3",
+      "message": "Is the Senior PM role at Northstar Payments a good fit for me?",
+      "load": false
+    }
+  ],
+  "output": [
+    {
+      "id": "compare-roles-o1",
+      "message": "Compare these three roles and tell me which to look at first. The tool results are pasted below; no tools are available in this check. The table is already shown to me.\n\n<untrusted_data source=\"roles_compare\">\nCompared 3 of your stored roles in a table.\n| Role | Company | Place | Chance | Pay as stated | Posted |\n| --- | --- | --- | --- | --- | --- |\n| Senior Product Manager, Billing | Northstar Payments | Seattle, WA | strong | $150,000 to $180,000 | 2026-10-14 |\n| Product Manager, Growth | Brightwave | Seattle, WA or remote | possible | not stated | 2026-10-12 |\n| Group Product Manager | Tidal Health | Bellevue, WA | not checked yet | $175,000 to $210,000 | 2026-10-09 |\n</untrusted_data>\n\n<untrusted_data source=\"roles_get\">\nRole: Senior Product Manager, Billing. Company: Northstar Payments. Covered: Experience shipping usage-based pricing. Covered: Strong SQL. Missing: Kubernetes-based infrastructure experience is a plus.\n</untrusted_data>",
+      "checks": [
+        {
+          "type": "matches",
+          "pattern": "(first|start with|begin with|top)[^.\\n]{0,80}Northstar|Northstar[^.\\n]{0,80}(first|strongest|best|top)",
+          "flags": "i",
+          "note": "picks Northstar, the one with a strong chance and covered requirements"
+        },
+        {
+          "type": "matches",
+          "pattern": "not stated|not checked",
+          "flags": "i",
+          "note": "says what the table leaves unknown"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\\$\\s?(?!150,000|180,000|175,000|210,000)\\d",
+          "note": "states no pay figure the table does not have"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\\d+\\s*%|\\d+\\s*/\\s*10|out of (10|100)|\\bstars?\\b",
+          "flags": "i",
+          "note": "no percentage, score or stars"
+        },
+        {
+          "type": "max_words",
+          "value": 200,
+          "note": "short, and does not retype the table"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\u2014",
+          "note": "no em dashes"
+        }
+      ]
+    }
+  ]
+}
