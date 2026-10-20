@@ -33,7 +33,7 @@ import { visibleTurns } from '@/lib/chat/versions'
 import type { ModelChoice } from '@/lib/models/choice'
 import { createClient } from '@/lib/supabase/client'
 import { FetchStreamTransport, useStream } from '@langchain/langgraph-sdk/react'
-import { agentFetch, errorMessage } from '@/lib/agents/client'
+import { agentFetch, errorMessage, unsentMessage } from '@/lib/agents/client'
 
 export interface ChatViewProps {
   /** The chat to open; null for a new one. */
@@ -236,7 +236,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     onCustomEvent,
     onError: (error) => {
       setLive(null)
-      if (unsent.current) unsent.current(errorMessage(error))
+      if (unsent.current) unsent.current(unsentMessage(error))
       else {
         setNote(errorMessage(error))
         void loadPage()
@@ -460,10 +460,10 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     try {
       await stream.submit({ messages: [{ type: 'human', content: typed }] }, { context: { quoted, choice: choiceOnce } })
     } catch {
-      unsent.current?.('Cello could not send that. Try again.')
+      unsent.current?.(unsentMessage(null))
     }
     // The stream ended without naming a turn and without an error: nothing was stored.
-    unsent.current?.('Cello could not send that. Try again.')
+    unsent.current?.(unsentMessage(null))
     if (refused) return
     setSending(false)
     void loadPage()
