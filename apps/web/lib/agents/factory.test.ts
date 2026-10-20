@@ -217,7 +217,14 @@ describe('the chat loop with a structured answer', () => {
     const model: ScriptedChatModel = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: steps.map((step) => step(() => model)), repeatLast })
     const agent = createCelloAgent({ kind: 'chat', ctx: ctx(over), saver: new MemorySaver(), model, fallbacks: [], skillsDir: skills(), tools: [ping], responseFormat: Answer as never } as never)
     const invoke = (recursionLimit = 80) => (agent as unknown as { invoke: (i: unknown, c: unknown) => Promise<{ structuredResponse: unknown }> }).invoke({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: `t-${Math.random()}` }, recursionLimit })
-    return { model, invoke }
+    // Every custom event the loop writes while it runs, in order.
+    const customs = async () => {
+      const chunks = await (agent as unknown as { stream: (i: unknown, c: unknown) => Promise<AsyncIterable<[string[], string, unknown]>> }).stream({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: `t-${Math.random()}` }, recursionLimit: 80, streamMode: ['custom'], subgraphs: true })
+      const seen: unknown[] = []
+      for await (const [, mode, data] of chunks) if (mode === 'custom') seen.push(data)
+      return seen
+    }
+    return { model, invoke, customs }
   }
   const run = (...steps: Step[]) => start(steps).invoke()
   const bad = 'x'.repeat(30)
@@ -256,6 +263,14 @@ describe('the chat loop with a structured answer', () => {
     expect(String(err)).toMatch(/AnswerShapeError/)
     expect(String(err)).not.toMatch(/jumpTo|INVALID_CONCURRENT|Recursion/i)
     expect(model.calls).toHaveLength(MAX_ANSWER_ASKS)
+  })
+
+  it('tells the stream when it throws an answer away, once per answer, and never for one it keeps', async () => {
+    const misfits = (seen: unknown[]) => seen.filter((e) => (e as { type?: string })?.type === 'misfit')
+    expect(misfits(await start([answers('fine')]).customs())).toHaveLength(0)
+    expect(misfits(await start([answers(bad), answers(bad), answers('fixed')]).customs())).toHaveLength(2)
+    // A message with two unusable answers is one thrown-away message.
+    expect(misfits(await start([pings(2), answers(bad, bad), answers('fixed')]).customs())).toHaveLength(1)
   })
 
   it('reads Stop before it asks again, and asks nobody once the person has stopped', async () => {
