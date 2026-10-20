@@ -246,9 +246,12 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
       }
     },
     onFinish: () => {
-      markStopping(false)
       streamTurnId.current = null
-      void loadPage().then(() => setLive(null))
+      // Stopping ends with the stopped row on the page, not before it: no frame goes back to the clock and live Stop keys.
+      void loadPage().then(() => {
+        markStopping(false)
+        setLive(null)
+      })
     },
   })
 
