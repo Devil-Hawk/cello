@@ -200,15 +200,28 @@ export async function runWorkers<I, R>(scope: WorkerScope, input: RunWorkersInpu
   })
 }
 
-/** One worker row around one piece of work: working while `work` runs, done when it returns, failed when it throws. */
-export async function withWorker<T>(scope: WorkerScope, input: Parameters<typeof openWorker>[1], work: (workerId: string | null) => Promise<T>): Promise<T> {
+/** One worker row around one piece of work: working while `work` runs, done when it returns, stopped when the person stopped it, failed when it throws. `work` gets the branch: its signal aborts once the row is stopped. */
+export async function withWorker<T>(
+  scope: WorkerScope,
+  input: Parameters<typeof openWorker>[1],
+  work: (workerId: string | null, branch: Pick<WorkerBranch, 'signal' | 'checkStop'>) => Promise<T>,
+  options: { signal?: AbortSignal; pollMs?: number } = {}
+): Promise<T> {
   const id = await openWorker(scope, input)
+  const watch = watchStop(scope.db, id, options.signal ?? new AbortController().signal, options.pollMs ?? STOP_POLL_MS)
   try {
-    const out = await work(id)
+    const out = await work(id, {
+      signal: watch.signal,
+      checkStop: async () => {
+        if (await isStopped(scope.db, id)) throw new StoppedError()
+      },
+    })
     await finishWorker(scope.db, id, { status: 'done' })
     return out
   } catch (e) {
     await finishWorker(scope.db, id, { status: (await isStopped(scope.db, id)) ? 'stopped' : 'failed', summary: e instanceof Error ? e.message : 'Failed' })
     throw e
+  } finally {
+    watch.done()
   }
 }

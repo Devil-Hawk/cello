@@ -20,7 +20,7 @@ import { readSettings } from './settings'
 import { routedAgent } from './route'
 import { recallInWordsOn } from './shown'
 import { runChatTurn } from './turn'
-import { INTERRUPTED, writeRollup } from './rollup'
+import { INTERRUPTED, turnApplications, writeRollup } from './rollup'
 import { finishWorker, isStopped, MOVED_LINE, MovedError, openWorker, STOP_POLL_MS } from './workers'
 import type { WireEvent } from '@/lib/agents/sse'
 const PROVIDER_NAMES = { openai: 'OpenAI', anthropic: 'Anthropic', openrouter: 'OpenRouter' } as const
@@ -53,13 +53,19 @@ export async function storePersonTurn(
 const NOTHING_CHANGED = 'Nothing was changed.'
 const KEPT = 'What was already done is kept.'
 
-/** The line a turn leaves when it ends without an answer. "Nothing was changed" is only true when no worker of the turn finished. */
+/** The line a turn leaves when it ends without an answer. "Nothing was changed" is only true when no worker of the turn finished and no application was made, whatever state its row ended in. The applications are named: they are Cello's work the person now owns. */
 async function leaveLine(db: AdminClient, userId: string, chatId: string, text: string, turnId?: string) {
+  let about: { kind: 'application'; ref: string }[] = []
   if (turnId && text.includes(NOTHING_CHANGED)) {
     const { count } = await db.from('agent_tasks').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('turn_id', turnId).neq('command', 'chat.turn').in('status', ['done', 'partial'])
-    if ((count ?? 0) > 0) text = text.replace(NOTHING_CHANGED, KEPT)
+    const made = await turnApplications(db, userId, chatId, turnId).catch(() => [])
+    if ((count ?? 0) > 0 || made.length > 0) text = text.replace(NOTHING_CHANGED, KEPT)
+    if (made.length > 0) {
+      text = `${text} Already started: ${made.map((a) => `[${a.name}](cello:application/${a.id})`).join(', ')}.`
+      about = made.map((a) => ({ kind: 'application' as const, ref: a.id }))
+    }
   }
-  await db.from('chat_turns').insert({ user_id: userId, chat_id: chatId, kind: 'cello', answer: text, origin: 'code', prov: { step: 'chat', rule: 'refusal' }, parts: [{ about: [], text }] })
+  await db.from('chat_turns').insert({ user_id: userId, chat_id: chatId, kind: 'cello', answer: text, origin: 'code', prov: { step: 'chat', rule: 'refusal' }, parts: [{ about, text }], links: about.map((a) => ({ kind: 'application', table: 'applications', id: a.ref, role: 'named' })) })
   await db.from('chats').update({ last_turn_at: new Date().toISOString() }).eq('id', chatId).eq('user_id', userId)
 }
 
@@ -153,6 +159,8 @@ export async function runStoredTurn(
     }
     if (!moved) {
       // The turn is over: no row of it may go on looking busy, and the checkpoint has done its job.
+      // A row the person stopped is stopped, not failed, whatever its work was still doing when the turn ended.
+      await db.from('agent_tasks').update({ status: 'stopped', finished_at: new Date().toISOString() }).eq('user_id', userId).eq('turn_id', turn.id).neq('command', 'chat.turn').is('finished_at', null).not('stop_requested_at', 'is', null)
       await db.from('agent_tasks').update({ status: 'failed', summary: 'Did not finish.', finished_at: new Date().toISOString() }).eq('user_id', userId).eq('turn_id', turn.id).neq('command', 'chat.turn').is('finished_at', null)
       const { count } = await db.from('agent_tasks').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('turn_id', turn.id).neq('command', 'chat.turn')
       if (options.resume || (count ?? 0) >= 2) await writeRollup(db, userId, chatId, turn.id).catch((e) => console.error('rollup failed', e))

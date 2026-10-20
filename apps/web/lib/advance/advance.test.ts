@@ -104,6 +104,23 @@ describe('advanceOne', () => {
     expect(calls.map((c) => `${c.from}>${c.to}:${c.event.step ?? ''}`)).toEqual(['preparing>preparing:one', 'preparing>preparing:two', 'preparing>ready:ready'])
   })
 
+  it('stops at the next step boundary when asked, and pauses the application so the sweeper does not carry on', async () => {
+    const steps = [ok('one'), ok('two')]
+    let asked = 0
+    const admin = fakeAdmin({ applications: [app()], pipeline_events: [] })
+    await advanceOne(admin, 'a1', { ...opts(steps), shouldStop: async () => ++asked > 1 })
+    expect(steps[0].run).toHaveBeenCalledTimes(1)
+    expect(steps[1].run).not.toHaveBeenCalled()
+    expect(calls.map((c) => `${c.from}>${c.to}:${c.event.kind}`)).toEqual(['preparing>preparing:step.finished', 'preparing>paused:application.paused'])
+  })
+
+  it('pauses instead of moving to Ready when the stop landed during the last step', async () => {
+    let asked = 0
+    const admin = fakeAdmin({ applications: [app()], pipeline_events: [] })
+    await advanceOne(admin, 'a1', { ...opts([ok('one')]), shouldStop: async () => ++asked > 1 })
+    expect(calls.map((c) => `${c.from}>${c.to}:${c.event.kind}`)).toEqual(['preparing>preparing:step.finished', 'preparing>paused:application.paused'])
+  })
+
   it('takes a free or expired lease once, and leaves a live one alone', async () => {
     const expired = fakeAdmin({ applications: [app({ lease_until: new Date(NOW - 60_000).toISOString() })], pipeline_events: [] })
     expect(await advanceOne(expired, 'a1', opts([ok('one')]))).not.toBeNull()

@@ -30,6 +30,8 @@ export interface AdvanceOptions {
   tailorResume?: StepCtx['tailorResume']
   writeCoverLetter?: StepCtx['writeCoverLetter']
   draftAnswer?: StepCtx['draftAnswer']
+  /** Asked before each step: true when the person has stopped this work. The application is then paused, not carried on by the sweeper. */
+  shouldStop?: () => Promise<boolean>
 }
 
 /** The plan's steps plus the ones added so far, each after the step that added it. */
@@ -174,6 +176,8 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
       const [after, step] = key.split(':')
       additions.set(key, { after, step: step as AddedStep['step'], why: '' })
     }
+    // Not "no": the person can Resume. The steps already done are kept and are not run again.
+    const stopped = (at: string) => transition(admin, { applicationId: app.id, from: ['preparing'], to: 'paused', step: 'Stopped by you', event: { ...base('application.paused', `stopped:${app.id}:${at}:${app.last_event_at ?? 'none'}`, 'Stopped from Chat. Resume it when you want Cello to carry on.', { step: at }), actor: DOORS.chat.actor, channel: DOORS.chat.channel } })
     const steps = withAdded(opts.steps ?? STEPS, [...additions.values()])
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i]
@@ -181,6 +185,7 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
       // a step that finished before is not run again: its event is its saved result
       const { data: had } = await admin.from('pipeline_events').select('id').eq('user_id', app.user_id).eq('idempotency_key', done).maybeSingle()
       if (had) continue
+      if (await opts.shouldStop?.()) return stopped(step.id)
       if (now() - started > BUDGET_MS) {
         await release(admin, app.id)
         return null
@@ -215,6 +220,7 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
         steps.splice(i + 1, 0, ADDED_STEPS[addition.step])
       }
     }
+    if (await opts.shouldStop?.()) return stopped('ready')
     const r = await transition(admin, { applicationId: app.id, from: ['preparing'], to: 'ready', step: 'Ready to send', event: base('step.finished', `ready:${app.id}:${app.attempt}`, 'Everything is prepared. It is ready for you to send.', { step: 'ready' }) })
     // Started in Hands-off: one more line says whether Send for me may take it, in SQL's words (its switch, caps and
     // rules) or code's (the site is not one Cello sends on yet). A line that moves nothing; the person reads why it waits.

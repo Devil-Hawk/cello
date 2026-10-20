@@ -15,6 +15,39 @@ const KINDS: [commands: string[], say: (n: number) => string][] = [
   [['research', 'companies.research'], (n) => `${n} researched`],
 ]
 
+export interface TurnApplication {
+  id: string
+  job_id: string
+  state: string
+  step: string | null
+  needs_reason: string | null
+  needs_detail: Record<string, unknown> | null
+  /** "Title at Company", or the title alone. */
+  name: string
+  company: string
+}
+
+/** The applications this turn made, found two ways so a start that was cut short is not missed: the chat holds them (attached with the turn's id) and their created event carries the turn's id. Whatever state the turn's row ended in. */
+export async function turnApplications(db: AdminClient, userId: string, chatId: string, turnId: string): Promise<TurnApplication[]> {
+  const { data: tiles } = await db.from('chat_attachments').select('ref, prov').eq('chat_id', chatId).eq('user_id', userId).eq('kind', 'application').eq('origin', 'model').is('removed_at', null)
+  const { data: made } = await db.from('pipeline_events').select('application_id, payload').eq('user_id', userId).eq('kind', 'application.created').order('created_at', { ascending: false }).limit(200)
+  const ids = [
+    ...new Set([
+      ...((tiles as { ref: { id?: string }; prov: { turn_id?: string } | null }[] | null) ?? []).filter((t) => t.prov?.turn_id === turnId && t.ref?.id).map((t) => t.ref.id as string),
+      ...((made as { application_id: string | null; payload: { turn_id?: string } | null }[] | null) ?? []).filter((e) => e.application_id && e.payload?.turn_id === turnId).map((e) => e.application_id as string),
+    ]),
+  ]
+  if (!ids.length) return []
+  const { data: apps } = await db.from('applications').select('id, job_id, state, step, needs_reason, needs_detail').eq('user_id', userId).in('id', ids)
+  const rows = (apps as Omit<TurnApplication, 'name' | 'company'>[] | null) ?? []
+  const { data: jobs } = rows.length ? await db.from('person_jobs').select('id, title, viewer_company_name').eq('viewer_id', userId).in('id', rows.map((a) => a.job_id)) : { data: [] }
+  return rows.map((a) => {
+    const job = ((jobs as { id: string; title: string; viewer_company_name: string | null }[] | null) ?? []).find((j) => j.id === a.job_id)
+    const company = job?.viewer_company_name ?? ''
+    return { ...a, company, name: job ? (company ? `${job.title} at ${company}` : job.title) : 'this application' }
+  })
+}
+
 /** One code-written turn: what was done and what needs the person. False when there was nothing to say or it was written already. */
 export async function writeRollup(db: AdminClient, userId: string, chatId: string, turnId: string): Promise<boolean> {
   // The check is in code, not in the query: a prov filter is not portable across the stores this runs on.
@@ -38,19 +71,12 @@ export async function writeRollup(db: AdminClient, userId: string, chatId: strin
   const stopped = count((r) => r.status === 'stopped')
   const doneText = `Done: ${named.length ? named.join(', ') : 'nothing finished'}.${failed ? ` ${failed} could not finish.` : ''}${stopped ? ` ${stopped} stopped by you.` : ''}`
 
-  const { data: tiles } = await db.from('chat_attachments').select('ref, prov').eq('chat_id', chatId).eq('user_id', userId).eq('kind', 'application').eq('origin', 'model').is('removed_at', null)
-  const ids = ((tiles as { ref: { id?: string }; prov: { turn_id?: string } | null }[] | null) ?? []).filter((t) => t.prov?.turn_id === turnId && t.ref?.id).map((t) => t.ref.id as string)
-  const { data: apps } = ids.length ? await db.from('applications').select('id, job_id, state, step, needs_reason, needs_detail').eq('user_id', userId).in('id', ids) : { data: [] }
-  // A role the person stopped is not asking for them, even when its preparation had already begun.
-  const stoppedRoles = new Set(rows.filter((r) => r.status === 'stopped' && r.command === 'applications.start').flatMap((r) => (r.object?.ref ? [r.object.ref] : [])))
-  const waiting = ((apps as { id: string; job_id: string; state: string; step: string | null; needs_reason: string | null; needs_detail: Record<string, unknown> | null }[] | null) ?? []).filter((a) => (a.state === 'needs_you' || a.state === 'ready') && !stoppedRoles.has(a.job_id))
-  const { data: jobs } = waiting.length ? await db.from('person_jobs').select('id, title, viewer_company_name').eq('viewer_id', userId).in('id', waiting.map((a) => a.job_id)) : { data: [] }
+  // A role the person stopped still counts when its application exists: it is ready, or waiting on them, whatever the row says.
+  const waiting = (await turnApplications(db, userId, chatId, turnId)).filter((a) => a.state === 'needs_you' || a.state === 'ready')
 
   const needs: Part[] = waiting.map((a) => {
-    const job = ((jobs as { id: string; title: string; viewer_company_name: string | null }[] | null) ?? []).find((j) => j.id === a.job_id)
-    const company = job?.viewer_company_name ?? ''
-    const name = job ? (company ? `${job.title} at ${company}` : job.title) : 'this application'
-    const link = `[${name}](cello:application/${a.id})`
+    const company = a.company
+    const link = `[${a.name}](cello:application/${a.id})`
     const about = [{ kind: 'application' as const, ref: a.id }]
     if (a.needs_reason === 'approve_resume') return { about, text: `Needs you: approve the tailored resume for ${link}.` }
     const why = statusSentence({ state: a.state as never, step: a.step, needsReason: a.needs_reason as never, needsDetail: a.needs_detail }, company).replace(/^Needs you:? ?/, '')
