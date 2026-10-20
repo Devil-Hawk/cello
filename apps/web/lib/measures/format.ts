@@ -1,7 +1,8 @@
 // The scorecard as plain text, for `pnpm scorecard` and for a page that wants the same words.
 // Sentence case, no em dashes. A failing row says FAILING; a measure with no run says "No run yet".
 
-import type { ScorecardRow, Status } from './scorecard'
+import { TIERS } from './tiers'
+import type { ScorecardRow, Status, TierCell } from './scorecard'
 
 const LABEL: Record<Status, string> = { failing: 'FAILING', passing: 'passing', no_run: 'no run' }
 
@@ -19,6 +20,13 @@ function latestText(r: ScorecardRow): string {
   return `${value || 'no value'} on ${date(r.latest.ranAt)}${sample}${trend}`
 }
 
+function cellText(c: TierCell | null): string {
+  if (!c) return 'not run'
+  const value = c.value === null ? 'cannot read' : String(Math.round(c.value * 1000) / 1000)
+  const verdict = c.passed === null ? '' : ` ${c.passed ? LABEL.passing : LABEL.failing}`
+  return `${value}${verdict} (${[c.model, date(c.ranAt)].filter(Boolean).join(', ')})`
+}
+
 /** One line per measure, failing first, then what each failing or pinned row has to say. */
 export function formatScorecard(rows: ScorecardRow[]): string {
   const failing = rows.filter((r) => r.status === 'failing').length
@@ -28,6 +36,7 @@ export function formatScorecard(rows: ScorecardRow[]): string {
   for (const r of rows) {
     lines.push(`${LABEL[r.status].padEnd(8)} ${r.id.padEnd(idWidth)}  ${shortName(r.name)}`)
     lines.push(`${' '.repeat(9 + idWidth + 2)}bar: ${r.bar}. Latest: ${latestText(r)}.`)
+    if (r.tiers) lines.push(`${' '.repeat(9 + idWidth + 2)}by tier: ${TIERS.map((t) => `${t} ${cellText(r.tiers![t])}`).join('; ')}`)
     const note = r.latest?.note
     if (note) lines.push(`${' '.repeat(9 + idWidth + 2)}${note}`)
     if (r.pinned && r.pinned !== note) lines.push(`${' '.repeat(9 + idWidth + 2)}${r.pinned}`)
