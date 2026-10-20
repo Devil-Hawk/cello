@@ -434,3 +434,18 @@ describe('CelloTaskRows', () => {
     expect(toolMessages(result)[0].content).toBe('echo:hi')
   })
 })
+
+describe('guardStack plan option', () => {
+  const names = (opts: Partial<Parameters<typeof guardStack>[0]>) => guardStack({ ctx: ctx(), agent: 'orchestrator', deadlineAt: farFuture(), fallbacks: [], ...opts }).map((m) => m.name)
+  const plan = { name: 'CelloPlanGate' } as never
+  const scope = { db: makeFakeAdmin(), userId: 'u1', threadId: 'c', chatId: 'c', turnId: 't' }
+
+  it('sits right after the Research rows, or after Stop when there are none, before CelloOneAnswer', () => {
+    const withRows = names({ stop: async () => false, taskRows: scope, plan })
+    expect(withRows[withRows.indexOf('CelloTaskRows') + 1]).toBe('CelloPlanGate')
+    const noRows = names({ stop: async () => false, plan })
+    expect(noRows[noRows.indexOf('CelloStop') + 1]).toBe('CelloPlanGate')
+    expect(noRows.indexOf('CelloPlanGate')).toBeLessThan(noRows.indexOf('CelloOneAnswer'))
+    expect(names({})).not.toContain('CelloPlanGate')
+  })
+})
