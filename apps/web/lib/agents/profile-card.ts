@@ -6,6 +6,7 @@
 // cacheable; the resume itself is read with my_profile when it is needed.
 
 import { keptLearningsBlock } from '@/lib/learning/read'
+import { getRoleType } from '@/lib/jobs/role-types'
 import { resolveTargeting } from '@/lib/targeting'
 import type { AdminClient } from '@/lib/harness/types'
 
@@ -34,6 +35,7 @@ export async function profileCard(admin: AdminClient, userId: string, now: Date 
     line('Name', profile.full_name),
     resume ? `Resume on file: ${resume.split(/\s+/).length} words. Starts: ${headline}` : 'Resume on file: none. Ask them to upload one in Settings before writing anything about them.',
     line('Looking for', [...targeting.functions, ...targeting.seniority]),
+    line('Role types', targeting.role_types?.flatMap((id) => getRoleType(id)?.label ?? [])),
     line('Places', [...locations, ...targeting.countries, targeting.remoteOnly ? 'remote only' : '']),
     line('Rules out (companies)', targeting.excludedCompanies),
     line('Rules out (words)', targeting.excludedKeywords),
