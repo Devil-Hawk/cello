@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { HumanMessage, ToolMessage } from '@langchain/core/messages'
+import { tool } from '@langchain/core/tools'
 import { MemorySaver } from '@langchain/langgraph'
 import { z } from 'zod'
 
@@ -28,8 +29,9 @@ vi.mock('@/lib/evals/agent/thresholds.json', () => ({
 
 import { MissingKeyError } from '@/lib/harness/providers'
 import type { AgentContext } from './context'
+import { SKILLS_OFF } from './backends'
 import { createCelloAgent, researcherSpec, specialists } from './factory'
-import { GUARD_ORDER } from './middleware'
+import { AGENT_CAPS, GUARD_ORDER, MAX_ANSWER_ASKS, recursionLimitFor } from './middleware'
 import { ScriptedChatModel, callTools, say } from './testing/scripted-model'
 import { makeFakeAdmin } from './testing/fake-admin'
 import { CELLO_TOOLS } from './tools/registry'
@@ -215,17 +217,23 @@ describe('no subagent runs above the highest the person allows', () => {
 })
 
 describe('the chat loop with a structured answer', () => {
-  const Answer = z.object({ text: z.string() })
+  const Answer = z.object({ text: z.string().max(8) })
+  const ping = tool(async () => 'pong', { name: 'ping', description: 'Ping.', schema: z.object({}) })
   // langchain names the answer tool extract-N from a counter shared by every agent, so the script reads the name the model was given.
   const answers = (...texts: string[]) => (model: () => ScriptedChatModel) => () => {
     const name = model().boundTools.find((n) => n.startsWith('extract-'))!
     return callTools(texts.map((text) => ({ name, args: { text } })))
   }
-  const run = async (...steps: ReturnType<ReturnType<typeof answers>>[] extends never ? never : ((model: () => ScriptedChatModel) => () => ReturnType<typeof callTools>)[]) => {
-    const model: ScriptedChatModel = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: steps.map((step) => step(() => model)) })
-    const agent = createCelloAgent({ kind: 'chat', ctx: ctx(), saver: new MemorySaver(), model, fallbacks: [], skillsDir: skills(), tools: [], responseFormat: Answer as never } as never)
-    return (agent as unknown as { invoke: (i: unknown, c: unknown) => Promise<{ structuredResponse: unknown }> }).invoke({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: `t-${Math.random()}` }, recursionLimit: 40 })
+  const pings = (n: number) => () => () => callTools(Array.from({ length: n }, () => ({ name: 'ping' })))
+  type Step = (model: () => ScriptedChatModel) => () => ReturnType<typeof callTools>
+  const start = (steps: Step[], repeatLast = false, over: Partial<AgentContext> = {}) => {
+    const model: ScriptedChatModel = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: steps.map((step) => step(() => model)), repeatLast })
+    const agent = createCelloAgent({ kind: 'chat', ctx: ctx(over), saver: new MemorySaver(), model, fallbacks: [], skillsDir: skills(), tools: [ping], responseFormat: Answer as never } as never)
+    const invoke = (recursionLimit = 80) => (agent as unknown as { invoke: (i: unknown, c: unknown) => Promise<{ structuredResponse: unknown }> }).invoke({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: `t-${Math.random()}` }, recursionLimit })
+    return { model, invoke }
   }
+  const run = (...steps: Step[]) => start(steps).invoke()
+  const bad = 'x'.repeat(30)
 
   it('keeps one structured answer as it is', async () => {
     expect((await run(answers('only'))).structuredResponse).toEqual({ text: 'only' })
@@ -233,6 +241,102 @@ describe('the chat loop with a structured answer', () => {
 
   it('keeps the first of two structured answers in one model message instead of crashing on jumpTo', async () => {
     expect((await run(answers('first', 'second'))).structuredResponse).toEqual({ text: 'first' })
+  })
+
+  it('asks again once when an answer does not fit the shape, and tells the model why', async () => {
+    const { model, invoke } = start([answers(bad), answers('fixed')])
+    expect((await invoke()).structuredResponse).toEqual({ text: 'fixed' })
+    expect(model.calls).toHaveLength(2)
+    const told = model.calls[1].filter((m) => ToolMessage.isInstance(m)).map((m) => String(m.content))
+    expect(told.join('\n')).toMatch(/text/)
+  })
+
+  it('asks again when two answers in one message are both unusable, and when an answer comes after tool calls', async () => {
+    const { model, invoke } = start([pings(2), answers(bad, bad), answers('fixed')])
+    expect((await invoke()).structuredResponse).toEqual({ text: 'fixed' })
+    expect(model.calls).toHaveLength(3)
+  })
+
+  it('runs parallel tool calls and then takes the answer', async () => {
+    const { model, invoke } = start([pings(3), pings(2), answers('done')])
+    expect((await invoke()).structuredResponse).toEqual({ text: 'done' })
+    expect(model.calls).toHaveLength(3)
+  })
+
+  it('gives up on an answer that never fits after three tries, with its own error, not jumpTo or the step limit', async () => {
+    const { model, invoke } = start([answers(bad)], true)
+    const err = await invoke().then(() => null, (e: Error) => e)
+    expect(String(err)).toMatch(/AnswerShapeError/)
+    expect(String(err)).not.toMatch(/jumpTo|INVALID_CONCURRENT|Recursion/i)
+    expect(model.calls).toHaveLength(MAX_ANSWER_ASKS)
+  })
+
+  it('reads Stop before it asks again, and asks nobody once the person has stopped', async () => {
+    let reads = 0
+    const { model, invoke } = start([answers(bad)], true, { stop: async () => ++reads > 1 })
+    expect(String(await invoke().then(() => null, (e: Error) => e))).toMatch(/Stopped/)
+    expect(model.calls).toHaveLength(1)
+  })
+
+  it('a model that keeps calling tools is ended by the model-call cap, politely, before the step limit', async () => {
+    const { model, invoke } = start([pings(1)], true)
+    const out = (await invoke(recursionLimitFor('orchestrator'))) as unknown as { messages: { content: unknown }[] }
+    expect(model.calls).toHaveLength(AGENT_CAPS.orchestrator.modelCalls)
+    expect(String(out.messages.at(-1)!.content)).toMatch(/model call limit/i)
+  })
+
+  it('the step limit sits above what the model-call cap needs', async () => {
+    const { model, invoke } = start([pings(1)], true)
+    await invoke(recursionLimitFor('orchestrator')).catch(() => null)
+    expect(model.calls.length * 7).toBeLessThanOrEqual(recursionLimitFor('orchestrator'))
+    // The old limit of 80 ended the same loop at 11 model calls with a GraphRecursionError.
+    const old = start([pings(1)], true)
+    expect(String(await old.invoke(80).then(() => null, (e: Error) => e))).toMatch(/Recursion/)
+    expect(old.model.calls.length).toBeLessThan(AGENT_CAPS.orchestrator.modelCalls)
+  })
+})
+
+describe('the plain chat core', () => {
+  const Answer = z.object({ text: z.string() })
+  const echo = tool(async ({ q }: { q: string }) => `found ${q}`, { name: 'roles_find', description: 'Find roles', schema: z.object({ q: z.string() }) })
+  const make = (core: 'deep' | 'plain', script: ConstructorParameters<typeof ScriptedChatModel>[0]['script']) => {
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script })
+    const agent = createCelloAgent({ kind: 'chat', core, ctx: ctx(), saver: new MemorySaver(), model, fallbacks: [], skillsDir: skills(), tools: [echo], responseFormat: Answer as never } as never) as unknown as Built & {
+      invoke: (i: unknown, c: unknown) => Promise<{ structuredResponse: unknown }>
+    }
+    return { agent, model }
+  }
+  const finish = (model: () => ScriptedChatModel) => () => callTools([{ name: model().boundTools.find((n) => n.startsWith('extract-'))!, args: { text: 'done' } }])
+
+  it('builds the plain core with the same tools, guards and answer shape', async () => {
+    const guardsOf = (a: Built) => a.options.middleware.map((m) => m.name).filter((n) => (GUARD_ORDER as readonly string[]).includes(n))
+    const deep = make('deep', [])
+    const plain = make('plain', [])
+    expect(plain.agent.options.tools.map((t) => t.name)).toEqual(['roles_find'])
+    const deepTools = [...deep.agent.options.tools, ...deep.agent.options.middleware.flatMap((m) => m.tools ?? [])].map((t) => t.name)
+    for (const n of ['task', 'ls', 'read_file', 'write_file', 'edit_file', 'glob', 'grep']) expect(deepTools).toContain(n)
+    expect(plain.agent.options.middleware.map((m) => m.name)).not.toContain('subAgentMiddleware')
+    expect(guardsOf(plain.agent)).toEqual([...GUARD_ORDER])
+    expect(guardsOf(plain.agent)).toEqual(guardsOf(deep.agent))
+    for (const core of ['deep', 'plain'] as const) {
+      const m: { model: ScriptedChatModel } = { model: undefined as never }
+      const built = make(core, [() => finish(() => m.model)()])
+      m.model = built.model
+      const out = await built.agent.invoke({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: `t-${Math.random()}` }, recursionLimit: 40 })
+      expect(out.structuredResponse).toEqual({ text: 'done' })
+    }
+  })
+
+  it('lets the deep chat core read a skill that is switched off when hiddenSkills is empty', async () => {
+    const off = Object.keys(SKILLS_OFF)[0]
+    const read = async (hiddenSkills?: string[]) => {
+      const model: ScriptedChatModel = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [callTools([{ name: 'read_file', args: { file_path: `/skills/${off}/SKILL.md` } }]), () => finish(() => model)()] })
+      const agent = createCelloAgent({ kind: 'chat', ctx: ctx(), saver: new MemorySaver(), model, fallbacks: [], skillsDir: path.join(process.cwd(), 'skills'), hiddenSkills, tools: [], responseFormat: Answer as never } as never) as unknown as { invoke: (i: unknown, c: unknown) => Promise<{ messages: { content: unknown }[] }> }
+      const out = await agent.invoke({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: `t-${Math.random()}` }, recursionLimit: 40 })
+      return JSON.stringify(out.messages.map((m) => m.content))
+    }
+    expect(await read([])).toContain(`name: ${off}`)
+    expect(await read()).not.toContain(`name: ${off}`)
   })
 })
 

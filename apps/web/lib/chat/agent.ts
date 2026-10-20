@@ -5,8 +5,10 @@
 
 import { HumanMessage, isAIMessageChunk, type AIMessageChunk, type BaseMessage, type BaseMessageChunk } from '@langchain/core/messages'
 import { MemorySaver } from '@langchain/langgraph'
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { tool } from '@langchain/core/tools'
-import { createCelloAgent } from '@/lib/agents/factory'
+import { createCelloAgent, type ChatCore } from '@/lib/agents/factory'
+import { recursionLimitFor } from '@/lib/agents/middleware'
 import { loadUserMcpTools, type UserMcpTool, type UserMcpTools } from '@/lib/agents/user-mcp'
 import type { AgentContext } from '@/lib/agents/context'
 import { agentView, chatDoor, CommandRefusal, runCommand, toolName } from '@/lib/commands'
@@ -56,6 +58,10 @@ export interface ChatAgentDeps {
   profileCard?: string
   /** Test seam: the person's own tools, loaded each call. Default: their enabled servers (lib/agents/user-mcp.ts). */
   mcp?: () => Promise<UserMcpTools>
+  /** The loop's engine. Production leaves it unset (Deep Agents); the evals set 'plain' to compare. */
+  core?: ChatCore
+  /** Eval seam: runs the loop and the Researcher on this model, so an eval never reaches the key-gated door or a paid default. */
+  model?: BaseChatModel
   /** Test seam: replaces the compiled agent. */
   build?: (input: { tools: unknown[] }) => {
     invoke: (input: unknown, config?: Record<string, unknown>) => Promise<{ messages: BaseMessage[]; structuredResponse?: unknown }>
@@ -215,10 +221,11 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         ctx,
         tools: [...lcTools, ...outside] as never,
         responseFormat: AnswerSchema as never,
-        model: celloChatModel(deps.ran, deps.keys),
+        ...(deps.core ? { core: deps.core } : {}),
+        model: deps.model ?? celloChatModel(deps.ran, deps.keys),
         skillsTier: ({ R2: 'local', R3: 'free', R4: 'paid' } as const)[deps.ran.rung],
         // The Researcher runs on the model the person chose for research, held to the same highest as Chat.
-        ...(deps.roles?.researcher ? { researcherModel: celloChatModel(deps.roles.researcher, deps.keys, 'researcher') } : {}),
+        ...(deps.model ? { researcherModel: deps.model } : deps.roles?.researcher ? { researcherModel: celloChatModel(deps.roles.researcher, deps.keys, 'researcher') } : {}),
         profileCard: deps.profileCard,
         saver,
       }) as unknown as NonNullable<ReturnType<NonNullable<ChatAgentDeps['build']>>>)
@@ -249,7 +256,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         const delegations = new Set<string>()
         if (retry) deps.emit({ event: 'custom', data: { type: 'tool', label: CHECKING, phase: 'start' } })
         try {
-          const chunks = await (agent as unknown as { stream: (input: unknown, config?: unknown) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown> }).stream({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, configurable: { thread_id: input.turnId }, recursionLimit: 80, streamMode: ['values', 'messages', 'custom'], subgraphs: true })
+          const chunks = await (agent as unknown as { stream: (input: unknown, config?: unknown) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown> }).stream({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, configurable: { thread_id: input.turnId }, recursionLimit: recursionLimitFor('orchestrator'), streamMode: ['values', 'messages', 'custom'], subgraphs: true })
           for await (const chunk of chunks) {
             if (!Array.isArray(chunk) || chunk.length < 3) continue
             const [namespace, mode, data] = chunk as [readonly string[], string, unknown]
@@ -284,7 +291,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         }
         out = { messages: values?.messages ?? [], structuredResponse: values?.structuredResponse }
       } else {
-        out = await agent.invoke({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, configurable: { thread_id: input.turnId }, recursionLimit: 80 })
+        out = await agent.invoke({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, configurable: { thread_id: input.turnId }, recursionLimit: recursionLimitFor('orchestrator') })
       }
     } catch (e) {
       // The loop itself died after a tool was refused: the refusal is the reason the person reads, not "try again".
@@ -295,7 +302,13 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
 
     const parsed = AnswerSchema.safeParse(out.structuredResponse)
     const last = [...out.messages].reverse().find((m) => m.getType() === 'ai' && textOf(m).trim())
-    let answer: ModelAnswer = parsed.success ? parsed.data : { parts: textOf(last).trim() ? [{ about: [], text: textOf(last).trim().slice(0, 4000) }] : [] }
+    // langchain's own words when the model-call cap ends a loop (no answer was written); a person gets a plain sentence.
+    const capped = !parsed.success && /model call limit/i.test(textOf(last))
+    let answer: ModelAnswer = parsed.success
+      ? parsed.data
+      : capped
+        ? { parts: [{ about: [], text: 'Cello reached the most it does in one message before it could write this up. Ask again for the part you want most, or split it into smaller asks.' }] }
+        : { parts: textOf(last).trim() ? [{ about: [], text: textOf(last).trim().slice(0, 4000) }] : [] }
     // A search's roles are shown as cards whether or not the model remembered to list them: the rows are code's.
     if (found.length && !answer.cards?.length) answer = { ...answer, cards: found.slice(0, 12).map((t) => ({ kind: t.kind as 'role', id: t.id })) }
     // The real reason a tool refused is said by code when the model's parts do not carry it (acceptance H2).

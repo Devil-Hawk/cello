@@ -5,6 +5,12 @@ import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
 import { CommandRefusal } from '@/lib/commands/define'
 import type { AdminClient } from '@/lib/harness/types'
 import { chatAgent } from './agent'
+import { createCelloAgent } from '@/lib/agents/factory'
+
+vi.mock('@/lib/agents/factory', async (orig) => ({
+  ...(await orig<typeof import('@/lib/agents/factory')>()),
+  createCelloAgent: vi.fn(() => ({ invoke: async () => ({ messages: [new AIMessage('ok')], structuredResponse: { parts: [{ about: [], text: 'Done.' }] } }) })),
+}))
 
 // The real loader reaches servers; the tests hand the agent a fake through deps.mcp.
 vi.mock('@/lib/agents/user-mcp', () => ({ loadUserMcpTools: vi.fn(async () => ({ tools: [], entries: [], skipped: [], close: async () => undefined })), callUserMcpTool: vi.fn() }))
@@ -72,6 +78,16 @@ describe('the loop dying after a refusal', () => {
       },
     })
     await expect(chatAgent(deps(crashing))(input)).rejects.toThrow('boom')
+  })
+})
+
+describe('the model-call cap ending the loop', () => {
+  it("says so in Cello's words, not the library's", async () => {
+    const capped = () => ({ invoke: async () => ({ messages: [new AIMessage('Model call limits exceeded: run limit (24/24)')], structuredResponse: undefined }) })
+    const out = await chatAgent(deps(capped))(input)
+    expect(out.answer.parts).toHaveLength(1)
+    expect(out.answer.parts[0].text).toMatch(/Ask again/)
+    expect(out.answer.parts[0].text).not.toMatch(/limits exceeded/i)
   })
 })
 
@@ -152,7 +168,6 @@ describe('the live words across messages and the answer check', () => {
     expect(tools(0)).toEqual([])
   })
 })
-
 
 describe("the person's own tools", () => {
   const schema = z.object({ to: z.string().optional(), cc: z.array(z.string()).optional(), q: z.string().optional(), body: z.string().optional() })
@@ -261,5 +276,22 @@ describe("the person's own tools", () => {
   it('says nothing about servers when all answered', async () => {
     const out = await run(world(), loaded([]).mcp, calling([]), 'Hi')
     expect(out).not.toHaveProperty('unreached')
+  })
+})
+
+describe('the eval seams', () => {
+  const lastBuild = () => vi.mocked(createCelloAgent).mock.calls.at(-1)![0] as unknown as Record<string, unknown>
+
+  it('uses the given model for the loop and for the Researcher, and passes the core', async () => {
+    const model = { _llmType: () => 'scripted' }
+    await chatAgent({ ...deps(undefined as never), build: undefined, model: model as never, core: 'plain', roles: { researcher: { rung: 'R3', model: 'paid/x', effort: 'low' } } })(input)
+    expect(lastBuild()).toMatchObject({ kind: 'chat', core: 'plain', model, researcherModel: model })
+  })
+
+  it('leaves the core unset and builds its own model when no seam is given', async () => {
+    await chatAgent({ ...deps(undefined as never), keys: { userId: 'u1', openrouter: 'k' }, build: undefined })(input)
+    expect(lastBuild().core).toBeUndefined()
+    expect(lastBuild().model).toBeDefined()
+    expect(lastBuild().researcherModel).toBeUndefined()
   })
 })

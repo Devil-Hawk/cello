@@ -65,7 +65,80 @@ describe('buildScorecard', () => {
   })
 })
 
+describe('tiers', () => {
+  const free = (over: Partial<RunRow> = {}) => run('S14', { note: 'tier=free model=g/m:free core=deep; injection=0', value: 0.85, ran_at: '2026-10-20T06:00:00Z', ...over })
+
+  it('is null for a measure with no tiered run', () => {
+    expect(buildScorecard([measure('S14')], [run('S14')])[0].tiers).toBeNull()
+  })
+
+  it('builds a cell per tier and leaves a tier with no run null', () => {
+    const rows = buildScorecard([measure('S14')], [free()])
+    expect(rows[0].tiers).toEqual({ local: null, free: { value: 0.85, passed: true, model: 'g/m:free', ranAt: '2026-10-20T06:00:00Z' }, paid: null })
+  })
+
+  it('takes the latest run per tier, and ignores plain runs for the cells', () => {
+    const rows = buildScorecard(
+      [measure('S14')],
+      [
+        free({ ran_at: '2026-10-18T06:00:00Z', value: 0.5, passed: false }),
+        free({ ran_at: '2026-10-19T06:00:00Z', value: 0.9 }),
+        free({ ran_at: '2026-10-20T06:00:00Z', value: 0.1, passed: false, note: 'tier=free model=g/m:free core=plain' }),
+        run('S14', { ran_at: '2026-10-17T06:00:00Z', value: 0.7, passed: true, note: 'tier=paid model=p core=deep' }),
+      ]
+    )
+    expect(rows[0].tiers?.free).toMatchObject({ value: 0.9, passed: true })
+    expect(rows[0].tiers?.paid).toMatchObject({ value: 0.7, model: 'p' })
+    expect(rows[0].tiers?.local).toBeNull()
+  })
+
+  it('takes the row latest, status and trend from the free tier, not from a newer paid or plain run', () => {
+    const rows = buildScorecard(
+      [measure('S14')],
+      [
+        free({ ran_at: '2026-10-18T06:00:00Z', value: 0.6, passed: false }),
+        free({ ran_at: '2026-10-19T06:00:00Z', value: 0.85, passed: true }),
+        run('S14', { ran_at: '2026-10-20T06:00:00Z', value: 0.2, passed: false, note: 'tier=paid model=p core=deep' }),
+        run('S14', { ran_at: '2026-10-20T07:00:00Z', value: 0.1, passed: false, note: 'tier=free model=g core=plain' }),
+      ]
+    )
+    expect(rows[0]).toMatchObject({ status: 'passing', previousValue: 0.6, trend: 'rising' })
+    expect(rows[0].latest).toMatchObject({ value: 0.85, ranAt: '2026-10-19T06:00:00Z' })
+  })
+
+  it('reads a tiered measure with only paid or plain runs as no run, never a status', () => {
+    const rows = buildScorecard([measure('S14')], [run('S14', { passed: true, note: 'tier=paid model=p core=deep' }), run('S14', { passed: false, ran_at: '2026-10-09T06:00:00Z', note: 'tier=free model=g core=plain' })])
+    expect(rows[0].status).toBe('no_run')
+    expect(rows[0].latest).toBeNull()
+    expect(rows[0].tiers?.paid).toMatchObject({ passed: true })
+  })
+
+  it('keeps an untiered measure as it was', () => {
+    const rows = buildScorecard([measure('T1')], [run('T1', { note: 'plain note' })])
+    expect(rows[0]).toMatchObject({ status: 'passing', tiers: null })
+  })
+})
+
 describe('formatScorecard', () => {
+  it('prints the by-tier line with not run for a tier without a run', () => {
+    const rows = buildScorecard([measure('S14')], [run('S14', { value: 0.85, ran_at: '2026-10-20T06:00:00Z', note: 'tier=free model=g/m:free core=deep' })])
+    expect(formatScorecard(rows)).toContain('by tier: local not run; free 0.85 passing (g/m:free, 2026-10-20); paid not run')
+  })
+
+  it('says FAILING for a failing tier and cannot read for a tier with no number', () => {
+    const rows = buildScorecard([measure('S14')], [
+      run('S14', { value: 0.4, passed: false, note: 'tier=paid model=p core=deep' }),
+      run('S14', { value: null, passed: false, ran_at: '2026-10-19T06:00:00Z', note: 'tier=local model=q core=deep' }),
+    ])
+    const text = formatScorecard(rows)
+    expect(text).toContain('local cannot read FAILING (q, 2026-10-19)')
+    expect(text).toContain('paid 0.4 FAILING (p, 2026-10-08)')
+  })
+
+  it('prints no by-tier line for a measure without tiers', () => {
+    expect(formatScorecard(buildScorecard([measure('T1')], [run('T1')]))).not.toContain('by tier')
+  })
+
   it('says FAILING, "No run yet" and the pinned note in words', () => {
     const rows = buildScorecard(
       [measure('S4', { bar: 'a rise of at least 0.10' }), measure('T1')],

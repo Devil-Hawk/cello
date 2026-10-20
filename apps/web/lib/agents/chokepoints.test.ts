@@ -5,7 +5,7 @@
 //   new ChatOpenAI(       nowhere (graph-chokepoints.test.ts bans every other Chat*( too)
 //   createDeepAgent(      only lib/agents/factory.ts (the guards are attached there)
 //   createSubAgent(       only lib/agents/factory.ts
-//   createAgent(          nowhere (createDeepAgent and createSubAgent cover every loop)
+//   createAgent(          only lib/agents/factory.ts (the plain chat core; every other loop is createDeepAgent or createSubAgent)
 //   MultiServerMCPClient( only lib/agents/user-mcp.ts (SSRF and DNS checks come first)
 //   PostgresSaver         constructed only in lib/agents/persistence.ts (and lib/graph/pg.ts, the
 //                         old graph's pool, until it is removed)
@@ -56,7 +56,7 @@ const RULES: Rule[] = [
   { name: 'new ChatOpenAI(', pattern: /\bnew\s+ChatOpenAI\s*\(/, allowed: ['lib/models/factory.ts'] },
   { name: 'createDeepAgent(', pattern: /\bcreateDeepAgent\s*\(/, allowed: ['lib/agents/factory.ts'] },
   { name: 'createSubAgent(', pattern: /\bcreateSubAgent\s*\(/, allowed: ['lib/agents/factory.ts'] },
-  { name: 'createAgent(', pattern: /\bcreateAgent\s*\(/, allowed: [] },
+  { name: 'createAgent(', pattern: /\bcreateAgent\s*\(/, allowed: ['lib/agents/factory.ts'] },
   { name: 'new MultiServerMCPClient(', pattern: /\bnew\s+MultiServerMCPClient\s*\(/, allowed: ['lib/agents/user-mcp.ts'] },
   { name: 'PostgresSaver constructed', pattern: /\b(?:new\s+PostgresSaver\s*\(|PostgresSaver\.fromConnString\s*\()/, allowed: ['lib/agents/persistence.ts', 'lib/graph/pg.ts'] },
   { name: 'PostgresStore constructed (a second memory store)', pattern: /\b(?:new\s+PostgresStore\s*\(|PostgresStore\.fromConnString\s*\()/, allowed: [] },

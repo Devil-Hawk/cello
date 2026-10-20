@@ -7,6 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isOwner } from './owner'
 import type { MeasureLayer } from './register'
+import { parseRunNote, TIERS, type Tier } from './tiers'
 
 type Db = SupabaseClient<any, any, any>
 
@@ -32,6 +33,14 @@ export interface RunRow {
 
 export type Status = 'failing' | 'passing' | 'no_run'
 
+/** A tier's latest served-core run (core deep, or none noted). */
+export interface TierCell {
+  value: number | null
+  passed: boolean | null
+  model: string | null
+  ranAt: string
+}
+
 export interface ScorecardRow extends MeasureRow {
   status: Status
   latest: { ranAt: string; value: number | null; passed: boolean | null; sampleN: number | null; note: string | null } | null
@@ -40,6 +49,8 @@ export interface ScorecardRow extends MeasureRow {
   trend: 'rising' | 'falling' | 'flat' | null
   /** A known failure that stays on the page: the note of the pinned run. */
   pinned: string | null
+  /** Latest per tier, null for a tier never run; null itself when no run of the measure names a tier. */
+  tiers: Record<Tier, TierCell | null> | null
 }
 
 export const PINNED_PREFIX = 'Pinned'
@@ -61,13 +72,26 @@ export function buildScorecard(measures: MeasureRow[], runs: RunRow[]): Scorecar
   for (const r of runs) byMeasure.set(r.measure_id, [...(byMeasure.get(r.measure_id) ?? []), r])
 
   const rows = measures.map((m): ScorecardRow => {
-    const mine = (byMeasure.get(m.id) ?? []).sort((a, b) => Date.parse(b.ran_at) - Date.parse(a.ran_at))
+    const all = (byMeasure.get(m.id) ?? []).sort((a, b) => Date.parse(b.ran_at) - Date.parse(a.ran_at))
+    const parsed = all.map((r) => ({ r, n: parseRunNote(r.note) }))
+    // A plain-core run is a comparison, never the measure's verdict. A measure with tiers is headlined by the free tier
+    // (a run with no tier is a legacy run and counts as free).
+    const served = parsed.filter((p) => p.n.core !== 'plain')
+    const mine = served.filter((p) => p.n.tier === null || p.n.tier === 'free').map((p) => p.r)
+    const tiers = parsed.some((p) => p.n.tier !== null)
+      ? (Object.fromEntries(
+          TIERS.map((t) => {
+            const hit = served.find((p) => p.n.tier === t)
+            return [t, hit ? { value: num(hit.r.value), passed: hit.r.passed, model: hit.n.model, ranAt: hit.r.ran_at } : null]
+          })
+        ) as Record<Tier, TierCell | null>)
+      : null
     const latest = mine[0] ?? null
     const previous = mine[1] ?? null
     const value = latest ? num(latest.value) : null
     const prevValue = previous ? num(previous.value) : null
     const trend = value !== null && prevValue !== null ? (value > prevValue ? 'rising' : value < prevValue ? 'falling' : 'flat') : null
-    const pinned = mine.find((r) => r.note?.startsWith(PINNED_PREFIX))?.note ?? null
+    const pinned = all.find((r) => r.note?.startsWith(PINNED_PREFIX))?.note ?? null
     const status: Status = !latest || latest.passed === null ? 'no_run' : latest.passed ? 'passing' : 'failing'
     return {
       ...m,
@@ -76,6 +100,7 @@ export function buildScorecard(measures: MeasureRow[], runs: RunRow[]): Scorecar
       previousValue: prevValue,
       trend,
       pinned,
+      tiers,
     }
   })
 

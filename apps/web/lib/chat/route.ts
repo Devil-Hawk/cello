@@ -164,9 +164,9 @@ export function noteText(n: { title: string; company: string; strength: string; 
 export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise<AgentOutput>, companyNames: () => Promise<string[]>): (input: AgentInput) => Promise<AgentOutput> {
   return async (input) => {
     // Tiles attached, a retry after a failed part, or a quoted selection: the loop's work, not a typed ask.
-    if (input.screen || input.feedback) return fallback(input)
+    if (input.screen || input.feedback) return { ...(await fallback(input)), route: 'loop' }
     const intent = routeIntent(input.typed, await companyNames())
-    if (!intent) return fallback(input)
+    if (!intent) return { ...(await fallback(input)), route: 'loop' }
 
     const startedAt = new Date().toISOString()
     // The draft's sentence is the Writer's: the model the person chose for writing, or Chat's when they never did.
@@ -202,7 +202,7 @@ export function routedAgent(deps: Deps, fallback: (input: AgentInput) => Promise
       await deps.db.from('llm_spend').update({ chat_turn_id: input.turnId }).eq('user_id', deps.userId).is('chat_turn_id', null).gte('created_at', startedAt)
       const made = madeIds.length ? (((await deps.db.from('artifacts').select('id, type, title, created_at').eq('user_id', deps.userId).in('id', madeIds.slice(0, 20))).data as { id: string; type: string; title: string; created_at: string }[] | null) ?? []) : []
       // The model that answered is read from these rows at the turn's end (disclosure.ts), not claimed here.
-      return { answer, results, ran: deps.ran, roles: { chat: deps.ran, writer: writer }, tools, sources, made }
+      return { answer, results, ran: deps.ran, roles: { chat: deps.ran, writer: writer }, tools, sources, made, route: intent.kind }
     }
 
     try {
