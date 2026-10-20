@@ -50,6 +50,17 @@ describe('buildDisclosure', () => {
   })
 })
 
+describe('unreached servers', () => {
+  const at = { startedAt: new Date('2026-10-06T10:00:00Z'), endedAt: new Date('2026-10-06T10:00:01Z') }
+  it('are written when there are any, and left out of the row when there are none', async () => {
+    const db = makeFakeAdmin({ agent_tasks: [], llm_spend: [] })
+    const input = { ran, tools: [], sources: [], ...at }
+    expect(await buildDisclosure(db, 'u1', 't1', { ...input, unreached: ['notes', 'mail'] })).toMatchObject({ unreached: ['notes', 'mail'] })
+    expect(await buildDisclosure(db, 'u1', 't1', { ...input, unreached: [] })).not.toHaveProperty('unreached')
+    expect(await buildDisclosure(db, 'u1', 't1', input)).not.toHaveProperty('unreached')
+  })
+})
+
 describe('disclosureLine', () => {
   it('says what a paid turn cost', () => {
     const base = { sources: [], tools: [], workers: [], seconds: 125 }
