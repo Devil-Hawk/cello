@@ -3,7 +3,7 @@
 // The list Cello shows before it does a lot at once: the things it plans to do, each of which can be moved or taken
 // off, then Go ahead or Cancel. Nothing has started while this shows. The titles are written by code from the rows.
 
-import { useReducer } from 'react'
+import { useEffect, useReducer, useRef } from 'react'
 import { ArrowDown, ArrowUp, X } from 'lucide-react'
 
 export interface PlanStep {
@@ -24,6 +24,11 @@ export function planReducer(ids: string[], action: PlanAction): string[] {
   next[at] = ids[to]
   next[to] = action.id
   return next
+}
+
+/** Which Remove key takes the focus once the step is gone: the one that took its place, else the last. -1 means the list is empty. */
+export function focusAfterRemove(ids: string[], id: string): number {
+  return Math.min(ids.indexOf(id), ids.length - 2)
 }
 
 export interface PlanCardViewProps {
@@ -63,7 +68,7 @@ export function PlanCardView({ steps, ids, busy = false, onGo, onCancel, dispatc
                   <button type="button" className={BUTTON} disabled={busy} aria-disabled={i === ids.length - 1 || undefined} aria-label={`Move down: ${t}`} onClick={i === ids.length - 1 ? undefined : () => dispatch({ type: 'down', id })}>
                     <ArrowDown className="h-4 w-4" aria-hidden />
                   </button>
-                  <button type="button" className={BUTTON} disabled={busy} aria-label={`Remove: ${t}`} onClick={() => dispatch({ type: 'remove', id })}>
+                  <button type="button" className={BUTTON} disabled={busy} aria-label={`Remove: ${t}`} data-plan-remove onClick={() => dispatch({ type: 'remove', id })}>
                     <X className="h-4 w-4" aria-hidden />
                   </button>
                 </span>
@@ -80,7 +85,7 @@ export function PlanCardView({ steps, ids, busy = false, onGo, onCancel, dispatc
           Cancel
         </button>
         {empty && (
-          <button type="button" className={BUTTON} disabled={busy} onClick={() => dispatch({ type: 'reset', ids: steps.map((s) => s.id) })}>
+          <button type="button" className={BUTTON} disabled={busy} data-plan-put-back onClick={() => dispatch({ type: 'reset', ids: steps.map((s) => s.id) })}>
             Put them back
           </button>
         )}
@@ -98,5 +103,24 @@ export interface PlanCardProps {
 
 export function PlanCard({ steps, busy, onGo, onCancel }: PlanCardProps) {
   const [ids, dispatch] = useReducer(planReducer, steps.map((s) => s.id))
-  return <PlanCardView steps={steps} ids={ids} busy={busy} onGo={onGo} onCancel={onCancel} dispatch={dispatch} />
+  const root = useRef<HTMLDivElement>(null)
+  const refocus = useRef<number | null>(null)
+  // The focused Remove key unmounts with its row, so hand the focus on once the list has changed.
+  useEffect(() => {
+    const at = refocus.current
+    if (at === null) return
+    refocus.current = null
+    const el = at < 0 ? root.current?.querySelector('[data-plan-put-back]') : root.current?.querySelectorAll('[data-plan-remove]')[at]
+    ;(el as HTMLElement | null | undefined)?.focus()
+  }, [ids])
+  const act = (a: PlanAction) => {
+    if (a.type === 'remove') refocus.current = focusAfterRemove(ids, a.id)
+    if (a.type === 'reset') refocus.current = 0 // Put them back unmounts too: the first Remove key takes the focus
+    dispatch(a)
+  }
+  return (
+    <div ref={root}>
+      <PlanCardView steps={steps} ids={ids} busy={busy} onGo={onGo} onCancel={onCancel} dispatch={act} />
+    </div>
+  )
 }
