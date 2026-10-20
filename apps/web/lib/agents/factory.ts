@@ -29,6 +29,7 @@ import { celloChatModel } from './model'
 import { RESEARCHER_DESCRIPTION } from './subagents/researcher'
 import { scoutSubAgent } from './subagents/scout'
 import { writerSubAgent } from '@/lib/workflows/writer'
+import { planGate } from '@/lib/chat/plan'
 import { toAgentTools } from './tools/langchain'
 import { researchPrimitives } from './tools/research-tools'
 import { RESEARCHER_TOOL_NAMES } from './tools/registry'
@@ -78,6 +79,8 @@ export interface CelloAgentInput {
   profileCard?: string
   /** Chat only: each delegation to the Researcher (the `task` tool) is a worker row with its own Stop. */
   taskRows?: WorkerScope
+  /** Chat only: a big ask waits for the person's plan before anything runs (lib/chat/plan.ts). */
+  planScope?: WorkerScope
 }
 
 /**
@@ -91,7 +94,7 @@ function answerFormat(model: BaseChatModel, format: unknown): never {
   return (format && isZod && !native ? toolStrategy(format as never, { handleError: false }) : format) as never
 }
 
-function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher', answer?: AnswerShape, taskRows?: WorkerScope) {
+function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher', answer?: AnswerShape, taskRows?: WorkerScope, plan?: WorkerScope) {
   const { ctx } = input
   const stop = ctx.stop ?? (() => Promise.resolve(false))
   return guardStack({
@@ -102,6 +105,7 @@ function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher', an
     answer,
     fallbacks: input.fallbacks,
     taskRows,
+    plan: plan ? planGate(plan) : undefined,
   })
 }
 
@@ -150,7 +154,7 @@ export function createCelloAgent(input: CelloAgentInput & { kind: 'orchestrator'
         model,
         tools: input.tools ?? [],
         systemPrompt: composeSystemPrompt({ mode: loadModeDoc('chat'), stableContext: input.profileCard }),
-        middleware: guards(input, 'orchestrator', typeof answer?.safeParse === 'function' ? answer : undefined),
+        middleware: guards(input, 'orchestrator', typeof answer?.safeParse === 'function' ? answer : undefined, undefined, input.planScope),
         responseFormat: answerFormat(model, input.responseFormat) as never,
         checkpointer: input.saver,
       }) as never
@@ -164,7 +168,7 @@ export function createCelloAgent(input: CelloAgentInput & { kind: 'orchestrator'
       skills: ['/skills/', '/my-skills/'],
       backend: celloBackend({ admin: ctx.admin, userId: ctx.userId, skillsDir: input.skillsDir, hiddenSkills: input.hiddenSkills, skillsTier: input.skillsTier }),
       permissions: PERMISSIONS.orchestrator,
-      middleware: guards(input, 'orchestrator', typeof answer?.safeParse === 'function' ? answer : undefined, input.taskRows),
+      middleware: guards(input, 'orchestrator', typeof answer?.safeParse === 'function' ? answer : undefined, input.taskRows, input.planScope),
       checkpointer: input.saver,
       responseFormat: answerFormat(model, input.responseFormat),
     })

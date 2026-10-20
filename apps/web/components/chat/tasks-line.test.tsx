@@ -16,6 +16,11 @@ describe('TasksLine', () => {
     expect(out).toContain('>Stop<')
   })
 
+  it('does not count a removed step as work', () => {
+    const removed = task(9, { status: 'stopped', command: 'chat.plan.step', summary: 'Removed by you' })
+    expect(text(line([task(1, { status: 'queued', command: 'chat.plan.step' }), task(2), removed]))).toContain('Cello is working: 0 of 2 done.')
+  })
+
   it('lists each task with its state, its reads and a Stop for the ones still going only', () => {
     const out = line([task(1, { status: 'done', reads: 3 }), task(2, { status: 'stopped' }), task(3, { status: 'failed' }), task(4, { reads: 1 })], { defaultOpen: true })
     expect(text(out)).toContain('Research company 1 Done 3 pages read')
@@ -42,6 +47,33 @@ describe('TasksLine', () => {
     expect(out).toContain('>Stop<')
     expect(out).not.toContain('>Show<')
     expect(out).not.toContain('of 0 done')
+  })
+})
+
+describe('TasksLine with a plan', () => {
+  it('says Planned for a planned row and Removed by you for a removed one', () => {
+    const out = text(line([
+      task(1, { status: 'queued', command: 'chat.plan.step', title: 'Start an application: Engineer at Ramp' }),
+      task(2, { status: 'stopped', command: 'chat.plan.step', summary: 'Removed by you', title: 'Write a cover letter' }),
+      task(3, { status: 'failed', command: 'chat.plan.step', summary: 'raw error text', title: 'Research: Ramp' }),
+    ], { defaultOpen: true }))
+    expect(out).toContain('Start an application: Engineer at Ramp Planned')
+    expect(out).toContain('Write a cover letter Removed by you')
+    expect(out).toContain('Research: Ramp Could not finish')
+    expect(out).not.toContain('raw error text')
+  })
+
+  it('shows an added row as added after the plan started', () => {
+    const out = text(line([task(1, { status: 'done', command: 'chat.plan.added', summary: 'Added after the plan started', title: 'Added: Write a cover letter' })], { defaultOpen: true }))
+    expect(out).toContain('Added: Write a cover letter Added after the plan started')
+  })
+
+  it('does not claim work for a plan that never began', () => {
+    expect(workedSummary([task(1, { status: 'stopped', command: 'chat.plan.step', summary: 'Cancelled by you' })], 2)).toBe('Nothing was started.')
+  })
+
+  it('leaves plan rows out of what was done', () => {
+    expect(workedSummary([task(1, { status: 'done', command: 'chat.plan' }), task(2, { status: 'done', command: 'chat.plan.step' }), task(3, { status: 'done', command: 'chat.plan.added' })], 5)).toBe('Worked 0:05.')
   })
 })
 

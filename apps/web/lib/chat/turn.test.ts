@@ -3,7 +3,7 @@ import { makeFakeAdmin, type FakeAdmin } from '@/lib/agents/testing/fake-admin'
 import { FreeCapError, reasonOf } from '@/lib/models/caps'
 import type { ModelAnswer } from './answer'
 import { inMemoryStore } from './memory.fake'
-import { MovedError } from './workers'
+import { MovedError, PlanWaitingError } from './workers'
 import { runChatTurn, type AgentInput, type AgentOutput, type TurnDeps } from './turn'
 import { refId, type ObjectReader } from './types'
 
@@ -157,6 +157,14 @@ describe('runChatTurn', () => {
     const agent = vi.fn(async (): Promise<AgentOutput> => Promise.reject(new MovedError()))
     await expect(send(deps(db, agent))).rejects.toBeInstanceOf(MovedError)
     expect(db.tables.chat_turns.map((t) => t.kind)).toEqual(['person'])
+  })
+
+  it('passes a waiting plan up and writes no line', async () => {
+    const db = seed()
+    const agent = vi.fn(async (): Promise<AgentOutput> => Promise.reject(new PlanWaitingError('p1')))
+    await expect(send(deps(db, agent))).rejects.toBeInstanceOf(PlanWaitingError)
+    expect(db.tables.chat_turns.filter((t) => t.kind === 'cello')).toHaveLength(0)
+    expect(db.tables.chat_turns.filter((t) => t.kind === 'person')).toHaveLength(1)
   })
 
   it('refuses another person\'s chat and empty words without storing anything', async () => {

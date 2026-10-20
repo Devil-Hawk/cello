@@ -184,6 +184,34 @@ describe('applications.start', () => {
     expect(await applicationsStart.guard!(ctx({ chat: true, db }), { job_ids: ['j4'] })).toBe('Cello starts at most 3 applications in one message.')
   })
 
+  const plan = (kept: string[], extra: Record<string, unknown>[] = [], status = 'done') => [
+    { id: 'p1', user_id: 'u1', turn_id: 't1', command: 'chat.plan', status, parent_id: null },
+    ...kept.map((ref, i) => ({ id: `s${i}`, user_id: 'u1', turn_id: 't1', command: 'chat.plan.step', status: 'done', parent_id: 'p1', object: { tool: 'applications_start', tool_call_id: `c:${i}`, args: { job_id: ref } } })),
+    ...extra,
+  ]
+  const started = (refs: string[]) => refs.map((ref) => ({ id: `t-${ref}`, user_id: 'u1', turn_id: 't1', command: 'applications.start', object: { kind: 'role', ref } }))
+  const sentence = (n: number) => `Cello starts at most ${n} applications in one message.`
+
+  it('lets an approved plan start each kept role', async () => {
+    const db = seed({ agent_tasks: [...plan(['j1', 'j2', 'j3', 'j4', 'j5'], [{ id: 'sx', user_id: 'u1', turn_id: 't1', command: 'chat.plan.step', status: 'stopped', parent_id: 'p1', object: { tool: 'applications_start', args: { job_id: 'j6' } } }, { id: 'sd', user_id: 'u1', turn_id: 't1', command: 'chat.plan.step', status: 'queued', parent_id: 'p1', object: { tool: 'documents_draft', args: {} } }]), ...started(['j1', 'j2', 'j3', 'j4'])] })
+    expect(await applicationsStart.guard!(ctx({ chat: true, db }), { job_id: 'j5' })).toBeNull()
+    db.tables.agent_tasks.push(...started(['j5']))
+    expect(await applicationsStart.guard!(ctx({ chat: true, db }), { job_id: 'j6' })).toBe(sentence(5))
+  })
+
+  it('still refuses a fourth start without a plan', async () => {
+    for (const rows of [plan(['j1', 'j2', 'j3', 'j4', 'j5'], [], 'waiting'), plan(['j1', 'j2', 'j3', 'j4', 'j5'], [], 'stopped').map((r) => ({ ...r, turn_id: 'other' }))]) {
+      const db = seed({ agent_tasks: [...rows, ...started(['j1', 'j2', 'j3'])] })
+      expect(await applicationsStart.guard!(ctx({ chat: true, db }), { job_id: 'j4' })).toBe(sentence(3))
+    }
+  })
+
+  it('an added start does not raise the cap', async () => {
+    const added = ['j4', 'j5'].map((ref, i) => ({ id: `a${i}`, user_id: 'u1', turn_id: 't1', command: 'chat.plan.added', status: 'done', parent_id: 'p1', object: { tool: 'applications_start', args: { job_id: ref } } }))
+    const db = seed({ agent_tasks: [...plan(['j1', 'j2'], added), ...started(['j1', 'j2', 'j3'])] })
+    expect(await applicationsStart.guard!(ctx({ chat: true, db }), { job_id: 'j4' })).toBe(sentence(3))
+  })
+
   it('a replay is not refused by the per-message limit', async () => {
     const db = seed({ agent_tasks: ['j1', 'j2', 'j3'].map((ref) => ({ id: `t-${ref}`, user_id: 'u1', turn_id: 't1', command: 'applications.start', object: { kind: 'role', ref } })) })
     expect(await applicationsStart.guard!(ctx({ chat: true, db }), { job_ids: ['j1', 'j2', 'j3'] })).toBeNull()

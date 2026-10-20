@@ -16,10 +16,12 @@ export interface TaskRow {
   command: string | null
   /** How many things the task has read. */
   reads: number
+  /** What the row says about itself (for a plan row: Removed by you, Added after the plan started). */
+  summary?: string | null
 }
 
 export const STATUS_WORDS: Record<TaskStatus, string> = {
-  queued: 'Waiting',
+  queued: 'Planned',
   working: 'Working',
   waiting: 'Waiting for your approval',
   done: 'Done',
@@ -29,6 +31,11 @@ export const STATUS_WORDS: Record<TaskStatus, string> = {
 }
 
 const alive = (s: TaskStatus) => s === 'queued' || s === 'working'
+
+const isPlan = (t: TaskRow) => t.command?.startsWith('chat.plan') ?? false
+
+/** The state cell: a stopped row's own reason and an added row's note, else the word. A failed row's summary can hold raw text, so it is never shown. */
+const stateText = (t: TaskRow) => ((t.status === 'stopped' || t.command === 'chat.plan.added') && t.summary ? t.summary : STATUS_WORDS[t.status])
 
 /** m:ss */
 export const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.max(0, Math.floor(seconds % 60))).padStart(2, '0')}`
@@ -44,11 +51,13 @@ const DONE_WORDS: Record<string, [string, string, string]> = {
 /** "Worked 0:41: researched 3 companies, drafted 1 draft." from the rows, never from the model. */
 export function workedSummary(tasks: TaskRow[], seconds: number): string {
   const counts = new Map<string, number>()
-  for (const t of tasks) if (t.command !== 'chat.turn' && (t.status === 'done' || t.status === 'partial')) counts.set(t.command ?? '', (counts.get(t.command ?? '') ?? 0) + 1)
+  for (const t of tasks) if (t.command !== 'chat.turn' && !isPlan(t) && (t.status === 'done' || t.status === 'partial')) counts.set(t.command ?? '', (counts.get(t.command ?? '') ?? 0) + 1)
   const parts = [...counts].map(([command, n]) => {
     const words = DONE_WORDS[command]
     return words ? `${words[0]} ${n} ${n === 1 ? words[1] : words[2]}` : `finished ${n} ${n === 1 ? 'task' : 'tasks'}`
   })
+  // A plan that was cancelled or never began: the clock would claim work that did not happen.
+  if (!parts.length && tasks.length > 0 && tasks.every((t) => isPlan(t) && t.status === 'stopped')) return 'Nothing was started.'
   return `Worked ${clock(seconds)}${parts.length ? `: ${parts.join(', ')}` : ''}.`
 }
 
@@ -76,8 +85,10 @@ export function TasksLine({ tasks, running, seconds, stopping = false, onStop, o
   }, [open])
   // A turn with no work rows has a line only while it runs: "Cello is working" with Stop, and nothing to show.
   if (tasks.length === 0 && !running) return null
-  const finished = tasks.filter((t) => !alive(t.status) && t.status !== 'waiting').length
-  const lead = background ? `Cello carries on in the background${tasks.length ? `: ${finished} of ${tasks.length} done` : ''}. You can leave this page.` : tasks.length ? `Cello is working: ${finished} of ${tasks.length} done.` : 'Cello is working.'
+  // A step the person took out of the plan is shown, but it is not work to be done.
+  const counted = tasks.filter((t) => !(t.command === 'chat.plan.step' && t.summary === 'Removed by you'))
+  const finished = counted.filter((t) => !alive(t.status) && t.status !== 'waiting').length
+  const lead = background ? `Cello carries on in the background${counted.length ? `: ${finished} of ${counted.length} done` : ''}. You can leave this page.` : counted.length ? `Cello is working: ${finished} of ${counted.length} done.` : 'Cello is working.'
   return (
     <div className="rounded-control border border-border bg-card px-3 py-2 text-caption" role="status" aria-live="polite">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -98,7 +109,7 @@ export function TasksLine({ tasks, running, seconds, stopping = false, onStop, o
           {tasks.map((t) => (
             <li key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5" data-task={t.status}>
               <span className="min-w-0 flex-1 break-words text-foreground">{t.title}</span>
-              <span className={cn('text-muted-foreground', t.status === 'failed' && 'text-foreground')}>{STATUS_WORDS[t.status]}</span>
+              <span className={cn('text-muted-foreground', t.status === 'failed' && 'text-foreground')}>{stateText(t)}</span>
               {t.reads > 0 && <span className="text-muted-foreground">{t.reads} {t.reads === 1 ? 'page' : 'pages'} read</span>}
               {alive(t.status) && (
                 <button type="button" className="min-h-11 min-w-11 text-muted-foreground underline underline-offset-2 hover:text-foreground" aria-label={`Stop: ${t.title}`} onClick={() => onStopTask(t.id)}>

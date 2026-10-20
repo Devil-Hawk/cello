@@ -21,6 +21,10 @@ export interface WorkerRow {
   created_at: string
   started_at: string | null
   finished_at: string | null
+  summary: string | null
+  object: unknown
+  parent_id: string | null
+  branch_index: number | null
 }
 
 /** An outside tool call waiting for the person's Confirm. */
@@ -69,7 +73,7 @@ export async function loadChatPage(db: AdminClient, userId: string, chatId: stri
   const [named, cards, workers, statuses] = await Promise.all([
     Promise.all(view.attachments.map(async (a) => [a.id, objectName((await get(db, userId, a.kind, a.ref)) ?? { kind: a.kind, title: '', company: null }) || null] as const)),
     Promise.all([...subjects.values()].map((s) => readCard(db, userId, s))),
-    db.from('agent_tasks').select('id, turn_id, title, status, command, reads, created_at, started_at, finished_at').eq('chat_id', chatId).eq('user_id', userId).order('created_at', { ascending: true }),
+    db.from('agent_tasks').select('id, turn_id, title, status, command, reads, created_at, started_at, finished_at, summary, object, parent_id, branch_index').eq('chat_id', chatId).eq('user_id', userId).order('created_at', { ascending: true }).order('branch_index', { ascending: true, nullsFirst: true }),
     readStatusLines(db, userId, view.turns.flatMap((t) => (t.kind === 'status' && t.event_id ? [t.event_id] : []))),
   ])
   const links = view.turns.flatMap((t) => t.links ?? [])

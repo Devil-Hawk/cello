@@ -14,7 +14,7 @@ import type { AgentContext } from '@/lib/agents/context'
 import { agentView, chatDoor, CommandRefusal, runCommand, toolName } from '@/lib/commands'
 import type { AnyCommand } from '@/lib/commands'
 import { isBudgetCapError } from '@/lib/agents/spend-port'
-import { MovedError, StoppedError } from './workers'
+import { MovedError, PlanWaitingError, StoppedError } from './workers'
 import { chunkToEvent } from '@/lib/agents/sse'
 import { joinWords, liveText } from './live'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
@@ -38,7 +38,7 @@ const HELP: Record<string, string> = {
   chat_recall: 'Look in the person\'s earlier chats by words. Returns what they said, made or decided there, with the chat it came from.',
   documents_draft: 'Write one draft with the Writer: type reply (to a person, pass contact_id), message, follow_up, note, cover_letter or resume (pass job_id for a role). Saves it as a draft. Never sends.',
   postings_read: 'Read one job posting from a link the person typed in this message. Returns its title, place, pay as stated and its requirements in the posting\'s own words. Stores nothing. A link to a list of roles is refused with what to do instead.',
-  applications_start: 'Start preparing applications for stored roles: job_id for one, or job_ids for up to 3 the person named or attached, in one call. It checks each posting and tailors the resume. In Ask first it then waits for the person to approve the resume and nothing is sent; in Hands-off, say what its sentence says. Never say you applied, sent or submitted.',
+  applications_start: 'Start preparing applications for stored roles: job_id for one, or job_ids for every role the person named or attached, all in one call. It checks each posting and tailors the resume. In Ask first it then waits for the person to approve the resume and nothing is sent; in Hands-off, say what its sentence says. Never say you applied, sent or submitted.',
 }
 
 export interface ChatAgentDeps {
@@ -60,6 +60,8 @@ export interface ChatAgentDeps {
   saver?: BaseCheckpointSaver
   /** The first call of this closure carries on the checkpoint of thread `turnId` instead of starting the turn. */
   resume?: boolean
+  /** What answers the interrupt the resumed turn holds (a plan decision). Without one it is told to continue. */
+  resumeValue?: unknown
   /** Test seam: the person's own tools, loaded each call. Default: their enabled servers (lib/agents/user-mcp.ts). */
   mcp?: () => Promise<UserMcpTools>
   /** The loop's engine. Production leaves it unset (Deep Agents); the evals set 'plain' to compare. */
@@ -236,6 +238,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
       stop: deps.stop,
       deadlineAt,
     }
+    const scope = { db: deps.db, userId: deps.userId, threadId: input.chatId, chatId: input.chatId, turnId: input.turnId, model: deps.ran.model, rung: deps.ran.rung }
     const agent =
       deps.build?.({ tools: [...lcTools, ...outside] }) ??
       (createCelloAgent({
@@ -250,7 +253,8 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         ...(deps.model ? { researcherModel: deps.model } : deps.roles?.researcher ? { researcherModel: celloChatModel(deps.roles.researcher, deps.keys, 'researcher') } : {}),
         profileCard: deps.profileCard,
         saver,
-        taskRows: { db: deps.db, userId: deps.userId, threadId: input.chatId, chatId: input.chatId, turnId: input.turnId, model: deps.ran.model, rung: deps.ran.rung },
+        taskRows: scope,
+        planScope: scope,
       }) as unknown as NonNullable<ReturnType<NonNullable<ChatAgentDeps['build']>>>)
 
     const next: BaseMessage[] = history ? [new HumanMessage(input.feedback ?? '')] : [...(input.screen ? [new HumanMessage(input.screen)] : []), new HumanMessage(input.typed)]
@@ -265,7 +269,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
       if (resuming) {
         resuming = false
         const state = await getState?.(thread)
-        if (state && state.next.length > 0) first = state.tasks?.some((t) => t.interrupts?.length) ? new Command({ resume: 'continue' }) : null
+        if (state && state.next.length > 0) first = state.tasks?.some((t) => t.interrupts?.length) ? new Command({ resume: deps.resumeValue ?? 'continue' }) : null
         // What the earlier slices' tools returned is in the checkpoint: read it back, so the answer is checked against all of it.
         for (const m of state?.values?.messages ?? []) {
           if (m.getType() !== 'tool') continue
@@ -359,9 +363,15 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
       }
       // The graph stopped before its end (the slice deadline): the checkpoint is saved and another request carries on.
       const end = await getState?.(thread)
-      if (end && end.next.length > 0) throw new MovedError()
+      if (end && end.next.length > 0) {
+        // A plan waiting for the person is not the slice deadline: the turn stays put until they answer.
+        const held = (end.tasks ?? []).flatMap((t) => t.interrupts ?? []).map((i) => i.value as { kind?: string; plan_id?: string } | null | undefined)
+        const plan = held.find((v) => v?.kind === 'plan')
+        if (plan) throw new PlanWaitingError(String(plan.plan_id))
+        throw new MovedError()
+      }
     } catch (e) {
-      if (e instanceof MovedError || e instanceof StoppedError) throw e
+      if (e instanceof MovedError || e instanceof PlanWaitingError || e instanceof StoppedError) throw e
       // The loop itself died after a tool was refused: the refusal is the reason the person reads, not "try again".
       if (refusals.length && !reasonOf(e) && !deps.signal?.aborted) throw new CommandRefusal(502, refusals.join(' '), 'failed')
       throw e
