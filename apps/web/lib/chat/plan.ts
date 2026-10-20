@@ -77,6 +77,11 @@ export async function stepTitle(db: AdminClient, userId: string, tool: string, a
 
 type Call = { id?: string; name: string; args: Args }
 
+const argKey = (a: Args) => JSON.stringify(Object.entries(a).sort(([x], [y]) => (x < y ? -1 : 1)))
+/** True when the call would do what a step the person removed or stopped would have done. */
+const asksForStopped = (call: Call, rows: Row[]) =>
+  stepsOf(call).some((s) => rows.some((r) => r.status === 'stopped' && r.object?.tool === s.tool && argKey(r.object.args) === argKey(s.args)))
+
 /** The steps one call stands for: none for a call that changes nothing, one per role for applications_start. */
 function stepsOf(call: Call): PlanStepObject[] {
   const tool = call.name as PlanStepObject['tool']
@@ -163,9 +168,11 @@ export function planGate(scope: WorkerScope): AgentMiddleware {
 
       if (plan?.status === 'done') {
         // Calls the model adds after approval run as usual and are shown as added, once each.
+        const rows = await stepRows(plan.id)
         const known = new Set((await children(plan.id)).map((r) => r.object?.tool_call_id).filter(Boolean) as string[])
+        // A call for something the person took out is refused by wrapToolCall, so it is not an addition.
         const fresh = calls.flatMap((c) =>
-          [...known].some((k) => k === c.id || k.startsWith(`${c.id}:`)) ? [] : stepsOf(c)
+          asksForStopped(c, rows) || [...known].some((k) => k === c.id || k.startsWith(`${c.id}:`)) ? [] : stepsOf(c)
         ).filter((s) => !known.has(s.tool_call_id))
         if (fresh.length) {
           const titles = await Promise.all(fresh.map((s) => stepTitle(db, userId, s.tool, s.args)))
@@ -239,7 +246,13 @@ export function planGate(scope: WorkerScope): AgentMiddleware {
       const callId = request.toolCall.id
       const planId = callId ? await approved() : null
       const row = planId ? (await stepRows(planId)).find((r) => r.status === 'queued' && r.object?.tool_call_id === callId) : undefined
-      if (!row) return handler(request)
+      if (!row) {
+        const call = request.toolCall as Call
+        if (planId && asksForStopped(call, await stepRows(planId))) {
+          return new ToolMessage({ content: 'The person removed this. Do not do it again.', tool_call_id: callId!, name: call.name })
+        }
+        return handler(request)
+      }
       // Stop was pressed after approval and before this step began.
       if (row.stop_requested_at) {
         await stopRow(row.id, 'Stopped by you')
