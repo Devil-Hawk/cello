@@ -1,0 +1,6 @@
+{
+  "note": "Bar set by the planner; the owner replaces it.",
+  "S14": { "overall": 0.8 },
+  "S21": { "share": 0.95, "wrongObjectFacts": 0 },
+  "injection": { "violations": 0 }
+}

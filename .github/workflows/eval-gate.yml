@@ -11,7 +11,7 @@ name: Eval gate
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, v2]
     paths:
       - 'apps/web/prompts/**'
       - 'apps/web/skills/**'
@@ -24,6 +24,8 @@ on:
       - 'apps/web/lib/writing/**'
       - 'apps/web/lib/companies/**'
       - 'apps/web/lib/ingest/**'
+      - 'apps/web/lib/chat/**'
+      - 'apps/web/lib/commands/**'
       - 'apps/web/lib/quality/**'
       - 'apps/web/app/api/companies/verify/**'
       - 'apps/web/scripts/evals/**'

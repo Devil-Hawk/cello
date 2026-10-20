@@ -3,11 +3,12 @@
 //   pnpm tsx lib/chat/evals/record.ts ready                          prints the four gating measures, exits 1 until all pass
 //   pnpm tsx lib/chat/evals/record.ts record S21 0.96 true 10 "note"  one measure_runs row (measure, value, passed, sample size, note)
 //
-// Chat is shown to everyone when S13, S14, S15 and S21 each have a latest run that passed. The owner then turns the
+// Chat is shown to everyone when S13, S14, S15 and S21 each have a latest run that passed (judged on the free tier and the deep core; legacy runs with no tier count). The owner then turns the
 // chat_shown switch on; this script never does. It refuses to say "ready" while any of the four has no run or failed.
 
 import type { AdminClient } from '@/lib/harness/types'
-import type { S21Score } from './score'
+import { parseRunNote, runNote, type RunMeta } from '@/lib/measures/tiers'
+import type { InjectionScore, S14Score, S21Score } from './score'
 
 export const CHAT_GATE = ['S13', 'S14', 'S15', 'S21'] as const
 
@@ -25,8 +26,14 @@ export async function recordMeasure(db: AdminClient, run: MeasureRun): Promise<b
 }
 
 /** S21's run from its score: the share of parts right, passed only with no fact on the wrong object. */
-export const recordS21 = (db: AdminClient, score: S21Score) =>
-  recordMeasure(db, { measure: 'S21', value: score.share, passed: score.passed, sampleN: score.parts, note: `${score.wrongObjectFacts} facts on the wrong object` })
+export function recordS21(db: AdminClient, score: S21Score, meta?: RunMeta) {
+  const rest = `${score.wrongObjectFacts} facts on the wrong object`
+  return recordMeasure(db, { measure: 'S21', value: score.share, passed: score.passed, sampleN: score.parts, note: meta ? runNote(meta, rest) : rest })
+}
+
+/** S14's run: right over cases (null when it cannot be read), passed only when the injection set is clean too. */
+export const recordS14 = (db: AdminClient, score: S14Score, injection: InjectionScore, meta: RunMeta) =>
+  recordMeasure(db, { measure: 'S14', value: score.overall, passed: score.passed && injection.passed, sampleN: score.cases, note: runNote(meta, `injection=${injection.violations.length}`) })
 
 export interface Readiness {
   ready: boolean
@@ -38,8 +45,12 @@ export interface Readiness {
 export async function chatReady(db: AdminClient): Promise<Readiness> {
   const latest = await Promise.all(
     CHAT_GATE.map(async (measure) => {
-      const { data } = await db.from('measure_runs').select('passed, ran_at').eq('measure_id', measure).order('ran_at', { ascending: false }).limit(1).maybeSingle()
-      const row = data as { passed: boolean | null; ran_at: string } | null
+      // The headline is the free tier on the deep core. A newer paid, local or plain run is not Chat's verdict.
+      const { data } = await db.from('measure_runs').select('passed, ran_at, note').eq('measure_id', measure).order('ran_at', { ascending: false }).limit(50)
+      const row = ((data ?? []) as { passed: boolean | null; ran_at: string; note: string | null }[]).find((r) => {
+        const n = parseRunNote(r.note)
+        return (n.tier === null || n.tier === 'free') && (n.core === null || n.core === 'deep')
+      })
       return { measure, passed: row ? row.passed : null, ranAt: row?.ran_at ?? null }
     })
   )

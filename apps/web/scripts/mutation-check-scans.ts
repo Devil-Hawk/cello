@@ -102,7 +102,7 @@ const AGENT_DOOR_RULES: { name: string; pattern: RegExp; allowed: string[]; offe
   { name: 'new ChatOpenRouter(', pattern: /\bnew\s+ChatOpenRouter\s*\(/, allowed: ['lib/agents/model.ts'], offending: 'const m = new ChatOpenRouter({ model })' },
   { name: 'createDeepAgent(', pattern: /\bcreateDeepAgent\s*\(/, allowed: ['lib/agents/factory.ts'], offending: 'const a = createDeepAgent({ tools })' },
   { name: 'createSubAgent(', pattern: /\bcreateSubAgent\s*\(/, allowed: ['lib/agents/factory.ts'], offending: 'const a = createSubAgent(spec)' },
-  { name: 'createAgent(', pattern: /\bcreateAgent\s*\(/, allowed: [], offending: 'const a = createAgent({ model })' },
+  { name: 'createAgent(', pattern: /\bcreateAgent\s*\(/, allowed: ['lib/agents/factory.ts'], offending: 'const a = createAgent({ model })' },
   { name: 'new MultiServerMCPClient(', pattern: /\bnew\s+MultiServerMCPClient\s*\(/, allowed: ['lib/agents/user-mcp.ts'], offending: 'const c = new MultiServerMCPClient({ mcpServers })' },
 ]
 
