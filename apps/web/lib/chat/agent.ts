@@ -4,14 +4,14 @@
 // answer.ts, or, when a model cannot give that shape, its last words as one part that is checked the same way.
 
 import { HumanMessage, isAIMessageChunk, type AIMessageChunk, type BaseMessage, type BaseMessageChunk } from '@langchain/core/messages'
-import { MemorySaver } from '@langchain/langgraph'
+import { Command, MemorySaver, type BaseCheckpointSaver } from '@langchain/langgraph'
 import { tool } from '@langchain/core/tools'
 import { createCelloAgent } from '@/lib/agents/factory'
 import type { AgentContext } from '@/lib/agents/context'
 import { agentView, chatDoor, CommandRefusal, runCommand, toolName } from '@/lib/commands'
 import type { AnyCommand } from '@/lib/commands'
 import { isBudgetCapError } from '@/lib/agents/spend-port'
-import { StoppedError } from './workers'
+import { MovedError, StoppedError } from './workers'
 import { chunkToEvent } from '@/lib/agents/sse'
 import { joinWords, liveText } from './live'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
@@ -32,7 +32,7 @@ const HELP: Record<string, string> = {
   people_find: 'Find one of the person\'s contacts by name. Returns the contact with their company and their latest message to the person. Use it before a reply, to get the contact id.',
   chat_recall: 'Look in the person\'s earlier chats by words. Returns what they said, made or decided there, with the chat it came from.',
   documents_draft: 'Write one draft with the Writer: type reply (to a person, pass contact_id), message, follow_up, note, cover_letter or resume (pass job_id for a role). Saves it as a draft. Never sends.',
-  applications_start: 'Start preparing an application for one stored role by its id. It checks the posting and tailors the resume. In Ask first it then waits for the person to approve the resume and nothing is sent; in Hands-off, say what its sentence says. Never say you applied, sent or submitted.',
+  applications_start: 'Start preparing applications for stored roles: job_id for one, or job_ids for up to 3 the person named or attached, in one call. It checks each posting and tailors the resume. In Ask first it then waits for the person to approve the resume and nothing is sent; in Hands-off, say what its sentence says. Never say you applied, sent or submitted.',
 }
 
 export interface ChatAgentDeps {
@@ -50,12 +50,20 @@ export interface ChatAgentDeps {
   stop?: () => Promise<boolean>
   emit?: (event: { event: string; data: unknown }) => void
   profileCard?: string
+  /** The checkpointer of the turn, opened by run.ts and closed there. Without one a MemorySaver keeps the turn in memory. */
+  saver?: BaseCheckpointSaver
+  /** The first call of this closure carries on the checkpoint of thread `turnId` instead of starting the turn. */
+  resume?: boolean
   /** Test seam: replaces the compiled agent. */
   build?: (input: { tools: unknown[] }) => {
     invoke: (input: unknown, config?: Record<string, unknown>) => Promise<{ messages: BaseMessage[]; structuredResponse?: unknown }>
     stream?: (input: unknown, config?: Record<string, unknown>) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown>
+    getState?: (config: Record<string, unknown>) => Promise<{ next: readonly string[]; tasks?: { interrupts?: { value?: unknown }[] }[] }>
   }
 }
+
+/** How long one request may run a turn before it hands over to the worker. */
+export const chatSliceMs = (): number => Number(process.env.CHAT_SLICE_MS) || 240_000
 
 /** The tool row shown while the model rewrites an answer the check sent back. */
 const CHECKING = 'Checking the answer'
@@ -78,18 +86,22 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
   const madeIds = new Set<string>()
   // A cap, a missing key or a refusal a tool met this turn, in code's words, so the person reads it even when the model leaves it out.
   const refusals: string[] = []
-  const saver = new MemorySaver()
+  const saver = deps.saver ?? new MemorySaver()
+  // One deadline for the whole turn, not one for each call: a retry does not get a fresh slice.
+  const deadlineAt = Date.now() + chatSliceMs()
+  let resuming = Boolean(deps.resume)
 
   return async (input) => {
     const ctxFor = () => chatDoor({ userId: deps.userId, typed: input.typed, chat: { chatId: input.chatId, turnId: input.turnId }, mode: deps.mode, signal: deps.signal })
     const defs: AnyCommand[] = agentView()
     const lcTools = defs.map((def) =>
       tool(
-        async (args: Record<string, unknown>) => {
+        async (args: Record<string, unknown>, config?: { toolCall?: { id?: string } }) => {
           if (await deps.stop?.()) throw new StoppedError()
           deps.emit?.({ event: 'custom', data: { type: 'tool', label: def.label, phase: 'start' } })
           try {
-            const out = await runCommand(def, ctxFor(), args)
+            const callId = config?.toolCall?.id
+            const out = await runCommand(def, { ...ctxFor(), callKey: callId ? `${input.turnId}:${callId}`.slice(0, 160) : undefined }, args)
             const things = thingsOf(out)
             tools.push({ label: def.label })
             for (const t of things) {
@@ -131,7 +143,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
       chatTurnId: input.turnId,
       signal: deps.signal,
       stop: deps.stop,
-      deadlineAt: Date.now() + 240_000,
+      deadlineAt,
     }
     const agent =
       deps.build?.({ tools: lcTools }) ??
@@ -145,11 +157,23 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         ...(deps.roles?.researcher ? { researcherModel: celloChatModel(deps.roles.researcher, deps.keys, 'researcher') } : {}),
         profileCard: deps.profileCard,
         saver,
+        taskRows: { db: deps.db, userId: deps.userId, threadId: input.chatId, chatId: input.chatId, turnId: input.turnId, model: deps.ran.model, rung: deps.ran.rung },
       }) as unknown as NonNullable<ReturnType<NonNullable<ChatAgentDeps['build']>>>)
 
     const next: BaseMessage[] = history ? [new HumanMessage(input.feedback ?? '')] : [...(input.screen ? [new HumanMessage(input.screen)] : []), new HumanMessage(input.typed)]
     let out: { messages: BaseMessage[]; structuredResponse?: unknown }
+    // One checkpoint thread for each turn; 'sync' saves it before the next step, so a request that dies loses nothing.
+    const thread = { configurable: { thread_id: input.turnId } }
+    const config = { signal: deps.signal, ...thread, durability: 'sync', recursionLimit: 80 }
+    const getState = (agent as { getState?: NonNullable<ReturnType<NonNullable<ChatAgentDeps['build']>>['getState']> }).getState?.bind(agent)
     try {
+      // The first call of a resumed turn carries on its checkpoint: a held interrupt is answered, a pending step is replayed.
+      let first: unknown = { messages: [...(history ?? []), ...next] }
+      if (resuming) {
+        resuming = false
+        const state = await getState?.(thread)
+        if (state && state.next.length > 0) first = state.tasks?.some((t) => t.interrupts?.length) ? new Command({ resume: 'continue' }) : null
+      }
       const stream = (agent as unknown as { stream?: (input: unknown, config?: unknown) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown> }).stream
       if (deps.emit && stream) {
         let values: { messages?: BaseMessage[]; structuredResponse?: unknown } | null = null
@@ -173,7 +197,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         const delegations = new Set<string>()
         if (retry) deps.emit({ event: 'custom', data: { type: 'tool', label: CHECKING, phase: 'start' } })
         try {
-          const chunks = await (agent as unknown as { stream: (input: unknown, config?: unknown) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown> }).stream({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, configurable: { thread_id: input.turnId }, recursionLimit: 80, streamMode: ['values', 'messages', 'custom'], subgraphs: true })
+          const chunks = await (agent as unknown as { stream: (input: unknown, config?: unknown) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown> }).stream(first, { ...config, streamMode: ['values', 'messages', 'custom'], subgraphs: true })
           for await (const chunk of chunks) {
             if (!Array.isArray(chunk) || chunk.length < 3) continue
             const [namespace, mode, data] = chunk as [readonly string[], string, unknown]
@@ -208,9 +232,13 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         }
         out = { messages: values?.messages ?? [], structuredResponse: values?.structuredResponse }
       } else {
-        out = await agent.invoke({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, configurable: { thread_id: input.turnId }, recursionLimit: 80 })
+        out = await agent.invoke(first as never, config)
       }
+      // The graph stopped before its end (the slice deadline): the checkpoint is saved and another request carries on.
+      const end = await getState?.(thread)
+      if (end && end.next.length > 0) throw new MovedError()
     } catch (e) {
+      if (e instanceof MovedError || e instanceof StoppedError) throw e
       // The loop itself died after a tool was refused: the refusal is the reason the person reads, not "try again".
       if (refusals.length && !reasonOf(e) && !deps.signal?.aborted) throw new CommandRefusal(502, refusals.join(' '), 'failed')
       throw e
