@@ -16,7 +16,6 @@ vi.mock('@/lib/search', () => ({
 
 import { MissingKeyError } from '@/lib/harness/providers'
 import type { AgentContext } from './context'
-import { tool } from '@langchain/core/tools'
 import { SKILLS_OFF } from './backends'
 import { createCelloAgent, researcherSpec, specialists } from './factory'
 import { AGENT_CAPS, GUARD_ORDER, MAX_ANSWER_ASKS, recursionLimitFor } from './middleware'
