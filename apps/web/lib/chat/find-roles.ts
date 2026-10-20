@@ -7,6 +7,7 @@ import { personJobs } from '@/lib/jobs/person-jobs'
 import { getRoleType, ROLE_TYPES, typeTitle } from '@/lib/jobs/role-types'
 import { listRoleTypes } from '@/lib/jobs/role-types/list'
 import type { AdminClient } from '@/lib/harness/types'
+import { resolveTargeting } from '@/lib/targeting'
 import type { Thing } from './things'
 
 export const MAX_FOUND = 12
@@ -60,6 +61,32 @@ interface Row {
   employer_id: string | null
 }
 
+/** 'A', 'A and B', 'A, B and C'; past `show` items the rest become 'and <n> more'. */
+function joined(items: string[], word: 'and' | 'or', show: number): string {
+  const list = items.length > show ? [...items.slice(0, show), `${items.length - show} more`] : items
+  return list.length < 2 ? (list[0] ?? '') : `${list.slice(0, -1).join(', ')} ${word} ${list[list.length - 1]}`
+}
+
+/** What the person saved on Your search: role type labels (unknown and 'other' dropped) and place matchers, both deduped. */
+async function savedTargets(db: AdminClient, userId: string) {
+  const { data, error } = await db.from('profiles').select('preferences').eq('id', userId).maybeSingle()
+  if (error) throw new Error(`Cello could not read your saved search: ${error.message}`)
+  const preferences = (data as { preferences?: Record<string, unknown> | null } | null)?.preferences ?? {}
+  const types = new Map<string, string>()
+  for (const id of resolveTargeting(preferences).role_types ?? []) {
+    const def = getRoleType(id)
+    if (def && def.id !== 'other') types.set(def.id, def.label)
+  }
+  const places = new Map<string, ReturnType<typeof placeMatcher>>()
+  const saved = preferences.preferredLocations
+  for (const p of Array.isArray(saved) ? saved : []) {
+    if (typeof p !== 'string' || !p.trim()) continue
+    const m = placeMatcher(p)
+    if (!places.has(m.label)) places.set(m.label, { label: m.label.slice(0, 40), test: m.test })
+  }
+  return { types, places: [...places.values()] }
+}
+
 const day = (iso: string | null) => (iso ? iso.slice(0, 10) : null)
 const WORDS = /[\p{L}\p{N}+#.]{2,}/gu
 
@@ -68,6 +95,9 @@ export async function findRoles(db: AdminClient, userId: string, input: FindRole
   const place = input.place ? placeMatcher(input.place) : null
   const terms = [...new Set((input.words ?? '').toLowerCase().match(WORDS) ?? [])].slice(0, 6)
   const limit = Math.min(Math.max(input.limit, 1), MAX_FOUND)
+  // Nothing typed: the person's saved roles and places on Your search stand in for it.
+  const saved = !input.type && !input.place && !input.words ? await savedTargets(db, userId) : null
+  const targets = saved && (saved.types.size > 0 || saved.places.length > 0) ? saved : null
 
   let q = personJobs(db)
     .select('id, title, location, salary_range, posted_at, role_type, viewer_role_type, viewer_company_name, employer_id')
@@ -83,12 +113,32 @@ export async function findRoles(db: AdminClient, userId: string, input: FindRole
   // A read that failed is not an empty list: say so instead of "0 match".
   if (error) throw new Error(`Cello could not read your stored roles: ${error.message}`)
 
-  const rows = ((data as Row[] | null) ?? []).filter(
+  let rows = ((data as Row[] | null) ?? []).filter(
     (r) =>
       (!type || (r.viewer_role_type ?? r.role_type) === type.id) &&
       (!place || place.test(r.location)) &&
+      (!targets?.types.size || targets.types.has((r.viewer_role_type ?? r.role_type) ?? '')) &&
+      (!targets?.places.length || targets.places.some((p) => p.test(r.location))) &&
       terms.every((t) => `${r.title} ${r.viewer_company_name ?? ''}`.toLowerCase().includes(t))
   )
+
+  // Saved targets only: leave out what the person already applied to (a skipped or unsent one is open again) or turned down.
+  let leftOut = 0
+  if (targets) {
+    const matchedIds = rows.map((r) => r.id).slice(0, 300)
+    const [apps, reactions] = matchedIds.length
+      ? await Promise.all([
+          db.from('applications').select('job_id, state').eq('user_id', userId).in('job_id', matchedIds),
+          db.from('role_reactions').select('job_id').eq('user_id', userId).eq('reaction', 'not_for_me').in('job_id', matchedIds),
+        ])
+      : [null, null]
+    if (apps?.error || reactions?.error) throw new Error(`Cello could not read your applications: ${(apps?.error ?? reactions?.error)?.message}`)
+    const out = new Set<string>()
+    for (const a of (apps?.data as { job_id: string; state: string | null }[] | null) ?? []) if (a.state !== 'skipped' && a.state !== 'not_sent') out.add(a.job_id)
+    for (const x of (reactions?.data as { job_id: string }[] | null) ?? []) out.add(x.job_id)
+    leftOut = rows.filter((r) => out.has(r.id)).length
+    rows = rows.filter((r) => !out.has(r.id))
+  }
 
   // The stored chance, and an employer's name for a role the person holds under no company of their own.
   const ids = rows.map((r) => r.id).slice(0, 300)
@@ -123,6 +173,19 @@ export async function findRoles(db: AdminClient, userId: string, input: FindRole
   const what = [type?.label ?? (input.type ? `"${input.type}"` : null), place ? `in ${place.label}` : null, terms.length ? `with ${terms.join(' ')}` : null, input.interested ? 'you marked Interested' : null].filter(Boolean).join(' ')
   const matched = rows.length
   const count = matched === 0 ? 'none match' : matched <= limit ? `${matched} match` : `${matched} match, ${limit} shown`
-  const sentence = `Searched ${total.count == null ? 'your stored roles' : `your ${total.count} stored roles`}${what ? ` for ${what}` : ''}: ${count}.`
+  const roles = total.count == null ? 'your stored roles' : `your ${total.count} stored roles`
+  if (targets) {
+    const types = [...targets.types.values()]
+    const places = targets.places.map((p) => p.label)
+    const sentence =
+      `Searched ${roles}` +
+      (types.length ? ` for your targets, ${joined(types, 'and', 4)}` : '') +
+      (places.length ? `${types.length ? ',' : ''} in ${joined(places, 'or', 3)}` : '') +
+      (input.interested ? ', only those you marked Interested' : '') +
+      (leftOut ? `, leaving out ${leftOut} you already applied to or turned down` : '') +
+      `: ${count}.`
+    return { things, sentence, matched }
+  }
+  const sentence = `Searched ${roles}${what ? ` for ${what}` : ''}: ${count}.${saved ? ' Set the roles and places you want on Your search, and Cello uses them here.' : ''}`
   return { things, sentence, matched }
 }
