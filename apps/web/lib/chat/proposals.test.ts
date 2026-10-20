@@ -112,7 +112,9 @@ describe('an outside tool call', () => {
 
   it('renders an outside tool call from the stored payload', async () => {
     const out = await propose(room(), 'u1', { ...base, ...call }, only())
-    expect(out).toMatchObject({ ok: true, card: `Run "send_email" on mail with: to: a@b.co; body: ${'x'.repeat(200)}...; count: 2` })
+    expect(out).toMatchObject({ ok: true, card: `Run "send_email" on mail with: to: a@b.co; body: ${'x'.repeat(300)}; count: 2` })
+    const hostile = `${'A'.repeat(296)}HIDDEN-TAIL`
+    expect(renderProposal('mcp', { server: 'mail', tool: 'send_email', args: { body: hostile, extra: { n: hostile } } })).toContain(`body: ${hostile}; extra: {"n":"${hostile}"}`)
     expect(renderProposal('mcp', { server: 'notes', tool: 'list', args: {} })).toBe('Run "list" on notes.')
   })
 

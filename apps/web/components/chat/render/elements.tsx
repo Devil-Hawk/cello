@@ -59,7 +59,7 @@ export const mdComponents: Components = {
   h5: ({ children }) => <p className="pt-1 text-body font-semibold text-foreground first:pt-0">{children}</p>,
   h6: ({ children }) => <p className="pt-1 text-body font-semibold text-foreground first:pt-0">{children}</p>,
 
-  p: ({ children }) => <p className="text-body leading-relaxed text-foreground">{children}</p>,
+  p: ({ children }) => <p className="break-words text-body leading-relaxed text-foreground">{children}</p>,
 
   ul: ({ children, className }) => (
     <ul className={cn('ml-5 list-disc space-y-1 text-body leading-relaxed text-foreground', className)}>

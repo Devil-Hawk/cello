@@ -31,7 +31,7 @@ const SCHEMAS = {
   material: z.strictObject({ text: z.string().max(2000), company_id: z.uuid().optional() }),
   instructions: z.strictObject({ text: z.string().max(300), local_time: z.string().regex(/^\d\d:\d\d$/), every: z.enum(['day', 'week']) }),
   learned: z.strictObject({ text: z.string().max(200), effect: z.enum(['rank.want', 'draft.style']) }),
-  // A call to a tool on a server the person connected. The args are the model's, so the card cuts what it shows.
+  // A call to a tool on a server the person connected. The args are the model's, so the card shows every value in full.
   mcp: z
     .strictObject({ server: z.string().max(40), tool: z.string().max(80), args: z.record(z.string().max(60), z.unknown()) })
     .refine((o) => JSON.stringify(o.args).length <= 4096, 'Too much'),
@@ -96,11 +96,9 @@ export function renderProposal(kind: ProposalKind, p: Record<string, unknown>): 
     case 'learned':
       return `Remember: ${p.text}`
     case 'mcp': {
-      const cut = (v: unknown) => {
-        const text = typeof v === 'string' ? v : (JSON.stringify(v) ?? String(v))
-        return text.length > 200 ? `${text.slice(0, 200)}...` : text
-      }
-      const args = Object.entries((p.args as Record<string, unknown> | undefined) ?? {}).map(([k, v]) => `${k}: ${cut(v)}`)
+      // Whole values, never cut: Confirm sends exactly what is stored, so the card shows exactly that (the payload is capped at 4 KB).
+      const show = (v: unknown) => (typeof v === 'string' ? v : (JSON.stringify(v) ?? String(v)))
+      const args = Object.entries((p.args as Record<string, unknown> | undefined) ?? {}).map(([k, v]) => `${k}: ${show(v)}`)
       return `Run "${p.tool}" on ${p.server}${args.length ? ` with: ${args.join('; ')}` : '.'}`
     }
   }
