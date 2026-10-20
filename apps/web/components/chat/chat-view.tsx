@@ -29,6 +29,7 @@ import type { SettingsView } from '@/lib/chat/settings'
 import { resolveMode, type Mode } from '@/lib/chat/mode'
 import type { Suggestions } from '@/lib/chat/suggest'
 import { refId, type AttachKind } from '@/lib/chat/types'
+import { liveShows, nextLive, type Live } from '@/lib/chat/live'
 import { visibleTurns } from '@/lib/chat/versions'
 import type { ModelChoice } from '@/lib/models/choice'
 import { createClient } from '@/lib/supabase/client'
@@ -127,7 +128,14 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   const scroller = useRef<HTMLDivElement>(null)
   // True while the person is at the newest content: a new turn or row keeps them there, and never pulls them back from older turns.
   const stuck = useRef(true)
-  const [live, setLive] = useState<{ words: string; tools: { label: string; phase: 'start' | 'end' }[] } | null>(null)
+  const [live, setLive] = useState<Live | null>(null)
+  // Stop pressed and not yet landed: the page says so, the Stop keys rest, and words from the call still in flight are dropped.
+  const [stopping, setStopping] = useState(false)
+  const stoppingRef = useRef(false)
+  const markStopping = useCallback((yes: boolean) => {
+    stoppingRef.current = yes
+    setStopping(yes)
+  }, [])
   const streamChatId = useRef(routeId)
   streamChatId.current = chatId
   // The turn the open stream is answering, from its first event: Stop posts exactly this id, never a row from an earlier read.
@@ -202,20 +210,14 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     (data: unknown) => {
       if (!data || typeof data !== 'object') return
       const event = data as { type?: string; text?: unknown; label?: unknown; phase?: unknown }
-      if (event.type === 'words' && typeof event.text === 'string') return setLive((current) => ({ words: event.text as string, tools: current?.tools ?? [] }))
-      if (event.type === 'tool' && typeof event.label === 'string' && (event.phase === 'start' || event.phase === 'end')) {
-        return setLive((current) => {
-          const tools = [...(current?.tools ?? [])]
-          const index = tools.findIndex((tool) => tool.label === event.label)
-          if (index < 0) tools.push({ label: event.label as string, phase: event.phase as 'start' | 'end' })
-          else tools[index] = { label: event.label as string, phase: event.phase as 'start' | 'end' }
-          return { words: current?.words ?? '', tools }
-        })
+      if (event.type === 'words' || event.type === 'tool') {
+        const stopped = stoppingRef.current
+        return setLive((current) => nextLive(current, event, stopped))
       }
       if (event.type === 'answer') {
-        setLive(null)
         streamTurnId.current = null
-        void loadPage()
+        // The live block stays until the stored answer is on the page: the thread never collapses in between.
+        void loadPage().then(() => setLive(null))
       }
     },
     [loadPage],
@@ -235,6 +237,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     },
     onCustomEvent,
     onError: (error) => {
+      markStopping(false)
       setLive(null)
       if (unsent.current) unsent.current(unsentMessage(error))
       else {
@@ -243,8 +246,9 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
       }
     },
     onFinish: () => {
+      markStopping(false)
       streamTurnId.current = null
-      void loadPage()
+      void loadPage().then(() => setLive(null))
     },
   })
 
@@ -315,6 +319,10 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     if (justSent !== null && pendingLine === null) setJustSent(null)
   }, [justSent, pendingLine])
   const running = tasks.some(alive) || awaiting || sending || pendingLine !== null || stream.isLoading
+  // The stopped row has landed and nothing runs any more: the page is done stopping.
+  useEffect(() => {
+    if (!running) markStopping(false)
+  }, [running, markStopping])
 
   // A comparison that arrives while the person is here opens beside the chat; one already there does not.
   useEffect(() => {
@@ -405,6 +413,8 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     if (typed.length > MAX_SEND) return setNote('Type something to send, up to 20,000 characters.')
     setSending(true)
     stopWanted.current = false
+    markStopping(false)
+    setLive(null)
     streamTurnId.current = null
     // The line moves from the compose box to the conversation at once; it comes back to the box if the send fails.
     setJustSent(typed)
@@ -444,6 +454,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
       unsent.current = null
       refused = true
       stopWanted.current = false
+      markStopping(false)
       setLive(null)
       failed(why)
       setQuoted(before.quoted)
@@ -480,15 +491,21 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   // Stop marks the turn's rows on the server (the work itself lives there, not in the stream); the stream's own turn id wins
   // over the newest row, which can still be the earlier turn right after Send.
   const stopTurn = useCallback(() => {
+    if (stoppingRef.current) return
     // While a send is in flight the stream has not named its turn yet: hold the Stop for the metadata event.
     if (sending && !streamTurnId.current) {
       stopWanted.current = true
-      return
+      return markStopping(true)
     }
     const turnId = streamTurnId.current ?? lastPersonTurn?.id
     const id = streamChatId.current ?? chatId
-    if (id && turnId) void send(`/api/chat/${encodeURIComponent(id)}/stop`, 'POST', { turn_id: turnId }).then(() => loadPage())
-  }, [chatId, lastPersonTurn?.id, loadPage, sending])
+    if (!id || !turnId) return
+    markStopping(true)
+    void send(`/api/chat/${encodeURIComponent(id)}/stop`, 'POST', { turn_id: turnId }).then((ok) => {
+      if (!ok) markStopping(false)
+      return loadPage()
+    })
+  }, [chatId, lastPersonTurn?.id, loadPage, markStopping, sending])
 
   async function signOut() {
     await createClient().auth.signOut()
@@ -669,7 +686,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
               </div>
             )}
 
-            {live && (live.words || live.tools.length > 0) && (
+            {liveShows(live, lastTurn?.kind, pendingLine !== null) && live && (
               <div className="space-y-2 text-caption text-muted-foreground" aria-live="polite">
                 {live.tools.length > 0 && (
                   <ul className="space-y-1" aria-label="What Cello is doing">
@@ -684,7 +701,9 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
                 {live.words && (
                   <div className="rounded-control border border-border bg-muted/50 px-3 py-2">
                     <p className="mb-1 text-label uppercase tracking-wide">Writing</p>
-                    <p className="whitespace-pre-wrap break-words text-foreground">{live.words}</p>
+                    <div className="text-foreground">
+                      <Markdown content={live.words} />
+                    </div>
                   </div>
                 )}
               </div>
@@ -695,6 +714,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
               <TasksLine
                 tasks={work.map(toTaskRow)}
                 running={running}
+                stopping={stopping && running}
                 defaultOpen
                 seconds={seconds(turnTasks)}
                 onStop={stopTurn}
@@ -705,7 +725,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
         </div>
 
         <div className="mx-auto w-full max-w-3xl px-4 pb-3">
-          <Composer value={draft} onChange={setDraft} onSend={() => void sendMessage()} onStop={stopTurn} running={running} quoted={quoted}
+          <Composer value={draft} onChange={setDraft} onSend={() => void sendMessage()} onStop={stopTurn} running={running} stopping={stopping} quoted={quoted}
             onRemoveQuote={() => setQuoted(null)}
             controls={
               settings ? (
