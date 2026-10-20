@@ -121,7 +121,7 @@ for (const p of DEMO_CONTACTS) {
 for (const a of DEMO_APPLICATIONS) {
   const job = DEMO_JOBS.find((j) => j.slug === a.jobSlug)
   if (!job) continue
-  const facts = [`Stage: ${a.stage}`, `Applied: ${dayOf(a.appliedDaysAgo)}`]
+  const facts = [`Stage: ${a.stage}`, ...(a.appliedDaysAgo === null ? [] : [`Applied: ${dayOf(a.appliedDaysAgo)}`])]
   add({ key: `application:${job.title}`, object: { kind: 'application', id: idOf('application', a.jobSlug), title: job.title, company: companyForJob(job).name, facts, body: null }, thing: null, evidence: facts.join('. ') })
 }
 
