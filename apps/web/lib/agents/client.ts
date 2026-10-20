@@ -14,6 +14,7 @@ export const AGENT_STREAM_URL = '/api/agent/stream'
 
 const FALLBACK = 'Something went wrong on our side. Your conversation is saved; send your message again.'
 const PREFIX = 'Failed to stream: '
+const UNSENT = 'Cello could not send that. Nothing was saved. Send it again.'
 
 /** fetch, but a refusal keeps the route's own sentence in statusText. */
 export async function agentFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -33,4 +34,10 @@ export function errorMessage(error: unknown): string {
   const text = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
   const sentence = text.startsWith(PREFIX) ? text.slice(PREFIX.length) : ''
   return sentence.trim() || FALLBACK
+}
+
+/** For a message that never reached the server: the route's own sentence if it gave one, else a plain one that is true of an unsent line. */
+export function unsentMessage(error: unknown): string {
+  const sentence = errorMessage(error)
+  return sentence === FALLBACK ? UNSENT : sentence
 }

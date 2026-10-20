@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { FetchStreamTransport } from '@langchain/langgraph-sdk/ui'
 import { AGENT_COPY } from './copy'
-import { agentFetch, errorMessage } from './client'
+import { agentFetch, errorMessage, unsentMessage } from './client'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -65,5 +65,18 @@ describe('errorMessage', () => {
     expect(errorMessage(new Error('TypeError: x is not a function'))).toBe(AGENT_COPY.generic)
     expect(errorMessage(undefined)).toBe(AGENT_COPY.generic)
     expect(errorMessage('Failed to stream: Hello.')).toBe('Hello.')
+  })
+})
+
+describe('unsentMessage', () => {
+  it('says nothing was saved when the message never arrived and the route gave no sentence', () => {
+    const said = 'Cello could not send that. Nothing was saved. Send it again.'
+    expect(unsentMessage(new TypeError('Failed to fetch'))).toBe(said)
+    expect(unsentMessage(undefined)).toBe(said)
+    expect(unsentMessage(new Error('Failed to stream: ' + AGENT_COPY.generic))).toBe(said)
+  })
+
+  it('keeps a sentence the route wrote', () => {
+    expect(unsentMessage(new Error('Failed to stream: That model is above your cap.'))).toBe('That model is above your cap.')
   })
 })
