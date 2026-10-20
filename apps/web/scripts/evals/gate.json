@@ -86,6 +86,12 @@
       "scripts": ["scripts/eval-ingest.ts"],
       "args": ["--quick"],
       "paths": ["prompts/requirements.md", "prompts/page_reader.md", "lib/ingest/", "scripts/eval-ingest.ts", "scripts/eval-ingest/"]
+    },
+    {
+      "name": "chat",
+      "scripts": ["scripts/evals/chat/live.sh"],
+      "args": [],
+      "paths": ["lib/chat/", "lib/commands/", "lib/agents/factory.ts", "prompts/chat.md", "scripts/evals/chat/"]
     }
   ]
 }
