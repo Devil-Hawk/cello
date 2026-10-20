@@ -130,7 +130,7 @@ export const searchGet = defineCommand({
   async run(ctx) {
     const { resolveTargeting, isTargetingConfigured } = await import('@/lib/targeting')
     const profile = await readProfile(ctx)
-    const targeting = resolveTargeting(profile.preferences?.targeting)
+    const targeting = resolveTargeting(profile.preferences)
     const fields = Object.entries(targeting).map(([key, value]) => ({
       key,
       value: Array.isArray(value) ? value.join(', ') : value === null ? '' : String(value),
