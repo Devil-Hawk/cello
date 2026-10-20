@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
+const callTool = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/agents/user-mcp', () => ({ callUserMcpTool: callTool }))
+
+import { mcpTargets } from './mcp-confirm'
 import { ApplyRefusal, confirmProposal, dismissProposal, propose, renderProposal, type ApplyTargets } from './proposals'
 
 const CHAT = '00000000-0000-4000-8000-000000000900'
@@ -153,5 +157,36 @@ describe('an outside tool call', () => {
     const refusing = vi.fn().mockRejectedValue(new ApplyRefusal('Could not reach mail.', 'Try Confirm again.'))
     expect(await confirmProposal(db, 'u1', made.id, only(refusing))).toEqual({ ok: false, error: 'Could not reach mail.', fix: 'Try Confirm again.' })
     expect(db.tables.proposals[0]).toMatchObject({ status: 'open' })
+  })
+
+  describe('when the server is slow or drops the answer', () => {
+    const mailCall = { kind: 'mcp', payload: { server: 'mail', tool: 'send_email', args: { to: 'a@b.co', body: 'hi' } } }
+    const confirmWith = async (outcome: unknown) => {
+      callTool.mockReset().mockResolvedValue(outcome)
+      const db = room()
+      db.tables.chats = [{ id: CHAT, user_id: 'u1', last_turn_at: null }]
+      const made = await propose(db, 'u1', { ...base, ...mailCall }, mcpTargets({ chatId: CHAT, isDemo: false }))
+      if (!made.ok) throw new Error('propose failed')
+      return { db, id: made.id, targets: mcpTargets({ chatId: CHAT, isDemo: false }) }
+    }
+    const turns = (db: ReturnType<typeof room>) => db.tables.chat_turns.filter((t) => t.origin === 'code')
+
+    it('keeps a timed out send confirmed, says so in one turn and offers no second Confirm', async () => {
+      const { db, id, targets } = await confirmWith({ ok: false, unsure: true, reason: 'Cello did not get an answer from mail.', fix: 'The call may or may not have gone through. Check on the server before you try again.' })
+      expect(await confirmProposal(db, 'u1', id, targets)).toEqual({ ok: true })
+      expect(db.tables.proposals[0]).toMatchObject({ status: 'confirmed' })
+      expect(turns(db)).toHaveLength(1)
+      expect(turns(db)[0].answer).toContain('may or may not have gone through')
+      // A second Confirm finds nothing open, so the server is not called again.
+      expect(await confirmProposal(db, 'u1', id, targets)).toMatchObject({ ok: false })
+      expect(callTool).toHaveBeenCalledTimes(1)
+    })
+
+    it('reopens the proposal when the call failed before it was sent', async () => {
+      const { db, id, targets } = await confirmWith({ ok: false, reason: 'Could not reach mail.', fix: 'Try Confirm again.' })
+      expect(await confirmProposal(db, 'u1', id, targets)).toEqual({ ok: false, error: 'Could not reach mail.', fix: 'Try Confirm again.' })
+      expect(db.tables.proposals[0]).toMatchObject({ status: 'open' })
+      expect(turns(db)).toHaveLength(0)
+    })
   })
 })

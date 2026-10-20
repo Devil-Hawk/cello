@@ -78,6 +78,17 @@ describe('the proposal route', () => {
     expect(db.tables.proposals[0]).toMatchObject({ status: 'open' })
   })
 
+  it('keeps a confirmed call whose outcome is unknown confirmed, stores the words, and a second Confirm sends nothing', async () => {
+    call.mockResolvedValue({ ok: false, unsure: true, reason: 'Cello did not get an answer from notes.', fix: 'The call may or may not have gone through. Check on the server before you try again.' })
+    const res = await POST(post({ decision: 'confirm' }), ctx('c1', 'p1'))
+    expect(res.status).toBe(200)
+    expect(db.tables.proposals[0]).toMatchObject({ status: 'confirmed' })
+    expect(db.tables.chat_turns).toHaveLength(1)
+    expect(db.tables.chat_turns[0].answer).toContain('may or may not have gone through')
+    expect((await POST(post({ decision: 'confirm' }), ctx('c1', 'p1'))).status).toBe(409)
+    expect(call).toHaveBeenCalledTimes(1)
+  })
+
   it('answers 409 for a proposal that is already decided', async () => {
     await POST(post({ decision: 'dismiss' }), ctx('c1', 'p1'))
     expect((await POST(post({ decision: 'confirm' }), ctx('c1', 'p1'))).status).toBe(409)

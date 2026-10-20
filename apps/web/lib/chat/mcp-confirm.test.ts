@@ -50,4 +50,18 @@ describe('mcpTargets', () => {
     await expect(run).rejects.toMatchObject({ message: 'Could not reach notes.', fix: 'Try Confirm again.' })
     expect(db.tables.chat_turns).toHaveLength(0)
   })
+
+  it('stores one turn saying the call may or may not have gone through, and does not throw', async () => {
+    call.mockResolvedValue({ ok: false, unsure: true, reason: 'Cello did not get an answer from notes.', fix: 'The call may or may not have gone through. Check on the server before you try again.' })
+    const db = room()
+    await mcpTargets({ chatId: 'c1', isDemo: false }).mcp!(db, 'u1', payload, 'p1')
+    expect(db.tables.chat_turns).toHaveLength(1)
+    expect(db.tables.chat_turns[0]).toMatchObject({
+      kind: 'cello',
+      origin: 'code',
+      prov: { step: 'mcp', proposal_id: 'p1' },
+      answer: 'Asked "search" on notes. No answer came back, so the call may or may not have gone through. Check on the server before you try again.',
+    })
+    expect(db.tables.chats[0].last_turn_at).toBeTruthy()
+  })
 })
