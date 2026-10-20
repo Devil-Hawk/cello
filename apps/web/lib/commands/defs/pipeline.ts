@@ -81,10 +81,15 @@ export const applicationsStart = defineCommand({
   async guard(ctx, input) {
     if (!ctx.chat) return null
     const ids = idsOf(input)
-    const { data } = await ctx.admin().from('agent_tasks').select('object').eq('user_id', ctx.userId).eq('turn_id', ctx.chat.turnId).eq('command', 'applications.start')
+    const { data } = await ctx.admin().from('agent_tasks').select('command, status, object').eq('user_id', ctx.userId).eq('turn_id', ctx.chat.turnId).in('command', ['applications.start', 'chat.plan', 'chat.plan.step'])
+    type Row = { command: string; status: string; object: { ref?: string; tool?: string } | null }
+    const rows = (data as Row[] | null) ?? []
     // A replay asks for the same roles again, so their rows do not count twice.
-    const others = new Set(((data as { object: { ref?: string } | null }[] | null) ?? []).flatMap((r) => (r.object?.ref && !ids.includes(r.object.ref) ? [r.object.ref] : [])))
-    return others.size + ids.length > STARTS_PER_TURN ? `Cello starts at most ${STARTS_PER_TURN} applications in one message.` : null
+    const others = new Set(rows.flatMap((r) => (r.command === 'applications.start' && r.object?.ref && !ids.includes(r.object.ref) ? [r.object.ref] : [])))
+    // An approved plan raises the cap to the roles the person kept; steps added after it do not.
+    const kept = rows.some((r) => r.command === 'chat.plan' && r.status === 'done') ? rows.filter((r) => r.command === 'chat.plan.step' && r.object?.tool === 'applications_start' && r.status !== 'stopped').length : 0
+    const cap = Math.max(STARTS_PER_TURN, kept)
+    return others.size + ids.length > cap ? `Cello starts at most ${cap} applications in one message.` : null
   },
   async run(ctx, input) {
     const db = ctx.admin()
