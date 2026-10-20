@@ -21,7 +21,8 @@ import { routedAgent } from './route'
 import { recallInWordsOn } from './shown'
 import { runChatTurn } from './turn'
 import { INTERRUPTED, turnApplications, writeRollup } from './rollup'
-import { finishWorker, isStopped, MOVED_LINE, MovedError, openWorker, STOP_POLL_MS } from './workers'
+import { finishWorker, isStopped, MOVED_LINE, MovedError, openWorker, PlanWaitingError, STOP_POLL_MS } from './workers'
+import type { PlanDecision } from './plan'
 import type { WireEvent } from '@/lib/agents/sse'
 const PROVIDER_NAMES = { openai: 'OpenAI', anthropic: 'Anthropic', openrouter: 'OpenRouter' } as const
 
@@ -51,15 +52,27 @@ export async function storePersonTurn(
 
 
 const NOTHING_CHANGED = 'Nothing was changed.'
+
+/** Rows of the plan (the plan, its steps and the ones added) are the person's to-do list, not work: readers leave them out. */
+const isPlanRow = (r: { command: string }) => r.command.startsWith('chat.plan')
+
+/** The turn's work rows: the root and the plan's rows are left out. */
+async function workRows(db: AdminClient, userId: string, turnId: string): Promise<{ id: string; status: string; finished_at: string | null }[]> {
+  const { data } = await db.from('agent_tasks').select('id, command, status, finished_at').eq('user_id', userId).eq('turn_id', turnId).neq('command', 'chat.turn')
+  return ((data as { id: string; command: string; status: string; finished_at: string | null }[] | null) ?? []).filter((r) => !isPlanRow(r))
+}
+
 const KEPT = 'What was already done is kept.'
+export const CANCEL_LINE = 'Cancelled. Nothing was changed.'
+export const BUSY_LINE = 'Cello is still finishing something in this chat. Try again in a minute.'
 
 /** The line a turn leaves when it ends without an answer. "Nothing was changed" is only true when no worker of the turn finished and no application was made, whatever state its row ended in. The applications are named: they are Cello's work the person now owns. */
 async function leaveLine(db: AdminClient, userId: string, chatId: string, text: string, turnId?: string) {
   let about: { kind: 'application'; ref: string }[] = []
   if (turnId && text.includes(NOTHING_CHANGED)) {
-    const { count } = await db.from('agent_tasks').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('turn_id', turnId).neq('command', 'chat.turn').in('status', ['done', 'partial'])
+    const finished = (await workRows(db, userId, turnId)).filter((r) => ['done', 'partial'].includes(r.status))
     const made = await turnApplications(db, userId, chatId, turnId).catch(() => [])
-    if ((count ?? 0) > 0 || made.length > 0) text = text.replace(NOTHING_CHANGED, KEPT)
+    if (finished.length > 0 || made.length > 0) text = text.replace(NOTHING_CHANGED, KEPT)
     if (made.length > 0) {
       text = `${text} Already started: ${made.map((a) => `[${a.name}](cello:application/${a.id})`).join(', ')}.`
       about = made.map((a) => ({ kind: 'application' as const, ref: a.id }))
@@ -69,14 +82,44 @@ async function leaveLine(db: AdminClient, userId: string, chatId: string, text: 
   await db.from('chats').update({ last_turn_at: new Date().toISOString() }).eq('id', chatId).eq('user_id', userId)
 }
 
+/** Deletes the checkpoints of turns that will never be carried on. No checkpointer here means nothing was kept. */
+async function dropCheckpoints(turnIds: string[], open: NonNullable<RunStoredTurnOptions['openPersistence']> = openAgentPersistence) {
+  if (!turnIds.length) return
+  try {
+    const kept = open()
+    for (const id of turnIds) await kept.saver.deleteThread(id).catch(() => undefined)
+    await kept.close().catch(() => undefined)
+  } catch {
+    // no checkpointer here: nothing was kept
+  }
+}
+
+/** Ends a plan that was waiting: its planned steps, the plan and the turn's root row stop, with `why` on the steps and the plan. False when the plan was not waiting any more. */
+async function endPlan(db: AdminClient, userId: string, plan: { id: string; turnId: string }, why: string): Promise<boolean> {
+  const at = new Date().toISOString()
+  const { data } = await db.from('agent_tasks').update({ status: 'stopped', summary: why, finished_at: at }).eq('id', plan.id).eq('user_id', userId).eq('command', 'chat.plan').eq('status', 'waiting').select('id')
+  if (((data as unknown[] | null) ?? []).length === 0) return false
+  await db.from('agent_tasks').update({ status: 'stopped', summary: why, finished_at: at }).eq('user_id', userId).eq('parent_id', plan.id).eq('command', 'chat.plan.step').eq('status', 'queued')
+  await db.from('agent_tasks').update({ status: 'stopped', finished_at: at }).eq('user_id', userId).eq('turn_id', plan.turnId).eq('command', 'chat.turn').is('finished_at', null)
+  return true
+}
+
+/** A new message in the chat ends every plan still waiting in it, with no line. */
+async function cancelWaitingPlans(db: AdminClient, userId: string, chatId: string, open?: RunStoredTurnOptions['openPersistence']) {
+  const { data } = await db.from('agent_tasks').select('id, turn_id').eq('user_id', userId).eq('chat_id', chatId).eq('command', 'chat.plan').eq('status', 'waiting')
+  const ended: string[] = []
+  for (const plan of (data as { id: string; turn_id: string }[] | null) ?? []) if (await endPlan(db, userId, { id: plan.id, turnId: plan.turn_id }, 'Cancelled when you asked something else')) ended.push(plan.turn_id)
+  await dropCheckpoints(ended, open)
+}
+
 /** The most requests one turn may take: after this many hand-overs it stops with what it has. */
 export const MAX_SLICES = 5
 const CAP_LINE = 'This took longer than Cello allows for one message, so it stopped. What was done is kept. Ask for the rest in a new message.'
 
 export interface RunStoredTurnOptions {
   emit?: (event: WireEvent) => void
-  /** Carry on a turn whose root row exists: reuse it, never open a new "Cello is working" row. */
-  resume?: { rootId: string; slices: number }
+  /** Carry on a turn whose root row exists: reuse it, never open a new "Cello is working" row. `value` is the plan decision that answers the interrupt the turn waits on. */
+  resume?: { rootId: string; slices: number; value?: PlanDecision }
   /** Test seam: the checkpointer. Defaults to openAgentPersistence() (lib/agents/persistence.ts). */
   openPersistence?: () => { saver: BaseCheckpointSaver; close: () => Promise<void> }
 }
@@ -117,14 +160,22 @@ export async function runStoredTurn(
   if (await recallInWordsOn(db)) recalled = await recall(db, getMemoryStore(), userId, typed).catch(() => [])
 
   const scope = { db, userId, threadId: chatId, chatId, turnId: turn.id, model: view.ran.model, rung: view.ran.rung }
+  // A new message ends any plan the person never answered: nothing of it runs, and it leaves no line.
+  if (!options.resume) await cancelWaitingPlans(db, userId, chatId, options.openPersistence)
   const root = options.resume ? options.resume.rootId : await openWorker(scope, { command: 'chat.turn', title: 'Cello is working' })
-  // What was in flight when the request died: finished here (the lease is ours, so nothing live is touched), and its call runs again under the same call key.
-  if (options.resume) await db.from('agent_tasks').update({ status: 'failed', summary: INTERRUPTED, finished_at: new Date().toISOString() }).eq('user_id', userId).eq('turn_id', turn.id).neq('command', 'chat.turn').is('finished_at', null)
+  if (options.resume) {
+    // A plan that was waiting works again: the root row says so before anything else.
+    await db.from('agent_tasks').update({ status: 'working', heartbeat_at: new Date().toISOString() }).eq('id', root).eq('user_id', userId)
+    // What was in flight when the request died: finished here (the lease is ours, so nothing live is touched), and its call runs again under the same call key. The plan's rows are not work in flight: a planned step is waiting its turn.
+    const open = (await workRows(db, userId, turn.id)).filter((r) => !r.finished_at).map((r) => r.id)
+    if (open.length) await db.from('agent_tasks').update({ status: 'failed', summary: INTERRUPTED, finished_at: new Date().toISOString() }).in('id', open)
+  }
   const stopBeat = startHeartbeat(db, root, lease ? () => renewLease(db, lease) : undefined)
   const stop = new AbortController()
   const timer = setInterval(() => void isStopped(db, root).then((yes) => yes && stop.abort()), STOP_POLL_MS)
   let persistence: ReturnType<NonNullable<RunStoredTurnOptions['openPersistence']>> | undefined
   let moved = false
+  let waiting = false
   try {
     // Without a checkpointer the turn still runs; it just cannot be carried on.
     try {
@@ -134,7 +185,7 @@ export async function runStoredTurn(
     }
     try {
       const card = await profileCard(db, userId).catch(() => undefined)
-      const loop = chatAgent({ db, userId, keys, isDemo: keys.isDemo !== false, ran: view.ran, roles: view.roles, mode: mode.mode, signal: stop.signal, stop: () => isStopped(db, root), emit: options.emit, saver: persistence?.saver, resume: Boolean(options.resume), profileCard: card })
+      const loop = chatAgent({ db, userId, keys, isDemo: keys.isDemo !== false, ran: view.ran, roles: view.roles, mode: mode.mode, signal: stop.signal, stop: () => isStopped(db, root), emit: options.emit, saver: persistence?.saver, resume: Boolean(options.resume), resumeValue: options.resume?.value, profileCard: card })
       const names = async () => (((await db.from('companies').select('name').eq('user_id', userId).limit(200)).data as { name: string }[] | null) ?? []).map((c) => c.name)
       const out = await runChatTurn(
         { db, agent: routedAgent({ db, userId, keys, ran: view.ran, roles: view.roles, mode: mode.mode, signal: stop.signal, stop: () => isStopped(db, root), emit: options.emit }, loop, names), store: getMemoryStore(), isDemo: keys.isDemo !== false },
@@ -145,7 +196,12 @@ export async function runStoredTurn(
       await finishWorker(db, root, { status: stopped ? 'stopped' : out.ok ? 'done' : 'failed' })
       options.emit?.({ event: 'custom', data: { type: 'answer', turn_id: turn.id } })
     } catch (e) {
-      if (e instanceof MovedError && slices + 1 < MAX_SLICES) {
+      if (e instanceof PlanWaitingError) {
+        // The plan is saved and nothing of it has run: no line, no answer, no clean-up. The row waits for the person.
+        waiting = true
+        if (root) await db.from('agent_tasks').update({ status: 'waiting', heartbeat_at: new Date().toISOString() }).eq('id', root).eq('user_id', userId)
+        options.emit?.({ event: 'custom', data: { type: 'plan', plan_id: e.planId, turn_id: turn.id } })
+      } else if (e instanceof MovedError && slices + 1 < MAX_SLICES) {
         // The checkpoint is saved and the row keeps working: no line, no answer. Another request carries on.
         moved = true
         options.emit?.({ event: 'custom', data: { type: 'moved', text: MOVED_LINE } })
@@ -157,13 +213,13 @@ export async function runStoredTurn(
         options.emit?.({ event: 'custom', data: { type: 'answer', turn_id: turn.id } })
       }
     }
-    if (!moved) {
+    if (!moved && !waiting) {
       // The turn is over: no row of it may go on looking busy, and the checkpoint has done its job.
       // A row the person stopped is stopped, not failed, whatever its work was still doing when the turn ended.
       await db.from('agent_tasks').update({ status: 'stopped', finished_at: new Date().toISOString() }).eq('user_id', userId).eq('turn_id', turn.id).neq('command', 'chat.turn').is('finished_at', null).not('stop_requested_at', 'is', null)
       await db.from('agent_tasks').update({ status: 'failed', summary: 'Did not finish.', finished_at: new Date().toISOString() }).eq('user_id', userId).eq('turn_id', turn.id).neq('command', 'chat.turn').is('finished_at', null)
-      const { count } = await db.from('agent_tasks').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('turn_id', turn.id).neq('command', 'chat.turn')
-      if (options.resume || (count ?? 0) >= 2) await writeRollup(db, userId, chatId, turn.id).catch((e) => console.error('rollup failed', e))
+      const count = (await workRows(db, userId, turn.id)).length
+      if (options.resume || count >= 2) await writeRollup(db, userId, chatId, turn.id).catch((e) => console.error('rollup failed', e))
       await persistence?.saver.deleteThread(turn.id).catch(() => undefined)
     }
   } finally {
@@ -179,7 +235,8 @@ export async function runStoredTurn(
 
 /** Carries on an unfinished chat turn: its own root row, its own checkpoint. False when there is nothing to resume or another request holds the chat. */
 export async function resumeChatTurn(db: AdminClient, chatId: string, turnId?: string, slices = 0): Promise<boolean> {
-  let find = db.from('agent_tasks').select('id, user_id, turn_id').eq('thread_id', chatId).eq('command', 'chat.turn').is('finished_at', null)
+  // A turn waiting for the person's answer to a plan is not carried on by anyone else.
+  let find = db.from('agent_tasks').select('id, user_id, turn_id').eq('thread_id', chatId).eq('command', 'chat.turn').is('finished_at', null).neq('status', 'waiting')
   if (turnId) find = find.eq('turn_id', turnId)
   const { data } = await find.order('created_at', { ascending: false }).limit(1).maybeSingle()
   const root = data as { id: string; user_id: string; turn_id: string } | null
@@ -207,4 +264,52 @@ export async function resumeChatTurn(db: AdminClient, chatId: string, turnId?: s
     return true
   }
   return runStoredTurn(db, userId, chatId, { id: p.id, typed: p.typed, quoted: p.quoted }, { resume: { rootId: root.id, slices } })
+}
+
+export interface WaitingPlan {
+  planId: string
+  turnId: string
+  rootId: string
+  stepIds: string[]
+}
+
+/** The chat's plan `planId` when it is waiting: the plan row, its planned steps in order, and the turn's waiting root row. Null otherwise. */
+export async function findWaitingPlan(db: AdminClient, userId: string, chatId: string, planId: string): Promise<WaitingPlan | null> {
+  const { data: plan } = await db.from('agent_tasks').select('id, turn_id').eq('id', planId).eq('user_id', userId).eq('chat_id', chatId).eq('command', 'chat.plan').eq('status', 'waiting').maybeSingle()
+  if (!plan) return null
+  const turnId = (plan as { turn_id: string }).turn_id
+  const { data: root } = await db.from('agent_tasks').select('id').eq('user_id', userId).eq('chat_id', chatId).eq('turn_id', turnId).eq('command', 'chat.turn').eq('status', 'waiting').is('finished_at', null).maybeSingle()
+  if (!root) return null
+  const { data: steps } = await db.from('agent_tasks').select('id').eq('user_id', userId).eq('chat_id', chatId).eq('parent_id', planId).eq('command', 'chat.plan.step').eq('status', 'queued').order('branch_index', { ascending: true })
+  return { planId, turnId, rootId: (root as { id: string }).id, stepIds: ((steps as { id: string }[] | null) ?? []).map((r) => r.id) }
+}
+
+/** Go ahead or Cancel. Cancel stops the plan's rows, leaves one plain line and drops the checkpoint without running anything. Go ahead carries the turn on with the decision; false when another request holds the chat. */
+export async function resumePlanTurn(
+  db: AdminClient,
+  userId: string,
+  chatId: string,
+  plan: WaitingPlan,
+  decision: PlanDecision,
+  options: Pick<RunStoredTurnOptions, 'emit' | 'openPersistence'> = {},
+): Promise<boolean> {
+  const answered = () => options.emit?.({ event: 'custom', data: { type: 'answer', turn_id: plan.turnId } })
+  if (decision.keep === null) {
+    // A second Cancel finds the plan already ended and adds nothing.
+    if (await endPlan(db, userId, { id: plan.planId, turnId: plan.turnId }, 'Cancelled by you')) {
+      await leaveLine(db, userId, chatId, CANCEL_LINE, plan.turnId)
+      await dropCheckpoints([plan.turnId], options.openPersistence)
+    }
+    answered()
+    return true
+  }
+  const { data: person } = await db.from('chat_turns').select('id, typed, quoted').eq('id', plan.turnId).eq('user_id', userId).eq('chat_id', chatId).eq('kind', 'person').maybeSingle()
+  if (!person) {
+    await endPlan(db, userId, { id: plan.planId, turnId: plan.turnId }, 'Cancelled when you asked something else')
+    await leaveLine(db, userId, chatId, 'Cello could not find the message this plan came from. Nothing was changed. Ask again in a new message.')
+    answered()
+    return true
+  }
+  const p = person as { id: string; typed: string; quoted: { text: string; turn_id: string } | null }
+  return runStoredTurn(db, userId, chatId, { id: p.id, typed: p.typed, quoted: p.quoted }, { emit: options.emit, openPersistence: options.openPersistence, resume: { rootId: plan.rootId, slices: 0, value: decision } })
 }

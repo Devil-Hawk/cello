@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeFakeAdmin, type FakeAdmin } from '@/lib/agents/testing/fake-admin'
 import type { WireEvent } from '@/lib/agents/sse'
 import { chatAgent } from './agent'
-import { MAX_SLICES, resumeChatTurn, runStoredTurn } from './run'
-import { MovedError, finishWorker, openWorker } from './workers'
+import { CANCEL_LINE, MAX_SLICES, findWaitingPlan, resumeChatTurn, resumePlanTurn, runStoredTurn } from './run'
+import { MovedError, PlanWaitingError, finishWorker, openWorker } from './workers'
 
 const order = vi.hoisted(() => [] as string[])
 const lease = vi.hoisted(() => ({ claim: vi.fn() }))
@@ -273,5 +273,145 @@ describe('the line a turn without an answer leaves', () => {
     agentThat(async () => Promise.reject(new Error('the model fell over')))
     await runStoredTurn(db, 'u1', 'c1', { id: 't1', typed: 'Apply to these' }, { openPersistence: persistence().open })
     expect(cello(db).map((t) => t.answer)).toContain('Cello could not finish this. Nothing was changed. Try again.')
+  })
+})
+
+describe('a plan that waits for the person', () => {
+  const row = (id: string, extra: Record<string, unknown>) => ({ user_id: 'u1', thread_id: 'c1', chat_id: 'c1', turn_id: 't1', parent_id: null, finished_at: null, stop_requested_at: null, ...extra, id })
+  /** What the gate leaves when it interrupts: a waiting plan with two planned steps, and the turn's root row waiting. */
+  const planned = (db: FakeAdmin, turnId = 't1', suffix = '', withRoot = true) => {
+    if (withRoot) db.tables.agent_tasks.push(row(`root${suffix}`, { turn_id: turnId, command: 'chat.turn', title: 'Cello is working', status: 'waiting', created_at: '2026-10-20T10:00:01.000Z' }))
+    db.tables.agent_tasks.push(
+      row(`p${suffix}`, { turn_id: turnId, command: 'chat.plan', title: 'Plan: 2 things', status: 'waiting', object: { ai_message_id: 'm1' } }),
+      row(`s1${suffix}`, { turn_id: turnId, command: 'chat.plan.step', title: 'Start an application: A at X', status: 'queued', parent_id: `p${suffix}`, branch_index: 0 }),
+      row(`s2${suffix}`, { turn_id: turnId, command: 'chat.plan.step', title: 'Start an application: B at Y', status: 'queued', parent_id: `p${suffix}`, branch_index: 1 })
+    )
+  }
+  const find = (db: FakeAdmin, id: string) => db.tables.agent_tasks.find((r) => r.id === id)!
+  const withThread = async (p: ReturnType<typeof persistence>, thread = 't1') =>
+    p.saver.put({ configurable: { thread_id: thread, checkpoint_ns: '' } }, emptyCheckpoint(), { source: 'input', step: 0, parents: {} } as never)
+
+  it('waits on a plan with no answer, no clean-up and the row waiting', async () => {
+    const db = seed()
+    const p = persistence()
+    await withThread(p)
+    const gone = vi.spyOn(p.saver, 'deleteThread')
+    const events: WireEvent[] = []
+    agentThat(async () => {
+      planned(db, 't1', '', false)
+      throw new PlanWaitingError('p')
+    })
+    const ok = await runStoredTurn(db, 'u1', 'c1', { id: 't1', typed: 'Apply to all of these' }, { emit: (e) => events.push(e), openPersistence: p.open })
+    expect(ok).toBe(true)
+    expect(rowsOf(db, 'chat.turn')).toHaveLength(1)
+    expect(rowsOf(db, 'chat.turn')[0]).toMatchObject({ status: 'waiting', turn_id: 't1' })
+    expect(rowsOf(db, 'chat.turn')[0].finished_at ?? null).toBeNull()
+    expect(cello(db)).toHaveLength(0)
+    expect(gone).not.toHaveBeenCalled()
+    expect(Object.keys(p.saver.storage)).toContain('t1')
+    expect(fire).not.toHaveBeenCalled()
+    expect(find(db, 'p')).toMatchObject({ status: 'waiting', finished_at: null })
+    expect(find(db, 's1')).toMatchObject({ status: 'queued', finished_at: null })
+    expect(events.map((e) => e.data)).toEqual([{ type: 'plan', plan_id: 'p', turn_id: 't1' }])
+    expect(order.slice(-2)).toEqual(['release', 'close'])
+  })
+
+  it('carries on an approved plan with the decision as the resume value', async () => {
+    const db = seed()
+    planned(db)
+    const p = persistence()
+    const decision = { plan_id: 'p', keep: ['s2', 's1'] }
+    const seen: Record<string, unknown>[] = []
+    agentThat(async () => {
+      // Resumed: the turn's row works again, and the planned steps were not marked as interrupted.
+      seen.push({ root: find(db, 'root').status, s1: find(db, 's1').status, s1summary: find(db, 's1').summary ?? null })
+      for (const id of ['s1', 's2']) Object.assign(find(db, id), { status: 'done', finished_at: '2026-10-20T10:00:05.000Z' })
+      return answers()()
+    })
+    const waiting = await findWaitingPlan(db, 'u1', 'c1', 'p')
+    expect(waiting).toEqual({ planId: 'p', turnId: 't1', rootId: 'root', stepIds: ['s1', 's2'] })
+    const events: WireEvent[] = []
+    expect(await resumePlanTurn(db, 'u1', 'c1', waiting!, decision, { emit: (e) => events.push(e), openPersistence: p.open })).toBe(true)
+    expect(vi.mocked(chatAgent).mock.calls[0][0]).toMatchObject({ resume: true, resumeValue: decision, saver: p.saver })
+    expect(seen).toEqual([{ root: 'working', s1: 'queued', s1summary: null }])
+    expect(find(db, 'root')).toMatchObject({ status: 'done' })
+    expect(rowsOf(db, 'chat.turn')).toHaveLength(1)
+    expect(cello(db).filter((t) => t.origin === 'model')).toHaveLength(1)
+    expect(events.map((e) => (e.data as { type: string }).type)).toEqual(['answer'])
+  })
+
+  it('cancels a plan with nothing changed and the checkpoint gone', async () => {
+    const db = seed()
+    planned(db)
+    const p = persistence()
+    await withThread(p)
+    agentThat(answers())
+    const events: WireEvent[] = []
+    const waiting = (await findWaitingPlan(db, 'u1', 'c1', 'p'))!
+    expect(await resumePlanTurn(db, 'u1', 'c1', waiting, { plan_id: 'p', keep: null }, { emit: (e) => events.push(e), openPersistence: p.open })).toBe(true)
+    expect(vi.mocked(chatAgent)).not.toHaveBeenCalled()
+    for (const id of ['s1', 's2']) expect(find(db, id)).toMatchObject({ status: 'stopped', summary: 'Cancelled by you' })
+    expect(find(db, 's1').finished_at).toBeTruthy()
+    expect(find(db, 'p')).toMatchObject({ status: 'stopped', summary: 'Cancelled by you' })
+    expect(find(db, 'root')).toMatchObject({ status: 'stopped' })
+    expect(find(db, 'root').finished_at).toBeTruthy()
+    expect(cello(db).map((t) => t.answer)).toEqual([CANCEL_LINE])
+    expect(CANCEL_LINE).toBe('Cancelled. Nothing was changed.')
+    expect(Object.keys(p.saver.storage)).not.toContain('t1')
+    expect(events.map((e) => e.data)).toEqual([{ type: 'answer', turn_id: 't1' }])
+    // A second Cancel finds nothing waiting and says nothing more.
+    expect(await resumePlanTurn(db, 'u1', 'c1', waiting, { plan_id: 'p', keep: null }, { openPersistence: p.open })).toBe(true)
+    expect(cello(db)).toHaveLength(1)
+    expect(await findWaitingPlan(db, 'u1', 'c1', 'p')).toBeNull()
+  })
+
+  it('keeps what was already done when work finished before the plan', async () => {
+    const db = seed()
+    planned(db)
+    db.tables.agent_tasks.push(row('w1', { command: 'documents.draft', title: 'Draft', status: 'done', finished_at: '2026-10-20T10:00:02.000Z' }))
+    const waiting = (await findWaitingPlan(db, 'u1', 'c1', 'p'))!
+    await resumePlanTurn(db, 'u1', 'c1', waiting, { plan_id: 'p', keep: null }, { openPersistence: persistence().open })
+    expect(cello(db).map((t) => t.answer)).toEqual(['Cancelled. What was already done is kept.'])
+  })
+
+  it('finds a plan only for its own person and chat while it waits', async () => {
+    const db = seed()
+    planned(db)
+    expect(await findWaitingPlan(db, 'u2', 'c1', 'p')).toBeNull()
+    expect(await findWaitingPlan(db, 'u1', 'c2', 'p')).toBeNull()
+    expect(await findWaitingPlan(db, 'u1', 'c1', 'nope')).toBeNull()
+    find(db, 'p').status = 'done'
+    expect(await findWaitingPlan(db, 'u1', 'c1', 'p')).toBeNull()
+  })
+
+  it('a new message cancels a plan still waiting', async () => {
+    const db = seed()
+    planned(db)
+    planned(db, 't9', 'x')
+    for (const r of db.tables.agent_tasks.filter((r) => String(r.id).endsWith('x'))) r.chat_id = 'c9'
+    const p = persistence()
+    await withThread(p)
+    agentThat(answers())
+    await runStoredTurn(db, 'u1', 'c1', { id: 't2', typed: 'Something else' }, { openPersistence: p.open })
+    for (const id of ['s1', 's2', 'p']) expect(find(db, id)).toMatchObject({ status: 'stopped', summary: 'Cancelled when you asked something else' })
+    expect(find(db, 's1').finished_at).toBeTruthy()
+    expect(find(db, 'root')).toMatchObject({ status: 'stopped' })
+    expect(find(db, 'root').finished_at).toBeTruthy()
+    expect(Object.keys(p.saver.storage)).not.toContain('t1')
+    // No line for the old plan; only the new turn answers. Another chat's plan is left alone.
+    expect(cello(db).map((t) => t.origin)).toEqual(['model'])
+    expect(find(db, 'px')).toMatchObject({ status: 'waiting', finished_at: null })
+    expect(rowsOf(db, 'chat.turn').find((r) => r.turn_id === 't2')).toMatchObject({ status: 'done' })
+  })
+
+  it('never resumes a waiting turn from a background post', async () => {
+    const db = seed()
+    planned(db)
+    agentThat(answers())
+    expect(await resumeChatTurn(db, 'c1', 't1')).toBe(false)
+    expect(await resumeChatTurn(db, 'c1')).toBe(false)
+    expect(vi.mocked(chatAgent)).not.toHaveBeenCalled()
+    expect(find(db, 'root')).toMatchObject({ status: 'waiting', finished_at: null })
+    expect(cello(db)).toHaveLength(0)
   })
 })
