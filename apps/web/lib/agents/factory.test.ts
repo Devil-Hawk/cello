@@ -16,6 +16,8 @@ vi.mock('@/lib/search', () => ({
 
 import { MissingKeyError } from '@/lib/harness/providers'
 import type { AgentContext } from './context'
+import { tool } from '@langchain/core/tools'
+import { SKILLS_OFF } from './backends'
 import { createCelloAgent, researcherSpec, specialists } from './factory'
 import { AGENT_CAPS, GUARD_ORDER, MAX_ANSWER_ASKS, recursionLimitFor } from './middleware'
 import { ScriptedChatModel, callTools, say } from './testing/scripted-model'
@@ -279,5 +281,49 @@ describe('the chat loop with a structured answer', () => {
     const old = start([pings(1)], true)
     expect(String(await old.invoke(80).then(() => null, (e: Error) => e))).toMatch(/Recursion/)
     expect(old.model.calls.length).toBeLessThan(AGENT_CAPS.orchestrator.modelCalls)
+  })
+})
+
+describe('the plain chat core', () => {
+  const Answer = z.object({ text: z.string() })
+  const echo = tool(async ({ q }: { q: string }) => `found ${q}`, { name: 'roles_find', description: 'Find roles', schema: z.object({ q: z.string() }) })
+  const make = (core: 'deep' | 'plain', script: ConstructorParameters<typeof ScriptedChatModel>[0]['script']) => {
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script })
+    const agent = createCelloAgent({ kind: 'chat', core, ctx: ctx(), saver: new MemorySaver(), model, fallbacks: [], skillsDir: skills(), tools: [echo], responseFormat: Answer as never } as never) as unknown as Built & {
+      invoke: (i: unknown, c: unknown) => Promise<{ structuredResponse: unknown }>
+    }
+    return { agent, model }
+  }
+  const finish = (model: () => ScriptedChatModel) => () => callTools([{ name: model().boundTools.find((n) => n.startsWith('extract-'))!, args: { text: 'done' } }])
+
+  it('builds the plain core with the same tools, guards and answer shape', async () => {
+    const guardsOf = (a: Built) => a.options.middleware.map((m) => m.name).filter((n) => (GUARD_ORDER as readonly string[]).includes(n))
+    const deep = make('deep', [])
+    const plain = make('plain', [])
+    expect(plain.agent.options.tools.map((t) => t.name)).toEqual(['roles_find'])
+    const deepTools = [...deep.agent.options.tools, ...deep.agent.options.middleware.flatMap((m) => m.tools ?? [])].map((t) => t.name)
+    for (const n of ['task', 'ls', 'read_file', 'write_file', 'edit_file', 'glob', 'grep']) expect(deepTools).toContain(n)
+    expect(plain.agent.options.middleware.map((m) => m.name)).not.toContain('subAgentMiddleware')
+    expect(guardsOf(plain.agent)).toEqual([...GUARD_ORDER])
+    expect(guardsOf(plain.agent)).toEqual(guardsOf(deep.agent))
+    for (const core of ['deep', 'plain'] as const) {
+      const m: { model: ScriptedChatModel } = { model: undefined as never }
+      const built = make(core, [() => finish(() => m.model)()])
+      m.model = built.model
+      const out = await built.agent.invoke({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: `t-${Math.random()}` }, recursionLimit: 40 })
+      expect(out.structuredResponse).toEqual({ text: 'done' })
+    }
+  })
+
+  it('lets the deep chat core read a skill that is switched off when hiddenSkills is empty', async () => {
+    const off = Object.keys(SKILLS_OFF)[0]
+    const read = async (hiddenSkills?: string[]) => {
+      const model: ScriptedChatModel = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [callTools([{ name: 'read_file', args: { file_path: `/skills/${off}/SKILL.md` } }]), () => finish(() => model)()] })
+      const agent = createCelloAgent({ kind: 'chat', ctx: ctx(), saver: new MemorySaver(), model, fallbacks: [], skillsDir: path.join(process.cwd(), 'skills'), hiddenSkills, tools: [], responseFormat: Answer as never } as never) as unknown as { invoke: (i: unknown, c: unknown) => Promise<{ messages: { content: unknown }[] }> }
+      const out = await agent.invoke({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: `t-${Math.random()}` }, recursionLimit: 40 })
+      return JSON.stringify(out.messages.map((m) => m.content))
+    }
+    expect(await read([])).toContain(`name: ${off}`)
+    expect(await read()).not.toContain(`name: ${off}`)
   })
 })

@@ -4,13 +4,15 @@
 // can exist without the guard stack (lib/agents/middleware.ts), the one chat model door
 // (lib/agents/model.ts) and the checkpointer. lib/agents/chokepoints.test.ts
 // fails the build when `createDeepAgent(`, `createSubAgent(` or `createAgent(` appears
-// anywhere else.
+// anywhere else. `createAgent` (langchain) is used here only for the plain chat core: the
+// same prompt, guards and answer shape without Deep Agents' delegation, todo list or files.
 //
 // Deep Agents does not hand custom middleware to an isolated subagent, so the Researcher's
 // guard stack is attached here, to its own spec, not inherited. Subagents never get the
 // task tool (Deep Agents gives it to the top agent only), so delegation is one level deep,
 // and the factory test checks that.
 
+import { createAgent } from 'langchain'
 import { createDeepAgent, createSubAgent, type AnySubAgent, type CreateDeepAgentParams, type SubAgent } from 'deepagents'
 import type { BaseCheckpointSaver } from '@langchain/langgraph'
 import type { StructuredToolInterface } from '@langchain/core/tools'
@@ -51,6 +53,9 @@ function skillBodies(names: readonly string[], skillsDir: string, hidden: readon
   }
   return parts.length ? `SKILLS YOU FOLLOW:\n\n${parts.join('\n\n---\n\n')}` : ''
 }
+
+/** The chat loop's engine: Deep Agents (what ships) or a plain tool loop (what the evals compare it with). */
+export type ChatCore = 'deep' | 'plain'
 
 export interface CelloAgentInput {
   ctx: AgentContext
@@ -126,20 +131,31 @@ export function createCelloAgent(input: CelloAgentInput & { kind: 'orchestrator'
 /** The Researcher as a loop of its own, for a deep research call. Not a task-tool agent: it has no delegation at all. */
 export function createCelloAgent(input: CelloAgentInput & { kind: 'researcher' }): ReturnType<typeof createSubAgent>
 /** Chat's loop: Chat's commands as tools, the Researcher, and a final answer in the shape lib/chat/answer.ts checks. */
-export function createCelloAgent(input: CelloAgentInput & { kind: 'chat'; tools: StructuredToolInterface[]; responseFormat: CreateDeepAgentParams['responseFormat'] }): ReturnType<typeof createDeepAgent>
-export function createCelloAgent(input: CelloAgentInput & { kind: 'orchestrator' | 'researcher' | 'chat'; tools?: StructuredToolInterface[]; responseFormat?: unknown }) {
+export function createCelloAgent(input: CelloAgentInput & { kind: 'chat'; tools: StructuredToolInterface[]; responseFormat: CreateDeepAgentParams['responseFormat']; core?: ChatCore }): ReturnType<typeof createDeepAgent>
+export function createCelloAgent(input: CelloAgentInput & { kind: 'orchestrator' | 'researcher' | 'chat'; tools?: StructuredToolInterface[]; responseFormat?: unknown; core?: ChatCore }) {
   const { ctx } = input
   if (input.kind === 'researcher') return createSubAgent(researcherSpec(input, 'researcher'))
   if (input.kind === 'chat') {
     const model = input.model ?? celloChatModel({ apiKeys: ctx.apiKeys, purpose: 'orchestrator', serverFallback: !ctx.isDemo })
     const answer = input.responseFormat as (AnswerShape & object) | undefined
+    if (input.core === 'plain') {
+      return createAgent({
+        name: 'cello-chat',
+        model,
+        tools: input.tools ?? [],
+        systemPrompt: composeSystemPrompt({ mode: loadModeDoc('chat'), stableContext: input.profileCard }),
+        middleware: guards(input, 'orchestrator', typeof answer?.safeParse === 'function' ? answer : undefined),
+        responseFormat: answerFormat(model, input.responseFormat) as never,
+        checkpointer: input.saver,
+      }) as never
+    }
     return createDeepAgent({
       name: 'cello-chat',
       model,
       systemPrompt: composeSystemPrompt({ mode: loadModeDoc('chat'), stableContext: input.profileCard }),
       tools: (input.tools ?? []) as never,
       subagents: [researcherSpec(input, 'general-purpose')],
-      backend: celloBackend({ admin: ctx.admin, userId: ctx.userId, skillsDir: input.skillsDir }),
+      backend: celloBackend({ admin: ctx.admin, userId: ctx.userId, skillsDir: input.skillsDir, hiddenSkills: input.hiddenSkills }),
       permissions: PERMISSIONS.orchestrator,
       middleware: guards(input, 'orchestrator', typeof answer?.safeParse === 'function' ? answer : undefined),
       checkpointer: input.saver,
