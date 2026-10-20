@@ -300,10 +300,14 @@ function judge(tier: SkillTier, name: string): { misses: SkillMiss[]; reason: st
   if (!row || !bar) return { misses: ['unmeasured'], reason: NOT_MEASURED }
   const misses: Bar[] = []
   const said: string[] = []
-  if (row.trigger === null) (misses.push('trigger'), said.push('Its picks could not be read'))
-  else if (row.trigger < bar.trigger) (misses.push('trigger'), said.push(`Picked ${Math.round(row.trigger * 3)} of 3 times, it needs ${need(bar.trigger, 3)} of 3`))
-  if (row.checks === null) (misses.push('checks'), said.push('Its answers could not be read'))
-  else if (row.checks < bar.checks) (misses.push('checks'), said.push(`Its answers passed ${Math.round(row.checks * 10)} of 10 checks, it needs ${need(bar.checks, 10)} of 10`))
+  const miss = (b: Bar, sentence: string) => {
+    misses.push(b)
+    said.push(sentence)
+  }
+  if (row.trigger === null) miss('trigger', 'Its picks could not be read')
+  else if (row.trigger < bar.trigger) miss('trigger', `Picked ${Math.round(row.trigger * 3)} of 3 times, it needs ${need(bar.trigger, 3)} of 3`)
+  if (row.checks === null) miss('checks', 'Its answers could not be read')
+  else if (row.checks < bar.checks) miss('checks', `Its answers passed ${Math.round(row.checks * 10)} of 10 checks, it needs ${need(bar.checks, 10)} of 10`)
   return { misses, reason: said.length ? `${said.join('. ')}.` : null }
 }
 
