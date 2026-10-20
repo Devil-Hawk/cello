@@ -34,6 +34,8 @@ export interface DraftAnswerInput {
   resume: { id: string; text: string } | null
   /** Where the draft came from, for the row's record. */
   applicationId?: string | null
+  /** Aborts the model call. */
+  signal?: AbortSignal
 }
 
 export type DraftAnswerResult = { ok: true; answer: string } | { ok: false; reason: string }
@@ -123,7 +125,7 @@ export async function draftAnswer(admin: SupabaseClient, userId: string, input: 
   try {
     const keys = await roleKeys(admin as never, userId, await loadApiKeys(admin as never, userId), 'worker')
     // Through the free rotation: a free model that writes nothing or thinks aloud is followed by the next free one.
-    const run = stepRunner(answerDraftStep, keys, undefined, (t) => t.length >= 40 && !/^\s*[{[<]/.test(t))
+    const run = stepRunner(answerDraftStep, keys, input.signal, (t) => t.length >= 40 && !/^\s*[{[<]/.test(t))
     const res = (await run({ system: SYSTEM, prompt, maxTokens: 900, temperature: 0.3, name: 'answer.draft' })) as StepResult
     text = res.content.trim().replace(/^["“]|["”]$/g, '').slice(0, MAX_ANSWER)
     prov = res.prov

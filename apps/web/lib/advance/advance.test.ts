@@ -37,7 +37,7 @@ vi.mock('@/lib/agents/artifacts', () => ({
 }))
 
 import { getLatestVersion } from '@/lib/resume/store'
-import { advanceOne } from './index'
+import { advanceOne, stopApplication } from './index'
 import { costLine, rateLimitOf, sumCost, waitAfter } from './cost'
 import { coverLetter, draftAnswers, readGreenhouseFields, readGreenhouseFiles, startedHandsOff, tailor, type Step, type StepCtx } from './steps'
 
@@ -119,6 +119,36 @@ describe('advanceOne', () => {
     const admin = fakeAdmin({ applications: [app()], pipeline_events: [] })
     await advanceOne(admin, 'a1', { ...opts([ok('one')]), shouldStop: async () => ++asked > 1 })
     expect(calls.map((c) => `${c.from}>${c.to}:${c.event.kind}`)).toEqual(['preparing>preparing:step.finished', 'preparing>paused:application.paused'])
+  })
+
+  it('a stop that lands while a step runs pauses the application and writes nothing the step found', async () => {
+    const stop = new AbortController()
+    const waiting: Step = { id: 'ask', doing: 'Asking', run: vi.fn(async () => (stop.abort(), { kind: 'wait' as const, reason: 'answer' as const, line: '9 questions need your answer.' })) }
+    const admin = fakeAdmin({ applications: [app()], pipeline_events: [] })
+    await advanceOne(admin, 'a1', { ...opts([waiting, ok('two')]), signal: stop.signal })
+    expect(calls.map((c) => `${c.from}>${c.to}:${c.event.kind}`)).toEqual(['preparing>paused:application.paused'])
+    expect(waiting.run).toHaveBeenCalledTimes(1)
+  })
+
+  it('a step the abort made throw is a stop, not a failed try', async () => {
+    const stop = new AbortController()
+    const throwing: Step = { id: 'model', doing: 'Writing', run: vi.fn(async () => (stop.abort(), Promise.reject(new Error('aborted')))) }
+    const admin = fakeAdmin({ applications: [app()], pipeline_events: [] })
+    await advanceOne(admin, 'a1', { ...opts([throwing]), signal: stop.signal })
+    expect(calls.map((c) => `${c.from}>${c.to}:${c.event.kind}`)).toEqual(['preparing>paused:application.paused'])
+  })
+
+  it('stopApplication pauses a preparing application, and an advance of a paused one does nothing', async () => {
+    const tables = { applications: [app()], pipeline_events: [] }
+    const admin = fakeAdmin(tables)
+    await stopApplication(admin, 'a1')
+    expect(calls.map((c) => `${c.from}>${c.to}:${c.event.kind}`)).toEqual(['preparing>paused:application.paused'])
+    calls.length = 0
+    tables.applications[0].state = 'paused'
+    const steps = [ok('one')]
+    expect(await advanceOne(admin, 'a1', opts(steps))).toBeNull()
+    expect(steps[0].run).not.toHaveBeenCalled()
+    expect(calls).toEqual([])
   })
 
   it('takes a free or expired lease once, and leaves a live one alone', async () => {
@@ -361,6 +391,13 @@ describe('tailor', () => {
     job: { url: 'https://example.com/jobs/1', title: 'Engineer', company_id: 'c1', closed_at: null, still_open: true, companyName: 'Acme' },
     fetchForm: async () => ({}),
     tailorResume,
+  })
+
+  it('hands the stop signal to the model call', async () => {
+    const stop = new AbortController()
+    const seen: (AbortSignal | undefined)[] = []
+    await tailor.run({ ...ctx(async (_a, signal) => (seen.push(signal), null)), signal: stop.signal })
+    expect(seen).toEqual([stop.signal])
   })
 
   it('says why tailoring was skipped', async () => {
