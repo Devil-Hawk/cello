@@ -22,10 +22,13 @@ import {
   updateServer,
   deleteServer,
   toConfig,
+  setToolRule,
   recordConnectionResult,
   type McpServerRow,
 } from '@/lib/mcp/registry'
-import { testMcpServer, isStdioAvailable } from '@/lib/mcp/client'
+import { testMcpServer, isStdioAvailable, listMcpTools } from '@/lib/mcp/client'
+import { classifyMcpTool, type McpTier } from '@/lib/agents/mcp-rule'
+import { isDemoProfile } from '@/lib/access/guardrails'
 import { McpError, isMcpTransportKind, type McpTransportKind } from '@/lib/mcp/types'
 
 function errMsg(e: unknown): string {
@@ -42,6 +45,7 @@ function toPublicRow(row: McpServerRow) {
     url: row.url,
     hasHeaders: Boolean(row.headers),
     enabled: row.enabled,
+    toolRules: row.tool_rules ?? {},
     lastConnectedAt: row.last_connected_at,
     lastError: row.last_error,
     createdAt: row.created_at,
@@ -61,11 +65,43 @@ async function requireUser() {
   return user
 }
 
-export async function GET() {
+/** One tool as Settings shows it. A demo gets every tier never. */
+export interface McpToolView {
+  name: string
+  description: string
+  tier: McpTier
+  never: boolean
+}
+
+const TOOL_LIST_TIMEOUT_MS = 5_000
+
+export async function GET(request: NextRequest) {
   const user = await requireUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const admin = createAdminClient()
+
+  // --- A server's tools, live, with the rule applied. ---
+  const toolsId = new URL(request.url).searchParams.get('tools')
+  if (toolsId) {
+    const row = await getServer(admin, user.id, toolsId)
+    if (!row) return NextResponse.json({ error: 'That server was not found.' }, { status: 404 })
+    const { data: profile } = await admin.from('profiles').select('is_demo, demo_expires_at').eq('id', user.id).maybeSingle()
+    const isDemo = isDemoProfile(profile as { is_demo: boolean | null; demo_expires_at: string | null } | null)
+    try {
+      const listed = await listMcpTools(toConfig(row), { timeoutMs: TOOL_LIST_TIMEOUT_MS })
+      const never = Object.keys(row.tool_rules ?? {})
+      const tools: McpToolView[] = listed.map((t) => {
+        const tier = classifyMcpTool({ name: t.name, readOnlyHint: t.readOnlyHint, inputSchema: t.inputSchema }, { never, isDemo })
+        return { name: t.name, description: (t.description ?? '').slice(0, 300), tier, never: tier === 'never' }
+      })
+      return NextResponse.json({ ok: true, tools })
+    } catch {
+      // Plain words only: the raw error can name the address or echo a header.
+      return NextResponse.json({ ok: false, error: `Could not reach ${row.name}. Check the address and try again.` })
+    }
+  }
+
   const rows = await listServers(admin, user.id)
   return NextResponse.json({
     servers: rows.map(toPublicRow),
@@ -160,6 +196,20 @@ export async function PATCH(request: NextRequest) {
   }
 
   const admin = createAdminClient()
+
+  // --- Mark a tool Never, or clear the mark. ---
+  if (body.tool !== undefined) {
+    if (typeof body.tool !== 'string' || body.tool.length < 1 || body.tool.length > 80 || typeof body.never !== 'boolean') {
+      return NextResponse.json({ error: 'tool must be 1 to 80 characters and never must be true or false' }, { status: 400 })
+    }
+    try {
+      const row = await setToolRule(admin, user.id, id, body.tool, body.never)
+      if (!row) return NextResponse.json({ error: 'That server was not found.' }, { status: 404 })
+      return NextResponse.json({ server: toPublicRow(row) })
+    } catch (e) {
+      return NextResponse.json({ error: errMsg(e) }, { status: 500 })
+    }
+  }
 
   if (body.transport !== undefined && !isMcpTransportKind(body.transport)) {
     return NextResponse.json({ error: 'transport must be http, sse, or stdio' }, { status: 400 })
