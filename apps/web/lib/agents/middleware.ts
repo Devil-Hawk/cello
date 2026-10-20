@@ -6,10 +6,12 @@
 // wrapToolCall in array order):
 //
 //   CelloDemoRules, modelCallLimit, toolCallLimit, contextEditing, CelloDeadline,
-//   modelFallback, modelRetry, CelloSpend, CelloUntrusted, toolRetry
+//   modelFallback, modelRetry, CelloOneAnswer, CelloSpend, CelloUntrusted, toolRetry
 //
 // - Retry sits inside fallback, so the chosen model is retried on a 429 before
 //   the call moves to a free model.
+// - CelloOneAnswer trims a doubled structured answer off the model's message. It sits just outside CelloSpend,
+//   because langchain wraps an error thrown by any middleware layer, and CelloSpend must still see the provider's raw one.
 // - CelloSpend is innermost on the model path, so every real attempt, each
 //   fallback included, reserves and settles its own cost.
 // - A BudgetCapError from CelloSpend is not retried; it reaches fallback, which
@@ -31,7 +33,7 @@ import {
   toolRetryMiddleware,
   type AgentMiddleware,
 } from 'langchain'
-import { ToolMessage, type BaseMessage } from '@langchain/core/messages'
+import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages'
 import { Command, interrupt, isCommand } from '@langchain/langgraph'
 import { scrubStructuralEscapes } from '@/lib/security/job-text'
 import { isTransient } from '@/lib/util/retry'
@@ -185,6 +187,56 @@ export function celloStop(isStopped: () => Promise<boolean>) {
   })
 }
 
+// --- one structured answer -----------------------------------------------------------
+
+const isAnswerCall = (c: { name?: string }) => c.name?.startsWith('extract-') === true
+
+/** The message with every structured-answer call after the first removed, everywhere a provider format keeps them. */
+function firstAnswerOnly(m: AIMessage): AIMessage {
+  const calls = m.tool_calls ?? []
+  if (calls.filter(isAnswerCall).length < 2) return m
+  const first = calls.find(isAnswerCall)
+  const dropped = new Set(calls.filter((c) => isAnswerCall(c) && c !== first).map((c) => c.id))
+  const kept = <T extends { id?: string }>(c: T) => !dropped.has(c.id)
+  const kwargs = m.additional_kwargs as { tool_calls?: { id?: string }[] }
+  return new AIMessage({
+    content: Array.isArray(m.content) ? m.content.filter((b) => kept(b as { id?: string })) : m.content,
+    tool_calls: calls.filter(kept),
+    additional_kwargs: Array.isArray(kwargs.tool_calls) ? { ...kwargs, tool_calls: kwargs.tool_calls.filter(kept) } : m.additional_kwargs,
+    response_metadata: m.response_metadata,
+    usage_metadata: m.usage_metadata,
+    id: m.id,
+    name: m.name,
+  })
+}
+
+/**
+ * A model may write its structured answer twice in one message (two `extract-N` tool calls). langchain
+ * handles that after the model returns, with a retry Command, while the step's after-model nodes are
+ * still live, and the call limits above then both write `jumpTo` in one step: InvalidUpdateError, and
+ * the turn dies. langchain decides before any middleware sees the message, so this wraps the model
+ * itself and keeps the first answer only.
+ */
+export function celloOneAnswer() {
+  type Bound = { invoke: (...args: unknown[]) => Promise<unknown> }
+  return createMiddleware({
+    name: 'CelloOneAnswer',
+    wrapModelCall: (request, handler) => {
+      const model = request.model as unknown as { bindTools?: (...args: unknown[]) => Bound }
+      if (typeof model.bindTools !== 'function') return handler(request)
+      const bindTools = (...args: unknown[]) => {
+        const bound = model.bindTools!(...args)
+        const invoke = async (...a: unknown[]) => {
+          const out = await bound.invoke(...a)
+          return AIMessage.isInstance(out) ? firstAnswerOnly(out) : out
+        }
+        return Object.create(bound, { invoke: { value: invoke } })
+      }
+      return handler({ ...request, model: Object.create(model, { bindTools: { value: bindTools } }) })
+    },
+  })
+}
+
 // --- untrusted text -----------------------------------------------------------------
 
 const MARKDOWN_IMAGE = /!\[[^\]]*\]\([^)]*\)/g
@@ -305,6 +357,7 @@ export function guardStack(opts: GuardStackOptions): AgentMiddleware[] {
     celloUntrusted(),
     toolRetryMiddleware({ maxRetries: 2, backoffFactor: 2, initialDelayMs: 300, retryOn: retryable }),
     ...(opts.stop ? [celloStop(opts.stop)] : []),
+    celloOneAnswer(),
     celloSpend(ctx),
   ]
   return stack as AgentMiddleware[]
@@ -322,5 +375,6 @@ export const GUARD_ORDER = [
   'CelloUntrusted',
   'toolRetryMiddleware',
   'CelloStop',
+  'CelloOneAnswer',
   'CelloSpend',
 ] as const
