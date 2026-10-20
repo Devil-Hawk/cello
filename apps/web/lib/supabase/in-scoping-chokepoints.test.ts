@@ -50,6 +50,14 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     calls: [".in('id', ids)", ".in('id', rows.map((a)"],
     reason: 'the applications Cello attached in one turn, at most CELLO_ATTACHES_PER_TURN (12).',
   },
+  'apps/web/lib/chat/plan.ts': {
+    calls: [".in('id', removed)"],
+    reason: "the step rows of one plan the person took out, never more than the plan's steps, which one model message and the 50-step answer the stream route takes bound.",
+  },
+  'apps/web/lib/chat/run.ts': {
+    calls: [".in('id', open)"],
+    reason: "the unfinished work rows of one chat turn, which the turn's own caps keep to a few dozen, and the update is fenced by id and user_id through them.",
+  },
   'apps/web/lib/commands/defs/pipeline.ts': {
     calls: [".in('id', ids)"],
     reason: "the role ids of one applications.start call, at most STARTS_PER_TURN (3) by the command's input.",

@@ -38,13 +38,14 @@ function scene() {
   const plan = () => rows().find((r) => r.command === 'chat.plan')
   const steps = () => rows().filter((r) => r.command === 'chat.plan.step')
   const build = (model: ScriptedChatModel, saver: MemorySaver, extra: unknown[] = []) =>
-    createAgent({ model, tools, middleware: [...extra, planGate(scope)] as never, checkpointer: saver })
+    createAgent({ model, tools, middleware: [...extra, planGate(scope)] as never, checkpointer: saver }) as unknown as Built
   return { admin, scope, ran, tools, rows, plan, steps, build }
 }
 
-type Built = ReturnType<ReturnType<typeof scene>['build']>
+// The graph's own types are deep; the tests only invoke it and read the messages and the interrupt back.
+type Built = { invoke: (input: unknown, config?: { configurable: { thread_id: string } }) => Promise<{ messages: { content: unknown; tool_calls?: unknown[] }[]; __interrupt__?: { value: unknown }[] }> }
 const cfg = { configurable: { thread_id: 'thread-1' } }
-const start = (agent: Built, thread = cfg) => agent.invoke({ messages: [new HumanMessage('do it')] }, thread) as Promise<{ __interrupt__?: { value: unknown }[] } & Record<string, unknown>>
+const start = (agent: Built, thread = cfg) => agent.invoke({ messages: [new HumanMessage('do it')] }, thread)
 const resume = (agent: Built, value: unknown, thread = cfg) => agent.invoke(new Command({ resume: value }), thread)
 
 // Four things: two applications, a draft and a piece of research.
@@ -63,7 +64,7 @@ describe('the plan gate', () => {
     const paused = await start(s.build(model, new MemorySaver()))
     const plan = s.plan()!
     expect(PLAN_ABOVE).toBe(3)
-    expect(paused.__interrupt__?.[0]?.value).toEqual({ kind: 'plan', plan_id: plan.id } satisfies PlanInterrupt)
+    expect(paused.__interrupt__?.[0]?.value).toEqual({ kind: 'plan', plan_id: plan.id as string } satisfies PlanInterrupt)
     expect(s.ran).toEqual([])
     expect(plan).toMatchObject({ command: 'chat.plan', status: 'waiting', title: 'Plan: 4 things', parent_id: null, user_id: 'u1', chat_id: 'chat-1', thread_id: 'chat-1', turn_id: 'turn-1', model: 'test/scripted', rung: 'free' })
     const steps = s.steps()
