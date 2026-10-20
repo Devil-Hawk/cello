@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Key } from '@/components/ui/key'
+import { TouchCheck } from '@/components/ui/touch-check'
 
 export type SkillTier = 'local' | 'free' | 'paid'
 export interface CelloSkillView {
@@ -136,10 +137,7 @@ export function YoursView({ skills, busy, onToggle, onDelete }: { skills: Person
             <p className="r-body break-words">{s.description}</p>
             <p className="r-meta">{s.source}. Not measured: no eval set</p>
           </div>
-          <label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center gap-2 r-body">
-            <input type="checkbox" role="switch" className="h-4 w-4" aria-label={`Use ${s.name}`} checked={s.enabled} disabled={busy === s.id} onChange={() => onToggle(s)} />
-            Use
-          </label>
+          <TouchCheck className="r-body" label="Use" ariaLabel={`Use ${s.name}`} checked={s.enabled} disabled={busy === s.id} onChange={() => onToggle(s)} />
           <Key variant="ghost" aria-label={`Delete ${s.name}`} disabled={busy === s.id} onClick={() => onDelete(s)}>Delete</Key>
         </li>
       ))}
