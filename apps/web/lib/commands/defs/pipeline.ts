@@ -11,7 +11,7 @@ import { advanceOne } from '@/lib/advance'
 import { SLICE_MS } from '@/lib/agents/context'
 import { fanOut } from '@/lib/agents/fanout'
 import { attach, ledgerKey } from '@/lib/chat/attach'
-import { runWorkers, withWorker, type WorkerBranch } from '@/lib/chat/workers'
+import { runWorkers, StoppedError, withWorker, type WorkerBranch } from '@/lib/chat/workers'
 import { DOORS } from '@/lib/pipeline/actors'
 import { start } from '@/lib/pipeline/commands'
 import { CommandRefusal, defineCommand, type AnyCommand, type CommandContext } from '../define'
@@ -22,7 +22,20 @@ export const STARTS_PER_TURN = 3
 
 const NOT_FOUND = 'That role is not in your stored roles.'
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
-const noStop = { checkStop: async () => undefined } as Pick<WorkerBranch, 'checkStop'>
+const noStop = { checkStop: async () => undefined } as Pick<WorkerBranch, 'checkStop'> & { signal?: AbortSignal }
+
+/** The work, or a StoppedError the moment the branch's signal aborts. The work itself is not cancelled (ponytail: advanceOne takes no signal, so it finishes on its own). */
+const untilStopped = <T>(work: Promise<T>, signal?: AbortSignal): Promise<T> =>
+  !signal
+    ? work
+    : Promise.race([
+        work,
+        new Promise<never>((_, reject) => {
+          const stop = () => reject(signal.reason instanceof Error ? signal.reason : new StoppedError())
+          if (signal.aborted) stop()
+          else signal.addEventListener('abort', stop, { once: true })
+        }),
+      ])
 
 const idsOf = (input: { job_id?: string; job_ids?: string[] }): string[] => [...new Set(input.job_ids ?? (input.job_id ? [input.job_id] : []))]
 
@@ -71,7 +84,7 @@ export const applicationsStart = defineCommand({
     const mode = ctx.mode ?? 'ask'
     const tail = mode === 'hands_off' ? 'Send for me sends it from your browser when it is ready, within its limits.' : 'Nothing was sent.'
 
-    const startOne = async (job: { id: string; title: string }, branch: Pick<WorkerBranch, 'checkStop'>) => {
+    const startOne = async (job: { id: string; title: string }, branch: Pick<WorkerBranch, 'checkStop'> & { signal?: AbortSignal }) => {
       await branch.checkStop()
       const moved = await start({ admin: db, userId: ctx.userId, door: DOORS.chat }, job.id, {
         payload: { mode, ...(ctx.chat ? { turn_id: ctx.chat.turnId } : {}), ...(ctx.callKey ? { call_key: ctx.callKey } : {}) },
@@ -87,7 +100,7 @@ export const applicationsStart = defineCommand({
         // The chat holds the application from now on, so each step reaches it as a status turn.
         if (ctx.chat) await attach(db, ctx.userId, ctx.chat.chatId, { kind: 'application', ref: { id: applicationId } }, { origin: 'model', turnId: ctx.chat.turnId, returned: new Set([ledgerKey('application', applicationId)]) })
         await branch.checkStop()
-        await advanceOne(db, applicationId)
+        await untilStopped(advanceOne(db, applicationId), branch.signal)
       }
       const { data: after } = await db.from('applications').select('state').eq('id', applicationId).maybeSingle()
       const state = (after as { state: string | null } | null)?.state ?? 'preparing'

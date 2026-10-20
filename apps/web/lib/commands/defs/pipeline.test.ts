@@ -71,6 +71,21 @@ describe('applications.start', () => {
     expect(out.application_id).toBe('a1')
   })
 
+  it('a Stop pressed while one role is being prepared ends its row at once and leaves the others', async () => {
+    const db = seed()
+    let first = true
+    vi.mocked(advanceOne).mockImplementation((() => (first ? ((first = false), new Promise(() => undefined)) : Promise.resolve(null))) as never)
+    setTimeout(() => {
+      const row = db.tables.agent_tasks.find((r) => (r.object as { ref?: string } | null)?.ref === 'j1')
+      if (row) row.stop_requested_at = '2026-10-20T10:00:00Z'
+    }, 100)
+    const out = await applicationsStart.run(ctx({ chat: true, db }), { job_ids: ['j1', 'j2'] })
+    expect(db.tables.agent_tasks.find((r) => (r.object as { ref?: string }).ref === 'j1')).toMatchObject({ status: 'stopped' })
+    expect(db.tables.agent_tasks.find((r) => (r.object as { ref?: string }).ref === 'j2')).toMatchObject({ status: 'done' })
+    expect(out.applications.map((a) => a.job_id)).toEqual(['j2'])
+    expect(out.sentence).toBe('Started 1 of 2: Role 2. 1 could not start: Stopped by you. Nothing was sent.')
+  }, 15_000)
+
   it('says which roles could not start', async () => {
     vi.mocked(start).mockImplementation((async (_c: unknown, jobId: string) => (jobId === 'j2' ? { ok: false, refusal: 'already', sentence: 'Cello is already working on this one.' } : ok)) as never)
     const out = await applicationsStart.run(ctx({ chat: true }), { job_ids: ['j1', 'j2'] })
