@@ -86,7 +86,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
   const madeIds = new Set<string>()
   // A cap, a missing key or a refusal a tool met this turn, in code's words, so the person reads it even when the model leaves it out.
   const refusals: string[] = []
-  // What a tool returned becomes evidence for the answer check, a source on the receipt and a card to show. One place, so a
+  // What a tool returned becomes evidence for the answer check, a source under the answer and a card to show. One place, so a
   // slice that carries on a turn can read it back from the checkpoint's tool messages instead of losing the first slice's.
   const record = (def: AnyCommand, out: unknown) => {
     const things = thingsOf(out)

@@ -99,7 +99,7 @@ describe('carrying a turn on', () => {
     const db = seed()
     handedOver(db)
     const p = persistence()
-    await p.saver.put({ configurable: { thread_id: 't1', checkpoint_ns: '' } }, emptyCheckpoint(), { source: 'input', step: 0, parents: {} } as never, {})
+    await p.saver.put({ configurable: { thread_id: 't1', checkpoint_ns: '' } }, emptyCheckpoint(), { source: 'input', step: 0, parents: {} } as never)
     expect(Object.keys(p.saver.storage)).toContain('t1')
     agentThat(answers())
     const ok = await resumeChatTurn(db, 'c1', 't1', 1)
