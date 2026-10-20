@@ -26,6 +26,7 @@ import { describe, expect, it } from 'vitest'
 import { SKILLS_OFF } from '@/lib/agents/backends'
 import { runChecks, skillsRead, SkillEvalsSchema, type SkillEvals } from '../agent-checks'
 import { recordMeasure } from '@/lib/chat/evals/record'
+import { s19Passed } from '@/lib/chat/evals/score'
 import { runNote, TIERS, type Tier } from '@/lib/measures/tiers'
 import { freeComplete, GENERATORS, mapLimit, pct, RUN_LIVE, stats, writeReport } from './free.eval'
 import { chatFirstAction, firstAction } from './run'
@@ -125,8 +126,9 @@ describe.skipIf(!RUN_LIVE)(`skills (${LABEL})`, () => {
         const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || ''
         if (/^https?:\/\/(127\.0\.0\.1|localhost)[:/]/.test(url) && process.env.SUPABASE_SERVICE_ROLE_KEY) {
           const db = (await import('@/lib/harness/supabase-admin')).createAdminClient()
-          const passed = perSkill.filter((p) => !p.off).every((p) => p.failing.length === 0)
-          const ok = await recordMeasure(db, { measure: 'S19', value: summary.trigger, passed, sampleN: triggerRows.length, note: runNote({ tier: TIER, model: GENERATORS.join(','), core: 'deep' }, 'kind=chat, value is trigger accuracy') })
+          // Every skill measured counts, the ones that are off included: a row that says passing must not hide the skills that miss a bar.
+          const passed = s19Passed(perSkill)
+          const ok = await recordMeasure(db, { measure: 'S19', value: summary.trigger, passed, sampleN: triggerRows.length, note: runNote({ tier: TIER, model: GENERATORS.join(','), core: 'deep' }, `kind=chat, value is trigger accuracy; ${perSkill.filter((p) => p.failing.length).length} of ${perSkill.length} skills miss a bar`) })
           console.log(ok ? `recorded S19 (${TIER})` : 'could not record S19 to the local database')
         } else console.log('No local database in the environment: nothing was recorded to measure_runs.')
       }
