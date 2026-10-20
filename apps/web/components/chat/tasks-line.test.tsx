@@ -4,8 +4,8 @@ import { clock, TasksLine, workedSummary, type TaskRow } from './tasks-line'
 
 const noop = () => undefined
 const task = (n: number, over: Partial<TaskRow> = {}): TaskRow => ({ id: `w${n}`, title: `Research company ${n}`, status: 'working', command: 'companies.research', reads: 0, ...over })
-const line = (tasks: TaskRow[], over: { running?: boolean; seconds?: number; defaultOpen?: boolean; stopping?: boolean } = {}) =>
-  renderToStaticMarkup(<TasksLine tasks={tasks} running={over.running ?? true} seconds={over.seconds ?? 42} onStop={noop} onStopTask={noop} defaultOpen={over.defaultOpen} stopping={over.stopping} />)
+const line = (tasks: TaskRow[], over: { running?: boolean; seconds?: number; defaultOpen?: boolean; stopping?: boolean; background?: boolean } = {}) =>
+  renderToStaticMarkup(<TasksLine tasks={tasks} running={over.running ?? true} seconds={over.seconds ?? 42} onStop={noop} onStopTask={noop} defaultOpen={over.defaultOpen} stopping={over.stopping} background={over.background} />)
 const text = (markup: string) => markup.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
 
 describe('TasksLine', () => {
@@ -63,5 +63,34 @@ describe('workedSummary and clock', () => {
     expect(workedSummary([task(1, { status: 'done', command: 'something.else' })], 5)).toBe('Worked 0:05: finished 1 task.')
     expect(workedSummary([task(1, { status: 'stopped' })], 5)).toBe('Worked 0:05.')
     expect(clock(125)).toBe('2:05')
+  })
+})
+
+describe('TasksLine in the background', () => {
+  it('says the turn carries on in the background with Stop while it runs without the page', () => {
+    const none = line([], { background: true, seconds: 7 })
+    expect(text(none)).toContain('Cello carries on in the background. You can leave this page. 0:07')
+    expect(none).toContain('>Stop<')
+    expect(none).toContain('role="status"')
+    expect(none).toContain('aria-live="polite"')
+    const rows = line([task(1, { status: 'done' }), task(2), task(3, { status: 'queued' })], { background: true })
+    expect(text(rows)).toContain('Cello carries on in the background: 1 of 3 done. You can leave this page. 0:42')
+    expect(rows).toContain('>Show<')
+    expect(rows).toContain('>Stop<')
+    expect(text(rows)).not.toContain('Cello is working')
+  })
+
+  it('reads Stopping, not the background line, once Stop is pressed', () => {
+    const out = text(line([task(1)], { background: true, stopping: true }))
+    expect(out).toContain('Stopping')
+    expect(out).not.toContain('background')
+  })
+
+  it('folds to what was done when the turn is over, whatever background says', () => {
+    expect(text(line([task(1, { status: 'done' })], { running: false, background: true, seconds: 41 }))).toContain('Worked 0:41: researched 1 company.')
+  })
+
+  it('keeps the plain working line when background is not set', () => {
+    expect(text(line([], { seconds: 7 }))).toContain('Cello is working. 0:07')
   })
 })
