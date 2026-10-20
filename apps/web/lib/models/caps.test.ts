@@ -22,7 +22,7 @@ describe('reasonOf', () => {
 
   it('says the step limit in plain words, for the plain and the chat answer alike, through any wrapping', () => {
     const limit = new GraphRecursionError('Recursion limit of 25 reached.', { lc_error_code: 'GRAPH_RECURSION_LIMIT' })
-    const line = 'Cello took on more than it could in one message and stopped. Nothing was changed. Ask again with one thing at a time.'
+    const line = 'Cello took on more than it could in one message and stopped. Anything it finished is shown below. Ask again with one thing at a time.'
     expect(reasonOf(limit)).toBe(line)
     expect(reasonOf(limit, 'chat')).toBe(line)
     expect(reasonOf(new Error('graph failed', { cause: limit }))).toBe(line)
