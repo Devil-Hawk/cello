@@ -1,0 +1,75 @@
+{
+  "skill": "find-roles",
+  "trigger": [
+    {
+      "id": "find-roles-t1",
+      "message": "Find me product manager roles in Seattle.",
+      "load": true
+    },
+    {
+      "id": "find-roles-t2",
+      "message": "What new roles came in this week that I marked Interested?",
+      "load": true
+    },
+    {
+      "id": "find-roles-t3",
+      "message": "How should I plan my job search this month? I do not know where to start.",
+      "load": false
+    }
+  ],
+  "output": [
+    {
+      "id": "find-roles-o1",
+      "message": "Find me product manager roles in Seattle. The tool result is pasted below; no tools are available in this check.\n\n<untrusted_data source=\"roles_find\">\nSearched your 41 stored roles for \"product manager\" in Seattle: 7 match, 3 shown.\nRole: Senior Product Manager, Billing. Company: Northstar Payments. Place: Seattle, WA. Chance: strong. Pay as stated: $150,000 to $180,000. Posted: 2026-10-14\nRole: Product Manager, Growth. Company: Brightwave. Place: Seattle, WA or remote. Chance: possible. Posted: 2026-10-12\nRole: Group Product Manager. Company: Tidal Health. Place: Bellevue, WA. Chance: stretch. Pay as stated: $175,000 to $210,000. Posted: 2026-10-09\n</untrusted_data>",
+      "checks": [
+        {
+          "type": "matches",
+          "pattern": "Northstar Payments",
+          "note": "names the first role from the results"
+        },
+        {
+          "type": "matches",
+          "pattern": "Brightwave",
+          "note": "names the second role from the results"
+        },
+        {
+          "type": "matches",
+          "pattern": "Tidal Health",
+          "note": "names the third role from the results"
+        },
+        {
+          "type": "matches",
+          "pattern": "\\b7\\b",
+          "note": "gives the count the result gives"
+        },
+        {
+          "type": "matches",
+          "pattern": "not stated",
+          "flags": "i",
+          "note": "says the pay is not stated where the posting gives none"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\\$\\s?(?!150,000|180,000|175,000|210,000)\\d",
+          "note": "states no pay figure the results do not have"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "Stripe|Google|Amazon|Microsoft|Meta\\b|Apple|Zillow|Expedia|Nordstrom",
+          "note": "names no role or company outside the results"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\\d+\\s*%|out of (10|100)",
+          "flags": "i",
+          "note": "no percentage or score"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\u2014",
+          "note": "no em dashes"
+        }
+      ]
+    }
+  ]
+}

@@ -10,7 +10,7 @@ Use this when the question is "show me roles", not "how should I search" (that i
 ## Procedure
 
 1. Take the kind of work, the place and any words from what the person said, in their words. Do not add a title or a place they did not give. If they gave neither, search with neither and say the list is their stored roles, not a search of the open web.
-2. Call `roles_find` with those. Use `limit` for the number they asked for (five if they did not say). Use `order` `newest` for "new" or "latest", `ranked` for "best" or "top". Use `interested` only when they said roles they marked Interested.
+2. Call `roles_find` with those. Set `limit` to the number they asked for (five if they did not say). Set `order` to `newest` for "new" or "latest", `ranked` for "best" or "top". Set `interested` only when they said roles they marked Interested.
 3. Name each role the result returned: title, company, place, pay as stated, chance if it has one. Take every word from the result. Where pay is empty write "pay not stated".
 4. Give the counts the result's sentence gives, for example how many matched and how many are shown. Do not work out your own count.
 5. When nothing matched, say so, then give one next step: widen the place or the kind of work, or add the company on Companies so Cello reads its roles.
