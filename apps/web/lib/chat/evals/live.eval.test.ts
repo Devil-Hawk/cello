@@ -23,7 +23,7 @@
 // stops after the first call (the first move is what it scores), so those cases count one call.
 
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { AIMessage } from '@langchain/core/messages'
@@ -343,7 +343,7 @@ async function runS21(door: Door, core: Core): Promise<SetResult<S21Result>> {
     }
   })
   const read = out.map((o) => o.scored).filter((s): s is S21Case => s !== null)
-  return { score: { ...scoreS21(read), errored: out.length - read.length, cases: out.length }, missed: out.flatMap((o) => o.miss ?? []), tokens: out.map((o) => o.tokens), errors: out.flatMap((o) => (o.error ? [`${o.id}: ${o.error}`] : [])) }
+  return { score: { ...scoreS21(read, out.length - read.length), errored: out.length - read.length, cases: out.length }, missed: out.flatMap((o) => o.miss ?? []), tokens: out.map((o) => o.tokens), errors: out.flatMap((o) => (o.error ? [`${o.id}: ${o.error}`] : [])) }
 }
 
 /** Where each channel's words sit for Chat: a quotation in the screen message, a tool's result, an attached chat, a made text. */
@@ -545,6 +545,10 @@ describe.skipIf(process.env.RUN_CHAT_EVALS !== '1')(`chat evals (${TIER}, ${CORE
       const dir = path.join(__dirname, 'reports')
       mkdirSync(dir, { recursive: true })
       writeFileSync(path.join(dir, `${TIER}-${CORE}.json`), `${JSON.stringify(report, null, 2)}\n`)
+      // Every run is kept, oldest first: one run is one sample, and decide.ts reads the spread from this file.
+      const runsFile = path.join(dir, `${TIER}-${CORE}-runs.json`)
+      const before = existsSync(runsFile) ? (JSON.parse(readFileSync(runsFile, 'utf8')) as { runs: unknown[] }).runs : []
+      writeFileSync(runsFile, `${JSON.stringify({ tier: TIER, core: CORE, runs: [...before, report] }, null, 2)}\n`)
       const cell = (v: number | null, d = 2) => (v === null ? 'cannot read' : v.toFixed(d))
       for (const m of models) {
         console.log(`${m.model} (${CORE}): S14 ${m.s14.right}/${m.s14.cases} (${cell(m.s14.overall)}); S21 share ${cell(m.s21.share)}, wrong-object facts ${m.s21.wrongObjectFacts}, errored ${m.s21.errored}/${m.s21.cases}; injection violations ${m.injection.violations.length}, errored ${m.injection.errored}; prompt tokens per turn ${m.promptTokensPerTurn ?? 'cannot read'}; requests ${JSON.stringify(m.requests)}`)
@@ -555,8 +559,7 @@ describe.skipIf(process.env.RUN_CHAT_EVALS !== '1')(`chat evals (${TIER}, ${CORE
       else {
         for (const m of models) {
           const meta = { tier: TIER, model: m.model, core: CORE, promptTokens: m.promptTokensPerTurn }
-          const s21 = { ...m.s21, share: m.s21.share as number }
-          const ok = [await recordS14(db, m.s14, m.injection, meta), await recordS21(db, s21, meta)]
+          const ok = [await recordS14(db, m.s14, m.injection, meta), await recordS21(db, m.s21, meta)]
           console.log(`${m.model}: ${ok.every(Boolean) ? 'recorded S14 and S21' : 'could not record to the local database'}`)
         }
       }
@@ -564,7 +567,7 @@ describe.skipIf(process.env.RUN_CHAT_EVALS !== '1')(`chat evals (${TIER}, ${CORE
       if (process.env.CHAT_EVAL_GATE !== '0') {
         for (const m of models) {
           expect(m.s14.passed, `${m.model} S14 ${cell(m.s14.overall)} is under ${BARS.S14.overall}`).toBe(true)
-          expect(m.s21.share !== null && m.s21.share >= BARS.S21.share && m.s21.wrongObjectFacts <= BARS.S21.wrongObjectFacts, `${m.model} S21 share ${cell(m.s21.share)}, wrong-object facts ${m.s21.wrongObjectFacts}`).toBe(true)
+          expect(m.s21.share !== null && m.s21.errored === 0 && m.s21.share >= BARS.S21.share && m.s21.wrongObjectFacts <= BARS.S21.wrongObjectFacts, `${m.model} S21 share ${cell(m.s21.share)}, wrong-object facts ${m.s21.wrongObjectFacts}`).toBe(true)
           expect(m.injection.violations.length <= BARS.injection.violations && m.injection.passed, `${m.model} injection: ${m.injection.violations.join('; ') || `${m.injection.errored} cases errored`}`).toBe(true)
         }
       }

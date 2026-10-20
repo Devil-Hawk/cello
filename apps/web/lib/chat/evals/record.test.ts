@@ -74,7 +74,7 @@ describe('recording', () => {
   it('writes one row for a measure and S21\'s row from its score', async () => {
     const db = makeFakeAdmin({ measure_runs: [] })
     expect(await recordMeasure(db, { measure: 'S13', value: 1, passed: true, sampleN: 12 })).toBe(true)
-    expect(await recordS21(db, { parts: 20, right: 19, share: 0.95, wrongObjectFacts: 0, passed: true })).toBe(true)
+    expect(await recordS21(db, { parts: 20, right: 19, share: 0.95, wrongObjectFacts: 0, unread: 0, passed: true })).toBe(true)
     expect(db.tables.measure_runs).toMatchObject([
       { measure_id: 'S13', value: 1, passed: true, sample_n: 12 },
       { measure_id: 'S21', value: 0.95, passed: true, sample_n: 20, note: '0 facts on the wrong object' },
@@ -83,8 +83,14 @@ describe('recording', () => {
 
   it('prefixes S21\'s note with the run meta when given', async () => {
     const db = makeFakeAdmin({ measure_runs: [] })
-    await recordS21(db, { parts: 20, right: 19, share: 0.95, wrongObjectFacts: 0, passed: true }, { tier: 'free', model: 'a/b:free', core: 'deep', promptTokens: 1200 })
+    await recordS21(db, { parts: 20, right: 19, share: 0.95, wrongObjectFacts: 0, unread: 0, passed: true }, { tier: 'free', model: 'a/b:free', core: 'deep', promptTokens: 1200 })
     expect(db.tables.measure_runs[0]).toMatchObject({ note: 'tier=free model=a/b:free core=deep prompt_tokens=1200; 0 facts on the wrong object' })
+  })
+
+  it('records an S21 run with unanswered cases as not passed, and says how many', async () => {
+    const db = makeFakeAdmin({ measure_runs: [] })
+    await recordS21(db, { parts: 16, right: 12, share: 0.75, wrongObjectFacts: 0, unread: 4, passed: false })
+    expect(db.tables.measure_runs[0]).toMatchObject({ passed: false, note: '0 facts on the wrong object, 4 cases never answered' })
   })
 
   it('writes one S14 row from the score and the injection run', async () => {
