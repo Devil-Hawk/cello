@@ -14,6 +14,7 @@ import {
   allScriptFiles,
   matchesAny,
   outcomeForExit,
+  requestBudget,
   selectSuites,
   summaryMarkdown,
   toWebRelative,
@@ -67,6 +68,16 @@ describe('selectSuites', () => {
     expect(yml).toMatch(/^\s+branches: \[main, v2\]$/m)
     expect(yml).toContain("- 'apps/web/lib/chat/**'")
     expect(yml).toContain("- 'apps/web/lib/commands/**'")
+  })
+
+  it('gives the chat suite its own request budget, above one cold run, and splits the shared one for the rest', () => {
+    const chat = manifest.suites.find((s) => s.name === 'chat')!
+    const other = manifest.suites.find((s) => s.name === 'agent')!
+    // The deep core spent 173, 180 and 177 real requests in a cold run.
+    expect(requestBudget(manifest, chat, 8)).toBeGreaterThanOrEqual(250)
+    expect(requestBudget(manifest, chat, 1)).toBe(requestBudget(manifest, chat, 8))
+    expect(requestBudget(manifest, other, 5)).toBe(Math.max(10, Math.floor(manifest.maxRequestsPerRun / 5)))
+    expect(readFileSync(path.join(WEB, 'scripts/evals/chat/live.sh'), 'utf8')).toContain(`${requestBudget(manifest, chat, 1)}}"`)
   })
 
   it('several changes select each suite once', () => {
