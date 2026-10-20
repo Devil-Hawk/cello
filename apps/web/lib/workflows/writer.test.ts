@@ -80,6 +80,7 @@ vi.mock('@/lib/agents/middleware', () => ({ quoteUntrusted: (label: string, text
 
 import type { AgentContext } from '@/lib/agents/context'
 import { writeMessage } from '@/lib/outreach/write'
+import { makeRunner } from '@/lib/harness/copilot-tools'
 import { buildWriterGraph, runWriter, type WriterDeps } from './writer'
 import type { FakeAdmin } from '@/lib/agents/testing/fake-admin'
 import { getArtifact, listArtifacts } from '@/lib/agents/artifacts'
@@ -145,6 +146,18 @@ describe('Writer: cover letter', () => {
     expect((saved?.version.review as { passed: boolean }).passed).toBe(true)
     // Nothing outside artifacts was written.
     expect(Object.keys(admin.tables).sort()).toEqual(['artifact_versions', 'artifacts', 'companies', 'contacts', 'person_jobs', 'profiles'])
+  })
+
+  it('the model call is stopped by the context signal, not only by the graph\'s own', async () => {
+    const stop = new AbortController()
+    const { deps } = setup({ signal: stop.signal })
+    const seen: (AbortSignal | undefined)[] = []
+    vi.mocked(makeRunner).mockImplementation(((_ctx: unknown, signal?: AbortSignal) => (seen.push(signal), vi.fn())) as never)
+    mocks.cvTailor.mockResolvedValue(tailorOut(letter(25)))
+    await runWriter({ ctx: deps.ctx, judge: deps.judge }, { type: 'cover_letter', job_id: 'j1' })
+    expect(seen.length).toBeGreaterThan(0)
+    stop.abort(new Error('stopped'))
+    expect(seen.every((sig) => sig?.aborted === true)).toBe(true)
   })
 
   it('sends a failing draft back once with the issues, then saves the better one', async () => {
