@@ -20,7 +20,7 @@ import { readSettings } from './settings'
 import { routedAgent } from './route'
 import { recallInWordsOn } from './shown'
 import { runChatTurn } from './turn'
-import { writeRollup } from './rollup'
+import { INTERRUPTED, writeRollup } from './rollup'
 import { finishWorker, isStopped, MOVED_LINE, MovedError, openWorker, STOP_POLL_MS } from './workers'
 import type { WireEvent } from '@/lib/agents/sse'
 const PROVIDER_NAMES = { openai: 'OpenAI', anthropic: 'Anthropic', openrouter: 'OpenRouter' } as const
@@ -176,9 +176,17 @@ export async function resumeChatTurn(db: AdminClient, chatId: string, turnId?: s
   if (((later as { prov: { turn_id?: string } | null }[] | null) ?? []).some((r) => r.prov?.turn_id === root.turn_id)) {
     await finishWorker(db, root.id, { status: 'done' })
     await writeRollup(db, userId, chatId, root.turn_id).catch(() => false)
+    // A request that died between the stored answer and the clean-up leaves the checkpoint behind: it goes now.
+    try {
+      const left = openAgentPersistence()
+      await left.saver.deleteThread(root.turn_id).catch(() => undefined)
+      await left.close().catch(() => undefined)
+    } catch {
+      // no checkpointer here: nothing was kept
+    }
     return true
   }
   // What was in flight when the request died: finished here, and its call runs again under the same call key.
-  await db.from('agent_tasks').update({ status: 'failed', summary: 'Interrupted. Cello picked this up again.', finished_at: new Date().toISOString() }).eq('user_id', userId).eq('turn_id', root.turn_id).neq('command', 'chat.turn').is('finished_at', null)
+  await db.from('agent_tasks').update({ status: 'failed', summary: INTERRUPTED, finished_at: new Date().toISOString() }).eq('user_id', userId).eq('turn_id', root.turn_id).neq('command', 'chat.turn').is('finished_at', null)
   return runStoredTurn(db, userId, chatId, { id: p.id, typed: p.typed, quoted: p.quoted }, { resume: { rootId: root.id, slices } })
 }
