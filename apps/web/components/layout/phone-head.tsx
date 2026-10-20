@@ -9,7 +9,7 @@ import { today } from '@/lib/routes'
 export function PhoneHead({ user, onSignOut, dots }: { user: ShellUser; onSignOut: () => void; dots?: { network?: boolean } }) {
   return (
     <header className="flex shrink-0 items-center gap-1 px-4 pb-1 pt-3 md:hidden">
-      <Link href={today.href} aria-label="Cello, Today" className="mr-auto flex min-h-11 items-center rounded-[12px]">
+      <Link href={today.href} aria-label="Cello, Today" className="mr-auto flex min-h-11 min-w-11 items-center rounded-[12px]">
         <MarkTwin size={28} />
       </Link>
       <ThemeKey />

@@ -501,6 +501,7 @@ export function McpTab({ onStatus }: McpTabProps) {
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="my-server"
+                className="min-h-11"
                 disabled={Boolean(form.id)}
               />
               <p className="mt-1 text-caption text-muted-foreground">
@@ -516,7 +517,7 @@ export function McpTab({ onStatus }: McpTabProps) {
                 value={form.transport}
                 onValueChange={(v) => setForm({ ...form, transport: v as Transport })}
               >
-                <SelectTrigger>
+                <SelectTrigger className="min-h-11">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -544,6 +545,7 @@ export function McpTab({ onStatus }: McpTabProps) {
                 value={form.url}
                 onChange={(e) => setForm({ ...form, url: e.target.value })}
                 placeholder={form.transport === 'stdio' ? 'npx -y @scope/server' : 'https://example.com/mcp'}
+                className="min-h-11"
               />
             </div>
 
