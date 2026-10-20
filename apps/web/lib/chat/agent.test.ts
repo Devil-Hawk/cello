@@ -1,4 +1,4 @@
-import { AIMessage } from '@langchain/core/messages'
+import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages'
 import { describe, expect, it, vi } from 'vitest'
 import { CommandRefusal } from '@/lib/commands/define'
 import type { AdminClient } from '@/lib/harness/types'
@@ -9,10 +9,12 @@ import { MovedError } from './workers'
 const CAP = 'The draft could not be written: Free models allow 5 drafts a day. Add credit or choose another way to run.'
 
 const seen = vi.hoisted(() => [] as { callKey?: string }[])
+const gate = vi.hoisted(() => ({ wait: null as Promise<void> | null }))
 vi.mock('@/lib/commands', async (orig) => ({
   ...(await orig<typeof import('@/lib/commands')>()),
   runCommand: async (_def: unknown, ctx: { callKey?: string }) => {
     seen.push(ctx)
+    if (gate.wait) await gate.wait
     throw new CommandRefusal(502, CAP, 'failed')
   },
 }))
@@ -153,7 +155,7 @@ describe('the live words across messages and the answer check', () => {
 })
 
 describe('a turn that carries on in the background', () => {
-  type State = { next: readonly string[]; tasks?: { interrupts?: { value?: unknown }[] }[] }
+  type State = { next: readonly string[]; tasks?: { interrupts?: { value?: unknown }[] }[]; values?: { messages?: BaseMessage[] } }
   const answered = { messages: [new AIMessage('ok')], structuredResponse: { parts: [{ about: [], text: 'Done' }] } }
   /** An agent whose checkpoint reads as each given state in turn; the inputs and configs it was run with are kept. */
   const withStates = (...states: State[]) => {
@@ -210,6 +212,21 @@ describe('a turn that carries on in the background', () => {
     expect(none.runs[1]!.input).toMatchObject({ messages: expect.any(Array) })
   })
 
+  it('reads the earlier slices tool results back from the checkpoint, so the answer is checked against all of them', async () => {
+    const thing = { kind: 'role', id: 'r1', title: 'AI Engineer', company: 'Stripe', place: null, pay: null, chance: null, posted: null, notes: [] }
+    const earlier = [
+      new ToolMessage({ name: 'roles_find', tool_call_id: 'call_1', content: JSON.stringify({ things: [thing], sentence: 'Searched your 146 stored roles: 1 match.', matched: 1 }) }),
+      new ToolMessage({ name: 'documents_draft', tool_call_id: 'call_2', content: JSON.stringify({ error: CAP, fix: 'Tell the person.' }) }),
+    ]
+    const { build } = withStates({ next: ['model_request'], tasks: [{ interrupts: [{ value: { kind: 'slice' } }] }], values: { messages: earlier } }, { next: [] })
+    const out = await chatAgent({ ...deps(build), resume: true })(input)
+    expect(out.tools).toEqual([{ label: 'Find roles' }])
+    expect(out.sources).toEqual([{ title: 'AI Engineer', host: 'Stripe' }])
+    expect(out.results).toEqual(expect.arrayContaining([expect.objectContaining({ object: { kind: 'role', ref: 'r1' } }), { object: null, text: 'Searched your 146 stored roles: 1 match.' }, { object: null, text: CAP }]))
+    expect(out.answer.cards).toEqual([{ kind: 'role', id: 'r1' }])
+    expect(out.answer.parts.map((p) => p.text)).toContain(CAP)
+  })
+
   it('gives each tool call a call key from the turn and the call id', async () => {
     seen.length = 0
     const calls = ({ tools }: { tools: unknown[] }) => ({
@@ -232,5 +249,37 @@ describe('a turn that carries on in the background', () => {
     process.env.CHAT_SLICE_MS = '20000'
     expect(chatSliceMs()).toBe(20_000)
     delete process.env.CHAT_SLICE_MS
+  })
+})
+
+describe('a command that fans out is not the Researcher', () => {
+  type Ev = { type: string; label?: string; phase?: string }
+  const run = async (nestedWhileACommandRuns: boolean) => {
+    const events: Ev[] = []
+    const streaming = ({ tools }: { tools: unknown[] }) => ({
+      invoke: async () => ({ messages: [new AIMessage('ok')], structuredResponse: { parts: [] } }),
+      stream: async function* (): AsyncGenerator<unknown> {
+        let release = () => {}
+        gate.wait = nestedWhileACommandRuns ? new Promise<void>((r) => (release = r)) : null
+        const running = (tools as Tool[]).find((t) => t.name === 'documents_draft')!.invoke({ type: 'message', job_id: 'j1', instructions: 'ask' })
+        // Let the tool get inside its command, then a nested graph reports under the tool's own namespace.
+        await new Promise((r) => setTimeout(r, 20))
+        yield [['tools:call1', 'branch:b1'], 'custom', { type: 'noise' }]
+        release()
+        await running
+        gate.wait = null
+        yield [[], 'values', { messages: [new AIMessage('ok')], structuredResponse: { parts: [] } }]
+      },
+    })
+    await chatAgent({ ...deps(streaming), emit: (e) => events.push(e.data as Ev) })(input)
+    return events.filter((e) => e.label === 'Research')
+  }
+
+  it('shows no Research row for the nested graphs of a running command', async () => {
+    expect(await run(true)).toEqual([])
+  })
+
+  it('still shows one for a delegation that runs on its own', async () => {
+    expect((await run(false)).map((e) => e.phase)).toEqual(['start', 'end'])
   })
 })

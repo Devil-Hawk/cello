@@ -58,7 +58,7 @@ export interface ChatAgentDeps {
   build?: (input: { tools: unknown[] }) => {
     invoke: (input: unknown, config?: Record<string, unknown>) => Promise<{ messages: BaseMessage[]; structuredResponse?: unknown }>
     stream?: (input: unknown, config?: Record<string, unknown>) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown>
-    getState?: (config: Record<string, unknown>) => Promise<{ next: readonly string[]; tasks?: { interrupts?: { value?: unknown }[] }[] }>
+    getState?: (config: Record<string, unknown>) => Promise<{ next: readonly string[]; tasks?: { interrupts?: { value?: unknown }[] }[]; values?: { messages?: BaseMessage[] } }>
   }
 }
 
@@ -86,10 +86,28 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
   const madeIds = new Set<string>()
   // A cap, a missing key or a refusal a tool met this turn, in code's words, so the person reads it even when the model leaves it out.
   const refusals: string[] = []
+  // What a tool returned becomes evidence for the answer check, a source on the receipt and a card to show. One place, so a
+  // slice that carries on a turn can read it back from the checkpoint's tool messages instead of losing the first slice's.
+  const record = (def: AnyCommand, out: unknown) => {
+    const things = thingsOf(out)
+    tools.push({ label: def.label })
+    for (const t of things) {
+      results.push(resultOf(t))
+      if (t.kind === 'made') madeIds.add(t.id)
+      else if (!t.recalled) sources.push({ title: t.title, host: t.company ?? 'Your stored roles' })
+      if (def.id === 'roles.find') found.push(t)
+    }
+    // The sentence is code's own: it also stands as evidence for a part about nothing in particular.
+    const sentence = (out as { sentence?: string } | null)?.sentence
+    if (sentence) results.push({ object: null, text: sentence })
+  }
   const saver = deps.saver ?? new MemorySaver()
   // One deadline for the whole turn, not one for each call: a retry does not get a fresh slice.
   const deadlineAt = Date.now() + chatSliceMs()
   let resuming = Boolean(deps.resume)
+  // Commands running now. A command that fans out (several applications at once) runs nested graphs under its own tool
+  // namespace; those are not the Researcher, so they are never shown as one.
+  let commandsRunning = 0
 
   return async (input) => {
     const ctxFor = () => chatDoor({ userId: deps.userId, typed: input.typed, chat: { chatId: input.chatId, turnId: input.turnId }, mode: deps.mode, signal: deps.signal })
@@ -99,20 +117,11 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         async (args: Record<string, unknown>, config?: { toolCall?: { id?: string } }) => {
           if (await deps.stop?.()) throw new StoppedError()
           deps.emit?.({ event: 'custom', data: { type: 'tool', label: def.label, phase: 'start' } })
+          commandsRunning++
           try {
             const callId = config?.toolCall?.id
             const out = await runCommand(def, { ...ctxFor(), callKey: callId ? `${input.turnId}:${callId}`.slice(0, 160) : undefined }, args)
-            const things = thingsOf(out)
-            tools.push({ label: def.label })
-            for (const t of things) {
-              results.push(resultOf(t))
-              if (t.kind === 'made') madeIds.add(t.id)
-              else if (!t.recalled) sources.push({ title: t.title, host: t.company ?? 'Your stored roles' })
-              if (def.id === 'roles.find') found.push(t)
-            }
-            // The sentence is code's own: it also stands as evidence for a part about nothing in particular.
-            const sentence = (out as { sentence?: string } | null)?.sentence
-            if (sentence) results.push({ object: null, text: sentence })
+            record(def, out)
             return JSON.stringify(out)
           } catch (e) {
             if (e instanceof StoppedError || isBudgetCapError(e)) throw e
@@ -123,6 +132,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
             if (reason && !refusals.includes(reason)) refusals.push(reason)
             return JSON.stringify({ error: message, fix: 'Tell the person what could not be done, in one sentence.' })
           } finally {
+            commandsRunning--
             deps.emit?.({ event: 'custom', data: { type: 'tool', label: def.label, phase: 'end' } })
           }
         },
@@ -173,6 +183,24 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         resuming = false
         const state = await getState?.(thread)
         if (state && state.next.length > 0) first = state.tasks?.some((t) => t.interrupts?.length) ? new Command({ resume: 'continue' }) : null
+        // What the earlier slices' tools returned is in the checkpoint: read it back, so the answer is checked against all of it.
+        for (const m of state?.values?.messages ?? []) {
+          if (m.getType() !== 'tool') continue
+          const def = defs.find((d) => toolName(d) === (m as { name?: string }).name)
+          let out: unknown = null
+          try {
+            out = JSON.parse(textOf(m))
+          } catch {
+            continue
+          }
+          if (!def) continue
+          const failed = (out as { error?: unknown } | null)?.error
+          if (typeof failed === 'string') {
+            results.push({ object: null, text: failed })
+            if (failed !== 'That did not work.' && !refusals.includes(failed)) refusals.push(failed)
+          }
+          else record(def, out)
+        }
       }
       const stream = (agent as unknown as { stream?: (input: unknown, config?: unknown) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown> }).stream
       if (deps.emit && stream) {
@@ -206,7 +234,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
             // model run nested inside a tool call ("tools:<id>" then "model_request:<id>").
             const delegation = namespace.length >= 2 && namespace[0].startsWith('tools:') ? namespace[0] : null
             const root = !namespace[0]?.startsWith('tools:')
-            if (delegation && !delegations.has(delegation)) {
+            if (delegation && commandsRunning === 0 && !delegations.has(delegation)) {
               delegations.add(delegation)
               deps.emit({ event: 'custom', data: { type: 'tool', label: 'Research', phase: 'start' } })
             }
