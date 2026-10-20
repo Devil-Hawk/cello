@@ -74,7 +74,7 @@ describe('the live words when an answer is thrown away', () => {
     const ctx: any = { admin: makeFakeAdmin(), userId: 'u1', userEmail: '', apiKeys: { openrouter: 'k', userId: 'u1' }, isDemo: false, threadId: 't', conversationId: null, autonomy: 'ask', traceId: '', deadlineAt: Date.now() + 120000 }
     const events: { type: string; text?: string }[] = []
     const ask = chatAgent({
-      db: {} as any, userId: 'u1', keys: { userId: 'u1' } as any, isDemo: false, ran: { rung: 'R3', model: 'x:free', effort: 'low' },
+      db: {} as any, mcp: async () => ({ tools: [], entries: [], skipped: [], close: async () => undefined }) as never, userId: 'u1', keys: { userId: 'u1' } as any, isDemo: false, ran: { rung: 'R3', model: 'x:free', effort: 'low' },
       emit: (e) => { if (e.event === 'custom') events.push(e.data as { type: string; text?: string }) },
       build: () => createCelloAgent({ kind: 'chat', ctx, saver: new MemorySaver(), model, fallbacks: [], tools: [], responseFormat: AnswerSchema as never } as never) as never,
     })
