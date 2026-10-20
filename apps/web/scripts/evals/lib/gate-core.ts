@@ -11,6 +11,8 @@ export interface Suite {
   /** Paths relative to apps/web. A `*` matches within one folder, `**` across folders. */
   scripts: string[]
   args?: string[]
+  /** Free-model requests each of this suite's scripts may spend; without it, the shared maxRequestsPerRun is split by script count. */
+  maxRequests?: number
   /** A change to any of these (relative to apps/web) selects the suite. */
   paths: string[]
 }
@@ -21,6 +23,11 @@ export interface Manifest {
   /** A change to any of these selects every suite. */
   runAll: string[]
   suites: Suite[]
+}
+
+/** The request cap one script of `suite` runs under. */
+export function requestBudget(manifest: Manifest, suite: Suite, scriptCount: number): number {
+  return suite.maxRequests ?? Math.max(10, Math.floor(manifest.maxRequestsPerRun / Math.max(1, scriptCount)))
 }
 
 /** `*` within a folder, `**` across folders, everything else literal. A pattern

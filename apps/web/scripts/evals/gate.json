@@ -91,6 +91,7 @@
       "name": "chat",
       "scripts": ["scripts/evals/chat/live.sh"],
       "args": [],
+      "maxRequests": 300,
       "paths": ["lib/chat/", "lib/commands/", "lib/agents/factory.ts", "prompts/chat.md", "scripts/evals/chat/"]
     }
   ]

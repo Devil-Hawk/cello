@@ -23,6 +23,7 @@ import {
   expandScripts,
   gateFails,
   outcomeForExit,
+  requestBudget,
   selectSuites,
   summaryMarkdown,
   type Manifest,
@@ -66,10 +67,9 @@ function main(): number {
   const files = allScriptFiles(WEB)
   const plan = suites.map((suite) => ({ suite, ...expandScripts(suite, files) }))
   const scriptCount = plan.reduce((n, p) => n + p.found.length, 0)
-  const perScript = Math.max(10, Math.floor(manifest.maxRequestsPerRun / Math.max(1, scriptCount)))
 
   if (process.argv.includes('--dry-run')) {
-    for (const p of plan) console.log(`${p.suite.name}: ${p.found.join(', ') || '(not present)'}`)
+    for (const p of plan) console.log(`${p.suite.name}: ${p.found.join(', ') || '(not present)'} (up to ${requestBudget(manifest, p.suite, scriptCount)} requests per script)`)
     return 0
   }
 
@@ -85,7 +85,7 @@ function main(): number {
         cwd: WEB,
         stdio: 'inherit',
         timeout: 20 * 60_000,
-        env: { ...process.env, EVAL_FREE_ONLY: '1', EVAL_MAX_REQUESTS: String(perScript) },
+        env: { ...process.env, EVAL_FREE_ONLY: '1', EVAL_MAX_REQUESTS: String(requestBudget(manifest, suite, scriptCount)) },
       })
       rows.push({ suite: suite.name, script, outcome: outcomeForExit(res.status), seconds: Math.round((Date.now() - started) / 1000) })
     }
