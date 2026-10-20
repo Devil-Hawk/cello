@@ -12,7 +12,7 @@
 // over npx, which would make CI flaky/slow, so it isn't checked in as a test.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { callMcpTool, isStdioAvailable, listMcpTools, splitCommandLine, testMcpServer } from './client'
+import { callMcpTool, checkMcpAddress, isStdioAvailable, listMcpTools, splitCommandLine, testMcpServer } from './client'
 import { McpError, type McpServerConfig } from './types'
 
 describe('splitCommandLine', () => {
@@ -150,5 +150,46 @@ describe('input validation', () => {
   it('rejects an invalid url', async () => {
     const server: McpServerConfig = { id: 'x', name: 'bad-url', transport: 'http', url: 'not a url', headers: {}, enabled: true }
     await expect(listMcpTools(server)).rejects.toBeInstanceOf(McpError)
+  })
+})
+
+describe('checkMcpAddress', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+  const loopback = ['http://127.0.0.1:3700/mcp', 'http://127.1.2.3/mcp', 'http://localhost:3700/mcp', 'http://[::1]:3700/mcp']
+  const stillRefused = ['http://10.0.0.5/mcp', 'http://169.254.169.254/latest', 'http://192.168.1.10/mcp', 'http://[fe80::1]/mcp', 'ftp://127.0.0.1/mcp']
+
+  it('refuses a loopback address by default', async () => {
+    vi.stubEnv('VERCEL', '')
+    vi.stubEnv('CELLO_SELF_HOSTED', '')
+    for (const url of loopback) expect((await checkMcpAddress(url)).ok, url).toBe(false)
+  })
+
+  it('allows a loopback address when self-hosted and not on Vercel', async () => {
+    vi.stubEnv('VERCEL', '')
+    vi.stubEnv('CELLO_SELF_HOSTED', '1')
+    for (const url of loopback) expect((await checkMcpAddress(url)).ok, url).toBe(true)
+  })
+
+  it('refuses a loopback address on Vercel even with the flag set', async () => {
+    vi.stubEnv('VERCEL', '1')
+    vi.stubEnv('CELLO_SELF_HOSTED', '1')
+    for (const url of loopback) expect((await checkMcpAddress(url)).ok, url).toBe(false)
+  })
+
+  it('refuses private, link-local and metadata addresses in every case', async () => {
+    for (const [vercel, flag] of [['', ''], ['', '1'], ['1', '1']]) {
+      vi.stubEnv('VERCEL', vercel)
+      vi.stubEnv('CELLO_SELF_HOSTED', flag)
+      for (const url of stillRefused) expect((await checkMcpAddress(url)).ok, `${url} ${vercel}${flag}`).toBe(false)
+    }
+  })
+
+  it('connect() uses it, so a refused address comes back as an McpError', async () => {
+    vi.stubEnv('VERCEL', '')
+    vi.stubEnv('CELLO_SELF_HOSTED', '')
+    const server: McpServerConfig = { id: 'x', name: 'loop', transport: 'http', url: 'http://127.0.0.1:1/mcp', headers: {}, enabled: true }
+    await expect(listMcpTools(server)).rejects.toThrow(/loopback/)
   })
 })
