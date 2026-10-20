@@ -9,7 +9,8 @@
 //   modelFallback, modelRetry, CelloOneAnswer, CelloSpend, CelloUntrusted, toolRetry
 //
 // (Chat's loop also gets CelloTaskRows directly after CelloStop, inside it: one worker row per delegation
-// to the Researcher. GUARD_ORDER lists the orchestrator's and the Researcher's stack, which have none.)
+// to the Researcher, and then CelloPlanGate (lib/chat/plan.ts), directly after CelloTaskRows, before CelloOneAnswer:
+// a big ask waits for the person's plan. GUARD_ORDER lists the orchestrator's and the Researcher's stack, which have none.)
 //
 // - Retry sits inside fallback, so the chosen model is retried on a 429 before
 //   the call moves to a free model.
@@ -243,7 +244,7 @@ export function celloTaskRows(scope: WorkerScope) {
 const isAnswerCall = (c: { name?: string }) => c.name?.startsWith('extract-') === true
 
 /** The message with only the calls `keep` returns true for, everywhere a provider format keeps them. */
-function keepCalls(m: AIMessage, keep: (c: { id?: string; name?: string }) => boolean): AIMessage {
+export function keepCalls(m: AIMessage, keep: (c: { id?: string; name?: string }) => boolean): AIMessage {
   const calls = m.tool_calls ?? []
   const dropped = new Set(calls.filter((c) => !keep(c)).map((c) => c.id))
   if (!dropped.size) return m
@@ -436,6 +437,8 @@ export interface GuardStackOptions {
   stop?: () => Promise<boolean>
   /** Chat only: each delegation to the Researcher becomes a worker row with its own Stop. */
   taskRows?: WorkerScope
+  /** Chat only: the plan gate (planGate in lib/chat/plan.ts), right after the Research rows. */
+  plan?: AgentMiddleware
   /** The shape of the loop's final answer, when it has one: a misfit is asked for again by Cello, not by langchain. */
   answer?: AnswerShape
   /** Test seam: fallback models to use instead of the free list. */
@@ -471,6 +474,7 @@ export function guardStack(opts: GuardStackOptions): AgentMiddleware[] {
     toolRetryMiddleware({ maxRetries: 2, backoffFactor: 2, initialDelayMs: 300, retryOn: retryable }),
     ...(opts.stop ? [celloStop(opts.stop)] : []),
     ...(opts.taskRows ? [celloTaskRows(opts.taskRows)] : []),
+    ...(opts.plan ? [opts.plan] : []),
     celloOneAnswer({ answer: opts.answer, stop: opts.stop }),
     celloSpend(ctx),
   ]

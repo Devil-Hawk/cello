@@ -149,6 +149,34 @@ describe('the Research rows', () => {
   })
 })
 
+describe('the plan gate', () => {
+  const scope = () => ({ db: makeFakeAdmin(), userId: 'u1', threadId: 'chat-1', chatId: 'chat-1', turnId: 'turn-1' })
+  const names = (agent: Built) => agent.options.middleware.map((m) => m.name)
+  const chatInput = { kind: 'chat', tools: [], responseFormat: z.object({ text: z.string() }) }
+
+  it('puts the plan gate on the chat kind right after CelloTaskRows', () => {
+    const chat = names(build({ ...chatInput, taskRows: scope(), planScope: scope() }).agent)
+    expect(chat[chat.indexOf('CelloTaskRows') + 1]).toBe('CelloPlanGate')
+    expect(chat.indexOf('CelloPlanGate')).toBeLessThan(chat.indexOf('CelloOneAnswer'))
+    expect(chat.filter((n) => n === 'CelloPlanGate')).toHaveLength(1)
+    // Without Research rows it sits right after Stop.
+    const bare = names(build({ ...chatInput, planScope: scope() }).agent)
+    expect(bare[bare.indexOf('CelloStop') + 1]).toBe('CelloPlanGate')
+    // The plain core gets it too.
+    const plain = names(build({ ...chatInput, core: 'plain', planScope: scope() }).agent)
+    expect(plain[plain.indexOf('CelloStop') + 1]).toBe('CelloPlanGate')
+    // The guards themselves stay in order.
+    expect(chat.filter((n) => n === 'CelloPlanGate' || (GUARD_ORDER as readonly string[]).includes(n))).toEqual(GUARD_ORDER.flatMap((n) => (n === 'CelloStop' ? [n, 'CelloPlanGate'] : [n])))
+  })
+
+  it('is never given to the orchestrator or the Researcher, nor to a chat without a scope', () => {
+    expect(names(build({ planScope: scope() }).agent)).not.toContain('CelloPlanGate')
+    expect(names(build(chatInput).agent)).not.toContain('CelloPlanGate')
+    const researcher = researcherSpec({ ctx: ctx(), model: new ScriptedChatModel({ script: [] }), fallbacks: [], skillsDir: skills(), planScope: scope() } as never)
+    expect((researcher.middleware ?? []).map((m) => m.name)).not.toContain('CelloPlanGate')
+  })
+})
+
 describe('the Researcher', () => {
   it('is a spec with its own guard stack, read-only permissions, read tools and its skills in the prompt', () => {
     const s = spec()

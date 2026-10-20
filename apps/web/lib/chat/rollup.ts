@@ -56,7 +56,8 @@ export async function writeRollup(db: AdminClient, userId: string, chatId: strin
 
   const { data: tasks } = await db.from('agent_tasks').select('command, status, summary, object').eq('user_id', userId).eq('turn_id', turnId).neq('command', 'chat.turn')
   type Row = { command: string; status: string; summary: string | null; object: { ref?: string } | null }
-  const all = (tasks as Row[] | null) ?? []
+  // A plan's rows are the person's own edits to what was asked, not work: a removed step is not "stopped by you".
+  const all = ((tasks as Row[] | null) ?? []).filter((r) => !r.command?.startsWith('chat.plan'))
   // A row cut short by a dead request is not a failure when the same piece of work then ran again and finished.
   const rows = all.filter((r) => !(r.summary === INTERRUPTED && all.some((o) => o !== r && o.command === r.command && o.object?.ref && o.object.ref === r.object?.ref && DONE.includes(o.status))))
   const count = (pick: (r: Row) => boolean) => rows.filter(pick).length

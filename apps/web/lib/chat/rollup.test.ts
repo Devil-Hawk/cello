@@ -59,6 +59,17 @@ describe('writeRollup', () => {
     expect((db.tables.chat_turns[0].parts as { text: string }[])[0].text).toBe('Done: 1 drafted, finished 2 other tasks.')
   })
 
+  it('says nothing about plan rows', async () => {
+    const plan = [task('chat.plan', 'done'), task('chat.plan.step', 'stopped'), task('chat.plan.step', 'queued'), task('chat.plan.step', 'failed'), task('chat.plan.step', 'done'), task('chat.plan.added', 'done')]
+    const only = seed(plan)
+    only.tables.chat_attachments = []
+    expect(await writeRollup(only, 'u1', 'c1', 't1')).toBe(false)
+    const db = seed([...plan, task('applications.start', 'done')])
+    db.tables.chat_attachments = []
+    await writeRollup(db, 'u1', 'c1', 't1')
+    expect((db.tables.chat_turns[0].parts as { text: string }[])[0].text).toBe('Done: 1 started.')
+  })
+
   it('says nothing finished when only failures are left', async () => {
     const db = seed([task('applications.start', 'failed')])
     db.tables.chat_attachments = []

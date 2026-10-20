@@ -6,7 +6,7 @@ import { CommandRefusal } from '@/lib/commands/define'
 import type { AdminClient } from '@/lib/harness/types'
 import { Command } from '@langchain/langgraph'
 import { chatAgent } from './agent'
-import { MovedError } from './workers'
+import { MovedError, PlanWaitingError } from './workers'
 import { createCelloAgent } from '@/lib/agents/factory'
 
 vi.mock('@/lib/agents/factory', async (orig) => ({
@@ -206,6 +206,31 @@ describe('a turn that carries on in the background', () => {
     const plain = withStates({ next: ['model_request'] })
     await expect(chatAgent(deps(plain.build))(input)).rejects.toBeInstanceOf(MovedError)
     expect(plain.runs[0]!.config).toMatchObject({ durability: 'sync', configurable: { thread_id: 't1' } })
+  })
+
+  it('waits on a plan instead of moving to the background', async () => {
+    const { build } = withStates({ next: ['model_request'], tasks: [{ interrupts: [{ value: { kind: 'plan', plan_id: 'p1' } }] }] })
+    const err = await chatAgent(deps(build))(input).catch((e) => e)
+    expect(err).toBeInstanceOf(PlanWaitingError)
+    expect(err).not.toBeInstanceOf(MovedError)
+    expect(err.planId).toBe('p1')
+    // A refusal met earlier in the turn does not turn the wait into a refusal line.
+    const calling = ({ tools }: { tools: unknown[] }) => ({
+      ...build(),
+      invoke: async () => {
+        await (tools as Tool[]).find((t) => t.name === 'documents_draft')!.invoke({ type: 'message', job_id: 'j1', instructions: 'ask about the timeline' })
+        return answered
+      },
+    })
+    await expect(chatAgent(deps(calling))(input)).rejects.toBeInstanceOf(PlanWaitingError)
+  })
+
+  it('resumes with the decision it was given', async () => {
+    const decision = { plan_id: 'p1', keep: ['s2', 's1'] }
+    const held = withStates({ next: ['model_request'], tasks: [{ interrupts: [{ value: { kind: 'plan', plan_id: 'p1' } }] }] }, { next: [] })
+    await chatAgent({ ...deps(held.build), resume: true, resumeValue: decision })(input)
+    expect(held.runs[0]!.input).toBeInstanceOf(Command)
+    expect((held.runs[0]!.input as Command).resume).toEqual(decision)
   })
 
   it('answers when the graph ran to its end', async () => {
@@ -422,6 +447,12 @@ describe('the eval seams', () => {
     const model = { _llmType: () => 'scripted' }
     await chatAgent({ ...deps(undefined as never), build: undefined, model: model as never, core: 'plain', roles: { researcher: { rung: 'R3', model: 'paid/x', effort: 'low' } } })(input)
     expect(lastBuild()).toMatchObject({ kind: 'chat', core: 'plain', model, researcherModel: model })
+  })
+
+  it('gives the plan gate the same scope as the task rows', async () => {
+    await chatAgent({ ...deps(undefined as never), build: undefined, model: { _llmType: () => 'scripted' } as never })(input)
+    expect(lastBuild().planScope).toEqual(expect.objectContaining({ userId: 'u1', chatId: 'c1', turnId: 't1' }))
+    expect(lastBuild().planScope).toEqual(lastBuild().taskRows)
   })
 
   it('leaves the core unset and builds its own model when no seam is given', async () => {

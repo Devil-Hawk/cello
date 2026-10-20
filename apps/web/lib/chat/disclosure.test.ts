@@ -48,6 +48,20 @@ describe('buildDisclosure', () => {
     expect(d).toMatchObject({ seconds: 41, costUsd: 0, ran })
     expect(disclosureLine(d)).toBe('1 source, 1 tool, 2 tasks. 0:41. Free.')
   })
+
+  it('leaves plan rows out of the tasks it lists', async () => {
+    const db = makeFakeAdmin({
+      agent_tasks: [
+        { user_id: 'u1', turn_id: 't1', title: 'Plan: 4 things', command: 'chat.plan', status: 'done', reads: [], created_at: '2026-10-06T10:00:00Z' },
+        { user_id: 'u1', turn_id: 't1', title: 'Start an application: Engineer at Ramp', command: 'chat.plan.step', status: 'stopped', reads: [], created_at: '2026-10-06T10:00:01Z' },
+        { user_id: 'u1', turn_id: 't1', title: 'Added: Write a cover letter', command: 'chat.plan.added', status: 'done', reads: [], created_at: '2026-10-06T10:00:02Z' },
+        { user_id: 'u1', turn_id: 't1', title: 'Start an application', command: 'applications.start', status: 'done', reads: [], created_at: '2026-10-06T10:00:03Z' },
+      ],
+      llm_spend: [],
+    })
+    const d = await buildDisclosure(db, 'u1', 't1', { ran, tools: [], sources: [], startedAt: new Date('2026-10-06T10:00:00Z'), endedAt: new Date('2026-10-06T10:00:05Z') })
+    expect(d.workers).toEqual([{ title: 'Start an application', status: 'done', reads: 0 }])
+  })
 })
 
 describe('unreached servers', () => {

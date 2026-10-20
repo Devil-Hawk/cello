@@ -73,8 +73,8 @@ export async function buildDisclosure(
     ...(input.runs ? { runs: input.runs } : {}),
     ...(input.mode ? { mode: input.mode } : {}),
     tools: input.tools,
-    // The turn's own row ("Cello is working", chat.turn) is still open while this is written and is not a task the turn used.
-    workers: rows.filter((r) => r.command !== 'chat.turn').map((r) => ({ title: r.title, status: r.status, reads: r.reads?.length ?? 0 })),
+    // The turn's own row ("Cello is working", chat.turn) is still open while this is written and is not a task the turn used; a plan's rows are not tasks either.
+    workers: rows.filter((r) => r.command !== 'chat.turn' && !r.command?.startsWith('chat.plan')).map((r) => ({ title: r.title, status: r.status, reads: r.reads?.length ?? 0 })),
     sources: input.sources,
     ...(input.unreached?.length ? { unreached: input.unreached } : {}),
     seconds: Math.max(0, Math.round((input.endedAt.getTime() - input.startedAt.getTime()) / 1000)),
