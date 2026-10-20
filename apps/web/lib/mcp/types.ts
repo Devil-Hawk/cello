@@ -101,9 +101,12 @@ export interface McpTestResult {
  */
 export class McpError extends Error {
   readonly server?: string
-  constructor(message: string, opts: { server?: string } = {}) {
+  /** true once the request had left for the server: the call may have run, whatever came back. */
+  readonly sent?: boolean
+  constructor(message: string, opts: { server?: string; sent?: boolean } = {}) {
     super(message)
     this.name = 'McpError'
     this.server = opts.server
+    this.sent = opts.sent
   }
 }

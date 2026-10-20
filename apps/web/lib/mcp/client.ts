@@ -255,7 +255,8 @@ export async function callMcpTool(
     )
     return { isError: Boolean(res.isError), content: res.content ?? res }
   } catch (e) {
-    throw e instanceof McpError ? e : new McpError(`Tool call "${toolName}" on "${server.name}" failed: ${errMsg(e)}`, { server: server.name })
+    // The request left for the server before this, so the call may have run even though no answer came back.
+    throw new McpError(e instanceof McpError ? e.message : `Tool call "${toolName}" on "${server.name}" failed: ${errMsg(e)}`, { server: server.name, sent: true })
   } finally {
     await conn.close()
   }

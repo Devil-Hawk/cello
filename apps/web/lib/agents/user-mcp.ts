@@ -17,6 +17,7 @@ import { MultiServerMCPClient } from '@langchain/mcp-adapters'
 import type { StructuredToolInterface } from '@langchain/core/tools'
 import { listServers, toConfig } from '@/lib/mcp/registry'
 import { callMcpTool, checkMcpAddress } from '@/lib/mcp/client'
+import { McpError } from '@/lib/mcp/types'
 import type { McpServerRow } from '@/lib/mcp/types'
 import { classifyMcpTool, recipientKeys, type McpTier } from './mcp-rule'
 import type { AgentContext } from './context'
@@ -137,7 +138,8 @@ export async function loadUserMcpTools(
   }
 }
 
-export type McpCallResult = { ok: true; text: string; isError: boolean } | { ok: false; reason: string; fix: string }
+/** unsure: the request was sent and no answer came back, so the call may have run. */
+export type McpCallResult = { ok: true; text: string; isError: boolean } | { ok: false; reason: string; fix: string; unsure?: true }
 
 const SETTINGS_FIX = 'in Settings, under Your own tools.'
 const refuse = (reason: string, fix: string): McpCallResult => ({ ok: false, reason, fix })
@@ -172,8 +174,10 @@ export async function callUserMcpTool(
   try {
     const out = await call(toConfig(row), tool, args, { timeoutMs: MCP_TOOL_TIMEOUT_MS })
     return { ok: true, text: textOf(out.content), isError: out.isError }
-  } catch {
-    // No error text: it can name the address or echo a header.
-    return refuse(`Could not reach ${row.name}.`, 'Try Confirm again.')
+  } catch (e) {
+    // No error text: it can name the address or echo a header. Only a failure known to be before the send may be tried again;
+    // a timeout or a dropped answer may have sent it, so the person is told to check on the server instead.
+    if (e instanceof McpError && !e.sent) return refuse(`Could not reach ${row.name}.`, 'Try Confirm again.')
+    return { ok: false, unsure: true, reason: `Cello did not get an answer from ${row.name}.`, fix: 'The call may or may not have gone through. Check on the server before you try again.' }
   }
 }
