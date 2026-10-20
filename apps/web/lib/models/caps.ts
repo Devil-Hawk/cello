@@ -59,6 +59,9 @@ export class FreeCapError extends Error {
   }
 }
 
+/** The graph hit its step cap (langgraph's GraphRecursionError). Its own message is a docs link, so this line replaces it. */
+export const STEP_LIMIT_LINE = 'Cello took too many steps on this and stopped. Nothing was changed. Ask again with one thing at a time.'
+
 export const NO_MODEL_LINE = 'Cello has no model to run on. Add a key or pick Free models in Settings, under Models.'
 const NO_MODEL_CHAT = 'Cello has no model to run on. Add a key or pick Free models in [Settings, under Models](/settings#models).'
 
@@ -72,10 +75,11 @@ const SAID_PLAINLY = new Set(['FreeCapError', 'BelowRungError', 'CeilingError', 
  * For the chat's answer (`as: 'chat'`, rendered as Markdown) the action after a cap or a missing key is a link.
  */
 export function reasonOf(e: unknown, as: 'plain' | 'chat' = 'plain'): string | null {
-  const root = rootCause(e) as { name?: unknown; message?: unknown } | null
+  const root = rootCause(e) as { name?: unknown; message?: unknown; lc_error_code?: unknown } | null
   const name = typeof root?.name === 'string' ? root.name : ''
   const message = typeof root?.message === 'string' ? root.message.trim() : ''
   if (name === 'MissingKeyError') return as === 'chat' ? NO_MODEL_CHAT : NO_MODEL_LINE
+  if (name === 'GraphRecursionError' || root?.lc_error_code === 'GRAPH_RECURSION_LIMIT') return STEP_LIMIT_LINE
   if (!SAID_PLAINLY.has(name) || !message) return null
   return as === 'chat' ? message.replace(CAP_FIX.plain, CAP_FIX.chat) : message
 }
