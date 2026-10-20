@@ -58,7 +58,7 @@ export class ScriptedChatModel extends BaseChatModel {
 
   // Both createAgent and Deep Agents bind tools before calling; the binding is recorded, the model is unchanged.
   bindTools(tools: unknown[]): this {
-    this.boundTools = tools.map((t) => (t as { name?: string }).name ?? '')
+    this.boundTools = tools.map((t) => (t as { name?: string; function?: { name?: string } }).name ?? (t as { function?: { name?: string } }).function?.name ?? '')
     return this
   }
 
