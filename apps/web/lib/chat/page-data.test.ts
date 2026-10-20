@@ -66,6 +66,24 @@ describe('loadChatPage', () => {
     expect(page?.tasks.map((t) => t.id)).toEqual(['w1'])
   })
 
+  it('returns the plan fields of each task row', async () => {
+    const db = seed()
+    db.tables.agent_tasks.push({ id: 'p1', user_id: 'u1', chat_id: 'c1', turn_id: 't1', title: 'Start an application: Engineer at Ramp', status: 'queued', command: 'chat.plan.step', reads: [], created_at: '2026-10-05T10:00:02Z', summary: null, object: { tool: 'applications_start' }, parent_id: 'w0', branch_index: 2 })
+    const asked: string[] = []
+    const from = db.from.bind(db)
+    db.from = ((table: string) => {
+      const q = from(table)
+      if (table !== 'agent_tasks') return q
+      const select = q.select.bind(q)
+      q.select = ((cols?: string, ...rest: unknown[]) => (asked.push(cols ?? ''), select(cols, ...(rest as []))))
+      return q
+    }) as typeof db.from
+    const page = await loadChatPage(db, 'u1', 'c1', get)
+    const columns = asked.find((c) => c.includes('command')) ?? ''
+    for (const column of ['summary', 'object', 'parent_id', 'branch_index']) expect(columns).toContain(column)
+    expect(page?.tasks.find((t) => t.id === 'p1')).toMatchObject({ summary: null, object: { tool: 'applications_start' }, parent_id: 'w0', branch_index: 2 })
+  })
+
   it('is null for another person\'s chat', async () => {
     expect(await loadChatPage(seed(), 'u2', 'c1', get)).toBeNull()
   })
