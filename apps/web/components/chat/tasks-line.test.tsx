@@ -45,6 +45,29 @@ describe('TasksLine', () => {
   })
 })
 
+describe('TasksLine with a plan', () => {
+  it('says Planned for a planned row and Removed by you for a removed one', () => {
+    const out = text(line([
+      task(1, { status: 'queued', command: 'chat.plan.step', title: 'Start an application: Engineer at Ramp' }),
+      task(2, { status: 'stopped', command: 'chat.plan.step', summary: 'Removed by you', title: 'Write a cover letter' }),
+      task(3, { status: 'failed', command: 'chat.plan.step', summary: 'raw error text', title: 'Research: Ramp' }),
+    ], { defaultOpen: true }))
+    expect(out).toContain('Start an application: Engineer at Ramp Planned')
+    expect(out).toContain('Write a cover letter Removed by you')
+    expect(out).toContain('Research: Ramp Could not finish')
+    expect(out).not.toContain('raw error text')
+  })
+
+  it('shows an added row as added after the plan started', () => {
+    const out = text(line([task(1, { status: 'done', command: 'chat.plan.added', summary: 'Added after the plan started', title: 'Added: Write a cover letter' })], { defaultOpen: true }))
+    expect(out).toContain('Added: Write a cover letter Added after the plan started')
+  })
+
+  it('leaves plan rows out of what was done', () => {
+    expect(workedSummary([task(1, { status: 'done', command: 'chat.plan' }), task(2, { status: 'done', command: 'chat.plan.step' }), task(3, { status: 'done', command: 'chat.plan.added' })], 5)).toBe('Worked 0:05.')
+  })
+})
+
 describe('TasksLine while stopping', () => {
   it('reads Stopping instead of the clock and rests the Stop key without dropping focus', () => {
     const out = line([], { running: true, seconds: 7, stopping: true })
