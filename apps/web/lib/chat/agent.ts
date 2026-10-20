@@ -5,8 +5,9 @@
 
 import { HumanMessage, isAIMessageChunk, type AIMessageChunk, type BaseMessage, type BaseMessageChunk } from '@langchain/core/messages'
 import { MemorySaver } from '@langchain/langgraph'
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { tool } from '@langchain/core/tools'
-import { createCelloAgent } from '@/lib/agents/factory'
+import { createCelloAgent, type ChatCore } from '@/lib/agents/factory'
 import { recursionLimitFor } from '@/lib/agents/middleware'
 import type { AgentContext } from '@/lib/agents/context'
 import { agentView, chatDoor, CommandRefusal, runCommand, toolName } from '@/lib/commands'
@@ -51,6 +52,10 @@ export interface ChatAgentDeps {
   stop?: () => Promise<boolean>
   emit?: (event: { event: string; data: unknown }) => void
   profileCard?: string
+  /** The loop's engine. Production leaves it unset (Deep Agents); the evals set 'plain' to compare. */
+  core?: ChatCore
+  /** Eval seam: runs the loop and the Researcher on this model, so an eval never reaches the key-gated door or a paid default. */
+  model?: BaseChatModel
   /** Test seam: replaces the compiled agent. */
   build?: (input: { tools: unknown[] }) => {
     invoke: (input: unknown, config?: Record<string, unknown>) => Promise<{ messages: BaseMessage[]; structuredResponse?: unknown }>
@@ -141,9 +146,10 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         ctx,
         tools: lcTools as never,
         responseFormat: AnswerSchema as never,
-        model: celloChatModel(deps.ran, deps.keys),
+        ...(deps.core ? { core: deps.core } : {}),
+        model: deps.model ?? celloChatModel(deps.ran, deps.keys),
         // The Researcher runs on the model the person chose for research, held to the same highest as Chat.
-        ...(deps.roles?.researcher ? { researcherModel: celloChatModel(deps.roles.researcher, deps.keys, 'researcher') } : {}),
+        ...(deps.model ? { researcherModel: deps.model } : deps.roles?.researcher ? { researcherModel: celloChatModel(deps.roles.researcher, deps.keys, 'researcher') } : {}),
         profileCard: deps.profileCard,
         saver,
       }) as unknown as NonNullable<ReturnType<NonNullable<ChatAgentDeps['build']>>>)

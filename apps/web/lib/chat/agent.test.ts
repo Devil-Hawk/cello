@@ -3,6 +3,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { CommandRefusal } from '@/lib/commands/define'
 import type { AdminClient } from '@/lib/harness/types'
 import { chatAgent } from './agent'
+import { createCelloAgent } from '@/lib/agents/factory'
+
+vi.mock('@/lib/agents/factory', async (orig) => ({
+  ...(await orig<typeof import('@/lib/agents/factory')>()),
+  createCelloAgent: vi.fn(() => ({ invoke: async () => ({ messages: [new AIMessage('ok')], structuredResponse: { parts: [{ about: [], text: 'Done.' }] } }) })),
+}))
 
 const CAP = 'The draft could not be written: Free models allow 5 drafts a day. Add credit or choose another way to run.'
 
@@ -155,5 +161,22 @@ describe('the live words across messages and the answer check', () => {
     expect(words(1)).toEqual([])
     expect(tools(1)).toEqual(['Checking the answer:start', 'Checking the answer:end'])
     expect(tools(0)).toEqual([])
+  })
+})
+
+describe('the eval seams', () => {
+  const lastBuild = () => vi.mocked(createCelloAgent).mock.calls.at(-1)![0] as unknown as Record<string, unknown>
+
+  it('uses the given model for the loop and for the Researcher, and passes the core', async () => {
+    const model = { _llmType: () => 'scripted' }
+    await chatAgent({ ...deps(undefined as never), build: undefined, model: model as never, core: 'plain', roles: { researcher: { rung: 'R3', model: 'paid/x', effort: 'low' } } })(input)
+    expect(lastBuild()).toMatchObject({ kind: 'chat', core: 'plain', model, researcherModel: model })
+  })
+
+  it('leaves the core unset and builds its own model when no seam is given', async () => {
+    await chatAgent({ ...deps(undefined as never), keys: { userId: 'u1', openrouter: 'k' }, build: undefined })(input)
+    expect(lastBuild().core).toBeUndefined()
+    expect(lastBuild().model).toBeDefined()
+    expect(lastBuild().researcherModel).toBeUndefined()
   })
 })
