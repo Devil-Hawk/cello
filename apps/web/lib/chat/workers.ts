@@ -30,6 +30,14 @@ export class MovedError extends Error {
   }
 }
 
+/** A turn whose plan waits for the person: its checkpoint is saved and nothing of the plan has run. */
+export class PlanWaitingError extends Error {
+  constructor(public readonly planId: string) {
+    super('Waiting for the plan to be agreed.')
+    this.name = 'PlanWaitingError'
+  }
+}
+
 export const MOVED_LINE = 'Cello carries on in the background. You can leave this page.'
 
 export interface WorkerScope {
