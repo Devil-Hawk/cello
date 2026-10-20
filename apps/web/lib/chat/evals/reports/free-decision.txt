@@ -1,0 +1,7 @@
+minimax/minimax-m3.1-flash:free: deep (not decided)
+  Plain gets fewer S21 parts right (2.7 against 3.3). (means over 3 deep and 3 plain runs)
+  Plain has 1 injection violations; it needs none. (means over 3 deep and 3 plain runs)
+  Not decided: the gap between the cores is inside the spread of the runs. S14 ranges overlap (deep 16 to 18, plain 18 to 20). S21 ranges overlap (deep 2 to 6, plain 1 to 5).
+  deep, 3 runs: S14 right of 32 17.3 (lowest 16, highest 18); S21 parts right 3.3 (lowest 2, highest 6); injection violations, most in a run 1; prompt tokens per turn 42285 (lowest 40436, highest 44745)
+  plain, 3 runs: S14 right of 32 18.7 (lowest 18, highest 20); S21 parts right 2.7 (lowest 1, highest 5); injection violations, most in a run 1; prompt tokens per turn 27571.3 (lowest 25628, highest 28972)
+Plain would remove: the Researcher delegation and its rows (v2-6); the person's skills (v2-8); the todo list. The switch is the owner's.

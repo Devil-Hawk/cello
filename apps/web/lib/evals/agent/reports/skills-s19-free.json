@@ -1,0 +1,950 @@
+{
+  "kind": "chat",
+  "tier": "free",
+  "note": "Measured on the chat kind, whose prompt and tools list no skills yet (the person's skills are v2-8), so a model has no reason to read one first: the trigger numbers are low for that reason and are reported as measured.",
+  "label": "s19-free",
+  "voters": [
+    "minimax/minimax-m3.1-flash:free"
+  ],
+  "summary": {
+    "trigger": 0.8333333333333334,
+    "checks": 0.8554216867469879
+  },
+  "perSkill": [
+    {
+      "skill": "answer-questions",
+      "trigger": 1,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [],
+      "off": true
+    },
+    {
+      "skill": "board-reader",
+      "trigger": 0.6666666666666666,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger"
+      ],
+      "off": true
+    },
+    {
+      "skill": "cold-outreach",
+      "trigger": 1,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [],
+      "off": true
+    },
+    {
+      "skill": "company-research",
+      "trigger": 1,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [],
+      "off": true
+    },
+    {
+      "skill": "compare-roles",
+      "trigger": 0.3333333333333333,
+      "checks": 0.8333333333333334,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger",
+        "checks"
+      ],
+      "off": true
+    },
+    {
+      "skill": "cover-letter",
+      "trigger": 1,
+      "checks": null,
+      "errors": 1,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "checks"
+      ],
+      "off": true
+    },
+    {
+      "skill": "find-roles",
+      "trigger": 0.6666666666666666,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger"
+      ],
+      "off": true
+    },
+    {
+      "skill": "follow-up",
+      "trigger": 1,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [],
+      "off": true
+    },
+    {
+      "skill": "negotiation",
+      "trigger": 1,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [],
+      "off": true
+    },
+    {
+      "skill": "reply",
+      "trigger": 0.3333333333333333,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger"
+      ],
+      "off": true
+    },
+    {
+      "skill": "role-fit",
+      "trigger": 1,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [],
+      "off": true
+    },
+    {
+      "skill": "search-strategy",
+      "trigger": 1,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [],
+      "off": true
+    },
+    {
+      "skill": "tailor-resume",
+      "trigger": 0.6666666666666666,
+      "checks": null,
+      "errors": 1,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [
+        "trigger",
+        "checks"
+      ],
+      "off": true
+    },
+    {
+      "skill": "visa-sponsorship",
+      "trigger": 1,
+      "checks": 1,
+      "errors": 0,
+      "bar": {
+        "trigger": 0.8,
+        "checks": 0.9
+      },
+      "failing": [],
+      "off": true
+    }
+  ],
+  "triggerRows": [
+    {
+      "skill": "answer-questions",
+      "id": "answer-questions-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/answer-questions/SKILL.md",
+          "ls /my-skills"
+        ]
+      }
+    },
+    {
+      "skill": "answer-questions",
+      "id": "answer-questions-t2",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/answer-questions/SKILL.md",
+          "roles_find"
+        ]
+      }
+    },
+    {
+      "skill": "answer-questions",
+      "id": "answer-questions-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/cover-letter/SKILL.md",
+          "roles_find"
+        ]
+      }
+    },
+    {
+      "skill": "board-reader",
+      "id": "board-reader-t1",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "postings_read"
+        ]
+      }
+    },
+    {
+      "skill": "board-reader",
+      "id": "board-reader-t2",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/board-reader/SKILL.md",
+          "postings_read"
+        ]
+      }
+    },
+    {
+      "skill": "board-reader",
+      "id": "board-reader-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "activity_get",
+          "profile_get",
+          "search_get"
+        ]
+      }
+    },
+    {
+      "skill": "cold-outreach",
+      "id": "cold-outreach-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/cold-outreach/SKILL.md",
+          "roles_find"
+        ]
+      }
+    },
+    {
+      "skill": "cold-outreach",
+      "id": "cold-outreach-t2",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/cold-outreach/SKILL.md",
+          "roles_find",
+          "ls /my-skills"
+        ]
+      }
+    },
+    {
+      "skill": "cold-outreach",
+      "id": "cold-outreach-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "people_find",
+          "read_file /skills/follow-up/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill": "company-research",
+      "id": "company-research-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/company-research/SKILL.md",
+          "ls /skills/company-research"
+        ]
+      }
+    },
+    {
+      "skill": "company-research",
+      "id": "company-research-t2",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/company-research/SKILL.md",
+          "roles_find",
+          "profile_get"
+        ]
+      }
+    },
+    {
+      "skill": "company-research",
+      "id": "company-research-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/visa-sponsorship/SKILL.md",
+          "ls /skills/visa-sponsorship"
+        ]
+      }
+    },
+    {
+      "skill": "compare-roles",
+      "id": "compare-roles-t1",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "roles_find",
+          "roles_find"
+        ]
+      }
+    },
+    {
+      "skill": "compare-roles",
+      "id": "compare-roles-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "roles_find"
+        ]
+      }
+    },
+    {
+      "skill": "compare-roles",
+      "id": "compare-roles-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/role-fit/SKILL.md",
+          "roles_find"
+        ]
+      }
+    },
+    {
+      "skill": "cover-letter",
+      "id": "cover-letter-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/cover-letter/SKILL.md",
+          "roles_find"
+        ]
+      }
+    },
+    {
+      "skill": "cover-letter",
+      "id": "cover-letter-t2",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/cover-letter/SKILL.md",
+          "roles_find",
+          "profile_get",
+          "activity_get"
+        ]
+      }
+    },
+    {
+      "skill": "cover-letter",
+      "id": "cover-letter-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/tailor-resume/SKILL.md",
+          "search_get",
+          "profile_get",
+          "activity_get",
+          "ls /my-skills"
+        ]
+      }
+    },
+    {
+      "skill": "find-roles",
+      "id": "find-roles-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/find-roles/SKILL.md",
+          "roles_find"
+        ]
+      }
+    },
+    {
+      "skill": "find-roles",
+      "id": "find-roles-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "roles_find",
+          "activity_get"
+        ]
+      }
+    },
+    {
+      "skill": "find-roles",
+      "id": "find-roles-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/search-strategy/SKILL.md",
+          "ls /my-skills",
+          "profile_get",
+          "activity_get"
+        ]
+      }
+    },
+    {
+      "skill": "follow-up",
+      "id": "follow-up-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "people_find",
+          "read_file /skills/follow-up/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill": "follow-up",
+      "id": "follow-up-t2",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/follow-up/SKILL.md",
+          "activity_get"
+        ]
+      }
+    },
+    {
+      "skill": "follow-up",
+      "id": "follow-up-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/cold-outreach/SKILL.md",
+          "people_find"
+        ]
+      }
+    },
+    {
+      "skill": "negotiation",
+      "id": "negotiation-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/negotiation/SKILL.md",
+          "roles_find",
+          "profile_get"
+        ]
+      }
+    },
+    {
+      "skill": "negotiation",
+      "id": "negotiation-t2",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/negotiation/SKILL.md",
+          "profile_get"
+        ]
+      }
+    },
+    {
+      "skill": "negotiation",
+      "id": "negotiation-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "roles_find",
+          "search_get"
+        ]
+      }
+    },
+    {
+      "skill": "reply",
+      "id": "reply-t1",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "people_find",
+          "profile_get"
+        ]
+      }
+    },
+    {
+      "skill": "reply",
+      "id": "reply-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "people_find",
+          "activity_get"
+        ]
+      }
+    },
+    {
+      "skill": "reply",
+      "id": "reply-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/cold-outreach/SKILL.md",
+          "roles_find"
+        ]
+      }
+    },
+    {
+      "skill": "role-fit",
+      "id": "role-fit-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/role-fit/SKILL.md",
+          "roles_find"
+        ]
+      }
+    },
+    {
+      "skill": "role-fit",
+      "id": "role-fit-t2",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/role-fit/SKILL.md",
+          "roles_find"
+        ]
+      }
+    },
+    {
+      "skill": "role-fit",
+      "id": "role-fit-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "activity_get",
+          "profile_get",
+          "search_get"
+        ]
+      }
+    },
+    {
+      "skill": "search-strategy",
+      "id": "search-strategy-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/search-strategy/SKILL.md",
+          "profile_get",
+          "search_get",
+          "activity_get"
+        ]
+      }
+    },
+    {
+      "skill": "search-strategy",
+      "id": "search-strategy-t2",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "profile_get",
+          "activity_get",
+          "search_get",
+          "read_file /skills/search-strategy/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill": "search-strategy",
+      "id": "search-strategy-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/find-roles/SKILL.md",
+          "roles_find"
+        ]
+      }
+    },
+    {
+      "skill": "tailor-resume",
+      "id": "tailor-resume-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "roles_find",
+          "read_file /skills/tailor-resume/SKILL.md"
+        ]
+      }
+    },
+    {
+      "skill": "tailor-resume",
+      "id": "tailor-resume-t2",
+      "should": true,
+      "loadedBy": 0,
+      "ok": false,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "roles_find",
+          "activity_get"
+        ]
+      }
+    },
+    {
+      "skill": "tailor-resume",
+      "id": "tailor-resume-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/cover-letter/SKILL.md",
+          "roles_find"
+        ]
+      }
+    },
+    {
+      "skill": "visa-sponsorship",
+      "id": "visa-sponsorship-t1",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/visa-sponsorship/SKILL.md",
+          "roles_find"
+        ]
+      }
+    },
+    {
+      "skill": "visa-sponsorship",
+      "id": "visa-sponsorship-t2",
+      "should": true,
+      "loadedBy": 1,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/visa-sponsorship/SKILL.md",
+          "profile_get",
+          "search_get"
+        ]
+      }
+    },
+    {
+      "skill": "visa-sponsorship",
+      "id": "visa-sponsorship-t3",
+      "should": false,
+      "loadedBy": 0,
+      "ok": true,
+      "errored": false,
+      "firstCalls": {
+        "minimax/minimax-m3.1-flash:free": [
+          "read_file /skills/company-research/SKILL.md",
+          "ls /skills/company-research"
+        ]
+      }
+    }
+  ],
+  "outs": [
+    {
+      "skill": "answer-questions",
+      "id": "answer-questions-o1",
+      "model": "minimax/minimax-m3.1-flash:free",
+      "passed": 6,
+      "total": 6,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "board-reader",
+      "id": "board-reader-o1",
+      "model": "minimax/minimax-m3.1-flash:free",
+      "passed": 7,
+      "total": 7,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "board-reader",
+      "id": "board-reader-o2",
+      "model": "minimax/minimax-m3.1-flash:free",
+      "passed": 5,
+      "total": 5,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "cold-outreach",
+      "id": "cold-outreach-o1",
+      "model": "minimax/minimax-m3.1-flash:free",
+      "passed": 7,
+      "total": 7,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "company-research",
+      "id": "company-research-o1",
+      "model": "minimax/minimax-m3.1-flash:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "compare-roles",
+      "id": "compare-roles-o1",
+      "model": "minimax/minimax-m3.1-flash:free",
+      "passed": 5,
+      "total": 6,
+      "errored": false,
+      "failures": [
+        "picks Northstar, the one with a strong chance and covered requirements"
+      ]
+    },
+    {
+      "skill": "cover-letter",
+      "id": "cover-letter-o1",
+      "model": "minimax/minimax-m3.1-flash:free",
+      "passed": 0,
+      "total": 6,
+      "errored": true,
+      "failures": [
+        "error: empty completion, provider returned error"
+      ]
+    },
+    {
+      "skill": "find-roles",
+      "id": "find-roles-o1",
+      "model": "minimax/minimax-m3.1-flash:free",
+      "passed": 9,
+      "total": 9,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "follow-up",
+      "id": "follow-up-o1",
+      "model": "minimax/minimax-m3.1-flash:free",
+      "passed": 6,
+      "total": 6,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "negotiation",
+      "id": "negotiation-o1",
+      "model": "minimax/minimax-m3.1-flash:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "reply",
+      "id": "reply-o1",
+      "model": "minimax/minimax-m3.1-flash:free",
+      "passed": 5,
+      "total": 5,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "role-fit",
+      "id": "role-fit-o1",
+      "model": "minimax/minimax-m3.1-flash:free",
+      "passed": 5,
+      "total": 5,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "search-strategy",
+      "id": "search-strategy-o1",
+      "model": "minimax/minimax-m3.1-flash:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    },
+    {
+      "skill": "tailor-resume",
+      "id": "tailor-resume-o1",
+      "model": "minimax/minimax-m3.1-flash:free",
+      "passed": 0,
+      "total": 5,
+      "errored": true,
+      "failures": [
+        "error: empty completion, provider returned error"
+      ]
+    },
+    {
+      "skill": "visa-sponsorship",
+      "id": "visa-sponsorship-o1",
+      "model": "minimax/minimax-m3.1-flash:free",
+      "passed": 4,
+      "total": 4,
+      "errored": false,
+      "failures": []
+    }
+  ],
+  "requests": {
+    "requests": 66,
+    "cacheHits": 6,
+    "retries": 15
+  }
+}
