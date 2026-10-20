@@ -5,10 +5,15 @@ import { NextRequest } from 'next/server'
 import { continueBody, signContinue } from '@/lib/clock/sign'
 
 const runRoutineMock = vi.fn()
+const resumeMock = vi.fn()
+const advanceMock = vi.fn()
 
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({ fake: 'admin' }) }))
 vi.mock('@/lib/clock/routines/index', () => ({ HANDLERS: { 'roles.check': () => undefined } }))
 vi.mock('@/lib/clock/routines', () => ({ runRoutine: (...args: unknown[]) => runRoutineMock(...args) }))
+
+vi.mock('@/lib/chat/run', () => ({ resumeChatTurn: (...args: unknown[]) => resumeMock(...args) }))
+vi.mock('@/lib/advance', () => ({ advanceOne: (...args: unknown[]) => advanceMock(...args) }))
 
 import { POST } from './route'
 
@@ -23,6 +28,8 @@ function post(body: string, signature?: string | null) {
 beforeEach(() => {
   process.env.AGENT_CONTINUE_SECRET = SECRET
   runRoutineMock.mockReset().mockResolvedValue({ ran: true, done: true, ok: true })
+  resumeMock.mockReset().mockResolvedValue(true)
+  advanceMock.mockReset().mockResolvedValue(undefined)
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -66,10 +73,49 @@ describe('POST /api/agent/continue', () => {
     expect(runRoutineMock).not.toHaveBeenCalled()
   })
 
-  it('answers the engine reasons and does nothing until the engine is here', async () => {
-    const body = continueBody({ reason: 'stale', thread_id: 't1' })
-    expect((await POST(post(body, signContinue(body, SECRET)))).status).toBe(202)
+  it('resumes a stale chat turn and ignores other threads', async () => {
+    const stale = continueBody({ reason: 'stale', thread_id: 'chat-1', turn_id: 'turn-1' })
+    expect((await POST(post(stale, signContinue(stale, SECRET)))).status).toBe(202)
+    expect(resumeMock).toHaveBeenCalledTimes(1)
+    expect(resumeMock).toHaveBeenCalledWith({ fake: 'admin' }, 'chat-1', 'turn-1')
+
+    resumeMock.mockClear()
+    for (const payload of [{ reason: 'due', thread_id: 'chat-1' }, { reason: 'stale' }, { reason: 'due', scheduled_task_id: 's1' }] as const) {
+      const body = continueBody(payload)
+      expect((await POST(post(body, signContinue(body, SECRET)))).status).toBe(202)
+    }
+    expect(resumeMock).not.toHaveBeenCalled()
     expect(runRoutineMock).not.toHaveBeenCalled()
+  })
+
+  it('carries a chat slice on with its turn and slice count', async () => {
+    const body = continueBody({ reason: 'slice', thread_id: 'chat-1', turn_id: 'turn-1', slice: { n: 2 } })
+    expect((await POST(post(body, signContinue(body, SECRET)))).status).toBe(202)
+    expect(resumeMock).toHaveBeenCalledWith({ fake: 'admin' }, 'chat-1', 'turn-1', 2)
+    expect(runRoutineMock).not.toHaveBeenCalled()
+
+    resumeMock.mockClear()
+    const noCount = continueBody({ reason: 'slice', thread_id: 'chat-1', turn_id: 'turn-1', slice: {} })
+    await POST(post(noCount, signContinue(noCount, SECRET)))
+    expect(resumeMock).toHaveBeenCalledWith({ fake: 'admin' }, 'chat-1', 'turn-1', 0)
+  })
+
+  it('a routine slice still goes to the routine, and a slice with nothing to carry on does nothing', async () => {
+    const both = continueBody({ reason: 'slice', routine_id: 'r1', thread_id: 'chat-1', slice: { n: 1 } })
+    await POST(post(both, signContinue(both, SECRET)))
+    expect(runRoutineMock).toHaveBeenCalledTimes(1)
+    expect(resumeMock).not.toHaveBeenCalled()
+
+    const bare = continueBody({ reason: 'slice' })
+    expect((await POST(post(bare, signContinue(bare, SECRET)))).status).toBe(202)
+    expect(resumeMock).not.toHaveBeenCalled()
+    expect(runRoutineMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('moves one application a step on advance', async () => {
+    const body = continueBody({ reason: 'advance', application_id: 'a1' })
+    await POST(post(body, signContinue(body, SECRET)))
+    expect(advanceMock).toHaveBeenCalledWith({ fake: 'admin' }, 'a1')
   })
 
   it('does not fail the request when the routine throws', async () => {
