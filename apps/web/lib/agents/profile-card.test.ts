@@ -22,6 +22,11 @@ describe('profileCard', () => {
     expect(card.length).toBeLessThan(1500)
   })
 
+  it('names the role types the person saved', async () => {
+    const admin = makeFakeAdmin({ profiles: [{ id: 'u1', preferences: { targeting: { role_types: ['ai-engineer', 'ml-engineer', 'nope'] } } }] })
+    expect(await profileCard(admin, 'u1')).toContain('Role types: AI Engineer, ML Engineer')
+  })
+
   it('no resume tells the model to ask for one before writing anything', async () => {
     const admin = makeFakeAdmin({ profiles: [{ id: 'u1', full_name: null, resume_text: '', preferences: {} }] })
     const card = await profileCard(admin, 'u1')
