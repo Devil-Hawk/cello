@@ -28,6 +28,8 @@
   "/(app)/search/page": 180429,
   "/(app)/settings/access/page": 128410,
   "/(app)/settings/page": 237670,
+  "/(app)/settings/skills/page": 102605,
+  "/(app)/settings/tools/page": 143053,
   "/(app)/today/page": 102195,
   "/(app)/welcome/page": 173261,
   "/_not-found/page": 87859,
