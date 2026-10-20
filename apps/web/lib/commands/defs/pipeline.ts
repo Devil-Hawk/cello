@@ -23,8 +23,10 @@ export const STARTS_PER_TURN = 3
 const NOT_FOUND = 'That role is not in your stored roles.'
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 const noStop = { checkStop: async () => undefined } as Pick<WorkerBranch, 'checkStop'> & { signal?: AbortSignal }
+/** True once the branch's row is stopped. */
+const stoppedNow = (branch: Pick<WorkerBranch, 'checkStop'>) => () => branch.checkStop().then(() => false, () => true)
 
-/** The work, or a StoppedError the moment the branch's signal aborts. The work itself is not cancelled (ponytail: advanceOne takes no signal, so it finishes on its own). */
+/** The work, or a StoppedError the moment the branch's signal aborts. The work is not cancelled: advanceOne is told to stop (shouldStop) and pauses the application at its next step. */
 const untilStopped = <T>(work: Promise<T>, signal?: AbortSignal): Promise<T> =>
   !signal
     ? work
@@ -100,7 +102,7 @@ export const applicationsStart = defineCommand({
         // The chat holds the application from now on, so each step reaches it as a status turn.
         if (ctx.chat) await attach(db, ctx.userId, ctx.chat.chatId, { kind: 'application', ref: { id: applicationId } }, { origin: 'model', turnId: ctx.chat.turnId, returned: new Set([ledgerKey('application', applicationId)]) })
         await branch.checkStop()
-        await untilStopped(advanceOne(db, applicationId), branch.signal)
+        await untilStopped(advanceOne(db, applicationId, { shouldStop: stoppedNow(branch) }), branch.signal)
       }
       const { data: after } = await db.from('applications').select('state').eq('id', applicationId).maybeSingle()
       const state = (after as { state: string | null } | null)?.state ?? 'preparing'
@@ -112,7 +114,7 @@ export const applicationsStart = defineCommand({
     const scope = ctx.chat && { db, userId: ctx.userId, threadId: ctx.chat.chatId, chatId: ctx.chat.chatId, turnId: ctx.chat.turnId }
     if (ids.length === 1) {
       const job = jobs[0]
-      const one = await (scope ? withWorker(scope, { command: 'applications.start', title: `Preparing ${job.title}`, object: { kind: 'role', ref: job.id } }, () => startOne(job, noStop)) : startOne(job, noStop))
+      const one = await (scope ? withWorker(scope, { command: 'applications.start', title: `Preparing ${job.title}`, object: { kind: 'role', ref: job.id } }, (_id, branch) => startOne(job, branch), { signal: ctx.signal }) : startOne(job, noStop))
       return { sentence: `Started ${job.title}. It is now ${one.state.replace('_', ' ')}. ${tail}`, application_id: one.application_id, state: one.state, steps: one.steps, applications: [{ job_id: one.job_id, application_id: one.application_id, state: one.state }] }
     }
 
