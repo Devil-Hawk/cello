@@ -354,11 +354,11 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   // While a new line is pending the rows are the earlier turn's, so none are shown.
   const work = pendingLine === null ? turnTasks.filter((t) => t.command !== 'chat.turn') : []
 
-  // A chat opens at its newest turn, and a new turn or row keeps the person there unless they have scrolled up to read.
+  // A chat opens at its newest turn, and a new turn, row, word or tool line keeps the person there unless they have scrolled up to read.
   useEffect(() => {
     const el = scroller.current
     if (el && stuck.current) el.scrollTop = el.scrollHeight
-  }, [chatId, page?.turns.length, tasks.length, pendingLine])
+  }, [chatId, page?.turns.length, tasks.length, pendingLine, live])
 
   // Selecting text in one of Cello's answers offers "Ask Cello": the selection becomes a quote above the compose box,
   // kept apart from what the person types. It never counts as their words.
