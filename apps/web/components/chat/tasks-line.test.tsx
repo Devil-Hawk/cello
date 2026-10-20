@@ -21,6 +21,14 @@ describe('TasksLine', () => {
     expect(text(line([task(1, { status: 'queued', command: 'chat.plan.step' }), task(2), removed]))).toContain('Cello is working: 0 of 2 done.')
   })
 
+  it('shows Stopped for a worker row whose summary is the library error', () => {
+    const row = task(1, { status: 'stopped', command: 'applications.start', summary: 'This operation was aborted' })
+    expect(text(line([row], { defaultOpen: true }))).toContain('Research company 1 Stopped')
+    expect(text(line([row], { defaultOpen: true }))).not.toContain('aborted')
+    const plan = task(2, { status: 'stopped', command: 'chat.plan.step', summary: 'Removed by you' })
+    expect(text(line([plan], { defaultOpen: true }))).toContain('Removed by you')
+  })
+
   it('lists each task with its state, its reads and a Stop for the ones still going only', () => {
     const out = line([task(1, { status: 'done', reads: 3 }), task(2, { status: 'stopped' }), task(3, { status: 'failed' }), task(4, { reads: 1 })], { defaultOpen: true })
     expect(text(out)).toContain('Research company 1 Done 3 pages read')

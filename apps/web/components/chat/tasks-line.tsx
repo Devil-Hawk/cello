@@ -34,8 +34,8 @@ const alive = (s: TaskStatus) => s === 'queued' || s === 'working'
 
 const isPlan = (t: TaskRow) => t.command?.startsWith('chat.plan') ?? false
 
-/** The state cell: a stopped row's own reason and an added row's note, else the word. A failed row's summary can hold raw text, so it is never shown. */
-const stateText = (t: TaskRow) => ((t.status === 'stopped' || t.command === 'chat.plan.added') && t.summary ? t.summary : STATUS_WORDS[t.status])
+/** The state cell: a plan row's own note (Removed by you, Added after the plan started), else the word. Any other row's summary can hold raw text (a stopped worker keeps the library's error), so it is never shown. */
+const stateText = (t: TaskRow) => (isPlan(t) && (t.status === 'stopped' || t.command === 'chat.plan.added') && t.summary ? t.summary : STATUS_WORDS[t.status])
 
 /** m:ss */
 export const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.max(0, Math.floor(seconds % 60))).padStart(2, '0')}`
