@@ -198,11 +198,11 @@ function firstAnswerOnly(m: AIMessage): AIMessage {
   const first = calls.find(isAnswerCall)
   const dropped = new Set(calls.filter((c) => isAnswerCall(c) && c !== first).map((c) => c.id))
   const kept = <T extends { id?: string }>(c: T) => !dropped.has(c.id)
-  const kwargs = m.additional_kwargs as { tool_calls?: { id?: string }[] }
+  const kwargs = m.additional_kwargs
   return new AIMessage({
     content: Array.isArray(m.content) ? m.content.filter((b) => kept(b as { id?: string })) : m.content,
     tool_calls: calls.filter(kept),
-    additional_kwargs: Array.isArray(kwargs.tool_calls) ? { ...kwargs, tool_calls: kwargs.tool_calls.filter(kept) } : m.additional_kwargs,
+    additional_kwargs: kwargs.tool_calls ? { ...kwargs, tool_calls: kwargs.tool_calls.filter(kept) } : kwargs,
     response_metadata: m.response_metadata,
     usage_metadata: m.usage_metadata,
     id: m.id,
