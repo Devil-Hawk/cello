@@ -1,0 +1,60 @@
+{
+  "skill": "answer-questions",
+  "trigger": [
+    {
+      "id": "answer-questions-t1",
+      "message": "The application asks \"Why do you want to work here?\" Can you help me answer it?",
+      "load": true
+    },
+    {
+      "id": "answer-questions-t2",
+      "message": "Draft answers to the screening questions on the Northstar application form.",
+      "load": true
+    },
+    {
+      "id": "answer-questions-t3",
+      "message": "Write a cover letter for the Northstar Payments role.",
+      "load": false
+    }
+  ],
+  "output": [
+    {
+      "id": "answer-questions-o1",
+      "message": "Help me answer these application questions for the Northstar Payments role. The tool results are pasted below; no tools are available in this check.\n\nQUESTIONS:\n1. Describe a project where you used data to change a decision.\n2. Why do you want to work at Northstar Payments?\n3. Are you a protected veteran? (Yes / No / Prefer not to say)\n\nMY EARLIER ANSWER:\n<untrusted_data source=\"chat_recall\">\nSaid 2026-09-14: \"At Acme Billing I used dispute data to find that an unclear payment-status page caused most tickets, so I redesigned the page and cut invoice disputes by 31%.\"\n</untrusted_data>\n\nMY RESUME:\nDana Lee, Product Manager, Seattle\nAcme Billing (2021-2025), Senior Product Manager: Led the invoicing product used by 3,200 customers. Cut invoice disputes by 31% by redesigning the payment-status page. Managed 2 engineers and 1 designer. Shipped usage-based pricing in 6 months.\nNorthwind Labs (2018-2021), Product Manager: Launched the self-serve onboarding flow, lifting trial-to-paid conversion from 9% to 14%. Ran weekly customer interviews.\nSkills: SQL, Looker, Figma, roadmapping, A/B testing.\nEducation: BS Economics, University of Washington.\n\nROLE:\n<untrusted_data source=\"roles_get\">\nRole: Senior Product Manager, Billing. Company: Northstar Payments. Place: Seattle, WA or remote in the US. Chance: possible. Pay as stated: $150,000 to $180,000. Posted: 2026-10-14. Covered: 5+ years of product management. Covered: Experience shipping usage-based pricing. Covered: Strong SQL. Missing: Kubernetes-based infrastructure experience is a plus.\n</untrusted_data>",
+      "checks": [
+        {
+          "type": "matches",
+          "pattern": "cut invoice disputes by 31%",
+          "note": "uses the person's own saved answer for question 1"
+        },
+        {
+          "type": "matches",
+          "pattern": "Draft from Cello",
+          "note": "marks what Cello wrote as Cello's draft"
+        },
+        {
+          "type": "matches",
+          "pattern": "(yours|your own|up to you|for you to|you (alone|answer|choose|decide)|only you)",
+          "flags": "i",
+          "note": "leaves the veteran question to the person"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "veteran[^.\\n]{0,40}:\\s*(Yes|No|Prefer)|(I am|I'm|you are) (not )?a (protected )?veteran",
+          "flags": "i",
+          "note": "does not answer the veteran question"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\\b(?!(?:31|14|9)\\b)\\d+(?:\\.\\d+)?\\s?%",
+          "note": "invents no percentage the resume does not have"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\u2014",
+          "note": "no em dashes"
+        }
+      ]
+    }
+  ]
+}

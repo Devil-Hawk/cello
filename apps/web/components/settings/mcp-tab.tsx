@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertCircle,
   CheckCircle,
@@ -24,6 +24,123 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+
+/** What Cello does with a tool of the person's own, said once at the top of the page. */
+export const RULE =
+  'Cello uses a tool freely only when its server says it only reads and it sends nothing to anyone. Every other tool asks you first. A tool you mark Never is left out.'
+
+export type Tier = 'read' | 'confirm' | 'never'
+export const TIER_WORDS: Record<Tier, string> = { read: 'Reads freely', confirm: 'Asks you first', never: 'Never' }
+
+/** One tool of a server, as GET /api/settings/mcp?tools=<id> gives it. */
+export interface McpToolView {
+  name: string
+  description: string
+  tier: Tier
+  never: boolean
+}
+
+export type ToolsState = { phase: 'loading' } | { phase: 'error'; error: string } | { phase: 'ready'; tools: McpToolView[] }
+
+const TRY_AGAIN = 'Cello could not read the tools. Try again.'
+
+async function errorOf(res: Response, fallback: string): Promise<string> {
+  const body = (await res.json().catch(() => null)) as { error?: unknown } | null
+  return typeof body?.error === 'string' && body.error ? body.error : fallback
+}
+
+/** The server's tools, read live. A server that cannot be reached comes back as its own plain sentence. */
+export async function readTools(id: string, f: typeof fetch = fetch): Promise<{ ok: true; tools: McpToolView[] } | { ok: false; error: string }> {
+  try {
+    const res = await f(`/api/settings/mcp?tools=${encodeURIComponent(id)}`)
+    if (!res.ok) return { ok: false, error: await errorOf(res, TRY_AGAIN) }
+    const body = (await res.json()) as { ok?: boolean; tools?: McpToolView[]; error?: string }
+    if (body.ok && Array.isArray(body.tools)) return { ok: true, tools: body.tools }
+    return { ok: false, error: body.error || TRY_AGAIN }
+  } catch {
+    return { ok: false, error: TRY_AGAIN }
+  }
+}
+
+/** Marks a tool Never, or takes the mark off. */
+export async function setNever(id: string, tool: string, never: boolean, f: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await f(`/api/settings/mcp?id=${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool, never }),
+    })
+    return res.ok ? { ok: true } : { ok: false, error: await errorOf(res, 'Cello could not save that. Try again.') }
+  } catch {
+    return { ok: false, error: 'Cello could not save that. Try again.' }
+  }
+}
+
+/** The list after a mark, before the server is asked again. Taking the mark off needs the server's own word for the tier. */
+export function withNever(tools: McpToolView[], tool: string, never: boolean): McpToolView[] {
+  return tools.map((t) => (t.name === tool ? { ...t, never, tier: never ? 'never' : t.tier } : t))
+}
+
+/** A server's tools: loading, cannot connect, none, or each with its tier and the Never switch. */
+export function ToolsView({ server, state, saving, onNever, onRetry }: { server: string; state: ToolsState; saving?: string | null; onNever: (tool: string, never: boolean) => void; onRetry: () => void }) {
+  if (state.phase === 'loading') return <p className="mt-2 text-caption text-muted-foreground" role="status">Reading the tools on {server}</p>
+  if (state.phase === 'error') {
+    return (
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        <p className="text-caption text-red-600 dark:text-red-400" role="alert">{state.error}</p>
+        <Button variant="outline" size="sm" className="min-h-11 min-w-11" onClick={onRetry}>Try again</Button>
+      </div>
+    )
+  }
+  if (state.tools.length === 0) return <p className="mt-2 text-caption text-muted-foreground">This server lists no tools.</p>
+  return (
+    <ul className="mt-2 divide-y divide-border">
+      {state.tools.map((t) => (
+        <li key={t.name} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2">
+          <div className="min-w-0 flex-1 basis-56">
+            <p className="break-words font-mono text-body text-foreground">{t.name}</p>
+            {t.description && <p className="break-words text-caption text-muted-foreground">{t.description}</p>}
+            <p className="text-caption text-foreground">{TIER_WORDS[t.never ? 'never' : t.tier]}</p>
+          </div>
+          <label className="inline-flex min-h-11 min-w-11 cursor-pointer items-center gap-2 text-caption text-foreground">
+            <input type="checkbox" role="switch" className="h-4 w-4" aria-label={`Never use ${t.name}`} checked={t.never} disabled={saving === t.name} onChange={(e) => onNever(t.name, e.target.checked)} />
+            Never use
+          </label>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** Opens on demand so the page does not connect to every server just to show its name. */
+function ServerTools({ server, onStatus }: { server: McpServer; onStatus: McpTabProps['onStatus'] }) {
+  const [state, setState] = useState<ToolsState | null>(null)
+  const [saving, setSaving] = useState<string | null>(null)
+  const load = useCallback(async () => {
+    setState({ phase: 'loading' })
+    const r = await readTools(server.id)
+    setState(r.ok ? { phase: 'ready', tools: r.tools } : { phase: 'error', error: r.error })
+  }, [server.id])
+  async function onNever(tool: string, never: boolean) {
+    setSaving(tool)
+    const r = await setNever(server.id, tool, never)
+    setSaving(null)
+    if (!r.ok) return onStatus('error', r.error)
+    setState((st) => (st?.phase === 'ready' ? { phase: 'ready', tools: withNever(st.tools, tool, never) } : st))
+    if (!never) {
+      const again = await readTools(server.id)
+      if (again.ok) setState({ phase: 'ready', tools: again.tools })
+    }
+  }
+  return (
+    <details className="mt-3" onToggle={(e) => e.currentTarget.open && state === null && void load()}>
+      <summary className="flex min-h-11 cursor-pointer select-none items-center gap-1 text-caption text-muted-foreground">
+        <ChevronDown className="h-3.5 w-3.5" aria-hidden /> Tools on {server.name}
+      </summary>
+      {state && <ToolsView server={server.name} state={state} saving={saving} onNever={(t, n) => void onNever(t, n)} onRetry={() => void load()} />}
+    </details>
+  )
+}
 
 export interface McpTabProps {
   onStatus: (status: 'success' | 'error', message: string) => void
@@ -256,31 +373,26 @@ export function McpTab({ onStatus }: McpTabProps) {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="font-display text-section text-foreground">MCP servers</h2>
-        <p className="mt-1 text-caption text-muted-foreground">
-          Connect any Model Context Protocol server and its tools become available to the
-          copilot as <code className="rounded bg-sunken px-1 py-0.5">mcp:&lt;name&gt;:&lt;tool&gt;</code>.
-          Disabling a server removes its tools from the copilot immediately — enforced on every
-          call, not just hidden from the list it's shown.
-        </p>
+        <h2 className="font-display text-section text-foreground">Your servers</h2>
+        <p className="mt-1 text-caption text-muted-foreground">{RULE}</p>
       </div>
 
       <div className="rounded-card border bg-sunken p-4 text-caption text-muted-foreground">
         <p className="font-medium text-foreground">These are third-party servers.</p>
         <p className="mt-1">
-          Cello only ever treats what a connected server describes or returns as data for the
-          copilot to read — never as instructions it obeys, and never a reason to skip your
-          confirmation before a destructive action. Only connect servers you trust.
+          Cello only ever treats what a connected server describes or returns as text to read,
+          never as instructions it obeys, and never a reason to skip your Confirm before a call
+          that sends or changes something. Only connect servers you trust.
         </p>
       </div>
 
       {isLoading ? (
-        <p className="text-caption text-muted-foreground">Loading…</p>
+        <p className="text-caption text-muted-foreground">Reading your servers.</p>
       ) : (
         <div className="space-y-3">
           {servers.length === 0 && !form && (
             <div className="rounded-card border border-dashed p-6 text-center text-caption text-muted-foreground">
-              No MCP servers connected yet.
+              You have not connected a server yet. Add one to give Cello your own tools.
             </div>
           )}
 
@@ -357,6 +469,8 @@ export function McpTab({ onStatus }: McpTabProps) {
                   </div>
                 </div>
 
+                <ServerTools server={s} onStatus={onStatus} />
+
                 {result?.ok && result.toolNames && result.toolNames.length > 0 && (
                   <details className="mt-3">
                     <summary className="flex cursor-pointer select-none items-center gap-1 text-caption text-muted-foreground">
@@ -392,7 +506,7 @@ export function McpTab({ onStatus }: McpTabProps) {
                 disabled={Boolean(form.id)}
               />
               <p className="mt-1 text-caption text-muted-foreground">
-                Letters, numbers, "_", "-" only — this becomes the tool prefix{' '}
+                Letters, numbers, "_" and "-" only. This becomes the tool prefix{' '}
                 <code className="rounded bg-sunken px-1">mcp:{form.name || '<name>'}:*</code>.
                 {form.id && ' Cannot be changed after creation.'}
               </p>
@@ -408,10 +522,10 @@ export function McpTab({ onStatus }: McpTabProps) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="http">HTTP (Streamable HTTP — recommended)</SelectItem>
+                  <SelectItem value="http">HTTP (streamable, recommended)</SelectItem>
                   <SelectItem value="sse">SSE (legacy transport)</SelectItem>
                   <SelectItem value="stdio" disabled={!stdioAvailable}>
-                    stdio {!stdioAvailable && '— unavailable on this (serverless) deployment'}
+                    stdio {!stdioAvailable && '(unavailable on this deployment)'}
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -462,7 +576,7 @@ export function McpTab({ onStatus }: McpTabProps) {
                 )}
               >
                 {testResults.draft.ok
-                  ? `Connected — found ${testResults.draft.toolCount ?? 0} tool(s): ${(testResults.draft.toolNames ?? []).join(', ')}`
+                  ? `Connected. Found ${testResults.draft.toolCount ?? 0} tool(s): ${(testResults.draft.toolNames ?? []).join(', ')}`
                   : `Failed: ${testResults.draft.error}`}
               </div>
             )}
@@ -485,9 +599,37 @@ export function McpTab({ onStatus }: McpTabProps) {
       ) : (
         <Button variant="outline" onClick={startAdd} className="h-9">
           <Plus className="h-4 w-4" />
-          Add MCP server
+          Add a server
         </Button>
       )}
+    </div>
+  )
+}
+
+/** The tab on its own page: Settings shows a banner for onStatus, so the page needs one of its own. */
+export function McpPage() {
+  const [banner, setBanner] = useState<{ ok: boolean; text: string } | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current)
+    },
+    []
+  )
+  return (
+    <div className="space-y-4">
+      {banner && (
+        <p className="text-caption text-foreground" role={banner.ok ? 'status' : 'alert'}>
+          {banner.text}
+        </p>
+      )}
+      <McpTab
+        onStatus={(s, text) => {
+          setBanner({ ok: s === 'success', text })
+          if (timer.current) clearTimeout(timer.current)
+          timer.current = setTimeout(() => setBanner(null), 4000)
+        }}
+      />
     </div>
   )
 }

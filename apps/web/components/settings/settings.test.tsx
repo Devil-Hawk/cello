@@ -52,6 +52,20 @@ describe('Settings sections', () => {
     expect(out).not.toMatch(/gpt-|claude-|gemini-|anthropic\/|openai\/|google\/|:free/i)
   })
 
+  it('links Connections to Your own tools and Your skills, each with one sentence, and keeps no fold of tools', () => {
+    const out = text(<SettingsView owner={false} />)
+    const connections = out.slice(out.indexOf('id="connections-h"'), out.indexOf('id="spend-h"'))
+    expect(connections).toMatch(/<a [^>]*href="\/settings\/tools"[^>]*>Your own tools<\/a>/)
+    expect(connections).toMatch(/<a [^>]*href="\/settings\/skills"[^>]*>Your skills<\/a>/)
+    expect(connections).toContain('Connect servers of your own and choose what Cello may do with each tool.')
+    expect(connections).toContain('Add a skill that tells Cello how to do one thing, or see the ones Cello has.')
+    expect(out).not.toContain('id="fold-tools"')
+  })
+
+  it('sends an old ?tab=mcp link to the Connections section', () => {
+    expect(TAB_TARGET.mcp).toEqual({ section: 'connections' })
+  })
+
   it('gives every old tab a place', () => {
     for (const tab of ['connections', 'sources', 'search', 'mcp', 'tokens', 'api-keys', 'provider', 'model']) expect(TAB_TARGET[tab]).toBeTruthy()
   })

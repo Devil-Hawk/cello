@@ -48,6 +48,8 @@ export interface McpServerRow {
    *  when the server needs none. NEVER plaintext, NEVER logged. */
   headers: string | null
   enabled: boolean
+  /** Tools the person marked Never, by the name the server gives them. Only the value 'never' exists. A null column reads as {}. */
+  tool_rules: Record<string, 'never'>
   last_connected_at: string | null
   last_error: string | null
   created_at: string

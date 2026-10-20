@@ -96,7 +96,7 @@ export function toConfig(row: McpServerRow): McpServerConfig {
 export async function listServers(admin: AdminClient, userId: string): Promise<McpServerRow[]> {
   const { data, error } = await admin
     .from(TABLE)
-    .select('id, user_id, name, transport, url, headers, enabled, last_connected_at, last_error, created_at')
+    .select('id, user_id, name, transport, url, headers, enabled, tool_rules, last_connected_at, last_error, created_at')
     .eq('user_id', userId)
     .order('created_at', { ascending: true })
   if (error) {
@@ -105,12 +105,14 @@ export async function listServers(admin: AdminClient, userId: string): Promise<M
     console.error('mcp: listServers failed', error.message)
     return []
   }
-  return (data as McpServerRow[]) ?? []
+  return ((data as McpServerRow[]) ?? []).map(withRules)
 }
+
+const withRules = (row: McpServerRow): McpServerRow => ({ ...row, tool_rules: row.tool_rules ?? {} })
 
 export async function getServer(admin: AdminClient, userId: string, id: string): Promise<McpServerRow | null> {
   const { data } = await admin.from(TABLE).select('*').eq('user_id', userId).eq('id', id).maybeSingle()
-  return (data as McpServerRow | null) ?? null
+  return data ? withRules(data as McpServerRow) : null
 }
 
 /**
@@ -205,6 +207,24 @@ export async function updateServer(
   const { data, error } = await admin.from(TABLE).update(update).eq('user_id', userId).eq('id', id).select('*').single()
   if (error) throw new McpError(`Failed to update server: ${error.message}`)
   return data as McpServerRow
+}
+
+/** Mark a tool Never (or clear the mark), scoped to the person. Null when the server is not theirs. */
+export async function setToolRule(
+  admin: AdminClient,
+  userId: string,
+  serverId: string,
+  tool: string,
+  never: boolean
+): Promise<McpServerRow | null> {
+  const existing = await getServer(admin, userId, serverId)
+  if (!existing) return null
+  const rules = { ...existing.tool_rules }
+  if (never) rules[tool] = 'never'
+  else delete rules[tool]
+  const { data, error } = await admin.from(TABLE).update({ tool_rules: rules }).eq('user_id', userId).eq('id', serverId).select('*').maybeSingle()
+  if (error) throw new McpError(`Failed to save the rule: ${error.message}`)
+  return data ? withRules(data as McpServerRow) : null
 }
 
 export async function deleteServer(admin: AdminClient, userId: string, id: string): Promise<void> {

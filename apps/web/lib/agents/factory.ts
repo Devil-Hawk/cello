@@ -20,7 +20,7 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { composeSystemPrompt, loadModeDoc } from '@/lib/harness/prompts'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { PERMISSIONS, SKILLS_OFF, celloBackend } from './backends'
+import { PERMISSIONS, SKILLS_OFF, celloBackend, type SkillTier } from './backends'
 import type { AgentContext } from './context'
 import { toolStrategy } from 'langchain'
 import { guardStack, type AnswerShape, type GuardStackOptions } from './middleware'
@@ -67,6 +67,8 @@ export interface CelloAgentInput {
   researcherModel?: BaseChatModel
   fallbacks?: GuardStackOptions['fallbacks']
   skillsDir?: string
+  /** The kind of model this turn runs on. Cello's own skills are served only where they met their bars; free when left out. */
+  skillsTier?: SkillTier
   /** A test and eval seam: replaces the skills that are switched off, so an eval can still measure one. */
   hiddenSkills?: readonly string[]
   /** Tools from the person's own MCP servers, already checked and prefixed. */
@@ -155,7 +157,8 @@ export function createCelloAgent(input: CelloAgentInput & { kind: 'orchestrator'
       systemPrompt: composeSystemPrompt({ mode: loadModeDoc('chat'), stableContext: input.profileCard }),
       tools: (input.tools ?? []) as never,
       subagents: [researcherSpec(input, 'general-purpose')],
-      backend: celloBackend({ admin: ctx.admin, userId: ctx.userId, skillsDir: input.skillsDir, hiddenSkills: input.hiddenSkills }),
+      skills: ['/skills/', '/my-skills/'],
+      backend: celloBackend({ admin: ctx.admin, userId: ctx.userId, skillsDir: input.skillsDir, hiddenSkills: input.hiddenSkills, skillsTier: input.skillsTier }),
       permissions: PERMISSIONS.orchestrator,
       middleware: guards(input, 'orchestrator', typeof answer?.safeParse === 'function' ? answer : undefined),
       checkpointer: input.saver,

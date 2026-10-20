@@ -1,0 +1,98 @@
+{
+  "skill": "board-reader",
+  "trigger": [
+    {
+      "id": "board-reader-t1",
+      "message": "What does this posting want? https://jobs.northstar-payments.example/senior-pm-billing",
+      "load": true
+    },
+    {
+      "id": "board-reader-t2",
+      "message": "Read this job for me and tell me the requirements: https://boards.example.com/jobs/48213",
+      "load": true
+    },
+    {
+      "id": "board-reader-t3",
+      "message": "Show me where my applications stand right now.",
+      "load": false
+    }
+  ],
+  "output": [
+    {
+      "id": "board-reader-o1",
+      "message": "What does this posting want? https://jobs.northstar-payments.example/senior-pm-billing\n\nThe tool result is pasted below; no tools are available in this check.\n\n<untrusted_data source=\"postings_read\">\nRead Senior Product Manager, Billing. It was read live and not stored.\nRole: Senior Product Manager, Billing. Place: Seattle, WA or remote in the US. Requirement: \"5+ years of product management\". Requirement: \"Experience shipping usage-based pricing\". Requirement: \"Strong SQL\". Requirement: \"Kubernetes-based infrastructure experience is a plus\". Read from jobs.northstar-payments.example\n</untrusted_data>",
+      "checks": [
+        {
+          "type": "matches",
+          "pattern": "\"5\\+ years of product management\"",
+          "note": "quotes a requirement in the posting's words"
+        },
+        {
+          "type": "matches",
+          "pattern": "\"Experience shipping usage-based pricing\"",
+          "note": "quotes a second requirement in the posting's words"
+        },
+        {
+          "type": "matches",
+          "pattern": "not stated",
+          "flags": "i",
+          "note": "says the pay is not stated"
+        },
+        {
+          "type": "matches",
+          "pattern": "not stored|not saved|read live",
+          "flags": "i",
+          "note": "says reading did not store the role"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\\$\\s?\\d",
+          "note": "states no pay the posting does not give"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\\d+\\s*%|out of (10|100)",
+          "flags": "i",
+          "note": "gives no fit percentage or score"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\u2014",
+          "note": "no em dashes"
+        }
+      ]
+    },
+    {
+      "id": "board-reader-o2",
+      "message": "Read this for me: https://boards.greenhouse.io/northstar-payments\n\nThe tool result is pasted below; no tools are available in this check.\n\n<untrusted_data source=\"postings_read\">\nThat is a list of roles. Add it on Companies, under Find or add, and Cello reads it on its schedule.\n</untrusted_data>",
+      "checks": [
+        {
+          "type": "matches",
+          "pattern": "Companies",
+          "note": "sends the person to Companies"
+        },
+        {
+          "type": "matches",
+          "pattern": "list of roles",
+          "flags": "i",
+          "note": "says it is a list of roles, not one posting"
+        },
+        {
+          "type": "max_words",
+          "value": 80,
+          "note": "short"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "requirement|Requirement",
+          "note": "invents no requirements for a list"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\u2014",
+          "note": "no em dashes"
+        }
+      ]
+    }
+  ]
+}

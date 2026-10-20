@@ -14,6 +14,19 @@ vi.mock('@/lib/search', () => ({
   webSearch: async () => ({ ok: true, backend: 'test', results: [{ title: 'Acme', url: 'https://acme.example', snippet: 'Robots' }] }),
 }))
 
+// A recorded run of our own: company-research met both bars, visa-sponsorship only its output checks.
+vi.mock('@/lib/evals/agent/reports/skills-s19.json', () => ({
+  default: {
+    perSkill: [
+      { skill: 'company-research', trigger: 1, checks: 1 },
+      { skill: 'visa-sponsorship', trigger: 0, checks: 1 },
+    ],
+  },
+}))
+vi.mock('@/lib/evals/agent/thresholds.json', () => ({
+  default: { skills: { 'company-research': { trigger: 0.8, checks: 0.9 }, 'visa-sponsorship': { trigger: 0.8, checks: 0.9 } } },
+}))
+
 import { MissingKeyError } from '@/lib/harness/providers'
 import type { AgentContext } from './context'
 import { SKILLS_OFF } from './backends'
@@ -324,5 +337,33 @@ describe('the plain chat core', () => {
     }
     expect(await read([])).toContain(`name: ${off}`)
     expect(await read()).not.toContain(`name: ${off}`)
+  })
+})
+
+describe('the chat loop and skills', () => {
+  const chatSystem = async (over: Record<string, unknown>, admin = makeFakeAdmin()) => {
+    const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('ok')] })
+    const agent = createCelloAgent({ kind: 'chat', ctx: ctx({ admin }), saver: new MemorySaver(), model, fallbacks: [], skillsDir: skills(), tools: [], responseFormat: undefined, ...over } as never)
+    await (agent as unknown as { invoke: (i: unknown, c: unknown) => Promise<unknown> }).invoke({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: `t-${Math.random()}` } })
+    const content = model.calls[0][0].content
+    return typeof content === 'string' ? content : content.map((b) => (b as { text?: string }).text ?? '').join('')
+  }
+
+  it("loads the person's own skills beside Cello's", async () => {
+    const admin = makeFakeAdmin({ person_skills: [{ user_id: 'u1', name: 'weekly-note', description: 'Write a weekly note.', body: 'Body', enabled: true }] })
+    const system = await chatSystem({}, admin)
+    expect(system).toContain('**weekly-note**')
+    expect(system).toContain('Write a weekly note.')
+  })
+
+  it("shows Cello's skills that met their bars on this kind of model and no others", async () => {
+    expect(await chatSystem({ skillsTier: 'free' })).toContain('**company-research**')
+    expect(await chatSystem({ skillsTier: 'free' })).not.toContain('**visa-sponsorship**')
+    for (const skillsTier of ['paid', 'local']) expect(await chatSystem({ skillsTier })).not.toContain('**company-research**')
+  })
+
+  it('leaves the Researcher with the skills that passed their output checks, on any tier', () => {
+    const s = researcherSpec({ ctx: ctx(), model: new ScriptedChatModel({ script: [] }), fallbacks: [], skillsDir: skills(), skillsTier: 'paid' } as never)
+    expect(String(s.systemPrompt)).toContain('Follow the company-research procedure.')
   })
 })
