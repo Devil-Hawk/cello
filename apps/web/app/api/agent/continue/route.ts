@@ -9,8 +9,10 @@
 // It answers 202 at once and does the work after the response, so the caller (the sweeper
 // especially) is never held for the length of a slice.
 //
-// The engine's reasons (stale, due) belong to the agent engine. Until it is on this deployment they
-// are accepted and answered, and nothing runs.
+// What each reason does: routine and a routine's slice run the routine; advance moves one application
+// a step; a chat slice (a thread_id and no routine_id) and a stale chat post carry an unfinished chat turn
+// on from its checkpoint (resumeChatTurn decides whether the thread is a chat turn at all); due, and any
+// reason without what it needs, are accepted, answered and logged.
 
 import { waitUntil } from '@vercel/functions'
 import { NextRequest, NextResponse } from 'next/server'
@@ -18,12 +20,21 @@ import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { HANDLERS } from '@/lib/clock/routines/index'
 import { runRoutine } from '@/lib/clock/routines'
 import { advanceOne } from '@/lib/advance'
+import { resumeChatTurn } from '@/lib/chat/run'
 import { verifyContinue, type ContinuePayload } from '@/lib/clock/sign'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
 async function carryOn(payload: ContinuePayload): Promise<void> {
+  if (payload.reason === 'slice' && typeof payload.thread_id === 'string' && typeof payload.routine_id !== 'string') {
+    await resumeChatTurn(createAdminClient(), payload.thread_id, payload.turn_id, typeof payload.slice?.n === 'number' ? payload.slice.n : 0)
+    return
+  }
+  if (payload.reason === 'stale' && typeof payload.thread_id === 'string') {
+    await resumeChatTurn(createAdminClient(), payload.thread_id, payload.turn_id)
+    return
+  }
   if (payload.reason === 'routine' || payload.reason === 'slice') {
     if (typeof payload.routine_id !== 'string') return
     await runRoutine(createAdminClient(), payload.routine_id, payload.slice ?? null, { handlers: HANDLERS })
@@ -33,8 +44,7 @@ async function carryOn(payload: ContinuePayload): Promise<void> {
     if (typeof payload.application_id === 'string') await advanceOne(createAdminClient(), payload.application_id)
     return
   }
-  // stale and due: the engine's. ponytail: nothing to hand them to until the engine's occurrences
-  // module is on this deployment (K8d adds the call here).
+  // due, and a stale or slice post with no thread: nothing to hand them to.
   console.error('[clock] nothing to do for', payload.reason)
 }
 

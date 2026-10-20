@@ -20,6 +20,7 @@ import {
   signContinue,
 } from './scheduler'
 import * as scheduler from './scheduler'
+import { verifyContinue } from '@/lib/clock/sign'
 import { makeFakeAdmin } from './testing/fake-admin'
 
 const SECRET = 'a-test-secret-that-is-long-enough'
@@ -128,6 +129,18 @@ describe('firing a continuation', () => {
     expect(url).toBe('http://example.test/api/agent/continue')
     expect(init.headers['x-cello-signature']).toBe(signContinue(init.body))
     expect(JSON.parse(init.body)).toMatchObject({ reason: 'slice', thread_id: 't1' })
+  })
+
+  it('signs a chat slice with its turn', async () => {
+    vi.stubEnv('AGENT_CONTINUE_URL', 'http://example.test/api/agent/continue')
+    const fetchImpl = vi.fn(async () => new Response('ok', { status: 202 }))
+    await fireContinue({ reason: 'slice', thread_id: 'chat-1', turn_id: 'turn-1', slice: { n: 1 } }, fetchImpl as never)
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, { body: string; headers: Record<string, string> }]
+    expect(JSON.parse(init.body)).toMatchObject({ reason: 'slice', thread_id: 'chat-1', turn_id: 'turn-1', slice: { n: 1 } })
+    expect(JSON.parse(init.body)).not.toHaveProperty('routine_id')
+    // The route checks it with lib/clock/sign.ts: the bytes and the key are the same.
+    const verdict = verifyContinue(init.body, init.headers['x-cello-signature'])
+    expect(verdict).toMatchObject({ ok: true, payload: { reason: 'slice', thread_id: 'chat-1', turn_id: 'turn-1', slice: { n: 1 } } })
   })
 
   it('uses waitUntil on Vercel so the response is not held', async () => {

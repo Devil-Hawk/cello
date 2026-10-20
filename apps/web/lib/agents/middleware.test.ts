@@ -18,10 +18,13 @@ vi.mock('@/lib/harness/spend', async (orig) => ({
   settleSpend: spend.settleSpend,
 }))
 
+vi.mock('@/lib/chat/workers', async (orig) => ({ ...(await orig<typeof import('@/lib/chat/workers')>()), STOP_POLL_MS: 20 }))
+
 import { BudgetCapError } from '@/lib/harness/spend'
+import { makeFakeAdmin } from './testing/fake-admin'
 import { isBudgetCapError } from './spend-port'
 import { tagRun } from './model'
-import { DEMO_SEND_REFUSAL, celloDeadline, celloDemoRules, celloSpend, celloStop, celloUntrusted, guardStack, quoteUntrusted, sanitizeUntrusted, type GuardContext } from './middleware'
+import { DEMO_SEND_REFUSAL, celloDeadline, celloDemoRules, celloSpend, celloStop, celloTaskRows, celloUntrusted, guardStack, quoteUntrusted, sanitizeUntrusted, type GuardContext } from './middleware'
 import { ScriptedChatModel, callTools, say } from './testing/scripted-model'
 
 const ctx = (over: Partial<GuardContext> = {}): GuardContext => ({
@@ -343,5 +346,91 @@ describe('CelloDeadline', () => {
     const done = await second.invoke(new Command({ resume: 'continue' }), config)
     expect(String(done.messages.at(-1)?.content)).toBe('finished')
     expect(model.calls).toHaveLength(1)
+  })
+})
+
+describe('CelloTaskRows', () => {
+  const task = (work: () => Promise<string>) => tool(work, { name: 'task', description: 'Delegate.', schema: z.object({ description: z.string(), subagent_type: z.string().default('general-purpose') }) })
+  const delegate = (description: string) => callTools([{ name: 'task', args: { description } }])
+  const setup = () => {
+    const admin = makeFakeAdmin()
+    return { admin, scope: { db: admin, userId: 'u1', threadId: 'chat-1', chatId: 'chat-1', turnId: 'turn-1' } }
+  }
+  const rows = (admin: ReturnType<typeof makeFakeAdmin>) => admin.tables.agent_tasks ?? []
+  const toolMessages = (result: { messages: unknown[] }) => result.messages.filter((m) => ToolMessage.isInstance(m)) as ToolMessage[]
+
+  it('makes each delegation to the Researcher a row with its own Stop', async () => {
+    const { admin, scope } = setup()
+    let seenWhileRunning: Record<string, unknown> | undefined
+    const research = task(async () => ((seenWhileRunning ??= { ...rows(admin)[0] }), 'found it'))
+    const long = `Look up   the\nhiring plans of ${'Acme '.repeat(30)}`
+    const model = new ScriptedChatModel({ model: 'm', script: [delegate(long), delegate('second job'), say('done')] })
+    const agent = createAgent({ model, tools: [research], middleware: [celloTaskRows(scope)] })
+
+    const result = await run(agent)
+    expect(rows(admin)).toHaveLength(2)
+    expect(rows(admin)[0]).toMatchObject({ command: 'research', user_id: 'u1', chat_id: 'chat-1', thread_id: 'chat-1', turn_id: 'turn-1', status: 'done' })
+    const title = String(rows(admin)[0].title)
+    expect(title.startsWith('Research: Look up the hiring plans of Acme')).toBe(true)
+    expect(title).toBe(`Research: ${long.replace(/\s+/g, ' ').trim().slice(0, 80)}`)
+    expect(title.length).toBe('Research: '.length + 80)
+    expect(seenWhileRunning).toMatchObject({ status: 'working' })
+    expect(seenWhileRunning?.finished_at ?? null).toBeNull()
+    expect(rows(admin)[1]).toMatchObject({ title: 'Research: second job', status: 'done' })
+    expect(toolMessages(result).map((m) => m.content)).toEqual(['found it', 'found it'])
+  })
+
+  it('a stopped Research row ends stopped and the loop gets a plain result', async () => {
+    const { admin, scope } = setup()
+    const slow = task(async () => {
+      // The person presses Stop on this row while the Researcher is working.
+      rows(admin)[0].stop_requested_at = new Date().toISOString()
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      return 'late answer'
+    })
+    const model = new ScriptedChatModel({ model: 'm', script: [delegate('Acme'), say('Here is what I have.')] })
+    const agent = createAgent({ model, tools: [slow], middleware: [celloTaskRows(scope)] })
+
+    const result = await run(agent)
+    expect(rows(admin)[0]).toMatchObject({ status: 'stopped' })
+    expect(rows(admin)[0].finished_at).toBeTruthy()
+    const [message] = toolMessages(result)
+    expect(message.content).toBe('The person stopped this research. Answer with what you have.')
+    expect(message.name).toBe('task')
+    expect(String(result.messages.at(-1)?.content)).toBe('Here is what I have.')
+    expect(model.calls).toHaveLength(2)
+  })
+
+  it('a failed delegation ends its row failed and the error goes on', async () => {
+    const { admin, scope } = setup()
+    const broken = task(async () => {
+      throw new Error('search is down')
+    })
+    const model = new ScriptedChatModel({ model: 'm', script: [delegate('Acme')] })
+    const agent = createAgent({ model, tools: [broken], middleware: [celloTaskRows(scope)] })
+
+    await expect(run(agent)).rejects.toThrow('search is down')
+    expect(rows(admin)[0]).toMatchObject({ status: 'failed', summary: 'search is down' })
+  })
+
+  it('still runs the delegation when its row could not be written', async () => {
+    const { admin, scope } = setup()
+    const realFrom = admin.from.bind(admin)
+    admin.from = ((name: string) => (name === 'agent_tasks' ? ({ insert: () => ({ select: () => ({ single: async () => ({ data: null, error: { message: 'down' } }) }) }), update: () => ({ eq: async () => ({}) }), select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null }) }) }) }) : realFrom(name))) as never
+    const model = new ScriptedChatModel({ model: 'm', script: [delegate('Acme'), say('done')] })
+    const agent = createAgent({ model, tools: [task(async () => 'found it')], middleware: [celloTaskRows(scope)] })
+
+    const result = await run(agent)
+    expect(toolMessages(result)[0].content).toBe('found it')
+  })
+
+  it('leaves every other tool alone', async () => {
+    const { admin, scope } = setup()
+    const model = new ScriptedChatModel({ model: 'm', script: [callTools([{ name: 'echo' }]), say('done')] })
+    const agent = createAgent({ model, tools: [echo], middleware: [celloTaskRows(scope)] })
+
+    const result = await run(agent)
+    expect(rows(admin)).toHaveLength(0)
+    expect(toolMessages(result)[0].content).toBe('echo:hi')
   })
 })
