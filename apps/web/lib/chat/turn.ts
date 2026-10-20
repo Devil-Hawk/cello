@@ -16,6 +16,7 @@ import type { Ran, Role } from '@/lib/models/choice'
 import { settleAnswer, type ModelAnswer, type Settled, type TurnResult } from './answer'
 import { activeTiles, ledgerKey } from './attach'
 import { recalledThing, resultOf } from './recalled'
+import { MovedError } from './workers'
 import { buildDisclosure, runsFromRows, type Disclosure } from './disclosure'
 import { writeTurnMemories, type ChatMemoryStore, type TurnMemories } from './memory'
 import type { ResolvedMode } from './mode'
@@ -119,6 +120,8 @@ export async function runChatTurn(
   try {
     settled = await settleAnswer(ask, () => ({ attached, results }))
   } catch (e) {
+    // A turn that moved to the background is not a failure: the person's turn stays, and no line is written.
+    if (e instanceof MovedError) throw e
     console.error('chat answer failed', e)
     // A cap or a missing key is said as it is; only an unknown failure gets the generic line.
     const reason = reasonOf(e, 'chat')
