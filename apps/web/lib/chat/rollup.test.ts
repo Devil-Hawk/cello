@@ -78,8 +78,20 @@ describe('writeRollup', () => {
     expect((db.tables.chat_turns[0].parts as { text: string }[])[0].text).toBe('Done: 1 started. 1 could not finish.')
   })
 
-  it('does not ask for a role the person stopped', async () => {
+  it('still asks for a stopped role whose application finished preparing and now waits for the person', async () => {
     const db = seed([task('applications.start', 'stopped', { object: { kind: 'role', ref: 'j1' } }), task('applications.start', 'done', { object: { kind: 'role', ref: 'j2' } })])
+    await writeRollup(db, 'u1', 'c1', 't1')
+    const parts = db.tables.chat_turns[0].parts as { text: string }[]
+    expect(parts.map((p) => p.text)).toEqual([
+      'Done: 1 started. 1 stopped by you.',
+      'Needs you: approve the tailored resume for [Forward Deployed Engineer at Ramp](cello:application/app1).',
+      'Needs you on [AI Engineer](cello:application/app2): a question Cello will not guess.',
+    ])
+  })
+
+  it('does not ask for a stopped role whose application is paused', async () => {
+    const db = seed([task('applications.start', 'stopped', { object: { kind: 'role', ref: 'j1' } }), task('applications.start', 'done', { object: { kind: 'role', ref: 'j2' } })])
+    db.tables.applications.find((a) => a.id === 'app1')!.state = 'paused'
     await writeRollup(db, 'u1', 'c1', 't1')
     const parts = db.tables.chat_turns[0].parts as { text: string }[]
     expect(parts.map((p) => p.text)).toEqual(['Done: 1 started. 1 stopped by you.', 'Needs you on [AI Engineer](cello:application/app2): a question Cello will not guess.'])

@@ -46,6 +46,7 @@ const seed = (): FakeAdmin =>
     companies: [],
     applications: [],
     person_jobs: [],
+    pipeline_events: [],
   })
 
 /** The root row of a turn that was handed over: still working, with its person turn stored. */
@@ -217,6 +218,35 @@ describe('the line a turn without an answer leaves', () => {
     })
     await runStoredTurn(db, 'u1', 'c1', { id: 't1', typed: 'Apply to these' }, { openPersistence: persistence().open })
     expect(cello(db).map((t) => t.answer)).toContain('Stopped. What was already done is kept.')
+  })
+
+  const madeAnApplication = (db: FakeAdmin, status: 'failed' | 'stopped' | 'working') =>
+    agentThat(async () => {
+      db.tables.applications.push({ id: 'app1', user_id: 'u1', job_id: 'j1', state: 'preparing' })
+      db.tables.person_jobs.push({ id: 'j1', viewer_id: 'u1', title: 'Forward Deployed Engineer', viewer_company_name: 'Ramp' })
+      db.tables.pipeline_events.push({ id: 'e1', user_id: 'u1', application_id: 'app1', kind: 'application.created', payload: { turn_id: 't1' } })
+      const id = await openWorker({ db, userId: 'u1', threadId: 'c1', chatId: 'c1', turnId: 't1' }, { command: 'applications.start', title: 'Start', object: { kind: 'role', ref: 'j1' } })
+      if (status !== 'working') await finishWorker(db, id, { status })
+      for (const r of db.tables.agent_tasks) if (!r.finished_at) r.stop_requested_at = '2026-10-20T10:00:09.000Z'
+      throw new Error('aborted')
+    })
+
+  it.each(['failed', 'stopped', 'working'] as const)('names the application a stop left behind when its row is %s, and does not say nothing was changed', async (status) => {
+    const db = seed()
+    db.tables.pipeline_events = []
+    madeAnApplication(db, status)
+    await runStoredTurn(db, 'u1', 'c1', { id: 't1', typed: 'Apply to this' }, { openPersistence: persistence().open })
+    const line = String(cello(db).find((t) => t.prov && (t.prov as { rule?: string }).rule === 'refusal')?.answer)
+    expect(line).toBe('Stopped. What was already done is kept. Already started: [Forward Deployed Engineer at Ramp](cello:application/app1).')
+  })
+
+  it('ends a row the person stopped as stopped, not failed, even when its work was still running', async () => {
+    const db = seed()
+    db.tables.pipeline_events = []
+    madeAnApplication(db, 'working')
+    await runStoredTurn(db, 'u1', 'c1', { id: 't1', typed: 'Apply to this' }, { openPersistence: persistence().open })
+    const row = rowsOf(db, 'applications.start')[0]
+    expect(row).toMatchObject({ status: 'stopped' })
   })
 
   it('says nothing was changed after a stop when nothing finished', async () => {
