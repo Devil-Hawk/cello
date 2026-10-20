@@ -7,7 +7,7 @@
 // finds its application already created in this turn and returns the stored state: nothing is attached or advanced twice.
 
 import { z } from 'zod'
-import { advanceOne } from '@/lib/advance'
+import { advanceOne, stopApplication } from '@/lib/advance'
 import { SLICE_MS } from '@/lib/agents/context'
 import { fanOut } from '@/lib/agents/fanout'
 import { attach, ledgerKey } from '@/lib/chat/attach'
@@ -26,7 +26,17 @@ const noStop = { checkStop: async () => undefined } as Pick<WorkerBranch, 'check
 /** True once the branch's row is stopped. */
 const stoppedNow = (branch: Pick<WorkerBranch, 'checkStop'>) => () => branch.checkStop().then(() => false, () => true)
 
-/** The work, or a StoppedError the moment the branch's signal aborts. The work is not cancelled: advanceOne is told to stop (shouldStop) and pauses the application at its next step. */
+/** Aborts only for the person's Stop. The turn ending for another reason leaves the application to the sweeper, which carries it on. */
+const stopOnly = (signal?: AbortSignal): AbortSignal | undefined => {
+  if (!signal) return undefined
+  const own = new AbortController()
+  const fire = () => signal.reason instanceof StoppedError && own.abort(signal.reason)
+  if (signal.aborted) fire()
+  else signal.addEventListener('abort', fire, { once: true })
+  return own.signal
+}
+
+/** The work, or a StoppedError the moment the branch's signal aborts. The work is not cancelled: advanceOne is told to stop (shouldStop, and its signal aborts a model call in flight). */
 const untilStopped = <T>(work: Promise<T>, signal?: AbortSignal): Promise<T> =>
   !signal
     ? work
@@ -101,8 +111,15 @@ export const applicationsStart = defineCommand({
       } else {
         // The chat holds the application from now on, so each step reaches it as a status turn.
         if (ctx.chat) await attach(db, ctx.userId, ctx.chat.chatId, { kind: 'application', ref: { id: applicationId } }, { origin: 'model', turnId: ctx.chat.turnId, returned: new Set([ledgerKey('application', applicationId)]) })
-        await branch.checkStop()
-        await untilStopped(advanceOne(db, applicationId, { shouldStop: stoppedNow(branch) }), branch.signal)
+        const stop = stopOnly(branch.signal)
+        try {
+          await branch.checkStop()
+          await untilStopped(advanceOne(db, applicationId, { shouldStop: stoppedNow(branch), signal: stop }), branch.signal)
+        } catch (e) {
+          // Stop is the application's state, not a note in this process: paused here, the sweeper (which advances only preparing ones) skips it even if the process holding the step ends.
+          if (e instanceof StoppedError || stop?.aborted) await stopApplication(db, applicationId)
+          throw e
+        }
       }
       const { data: after } = await db.from('applications').select('state').eq('id', applicationId).maybeSingle()
       const state = (after as { state: string | null } | null)?.state ?? 'preparing'
