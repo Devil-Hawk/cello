@@ -22,6 +22,7 @@ import { SidePanel } from '@/components/chat/side-panel'
 import { StatusTurn } from '@/components/chat/status-turn'
 import { PlanCard } from '@/components/chat/plan-card'
 import { TasksLine, type TaskRow, type TaskStatus } from '@/components/chat/tasks-line'
+import { workedSeconds } from '@/components/chat/worked-time'
 import { Tiles, type TileData } from '@/components/chat/tiles'
 import type { Disclosure } from '@/lib/chat/disclosure'
 import type { Found } from '@/lib/chat/find'
@@ -82,11 +83,6 @@ async function sendJson<T = Record<string, unknown>>(url: string, method: string
 }
 
 const toTaskRow = (t: ChatPageData['tasks'][number]): TaskRow => ({ id: t.id, title: t.title, status: t.status as TaskStatus, command: t.command, reads: t.reads?.length ?? 0, summary: t.summary })
-const seconds = (rows: ChatPageData['tasks']) => {
-  const starts = rows.map((r) => Date.parse(r.started_at ?? r.created_at)).filter((n) => !Number.isNaN(n))
-  const ends = rows.map((r) => (r.finished_at ? Date.parse(r.finished_at) : Date.now()))
-  return starts.length ? Math.max(0, Math.round((Math.max(...ends) - Math.min(...starts)) / 1000)) : 0
-}
 
 export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: ChatViewProps) {
   const router = useRouter()
@@ -754,7 +750,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
                 stopping={stopping && running}
                 defaultOpen
                 background={running && !sending && pendingLine === null && !stream.isLoading && turnTasks.some((t) => t.command === 'chat.turn' && (t.status === 'working' || t.status === 'queued'))}
-                seconds={seconds(turnTasks)}
+                seconds={workedSeconds(turnTasks)}
                 onStop={stopTurn}
                 onStopTask={(id) => void send(`/api/chat/${chatId}/stop`, 'POST', { task_id: id }).then(loadPage)}
               />
