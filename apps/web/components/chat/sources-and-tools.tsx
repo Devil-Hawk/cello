@@ -29,6 +29,8 @@ export function modelWords(ran: Disclosure['ran'], runs?: Disclosure['runs']): s
 
 export function SourcesAndTools({ d }: { d: Disclosure }) {
   const tools = [...new Set(d.tools.map((t) => t.label))]
+  // Written by the chat when a server of the person's was left out of the turn (lib/chat/disclosure.ts).
+  const unreached = (d as Disclosure & { unreached?: string[] }).unreached ?? []
   const sources = [...new Map(d.sources.map((s) => [`${s.title}|${s.host}`, s])).values()]
   return (
     // Opened on the newest answer, the rows come into view rather than sitting under the compose box.
@@ -52,6 +54,12 @@ export function SourcesAndTools({ d }: { d: Disclosure }) {
           <dt className="w-16 shrink-0">Tools</dt>
           <dd className="text-foreground">{tools.length ? tools.join(', ') : 'None used'}</dd>
         </div>
+        {unreached.length > 0 && (
+          <div className="flex gap-2">
+            <dt className="w-16 shrink-0">Could not reach</dt>
+            <dd className="text-foreground">{unreached.join(', ')}</dd>
+          </div>
+        )}
         {d.workers.length > 0 && (
           <div className="flex gap-2">
             <dt className="w-16 shrink-0">Tasks</dt>

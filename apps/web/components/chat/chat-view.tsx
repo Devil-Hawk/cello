@@ -5,7 +5,7 @@
 // /api/chat: tiles with names, answers as the parts code passed, cards from stored rows, the tasks line from agent_tasks.
 // The page reads the chat through the stream while a turn is answered, and Realtime updates rows after the stream ends.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { Menu, X, Check, Loader2 } from 'lucide-react'
 import { Markdown } from '@/components/chat/markdown'
@@ -14,6 +14,7 @@ import { SourcesAndTools } from '@/components/chat/sources-and-tools'
 import { ModelPicker, steppedDownWords, type PickScope } from '@/components/chat/model-picker'
 import { ModePicker } from '@/components/chat/mode-picker'
 import { Composer } from '@/components/chat/composer'
+import { ConfirmCard, type OpenProposal } from '@/components/chat/confirm-card'
 import { AnswerParts, type Named } from '@/components/chat/parts'
 import { Finder } from '@/components/chat/finder'
 import { Rail, type EarlierChat, type RailChat, type ScheduledRow } from '@/components/chat/rail'
@@ -359,6 +360,9 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   const names: Named[] = useMemo(() => (page?.attachments ?? []).map((a) => ({ kind: a.kind, ref: refId(a.kind, a.ref), name: page?.names[a.id] ?? 'No longer listed' })), [page])
   const tiles: TileData[] = useMemo(() => active.map((a) => ({ id: a.id, kind: a.kind, ref: refId(a.kind, a.ref), name: page?.names[a.id] ?? 'No longer listed', origin: a.origin })), [active, page])
   const seen = useMemo(() => visibleTurns(page?.turns ?? [], picks), [page, picks])
+  // A call waiting for the person's Confirm sits under the answer that told them about it, or under their own turn when that answer was never stored.
+  const openProposals = (page as (ChatPageData & { proposals?: OpenProposal[] }) | null)?.proposals ?? []
+  const proposalsFor = (turnId: string) => openProposals.filter((p) => (p.answerId ?? p.turnId) === turnId)
   const lastPersonTurn = [...seen.turns].reverse().find((t) => t.kind === 'person')
   const turnTasks = page?.tasks.filter((t) => t.turn_id === lastPersonTurn?.id) ?? []
   // The turn's own row (chat.turn) is the loop, not work: it is listed nowhere, so the counts here and in Sources and tools agree.
@@ -606,79 +610,84 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
                 </ul>
               </div>
             ) : (
-              seen.turns.map((t) =>
-                t.kind === 'person' ? (
-                  <div key={t.id} className="group ml-auto max-w-[85%]">
-                    {editing?.id === t.id ? (
-                      <div className="space-y-1">
-                        <textarea aria-label="Edit your message" value={editing.text} rows={3} onChange={(e) => setEditing({ id: t.id, text: e.target.value })} className="w-full rounded-control border border-input bg-card p-2 text-body" />
-                        <div className="flex justify-end gap-2 text-caption">
-                          <button type="button" className="min-h-11 rounded-control px-2 py-1 text-muted-foreground hover:bg-muted" onClick={() => setEditing(null)}>
-                            Cancel
-                          </button>
-                          <button
-                            type="button"
-                            disabled={!editing.text.trim()}
-                            className="min-h-11 rounded-control border border-border bg-card px-2 py-1 text-foreground hover:bg-muted disabled:opacity-40"
-                            onClick={() =>
-                              // This forks the chat and keeps the old version; the page then follows the new answer.
-                              void send(`/api/chat/${chatId}/edit`, 'POST', { turn_id: t.id, typed: editing.text }).then((ok) => {
-                                if (!ok) setNote('Cello could not save that edit.')
-                                setEditing(null)
-                                return loadPage()
-                              })
-                            }
-                          >
-                            Save edit
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="rounded-card bg-muted px-3 py-2 text-body text-foreground">
-                          {t.quoted && <p className="mb-1 border-l-2 border-border pl-2 text-caption text-muted-foreground">{t.quoted.text}</p>}
-                          <p className="whitespace-pre-wrap break-words">{t.typed}</p>
-                        </div>
-                        <div className="mt-0.5 flex items-center justify-end gap-2 text-caption text-muted-foreground">
-                          {seen.slots[t.id] && (
-                            <span className="flex items-center gap-1">
-                              <button type="button" aria-label="Previous version" disabled={seen.slots[t.id].index <= 1} className="inline-flex min-h-11 min-w-11 items-center justify-center px-1 hover:text-foreground disabled:opacity-40" onClick={() => setPicks({ ...picks, [seen.slots[t.id].root]: seen.slots[t.id].index - 2 })}>
-                                {'\u2039'}
-                              </button>
-                              Version {seen.slots[t.id].index} of {seen.slots[t.id].count}
-                              <button type="button" aria-label="Next version" disabled={seen.slots[t.id].index >= seen.slots[t.id].count} className="inline-flex min-h-11 min-w-11 items-center justify-center px-1 hover:text-foreground disabled:opacity-40" onClick={() => setPicks({ ...picks, [seen.slots[t.id].root]: seen.slots[t.id].index })}>
-                                {'\u203a'}
-                              </button>
-                            </span>
-                          )}
-                          {chatId && !t.superseded_at && (
-                            <button type="button" className="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-foreground md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100" onClick={() => setEditing({ id: t.id, text: t.typed ?? '' })}>
-                              Edit
+              seen.turns.map((t) => (
+                <Fragment key={t.id}>
+                  {t.kind === 'person' ? (
+                    <div key={t.id} className="group ml-auto max-w-[85%]">
+                      {editing?.id === t.id ? (
+                        <div className="space-y-1">
+                          <textarea aria-label="Edit your message" value={editing.text} rows={3} onChange={(e) => setEditing({ id: t.id, text: e.target.value })} className="w-full rounded-control border border-input bg-card p-2 text-body" />
+                          <div className="flex justify-end gap-2 text-caption">
+                            <button type="button" className="min-h-11 rounded-control px-2 py-1 text-muted-foreground hover:bg-muted" onClick={() => setEditing(null)}>
+                              Cancel
                             </button>
-                          )}
+                            <button
+                              type="button"
+                              disabled={!editing.text.trim()}
+                              className="min-h-11 rounded-control border border-border bg-card px-2 py-1 text-foreground hover:bg-muted disabled:opacity-40"
+                              onClick={() =>
+                                // This forks the chat and keeps the old version; the page then follows the new answer.
+                                void send(`/api/chat/${chatId}/edit`, 'POST', { turn_id: t.id, typed: editing.text }).then((ok) => {
+                                  if (!ok) setNote('Cello could not save that edit.')
+                                  setEditing(null)
+                                  return loadPage()
+                                })
+                              }
+                            >
+                              Save edit
+                            </button>
+                          </div>
                         </div>
-                      </>
-                    )}
-                  </div>
-                ) : t.kind === 'cello' ? (
-                  <div key={t.id} className="space-y-1" data-answer-turn={t.id}>
-                    {t.parts.length > 0 ? <AnswerParts parts={t.parts} names={names} tileCount={active.length} cards={page?.cards ?? []} onOpen={openThing} recalled={page?.recalled} onAddChat={(id) => void addThing({ kind: 'chat', id, name: '', detail: null })} /> : t.answer ? <Markdown content={t.answer} /> : null}
-                    {(t.links ?? []).flatMap((l) => (l.kind === 'made' && l.role !== 'recalled' && page?.made[l.id] ? [page.made[l.id]] : [])).map((m) => (
-                      <MadeBlock key={m.id} made={m} onOpen={setPanel} />
-                    ))}
-                    {t.disclosure ? <SourcesAndTools d={t.disclosure as Disclosure} /> : null}
-                  </div>
-                ) : (
-                  <StatusTurn
-                    key={t.id}
-                    line={t.event_id ? page?.statuses[t.event_id] : undefined}
-                    onReview={setPanel}
-                    onApproved={() => {
-                      void loadPage()
-                    }}
-                  />
-                )
-              )
+                      ) : (
+                        <>
+                          <div className="rounded-card bg-muted px-3 py-2 text-body text-foreground">
+                            {t.quoted && <p className="mb-1 border-l-2 border-border pl-2 text-caption text-muted-foreground">{t.quoted.text}</p>}
+                            <p className="whitespace-pre-wrap break-words">{t.typed}</p>
+                          </div>
+                          <div className="mt-0.5 flex items-center justify-end gap-2 text-caption text-muted-foreground">
+                            {seen.slots[t.id] && (
+                              <span className="flex items-center gap-1">
+                                <button type="button" aria-label="Previous version" disabled={seen.slots[t.id].index <= 1} className="inline-flex min-h-11 min-w-11 items-center justify-center px-1 hover:text-foreground disabled:opacity-40" onClick={() => setPicks({ ...picks, [seen.slots[t.id].root]: seen.slots[t.id].index - 2 })}>
+                                  {'\u2039'}
+                                </button>
+                                Version {seen.slots[t.id].index} of {seen.slots[t.id].count}
+                                <button type="button" aria-label="Next version" disabled={seen.slots[t.id].index >= seen.slots[t.id].count} className="inline-flex min-h-11 min-w-11 items-center justify-center px-1 hover:text-foreground disabled:opacity-40" onClick={() => setPicks({ ...picks, [seen.slots[t.id].root]: seen.slots[t.id].index })}>
+                                  {'\u203a'}
+                                </button>
+                              </span>
+                            )}
+                            {chatId && !t.superseded_at && (
+                              <button type="button" className="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-foreground md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100" onClick={() => setEditing({ id: t.id, text: t.typed ?? '' })}>
+                                Edit
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ) : t.kind === 'cello' ? (
+                    <div key={t.id} className="space-y-1" data-answer-turn={t.id}>
+                      {t.parts.length > 0 ? <AnswerParts parts={t.parts} names={names} tileCount={active.length} cards={page?.cards ?? []} onOpen={openThing} recalled={page?.recalled} onAddChat={(id) => void addThing({ kind: 'chat', id, name: '', detail: null })} /> : t.answer ? <Markdown content={t.answer} /> : null}
+                      {(t.links ?? []).flatMap((l) => (l.kind === 'made' && l.role !== 'recalled' && page?.made[l.id] ? [page.made[l.id]] : [])).map((m) => (
+                        <MadeBlock key={m.id} made={m} onOpen={setPanel} />
+                      ))}
+                      {t.disclosure ? <SourcesAndTools d={t.disclosure as Disclosure} /> : null}
+                    </div>
+                  ) : (
+                    <StatusTurn
+                      key={t.id}
+                      line={t.event_id ? page?.statuses[t.event_id] : undefined}
+                      onReview={setPanel}
+                      onApproved={() => {
+                        void loadPage()
+                      }}
+                    />
+                  )}
+                  {proposalsFor(t.id).map((p) => (
+                    <ConfirmCard key={p.id} chatId={chatId ?? ''} proposal={p} onDecided={() => void loadPage()} />
+                  ))}
+                </Fragment>
+              ))
             )}
 
             {pendingLine !== null && (
