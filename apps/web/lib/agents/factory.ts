@@ -20,6 +20,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { PERMISSIONS, SKILLS_OFF, celloBackend } from './backends'
 import type { AgentContext } from './context'
+import type { WorkerScope } from '@/lib/chat/workers'
 import { guardStack, type GuardStackOptions } from './middleware'
 import { celloChatModel } from './model'
 import { RESEARCHER_DESCRIPTION } from './subagents/researcher'
@@ -67,9 +68,11 @@ export interface CelloAgentInput {
   extraTools?: StructuredToolInterface[]
   /** A short card about the person, appended to the system prompt. Stable across a conversation. */
   profileCard?: string
+  /** Chat only: each delegation to the Researcher (the `task` tool) is a worker row with its own Stop. */
+  taskRows?: WorkerScope
 }
 
-function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher') {
+function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher', taskRows?: WorkerScope) {
   const { ctx } = input
   const stop = ctx.stop ?? (() => Promise.resolve(false))
   return guardStack({
@@ -78,6 +81,7 @@ function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher') {
     deadlineAt: ctx.deadlineAt,
     stop,
     fallbacks: input.fallbacks,
+    taskRows,
   })
 }
 
@@ -126,7 +130,7 @@ export function createCelloAgent(input: CelloAgentInput & { kind: 'orchestrator'
       subagents: [researcherSpec(input, 'general-purpose')],
       backend: celloBackend({ admin: ctx.admin, userId: ctx.userId, skillsDir: input.skillsDir }),
       permissions: PERMISSIONS.orchestrator,
-      middleware: guards(input, 'orchestrator'),
+      middleware: guards(input, 'orchestrator', input.taskRows),
       checkpointer: input.saver,
       responseFormat: input.responseFormat as never,
     })
