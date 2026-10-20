@@ -22,6 +22,16 @@ export class StoppedError extends Error {
   }
 }
 
+/** A turn that reached its slice deadline: its checkpoint is saved and it carries on in another request. */
+export class MovedError extends Error {
+  constructor() {
+    super('Moved to the background.')
+    this.name = 'MovedError'
+  }
+}
+
+export const MOVED_LINE = 'Cello carries on in the background. You can leave this page.'
+
 export interface WorkerScope {
   db: AdminClient
   userId: string

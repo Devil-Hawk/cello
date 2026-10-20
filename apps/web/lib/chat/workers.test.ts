@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
-import { addRead, finishWorker, MAX_READS, openWorker, requestStop, requestStopWorker, runWorkers, withWorker, type WorkerScope } from './workers'
+import { addRead, finishWorker, MAX_READS, MOVED_LINE, MovedError, openWorker, requestStop, requestStopWorker, runWorkers, withWorker, type WorkerScope } from './workers'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const caps = { steps: 10, ms: 30_000, tokens: 10_000 }
@@ -158,5 +158,14 @@ describe('withWorker', () => {
     expect(failed.finished_at).toBeTruthy()
     expect(done).toMatchObject({ title: 'Writing a note', status: 'done' })
     expect(done.summary).toBeUndefined()
+  })
+})
+
+describe('MovedError', () => {
+  it('is a named error the loop throws when a turn goes to the background', () => {
+    const e = new MovedError()
+    expect(e).toBeInstanceOf(Error)
+    expect(e.name).toBe('MovedError')
+    expect(MOVED_LINE).toBe('Cello carries on in the background. You can leave this page.')
   })
 })
