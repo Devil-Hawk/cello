@@ -16,6 +16,11 @@ describe('TasksLine', () => {
     expect(out).toContain('>Stop<')
   })
 
+  it('does not count a removed step as work', () => {
+    const removed = task(9, { status: 'stopped', command: 'chat.plan.step', summary: 'Removed by you' })
+    expect(text(line([task(1, { status: 'queued', command: 'chat.plan.step' }), task(2), removed]))).toContain('Cello is working: 0 of 2 done.')
+  })
+
   it('lists each task with its state, its reads and a Stop for the ones still going only', () => {
     const out = line([task(1, { status: 'done', reads: 3 }), task(2, { status: 'stopped' }), task(3, { status: 'failed' }), task(4, { reads: 1 })], { defaultOpen: true })
     expect(text(out)).toContain('Research company 1 Done 3 pages read')

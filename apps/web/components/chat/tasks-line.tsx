@@ -83,8 +83,10 @@ export function TasksLine({ tasks, running, seconds, stopping = false, onStop, o
   }, [open])
   // A turn with no work rows has a line only while it runs: "Cello is working" with Stop, and nothing to show.
   if (tasks.length === 0 && !running) return null
-  const finished = tasks.filter((t) => !alive(t.status) && t.status !== 'waiting').length
-  const lead = background ? `Cello carries on in the background${tasks.length ? `: ${finished} of ${tasks.length} done` : ''}. You can leave this page.` : tasks.length ? `Cello is working: ${finished} of ${tasks.length} done.` : 'Cello is working.'
+  // A step the person took out of the plan is shown, but it is not work to be done.
+  const counted = tasks.filter((t) => !(t.command === 'chat.plan.step' && t.summary === 'Removed by you'))
+  const finished = counted.filter((t) => !alive(t.status) && t.status !== 'waiting').length
+  const lead = background ? `Cello carries on in the background${counted.length ? `: ${finished} of ${counted.length} done` : ''}. You can leave this page.` : counted.length ? `Cello is working: ${finished} of ${counted.length} done.` : 'Cello is working.'
   return (
     <div className="rounded-control border border-border bg-card px-3 py-2 text-caption" role="status" aria-live="polite">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
