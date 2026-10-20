@@ -105,3 +105,12 @@ describe('AnswerParts', () => {
     expect(out).toContain('aria-label="Copy"')
   })
 })
+
+describe('a long unbroken value in an answer sentence', () => {
+  it('shows all of it and may wrap anywhere', () => {
+    const value = `${'A'.repeat(296)}HIDDEN-TAIL`
+    const out = html([{ about: [], text: `Waiting for your Confirm: Run "send_email" on mail with: body: ${value}` }])
+    expect(out).toContain(value)
+    expect(out).toMatch(/<p class="break-words [^"]*">Waiting for your Confirm/)
+  })
+})
