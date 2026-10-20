@@ -7,6 +7,7 @@ import { HumanMessage, isAIMessageChunk, type AIMessageChunk, type BaseMessage, 
 import { MemorySaver } from '@langchain/langgraph'
 import { tool } from '@langchain/core/tools'
 import { createCelloAgent } from '@/lib/agents/factory'
+import { recursionLimitFor } from '@/lib/agents/middleware'
 import type { AgentContext } from '@/lib/agents/context'
 import { agentView, chatDoor, CommandRefusal, runCommand, toolName } from '@/lib/commands'
 import type { AnyCommand } from '@/lib/commands'
@@ -173,7 +174,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         const delegations = new Set<string>()
         if (retry) deps.emit({ event: 'custom', data: { type: 'tool', label: CHECKING, phase: 'start' } })
         try {
-          const chunks = await (agent as unknown as { stream: (input: unknown, config?: unknown) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown> }).stream({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, configurable: { thread_id: input.turnId }, recursionLimit: 80, streamMode: ['values', 'messages', 'custom'], subgraphs: true })
+          const chunks = await (agent as unknown as { stream: (input: unknown, config?: unknown) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown> }).stream({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, configurable: { thread_id: input.turnId }, recursionLimit: recursionLimitFor('orchestrator'), streamMode: ['values', 'messages', 'custom'], subgraphs: true })
           for await (const chunk of chunks) {
             if (!Array.isArray(chunk) || chunk.length < 3) continue
             const [namespace, mode, data] = chunk as [readonly string[], string, unknown]
@@ -208,7 +209,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         }
         out = { messages: values?.messages ?? [], structuredResponse: values?.structuredResponse }
       } else {
-        out = await agent.invoke({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, configurable: { thread_id: input.turnId }, recursionLimit: 80 })
+        out = await agent.invoke({ messages: [...(history ?? []), ...next] }, { signal: deps.signal, configurable: { thread_id: input.turnId }, recursionLimit: recursionLimitFor('orchestrator') })
       }
     } catch (e) {
       // The loop itself died after a tool was refused: the refusal is the reason the person reads, not "try again".
@@ -219,7 +220,13 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
 
     const parsed = AnswerSchema.safeParse(out.structuredResponse)
     const last = [...out.messages].reverse().find((m) => m.getType() === 'ai' && textOf(m).trim())
-    let answer: ModelAnswer = parsed.success ? parsed.data : { parts: textOf(last).trim() ? [{ about: [], text: textOf(last).trim().slice(0, 4000) }] : [] }
+    // langchain's own words when the model-call cap ends a loop (no answer was written); a person gets a plain sentence.
+    const capped = !parsed.success && /model call limit/i.test(textOf(last))
+    let answer: ModelAnswer = parsed.success
+      ? parsed.data
+      : capped
+        ? { parts: [{ about: [], text: 'Cello reached the most it does in one message before it could write this up. Ask again for the part you want most, or split it into smaller asks.' }] }
+        : { parts: textOf(last).trim() ? [{ about: [], text: textOf(last).trim().slice(0, 4000) }] : [] }
     // A search's roles are shown as cards whether or not the model remembered to list them: the rows are code's.
     if (found.length && !answer.cards?.length) answer = { ...answer, cards: found.slice(0, 12).map((t) => ({ kind: t.kind as 'role', id: t.id })) }
     // The real reason a tool refused is said by code when the model's parts do not carry it (acceptance H2).
