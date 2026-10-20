@@ -151,7 +151,7 @@ export function Composer({ value, onChange, onSend, onStop, running, stopping = 
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{controls}</div>
         <Dictate value={value} onChange={onChange} />
         {running ? (
-          <button type="button" aria-label="Stop" disabled={stopping} className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40" onClick={onStop}>
+          <button type="button" aria-label="Stop" aria-disabled={stopping || undefined} className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 aria-disabled:pointer-events-none aria-disabled:opacity-40" onClick={stopping ? undefined : onStop}>
             <Square className="h-4 w-4" aria-hidden />
           </button>
         ) : (

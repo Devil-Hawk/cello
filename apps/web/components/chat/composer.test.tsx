@@ -19,8 +19,8 @@ describe('Composer', () => {
   })
 
   it('rests the Stop key once Stop has been pressed', () => {
-    expect(html({ value: 'x', running: true })).not.toMatch(/aria-label="Stop"[^>]*disabled=""/)
-    expect(html({ value: 'x', running: true, stopping: true })).toMatch(/aria-label="Stop"[^>]*disabled=""/)
+    expect(html({ value: 'x', running: true })).not.toMatch(/aria-label="Stop"[^>]*aria-disabled="/)
+    expect(html({ value: 'x', running: true, stopping: true })).toMatch(/aria-label="Stop"[^>]*aria-disabled="true"/)
   })
 
   it('shows a quoted selection apart from the field, marked as Cello\'s earlier words, with Remove', () => {

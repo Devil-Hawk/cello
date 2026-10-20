@@ -46,11 +46,11 @@ describe('TasksLine', () => {
 })
 
 describe('TasksLine while stopping', () => {
-  it('reads Stopping instead of the clock and rests the Stop key', () => {
+  it('reads Stopping instead of the clock and rests the Stop key without dropping focus', () => {
     const out = line([], { running: true, seconds: 7, stopping: true })
     expect(text(out)).toContain('Stopping')
     expect(text(out)).not.toContain('0:07')
-    expect(out).toMatch(/<button[^>]*disabled=""[^>]*>Stop<\/button>/)
+    expect(out).toMatch(/<button[^>]*aria-disabled="true"[^>]*>Stop<\/button>/)
   })
 
   it('reads Stopping with work rows too', () => {
