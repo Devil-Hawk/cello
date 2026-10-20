@@ -217,10 +217,23 @@ interface Handle {
 }
 type Door = (stopAfterCalls?: number) => Handle
 
+/**
+ * The same model is the loop's and the Researcher's (the chatAgent seam), and langchain refuses a model that already has
+ * tools bound when the Researcher is built on first delegation. So binding gives back a copy that carries the tools and
+ * shares the original's record of calls, and the model itself stays unbound.
+ */
+class UnboundFreeModel extends FreeChatModel {
+  bindTools(tools: unknown[]): this {
+    const bound = Object.create(this) as this
+    ;(bound as unknown as { tools: unknown[] }).tools = tools
+    return bound
+  }
+}
+
 const freeDoor =
   (id: string): Door =>
   (stopAfterCalls) => {
-    const model = new FreeChatModel({ model: id, stopAfterCalls })
+    const model = new UnboundFreeModel({ model: id, stopAfterCalls })
     return { id, model, responses: () => model.calls.map((c) => c.response) }
   }
 
@@ -287,41 +300,50 @@ async function screenOf(objects: ChatObject[], quoted?: { text: string; turn_id:
 
 interface SetResult<S> {
   score: S
+  /** S14: what the model did first in each case it got wrong. S21: the parts whose `about` matched no labelled part. */
+  missed?: string[]
   /** Per case: the summed prompt tokens of the turn, null when unknown. */
   tokens: (number | null)[]
+  /** Why runs errored, so "cannot read" says what was in the way. */
+  errors: string[]
 }
 
+const why = (e: unknown) => (e instanceof Error ? e.message : String(e)).replace(/\s+/g, ' ').slice(0, 160)
+
 async function runS14(door: Door, core: Core): Promise<SetResult<S14Score>> {
-  const out = await mapLimit(S14_CASES, 2, async (c): Promise<{ run: S14Run; tokens: number | null }> => {
+  const out = await mapLimit(S14_CASES, 2, async (c): Promise<{ run: S14Run; tokens: number | null; error?: string }> => {
     try {
       const turn = await runTurn(door, core, { typed: c.ask, screen: await screenOf(resolveAll(c.attached).map((f) => f.object)), stopAfterCalls: 1 })
       const first = turn.responses[0]
       // The first move is what is scored: a run that never got a first answer read nothing.
-      return first ? { run: { id: c.id, calls: callsOf([first]) }, tokens: tokensOf([first]) } : { run: { id: c.id, calls: [], errored: true }, tokens: null }
-    } catch {
-      return { run: { id: c.id, calls: [], errored: true }, tokens: null }
+      return first ? { run: { id: c.id, calls: callsOf([first]) }, tokens: tokensOf([first]) } : { run: { id: c.id, calls: [], errored: true }, tokens: null, error: turn.error ?? 'no model answer' }
+    } catch (e) {
+      return { run: { id: c.id, calls: [], errored: true }, tokens: null, error: why(e) }
     }
   })
-  return { score: scoreS14(S14_CASES, out.map((o) => o.run), BARS.S14.overall), tokens: out.map((o) => o.tokens) }
+  const score = scoreS14(S14_CASES, out.map((o) => o.run), BARS.S14.overall)
+  const missed = out.filter((o) => !o.run.errored && !(o.run.calls.length ? o.run.calls.every((x) => S14_CASES.find((c) => c.id === o.run.id)!.allowed.includes(x)) : S14_CASES.find((c) => c.id === o.run.id)!.allowed.includes('answer'))).map((o) => `${o.run.id}: ${o.run.calls.join(', ') || 'answered with no command'}`)
+  return { score, missed, tokens: out.map((o) => o.tokens), errors: out.flatMap((o) => (o.error ? [`${o.run.id}: ${o.error}`] : [])) }
 }
 
 type S21Result = S21Score & { errored: number; cases: number }
 
 async function runS21(door: Door, core: Core): Promise<SetResult<S21Result>> {
-  const out = await mapLimit(S21_CASES, 2, async (c): Promise<{ scored: S21Case | null; tokens: number | null }> => {
+  const out = await mapLimit(S21_CASES, 2, async (c): Promise<{ id: string; scored: S21Case | null; tokens: number | null; error?: string; miss?: string[] }> => {
     try {
       const fixtures = resolveAll(c.attached)
       const turn = await runTurn(door, core, { typed: c.ask, screen: await screenOf(fixtures.map((f) => f.object)) })
-      if (!turn.answer) return { scored: null, tokens: tokensOf(turn.responses) }
+      if (!turn.answer) return { id: c.id, scored: null, tokens: tokensOf(turn.responses), error: turn.error ?? 'no answer' }
       const keyOf = new Map(fixtures.map((f) => [f.object.id, f.key]))
       const answer = turn.answer.parts.map((p) => ({ about: p.about.map((a) => keyOf.get(a.id) ?? `${a.kind}:${a.id}`), text: p.text }))
-      return { scored: { id: c.id, expected: c.expected, evidence: Object.fromEntries(fixtures.map((f) => [f.key, f.evidence])), answer }, tokens: tokensOf(turn.responses) }
-    } catch {
-      return { scored: null, tokens: null }
+      const miss = answer.filter((p) => !c.expected.some((e) => e.length === p.about.length && e.every((x) => p.about.includes(x)))).map((p) => `${c.id}: a part about [${p.about.join(' | ')}]`)
+      return { id: c.id, scored: { id: c.id, expected: c.expected, evidence: Object.fromEntries(fixtures.map((f) => [f.key, f.evidence])), answer }, tokens: tokensOf(turn.responses), miss }
+    } catch (e) {
+      return { id: c.id, scored: null, tokens: null, error: why(e) }
     }
   })
   const read = out.map((o) => o.scored).filter((s): s is S21Case => s !== null)
-  return { score: { ...scoreS21(read), errored: out.length - read.length, cases: out.length }, tokens: out.map((o) => o.tokens) }
+  return { score: { ...scoreS21(read), errored: out.length - read.length, cases: out.length }, missed: out.flatMap((o) => o.miss ?? []), tokens: out.map((o) => o.tokens), errors: out.flatMap((o) => (o.error ? [`${o.id}: ${o.error}`] : [])) }
 }
 
 /** Where each channel's words sit for Chat: a quotation in the screen message, a tool's result, an attached chat, a made text. */
@@ -340,18 +362,18 @@ async function injectionTurn(door: Door, core: Core, c: InjectionCase): Promise<
 }
 
 async function runInjection(door: Door, core: Core): Promise<SetResult<InjectionScore>> {
-  const out = await mapLimit(INJECTION_CASES, 2, async (c): Promise<{ run: InjectionRun; tokens: number | null }> => {
+  const out = await mapLimit(INJECTION_CASES, 2, async (c): Promise<{ run: InjectionRun; tokens: number | null; error?: string }> => {
     try {
       // Eight model calls are plenty to act on planted words; the turn is read as far as it went.
       const turn = await injectionTurn((stop) => door(stop ?? 8), core, c)
       const dead = turn.error !== null || turn.responses.length === 0
       const text = [...turn.responses.map(wordsOf), ...(turn.answer?.parts.map((p) => p.text) ?? [])].join('\n')
-      return { run: { id: c.id, calls: callsOf(turn.responses), text, errored: dead }, tokens: tokensOf(turn.responses) }
-    } catch {
-      return { run: { id: c.id, calls: [], text: '', errored: true }, tokens: null }
+      return { run: { id: c.id, calls: callsOf(turn.responses), text, errored: dead }, tokens: tokensOf(turn.responses), error: dead ? (turn.error ?? 'no model answer') : undefined }
+    } catch (e) {
+      return { run: { id: c.id, calls: [], text: '', errored: true }, tokens: null, error: why(e) }
     }
   })
-  return { score: scoreInjection(INJECTION_CASES, out.map((o) => o.run)), tokens: out.map((o) => o.tokens) }
+  return { score: scoreInjection(INJECTION_CASES, out.map((o) => o.run)), tokens: out.map((o) => o.tokens), errors: out.flatMap((o) => (o.error ? [`${o.run.id}: ${o.error}`] : [])) }
 }
 
 export interface ModelReport {
@@ -360,6 +382,12 @@ export interface ModelReport {
   s21: Omit<S21Result, 'share'> & { share: number | null }
   injection: InjectionScore
   promptTokensPerTurn: number | null
+  /** What errored runs died of, per case. */
+  errors: string[]
+  /** S14: what the model did first in each case it got wrong. */
+  s14Misses: string[]
+  /** S21: the parts whose `about` matched no labelled part. */
+  s21Misses: string[]
   requests: { requests: number; cacheHits: number; retries: number }
 }
 
@@ -377,6 +405,9 @@ async function measure(model: string, door: Door, core: Core): Promise<ModelRepo
     s21: { ...s21.score, share: unreadable ? null : s21.score.share },
     injection: injection.score,
     promptTokensPerTurn: known.length ? Math.round(known.reduce((a, b) => a + b, 0) / known.length) : null,
+    s14Misses: s14.missed ?? [],
+    s21Misses: s21.missed ?? [],
+    errors: [...s14.errors, ...s21.errors, ...injection.errors],
     requests: { requests: stats.requests - before.requests, cacheHits: stats.cacheHits - before.cacheHits, retries: stats.retries - before.retries },
   }
 }
