@@ -20,7 +20,8 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { PERMISSIONS, SKILLS_OFF, celloBackend } from './backends'
 import type { AgentContext } from './context'
-import { guardStack, type GuardStackOptions } from './middleware'
+import { toolStrategy } from 'langchain'
+import { guardStack, type AnswerShape, type GuardStackOptions } from './middleware'
 import { celloChatModel } from './model'
 import { RESEARCHER_DESCRIPTION } from './subagents/researcher'
 import { scoutSubAgent } from './subagents/scout'
@@ -69,7 +70,18 @@ export interface CelloAgentInput {
   profileCard?: string
 }
 
-function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher') {
+/**
+ * The final answer's format. A bad answer is asked for again by CelloOneAnswer (middleware.ts); langchain's own
+ * retry for the tool-call format is turned off, because it breaks the after-model nodes (see CelloOneAnswer).
+ * A model that answers in the provider's own JSON mode keeps the plain schema, which has no such retry.
+ */
+function answerFormat(model: BaseChatModel, format: unknown): never {
+  const native = (model as { profile?: { structuredOutput?: boolean } }).profile?.structuredOutput === true
+  const isZod = typeof (format as { safeParse?: unknown } | undefined)?.safeParse === 'function'
+  return (format && isZod && !native ? toolStrategy(format as never, { handleError: false }) : format) as never
+}
+
+function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher', answer?: AnswerShape) {
   const { ctx } = input
   const stop = ctx.stop ?? (() => Promise.resolve(false))
   return guardStack({
@@ -77,6 +89,7 @@ function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher') {
     agent,
     deadlineAt: ctx.deadlineAt,
     stop,
+    answer,
     fallbacks: input.fallbacks,
   })
 }
@@ -118,17 +131,19 @@ export function createCelloAgent(input: CelloAgentInput & { kind: 'orchestrator'
   const { ctx } = input
   if (input.kind === 'researcher') return createSubAgent(researcherSpec(input, 'researcher'))
   if (input.kind === 'chat') {
+    const model = input.model ?? celloChatModel({ apiKeys: ctx.apiKeys, purpose: 'orchestrator', serverFallback: !ctx.isDemo })
+    const answer = input.responseFormat as (AnswerShape & object) | undefined
     return createDeepAgent({
       name: 'cello-chat',
-      model: input.model ?? celloChatModel({ apiKeys: ctx.apiKeys, purpose: 'orchestrator', serverFallback: !ctx.isDemo }),
+      model,
       systemPrompt: composeSystemPrompt({ mode: loadModeDoc('chat'), stableContext: input.profileCard }),
       tools: (input.tools ?? []) as never,
       subagents: [researcherSpec(input, 'general-purpose')],
       backend: celloBackend({ admin: ctx.admin, userId: ctx.userId, skillsDir: input.skillsDir }),
       permissions: PERMISSIONS.orchestrator,
-      middleware: guards(input, 'orchestrator'),
+      middleware: guards(input, 'orchestrator', typeof answer?.safeParse === 'function' ? answer : undefined),
       checkpointer: input.saver,
-      responseFormat: input.responseFormat as never,
+      responseFormat: answerFormat(model, input.responseFormat),
     })
   }
 
