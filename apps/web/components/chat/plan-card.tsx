@@ -115,6 +115,7 @@ export function PlanCard({ steps, busy, onGo, onCancel }: PlanCardProps) {
   }, [ids])
   const act = (a: PlanAction) => {
     if (a.type === 'remove') refocus.current = focusAfterRemove(ids, a.id)
+    if (a.type === 'reset') refocus.current = 0 // Put them back unmounts too: the first Remove key takes the focus
     dispatch(a)
   }
   return (
