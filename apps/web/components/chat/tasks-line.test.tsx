@@ -4,8 +4,8 @@ import { clock, TasksLine, workedSummary, type TaskRow } from './tasks-line'
 
 const noop = () => undefined
 const task = (n: number, over: Partial<TaskRow> = {}): TaskRow => ({ id: `w${n}`, title: `Research company ${n}`, status: 'working', command: 'companies.research', reads: 0, ...over })
-const line = (tasks: TaskRow[], over: { running?: boolean; seconds?: number; defaultOpen?: boolean } = {}) =>
-  renderToStaticMarkup(<TasksLine tasks={tasks} running={over.running ?? true} seconds={over.seconds ?? 42} onStop={noop} onStopTask={noop} defaultOpen={over.defaultOpen} />)
+const line = (tasks: TaskRow[], over: { running?: boolean; seconds?: number; defaultOpen?: boolean; stopping?: boolean } = {}) =>
+  renderToStaticMarkup(<TasksLine tasks={tasks} running={over.running ?? true} seconds={over.seconds ?? 42} onStop={noop} onStopTask={noop} defaultOpen={over.defaultOpen} stopping={over.stopping} />)
 const text = (markup: string) => markup.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
 
 describe('TasksLine', () => {
@@ -42,6 +42,19 @@ describe('TasksLine', () => {
     expect(out).toContain('>Stop<')
     expect(out).not.toContain('>Show<')
     expect(out).not.toContain('of 0 done')
+  })
+})
+
+describe('TasksLine while stopping', () => {
+  it('reads Stopping instead of the clock and rests the Stop key', () => {
+    const out = line([], { running: true, seconds: 7, stopping: true })
+    expect(text(out)).toContain('Stopping')
+    expect(text(out)).not.toContain('0:07')
+    expect(out).toMatch(/<button[^>]*disabled=""[^>]*>Stop<\/button>/)
+  })
+
+  it('reads Stopping with work rows too', () => {
+    expect(text(line([task(1), task(2, { status: 'done' })], { stopping: true }))).not.toContain('of 2 done')
   })
 })
 

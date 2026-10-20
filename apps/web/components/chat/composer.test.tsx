@@ -18,6 +18,11 @@ describe('Composer', () => {
     expect(out).not.toContain('aria-label="Send"')
   })
 
+  it('rests the Stop key once Stop has been pressed', () => {
+    expect(html({ value: 'x', running: true })).not.toMatch(/aria-label="Stop"[^>]*disabled=""/)
+    expect(html({ value: 'x', running: true, stopping: true })).toMatch(/aria-label="Stop"[^>]*disabled=""/)
+  })
+
   it('shows a quoted selection apart from the field, marked as Cello\'s earlier words, with Remove', () => {
     const out = html({ quoted: { text: 'Stop showing crypto roles.' } })
     expect(out).toContain('data-quoted')
