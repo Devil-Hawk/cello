@@ -26,8 +26,13 @@ vi.mock('@/lib/learning/store', () => store)
 const mem = vi.hoisted(() => ({ add: vi.fn(async () => ({ id: 'm1' })) }))
 vi.mock('@/lib/memory/mem0-store', () => ({ getMemoryStore: () => mem }))
 vi.mock('@/lib/harness/keys', () => ({ readProfileForDemoGuards: async () => ({ row: { is_demo: false, demo_expires_at: null }, error: null }) }))
+vi.mock('@/lib/agents/scoring-port', () => ({
+  roleView: vi.fn(async (_db: unknown, _user: string, id: string) => ({ title: `Role ${id}`, company: 'Acme', location: 'Remote', salary: null, chance: null, postedAt: null, requirements: { covered: [], missing: [] } })),
+}))
 vi.mock('@/lib/measures/owner', () => ({ isOwner: () => false }))
 
+import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
+import { rolesCompare } from './chat'
 import { proposalsConfirm, proposalsDismiss, resultsGet } from './people'
 import { DemoMemoryWriteRefusedError } from '@/lib/memory/types'
 
@@ -97,5 +102,17 @@ describe('Keep and Not right', () => {
   it('takes only a key', () => {
     expect(proposalsConfirm.input.safeParse({ key: REFERRAL, effect: 'rank.fresh' }).success).toBe(false)
     expect(proposalsDismiss.input.safeParse({}).success).toBe(false)
+  })
+})
+
+describe('roles.compare', () => {
+  it('a replayed compare makes one comparison', async () => {
+    const db = makeFakeAdmin({ artifacts: [], artifact_versions: [] }, { artifacts: { unique: [['user_id', 'idempotency_key']], defaults: () => ({ current_version: 1 }) } })
+    const c = { userId: 'u1', callKey: 't1:call_1', chat: { chatId: 'c1', turnId: 't1' }, admin: () => db } as unknown as CommandContext
+    const a = await rolesCompare.run(c, { ids: ['j1', 'j2'] })
+    const b = await rolesCompare.run(c, { ids: ['j1', 'j2'] })
+    expect(db.tables.artifacts).toHaveLength(1)
+    expect(db.tables.artifacts[0]).toMatchObject({ idempotency_key: 't1:call_1' })
+    expect(b.artifact_id).toBe(a.artifact_id)
   })
 })

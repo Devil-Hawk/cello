@@ -58,6 +58,8 @@ export interface CommandContext {
   chat?: { chatId: string; turnId: string }
   /** The turn's mode (lib/chat/mode.ts), set by code at the Chat door only; no command input carries one. */
   mode?: Mode
+  /** One tool call of one Chat turn, `<turnId>:<tool call id>`, set by the Chat loop's tool wrapper only. The same on a replay of a checkpointed call. */
+  callKey?: string
   /** A service-role client, built only when a command asks for one. */
   admin: () => AdminClient
   /** Replaces the database counter in tests. */
