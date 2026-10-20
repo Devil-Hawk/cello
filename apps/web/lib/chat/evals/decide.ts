@@ -10,7 +10,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
-import { decideCore, PLAIN_REMOVES, type CoreTotals } from './score'
+import { decideCore, PLAIN_REMOVES, splitInjection, type CoreTotals } from './score'
 
 interface ModelEntry {
   model: string
@@ -21,7 +21,7 @@ interface ModelEntry {
 }
 interface Report { models: ModelEntry[] }
 
-export const totalsOf = (core: 'deep' | 'plain', m: ModelEntry): CoreTotals => ({ core, model: m.model, s14Right: m.s14.right, s21Share: m.s21.share ?? 0, injectionViolations: m.injection.violations.length, promptTokensPerTurn: m.promptTokensPerTurn })
+export const totalsOf = (core: 'deep' | 'plain', m: ModelEntry): CoreTotals => ({ core, model: m.model, s14Right: m.s14.right, s21Share: m.s21.share ?? 0, injectionViolations: splitInjection(m.injection.violations).forbidden, injectionMissed: splitInjection(m.injection.violations).missed, promptTokensPerTurn: m.promptTokensPerTurn })
 
 const unread = (label: string, m: ModelEntry) => [
   m.s14.errored * 2 > m.s14.cases && `${label} S14 cannot be read (${m.s14.errored} of ${m.s14.cases} cases errored).`,
@@ -47,7 +47,8 @@ export function summarise(runs: ModelEntry[]) {
   return {
     s14: spreadOf(runs.map((r) => r.s14.right)),
     s21: spreadOf(runs.map((r) => r.s21.share ?? 0)),
-    violations: Math.max(...runs.map((r) => r.injection.violations.length)),
+    violations: Math.max(...runs.map((r) => splitInjection(r.injection.violations).forbidden)),
+    missed: Math.max(...runs.map((r) => splitInjection(r.injection.violations).missed)),
     tokens: tokens.length === runs.length ? spreadOf(tokens) : null,
   }
 }
@@ -59,8 +60,8 @@ export function decideRuns(deepRuns: ModelEntry[], plainRuns: ModelEntry[]): { p
   const d = summarise(deepRuns)
   const p = summarise(plainRuns)
   const base = decideCore(
-    { core: 'deep', model: deepRuns[0].model, s14Right: dec(d.s14.mean), s21Share: dec(d.s21.mean, 2), injectionViolations: 0, promptTokensPerTurn: d.tokens ? Math.round(d.tokens.mean) : null },
-    { core: 'plain', model: plainRuns[0].model, s14Right: dec(p.s14.mean), s21Share: dec(p.s21.mean, 2), injectionViolations: p.violations, promptTokensPerTurn: p.tokens ? Math.round(p.tokens.mean) : null }
+    { core: 'deep', model: deepRuns[0].model, s14Right: dec(d.s14.mean), s21Share: dec(d.s21.mean, 2), injectionViolations: d.violations, injectionMissed: d.missed, promptTokensPerTurn: d.tokens ? Math.round(d.tokens.mean) : null },
+    { core: 'plain', model: plainRuns[0].model, s14Right: dec(p.s14.mean), s21Share: dec(p.s21.mean, 2), injectionViolations: p.violations, injectionMissed: p.missed, promptTokensPerTurn: p.tokens ? Math.round(p.tokens.mean) : null }
   )
   const why = base.why.map((w) => `${w} (means over ${deepRuns.length} deep and ${plainRuns.length} plain runs)`)
   if (Math.min(deepRuns.length, plainRuns.length) < 2) return { pick: 'deep', decided: false, why: [...why, `Not decided: ${deepRuns.length} deep and ${plainRuns.length} plain runs. One run of each is one sample; the same model on the same cases has moved by several cases between runs.`] }
@@ -96,7 +97,7 @@ function main() {
     console.log(`${model}: ${pick}${decided ? ' (decided)' : ' (not decided)'}${why.length ? `\n  ${why.join('\n  ')}` : ''}`)
     for (const [label, runs] of [['deep', dr], ['plain', pr]] as const) {
       const s = summarise(runs)
-      console.log(`  ${label}, ${runs.length} runs: S14 right of ${runs[0].s14.cases} ${fmt(s.s14)}; S21 share of expected parts right ${fmt(s.s21, 2)}; injection violations, most in a run ${s.violations}; prompt tokens per turn ${s.tokens ? fmt(s.tokens, 0) : 'cannot read'}`)
+      console.log(`  ${label}, ${runs.length} runs: S14 right of ${runs[0].s14.cases} ${fmt(s.s14)}; S21 share of expected parts right ${fmt(s.s21, 2)}; injection, most in a run: forbidden call or text ${s.violations}, missed required phrase ${s.missed}; prompt tokens per turn ${s.tokens ? fmt(s.tokens, 0) : 'cannot read'}`)
     }
   }
   console.log(`Plain would remove: ${PLAIN_REMOVES.join('; ')}. The switch is the owner's.`)
