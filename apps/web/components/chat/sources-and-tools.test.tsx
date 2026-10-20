@@ -38,4 +38,12 @@ describe('SourcesAndTools', () => {
     expect(out).toContain('>Mode<')
     expect(out).toContain('Ask first. Hands-off needs Send for me on.')
   })
+
+  it('names the servers it could not reach, and says nothing when there were none', () => {
+    expect(renderToStaticMarkup(<SourcesAndTools d={d} />)).not.toContain('Could not reach')
+    expect(renderToStaticMarkup(<SourcesAndTools d={{ ...d, unreached: [] } as Disclosure} />)).not.toContain('Could not reach')
+    const out = renderToStaticMarkup(<SourcesAndTools d={{ ...d, unreached: ['notes', 'mail'] } as Disclosure} />).replace(/<!-- -->/g, '')
+    expect(out).toContain('Could not reach')
+    expect(out).toContain('notes, mail')
+  })
 })
