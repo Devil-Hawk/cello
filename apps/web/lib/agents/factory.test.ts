@@ -7,6 +7,7 @@ import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { HumanMessage, ToolMessage } from '@langchain/core/messages'
 import { MemorySaver } from '@langchain/langgraph'
+import { z } from 'zod'
 
 vi.mock('@/lib/search', () => ({
   webSearch: async () => ({ ok: true, backend: 'test', results: [{ title: 'Acme', url: 'https://acme.example', snippet: 'Robots' }] }),
@@ -197,5 +198,27 @@ describe('no subagent runs above the highest the person allows', () => {
   it("the Researcher runs on the turn's model when one was resolved for it", () => {
     const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [] })
     expect(researcherSpec({ ctx: ctx(), model, fallbacks: [], skillsDir: skills() }, 'general-purpose').model).toBe(model)
+  })
+})
+
+describe('the chat loop with a structured answer', () => {
+  const Answer = z.object({ text: z.string() })
+  // langchain names the answer tool extract-N from a counter shared by every agent, so the script reads the name the model was given.
+  const answers = (...texts: string[]) => (model: () => ScriptedChatModel) => () => {
+    const name = model().boundTools.find((n) => n.startsWith('extract-'))!
+    return callTools(texts.map((text) => ({ name, args: { text } })))
+  }
+  const run = async (...steps: ReturnType<ReturnType<typeof answers>>[] extends never ? never : ((model: () => ScriptedChatModel) => () => ReturnType<typeof callTools>)[]) => {
+    const model: ScriptedChatModel = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: steps.map((step) => step(() => model)) })
+    const agent = createCelloAgent({ kind: 'chat', ctx: ctx(), saver: new MemorySaver(), model, fallbacks: [], skillsDir: skills(), tools: [], responseFormat: Answer as never } as never)
+    return (agent as unknown as { invoke: (i: unknown, c: unknown) => Promise<{ structuredResponse: unknown }> }).invoke({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: `t-${Math.random()}` }, recursionLimit: 40 })
+  }
+
+  it('keeps one structured answer as it is', async () => {
+    expect((await run(answers('only'))).structuredResponse).toEqual({ text: 'only' })
+  })
+
+  it('keeps the first of two structured answers in one model message instead of crashing on jumpTo', async () => {
+    expect((await run(answers('first', 'second'))).structuredResponse).toEqual({ text: 'first' })
   })
 })
