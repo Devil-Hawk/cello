@@ -71,7 +71,13 @@ export async function loadUserMcpTools(
   makeClient: (config: ClientConfig) => Client = (c) => new MultiServerMCPClient(c)
 ): Promise<UserMcpTools> {
   if (ctx.isDemo) return none()
-  const rows = (await listServers(ctx.admin, ctx.userId)).filter((r) => r.enabled)
+  let rows: McpServerRow[]
+  try {
+    rows = (await listServers(ctx.admin, ctx.userId)).filter((r) => r.enabled)
+  } catch {
+    // A database hiccup costs the person their own tools for this turn, never the turn.
+    return none([{ name: 'your tools', reason: 'could not be read' }])
+  }
   const skipped: UserMcpTools['skipped'] = []
   const clients: Client[] = []
   const entries: UserMcpTool[] = []
