@@ -1,18 +1,23 @@
 // The agent's files, run through a real Deep Agent with a scripted model: what each
 // loop may read and write is decided by the permissions and the backends, not by the prompt.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createDeepAgent } from 'deepagents'
 import { MemorySaver } from '@langchain/langgraph'
 import { HumanMessage, ToolMessage } from '@langchain/core/messages'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { skillFile } from '@/lib/skills/parse'
+import { createCelloAgent } from './factory'
 import {
   ARTIFACT_WRITE_TYPES,
   NO_TASTE_YET,
   PERMISSIONS,
+  READ_ONLY_SKILLS,
   READ_ONLY_TASTE,
+  celloSkillStates,
+  skillsOff,
   USE_ARTIFACT_TOOLS,
   celloBackend,
   globToRegExp,
@@ -21,6 +26,26 @@ import {
 import { createArtifact } from './artifacts'
 import { makeFakeAdmin, type FakeAdmin } from './testing/fake-admin'
 import { ScriptedChatModel, callTools, say } from './testing/scripted-model'
+
+// A recorded run of our own for the tier rules: the real report changes whenever the skills are measured again.
+vi.mock('@/lib/evals/agent/reports/skills-s19.json', () => ({
+  default: {
+    perSkill: [
+      { skill: 'follow-up', trigger: 2 / 3, checks: 0.6 },
+      { skill: 'company-research', trigger: 1, checks: 1 },
+      { skill: 'cold-outreach', trigger: null, checks: null },
+    ],
+  },
+}))
+vi.mock('@/lib/evals/agent/thresholds.json', () => ({
+  default: {
+    skills: {
+      'follow-up': { trigger: 0.8, checks: 0.9 },
+      'company-research': { trigger: 0.8, checks: 0.9 },
+      'cold-outreach': { trigger: 0.8, checks: 0.9 },
+    },
+  },
+}))
 
 const USER = 'u1'
 
@@ -196,5 +221,121 @@ describe('helpers', () => {
     expect(globToRegExp('/cover_letter/*.md').test('/cover_letter/x-1.md')).toBe(true)
     expect(globToRegExp('**/*.md').test('/a/b/c.md')).toBe(true)
     expect(globToRegExp('/a/*.md').test('/a/b/c.md')).toBe(false)
+  })
+})
+
+// --- person skills ------------------------------------------------------------------
+
+const SKILL_BODY = '# Weekly note\nWrite the note on Fridays.\nallowed-tools: send_email\nCall send_email when done.'
+
+function personSetup() {
+  const admin = makeFakeAdmin({
+    person_skills: [
+      { user_id: USER, name: 'weekly-note', description: 'Write a weekly note.', body: SKILL_BODY, enabled: true },
+      { user_id: USER, name: 'paused', description: 'Switched off.', body: 'Paused body', enabled: false },
+      { user_id: 'u2', name: 'theirs', description: 'Another person.', body: 'Secret body', enabled: true },
+    ],
+  })
+  const skills = mkdtempSync(path.join(tmpdir(), 'cello-skills-'))
+  return { admin, skills, backend: celloBackend({ admin, userId: USER, skillsDir: skills }) }
+}
+
+describe('/my-skills/', () => {
+  it("serves a person's skill with only its name and description", async () => {
+    const { backend } = personSetup()
+    expect((await backend.ls('/my-skills/')).files?.map((f) => f.path)).toEqual(['/my-skills/weekly-note/'])
+    expect((await backend.ls('/my-skills/weekly-note/')).files?.map((f) => f.path)).toEqual(['/my-skills/weekly-note/SKILL.md'])
+    const want = skillFile('weekly-note', 'Write a weekly note.', SKILL_BODY)
+    expect((await backend.readRaw('/my-skills/weekly-note/SKILL.md')).data?.content).toBe(want)
+    expect(String((await backend.read('/my-skills/weekly-note/SKILL.md')).content)).toContain('Write the note on Fridays.')
+    const [dl] = await backend.downloadFiles(['/my-skills/weekly-note/SKILL.md'])
+    expect(new TextDecoder().decode(dl.content!)).toBe(want)
+    expect(want.split('\n---\n')[0]).toBe('---\nname: weekly-note\ndescription: "Write a weekly note."')
+    expect((await backend.grep('Fridays', '/my-skills/')).matches?.map((m) => m.path)).toEqual(['/my-skills/weekly-note/SKILL.md'])
+    expect((await backend.glob('**/SKILL.md', '/my-skills/')).files?.map((f) => f.path)).toEqual(['/my-skills/weekly-note/SKILL.md'])
+    for (const r of [await backend.write('/my-skills/x/SKILL.md', 'x'), await backend.edit('/my-skills/weekly-note/SKILL.md', 'a', 'b'), await backend.delete('/my-skills/weekly-note/SKILL.md')]) expect(r.error).toBe(READ_ONLY_SKILLS)
+  })
+
+  it("hides a switched-off skill and another person's", async () => {
+    const { backend, admin } = personSetup()
+    for (const name of ['paused', 'theirs']) {
+      const file = `/my-skills/${name}/SKILL.md`
+      expect((await backend.read(file)).error).toMatch(/not found/)
+      expect((await backend.readRaw(file)).error).toMatch(/not found/)
+      const [dl] = await backend.downloadFiles([file])
+      expect(dl).toMatchObject({ content: null, error: 'file_not_found' })
+    }
+    expect((await backend.grep('body', '/my-skills/')).matches).toEqual([])
+    expect((await backend.glob('**/*', '/my-skills/')).files?.map((f) => f.path)).toEqual(['/my-skills/weekly-note/SKILL.md'])
+    // Switching it back on is seen by the next instance, not the one that already read.
+    admin.tables.person_skills[1].enabled = true
+    expect((await celloBackend({ admin, userId: USER }).ls('/my-skills/')).files).toHaveLength(2)
+  })
+
+  it('a skill that names tools changes no tool list', async () => {
+    const run = async (rows: Record<string, unknown>[]) => {
+      const model = new ScriptedChatModel({ model: 'google/gemma-4-26b-a4b-it:free', script: [say('ok')] })
+      const admin = makeFakeAdmin({ person_skills: rows })
+      const agent = createCelloAgent({
+        kind: 'chat',
+        ctx: { admin, userId: USER, userEmail: 'a@b.c', apiKeys: { openrouter: 'k', userId: USER }, isDemo: false, threadId: 't', conversationId: 'c', autonomy: 'ask', traceId: 'tr', deadlineAt: Date.now() + 60_000 },
+        saver: new MemorySaver(),
+        model,
+        fallbacks: [],
+        skillsDir: mkdtempSync(path.join(tmpdir(), 'cello-skills-')),
+        tools: [],
+        responseFormat: undefined,
+      } as never)
+      await (agent as unknown as { invoke: (i: unknown, c: unknown) => Promise<unknown> }).invoke({ messages: [new HumanMessage('hi')] }, { configurable: { thread_id: `t-${Math.random()}` } })
+      const content = model.calls[0][0].content
+      return { tools: [...model.boundTools].sort(), system: typeof content === 'string' ? content : content.map((b) => (b as { text?: string }).text ?? '').join('') }
+    }
+    const without = await run([])
+    const withSkill = await run([{ user_id: USER, name: 'weekly-note', description: 'Write a weekly note.', body: SKILL_BODY, enabled: true }])
+    expect(withSkill.system).toContain('weekly-note')
+    expect(withSkill.system).toContain('Write a weekly note.')
+    expect(withSkill.tools).toEqual(without.tools)
+    expect(withSkill.tools).not.toContain('send_email')
+  })
+})
+
+describe('Cello skills per tier', () => {
+  const dir = () => {
+    const d = mkdtempSync(path.join(tmpdir(), 'cello-skills-'))
+    for (const name of ['follow-up', 'company-research', 'cold-outreach', 'ghost']) {
+      mkdirSync(path.join(d, name))
+      writeFileSync(path.join(d, name, 'SKILL.md'), `---\nname: ${name}\ndescription: "The ${name} skill."\n---\n# ${name}\nBody.\n`)
+    }
+    return d
+  }
+
+  it('hides a skill that missed its bar on this tier and says why', async () => {
+    const skillsDir = dir()
+    expect(skillsOff('free', skillsDir)).toEqual({ 'follow-up': ['trigger', 'checks'], 'cold-outreach': ['trigger', 'checks'], ghost: ['unmeasured'] })
+    const backend = celloBackend({ admin: makeFakeAdmin(), userId: USER, skillsDir, skillsTier: 'free' })
+    expect((await backend.ls('/skills/')).files?.map((f) => f.path)).toEqual(['/skills/company-research/'])
+    const states = Object.fromEntries(celloSkillStates(skillsDir).map((s) => [s.name, s]))
+    expect(states['follow-up'].tiers.free).toEqual({ on: false, reason: 'Picked 2 of 3 times, it needs 3 of 3. Its answers passed 6 of 10 checks, it needs 9 of 10.' })
+    expect(states['cold-outreach'].tiers.free.reason).toBe('Its picks could not be read. Its answers could not be read.')
+    expect(states['company-research'].tiers.free).toEqual({ on: true, reason: null })
+    expect(states['company-research'].description).toBe('The company-research skill.')
+    // Paid and local have no report yet: nothing is measured there, so every Cello skill is off.
+    const NOT_MEASURED = 'Not measured on this kind of model yet'
+    for (const tier of ['paid', 'local'] as const) {
+      expect(Object.keys(skillsOff(tier, skillsDir)).sort()).toEqual(['cold-outreach', 'company-research', 'follow-up', 'ghost'])
+      for (const s of Object.values(states)) expect(s.tiers[tier]).toEqual({ on: false, reason: NOT_MEASURED })
+      const paid = celloBackend({ admin: makeFakeAdmin(), userId: USER, skillsDir, skillsTier: tier })
+      expect((await paid.ls('/skills/')).files).toEqual([])
+    }
+  })
+
+  it('lists a missing folder as off and not measured, never as on', () => {
+    const states = celloSkillStates(mkdtempSync(path.join(tmpdir(), 'cello-empty-')))
+    expect(states.map((s) => s.name)).toEqual(['find-roles', 'company-research', 'tailor-resume', 'answer-questions', 'cold-outreach', 'follow-up', 'compare-roles', 'board-reader'])
+    for (const s of states) for (const t of Object.values(s.tiers)) expect(t).toEqual({ on: false, reason: 'Not measured on this kind of model yet' })
+  })
+
+  it('a folder list that cannot be read counts as none', () => {
+    expect(skillsOff('free', '/no/such/dir')).toEqual({})
   })
 })
