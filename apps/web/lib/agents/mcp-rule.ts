@@ -32,7 +32,7 @@ const isNode = (v: unknown): v is Node => !!v && typeof v === 'object' && !Array
 
 /**
  * Every property name in a JSON schema that isRecipientKey, and whether the schema hides what the tool takes: an open object
- * (no declared properties, extras allowed), a $ref that cannot be resolved, or nesting past the depth limit. $ref is followed
+ * (no declared properties, extras allowed; the adapter adds an empty `properties` to one), a $ref that cannot be resolved, or nesting past the depth limit. $ref is followed
  * through $defs and definitions; each ref is read once, so a cycle ends.
  */
 export function scanInput(inputSchema: unknown): { keys: string[]; opaque: boolean } {
@@ -60,7 +60,7 @@ export function scanInput(inputSchema: unknown): { keys: string[]; opaque: boole
     }
     const type = node.type
     const isObject = type === 'object' || (Array.isArray(type) && type.includes('object'))
-    if (isObject && !isNode(node.properties) && node.additionalProperties !== false) opaque = true
+    if (isObject && !(isNode(node.properties) && Object.keys(node.properties).length) && node.additionalProperties !== false) opaque = true
     for (const group of [node.properties, node.patternProperties]) {
       if (!isNode(group)) continue
       for (const [key, sub] of Object.entries(group)) {

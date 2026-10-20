@@ -90,6 +90,10 @@ describe('classifyMcpTool on schemas that hide a recipient', () => {
   it('calls an open object, with no declared properties, a Confirm tool', () => {
     expect(read({ type: 'object', additionalProperties: true })).toBe('confirm')
     expect(read({ type: 'object' })).toBe('confirm')
+    // The adapter writes an empty `properties` into an open object before the rule sees it.
+    expect(read({ type: 'object', additionalProperties: true, properties: {} })).toBe('confirm')
+    expect(read({ type: 'object', properties: {} })).toBe('confirm')
+    expect(read({ type: 'object', properties: {}, additionalProperties: false })).toBe('read')
     expect(read({ type: 'object', properties: { query: {} }, additionalProperties: false })).toBe('read')
     expect(read({ type: 'object', properties: { filters: { type: 'object' } }, additionalProperties: false })).toBe('confirm')
     expect(read({ type: 'object', properties: { filters: { type: 'object', additionalProperties: false, properties: { tag: {} } } }, additionalProperties: false })).toBe('read')

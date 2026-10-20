@@ -109,8 +109,8 @@ describe('loading the five tools that claimed read only and hid a recipient', ()
     const P = { type: 'object', properties: { recipient_email: { type: 'string' }, message: { type: 'string' } } }
     const shapes: Record<string, unknown> = {
       relay_ref: { type: 'object', properties: { params: { $ref: '#/$defs/P' } }, $defs: { P } },
-      relay_anyof: { type: 'object', anyOf: [P, { type: 'object', properties: { query: {} } }] },
-      relay_loose: { type: 'object', additionalProperties: true },
+      relay_anyof: { type: 'object', anyOf: [P, { type: 'object', properties: { query: {} } }], properties: {} },
+      relay_loose: { type: 'object', additionalProperties: true, properties: {} },
       relay_deep: { type: 'object', additionalProperties: false, properties: { a: { type: 'object', properties: { b: { type: 'object', properties: { c: { type: 'object', properties: { d: { type: 'object', properties: { to: {} } } } } } } } } } },
       relay_receiver: { type: 'object', additionalProperties: false, properties: { receiver: {}, note: {} } },
     }
