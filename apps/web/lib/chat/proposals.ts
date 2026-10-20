@@ -43,7 +43,7 @@ const KINDS = Object.keys(SCHEMAS) as ProposalKind[]
 const GUARDED = new Set(['pipeline', 'following', 'watching', 'send', 'autonomy'])
 
 /** The command a kind is applied through (search.update, answers.answer, ...), supplied by whoever wires Chat. */
-export type ApplyTarget = (db: AdminClient, userId: string, payload: Record<string, unknown>) => Promise<void>
+export type ApplyTarget = (db: AdminClient, userId: string, payload: Record<string, unknown>, proposalId?: string) => Promise<void>
 export type ApplyTargets = Partial<Record<ProposalKind, ApplyTarget>>
 
 /** An apply target throws this when it knows why and what to do: the proposal opens again and the person reads these words. */
@@ -162,7 +162,7 @@ export async function confirmProposal(db: AdminClient, userId: string, id: strin
   const { data: claimed } = await db.from('proposals').update({ status: 'confirmed', decided_at: now, confirmed_at: now }).eq('id', id).eq('user_id', userId).eq('status', 'open').select('id')
   if (((claimed as unknown[] | null) ?? []).length !== 1) return refuse('That proposal is already decided.', 'Open the chat again.')
   try {
-    await target(db, userId, parsed.value)
+    await target(db, userId, parsed.value, id)
   } catch (e) {
     await db.from('proposals').update({ status: 'open', decided_at: null, confirmed_at: null }).eq('id', id).eq('user_id', userId)
     if (e instanceof ApplyRefusal) return refuse(e.message, e.fix)

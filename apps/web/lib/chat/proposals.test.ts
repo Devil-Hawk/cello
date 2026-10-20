@@ -71,7 +71,7 @@ describe('confirmProposal', () => {
     const made = await propose(db, 'u1', { ...base, ...search }, all(apply))
     if (!made.ok) throw new Error('propose failed')
     expect(await confirmProposal(db, 'u1', made.id, all(apply))).toEqual({ ok: true })
-    expect(apply).toHaveBeenCalledWith(db, 'u1', { exclude_keywords: ['crypto'] })
+    expect(apply).toHaveBeenCalledWith(db, 'u1', { exclude_keywords: ['crypto'] }, made.id)
     expect(db.tables.proposals[0]).toMatchObject({ status: 'confirmed' })
     expect(db.tables.proposals[0].confirmed_at).toBeTruthy()
     expect(await confirmProposal(db, 'u1', made.id, all(apply))).toMatchObject({ ok: false })
@@ -133,7 +133,7 @@ describe('an outside tool call', () => {
     expect(await confirmProposal(db, 'u1', made.id, only(apply))).toEqual({ ok: true })
     expect(await confirmProposal(db, 'u1', made.id, only(apply))).toMatchObject({ ok: false })
     expect(apply).toHaveBeenCalledTimes(1)
-    expect(apply).toHaveBeenCalledWith(db, 'u1', call.payload)
+    expect(apply).toHaveBeenCalledWith(db, 'u1', call.payload, made.id)
   })
 
   it('refuses a stored payload with an extra key', async () => {
