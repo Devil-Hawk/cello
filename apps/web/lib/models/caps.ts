@@ -60,7 +60,7 @@ export class FreeCapError extends Error {
 }
 
 /** The graph hit its step cap (langgraph's GraphRecursionError). Its own message is a docs link, so this line replaces it. */
-export const STEP_LIMIT_LINE = 'Cello took too many steps on this and stopped. Nothing was changed. Ask again with one thing at a time.'
+export const STEP_LIMIT_LINE = 'Cello took on more than it could in one message and stopped. Nothing was changed. Ask again with one thing at a time.'
 
 export const NO_MODEL_LINE = 'Cello has no model to run on. Add a key or pick Free models in Settings, under Models.'
 const NO_MODEL_CHAT = 'Cello has no model to run on. Add a key or pick Free models in [Settings, under Models](/settings#models).'

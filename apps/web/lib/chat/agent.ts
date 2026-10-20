@@ -260,6 +260,13 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
           for await (const chunk of chunks) {
             if (!Array.isArray(chunk) || chunk.length < 3) continue
             const [namespace, mode, data] = chunk as [readonly string[], string, unknown]
+            // An answer the loop threw away (it did not fit the shape) leaves the box: the next try writes into a clean one.
+            if (mode === 'custom' && !namespace[0]?.startsWith('tools:') && (data as { type?: string } | null)?.type === 'misfit') {
+              written = null
+              lastWords = ''
+              if (!retry) deps.emit({ event: 'custom', data: { type: 'words', text: settled } })
+              continue
+            }
             if (!retry || mode !== 'messages') deps.emit(chunkToEvent([namespace, mode, data]))
             // The chat loop's own model runs under "model_request:<id>" and its tools under "tools:<id>"; a subagent is a
             // model run nested inside a tool call ("tools:<id>" then "model_request:<id>").
