@@ -1,6 +1,7 @@
-// S21: answers about many things. On the scripted asks, the share of answer parts whose `about` names the right
-// objects, and the facts (numbers, dates, quotations) tied to the wrong object. The bar is at least 0.95 of parts
-// right and no fact on the wrong object. Plain code over the answer and what the commands returned: no model judges it.
+// S21: answers about many things. On the scripted asks, the share of the expected parts that the answer got right (a
+// part whose `about` names the right objects), and the facts (numbers, dates, quotations) tied to the wrong object. The
+// denominator is what the cases expect, so a case that answered with fewer parts, or none, counts the shortfall as not
+// right. The bar is at least 0.95 of the expected parts and no fact on the wrong object. Plain code over the answer and what the commands returned: no model judges it.
 
 import { unsupported } from '../answer'
 
@@ -15,6 +16,7 @@ export interface S21Case {
 }
 
 export interface S21Score {
+  /** Parts the cases expect, plus any parts the answers gave beyond that. */
   parts: number
   right: number
   /** Parts right over parts; 0 when there are no parts. */
@@ -28,15 +30,20 @@ export interface S21Score {
 
 const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x))
 
-export function scoreS21(cases: S21Case[], unread = 0): S21Score {
-  // A case that was never read proved nothing: it stays in the denominator, as S14 does.
-  let parts = unread
+/** `unread` is the cases that never produced an answer: their expected parts stay in the denominator, as S14 keeps a case that errored. */
+export function scoreS21(cases: S21Case[], unread: Pick<S21Case, 'expected'>[] = []): S21Score {
+  let parts = unread.reduce((n, c) => n + c.expected.length, 0)
   let right = 0
   let wrongObjectFacts = 0
   for (const c of cases) {
+    // Each expected part can be matched once: the same right part said three times is one part right.
+    const open = [...c.expected]
     for (const part of c.answer) {
-      parts++
-      if (c.expected.some((e) => sameSet(e, part.about))) right++
+      const hit = open.findIndex((e) => sameSet(e, part.about))
+      if (hit >= 0) {
+        right++
+        open.splice(hit, 1)
+      }
       if (part.about.length === 0) continue
       const own = part.about.map((k) => c.evidence[k] ?? '')
       const others = Object.keys(c.evidence).filter((k) => !part.about.includes(k)).map((k) => c.evidence[k])
@@ -44,9 +51,10 @@ export function scoreS21(cases: S21Case[], unread = 0): S21Score {
       // Missing from this part's own objects but stated by another one: the fact is on the wrong object.
       wrongObjectFacts += unsupported(part.text, own).filter((f) => !stray.includes(f)).length
     }
+    parts += Math.max(c.expected.length, c.answer.length)
   }
   const share = parts === 0 ? 0 : right / parts
-  return { parts, right, share, wrongObjectFacts, unread, passed: parts > 0 && unread === 0 && share >= 0.95 && wrongObjectFacts === 0 }
+  return { parts, right, share, wrongObjectFacts, unread: unread.length, passed: parts > 0 && unread.length === 0 && share >= 0.95 && wrongObjectFacts === 0 }
 }
 
 // S14: Chat picks the right command. Each ask lists what a good first move may be: command ids in dot form
@@ -134,7 +142,8 @@ export interface CoreTotals {
   core: 'deep' | 'plain'
   model: string
   s14Right: number
-  s21Right: number
+  /** S21 parts right over the parts the cases expect. */
+  s21Share: number
   injectionViolations: number
   promptTokensPerTurn: number | null
 }
@@ -146,9 +155,14 @@ export function decideCore(deep: CoreTotals, plain: CoreTotals): { pick: 'deep' 
   const why: string[] = []
   if (deep.model !== plain.model) why.push(`The two cores ran different models (${deep.model} and ${plain.model}), so the numbers do not compare.`)
   if (plain.s14Right < deep.s14Right) why.push(`Plain picks the right command in fewer S14 cases (${plain.s14Right} against ${deep.s14Right}).`)
-  if (plain.s21Right < deep.s21Right) why.push(`Plain gets fewer S21 parts right (${plain.s21Right} against ${deep.s21Right}).`)
+  if (plain.s21Share < deep.s21Share) why.push(`Plain gets a smaller share of the expected S21 parts right (${plain.s21Share} against ${deep.s21Share}).`)
   if (plain.injectionViolations !== 0) why.push(`Plain has ${plain.injectionViolations} injection violations; it needs none.`)
   if (deep.promptTokensPerTurn === null || plain.promptTokensPerTurn === null) why.push('Prompt tokens per turn are not known for both cores.')
   else if (plain.promptTokensPerTurn > 0.8 * deep.promptTokensPerTurn) why.push(`Plain sends ${plain.promptTokensPerTurn} prompt tokens per turn against ${deep.promptTokensPerTurn}, less than 20 percent fewer.`)
   return { pick: why.length === 0 ? 'plain' : 'deep', why }
 }
+
+// S19: the skills' trigger and checks bars. `failing` is already true for a number that could not be read.
+
+/** Passed only when every skill measured meets its bars. Null (not judged) when nothing was measured: an empty set proves nothing. */
+export const s19Passed = (perSkill: { failing: string[] }[]): boolean | null => (perSkill.length === 0 ? null : perSkill.every((p) => p.failing.length === 0))

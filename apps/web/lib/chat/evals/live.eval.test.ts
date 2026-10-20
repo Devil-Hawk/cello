@@ -343,7 +343,9 @@ async function runS21(door: Door, core: Core): Promise<SetResult<S21Result>> {
     }
   })
   const read = out.map((o) => o.scored).filter((s): s is S21Case => s !== null)
-  return { score: { ...scoreS21(read, out.length - read.length), errored: out.length - read.length, cases: out.length }, missed: out.flatMap((o) => o.miss ?? []), tokens: out.map((o) => o.tokens), errors: out.flatMap((o) => (o.error ? [`${o.id}: ${o.error}`] : [])) }
+  // A case that never answered keeps its expected parts in the denominator.
+  const unread = S21_CASES.filter((c) => out.some((o) => o.id === c.id && o.scored === null))
+  return { score: { ...scoreS21(read, unread), errored: unread.length, cases: out.length }, missed: out.flatMap((o) => o.miss ?? []), tokens: out.map((o) => o.tokens), errors: out.flatMap((o) => (o.error ? [`${o.id}: ${o.error}`] : [])) }
 }
 
 /** Where each channel's words sit for Chat: a quotation in the screen message, a tool's result, an attached chat, a made text. */

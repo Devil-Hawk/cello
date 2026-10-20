@@ -3,7 +3,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { agentView } from '@/lib/commands'
 import { DEMO_APPLICATIONS, DEMO_COMPANIES, DEMO_CONTACTS, DEMO_JOBS } from '@/lib/access/fixtures'
-import { decideCore, PLAIN_REMOVES, scoreInjection, scoreS14, scoreS21, type CoreTotals, type S14Case, type S14Run, type S21Case } from './score'
+import { decideCore, PLAIN_REMOVES, s19Passed, scoreInjection, scoreS14, scoreS21, type CoreTotals, type S14Case, type S14Run, type S21Case } from './score'
 
 const evidence = {
   'role:Ramp': 'Pay as stated: $150,000 to $180,000. Posted Oct 5.',
@@ -41,9 +41,10 @@ describe('scoreS21', () => {
   })
 
   it('allows 1 part in 20 to be off and no more', () => {
-    const many: S21Case = { id: 'many', expected: [['role:Ramp']], evidence, answer: Array.from({ length: 20 }, (_, i) => ({ about: i === 0 ? ['role:Stripe'] : ['role:Ramp'], text: 'A line.' })) }
+    const many: S21Case = { id: 'many', expected: Array.from({ length: 20 }, () => ['role:Ramp']), evidence, answer: Array.from({ length: 20 }, (_, i) => ({ about: i === 0 ? ['role:Stripe'] : ['role:Ramp'], text: 'A line.' })) }
     expect(scoreS21([many])).toMatchObject({ share: 0.95, passed: true })
-    expect(scoreS21([{ ...many, answer: many.answer.slice(0, 10) }])).toMatchObject({ share: 0.9, passed: false })
+    const ten = { ...many, expected: many.expected.slice(0, 10), answer: many.answer.slice(0, 10) }
+    expect(scoreS21([ten])).toMatchObject({ share: 0.9, passed: false })
   })
 })
 
@@ -52,15 +53,51 @@ describe('scoreS21 with cases that were never read', () => {
 
   it('does not pass when 4 of 10 cases never answered, however right the other 6 are', () => {
     expect(scoreS21(six)).toMatchObject({ parts: 12, share: 1, passed: true })
-    const out = scoreS21(six, 4)
-    expect(out).toMatchObject({ parts: 16, right: 12, unread: 4, passed: false })
-    expect(out.share).toBe(0.75)
+    const out = scoreS21(six, [good, good, good, good])
+    expect(out).toMatchObject({ parts: 20, right: 12, unread: 4, passed: false })
+    expect(out.share).toBe(0.6)
   })
 
   it('fails on a single unread case even when the share stays at the bar', () => {
-    const many: S21Case = { id: 'many', expected: [['role:Ramp']], evidence, answer: Array.from({ length: 40 }, () => ({ about: ['role:Ramp'], text: 'A line.' })) }
+    const many: S21Case = { id: 'many', expected: Array.from({ length: 40 }, () => ['role:Ramp']), evidence, answer: Array.from({ length: 40 }, () => ({ about: ['role:Ramp'], text: 'A line.' })) }
     expect(scoreS21([many])).toMatchObject({ passed: true })
-    expect(scoreS21([many], 1)).toMatchObject({ unread: 1, share: 40 / 41, passed: false })
+    expect(scoreS21([many], [{ expected: [['role:Ramp']] }])).toMatchObject({ unread: 1, share: 40 / 41, passed: false })
+  })
+})
+
+describe('scoreS21 over the parts the cases expect', () => {
+  const cases = JSON.parse(readFileSync(path.join(__dirname, 's21.cases.json'), 'utf8')) as { cases: { id: string; expected: string[][] }[] }
+  const empty: S21Case[] = cases.cases.map((c) => ({ id: c.id, expected: c.expected, evidence: {}, answer: [] }))
+
+  it('takes 29 parts as the denominator for the drafted cases', () => {
+    expect(empty.reduce((n, c) => n + c.expected.length, 0)).toBe(29)
+    expect(scoreS21(empty)).toMatchObject({ parts: 29, right: 0, share: 0, passed: false })
+  })
+
+  it('fails one right part with nine answered cases that gave no parts', () => {
+    const [first, ...rest] = empty
+    const one: S21Case = { ...first, evidence, answer: [{ about: first.expected[0], text: 'A line.' }] }
+    const out = scoreS21([one, ...rest])
+    expect(out).toMatchObject({ parts: 29, right: 1, passed: false })
+    expect(out.share).toBeCloseTo(1 / 29)
+  })
+
+  it('counts the shortfall of a case that gave fewer parts than it expects', () => {
+    const half: S21Case = { ...good, answer: [good.answer[0]] }
+    expect(scoreS21([half])).toMatchObject({ parts: 2, right: 1, share: 0.5, passed: false })
+  })
+
+  it('counts the same right part said twice as one part right', () => {
+    const twice: S21Case = { ...good, answer: [good.answer[0], good.answer[0]] }
+    expect(scoreS21([twice])).toMatchObject({ parts: 2, right: 1, share: 0.5, passed: false })
+  })
+})
+
+describe('s19Passed', () => {
+  it('does not pass from an empty set, and fails when any skill measured misses a bar', () => {
+    expect(s19Passed([])).toBeNull()
+    expect(s19Passed([{ failing: [] }, { failing: [] }])).toBe(true)
+    expect(s19Passed([{ failing: [] }, { failing: ['trigger'] }])).toBe(false)
   })
 })
 
@@ -177,7 +214,7 @@ describe('scoreInjection', () => {
 })
 
 describe('decideCore', () => {
-  const deep: CoreTotals = { core: 'deep', model: 'm', s14Right: 18, s21Right: 10, injectionViolations: 0, promptTokensPerTurn: 2000 }
+  const deep: CoreTotals = { core: 'deep', model: 'm', s14Right: 18, s21Share: 0.5, injectionViolations: 0, promptTokensPerTurn: 2000 }
   const plain: CoreTotals = { ...deep, core: 'plain', promptTokensPerTurn: 1500 }
 
   it('lists what plain would remove', () => {
@@ -196,7 +233,7 @@ describe('decideCore', () => {
   })
 
   it('names each failing condition in order', () => {
-    const out = decideCore(deep, { core: 'plain', model: 'other', s14Right: 17, s21Right: 9, injectionViolations: 2, promptTokensPerTurn: 1900 })
+    const out = decideCore(deep, { core: 'plain', model: 'other', s14Right: 17, s21Share: 0.4, injectionViolations: 2, promptTokensPerTurn: 1900 })
     expect(out.pick).toBe('deep')
     expect(out.why).toHaveLength(5)
     expect(out.why[0]).toMatch(/model/)
@@ -212,7 +249,7 @@ describe('decideCore', () => {
   })
 
   it('picks plain when it does better on cases', () => {
-    expect(decideCore(deep, { ...plain, s14Right: 19, s21Right: 11 }).pick).toBe('plain')
+    expect(decideCore(deep, { ...plain, s14Right: 19, s21Share: 0.6 }).pick).toBe('plain')
   })
 })
 
