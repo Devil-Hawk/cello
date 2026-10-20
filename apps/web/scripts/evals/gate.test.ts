@@ -11,6 +11,7 @@ import {
   expandScripts,
   gateFails,
   globToRegExp,
+  allScriptFiles,
   matchesAny,
   outcomeForExit,
   selectSuites,
@@ -51,6 +52,21 @@ describe('selectSuites', () => {
   it('files outside apps/web, and code no suite covers, run nothing', () => {
     expect(names(['README.md', 'docs/PROMPT-POLICY.md', '.github/workflows/ci.yml'])).toEqual([])
     expect(names(['apps/web/components/ui/button.tsx'])).toEqual([])
+  })
+
+  it('runs the chat suite', () => {
+    expect(names(['apps/web/lib/chat/turn.ts'])).toEqual(['chat'])
+    expect(names(['apps/web/prompts/chat.md'])).toEqual(['chat'])
+    expect(names(['apps/web/lib/agents/factory.ts']).sort()).toEqual(['agent', 'chat'])
+    const chat = manifest.suites.find((s) => s.name === 'chat')
+    expect(chat, 'a chat suite in gate.json').toBeDefined()
+    const found = expandScripts(chat!, allScriptFiles(WEB))
+    expect(found.found).toContain('scripts/evals/chat/live.sh')
+    expect(found.missing).toEqual([])
+    const yml = readFileSync(path.join(WEB, '../../.github/workflows/eval-gate.yml'), 'utf8')
+    expect(yml).toMatch(/^\s+branches: \[main, v2\]$/m)
+    expect(yml).toContain("- 'apps/web/lib/chat/**'")
+    expect(yml).toContain("- 'apps/web/lib/commands/**'")
   })
 
   it('several changes select each suite once', () => {

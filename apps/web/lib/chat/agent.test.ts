@@ -5,6 +5,12 @@ import type { AdminClient } from '@/lib/harness/types'
 import { Command } from '@langchain/langgraph'
 import { chatAgent } from './agent'
 import { MovedError } from './workers'
+import { createCelloAgent } from '@/lib/agents/factory'
+
+vi.mock('@/lib/agents/factory', async (orig) => ({
+  ...(await orig<typeof import('@/lib/agents/factory')>()),
+  createCelloAgent: vi.fn(() => ({ invoke: async () => ({ messages: [new AIMessage('ok')], structuredResponse: { parts: [{ about: [], text: 'Done.' }] } }) })),
+}))
 
 const CAP = 'The draft could not be written: Free models allow 5 drafts a day. Add credit or choose another way to run.'
 
@@ -73,6 +79,16 @@ describe('the loop dying after a refusal', () => {
       },
     })
     await expect(chatAgent(deps(crashing))(input)).rejects.toThrow('boom')
+  })
+})
+
+describe('the model-call cap ending the loop', () => {
+  it("says so in Cello's words, not the library's", async () => {
+    const capped = () => ({ invoke: async () => ({ messages: [new AIMessage('Model call limits exceeded: run limit (24/24)')], structuredResponse: undefined }) })
+    const out = await chatAgent(deps(capped))(input)
+    expect(out.answer.parts).toHaveLength(1)
+    expect(out.answer.parts[0].text).toMatch(/Ask again/)
+    expect(out.answer.parts[0].text).not.toMatch(/limits exceeded/i)
   })
 })
 
@@ -281,5 +297,22 @@ describe('a command that fans out is not the Researcher', () => {
 
   it('still shows one for a delegation that runs on its own', async () => {
     expect((await run(false)).map((e) => e.phase)).toEqual(['start', 'end'])
+  })
+})
+
+describe('the eval seams', () => {
+  const lastBuild = () => vi.mocked(createCelloAgent).mock.calls.at(-1)![0] as unknown as Record<string, unknown>
+
+  it('uses the given model for the loop and for the Researcher, and passes the core', async () => {
+    const model = { _llmType: () => 'scripted' }
+    await chatAgent({ ...deps(undefined as never), build: undefined, model: model as never, core: 'plain', roles: { researcher: { rung: 'R3', model: 'paid/x', effort: 'low' } } })(input)
+    expect(lastBuild()).toMatchObject({ kind: 'chat', core: 'plain', model, researcherModel: model })
+  })
+
+  it('leaves the core unset and builds its own model when no seam is given', async () => {
+    await chatAgent({ ...deps(undefined as never), keys: { userId: 'u1', openrouter: 'k' }, build: undefined })(input)
+    expect(lastBuild().core).toBeUndefined()
+    expect(lastBuild().model).toBeDefined()
+    expect(lastBuild().researcherModel).toBeUndefined()
   })
 })

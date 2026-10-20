@@ -37,8 +37,13 @@ export interface AgentInput {
   returned: ReadonlySet<string>
 }
 
+/** Which path answered a typed ask: one of the code routes, or the model loop. */
+export type Route = 'find' | 'compare' | 'draft' | 'loop'
+
 export interface AgentOutput {
   answer: ModelAnswer
+  /** Which path answered; the turn keeps the first call's. */
+  route?: Route
   /** What the tools returned this run, each with the thing it was about. */
   results: TurnResult[]
   ran?: Ran
@@ -109,9 +114,11 @@ export async function runChatTurn(
   const returned = new Set<string>(recalledResults.flatMap((r) => (r.object ? [ledgerKey(r.object.kind, r.object.ref)] : [])))
   let results: TurnResult[] = recalledResults
   let last: AgentOutput | null = null
+  let route: Route | undefined
   const ask = async (feedback: string | null) => {
     const out = await deps.agent({ chatId, turnId, screen, typed, feedback, returned })
     last = out
+    route ??= out.route
     results = results.concat(out.results)
     for (const r of out.results) if (r.object) returned.add(ledgerKey(r.object.kind, r.object.ref))
     return out.answer
@@ -148,7 +155,7 @@ export async function runChatTurn(
       prov: { step: 'chat', turn_id: turnId },
       parts: settled.parts,
       links: [...settled.links, ...(out?.made ?? []).filter((m) => !settled.links.some((l) => l.kind === 'made' && l.id === m.id)).map((m): TurnLink => ({ kind: 'made', table: 'artifacts', id: m.id, role: 'made' }))],
-      ran: chatRan,
+      ran: chatRan || route ? { ...(chatRan ?? {}), ...(route ? { route } : {}) } : null,
       disclosure,
     })
     .select('id')

@@ -5,8 +5,10 @@
 
 import { HumanMessage, isAIMessageChunk, type AIMessageChunk, type BaseMessage, type BaseMessageChunk } from '@langchain/core/messages'
 import { Command, MemorySaver, type BaseCheckpointSaver } from '@langchain/langgraph'
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { tool } from '@langchain/core/tools'
-import { createCelloAgent } from '@/lib/agents/factory'
+import { createCelloAgent, type ChatCore } from '@/lib/agents/factory'
+import { recursionLimitFor } from '@/lib/agents/middleware'
 import type { AgentContext } from '@/lib/agents/context'
 import { agentView, chatDoor, CommandRefusal, runCommand, toolName } from '@/lib/commands'
 import type { AnyCommand } from '@/lib/commands'
@@ -54,6 +56,10 @@ export interface ChatAgentDeps {
   saver?: BaseCheckpointSaver
   /** The first call of this closure carries on the checkpoint of thread `turnId` instead of starting the turn. */
   resume?: boolean
+  /** The loop's engine. Production leaves it unset (Deep Agents); the evals set 'plain' to compare. */
+  core?: ChatCore
+  /** Eval seam: runs the loop and the Researcher on this model, so an eval never reaches the key-gated door or a paid default. */
+  model?: BaseChatModel
   /** Test seam: replaces the compiled agent. */
   build?: (input: { tools: unknown[] }) => {
     invoke: (input: unknown, config?: Record<string, unknown>) => Promise<{ messages: BaseMessage[]; structuredResponse?: unknown }>
@@ -162,9 +168,10 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         ctx,
         tools: lcTools as never,
         responseFormat: AnswerSchema as never,
-        model: celloChatModel(deps.ran, deps.keys),
+        ...(deps.core ? { core: deps.core } : {}),
+        model: deps.model ?? celloChatModel(deps.ran, deps.keys),
         // The Researcher runs on the model the person chose for research, held to the same highest as Chat.
-        ...(deps.roles?.researcher ? { researcherModel: celloChatModel(deps.roles.researcher, deps.keys, 'researcher') } : {}),
+        ...(deps.model ? { researcherModel: deps.model } : deps.roles?.researcher ? { researcherModel: celloChatModel(deps.roles.researcher, deps.keys, 'researcher') } : {}),
         profileCard: deps.profileCard,
         saver,
         taskRows: { db: deps.db, userId: deps.userId, threadId: input.chatId, chatId: input.chatId, turnId: input.turnId, model: deps.ran.model, rung: deps.ran.rung },
@@ -174,7 +181,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
     let out: { messages: BaseMessage[]; structuredResponse?: unknown }
     // One checkpoint thread for each turn; 'sync' saves it before the next step, so a request that dies loses nothing.
     const thread = { configurable: { thread_id: input.turnId } }
-    const config = { signal: deps.signal, ...thread, durability: 'sync', recursionLimit: 80 }
+    const config = { signal: deps.signal, ...thread, durability: 'sync', recursionLimit: recursionLimitFor('orchestrator') }
     const getState = (agent as { getState?: NonNullable<ReturnType<NonNullable<ChatAgentDeps['build']>>['getState']> }).getState?.bind(agent)
     try {
       // The first call of a resumed turn carries on its checkpoint: a held interrupt is answered, a pending step is replayed.
@@ -275,7 +282,13 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
 
     const parsed = AnswerSchema.safeParse(out.structuredResponse)
     const last = [...out.messages].reverse().find((m) => m.getType() === 'ai' && textOf(m).trim())
-    let answer: ModelAnswer = parsed.success ? parsed.data : { parts: textOf(last).trim() ? [{ about: [], text: textOf(last).trim().slice(0, 4000) }] : [] }
+    // langchain's own words when the model-call cap ends a loop (no answer was written); a person gets a plain sentence.
+    const capped = !parsed.success && /model call limit/i.test(textOf(last))
+    let answer: ModelAnswer = parsed.success
+      ? parsed.data
+      : capped
+        ? { parts: [{ about: [], text: 'Cello reached the most it does in one message before it could write this up. Ask again for the part you want most, or split it into smaller asks.' }] }
+        : { parts: textOf(last).trim() ? [{ about: [], text: textOf(last).trim().slice(0, 4000) }] : [] }
     // A search's roles are shown as cards whether or not the model remembered to list them: the rows are code's.
     if (found.length && !answer.cards?.length) answer = { ...answer, cards: found.slice(0, 12).map((t) => ({ kind: t.kind as 'role', id: t.id })) }
     // The real reason a tool refused is said by code when the model's parts do not carry it (acceptance H2).

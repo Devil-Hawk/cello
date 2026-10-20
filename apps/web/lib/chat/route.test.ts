@@ -92,3 +92,27 @@ describe('the routed draft when no model sentence passes the checks', () => {
     expect(db.tables.agent_tasks[0]).toMatchObject({ command: 'documents.draft', title: 'Writing a message', status: 'failed', summary: NO_SENTENCE_LINE })
   })
 })
+
+describe('the route each answer reports', () => {
+  const mk = (fallback = async () => ({ answer: { parts: [{ about: [], text: 'From the loop.' }] }, results: [] })) => {
+    const db = makeFakeAdmin({ profiles: [], person_roles: [], llm_spend: [], agent_tasks: [], artifacts: [] })
+    const deps = { db, userId: 'u1', keys: { userId: 'u1' } as DecryptedApiKeys, ran: { rung: 'R3' as const, model: 'x:free', effort: 'low' as const } }
+    return routedAgent(deps, fallback, async () => ['Datadog'])
+  }
+  const ask = (typed: string, extra: { screen?: string | null } = {}) => ({ chatId: 'c1', turnId: 't1', screen: extra.screen ?? null, typed, feedback: null, returned: new Set<string>() })
+
+  it('says find, compare and draft for the code paths', async () => {
+    expect((await mk()(ask('Find me data engineer roles in New York'))).route).toBe('find')
+    expect((await mk()(ask('Compare my top three'))).route).toBe('compare')
+    expect((await mk()(ask('Draft a short note to Datadog asking about the timeline'))).route).toBe('draft')
+  })
+
+  it('says loop, with the fallback answer intact, for tiles on the screen and for a line with no intent', async () => {
+    const onScreen = await mk()(ask('Find me data engineer roles in New York', { screen: '<untrusted_data source="screen">x</untrusted_data>' }))
+    expect(onScreen.route).toBe('loop')
+    expect(onScreen.answer.parts[0].text).toBe('From the loop.')
+    const none = await mk()(ask('What should I focus on this week?'))
+    expect(none.route).toBe('loop')
+    expect(none.answer.parts[0].text).toBe('From the loop.')
+  })
+})

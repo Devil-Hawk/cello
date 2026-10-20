@@ -92,6 +92,29 @@ describe('runChatTurn', () => {
     expect(out.ok && out.settled.dropped).toBe(0)
   })
 
+  it('records which route answered', async () => {
+    const good = answerFor(['$190,000', '$215,000', '$165,000'])
+    const cello = (db: FakeAdmin) => db.tables.chat_turns.find((t) => t.kind === 'cello')
+
+    const a = seed()
+    await send(deps(a, async () => ({ answer: good, results: resultsOf(), route: 'find' })))
+    expect(cello(a)?.ran).toEqual({ route: 'find' })
+
+    // The retry after a failed check always goes to the loop; it must not overwrite the first route.
+    const b = seed()
+    const agent = vi
+      .fn<[AgentInput], Promise<AgentOutput>>()
+      .mockResolvedValueOnce({ answer: answerFor(['$190,000', '$999,999', '$165,000']), results: resultsOf(), route: 'find' })
+      .mockResolvedValueOnce({ answer: good, results: [], route: 'loop' })
+    await send(deps(b, agent))
+    expect(agent).toHaveBeenCalledTimes(2)
+    expect(cello(b)?.ran).toEqual({ route: 'find' })
+
+    const c = seed()
+    await send(deps(c, async () => ({ answer: good, results: resultsOf() })))
+    expect(cello(c)?.ran).toBeNull()
+  })
+
   it('drops a part that fails twice and says so, keeping the rest', async () => {
     const db = seed()
     const agent = vi.fn(async (): Promise<AgentOutput> => ({ answer: answerFor(['$190,000', '$999,999', '$165,000']), results: resultsOf() }))

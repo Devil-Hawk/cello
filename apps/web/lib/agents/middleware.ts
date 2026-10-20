@@ -13,8 +13,9 @@
 //
 // - Retry sits inside fallback, so the chosen model is retried on a 429 before
 //   the call moves to a free model.
-// - CelloOneAnswer trims a doubled structured answer off the model's message. It sits just outside CelloSpend,
-//   because langchain wraps an error thrown by any middleware layer, and CelloSpend must still see the provider's raw one.
+// - CelloOneAnswer trims a doubled structured answer off the model's message and asks again, itself and a bounded
+//   number of times, when the answer does not fit its shape (langchain's own retry breaks the after-model nodes). It
+//   sits just outside CelloSpend, so each ask reserves and settles on its own, and CelloSpend still sees the provider's raw error.
 // - CelloSpend is innermost on the model path, so every real attempt, each
 //   fallback included, reserves and settles its own cost.
 // - A BudgetCapError from CelloSpend is not retried; it reaches fallback, which
@@ -56,6 +57,15 @@ export const AGENT_CAPS = {
 } as const
 
 export type AgentKind = keyof typeof AGENT_CAPS
+
+/**
+ * Graph steps one model call can take with the guard stack on (measured in factory.test.ts: 7, with the call
+ * limits' nodes before and after the model, and the tools). The step limit is only a backstop, so it has to sit
+ * above what the model-call cap allows, or a long turn dies of the backstop before the cap can end it politely.
+ */
+const STEPS_PER_MODEL_CALL = 8
+
+export const recursionLimitFor = (agent: AgentKind): number => AGENT_CAPS[agent].modelCalls * STEPS_PER_MODEL_CALL + 16
 
 export interface GuardContext {
   admin: AdminClient
@@ -232,12 +242,11 @@ export function celloTaskRows(scope: WorkerScope) {
 
 const isAnswerCall = (c: { name?: string }) => c.name?.startsWith('extract-') === true
 
-/** The message with every structured-answer call after the first removed, everywhere a provider format keeps them. */
-function firstAnswerOnly(m: AIMessage): AIMessage {
+/** The message with only the calls `keep` returns true for, everywhere a provider format keeps them. */
+function keepCalls(m: AIMessage, keep: (c: { id?: string; name?: string }) => boolean): AIMessage {
   const calls = m.tool_calls ?? []
-  if (calls.filter(isAnswerCall).length < 2) return m
-  const first = calls.find(isAnswerCall)
-  const dropped = new Set(calls.filter((c) => isAnswerCall(c) && c !== first).map((c) => c.id))
+  const dropped = new Set(calls.filter((c) => !keep(c)).map((c) => c.id))
+  if (!dropped.size) return m
   const kept = <T extends { id?: string }>(c: T) => !dropped.has(c.id)
   const kwargs = m.additional_kwargs
   return new AIMessage({
@@ -251,29 +260,86 @@ function firstAnswerOnly(m: AIMessage): AIMessage {
   })
 }
 
+/** A model may write its structured answer twice in one message: the first one is the answer. */
+function firstAnswerOnly(m: AIMessage): AIMessage {
+  const first = (m.tool_calls ?? []).find(isAnswerCall)
+  return keepCalls(m, (c) => !isAnswerCall(c) || c === first)
+}
+
+/** What a model is told when its answer does not fit: where, and what was wrong. Never shown to a person. */
+function issuesOf(error: { issues: { path: PropertyKey[]; message: string }[] }): string {
+  return error.issues
+    .slice(0, 5)
+    .map((i) => `${i.path.length ? i.path.map(String).join('.') : 'answer'}: ${i.message}`)
+    .join('; ')
+    .slice(0, 600)
+}
+
+/** The most times Cello asks a model for one answer: the first ask and two more. */
+export const MAX_ANSWER_ASKS = 3
+
+export class AnswerShapeError extends Error {
+  constructor(detail: string) {
+    super(`The model's answer did not fit the shape after ${MAX_ANSWER_ASKS} tries: ${detail}`)
+    this.name = 'AnswerShapeError'
+  }
+}
+
+export interface AnswerShape {
+  safeParse: (v: unknown) => { success: boolean; error?: unknown }
+}
+
 /**
- * A model may write its structured answer twice in one message (two `extract-N` tool calls). langchain
- * handles that after the model returns, with a retry Command, while the step's after-model nodes are
- * still live, and the call limits above then both write `jumpTo` in one step: InvalidUpdateError, and
- * the turn dies. langchain decides before any middleware sees the message, so this wraps the model
- * itself and keeps the first answer only.
+ * One structured answer, and one bounded retry that is Cello's own.
+ *
+ * langchain meets a bad structured answer (two of them in one message, or one that does not fit the schema)
+ * after the model returns, and answers it with a retry Command that goes back to the model node. That node
+ * keeps its edge into the after-model nodes too, so the retried model call and the first call's chain of
+ * after-model nodes (the model, tool and delegation limits) run one step apart, two of them land in one
+ * step, and each writes `jumpTo`: InvalidUpdateError, and the turn dies. It also lets a model that keeps
+ * failing loop until the step limit. langchain decides before any middleware sees the message, so this wraps
+ * the model itself. It keeps the first answer, checks it against the schema, and when it does not fit it
+ * hides the message from langchain (an empty plain one with the same usage, which langchain passes through),
+ * then asks again from here with the reason, at most MAX_ANSWER_ASKS times, reading Stop before each ask.
+ * Every ask goes through CelloSpend, which sits inside this. createCelloAgent also turns langchain's own
+ * retry off for the answer (handleError false), so anything this misses ends the turn with a plain error.
  */
-export function celloOneAnswer() {
+export function celloOneAnswer(opts: { answer?: AnswerShape; stop?: () => Promise<boolean> } = {}) {
   type Bound = { invoke: (...args: unknown[]) => Promise<unknown> }
+  type Misfit = { message: AIMessage; why: string }
   return createMiddleware({
     name: 'CelloOneAnswer',
-    wrapModelCall: (request, handler) => {
+    wrapModelCall: async (request, handler) => {
       const model = request.model as unknown as { bindTools?: (...args: unknown[]) => Bound }
       if (typeof model.bindTools !== 'function') return handler(request)
+      const seen: { misfit: Misfit | null } = { misfit: null }
       const bindTools = (...args: unknown[]) => {
         const bound = model.bindTools!(...args)
         const invoke = async (...a: unknown[]) => {
-          const out = await bound.invoke(...a)
-          return AIMessage.isInstance(out) ? firstAnswerOnly(out) : out
+          const raw = await bound.invoke(...a)
+          if (!AIMessage.isInstance(raw)) return raw
+          const out = firstAnswerOnly(raw)
+          const call = (out.tool_calls ?? []).find(isAnswerCall)
+          const checked = call && opts.answer ? opts.answer.safeParse(call.args) : null
+          if (!call || !checked || checked.success) return out
+          // Only the answer goes back to the model: tool calls beside it were never run.
+          seen.misfit = { message: keepCalls(out, (c) => c === call), why: issuesOf(checked.error as Parameters<typeof issuesOf>[0]) }
+          return new AIMessage({ content: '', usage_metadata: out.usage_metadata, response_metadata: out.response_metadata, id: out.id, name: out.name })
         }
         return Object.create(bound, { invoke: { value: invoke } })
       }
-      return handler({ ...request, model: Object.create(model, { bindTools: { value: bindTools } }) })
+      const wrapped = Object.create(model, { bindTools: { value: bindTools } })
+      let messages = request.messages
+      for (let ask = 1; ; ask++) {
+        seen.misfit = null
+        const response = await handler({ ...request, messages, model: wrapped })
+        const bad = seen.misfit as Misfit | null
+        if (!bad) return response
+        if (ask >= MAX_ANSWER_ASKS) throw new AnswerShapeError(bad.why)
+        if (await opts.stop?.()) throw new StoppedError()
+        const call = bad.message.tool_calls?.[0]
+        messages = [...messages, bad.message, new ToolMessage({ content: `Your answer did not fit the shape, so it was not used: ${bad.why}. Call ${call?.name} again with a corrected answer.`, tool_call_id: call?.id ?? '', status: 'error' })]
+      }
     },
   })
 }
@@ -368,6 +434,8 @@ export interface GuardStackOptions {
   stop?: () => Promise<boolean>
   /** Chat only: each delegation to the Researcher becomes a worker row with its own Stop. */
   taskRows?: WorkerScope
+  /** The shape of the loop's final answer, when it has one: a misfit is asked for again by Cello, not by langchain. */
+  answer?: AnswerShape
   /** Test seam: fallback models to use instead of the free list. */
   fallbacks?: Parameters<typeof modelFallbackMiddleware>
 }
@@ -401,7 +469,7 @@ export function guardStack(opts: GuardStackOptions): AgentMiddleware[] {
     toolRetryMiddleware({ maxRetries: 2, backoffFactor: 2, initialDelayMs: 300, retryOn: retryable }),
     ...(opts.stop ? [celloStop(opts.stop)] : []),
     ...(opts.taskRows ? [celloTaskRows(opts.taskRows)] : []),
-    celloOneAnswer(),
+    celloOneAnswer({ answer: opts.answer, stop: opts.stop }),
     celloSpend(ctx),
   ]
   return stack as AgentMiddleware[]
