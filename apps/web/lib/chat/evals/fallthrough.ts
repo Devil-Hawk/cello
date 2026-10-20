@@ -1,6 +1,6 @@
 // Which typed asks fall through the code router to the model loop.
 //
-//   pnpm tsx lib/chat/evals/fallthrough.ts [--days 30]
+//   npx --no-install tsx lib/chat/evals/fallthrough.ts [--days 30]
 //
 // Reads the answers of the window whose stored route is "loop", finds the line the person typed for each, and
 // prints the opening words that recur most. It writes nothing.
