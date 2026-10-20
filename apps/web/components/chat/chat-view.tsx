@@ -20,6 +20,7 @@ import { Finder } from '@/components/chat/finder'
 import { Rail, type EarlierChat, type RailChat, type ScheduledRow } from '@/components/chat/rail'
 import { SidePanel } from '@/components/chat/side-panel'
 import { StatusTurn } from '@/components/chat/status-turn'
+import { PlanCard } from '@/components/chat/plan-card'
 import { TasksLine, type TaskRow, type TaskStatus } from '@/components/chat/tasks-line'
 import { Tiles, type TileData } from '@/components/chat/tiles'
 import type { Disclosure } from '@/lib/chat/disclosure'
@@ -80,8 +81,7 @@ async function sendJson<T = Record<string, unknown>>(url: string, method: string
   }
 }
 
-const toTaskRow = (t: ChatPageData['tasks'][number]): TaskRow => ({ id: t.id, title: t.title, status: t.status as TaskStatus, command: t.command, reads: t.reads?.length ?? 0 })
-const alive = (t: TaskRow) => t.status === 'queued' || t.status === 'working'
+const toTaskRow = (t: ChatPageData['tasks'][number]): TaskRow => ({ id: t.id, title: t.title, status: t.status as TaskStatus, command: t.command, reads: t.reads?.length ?? 0, summary: t.summary })
 const seconds = (rows: ChatPageData['tasks']) => {
   const starts = rows.map((r) => Date.parse(r.started_at ?? r.created_at)).filter((n) => !Number.isNaN(n))
   const ends = rows.map((r) => (r.finished_at ? Date.parse(r.finished_at) : Date.now()))
@@ -102,6 +102,8 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   // Null until it has been read, and when it cannot be: the rail then says nothing rather than "Nothing scheduled".
   const [scheduled, setScheduled] = useState<ScheduledRow[] | null>(null)
   const [note, setNote] = useState<string | null>(null)
+  // Go ahead or Cancel was pressed on the plan card and the page has not read the result yet.
+  const [planBusy, setPlanBusy] = useState(false)
   const [adding, setAdding] = useState(false)
   const [addWords, setAddWords] = useState('')
   const [picks, setPicks] = useState<Record<string, number>>({})
@@ -211,11 +213,12 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     (data: unknown) => {
       if (!data || typeof data !== 'object') return
       const event = data as { type?: string; text?: unknown; label?: unknown; phase?: unknown }
+      if (event.type === 'busy' && typeof event.text === 'string') return setNote(event.text)
       if (event.type === 'words' || event.type === 'tool') {
         const stopped = stoppingRef.current
         return setLive((current) => nextLive(current, event, stopped))
       }
-      if (event.type === 'answer') {
+      if (event.type === 'answer' || event.type === 'plan') {
         streamTurnId.current = null
         // The live block stays until the stored answer is on the page: the thread never collapses in between.
         void loadPage().then(() => setLive(null))
@@ -238,6 +241,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
     },
     onCustomEvent,
     onError: (error) => {
+      setPlanBusy(false)
       markStopping(false)
       setLive(null)
       if (unsent.current) unsent.current(unsentMessage(error))
@@ -252,6 +256,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
       void loadPage().then(() => {
         markStopping(false)
         setLive(null)
+        setPlanBusy(false)
       })
     },
   })
@@ -316,13 +321,15 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   const lastTurn = page?.turns.filter((t) => !t.superseded_at && t.kind !== 'status').at(-1)
   // What the newest answer ran on, from its disclosure (the ledger's model, disclosure.ts), for the picker's step-down line.
   const lastRan = (page?.turns.filter((t) => !t.superseded_at && t.kind === 'cello').at(-1)?.disclosure as Disclosure | null | undefined)?.ran ?? null
-  const awaiting = lastTurn?.kind === 'person' && Date.now() - Date.parse(lastTurn.created_at) < 6 * 60_000
+  // A plan waiting for the person's word: nothing runs, and its planned steps are not alive.
+  const waitingPlan = lastTurn?.kind === 'person' ? page?.tasks.find((t) => t.command === 'chat.plan' && t.status === 'waiting' && t.turn_id === lastTurn.id) : undefined
+  const awaiting = lastTurn?.kind === 'person' && !waitingPlan && Date.now() - Date.parse(lastTurn.created_at) < 6 * 60_000
   // The sent line stands in for the person's turn until the rows hold it.
   const pendingLine = justSent !== null && !page?.turns.some((t) => t.kind === 'person' && t.typed === justSent) ? justSent : null
   useEffect(() => {
     if (justSent !== null && pendingLine === null) setJustSent(null)
   }, [justSent, pendingLine])
-  const running = tasks.some(alive) || awaiting || sending || pendingLine !== null || stream.isLoading
+  const running = (page?.tasks ?? []).some((t) => (t.status === 'queued' || t.status === 'working') && t.parent_id !== waitingPlan?.id) || awaiting || sending || pendingLine !== null || stream.isLoading
   // The stopped row has landed and nothing runs any more: the page is done stopping.
   useEffect(() => {
     if (!running) markStopping(false)
@@ -367,7 +374,21 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
   const turnTasks = page?.tasks.filter((t) => t.turn_id === lastPersonTurn?.id) ?? []
   // The turn's own row (chat.turn) is the loop, not work: it is listed nowhere, so the counts here and in Sources and tools agree.
   // While a new line is pending the rows are the earlier turn's, so none are shown.
-  const work = pendingLine === null ? turnTasks.filter((t) => t.command !== 'chat.turn') : []
+  // The plan row is never listed, a started step shows as its own work, and the steps of a waiting plan are on the plan card.
+  const work = pendingLine === null ? turnTasks.filter((t) => t.command !== 'chat.turn' && t.command !== 'chat.plan' && !(t.command === 'chat.plan.step' && (t.status === 'done' || t.parent_id === waitingPlan?.id))) : []
+  const planSteps = waitingPlan ? (page?.tasks ?? []).filter((t) => t.command === 'chat.plan.step' && t.parent_id === waitingPlan.id).sort((a, b) => (a.branch_index ?? 0) - (b.branch_index ?? 0)).map((t) => ({ id: t.id, title: t.title })) : []
+  const decidePlan = async (keep: string[] | null) => {
+    if (!waitingPlan) return
+    setPlanBusy(true)
+    setNote(null)
+    streamChatId.current = chatId
+    try {
+      await stream.submit(undefined, { command: { resume: { plan_id: waitingPlan.id, keep } } })
+    } catch {
+      setPlanBusy(false)
+      setNote('Cello could not send that. Try again.')
+    }
+  }
 
   // A chat opens at its newest turn, and a new turn, row, word or tool line keeps the person there unless they have scrolled up to read.
   useEffect(() => {
@@ -721,6 +742,10 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
               </div>
             )}
 
+
+            {waitingPlan && !stream.isLoading && pendingLine === null && planSteps.length > 0 && (
+              <PlanCard key={waitingPlan.id} steps={planSteps} busy={planBusy} onGo={(keep) => void decidePlan(keep)} onCancel={() => void decidePlan(null)} />
+            )}
 
             {(work.length > 0 || running) && (
               <TasksLine
