@@ -30,6 +30,8 @@ export interface AdvanceOptions {
   tailorResume?: StepCtx['tailorResume']
   writeCoverLetter?: StepCtx['writeCoverLetter']
   draftAnswer?: StepCtx['draftAnswer']
+  /** Asked before each step: true when the person has stopped this work. The application is then paused, not carried on by the sweeper. */
+  shouldStop?: () => Promise<boolean>
 }
 
 /** The plan's steps plus the ones added so far, each after the step that added it. */
@@ -181,6 +183,10 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
       // a step that finished before is not run again: its event is its saved result
       const { data: had } = await admin.from('pipeline_events').select('id').eq('user_id', app.user_id).eq('idempotency_key', done).maybeSingle()
       if (had) continue
+      if (await opts.shouldStop?.()) {
+        // Not "no", the person can Resume: the steps already done are kept and are not run again.
+        return await transition(admin, { applicationId: app.id, from: ['preparing'], to: 'paused', step: 'Stopped by you', event: { ...base('application.paused', `stopped:${app.id}:${step.id}:${app.last_event_at ?? 'none'}`, 'Stopped from Chat. Resume it when you want Cello to carry on.', { step: step.id }), actor: DOORS.chat.actor, channel: DOORS.chat.channel } })
+      }
       if (now() - started > BUDGET_MS) {
         await release(admin, app.id)
         return null
