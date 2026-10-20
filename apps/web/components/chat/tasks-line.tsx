@@ -57,13 +57,15 @@ export interface TasksLineProps {
   /** True while the turn runs. */
   running: boolean
   seconds: number
+  /** Stop has been pressed and has not landed yet: the line says so instead of counting, and Stop rests. */
+  stopping?: boolean
   onStop: () => void
   onStopTask: (id: string) => void
   /** Show the list at first (the page remembers what the person chose). */
   defaultOpen?: boolean
 }
 
-export function TasksLine({ tasks, running, seconds, onStop, onStopTask, defaultOpen = false }: TasksLineProps) {
+export function TasksLine({ tasks, running, seconds, stopping = false, onStop, onStopTask, defaultOpen = false }: TasksLineProps) {
   const [open, setOpen] = useState(defaultOpen)
   const list = useRef<HTMLUListElement>(null)
   // The list comes into view when it opens, rather than sitting under the compose box.
@@ -76,14 +78,14 @@ export function TasksLine({ tasks, running, seconds, onStop, onStopTask, default
   return (
     <div className="rounded-control border border-border bg-card px-3 py-2 text-caption" role="status" aria-live="polite">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-foreground">{running ? (tasks.length ? `Cello is working: ${finished} of ${tasks.length} done. ${clock(seconds)}` : `Cello is working. ${clock(seconds)}`) : workedSummary(tasks, seconds)}</span>
+        <span className="text-foreground">{running && stopping ? 'Stopping' : running ? (tasks.length ? `Cello is working: ${finished} of ${tasks.length} done. ${clock(seconds)}` : `Cello is working. ${clock(seconds)}`) : workedSummary(tasks, seconds)}</span>
         {tasks.length > 0 && (
           <button type="button" className="min-h-11 min-w-11 text-muted-foreground underline underline-offset-2 hover:text-foreground" aria-expanded={open} onClick={() => setOpen(!open)}>
             {open ? 'Hide' : 'Show'}
           </button>
         )}
         {running && (
-          <button type="button" className="min-h-11 rounded-control border border-input px-2 py-0.5 text-foreground hover:bg-muted" onClick={onStop}>
+          <button type="button" disabled={stopping} className="min-h-11 rounded-control border border-input px-2 py-0.5 text-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-40" onClick={onStop}>
             Stop
           </button>
         )}

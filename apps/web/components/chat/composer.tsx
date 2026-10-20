@@ -13,6 +13,8 @@ export interface ComposerProps {
   onSend: () => void
   onStop: () => void
   running: boolean
+  /** Stop has been pressed and has not landed yet: the Stop key rests. */
+  stopping?: boolean
   /** A selection quoted from an earlier answer with Ask Cello. */
   quoted?: { text: string } | null
   onRemoveQuote?: () => void
@@ -99,7 +101,7 @@ function Dictate({ value, onChange }: { value: string; onChange: (value: string)
   )
 }
 
-export function Composer({ value, onChange, onSend, onStop, running, quoted, onRemoveQuote, notice, above, controls, status, placeholder = 'Ask Cello to find, compare, write or apply' }: ComposerProps) {
+export function Composer({ value, onChange, onSend, onStop, running, stopping = false, quoted, onRemoveQuote, notice, above, controls, status, placeholder = 'Ask Cello to find, compare, write or apply' }: ComposerProps) {
   const canSend = !running && value.trim().length > 0 && !notice
   const lines = Math.min(MAX_LINES, Math.max(1, value.split('\n').length))
   const field = useRef<HTMLTextAreaElement>(null)
@@ -149,7 +151,7 @@ export function Composer({ value, onChange, onSend, onStop, running, quoted, onR
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{controls}</div>
         <Dictate value={value} onChange={onChange} />
         {running ? (
-          <button type="button" aria-label="Stop" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90" onClick={onStop}>
+          <button type="button" aria-label="Stop" disabled={stopping} className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40" onClick={onStop}>
             <Square className="h-4 w-4" aria-hidden />
           </button>
         ) : (
