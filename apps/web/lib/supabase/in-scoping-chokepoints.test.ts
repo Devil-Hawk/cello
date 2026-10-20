@@ -42,6 +42,18 @@ const SCAN_ROOTS = ['apps/web/app', 'apps/web/lib']
  * reason is why that specific variable can never reach an unbounded size.
  */
 const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
+  'apps/web/lib/chat/find-roles.ts': {
+    calls: [".in('job_id', matchedIds)"],
+    reason: 'the ids of the roles one search matched, cut to 300 where the array is made.',
+  },
+  'apps/web/lib/chat/rollup.ts': {
+    calls: [".in('id', ids)", ".in('id', waiting.map((a)"],
+    reason: 'the applications Cello attached in one turn, at most CELLO_ATTACHES_PER_TURN (12).',
+  },
+  'apps/web/lib/commands/defs/pipeline.ts': {
+    calls: [".in('id', ids)"],
+    reason: "the role ids of one applications.start call, at most STARTS_PER_TURN (3) by the command's input.",
+  },
   'apps/web/lib/targeting/roles.ts': {
     calls: [
       ".in('job_function', t.functions)",
