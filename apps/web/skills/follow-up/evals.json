@@ -30,8 +30,19 @@
         },
         {
           "type": "max_words",
-          "value": 120,
+          "value": 140,
           "note": "shorter than the first note"
+        },
+        {
+          "type": "matches",
+          "pattern": "draft",
+          "flags": "i",
+          "note": "says it is a draft, not sent"
+        },
+        {
+          "type": "not_matches",
+          "pattern": "\\b(?!(?:31|14|9)\\b)\\d+(?:\\.\\d+)?\\s?%",
+          "note": "invents no percentage the resume does not have"
         },
         {
           "type": "matches",
