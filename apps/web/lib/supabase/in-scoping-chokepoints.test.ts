@@ -47,7 +47,7 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     reason: 'the ids of the roles one search matched, cut to 300 where the array is made.',
   },
   'apps/web/lib/chat/rollup.ts': {
-    calls: [".in('id', ids)", ".in('id', waiting.map((a)"],
+    calls: [".in('id', ids)", ".in('id', rows.map((a)"],
     reason: 'the applications Cello attached in one turn, at most CELLO_ATTACHES_PER_TURN (12).',
   },
   'apps/web/lib/commands/defs/pipeline.ts': {
