@@ -63,9 +63,11 @@ export interface TasksLineProps {
   onStopTask: (id: string) => void
   /** Show the list at first (the page remembers what the person chose). */
   defaultOpen?: boolean
+  /** The turn runs on the server without this page: the line says it carries on and the person can leave. */
+  background?: boolean
 }
 
-export function TasksLine({ tasks, running, seconds, stopping = false, onStop, onStopTask, defaultOpen = false }: TasksLineProps) {
+export function TasksLine({ tasks, running, seconds, stopping = false, onStop, onStopTask, defaultOpen = false, background = false }: TasksLineProps) {
   const [open, setOpen] = useState(defaultOpen)
   const list = useRef<HTMLUListElement>(null)
   // The list comes into view when it opens, rather than sitting under the compose box.
@@ -75,10 +77,11 @@ export function TasksLine({ tasks, running, seconds, stopping = false, onStop, o
   // A turn with no work rows has a line only while it runs: "Cello is working" with Stop, and nothing to show.
   if (tasks.length === 0 && !running) return null
   const finished = tasks.filter((t) => !alive(t.status) && t.status !== 'waiting').length
+  const lead = background ? `Cello carries on in the background${tasks.length ? `: ${finished} of ${tasks.length} done` : ''}. You can leave this page.` : tasks.length ? `Cello is working: ${finished} of ${tasks.length} done.` : 'Cello is working.'
   return (
     <div className="rounded-control border border-border bg-card px-3 py-2 text-caption" role="status" aria-live="polite">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-foreground">{running && stopping ? 'Stopping' : running ? (tasks.length ? `Cello is working: ${finished} of ${tasks.length} done. ${clock(seconds)}` : `Cello is working. ${clock(seconds)}`) : workedSummary(tasks, seconds)}</span>
+        <span className="text-foreground">{running && stopping ? 'Stopping' : running ? `${lead} ${clock(seconds)}` : workedSummary(tasks, seconds)}</span>
         {tasks.length > 0 && (
           <button type="button" className="min-h-11 min-w-11 text-muted-foreground underline underline-offset-2 hover:text-foreground" aria-expanded={open} onClick={() => setOpen(!open)}>
             {open ? 'Hide' : 'Show'}
