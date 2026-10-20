@@ -29,6 +29,7 @@ const kept = [
   'kb_sources',
   'llm_spend',
   'outreach_messages',
+  'person_skills',
   'resume_documents',
   'user_mcp_servers',
 ]

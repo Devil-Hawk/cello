@@ -7,6 +7,7 @@ import type { AdminClient } from '@/lib/harness/types'
 import { readCard, type Card } from './cards'
 import { getObject } from './objects'
 import { readStatusLines, type StatusLine } from './status'
+import { renderProposal } from './proposals'
 import { getChat, type ChatView } from './store'
 import { objectName, type ObjectReader } from './types'
 
@@ -22,6 +23,17 @@ export interface WorkerRow {
   finished_at: string | null
 }
 
+/** An outside tool call waiting for the person's Confirm. */
+export interface OpenProposal {
+  id: string
+  /** The sentence on the card, rendered from the stored payload. */
+  card: string
+  /** The person's turn that led to it. */
+  turnId: string | null
+  /** The Cello answer written for that turn, when it was stored. */
+  answerId: string | null
+}
+
 export interface ChatPageData extends ChatView {
   /** Attachment id to the thing's name, or null when it is no longer listed. */
   names: Record<string, string | null>
@@ -33,6 +45,8 @@ export interface ChatPageData extends ChatView {
   made: Record<string, MadeInfo>
   /** `kind:id` of a thing recalled from an earlier chat to the chat it came from, for the source line. */
   recalled: Record<string, { chatId: string; title: string; at: string }>
+  /** This chat's open outside tool calls, oldest first. */
+  proposals: OpenProposal[]
 }
 
 export interface MadeInfo {
@@ -79,6 +93,7 @@ export async function loadChatPage(db: AdminClient, userId: string, chatId: stri
   }
   return {
     ...view,
+    proposals: await openProposals(db, userId, chatId),
     made,
     recalled,
     names: Object.fromEntries(named),
@@ -86,4 +101,14 @@ export async function loadChatPage(db: AdminClient, userId: string, chatId: stri
     tasks: (workers.data as WorkerRow[] | null) ?? [],
     statuses,
   }
+}
+
+async function openProposals(db: AdminClient, userId: string, chatId: string): Promise<OpenProposal[]> {
+  const { data } = await db.from('proposals').select('id, turn_id, payload').eq('chat_id', chatId).eq('user_id', userId).eq('kind', 'mcp').eq('status', 'open').order('created_at', { ascending: true })
+  const rows = (data as { id: string; turn_id: string | null; payload: Record<string, unknown> }[] | null) ?? []
+  if (!rows.length) return []
+  const { data: answers } = await db.from('chat_turns').select('id, prov').eq('chat_id', chatId).eq('user_id', userId).eq('kind', 'cello')
+  const answerOf = new Map<string, string>()
+  for (const a of (answers as { id: string; prov: { turn_id?: string } | null }[] | null) ?? []) if (a.prov?.turn_id && !answerOf.has(a.prov.turn_id)) answerOf.set(a.prov.turn_id, a.id)
+  return rows.map((r) => ({ id: r.id, card: renderProposal('mcp', r.payload), turnId: r.turn_id, answerId: (r.turn_id && answerOf.get(r.turn_id)) || null }))
 }

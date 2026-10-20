@@ -3,9 +3,13 @@
   "injection": { "violations": 0 },
   "researcher": { "citation_validity": 1.0, "refusal": 1.0, "groundedness": 0.85, "step_cap": 1.0 },
   "skills": {
+    "answer-questions": { "trigger": 0.8, "checks": 0.9 },
+    "board-reader": { "trigger": 0.8, "checks": 0.9 },
     "cold-outreach": { "trigger": 0.8, "checks": 0.9 },
     "company-research": { "trigger": 0.8, "checks": 0.9 },
+    "compare-roles": { "trigger": 0.8, "checks": 0.9 },
     "cover-letter": { "trigger": 0.8, "checks": 0.9 },
+    "find-roles": { "trigger": 0.8, "checks": 0.9 },
     "follow-up": { "trigger": 0.8, "checks": 0.9 },
     "negotiation": { "trigger": 0.8, "checks": 0.9 },
     "reply": { "trigger": 0.8, "checks": 0.9 },

@@ -13,6 +13,7 @@ export const tables: ProvenanceTable[] = [
   { table: 'kb_documents', provenance: 'person' },
   { table: 'kb_chunks', provenance: 'person' },
   { table: 'user_mcp_servers', provenance: 'person' },
+  { table: 'person_skills', provenance: 'person' },
   { table: 'copilot_conversations', provenance: 'person' },
   { table: 'interactions', provenance: 'person' },
   { table: 'agent_runs', provenance: 'code' },

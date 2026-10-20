@@ -77,4 +77,26 @@ describe('loadChatPage', () => {
     const page = await loadChatPage(db, 'u1', 'c1', get)
     expect(page?.statuses.e1.sentence).toBe('Sent.')
   })
+
+  it('lists the open outside tool calls oldest first, each card from the stored payload and tied to its answer', async () => {
+    const db = seed()
+    const payload = (tool: string) => ({ server: 'notes', tool, args: { q: 'rent' } })
+    db.tables.chat_turns.push({ id: 't4', user_id: 'u1', chat_id: 'c1', kind: 'cello', created_at: '2026-10-05T10:02:00Z', parts: [], prov: { step: 'chat', turn_id: 't1' } })
+    db.tables.proposals = [
+      { id: 'p2', user_id: 'u1', chat_id: 'c1', turn_id: 't9', kind: 'mcp', status: 'open', payload: payload('later'), created_at: '2026-10-05T10:03:00Z' },
+      { id: 'p1', user_id: 'u1', chat_id: 'c1', turn_id: 't1', kind: 'mcp', status: 'open', payload: payload('search'), created_at: '2026-10-05T10:01:00Z' },
+      { id: 'p3', user_id: 'u1', chat_id: 'c1', turn_id: 't1', kind: 'mcp', status: 'confirmed', payload: payload('done'), created_at: '2026-10-05T10:01:00Z' },
+      { id: 'p4', user_id: 'u1', chat_id: 'c1', turn_id: 't1', kind: 'search', status: 'open', payload: { exclude_keywords: ['x'] }, created_at: '2026-10-05T10:01:00Z' },
+      { id: 'p5', user_id: 'u2', chat_id: 'c1', turn_id: 't1', kind: 'mcp', status: 'open', payload: payload('theirs'), created_at: '2026-10-05T10:01:00Z' },
+    ]
+    const page = await loadChatPage(db, 'u1', 'c1', get)
+    expect(page?.proposals).toEqual([
+      { id: 'p1', card: 'Run "search" on notes with: q: rent', turnId: 't1', answerId: 't4' },
+      { id: 'p2', card: 'Run "later" on notes with: q: rent', turnId: 't9', answerId: null },
+    ])
+  })
+
+  it('has no proposals for a chat that made none', async () => {
+    expect((await loadChatPage(seed(), 'u1', 'c1', get))?.proposals).toEqual([])
+  })
 })

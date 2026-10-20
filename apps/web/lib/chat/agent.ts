@@ -9,6 +9,7 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { tool } from '@langchain/core/tools'
 import { createCelloAgent, type ChatCore } from '@/lib/agents/factory'
 import { recursionLimitFor } from '@/lib/agents/middleware'
+import { loadUserMcpTools, type UserMcpTool, type UserMcpTools } from '@/lib/agents/user-mcp'
 import type { AgentContext } from '@/lib/agents/context'
 import { agentView, chatDoor, CommandRefusal, runCommand, toolName } from '@/lib/commands'
 import type { AnyCommand } from '@/lib/commands'
@@ -20,6 +21,8 @@ import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { reasonOf } from '@/lib/models/caps'
 import { celloChatModel, type Ran, type Role } from '@/lib/models/choice'
 import { AnswerSchema, type ModelAnswer, type TurnResult } from './answer'
+import { mcpTargets } from './mcp-confirm'
+import { propose } from './proposals'
 import type { Mode } from './mode'
 import type { AgentInput, AgentOutput } from './turn'
 import { resultOf } from './recalled'
@@ -34,6 +37,7 @@ const HELP: Record<string, string> = {
   people_find: 'Find one of the person\'s contacts by name. Returns the contact with their company and their latest message to the person. Use it before a reply, to get the contact id.',
   chat_recall: 'Look in the person\'s earlier chats by words. Returns what they said, made or decided there, with the chat it came from.',
   documents_draft: 'Write one draft with the Writer: type reply (to a person, pass contact_id), message, follow_up, note, cover_letter or resume (pass job_id for a role). Saves it as a draft. Never sends.',
+  postings_read: 'Read one job posting from a link the person typed in this message. Returns its title, place, pay as stated and its requirements in the posting\'s own words. Stores nothing. A link to a list of roles is refused with what to do instead.',
   applications_start: 'Start preparing applications for stored roles: job_id for one, or job_ids for up to 3 the person named or attached, in one call. It checks each posting and tailors the resume. In Ask first it then waits for the person to approve the resume and nothing is sent; in Hands-off, say what its sentence says. Never say you applied, sent or submitted.',
 }
 
@@ -56,6 +60,8 @@ export interface ChatAgentDeps {
   saver?: BaseCheckpointSaver
   /** The first call of this closure carries on the checkpoint of thread `turnId` instead of starting the turn. */
   resume?: boolean
+  /** Test seam: the person's own tools, loaded each call. Default: their enabled servers (lib/agents/user-mcp.ts). */
+  mcp?: () => Promise<UserMcpTools>
   /** The loop's engine. Production leaves it unset (Deep Agents); the evals set 'plain' to compare. */
   core?: ChatCore
   /** Eval seam: runs the loop and the Researcher on this model, so an eval never reaches the key-gated door or a paid default. */
@@ -81,6 +87,21 @@ const thingsOf = (out: unknown): Thing[] => {
   return Array.isArray(t) ? (t as Thing[]) : []
 }
 
+const NO_MCP: UserMcpTools = { tools: [], entries: [], skipped: [], close: async () => undefined }
+const RESULT_MAX = 4000
+
+/** The words of what a server returned: text blocks as they are, any other block as its type. */
+const flatten = (v: unknown): string =>
+  typeof v === 'string' ? v : Array.isArray(v) ? v.map((b) => (typeof b === 'string' ? b : typeof (b as { text?: unknown })?.text === 'string' ? (b as { text: string }).text : `[${(b as { type?: string })?.type ?? 'content'}]`)).join('\n\n') : (JSON.stringify(v) ?? '')
+
+/** Every string under a key that names who or where something goes, at any depth and inside arrays. */
+function recipientValues(args: unknown, keys: readonly string[], inside = false): string[] {
+  if (typeof args === 'string') return inside ? [args] : []
+  if (Array.isArray(args)) return args.flatMap((v) => recipientValues(v, keys, inside))
+  if (args && typeof args === 'object') return Object.entries(args).flatMap(([k, v]) => recipientValues(v, keys, inside || keys.includes(k)))
+  return []
+}
+
 /** The loop for one person, as the function runChatTurn calls once for the answer and once more for a failed part. */
 export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<AgentOutput> {
   // One conversation with the model per turn: a retry continues it, so the tools are not called again for nothing.
@@ -92,6 +113,10 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
   const madeIds = new Set<string>()
   // A cap, a missing key or a refusal a tool met this turn, in code's words, so the person reads it even when the model leaves it out.
   const refusals: string[] = []
+  // What code adds to the answer when the model leaves it out: a Confirm that is waiting, a tool it would not use.
+  const waiting: string[] = []
+  const declined: string[] = []
+  const unreached = new Set<string>()
   // What a tool returned becomes evidence for the answer check, a source under the answer and a card to show. One place, so a
   // slice that carries on a turn can read it back from the checkpoint's tool messages instead of losing the first slice's.
   const record = (def: AnyCommand, out: unknown) => {
@@ -115,7 +140,7 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
   // namespace; those are not the Researcher, so they are never shown as one.
   let commandsRunning = 0
 
-  return async (input) => {
+  const turn = async (input: AgentInput, mcp: UserMcpTools): Promise<AgentOutput> => {
     const ctxFor = () => chatDoor({ userId: deps.userId, typed: input.typed, chat: { chatId: input.chatId, turnId: input.turnId }, mode: deps.mode, signal: deps.signal })
     const defs: AnyCommand[] = agentView()
     const lcTools = defs.map((def) =>
@@ -146,6 +171,56 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
       )
     )
 
+    // The person's own tools. A tool marked Never is not here; read tools run, the rest wait for the person's Confirm.
+    const outside = mcp.entries
+      .filter((e) => (['read', 'confirm'] as string[]).includes(e.tier))
+      .map((entry) => {
+        const label = `${entry.name} on ${entry.server}`
+        return tool(
+          async (args: Record<string, unknown>) => {
+            if (await deps.stop?.()) throw new StoppedError()
+            deps.emit?.({ event: 'custom', data: { type: 'tool', label, phase: 'start' } })
+            try {
+              if (entry.tier === 'read') {
+                tools.push({ label })
+                const text = flatten(await entry.tool.invoke(args)).slice(0, RESULT_MAX)
+                results.push({ object: null, text })
+                return text
+              }
+              return await waitForConfirm(entry, args)
+            } catch (e) {
+              if (e instanceof StoppedError || isBudgetCapError(e)) throw e
+              const message = 'That did not work.'
+              results.push({ object: null, text: message })
+              return JSON.stringify({ error: message, fix: 'Tell the person what could not be done, in one sentence.' })
+            } finally {
+              deps.emit?.({ event: 'custom', data: { type: 'tool', label, phase: 'end' } })
+            }
+          },
+          { name: entry.tool.name, description: entry.tool.description, schema: entry.tool.schema as never }
+        )
+      })
+    // A tool that sends or submits is never called here: its call becomes a card, and the server hears of it on Confirm.
+    const waitForConfirm = async (entry: UserMcpTool, args: Record<string, unknown>): Promise<string> => {
+      const typed = input.typed.toLowerCase()
+      const stray = recipientValues(args, entry.recipients).find((v) => !typed.includes(v.toLowerCase()))
+      if (stray !== undefined) {
+        const line = `Cello did not use ${entry.name}: ${stray} is not in what you typed.`
+        if (!declined.includes(line)) declined.push(line)
+        results.push({ object: null, text: line })
+        return JSON.stringify({ error: 'That address is not in what the person typed.', fix: 'Ask the person who it goes to.' })
+      }
+      const made = await propose(deps.db, deps.userId, { chatId: input.chatId, turnId: input.turnId, kind: 'mcp', payload: { server: entry.server, tool: entry.name, args } }, mcpTargets({ chatId: input.chatId, isDemo: deps.isDemo }))
+      if (!made.ok) {
+        results.push({ object: null, text: made.error })
+        return JSON.stringify({ error: made.error, fix: made.fix })
+      }
+      const sentence = `Waiting for your Confirm: ${made.card}`
+      waiting.push(sentence)
+      results.push({ object: null, text: sentence })
+      return JSON.stringify({ waiting: true, sentence })
+    }
+
     const ctx: AgentContext = {
       admin: deps.db,
       userId: deps.userId,
@@ -162,14 +237,15 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
       deadlineAt,
     }
     const agent =
-      deps.build?.({ tools: lcTools }) ??
+      deps.build?.({ tools: [...lcTools, ...outside] }) ??
       (createCelloAgent({
         kind: 'chat',
         ctx,
-        tools: lcTools as never,
+        tools: [...lcTools, ...outside] as never,
         responseFormat: AnswerSchema as never,
         ...(deps.core ? { core: deps.core } : {}),
         model: deps.model ?? celloChatModel(deps.ran, deps.keys),
+        skillsTier: ({ R2: 'local', R3: 'free', R4: 'paid' } as const)[deps.ran.rung],
         // The Researcher runs on the model the person chose for research, held to the same highest as Chat.
         ...(deps.model ? { researcherModel: deps.model } : deps.roles?.researcher ? { researcherModel: celloChatModel(deps.roles.researcher, deps.keys, 'researcher') } : {}),
         profileCard: deps.profileCard,
@@ -193,20 +269,25 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
         // What the earlier slices' tools returned is in the checkpoint: read it back, so the answer is checked against all of it.
         for (const m of state?.values?.messages ?? []) {
           if (m.getType() !== 'tool') continue
-          const def = defs.find((d) => toolName(d) === (m as { name?: string }).name)
+          const name = (m as { name?: string }).name
+          const def = defs.find((d) => toolName(d) === name)
+          const entry = mcp.entries.find((e) => e.tool.name === name && e.tier === 'read')
           let out: unknown = null
           try {
             out = JSON.parse(textOf(m))
           } catch {
-            continue
+            out = textOf(m)
           }
-          if (!def) continue
-          const failed = (out as { error?: unknown } | null)?.error
-          if (typeof failed === 'string') {
-            results.push({ object: null, text: failed })
-            if (failed !== 'That did not work.' && !refusals.includes(failed)) refusals.push(failed)
+          if (def) {
+            const failed = (out as { error?: unknown } | null)?.error
+            if (typeof failed === 'string') {
+              results.push({ object: null, text: failed })
+              if (failed !== 'That did not work.' && !refusals.includes(failed)) refusals.push(failed)
+            } else record(def, out)
+          } else if (entry) {
+            tools.push({ label: `${entry.name} on ${entry.server}` })
+            results.push({ object: null, text: textOf(m).slice(0, RESULT_MAX) })
           }
-          else record(def, out)
         }
       }
       const stream = (agent as unknown as { stream?: (input: unknown, config?: unknown) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown> }).stream
@@ -295,10 +376,24 @@ export function chatAgent(deps: ChatAgentDeps): (input: AgentInput) => Promise<A
     const said = answer.parts.map((p) => p.text.toLowerCase()).join('\n')
     const unsaid = refusals.filter((r) => !said.includes(r.toLowerCase()))
     if (unsaid.length) answer = { ...answer, parts: [...answer.parts, ...unsaid.map((text) => ({ about: [], text }))] }
+    // A Confirm that is waiting, and a tool Cello would not use, are said by code: the person must not have to guess.
+    const sentences = [...declined.filter((l) => !said.includes(l.toLowerCase())), ...waiting.filter((w) => !said.includes('waiting for your confirm') && !said.includes(w.toLowerCase()))]
+    if (sentences.length) answer = { ...answer, parts: [...answer.parts, ...sentences.map((text) => ({ about: [], text }))] }
 
     const made = madeIds.size
       ? (((await deps.db.from('artifacts').select('id, type, title, created_at').eq('user_id', deps.userId).in('id', [...madeIds])).data as { id: string; type: string; title: string; created_at: string }[] | null) ?? [])
       : []
-    return { answer, results: results.splice(0), ran: deps.ran, roles: { chat: deps.ran, ...(deps.roles?.researcher ? { researcher: deps.roles.researcher } : {}) }, tools, sources, made }
+    return { answer, results: results.splice(0), ran: deps.ran, roles: { chat: deps.ran, ...(deps.roles?.researcher ? { researcher: deps.roles.researcher } : {}) }, tools, sources, made, ...(unreached.size ? { unreached: [...unreached] } : {}) }
+  }
+
+  // The person's servers are loaded for each call and closed after it, so a server added now is used on the next turn.
+  return async (input) => {
+    const mcp = deps.isDemo ? NO_MCP : await (deps.mcp ?? (() => loadUserMcpTools({ admin: deps.db, userId: deps.userId, isDemo: deps.isDemo })))()
+    for (const s of mcp.skipped) unreached.add(s.name)
+    try {
+      return await turn(input, mcp)
+    } finally {
+      await mcp.close().catch(() => undefined)
+    }
   }
 }

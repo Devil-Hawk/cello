@@ -23,7 +23,6 @@ const ConnectionsTab = dynamic(() => import('@/components/settings/connections-t
 const ApiKeysTab = dynamic(() => import('@/components/settings/api-keys-tab').then((m) => m.ApiKeysTab), { ssr: false })
 const ModelTab = dynamic(() => import('@/components/settings/model-tab').then((m) => m.ModelTab), { ssr: false })
 const ProviderTab = dynamic(() => import('@/components/settings/provider-tab').then((m) => m.ProviderTab), { ssr: false })
-const McpTab = dynamic(() => import('@/components/settings/mcp-tab').then((m) => m.McpTab), { ssr: false })
 const TokensTab = dynamic(() => import('@/components/settings/tokens-tab').then((m) => m.TokensTab), { ssr: false })
 const SearchTab = dynamic(() => import('@/components/settings/search-tab').then((m) => m.SearchTab), { ssr: false })
 const SourcesTab = dynamic(() => import('@/components/settings/sources-tab').then((m) => m.SourcesTab), { ssr: false })
@@ -49,7 +48,7 @@ export const SECTIONS: { id: string; label: string }[] = [
 /** Old ?tab= links (the Gmail sync card, emails) land on the part that took the tab's place. */
 export const TAB_TARGET: Record<string, { section: string; fold?: string }> = {
   connections: { section: 'connections' },
-  mcp: { section: 'connections', fold: 'tools' },
+  mcp: { section: 'connections' },
   'api-keys': { section: 'models', fold: 'key' },
   model: { section: 'models', fold: 'default' },
   provider: { section: 'models', fold: 'computer' },
@@ -96,6 +95,22 @@ function Account({ email }: { email: string | null }) {
         <Key variant="ghost" disabled={busy} onClick={signOut}>Sign out</Key>
       </div>
     </>
+  )
+}
+
+/** Your own tools and Your skills are pages of their own; Connections points to them. */
+function OwnPages() {
+  return (
+    <ul className="space-y-3">
+      <li className="space-y-1">
+        <Key asChild variant="raised"><Link href="/settings/tools">Your own tools</Link></Key>
+        <p className="r-meta">Connect servers of your own and choose what Cello may do with each tool.</p>
+      </li>
+      <li className="space-y-1">
+        <Key asChild variant="raised"><Link href="/settings/skills">Your skills</Link></Key>
+        <p className="r-meta">Add a skill that tells Cello how to do one thing, or see the ones Cello has.</p>
+      </li>
+    </ul>
   )
 }
 
@@ -279,7 +294,7 @@ export function SettingsView({ owner }: { owner: boolean }) {
       <Section id="connections" title="Connections">
         <ConnectionsTab onStatus={onStatus} />
         <GmailStatus />
-        <Fold id="tools" title="Your own tools" open={target?.fold === 'tools'}>{() => <McpTab onStatus={onStatus} />}</Fold>
+        <OwnPages />
       </Section>
 
       <Section id="spend" title="Spend"><Spend hasKey={ownKey} onStatus={onStatus} /></Section>

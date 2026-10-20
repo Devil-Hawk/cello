@@ -42,6 +42,7 @@ export const UNTRUSTED_TOOL_NAMES: ReadonlySet<string> = new Set([
   'people_find',
   'chat_recall',
   'documents_draft',
+  'postings_read',
   // What a specialist hands back about text it read. The orchestrator treats it as data too.
   'task',
 ])

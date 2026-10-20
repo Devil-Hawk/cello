@@ -2,14 +2,17 @@
 // answer. Each is code over stored rows; every string a model may quote comes back inside a `things` list, and the
 // loop turns each thing into a result the answer check reads (lib/chat/agent.ts). Nothing here reaches a model.
 
+import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { createArtifact } from '@/lib/agents/artifacts'
 import { roleView } from '@/lib/agents/scoring-port'
+import { detectFromUrl } from '@/lib/ats/detect'
 import { readCard } from '@/lib/chat/cards'
 import { findRoles, MAX_FOUND } from '@/lib/chat/find-roles'
 import { recall } from '@/lib/chat/recall'
 import { recalledThing } from '@/lib/chat/recalled'
 import { madeThing, ThingSchema, type Thing } from '@/lib/chat/things'
+import { previewPosting } from '@/lib/companies/preview'
 import { getMemoryStore } from '@/lib/memory/mem0-store'
 import { CommandRefusal, defineCommand, type AnyCommand, type CommandContext } from '../define'
 import { codeText, untrustedText } from '../text'
@@ -154,6 +157,43 @@ export const chatRecall = defineCommand({
   },
 })
 
+export const postingsRead = defineCommand({
+  id: 'postings.read',
+  label: 'Read a posting',
+  input: z.strictObject({ url: z.string().url().max(2000) }),
+  output: z.object({ sentence: codeText(300), things }),
+  callers: ['chat'],
+  kind: 'code',
+  sends: false,
+  egress: 'typed',
+  needsTyped: true,
+  measure: 'T21',
+  async run(ctx, input) {
+    // Only a link the person typed in this message: a link a page or an email held never gets read.
+    const typed = ctx.typed ?? ''
+    if (!typed.includes(input.url) && !typed.includes(input.url.replace(/\/$/, ''))) throw new CommandRefusal(400, 'Cello reads a posting only from a link you typed in this message.', 'needs_typed')
+    const p = await previewPosting({ url: input.url })
+    if (!p) {
+      if (detectFromUrl({ careerUrl: input.url, domain: null })) return { sentence: 'That is a list of roles. Add it on Companies, under Find or add, and Cello reads it on its schedule.', things: [] }
+      return { sentence: 'Cello could not read that page as one posting. Check the link, or add the company on Companies.', things: [] }
+    }
+    const items = [...(p.requirements.items ?? [])].sort((a, b) => Number(b.kind === 'must') - Number(a.kind === 'must')).slice(0, 11)
+    const hash = p.description_md5 ?? createHash('sha256').update(input.url).digest('hex')
+    const thing: Thing = {
+      kind: 'role',
+      id: `posting:${hash.slice(0, 16)}`,
+      title: p.title,
+      company: null,
+      place: p.location,
+      pay: p.salary_range,
+      chance: null,
+      posted: null,
+      notes: [...items.map((i) => `Requirement: "${i.quote}"`), `Read from ${new URL(input.url).hostname}`],
+    }
+    return { sentence: `Read ${p.title}. It was read live and not stored.`, things: [thing] }
+  },
+})
+
 export const chatKeep = defineCommand({
   id: 'chat.keep',
   label: 'Keep this',
@@ -174,4 +214,4 @@ export const chatKeep = defineCommand({
   },
 })
 
-export const chatCommands: AnyCommand[] = [rolesFind, rolesGet, companiesGet, rolesCompare, peopleFind, chatRecall, chatKeep]
+export const chatCommands: AnyCommand[] = [rolesFind, rolesGet, companiesGet, rolesCompare, peopleFind, chatRecall, postingsRead, chatKeep]

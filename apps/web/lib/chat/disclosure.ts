@@ -22,6 +22,8 @@ export interface Disclosure {
   tools: { label: string; object?: string }[]
   workers: { title: string; status: string; reads: number }[]
   sources: { title: string; host: string }[]
+  /** The person's own servers left out this turn because they could not be reached. Absent when none were. */
+  unreached?: string[]
   seconds: number
   costUsd: number
 }
@@ -62,7 +64,7 @@ export async function buildDisclosure(
   db: AdminClient,
   userId: string,
   turnId: string,
-  input: { ran: Ran | null; runs?: Run[]; mode?: ResolvedMode; tools: Disclosure['tools']; sources: Disclosure['sources']; startedAt: Date; endedAt: Date }
+  input: { ran: Ran | null; runs?: Run[]; mode?: ResolvedMode; tools: Disclosure['tools']; sources: Disclosure['sources']; unreached?: string[]; startedAt: Date; endedAt: Date }
 ): Promise<Disclosure> {
   const { data } = await db.from('agent_tasks').select('title, status, reads, branch_index, command').eq('user_id', userId).eq('turn_id', turnId).order('created_at', { ascending: true })
   const rows = (data as { title: string; status: string; reads: unknown[] | null; command: string | null }[] | null) ?? []
@@ -74,6 +76,7 @@ export async function buildDisclosure(
     // The turn's own row ("Cello is working", chat.turn) is still open while this is written and is not a task the turn used.
     workers: rows.filter((r) => r.command !== 'chat.turn').map((r) => ({ title: r.title, status: r.status, reads: r.reads?.length ?? 0 })),
     sources: input.sources,
+    ...(input.unreached?.length ? { unreached: input.unreached } : {}),
     seconds: Math.max(0, Math.round((input.endedAt.getTime() - input.startedAt.getTime()) / 1000)),
     costUsd: await turnCost(db, userId, turnId),
   }

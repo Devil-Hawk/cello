@@ -23,7 +23,7 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { McpError, type McpServerConfig, type McpToolDescriptor } from './types'
-import { assertSsrfSafe } from '@/lib/security/untrusted'
+import { checkSsrf, type SsrfCheckResult } from '@/lib/security/untrusted'
 import { isSelfHosted } from '@/lib/self-hosted'
 
 const CLIENT_NAME = 'cello-copilot'
@@ -33,6 +33,24 @@ const CLIENT_VERSION = '1.0.0'
  *  (registry prompt-block building, copilot-tools dispatch) pass their own
  *  tighter budget when they need to stay inside a larger request deadline. */
 export const DEFAULT_MCP_TIMEOUT_MS = 10_000
+
+/** checkSsrf, except a literal loopback host (127.0.0.0/8, ::1, localhost) passes when isSelfHosted(), so a person
+ *  running Cello on their own machine can reach a server beside it. Private, link-local and metadata addresses stay
+ *  refused everywhere. One answer for Settings, the chat turn and the Confirm call. */
+export async function checkMcpAddress(url: string): Promise<SsrfCheckResult> {
+  if (isSelfHosted()) {
+    try {
+      const u = new URL(url)
+      const host = u.hostname.replace(/^\[|\]$/g, '')
+      if ((u.protocol === 'http:' || u.protocol === 'https:') && (host === 'localhost' || host === '::1' || /^127(\.\d{1,3}){3}$/.test(host))) {
+        return { ok: true, hostname: u.hostname, addresses: [host] }
+      }
+    } catch {
+      // not a URL: checkSsrf below says so
+    }
+  }
+  return checkSsrf(url)
+}
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -143,11 +161,8 @@ async function connect(server: McpServerConfig, timeoutMs: number, signal?: Abor
   // already gated behind isStdioAvailable() for self-hosted deployments only.
   if (server.transport === 'http' || server.transport === 'sse') {
     if (server.url) {
-      try {
-        await assertSsrfSafe(server.url)
-      } catch (e) {
-        throw new McpError(errMsg(e), { server: server.name })
-      }
+      const check = await checkMcpAddress(server.url)
+      if (!check.ok) throw new McpError(check.message, { server: server.name })
     }
   }
 
