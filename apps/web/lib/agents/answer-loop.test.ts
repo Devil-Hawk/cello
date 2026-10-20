@@ -6,7 +6,9 @@ import { HumanMessage } from '@langchain/core/messages'
 import { MemorySaver } from '@langchain/langgraph'
 import { ChatOpenRouter } from '@langchain/openrouter'
 import { z } from 'zod'
+import { chatAgent } from '@/lib/chat/agent'
 import { createCelloAgent } from './factory'
+import { AnswerSchema } from '@/lib/chat/answer'
 import { makeFakeAdmin } from './testing/fake-admin'
 
 const Answer = z.object({ text: z.string().max(8) })
@@ -62,4 +64,31 @@ describe('a misfit answer on the real OpenRouter adapter', () => {
       s.close()
     })
   }
+})
+
+describe('the live words when an answer is thrown away', () => {
+  it('never show the rejected text once Cello has rejected it, and end on the good answer alone', async () => {
+    const misfit = 'LONGMISFIT ' + 'x'.repeat(4100)
+    const s = await serve([() => ({ parts: [{ about: [], text: misfit }] }), () => ({ parts: [{ about: [], text: misfit }] }), () => ({ parts: [{ about: [], text: 'The good answer' }] })])
+    const model = new ChatOpenRouter({ model: 'nvidia/nemotron-3-super-120b-a12b:free', apiKey: 'k', baseURL: s.url, maxRetries: 0 } as never)
+    const ctx: any = { admin: makeFakeAdmin(), userId: 'u1', userEmail: '', apiKeys: { openrouter: 'k', userId: 'u1' }, isDemo: false, threadId: 't', conversationId: null, autonomy: 'ask', traceId: '', deadlineAt: Date.now() + 120000 }
+    const events: { type: string; text?: string }[] = []
+    const ask = chatAgent({
+      db: {} as any, mcp: async () => ({ tools: [], entries: [], skipped: [], close: async () => undefined }) as never, userId: 'u1', keys: { userId: 'u1' } as any, isDemo: false, ran: { rung: 'R3', model: 'x:free', effort: 'low' },
+      emit: (e) => { if (e.event === 'custom') events.push(e.data as { type: string; text?: string }) },
+      build: () => createCelloAgent({ kind: 'chat', ctx, saver: new MemorySaver(), model, fallbacks: [], tools: [], responseFormat: AnswerSchema as never } as never) as never,
+    })
+    const out = await ask({ chatId: 'c1', turnId: 't1', screen: null, typed: 'hi', feedback: null, returned: new Set() })
+    expect(out.answer.parts[0]!.text).toBe('The good answer')
+    expect(s.bodies).toHaveLength(3)
+    const words = events.filter((e) => e.type === 'words').map((e) => e.text ?? '')
+    // The box showed the rejected text while it streamed, then was cleared when Cello rejected it, each time.
+    expect(words.some((w) => w.includes('LONGMISFIT'))).toBe(true)
+    expect(words).toContain('')
+    // The rejected text is never shown beside the next try, and a clear follows each rejection.
+    expect(words.filter((w) => w.includes('LONGMISFIT') && w.includes('good answer'))).toEqual([])
+    expect(words.filter((w) => w === '')).toHaveLength(2)
+    expect(words.at(-1)).toBe('The good answer')
+    s.close()
+  })
 })

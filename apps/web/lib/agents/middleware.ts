@@ -335,6 +335,8 @@ export function celloOneAnswer(opts: { answer?: AnswerShape; stop?: () => Promis
         const response = await handler({ ...request, messages, model: wrapped })
         const bad = seen.misfit as Misfit | null
         if (!bad) return response
+        // The words of the answer just thrown away may already be on the person's screen: say so on the stream.
+        ;(request.runtime as { writer?: (chunk: unknown) => void } | undefined)?.writer?.({ type: 'misfit' })
         if (ask >= MAX_ANSWER_ASKS) throw new AnswerShapeError(bad.why)
         if (await opts.stop?.()) throw new StoppedError()
         const call = bad.message.tool_calls?.[0]
