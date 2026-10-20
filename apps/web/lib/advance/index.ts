@@ -32,6 +32,8 @@ export interface AdvanceOptions {
   draftAnswer?: StepCtx['draftAnswer']
   /** Asked before each step: true when the person has stopped this work. The application is then paused, not carried on by the sweeper. */
   shouldStop?: () => Promise<boolean>
+  /** Aborts when the person stops this work: a model call in flight ends, and whatever the step found is dropped. */
+  signal?: AbortSignal
 }
 
 /** The plan's steps plus the ones added so far, each after the step that added it. */
@@ -128,6 +130,17 @@ export async function recordCost(admin: SupabaseClient, applicationId: string): 
   await admin.from('applications').update({ cost_usd: c.usd }).eq('id', applicationId)
 }
 
+/** Not "no": the person can Resume. The steps already done are kept and are not run again. Only a preparing application moves, so a second stop is a refusal, not a second event. */
+function pauseStopped(admin: SupabaseClient, applicationId: string, at: string, lastEventAt: string | null) {
+  return transition(admin, { applicationId, from: ['preparing'], to: 'paused', step: 'Stopped by you', event: { ...base('application.paused', `stopped:${applicationId}:${at}:${lastEventAt ?? 'none'}`, 'Stopped from Chat. Resume it when you want Cello to carry on.', { step: at }), actor: DOORS.chat.actor, channel: DOORS.chat.channel } })
+}
+
+/** The person stopped this application: pause it now, whoever holds its steps, so the sweeper (which advances only preparing ones) never carries it on. */
+export async function stopApplication(admin: SupabaseClient, applicationId: string): Promise<MoveResult> {
+  const { data } = await admin.from('applications').select('last_event_at').eq('id', applicationId).maybeSingle()
+  return pauseStopped(admin, applicationId, 'stop', (data as { last_event_at: string | null } | null)?.last_event_at ?? null)
+}
+
 export async function advanceOne(admin: SupabaseClient, applicationId: string, opts: AdvanceOptions = {}): Promise<MoveResult | null> {
   const now = opts.now ?? Date.now
   const started = now()
@@ -148,8 +161,11 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
     tailorResume: opts.tailorResume,
     writeCoverLetter: opts.writeCoverLetter,
     draftAnswer: opts.draftAnswer,
+    signal: opts.signal,
   }
   const key = (step: string) => `step:${app.id}:${step}:${app.attempt}`
+  const stopped = (at: string) => pauseStopped(admin, app.id, at, app.last_event_at)
+  const halt = async () => Boolean(opts.signal?.aborted) || (await opts.shouldStop?.()) === true
 
   try {
     // A completion or wait event carries its additions atomically. The separate added-step event is only the
@@ -176,8 +192,6 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
       const [after, step] = key.split(':')
       additions.set(key, { after, step: step as AddedStep['step'], why: '' })
     }
-    // Not "no": the person can Resume. The steps already done are kept and are not run again.
-    const stopped = (at: string) => transition(admin, { applicationId: app.id, from: ['preparing'], to: 'paused', step: 'Stopped by you', event: { ...base('application.paused', `stopped:${app.id}:${at}:${app.last_event_at ?? 'none'}`, 'Stopped from Chat. Resume it when you want Cello to carry on.', { step: at }), actor: DOORS.chat.actor, channel: DOORS.chat.channel } })
     const steps = withAdded(opts.steps ?? STEPS, [...additions.values()])
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i]
@@ -185,7 +199,7 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
       // a step that finished before is not run again: its event is its saved result
       const { data: had } = await admin.from('pipeline_events').select('id').eq('user_id', app.user_id).eq('idempotency_key', done).maybeSingle()
       if (had) continue
-      if (await opts.shouldStop?.()) return stopped(step.id)
+      if (await halt()) return stopped(step.id)
       if (now() - started > BUDGET_MS) {
         await release(admin, app.id)
         return null
@@ -194,6 +208,8 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
       const t0 = now()
       const out = await step.run(ctx)
       const ms = now() - t0
+      // Stopped while it ran: what it found (a question, a draft) is not the person's to see, so nothing of it is written.
+      if (opts.signal?.aborted) return stopped(step.id)
 
       if (out.kind === 'wait') {
         const added = (out.add ?? []).map((addition) => ({ ...addition, after: step.id }))
@@ -220,7 +236,7 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
         steps.splice(i + 1, 0, ADDED_STEPS[addition.step])
       }
     }
-    if (await opts.shouldStop?.()) return stopped('ready')
+    if (await halt()) return stopped('ready')
     const r = await transition(admin, { applicationId: app.id, from: ['preparing'], to: 'ready', step: 'Ready to send', event: base('step.finished', `ready:${app.id}:${app.attempt}`, 'Everything is prepared. It is ready for you to send.', { step: 'ready' }) })
     // Started in Hands-off: one more line says whether Send for me may take it, in SQL's words (its switch, caps and
     // rules) or code's (the site is not one Cello sends on yet). A line that moves nothing; the person reads why it waits.
@@ -231,6 +247,7 @@ export async function advanceOne(admin: SupabaseClient, applicationId: string, o
     await recordCost(admin, app.id)
     return r
   } catch (e) {
+    if (opts.signal?.aborted) return await stopped('abort')
     return await failed(admin, app, e, now)
   } finally {
     await release(admin, app.id)

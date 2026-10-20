@@ -57,10 +57,19 @@ describe('findRoles with saved targets', () => {
     expect(out.sentence).toBe('Searched your 10 stored roles for your targets, AI Engineer, leaving out 2 you already applied to or turned down: 3 match.')
   })
 
-  it('treats an application with no state as applied to', async () => {
-    view.rows = [role('a', 'AI Engineer')]
-    const db = makeFakeAdmin({ profiles: [{ id: 'u1', ...prefs({ role_types: ['ai-engineer'] }) }], applications: [{ user_id: 'u1', job_id: 'a', state: null }] })
-    expect((await findRoles(db, 'u1', base)).things).toEqual([])
+  it('keeps a role only saved with Interested (stage discovered, no state), and counts one marked Applied (stage applied, no state)', async () => {
+    view.total = 5
+    view.rows = [role('a', 'AI Engineer'), role('b', 'AI Engineer'), role('c', 'AI Engineer')]
+    const db = makeFakeAdmin({
+      profiles: [{ id: 'u1', ...prefs({ role_types: ['ai-engineer'] }) }],
+      applications: [
+        { user_id: 'u1', job_id: 'a', state: null, stage: 'discovered', applied_at: null },
+        { user_id: 'u1', job_id: 'b', state: null, stage: 'applied', applied_at: '2026-10-01T00:00:00Z' },
+      ],
+    })
+    const out = await findRoles(db, 'u1', base)
+    expect(out.things.map((t) => t.id).sort()).toEqual(['a', 'c'])
+    expect(out.sentence).toBe('Searched your 5 stored roles for your targets, AI Engineer, leaving out 1 you already applied to or turned down: 2 match.')
   })
 
   it('names only the places when no type is saved', async () => {

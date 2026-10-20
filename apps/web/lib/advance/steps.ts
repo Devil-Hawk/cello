@@ -53,11 +53,13 @@ export interface StepCtx {
   job: StepJob
   fetchForm: (url: string) => Promise<unknown>
   /** Writes the tailored resume for this role (the Writer), or says why it could not. Tests pass their own. */
-  tailorResume?: (app: StepApp) => Promise<{ artifact_id: string; version: number } | { error: string } | null>
+  tailorResume?: (app: StepApp, signal?: AbortSignal) => Promise<{ artifact_id: string; version: number } | { error: string } | null>
   /** Writes the cover letter for this role (the Writer), or says why it could not. Tests pass their own. */
-  writeCoverLetter?: (app: StepApp) => Promise<{ artifact_id: string; version: number } | { error: string } | null>
+  writeCoverLetter?: (app: StepApp, signal?: AbortSignal) => Promise<{ artifact_id: string; version: number } | { error: string } | null>
   /** Drafts one open answer (lib/answers/draft.ts). Tests pass their own. */
-  draftAnswer?: (app: StepApp, q: { answerId: string; question: string }) => Promise<{ ok: boolean; reason?: string }>
+  draftAnswer?: (app: StepApp, q: { answerId: string; question: string }, signal?: AbortSignal) => Promise<{ ok: boolean; reason?: string }>
+  /** Aborts when the person stops this application: handed to every model call. */
+  signal?: AbortSignal
 }
 
 export type StepOutcome =
@@ -168,19 +170,19 @@ export const readForm: Step = {
 }
 
 /** Cello's draft of each open long question, then the stop for the person: every open row, drafted or not. */
-async function draftOpenAnswer(admin: SupabaseClient, app: StepApp, q: { answerId: string; question: string }): Promise<{ ok: boolean; reason?: string }> {
+async function draftOpenAnswer(admin: SupabaseClient, app: StepApp, q: { answerId: string; question: string }, signal?: AbortSignal): Promise<{ ok: boolean; reason?: string }> {
   const { draftAnswer } = await import('@/lib/answers/draft')
   const { gatherApplyContext } = await import('@/lib/workflows/gather/apply')
   const context = await gatherApplyContext(admin as never, app.user_id, app.job_id)
   const base = await getBaseResume(admin, app.user_id).catch(() => null)
-  const out = await draftAnswer(admin, app.user_id, { question: q.question, answerId: q.answerId, context, resume: base ? { id: base.id, text: base.content } : null, applicationId: app.id })
+  const out = await draftAnswer(admin, app.user_id, { question: q.question, answerId: q.answerId, context, resume: base ? { id: base.id, text: base.content } : null, applicationId: app.id, signal })
   return out.ok ? { ok: true } : { ok: false, reason: out.reason }
 }
 
 export const draftAnswers: Step = {
   id: 'draft_answers',
   doing: 'Drafting answers for you to check',
-  async run({ admin, app, job, draftAnswer }) {
+  async run({ admin, app, job, draftAnswer, signal }) {
     const { data } = await admin.from('applications').select('form_fields').eq('id', app.id).eq('user_id', app.user_id).maybeSingle()
     const fields = ((data as { form_fields: FormField[] | null } | null)?.form_fields ?? []) as FormField[]
     const { open } = await resolveFieldValues(admin, app.user_id, fields, { companyId: job.company_id, companyName: job.companyName, applicationId: app.id })
@@ -189,7 +191,7 @@ export const draftAnswers: Step = {
     let drafted = 0
     let reason: string | null = null
     for (const q of long) {
-      const r = await (draftAnswer ?? ((a, qq) => draftOpenAnswer(admin, a, qq)))(app, q).catch((e: unknown) => ({ ok: false, reason: reasonOf(e) ?? undefined }))
+      const r = await (draftAnswer ?? ((a, qq, sig) => draftOpenAnswer(admin, a, qq, sig)))(app, q, signal).catch((e: unknown) => ({ ok: false, reason: reasonOf(e) ?? undefined }))
       if (r.ok) drafted++
       else reason ??= r.reason ?? null
     }
@@ -211,7 +213,7 @@ export const resume: Step = {
 }
 
 /** The Writer, on the person's keys, for this role; its own reason when it could not write. */
-async function writeTailored(admin: SupabaseClient, app: StepApp): Promise<{ artifact_id: string; version: number } | { error: string }> {
+async function writeTailored(admin: SupabaseClient, app: StepApp, signal?: AbortSignal): Promise<{ artifact_id: string; version: number } | { error: string }> {
   const { loadApiKeys } = await import('@/lib/harness/keys')
   const { runWriter } = await import('@/lib/workflows/writer')
   const { newDeadline } = await import('@/lib/agents/context')
@@ -219,7 +221,7 @@ async function writeTailored(admin: SupabaseClient, app: StepApp): Promise<{ art
   // Nobody is watching: the person's model for background work, which follows Chat when they never chose one.
   const apiKeys = await roleKeys(admin as never, app.user_id, await loadApiKeys(admin as never, app.user_id), 'worker')
   const out = await runWriter(
-    { ctx: { admin: admin as never, userId: app.user_id, userEmail: '', apiKeys, isDemo: apiKeys.isDemo !== false, threadId: '', conversationId: null, autonomy: 'ask', traceId: '', deadlineAt: newDeadline() } },
+    { ctx: { admin: admin as never, userId: app.user_id, userEmail: '', apiKeys, isDemo: apiKeys.isDemo !== false, threadId: '', conversationId: null, autonomy: 'ask', traceId: '', deadlineAt: newDeadline(), signal } },
     { type: 'resume', job_id: app.job_id }
   )
   if (out.artifact_id && out.version && out.status !== 'failed') return { artifact_id: out.artifact_id, version: out.version }
@@ -228,14 +230,14 @@ async function writeTailored(admin: SupabaseClient, app: StepApp): Promise<{ art
 }
 
 /** The Writer's cover letter for this role, on the person's keys, with the whole context; its own reason when it could not write. */
-async function writeLetter(admin: SupabaseClient, app: StepApp): Promise<{ artifact_id: string; version: number } | { error: string }> {
+async function writeLetter(admin: SupabaseClient, app: StepApp, signal?: AbortSignal): Promise<{ artifact_id: string; version: number } | { error: string }> {
   const { loadApiKeys } = await import('@/lib/harness/keys')
   const { runWriter } = await import('@/lib/workflows/writer')
   const { newDeadline } = await import('@/lib/agents/context')
   const { roleKeys } = await import('@/lib/models/choice')
   const apiKeys = await roleKeys(admin as never, app.user_id, await loadApiKeys(admin as never, app.user_id), 'worker')
   const out = await runWriter(
-    { ctx: { admin: admin as never, userId: app.user_id, userEmail: '', apiKeys, isDemo: apiKeys.isDemo !== false, threadId: '', conversationId: null, autonomy: 'ask', traceId: '', deadlineAt: newDeadline() } },
+    { ctx: { admin: admin as never, userId: app.user_id, userEmail: '', apiKeys, isDemo: apiKeys.isDemo !== false, threadId: '', conversationId: null, autonomy: 'ask', traceId: '', deadlineAt: newDeadline(), signal } },
     { type: 'cover_letter', job_id: app.job_id, idempotency_key: `cover_letter:${app.id}` }
   )
   if (out.artifact_id && out.version && out.status !== 'failed') return { artifact_id: out.artifact_id, version: out.version }
@@ -266,11 +268,11 @@ function notTailored(why: string | null): StepOutcome {
 export const tailor: Step = {
   id: 'tailor',
   doing: 'Tailoring your resume',
-  async run({ admin, app, tailorResume }) {
+  async run({ admin, app, tailorResume, signal }) {
     // The version for this role: written once, then only read. The person approves exactly this text.
     let doc = await getLatestVersion(admin, app.user_id, app.job_id)
     if (!doc) {
-      const made = await (tailorResume ?? ((a) => writeTailored(admin, a)))(app).catch((e: unknown) => ({ error: reasonOf(e) ?? '' }))
+      const made = await (tailorResume ?? ((a, sig) => writeTailored(admin, a, sig)))(app, signal).catch((e: unknown) => ({ error: reasonOf(e) ?? '' }))
       if (!made) return notTailored(null)
       if ('error' in made) return notTailored(made.error || null)
       doc = await getLatestVersion(admin, app.user_id, app.job_id)
@@ -302,7 +304,7 @@ export const tailor: Step = {
 export const coverLetter: Step = {
   id: 'cover_letter',
   doing: 'Writing the cover letter',
-  async run({ admin, app, writeCoverLetter }) {
+  async run({ admin, app, writeCoverLetter, signal }) {
     // Written once for this application, then only read: the person approves exactly this text.
     const current = async () => {
       const [a] = await listArtifacts(admin as never, app.user_id, { type: 'cover_letter', jobId: app.job_id, limit: 1 })
@@ -311,7 +313,7 @@ export const coverLetter: Step = {
     }
     let doc = await current()
     if (!doc) {
-      const made = await (writeCoverLetter ?? ((a) => writeLetter(admin, a)))(app).catch((e: unknown) => ({ error: reasonOf(e) ?? '' }))
+      const made = await (writeCoverLetter ?? ((a, sig) => writeLetter(admin, a, sig)))(app, signal).catch((e: unknown) => ({ error: reasonOf(e) ?? '' }))
       const why = made && 'error' in made ? made.error.replace(/^The draft could not be written: /, '').replace(/\.$/, '') : null
       doc = made && !('error' in made) ? await current() : null
       if (!doc) return { kind: 'continue', line: why ? `Cello could not write the cover letter (${why}). Write one yourself if the form needs it.` : 'Cello could not write the cover letter. Write one yourself if the form needs it.' }

@@ -3,14 +3,14 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeFakeAdmin } from '@/lib/agents/testing/fake-admin'
-import { advanceOne } from '@/lib/advance'
+import { advanceOne, stopApplication } from '@/lib/advance'
 import { attach } from '@/lib/chat/attach'
 import { start } from '@/lib/pipeline/commands'
 import type { CommandContext } from '../define'
 import { applicationsStart } from './pipeline'
 
 vi.mock('@/lib/pipeline/commands', () => ({ start: vi.fn() }))
-vi.mock('@/lib/advance', () => ({ advanceOne: vi.fn(async () => null) }))
+vi.mock('@/lib/advance', () => ({ advanceOne: vi.fn(async () => null), stopApplication: vi.fn(async () => undefined) }))
 vi.mock('@/lib/chat/attach', () => ({ attach: vi.fn(async () => undefined), ledgerKey: (k: string, id: string) => `${k}:${id}` }))
 
 const ok = { ok: true, replay: false, event: { id: 'e1' } }
@@ -101,6 +101,53 @@ describe('applications.start', () => {
     expect(db.tables.agent_tasks).toHaveLength(1)
     expect(db.tables.agent_tasks[0]).toMatchObject({ status: 'stopped' })
     expect(await shouldStop?.()).toBe(true)
+  }, 15_000)
+
+  it('a Stop pauses the application at once, so the sweeper that only advances preparing ones skips it', async () => {
+    const db = seed()
+    vi.mocked(advanceOne).mockImplementationOnce((() => new Promise(() => undefined)) as never)
+    setTimeout(() => {
+      const row = db.tables.agent_tasks.find((r) => r.command === 'applications.start')
+      if (row) row.stop_requested_at = '2026-10-20T10:00:00Z'
+    }, 100)
+    await expect(applicationsStart.run(ctx({ chat: true, db }), { job_id: 'j1' })).rejects.toMatchObject({ name: 'StoppedError' })
+    expect(stopApplication).toHaveBeenCalledWith(db, 'a1')
+  }, 15_000)
+
+  it('a Stop that lands before the steps begin pauses the application too', async () => {
+    const db = seed()
+    vi.mocked(attach).mockImplementationOnce((async () => {
+      const row = db.tables.agent_tasks.find((r) => r.command === 'applications.start')
+      if (row) row.stop_requested_at = '2026-10-20T10:00:00Z'
+    }) as never)
+    await expect(applicationsStart.run(ctx({ chat: true, db }), { job_id: 'j1' })).rejects.toMatchObject({ name: 'StoppedError' })
+    expect(advanceOne).not.toHaveBeenCalled()
+    expect(stopApplication).toHaveBeenCalledWith(db, 'a1')
+  })
+
+  it('a Stop aborts the running step: advanceOne gets the branch signal', async () => {
+    const db = seed()
+    let signal: AbortSignal | undefined
+    vi.mocked(advanceOne).mockImplementationOnce((async (_db: unknown, _id: string, o?: { signal?: AbortSignal }) => {
+      signal = o?.signal
+      await new Promise(() => undefined)
+    }) as never)
+    setTimeout(() => {
+      const row = db.tables.agent_tasks.find((r) => r.command === 'applications.start')
+      if (row) row.stop_requested_at = '2026-10-20T10:00:00Z'
+    }, 100)
+    await expect(applicationsStart.run(ctx({ chat: true, db }), { job_id: 'j1' })).rejects.toMatchObject({ name: 'StoppedError' })
+    expect(signal?.aborted).toBe(true)
+  }, 15_000)
+
+  it('a turn that ends for another reason does not pause the application', async () => {
+    const db = seed()
+    const turn = new AbortController()
+    vi.mocked(advanceOne).mockImplementationOnce((() => new Promise(() => undefined)) as never)
+    setTimeout(() => turn.abort(new Error('turn over')), 100)
+    const c = { ...ctx({ chat: true, db }), signal: turn.signal } as CommandContext
+    await expect(applicationsStart.run(c, { job_id: 'j1' })).rejects.toThrow('turn over')
+    expect(stopApplication).not.toHaveBeenCalled()
   }, 15_000)
 
   it('says which roles could not start', async () => {

@@ -160,7 +160,8 @@ function fail(f: Fix): WriterResult {
 export function buildWriterGraph(deps: WriterDeps) {
   const { ctx } = deps
   const runner = (config: RunnableConfig | undefined, name: string): LlmRunner =>
-    deps.llm ?? makeRunner(ctx, config?.signal ?? ctx.signal, name)
+    // LangGraph hands every node its own signal, which is not the caller's: a Stop on ctx.signal has to reach the model call too.
+    deps.llm ?? makeRunner(ctx, config?.signal && ctx.signal ? AbortSignal.any([config.signal, ctx.signal]) : (config?.signal ?? ctx.signal), name)
 
   // --- intake: the brief arrives structured, or as text from the task tool ----------
 
