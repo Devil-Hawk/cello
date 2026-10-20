@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 const reg = vi.hoisted(() => ({ listServers: vi.fn() }))
 vi.mock('@/lib/mcp/registry', () => ({
@@ -23,7 +23,7 @@ const tool = (server: string, name: string, over: Record<string, unknown> = {}) 
 /** One client per server, as loadUserMcpTools builds them: `make` records each config; `tools` says what each server lists. */
 function client(over: Partial<{ getTools: () => Promise<unknown[]>; close: () => Promise<void> }> = {}) {
   const made: { mcpServers: Record<string, unknown> }[] = []
-  const closes: ReturnType<typeof vi.fn>[] = []
+  const closes: Mock[] = []
   const make = (config: { mcpServers: Record<string, unknown> }) => {
     made.push(config)
     const name = Object.keys(config.mcpServers)[0]
@@ -159,13 +159,13 @@ describe('loading for Chat', () => {
   it('skips a server that does not answer in 5 seconds, closes it and keeps the others', async () => {
     vi.useFakeTimers()
     reg.listServers.mockResolvedValue([row({ name: 'slow' }), row({ id: 's2', name: 'fast' })])
-    const closes: Record<string, ReturnType<typeof vi.fn>> = {}
+    const closes: Record<string, Mock> = {}
     const make = (config: { mcpServers: Record<string, unknown> }) => {
       const name = Object.keys(config.mcpServers)[0]
       closes[name] = vi.fn(async () => undefined)
       return { getTools: name === 'slow' ? () => new Promise(() => undefined) : async () => [tool(name, 'search')], close: closes[name] } as never
     }
-    const pending = loadUserMcpTools(ctx(), make)
+    const pending = loadUserMcpTools(ctx(), make as never)
     await vi.advanceTimersByTimeAsync(MCP_LOAD_BUDGET_MS)
     const out = await pending
     expect(MCP_LOAD_BUDGET_MS).toBe(5000)
@@ -192,7 +192,7 @@ describe('loading for Chat', () => {
 })
 
 describe('callUserMcpTool', () => {
-  afterEach(() => vi.unstubAllEnvs())
+  afterEach(() => { vi.unstubAllEnvs() })
   const ok = { content: [{ type: 'text', text: 'one' }, { type: 'image', data: 'x' }, { type: 'text', text: 'two' }], isError: false }
   const refusal = (reason: string, fix: string) => ({ ok: false, reason, fix })
 

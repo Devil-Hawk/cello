@@ -177,7 +177,7 @@ export const postingsRead = defineCommand({
       if (detectFromUrl({ careerUrl: input.url, domain: null })) return { sentence: 'That is a list of roles. Add it on Companies, under Find or add, and Cello reads it on its schedule.', things: [] }
       return { sentence: 'Cello could not read that page as one posting. Check the link, or add the company on Companies.', things: [] }
     }
-    const items = [...p.requirements.items].sort((a, b) => Number(b.kind === 'must') - Number(a.kind === 'must')).slice(0, 11)
+    const items = [...(p.requirements.items ?? [])].sort((a, b) => Number(b.kind === 'must') - Number(a.kind === 'must')).slice(0, 11)
     const hash = p.description_md5 ?? createHash('sha256').update(input.url).digest('hex')
     const thing: Thing = {
       kind: 'role',

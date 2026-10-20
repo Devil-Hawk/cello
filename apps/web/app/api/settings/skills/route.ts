@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
     console.error('[settings/skills] insert failed', error)
     return FAILED()
   }
-  return json({ skill: view(data) })
+  return json({ skill: view(data as Record<string, unknown>) })
 }
 
 export async function PATCH(request: NextRequest) {
@@ -99,7 +99,7 @@ export async function PATCH(request: NextRequest) {
     console.error('[settings/skills] update failed', error)
     return FAILED()
   }
-  return json({ skill: view(data) })
+  return json({ skill: view(data as Record<string, unknown>) })
 }
 
 export async function DELETE(request: NextRequest) {
