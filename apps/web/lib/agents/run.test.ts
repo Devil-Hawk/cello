@@ -55,7 +55,7 @@ function request(w: W, model: ScriptedChatModel, over: Partial<TurnRequest> = {}
     emit: (e) => events.push(e),
     deps: {
       persistence: { saver: w.saver, close } as never,
-      mcp: { tools: [], skipped: [], close: async () => undefined },
+      mcp: { tools: [], entries: [], skipped: [], close: async () => undefined },
       fire,
       card: 'ABOUT THE PERSON: Name: Dana',
       buildAgent: (input) => createCelloAgent({ ...input, model, fallbacks: [], skillsDir, ...extra } as never) as unknown as RunnableAgent,

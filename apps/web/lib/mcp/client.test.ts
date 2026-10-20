@@ -12,6 +12,7 @@
 // over npx, which would make CI flaky/slow, so it isn't checked in as a test.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { callMcpTool, checkMcpAddress, isStdioAvailable, listMcpTools, splitCommandLine, testMcpServer } from './client'
 import { McpError, type McpServerConfig } from './types'
 
@@ -191,5 +192,28 @@ describe('checkMcpAddress', () => {
     vi.stubEnv('CELLO_SELF_HOSTED', '')
     const server: McpServerConfig = { id: 'x', name: 'loop', transport: 'http', url: 'http://127.0.0.1:1/mcp', headers: {}, enabled: true }
     await expect(listMcpTools(server)).rejects.toThrow(/loopback/)
+  })
+})
+
+describe('callMcpTool closes its connection', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+  const server: McpServerConfig = { id: 'x', name: 'notes', transport: 'http', url: 'https://8.8.8.8/mcp', headers: {}, enabled: true }
+
+  it('after a call that answers', async () => {
+    vi.spyOn(Client.prototype, 'connect').mockResolvedValue(undefined)
+    vi.spyOn(Client.prototype, 'callTool').mockResolvedValue({ content: [{ type: 'text', text: 'hi' }] } as never)
+    const close = vi.spyOn(Client.prototype, 'close').mockResolvedValue(undefined)
+    expect(await callMcpTool(server, 'search', {})).toEqual({ isError: false, content: [{ type: 'text', text: 'hi' }] })
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('after a call that fails', async () => {
+    vi.spyOn(Client.prototype, 'connect').mockResolvedValue(undefined)
+    vi.spyOn(Client.prototype, 'callTool').mockRejectedValue(new Error('boom'))
+    const close = vi.spyOn(Client.prototype, 'close').mockResolvedValue(undefined)
+    await expect(callMcpTool(server, 'search', {})).rejects.toBeInstanceOf(McpError)
+    expect(close).toHaveBeenCalledTimes(1)
   })
 })
