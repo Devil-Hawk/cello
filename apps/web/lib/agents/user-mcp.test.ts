@@ -175,6 +175,14 @@ describe('loading for Chat', () => {
     expect(closes.fast).not.toHaveBeenCalled()
   })
 
+  it('hands the adapter a config its own schema accepts', async () => {
+    reg.listServers.mockResolvedValue([row()])
+    const c = client()
+    await loadUserMcpTools(ctx(), c.make)
+    const { MultiServerMCPClient } = await import('@langchain/mcp-adapters')
+    expect(() => new MultiServerMCPClient(c.made[0] as never)).not.toThrow()
+  })
+
   it('skips a loopback server unless the install is self-hosted', async () => {
     reg.listServers.mockResolvedValue([row({ name: 'loop', url: 'http://127.0.0.1:3700/mcp' })])
     vi.stubEnv('VERCEL', '')

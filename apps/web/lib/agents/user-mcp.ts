@@ -99,7 +99,6 @@ export async function loadUserMcpTools(
       defaultToolTimeout: MCP_TOOL_TIMEOUT_MS,
       prefixToolNameWithServerName: true,
       additionalToolNamePrefix: 'mcp',
-      useStandardContentBlocks: true,
     } as never)
     try {
       const listed = (await raceBudget(client.getTools())) as StructuredToolInterface[]
