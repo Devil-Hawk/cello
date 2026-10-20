@@ -6,6 +6,7 @@ vi.mock('@/lib/mcp/registry', () => ({
   toConfig: (row: { headers: string | null }) => ({ headers: row.headers ? { Authorization: `Bearer decrypted-${row.headers}` } : {} }),
 }))
 
+import { McpError } from '@/lib/mcp/types'
 import { MCP_LOAD_BUDGET_MS, MCP_TOOL_TIMEOUT_MS, callUserMcpTool, loadUserMcpTools } from './user-mcp'
 
 const row = (over: Record<string, unknown> = {}) => ({ id: 's1', name: 'notes', transport: 'http', url: 'https://8.8.8.8/mcp', headers: null, enabled: true, tool_rules: {}, ...over })
@@ -264,12 +265,21 @@ describe('callUserMcpTool', () => {
     expect(call).not.toHaveBeenCalled()
   })
 
-  it('a failed or timed out call says to try Confirm again, without the error text', async () => {
+  it('a connection that fails before anything is sent says to try Confirm again, without the error text', async () => {
     reg.listServers.mockResolvedValue([row({ headers: 'enc' })])
-    const call = vi.fn().mockRejectedValue(new Error('Bearer decrypted-enc leaked'))
+    const call = vi.fn().mockRejectedValue(new McpError('Could not connect to "notes": Bearer decrypted-enc leaked', { server: 'notes' }))
     const out = await callUserMcpTool(ctx(), 'notes', 'search', {}, call)
     expect(out).toEqual(refusal('Could not reach notes.', 'Try Confirm again.'))
     expect(JSON.stringify(out)).not.toContain('decrypted')
+  })
+
+  it('a call that was sent and then timed out or dropped is unsure, and never says to try again', async () => {
+    reg.listServers.mockResolvedValue([row({ headers: 'enc' })])
+    for (const failure of [new McpError('Calling "search" on "notes" timed out Bearer decrypted-enc', { server: 'notes', sent: true }), new Error('socket hang up')]) {
+      const out = await callUserMcpTool(ctx(), 'notes', 'search', {}, vi.fn().mockRejectedValue(failure))
+      expect(out).toEqual({ ok: false, unsure: true, reason: 'Cello did not get an answer from notes.', fix: 'The call may or may not have gone through. Check on the server before you try again.' })
+      expect(JSON.stringify(out)).not.toMatch(/decrypted|Confirm again/)
+    }
   })
 
   it('calls once as the person, with their headers, and joins the text blocks', async () => {
