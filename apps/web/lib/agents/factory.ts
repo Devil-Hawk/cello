@@ -22,6 +22,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { PERMISSIONS, SKILLS_OFF, celloBackend, type SkillTier } from './backends'
 import type { AgentContext } from './context'
+import type { WorkerScope } from '@/lib/chat/workers'
 import { toolStrategy } from 'langchain'
 import { guardStack, type AnswerShape, type GuardStackOptions } from './middleware'
 import { celloChatModel } from './model'
@@ -75,6 +76,8 @@ export interface CelloAgentInput {
   extraTools?: StructuredToolInterface[]
   /** A short card about the person, appended to the system prompt. Stable across a conversation. */
   profileCard?: string
+  /** Chat only: each delegation to the Researcher (the `task` tool) is a worker row with its own Stop. */
+  taskRows?: WorkerScope
 }
 
 /**
@@ -88,7 +91,7 @@ function answerFormat(model: BaseChatModel, format: unknown): never {
   return (format && isZod && !native ? toolStrategy(format as never, { handleError: false }) : format) as never
 }
 
-function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher', answer?: AnswerShape) {
+function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher', answer?: AnswerShape, taskRows?: WorkerScope) {
   const { ctx } = input
   const stop = ctx.stop ?? (() => Promise.resolve(false))
   return guardStack({
@@ -98,6 +101,7 @@ function guards(input: CelloAgentInput, agent: 'orchestrator' | 'researcher', an
     stop,
     answer,
     fallbacks: input.fallbacks,
+    taskRows,
   })
 }
 
@@ -160,7 +164,7 @@ export function createCelloAgent(input: CelloAgentInput & { kind: 'orchestrator'
       skills: ['/skills/', '/my-skills/'],
       backend: celloBackend({ admin: ctx.admin, userId: ctx.userId, skillsDir: input.skillsDir, hiddenSkills: input.hiddenSkills, skillsTier: input.skillsTier }),
       permissions: PERMISSIONS.orchestrator,
-      middleware: guards(input, 'orchestrator', typeof answer?.safeParse === 'function' ? answer : undefined),
+      middleware: guards(input, 'orchestrator', typeof answer?.safeParse === 'function' ? answer : undefined, input.taskRows),
       checkpointer: input.saver,
       responseFormat: answerFormat(model, input.responseFormat),
     })

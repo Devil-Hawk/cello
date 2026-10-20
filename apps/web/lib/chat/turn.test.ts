@@ -3,6 +3,7 @@ import { makeFakeAdmin, type FakeAdmin } from '@/lib/agents/testing/fake-admin'
 import { FreeCapError, reasonOf } from '@/lib/models/caps'
 import type { ModelAnswer } from './answer'
 import { inMemoryStore } from './memory.fake'
+import { MovedError } from './workers'
 import { runChatTurn, type AgentInput, type AgentOutput, type TurnDeps } from './turn'
 import { refId, type ObjectReader } from './types'
 
@@ -148,6 +149,13 @@ describe('runChatTurn', () => {
     const db = seed()
     const out = await send(deps(db, async () => Promise.reject(new FreeCapError('drafts'))), 'Draft a note to Datadog asking about the timeline')
     expect(out).toMatchObject({ ok: false, error: reasonOf(new FreeCapError('drafts'), 'chat'), fix: '' })
+    expect(db.tables.chat_turns.map((t) => t.kind)).toEqual(['person'])
+  })
+
+  it('lets a moved turn through untouched', async () => {
+    const db = seed()
+    const agent = vi.fn(async (): Promise<AgentOutput> => Promise.reject(new MovedError()))
+    await expect(send(deps(db, agent))).rejects.toBeInstanceOf(MovedError)
     expect(db.tables.chat_turns.map((t) => t.kind)).toEqual(['person'])
   })
 

@@ -728,6 +728,7 @@ export function ChatView({ chatId: routeId, person, initialAsk, initialAbout }: 
                 running={running}
                 stopping={stopping && running}
                 defaultOpen
+                background={running && !sending && pendingLine === null && !stream.isLoading && turnTasks.some((t) => t.command === 'chat.turn' && (t.status === 'working' || t.status === 'queued'))}
                 seconds={seconds(turnTasks)}
                 onStop={stopTurn}
                 onStopTask={(id) => void send(`/api/chat/${chatId}/stop`, 'POST', { task_id: id }).then(loadPage)}

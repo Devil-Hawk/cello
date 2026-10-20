@@ -127,6 +127,28 @@ describe('createCelloAgent', () => {
   })
 })
 
+describe('the Research rows', () => {
+  const scope = () => ({ db: makeFakeAdmin(), userId: 'u1', threadId: 'chat-1', chatId: 'chat-1', turnId: 'turn-1' })
+  const names = (agent: Built) => agent.options.middleware.map((m) => m.name)
+
+  it('puts the Research rows inside Stop for the chat kind only', () => {
+    const chat = names(build({ kind: 'chat', tools: [], responseFormat: z.object({ text: z.string() }), taskRows: scope() }).agent)
+    expect(chat[chat.indexOf('CelloStop') + 1]).toBe('CelloTaskRows')
+    expect(chat.filter((n) => n === 'CelloTaskRows')).toHaveLength(1)
+    // The guards around it still stand in order, with the rows added.
+    expect(chat.filter((n) => n === 'CelloTaskRows' || (GUARD_ORDER as readonly string[]).includes(n))).toEqual(
+      GUARD_ORDER.flatMap((n) => (n === 'CelloStop' ? [n, 'CelloTaskRows'] : [n]))
+    )
+
+    // The orchestrator and the Researcher are never given them, even when asked.
+    expect(names(build({ taskRows: scope() }).agent)).not.toContain('CelloTaskRows')
+    expect(names(build({ kind: 'chat', tools: [], responseFormat: z.object({ text: z.string() }) }).agent)).not.toContain('CelloTaskRows')
+    const researcher = researcherSpec({ ctx: ctx(), model: new ScriptedChatModel({ script: [] }), fallbacks: [], skillsDir: skills(), taskRows: scope() } as never)
+    expect((researcher.middleware ?? []).map((m) => m.name)).not.toContain('CelloTaskRows')
+    expect((researcher.middleware ?? []).map((m) => m.name).filter((n) => (GUARD_ORDER as readonly string[]).includes(n))).toEqual([...GUARD_ORDER])
+  })
+})
+
 describe('the Researcher', () => {
   it('is a spec with its own guard stack, read-only permissions, read tools and its skills in the prompt', () => {
     const s = spec()

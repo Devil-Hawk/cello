@@ -15,6 +15,8 @@ export interface ContinuePayload {
   slice?: Record<string, unknown>
   /** The engine's reasons. */
   thread_id?: string
+  /** reason slice or stale on a chat: the person's turn this continues. */
+  turn_id?: string
   scheduled_task_id?: string
   /** reason advance: the application to move one step. */
   application_id?: string

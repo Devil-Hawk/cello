@@ -57,7 +57,7 @@ export const documentsDraft = defineCommand({
     // The Writer reports a cap or a missing key as a failed result, not a throw; the check sits inside the worker's work so
     // the task row ends failed with that reason as its summary, and the page never counts it as a draft.
     const work = async () => {
-      const out = await runWriter({ ctx: agent }, { type: input.type, job_id: input.job_id, contact_id: input.contact_id, instructions: input.instructions, reply_to: replyTo })
+      const out = await runWriter({ ctx: agent }, { type: input.type, job_id: input.job_id, contact_id: input.contact_id, instructions: input.instructions, reply_to: replyTo, idempotency_key: ctx.callKey })
       if (out.status === 'failed' || !out.artifact_id || !out.version) throw new CommandRefusal(502, out.error ?? 'The draft could not be written.', 'failed')
       return { ...out, artifact_id: out.artifact_id, version: out.version }
     }

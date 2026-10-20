@@ -116,6 +116,10 @@ export type ContinueReason = 'slice' | 'stale' | 'due'
 export interface ContinuePayload {
   reason: ContinueReason
   thread_id?: string
+  /** A chat slice: the person's turn it continues. */
+  turn_id?: string
+  /** A chat slice: how many slices the turn has run, as { n }. */
+  slice?: Record<string, unknown>
   scheduled_task_id?: string
   /** Run a scheduled task now even if it is not due (Run now). */
   force?: boolean

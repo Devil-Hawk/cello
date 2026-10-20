@@ -8,6 +8,9 @@
 //   CelloDemoRules, modelCallLimit, toolCallLimit, contextEditing, CelloDeadline,
 //   modelFallback, modelRetry, CelloOneAnswer, CelloSpend, CelloUntrusted, toolRetry
 //
+// (Chat's loop also gets CelloTaskRows directly after CelloStop, inside it: one worker row per delegation
+// to the Researcher. GUARD_ORDER lists the orchestrator's and the Researcher's stack, which have none.)
+//
 // - Retry sits inside fallback, so the chosen model is retried on a 429 before
 //   the call moves to a free model.
 // - CelloOneAnswer trims a doubled structured answer off the model's message and asks again, itself and a bounded
@@ -38,7 +41,7 @@ import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messag
 import { Command, interrupt, isCommand } from '@langchain/langgraph'
 import { scrubStructuralEscapes } from '@/lib/security/job-text'
 import { isTransient } from '@/lib/util/retry'
-import { StoppedError } from '@/lib/chat/workers'
+import { STOP_POLL_MS, StoppedError, finishWorker, isStopped, openWorker, type WorkerScope } from '@/lib/chat/workers'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { celloChatModel, freeFallbackModels, isFreeModel, runTagOf } from './model'
 import { isBudgetCapError, reserve, rootCause, settle } from './spend-port'
@@ -193,6 +196,44 @@ export function celloStop(isStopped: () => Promise<boolean>) {
     wrapToolCall: async (request, handler) => {
       if (await isStopped()) throw new StoppedError()
       return handler(request)
+    },
+  })
+}
+
+/**
+ * Each delegation to the Researcher (the `task` tool) is a worker row in the thread with its own Stop. Stop is
+ * polled every STOP_POLL_MS while the delegation runs; a stopped row ends stopped and the loop gets a plain
+ * result to answer from. Not withWorker: that would mark a stopped row done. A row that could not be written
+ * (openWorker gives null) never stops the research.
+ */
+export function celloTaskRows(scope: WorkerScope) {
+  return createMiddleware({
+    name: 'CelloTaskRows',
+    wrapToolCall: async (request, handler) => {
+      if (request.toolCall.name !== 'task') return handler(request)
+      const args = (request.toolCall.args ?? {}) as { description?: unknown }
+      const title = 'Research: ' + String(args.description ?? '').replace(/\s+/g, ' ').trim().slice(0, 80)
+      const rowId = await openWorker(scope, { command: 'research', title })
+      let timer: ReturnType<typeof setInterval> | undefined
+      const stopped = new Promise<'stopped'>((resolve) => {
+        timer = setInterval(() => void isStopped(scope.db, rowId).then((yes) => yes && resolve('stopped')), STOP_POLL_MS)
+        timer.unref?.()
+      })
+      try {
+        // ponytail: a stopped Researcher is not aborted; its call ends on its own and the result is dropped.
+        const out = await Promise.race([handler(request), stopped])
+        if (out === 'stopped') {
+          await finishWorker(scope.db, rowId, { status: 'stopped' })
+          return new ToolMessage({ content: 'The person stopped this research. Answer with what you have.', tool_call_id: request.toolCall.id ?? '', name: 'task' })
+        }
+        await finishWorker(scope.db, rowId, { status: 'done' })
+        return out
+      } catch (e) {
+        await finishWorker(scope.db, rowId, { status: 'failed', summary: e instanceof Error ? e.message : 'Failed' })
+        throw e
+      } finally {
+        clearInterval(timer)
+      }
     },
   })
 }
@@ -393,6 +434,8 @@ export interface GuardStackOptions {
   deadlineAt: number
   /** The row's Stop flag. */
   stop?: () => Promise<boolean>
+  /** Chat only: each delegation to the Researcher becomes a worker row with its own Stop. */
+  taskRows?: WorkerScope
   /** The shape of the loop's final answer, when it has one: a misfit is asked for again by Cello, not by langchain. */
   answer?: AnswerShape
   /** Test seam: fallback models to use instead of the free list. */
@@ -427,6 +470,7 @@ export function guardStack(opts: GuardStackOptions): AgentMiddleware[] {
     celloUntrusted(),
     toolRetryMiddleware({ maxRetries: 2, backoffFactor: 2, initialDelayMs: 300, retryOn: retryable }),
     ...(opts.stop ? [celloStop(opts.stop)] : []),
+    ...(opts.taskRows ? [celloTaskRows(opts.taskRows)] : []),
     celloOneAnswer({ answer: opts.answer, stop: opts.stop }),
     celloSpend(ctx),
   ]

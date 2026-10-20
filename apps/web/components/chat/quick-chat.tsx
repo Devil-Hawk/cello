@@ -40,15 +40,15 @@ export function QuickChat({ about }: QuickChatProps) {
   if (!open) return null
   return (
     <form
-      className="flex items-center gap-2 rounded-card border border-input bg-card p-1.5"
+      className="flex items-center gap-2 rounded-card border border-input bg-card p-1.5 focus-within:ring-2 focus-within:ring-ring"
       onSubmit={(e) => {
         e.preventDefault()
         const href = quickChatHref(text, about)
         if (href) router.push(href)
       }}
     >
-      <input aria-label="Chat about this" value={text} onChange={(e) => setText(e.target.value)} placeholder="Chat about this" maxLength={2000} className="min-w-0 flex-1 bg-transparent px-2 py-1 text-body text-foreground placeholder:text-muted-foreground focus:outline-none" />
-      <button type="submit" aria-label="Start a chat" disabled={!text.trim()} className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40">
+      <input aria-label="Chat about this" value={text} onChange={(e) => setText(e.target.value)} placeholder="Chat about this" maxLength={2000} className="min-w-0 flex-1 bg-transparent min-h-11 px-2 text-body text-foreground placeholder:text-muted-foreground focus:outline-none" />
+      <button type="submit" aria-label="Start a chat" disabled={!text.trim()} className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40">
         <ArrowUp className="h-4 w-4" aria-hidden />
       </button>
     </form>
