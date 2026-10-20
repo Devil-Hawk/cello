@@ -56,6 +56,8 @@ export function workedSummary(tasks: TaskRow[], seconds: number): string {
     const words = DONE_WORDS[command]
     return words ? `${words[0]} ${n} ${n === 1 ? words[1] : words[2]}` : `finished ${n} ${n === 1 ? 'task' : 'tasks'}`
   })
+  // A plan that was cancelled or never began: the clock would claim work that did not happen.
+  if (!parts.length && tasks.length > 0 && tasks.every((t) => isPlan(t) && t.status === 'stopped')) return 'Nothing was started.'
   return `Worked ${clock(seconds)}${parts.length ? `: ${parts.join(', ')}` : ''}.`
 }
 

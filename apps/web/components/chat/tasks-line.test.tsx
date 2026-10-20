@@ -68,6 +68,10 @@ describe('TasksLine with a plan', () => {
     expect(out).toContain('Added: Write a cover letter Added after the plan started')
   })
 
+  it('does not claim work for a plan that never began', () => {
+    expect(workedSummary([task(1, { status: 'stopped', command: 'chat.plan.step', summary: 'Cancelled by you' })], 2)).toBe('Nothing was started.')
+  })
+
   it('leaves plan rows out of what was done', () => {
     expect(workedSummary([task(1, { status: 'done', command: 'chat.plan' }), task(2, { status: 'done', command: 'chat.plan.step' }), task(3, { status: 'done', command: 'chat.plan.added' })], 5)).toBe('Worked 0:05.')
   })
