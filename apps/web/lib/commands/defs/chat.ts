@@ -103,7 +103,7 @@ export const rolesCompare = defineCommand({
       ...roles.map((r) => `| ${[r.title, r.company, r.place, r.chance ?? 'not checked yet', r.pay, r.posted].map(cell).join(' | ')} |`),
     ].join('\n')
     const title = `Compare ${roles.length} roles`
-    const made = await createArtifact(ctx.admin(), { userId: ctx.userId, type: 'comparison', title, author: 'cello', content: { text: table, role_ids: roles.map((r) => r.id) }, about: roles.map((r) => ({ kind: 'job' as const, ref: r.id })) })
+    const made = await createArtifact(ctx.admin(), { userId: ctx.userId, type: 'comparison', title, author: 'cello', content: { text: table, role_ids: roles.map((r) => r.id) }, about: roles.map((r) => ({ kind: 'job' as const, ref: r.id })), idempotencyKey: ctx.callKey })
     if (ctx.chat) await ctx.admin().from('artifacts').update({ chat_turn_id: ctx.chat.turnId }).eq('id', made.id).eq('user_id', ctx.userId)
     const sentence = `Compared ${roles.length} of your stored roles in a table.`
     return { sentence, table, artifact_id: made.id, version: made.version, things: [...roles, madeThing(made.id, title, [`Comparison table, version ${made.version}`, table])] }
