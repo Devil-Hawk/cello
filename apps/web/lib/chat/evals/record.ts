@@ -26,8 +26,8 @@ export async function recordMeasure(db: AdminClient, run: MeasureRun): Promise<b
 }
 
 /** S21's run from its score: the share of parts right, passed only with no fact on the wrong object. */
-export function recordS21(db: AdminClient, score: S21Score, meta?: RunMeta) {
-  const rest = `${score.wrongObjectFacts} facts on the wrong object`
+export function recordS21(db: AdminClient, score: Omit<S21Score, 'share'> & { share: number | null }, meta?: RunMeta) {
+  const rest = `${score.wrongObjectFacts} facts on the wrong object${score.unread ? `, ${score.unread} cases never answered` : ''}`
   return recordMeasure(db, { measure: 'S21', value: score.share, passed: score.passed, sampleN: score.parts, note: meta ? runNote(meta, rest) : rest })
 }
 
