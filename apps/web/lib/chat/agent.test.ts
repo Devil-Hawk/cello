@@ -96,3 +96,54 @@ describe('streaming a structured answer', () => {
     expect(out.answer.parts).toEqual(final.parts)
   })
 })
+
+describe('the live words across messages and the answer check', () => {
+  type Ev = { type: string; text?: string; label?: string; phase?: string }
+  const run = async (script: (call: number) => [string, string][]) => {
+    const { AIMessageChunk } = await import('@langchain/core/messages')
+    // One streamed piece: [message id, words]. The words are written as a part of the structured answer.
+    const piece = ([id, text]: [string, string]) => new AIMessageChunk({ content: '', id, tool_call_chunks: text ? [{ name: 'AnswerSchema', id, args: JSON.stringify({ parts: [{ about: [], text }] }), index: 0, type: 'tool_call_chunk' }] : [] })
+    const final = { parts: [{ about: [], text: 'Done' }] }
+    let call = 0
+    const streaming = () => ({
+      invoke: async () => ({ messages: [new AIMessage('ok')], structuredResponse: final }),
+      stream: async function* (): AsyncGenerator<unknown> {
+        const mine = ++call
+        for (const p of script(mine)) {
+          yield [[], 'messages', [piece(p), {}]]
+          await new Promise((r) => setTimeout(r, 160))
+        }
+        yield [[], 'values', { messages: [new AIMessage('ok')], structuredResponse: final }]
+      },
+    })
+    const events: Ev[][] = [[], []]
+    const agent = chatAgent({ ...deps(streaming), emit: (e) => events[which]!.push(e.data as Ev) })
+    let which = 0
+    await agent(input)
+    which = 1
+    await agent({ ...input, feedback: 'Fix the unsupported numbers.' })
+    const words = (i: number) => events[i]!.filter((e) => e.type === 'words').map((e) => e.text)
+    return { words, tools: (i: number) => events[i]!.filter((e) => e.type === 'tool').map((e) => `${e.label}:${e.phase}`) }
+  }
+
+  it('keeps the earlier message and appends the next one after a blank line', async () => {
+    const { words } = await run((n) => (n === 1 ? [['m1', 'First message'], ['m2', 'Second message']] : []))
+    const w = words(0)
+    expect(w).toContain('First message')
+    expect(w.at(-1)).toBe('First message\n\nSecond message')
+    for (let i = 1; i < w.length; i++) expect(w[i]!.length).toBeGreaterThanOrEqual(w[i - 1]!.length)
+  })
+
+  it('adds nothing for a message with no words', async () => {
+    const { words } = await run((n) => (n === 1 ? [['m1', 'Only words'], ['m2', '']] : []))
+    expect(words(0).at(-1)).toBe('Only words')
+  })
+
+  it('streams no words in the retry the answer check asks for, and shows the check as a tool', async () => {
+    const { words, tools } = await run((n) => (n === 1 ? [['m1', 'The draft']] : [['r1', 'You are right. Let me fix it.']]))
+    expect(words(0).at(-1)).toBe('The draft')
+    expect(words(1)).toEqual([])
+    expect(tools(1)).toEqual(['Checking the answer:start', 'Checking the answer:end'])
+    expect(tools(0)).toEqual([])
+  })
+})
