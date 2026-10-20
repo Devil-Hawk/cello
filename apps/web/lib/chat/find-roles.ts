@@ -122,19 +122,19 @@ export async function findRoles(db: AdminClient, userId: string, input: FindRole
       terms.every((t) => `${r.title} ${r.viewer_company_name ?? ''}`.toLowerCase().includes(t))
   )
 
-  // Saved targets only: leave out what the person already applied to (a skipped or unsent one is open again) or turned down.
+  // Saved targets only: leave out what the person already applied to (a skipped or unsent one is open again, and a role only saved with Interested has no state and stage discovered) or turned down.
   let leftOut = 0
   if (targets) {
     const matchedIds = rows.map((r) => r.id).slice(0, 300)
     const [apps, reactions] = matchedIds.length
       ? await Promise.all([
-          db.from('applications').select('job_id, state').eq('user_id', userId).in('job_id', matchedIds),
+          db.from('applications').select('job_id, state, stage').eq('user_id', userId).in('job_id', matchedIds),
           db.from('role_reactions').select('job_id').eq('user_id', userId).eq('reaction', 'not_for_me').in('job_id', matchedIds),
         ])
       : [null, null]
     if (apps?.error || reactions?.error) throw new Error(`Cello could not read your applications: ${(apps?.error ?? reactions?.error)?.message}`)
     const out = new Set<string>()
-    for (const a of (apps?.data as { job_id: string; state: string | null }[] | null) ?? []) if (a.state !== 'skipped' && a.state !== 'not_sent') out.add(a.job_id)
+    for (const a of (apps?.data as { job_id: string; state: string | null; stage: string | null }[] | null) ?? []) if (a.state ? a.state !== 'skipped' && a.state !== 'not_sent' : a.stage !== 'discovered') out.add(a.job_id)
     for (const x of (reactions?.data as { job_id: string }[] | null) ?? []) out.add(x.job_id)
     leftOut = rows.filter((r) => out.has(r.id)).length
     rows = rows.filter((r) => !out.has(r.id))
