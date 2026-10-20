@@ -85,7 +85,7 @@ export function TasksLine({ tasks, running, seconds, stopping = false, onStop, o
           </button>
         )}
         {running && (
-          <button type="button" disabled={stopping} className="min-h-11 rounded-control border border-input px-2 py-0.5 text-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-40" onClick={onStop}>
+          <button type="button" aria-disabled={stopping || undefined} className="min-h-11 rounded-control border border-input px-2 py-0.5 text-foreground hover:bg-muted aria-disabled:pointer-events-none aria-disabled:opacity-40" onClick={stopping ? undefined : onStop}>
             Stop
           </button>
         )}

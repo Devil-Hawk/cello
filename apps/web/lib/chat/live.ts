@@ -44,3 +44,6 @@ function rawLiveText(message: unknown): string {
   if (typeof args === 'string') return partsText(partialObject(args)) ?? ''
   return partsText(args) ?? ''
 }
+
+/** Earlier words and the current message's, one blank line apart; an empty side adds nothing. */
+export const joinWords = (settled: string, current: string): string => (settled && current ? `${settled}\n\n${current}` : settled || current)
