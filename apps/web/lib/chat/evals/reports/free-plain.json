@@ -1,7 +1,7 @@
 {
   "tier": "free",
   "core": "plain",
-  "ranAt": "2026-10-20T10:30:58.636Z",
+  "ranAt": "2026-10-20T12:00:27.042Z",
   "thresholds": {
     "note": "Bar set by the planner; the owner replaces it.",
     "S14": {
@@ -20,19 +20,19 @@
       "model": "minimax/minimax-m3.1-flash:free",
       "s14": {
         "cases": 32,
-        "right": 18,
+        "right": 17,
         "errored": 0,
-        "overall": 0.5625,
+        "overall": 0.53125,
         "passed": false
       },
       "s21": {
-        "parts": 7,
-        "right": 1,
-        "share": 0.14285714285714285,
+        "parts": 32,
+        "right": 3,
+        "share": 0.09375,
         "wrongObjectFacts": 0,
-        "unread": 0,
+        "unread": 1,
         "passed": false,
-        "errored": 0,
+        "errored": 1,
         "cases": 10
       },
       "injection": {
@@ -43,34 +43,37 @@
         "errored": 0,
         "passed": false
       },
-      "promptTokensPerTurn": 28114,
+      "promptTokensPerTurn": 25473,
       "s14Misses": [
         "find-remote-data: roles.find, search.get",
-        "find-person: people.find, roles.find",
-        "find-person-attached: companies.get",
+        "find-seattle: roles.find, profile.get",
+        "compare-two: roles.get, roles.get",
+        "find-person: roles.find, people.find",
+        "find-person-attached: companies.get, people.find",
         "recall-decision: chat.recall, roles.find",
-        "draft-cover: roles.get, profile.get, profile.get",
-        "draft-note: companies.get, roles.find, people.find",
-        "start-application-find: roles.get, profile.get",
-        "who-wrote: people.find, people.find, companies.get, companies.get",
-        "research-many: roles.find, roles.find, roles.find, roles.find, search.get",
-        "what-can-you-do: profile.get, search.get, activity.get, checks.status",
-        "make-plan: profile.get, search.get, roles.find, activity.get, checks.status",
-        "counter-offer: roles.find, chat.recall, profile.get",
-        "thanks: search.get, checks.status, activity.get",
-        "how-interview: profile.get, profile.get"
+        "draft-cover: roles.get, profile.get",
+        "draft-note: companies.get, companies.employer",
+        "start-application: roles.get, applications.start",
+        "who-wrote: companies.get, companies.get",
+        "what-can-you-do: profile.get, search.get, checks.status",
+        "make-plan: profile.get, search.get, activity.get, checks.status, roles.find",
+        "counter-offer: roles.find, profile.get, search.get",
+        "thanks: activity.get, checks.status",
+        "how-interview: profile.get, profile.get, search.get"
       ],
       "s21Misses": [
-        "who-wrote: a part about [person:Marcus Oyelaran]",
-        "who-wrote: a part about [person:Dana Whitfield]",
-        "who-wrote: a part about [company:Petrichor Labs | company:Northwind Atlas]",
-        "application-status: a part about []",
+        "shared-gap: a part about []",
+        "who-wrote: a part about []",
+        "open-roles-by-company: a part about []",
         "role-and-its-company: a part about []",
-        "posting-says-another-company: a part about []"
+        "whose-pay-is-higher: a part about []",
+        "posting-says-another-company: a part about [role:Senior Backend Engineer, Data Platform | role:Senior Backend Engineer, Payments]"
       ],
-      "errors": [],
+      "errors": [
+        "pay-highest-two: The model's answer did not fit the shape after 3 tries: cards: Invalid input: expected array, received object; parts: Invalid input: expected array, received ob"
+      ],
       "requests": {
-        "requests": 139,
+        "requests": 129,
         "cacheHits": 6,
         "retries": 0
       }

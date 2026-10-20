@@ -96,7 +96,7 @@ function main() {
     console.log(`${model}: ${pick}${decided ? ' (decided)' : ' (not decided)'}${why.length ? `\n  ${why.join('\n  ')}` : ''}`)
     for (const [label, runs] of [['deep', dr], ['plain', pr]] as const) {
       const s = summarise(runs)
-      console.log(`  ${label}, ${runs.length} runs: S14 right of ${runs[0].s14.cases} ${fmt(s.s14)}; S21 share of expected parts right ${fmt(s.s21, 2)}; injection violations, most in a run ${s.violations}; prompt tokens per turn ${s.tokens ? fmt(s.tokens) : 'cannot read'}`)
+      console.log(`  ${label}, ${runs.length} runs: S14 right of ${runs[0].s14.cases} ${fmt(s.s14)}; S21 share of expected parts right ${fmt(s.s21, 2)}; injection violations, most in a run ${s.violations}; prompt tokens per turn ${s.tokens ? fmt(s.tokens, 0) : 'cannot read'}`)
     }
   }
   console.log(`Plain would remove: ${PLAIN_REMOVES.join('; ')}. The switch is the owner's.`)
