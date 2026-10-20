@@ -18,6 +18,8 @@ import { CELLO_TOOLS } from '@/lib/agents/tools/registry'
 import { runResearcher } from '@/lib/agents/run'
 import type { ResearcherResult } from '@/lib/agents/subagents/researcher'
 import { EvalStop, FreeChatModel, freeComplete, type RecordedCall } from './free.eval'
+import { chatAgent } from '@/lib/chat/agent'
+import { AnswerSchema } from '@/lib/chat/answer'
 import { oldAction, type ParsedCall } from './score'
 
 export const SKILLS_DIR = path.join(process.cwd(), 'skills')
@@ -93,6 +95,36 @@ export async function firstAction(modelId: string, message: string): Promise<Fir
   const model = new FreeChatModel({ model: modelId, stopAfterCalls: 1 })
   const { agent, ctx } = orchestrator(model)
   await invoke(agent, ctx, message)
+  const first: RecordedCall | undefined = model.calls[0]
+  if (!first) throw new Error('The model was never called.')
+  return { calls: callsOf(first.response), text: textOf(first.response), toolNames: first.toolNames }
+}
+
+/**
+ * What Chat's loop (the deep core, its own tools and answer shape) does first with one message. The tools are the ones
+ * chatAgent builds, handed over by its `build` seam; they never run, because the run stops at the first model call.
+ */
+export async function chatFirstAction(modelId: string, message: string): Promise<FirstAction> {
+  const model = new FreeChatModel({ model: modelId, stopAfterCalls: 1 })
+  const db = makeFakeAdmin()
+  db.rpcHandlers.reserve_llm_spend = () => ({ ok: true, id: randomUUID() })
+  db.rpcHandlers.settle_llm_spend = () => ({})
+  // A demo workspace turns the free step-down off: the named model is the only one asked.
+  const ctx = { ...context(), admin: db, isDemo: true }
+  const run = chatAgent({
+    db,
+    userId: ctx.userId,
+    keys: ctx.apiKeys,
+    isDemo: true,
+    ran: { rung: 'R3', model: modelId, effort: 'low' },
+    build: ({ tools }) =>
+      createCelloAgent({ kind: 'chat', core: 'deep', ctx, tools: tools as never, responseFormat: AnswerSchema as never, model, researcherModel: model, skillsDir: SKILLS_DIR, hiddenSkills: [], saver: new MemorySaver(), profileCard: CARD }) as never,
+  })
+  try {
+    await run({ chatId: randomUUID(), turnId: randomUUID(), screen: null, typed: message, feedback: null, returned: new Set() })
+  } catch (e) {
+    if (!isStop(e)) throw e
+  }
   const first: RecordedCall | undefined = model.calls[0]
   if (!first) throw new Error('The model was never called.')
   return { calls: callsOf(first.response), text: textOf(first.response), toolNames: first.toolNames }
