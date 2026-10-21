@@ -232,6 +232,16 @@ describe('blockReasons: the dealbreakers', () => {
     expect(blockReasons(facts({ description: 'We sponsor visas.' }), need)).toEqual([])
   })
 
+  it('reads a required citizenship as a refusal to sponsor, and keeps "authorized to work"', () => {
+    const need = { ...NO_CONSTRAINTS, needsSponsorship: true }
+    const d = 'Applicants must be a U.S. citizen. Security clearance required.'
+    expect(blockReasons(facts({ description: d }), need)[0].kind).toBe('sponsorship')
+    expect(keepsRole(role({ description: d }), targets({}, [], need))).toEqual({ keep: false, reason: 'dealbreaker' })
+    const open = 'Candidates must be authorized to work in the US.'
+    expect(blockReasons(facts({ description: open }), need)).toEqual([])
+    expect(keepsRole(role({ description: open }), targets({}, [], need))).toMatchObject({ keep: true })
+  })
+
   it('applies a salary floor only to a stated range whose top is below it', () => {
     const c = { ...NO_CONSTRAINTS, salaryFloorUsd: 190000 }
     expect(blockReasons(facts({ salaryRange: '$120,000 - $160,000' }), c)[0].kind).toBe('salary')

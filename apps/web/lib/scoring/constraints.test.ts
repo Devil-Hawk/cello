@@ -63,11 +63,16 @@ describe('sponsorshipRefusal', () => {
     'Candidates must be authorized to work in the US without sponsorship.',
     'This role does not offer visa sponsorship.',
     'No sponsorship available for this position.',
+    'Applicants must be a U.S. citizen.',
+    'U.S. citizenship is required.',
+    'Open to U.S. persons only.',
   ])('finds %s', (s) => {
     expect(sponsorshipRefusal(`Intro text. ${s} More text.`)).toContain(s.slice(0, 15))
   })
   it('stays silent when the posting says nothing or offers sponsorship', () => {
     expect(sponsorshipRefusal('We sponsor visas for strong candidates.')).toBeNull()
     expect(sponsorshipRefusal(null)).toBeNull()
+    expect(sponsorshipRefusal('Candidates must be authorized to work in the US.')).toBeNull()
+    expect(sponsorshipRefusal('Security clearance required. We are based in the U.S. and hire widely.')).toBeNull()
   })
 })

@@ -150,12 +150,16 @@ const NO_SPONSORSHIP = [
   /without\s+(?:the\s+need\s+for\s+)?(?:visa\s+)?sponsorship/i,
   /(?:cannot|can't|won't)\s+(?:provide\s+|offer\s+)?(?:visa\s+)?sponsor/i,
   /sponsorship\s+(?:is\s+)?not\s+(?:available|offered|provided)/i,
+  // Citizenship asked for outright: a person who needs sponsorship is not a citizen.
+  /\bmust\s+be\s+(?:a\s+)?(?:u\.?s\.?\s+|united\s+states\s+)?citizen/i,
+  /\bcitizenship\s+(?:is\s+)?(?:required|mandatory)/i,
+  /\bu\.?s\.?\s+(?:citizens?|persons?)\s+only\b/i,
 ]
 
 /** The sentence in which a posting says it will not sponsor, or null when it does not say so. */
 export function sponsorshipRefusal(description: string | null | undefined): string | null {
   if (!description) return null
-  const sentences = description.replace(/\s+/g, ' ').split(/(?<=[.!?])\s+/)
+  const sentences = description.replace(/\s+/g, ' ').split(/(?<=[.!?])(?<!\b[A-Z]\.)\s+/)
   for (const s of sentences) {
     if (s.length > 400) continue
     if (NO_SPONSORSHIP.some((re) => re.test(s))) return s.trim()
