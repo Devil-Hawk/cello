@@ -39,15 +39,13 @@ interface Stats {
 // Applications still "alive" — everything except the two terminal stages.
 const ACTIVE_STAGES = new Set<string>(['discovered', 'applied', 'screen', 'interview', 'offer'])
 
-/** Response shape from POST /api/agents/match/batch — see app/(app)/jobs/page.tsx for the same contract. */
+/** Response shape from POST /api/roles/judge-all — see app/(app)/jobs/page.tsx for the same contract. */
 interface BatchMatchResult {
   scored: number
   failed: number
   remaining: number
   skippedReasons?: Record<string, number>
 }
-
-const BATCH_LIMIT = 25
 
 function DashboardSkeleton() {
   return (
@@ -325,7 +323,7 @@ export default function DashboardPage() {
   }
 
   /**
-   * Same server batch the jobs page drives (POST /api/agents/match/batch): the
+   * Same server batch the jobs page drives (POST /api/roles/judge-all): the
    * dashboard's "Not assessed yet" tile used to be a plain link to /jobs that
    * assessed nothing on its own. Safe to click repeatedly; each call reports
    * how many are left so the count can keep draining.
@@ -333,11 +331,7 @@ export default function DashboardPage() {
   async function calculateBatch() {
     setCalculatingBatch(true)
     try {
-      const response = await fetch('/api/agents/match/batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ limit: BATCH_LIMIT }),
-      })
+      const response = await fetch('/api/roles/judge-all', { method: 'POST' })
       const rawText = await response.text()
       let data: (BatchMatchResult & { error?: string }) | null = null
       try {
