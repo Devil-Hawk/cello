@@ -292,3 +292,11 @@ export async function judgeStatus(db: AdminClient, userId: string, deps: JudgeDe
   const spent = !own && row !== null && (row.calls >= cap || (row.by_user?.[userId] ?? 0) >= share)
   return { judgedToday, waiting, line: spent ? dayLine(judgedToday, waiting) : checkingLine(waiting) }
 }
+
+/** What a route says, and with which status, when a limit stopped the judging. */
+export function stopAnswer(stopped: Stopped, s: JudgeStatus): { status: number; error: string; skippedReason: string } {
+  if (stopped === 'day') return { status: 429, error: dayLine(s.judgedToday, s.waiting), skippedReason: 'day' }
+  if (stopped === 'minute') return { status: 429, error: 'Cello is pacing its free checks. Try again in a minute.', skippedReason: 'minute' }
+  if (stopped === 'no_resume') return { status: 400, error: 'Add your resume so Cello can check the requirements against it.', skippedReason: 'no-resume' }
+  return { status: 400, error: 'Cello needs a model to read this one. Choose a free model.', skippedReason: 'no-llm-key' }
+}
