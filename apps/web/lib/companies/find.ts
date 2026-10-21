@@ -161,7 +161,7 @@ async function fromBoards(name: string, deps: FindDeps): Promise<Candidate[]> {
   return settled(
     probes.map(async ({ provider, token }): Promise<Candidate | null> => {
       const check = await checkBoard({ name, domain: null, provider, token }, deps.verify)
-      return check.ok ? { name: check.name, domain: check.domain, provider, token, foundBy: 'board', provenBy: provenBy(check.verifiedBy, check.domain), jobs: check.jobs.length } : null
+      return check.ok ? { name: check.name, domain: check.domain, provider, token, foundBy: 'board', provenBy: check.domain ? provenBy('board_links_home', check.domain) : provenBy(check.verifiedBy, null), jobs: check.jobs.length } : null
     })
   )
 }

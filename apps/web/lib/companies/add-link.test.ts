@@ -3,7 +3,8 @@ import { HttpError } from '../ats/http'
 import type { AtsJob } from '../ats/types'
 import type { BoardIdentity, BoardRef } from '../ats/verify'
 import type { SiteRead } from '../ingest/reader'
-import { addCompany, DAILY_ADD_LIMIT, employerDomain, parseLink, type AddDeps } from './add-link'
+import { addCompany, DAILY_ADD_LIMIT, employerDomain, parseLink, type AddDeps, type AddStep } from './add-link'
+import type { WikidataEntity } from './wikidata'
 import { fakeDb } from './fake-db'
 
 const NOW = Date.now()
@@ -18,9 +19,11 @@ interface Setup {
   page?: BoardRef[]
   site?: Partial<SiteRead>
   trace?: { employer: string | null; applyUrl: string | null }
+  wikidata?: WikidataEntity | null
 }
 
 function deps(s: Setup = {}) {
+  const events: AddStep[] = []
   const read = vi.fn<Parameters<AddDeps['read']>, ReturnType<AddDeps['read']>>(async (_input, readBoard) => {
     for (const b of s.boards ?? []) {
       const board = await readBoard(b, [])
@@ -32,14 +35,16 @@ function deps(s: Setup = {}) {
     verify: { now: () => NOW, fetchBoard: async () => s.jobs ?? fresh, identify: async () => s.identity ?? null, pageBoards: async () => s.page ?? [] },
     read,
     trace: async () => s.trace ?? { employer: null, applyUrl: null },
+    wikidata: async () => s.wikidata ?? null,
+    report: (step) => events.push(step),
   }
-  return { value, read }
+  return { value, read, events }
 }
 
 const profile = { id: 'u1', is_demo: false, demo_expires_at: null }
 const retellRow = { id: 'e1', name: 'Retell AI', domain: 'retellai.com' }
 const world = (tables: Record<string, Record<string, unknown>[]> = {}) =>
-  fakeDb({ profiles: [profile], companies: [], ...tables }, { rpc: { search_company_directory: () => [retellRow] } })
+  fakeDb({ profiles: [profile], companies: [], ...tables }, { rpc: { search_company_directory: () => [retellRow] }, autoId: ['companies', 'company_directory', 'directory_candidates', 'render_jobs'] })
 const writes = (queries: { op: string }[]) => queries.filter((q) => q.op !== 'select')
 
 describe('parseLink: the first door', () => {
@@ -249,5 +254,168 @@ describe('companies.add by directory id and by candidate', () => {
     expect(r).toMatchObject({ ok: true, employer: { name: 'Gusto' } })
     expect(tables.directory_candidates[0]).toMatchObject({ state: 'verified' })
     expect(tables.companies[0]).toMatchObject({ user_id: 'u1', watching: true })
+  })
+})
+
+const verifiedRetell = { id: 'e1', name: 'Retell AI', name_norm: 'retell ai', domain: 'retellai.com', logo_url: null, careers_url: 'https://retellai.com/careers', ats_provider: 'ashby', ats_token: 'retell-ai', verified_by: 'careers_page_link', verified_at: '2026-10-01T00:00:00Z', open_count: 12, source: 'person' }
+
+describe('the stages of a link, as they happen', () => {
+  it('Retell AI: reading, the board found, the roles counted, the owner checked, in the order they happen', async () => {
+    const { client } = world()
+    const d = deps({ boards: [{ provider: 'ashby', token: 'retell-ai', via: 'link' }], identity: { name: 'Retell AI', homeUrls: ['https://retellai.com'] }, page: [{ provider: 'ashby', token: 'retell-ai' }] })
+    await addCompany(client, 'u1', { link: 'retellai.com/careers' }, d.value)
+    expect(d.events.map((e) => e.line)).toEqual(['Reading retellai.com', 'Found an Ashby board', 'Reading the board, 2 postings so far', "Checking it is Retell AI's"])
+    expect(d.events.map((e) => e.step)).toEqual(['reading', 'board_found', 'reading_roles', 'checking_owner'])
+    expect(d.events[1]).toMatchObject({ provider: 'ashby' })
+    expect(d.events[2]).toMatchObject({ count: 2 })
+  })
+
+  it('a site that lists roles with no board says so', async () => {
+    const { client } = world()
+    const d = deps({ site: { tier: 'listing', jobs: fresh, complete: true, reason: null } })
+    await addCompany(client, 'u1', { link: 'https://careers.acme.com/jobs' }, d.value)
+    expect(d.events.map((e) => e.line)).toEqual(['Reading careers.acme.com', 'Found roles on the page itself'])
+  })
+
+  it('an employer already in the directory is shown at once, before anything is fetched, and followed', async () => {
+    const { client, tables } = world({ company_directory: [{ ...verifiedRetell }] })
+    const d = deps({ boards: [{ provider: 'ashby', token: 'retell-ai', via: 'link' }] })
+    const fetchBoard = vi.fn(async (): Promise<AtsJob[]> => fresh)
+    d.value.verify.fetchBoard = fetchBoard
+    const r = await addCompany(client, 'u1', { link: 'https://www.retellai.com/careers' }, d.value)
+    expect(r).toMatchObject({ ok: true, already: false, employer: { employerId: 'e1' } })
+    expect(d.events).toEqual([{ step: 'directory_hit', following: false, line: 'In the directory, not on your page yet' }])
+    expect(d.read).not.toHaveBeenCalled()
+    expect(fetchBoard).not.toHaveBeenCalled()
+    expect(tables.companies[0]).toMatchObject({ employer_id: 'e1', watching: true })
+    // and a board's own address finds the row the same way
+    const again = world({ company_directory: [{ ...verifiedRetell }] })
+    const e2 = deps()
+    await addCompany(again.client, 'u1', { link: 'https://jobs.ashbyhq.com/retell-ai' }, e2.value)
+    expect(e2.events).toEqual([{ step: 'directory_hit', following: false, line: 'In the directory, not on your page yet' }])
+    expect(e2.read).not.toHaveBeenCalled()
+  })
+
+  it('says "You follow this already" for an employer the person follows', async () => {
+    const { client } = world({ company_directory: [{ ...verifiedRetell }], companies: [{ id: 'co1', user_id: 'u1', name: 'Retell AI', domain: 'retellai.com', watching: true, employer_id: 'e1', logo_url: null }] })
+    const d = deps()
+    await addCompany(client, 'u1', { link: 'https://retellai.com/careers' }, d.value)
+    expect(d.events).toEqual([{ step: 'directory_hit', following: true, line: 'You follow this already' }])
+  })
+})
+
+describe('a board checked by hand', () => {
+  it.each([
+    ['https://www.datadoghq.com/careers', 'greenhouse', 'datadog', 'Datadog', 'datadoghq.com'],
+    ['https://ramp.com/careers', 'ashby', 'ramp', 'Ramp', 'ramp.com'],
+  ])('%s is accepted as known_board even though its page links no board, and the page is not read', async (link, provider, token, name, domain) => {
+    const { client, tables } = world()
+    const d = deps({ identity: null })
+    const r = await addCompany(client, 'u1', { link }, d.value)
+    expect(r).toMatchObject({ ok: true, employer: { name, domain, openCount: 2 } })
+    expect(tables.company_directory[0]).toMatchObject({ verified_by: 'known_board', ats_provider: provider, ats_token: token, source: 'person', domain })
+    expect(d.read).not.toHaveBeenCalled()
+  })
+
+  it('a known board that has gone quiet is not accepted on the strength of the list alone', async () => {
+    const { client, tables } = world()
+    const d = deps({ jobs: [job(300)] })
+    const r = await addCompany(client, 'u1', { link: 'https://www.datadoghq.com/careers' }, d.value)
+    expect(r).toMatchObject({ ok: false })
+    expect(tables.company_directory ?? []).toHaveLength(0)
+  })
+
+  it('Amazon on Personio is still another employer, with the curated domain given', async () => {
+    const { client, tables } = world()
+    const d = deps({ boards: [{ provider: 'personio', token: 'amazon', via: 'url' }], identity: null })
+    expect(await addCompany(client, 'u1', { link: 'https://amazon.jobs.personio.de/' }, d.value)).toMatchObject({ ok: false, reason: 'other_owner' })
+    expect(tables.company_directory ?? []).toHaveLength(0)
+  })
+})
+
+describe('a page only a browser can read', () => {
+  it('a bot check on the employer\'s own address is queued for the worker: a candidate, a job for this person, and the line', async () => {
+    const { client, tables } = world()
+    const d = deps({ site: { reason: 'bot_check' } })
+    const r = await addCompany(client, 'u1', { link: 'https://acme.com/careers' }, d.value)
+    expect(r).toMatchObject({ ok: false, reason: 'cannot_read', queued: 'Cello could not read that page: the site asked for a bot check. Trying with a browser within the hour.' })
+    expect(tables.directory_candidates).toEqual([expect.objectContaining({ name: 'Acme', domain: 'acme.com', source: 'person' })])
+    expect(tables.render_jobs).toEqual([expect.objectContaining({ kind: 'careers_page', url: 'https://acme.com/careers', candidate_id: tables.directory_candidates[0].id, requested_by: 'u1' })])
+    expect(tables.company_directory ?? []).toHaveLength(0)
+    expect(tables.companies).toHaveLength(0)
+    // pasting it again queues nothing new (the database defaults a new job to queued)
+    tables.render_jobs[0].state = 'queued'
+    await addCompany(client, 'u1', { link: 'https://acme.com/careers' }, d.value)
+    expect(tables.directory_candidates).toHaveLength(1)
+    expect(tables.render_jobs).toHaveLength(1)
+  })
+
+  it('a page that lists roles only to a browser is queued too; a site that did not answer, a login and robots are not', async () => {
+    const { client, tables } = world()
+    await addCompany(client, 'u1', { link: 'https://acme.com/careers' }, deps({ site: { reason: 'role_pages' } }).value)
+    expect(tables.render_jobs).toHaveLength(1)
+    for (const reason of ['unreachable', 'login_required', 'robots'] as const) {
+      const r = await addCompany(client, 'u1', { link: `https://${reason.replace('_', '')}.example/careers` }, deps({ site: { reason } }).value)
+      expect(r).toMatchObject({ ok: false, reason: 'cannot_read' })
+      expect((r as { queued?: string }).queued).toBeUndefined()
+    }
+    expect(tables.render_jobs).toHaveLength(1)
+  })
+})
+
+describe('a board or a site a search proved', () => {
+  const retellBoard = { provider: 'ashby' as const, token: 'retell-ai', name: 'Retell AI', domain: 'retellai.com' }
+  const setup = { identity: { name: 'Retell AI', homeUrls: ['https://retellai.com'] }, page: [{ provider: 'ashby' as const, token: 'retell-ai' }] }
+  const entity: WikidataEntity = { qid: 'Q1', label: 'Retell AI', website: 'https://www.retellai.com/', hq: 'San Francisco', employees: 75, industry: null, logo: null, founded: 2023, ticker: null, github: null, fetchedAt: '2026-10-21T00:00:00.000Z' }
+
+  it('proves the board again, writes the employer as the person\'s add, follows it and keeps the Wikidata profile', async () => {
+    const { client, tables } = world()
+    const d = deps({ ...setup, wikidata: entity })
+    const r = await addCompany(client, 'u1', { board: { ...retellBoard, qid: 'Q1' } }, d.value)
+    expect(r).toMatchObject({ ok: true, employer: { name: 'Retell AI', domain: 'retellai.com', openCount: 2 } })
+    expect(tables.company_directory[0]).toMatchObject({ ats_provider: 'ashby', ats_token: 'retell-ai', verified_by: 'careers_page_link', source: 'person', profile: expect.objectContaining({ source: 'wikidata', qid: 'Q1', hq: 'San Francisco' }) })
+    expect(tables.companies[0]).toMatchObject({ user_id: 'u1', watching: true, employer_id: tables.company_directory[0].id })
+    expect(d.events.map((e) => e.step)).toEqual(['board_found', 'reading_roles', 'checking_owner'])
+  })
+
+  it('takes nothing a client sent on trust: a forged domain, a name that is not the board\'s and a profile for another site all fail', async () => {
+    const forged = world()
+    expect(await addCompany(forged.client, 'u1', { board: { ...retellBoard, domain: 'evil.example' } }, deps(setup).value)).toMatchObject({ ok: false, reason: 'other_owner' })
+    expect(forged.tables.company_directory ?? []).toHaveLength(0)
+
+    const renamed = world()
+    expect(await addCompany(renamed.client, 'u1', { board: { ...retellBoard, domain: null, name: 'Amazon' } }, deps({ identity: { name: 'Retell AI', homeUrls: [] } }).value)).toMatchObject({ ok: false, reason: 'not_linked' })
+    expect(renamed.tables.company_directory ?? []).toHaveLength(0)
+
+    const other = world()
+    const r = await addCompany(other.client, 'u1', { board: { ...retellBoard, qid: 'Q1' } }, deps({ ...setup, wikidata: { ...entity, website: 'https://other.example' } }).value)
+    expect(r).toMatchObject({ ok: true })
+    expect(other.tables.company_directory[0].profile).toBeUndefined()
+  })
+
+  it('a board the directory already has is shown without a check', async () => {
+    const { client } = world({ company_directory: [{ ...verifiedRetell }] })
+    const d = deps(setup)
+    d.value.verify.fetchBoard = vi.fn(async (): Promise<AtsJob[]> => fresh)
+    expect(await addCompany(client, 'u1', { board: retellBoard }, d.value)).toMatchObject({ ok: true, employer: { employerId: 'e1' } })
+    expect(d.value.verify.fetchBoard).not.toHaveBeenCalled()
+    expect(d.events[0]).toMatchObject({ step: 'directory_hit' })
+  })
+
+  it('a site that lists roles is read at its own address and written as the person\'s add; an address on another domain is refused', async () => {
+    const { client, tables } = world()
+    const d = deps({ site: { tier: 'listing', jobs: fresh, complete: true, reason: null } })
+    const r = await addCompany(client, 'u1', { site: { domain: 'acme.com', careersUrl: 'https://acme.com/careers', name: 'Acme Labs' } }, d.value)
+    expect(r).toMatchObject({ ok: true, employer: { name: 'Acme Labs', domain: 'acme.com', openCount: 2 } })
+    expect(tables.company_directory[0]).toMatchObject({ verified_by: 'careers_url_host', careers_url: 'https://acme.com/careers', ats_provider: null })
+    expect(await addCompany(world().client, 'u1', { site: { domain: 'acme.com', careersUrl: 'https://evil.example/careers' } }, deps().value)).toMatchObject({ ok: false, reason: 'bad_link' })
+  })
+
+  it('counts against the day\'s limit like any add', async () => {
+    const today = new Date().toISOString()
+    const rows = Array.from({ length: DAILY_ADD_LIMIT }, (_, i) => ({ id: `c${i}`, user_id: 'u1', name: `Co ${i}`, domain: `co${i}.com`, watching: true, created_at: today }))
+    const { client } = world({ companies: rows })
+    const d = deps(setup)
+    expect(await addCompany(client, 'u1', { board: retellBoard }, d.value)).toMatchObject({ ok: false, reason: 'daily_limit' })
   })
 })

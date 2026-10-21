@@ -162,6 +162,9 @@ export function employerDomain(host: string): string {
   return host.toLowerCase().replace(/^(www|careers|jobs|apply|boards|join|work)\./, '')
 }
 
+/** "Found a Greenhouse board", "Found an Ashby board". */
+const foundLine = (provider: AtsProviderId) => `Found ${/^[aeiou]/i.test(PROVIDER_LABELS[provider]) ? 'an' : 'a'} ${PROVIDER_LABELS[provider]} board`
+
 const titleCase = (token: string) => token.replace(/[-_.]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 
 // --- following -----------------------------------------------------------------
@@ -292,7 +295,7 @@ async function addBoard(db: Db, userId: string, b: Extract<AddBy, { board: unkno
   const row = await directoryRow(db, { provider: b.provider, token: b.token })
   if (row) return addVerified(db, userId, row, 'url', dream, deps)
   if ((await addsToday(db, userId)) >= DAILY_ADD_LIMIT) return refuse('daily_limit')
-  deps.report?.({ step: 'board_found', provider: b.provider, line: `Found a ${PROVIDER_LABELS[b.provider]} board` })
+  deps.report?.({ step: 'board_found', provider: b.provider, line: foundLine(b.provider) })
   const check = await checkBoard({ name: b.name, domain: b.domain, provider: b.provider, token: b.token }, deps.verify)
   if (!check.ok) return refuse(check.reason, check.reason === 'other_owner' ? await directoryOffers(db, { name: b.name, domain: b.domain }) : [])
   const written = await writeEmployer(db, { name: check.name, domain: b.domain, careersUrl: null, provider: b.provider, token: b.token, verifiedBy: check.verifiedBy, source: 'person', openCount: check.jobs.length, readTier: 'board', keepExisting: true })
@@ -364,7 +367,7 @@ async function verifyLink(db: Db, url: URL, domain: string | null, directToken: 
   deps.report?.({ step: 'reading', host: url.hostname.replace(/^www\./, ''), line: `Reading ${url.hostname.replace(/^www\./, '')}` })
 
   const readBoard: NonNullable<SiteDeps['readBoard']> = async (candidate) => {
-    deps.report?.({ step: 'board_found', provider: candidate.provider, line: `Found a ${PROVIDER_LABELS[candidate.provider]} board` })
+    deps.report?.({ step: 'board_found', provider: candidate.provider, line: foundLine(candidate.provider) })
     const pasted = candidate.via === 'url'
     let check = await checkBoard({ name: pasted ? null : guess, domain: pasted ? null : domain, careerUrl: url.href, provider: candidate.provider, token: candidate.token }, deps.verify)
     // The person pasted the board's own address: that is their say-so that this is the board. A provider that keeps no
