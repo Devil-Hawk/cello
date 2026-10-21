@@ -12,7 +12,8 @@ export interface CompanyToAdd {
   domain: string | null
   careerUrl: string | null
   logoUrl: string | null
-  isDream: boolean
+  /** Written only when given: a re-follow without it keeps the person's dream flag. */
+  isDream?: boolean
 }
 
 export type AddCompanyResult = { id: string; error?: undefined } | { id?: undefined; error: string }
@@ -22,6 +23,7 @@ interface ExistingRow {
   name: string
   domain: string | null
   metadata: Record<string, unknown> | null
+  watching: boolean | null
 }
 
 export async function saveCompany(db: SupabaseClient, userId: string, c: CompanyToAdd): Promise<AddCompanyResult> {
@@ -33,7 +35,7 @@ export async function saveCompany(db: SupabaseClient, userId: string, c: Company
   if (match) {
     const { data, error } = await db
       .from('companies')
-      .select('id, name, domain, metadata')
+      .select('id, name, domain, metadata, watching')
       .eq('user_id', userId)
       .or(match)
       .limit(1)
@@ -47,7 +49,7 @@ export async function saveCompany(db: SupabaseClient, userId: string, c: Company
   const fields = {
     logo_url: c.logoUrl,
     career_url: c.careerUrl ?? '',
-    is_dream_company: c.isDream,
+    ...(c.isDream === undefined ? {} : { is_dream_company: c.isDream }),
   }
 
   if (existing) {

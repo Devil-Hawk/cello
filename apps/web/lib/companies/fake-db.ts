@@ -2,7 +2,8 @@
 // modules use. Test support only: nothing in the app imports it.
 //
 // Supported: select, insert, upsert (onConflict, ignoreDuplicates), update,
-// delete, eq, neq, in, lt, gt, is, ilike (trailing % only), or('a.eq.x,b.eq.y'), order, limit,
+// delete, eq, neq, in, lt, gt, is, ilike (trailing % only), or('a.eq.x,b.eq.y'; eq, neq and is inside or, with
+// 'col->>key' for a key of a jsonb column), order, limit,
 // maybeSingle, single, rpc. Filters and writes behave like Postgres for the
 // cases the tests exercise, including unique-constraint violations (23505).
 
@@ -47,6 +48,8 @@ export function fakeDb(seed: Record<string, Row[]> = {}, options: FakeDbOptions 
     let order: { col: string; asc: boolean } | null = null
     let max = Infinity
     let single: 'one' | 'maybe' | null = null
+    // The columns a select names; rows come back with only these, as Postgres returns them.
+    let projection: string[] | null = null
 
     const q: Record<string, unknown> = {}
     const add = (name: string, f: Filter) => {
@@ -56,7 +59,8 @@ export function fakeDb(seed: Record<string, Row[]> = {}, options: FakeDbOptions 
     }
 
     let counted = false
-    q.select = (_cols?: string, o?: { count?: string; head?: boolean }) => {
+    q.select = (cols?: string, o?: { count?: string; head?: boolean }) => {
+      if (cols && cols.trim() !== '*' && !cols.includes('(')) projection = cols.split(',').map((c) => c.trim())
       if (op !== 'select') returning = true
       if (o?.count) counted = true
       return q
@@ -102,11 +106,25 @@ export function fakeDb(seed: Record<string, Row[]> = {}, options: FakeDbOptions 
     // not('col', 'is', null) is the only form the directory reads use.
     q.not = (c: string, _op: string, v: unknown) => add(c, (r) => (v === null ? r[c] != null : r[c] !== v))
     q.is = (c: string, v: unknown) => add(c, (r) => (v === null ? r[c] == null : r[c] === v))
+    // 'metadata->>suggested' reads key "suggested" of the jsonb column "metadata", as PostgREST does. SQL null never
+    // equals anything, so neq is false for a missing value.
+    const jsonOrColumn = (r: Row, c: string): unknown => {
+      const [col, key] = c.split('->>')
+      return key === undefined ? r[col] : (r[col] as Row | null | undefined)?.[key]
+    }
     q.or = (expr: string) => {
       const parts = expr.split(',').map((p) => p.split('.'))
       return add(
         parts.map((p) => p[0]).join('|'),
-        (r) => parts.some(([c, o, ...v]) => o === 'eq' && r[c] === v.join('.'))
+        (r) =>
+          parts.some(([c, o, ...v]) => {
+            const val = v.join('.')
+            const x = jsonOrColumn(r, c)
+            if (o === 'eq') return x === val
+            if (o === 'neq') return x != null && String(x) !== val
+            if (o === 'is') return val === 'null' && x == null
+            return false
+          })
       )
     }
     q.order = (col: string, o?: { ascending?: boolean }) => {
@@ -172,7 +190,8 @@ export function fakeDb(seed: Record<string, Row[]> = {}, options: FakeDbOptions 
         if (counted) return { data: null, count: rows.length, error: null } as never
       }
       if (op !== 'select' && !returning) return { data: null, error: null }
-      const out = touched.map((r) => ({ ...r }))
+      const pick = (r: Row): Row => (projection ? Object.fromEntries(projection.map((c) => [c, r[c]])) : { ...r })
+      const out = touched.map(pick)
       if (single === 'maybe') return { data: out[0] ?? null, error: null }
       if (single === 'one') {
         return out[0] ? { data: out[0], error: null } : { data: null, error: { message: 'no rows', code: 'PGRST116' } }

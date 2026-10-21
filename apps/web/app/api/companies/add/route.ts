@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
+import { isCrossSiteRequest } from '@/lib/security/same-origin'
 import { addCompany, type AddBy, type AddFailure } from '@/lib/companies/add-link'
 
 // POST /api/companies/add   { employerId } | { candidateId } | { link }
@@ -28,6 +29,7 @@ function parseBody(body: unknown): AddBy | null {
 }
 
 export async function POST(request: NextRequest) {
+  if (isCrossSiteRequest(request.headers)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const supabase = await createClient()
   const {
     data: { user },

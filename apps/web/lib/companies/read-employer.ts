@@ -55,11 +55,16 @@ export async function loadPeople(db: Db): Promise<Person[]> {
   const people: Person[] = []
   for (const p of (data ?? []) as { id: string; is_demo: boolean | null; demo_expires_at: string | null }[]) {
     if (isDemoProfile(p)) continue
-    const t = await loadTargets(db, p.id)
-    const targets: PersonTargets = { targeting: t.targeting, titles: t.titles, typeStep: t.typeStep }
-    if (hasPersonTargets(targets)) people.push({ userId: p.id, targets, prepared: prepareTargets(targets.titles) })
+    people.push(...(await loadPerson(db, p.id)))
   }
   return people
+}
+
+/** One person's targets as a Person: [] when nothing is stated. The read a person asks for uses only this person. */
+export async function loadPerson(db: Db, userId: string): Promise<Person[]> {
+  const t = await loadTargets(db, userId)
+  const targets: PersonTargets = { targeting: t.targeting, titles: t.titles, typeStep: t.typeStep }
+  return hasPersonTargets(targets) ? [{ userId, targets, prepared: prepareTargets(targets.titles) }] : []
 }
 
 export interface ReadDeps {
