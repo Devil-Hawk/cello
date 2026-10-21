@@ -207,8 +207,8 @@ export function scoreLabels(rows: { cello: string; label: string }[], chosen: re
 export function scoreReport(score: LabelScore, chosenGiven: boolean): string[] {
   const out = score.perType.map((t) =>
     t.precision === null && t.recall === null
-      ? `${t.type}: ${t.labels} labels. Too few to tell`
-      : `${t.type}: ${t.labels} labels, precision ${t.precision ?? 'not known'}, recall ${t.recall ?? 'not known'}${(t.precision ?? 0) >= TYPE_BAR && (t.recall ?? 0) >= TYPE_BAR ? '' : ' (under 0.90)'}`
+      ? `${t.type}: labels ${t.labels}. Too few to tell`
+      : `${t.type}: labels ${t.labels}, precision ${t.precision ?? 'not known'}, recall ${t.recall ?? 'not known'}${(t.precision ?? 0) >= TYPE_BAR && (t.recall ?? 0) >= TYPE_BAR ? '' : ' (under 0.90)'}`
   )
   out.push(
     score.keepRecall === null

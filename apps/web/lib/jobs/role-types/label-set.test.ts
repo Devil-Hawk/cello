@@ -105,8 +105,8 @@ describe('scoring the marked file', () => {
     // 14 wanted titles, 13 kept (the untyped one is not)
     expect(score).toMatchObject({ keepRecall: 0.929, keepN: 14, gate: false })
     expect(scoreReport(score, false)).toEqual([
-      'ai-engineer: 10 labels, precision 0.9, recall 0.9',
-      'backend-engineer: 4 labels. Too few to tell',
+      'ai-engineer: labels 10, precision 0.9, recall 0.9',
+      'backend-engineer: labels 4. Too few to tell',
       'Keep-recall over every type you marked (pass --chosen to narrow it): 0.929 on 14 titles',
       'The 0.95 gate does not hold',
     ])

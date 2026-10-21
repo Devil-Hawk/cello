@@ -28,6 +28,10 @@ One JSON object and nothing else, no code fence, no commentary:
 One entry for each item, with the same `i`. `type` is one of the ids below, or
 `none`.
 
+Start your answer with `{`. Do not think out loud, number the items, or explain:
+the code reads the JSON object and nothing else, and a long preamble can use up
+the room the object needs.
+
 ## The quote
 
 The `quote` is the words, copied exactly, that decide the type. They must appear
@@ -38,6 +42,8 @@ quote loses the answer. Prefer the title: "Applied AI Engineer" decides
 `ai-engineer` by the title alone. Quote the posting only when the title names no
 particular job ("Member of Technical Staff") and the posting says what the person
 will be.
+
+One quote is one unbroken run of words from one place, not two joined with "and".
 
 A quote that only repeats a word shared by several types ("engineer") decides
 nothing.
