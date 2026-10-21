@@ -319,7 +319,7 @@ export const REGISTER: readonly MeasureDef[] = [
   {
     id: 'T34',
     layer: 'true',
-    name: 'directory search by name: the owner\'s named set through the full search ladder, the right employer among the candidates with the rung that found it, every miss named with its reason',
+    name: 'company search: the owner\'s named set through the company search steps, the right employer among the candidates with the step that found it, every miss named with its reason',
     bar: '11 of 11 named; 8 of 10 unseeded startups',
     direction: 'higher',
     source: 'measure_runs from scripts/directory-coverage.ts --find --record',
@@ -346,7 +346,7 @@ export const REGISTER: readonly MeasureDef[] = [
   {
     id: 'T37',
     layer: 'true',
-    name: 'Companies route timings: share of add calls ending or handing off within 60 s, and of follow calls with their first read ending or handing off within 8 s, per 7 days',
+    name: 'Companies route timings: share of add calls answered within 60 s, and of follow calls answered within 8 s, failures counted as misses, per 7 days',
     bar: '95 percent within each bar',
     direction: 'higher',
     source: 'route_timings',

@@ -51,7 +51,9 @@ describe('the register', () => {
   })
 
   it('seeds every row as watch and never overwrites a row a package has flipped', () => {
-    expect(migration.match(/on conflict \(id\) do nothing/g)).toHaveLength(2)
+    expect(migration.match(/on conflict \(id\) do nothing/g)).toHaveLength(1)
+    // the Companies rows update their words on a re-apply and keep their state, which a package may have flipped
+    expect(migration).toMatch(/on conflict \(id\) do update set name = excluded\.name, bar = excluded\.bar, direction = excluded\.direction, source = excluded\.source, gates = excluded\.gates;/)
     expect(migration).not.toMatch(/'gating'/)
   })
 })
