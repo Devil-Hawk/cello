@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ashby } from './ashby'
+import { typeTitle } from '../jobs/role-types'
 
 const realFetch = globalThis.fetch
 
@@ -64,5 +65,21 @@ describe('ashby.fetch', () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch
     await expect(ashby.fetch('../etc/passwd')).rejects.toThrow(/invalid/)
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('ashby.fetch: the department reaches the type', () => {
+  it('reads "member of technical staff" by the team, else by the department', async () => {
+    const mts = { ...POSTING, title: 'Member of Technical Staff' }
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({ jobs: [{ ...mts, team: 'Forward Deployed', department: 'Engineering' }] })) as unknown as typeof fetch
+    const [byTeam] = await ashby.fetch('ramp')
+    expect(byTeam.department).toBe('Forward Deployed')
+    expect(typeTitle(byTeam.title, byTeam.department)).toMatchObject({ dept_norm: 'forward deployed', role_type: 'forward-deployed-engineer' })
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({ jobs: [{ ...mts, department: 'Forward Deployed' }] })) as unknown as typeof fetch
+    const [byDepartment] = await ashby.fetch('ramp')
+    expect(typeTitle(byDepartment.title, byDepartment.department).role_type).toBe('forward-deployed-engineer')
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({ jobs: [mts] })) as unknown as typeof fetch
+    const [bare] = await ashby.fetch('ramp')
+    expect(typeTitle(bare.title, bare.department).role_type).toBeNull()
   })
 })

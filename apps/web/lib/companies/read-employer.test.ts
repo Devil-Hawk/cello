@@ -173,3 +173,15 @@ describe('readEmployer: what a sweep read keeps, counts and records', () => {
     expect(same.directory.verified_at).toBe(iso(5))
   })
 })
+
+describe('readEmployer: the department reaches the type', () => {
+  it('counts "member of technical staff" under the type its department gives, and under none without one', async () => {
+    const mts = (id: string, department?: string) => job(id, 'Member of Technical Staff', 3, { department })
+    const roleTypes = async (jobs: AtsJob[]) => {
+      const { rpcs } = await run({ jobs })
+      return (rpcs.bump_employer_stats[0].p_rows as { role_type: string | null }[]).map((s) => s.role_type)
+    }
+    expect(await roleTypes([mts('1', 'Forward Deployed')])).toEqual(['forward-deployed-engineer'])
+    expect(await roleTypes([mts('2')])).toEqual([null])
+  })
+})
