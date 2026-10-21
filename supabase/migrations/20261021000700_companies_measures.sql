@@ -104,6 +104,8 @@ begin
     return;
   end if;
   begin
+    -- the owner's own followed companies are set aside inside the block and come back on rollback
+    update public.companies set watching = false;
     insert into public.company_directory (name, name_norm, source, cannot_read_reason, verified_at, careers_url) values ('Self check unreadable', 'self check unreadable', 'seed', 'cannot_read', now(), 'https://unreadable.example/careers') returning id into e1;
     insert into public.company_directory (name, name_norm, source, verified_at, careers_url) values ('Self check readable', 'self check readable', 'seed', now(), 'https://readable.example/careers') returning id into e2;
     insert into public.company_directory (name, name_norm, source, cannot_read_reason, verified_at, careers_url) values ('Self check stale', 'self check stale', 'seed', 'stale', now(), 'https://stale.example/careers') returning id into e3;
