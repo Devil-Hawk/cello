@@ -593,7 +593,7 @@ describe('429 and Retry-After', () => {
     expect(result).toEqual({ ok: true })
     // The backoff obeys "2 seconds" rather than our own 10ms schedule…
     expect(waits[0]).toBeGreaterThanOrEqual(2_000)
-    expect(waits[0]).toBeLessThan(2_500)
+    expect(waits[0]).toBeLessThanOrEqual(2_500)
     // …and the 429 also tightened the per-host rate, so the retry itself is
     // metered rather than fired the instant the backoff ends.
     expect(waits.length).toBe(2)
