@@ -179,11 +179,14 @@ async function header(db: Db, userId: string, now: Date): Promise<CompaniesHeade
     meterState(db, now).catch(() => null),
     directoryProgress(db),
   ])
+  const backgroundOff = ready.data !== true
+  const checked = routineStatus('directory.sweep', routine.data ?? undefined, heartbeat.data ?? undefined, now)
   return {
     foundByCelloThisWeek: found.count ?? 0,
     following: following.count ?? 0,
-    checked: routineStatus('directory.sweep', routine.data ?? undefined, heartbeat.data ?? undefined, now),
-    backgroundOff: ready.data !== true,
+    // with background work off Cello is not retrying, so "Cello is retrying" would be false
+    checked: backgroundOff ? { ...checked, missedText: null } : checked,
+    backgroundOff,
     paced: meter?.paused === true,
     seedProgress,
   }

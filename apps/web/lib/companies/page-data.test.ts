@@ -96,16 +96,18 @@ describe('companiesPage', () => {
     expect(header.checked).toMatchObject({ lastSucceededAt: hoursAgo(2), nextDueAt: hoursAgo(-1), missed: false, found: { boards: 40 } })
   })
 
-  it('the header says a check is missed, background work off, and the allowance used', async () => {
-    const { client } = setup([], {
+  it('the header says a check is missed and retried, or background work off and no retry, and the allowance used', async () => {
+    const seed = {
       routines: [{ command: 'directory.sweep', user_id: null, next_due_at: hoursAgo(5), enabled: true }],
       job_heartbeats: [{ job: 'directory.sweep', user_id: null, succeeded_at: hoursAgo(9), next_due_at: hoursAgo(5), found: {}, failure: null }],
       clock_meter: [{ month: '2026-10-01', duration_ms: 9e12 }],
-    }, { ready: false })
-    const { header } = await companiesPage(client, 'u1', { now: NOW })
+    }
+    const on = (await companiesPage(setup([], seed).client, 'u1', { now: NOW })).header
+    expect(on.checked.missed).toBe(true)
+    expect(on.checked.missedText).toMatch(/^Missed at \d\d:\d\d\. Cello is retrying\.$/)
+    const { header } = await companiesPage(setup([], seed, { ready: false }).client, 'u1', { now: NOW })
     expect(header).toMatchObject({ backgroundOff: true, paced: true, foundByCelloThisWeek: 0, following: 0 })
-    expect(header.checked.missed).toBe(true)
-    expect(header.checked.missedText).toMatch(/^Missed at \d\d:\d\d\. Cello is retrying\.$/)
+    expect(header.checked).toMatchObject({ missed: true, missedText: null })
   })
 
   it('throws, rather than showing an empty wall, when the database fails', async () => {
