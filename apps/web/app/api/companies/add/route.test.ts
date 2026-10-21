@@ -75,6 +75,18 @@ describe('POST /api/companies/add', () => {
     expect(await res.json()).toMatchObject({ ok: true, companyId: 'c1' })
   })
 
+  it('writes no timing row for a call refused at the door: no session, a bad body, or cross-site', async () => {
+    const insert = vi.fn(async () => ({ error: null }))
+    admin.mockImplementation(() => ({ from: () => ({ insert }) }))
+    user = null
+    expect((await post({ link: 'retellai.com/careers' })).status).toBe(401)
+    user = { id: 'u1' }
+    expect((await post({})).status).toBe(400)
+    const crossSite = new NextRequest('http://localhost/api/companies/add', { method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' }, body: JSON.stringify({ link: 'retellai.com/careers' }) })
+    expect((await POST(crossSite)).status).toBe(403)
+    expect(insert).not.toHaveBeenCalled()
+  })
+
   it('says it could not add, and nothing else, when the work throws', async () => {
     addMock.mockRejectedValueOnce(new Error('secret detail'))
     const res = await post({ link: 'retellai.com/careers' })

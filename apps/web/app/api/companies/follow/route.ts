@@ -24,13 +24,6 @@ function employerIdOf(body: unknown): string | null {
 }
 
 export async function POST(request: NextRequest) {
-  const started = Date.now()
-  const response = await follow(request)
-  await recordRouteTiming(createAdminClient, 'follow', Date.now() - started, response.status < 500)
-  return response
-}
-
-async function follow(request: NextRequest) {
   if (isCrossSiteRequest(request.headers)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const supabase = await createClient()
   const {
@@ -43,9 +36,17 @@ async function follow(request: NextRequest) {
   const dream = (body as { dream?: unknown } | null)?.dream
   if (!employerId || (dream !== undefined && typeof dream !== 'boolean')) return NextResponse.json({ error: 'Send employerId, and dream if you set it.' }, { status: 400 })
 
+  // Timed only once the request has reached the work: a 401, 403 or 400 writes no row.
+  const started = Date.now()
+  const response = await answer(user.id, employerId, dream as boolean | undefined)
+  await recordRouteTiming(createAdminClient, 'follow', Date.now() - started, response.status < 500)
+  return response
+}
+
+async function answer(userId: string, employerId: string, dream: boolean | undefined) {
   try {
     const db = createAdminClient()
-    const result = await followAndRead(db, user.id, employerId, await loadPerson(db, user.id), { dream: dream as boolean | undefined })
+    const result = await followAndRead(db, userId, employerId, await loadPerson(db, userId), { dream })
     if (result.ok) return NextResponse.json(result)
     return NextResponse.json(result, { status: STATUS[result.reason] })
   } catch {

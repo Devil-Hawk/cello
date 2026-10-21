@@ -30,13 +30,6 @@ function parseBody(body: unknown): AddBy | null {
 }
 
 export async function POST(request: NextRequest) {
-  const started = Date.now()
-  const response = await answer(request)
-  await recordRouteTiming(createAdminClient, 'add', Date.now() - started, response.status < 500)
-  return response
-}
-
-async function answer(request: NextRequest) {
   if (isCrossSiteRequest(request.headers)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const supabase = await createClient()
   const {
@@ -47,8 +40,16 @@ async function answer(request: NextRequest) {
   const by = parseBody(await request.json().catch(() => null))
   if (!by) return NextResponse.json({ error: 'Send one of employerId, candidateId or link.' }, { status: 400 })
 
+  // Timed only once the request has reached the work: a 401, 403 or 400 writes no row.
+  const started = Date.now()
+  const response = await answer(user.id, by)
+  await recordRouteTiming(createAdminClient, 'add', Date.now() - started, response.status < 500)
+  return response
+}
+
+async function answer(userId: string, by: AddBy) {
   try {
-    const result = await addCompany(createAdminClient(), user.id, by)
+    const result = await addCompany(createAdminClient(), userId, by)
     if (result.ok) return NextResponse.json(result)
     return NextResponse.json(result, { status: STATUS[result.reason] ?? 200 })
   } catch {

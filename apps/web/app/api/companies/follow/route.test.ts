@@ -4,7 +4,8 @@ import { NextRequest } from 'next/server'
 const followMock = vi.fn()
 const unfollowMock = vi.fn()
 
-vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: async () => ({ data: { user: { id: 'u1' } }, error: null }) } }) }))
+let signedIn = true
+vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: async () => ({ data: { user: signedIn ? { id: 'u1' } : null }, error: null }) } }) }))
 const admin = vi.fn((): unknown => ({ admin: true }))
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => admin() }))
 vi.mock('@/lib/companies/read-employer', () => ({ loadPerson: async () => [] }))
@@ -41,6 +42,18 @@ describe('/api/companies/follow cross-site refusal', () => {
     expect(await res.json()).toEqual({ ok: true })
     admin.mockImplementation(() => ({ admin: true }))
     followMock.mockReset()
+  })
+
+  it('writes no timing row for a call refused at the door: no session, a bad body, or cross-site', async () => {
+    const insert = vi.fn(async () => ({ error: null }))
+    admin.mockImplementation(() => ({ from: () => ({ insert }) }))
+    signedIn = false
+    expect((await POST(req('POST', { 'content-type': 'application/json' }, { employerId: ID }))).status).toBe(401)
+    signedIn = true
+    expect((await POST(req('POST', { 'content-type': 'application/json' }, {}))).status).toBe(400)
+    expect((await POST(req('POST', crossSite, { employerId: ID }))).status).toBe(403)
+    expect(insert).not.toHaveBeenCalled()
+    admin.mockImplementation(() => ({ admin: true }))
   })
 
   it('refuses a follow or an unfollow with no employer id, a bad id, or a dream flag that is not a boolean', async () => {
