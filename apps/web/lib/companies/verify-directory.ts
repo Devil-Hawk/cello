@@ -226,7 +226,6 @@ export async function writeEmployer(db: Db, w: EmployerWrite, now: () => number 
 
 // --- what a read of a verified board did to its row ----------------------------
 
-/** A board is read again after this long, or after RETRY_READ_HOURS when it did not answer. */
 /**
  * "Not this company": the board is proven again at the next slice. verified_at is set back to `verifiedAt` (older than
  * the re-check age the caller uses), not null, so the employer stays in search, getEmployer and the sweep. This file
@@ -240,6 +239,7 @@ export async function queueReverify(db: Db, employerId: string, verifiedAt: stri
   if (error) throw new Error(`could not queue the re-check: ${error.message}`)
 }
 
+/** A board is read again after this long, or after RETRY_READ_HOURS when it did not answer. */
 export const READ_EVERY_HOURS = 24
 export const RETRY_READ_HOURS = 6
 const HOUR_MS = 3_600_000
