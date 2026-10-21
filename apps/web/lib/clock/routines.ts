@@ -59,6 +59,7 @@ export type RoutineHandler = (ctx: RoutineContext) => Promise<RoutineOutcome>
 /** What the pages call each routine. */
 export const ROUTINE_LABELS: Record<string, string> = {
   'roles.check': 'Find new roles',
+  'roles.match': 'Check your chances',
   'roles.retype': 'Sort roles by kind',
   'postings.backfill': 'Fill in whole postings',
   'storage.alert': 'Storage check',
