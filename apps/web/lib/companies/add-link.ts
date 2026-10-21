@@ -147,7 +147,7 @@ interface FollowedRow {
 }
 
 /** The person's own tracked row for this employer, by the employer's id or by domain. */
-async function followedRow(db: Db, userId: string, by: { employerId?: string; domain?: string | null }): Promise<FollowedRow | null> {
+export async function followedRow(db: Db, userId: string, by: { employerId?: string; domain?: string | null }): Promise<FollowedRow | null> {
   for (const [column, value] of [['employer_id', by.employerId], ['domain', by.domain]] as const) {
     if (!value) continue
     const { data } = await db.from('companies').select('id, name, domain, logo_url, employer_id').eq('user_id', userId).eq('watching', true).eq(column, value).limit(1).maybeSingle()
@@ -156,7 +156,7 @@ async function followedRow(db: Db, userId: string, by: { employerId?: string; do
   return null
 }
 
-async function addsToday(db: Db, userId: string): Promise<number> {
+export async function addsToday(db: Db, userId: string): Promise<number> {
   const since = new Date(Date.now() - 86_400_000).toISOString()
   const { count } = await db.from('companies').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('watching', true).gte('created_at', since)
   return count ?? 0
@@ -165,7 +165,7 @@ async function addsToday(db: Db, userId: string): Promise<number> {
 const briefOf = (e: DirectoryRow): AddedEmployer => ({ employerId: e.id, name: e.name, domain: e.domain, logoUrl: e.logo_url, openCount: e.open_count })
 
 async function follow(db: Db, userId: string, employer: DirectoryRow, source: 'url' | 'known', dream: boolean): Promise<AddResult> {
-  const f = await followEmployer(db, userId, employer, source, dream)
+  const f = await followEmployer(db, userId, employer, source, { dream })
   if (f.error !== undefined) return refuse('not_saved')
   return { ok: true, companyId: f.id, already: false, employer: briefOf(employer) }
 }
