@@ -119,7 +119,6 @@ export interface RoleLine {
   location: string | null
   isRemote?: boolean | null
   postedAt: string | null
-  insideTargets?: boolean
 }
 
 export function formatRoleLine(r: RoleLine): string {
@@ -127,7 +126,7 @@ export function formatRoleLine(r: RoleLine): string {
   const head = r.url ? `[${title}](${r.url})` : title
   const place = r.location?.trim() || (r.isRemote ? 'Remote' : 'place not listed')
   const posted = r.postedAt ? `posted ${r.postedAt.slice(0, 10)}` : 'undated'
-  return `- ${[head, r.company ?? 'unknown company', place, posted].join(', ')}${r.insideTargets === false ? ', outside your targets' : ''}`
+  return `- ${[head, r.company ?? 'unknown company', place, posted].join(', ')}`
 }
 
 function names(list: string[], joiner = 'and'): string {

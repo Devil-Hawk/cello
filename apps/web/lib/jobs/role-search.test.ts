@@ -157,10 +157,8 @@ describe('formatRoleAnswer', () => {
     expect(out).toContain('Searched A, B, C, D, E and 2 more:')
   })
 
-  it('flags roles outside the targets and fills in what is missing', () => {
-    expect(formatRoleLine({ title: 'FDE', company: 'Meta', url: null, location: null, isRemote: true, postedAt: null, insideTargets: false })).toBe(
-      '- FDE, Meta, Remote, undated, outside your targets'
-    )
+  it('fills in what is missing', () => {
+    expect(formatRoleLine({ title: 'FDE', company: 'Meta', url: null, location: null, isRemote: true, postedAt: null })).toBe('- FDE, Meta, Remote, undated')
     expect(formatRoleLine({ title: 'FDE', company: 'Meta', url: null, location: null, postedAt: null })).toBe('- FDE, Meta, place not listed, undated')
   })
 

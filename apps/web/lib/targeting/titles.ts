@@ -102,20 +102,3 @@ export function resolveTargetTitles(preferences: unknown): string[] {
   const raw = (prefs.targeting && typeof prefs.targeting === 'object' ? prefs.targeting : {}) as Record<string, unknown>
   return normalizeTargetTitles(raw.titles)
 }
-
-/**
- * Parse the `?titles=` URL form. An EMPTY string is meaningful and distinct
- * from an absent parameter: it means "I explicitly cleared my titles here",
- * which the caller uses to stop falling back to the stored preference — the
- * same always-write override convention the jobs page already uses for its
- * fn/sr/country/lang facets.
- */
-export function parseTargetTitlesParam(param: string | null | undefined): string[] {
-  if (typeof param !== 'string' || param.trim() === '') return []
-  return normalizeTargetTitles(param.split(TITLES_PARAM_SEPARATOR))
-}
-
-/** Serialize for the `?titles=` URL form. Round-trips through parse exactly. */
-export function serializeTargetTitlesParam(titles: readonly string[]): string {
-  return normalizeTargetTitles([...titles]).join(TITLES_PARAM_SEPARATOR)
-}
