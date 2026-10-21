@@ -40,6 +40,21 @@ export const REVERIFY_DAYS = 90
 /** Rows per request to the database: a body can be 200,000 characters. */
 const WRITE_CHUNK = 25
 
+/** The place most postings name, counted without case or edge spaces; a tie goes to the one seen first. Null when none names one. */
+export function commonLocation(jobs: { location?: string | null }[]): string | null {
+  const seen = new Map<string, { text: string; n: number }>()
+  for (const j of jobs) {
+    const text = j.location?.trim()
+    if (!text) continue
+    const at = seen.get(text.toLowerCase()) ?? { text, n: 0 }
+    at.n++
+    seen.set(text.toLowerCase(), at)
+  }
+  let best: { text: string; n: number } | null = null
+  for (const at of seen.values()) if (!best || at.n > best.n) best = at
+  return best?.text ?? null
+}
+
 export interface Person {
   userId: string
   targets: PersonTargets
@@ -201,6 +216,6 @@ export async function readEmployer(db: Db, employer: DirectoryRow, people: Perso
   const { error: statsError } = await db.rpc('bump_employer_stats', { p_employer: employer.id, p_rows: [...stats.values()] })
   if (statsError) out.errors.push('bump_employer_stats')
 
-  await recordRead(db, employer, { ok: true, openCount: clean.length }, deps.verify.now)
+  await recordRead(db, employer, { ok: true, openCount: clean.length, hq: commonLocation(clean) }, deps.verify.now)
   return out
 }

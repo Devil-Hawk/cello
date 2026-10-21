@@ -28,6 +28,9 @@ export interface DirectoryRow {
   read_tier: string | null
   cannot_read_reason: string | null
   failed_reads: number | null
+  /** The place most of the last read's postings name; profile: facts from a named public source (PR 5 writes it). */
+  hq?: string | null
+  profile?: Record<string, unknown> | null
 }
 
 /** A candidate Cello knows of and has not checked: shown in search as "Not checked yet", with no count. */

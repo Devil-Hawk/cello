@@ -6,7 +6,7 @@ import { prepareTargets } from '../jobs/target-relevance'
 import { EMPTY_TARGETING } from '../targeting'
 import type { DirectoryRow } from './directory'
 import { fakeDb } from './fake-db'
-import { readEmployer, type Person, type ReadDeps } from './read-employer'
+import { commonLocation, readEmployer, type Person, type ReadDeps } from './read-employer'
 
 const NOW = Date.parse('2026-10-06T12:00:00Z')
 const iso = (daysAgo: number) => new Date(NOW - daysAgo * 86_400_000).toISOString()
@@ -70,6 +70,15 @@ describe('readEmployer: what a sweep read keeps, counts and records', () => {
     // "of 636 open" is the last read
     expect(directory).toMatchObject({ open_count: 4, last_read_at: new Date(NOW).toISOString(), failed_reads: 0, cannot_read_reason: null })
     expect(rpcs.record_employer_sightings[0]).toMatchObject({ p_employer: 'e1', p_external_ids: ['1', '2', '3', '4'] })
+  })
+
+  it('records the most common place of the board as hq, ties to the one seen first, and keeps the old hq when none is named', async () => {
+    expect(commonLocation([{ location: ' Paris ' }, { location: 'new york' }, { location: 'New York' }, { location: 'Paris' }, { location: undefined }])).toBe('Paris')
+    expect(commonLocation([{ location: 'Boston' }, { location: 'Paris' }])).toBe('Boston')
+    expect(commonLocation([{ location: ' ' }, {}])).toBeNull()
+    const places = [job('1', 'Software Engineer', 3, { location: 'Paris' }), job('2', 'Software Engineer', 4, { location: 'Berlin' }), job('3', 'Software Engineer', 5, { location: 'berlin ' })]
+    expect((await run({ jobs: places })).directory.hq).toBe('Berlin')
+    expect((await run({ jobs: [job('1', 'Software Engineer', 3, { location: undefined })], row: { hq: 'Rome' } })).directory.hq).toBe('Rome')
   })
 
   it('a role stays in reach for 180 days at an employer somebody follows', async () => {
