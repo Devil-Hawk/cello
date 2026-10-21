@@ -54,7 +54,8 @@ export type AddBy =
   | { candidateId: string }
   | { link: string }
   | { board: { provider: AtsProviderId; token: string; name: string; domain: string | null; qid?: string } }
-  | { site: { domain: string; careersUrl: string; name?: string; qid?: string } }
+  /** A site's name is never taken from the client: it comes from the curated list, the Wikidata item the server reads by Q-id, or the domain. */
+  | { site: { domain: string; careersUrl: string; qid?: string } }
 export type AddFailure = FailReason | 'bad_link' | 'daily_limit' | 'demo' | 'not_found' | 'not_saved'
 
 /** What the page says for each failure. Plain and specific: what Cello found, and what the person can do. */
@@ -223,7 +224,7 @@ export async function addCompany(db: Db, userId: string, by: AddBy, deps: AddDep
   if ('employerId' in by) result = await addVerified(db, userId, await getEmployer(db, by.employerId), 'known', dream, d)
   else if ('candidateId' in by) result = await addCandidate(db, userId, by.candidateId, d, dream)
   else if ('board' in by) result = await addBoard(db, userId, by.board, d, dream)
-  else if ('site' in by) result = await addLink(db, userId, by.site.careersUrl, d, dream, by.site)
+  else if ('site' in by) result = await addLink(db, userId, by.site.careersUrl, d, dream, { domain: by.site.domain, name: await siteName(by.site, d) })
   else result = await addLink(db, userId, by.link, d, dream)
 
   const qid = 'board' in by ? by.board.qid : 'site' in by ? by.site.qid : undefined
@@ -231,10 +232,22 @@ export async function addCompany(db: Db, userId: string, by: AddBy, deps: AddDep
   return result
 }
 
+/** A Wikidata item read again by its Q-id, or null: an outage or an unknown item is no item. */
+const itemOf = (qid: string, deps: AddDeps) => (deps.wikidata ?? wikidataByQid)(qid).catch(() => null)
+
+/**
+ * The name a chosen site is added under, from the server's own evidence: the label of the Wikidata item it re-reads by
+ * Q-id when that item's website is this domain. Otherwise none, and the curated list or the domain names it.
+ */
+async function siteName(site: { domain: string; qid?: string }, deps: AddDeps): Promise<string | undefined> {
+  const item = site.qid ? await itemOf(site.qid, deps) : null
+  return item && registrable(item.website) === registrable(site.domain) ? item.label : undefined
+}
+
 /** The Wikidata facts of the item the person chose, read again from Wikidata, kept only when its website is the employer's own domain. */
 async function attachProfile(db: Db, employer: AddedEmployer, qid: string, deps: AddDeps): Promise<void> {
   try {
-    const item = await (deps.wikidata ?? wikidataByQid)(qid)
+    const item = await itemOf(qid, deps)
     if (item && employer.domain && registrable(item.website) === registrable(employer.domain)) await writeProfile(db, employer.employerId as string, toProfile(item))
   } catch {
     /* a profile is a nicety: the add stands without it */
@@ -367,7 +380,7 @@ type Verified = { ok: true; employerId: string } | { ok: false; reason: FailReas
 /** Read a link with the reader's plain tiers and let the verifier decide whose board it is; write the employer on a pass. */
 async function verifyLink(db: Db, url: URL, domain: string | null, directToken: string | null, deps: AddDeps, givenName?: string): Promise<Verified> {
   const known = domain ? lookupKnownCompanyByDomain(domain) : null
-  const guess = givenName ?? known?.name ?? (domain ? nameFromDomain(domain) : null)
+  const guess = known?.name ?? givenName ?? (domain ? nameFromDomain(domain) : null)
   const failed: Extract<BoardCheck, { ok: false }>[] = []
   const passed = new Map<string, Extract<BoardCheck, { ok: true }>>()
   deps.report?.({ step: 'reading', host: url.hostname.replace(/^www\./, ''), line: `Reading ${url.hostname.replace(/^www\./, '')}` })

@@ -420,13 +420,30 @@ describe('a board or a site a search proved', () => {
     expect(d.events[0]).toMatchObject({ step: 'directory_hit' })
   })
 
-  it('a site that lists roles is read at its own address and written as the person\'s add; an address on another domain is refused', async () => {
+  it('a site that lists roles is read at its own address and written as the person\'s add, named by the Wikidata item it re-reads; an address on another domain is refused', async () => {
     const { client, tables } = world()
-    const d = deps({ site: { tier: 'listing', jobs: fresh, complete: true, reason: null } })
-    const r = await addCompany(client, 'u1', { site: { domain: 'acme.com', careersUrl: 'https://acme.com/careers', name: 'Acme Labs' } }, d.value)
+    const d = deps({ site: { tier: 'listing', jobs: fresh, complete: true, reason: null }, wikidata: { ...entity, label: 'Acme Labs', website: 'https://www.acme.com/' } })
+    const r = await addCompany(client, 'u1', { site: { domain: 'acme.com', careersUrl: 'https://acme.com/careers', qid: 'Q1' } }, d.value)
     expect(r).toMatchObject({ ok: true, employer: { name: 'Acme Labs', domain: 'acme.com', openCount: 2 } })
     expect(tables.company_directory[0]).toMatchObject({ verified_by: 'careers_url_host', careers_url: 'https://acme.com/careers', ats_provider: null })
     expect(await addCompany(world().client, 'u1', { site: { domain: 'acme.com', careersUrl: 'https://evil.example/careers' } }, deps().value)).toMatchObject({ ok: false, reason: 'bad_link' })
+  })
+
+  it('ignores a name the client sends for a site: the domain, the curated list or a matching Wikidata item names it', async () => {
+    const listing = { site: { tier: 'listing' as const, jobs: fresh, complete: true, reason: null } }
+    const nameOf = async (site: object, setup: Setup) => {
+      const w = world()
+      const r = await addCompany(w.client, 'u1', { site: { ...site, name: 'Glean' } } as never, deps(setup).value)
+      return r.ok ? r.employer.name : r
+    }
+    expect(await nameOf({ domain: 'attacker.example', careersUrl: 'https://attacker.example/careers' }, listing)).toBe('Attacker')
+    // an item for another website is not evidence for this one
+    expect(await nameOf({ domain: 'attacker.example', careersUrl: 'https://attacker.example/careers', qid: 'Q1' }, { ...listing, wikidata: { ...entity, label: 'Glean' } })).toBe('Attacker')
+    expect(await nameOf({ domain: 'amazon.jobs', careersUrl: 'https://www.amazon.jobs/en/search' }, listing)).toBe('Amazon')
+    // the real Glean can still be added afterwards, because the attacker took nothing
+    const w = world()
+    await addCompany(w.client, 'u1', { site: { domain: 'attacker.example', careersUrl: 'https://attacker.example/careers', name: 'Glean' } } as never, deps(listing).value)
+    expect(w.tables.company_directory.map((r) => r.name)).not.toContain('Glean')
   })
 
   it('counts against the day\'s limit like any add', async () => {

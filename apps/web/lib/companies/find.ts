@@ -277,7 +277,7 @@ export function addByOf(c: Candidate): AddBy | null {
   if (c.candidateId) return { candidateId: c.candidateId }
   const qid = c.profile?.qid
   if (c.provider && c.token) return { board: { provider: c.provider, token: c.token, name: c.name, domain: c.domain, qid } }
-  return c.domain && c.careersUrl ? { site: { domain: c.domain, careersUrl: c.careersUrl, name: c.name, qid } } : null
+  return c.domain && c.careersUrl ? { site: { domain: c.domain, careersUrl: c.careersUrl, qid } } : null
 }
 
 /**

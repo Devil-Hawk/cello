@@ -50,7 +50,8 @@ function parseCandidate(c: unknown): AddBy | null {
   }
   const domain = text(v.domain, 253)?.toLowerCase()
   const careersUrl = text(v.careersUrl, 2000)
-  return domain && careersUrl ? { site: { domain, careersUrl, ...(name ? { name } : {}), qid } } : null
+  // A site's name is not taken from the body: the add names it from its own evidence.
+  return domain && careersUrl ? { site: { domain, careersUrl, qid } } : null
 }
 
 function parseBody(body: unknown): AddBy | null {
