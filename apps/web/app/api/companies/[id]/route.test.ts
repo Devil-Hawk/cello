@@ -7,7 +7,8 @@ const calls: unknown[][] = []
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: async () => ({ data: { user }, error: null }) } }) }))
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({}) }))
-vi.mock('@/lib/companies', () => ({
+vi.mock('@/lib/companies', async (original) => ({
+  ...(await original<typeof import('@/lib/companies')>()),
   companyPage: async (_db: unknown, userId: string, id: string) => (calls.push(['page', userId, id]), page),
   companyRoles: async (_db: unknown, userId: string, id: string, q: string) => (calls.push(['roles', userId, id, q]), [{ id: 'j1', title: 'Data Engineer' }]),
 }))
@@ -42,6 +43,8 @@ describe('GET /api/companies/[id]', () => {
 
   it('is 404 for an id that is not one, and for an employer the directory does not hold', async () => {
     expect((await get('not-an-id')).status).toBe(404)
+    expect((await get('-'.repeat(36))).status).toBe(404)
+    expect((await roles('-'.repeat(36))).status).toBe(404)
     expect(calls).toEqual([])
     page = null
     expect((await get(ID)).status).toBe(404)

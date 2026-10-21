@@ -28,6 +28,9 @@ type Db = SupabaseClient<any, any, any>
 export const PAGE_SIZE = 50
 const WEEK_MS = 7 * 86_400_000
 
+/** An id the database will accept as a uuid; anything else is a 404 before it reaches Postgres. */
+export const isUuid = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+
 export interface Checked {
   at: string
   ok: boolean
