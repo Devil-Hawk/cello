@@ -108,6 +108,23 @@ describe('companies.add by link', () => {
     expect(tables.company_directory ?? []).toHaveLength(0)
   })
 
+  it('a dead board under a big employer name is a namesake\'s: other_owner, not stale', async () => {
+    const { client, tables } = world()
+    const d = deps({ boards: [{ provider: 'personio', token: 'amazon', via: 'url' }], jobs: [job(2000)], identity: null })
+    expect(await addCompany(client, 'u1', { link: 'https://amazon.jobs.personio.de/' }, d.value)).toMatchObject({ ok: false, reason: 'other_owner' })
+    expect(tables.company_directory ?? []).toHaveLength(0)
+    // an unknown name keeps the plain reason
+    const quiet = deps({ boards: [{ provider: 'personio', token: 'tiny-co', via: 'url' }], jobs: [job(2000)], identity: null })
+    expect(await addCompany(world().client, 'u1', { link: 'https://tiny-co.jobs.personio.de/' }, quiet.value)).toMatchObject({ ok: false, reason: 'stale' })
+  })
+
+  it('a Workday board is named for its tenant, not its compound token', async () => {
+    const { client, tables } = world()
+    const d = deps({ boards: [{ provider: 'workday', token: 'pfizer.wd1.PfizerCareers', via: 'url' }], identity: null })
+    expect(await addCompany(client, 'u1', { link: 'https://pfizer.wd1.myworkdayjobs.com/PfizerCareers' }, d.value)).toMatchObject({ ok: true, employer: { name: 'Pfizer' } })
+    expect(tables.company_directory[0]).toMatchObject({ ats_provider: 'workday', verified_by: 'careers_url' })
+  })
+
   it('a pasted Workable board named like a verified employer is other_owner, offers that employer, and writes nothing', async () => {
     const real = { id: 'e1', name: 'Retell AI', name_norm: 'retell ai', domain: 'retellai.com', logo_url: null, careers_url: 'https://retellai.com/careers', ats_provider: 'ashby', ats_token: 'retell-ai', verified_by: 'careers_page_link', verified_at: '2026-10-01T00:00:00Z', open_count: 12, source: 'person' }
     const { client, tables } = world({ company_directory: [{ ...real }] })

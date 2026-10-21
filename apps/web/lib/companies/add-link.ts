@@ -373,12 +373,16 @@ async function verifyLink(db: Db, url: URL, domain: string | null, directToken: 
     // The person pasted the board's own address: that is their say-so that this is the board. A provider that keeps no
     // record of its owner (Workday, Personio) is taken on it while the board is alive, except under the name of a big
     // employer: a slug that is only a name is how a namesake's board gets taken for Amazon's.
+    // A Workday token is compound ("pfizer.wd1.PfizerCareers"): the tenant, the first part, is the name.
+    const tenant = titleCase(candidate.token.split('.')[0])
     if (!check.ok && pasted && check.reason === 'not_linked' && check.jobs && check.jobs.length > 0) {
-      const name = check.identity?.name || titleCase(candidate.token)
+      const name = check.identity?.name || tenant
       check = isKnownEmployer({ name }) && !check.identity?.name
         ? { ok: false, reason: 'other_owner', identity: check.identity, jobs: check.jobs }
         : { ok: true, verifiedBy: 'careers_url', jobs: check.jobs, domain: null, name }
     }
+    // A board gone quiet under a big employer's name is a namesake's too ("amazon" on Personio holds 2018 postings).
+    if (!check.ok && pasted && check.reason === 'stale' && isKnownEmployer({ name: tenant })) check = { ok: false, reason: 'other_owner', jobs: check.jobs }
     if (!check.ok) {
       failed.push(check)
       return null
