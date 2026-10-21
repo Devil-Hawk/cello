@@ -30,9 +30,10 @@ import {
   type JudgeContext,
 } from '../ingest/reader/legit'
 import { searchTerms, type ReaderTargets } from '../ingest/reader/targets'
-import { targetVerdict, type TargetVerdict } from '../targeting/roles'
-import { hasPersonTargets, judgeForPerson, prepareTargets, type OutsideReason, type TypeStep } from '../jobs/target-relevance'
-import type { PostingCapture, SourceTier, TypeProv } from '../jobs/relevance-types'
+import { keepsRole, type RoleToKeep } from '../roles/keep'
+import type { StatedConstraints } from '../scoring/constraints'
+import { hasPersonTargets, type PersonTargets, type TypeStep } from '../jobs/target-relevance'
+import type { OutsideReason, PostingCapture, SourceTier, TypeProv } from '../jobs/relevance-types'
 import { typeTitle } from '../jobs/role-types'
 import { EMPTY_TARGETING, type Targeting } from '../targeting'
 // Relative import (not `@/...`): lib/ats/* stays framework-free, and
@@ -628,7 +629,7 @@ export async function refreshLocked(
     stored,
     judge: { name: company.name, domain: company.domain ?? null, careerUrl: company.career_url },
     targeting: targets?.targeting,
-    ...(company.user_id ? { owner: { userId: company.user_id, targetsVersion: targets?.version ?? 0 }, titles: targets?.titles, typeStep: targets?.typeStep } : {}),
+    ...(company.user_id ? { owner: { userId: company.user_id, targetsVersion: targets?.version ?? 0 }, titles: targets?.titles, typeStep: targets?.typeStep, constraints: targets?.constraints } : {}),
     windowed: providers[provider].searchesByQuery === true && query.length > 0,
   }, result)
   return board
@@ -656,6 +657,8 @@ export interface SyncOptions {
   titles?: readonly string[]
   /** The role types the person chose and what they are worth (K5c): counted beside the old filter, or deciding once the switch is on. */
   typeStep?: TypeStep
+  /** The dealbreakers the person stated: a role that breaks one is counted, not kept. */
+  constraints?: StatedConstraints
   /** The person pasted this role: it is kept for them whatever their targets say, and marked as a link's. */
   pasted?: boolean
 }
@@ -744,23 +747,8 @@ export async function syncJobs(
   const openStoredRows = [...stored.values()].filter((s) => s.open !== false)
   let room = Math.max(0, MAX_ROLES_PER_COMPANY - stored.size)
   const targeting = opts.targeting ?? EMPTY_TARGETING
-  const fresh = candidates.filter((job) => !stored.has(job.externalId)).map(classify).filter(({ c }) => !c.rejectReason && !isLowQuality(c))
-  let ranked = orderForCap(fresh, ({ job, c }) =>
-    targetVerdict(
-      { title: job.title, description: job.description, job_function: c.jobFunction, seniority: c.seniority, country: c.country, language: c.language, is_remote: c.isRemote },
-      targeting,
-      company.name
-    ),
-    ({ job }) => job.postedAt
-  )
-  // Only roles inside the person's stated targets are stored, and the rest are counted by why. With no
-  // targets stated the followed employer keeps up to the cap, as before, and those roles are marked
-  // by targets version 0. A role nothing disagrees with, whose place or level could not be read, is
-  // kept hidden for the person.
-  const personTargets = { targeting, titles: opts.titles ?? [], typeStep: opts.typeStep }
-  const filtering = Boolean(opts.owner) && !opts.pasted && hasPersonTargets(personTargets)
-  const outside: Record<OutsideReason, number> = { place: 0, age: tooOld, excluded: 0, level: 0, title: 0, type: 0, untyped: 0 }
-  const hiddenIds = new Set<string>()
+  // The one judge decides what is kept and what is only ordered first: the person's targets, in one object.
+  const personTargets: PersonTargets = { targeting, titles: opts.titles ?? [], typeStep: opts.typeStep, constraints: opts.constraints }
   // Every title is typed by code before it is judged, so the type step and the stored row see the same answer.
   const typed = new Map<string, ReturnType<typeof typeTitle>>()
   const typedFor = (job: AtsJob, title: string) => {
@@ -768,17 +756,43 @@ export async function syncJobs(
     if (!t) typed.set(job.externalId, (t = typeTitle(title)))
     return t
   }
+  type Classified = ReturnType<typeof classifyJob>
+  const roleOf = (job: AtsJob, title: string, c: Classified): RoleToKeep => {
+    const t = typedFor(job, title)
+    return {
+      title: job.title,
+      description: job.description,
+      job_function: c.jobFunction,
+      seniority: c.seniority,
+      country: c.country,
+      language: c.language,
+      is_remote: c.isRemote,
+      location: job.location,
+      salary_range: job.salary,
+      postedAt: job.postedAt,
+      title_norm: t.title_norm,
+      role_type: t.role_type,
+      company: company.name,
+    }
+  }
+  const fresh = candidates.filter((job) => !stored.has(job.externalId)).map(classify).filter(({ c }) => !c.rejectReason && !isLowQuality(c))
+  let ranked = orderForCap(fresh, ({ job, title, c }) => keepsRole(roleOf(job, title, c), personTargets).keep, ({ job }) => job.postedAt)
+  // Only roles inside the person's stated targets are stored, and the rest are counted by why. With no
+  // targets stated the followed employer keeps up to the cap, as before, and those roles are marked
+  // by targets version 0. A role nothing disagrees with, whose place or level could not be read, is
+  // kept hidden for the person.
+  const filtering = Boolean(opts.owner) && !opts.pasted && hasPersonTargets(personTargets)
+  const outside: Record<OutsideReason, number> = { place: 0, age: tooOld, excluded: 0, level: 0, dealbreaker: 0, type: 0, untyped: 0 }
+  const hiddenIds = new Set<string>()
   // While the switch is off the old filter decides and the type step is only counted beside it (T20).
   const shadow = Boolean(opts.typeStep) && opts.typeStep!.live === false && opts.typeStep!.chosen.length > 0
   const shadowCount = { keep: 0, drop: 0 }
   if (filtering) {
-    const prepared = prepareTargets(personTargets.titles)
     ranked = ranked.filter(({ job, title, c }) => {
-      const t = typedFor(job, title)
-      const role = { title: job.title, description: job.description, job_function: c.jobFunction, seniority: c.seniority, country: c.country, language: c.language, is_remote: c.isRemote, postedAt: job.postedAt, title_norm: t.title_norm, role_type: t.role_type }
-      const verdict = judgeForPerson(role, personTargets, company.name, prepared)
+      const role = roleOf(job, title, c)
+      const verdict = keepsRole(role, personTargets)
       if (shadow) {
-        const typeStepVerdict = judgeForPerson(role, { ...personTargets, typeStep: { ...opts.typeStep!, live: true } }, company.name, prepared)
+        const typeStepVerdict = keepsRole(role, { ...personTargets, typeStep: { ...opts.typeStep!, live: true } })
         if (typeStepVerdict.keep && !verdict.keep) shadowCount.keep++
         if (verdict.keep && !typeStepVerdict.keep) shadowCount.drop++
       }
@@ -810,30 +824,25 @@ export async function syncJobs(
   // and the stored ones that lose are given up (those nothing points at; the others stay and count).
   if (ranked.length > room && store.evictJobs && ranked.length > 0) {
     type Entry = { id: string; stored: boolean }
-    const pool: { entry: Entry; verdict: TargetVerdict; at?: string }[] = [
+    const pool: { entry: Entry; keep: boolean; at?: string }[] = [
       ...openStoredRows.map((s) => ({
         entry: { id: s.externalId, stored: true },
-        verdict: targetVerdict(
-          { title: s.title, description: '', job_function: s.jobFunction, seniority: s.seniority, country: s.country, language: s.language, is_remote: s.isRemote },
-          targeting,
-          company.name
-        ),
+        keep: keepsRole(
+          { title: s.title, description: '', job_function: s.jobFunction, seniority: s.seniority, country: s.country, language: s.language, is_remote: s.isRemote, location: s.location, salary_range: s.salaryRange, postedAt: s.postedAt, ...typeTitle(s.title), company: company.name },
+          personTargets
+        ).keep,
         // A stored role with no date is not older than a new one: it has been listed as recently as anything.
         at: s.postedAt ?? now,
       })),
-      ...ranked.map(({ job, c }) => ({
+      ...ranked.map(({ job, title, c }) => ({
         entry: { id: job.externalId, stored: false },
-        verdict: targetVerdict(
-          { title: job.title, description: job.description, job_function: c.jobFunction, seniority: c.seniority, country: c.country, language: c.language, is_remote: c.isRemote },
-          targeting,
-          company.name
-        ),
+        keep: keepsRole(roleOf(job, title, c), personTargets).keep,
         at: job.postedAt,
       })),
     ]
     // Stored first, so on a tie nothing is swapped.
     const closedLeft = stored.size - openStoredRows.length
-    const kept = new Set(orderForCap(pool, (p) => p.verdict, (p) => p.at).slice(0, Math.max(0, MAX_ROLES_PER_COMPANY - closedLeft)).map((p) => p.entry.id))
+    const kept = new Set(orderForCap(pool, (p) => p.keep, (p) => p.at).slice(0, Math.max(0, MAX_ROLES_PER_COMPANY - closedLeft)).map((p) => p.entry.id))
     const losers = openStoredRows.filter((s) => !kept.has(s.externalId)).map((s) => s.externalId)
     if (losers.length > 0) {
       try {

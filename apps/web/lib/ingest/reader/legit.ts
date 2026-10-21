@@ -17,7 +17,6 @@ import { normalizeEmployerName, onCompanyDomain, sameEmployerName } from '../../
 import { classifyJob, isLowQuality } from '../../jobs/classify'
 import { isStalePosting } from '../../jobs/freshness'
 import { KNOWN_JOB_HOSTS } from '../snapshot'
-import type { TargetVerdict } from '../../targeting/roles'
 
 export type ExcludeReason = 'agency' | 'reposting' | 'other_employer' | 'expired' | 'stale' | 'gone' | 'non_role' | 'duplicate'
 
@@ -214,20 +213,17 @@ export function dedupeRoles(jobs: AtsJob[], stored: readonly StoredRole[], sourc
 export const MAX_ROLES_PER_COMPANY = 200
 export const MAX_DESCRIPTION_CHARS = 20_000
 
-const RANK: Record<TargetVerdict, number> = { inside: 0, unclassified: 1, outside: 2 }
-
 /**
- * Order roles for the per-company cap: inside the person's targets first, then
- * roles whose fit cannot be read, then the rest; newest first within each.
- * `verdictOf` is truth's targetVerdict over the job's classification.
+ * Order roles for the per-company cap: the ones the one judge keeps (lib/roles/keep.ts) first, then the
+ * rest; newest first within each.
  */
 export function orderForCap<T>(
   items: readonly T[],
-  verdictOf: (item: T) => TargetVerdict,
+  keeps: (item: T) => boolean,
   postedAtOf: (item: T) => string | undefined = (item) => (item as AtsJob).postedAt
 ): T[] {
   return items
-    .map((item, i) => ({ item, i, rank: RANK[verdictOf(item)], t: Date.parse(postedAtOf(item) ?? '') || 0 }))
+    .map((item, i) => ({ item, i, rank: keeps(item) ? 0 : 1, t: Date.parse(postedAtOf(item) ?? '') || 0 }))
     .sort((a, b) => a.rank - b.rank || b.t - a.t || a.i - b.i)
     .map((x) => x.item)
 }

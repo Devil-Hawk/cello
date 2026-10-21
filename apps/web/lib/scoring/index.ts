@@ -128,7 +128,7 @@ export async function runDailyShortlist(args: DailyShortlistArgs): Promise<Short
   const base = { forDate, picks: [], unfinished: 0, counts: { newRoles: 0, filtered: 0 }, learning: { nReactions: inputs.nReactions, mode: learningMode(inputs.nReactions, false) }, notes: [] as string[] }
   if (!inputs.resumeText) return { ...base, status: 'no_resume' }
 
-  const candidates = await candidateRoles(args.admin, args.userId, inputs.targeting, inputs.stated.titles, { limit: 60 })
+  const candidates = await candidateRoles(args.admin, args.userId, inputs.targeting, { limit: 60 })
   if (candidates.length === 0) return { ...base, status: 'empty' }
 
   const store = new SupabaseScoringStore(args.admin, args.userId)
@@ -256,7 +256,7 @@ export async function assessJobs(args: AssessJobsArgs): Promise<AssessJobsResult
   const inputs = await loadScoringInputs(args.admin, args.userId)
   if (!inputs.resumeText) return empty('no-resume')
   const limit = args.limit ?? 25
-  const candidates = await candidateRoles(args.admin, args.userId, inputs.targeting, inputs.stated.titles, {
+  const candidates = await candidateRoles(args.admin, args.userId, inputs.targeting, {
     limit,
     jobIds: args.jobIds,
     onlyUnassessed: !args.jobIds || args.jobIds.length === 0,

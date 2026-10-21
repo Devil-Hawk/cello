@@ -10,6 +10,7 @@ import { EMPTY_TARGETING, resolveTargeting, type Targeting } from '../../targeti
 import { resolveTargetTitles } from '../../targeting/titles'
 import { getRoleType, ROLE_TYPES } from '../../jobs/role-types'
 import type { TypeStep } from '../../jobs/target-relevance'
+import { hasAnyConstraint, resolveConstraints, type StatedConstraints } from '../../scoring/constraints'
 
 export interface ReaderTargets {
   targeting: Targeting
@@ -19,6 +20,8 @@ export interface ReaderTargets {
   version?: number
   /** The role types the person chose, their own words for titles, and whether the type step decides (K5c). Absent when none are chosen. */
   typeStep?: TypeStep
+  /** The dealbreakers the person stated (profiles.preferences.constraints): sponsorship, pay floor, onsite cities, refused levels, excluded title words. */
+  constraints?: StatedConstraints
 }
 
 export const NO_TARGETS: ReaderTargets = { targeting: EMPTY_TARGETING, titles: [] }
@@ -76,7 +79,7 @@ export function matchesTargets(titleOrSlug: string, t: ReaderTargets): boolean {
 
 type Db = SupabaseClient<any, any, any>
 
-/** The person's targets, from profiles.preferences. */
+/** The person's targets, from profiles.preferences: the one loader, so every judge reads the same targets. */
 /** `userId` may be left out with a client that is already the user's (row level security returns only their own profile). */
 export async function loadTargets(client: Db, userId?: string): Promise<ReaderTargets> {
   try {
@@ -84,7 +87,10 @@ export async function loadTargets(client: Db, userId?: string): Promise<ReaderTa
     const { data } = await (userId ? query.eq('id', userId) : query).maybeSingle()
     const row = data as { preferences?: unknown; targets_version?: number | null } | null
     const targeting = resolveTargeting(row?.preferences)
+    // Only what the person stated under constraints: resolveConstraints would also fold the targeting in, which the judge's own rungs already read.
+    const stated = resolveConstraints({ constraints: (row?.preferences as { constraints?: unknown } | null | undefined)?.constraints })
     const out: ReaderTargets = { targeting, titles: resolveTargetTitles(row?.preferences), version: row?.targets_version ?? 0 }
+    if (hasAnyConstraint(stated)) out.constraints = stated
     const chosen = (targeting.role_types ?? []).filter((id) => getRoleType(id))
     if (chosen.length === 0) return out
 

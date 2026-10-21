@@ -318,6 +318,7 @@ export async function ingestCompany(store: AtsStore, company: DueCompany, deps: 
             owner: ownerOf(company, targets),
             titles: targets.titles,
             typeStep: targets.typeStep,
+            constraints: targets.constraints,
             windowed: providers[b.provider].searchesByQuery === true && searchTerms(targets).length > 0,
           },
           result
@@ -331,7 +332,7 @@ export async function ingestCompany(store: AtsStore, company: DueCompany, deps: 
           store,
           company,
           read.jobs,
-          { source, sightingSources: read.complete ? [source] : [], stored, judge, targeting: targets.targeting, owner: ownerOf(company, targets), titles: targets.titles, typeStep: targets.typeStep, listedIds: read.listedIds, windowed: !read.complete },
+          { source, sightingSources: read.complete ? [source] : [], stored, judge, targeting: targets.targeting, owner: ownerOf(company, targets), titles: targets.titles, typeStep: targets.typeStep, constraints: targets.constraints, listedIds: read.listedIds, windowed: !read.complete },
           result
         )
         // A window onto the site never counts a role as missed, so the scheduled pass asks a few stored roles' own pages whether they are still there.

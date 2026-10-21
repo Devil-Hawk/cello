@@ -177,14 +177,14 @@ describe('confirmRoles: a page that is only its site shell is not a role', () =>
 })
 
 describe('orderForCap', () => {
-  it('puts roles inside the targets first, then unread, then outside; newest first within each', () => {
+  it('puts the roles the judge keeps first, newest first within each', () => {
     const jobs = [
       job({ externalId: 'out-new', postedAt: ago(1) }),
       job({ externalId: 'in-old', postedAt: ago(30) }),
       job({ externalId: 'in-new', postedAt: ago(2) }),
-      job({ externalId: 'unread', postedAt: ago(1) }),
+      job({ externalId: 'out-old', postedAt: ago(9) }),
     ]
-    const verdict: Record<string, 'inside' | 'outside' | 'unclassified'> = { 'out-new': 'outside', 'in-old': 'inside', 'in-new': 'inside', unread: 'unclassified' }
-    expect(orderForCap(jobs, (j) => verdict[j.externalId]).map((j) => j.externalId)).toEqual(['in-new', 'in-old', 'unread', 'out-new'])
+    const kept = new Set(['in-old', 'in-new'])
+    expect(orderForCap(jobs, (j) => kept.has(j.externalId)).map((j) => j.externalId)).toEqual(['in-new', 'in-old', 'out-new', 'out-old'])
   })
 })
