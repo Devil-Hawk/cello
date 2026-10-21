@@ -233,7 +233,7 @@ def test_a_failure_prints_only_the_class_name_and_the_rung_never_the_url(net, ca
 
 
 def test_a_browser_that_could_not_run_says_so_with_the_class_and_keeps_the_plain_page(net):
-    class PlaywrightMissing(Exception):
+    class PlaywrightMissing(Exception):  # noqa: N818
         pass
 
     net.http = [FakeResponse(SHELL)]

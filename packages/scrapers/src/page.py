@@ -85,6 +85,9 @@ class CaptchaWall(Wall):
     pass
 
 
+_CF_MARKERS = "#challenge-form, .cf-turnstile, #cf-challenge-running"
+
+
 def _wall(html: str) -> type[Wall] | None:
     """Which wall this page is, or None. A wall is a small page with no job links."""
     from scrapling.parser import Selector
@@ -94,7 +97,7 @@ def _wall(html: str) -> type[Wall] | None:
         return None
     page = Selector(html)
     title = (page.css("title::text").get() or "").lower()
-    if "just a moment" in title or page.css("#challenge-form, .cf-turnstile, #cf-challenge-running"):
+    if "just a moment" in title or page.css(_CF_MARKERS):
         return CloudflareWall
     if page.css(
         'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], .g-recaptcha, .h-captcha, '
@@ -137,7 +140,7 @@ def _static_get(url: str) -> tuple[str, str]:
     raise UnsafeRedirect("too many redirects")
 
 
-def _browser(url: str, solve_cloudflare: bool) -> tuple[str, str]:
+def browser_get(url: str, solve_cloudflare: bool) -> tuple[str, str]:
     """Rungs "rendered" and "stealth": (html, final_url), or raises the wall or the class."""
     got = fetch_rendered(
         url, solve_cloudflare=solve_cloudflare, timeout_ms=60_000 if solve_cloudflare else 30_000
@@ -189,8 +192,8 @@ def fetch_page(url: str, force_render: bool = False) -> dict[str, object]:
 
     ladder = [
         ("http", lambda: _static_get(url)),
-        ("rendered", lambda: _browser(target, False)),
-        ("stealth", lambda: _browser(target, True)),
+        ("rendered", lambda: browser_get(target, False)),
+        ("stealth", lambda: browser_get(target, True)),
         ("click", click),
     ]
     for rung, step in ladder if force_render else ladder[:1]:

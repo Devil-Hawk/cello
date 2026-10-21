@@ -18,7 +18,6 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-
 # Anchors that look like they lead to an individual posting. Deliberately broad:
 # a false "this page has jobs" is cheap (we skip rendering a page that was fine),
 # while a false "this page is empty" costs a needless browser launch.
