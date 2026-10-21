@@ -50,8 +50,9 @@ NOT_AN_EMPLOYER = (
 )  # fmt: skip
 
 # ponytail: Vercel Functions refuse a request body over 4.5 MB, so a very long page is
-# cut here. Listings come early in a page; raise this only with the host's limit.
-_MAX_HTML = 3_000_000
+# cut here, counted in UTF-8 bytes. Listings come early in a page; raise this only with
+# the host's limit.
+_MAX_HTML = 3_000_000  # bytes of the UTF-8 HTML
 _EXP_AHEAD_S = 60
 _DOMAINS = 3
 
@@ -125,7 +126,7 @@ def do_job(job: dict[str, Any]) -> dict[str, Any]:
         if out.get("render_error"):  # the browser failed; the plain page is only an empty shell
             return {"ok": False, "error": str(out["render_error"])}
         if isinstance(out.get("html"), str):
-            out["html"] = out["html"][:_MAX_HTML]
+            out["html"] = out["html"].encode()[:_MAX_HTML].decode(errors="ignore")
         return {k: out[k] for k in ("ok", "html", "final_url", "rung", "error") if k in out}
     except Exception as exc:  # noqa: BLE001 - reported by class name only
         return {"ok": False, "error": type(exc).__name__}

@@ -159,9 +159,10 @@ def test_a_crash_while_reading_posts_its_class_never_its_message(serve, monkeypa
 
 def test_a_long_page_is_cut_to_fit_the_hosts_body_limit(serve, monkeypatch):
     server = serve([JOB])
-    monkeypatch.setattr(worker, "fetch_page", lambda url, render: {"ok": True, "html": "a" * 4_000_000, "final_url": url, "rung": "http"})
+    # Two bytes per character: 2,000,000 characters is 4,000,000 bytes, so the cut is by bytes.
+    monkeypatch.setattr(worker, "fetch_page", lambda url, render: {"ok": True, "html": "é" * 2_000_000, "final_url": url, "rung": "http"})
     worker.main(["--once"])
-    assert len(json.loads(server.results[0][2])["html"]) == 3_000_000
+    assert len(json.loads(server.results[0][2])["html"].encode()) == 3_000_000
 
 
 def test_a_web_search_posts_the_domains_and_never_logs_the_query(serve, monkeypatch, capsys):
