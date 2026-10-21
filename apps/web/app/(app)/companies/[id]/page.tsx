@@ -129,7 +129,7 @@ export default function CompanyPageView() {
 
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-display text-section text-foreground">Open roles ({roles.length})</h2>
+          <h2 className="font-display text-section text-foreground">Open roles{company.checked?.ok && company.openCount !== null ? ` (${company.openCount})` : ''}</h2>
           <Input type="text" aria-label="Search this employer's roles" placeholder="Search titles, types and descriptions" value={q} onChange={(e) => setQ(e.target.value)} className="sm:max-w-xs" />
         </div>
         {roles.length === 0 ? (
