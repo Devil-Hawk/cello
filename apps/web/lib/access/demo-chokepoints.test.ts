@@ -174,9 +174,7 @@ const GUARDED_KEY_SOURCE_FILES = ['lib/harness/keys.ts', 'lib/apikeys.ts', 'lib/
 const MODEL_KEY_SLOT = /\b(openrouter|openai|anthropic)\b/
 
 /**
- * Routes that reach a model without a guarded source. Empty: companies/verify
- * used to read a non-existent `profiles.api_keys` column, and now loads keys
- * through getDecryptedApiKeys (see the test below). This list must not grow.
+ * Routes that reach a model without a guarded source. Empty, and it must not grow.
  */
 const KNOWN_UNGUARDED_MODEL_ROUTES: string[] = []
 
@@ -274,13 +272,6 @@ describe('every path that reaches a model is behind the demo spend + expiry guar
         `their caller, but they now reach for key material themselves. The exemption no longer ` +
         `holds — either route them through a guarded source or take them off the list:\n  ${offenders.join('\n  ')}`
     ).toEqual([])
-  })
-
-  it('companies/verify loads keys through the guarded loader and reaches the model through callLlm', () => {
-    const src = read(path.join(API_ROOT, 'companies/verify/route.ts'))
-    expect(calls(src, 'getDecryptedApiKeys')).toBe(true)
-    expect(src).toContain('callLlm')
-    expect(src).not.toContain(".select('api_keys')")
   })
 })
 

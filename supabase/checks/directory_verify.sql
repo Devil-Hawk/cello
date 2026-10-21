@@ -1,6 +1,6 @@
 -- K6: the directory (migration 20261008060001). Verified rows only, candidates never listed, the sweep's order.
 --
--- Proves: a seed slug or a YC row that is still a candidate is never in list_company_directory or
+-- Proves: a seed slug or a YC row that is still a candidate is never in companies_page or
 -- search_company_directory, and neither is a directory row that has not been verified; "retell",
 -- "retellai.com", "retell-ai" and "Retell AI" each find Retell AI first, a namesake behind it; the name key
 -- ignores legal words; upsert_directory_candidates writes only new or changed entries and sends a changed name
@@ -61,12 +61,12 @@ begin
   -- the namesake is behind it; the unverified row and the candidate are nowhere
   select string_agg(name, ', ' order by name) into names from public.search_company_directory('retell', 10);
   if names <> 'Retell AI, Retell Labs' then raise exception 'search for retell must list the two verified employers only, got %', names; end if;
-  if exists (select 1 from public.list_company_directory(100, 0) where id = f.unverified or name = 'Retell Seed') then
-    raise exception 'list_company_directory returned a row that is not verified';
+  if exists (select 1 from public.companies_page(gen_random_uuid(), null, false, true, 100, 0) where employer_id = f.unverified or name = 'Retell Seed') then
+    raise exception 'companies_page returned a row that is not verified';
   end if;
-  if (select count(*) from public.list_company_directory(100, 0)) <> 5 then raise exception 'five verified employers are listed (the unverified one is not), got %', (select count(*) from public.list_company_directory(100, 0)); end if;
+  if (select count(*) from public.companies_page(gen_random_uuid(), null, false, true, 100, 0)) <> 5 then raise exception 'five verified employers are listed (the unverified one is not), got %', (select count(*) from public.companies_page(gen_random_uuid(), null, false, true, 100, 0)); end if;
   -- most open roles first
-  if (select name from public.list_company_directory(1, 0)) <> 'Busy Co' then raise exception 'the list starts with the most open roles'; end if;
+  if (select name from public.companies_page(gen_random_uuid(), null, false, true, 1, 0)) <> 'Busy Co' then raise exception 'the list starts with the most open roles'; end if;
   if (select count(*) from public.search_company_directory('   ', 5)) <> 0 then raise exception 'a blank query finds nothing'; end if;
   -- a board token and a domain match exactly
   if (select name from public.search_company_directory('busyco', 3) limit 1) is distinct from 'Busy Co' then raise exception 'a board token finds its employer'; end if;
@@ -209,7 +209,7 @@ end $$;
 
 select pg_temp.must_be_denied('select count(*) from public.directory_candidates');
 select pg_temp.must_be_denied('select * from public.search_company_directory(''retell'', 5)');
-select pg_temp.must_be_denied('select * from public.list_company_directory(5, 0)');
+select pg_temp.must_be_denied('select * from public.companies_page(gen_random_uuid(), null, false, true, 5, 0)');
 select pg_temp.must_be_denied('select * from public.directory_candidates_due(5)');
 select pg_temp.must_be_denied('select * from public.directory_boards_due(5)');
 select pg_temp.must_be_denied('select public.upsert_directory_candidates(''[]''::jsonb)');

@@ -1,22 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { directoryProgress, listCompanies, searchCompanies } from './directory'
+import { directoryProgress, searchCompanies } from './directory'
 import { fakeDb } from './fake-db'
 
 const retell = { id: 'e1', name: 'Retell AI', name_norm: 'retell ai', domain: 'retellai.com', open_count: 12, verified_at: '2026-10-01T00:00:00Z' }
 
-describe('companies.list and companies.search', () => {
-  it('list asks only for verified rows, a page at a time, and reads no candidate', async () => {
-    const calls: { name: string; args: Record<string, unknown> }[] = []
-    const { client, queries } = fakeDb(
-      { directory_candidates: [{ id: 'c1', name: 'Seed only', name_norm: 'seed only', state: 'pending' }] },
-      { rpc: { list_company_directory: (args) => (calls.push({ name: 'list_company_directory', args }), [retell]) } }
-    )
-    const rows = await listCompanies(client, { limit: 10, offset: 20 })
-    expect(rows.map((r) => r.name)).toEqual(['Retell AI'])
-    expect(calls).toEqual([{ name: 'list_company_directory', args: { p_limit: 10, p_offset: 20 } }])
-    expect(queries.filter((q) => q.table === 'directory_candidates')).toEqual([])
-  })
-
+describe('companies.search', () => {
   it('search shows a pending candidate as not checked, with no count, and never a failed or an already verified one', async () => {
     const { client } = fakeDb(
       {

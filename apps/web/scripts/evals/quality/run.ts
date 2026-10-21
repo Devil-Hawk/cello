@@ -18,7 +18,7 @@
 import { FreeClient, GENERATOR, JUDGE, BudgetStop, QuotaError } from './lib/free'
 import { loadThresholds, misses, readReport, writeReport, type SuiteCtx, type SuiteResult, type Variant } from './lib/report'
 
-const SUITES = ['planner', 'analyst', 'distill', 'memory_extract', 'company_verify', 'goal_judge'] as const
+const SUITES = ['planner', 'analyst', 'distill', 'memory_extract', 'goal_judge'] as const
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name)

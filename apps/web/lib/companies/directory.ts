@@ -28,6 +28,9 @@ export interface DirectoryRow {
   read_tier: string | null
   cannot_read_reason: string | null
   failed_reads: number | null
+  /** The place most of the last read's postings name; profile: facts from a named public source (PR 5 writes it). */
+  hq?: string | null
+  profile?: Record<string, unknown> | null
 }
 
 /** A candidate Cello knows of and has not checked: shown in search as "Not checked yet", with no count. */
@@ -35,15 +38,6 @@ export interface NotChecked {
   id: string
   name: string
   domain: string | null
-}
-
-export const LIST_PAGE = 50
-
-/** The verified employers, most open roles first, a page at a time. */
-export async function listCompanies(db: Db, opts: { limit?: number; offset?: number } = {}): Promise<DirectoryRow[]> {
-  const { data, error } = await db.rpc('list_company_directory', { p_limit: opts.limit ?? LIST_PAGE, p_offset: opts.offset ?? 0 })
-  if (error) throw new Error('could not list employers')
-  return (data ?? []) as DirectoryRow[]
 }
 
 /** Verified employers by name, domain or board token, then pending candidates by name. A query with nothing to match is empty. */

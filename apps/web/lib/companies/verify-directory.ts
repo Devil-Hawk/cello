@@ -245,7 +245,7 @@ export const RETRY_READ_HOURS = 6
 const HOUR_MS = 3_600_000
 
 export type ReadRecord =
-  | { ok: true; openCount: number }
+  | { ok: true; openCount: number; /** The most common place among the read's postings; left as it was when the board names none. */ hq?: string | null }
   | { ok: false; reason: FailReason; permanent: boolean }
 
 /**
@@ -257,7 +257,7 @@ export async function recordRead(db: Db, employer: { id: string; failed_reads?: 
   const at = new Date(now()).toISOString()
   let patch: Record<string, unknown>
   if (r.ok) {
-    patch = { open_count: r.openCount, open_count_at: at, last_read_at: at, next_read_at: new Date(now() + READ_EVERY_HOURS * HOUR_MS).toISOString(), failed_reads: 0, cannot_read_reason: null }
+    patch = { open_count: r.openCount, open_count_at: at, last_read_at: at, next_read_at: new Date(now() + READ_EVERY_HOURS * HOUR_MS).toISOString(), failed_reads: 0, cannot_read_reason: null, ...(r.hq ? { hq: r.hq } : {}) }
   } else {
     const reads = (employer.failed_reads ?? 0) + 1
     const leaves = r.permanent || reads >= MAX_UNREAD
