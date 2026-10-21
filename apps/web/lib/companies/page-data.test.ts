@@ -133,6 +133,14 @@ describe('companyPage', () => {
     expect(p).toMatchObject({ openCount: null, checked: { ok: false, reason: 'cannot_read', line: 'its job board did not answer' } })
   })
 
+  it('takes the id of the person\'s follow row too, which older links carry', async () => {
+    const { client, calls } = setup([page()], { companies: [{ id: 'c1', user_id: 'u1', employer_id: 'e1' }, { id: 'c2', user_id: 'u2', employer_id: 'e9' }] })
+    await companyPage(client, 'u1', 'c1')
+    await companyPage(client, 'u1', 'c2')
+    await companyRoles(client, 'u1', 'c1', '')
+    expect(calls.map((c) => c.p_employer)).toEqual(['e1', 'c2', 'e1'])
+  })
+
   it('is null for an employer the directory does not hold', async () => {
     const { client } = setup([])
     expect(await companyPage(client, 'u1', 'nope')).toBeNull()

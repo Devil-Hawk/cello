@@ -199,8 +199,17 @@ export async function companiesPage(db: Db, userId: string, opts: CompaniesPageO
   return { header: h, rows, limit, offset }
 }
 
-export async function companyPage(db: Db, userId: string, employerId: string): Promise<CompanyPage | null> {
-  const { data, error } = await db.rpc('company_page', { p_user: userId, p_employer: employerId })
+/**
+ * The directory id for an id from either door: an employer's own, or the id of the person's follow row, which the
+ * dashboard and the role sheet still link with. ponytail: one extra read; drop it when those links carry the employer id.
+ */
+async function employerOf(db: Db, userId: string, id: string): Promise<string> {
+  const { data } = await db.from('companies').select('employer_id').eq('id', id).eq('user_id', userId).maybeSingle()
+  return (data as { employer_id: string | null } | null)?.employer_id ?? id
+}
+
+export async function companyPage(db: Db, userId: string, id: string): Promise<CompanyPage | null> {
+  const { data, error } = await db.rpc('company_page', { p_user: userId, p_employer: await employerOf(db, userId, id) })
   if (error) throw new Error('could not read the company')
   const r = (Array.isArray(data) ? data[0] : data) as
     | (Head & {
@@ -227,8 +236,8 @@ export async function companyPage(db: Db, userId: string, employerId: string): P
 }
 
 /** Search inside one employer's stored open roles: title, role type or description holds `q` (all of them when `q` is empty). */
-export async function companyRoles(db: Db, userId: string, employerId: string, q: string): Promise<RoleHit[]> {
-  const { data, error } = await db.rpc('company_roles', { p_user: userId, p_employer: employerId, p_q: q.trim() })
+export async function companyRoles(db: Db, userId: string, id: string, q: string): Promise<RoleHit[]> {
+  const { data, error } = await db.rpc('company_roles', { p_user: userId, p_employer: await employerOf(db, userId, id), p_q: q.trim() })
   if (error) throw new Error('could not read the roles')
   return ((data ?? []) as { id: string; title: string; role_type: string | null; location: string | null; url: string; posted_at: string | null; kept: boolean; chance: string | null }[]).map((r) => ({
     id: r.id,
