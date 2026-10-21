@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AddResult } from './add-link'
-import { addLinksRun, coverageRun, recordMeasureRun, runAddLinks, runCoverage } from './directory-runs'
+import { addLinksRun, coverageRun, recordMeasureRun, runAddLinks, runCoverage, runFinds } from './directory-runs'
 import { fakeDb } from './fake-db'
 
 describe('T24: directory search coverage', () => {
@@ -88,5 +88,35 @@ describe('recordMeasureRun', () => {
     const { client, tables } = fakeDb({ measure_runs: [] })
     await recordMeasureRun(client, 'T24', { value: 0.97, passed: true, sample_n: 35, note: 'ok' })
     expect(tables.measure_runs).toEqual([{ measure_id: 'T24', value: 0.97, passed: true, sample_n: 35, note: 'ok' }])
+  })
+})
+
+describe('T34: find by name', () => {
+  it('counts a name when a candidate for that employer is offered, and says which rung found it or how far a miss got', async () => {
+    const answers: Record<string, { rungs: ('directory' | 'boards' | 'lookup' | 'site' | 'web')[]; result: unknown }> = {
+      'Retell AI': { rungs: ['directory', 'boards'], result: { candidates: [{ name: 'Retell AI', domain: 'retellai.com', foundBy: 'board', provenBy: 'the board declares retellai.com as home', jobs: 12 }] } },
+      Modal: { rungs: ['directory', 'boards', 'lookup'], result: { candidates: [{ name: 'Modal Trouble', domain: 'modaltrouble.com', foundBy: 'wikidata', provenBy: 'x', jobs: null }] } },
+      Cursor: { rungs: ['directory', 'boards', 'lookup', 'site', 'web'], result: { none: true, queued: true, line: 'x' } },
+      Glean: { rungs: ['directory', 'boards', 'lookup', 'site', 'web'], result: { none: true, line: 'x' } },
+      Linear: { rungs: ['directory', 'boards'], result: { candidates: [{ name: 'Linear Orbit', domain: 'linear.app', foundBy: 'board', provenBy: 'x', jobs: 3 }] } },
+      'Fireworks AI': { rungs: ['directory', 'boards', 'lookup', 'site'], result: { candidates: [{ name: 'Fireworks', domain: 'fireworks.ai', foundBy: 'site', provenBy: 'its site links the board', jobs: 9 }] } },
+    }
+    let t = 0
+    const run = await runFinds(['Retell AI', 'Modal', 'Cursor', 'Glean', 'Linear', 'Fireworks AI', '  '], async (name, report) => {
+      const a = answers[name]
+      a.rungs.forEach((rung) => report({ rung, line: rung }))
+      t += 100
+      return a.result as never
+    }, () => t)
+    expect(run.total).toBe(6)
+    expect(run.hits).toBe(3)
+    expect(run.rows.map((r) => [r.name, r.hit, r.rung, r.found ?? r.reason])).toEqual([
+      ['Retell AI', true, 'board', 'Retell AI (retellai.com); the board declares retellai.com as home'],
+      ['Modal', false, 'lookup', 'offered other employers (Modal Trouble at modaltrouble.com), not Modal'],
+      ['Cursor', false, 'web', 'nothing proven; no search key, so the web search was left for the worker'],
+      ['Glean', false, 'web', 'nothing proven'],
+      ['Linear', true, 'board', 'Linear Orbit (linear.app); x'],
+      ['Fireworks AI', true, 'site', 'Fireworks (fireworks.ai); its site links the board'],
+    ])
   })
 })
