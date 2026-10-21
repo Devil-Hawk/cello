@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
-import { directoryProgress, listCompanies, searchCompanies, LIST_PAGE } from '@/lib/companies/directory'
+import { companiesPage, searchCompanies } from '@/lib/companies'
+import { ROLE_TYPE_IDS } from '@/lib/jobs/role-types'
 
-// GET /api/companies            the verified employers, a page at a time (?limit, ?offset)
+// GET /api/companies   the wall: { header, rows } for the signed-in person (?type, ?show_closed, ?limit, ?offset)
 // GET /api/companies?q=retell   verified employers by name, domain or board token, and "Not checked yet" candidates
 //
 // A candidate is never listed and never counted; a failed one is never shown. The directory holds public facts only,
@@ -24,15 +25,21 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const params = new URL(request.url).searchParams
+  const q = params.get('q')
+  if (q !== null && q.length > 120) return NextResponse.json({ error: 'Search with at most 120 characters.' }, { status: 400 })
+  const type = params.get('type') || undefined
+  if (type !== undefined && !ROLE_TYPE_IDS.includes(type)) return NextResponse.json({ error: 'That is not a role type.' }, { status: 400 })
+
   const admin = createAdminClient()
   try {
-    const q = params.get('q')
     if (q !== null) return NextResponse.json({ ok: true, query: q.trim(), ...(await searchCompanies(admin, q)) })
-    const limit = int(params.get('limit'), LIST_PAGE, 100)
-    const offset = int(params.get('offset'), 0, 100_000)
-    const employers = await listCompanies(admin, { limit, offset })
-    // Until the seed is checked the page says how far it has come ("Cello has checked 1,200 employers so far").
-    return NextResponse.json({ ok: true, employers, limit, offset, progress: await directoryProgress(admin) })
+    const page = await companiesPage(admin, user.id, {
+      type,
+      showClosed: ['1', 'true'].includes(params.get('show_closed') ?? ''),
+      limit: int(params.get('limit'), 50, 100),
+      offset: int(params.get('offset'), 0, 100_000),
+    })
+    return NextResponse.json({ ok: true, ...page })
   } catch {
     return NextResponse.json({ error: 'Could not read the employers right now.' }, { status: 500 })
   }

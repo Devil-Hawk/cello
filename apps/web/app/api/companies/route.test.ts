@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
+const pages: Record<string, unknown>[] = []
+vi.mock('@/lib/companies', async (original) => ({
+  ...(await original<typeof import('@/lib/companies')>()),
+  companiesPage: async (_db: unknown, userId: string, opts: Record<string, unknown>) => (pages.push({ userId, ...opts }), { header: { following: 1 }, rows: [{ employerId: 'e1' }], limit: opts.limit, offset: opts.offset }),
+}))
+
 let user: { id: string } | null = { id: 'u1' }
 const rpcs: { name: string; args: Record<string, unknown> }[] = []
 const pendingQueries: string[] = []
@@ -32,6 +38,7 @@ beforeEach(() => {
   user = { id: 'u1' }
   rpcs.length = 0
   pendingQueries.length = 0
+  pages.length = 0
 })
 
 describe('GET /api/companies', () => {
@@ -41,10 +48,23 @@ describe('GET /api/companies', () => {
     expect(rpcs).toEqual([])
   })
 
-  it('lists verified employers a page at a time and clamps the page', async () => {
+  it('returns the wall for the signed-in person a page at a time and clamps the page', async () => {
     const res = await get('?limit=9999&offset=-4')
     expect(res.status).toBe(200)
-    expect(rpcs[0]).toEqual({ name: 'list_company_directory', args: { p_limit: 100, p_offset: 0 } })
+    expect(await res.json()).toMatchObject({ ok: true, header: { following: 1 }, rows: [{ employerId: 'e1' }], limit: 100, offset: 0 })
+    expect(pages[0]).toEqual({ userId: 'u1', type: undefined, showClosed: false, limit: 100, offset: 0 })
+  })
+
+  it('passes a role type and show_closed through, and refuses a type that is not one', async () => {
+    expect((await get('?type=forward-deployed-engineer&show_closed=1&limit=20&offset=40')).status).toBe(200)
+    expect(pages[0]).toEqual({ userId: 'u1', type: 'forward-deployed-engineer', showClosed: true, limit: 20, offset: 40 })
+    expect((await get('?type=wizard')).status).toBe(400)
+    expect(pages).toHaveLength(1)
+  })
+
+  it('refuses a search longer than 120 characters', async () => {
+    expect((await get(`?q=${'a'.repeat(121)}`)).status).toBe(400)
+    expect(rpcs).toEqual([])
   })
 
   it('searches verified employers, and shows a waiting candidate as not checked, never one already listed', async () => {
