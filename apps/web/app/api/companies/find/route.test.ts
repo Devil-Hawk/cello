@@ -4,11 +4,13 @@ import { NextRequest } from 'next/server'
 let user: { id: string } | null = { id: 'u1' }
 const findMock = vi.fn()
 const takeMock = vi.fn()
+const timingMock = vi.fn()
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: async () => ({ data: { user }, error: null }) } }) }))
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({ admin: true }) }))
 vi.mock('@/lib/commands/slots', () => ({ rpcSlotStore: () => ({ take: (...args: unknown[]) => takeMock(...args) }) }))
 vi.mock('@/lib/companies/find', () => ({ findEmployer: (...args: unknown[]) => findMock(...args), realFindDeps: () => ({ deps: true }) }))
+vi.mock('@/lib/companies/route-timing', () => ({ recordRouteTiming: (...args: unknown[]) => timingMock(...args) }))
 
 import { POST } from './route'
 
@@ -18,6 +20,7 @@ const lines = async (res: Response) => (await res.text()).split('\n').filter(Boo
 beforeEach(() => {
   user = { id: 'u1' }
   takeMock.mockReset().mockResolvedValue(true)
+  timingMock.mockReset().mockResolvedValue(undefined)
   findMock.mockReset().mockImplementation(async (_db, _user, _name, _deps, report) => {
     report({ rung: 'directory', line: 'Checking the directory' })
     report({ rung: 'boards', line: 'Checking job boards' })
@@ -51,6 +54,7 @@ describe('POST /api/companies/find', () => {
     expect((await post({ name: 'Retell AI' }, { 'sec-fetch-site': 'cross-site' })).status).toBe(403)
     for (const body of ['not json', {}, { name: 'a' }, { name: ' x ' }, { name: 'x'.repeat(121) }, { name: 7 }]) expect((await post(body)).status, JSON.stringify(body).slice(0, 30)).toBe(400)
     expect(findMock).not.toHaveBeenCalled()
+    expect(timingMock).not.toHaveBeenCalled()
     expect((await post({ name: 'ab' })).status).toBe(200)
     expect((await post({ name: 'x'.repeat(120) })).status).toBe(200)
   })
@@ -76,5 +80,63 @@ describe('POST /api/companies/find', () => {
     findMock.mockRejectedValue(new Error('secret detail https://x.example'))
     const out = await lines(await post({ name: 'Retell AI' }))
     expect(out).toEqual([{ step: 'error', line: 'Cello could not finish that right now. Try again.' }])
+    expect(timingMock.mock.calls.map((c) => [c[1], c[3]])).toEqual([
+      ['find', false],
+      ['find.directory', false],
+    ])
+  })
+
+  it('returns the stream at the first rung, not when a slow search ends', async () => {
+    findMock.mockImplementationOnce(async (_db, _user, _name, _deps, report) => {
+      report({ rung: 'directory', line: 'Checking the directory' })
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      report({ rung: 'boards', line: 'Checking job boards' })
+      return { none: true, line: 'Cello could not find Zzz. Paste its careers link.' }
+    })
+    const started = Date.now()
+    const res = await post({ name: 'Zzz' })
+    expect(Date.now() - started).toBeLessThan(200)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('application/x-ndjson')
+    expect(await lines(res)).toEqual([
+      { rung: 'directory', line: 'Checking the directory' },
+      { rung: 'boards', line: 'Checking job boards' },
+      { none: true, line: 'Cello could not find Zzz. Paste its careers link.' },
+    ])
+  })
+
+  it('answers a search that fails before its first rung as a plain 500 with the error line, and no detail', async () => {
+    findMock.mockRejectedValueOnce(new Error('secret detail https://x.example'))
+    const res = await post({ name: 'Retell AI' })
+    expect(res.status).toBe(500)
+    expect(res.headers.get('content-type')).toContain('application/json')
+    expect(await res.json()).toEqual({ step: 'error', line: 'Cello could not finish that right now. Try again.' })
+  })
+
+  it('writes two timings for a search: the whole search, and its first rung ending where the next one starts', async () => {
+    findMock.mockImplementationOnce(async (_db, _user, _name, _deps, report) => {
+      report({ rung: 'directory', line: 'Checking the directory' })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      report({ rung: 'boards', line: 'Checking job boards' })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      return { none: true, line: 'Cello could not find Zzz. Paste its careers link.' }
+    })
+    await lines(await post({ name: 'Zzz' }))
+    expect(timingMock.mock.calls.map((c) => [c[1], c[3]])).toEqual([
+      ['find', true],
+      ['find.directory', true],
+    ])
+    const [whole, directory] = [timingMock.mock.calls[0][2], timingMock.mock.calls[1][2]]
+    expect(directory).toBeGreaterThanOrEqual(15)
+    expect(whole).toBeGreaterThanOrEqual(directory)
+  })
+
+  it('gives a search that ends on the directory rung the same time for both rows', async () => {
+    findMock.mockImplementationOnce(async (_db, _user, _name, _deps, report) => {
+      report({ rung: 'directory', line: 'Checking the directory' })
+      return { candidates: [] }
+    })
+    await lines(await post({ name: 'Retell AI' }))
+    expect(timingMock.mock.calls[0][2]).toBe(timingMock.mock.calls[1][2])
   })
 })

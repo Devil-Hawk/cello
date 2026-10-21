@@ -70,7 +70,8 @@ export interface BoardCheckInput {
 }
 
 export type BoardCheck =
-  | { ok: true; verifiedBy: 'careers_page_link' | 'board_links_home' | 'provider_name' | 'seed_checked' | 'careers_url' | 'known_board'; jobs: AtsJob[]; domain: string | null; name: string }
+  /** `providerName` is the name the provider's own record gives the board, or null when the record names none (name is then the given one). */
+  | { ok: true; verifiedBy: 'careers_page_link' | 'board_links_home' | 'provider_name' | 'seed_checked' | 'careers_url' | 'known_board'; jobs: AtsJob[]; domain: string | null; name: string; providerName: string | null }
   | { ok: false; reason: FailReason; identity?: BoardIdentity | null; jobs?: AtsJob[] }
 
 const hostOf = (url: string): string | null => {
@@ -117,7 +118,7 @@ export async function checkBoard(input: BoardCheckInput, deps: VerifyDeps = real
   // even when the employer's page links it only through script.
   const curated = domain ? knownBoard({ domain, careerUrl: input.careerUrl }) : null
   if (domain && curated && curated.provider === provider && curated.token.toLowerCase() === token.toLowerCase()) {
-    return { ok: true, verifiedBy: 'known_board', jobs, domain, name: lookupKnownCompanyByDomain(domain)?.name ?? name ?? domain }
+    return { ok: true, verifiedBy: 'known_board', jobs, domain, name: lookupKnownCompanyByDomain(domain)?.name ?? name ?? domain, providerName: null }
   }
 
   let identity: BoardIdentity | null = null
@@ -135,7 +136,7 @@ export async function checkBoard(input: BoardCheckInput, deps: VerifyDeps = real
     // A board with no employer domain (the seed, a pasted board): the provider's own record must name the employer.
     if (!identity?.name) return { ok: false, reason: 'not_linked', identity, jobs }
     if (name && !sameEmployerName(identity.name, name)) return { ok: false, reason: home ? 'other_owner' : 'not_linked', identity, jobs }
-    return { ok: true, verifiedBy: name ? 'seed_checked' : 'provider_name', jobs, domain: home, name: identity.name }
+    return { ok: true, verifiedBy: name ? 'seed_checked' : 'provider_name', jobs, domain: home, name: identity.name, providerName: identity.name }
   }
 
   // An employer's domain is known: a home the board declares elsewhere, or a different name on a big employer's board, is another owner.
@@ -147,7 +148,7 @@ export async function checkBoard(input: BoardCheckInput, deps: VerifyDeps = real
   if ((page.length > 1 || !home) && name && identity?.name && !sameEmployerName(identity.name, name)) return { ok: false, reason: 'other_owner', identity, jobs }
   const verifiedBy = await verifyBoard({ provider, token, jobs, company: { name, domain }, pageBoards: page, knownEmployer: known, now: deps.now(), identify: owner ? async () => owner : null })
   // The provider's own name for the board is the best name for the employer; the given one is the fallback.
-  if (verifiedBy) return { ok: true, verifiedBy, jobs, domain, name: identity?.name || name || domain }
+  if (verifiedBy) return { ok: true, verifiedBy, jobs, domain, name: identity?.name || name || domain, providerName: identity?.name ?? null }
   if (known || (name && identity?.name && !sameEmployerName(identity.name, name))) return { ok: false, reason: 'other_owner', identity, jobs }
   return { ok: false, reason: 'not_linked', identity, jobs }
 }

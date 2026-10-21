@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AddResult } from './add-link'
-import { addLinksRun, coverageRun, recordMeasureRun, runAddLinks, runCoverage, runFinds } from './directory-runs'
+import { addLinksRun, coverageRun, findRun, recordMeasureRun, runAddLinks, runCoverage, runFinds, t34Recordable, type FindRow } from './directory-runs'
 import { fakeDb } from './fake-db'
 
 describe('T24: directory search coverage', () => {
@@ -118,5 +118,40 @@ describe('T34: find by name', () => {
       ['Linear', true, 'board', 'Linear Orbit (linear.app); x'],
       ['Fireworks AI', true, 'site', 'Fireworks (fireworks.ai); its site links the board'],
     ])
+  })
+})
+
+describe('T34: the verdict and its note', () => {
+  const row = (name: string, hit: boolean): FindRow => (hit ? { name, hit, rung: 'board', found: name, ms: 1 } : { name, hit, rung: 'site', reason: 'nothing proven', ms: 1 })
+
+  it('passes when every owner name is found and 8 of 10 startups are, and says both counts', () => {
+    const owner = ['Amazon', 'Apple'].map((n) => row(n, true))
+    const startups = Array.from({ length: 10 }, (_, i) => row(`S${i}`, i < 8))
+    const run = findRun([...owner, ...startups], 2)
+    expect(run).toMatchObject({ passed: true, sample_n: 12, value: 10 / 12 })
+    expect(run.note).toBe("Owner's names found: 2 of 2. Startups found: 8 of 10 (need 8). Misses: S8 at site: nothing proven; S9 at site: nothing proven.")
+  })
+
+  it('fails on one owner miss, or on 7 of 10 startups, and names each miss with its rung', () => {
+    expect(findRun([row('Amazon', false), row('Apple', true)], 2)).toMatchObject({ passed: false })
+    const seven = Array.from({ length: 10 }, (_, i) => row(`S${i}`, i < 7))
+    const run = findRun([row('Amazon', true), row('Apple', true), ...seven], 2)
+    expect(run.passed).toBe(false)
+    expect(run.note).toContain('Startups found: 7 of 10 (need 8)')
+    expect(run.note).toContain('S7 at site: nothing proven')
+  })
+
+  it('reports no verdict when there is no row to judge', () => {
+    expect(findRun([], 0)).toMatchObject({ passed: null, value: null, sample_n: 0 })
+  })
+})
+
+describe('T34: which names file may write the row', () => {
+  it('writes from the pinned fixture, or from a file of 21 names or more, and never from a partial file', () => {
+    const names = Array.from({ length: 21 }, (_, i) => `Name ${i}`)
+    expect(t34Recordable(names.slice(0, 2), true)).toBe(true)
+    expect(t34Recordable(names, false)).toBe(true)
+    expect(t34Recordable(names.slice(0, 20), false)).toBe(false)
+    expect(t34Recordable(['Amazon', 'Apple', ''], false)).toBe(false)
   })
 })

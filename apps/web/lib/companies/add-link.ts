@@ -91,7 +91,7 @@ export type AddResult =
 export type AddStep =
   | CheckStep
   | { step: 'directory_hit'; following: boolean; line: string }
-  | { step: 'reading'; host: string; line: string }
+  | { step: 'reading'; host?: string; line: string }
   | { step: 'board_found'; provider: AtsProviderId | null; line: string }
 
 const refuse = (reason: AddFailure, offers: Offer[] = []): Extract<AddResult, { ok: false }> => ({ ok: false, reason, line: ADD_LINES[reason], offers })
@@ -294,6 +294,8 @@ async function addCandidate(db: Db, userId: string, candidateId: string, deps: A
 
   // Chosen by a person, so checked now. A failed one is marked failed and never shows in search again.
   // A person's check never counts an unread board against the candidate: only the sweep does.
+  // The first network step is told before it happens, so a route can stream the check like a link's.
+  deps.report?.({ step: 'reading', ...(candidate.domain ? { host: candidate.domain } : {}), line: candidate.domain ? `Reading ${candidate.domain}` : `Checking ${candidate.name}` })
   const settled = await settleCandidate(db, candidate, deps.verify, { person: true })
   if (settled.state === 'verified') {
     const employer = await getEmployer(db, settled.employerId)
@@ -311,7 +313,10 @@ async function addBoard(db: Db, userId: string, b: Extract<AddBy, { board: unkno
   deps.report?.({ step: 'board_found', provider: b.provider, line: foundLine(b.provider) })
   const check = await checkBoard({ name: b.name, domain: b.domain, provider: b.provider, token: b.token }, deps.verify)
   if (!check.ok) return refuse(check.reason, check.reason === 'other_owner' ? await directoryOffers(db, { name: b.name, domain: b.domain }) : [])
-  const written = await writeEmployer(db, { name: check.name, domain: b.domain, careersUrl: null, provider: b.provider, token: b.token, verifiedBy: check.verifiedBy, source: 'person', openCount: check.jobs.length, readTier: 'board', keepExisting: true })
+  // The name is the provider's own record's, else the curated list's, else the domain's, else the token's in title case.
+  // The name the client sent was only checked against the record above; it is never what gets stored.
+  const name = check.providerName ?? (b.domain ? lookupKnownCompanyByDomain(b.domain)?.name ?? nameFromDomain(b.domain) : null) ?? titleCase(b.token)
+  const written = await writeEmployer(db, { name, domain: b.domain, careersUrl: null, provider: b.provider, token: b.token, verifiedBy: check.verifiedBy, source: 'person', openCount: check.jobs.length, readTier: 'board', keepExisting: true })
   if (!written.ok) return refuse(written.reason, written.offers)
   return addVerified(db, userId, await getEmployer(db, written.employerId), 'url', dream)
 }
@@ -398,7 +403,7 @@ async function verifyLink(db: Db, url: URL, domain: string | null, directToken: 
       const name = check.identity?.name || tenant
       check = isKnownEmployer({ name }) && !check.identity?.name
         ? { ok: false, reason: 'other_owner', identity: check.identity, jobs: check.jobs }
-        : { ok: true, verifiedBy: 'careers_url', jobs: check.jobs, domain: null, name }
+        : { ok: true, verifiedBy: 'careers_url', jobs: check.jobs, domain: null, name, providerName: check.identity?.name ?? null }
     }
     // A board gone quiet under a big employer's name is a namesake's too ("amazon" on Personio holds 2018 postings).
     if (!check.ok && pasted && check.reason === 'stale' && isKnownEmployer({ name: tenant })) check = { ok: false, reason: 'other_owner', jobs: check.jobs }

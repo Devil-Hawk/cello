@@ -19,6 +19,7 @@ import { POST } from './route'
 const ID = '11111111-1111-4111-8111-111111111111'
 const post = (body: unknown, headers: Record<string, string> = {}) => POST(new NextRequest('http://localhost/api/companies/add', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) }))
 const lines = async (res: Response) => (await res.text()).split('\n').filter(Boolean).map((l) => JSON.parse(l))
+const last = async (res: Response) => (await lines(res)).at(-1)
 const added = { ok: true, companyId: 'c1', already: false, employer: { employerId: 'e1', name: 'Retell AI', domain: 'retellai.com', logoUrl: null, openCount: 12 } }
 
 beforeEach(() => {
@@ -71,6 +72,7 @@ describe('POST /api/companies/add', () => {
     expect(await lines(res)).toEqual([
       { step: 'reading', host: 'retellai.com', line: 'Reading retellai.com' },
       { step: 'board_found', provider: 'ashby', line: 'Found an Ashby board' },
+      { step: 'reading_board', line: 'Reading the board' },
       { step: 'added', companyId: 'c1', already: false, employer: added.employer, read: { listed: 12, kept: 2 }, line: 'Following. Cello checks it with the others, every 6 hours.' },
     ])
     expect(readMock).toHaveBeenCalledTimes(1)
@@ -78,19 +80,32 @@ describe('POST /api/companies/add', () => {
     expect(readMock.mock.calls[0][2]).toEqual([{ userId: 'u1' }])
   })
 
+  it('does not say Reading the board twice: a board the verifier already counted gets no second step from the route', async () => {
+    addMock.mockImplementationOnce(async (_db, _user, _by, deps) => {
+      deps.report({ step: 'reading', host: 'retellai.com', line: 'Reading retellai.com' })
+      deps.report({ step: 'board_found', provider: 'ashby', line: 'Found an Ashby board' })
+      deps.report({ step: 'reading_roles', count: 12, line: 'Reading the board, 12 postings so far' })
+      return added
+    })
+    const out = await lines(await post({ link: 'retellai.com/careers' }))
+    expect(out.map((l) => l.step)).toEqual(['reading', 'board_found', 'reading_roles', 'added'])
+    expect(out.filter((l) => l.line === 'Reading the board')).toEqual([])
+    expect(readMock).toHaveBeenCalledTimes(1)
+  })
+
   it('reads nothing again for an employer the person already follows, and says so; a read that throws is null, not an error', async () => {
     addMock.mockResolvedValueOnce({ ...added, already: true })
-    expect(await lines(await post({ link: 'retellai.com/careers' }))).toEqual([expect.objectContaining({ step: 'added', already: true, read: null, line: 'You follow this already.' })])
+    expect(await last(await post({ link: 'retellai.com/careers' }))).toEqual(expect.objectContaining({ step: 'added', already: true, read: null, line: 'You follow this already.' }))
     expect(readMock).not.toHaveBeenCalled()
     readMock.mockRejectedValueOnce(new Error('boom'))
-    expect(await lines(await post({ link: 'retellai.com/careers' }))).toEqual([expect.objectContaining({ step: 'added', read: null })])
+    expect(await last(await post({ link: 'retellai.com/careers' }))).toEqual(expect.objectContaining({ step: 'added', read: null }))
   })
 
   it('sends read null, never 0 open, when the first read failed; kept is null when the person has no targets', async () => {
     readMock.mockResolvedValueOnce({ listed: 0, kept: 0, stored: 0, errors: [], failure: 'cannot_read' })
-    expect(await lines(await post({ link: 'retellai.com/careers' }))).toEqual([expect.objectContaining({ step: 'added', read: null })])
+    expect(await last(await post({ link: 'retellai.com/careers' }))).toEqual(expect.objectContaining({ step: 'added', read: null }))
     vi.mocked(loadPerson).mockResolvedValueOnce([])
-    expect(await lines(await post({ link: 'retellai.com/careers' }))).toEqual([expect.objectContaining({ step: 'added', read: { listed: 12, kept: null } })])
+    expect(await last(await post({ link: 'retellai.com/careers' }))).toEqual(expect.objectContaining({ step: 'added', read: { listed: 12, kept: null } }))
   })
 
   it('hands a first read that runs past 8 s off, as a follow does: read null and the hand-off line', async () => {
@@ -99,7 +114,7 @@ describe('POST /api/companies/add', () => {
       readMock.mockReturnValueOnce(new Promise(() => {}))
       const pending = post({ link: 'retellai.com/careers' })
       await vi.advanceTimersByTimeAsync(8000)
-      expect(await lines(await pending)).toEqual([expect.objectContaining({ step: 'added', read: null, line: 'Following. Cello reads its board within the hour.' })])
+      expect(await last(await pending)).toEqual(expect.objectContaining({ step: 'added', read: null, line: 'Following. Cello reads its board within the hour.' }))
     } finally {
       vi.useRealTimers()
     }
@@ -136,9 +151,36 @@ describe('POST /api/companies/add', () => {
       deps.report({ step: 'directory_hit', following: false, line: 'In the directory, not on your page yet' })
       return added
     })
+    // The board read of an added employer is a network step: the answer streams from there, with the hit before it.
     const hit = await post({ employerId: ID })
     expect(hit.status).toBe(200)
-    expect(await hit.json()).toMatchObject({ step: 'added', employer: added.employer })
+    expect(hit.headers.get('content-type')).toContain('application/x-ndjson')
+    expect(await lines(hit)).toEqual([
+      { step: 'directory_hit', following: false, line: 'In the directory, not on your page yet' },
+      { step: 'reading_board', line: 'Reading the board' },
+      expect.objectContaining({ step: 'added', employer: added.employer }),
+    ])
+  })
+
+  it('answers a candidate add as plain JSON until its first network step, then as NDJSON', async () => {
+    const candidate = { candidate: { provider: 'ashby', token: 'retell-ai', name: 'Retell AI', domain: 'retellai.com' } }
+    // refused before any network call (here, the day's limit): plain JSON with its status
+    addMock.mockResolvedValueOnce({ ok: false, reason: 'daily_limit', line: 'a line', offers: [] })
+    const plain = await post(candidate)
+    expect(plain.status).toBe(429)
+    expect(plain.headers.get('content-type')).toContain('application/json')
+    // checked: the first step is told before the board is fetched, so the answer streams
+    addMock.mockImplementationOnce(async (_db, _user, _by, deps) => {
+      deps.report({ step: 'reading', host: 'retellai.com', line: 'Reading retellai.com' })
+      return { ok: false, reason: 'cannot_read', line: 'a line', offers: [] }
+    })
+    const streamed = await post(candidate)
+    expect(streamed.status).toBe(200)
+    expect(streamed.headers.get('content-type')).toContain('application/x-ndjson')
+    expect(await lines(streamed)).toEqual([
+      { step: 'reading', host: 'retellai.com', line: 'Reading retellai.com' },
+      { step: 'refused', reason: 'cannot_read', line: 'a line', offers: [] },
+    ])
   })
 
   it('streams a proven board from board_found, which is its first network step', async () => {
@@ -165,13 +207,15 @@ describe('POST /api/companies/add', () => {
   it('writes one timing row per call, and still answers when the timing insert throws', async () => {
     const insert = vi.fn(async () => ({ error: null }))
     admin.mockImplementation(() => ({ from: () => ({ insert }) }))
-    expect((await post({ link: 'retellai.com/careers' })).status).toBe(200)
+    const answer = await post({ link: 'retellai.com/careers' })
+    expect(answer.status).toBe(200)
+    await answer.text()
     expect(insert).toHaveBeenCalledWith({ route: 'add', ms: expect.any(Number), ok: true })
 
     admin.mockImplementation(() => ({ from: () => { throw new Error('insert failed') } }))
     const res = await post({ link: 'retellai.com/careers' })
     expect(res.status).toBe(200)
-    expect(await res.json()).toMatchObject({ step: 'added', companyId: 'c1' })
+    expect(await last(res)).toMatchObject({ step: 'added', companyId: 'c1' })
   })
 
   it('writes no timing row for a call refused at the door: no session, a bad body, or cross-site', async () => {

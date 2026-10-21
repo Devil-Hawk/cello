@@ -4,19 +4,21 @@
 //   cd apps/web && pnpm directory:coverage --owner <your user id>           the employers of your applications
 //   add --no-record to print without writing the measure_runs row
 //   cd apps/web && pnpm directory:coverage --find --names scripts/fixtures/t34-names.txt     T34, the real search ladder
+//   cd apps/web && pnpm directory:coverage --find --record --names scripts/fixtures/t34-names.txt   the same, and the T34 measure_runs row
 //
 // Each name goes through companies.search; it counts when the employer is among the first 3 verified rows. A miss says
 // why. The bar is 34 of 35. It reads and writes with the service role (SUPABASE_URL, SUPABASE_SERVICE_KEY).
 //
 // With --find each name goes through companies.find instead (the five rungs, the real network): it counts when a
 // candidate for that employer is offered, and the row says which rung found it, how long it took, and for a miss how far
-// it got. Nothing is written and nothing is recorded: a search writes nothing, and a web search that would be queued for
-// the pull worker is only reported. Add --owner <user id> to use that person's own Tavily key; TAVILY_API_KEY also works.
-// The names above a "# startups" line in the file are the owner's own: any miss among them exits 1. The names below it
-// need 4 of every 5 (8 of 10). Lines starting with # are otherwise ignored.
+// it got. A search writes nothing about an employer, and a web search that would be queued for the pull worker is only
+// reported. --record writes the T34 measure_runs row, only from the full set (the fixture or 21 names or more); without it nothing is written. Add --owner <user id> to use that
+// person's own Tavily key; TAVILY_API_KEY also works. The names above a "# startups" line in the file are the owner's
+// own: any miss among them exits 1. The names below it need 4 of every 5 (8 of 10). Lines starting with # are otherwise ignored.
 
 import { readFileSync } from 'node:fs'
-import { coverageRun, recordMeasureRun, runCoverage, runFinds } from '../lib/companies/directory-runs'
+import { resolve } from 'node:path'
+import { coverageRun, findRun, recordMeasureRun, runCoverage, runFinds, T34_FULL_SET, t34Recordable } from '../lib/companies/directory-runs'
 import { findEmployer, realFindDeps } from '../lib/companies/find'
 import { createAdminClient } from '../lib/harness/supabase-admin'
 
@@ -32,6 +34,8 @@ async function namesOf(admin: ReturnType<typeof createAdminClient>, owner: strin
   const { data } = await admin.from('person_jobs').select('viewer_company_name').eq('viewer_id', owner).in('id', ids.slice(0, 500))
   return [...new Set(((data ?? []) as { viewer_company_name: string | null }[]).map((r) => r.viewer_company_name?.trim()).filter((n): n is string => !!n))]
 }
+
+const T34_FIXTURE = 'scripts/fixtures/t34-names.txt'
 
 async function main(): Promise<void> {
   let admin
@@ -58,12 +62,13 @@ async function main(): Promise<void> {
     for (const r of run.rows) console.log(`${r.hit ? 'found ' : 'MISS  '} ${r.name} [${r.hit ? 'rung' : 'reached'}: ${r.rung}, ${r.ms} ms] ${r.hit ? `-> ${r.found}` : `: ${r.reason}`}`)
     console.log(`\n${run.hits} of ${run.total} names offered as the right employer.`)
     // The bar: every name the owner gave, and 4 of every 5 of the startups (8 of 10).
-    const ownedMisses = run.rows.slice(0, owned).filter((r) => !r.hit).length
-    const startups = run.rows.slice(owned)
-    const startupHits = startups.filter((r) => r.hit).length
-    const startupBar = Math.ceil(startups.length * 0.8)
-    console.log(`owner's names: ${owned - ownedMisses} of ${owned}; startups: ${startupHits} of ${startups.length} (need ${startupBar}).`)
-    process.exit(ownedMisses > 0 || startupHits < startupBar ? 1 : 0)
+    const t34 = findRun(run.rows, owned)
+    console.log(t34.note)
+    if (process.argv.includes('--record')) {
+      if (t34Recordable(names, file !== undefined && resolve(file) === resolve(T34_FIXTURE))) await recordMeasureRun(admin, 'T34', t34)
+      else console.log(`Not recorded: T34 is written only from ${T34_FIXTURE} or a names file of ${T34_FULL_SET} or more. This file has ${names.filter((n) => n.trim() !== '').length}.`)
+    }
+    process.exit(t34.passed ? 0 : 1)
   }
   const result = await runCoverage(admin, names)
   for (const r of result.rows) console.log(`${r.hit ? 'found ' : 'MISS  '} ${r.name}${r.hit ? ` -> ${r.found}` : `: ${r.reason}${r.detail ? ` (${r.detail})` : ''}`}`)

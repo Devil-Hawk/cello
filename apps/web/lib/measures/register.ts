@@ -346,7 +346,7 @@ export const REGISTER: readonly MeasureDef[] = [
   {
     id: 'T37',
     layer: 'true',
-    name: 'Companies route timings: share of add calls answered within 60 s, and of follow calls answered within 8 s, failures counted as misses, per 7 days',
+    name: 'Companies route timings: share of add calls answered within 60 s, follow calls within 8 s, find calls within 30 s and the find directory rung within 300 ms, failures counted as misses, per 7 days',
     bar: '95 percent within each bar',
     direction: 'higher',
     source: 'route_timings',

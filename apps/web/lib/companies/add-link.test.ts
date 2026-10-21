@@ -6,7 +6,8 @@ import type { SiteRead } from '../ingest/reader'
 import { addCompany, DAILY_ADD_LIMIT, employerDomain, parseLink, type AddDeps, type AddStep } from './add-link'
 import type { WikidataEntity } from './wikidata'
 import { fakeDb } from './fake-db'
-import { KNOWN_COMPANIES, lookupKnownCompanyByName, type KnownCompany } from './known-companies'
+import { KNOWN_COMPANIES, lookupKnownCompanyByDomain, lookupKnownCompanyByName, type KnownCompany } from './known-companies'
+import { nameFromDomain } from './page-name'
 
 const NOW = Date.now()
 const job = (daysAgo: number, i = 0): AtsJob => ({ title: `Engineer ${i}`, url: `https://boards.example/${i}`, externalId: `${i}`, postedAt: new Date(NOW - daysAgo * 86_400_000).toISOString() })
@@ -273,6 +274,45 @@ describe('companies.add by directory id and by candidate', () => {
     expect(tables.directory_candidates[0]).toMatchObject({ state: 'verified' })
     expect(tables.companies[0]).toMatchObject({ user_id: 'u1', watching: true })
   })
+
+  it('a candidate with no domain says Checking its name and sends no host', async () => {
+    const noDomain = { id: 'c2', name: 'Gusto', domain: null, ats_provider: 'greenhouse', ats_token: 'gusto', source: 'kalil', failed_reads: 0, state: 'pending', employer_id: null }
+    const d = deps({ identity: { name: 'Gusto', homeUrls: [] } })
+    await addCompany(world({ directory_candidates: [noDomain] }).client, 'u1', { candidateId: 'c2' }, d.value)
+    expect(d.events[0]).toEqual({ step: 'reading', line: 'Checking Gusto' })
+    expect(d.events[0]).not.toHaveProperty('host')
+  })
+
+  it('a candidate add says reading before its first network call; the cooldown, already-followed and daily-limit refusals say nothing', async () => {
+    const pending = { id: 'c1', name: 'Gusto', domain: 'gusto.com', ats_provider: 'greenhouse', ats_token: 'gusto', source: 'kalil', failed_reads: 0, state: 'pending', employer_id: null }
+    const order: string[] = []
+    const d = deps({ identity: { name: 'Gusto', homeUrls: ['https://gusto.com'] } })
+    d.value.verify.fetchBoard = async () => {
+      order.push('fetch')
+      return fresh
+    }
+    d.value.report = (step) => {
+      order.push(step.step)
+      d.events.push(step)
+    }
+    const { client } = world({ directory_candidates: [pending] })
+    await addCompany(client, 'u1', { candidateId: 'c1' }, d.value)
+    expect(order[0]).toBe('reading')
+    expect(order.indexOf('reading')).toBeLessThan(order.indexOf('fetch'))
+
+    const refused = async (tables: Record<string, Record<string, unknown>[]>) => {
+      const quiet = deps()
+      const r = await addCompany(world(tables).client, 'u1', { candidateId: 'c1' }, quiet.value)
+      expect(quiet.events.map((e) => e.step)).toEqual([])
+      return r
+    }
+    const cooling = { ...pending, next_check_at: new Date(Date.now() + 3_600_000).toISOString() }
+    expect(await refused({ directory_candidates: [cooling] })).toMatchObject({ ok: false, reason: 'cannot_read' })
+    const following = { id: 'co1', user_id: 'u1', watching: true, name: 'Gusto', domain: 'gusto.com', employer_id: null, logo_url: null }
+    expect(await refused({ directory_candidates: [pending], companies: [following] })).toMatchObject({ ok: true, already: true })
+    const full = Array.from({ length: DAILY_ADD_LIMIT }, (_, i) => ({ id: `co${i}`, user_id: 'u1', watching: true, name: `Co ${i}`, domain: `co${i}.com`, created_at: new Date().toISOString(), metadata: null }))
+    expect(await refused({ directory_candidates: [pending], companies: full })).toMatchObject({ ok: false, reason: 'daily_limit' })
+  })
 })
 
 const verifiedRetell = { id: 'e1', name: 'Retell AI', name_norm: 'retell ai', domain: 'retellai.com', logo_url: null, careers_url: 'https://retellai.com/careers', ats_provider: 'ashby', ats_token: 'retell-ai', verified_by: 'careers_page_link', verified_at: '2026-10-01T00:00:00Z', open_count: 12, source: 'person' }
@@ -409,6 +449,19 @@ describe('a board or a site a search proved', () => {
     const r = await addCompany(other.client, 'u1', { board: { ...retellBoard, qid: 'Q1' } }, deps({ ...setup, wikidata: { ...entity, website: 'https://other.example' } }).value)
     expect(r).toMatchObject({ ok: true })
     expect(other.tables.company_directory[0].profile).toBeUndefined()
+  })
+
+  it('names a board whose record carries no name from the server, never from the name the client sent', async () => {
+    const nameless = world()
+    const r = await addCompany(nameless.client, 'u1', { board: { ...retellBoard, name: 'Zeta Corp' } }, deps({ identity: { name: null, homeUrls: ['https://retellai.com'] }, page: [{ provider: 'ashby', token: 'retell-ai' }] }).value)
+    expect(r).toMatchObject({ ok: true })
+    expect(nameless.tables.company_directory[0].name).toBe(lookupKnownCompanyByDomain('retellai.com')?.name ?? nameFromDomain('retellai.com'))
+    expect(nameless.tables.company_directory[0].name).not.toBe('Zeta Corp')
+
+    // a record that names the board keeps its name, whatever the client sent
+    const named = world()
+    await addCompany(named.client, 'u1', { board: { ...retellBoard, name: 'Zeta Corp' } }, deps(setup).value)
+    expect(named.tables.company_directory[0].name).toBe('Retell AI')
   })
 
   it('a board the directory already has is shown without a check', async () => {
