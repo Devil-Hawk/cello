@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { isCrossSiteRequest } from '@/lib/security/same-origin'
-import { findEmployer, realFindDeps } from '@/lib/companies/find'
+import { findEmployer, realFindDeps, type Rung } from '@/lib/companies/find'
 import { ndjson } from '@/lib/companies/ndjson'
+import { recordRouteTiming } from '@/lib/companies/route-timing'
 import { rpcSlotStore } from '@/lib/commands/slots'
 
 // POST /api/companies/find   { name }
@@ -12,6 +13,9 @@ import { rpcSlotStore } from '@/lib/commands/slots'
 // starts, {"rung","line"}, then one last line, {"candidates":[...]} or {"none":true,"line"}. A search writes nothing
 // about an employer; choosing a candidate is POST /api/companies/add. A demo account may search. A person may search
 // FIND_LIMIT times an hour (the command slots); past that the answer is a plain 429 with a line.
+//
+// Timed once the search is allowed to start (a 401, 400, 429 or 503 writes no row): two route_timings rows, `find` for
+// the whole search and `find.directory` for its first rung, which ends when the next rung starts.
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -35,5 +39,24 @@ export async function POST(request: NextRequest) {
   const allowed = await rpcSlotStore(db).take({ userId: user.id, channel: 'companies', bucket: 'find', limit: FIND_LIMIT, windowSeconds: 3600 }).catch(() => null)
   if (allowed === null) return NextResponse.json({ error: 'Could not search right now. Try again.' }, { status: 503 })
   if (!allowed) return NextResponse.json({ error: 'rate_limited', line: 'You have searched a lot this hour. Try again a little later, or paste the careers link.' }, { status: 429 })
-  return ndjson(async (emit) => emit(await findEmployer(db, user.id, name, realFindDeps(db, user.id), emit)))
+  const started = Date.now()
+  return ndjson(async (emit) => {
+    let directoryMs: number | null = null
+    const report = (event: { rung: Rung; line: string }) => {
+      if (directoryMs === null && event.rung !== 'directory') directoryMs = Date.now() - started
+      emit(event)
+    }
+    let ok = true
+    try {
+      emit(await findEmployer(db, user.id, name, realFindDeps(db, user.id), report))
+    } catch (error) {
+      ok = false
+      throw error
+    } finally {
+      const total = Date.now() - started
+      // A search that ends on its first rung took all its time there.
+      await recordRouteTiming(createAdminClient, 'find', total, ok)
+      await recordRouteTiming(createAdminClient, 'find.directory', directoryMs ?? total, ok)
+    }
+  })
 }
