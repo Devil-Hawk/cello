@@ -11,6 +11,7 @@ import { NO_CONSTRAINTS } from '../scoring/constraints'
 const COMPANY: CompanyInput = { id: 'c1', name: 'Acme', domain: 'acme.com', career_url: 'https://acme.com/careers', user_id: 'u1', employer_id: 'e1' }
 const day = 86_400_000
 const ago = (d: number) => new Date(Date.now() - d * day).toISOString()
+const POSTED = ago(2)
 
 function memory() {
   const upserted: JobUpsertRow[] = []
@@ -46,7 +47,7 @@ const role = (n: number, title: string, over: Partial<AtsJob> = {}): AtsJob => (
   url: `https://acme.com/jobs/${n}`,
   externalId: `https://acme.com/jobs/${n}`,
   description: 'Build things.',
-  postedAt: ago(2),
+  postedAt: POSTED,
   ...over,
 })
 
