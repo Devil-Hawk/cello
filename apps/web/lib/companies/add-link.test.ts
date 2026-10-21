@@ -6,7 +6,8 @@ import type { SiteRead } from '../ingest/reader'
 import { addCompany, DAILY_ADD_LIMIT, employerDomain, parseLink, type AddDeps, type AddStep } from './add-link'
 import type { WikidataEntity } from './wikidata'
 import { fakeDb } from './fake-db'
-import { KNOWN_COMPANIES, lookupKnownCompanyByName, type KnownCompany } from './known-companies'
+import { KNOWN_COMPANIES, lookupKnownCompanyByDomain, lookupKnownCompanyByName, type KnownCompany } from './known-companies'
+import { nameFromDomain } from './page-name'
 
 const NOW = Date.now()
 const job = (daysAgo: number, i = 0): AtsJob => ({ title: `Engineer ${i}`, url: `https://boards.example/${i}`, externalId: `${i}`, postedAt: new Date(NOW - daysAgo * 86_400_000).toISOString() })
@@ -409,6 +410,19 @@ describe('a board or a site a search proved', () => {
     const r = await addCompany(other.client, 'u1', { board: { ...retellBoard, qid: 'Q1' } }, deps({ ...setup, wikidata: { ...entity, website: 'https://other.example' } }).value)
     expect(r).toMatchObject({ ok: true })
     expect(other.tables.company_directory[0].profile).toBeUndefined()
+  })
+
+  it('names a board whose record carries no name from the server, never from the name the client sent', async () => {
+    const nameless = world()
+    const r = await addCompany(nameless.client, 'u1', { board: { ...retellBoard, name: 'Zeta Corp' } }, deps({ identity: { name: null, homeUrls: ['https://retellai.com'] }, page: [{ provider: 'ashby', token: 'retell-ai' }] }).value)
+    expect(r).toMatchObject({ ok: true })
+    expect(nameless.tables.company_directory[0].name).toBe(lookupKnownCompanyByDomain('retellai.com')?.name ?? nameFromDomain('retellai.com'))
+    expect(nameless.tables.company_directory[0].name).not.toBe('Zeta Corp')
+
+    // a record that names the board keeps its name, whatever the client sent
+    const named = world()
+    await addCompany(named.client, 'u1', { board: { ...retellBoard, name: 'Zeta Corp' } }, deps(setup).value)
+    expect(named.tables.company_directory[0].name).toBe('Retell AI')
   })
 
   it('a board the directory already has is shown without a check', async () => {
