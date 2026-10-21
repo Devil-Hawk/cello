@@ -16,7 +16,7 @@ import { rpcSlotStore } from '@/lib/commands/slots'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-export const FIND_LIMIT = 60
+const FIND_LIMIT = 60
 
 export async function POST(request: NextRequest) {
   if (isCrossSiteRequest(request.headers)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
