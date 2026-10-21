@@ -36,7 +36,7 @@ export async function followEmployer(db: Db, userId: string, employer: Pick<Dire
 }
 
 export type FollowResult =
-  | { ok: true; following: true; already: boolean; read: { listed: number; kept: number } | null; line: string }
+  | { ok: true; following: true; already: boolean; read: { listed: number; kept: number } | null; line: string; fit: string | null }
   | { ok: false; reason: 'demo' | 'daily_limit' | 'not_found' | 'not_saved'; line: string }
 
 export interface FollowOpts {
@@ -59,12 +59,12 @@ export async function followAndRead(db: Db, userId: string, employerId: string, 
   if (!employer) return refuse('not_found')
   const { data: profile } = await db.from('profiles').select('is_demo, demo_expires_at').eq('id', userId).maybeSingle()
   if (isDemoProfile(profile as { is_demo: boolean | null; demo_expires_at: string | null } | null)) return refuse('demo')
-  if (await followedRow(db, userId, { employerId })) return { ok: true, following: true, already: true, read: null, line: `Already following ${employer.name}.` }
+  if (await followedRow(db, userId, { employerId })) return { ok: true, following: true, already: true, read: null, line: `Already following ${employer.name}.`, fit: null }
   if ((await addsToday(db, userId)) >= DAILY_ADD_LIMIT) return refuse('daily_limit')
 
   const followed = await followEmployer(db, userId, employer, 'known', { dream: opts.dream })
   if (followed.error !== undefined) return refuse('not_saved')
-  if (!employer.ats_provider || !employer.ats_token) return { ok: true, following: true, already: false, read: null, line: 'Following. Cello has no job board for it to read yet.' }
+  if (!employer.ats_provider || !employer.ats_token) return { ok: true, following: true, already: false, read: null, line: 'Following. Cello has no job board for it to read yet.', fit: null }
 
   // The read runs while the budget runs. Past the budget the person gets the hand-off line and the read goes on.
   const work = read(employer, people).catch(() => null)
@@ -73,13 +73,14 @@ export async function followAndRead(db: Db, userId: string, employerId: string, 
   clearTimeout(timer)
   if (first === 'timeout') {
     if (process.env.VERCEL) waitUntil(work)
-    return { ok: true, following: true, already: false, read: null, line: HANDOFF_LINE }
+    return { ok: true, following: true, already: false, read: null, line: HANDOFF_LINE, fit: null }
   }
-  if (first === null) return { ok: true, following: true, already: false, read: null, line: ADD_LINES.cannot_read }
-  if (first.failure) return { ok: true, following: true, already: false, read: null, line: ADD_LINES[first.failure] }
+  if (first === null) return { ok: true, following: true, already: false, read: null, line: ADD_LINES.cannot_read, fit: null }
+  if (first.failure) return { ok: true, following: true, already: false, read: null, line: ADD_LINES[first.failure], fit: null }
 
-  const line = people.length === 0 ? `${first.listed} open` : `${first.kept} fit your targets of ${first.listed} open`
-  return { ok: true, following: true, already: false, read: { listed: first.listed, kept: first.kept }, line }
+  // Part 1.5: the tile's line is the open count; the fit line only when the person has targets and something is kept.
+  const fit = people.length > 0 && first.kept > 0 ? `${first.kept} fit your targets` : null
+  return { ok: true, following: true, already: false, read: { listed: first.listed, kept: first.kept }, line: `${first.listed} open · checked just now`, fit }
 }
 
 /** The bookmark off: the row stays, the employer stays in the directory and keeps being read. */

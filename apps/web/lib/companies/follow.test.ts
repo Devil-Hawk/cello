@@ -33,7 +33,7 @@ describe('followAndRead: follow, then one read inside the budget', () => {
     const { client, tables } = world()
     const read = readFn()
     const first = await followAndRead(client, 'u1', 'e1', [engineer], { read })
-    expect(first).toEqual({ ok: true, following: true, already: false, read: { listed: 3, kept: 1 }, line: '1 fit your targets of 3 open' })
+    expect(first).toEqual({ ok: true, following: true, already: false, read: { listed: 3, kept: 1 }, line: '3 open · checked just now', fit: '1 fit your targets' })
     expect(tables.companies[0]).toMatchObject({ user_id: 'u1', employer_id: 'e1', watching: true })
     expect(read).toHaveBeenCalledTimes(1)
 
@@ -45,7 +45,12 @@ describe('followAndRead: follow, then one read inside the budget', () => {
 
   it('with no targets stated the line counts open roles and says nothing about fit', async () => {
     const r = await followAndRead(world().client, 'u1', 'e1', [], { read: readFn() })
-    expect(r).toMatchObject({ line: '3 open' })
+    expect(r).toMatchObject({ line: '3 open · checked just now', fit: null })
+  })
+
+  it('with targets and nothing kept the fit line is null, not a verdict', async () => {
+    const r = await followAndRead(world().client, 'u1', 'e1', [engineer], { read: readFn({ listed: 12, kept: 0, stored: 0, errors: [] }) })
+    expect(r).toMatchObject({ line: '12 open · checked just now', fit: null })
   })
 
   it('past the budget the person gets the hand-off line and the read still finishes', async () => {
@@ -56,7 +61,7 @@ describe('followAndRead: follow, then one read inside the budget', () => {
       return READ
     }
     const r = await followAndRead(world().client, 'u1', 'e1', [engineer], { read, budgetMs: 5 })
-    expect(r).toEqual({ ok: true, following: true, already: false, read: null, line: 'Following. Cello reads its board within the hour.' })
+    expect(r).toEqual({ ok: true, following: true, already: false, read: null, line: 'Following. Cello reads its board within the hour.', fit: null })
     expect(finished).toBe(false)
     await new Promise((resolve) => setTimeout(resolve, 80))
     expect(finished).toBe(true)
