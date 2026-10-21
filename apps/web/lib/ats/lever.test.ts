@@ -55,6 +55,7 @@ describe('lever.fetch', () => {
       url: 'https://jobs.lever.co/acme/abc',
       externalId: 'https://jobs.lever.co/acme/abc',
       location: 'Remote - US',
+      department: 'Platform',
     })
     expect(job.postedAt).toBe(new Date(1_790_000_000_000).toISOString())
     expect(job.salary).toBe('USD 150,000–190,000 per year salary')
@@ -88,5 +89,17 @@ describe('lever.fetch', () => {
   it('skips an entry with no hosted url', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse([{ text: 'No url' }, POSTING])) as unknown as typeof fetch
     expect(await lever.fetch('acme')).toHaveLength(1)
+  })
+})
+
+describe('the department reaches the stored type', () => {
+  it('reads "member of technical staff" by the board\'s team', async () => {
+    const { jobRow } = await import('./index')
+    const { classifyJob } = await import('../jobs/classify')
+    const job = { title: 'Member of Technical Staff', url: 'https://jobs.lever.co/acme/x', externalId: 'x', department: 'Forward Deployed' }
+    const c = classifyJob({ title: job.title, description: '', location: undefined, companyName: 'Acme' })
+    const row = jobRow({ id: 'c1', employer_id: 'e1' }, job, job.title, c, 'lever', '2026-10-22T00:00:00Z')
+    expect(row).toMatchObject({ dept_norm: 'forward deployed', role_type: 'forward-deployed-engineer', type_origin: 'code' })
+    expect(jobRow({ id: 'c1', employer_id: 'e1' }, { ...job, department: undefined }, job.title, c, 'lever', '2026-10-22T00:00:00Z')).toMatchObject({ dept_norm: '', role_type: null })
   })
 })

@@ -18,6 +18,7 @@ const MAX_TYPES = 8
 interface JobRow {
   id: string
   title: string
+  dept_norm: string | null
 }
 
 /** Roles to type: never typed, or typed by code under an older version. A model's answer is never overwritten. */
@@ -26,7 +27,7 @@ async function typeStoredRoles(ctx: RoutineContext): Promise<{ typed: number; mo
   while (ctx.now() < ctx.deadlineAt) {
     const { data, error } = await ctx.admin
       .from('jobs')
-      .select('id, title')
+      .select('id, title, dept_norm')
       .or(`title_norm.is.null,type_prov->>taxonomy_version.is.null,type_prov->>taxonomy_version.neq.${TAXONOMY_VERSION}`)
       .or('type_origin.is.null,type_origin.eq.code')
       .order('id')
@@ -35,7 +36,7 @@ async function typeStoredRoles(ctx: RoutineContext): Promise<{ typed: number; mo
     const rows = (data ?? []) as JobRow[]
     if (rows.length === 0) return { typed, more: false }
     const batch = rows.map((r) => {
-      const t = typeTitle(r.title ?? '')
+      const t = typeTitle(r.title ?? '', r.dept_norm)
       // an untyped role still records the version it was tried under, so it is not tried again until the next bump
       return { id: r.id, title_norm: t.title_norm, dept_norm: t.dept_norm, role_type: t.role_type, type_origin: t.type_origin, type_prov: t.type_prov ?? { taxonomy_version: TAXONOMY_VERSION } }
     })
