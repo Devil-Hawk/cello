@@ -96,7 +96,7 @@ const intFromEnv = (v: string | undefined, fallback: number) => {
 // Lazy on purpose: this module is imported by the harness registry, and a test that mocks one of these imports only partly
 // must not fail on module load.
 export const realDoor: DoorDeps = {
-  call: (...a) => callLlm(...a),
+  call: callLlm,
   loadKeys: (db, userId) => loadApiKeys(db, userId),
   platformKey: () => process.env.OPENROUTER_API_KEY?.trim() || undefined,
   selfHosted: () => isSelfHosted(),
