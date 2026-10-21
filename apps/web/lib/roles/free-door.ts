@@ -93,11 +93,13 @@ const intFromEnv = (v: string | undefined, fallback: number) => {
   return Number.isFinite(n) && n > 0 ? n : fallback
 }
 
+// Lazy on purpose: this module is imported by the harness registry, and a test that mocks one of these imports only partly
+// must not fail on module load.
 export const realDoor: DoorDeps = {
-  call: callLlm,
-  loadKeys: loadApiKeys,
+  call: (...a) => callLlm(...a),
+  loadKeys: (db, userId) => loadApiKeys(db, userId),
   platformKey: () => process.env.OPENROUTER_API_KEY?.trim() || undefined,
-  selfHosted: isSelfHosted,
+  selfHosted: () => isSelfHosted(),
   bucket: new Bucket(),
   now: () => new Date(),
   dailyCap: () => intFromEnv(process.env.JUDGE_FREE_DAILY_CALLS, DEFAULT_DAILY_CALLS),

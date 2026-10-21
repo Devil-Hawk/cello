@@ -338,7 +338,7 @@ function installDefaults(): void {
   io.loadApiKeys.mockResolvedValue({ openrouter: 'or-key', userId: DEMO_USER })
   io.userCompanyIds.mockResolvedValue(['company-1'])
   io.nextWaiting.mockResolvedValue(['j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7', 'j8', 'j9'])
-  io.judgeRoles.mockResolvedValue({ judged: ['j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7'], stopped: null })
+  io.judgeRoles.mockResolvedValue({ judged: ['j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7'], failed: [], stopped: null })
   io.judgeStatus.mockResolvedValue({ judgedToday: 7, waiting: 0, line: null })
   io.readOutreachConfig.mockResolvedValue({ openrouterKey: undefined })
   io.findDuplicateInitial.mockResolvedValue(null)
@@ -522,7 +522,7 @@ const PRODUCERS: Producer[] = [
   },
   {
     name: 'score batch — no model',
-    arrange: () => io.judgeRoles.mockResolvedValue({ judged: [], stopped: 'no_model' }),
+    arrange: () => io.judgeRoles.mockResolvedValue({ judged: [], failed: [], stopped: 'no_model' }),
     run: () => scoreBatch(post('/api/roles/judge-all', {})),
     status: 400,
     action: 'jobs.score_batch',
@@ -531,7 +531,7 @@ const PRODUCERS: Producer[] = [
   },
   {
     name: 'score batch — no resume',
-    arrange: () => io.judgeRoles.mockResolvedValue({ judged: [], stopped: 'no_resume' }),
+    arrange: () => io.judgeRoles.mockResolvedValue({ judged: [], failed: [], stopped: 'no_resume' }),
     run: () => scoreBatch(post('/api/roles/judge-all', {})),
     status: 400,
     action: 'jobs.score_batch',
@@ -540,7 +540,7 @@ const PRODUCERS: Producer[] = [
   },
   {
     name: 'score batch — the day allowance is used',
-    arrange: () => io.judgeRoles.mockResolvedValue({ judged: [], stopped: 'day' }),
+    arrange: () => io.judgeRoles.mockResolvedValue({ judged: [], failed: [], stopped: 'day' }),
     run: () => scoreBatch(post('/api/roles/judge-all', {})),
     status: 429,
     action: 'jobs.score_batch',

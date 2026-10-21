@@ -1264,7 +1264,7 @@ vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: async () => ({ openrouter: '
 vi.mock('@/lib/roles/judge', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/roles/judge')>()),
   nextWaiting: async () => ['j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7', 'j8', 'j9'],
-  judgeRoles: async () => ({ judged: ['j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7'], stopped: null }),
+  judgeRoles: async () => ({ judged: ['j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7'], failed: [], stopped: null }),
   judgeStatus: async () => ({ judgedToday: 7, waiting: 0, line: null }),
 }))
 vi.mock('@/lib/jobs/owned-query', async (importOriginal) => ({
