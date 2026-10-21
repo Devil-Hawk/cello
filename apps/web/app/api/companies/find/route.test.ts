@@ -86,6 +86,33 @@ describe('POST /api/companies/find', () => {
     ])
   })
 
+  it('returns the stream at the first rung, not when a slow search ends', async () => {
+    findMock.mockImplementationOnce(async (_db, _user, _name, _deps, report) => {
+      report({ rung: 'directory', line: 'Checking the directory' })
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      report({ rung: 'boards', line: 'Checking job boards' })
+      return { none: true, line: 'Cello could not find Zzz. Paste its careers link.' }
+    })
+    const started = Date.now()
+    const res = await post({ name: 'Zzz' })
+    expect(Date.now() - started).toBeLessThan(200)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('application/x-ndjson')
+    expect(await lines(res)).toEqual([
+      { rung: 'directory', line: 'Checking the directory' },
+      { rung: 'boards', line: 'Checking job boards' },
+      { none: true, line: 'Cello could not find Zzz. Paste its careers link.' },
+    ])
+  })
+
+  it('answers a search that fails before its first rung as a plain 500 with the error line, and no detail', async () => {
+    findMock.mockRejectedValueOnce(new Error('secret detail https://x.example'))
+    const res = await post({ name: 'Retell AI' })
+    expect(res.status).toBe(500)
+    expect(res.headers.get('content-type')).toContain('application/json')
+    expect(await res.json()).toEqual({ step: 'error', line: 'Cello could not finish that right now. Try again.' })
+  })
+
   it('writes two timings for a search: the whole search, and its first rung ending where the next one starts', async () => {
     findMock.mockImplementationOnce(async (_db, _user, _name, _deps, report) => {
       report({ rung: 'directory', line: 'Checking the directory' })

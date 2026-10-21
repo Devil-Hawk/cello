@@ -14,6 +14,7 @@ import { rpcSlotStore } from '@/lib/commands/slots'
 // about an employer; choosing a candidate is POST /api/companies/add. A demo account may search. A person may search
 // FIND_LIMIT times an hour (the command slots); past that the answer is a plain 429 with a line.
 //
+// The stream starts with the first rung; a search that fails or ends before any rung is a plain JSON answer.
 // Timed once the search is allowed to start (a 401, 400, 429 or 503 writes no row): two route_timings rows, `find` for
 // the whole search and `find.directory` for its first rung, which ends when the next rung starts.
 
@@ -58,5 +59,5 @@ export async function POST(request: NextRequest) {
       await recordRouteTiming(createAdminClient, 'find', total, ok)
       await recordRouteTiming(createAdminClient, 'find.directory', directoryMs ?? total, ok)
     }
-  })
+  }, { streamFrom: (event) => 'rung' in event })
 }
