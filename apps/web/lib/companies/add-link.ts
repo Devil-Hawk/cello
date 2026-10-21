@@ -156,10 +156,18 @@ export async function followedRow(db: Db, userId: string, by: { employerId?: str
   return null
 }
 
-/** Rows the person created in the last 24 hours, followed or not: an unfollow does not reset the day's limit. */
+/**
+ * Rows the person created in the last 24 hours, followed or not: an unfollow does not reset the day's limit. A lead
+ * the sourcer wrote (metadata.suggested) is not an add by the person, so it does not count.
+ */
 export async function addsToday(db: Db, userId: string): Promise<number> {
   const since = new Date(Date.now() - 86_400_000).toISOString()
-  const { count } = await db.from('companies').select('id', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', since)
+  const { count } = await db
+    .from('companies')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .gte('created_at', since)
+    .or('metadata->>suggested.is.null,metadata->>suggested.neq.true')
   return count ?? 0
 }
 

@@ -123,6 +123,16 @@ describe('followAndRead: follow, then one read inside the budget', () => {
     expect(r).toMatchObject({ ok: false, reason: 'daily_limit' })
     expect(read).not.toHaveBeenCalled()
   })
+
+  it('lead rows the sourcer wrote today do not use up the 30-a-day limit', async () => {
+    const today = new Date().toISOString()
+    const rows = Array.from({ length: DAILY_ADD_LIMIT }, (_, i) => ({ id: `c${i}`, user_id: 'u1', name: `Co ${i}`, domain: `co${i}.com`, watching: false, created_at: today, metadata: { suggested: true } }))
+    const read = readFn()
+    const { client, tables } = world({ companies: rows })
+    expect(await followAndRead(client, 'u1', 'e1', [engineer], { read })).toMatchObject({ ok: true, following: true, already: false })
+    expect(read).toHaveBeenCalledTimes(1)
+    expect(tables.companies).toHaveLength(DAILY_ADD_LIMIT + 1)
+  })
 })
 
 describe('unfollow and report', () => {
