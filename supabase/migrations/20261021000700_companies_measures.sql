@@ -1,0 +1,231 @@
+-- companies/measures (feature 1, PR 6): the Companies measures on the scorecard, and the route timings that one of them reads.
+--
+-- WHY
+--   Directive 24: every capability has a named measure, a bar and a place the owner sees the number (pnpm scorecard).
+--   Part 1 section 1.11 names T34 to T36 and S1 for Companies. The register already holds S1 (requirements, 20261008045000),
+--   so the route-timing measure is T37: a true-layer row, run every day by run_true_measures().
+--   T34 (the search ladder) is run by scripts/directory-coverage.ts --find --record when the find route lands (a later PR).
+--
+-- WHAT
+--   route_timings   one row per call of a Companies route (lib/companies/route-timing.ts); service role only.
+--   measure_t35()   browser reads of the last 7 days from render_jobs: queued, done with a verified employer, done with none, failed by class. Report.
+--   measure_t36()   "Not this company" reports of the last 30 days and where each employer stands now. Report.
+--   measure_t37()   share of add and follow calls of the last 7 days that end inside their bar: 60 s and 8 s, 95 percent.
+--   T12             a static row: the numbers on the Companies pages and in the scorecard name their columns in the pull request.
+--
+-- The clock's prune deletes route_timings older than 30 days (lib/clock/routines/prune.ts).
+
+-- ---------------------------------------------------------------------------
+-- route_timings
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.route_timings (
+  id bigint generated always as identity primary key,
+  route text not null,
+  ms integer not null check (ms >= 0),
+  ok boolean not null,
+  at timestamptz not null default now()
+);
+
+create index if not exists route_timings_route_idx on public.route_timings (route, at);
+
+alter table public.route_timings enable row level security;
+revoke all on public.route_timings from public, anon, authenticated;
+grant all on public.route_timings to service_role;
+grant usage, select on sequence public.route_timings_id_seq to service_role;
+
+-- ---------------------------------------------------------------------------
+-- The register rows (lib/measures/register.ts holds the same rows; a test keeps the two equal)
+-- ---------------------------------------------------------------------------
+
+insert into public.measures (id, layer, name, bar, direction, source, gates) values
+  ('T34', 'true', 'directory search by name: the owner''s named set through the full search ladder, the right employer among the candidates with the rung that found it, every miss named with its reason', '11 of 11 named; 8 of 10 unseeded startups', 'higher', 'measure_runs from scripts/directory-coverage.ts --find --record', array['K6', 'PG11']::text[]),
+  ('T35', 'true', 'browser reads of an employer''s careers page: queued, done with a verified employer, done with none, failed by class, per 7 days', 'reported; no bar until a month of numbers', 'reported', 'render_jobs', array['PG11']::text[]),
+  ('T36', 'true', '"Not this company" reports and what the re-check found: where each reported employer stands now, per 30 days', 'reported', 'reported', 'employer_reports and company_directory', array['K6']::text[]),
+  ('T37', 'true', 'Companies route timings: share of add calls ending or handing off within 60 s, and of follow calls with their first read ending or handing off within 8 s, per 7 days', '95 percent within each bar', 'higher', 'route_timings', array['K6']::text[])
+on conflict (id) do nothing;
+
+-- ---------------------------------------------------------------------------
+-- T35: browser reads
+-- ---------------------------------------------------------------------------
+
+create or replace function public.measure_t35()
+returns table (value numeric, passed boolean, sample_n integer, note text)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  n_queued integer;
+  n_proven integer;
+  n_none integer;
+  n_failed integer;
+  by_class text;
+begin
+  select count(*) filter (where state in ('queued', 'claimed')),
+         count(*) filter (where state = 'done' and result->>'settled' = 'verified'),
+         count(*) filter (where state = 'done' and coalesce(result->>'settled', '') <> 'verified'),
+         count(*) filter (where state = 'failed')
+    into n_queued, n_proven, n_none, n_failed
+    from public.render_jobs
+   where created_at > now() - interval '7 days';
+
+  select string_agg(format('%s %s', f.n, f.failure), ', ' order by f.n desc, f.failure) into by_class
+    from (
+      select coalesce(failure, 'no reason') as failure, count(*) as n
+        from public.render_jobs
+       where state = 'failed' and created_at > now() - interval '7 days'
+       group by 1
+    ) f;
+
+  if n_queued + n_proven + n_none + n_failed = 0 then
+    return query select null::numeric, null::boolean, 0, 'No browser read in the last 7 days.'::text;
+    return;
+  end if;
+  return query select
+    n_proven::numeric,
+    null::boolean,
+    n_queued + n_proven + n_none + n_failed,
+    format('In the last 7 days: %s queued, %s done with a verified employer, %s done with none, %s failed%s. Reported; no bar yet.',
+      n_queued, n_proven, n_none, n_failed, coalesce(' (' || by_class || ')', ''));
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- T36: "Not this company" reports
+-- ---------------------------------------------------------------------------
+
+create or replace function public.measure_t36()
+returns table (value numeric, passed boolean, sample_n integer, note text)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  n integer;
+  n_verified integer;
+  n_unreadable integer;
+  n_unverified integer;
+  reasons text;
+begin
+  select count(*),
+         count(*) filter (where d.verified_at is not null and d.cannot_read_reason is null),
+         count(*) filter (where d.cannot_read_reason is not null),
+         count(*) filter (where d.verified_at is null and d.cannot_read_reason is null)
+    into n, n_verified, n_unreadable, n_unverified
+    from public.employer_reports r
+    join public.company_directory d on d.id = r.employer_id
+   where r.created_at > now() - interval '30 days';
+
+  select string_agg(format('%s %s', x.n, x.reason), ', ' order by x.n desc, x.reason) into reasons
+    from (
+      select d.cannot_read_reason as reason, count(*) as n
+        from public.employer_reports r
+        join public.company_directory d on d.id = r.employer_id
+       where r.created_at > now() - interval '30 days' and d.cannot_read_reason is not null
+       group by 1
+    ) x;
+
+  if n = 0 then
+    return query select null::numeric, null::boolean, 0, 'No "Not this company" report in the last 30 days.'::text;
+    return;
+  end if;
+  return query select
+    n::numeric,
+    null::boolean,
+    n,
+    format('%s "Not this company" reports in the last 30 days. Each one checked the board again: %s employers still verified, %s cannot be read%s, %s no longer verified. Reported; no bar yet.',
+      n, n_verified, n_unreadable, coalesce(' (' || reasons || ')', ''), n_unverified);
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- T37: route timings for add and follow
+-- ---------------------------------------------------------------------------
+
+create or replace function public.measure_t37()
+returns table (value numeric, passed boolean, sample_n integer, note text)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  r record;
+  worst numeric := null;
+  total integer := 0;
+  parts text := '';
+begin
+  for r in
+    select b.route, b.bar_ms, count(t.ms) as n,
+           count(t.ms) filter (where t.ms <= b.bar_ms) as within,
+           percentile_cont(0.95) within group (order by t.ms) as p95
+      from (values ('add', 60000), ('follow', 8000)) as b (route, bar_ms)
+      left join public.route_timings t on t.route = b.route and t.at > now() - interval '7 days'
+     group by b.route, b.bar_ms
+     order by b.route
+  loop
+    total := total + r.n;
+    if r.n = 0 then
+      parts := parts || format('%s: no calls in the last 7 days. ', r.route);
+    else
+      worst := least(coalesce(worst, 1), r.within::numeric / r.n);
+      parts := parts || format('%s: %s of %s within %s ms, p95 %s ms. ', r.route, r.within, r.n, r.bar_ms, round(r.p95::numeric));
+    end if;
+  end loop;
+
+  if total = 0 then
+    return query select null::numeric, null::boolean, 0, 'No add or follow call in the last 7 days.'::text;
+    return;
+  end if;
+  return query select
+    round(100 * worst, 1),
+    case when worst is null then null else worst >= 0.95 end,
+    total,
+    trim(parts) || ' The bar is 95 percent within each bar.';
+end;
+$$;
+
+revoke all on function public.measure_t35(), public.measure_t36(), public.measure_t37() from public, anon, authenticated;
+grant execute on function public.measure_t35(), public.measure_t36(), public.measure_t37() to service_role;
+
+-- T12 is a static row: the review of this pull request traced every number to its column.
+insert into public.measure_runs (measure_id, value, passed, sample_n, note)
+select 'T12', null, true, null, 'Checked in review of the companies/measures pull request: every number on the Companies pages and the scorecard names its column in that pull request body.'
+where not exists (select 1 from public.measure_runs where measure_id = 'T12');
+
+-- ---------------------------------------------------------------------------
+-- Self-check: the functions return one row each; T37 counts a bar, and the rows are made in a block that always rolls back.
+-- ---------------------------------------------------------------------------
+
+do $$
+declare
+  r record;
+begin
+  if to_regclass('public.route_timings') is null then raise exception 'route_timings is missing'; end if;
+  if (select count(*) from public.measures where id in ('T34', 'T35', 'T36', 'T37')) <> 4 then raise exception 'the Companies measures must be in the register'; end if;
+  if has_table_privilege('authenticated', 'public.route_timings', 'select') or has_table_privilege('anon', 'public.route_timings', 'select') then
+    raise exception 'route_timings must not be readable by client roles';
+  end if;
+  if has_function_privilege('anon', 'public.measure_t37()', 'execute') or has_function_privilege('authenticated', 'public.measure_t37()', 'execute') then
+    raise exception 'measure_t37 must not be executable by client roles';
+  end if;
+  if (select count(*) from public.measure_t35()) <> 1 or (select count(*) from public.measure_t36()) <> 1 or (select count(*) from public.measure_t37()) <> 1 then
+    raise exception 'each Companies measure must return one row';
+  end if;
+
+  begin
+    -- one add within 60 s, one add over it, one follow within 8 s: adds 50 percent, follows 100 percent, so the worst is 50
+    insert into public.route_timings (route, ms, ok) values ('add', 1000, true), ('add', 90000, true), ('follow', 2000, true);
+    select * into r from public.measure_t37();
+    if r.value <> 50 or r.passed or r.sample_n <> 3 then
+      raise exception 'measure_t37: the worst bar share must be 50 and not pass, got % % %', r.value, r.passed, r.sample_n;
+    end if;
+    raise exception 'companies_measures self-check passed' using errcode = 'P0001';
+  exception when raise_exception then
+    if sqlerrm <> 'companies_measures self-check passed' then raise; end if;
+  end;
+  if exists (select 1 from public.route_timings) then raise exception 'the self-check left route timings behind'; end if;
+end
+$$;
+
+notify pgrst, 'reload schema';
