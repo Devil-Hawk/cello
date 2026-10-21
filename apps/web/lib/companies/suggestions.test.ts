@@ -3,6 +3,7 @@ import { EMPTY_TARGETING } from '../targeting'
 import type { JobLead } from '../sources/types'
 import type { BoardHit, YcRow } from './types'
 import type { LocationPrefs } from './location'
+import { normalizeCompanyName } from '../entities/companies'
 import { buildSuggestions, leadCompanies, roleMatcher, type SuggestionInputs } from './suggestions'
 
 const NOW = new Date('2026-10-05T12:00:00Z')
@@ -66,7 +67,12 @@ function ycDirectory(extra: YcRow[] = []): YcRow[] {
   return [...rows, ...extra]
 }
 
-const run = (i: SuggestionInputs, leads: JobLead[], d: YcRow[] = [], boards = new Map<string, BoardHit>()) => buildSuggestions(i, leads, d, boards, NOW)
+// A verified employer of the directory: the only kind of company that is ever suggested.
+const employer = (name: string, domain: string | null): YcRow => dir({ name, name_key: normalizeCompanyName(name), domain, source: 'directory', profile_url: null, regions: [], locations: null })
+
+// Every company a lead names is a verified employer here, and so is each of `verified`.
+const run = (i: SuggestionInputs, leads: JobLead[], d: YcRow[] = [], boards = new Map<string, BoardHit>(), verified: YcRow[] = []) =>
+  buildSuggestions(i, leads, [...d, ...leads.map((l) => employer(l.company, l.companyDomain ?? null)), ...verified], boards, NOW)
 
 describe('roleMatcher', () => {
   it('uses target titles first, then functions, then resume keywords on the title, else null', () => {
@@ -115,12 +121,15 @@ describe('leadCompanies', () => {
         lead({ company: 'Stripe', companyDomain: 'stripe.com', externalId: 'x4' }),
         lead({ company: 'Evil Corp', companyDomain: 'evil.com', externalId: 'x5' }),
         lead({ company: 'Yc Co', source: 'ycombinator', externalId: 'x6' }),
+        lead({ company: 'Not In Directory', companyDomain: 'nid.com', externalId: 'x7' }),
       ],
-      []
+      [employer('Acme', 'acme.com'), employer('Marketing Wizards', null), employer('Stripe', 'stripe.com'), employer('Evil Corp', 'evil.com'), employer('Pool Co', 'pool.com')]
     )
+    // the leads' companies that are directory employers first, then the rest of the pool; none that the directory lacks
     expect(out).toEqual([
       { key: 'acme.com', name: 'Acme', domain: 'acme.com' },
       { key: 'name:marketing wizards', name: 'Marketing Wizards', domain: null },
+      { key: 'pool.com', name: 'Pool Co', domain: 'pool.com' },
     ])
   })
 
@@ -129,6 +138,36 @@ describe('leadCompanies', () => {
     const out = run(inputs(), [lead({ company: 'Quiet Co', companyDomain: 'quiet.com', title: 'Office Manager' })], [], new Map([['quiet.com', hit]]))!
     expect(out).toHaveLength(1)
     expect(out[0]).toMatchObject({ name: 'Quiet Co', tier: 1, ats: { matchingRoles: 1 } })
+  })
+})
+
+describe('the pool', () => {
+  const ycTiny = dir({ name: 'Tiny Pay', name_key: 'tiny pay', domain: 'tiny.com', tags: ['Fintech', 'Payments'], profile_url: 'https://www.ycombinator.com/companies/tiny-pay' })
+  const liked = [{ name: 'Stripe', domain: 'stripe.com', tags: ['fintech', 'payments'] }]
+
+  it('suggests only verified directory employers: not a lead, not a Y Combinator company, the directory has not verified', () => {
+    const leads = [lead({ company: 'Lead Only', companyDomain: 'leadonly.com' }), lead({ company: 'Verified Co', companyDomain: 'verified.com', externalId: 'v' })]
+    // no employer for Lead Only or Tiny Pay: their domains are not in the directory
+    const out = buildSuggestions(inputs({ liked }), leads, [...ycDirectory([ycTiny]), employer('Verified Co', 'verified.com')], new Map(), NOW)!
+    expect(out.map((s) => s.name)).toEqual(['Verified Co'])
+    // a lead without a domain is the verified employer of that name, and a different domain is another company
+    const byName = buildSuggestions(inputs(), [lead({ company: 'Verified Co', companyDomain: null })], [employer('Verified Co', 'verified.com')], new Map(), NOW)!
+    expect(byName.map((s) => s.name)).toEqual(['Verified Co'])
+    expect(buildSuggestions(inputs(), [lead({ company: 'Verified Co', companyDomain: 'other.com' })], [employer('Verified Co', 'verified.com')], new Map(), NOW)).toEqual([])
+  })
+
+  it('suggests a verified employer no lead names when its own board has a matching role, and one a similar Y Combinator company is', () => {
+    const pool = [employer('Quiet Co', 'quiet.com'), employer('Tiny Pay', 'tiny.com'), employer('Dull Co', 'dull.com')]
+    const hits = new Map([['quiet.com', board({ titles: ['Backend Engineer'] })], ['dull.com', board({ titles: ['Office Manager'] })]])
+    const out = buildSuggestions(inputs({ liked }), [], [...ycDirectory([ycTiny]), ...pool], hits, NOW)!
+    expect(out.map((s) => [s.name, s.tier])).toEqual([['Quiet Co', 1], ['Tiny Pay', 4]])
+  })
+
+  it('leaves out an employer the person follows, whichever way it is named', () => {
+    const pool = [employer('Followed Co', 'followed.com'), employer('Free Co', 'free.com')]
+    const hits = new Map([['followed.com', board({})], ['free.com', board({})]])
+    const out = buildSuggestions(inputs({ watched: [{ name: 'Followed Company', domain: 'www.followed.com' }] }), [], pool, hits, NOW)!
+    expect(out.map((s) => s.name)).toEqual(['Free Co'])
   })
 })
 
@@ -145,7 +184,7 @@ describe('tiers', () => {
       lead({ company: 'BoardCo', companyDomain: 'boardco.com', url: 'https://remotive.com/d', externalId: 'd' }),
     ]
     const boards = new Map([['boardco.com', board({ titles: ['Backend Engineer', 'Designer'] })]])
-    const out = run(inputs({ liked: [{ name: 'Stripe', domain: 'stripe.com', tags: ['fintech', 'payments'] }] }), leads, d, boards)!
+    const out = run(inputs({ liked: [{ name: 'Stripe', domain: 'stripe.com', tags: ['fintech', 'payments'] }] }), leads, d, boards, [employer('Tiny Pay', 'tiny.com')])!
     expect(out.map((s) => [s.name, s.tier])).toEqual([['BoardCo', 1], ['Two Posts', 2], ['One Post', 3], ['Tiny Pay', 4]])
     expect(out.map((s) => s.rank)).toEqual([1, 2, 3, 4])
   })
@@ -225,7 +264,7 @@ describe('location is strict', () => {
     const d = ycDirectory([
       dir({ name: 'UK Pay', name_key: 'uk pay', domain: 'uk.com', tags: ['Fintech', 'Payments'], locations: 'London, England, United Kingdom', regions: ['United Kingdom'] }),
     ])
-    const out = run(inputs({ liked: [{ name: 'Stripe', domain: null, tags: ['fintech', 'payments'] }] }), [], d)!
+    const out = run(inputs({ liked: [{ name: 'Stripe', domain: null, tags: ['fintech', 'payments'] }] }), [], d, new Map(), [employer('UK Pay', 'uk.com')])!
     expect(out).toEqual([])
   })
 })
@@ -238,7 +277,7 @@ describe('every suggestion is sourced', () => {
     lead({ company: 'HN Co', companyDomain: 'hn.com', source: 'hackernews', url: 'https://hn.com/apply', externalId: 'https://news.ycombinator.com/item?id=4242', title: 'Backend Engineer', location: 'Remote (US)' }),
     lead({ company: 'Posted Co', companyDomain: 'posted.com' }),
   ]
-  const out = run(inputs({ liked: [{ name: 'Stripe', domain: null, tags: ['fintech', 'payments'] }] }), leads, d, new Map([['boardco.com', board({})]]))!
+  const out = run(inputs({ liked: [{ name: 'Stripe', domain: null, tags: ['fintech', 'payments'] }] }), leads, d, new Map([['boardco.com', board({})]]), [employer('Tiny Pay', 'tiny.com')])!
 
   it('has an http(s) source URL and a label on every row, and at most 160 characters with no em dash in the reason', () => {
     expect(out.length).toBeGreaterThanOrEqual(3)
@@ -285,7 +324,7 @@ describe('every suggestion is sourced', () => {
 
   it('does not suggest a company that shares only a generic tag with a liked one', () => {
     const generic = ycDirectory([dir({ name: 'Generic Co', name_key: 'generic co', domain: 'gen.com', tags: ['B2B'] })])
-    expect(run(inputs({ liked: [{ name: 'Stripe', domain: null, tags: ['b2b'] }] }), [], generic)).toEqual([])
+    expect(run(inputs({ liked: [{ name: 'Stripe', domain: null, tags: ['b2b'] }] }), [], generic, new Map(), [employer('Generic Co', 'gen.com')])).toEqual([])
   })
 
   it('caps the list at 30', () => {

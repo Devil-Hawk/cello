@@ -7,7 +7,8 @@
 // Evidence gathered per person, all of it public or their own:
 //   leads            the aggregators Cello already reads, filtered by their targeting. They are evidence of hiring
 //                    only: nothing here makes an employer or stores a role (a lead is traced or counted elsewhere)
-//   the directory    Y Combinator candidates with their tags (the seed's), and verified employers by name
+//   the directory    the pool every suggestion comes from: verified employers (company_directory), the ones with the most
+//                    open roles plus any the leads name, with Y Combinator candidates' tags (the seed's) to compare by
 //   live boards      the verified employers' own boards, read now. A board is only ever one the verifier tied to the
 //                    employer; no board is guessed from a name
 // Failure never destroys good data: when every source fails the old open rows stay and the state says "failed".
@@ -41,6 +42,8 @@ const MAX_LIKED = 40
 const LIKED_DESCRIPTIONS = 3
 const LIKED_TEXT_CHARS = 1500
 const MAX_BOARD_JOBS = 200
+/** Verified employers with a readable board considered per person, the most open roles first. ponytail: the same 300 for everyone; rotate the window when the directory outgrows it. */
+const POOL_MAX = 300
 
 export type RefreshStatus = 'ok' | 'partial' | 'failed' | 'needs_targeting'
 
@@ -266,13 +269,17 @@ interface DirectoryRow {
   ats_token: string | null
 }
 
-/** Verified employers the leads name, by name: their domain says which company a lead without one means. */
+/**
+ * The pool: verified employers whose board reads, the ones with the most open roles, and any the leads name by name (their
+ * domain says which company a lead without one means). Only employers in the directory are ever suggested.
+ */
 async function loadEmployerRows(admin: AdminClient, leads: JobLead[]): Promise<{ rows: YcRow[]; employers: DirectoryRow[] }> {
   const keys = [...new Set(leads.map((l) => normalizeCompanyName(l.company)).filter(Boolean))]
-  const employers: DirectoryRow[] = []
+  const { data: top } = await admin.from('company_directory').select(COLUMNS).not('verified_at', 'is', null).is('cannot_read_reason', null).not('ats_provider', 'is', null).gt('open_count', 0).order('open_count', { ascending: false }).limit(POOL_MAX)
+  const employers: DirectoryRow[] = (top as DirectoryRow[] | null) ?? []
   for (let i = 0; i < keys.length; i += 100) {
     const { data } = await admin.from('company_directory').select(COLUMNS).not('verified_at', 'is', null).in('name_norm', keys.slice(i, i + 100))
-    employers.push(...((data as DirectoryRow[] | null) ?? []))
+    for (const e of (data as DirectoryRow[] | null) ?? []) if (!employers.some((o) => o.id === e.id)) employers.push(e)
   }
   const rows: YcRow[] = employers.map((e) => ({ name: e.name, name_key: e.name_norm, domain: e.domain, source: 'directory', profile_url: null, tags: [], regions: [], locations: null }))
   return { rows, employers }
