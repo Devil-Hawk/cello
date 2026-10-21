@@ -14,7 +14,7 @@ def _read(name: str) -> str:
     return (WORKFLOWS / name).read_text()
 
 
-@pytest.mark.parametrize("name", ["harness-cron.yml", "gmail-cron.yml", "autopilot-cron.yml"])
+@pytest.mark.parametrize("name", ["gmail-cron.yml", "autopilot-cron.yml"])
 def test_cron_workflows_never_print_the_response_body(name):
     text = _read(name)
     assert not re.search(r"\bcat\s+/tmp/", text), "response body must not be cat'd into the log"
@@ -25,29 +25,23 @@ def test_cron_workflows_never_print_the_response_body(name):
 def test_scrape_dispatch_input_is_not_interpolated_into_the_shell():
     text = _read("scrape.yml")
     for line in text.splitlines():
-        if "github.event.inputs.company_id" in line or "inputs.company_id" in line:
-            assert line.strip().startswith("COMPANY_ID:"), line
+        if "inputs.company_ids" in line:
+            assert line.strip().startswith("COMPANY_IDS:"), line
     assert "npx tsx scripts/ingest.ts" in text
-    assert '[[ "$COMPANY_ID" =~ ^[0-9a-fA-F]{8}-' in text
+    assert '[[ "$COMPANY_IDS" =~ ^${uuid}' in text
 
 
-def test_schedules():
-    assert "cron: '41 */6 * * *'" in _read("scrape.yml")
-    assert "group: scrape\n" in _read("scrape.yml")
-    assert "cron: '47 * * * *'" in _read("gmail-cron.yml")
+def test_scrape_runs_one_at_a_time_and_is_not_scheduled_here():
+    # The database clock dispatches this workflow; lib/clock/no-schedules.test.ts holds every workflow to that.
+    text = _read("scrape.yml")
+    assert re.search(r"^\s*group: scrape$", text, re.M)
+    assert not re.search(r"^\s*schedule:", "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#")), re.M)
 
 
 def test_autopilot_cron_has_no_schedule():
     text = _read("autopilot-cron.yml")
     assert "schedule:" not in text.split("jobs:")[0].replace("# No schedule: paused", "")
     assert "workflow_dispatch:" in text
-
-
-def test_harness_cron_has_no_schedule_and_waits_for_the_route():
-    text = _read("harness-cron.yml")
-    assert "schedule:" not in text.split("jobs:")[0].replace("# No schedule here", "")
-    assert "workflow_dispatch:" in text
-    assert "--max-time 330" in text
 
 
 def test_browser_apply_does_not_lean_on_the_inert_browser_use_env_var():

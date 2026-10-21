@@ -107,7 +107,7 @@ jobs:
       - name: Run tests
         run: |
           cd packages/scrapers
-          pytest || true  # Allow test failures for now
+          pytest -q
 
   build:
     name: Build
