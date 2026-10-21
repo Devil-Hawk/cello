@@ -55,6 +55,14 @@ describe('GET /api/companies', () => {
     expect(pages[0]).toEqual({ userId: 'u1', type: undefined, showClosed: false, limit: 100, offset: 0 })
   })
 
+  it('a bare request is the first page of 50, and a limit of 0 is a page of one', async () => {
+    const res = await get()
+    expect(await res.json()).toMatchObject({ ok: true, limit: 50, offset: 0 })
+    await get('?limit=&offset=')
+    await get('?limit=0')
+    expect(pages.map((p) => [p.limit, p.offset])).toEqual([[50, 0], [50, 0], [1, 0]])
+  })
+
   it('passes a role type and show_closed through, and refuses a type that is not one', async () => {
     expect((await get('?type=forward-deployed-engineer&show_closed=1&limit=20&offset=40')).status).toBe(200)
     expect(pages[0]).toEqual({ userId: 'u1', type: 'forward-deployed-engineer', showClosed: true, limit: 20, offset: 40 })

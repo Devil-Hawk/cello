@@ -12,9 +12,11 @@ import { ROLE_TYPE_IDS } from '@/lib/jobs/role-types'
 
 export const dynamic = 'force-dynamic'
 
-const int = (v: string | null, fallback: number, max: number) => {
+// An absent or empty value is the fallback (Number(null) is 0, which would turn a bare request into a page of one).
+const int = (v: string | null, fallback: number, max: number, min = 0) => {
+  if (v === null || v === '') return fallback
   const n = Number(v)
-  return Number.isFinite(n) && n >= 0 ? Math.min(Math.floor(n), max) : fallback
+  return Number.isFinite(n) && n >= 0 ? Math.max(Math.min(Math.floor(n), max), min) : fallback
 }
 
 export async function GET(request: NextRequest) {
@@ -36,7 +38,7 @@ export async function GET(request: NextRequest) {
     const page = await companiesPage(admin, user.id, {
       type,
       showClosed: ['1', 'true'].includes(params.get('show_closed') ?? ''),
-      limit: int(params.get('limit'), 50, 100),
+      limit: int(params.get('limit'), 50, 100, 1),
       offset: int(params.get('offset'), 0, 100_000),
     })
     return NextResponse.json({ ok: true, ...page })
