@@ -275,6 +275,14 @@ describe('companies.add by directory id and by candidate', () => {
     expect(tables.companies[0]).toMatchObject({ user_id: 'u1', watching: true })
   })
 
+  it('a candidate with no domain says Checking its name and sends no host', async () => {
+    const noDomain = { id: 'c2', name: 'Gusto', domain: null, ats_provider: 'greenhouse', ats_token: 'gusto', source: 'kalil', failed_reads: 0, state: 'pending', employer_id: null }
+    const d = deps({ identity: { name: 'Gusto', homeUrls: [] } })
+    await addCompany(world({ directory_candidates: [noDomain] }).client, 'u1', { candidateId: 'c2' }, d.value)
+    expect(d.events[0]).toEqual({ step: 'reading', line: 'Checking Gusto' })
+    expect(d.events[0]).not.toHaveProperty('host')
+  })
+
   it('a candidate add says reading before its first network call; the cooldown, already-followed and daily-limit refusals say nothing', async () => {
     const pending = { id: 'c1', name: 'Gusto', domain: 'gusto.com', ats_provider: 'greenhouse', ats_token: 'gusto', source: 'kalil', failed_reads: 0, state: 'pending', employer_id: null }
     const order: string[] = []
