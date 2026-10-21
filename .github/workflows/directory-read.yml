@@ -1,0 +1,71 @@
+name: Read careers pages
+
+# Reads the pages Cello's own server could not: careers pages that build their list with script, sit behind
+# a Cloudflare check, or answer a search. It has no schedule. The database clock (agent_sweep()) dispatches it
+# when render_jobs has waiting rows, at most once an hour, with the number of jobs to take.
+# The worker holds no database key. It claims each job from the app and posts what it read, both signed with
+# the shared secret. Nothing here prints an address or a search: only counts and error classes.
+# Run by hand from the Actions tab, or on your own machine (packages/scrapers/README.md).
+
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: 'Most jobs to take (1 to 50)'
+        required: true
+        default: '10'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: directory-read
+  cancel-in-progress: false
+
+jobs:
+  read:
+    name: Read careers pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+
+    steps:
+      - name: Check the count
+        env:
+          COUNT: ${{ inputs.count }}
+        run: |
+          # Via env, never interpolated into the script: a dispatch input is attacker-shaped text.
+          if ! [[ "$COUNT" =~ ^[0-9]{1,2}$ ]] || [ "$COUNT" -lt 1 ] || [ "$COUNT" -gt 50 ]; then
+            echo "::error::count must be a number from 1 to 50"
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install the worker
+        run: |
+          cd packages/scrapers
+          pip install -e ".[render]"
+
+      # Scrapling's browser, for the rendered and stealth rungs. Non-fatal: without it the worker still
+      # reads what plain requests can, and a job it cannot read is reported by class.
+      - name: Install the browser
+        continue-on-error: true
+        run: |
+          cd packages/scrapers
+          scrapling install
+
+      - name: Work the queue
+        env:
+          CELLO_URL: ${{ secrets.CELLO_URL }}
+          CELLO_CONTINUE_SECRET: ${{ secrets.CELLO_CONTINUE_SECRET }}
+          COUNT: ${{ inputs.count }}
+        run: |
+          cd packages/scrapers
+          python -m src.worker --once --max "$COUNT"
