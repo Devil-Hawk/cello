@@ -53,7 +53,7 @@ export interface TypeResult {
 
 export type TypeStop = 'limit' | 'unavailable' | null
 
-const ItemSchema = z.object({ i: z.number().int(), type: z.enum([...ROLE_TYPE_IDS, 'none'] as [string, ...string[]]), quote: z.string() })
+const ItemSchema = z.object({ i: z.number().int(), type: z.enum(['none', ...ROLE_TYPE_IDS]), quote: z.string() })
 const AnswerSchema = z.object({ items: z.array(z.unknown()) })
 
 const fold = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
