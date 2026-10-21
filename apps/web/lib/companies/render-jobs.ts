@@ -22,6 +22,8 @@ export interface RenderJob {
   url: string | null
   query: string | null
   state: string
+  /** The person who asked, who follows the employer when the answer proves one. */
+  requested_by?: string | null
 }
 
 export interface QueueInput {
@@ -29,6 +31,7 @@ export interface QueueInput {
   candidateId?: string | null
   url?: string | null
   query?: string | null
+  requestedBy?: string | null
 }
 
 const isHttp = (u: string) => u.length <= 2000 && /^https?:\/\/[^\s]+$/i.test(u)
@@ -49,7 +52,7 @@ export async function queueRenderJob(db: Db, input: QueueInput): Promise<string 
 
   const { data, error } = await db
     .from('render_jobs')
-    .insert({ kind: input.kind, candidate_id: input.candidateId ?? null, url: input.kind === 'careers_page' ? url : null, query: input.kind === 'web_search' ? query : null })
+    .insert({ kind: input.kind, candidate_id: input.candidateId ?? null, url: input.kind === 'careers_page' ? url : null, query: input.kind === 'web_search' ? query : null, requested_by: input.requestedBy ?? null })
     .select('id')
     .single()
   if (error || !data) return null
