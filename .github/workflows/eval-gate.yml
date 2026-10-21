@@ -25,7 +25,6 @@ on:
       - 'apps/web/lib/companies/**'
       - 'apps/web/lib/ingest/**'
       - 'apps/web/lib/quality/**'
-      - 'apps/web/app/api/companies/verify/**'
       - 'apps/web/scripts/evals/**'
       - 'apps/web/scripts/eval-*.ts'
       - 'apps/web/scripts/eval-*/**'
