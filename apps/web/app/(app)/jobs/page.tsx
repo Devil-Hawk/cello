@@ -7,7 +7,6 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Briefcase, Building2, Loader2, Plus, SearchX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
