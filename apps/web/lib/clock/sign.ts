@@ -38,6 +38,14 @@ export function continueBody(payload: Omit<ContinuePayload, 'exp'>, nowMs: numbe
   return JSON.stringify({ ...payload, exp: Math.floor(nowMs / 1000) + MAX_EXP_AHEAD_S })
 }
 
+/** True when `signature` is the hex HMAC of exactly these bytes under `key`. The one comparison every signed door uses. */
+export function verifySigned(raw: string, signature: string | null | undefined, key: string): boolean {
+  if (!signature) return false
+  const given = Buffer.from(signature, 'hex')
+  const expected = Buffer.from(signContinue(raw, key), 'hex')
+  return given.length === expected.length && timingSafeEqual(given, expected)
+}
+
 export type VerifyResult =
   | { ok: true; payload: ContinuePayload }
   | { ok: false; reason: 'no_signature' | 'bad_signature' | 'bad_body' | 'expired' | 'too_far' }
@@ -45,11 +53,7 @@ export type VerifyResult =
 /** Check a continue request: the signature over the exact raw body, then the expiry. */
 export function verifyContinue(rawBody: string, signature: string | null | undefined, nowMs: number = Date.now(), key: string = secret()): VerifyResult {
   if (!signature) return { ok: false, reason: 'no_signature' }
-  const given = Buffer.from(signature, 'hex')
-  const matches = (text: string): boolean => {
-    const expected = Buffer.from(signContinue(text, key), 'hex')
-    return given.length === expected.length && timingSafeEqual(given, expected)
-  }
+  const matches = (text: string): boolean => verifySigned(text, signature, key)
   let payload: ContinuePayload
   try {
     payload = JSON.parse(rawBody) as ContinuePayload
