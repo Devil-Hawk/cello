@@ -26,4 +26,16 @@ describe('/api/companies/follow cross-site refusal', () => {
     expect(followMock).not.toHaveBeenCalled()
     expect(unfollowMock).not.toHaveBeenCalled()
   })
+
+  it('refuses a follow or an unfollow with no employer id, a bad id, or a dream flag that is not a boolean', async () => {
+    const bad = [{}, { employerId: 'nope' }, { employerId: ID, dream: 'yes' }]
+    for (const body of bad) {
+      expect((await POST(req('POST', { 'content-type': 'application/json' }, body))).status, JSON.stringify(body)).toBe(400)
+      expect((await DELETE(req('DELETE', { 'content-type': 'application/json' }, { employerId: 'nope' }))).status).toBe(400)
+    }
+    const notJson = new NextRequest('http://localhost/api/companies/follow', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{bad' })
+    expect((await POST(notJson)).status).toBe(400)
+    expect(followMock).not.toHaveBeenCalled()
+    expect(unfollowMock).not.toHaveBeenCalled()
+  })
 })

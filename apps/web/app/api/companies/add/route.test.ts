@@ -55,6 +55,12 @@ describe('POST /api/companies/add', () => {
     }
   })
 
+  it('refuses a cross-site add before anything is read', async () => {
+    const res = await POST(new NextRequest('http://localhost/api/companies/add', { method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' }, body: JSON.stringify({ link: 'retellai.com/careers' }) }))
+    expect(res.status).toBe(403)
+    expect(addMock).not.toHaveBeenCalled()
+  })
+
   it('says it could not add, and nothing else, when the work throws', async () => {
     addMock.mockRejectedValueOnce(new Error('secret detail'))
     const res = await post({ link: 'retellai.com/careers' })
