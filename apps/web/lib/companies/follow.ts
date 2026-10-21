@@ -97,9 +97,15 @@ export async function unfollowEmployer(db: Db, userId: string, employerId: strin
  * from search and from getEmployer, which is the opposite of re-proving it.
  * ponytail: no per-person limit on reports; each one costs one board check. Add a cap when reports are abused.
  */
-export async function reportEmployer(db: Db, userId: string, employerId: string): Promise<{ ok: true; was: 'following' | 'not_following' } | { ok: false; reason: 'not_found' }> {
+export type ReportResult = { ok: true; was: 'following' | 'not_following' } | { ok: false; reason: 'not_found' | 'demo' }
+
+/** Only a followed employer can be reported: a report on one the person does not follow writes nothing. */
+export async function reportEmployer(db: Db, userId: string, employerId: string): Promise<ReportResult> {
   if (!(await getEmployer(db, employerId))) return { ok: false, reason: 'not_found' }
+  const { data: profile } = await db.from('profiles').select('is_demo, demo_expires_at').eq('id', userId).maybeSingle()
+  if (isDemoProfile(profile as { is_demo: boolean | null; demo_expires_at: string | null } | null)) return { ok: false, reason: 'demo' }
   const unfollowed = await unfollowEmployer(db, userId, employerId)
+  if (unfollowed.was === 'not_following') return { ok: true, was: 'not_following' }
   const { error: reportError } = await db.from('employer_reports').insert({ user_id: userId, employer_id: employerId })
   if (reportError) throw new Error(`could not keep the report: ${reportError.message}`)
   const now = Date.now()

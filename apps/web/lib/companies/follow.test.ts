@@ -136,6 +136,19 @@ describe('unfollow and report', () => {
     expect(Date.parse(dir.next_read_at as string)).toBeLessThanOrEqual(Date.now())
   })
 
+  it('report by a demo account is refused and writes nothing', async () => {
+    const { client, queries } = world({ profiles: [{ id: 'u1', is_demo: true, demo_expires_at: null }], companies: [{ id: 'c1', user_id: 'u1', name: 'Acme', employer_id: 'e1', watching: true }] })
+    expect(await reportEmployer(client, 'u1', 'e1')).toEqual({ ok: false, reason: 'demo' })
+    expect(writes(queries)).toEqual([])
+  })
+
+  it('report on an employer the person does not follow writes no report and no re-check', async () => {
+    const { client, tables } = world()
+    expect(await reportEmployer(client, 'u1', 'e1')).toEqual({ ok: true, was: 'not_following' })
+    expect(tables.employer_reports).toEqual([])
+    expect(tables.company_directory[0]).toMatchObject({ verified_at: employer().verified_at, next_read_at: null })
+  })
+
   it('report for an employer Cello does not have is not_found and writes nothing', async () => {
     const { client, queries } = world()
     expect(await reportEmployer(client, 'u1', 'nope')).toEqual({ ok: false, reason: 'not_found' })
