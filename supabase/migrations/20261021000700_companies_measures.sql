@@ -140,16 +140,25 @@ declare
   n_queued integer;
   n_proven integer;
   n_none integer;
+  n_searched integer;
+  n_unwaited integer;
   n_failed integer;
+  n_total integer;
   by_class text;
 begin
-  select count(*) filter (where state in ('queued', 'claimed')),
-         count(*) filter (where state = 'done' and result->>'settled' = 'verified'),
-         count(*) filter (where state = 'done' and coalesce(result->>'settled', '') <> 'verified'),
-         count(*) filter (where state = 'failed')
-    into n_queued, n_proven, n_none, n_failed
-    from public.render_jobs
-   where created_at > now() - interval '7 days';
+  -- Counted from the job and the candidate it was for, never from the job's own settled word: two racing posts can leave
+  -- "retry" on a job whose employer is verified. A web search answers with domains, and a read with nobody waiting has no candidate.
+  select count(*) filter (where j.state in ('queued', 'claimed')),
+         count(*) filter (where j.kind = 'careers_page' and j.state = 'done' and c.state = 'verified'),
+         count(*) filter (where j.kind = 'careers_page' and j.state = 'done' and c.id is not null and c.state <> 'verified'),
+         count(*) filter (where j.kind = 'web_search' and j.state = 'done' and j.result ? 'domains'),
+         count(*) filter (where j.kind = 'careers_page' and j.state = 'done' and j.candidate_id is null),
+         count(*) filter (where j.state = 'failed'),
+         count(*)
+    into n_queued, n_proven, n_none, n_searched, n_unwaited, n_failed, n_total
+    from public.render_jobs j
+    left join public.directory_candidates c on c.id = j.candidate_id
+   where j.created_at > now() - interval '7 days';
 
   select string_agg(format('%s %s', f.n, f.failure), ', ' order by f.n desc, f.failure) into by_class
     from (
@@ -159,17 +168,54 @@ begin
        group by 1
     ) f;
 
-  if n_queued + n_proven + n_none + n_failed = 0 then
+  if n_total = 0 then
     return query select null::numeric, null::boolean, 0, 'No browser read in the last 7 days.'::text;
     return;
   end if;
   return query select
     n_proven::numeric,
     null::boolean,
-    n_queued + n_proven + n_none + n_failed,
-    format('In the last 7 days: %s queued, %s done with a verified employer, %s done with none, %s failed%s. Reported; no bar yet.',
-      n_queued, n_proven, n_none, n_failed, coalesce(' (' || by_class || ')', ''));
+    n_total,
+    format('In the last 7 days: %s queued, %s done with a verified employer, %s done with none, %s web searches answered, %s reads with nobody waiting, %s failed%s. Reported; no bar yet.',
+      n_queued, n_proven, n_none, n_searched, n_unwaited, n_failed, coalesce(' (' || by_class || ')', ''));
 end;
+$$;
+
+-- Self-check: the review's case, two verified, one none, one web search, one failed and one queued (with one read nobody waited
+-- for). The existing jobs are set aside inside the block and come back on rollback.
+do $$
+declare
+  c_ok1 uuid;
+  c_ok2 uuid;
+  c_bad uuid;
+  r record;
+begin
+  begin
+    delete from public.render_jobs;
+    insert into public.directory_candidates (name, name_norm, source, state) values
+      ('Self check verified one', 'self check verified one', 'person', 'verified') returning id into c_ok1;
+    insert into public.directory_candidates (name, name_norm, source, state) values
+      ('Self check verified two', 'self check verified two', 'person', 'verified') returning id into c_ok2;
+    insert into public.directory_candidates (name, name_norm, source, state) values
+      ('Self check no board', 'self check no board', 'person', 'failed') returning id into c_bad;
+    insert into public.render_jobs (kind, candidate_id, url, state, result) values
+      ('careers_page', c_ok1, 'https://ok1.example/careers', 'done', '{"settled": "verified"}'),
+      ('careers_page', c_ok2, 'https://ok2.example/careers', 'done', '{"settled": "retry"}'),
+      ('careers_page', c_bad, 'https://bad.example/careers', 'done', '{"settled": "failed", "reason": "no_board"}'),
+      ('web_search', null, null, 'done', '{"domains": ["search.example"]}'),
+      ('careers_page', null, 'https://loose.example/careers', 'done', '{"rung": "a"}'),
+      ('careers_page', c_bad, 'https://timeout.example/careers', 'failed', null),
+      ('careers_page', c_bad, 'https://queued.example/careers', 'queued', null);
+    update public.render_jobs set failure = 'Timeout' where state = 'failed';
+    select * into r from public.measure_t35();
+    if r.value <> 2 or r.sample_n <> 7 or r.note not like '%, 1 done with none,%' or r.note not like '%1 web searches answered, 1 reads with nobody waiting, 1 failed (1 Timeout)%' then
+      raise exception 'measure_t35: expected 2 verified, 1 none, 1 search, 1 nobody waiting, 1 failed, 1 queued, got % % %', r.value, r.sample_n, r.note;
+    end if;
+    raise exception 'measure_t35 self-check passed' using errcode = 'P0001';
+  exception when raise_exception then
+    if sqlerrm <> 'measure_t35 self-check passed' then raise; end if;
+  end;
+end
 $$;
 
 -- ---------------------------------------------------------------------------
