@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { fakeDb } from '../../companies/fake-db'
 import type { RoutineContext, RoutineRow } from '../routines'
 import type { WikidataEntity } from '../../companies/wikidata'
@@ -106,5 +106,19 @@ describe('directory.sweep: the profile fill', () => {
     const down = setup({ directory: [verified('e1', 'Retell AI', 'retellai.com', '2026-10-01T00:00:00Z')], wikidata: async () => { throw new Error('wikidata 503') } })
     expect(await sweepWith(down.ctx, down.deps)).toMatchObject({ ok: true, found: { profiled: 0, errors: 1 } })
     expect(down.tables.company_directory[0].profile).toBeUndefined()
+  })
+
+  it('starts no Wikidata lookup past the slice deadline, and drops one that runs past it without writing', async () => {
+    const row = verified('e1', 'Retell AI', 'retellai.com', '2026-10-01T00:00:00Z')
+    // the clock reads inside the deadline for the sweep's own checks, then past it when the fill looks
+    let reads = 0
+    const late = setup({ directory: [row], now: () => NOW + (++reads > 2 ? 10_000 : 0), deadlineAt: NOW + 5_000, wikidata: vi.fn(async () => [entity('https://www.retellai.com/')]) })
+    expect(await sweepWith(late.ctx, late.deps)).toMatchObject({ ok: true, found: { profiled: 0, errors: 0 } })
+    expect(late.deps.wikidata).not.toHaveBeenCalled()
+    expect(late.tables.company_directory[0].profile).toBeUndefined()
+
+    const slow = setup({ directory: [row], now: () => Date.now(), deadlineAt: Date.now() + 40, wikidata: () => new Promise(() => {}) })
+    expect(await sweepWith(slow.ctx, slow.deps)).toMatchObject({ ok: true, found: { profiled: 0, errors: 0 } })
+    expect(slow.tables.company_directory[0].profile).toBeUndefined()
   })
 })

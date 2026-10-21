@@ -43,12 +43,17 @@ export const realSweepDeps: SweepDeps = {
 
 /** One verified employer with no profile: Wikidata's facts when its website is the employer's own, else the marker. */
 async function fillProfile(ctx: RoutineContext, deps: SweepDeps): Promise<number> {
+  // A lookup is up to three requests of up to 8 s each: it starts only with time left and is cut at the deadline.
+  if (ctx.now() >= ctx.deadlineAt) return 0
   const { data } = await ctx.admin.from('company_directory').select('id, name, domain').not('verified_at', 'is', null).is('profile', null).order('verified_at', { ascending: true }).limit(1).maybeSingle()
   const employer = data as { id: string; name: string; domain: string | null } | null
   if (!employer) return 0
   // A Wikidata outage throws here and writes nothing, so the same employer is first in line next slice.
   const own = employer.domain ? registrable(employer.domain) : null
-  const match = (await deps.wikidata(employer.name)).find((e) => !own || registrable(e.website) === own)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const entities = await Promise.race([deps.wikidata(employer.name), new Promise<'late'>((resolve) => (timer = setTimeout(() => resolve('late'), Math.max(0, ctx.deadlineAt - ctx.now()))))]).finally(() => clearTimeout(timer))
+  if (entities === 'late') return 0
+  const match = entities.find((e) => !own || registrable(e.website) === own)
   await writeProfile(ctx.admin, employer.id, match ? toProfile(match) : { source: 'wikidata', checked_at: new Date(ctx.now()).toISOString(), matched: false })
   return 1
 }
