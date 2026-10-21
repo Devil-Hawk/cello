@@ -20,7 +20,7 @@ import { HttpError } from '../ats/http'
 import type { AtsJob, AtsProviderId, FetchContext } from '../ats/types'
 import { IDENTIFY, sameEmployerName, verifyBoard, type BoardIdentity, type BoardRef } from '../ats/verify'
 import { normalizeCompanyName } from '../entities/companies'
-import { faviconForDomain, isKnownEmployer, lookupKnownCompanyByDomain, lookupKnownCompanyByName } from './known-companies'
+import { faviconForDomain, isKnownEmployer, knownBoard, lookupKnownCompanyByDomain, lookupKnownCompanyByName } from './known-companies'
 
 type Db = SupabaseClient<any, any, any>
 
@@ -40,12 +40,17 @@ export interface Offer {
   url?: string
 }
 
+/** A real stage of a board check, for the person watching it (the add flow streams these). */
+export type CheckStep = { step: 'reading_roles'; count: number; line: string } | { step: 'checking_owner'; line: string }
+
 export interface VerifyDeps {
   fetchBoard: (provider: AtsProviderId, token: string, ctx?: FetchContext) => Promise<AtsJob[]>
   identify: (provider: AtsProviderId, token: string) => Promise<BoardIdentity | null>
   /** The boards the employer's own site links to (lazy: read only when the check needs them). */
   pageBoards: (input: { careerUrl: string | null; domain: string | null }) => Promise<BoardRef[]>
   now: () => number
+  /** Told at each real stage of a board check; absent when nobody is watching. */
+  report?: (step: CheckStep) => void
 }
 
 export const realDeps: VerifyDeps = {
@@ -65,7 +70,7 @@ export interface BoardCheckInput {
 }
 
 export type BoardCheck =
-  | { ok: true; verifiedBy: 'careers_page_link' | 'board_links_home' | 'provider_name' | 'seed_checked' | 'careers_url'; jobs: AtsJob[]; domain: string | null; name: string }
+  | { ok: true; verifiedBy: 'careers_page_link' | 'board_links_home' | 'provider_name' | 'seed_checked' | 'careers_url' | 'known_board'; jobs: AtsJob[]; domain: string | null; name: string }
   | { ok: false; reason: FailReason; identity?: BoardIdentity | null; jobs?: AtsJob[] }
 
 const hostOf = (url: string): string | null => {
@@ -75,7 +80,7 @@ const hostOf = (url: string): string | null => {
     return null
   }
 }
-const PROVIDER_HOSTS = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|workable\.com|smartrecruiters\.com|recruitee\.com|personio\.(de|com)|myworkdayjobs\.com|eightfold\.ai)$/
+export const PROVIDER_HOSTS = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|workable\.com|smartrecruiters\.com|recruitee\.com|personio\.(de|com)|myworkdayjobs\.com|eightfold\.ai)$/
 
 /** The domain a board declares for itself (not the provider's own host), or null. */
 export function declaredDomain(identity: BoardIdentity | null | undefined): string | null {
@@ -107,6 +112,13 @@ export async function checkBoard(input: BoardCheckInput, deps: VerifyDeps = real
   // Nothing posted, or nothing posted lately (an undated board is not shown to be alive): held as stale.
   const newest = newestPosting(jobs)
   if (jobs.length === 0 || newest === 0 || deps.now() - newest > STALE_DAYS * DAY_MS) return { ok: false, reason: 'stale', jobs }
+  deps.report?.({ step: 'reading_roles', count: jobs.length, line: `Reading the board, ${jobs.length} posting${jobs.length === 1 ? '' : 's'} so far` })
+  // A board checked by hand for this employer's domain (Datadog on Greenhouse, Ramp on Ashby) is its own while it is alive,
+  // even when the employer's page links it only through script.
+  const curated = domain ? knownBoard({ domain, careerUrl: input.careerUrl }) : null
+  if (domain && curated && curated.provider === provider && curated.token.toLowerCase() === token.toLowerCase()) {
+    return { ok: true, verifiedBy: 'known_board', jobs, domain, name: lookupKnownCompanyByDomain(domain)?.name ?? name ?? domain }
+  }
 
   let identity: BoardIdentity | null = null
   try {
@@ -116,6 +128,8 @@ export async function checkBoard(input: BoardCheckInput, deps: VerifyDeps = real
   }
   const owner = identity
   const home = declaredDomain(owner)
+  const who = identity?.name || name
+  deps.report?.({ step: 'checking_owner', line: who ? `Checking it is ${who}'s` : 'Checking who owns the board' })
 
   if (!domain) {
     // A board with no employer domain (the seed, a pasted board): the provider's own record must name the employer.
@@ -152,6 +166,8 @@ export interface EmployerWrite {
   readTier: string | null
   /** A person's or a lead's check: an employer already in the directory (by board or domain) is returned and left exactly as it is. */
   keepExisting?: boolean
+  /** Facts from a named public source (lib/companies/wikidata.ts toProfile), kept on a new row. */
+  profile?: Record<string, unknown>
 }
 
 const MS_AFTER_VERIFY = 6 * 3_600_000
@@ -186,6 +202,7 @@ export async function writeEmployer(db: Db, w: EmployerWrite, now: () => number 
     open_count: w.openCount,
     open_count_at: w.openCount === null ? null : at,
     updated_at: at,
+    ...(w.profile ? { profile: w.profile } : {}),
   }
   type Row = { id: string; source: string; ats_provider: string | null; ats_token: string | null }
   let existing: Row | null = null
@@ -222,6 +239,12 @@ export async function writeEmployer(db: Db, w: EmployerWrite, now: () => number 
   const { data, error } = await db.from('company_directory').insert({ ...fields, source: w.source }).select('id').single()
   if (error || !data) throw new Error('could not write the employer')
   return { ok: true, employerId: (data as { id: string }).id }
+}
+
+/** A profile for an employer that has none: one already there stays. */
+export async function writeProfile(db: Db, employerId: string, profile: Record<string, unknown>): Promise<void> {
+  const { error } = await db.from('company_directory').update({ profile }).eq('id', employerId).is('profile', null)
+  if (error) throw new Error('could not write the profile')
 }
 
 // --- what a read of a verified board did to its row ----------------------------
