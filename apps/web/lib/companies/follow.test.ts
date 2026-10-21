@@ -150,6 +150,14 @@ describe('unfollow and report', () => {
     expect(writes(queries)).toEqual([])
   })
 
+  it('report on a site-only employer unfollows it and leaves the directory row alone', async () => {
+    const { client, tables } = world({ company_directory: [{ ...employer({ ats_provider: null, ats_token: null, verified_at: iso(5) }) }], companies: [{ id: 'c1', user_id: 'u1', name: 'Acme', employer_id: 'e1', watching: true }] })
+    expect(await reportEmployer(client, 'u1', 'e1')).toEqual({ ok: true, was: 'following' })
+    expect(tables.companies[0]).toMatchObject({ watching: false })
+    expect(tables.employer_reports).toHaveLength(1)
+    expect(tables.company_directory[0]).toMatchObject({ verified_at: iso(5), next_read_at: null })
+  })
+
   it('report on an employer the person does not follow writes no report and no re-check', async () => {
     const { client, tables } = world()
     expect(await reportEmployer(client, 'u1', 'e1')).toEqual({ ok: true, was: 'not_following' })

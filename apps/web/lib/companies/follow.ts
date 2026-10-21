@@ -72,6 +72,7 @@ export async function followAndRead(db: Db, userId: string, employerId: string, 
   const first = await Promise.race([work, new Promise<'timeout'>((resolve) => (timer = setTimeout(() => resolve('timeout'), opts.budgetMs ?? 8000)))])
   clearTimeout(timer)
   if (first === 'timeout') {
+    // ponytail: the +24 h next read holds only when the background read finishes; a host that kills it past its time leaves next_read_at old. Upgrade: queue the first read as a job the sweep finishes.
     if (process.env.VERCEL) waitUntil(work)
     return { ok: true, following: true, already: false, read: null, line: HANDOFF_LINE, fit: null }
   }
@@ -92,27 +93,31 @@ export async function unfollowEmployer(db: Db, userId: string, employerId: strin
 
 /**
  * "Not this company": unfollow, keep the person's report, and ask for the board to be proven again.
- * readEmployer re-checks a board whose verified_at is older than REVERIFY_DAYS, and directory_boards_due picks it up at
- * once because next_read_at is now. verified_at is set back rather than null: null would drop the row from the sweep,
- * from search and from getEmployer, which is the opposite of re-proving it.
+ * readEmployer re-checks a board whose verified_at is older than REVERIFY_DAYS, and directory_boards_due takes it at the
+ * next slice because next_read_at is now. verified_at is set back rather than null: null would drop the row from the
+ * sweep, from search and from getEmployer, which is the opposite of re-proving it.
+ * A site-only employer has no board for the sweep to read, so there is nothing to re-prove and the rewind is skipped.
  * ponytail: no per-person limit on reports; each one costs one board check. Add a cap when reports are abused.
  */
 export type ReportResult = { ok: true; was: 'following' | 'not_following' } | { ok: false; reason: 'not_found' | 'demo' }
 
 /** Only a followed employer can be reported: a report on one the person does not follow writes nothing. */
 export async function reportEmployer(db: Db, userId: string, employerId: string): Promise<ReportResult> {
-  if (!(await getEmployer(db, employerId))) return { ok: false, reason: 'not_found' }
+  const employer = await getEmployer(db, employerId)
+  if (!employer) return { ok: false, reason: 'not_found' }
   const { data: profile } = await db.from('profiles').select('is_demo, demo_expires_at').eq('id', userId).maybeSingle()
   if (isDemoProfile(profile as { is_demo: boolean | null; demo_expires_at: string | null } | null)) return { ok: false, reason: 'demo' }
   const unfollowed = await unfollowEmployer(db, userId, employerId)
   if (unfollowed.was === 'not_following') return { ok: true, was: 'not_following' }
   const { error: reportError } = await db.from('employer_reports').insert({ user_id: userId, employer_id: employerId })
   if (reportError) throw new Error(`could not keep the report: ${reportError.message}`)
-  const now = Date.now()
-  const { error } = await db
-    .from('company_directory')
-    .update({ verified_at: new Date(now - (REVERIFY_DAYS + 1) * DAY_MS).toISOString(), next_read_at: new Date(now).toISOString(), cannot_read_reason: null })
-    .eq('id', employerId)
-  if (error) throw new Error(`could not queue the re-check: ${error.message}`)
+  if (employer.ats_provider) {
+    const now = Date.now()
+    const { error } = await db
+      .from('company_directory')
+      .update({ verified_at: new Date(now - (REVERIFY_DAYS + 1) * DAY_MS).toISOString(), next_read_at: new Date(now).toISOString(), cannot_read_reason: null })
+      .eq('id', employerId)
+    if (error) throw new Error(`could not queue the re-check: ${error.message}`)
+  }
   return { ok: true, was: unfollowed.was }
 }
