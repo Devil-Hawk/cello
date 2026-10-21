@@ -18,9 +18,10 @@ import { recordRouteTiming } from '@/lib/companies/route-timing'
 //
 // What is known before any network call is plain JSON with its status: 400 for a link Cello will not read or a body it
 // does not know, 403 for a demo account, 404 for an employer Cello does not have, 429 for the day's limit, 500 for a
-// failure, 200 for an add or a directory hit. The answer becomes NDJSON only at the first network step (reading, or
-// board_found for a proven board): one {"step",...} line per real stage as it happens (reading, board_found,
-// checking_owner, reading_roles), then one last line: added {employer, read}, refused {reason, line, offers} or
+// failure, 200 for an add or a directory hit. The answer becomes NDJSON at the first network step, whichever add it is:
+// reading (a link or a chosen candidate), board_found (a proven board) or reading_board (the first read of an added
+// employer's board). One {"step",...} line per real stage as it happens (reading, board_found, checking_owner,
+// reading_roles, reading_board), then one last line: added {employer, read}, refused {reason, line, offers} or
 // queued {line}. A check that ends in a reason is an answer, not an error. `read` is {listed, kept}, or null when the
 // board could not be read in 8 s; `kept` is null when the person has stated no targets.
 //
@@ -95,6 +96,8 @@ export async function POST(request: NextRequest) {
       let line = result.already ? 'You follow this already.' : 'Following. Cello checks it with the others, every 6 hours.'
       if (employer?.ats_provider) {
         const people = await loadPerson(db, user.id)
+        // The read is a network step too: the answer streams from here, as the add's own stages do.
+        emit({ step: 'reading_board', line: 'Reading the board' })
         const first = await readWithin(readEmployer(db, employer, people))
         if (first === 'timeout') line = HANDOFF_LINE
         else if (first && !first.failure) read = { listed: first.listed, kept: people.length > 0 ? first.kept : null }
@@ -108,7 +111,7 @@ export async function POST(request: NextRequest) {
       }
     },
     {
-      streamFrom: (e) => ['reading', 'board_found'].includes((e as { step?: string }).step ?? ''),
+      streamFrom: (e) => ['reading', 'board_found', 'reading_board'].includes((e as { step?: string }).step ?? ''),
       status: (e) => ((e as { step?: string }).step === 'refused' ? STATUS[(e as { reason: AddFailure }).reason] : undefined) ?? 200,
     }
   )

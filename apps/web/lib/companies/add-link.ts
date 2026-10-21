@@ -294,6 +294,8 @@ async function addCandidate(db: Db, userId: string, candidateId: string, deps: A
 
   // Chosen by a person, so checked now. A failed one is marked failed and never shows in search again.
   // A person's check never counts an unread board against the candidate: only the sweep does.
+  // The first network step is told before it happens, so a route can stream the check like a link's.
+  deps.report?.({ step: 'reading', host: candidate.domain ?? '', line: candidate.domain ? `Reading ${candidate.domain}` : `Checking ${candidate.name}` })
   const settled = await settleCandidate(db, candidate, deps.verify, { person: true })
   if (settled.state === 'verified') {
     const employer = await getEmployer(db, settled.employerId)
