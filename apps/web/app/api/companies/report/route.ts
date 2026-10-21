@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
+import { isCrossSiteRequest } from '@/lib/security/same-origin'
 import { ADD_LINES } from '@/lib/companies/add-link'
 import { reportEmployer } from '@/lib/companies/follow'
 
@@ -16,6 +17,7 @@ export const maxDuration = 60
 const UUID = /^[0-9a-f-]{36}$/i
 
 export async function POST(request: NextRequest) {
+  if (isCrossSiteRequest(request.headers)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const supabase = await createClient()
   const {
     data: { user },
