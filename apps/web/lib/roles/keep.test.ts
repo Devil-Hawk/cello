@@ -227,6 +227,32 @@ describe('blockReasons: the dealbreakers', () => {
     expect(blockReasons(facts({ description: 'We raised $200 million last year.' }), c)).toEqual([])
   })
 
+  it.each([
+    'Our annual company retreat is on us, and there is a $15,000 learning stipend.',
+    'Competitive salary plus annual bonus up to $12,000.',
+    'Compensation: competitive, with a $50,000 sign-on bonus.',
+    'We offer an annual relocation allowance of $20,000.',
+    'Annual equity refresh of $20,000 - $30,000 in stock.',
+    'Compensation: a $10,000 - $12,000 signing bonus.',
+  ])('keeps a role whose posting states no salary: %s', (description) => {
+    const c = { ...NO_CONSTRAINTS, salaryFloorUsd: 150000 }
+    expect(blockReasons(facts({ description }), c)).toEqual([])
+    expect(keepsRole(role({ description }), targets({}, [], c))).toMatchObject({ keep: true })
+  })
+
+  it('keeps a monthly, weekly or daily figure, which is not a yearly salary', () => {
+    const c = { ...NO_CONSTRAINTS, salaryFloorUsd: 100000 }
+    for (const salaryRange of ['$15k - $20k per month', '$3,000 - $4,000 a week', '$500 - $700 per day', '$9,000 - $12,000 monthly']) {
+      expect(blockReasons(facts({ salaryRange }), c)).toEqual([])
+    }
+  })
+
+  it('still blocks a stated yearly range below the floor, in the field or in a pay paragraph', () => {
+    const c = { ...NO_CONSTRAINTS, salaryFloorUsd: 150000 }
+    expect(blockReasons(facts({ salaryRange: '$90k to $120k' }), c)[0].kind).toBe('salary')
+    expect(blockReasons(facts({ description: 'The salary range for this role is $90,000 - $120,000 plus equity.' }), c)[0].kind).toBe('salary')
+  })
+
   it('refuses a level they will not take, from the title', () => {
     const c = { ...NO_CONSTRAINTS, refusedSeniority: ['intern', 'manager'] }
     expect(blockReasons(facts({ title: 'Software Engineering Intern' }), c)[0].kind).toBe('seniority')

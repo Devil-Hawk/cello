@@ -123,6 +123,8 @@ const MONEY = /(?:\$|usd\s?)\s?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s?(k)?/gi
 export function parsePayRange(text: string | null | undefined): PayRange | null {
   if (!text) return null
   const t = text.replace(/ /g, ' ')
+  // A monthly, weekly or daily figure is not a yearly one, and Cello does not guess the conversion.
+  if (/(?:\bper|\ba|\beach|\/)\s?(?:month|mo|week|wk|day)\b|\b(?:monthly|weekly|daily)\b/i.test(t)) return null
   const hourly = /\/\s?(?:hr|hour)|per hour|hourly/i.test(t)
   const nums: number[] = []
   for (const m of t.matchAll(MONEY)) {

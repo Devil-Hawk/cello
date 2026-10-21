@@ -134,11 +134,21 @@ const COUNTRY_NAMES: Record<string, string> = {
 }
 const countryName = (code: string) => COUNTRY_NAMES[code] ?? code
 
-/** The part of a description that talks about pay, so a stray "$5 million" elsewhere is not read as a salary. */
+const AMOUNT = String.raw`(?:\$|usd\s?)\s?\d[\d,]*(?:\.\d+)?\s?k?`
+const PAY_RANGE = new RegExp(String.raw`(?:salary|compensation|base pay|pay range|pay scale|annual)([^$]{0,120})(${AMOUNT}\s*(?:-|\u2013|\u2014|to)\s*${AMOUNT})(.{0,24})`, 'i')
+/** Pay that is not the salary: a range of these is a bonus or an allowance, never the floor's business. */
+const NOT_SALARY = /bonus|stipend|allowance|relocation|sign-?on|signing|equity|stock|commission|reimburs/i
+const NOT_SALARY_AFTER = /^\s*(?:\w+\s+)?(?:bonus|stipend|allowance)/i
+
+/**
+ * The pay range a description states, or null. Only a range (two dollar amounts joined by a dash or "to")
+ * after a pay word counts, never a single amount: a $20,000 relocation allowance is not a salary, and a role
+ * is only blocked on pay the posting states.
+ * ponytail: a range written "$150k - 200k" (no sign on the second amount) is not read, so it keeps.
+ */
 function payParagraph(description: string | null | undefined): string | null {
-  if (!description) return null
-  const m = /(?:salary|compensation|base pay|pay range|pay scale|annual)[^$]{0,120}(\$[^\n]{0,160})/i.exec(description)
-  return m ? m[1] : null
+  const m = description ? PAY_RANGE.exec(description) : null
+  return m && !NOT_SALARY.test(m[1]) && !NOT_SALARY_AFTER.test(m[3]) ? m[2] : null
 }
 
 /**

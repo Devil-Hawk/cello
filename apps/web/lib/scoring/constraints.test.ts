@@ -51,6 +51,9 @@ describe('parsePayRange', () => {
     expect(parsePayRange(null)).toBeNull()
     expect(parsePayRange('€90,000 - €110,000')).toBeNull()
     expect(parsePayRange('$5')).toBeNull()
+    expect(parsePayRange('$15k - $20k per month')).toBeNull()
+    expect(parsePayRange('$3,000 - $4,000 a week')).toBeNull()
+    expect(parsePayRange('$500 - $700/day')).toBeNull()
   })
 })
 
