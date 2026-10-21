@@ -209,6 +209,21 @@ describe('blockReasons: the dealbreakers', () => {
     expect(blockReasons(facts({ location: 'Austin, TX' }), c)[0].text).toMatch(/on site in Austin, TX/)
   })
 
+  it.each(['', 'United States', 'US', 'Massachusetts', 'EMEA', 'NYC', 'London', 'Remote', 'Remote - US', 'Boston, MA', 'Hybrid - New York, NY'])(
+    'keeps a role whose location names no city off their list: "%s"',
+    (location) => {
+      const c = { ...NO_CONSTRAINTS, onsiteCities: ['boston'] }
+      expect(blockReasons(facts({ location }), c)).toEqual([])
+      expect(keepsRole(role({ location }), targets({}, [], c))).toMatchObject({ keep: true })
+    }
+  )
+
+  it('blocks a "City, Region" location off their list', () => {
+    const c = { ...NO_CONSTRAINTS, onsiteCities: ['boston'] }
+    expect(blockReasons(facts({ location: 'San Francisco, CA' }), c)[0].kind).toBe('location')
+    expect(keepsRole(role({ location: 'San Francisco, CA' }), targets({}, [], c))).toEqual({ keep: false, reason: 'dealbreaker' })
+  })
+
   it('blocks on sponsorship only when needed and the posting refuses', () => {
     const d = 'Great team. We are unable to sponsor work visas. Apply now.'
     const need = { ...NO_CONSTRAINTS, needsSponsorship: true }

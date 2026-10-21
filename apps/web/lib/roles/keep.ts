@@ -188,7 +188,9 @@ export function blockReasons(role: RoleFacts, c: StatedConstraints): BlockReason
   if (
     c.onsiteCities.length > 0 &&
     !remote &&
-    (role.location ?? '').trim() !== '' &&
+    // ponytail: only a "City, Region" location can name a city we know is not theirs. A single word ("London",
+    // "NYC") could be a city, a state or a region, so it keeps; upgrade is a city list.
+    (role.location ?? '').includes(',') &&
     !c.onsiteCities.some((city) => containsWord(role.location ?? '', city)) &&
     // A country-wide or multi-site listing says nothing about where the person would sit.
     !/\b(?:multiple|various|anywhere|hybrid)\b/i.test(role.location ?? '')
