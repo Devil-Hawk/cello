@@ -40,6 +40,11 @@ export type JudgeResult<T> = { ok: true; json: T; prov: Prov } | { ok: false; li
 
 /** Free calls a day for the whole server when JUDGE_FREE_DAILY_CALLS is not set. OpenRouter allows 1,000 a day on a funded account. */
 export const DEFAULT_DAILY_CALLS = 800
+/**
+ * The output ceiling for a free model, whatever the step asked for. Some free models think at length before they answer
+ * (reasoning 'none' is not always honoured), and a reply cut off at the step's own ceiling is lost. A free token costs nothing.
+ */
+export const FREE_MAX_TOKENS = 12_000
 /** The fewest calls a person's day share can be, however many people are waiting. */
 export const MIN_SHARE = 20
 export const CALLS_PER_MINUTE = 20
@@ -184,7 +189,7 @@ export async function judgeCall<T>(db: AdminClient, args: JudgeCallInput<T>, dep
     const cool = (model: string) => deps.cooling.set(model, deps.now().getTime() + COOLDOWN_MS)
     for (const model of open) {
       try {
-        const result = await deps.call(free, { ...request, model, reasoning: { effort: 'none' } }, AbortSignal.timeout(60_000))
+        const result = await deps.call(free, { ...request, model, maxTokens: Math.max(request.maxTokens, FREE_MAX_TOKENS), reasoning: { effort: 'none' } }, AbortSignal.timeout(120_000))
         const json = checked(result.content, args.schema)
         if (json !== null) return { ok: true, json, prov: provOf(args.step, result, 'openrouter', deps) }
         answered = 'bad'

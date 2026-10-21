@@ -77,6 +77,15 @@ describe('the path order', () => {
     expect(t.call).toHaveBeenCalledTimes(4)
   })
 
+  it('gives a free model room to think, and the person own model only what the step asked for', async () => {
+    const free = setup()
+    await free.run()
+    expect((free.call.mock.calls[0][1] as { maxTokens: number }).maxTokens).toBe(12_000)
+    const own = setup({ keys: { openrouter: 'sk-own' } })
+    await own.run()
+    expect((own.call.mock.calls[0][1] as { maxTokens: number }).maxTokens).toBe(1500)
+  })
+
   it('falls back to the free models when the own key fails', async () => {
     const t = setup({ keys: { openrouter: 'sk-own' }, replies: (m) => (m ? answer(m) : new Error('401')) })
     expect(await t.run()).toMatchObject({ ok: true, prov: { rung: 'R3' } })
