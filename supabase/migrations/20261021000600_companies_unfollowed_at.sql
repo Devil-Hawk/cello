@@ -38,4 +38,30 @@ begin
   end if;
 end $$;
 
+-- Self-check: an unfollow stamps the time and a refollow clears it. The rows are made inside a block that always rolls back.
+do $$
+declare
+  u uuid := gen_random_uuid();
+  c uuid;
+  stamp timestamptz;
+begin
+  begin
+    insert into auth.users (id, email) values (u, 'companies-unfollowed-selfcheck@example.invalid');
+    insert into public.companies (user_id, name, domain, career_url, watching)
+      values (u, 'Selfcheck Unfollow', 'selfcheck-unfollow.invalid', 'https://selfcheck-unfollow.invalid/careers', true)
+      returning id into c;
+    update public.companies set watching = false where id = c;
+    select unfollowed_at into stamp from public.companies where id = c;
+    if stamp is null then raise exception 'companies_stamp_unfollow: an unfollow must stamp unfollowed_at'; end if;
+    update public.companies set watching = true where id = c;
+    select unfollowed_at into stamp from public.companies where id = c;
+    if stamp is not null then raise exception 'companies_stamp_unfollow: a refollow must clear unfollowed_at'; end if;
+
+    raise exception 'companies_unfollowed_at self-check passed' using errcode = 'P0001';
+  exception when raise_exception then
+    if sqlerrm <> 'companies_unfollowed_at self-check passed' then raise; end if;
+  end;
+  if exists (select 1 from public.companies where name = 'Selfcheck Unfollow') then raise exception 'the self-check left rows behind'; end if;
+end $$;
+
 notify pgrst, 'reload schema';
