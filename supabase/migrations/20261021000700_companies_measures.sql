@@ -46,6 +46,85 @@ insert into public.measures (id, layer, name, bar, direction, source, gates) val
 on conflict (id) do nothing;
 
 -- ---------------------------------------------------------------------------
+-- T4: followed employers that cannot be read. Replaces the seed's version, which read companies.metadata only: the sweep
+-- records its failures on company_directory (cannot_read_reason), so a board the sweep gave up on never reached metadata.
+-- ---------------------------------------------------------------------------
+
+update public.measures set source = 'companies and company_directory (cannot_read_reason)' where id = 'T4';
+
+create or replace function public.measure_t4()
+returns table (value numeric, passed boolean, sample_n integer, note text)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  n_followed integer;
+  n_cannot integer;
+  n_no_reason integer;
+  n_reading integer;
+begin
+  select count(*),
+         count(*) filter (where d.cannot_read_reason is not null
+                             or (c.metadata->'source_check'->>'readable' = 'false' and coalesce(c.metadata->'source_check'->>'reason', '') <> 'reading')),
+         count(*) filter (where d.cannot_read_reason is null
+                             and c.metadata->'source_check'->>'readable' = 'false' and coalesce(c.metadata->'source_check'->>'reason', '') = ''),
+         count(*) filter (where c.metadata->'source_check'->>'reason' = 'reading')
+    into n_followed, n_cannot, n_no_reason, n_reading
+    from public.companies c
+    left join public.company_directory d on d.id = c.employer_id
+   where c.watching
+     and (c.metadata->>'suggested' is null or c.metadata->>'suggested' <> 'true')
+     and (nullif(btrim(coalesce(c.career_url, '')), '') is not null or c.metadata ? 'ats');
+  if n_followed = 0 then
+    return query select null::numeric, null::boolean, 0, 'No followed employers yet.'::text;
+    return;
+  end if;
+  return query select
+    round(100.0 * n_cannot / n_followed, 2),
+    (100.0 * n_cannot / n_followed) < 5 and n_no_reason = 0,
+    n_followed,
+    format('%s of %s followed employers cannot be read; %s without a reason; %s waiting for a browser read.', n_cannot, n_followed, n_no_reason, n_reading);
+end;
+$$;
+
+-- Self-check: three followed employers, two of them unreadable (one by the sweep's reason, one only in metadata) and one
+-- readable, must fail the bar. The rows are made in a block that always rolls back. No profile, no seed: the check says so.
+do $$
+declare
+  uid uuid;
+  e1 uuid;
+  e2 uuid;
+  e3 uuid;
+  r record;
+begin
+  select id into uid from public.profiles limit 1;
+  if uid is null then
+    raise notice 'measure_t4 self-check skipped: no profile owns the seeded companies';
+    return;
+  end if;
+  begin
+    insert into public.company_directory (name, name_norm, source, cannot_read_reason, verified_at, careers_url) values ('Self check unreadable', 'self check unreadable', 'seed', 'cannot_read', now(), 'https://unreadable.example/careers') returning id into e1;
+    insert into public.company_directory (name, name_norm, source, verified_at, careers_url) values ('Self check readable', 'self check readable', 'seed', now(), 'https://readable.example/careers') returning id into e2;
+    insert into public.company_directory (name, name_norm, source, cannot_read_reason, verified_at, careers_url) values ('Self check stale', 'self check stale', 'seed', 'stale', now(), 'https://stale.example/careers') returning id into e3;
+    insert into public.companies (user_id, name, career_url, employer_id, metadata) values
+      (uid, 'Self check unreadable', 'https://unreadable.example/careers', e1, '{}'),
+      (uid, 'Self check readable', 'https://readable.example/careers', e2, '{}'),
+      (uid, 'Self check stale', 'https://stale.example/careers', e3, '{}');
+    insert into public.companies (user_id, name, career_url, employer_id, metadata, watching) values
+      (uid, 'Self check not followed', 'https://stale.example/careers', e3, '{}', false);
+    select * into r from public.measure_t4();
+    if round(r.value, 2) <> 66.67 or r.passed or r.sample_n <> 3 then
+      raise exception 'measure_t4: 2 of 3 followed employers unreadable must fail, got % % %', r.value, r.passed, r.sample_n;
+    end if;
+    raise exception 'measure_t4 self-check passed' using errcode = 'P0001';
+  exception when raise_exception then
+    if sqlerrm <> 'measure_t4 self-check passed' then raise; end if;
+  end;
+end
+$$;
+
+-- ---------------------------------------------------------------------------
 -- T35: browser reads
 -- ---------------------------------------------------------------------------
 

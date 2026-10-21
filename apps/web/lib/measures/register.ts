@@ -52,7 +52,7 @@ export const REGISTER: readonly MeasureDef[] = [
     name: 'followed employers that cannot be read',
     bar: 'under 5 percent, each with a reason',
     direction: 'lower',
-    source: 'heartbeats',
+    source: 'companies and company_directory (cannot_read_reason)',
     gates: ['K4'],
   },
   {
