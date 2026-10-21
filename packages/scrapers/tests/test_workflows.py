@@ -65,7 +65,7 @@ def test_ingest_logs_ids_and_counts_only():
 def test_the_page_fetcher_cannot_print_a_url():
     text = (WORKFLOWS.parents[1] / "packages" / "scrapers" / "src" / "page.py").read_text()
     assert "logging.disable(logging.CRITICAL)" in text
-    assert '"error": type(' in text
+    assert "type(error).__name__" in text
 
 
 def test_scrape_is_one_job_on_free_models():
