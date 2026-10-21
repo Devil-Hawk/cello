@@ -19,7 +19,7 @@
 //     the compiled graph with bypassMode:true; this file proves it holds by
 //     construction, in the source, and stays there rather than duplicating.
 //   - autopilot.ts: only draftTask's own applier call can reach a submit
-//     path — sourceTask/scoreTask/judgeTask never mention applier,
+//     path — sourceTask/judgeTask never mention applier,
 //     submissionRef or buildSubmitConfirmedPlan — and the entrypoint itself
 //     never calls interrupt() (autopilot's budget stop is a terminal return,
 //     never a paused/resumable interrupt a later tick could reopen).
@@ -144,10 +144,9 @@ describe('dispatchExecute source order: submitOrSendReason before dispatchTool, 
 describe('autopilotTickGraph — graph shape', () => {
   const src = readFileSync(path.resolve(process.cwd(), 'lib/graph/autopilot.ts'), 'utf8')
 
-  it('sourceTask, scoreTask and judgeTask never mention applier, submissionRef or a submit path', () => {
+  it('sourceTask and judgeTask never mention applier, submissionRef or a submit path', () => {
     for (const [name, marker] of [
       ['sourceTask', "task('source'"],
-      ['scoreTask', "task('score'"],
       ['judgeTask', "task('judge'"],
     ] as const) {
       const start = src.indexOf(marker)

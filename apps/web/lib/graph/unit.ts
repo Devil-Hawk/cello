@@ -140,7 +140,6 @@ export interface RunAgentUnitArgs {
 export const UNIT_GENERATION_NAME: Record<UnitType, string> = {
   sourcer: 'source-jobs',
   matcher: 'score-job-match',
-  bulk_matcher: 'score-job-batch',
   enricher: 'enrich-job',
   cv_tailor: 'tailor-cv',
   applier: 'apply-to-job',
@@ -160,7 +159,6 @@ export const UNIT_GENERATION_NAME: Record<UnitType, string> = {
 export const UNIT_AGENT_NAME: Record<UnitType, string> = {
   sourcer: 'run-job-sourcer',
   matcher: 'run-job-matcher',
-  bulk_matcher: 'run-bulk-matcher',
   enricher: 'run-job-enricher',
   cv_tailor: 'run-cv-tailor',
   applier: 'run-applier',
@@ -394,7 +392,7 @@ async function runUnitBody<T extends UnitType>(
   // Sums every ctx.llm call this unit makes — most agent implementations
   // return `tokensUsed: 0` from their own AgentResult on the understanding
   // that a caller meters ctx.llm itself (see e.g.
-  // lib/harness/agents/matcher.ts:832's "already metered per-call through
+  // the old matcher's "already metered per-call through
   // ctx.llm" comment; lib/harness/executor.ts#attemptOnce did this same
   // summing for the pre-port DAG executor). Without it, tokensUsed below
   // would silently read 0 for most units and the run-level budget gate in

@@ -11,6 +11,7 @@ import { clockMeter } from './meter'
 import { ownerHealth } from './owner-health'
 import { clockPrune } from './prune'
 import { rolesCheck } from './roles-check'
+import { rolesMatch } from './roles-match'
 import { postingsBackfill } from './postings-backfill'
 import { rolesRetype } from './roles-retype'
 import { storageAlert } from './storage-alert'
@@ -18,6 +19,7 @@ import { suggestionsRefresh } from './suggestions-refresh'
 
 export const HANDLERS: Record<string, RoutineHandler> = {
   'roles.check': (ctx) => rolesCheck(ctx),
+  'roles.match': rolesMatch,
   'roles.retype': rolesRetype,
   'postings.backfill': postingsBackfill,
   'storage.alert': storageAlert,

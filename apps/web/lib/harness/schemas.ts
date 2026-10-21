@@ -65,7 +65,6 @@ export const StepAgentTypeSchema = z.enum(STEP_AGENT_TYPES)
  */
 export const UNIT_TYPES = [
   ...STEP_AGENT_TYPES,
-  'bulk_matcher',
   'digest',
   'outreach',
   'resume_optimizer',
@@ -100,8 +99,6 @@ export const MatcherOutput = z.object({
     z.object({
       jobId: z.string(),
       chance: z.enum(['strong', 'possible', 'stretch', 'cannot_assess']),
-      /** Probability (0 to 1) the person is interested. Orders roles; never shown as a number. */
-      want: z.number().min(0).max(1),
       highlights: z.array(z.string()).default([]),
       gaps: z.array(z.string()).default([]),
     })
@@ -479,7 +476,7 @@ export const PlannerInput = z.object({
 // re-declared, so the schema stays byte-identical to the one that file's own
 // AgentFn parses against.
 
-// bulk_matcher, batch assessment (lib/harness/agents/bulk_matcher.ts#runBulkMatch).
+// bulk_matcher, retired: nothing runs it any more (judging is lib/roles/judge.ts). The schemas stay so journaled steps still read.
 export const BulkMatcherInput = z.object({
   companyIds: z.array(z.string()).optional(),
   jobIds: z.array(z.string()).optional(),

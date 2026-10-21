@@ -15,7 +15,7 @@
 
 import type { AgentFn, AdminClient } from '../types'
 import { VerifierInput } from '../schemas'
-import { ownedJobsQuery } from './matcher'
+import { ownedJobsQuery } from '@/lib/jobs/owned-query'
 
 /** Cap jobs checked per run. */
 const MAX_JOBS = 30

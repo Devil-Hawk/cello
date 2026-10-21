@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { LlmResult, LlmRunOptions } from '@/lib/harness/types'
 import { MissingKeyError } from '@/lib/harness/llm'
-import { assessChances, labelChance, resumeLines, verifyChecks, type CitationStats } from './chance'
+import { assessChances, ChanceStop, labelChance, resumeLines, verifyChecks, type CitationStats } from './chance'
 import type { Requirement, RequirementsOutcome } from './posting-requirements'
 import type { RequirementCheck, RoleFacts } from './types'
 
@@ -161,7 +161,7 @@ describe('assessChances', () => {
     expect(none.get('a')!.note).toContain('Add your resume')
   })
 
-  it('labels from verified citations and puts the resume in the system prompt', async () => {
+  it('labels from verified citations and puts the resume next to the question', async () => {
     const { fn, calls } = llmReturning(
       JSON.stringify({
         checks: [
@@ -173,8 +173,8 @@ describe('assessChances', () => {
     const res = await assessChances(fn, RESUME, [{ role: role('a'), outcome: ok(reqs) }])
     expect(res.get('a')).toMatchObject({ chance: 'strong' })
     expect(res.get('a')!.checks[0].evidence).toEqual({ line: 2, quote: 'Backend engineer, Brightpay, 2020-2024' })
-    expect(calls[0].system).toContain('[2] Backend engineer, Brightpay')
-    expect(calls[0].prompt).not.toContain('Brightpay')
+    expect(calls[0].prompt).toContain('[2] Backend engineer, Brightpay')
+    expect(calls[0].system).not.toContain('Jane Doe')
   })
 
   it('downgrades a requirement whose cited quote is invented', async () => {
@@ -200,6 +200,11 @@ describe('assessChances', () => {
   it('lets a missing key through to the caller', async () => {
     const { fn } = llmReturning(new MissingKeyError('no key'))
     await expect(assessChances(fn, RESUME, [{ role: role('a'), outcome: ok(reqs) }])).rejects.toThrow('no key')
+  })
+
+  it('lets a stop through, so the roles are not marked as cannot assess', async () => {
+    const { fn } = llmReturning(new ChanceStop('day'))
+    await expect(assessChances(fn, RESUME, [{ role: role('a'), outcome: ok(reqs) }])).rejects.toBeInstanceOf(ChanceStop)
   })
 
   it('checks three roles in one call', async () => {

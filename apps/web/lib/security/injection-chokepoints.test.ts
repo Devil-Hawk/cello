@@ -138,7 +138,7 @@ const PROMPT_BUILDERS: Record<string, string> = {
     'The langgraph port step 9 context-assembly door: buildMatchContext/outreachHistory/' +
     'buildTurnContext all interpolate employer-derived prose (a kb search ' +
     "hit's .content, a company dossier's .summary) into context blocks headed for a prompt — " +
-    'lib/harness/agents/matcher.ts, lib/harness/agents/outreach.ts, ' +
+    'lib/harness/agents/outreach.ts, ' +
     'and lib/graph/copilot.ts all interpolate this file\'s ' +
     'output. Framed at the source (this file), never at a consumer — every employer-derived ' +
     'string is wrapped in frameJobText/frameJobTextList before it leaves one of the ' +
@@ -152,11 +152,8 @@ const PROMPT_BUILDERS: Record<string, string> = {
     "verdicts' rationale text into the distillation prompt — those rationales can carry model " +
     'output built from framed job text (matcher gaps/missingSkills, a judge summary — see ' +
     'lib/graph/verify/cv-tailor.ts / outreach.ts). Uses frameJobTextList, same ' +
-    "batch shape as lib/scoring/want-judge.ts, so this file's own scan-mutation check " +
+    "batch shape as the retired want judge, so this file's own scan-mutation check " +
     'documented in its header stays true.',
-  'apps/web/lib/scoring/want-judge.ts':
-    'judgeWant puts a posting excerpt per role in the judging prompt. Frames the batch with ' +
-    'frameJobTextList. The model only returns a probability and one sentence, clamped and parsed in code.',
 }
 
 /**
@@ -179,10 +176,11 @@ const PENDING_WIRING: string[] = [
  * fences, so they are exempt BY CLASSIFICATION, not by omission.
  */
 const FORWARDERS: Record<string, string> = {
-  'apps/web/lib/harness/agents/matcher.ts':
-    'Hands roles to lib/scoring (assessJobs), which frames every description it sends to a model ' +
-    '(lib/scoring/want-judge.ts uses frameJobTextList; what a posting asks for comes from the stored reader record, mapped in lib/scoring/posting-requirements.ts, with no prompt of its own). diagnoseCandidateJobs only ' +
-    'checks whether a posting has a description; it never puts one in a prompt.',
+  'apps/web/lib/roles/judge.ts':
+    'Loads the posting and hands it on. A posting with no list goes to completeRequirements ' +
+    '(lib/jobs/requirements-model.ts, which frames it with frameJobText); the evidence step carries only the ' +
+    "requirement items (the posting's own words, each fenced as data by prompts/role_chance.md), the title and the person's resume. " +
+    'It never puts the description body in a prompt itself.',
   'apps/web/lib/graph/autopilot.ts':
     'Selects jobs and hands them to the matcher/tailorer agents (moved from lib/harness/autopilot.ts ' +
     'in the langgraph port step 10 — draftTask now reaches cv_tailor/applier through ' +

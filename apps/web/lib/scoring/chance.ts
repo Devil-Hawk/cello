@@ -116,6 +116,13 @@ export function labelChance(reqs: readonly Requirement[], checks: readonly Requi
   return { chance, checks: [...checks], gaps: gaps.slice(0, 6), confirm, note: `${shown} of ${must.length} required items are shown on your resume.` }
 }
 
+/** Thrown by a runner when no model could be asked at all (a limit): those roles stay unanswered instead of becoming "cannot assess". */
+export class ChanceStop extends Error {
+  constructor(readonly limit: string) {
+    super(`The chance check stopped: ${limit}`)
+  }
+}
+
 export interface ChanceInput {
   role: RoleFacts
   outcome: RequirementsOutcome
@@ -154,12 +161,12 @@ export async function assessChances(llm: LlmRunner, resumeText: string, inputs: 
     try {
       const res = await llm({
         name: 'check-role-requirements',
-        system: scoringSystem('role_chance', resumeBlock),
-        prompt: `${prompt}\n\nCheck every requirement id against the resume.`,
+        system: scoringSystem('role_chance'),
+        // The resume sits beside the question, not at the end of a long system prompt: the small free models lose it there.
+        prompt: `${resumeBlock}\n\n${prompt}\n\nCheck every requirement id against the resume.`,
         json: true,
         temperature: 0,
         maxTokens: 600 * batch.length + 1500,
-        cachePrefix: true,
         promptRef: scoringPromptRef('role_chance'),
       })
       const parsed = parseJsonLoose<{ checks?: unknown }>(res.content)
@@ -167,7 +174,7 @@ export async function assessChances(llm: LlmRunner, resumeText: string, inputs: 
         out.set(role.id, labelChance(reqs, verifyChecks(parsed.checks, reqs, lines, idOf(k), stats)))
       })
     } catch (err) {
-      if (err instanceof MissingKeyError || err instanceof BudgetCapError) throw err
+      if (err instanceof MissingKeyError || err instanceof BudgetCapError || err instanceof ChanceStop) throw err
       for (const { role } of batch) out.set(role.id, cannot('Cannot assess yet. The check did not complete just now.'))
     }
   }

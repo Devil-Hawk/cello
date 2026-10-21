@@ -13,16 +13,8 @@ import { CountUp } from '@/components/ui/motion'
 import { GradientMesh } from '@/components/ui/gradient-mesh'
 import { cn, formatRelativeTime } from '@/lib/utils'
 
-/**
- * Roles checked per click of the "Check now" trigger, mirrors BATCH_LIMIT in
- * app/(app)/dashboard/page.tsx and app/(app)/jobs/page.tsx (both currently
- * 25), which is what's actually sent to POST /api/agents/match/batch. Not a
- * prop: this component isn't wired to a shared constant, so this is
- * duplicated on purpose to keep the cost disclosure below truthful without
- * adding a new prop for a static number. If that constant ever changes,
- * update this one too.
- */
-const BATCH_LIMIT = 25
+/** Roles judged per click of the "Check now" trigger: what POST /api/roles/judge-all does in the request itself. */
+const CHECK_NOW = 12
 
 /** A sweep counts as "live" for the header ping only inside this window —
  *  otherwise the dot would read as "something's happening" for a sweep that
@@ -42,7 +34,7 @@ interface PulseRibbonProps {
   /** Most recent companies.last_scraped_at across the user's tracked companies. */
   lastScrapedAt: string | null
   /**
-   * Wired to POST /api/agents/match/batch. When present, the Not assessed yet tile
+   * Wired to POST /api/roles/judge-all. When present, the Not assessed yet tile
    * gets a "Check now" trigger next to the count instead of only linking to
    * /jobs (which assesses nothing on its own). Omit to keep the tile a plain
    * link — never partially wire this in a way that fails silently.
@@ -223,12 +215,9 @@ export function PulseRibbon({
                     <TooltipProvider delayDuration={200}>
                       <Tooltip>
                         <TooltipTrigger asChild>{scoreButton}</TooltipTrigger>
-                        {/* Always render content: pressing this spends up to
-                            BATCH_LIMIT metered LLM calls, so the cost (or the
-                            block reason, if it can't run) must show up front
-                            — never a silent/empty tooltip on the enabled
-                            path. Matches the standard on the jobs page's
-                            "Score unscored jobs" button. */}
+                        {/* Always render content: what the click does, or the block
+                            reason if it can't run, must show up front — never
+                            a silent/empty tooltip on the enabled path. */}
                         <TooltipContent side="bottom" className="max-w-xs p-3">
                           {isBlocked ? (
                             <div className="space-y-2">
@@ -251,7 +240,7 @@ export function PulseRibbon({
                             // guarding this file forbids adding a new fetch
                             // for it. This line is still true without it.
                             <p className="text-caption text-muted-foreground">
-                              Checks up to {BATCH_LIMIT} roles per click, with metered AI calls.
+                              Checks up to {CHECK_NOW} roles per click, on your own key or Cello's free allowance for today.
                             </p>
                           )}
                         </TooltipContent>

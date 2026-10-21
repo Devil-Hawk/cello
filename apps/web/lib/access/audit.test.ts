@@ -123,7 +123,7 @@ function fakeAdmin(
         // Two calling conventions both have to work: a bare
         // `await ...insert(row)` (every pre-port caller) and
         // `await ...insert(row).select('id').single()` (lib/graph/oneshot.ts's
-        // agent_runs bootstrap, needed once match/batch + outreach/draft route
+        // agent_runs bootstrap, needed once judge-all + outreach/draft route
         // through runAgentUnit). insert() therefore returns a thenable that is
         // ALSO chainable, rather than resolving immediately.
         insert: (inserted: Record<string, unknown>) => {
@@ -1258,27 +1258,18 @@ vi.mock('@/lib/resume/store', () => ({
   listVersions: async () => [],
 }))
 vi.mock('@/lib/harness/keys', () => ({ loadApiKeys: async () => ({ openrouter: 'or-key', userId: DEMO_USER }) }))
-// runAgentUnit('bulk_matcher')/('outreach') now route match/batch + outreach/draft
-// through lib/harness/registry.ts's UNIT_REGISTRY, which imports the REAL
-// `matcher` AgentFn (never invoked by either flow under test here, but it must
-// exist for the module to resolve) — importOriginal keeps it real while still
-// overriding userCompanyIds, same pattern trail-producers.test.ts already uses
-// for @/lib/harness/agents/outreach below.
-vi.mock('@/lib/scoring/inputs', () => ({ countUnassessed: async () => ({ inRecall: 0, total: 0 }) }))
+// The judge-all route reads the waiting roles and judges them through lib/roles/judge, which this test does not exercise:
+// it is faked so the trail row is the only thing under test. lib/harness/registry.ts imports the real module for the
+// matcher AgentFn, so importOriginal keeps the rest real.
+vi.mock('@/lib/roles/judge', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/roles/judge')>()),
+  nextWaiting: async () => ['j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7', 'j8', 'j9'],
+  judgeRoles: async () => ({ judged: ['j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7'], failed: [], stopped: null }),
+  judgeStatus: async () => ({ judgedToday: 7, waiting: 0, line: null }),
+}))
 vi.mock('@/lib/jobs/owned-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/jobs/owned-query')>()),
   userCompanyIds: async () => ['company-1'],
-}))
-vi.mock('@/lib/harness/agents/bulk_matcher', () => ({
-  runBulkMatch: async () => ({
-    scored: 7,
-    failed: 1,
-    candidatesConsidered: 9,
-    skippedReasons: {},
-    batches: 2,
-    tokensUsed: 1234,
-    jobOutcomes: [],
-  }),
 }))
 // generateOutreachDraft is mocked (rather than left real) so the outreach/draft
 // case below never reaches a real model call through ctx.llm — loadApiKeys
@@ -1308,7 +1299,7 @@ vi.mock('@/lib/graph/verify/outreach', () => ({
   }),
 }))
 
-import { POST as scoreBatch } from '@/app/api/agents/match/batch/route'
+import { POST as scoreBatch } from '@/app/api/roles/judge-all/route'
 import { POST as sourceContacts } from '@/app/api/contacts/source/route'
 import { POST as draftOutreach } from '@/app/api/outreach/draft/route'
 import { POST as resumeDocuments } from '@/app/api/resume/documents/route'
@@ -1375,11 +1366,11 @@ describe('instrumented routes', () => {
 
   const cases: Case[] = [
     {
-      name: 'POST /api/agents/match/batch',
+      name: 'POST /api/roles/judge-all',
       action: 'jobs.score_batch',
       target: '/jobs',
-      detail: { count: 7, failed: 1, considered: 9, remaining: 0 },
-      run: () => scoreBatch(post('/api/agents/match/batch', { limit: 10 })),
+      detail: { count: 7, failed: 2, considered: 9, remaining: 0 },
+      run: () => scoreBatch(post('/api/roles/judge-all', {})),
     },
     {
       name: 'POST /api/contacts/source',

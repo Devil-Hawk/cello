@@ -34,9 +34,8 @@ import { optimizeResume } from './agents/resume_optimizer'
 import { generateOutreachDraft, fallbackOutreachDraft, type OutreachDraftInput } from './agents/outreach'
 import { generateDossier, type CompanyResearcherResult } from './agents/company_researcher'
 import { cv_tailor } from './agents/cv_tailor'
-import { runBulkMatch, type BulkMatchResult } from './agents/bulk_matcher'
 import { FIT_COLUMNS, fitHighlights, parseFit } from '@/lib/scoring/read'
-import { diagnoseCandidateJobs, type CandidateDiagnosis } from './agents/matcher'
+import { judgeRoles, judgeStatus, stopAnswer } from '@/lib/roles/judge'
 import { ownedJobsQuery, userCompanyIds } from '../jobs/owned-query'
 import { canRunLlm, missingOpenRouterMessage } from './llm-key-message'
 import { resolveTargeting } from '@/lib/targeting'
@@ -119,15 +118,10 @@ const COPILOT_RUN_BUDGET = 90_000
  *  so a slow third-party server degrades one tool call, not the whole turn. */
 const MCP_CALL_TIMEOUT_MS = 20_000
 
-/** score_jobs batch size. Deliberately small: every role assessed is real LLM
- *  spend (judging what the person wants, then checking their chance),
- *  this is the "bound it hard" the copilot's inline scoring tool needs that
- *  trigger_run's own COPILOT_RUN_BUDGET doesn't give per-call granularity for. */
+/** score_jobs batch size. Deliberately small: a call judges its roles one model call per three, in the request itself,
+ *  within the person's key or their free allowance for the day. */
 const SCORE_JOBS_DEFAULT_LIMIT = 10
 const SCORE_JOBS_MAX_LIMIT = 15
-/** Wall-clock ceiling for one score_jobs call, same defense as
- *  MCP_CALL_TIMEOUT_MS, just sized for LLM latency instead of HTTP fan-out. */
-const SCORE_JOBS_TIMEOUT_MS = 70_000
 
 /** web_search result size — a general lookup, not a firehose. */
 const WEB_SEARCH_DEFAULT_LIMIT = 5
@@ -264,7 +258,7 @@ export interface JobBriefRow {
  *  than whatever order Postgres happens to return rows in. No ownership check
  *  here — every caller already sourced these ids from an owned/company-scoped
  *  query (ingestLeads only ever creates rows under this user's companies;
- *  bulk_matcher's candidate selection filters by this user's companyIds). */
+ *  score_jobs's candidate selection filters by this user's companyIds). */
 export async function loadJobBriefs(ctx: CopilotToolContext, jobIds: string[]): Promise<JobBriefRow[]> {
   if (jobIds.length === 0) return []
   // the person's own role rows: their verdict, new flag and company, never the shared row's or the first storer's
@@ -337,7 +331,7 @@ export interface ScoringCandidatePick {
 }
 
 /**
- * Pick which unscored jobs to hand runBulkMatch when the model didn't pass
+ * Pick which unscored jobs to hand the judge when the model didn't pass
  * explicit jobIds. With no query (or an all-stopword query), this is just
  * pickUnscoredJobIds — unchanged, oldest-first behavior. With a real query,
  * it pulls a wider unscored pool, ranks it with lib/jobs/relevance.ts (whole-
@@ -1103,7 +1097,7 @@ async function doRefreshCompanies(ctx: CopilotToolContext) {
 interface ScoreJobsReportRow {
   jobId: string
   title: string | null
-  status: 'assessed' | 'blocked' | 'excluded' | 'not-assessed' | 'not-found'
+  status: 'assessed' | 'not-assessed' | 'not-found'
   chance: string | null
   reason: string
   /** True when the job has no description on file. NOT itself a failure —
@@ -1112,13 +1106,11 @@ interface ScoreJobsReportRow {
 }
 
 /**
- * score_jobs: assess a bounded batch of unassessed roles inline instead of
- * handing the user off to trigger_run. Calls the SAME bulk matcher
- * (lib/harness/agents/bulk_matcher.ts's runBulkMatch, which goes through
- * lib/scoring like every other path in the product), nothing about matching
- * itself is reimplemented here. HARD BOUNDED:
- * SCORE_JOBS_DEFAULT_LIMIT/MAX_LIMIT keep one call's spend small, because
- * every role assessed is real LLM cost.
+ * score_jobs: judge a bounded batch of unjudged roles inline instead of handing
+ * the user off to trigger_run. It calls the same judge as the clock and the
+ * judge-now routes (lib/roles/judge.ts), which reads the model through the free
+ * door, so nothing about judging is reimplemented here. HARD BOUNDED:
+ * SCORE_JOBS_DEFAULT_LIMIT/MAX_LIMIT keep one call small.
  *
  * Candidate selection, when the model didn't pass explicit jobIds: a `query`
  * ranks the user's unscored jobs by relevance (lib/jobs/relevance.ts — whole-
@@ -1127,10 +1119,6 @@ interface ScoreJobsReportRow {
  * only one) keeps the old oldest-first behavior unchanged.
  */
 async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
-  if (!canRunLlm(ctx.apiKeys)) return { error: missingOpenRouterMessage(ctx.apiKeys) }
-  const resumeText = await loadResume(ctx)
-  if (!resumeText) return { error: 'No resume on file — upload one in Settings first.' }
-
   const companyIds = await userCompanyIds(ctx.admin, ctx.userId)
   if (companyIds.length === 0) {
     return { scored: 0, failed: 0, candidatesConsidered: 0, note: 'No companies tracked yet. Follow companies on the Companies page first.' }
@@ -1161,77 +1149,35 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
     }
   }
 
-  const signal = boundSignal(ctx.signal, SCORE_JOBS_TIMEOUT_MS)
+  // Which of the requested ids are the person's own, so every id gets a concrete answer even if it never reaches the model.
+  const { data: owned } = await ownedJobsQuery(ctx.admin, ctx.userId, 'id, title, description').in('id', jobIds)
+  const ownedById = new Map(((owned as unknown as { id: string; title: string | null; description: string | null }[] | null) ?? []).map((r) => [r.id, r]))
 
-  // Diagnose the exact requested batch against ownership BEFORE assessing, so
-  // every job id gets a concrete answer even if it never reaches the model:
-  // this is what replaces a bare "2 failed" with a real per-job reason.
-  const diagnosis = await diagnoseCandidateJobs(ctx.admin, jobIds, ctx.userId)
-  const diagnosisById = new Map<string, CandidateDiagnosis>(diagnosis.map((d) => [d.jobId, d]))
-
-  let result: BulkMatchResult
+  let out: Awaited<ReturnType<typeof judgeRoles>>
   try {
-    result = await runBulkMatch({
-      admin: ctx.admin,
-      userId: ctx.userId,
-      llm: makeRunner(ctx, signal, 'score-job-batch'),
-      limit,
-      jobIds,
-      apiKeys: ctx.apiKeys,
-    })
+    out = await judgeRoles(ctx.admin, ctx.userId, jobIds)
   } catch (e) {
     return { error: `Assessing failed: ${errMsg(e)}` }
   }
+  if (out.stopped && out.judged.length === 0) return { error: (await stopAnswer(out.stopped, () => judgeStatus(ctx.admin, ctx.userId))).error }
 
-  // Defense in depth: canRunLlm already gated entry above, but a backend that
-  // was configured-but-unreachable (e.g. local-server going down mid-call)
-  // surfaces here as this skippedReason instead of a thrown error.
-  if (result.skippedReasons['no-llm-key']) {
-    return { error: missingOpenRouterMessage(ctx.apiKeys) }
-  }
-
-  const outcomeById = new Map(result.jobOutcomes.map((o) => [o.jobId, o]))
+  const { data: judged } = await ctx.admin.from('person_roles').select('job_id, band, chance_detail').eq('user_id', ctx.userId).in('job_id', out.judged)
+  const bandById = new Map(((judged as { job_id: string; band: string; chance_detail: { note?: string } | null }[] | null) ?? []).map((r) => [r.job_id, r]))
   const jobResults: ScoreJobsReportRow[] = jobIds.map((jobId) => {
-    const d = diagnosisById.get(jobId)
-    if (!d || !d.willAttemptScoring) {
-      return {
-        jobId,
-        title: d?.title ?? null,
-        status: !d || !d.found ? 'not-found' : 'excluded',
-        chance: null,
-        reason: d?.reason ?? 'not found among your tracked companies\' jobs',
-        titleOnly: d ? !d.hasDescription : false,
-      }
-    }
-    const outcome = outcomeById.get(jobId)
-    if (!outcome) {
-      // Should not happen (diagnosis said it would be attempted, runBulkMatch
-      // reports one outcome per attempted job) — still never a bare "failed".
-      return {
-        jobId,
-        title: d.title,
-        status: 'not-assessed',
-        chance: null,
-        reason: 'not attempted this call — likely dropped by a concurrent limit; retry score_jobs for this id',
-        titleOnly: !d.hasDescription,
-      }
-    }
-    return {
-      jobId,
-      title: d.title,
-      status: outcome.status,
-      chance: outcome.chance,
-      reason: outcome.reason,
-      titleOnly: outcome.titleOnly,
-    }
+    const job = ownedById.get(jobId)
+    if (!job) return { jobId, title: null, status: 'not-found', chance: null, reason: "not found among the roles you hold", titleOnly: false }
+    const row = bandById.get(jobId)
+    const titleOnly = !(job.description ?? '').trim()
+    if (!row) return { jobId, title: job.title, status: 'not-assessed', chance: null, reason: out.stopped ? 'left waiting: the free allowance or pace limit was reached, so the clock will judge it' : 'not judged this call', titleOnly }
+    return { jobId, title: job.title, status: 'assessed', chance: row.band, reason: row.chance_detail?.note ?? 'Judged.', titleOnly }
   })
 
   const jobs = await loadJobBriefs(ctx, jobIds)
   return {
-    scored: result.scored,
-    failed: result.failed,
-    candidatesConsidered: result.candidatesConsidered,
-    skippedReasons: Object.keys(result.skippedReasons).length ? result.skippedReasons : undefined,
+    scored: out.judged.length,
+    failed: jobResults.filter((r) => r.status === 'not-assessed').length,
+    candidatesConsidered: jobIds.length,
+    skippedReasons: out.stopped ? { [out.stopped]: 1 } : undefined,
     jobs,
     jobResults,
     relevance: relevanceInfo,
@@ -1240,9 +1186,7 @@ async function doScoreJobs(ctx: CopilotToolContext, args: Args) {
         ? `Nothing unassessed matched "${relevanceInfo.query}" in the ${relevanceInfo.poolSize} most recent unassessed ` +
           'jobs, so this broadened to the newest unassessed jobs instead of assessing nothing, consider refresh_companies ' +
           'if you want fresher candidates for this ask.'
-        : result.scored === 0 && result.candidatesConsidered === 0
-          ? 'Nothing to assess in this batch. Run refresh_companies, or widen targeting in Settings.'
-          : undefined,
+        : undefined,
   }
 }
 

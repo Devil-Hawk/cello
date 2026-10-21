@@ -2,9 +2,9 @@
 // and to record what the person thought of one.
 //
 // It reads what lib/scoring stored on the person's own row for each role (their want
-// and their chance), assesses unassessed roles through assessJobs, and records a
-// reaction through triageRole. The daily picks (runDailyShortlist) are switched off
-// until they beat plain ordering, so the list here is ordered by chance and want.
+// and their chance), judges unjudged roles through judgeRoles (lib/roles/judge.ts, the free
+// door), and records a reaction through triageRole. The daily picks (runDailyShortlist) are
+// switched off until they beat plain ordering, so the list here is ordered by chance and want.
 //
 // Rules this file keeps:
 //   - a role that was not assessed says so (chance null, "Not assessed yet"), never a guess
@@ -12,13 +12,12 @@
 //   - one slot in a full shortlist is labelled exploration: a role ranked below the cut,
 //     shown so Cello can learn from the reaction, not because it ranks highest
 
-import { makeRunner } from '@/lib/harness/copilot-tools'
-import { canRunLlm } from '@/lib/harness/llm-key-message'
 import { isStalePosting } from '@/lib/jobs/freshness'
 import { ownedJobsQuery } from '@/lib/jobs/owned-query'
 import { hasRelevanceTerms, parseRelevanceQuery, rankJobsByRelevance } from '@/lib/jobs/relevance'
-import { assessJobs, FIT_COLUMNS, parseFit, PASS_REASONS, ScoringInputError, triageRole, type PassReason } from '@/lib/scoring'
-import { fitHighlights, fitToColumns, type FitRow } from '@/lib/scoring/read'
+import { judgeRoles, STOP_REASON } from '@/lib/roles/judge'
+import { FIT_COLUMNS, parseFit, PASS_REASONS, ScoringInputError, triageRole, type PassReason } from '@/lib/scoring'
+import { fitHighlights, type FitRow } from '@/lib/scoring/read'
 import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 
 export type Chance = 'strong' | 'possible' | 'stretch'
@@ -48,7 +47,7 @@ export interface ShortlistInput {
   apiKeys: DecryptedApiKeys
   limit: number
   query?: string
-  /** Assess up to this many unassessed roles first (costs model calls). 0 reads what is stored. */
+  /** Judge up to this many unjudged roles first (model calls on the free door). 0 reads what is stored. */
   assessMissing?: number
   location?: string
   remoteOnly?: boolean
@@ -153,20 +152,14 @@ export async function shortlistFor(input: ShortlistInput): Promise<ShortlistOutp
 
   const missing = pool.filter((r) => r.assessed_at == null).slice(0, Math.max(0, input.assessMissing ?? 0))
   if (missing.length > 0) {
-    if (!canRunLlm(input.apiKeys)) {
-      skippedReason = 'no-llm-key'
-    } else {
-      const result = await assessJobs({
-        admin: input.admin,
-        userId: input.userId,
-        apiKeys: input.apiKeys,
-        llm: makeRunner({ admin: input.admin, userId: input.userId, userEmail: '', apiKeys: input.apiKeys, signal: input.signal }, input.signal, 'assess-roles'),
-        jobIds: missing.map((r) => r.id),
-        limit: missing.length,
-      })
-      assessedNow = result.assessed
-      skippedReason = result.skippedReason
-      if (result.fits.size > 0) pool = pool.map((r) => (result.fits.has(r.id) ? { ...r, ...fitToColumns(result.fits.get(r.id)!) } : r))
+    // The free door picks the model: the person's own key, the free models within today's allowance, or a local model.
+    const out = await judgeRoles(input.admin, input.userId, missing.map((r) => r.id))
+    assessedNow = out.judged.length
+    if (out.stopped) skippedReason = STOP_REASON[out.stopped]
+    if (out.judged.length > 0) {
+      const { data } = await ownedJobsQuery(input.admin, input.userId, ROLE_SELECT).in('id', out.judged)
+      const fresh = new Map(((data as unknown as RoleRow[] | null) ?? []).map((r) => [r.id, r]))
+      pool = pool.map((r) => fresh.get(r.id) ?? r)
     }
   }
 

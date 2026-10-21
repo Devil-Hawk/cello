@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RoleFit } from '@/lib/scoring/types'
 
-const mocks = vi.hoisted(() => ({ assessJobs: vi.fn() }))
-vi.mock('@/lib/scoring', async (orig) => ({ ...(await orig<typeof import('@/lib/scoring')>()), assessJobs: mocks.assessJobs }))
+const mocks = vi.hoisted(() => ({ judgeRoles: vi.fn() }))
+vi.mock('@/lib/roles/judge', async (orig) => ({ ...(await orig<typeof import('@/lib/roles/judge')>()), judgeRoles: mocks.judgeRoles }))
 
 import { NOT_ASSESSED, recordReaction, roleView, shortlistFor } from './scoring-port'
 import { makeFakeAdmin, type FakeAdmin } from './testing/fake-admin'
@@ -75,7 +74,9 @@ function setup(rows: Record<string, unknown>[]): FakeAdmin {
 
 const base = { userId: 'u1', apiKeys: { openrouter: 'k', userId: 'u1' } }
 
-beforeEach(() => mocks.assessJobs.mockReset())
+beforeEach(() => {
+  mocks.judgeRoles.mockReset()
+})
 
 describe('shortlistFor', () => {
   it('ranks by chance then want, gives each assessed role its reason, and never guesses for an unassessed one', async () => {
@@ -137,32 +138,31 @@ describe('shortlistFor', () => {
     expect((await shortlistFor({ ...base, admin, limit: 5 })).picks.every((p) => !p.exploration)).toBe(true)
   })
 
-  it('assesses missing roles only when asked, and ranks what it assessed', async () => {
+  it('judges missing roles only when asked, and ranks what it judged', async () => {
     const admin = setup([role('j1'), assessed('j2', 'possible', 0.5)])
-    const fit: RoleFit = {
-      jobId: 'j1',
-      assessedAt: daysAgo(0),
-      blocked: [],
-      want: { p: 0.9, reason: 'Built billing at Acme', tier: 'high', calibrated: false, nReactions: 0 },
-      chance: { label: 'strong', checks: [], gaps: [], confirm: [], note: null },
-    }
-    mocks.assessJobs.mockResolvedValue({ assessed: 1, blocked: 0, failed: 0, remaining: 0, fits: new Map([['j1', fit]]) })
+    // The judge writes the verdict onto the person's own row; the port reads it back.
+    mocks.judgeRoles.mockImplementation(async (db: FakeAdmin, _user: string, ids: string[]) => {
+      await db.from('person_jobs').update({ assessed_at: daysAgo(0), chance: 'strong', want_p: 0.9, want_reason: 'Built billing at Acme' }).eq('id', ids[0])
+      return { judged: [ids[0]], stopped: null }
+    })
     const out = await shortlistFor({ ...base, admin, limit: 5, assessMissing: 3 })
-    expect(mocks.assessJobs).toHaveBeenCalledTimes(1)
-    expect(mocks.assessJobs.mock.calls[0][0]).toMatchObject({ userId: 'u1', jobIds: ['j1'] })
+    expect(mocks.judgeRoles).toHaveBeenCalledTimes(1)
+    expect(mocks.judgeRoles.mock.calls[0].slice(1)).toEqual(['u1', ['j1']])
     expect(out.assessedNow).toBe(1)
     expect(out.picks[0]).toMatchObject({ jobId: 'j1', chance: 'strong', reason: 'Built billing at Acme' })
 
-    mocks.assessJobs.mockClear()
+    mocks.judgeRoles.mockClear()
     await shortlistFor({ ...base, admin, limit: 5 })
-    expect(mocks.assessJobs).not.toHaveBeenCalled()
+    expect(mocks.judgeRoles).not.toHaveBeenCalled()
   })
 
-  it('without a key it reads what is stored and says why nothing was assessed', async () => {
+  it('reads what is stored and says why nothing was judged when the door stops', async () => {
     const admin = setup([role('j1')])
-    const out = await shortlistFor({ ...base, apiKeys: {}, admin, limit: 5, assessMissing: 3 })
+    mocks.judgeRoles.mockResolvedValue({ judged: [], stopped: 'no_model' })
+    const out = await shortlistFor({ ...base, admin, limit: 5, assessMissing: 3 })
     expect(out.skippedReason).toBe('no-llm-key')
-    expect(mocks.assessJobs).not.toHaveBeenCalled()
+    mocks.judgeRoles.mockResolvedValue({ judged: [], stopped: 'day' })
+    expect((await shortlistFor({ ...base, admin, limit: 5, assessMissing: 3 })).skippedReason).toBe('day-allowance-used')
     expect(out.picks[0].reason).toBe(NOT_ASSESSED)
   })
 })

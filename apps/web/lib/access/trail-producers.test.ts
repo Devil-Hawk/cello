@@ -65,7 +65,9 @@ const io = vi.hoisted(() => ({
   readContactProviderKeys: vi.fn(),
   loadApiKeys: vi.fn(),
   userCompanyIds: vi.fn(),
-  runBulkMatch: vi.fn(),
+  nextWaiting: vi.fn(),
+  judgeRoles: vi.fn(),
+  judgeStatus: vi.fn(),
   readOutreachConfig: vi.fn(),
   findDuplicateInitial: vi.fn(),
   insertOutreach: vi.fn(),
@@ -88,9 +90,13 @@ vi.mock('@/lib/jobs/owned-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/jobs/owned-query')>()),
   userCompanyIds: io.userCompanyIds,
 }))
-// How many roles still wait for an assessment is a head-count query; nothing waits here.
-vi.mock('@/lib/scoring/inputs', () => ({ countUnassessed: async () => ({ inRecall: 0, total: 0 }) }))
-vi.mock('@/lib/harness/agents/bulk_matcher', () => ({ runBulkMatch: io.runBulkMatch }))
+// The judge-all route reads the waiting roles and judges them through lib/roles/judge; both are slots here.
+vi.mock('@/lib/roles/judge', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/roles/judge')>()),
+  nextWaiting: io.nextWaiting,
+  judgeRoles: io.judgeRoles,
+  judgeStatus: io.judgeStatus,
+}))
 vi.mock('@/lib/outreach/config', () => ({ readOutreachConfig: io.readOutreachConfig }))
 vi.mock('@/lib/outreach/store', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/outreach/store')>()),
@@ -151,7 +157,7 @@ vi.mock('@/lib/harness/supabase-admin', () => ({
 const routeSession = vi.hoisted(() => ({ current: null as unknown }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => routeSession.current }))
 
-import { POST as scoreBatch } from '@/app/api/agents/match/batch/route'
+import { POST as scoreBatch } from '@/app/api/roles/judge-all/route'
 import { POST as sourceContacts } from '@/app/api/contacts/source/route'
 import { POST as draftOutreach } from '@/app/api/outreach/draft/route'
 import { GET as resumeGet, POST as resumePost } from '@/app/api/resume/documents/route'
@@ -201,7 +207,7 @@ function fakeAdmin(options: AdminOptions): { admin: SupabaseClient; inserts: Ins
         // Two calling conventions both have to work: a bare
         // `await ...insert(row)` (every pre-port caller) and
         // `await ...insert(row).select('id').single()` (lib/graph/oneshot.ts's
-        // agent_runs bootstrap, needed once match/batch + outreach/draft route
+        // agent_runs bootstrap, needed once judge-all + outreach/draft route
         // through runAgentUnit). insert() therefore returns a thenable that is
         // ALSO chainable, rather than resolving immediately.
         insert: (inserted: Record<string, unknown>) => {
@@ -209,7 +215,7 @@ function fakeAdmin(options: AdminOptions): { admin: SupabaseClient; inserts: Ins
           // (auditRows() below only ever reads access_code_events too) —
           // scoped to that table specifically, not every table, now that
           // lib/graph/oneshot.ts's agent_runs bootstrap is a SECOND,
-          // load-bearing admin insert match/batch + outreach/draft depend on
+          // load-bearing admin insert outreach/draft depends on
           // to run at all. Applying these to that one too would be testing a
           // different claim ("the route survives its OWN journaling infra
           // failing"), which is not what this suite is about.
@@ -331,15 +337,9 @@ function installDefaults(): void {
   io.readContactProviderKeys.mockResolvedValue({ hunter: null, apollo: null })
   io.loadApiKeys.mockResolvedValue({ openrouter: 'or-key', userId: DEMO_USER })
   io.userCompanyIds.mockResolvedValue(['company-1'])
-  io.runBulkMatch.mockResolvedValue({
-    scored: 7,
-    failed: 1,
-    candidatesConsidered: 9,
-    skippedReasons: {},
-    batches: 2,
-    tokensUsed: 1234,
-    jobOutcomes: [],
-  })
+  io.nextWaiting.mockResolvedValue(['j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7', 'j8', 'j9'])
+  io.judgeRoles.mockResolvedValue({ judged: ['j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7'], failed: [], stopped: null })
+  io.judgeStatus.mockResolvedValue({ judgedToday: 7, waiting: 0, line: null })
   io.readOutreachConfig.mockResolvedValue({ openrouterKey: undefined })
   io.findDuplicateInitial.mockResolvedValue(null)
   io.insertOutreach.mockImplementation(async (_client: unknown, row: Record<string, unknown>) => ({
@@ -481,7 +481,7 @@ interface Producer {
   /**
    * Overrides merged into the profile row the SERVICE-ROLE client returns.
    *
-   * Both `/api/agents/match/batch` and the resume generate handler read
+   * The resume generate handler reads
    * `resume_text` through the admin client, not through the caller's own — so
    * "this workspace has no resume" has to be arranged there. The demo flags on
    * that same row are what session.ts reads, which is why this merges into the
@@ -513,17 +513,17 @@ const SAVE_BODY = {
 const PRODUCERS: Producer[] = [
   // --- jobs.score_batch ---
   {
-    name: 'score batch — scored',
-    run: () => scoreBatch(post('/api/agents/match/batch', { limit: 10 })),
+    name: 'score batch — judged',
+    run: () => scoreBatch(post('/api/roles/judge-all', {})),
     status: 200,
     action: 'jobs.score_batch',
     target: '/jobs',
-    detail: { count: 7, failed: 1, considered: 9, remaining: 0 },
+    detail: { count: 7, failed: 2, considered: 9, remaining: 0 },
   },
   {
-    name: 'score batch — no key',
-    arrange: () => io.loadApiKeys.mockResolvedValue({}),
-    run: () => scoreBatch(post('/api/agents/match/batch', {})),
+    name: 'score batch — no model',
+    arrange: () => io.judgeRoles.mockResolvedValue({ judged: [], failed: [], stopped: 'no_model' }),
+    run: () => scoreBatch(post('/api/roles/judge-all', {})),
     status: 400,
     action: 'jobs.score_batch',
     target: '/jobs',
@@ -531,21 +531,21 @@ const PRODUCERS: Producer[] = [
   },
   {
     name: 'score batch — no resume',
-    adminProfile: { resume_text: '' },
-    run: () => scoreBatch(post('/api/agents/match/batch', {})),
+    arrange: () => io.judgeRoles.mockResolvedValue({ judged: [], failed: [], stopped: 'no_resume' }),
+    run: () => scoreBatch(post('/api/roles/judge-all', {})),
     status: 400,
     action: 'jobs.score_batch',
     target: '/jobs',
     detail: { outcome: 'failed', reason: 'no_resume' },
   },
   {
-    name: 'score batch — no companies',
-    arrange: () => io.userCompanyIds.mockResolvedValue([]),
-    run: () => scoreBatch(post('/api/agents/match/batch', {})),
-    status: 200,
+    name: 'score batch — the day allowance is used',
+    arrange: () => io.judgeRoles.mockResolvedValue({ judged: [], failed: [], stopped: 'day' }),
+    run: () => scoreBatch(post('/api/roles/judge-all', {})),
+    status: 429,
     action: 'jobs.score_batch',
     target: '/jobs',
-    detail: { count: 0, reason: 'no_companies' },
+    detail: { outcome: 'failed', reason: 'day_limit' },
   },
   // --- contacts.source ---
   {
@@ -916,7 +916,7 @@ describe('every producer of the demo trail', () => {
 
 // --- the two producers that do not return a response --------------------------
 //
-// /api/outreach/draft and /api/agents/match/batch both journal a failure and
+// /api/outreach/draft and /api/roles/judge-all both journal a failure and
 // then RETHROW, because that is what those two paths did before the trail
 // existed and an audit row is not a licence to change a handler's behaviour.
 // They cannot go in the table above (which asserts a status code), and they are
@@ -940,11 +940,11 @@ describe('producers that journal a failure and then rethrow', () => {
     expect(rows[0].detail).toEqual({ outcome: 'failed', reason: 'llm_failed' })
   })
 
-  it('records the scoring run when runBulkMatch blows up mid-spend', async () => {
+  it('records the judging run when judgeRoles blows up mid-run', async () => {
     const { inserts } = useServiceRole({ profileRow: DEMO_WORKSPACE_PROFILE, codeRow: LIVE_CODE_ROW })
-    io.runBulkMatch.mockRejectedValue(new Error('the assessment never returned'))
+    io.judgeRoles.mockRejectedValue(new Error('the assessment never returned'))
 
-    await expect(scoreBatch(post('/api/agents/match/batch', { limit: 10 }))).rejects.toThrow(
+    await expect(scoreBatch(post('/api/roles/judge-all', {}))).rejects.toThrow(
       'the assessment never returned'
     )
 
@@ -956,9 +956,9 @@ describe('producers that journal a failure and then rethrow', () => {
 
   it('writes nothing for an ordinary user on either path', async () => {
     const { inserts } = useServiceRole({ profileRow: ORDINARY_WORKSPACE_PROFILE, codeRow: LIVE_CODE_ROW })
-    io.runBulkMatch.mockRejectedValue(new Error('the assessment never returned'))
+    io.judgeRoles.mockRejectedValue(new Error('the assessment never returned'))
 
-    await expect(scoreBatch(post('/api/agents/match/batch', { limit: 10 }))).rejects.toThrow()
+    await expect(scoreBatch(post('/api/roles/judge-all', {}))).rejects.toThrow()
 
     expect(auditRows(inserts)).toHaveLength(0)
   })

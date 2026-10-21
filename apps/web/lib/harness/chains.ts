@@ -75,7 +75,7 @@ export function buildApplyToRolePlan(rawParams: unknown): Plan {
       dependsOn: [],
     },
     // matcher pulls its candidate jobIds from ANY dep output's `.jobIds` field
-    // (lib/harness/agents/matcher.ts#collectJobIds) — no need to thread the id
+    // (the matcher AgentFn in lib/harness/registry.ts) — no need to thread the id
     // list through `input` by hand.
     { label: 'match', agent_type: 'matcher', input: {}, dependsOn: ['source'] },
     {

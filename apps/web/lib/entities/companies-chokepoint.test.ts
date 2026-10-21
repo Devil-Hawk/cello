@@ -14,8 +14,8 @@
 //   lib/access/demo-chokepoints.test.ts: it catches the NEXT raw read added
 //   to these modules, not just the ones the company-identity audit named.
 //
-// SCOPE: the four places the audit named — lib/harness/agents/matcher.ts,
-// lib/contacts/**, lib/dossier/**, and the company-facing app/api aggregates
+// SCOPE: the three places the audit still names (the fourth, lib/harness/agents/matcher.ts,
+// is gone) — lib/contacts/**, lib/dossier/**, and the company-facing app/api aggregates
 // (app/api/contacts/**, app/api/companies/**) — not the whole repo. `.eq
 // ('company_id', ...)` is an ordinary, entirely legitimate filter throughout
 // jobs/contacts CRUD (ownership scoping, inserts, per-row lookups); scanning
@@ -56,9 +56,8 @@ function walk(dir: string, keep: (name: string) => boolean = (name) => name.ends
 
 const isTest = (name: string) => name.includes('.test.')
 
-/** The four places the audit named. matcher.ts is a single file; the rest are directories. */
+/** The places the audit named; each is a directory. */
 const SCAN_ROOTS = [
-  path.resolve(WEB_ROOT, 'lib/harness/agents/matcher.ts'),
   path.resolve(WEB_ROOT, 'lib/contacts'),
   path.resolve(WEB_ROOT, 'lib/dossier'),
   path.resolve(WEB_ROOT, 'app/api/contacts'),

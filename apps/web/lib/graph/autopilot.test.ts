@@ -2,11 +2,11 @@
 // Functional API port of the pre-port lib/harness/autopilot.ts. Same testing
 // philosophy as runs.test.ts/refresh.test.ts: a REAL @langchain/langgraph
 // MemorySaver (real Functional API memoization), with refreshCompany,
-// scoreJobBatch, runAgentUnit and loadApiKeys mocked — this file tests
+// runAgentUnit and loadApiKeys mocked — this file tests
 // orchestration (caps, dispatch, budget, journaling, fresh-thread-per-tick,
-// replay safety), not lib/ats's provider detection, lib/harness/agents/
-// matcher.ts's own scoring logic, or lib/graph/unit.ts's own contract (all
-// separately tested). The GOAL LEDGER's own state-machine correctness
+// replay safety), not lib/ats's provider detection or lib/graph/unit.ts's own
+// contract (all separately tested). Autopilot judges nothing: the roles.match
+// routine does, and this file only reads what it concluded. The GOAL LEDGER's own state-machine correctness
 // (caps, dedupe, merge-under-concurrency) is lib/harness/goals.test.ts's
 // job, not re-proven here — this file only proves the GRAPH wires goals.ts
 // in correctly. ZERO network, ZERO real LLM calls, ZERO real Postgres.
@@ -44,26 +44,6 @@ vi.mock('../ingest/run', () => ({
 vi.mock('../ingest/reader/targets', () => ({ loadTargets: async () => ({ targeting: {}, titles: [] }) }))
 vi.mock('../ingest/fetch-page', () => ({ staticFetchPage: async () => ({ html: '', finalUrl: '', rendered: false }) }))
 
-const scoreJobBatchMock = vi.fn(async (_opts: unknown): Promise<{ scored: unknown[]; failedCount: number; candidatesConsidered: number; skippedReason?: string }> => ({
-  scored: [],
-  failedCount: 0,
-  candidatesConsidered: 0,
-  skippedReason: 'no-companies',
-}))
-vi.mock('../harness/agents/matcher', async (importOriginal) => {
-  // Only scoreJobBatch is faked, since that's the metered LLM path this file
-  // never wants to actually run.
-  const actual = await importOriginal<typeof import('../harness/agents/matcher')>()
-  return {
-    ...actual,
-    scoreJobBatch: (opts: unknown) => scoreJobBatchMock(opts),
-  }
-})
-
-// The day's shortlist is picked once a day by lib/scoring; this file only checks that autopilot asks for it.
-const runDailyShortlistMock = vi.fn(async (_args: unknown) => ({ status: 'ok', picks: [] as unknown[] }))
-vi.mock('../scoring', () => ({ runDailyShortlist: (args: unknown) => runDailyShortlistMock(args) }))
-
 const loadApiKeysMock = vi.fn(async (_admin: unknown, _userId: string): Promise<Record<string, unknown>> => ({
   openrouter: 'fake-key',
   userId: 'user-1',
@@ -72,9 +52,8 @@ vi.mock('../harness/keys', () => ({
   loadApiKeys: (admin: unknown, userId: string) => loadApiKeysMock(admin, userId),
 }))
 
-// callLlm must never be reached in the untargeted-sweep tests (scoreJobBatch
-// is mocked and never touches the llm it's handed); the goal-path tests below
-// override this per-test.
+// callLlm must never be reached in the untargeted-sweep tests; the goal-path
+// tests below override this per-test.
 interface FakeLlmResult {
   content: string
   tokensUsed: number
@@ -399,8 +378,6 @@ let autopilotTickGraph: typeof import('./autopilot').autopilotTickGraph
 beforeEach(async () => {
   vi.resetModules()
   refreshCompanyMock.mockClear()
-  scoreJobBatchMock.mockClear()
-  runDailyShortlistMock.mockClear()
   loadApiKeysMock.mockClear()
   callLlmMock.mockClear()
   runAgentUnitMock.mockClear()
@@ -447,7 +424,7 @@ describe('autopilotTickGraph — disabled / no-resume skips', () => {
 })
 
 describe('autopilotTickGraph — untargeted sweep, happy path', () => {
-  it('sources, assesses, drafts eligible jobs, journals one agent_runs row, and never sets autoSubmit true', async () => {
+  it('sources, drafts eligible jobs, journals one agent_runs row, and never sets autoSubmit true', async () => {
     const admin = new FakeAdmin()
     setAdmin(admin)
     const profile = makeProfile()
@@ -455,7 +432,6 @@ describe('autopilotTickGraph — untargeted sweep, happy path', () => {
     const companyIds = admin.allRows('companies').map((c) => c.id as string)
     seedJobs(admin, companyIds, 1, 'strong') // 3 roles the person wants, each with a Strong chance
 
-    scoreJobBatchMock.mockResolvedValueOnce({ scored: [{ jobId: 'x' }], failedCount: 0, candidatesConsidered: 3 })
 
     const saver = new MemorySaver()
     const result = (await autopilotTickGraph.invoke({ profile }, makeConfig('t-happy', profile.id, saver))) as {
@@ -482,9 +458,8 @@ describe('autopilotTickGraph — untargeted sweep, happy path', () => {
     for (const c of applierCalls) {
       expect((c.input as { autoSubmit: unknown }).autoSubmit).toBe(false)
     }
-    expect(scoreJobBatchMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 60 }))
-    // It also makes sure today's shortlist exists, without paying for it twice.
-    expect(runDailyShortlistMock).toHaveBeenCalledWith(expect.objectContaining({ userId: 'user-1', skipIfBuilt: true }))
+    // It judges nothing itself: no matcher step is journaled.
+    expect(runAgentUnitCalls.some((c) => c.unitType === 'matcher')).toBe(false)
   })
 
   it('drafts only for roles the person wants, that nothing they stated blocks, and whose chance is not a stretch', async () => {
@@ -521,7 +496,6 @@ describe('autopilotTickGraph — untargeted sweep, happy path', () => {
     role('job-listed', 'strong', { want_p: 0.9 })
     admin.seed('shortlist_items', { id: 'item-1', user_id: profile.id, for_date: new Date().toISOString().slice(0, 10), job_id: 'job-listed' })
 
-    scoreJobBatchMock.mockResolvedValueOnce({ scored: [], failedCount: 0, candidatesConsidered: 5 })
 
     const saver = new MemorySaver()
     const result = (await autopilotTickGraph.invoke({ profile }, makeConfig('t-gate', profile.id, saver))) as { eligible?: number }
@@ -542,7 +516,6 @@ describe('autopilotTickGraph — untargeted sweep, happy path', () => {
     admin.seed('applications', { id: 'app-1', user_id: profile.id, job_id: saved, stage: 'discovered', source: 'triage' })
     admin.seed('applications', { id: 'app-2', user_id: profile.id, job_id: working, stage: 'applied', source: 'triage' })
 
-    scoreJobBatchMock.mockResolvedValueOnce({ scored: [], failedCount: 0, candidatesConsidered: 2 })
     const saver = new MemorySaver()
     const result = (await autopilotTickGraph.invoke({ profile }, makeConfig('t-triage', profile.id, saver))) as { eligible?: number }
 
@@ -558,7 +531,6 @@ describe('autopilotTickGraph — untargeted sweep, happy path', () => {
     const companyIds = admin.allRows('companies').map((c) => c.id as string)
     seedJobs(admin, companyIds, 1, 'strong')
 
-    scoreJobBatchMock.mockResolvedValueOnce({ scored: [], failedCount: 0, candidatesConsidered: 1 })
     // Neither BudgetExceededError/BudgetCapError nor CvTailorContainmentError
     // — e.g. loadJobFacts/loadResumeText/claimsFor's DB read failing inside
     // verifyCvTailorDraft. Before this fix, prepareApplicationDraft's catch

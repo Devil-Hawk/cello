@@ -11,7 +11,7 @@
 // own companies).
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { ownedJobsQuery } from '@/lib/harness/agents/matcher'
+import { ownedJobsQuery } from '@/lib/jobs/owned-query'
 import { STAGE_META, type PipelineStage } from '@/lib/format'
 
 const utcDateKey = (now = new Date()) => now.toISOString().slice(0, 10)

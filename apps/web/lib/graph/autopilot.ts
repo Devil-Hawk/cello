@@ -91,12 +91,8 @@
 //   sourceTask  refreshes the user's tracked companies via the official ATS
 //               APIs (lib/ats). Runs at most once per tick — module-level,
 //               like lib/graph/runs.ts's plannerTask.
-//   scoreTask   assesses unassessed candidates via the shared matcher path
-//               (lib/harness/agents/matcher.ts#scoreJobBatch, which goes through
-//               lib/scoring) and makes sure today's shortlist exists, the exact
-//               code path the cron digest uses, so autopilot can never silently
-//               diverge in how roles are judged.
-//               Module-level, once per tick.
+//               Autopilot judges nothing: the roles.match routine (lib/roles/judge.ts) judges
+//               every kept role, so this file only reads what it concluded.
 //   judgeTask   the goal path's keep/discard judgement
 //               (lib/harness/goals.ts#judgeCandidates). Module-level, once per
 //               tick, only reached when an active goal exists.
@@ -149,10 +145,8 @@ import { loadTargets } from '../ingest/reader/targets'
 import { ingestCompany, type DueCompany } from '../ingest/run'
 import { trackedOnly } from '../companies/watchlist'
 import { loadApiKeys } from '../harness/keys'
-import { callLlm, MissingKeyError } from '../harness/llm'
+import { callLlm } from '../harness/llm'
 import { canRunLlm } from '../harness/llm-key-message'
-import { scoreJobBatch } from '../harness/agents/matcher'
-import { runDailyShortlist } from '../scoring'
 import { BudgetCapError } from '../harness/spend'
 import { createAdminClient } from '../harness/supabase-admin'
 import {
@@ -191,8 +185,6 @@ const DEFAULT_BUDGET_TOKENS = 150_000
 const MAX_ACTIONS_PER_TICK = 8
 /** Cap companies refreshed per tick to bound wall-clock time. */
 const MAX_COMPANIES_REFRESH = 20
-/** Cap unassessed jobs we assess per tick. */
-const MAX_SCORE_PER_TICK = 60
 /** Candidate jobs pulled per user. */
 const CANDIDATE_JOB_LIMIT = 150
 
@@ -303,24 +295,8 @@ const sourceTask = task('source', async (args: SourceTaskArgs): Promise<SourceTa
   return { discovered, refreshed: toRefresh.length }
 })
 
-interface ScoreTaskArgs {
-  userId: string
-  limit: number
-  /** Tick's remaining token allowance — bounds THIS task's own local meter. */
-  budgetRemaining: number
-  runId: string
-}
-interface ScoreTaskResult {
-  scored: number
-  failedCount: number
-  candidatesConsidered: number
-  skippedReason?: string
-  tokensUsed: number
-}
-
 /** A fresh, per-task metered LlmRunner that aborts once its own usage crosses
- *  `budgetRemaining` — see this file's header BUDGET note. Shared shape
- *  between scoreTask and judgeTask. */
+ *  `budgetRemaining` — see this file's header BUDGET note. */
 function meteredLlm(apiKeys: DecryptedApiKeys, budgetRemaining: number, name: string): { llm: LlmRunner; signal: AbortSignal; used: () => number } {
   const controller = new AbortController()
   let used = 0
@@ -336,28 +312,6 @@ function meteredLlm(apiKeys: DecryptedApiKeys, budgetRemaining: number, name: st
   }
   return { llm, signal: controller.signal, used: () => used }
 }
-
-const scoreTask = task('score', async (args: ScoreTaskArgs): Promise<ScoreTaskResult> => {
-  const admin = createAdminClient()
-  const apiKeys = await loadApiKeys(admin, args.userId)
-  const { llm, signal, used } = meteredLlm(apiKeys, args.budgetRemaining, 'score-job-batch')
-  const batch = await scoreJobBatch({ admin, userId: args.userId, llm, limit: args.limit, signal, apiKeys })
-  // Today's shortlist is picked once a day; this is a no-op when it is already there.
-  if (!batch.skippedReason || batch.skippedReason === 'no-roles') {
-    try {
-      await runDailyShortlist({ admin, userId: args.userId, apiKeys, llm, skipIfBuilt: true })
-    } catch (err) {
-      if (!(err instanceof MissingKeyError) && !(err instanceof BudgetExceededError)) throw err
-    }
-  }
-  return {
-    scored: batch.scored.length,
-    failedCount: batch.failedCount,
-    candidatesConsidered: batch.candidatesConsidered,
-    skippedReason: batch.skippedReason,
-    tokensUsed: used(),
-  }
-})
 
 interface JudgeTaskArgs {
   userId: string
@@ -549,29 +503,25 @@ function makeDraftTask(jobId: string) {
   })
 }
 
-// --- shared source+score phase (both tick paths run this identically) -------
+// --- shared source phase (both tick paths run this identically) ------------
 
 function toGoalCandidate(job: CandidateJob): GoalCandidate {
   return { id: job.id, title: job.title, description: job.description, location: job.location, chance: job.chance, want: job.want_p }
 }
 
 /**
- * SOURCE (refresh the user's companies) + SCORE (the shared matcher path) +
- * load the candidate pool.
+ * SOURCE (refresh the user's companies) + load the candidate pool, with the
+ * judgement the roles.match routine has already written (lib/roles/judge.ts).
  *
  * Shared by the untargeted sweep and the goal tick ON PURPOSE. These two paths
- * differ in what they DO with candidates, not in how candidates come to exist,
- * and two copies of "how autopilot finds jobs" is exactly how the goal path
- * would quietly drift into scoring things differently from the digest cron —
- * the divergence lib/harness/agents/matcher.ts's header says centralising was
- * meant to prevent.
+ * differ in what they DO with candidates, not in how candidates come to exist.
+ * Nothing here judges a role: a role the routine has not reached yet has no
+ * chance and is not eligible this tick.
  */
-async function sourceAndScore(
+async function sourceAndLoad(
   admin: AdminClient,
   runId: string,
   userId: string,
-  profile: ProfileRow,
-  budgetRemaining: number,
   digest: AutopilotUserResult
 ): Promise<{ candidates: CandidateJob[]; tokensUsed: number }> {
   const companies = await loadCompanies(admin, userId)
@@ -591,36 +541,10 @@ async function sourceAndScore(
   // --- DEDUPE: jobs already drafted or applied -------------------------------
   const excluded = await loadExcludedJobIds(admin, userId)
 
-  // --- ASSESS: same shared code path as the harness matcher agent
-  // (lib/harness/agents/matcher.ts) — this is what keeps autopilot and the
-  // daily-digest cron from double-assessing or diverging in how roles are
-  // judged. Both take roles with no assessment yet, so whichever tick gets to
-  // a role first claims it.
   const companyIds = companies.map((c) => c.id)
 
-  await journalStepStart(admin, { runId, label: 'autopilot-match', agentType: 'matcher', input: { companyCount: companyIds.length } })
-  const scoreResult: ScoreTaskResult =
-    companyIds.length > 0
-      ? await scoreTask({ userId, limit: MAX_SCORE_PER_TICK, budgetRemaining, runId })
-      : { scored: 0, failedCount: 0, candidatesConsidered: 0, skippedReason: 'no-companies', tokensUsed: 0 }
-  digest.scored = scoreResult.scored
-  await journalStepFinish(admin, {
-    runId,
-    label: 'autopilot-match',
-    agentType: 'matcher',
-    status: 'completed',
-    output: {
-      scored: scoreResult.scored,
-      failed: scoreResult.failedCount,
-      candidatesConsidered: scoreResult.candidatesConsidered,
-      skippedReason: scoreResult.skippedReason,
-    },
-    tokensUsed: scoreResult.tokensUsed,
-  })
-
-  // Load ALL candidates (now including whatever was just assessed above).
   const candidates = companyIds.length > 0 ? await loadCandidateJobs(admin, userId, excluded) : []
-  return { candidates, tokensUsed: scoreResult.tokensUsed }
+  return { candidates, tokensUsed: 0 }
 }
 
 // --- the goal-directed tick --------------------------------------------------
@@ -708,8 +632,8 @@ async function runGoalTick(
   // reliably crashes loops at full price forever.
   let g = await persistGoal(admin, userId, startTick(goal))
 
-  // 3) Source + score, exactly as the untargeted sweep does.
-  const sourced = await sourceAndScore(admin, runId, userId, profile, tickConfig.budgetTokens - spent, digest)
+  // 3) Source, exactly as the untargeted sweep does.
+  const sourced = await sourceAndLoad(admin, runId, userId, digest)
   spent += sourced.tokensUsed
 
   let budgetHit = false
@@ -1048,8 +972,8 @@ export const autopilotTickGraph = entrypoint(
         .gte('submitted_at', since)
       let remainingCap = tickConfig.dailyCap - (submitted24h ?? 0)
 
-      // --- SOURCE + SCORE + load candidates (shared with the goal path) ------
-      const sourced = await sourceAndScore(admin, runId, userId, profile, tickConfig.budgetTokens - spent, digest)
+      // --- SOURCE + load candidates (shared with the goal path) --------------
+      const sourced = await sourceAndLoad(admin, runId, userId, digest)
       spent += sourced.tokensUsed
 
       // --- QUALITY GATE: wanted, not blocked, a real chance; most wanted first --
@@ -1060,7 +984,7 @@ export const autopilotTickGraph = entrypoint(
       digest.eligible = eligible.length
 
       if (eligible.length === 0) {
-        digest.message = `No new roles worth drafting for. Discovered ${digest.discovered}, assessed ${digest.scored}.`
+        digest.message = `No new roles worth drafting for. Discovered ${digest.discovered}.`
         await finishRun(admin, runId, spent, digest)
         return digest
       }

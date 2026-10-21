@@ -98,7 +98,7 @@ interface Job extends JobRowJob {
 
 type SortKey = 'newest' | 'best_match'
 
-/** Response shape from POST /api/agents/match/batch — batches the whole backlog server-side. */
+/** Response shape from POST /api/roles/judge-all: up to 12 waiting roles judged now, the rest queued for the clock. */
 interface BatchMatchResult {
   scored: number
   failed: number
@@ -112,17 +112,9 @@ interface BatchMatchResult {
 }
 
 const PAGE_SIZE = 30
-/** Roles checked per click of the batch trigger; click again to keep draining the backlog. */
-// The route's own default is 200 with a 500 hard cap, and bulk_matcher is built
-// to triage a whole backlog in internal 60-job batches. Sending 25 meant ~451
-// manual clicks to cover 11,275 rows — against a finish line that, before the
-// route's remaining-count fix, did not exist. One round now does real work and
-// runBatchUntilDone below keeps going until the reachable backlog is empty.
-const BATCH_LIMIT = 200
 
-/** Hard stop on the auto-continue loop. Every round spends metered LLM calls,
- *  so a runaway loop is a money bug, not just a slow one. At 200/round this
- *  still covers 4,000 jobs, far past any real in-targeting backlog. */
+/** Hard stop on the auto-continue loop. A round judges up to 12 roles within the day's allowance, and the server
+ *  answers 429 with the day line once it is used, so this is only a backstop. */
 const MAX_BATCH_ROUNDS = 20
 
 // Read through person_jobs: the company, the new flag and the verdict are this person's own, never the shared role's.
@@ -809,7 +801,7 @@ function JobsPageInner() {
   async function calculateMatch(jobId: string) {
     setCalculatingMatch(jobId)
     try {
-      const response = await fetch(`/api/roles/${jobId}/fit`, { method: 'POST' })
+      const response = await fetch(`/api/roles/${jobId}/judge`, { method: 'POST' })
       // Read as text first: a non-JSON body (platform error page, etc.) must not
       // collapse into an opaque generic error.
       const rawText = await response.text()
@@ -858,11 +850,7 @@ function JobsPageInner() {
    */
   async function runOneBatch(): Promise<BatchMatchResult | null> {
     {
-      const response = await fetch('/api/agents/match/batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ limit: BATCH_LIMIT }),
-      })
+      const response = await fetch('/api/roles/judge-all', { method: 'POST' })
       const rawText = await response.text()
       let data: (BatchMatchResult & { error?: string }) | null = null
       try {
@@ -1134,10 +1122,8 @@ function JobsPageInner() {
                 </div>
               )
             }
-            // Enabled + work left to do: this click can fire up to
-            // BATCH_LIMIT real, metered LLM calls in one go — the biggest
-            // single spend exposed on this page — so it's worth a budget
-            // hint even though nothing is blocking the click.
+            // Enabled + work left to do: the click judges roles on the person's own key or on Cello's free
+            // allowance for the day, so the hint says which.
             if (!isBlocked && !allScored) {
               if (!budgetHint) return batchButton
               return (
@@ -1147,8 +1133,8 @@ function JobsPageInner() {
                     <TooltipContent side="bottom" className="max-w-xs p-3">
                       <p className="text-caption text-muted-foreground">
                         Keeps checking until everything your filters allow is
-                        done, {BATCH_LIMIT} at a time, with metered AI calls.
-                        You can stop it at any point. {budgetHint}.
+                        done, 12 at a time, within your own key or Cello's free
+                        allowance for today. You can stop it at any point. {budgetHint}.
                       </p>
                     </TooltipContent>
                   </Tooltip>

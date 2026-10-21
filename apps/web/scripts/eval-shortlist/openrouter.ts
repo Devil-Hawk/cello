@@ -9,7 +9,6 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { LlmResult, LlmRunOptions } from '@/lib/harness/types'
-import type { Embedder } from '@/lib/scoring/pipeline'
 
 export interface ClientOptions {
   apiKey: string
@@ -172,23 +171,5 @@ export class FreeModelClient {
       }
       return last ?? { content: '', tokensUsed: 0, promptTokens: 0, completionTokens: 0, model: models[0] }
     }
-  }
-
-  async embeddings(model: string, texts: string[]): Promise<number[][]> {
-    if (!model.endsWith(':free')) throw new Error(`refusing non-free model ${model}`)
-    const body = { model, input: texts }
-    const file = path.join(this.opts.cacheDir, `emb-${this.key(body)}.json`)
-    if (existsSync(file)) {
-      this.cached += 1
-      return JSON.parse(readFileSync(file, 'utf8'))
-    }
-    const j = await this.live_('https://openrouter.ai/api/v1/embeddings', body, model, 120_000)
-    const vectors = [...j.data].sort((a: any, b: any) => a.index - b.index).map((d: any) => d.embedding as number[])
-    writeFileSync(file, JSON.stringify(vectors))
-    return vectors
-  }
-
-  embedder(model: string): Embedder {
-    return { model, embed: (texts) => this.embeddings(model, texts) }
   }
 }
