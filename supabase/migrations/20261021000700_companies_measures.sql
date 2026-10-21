@@ -42,7 +42,7 @@ insert into public.measures (id, layer, name, bar, direction, source, gates) val
   ('T34', 'true', 'company search: the owner''s named set through the company search steps, the right employer among the candidates with the step that found it, every miss named with its reason', '11 of 11 named; 8 of 10 unseeded startups', 'higher', 'measure_runs from scripts/directory-coverage.ts --find --record', array['K6', 'PG11']::text[]),
   ('T35', 'true', 'browser reads of an employer''s careers page: queued, done with a verified employer, done with none, failed by class, per 7 days', 'reported; no bar until a month of numbers', 'reported', 'render_jobs', array['PG11']::text[]),
   ('T36', 'true', '"Not this company" reports and what the re-check found: where each reported employer stands now, per 30 days', 'reported', 'reported', 'employer_reports and company_directory', array['K6']::text[]),
-  ('T37', 'true', 'Companies route timings: share of add calls answered within 60 s, and of follow calls answered within 8 s, failures counted as misses, per 7 days', '95 percent within each bar', 'higher', 'route_timings', array['K6']::text[])
+  ('T37', 'true', 'Companies route timings: share of add calls answered within 60 s, follow calls within 8 s, find calls within 30 s and the find directory rung within 300 ms, failures counted as misses, per 7 days', '95 percent within each bar', 'higher', 'route_timings', array['K6']::text[])
 on conflict (id) do update set name = excluded.name, bar = excluded.bar, direction = excluded.direction, source = excluded.source, gates = excluded.gates;
 
 -- ---------------------------------------------------------------------------
