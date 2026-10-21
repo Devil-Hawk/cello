@@ -156,9 +156,10 @@ export async function followedRow(db: Db, userId: string, by: { employerId?: str
   return null
 }
 
+/** Rows the person created in the last 24 hours, followed or not: an unfollow does not reset the day's limit. */
 export async function addsToday(db: Db, userId: string): Promise<number> {
   const since = new Date(Date.now() - 86_400_000).toISOString()
-  const { count } = await db.from('companies').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('watching', true).gte('created_at', since)
+  const { count } = await db.from('companies').select('id', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', since)
   return count ?? 0
 }
 
