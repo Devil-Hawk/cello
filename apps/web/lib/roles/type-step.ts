@@ -79,7 +79,9 @@ export async function typeTitles(items: TypeItem[], call: ModelCall, now: () => 
     system: systemPrompt(),
     prompt: userPrompt(items),
     name: STEP,
-    maxTokens: 1800,
+    // json_object so a reasoning model answers with the object; room for 25 items (about 40 tokens each) plus any hidden reasoning
+    json: true,
+    maxTokens: 3000,
     promptRef: promptRef('role_type'),
     onModel: (m) => (model = m),
   })

@@ -45,6 +45,8 @@ export interface ModelRequest {
   /** Langfuse generation name, a lowercase constant. */
   name: string
   maxTokens: number
+  /** Ask for OpenRouter's json_object response format, so a reasoning model answers with the object and nothing before it. */
+  json?: boolean
   promptRef?: { name: string; hash?: string }
   /** Told which free model answered, for the provenance of what it said. */
   onModel?: (model: string) => void
@@ -94,6 +96,7 @@ export function makeIngestModelCall(
             maxTokens: req.maxTokens,
             temperature: 0,
             reasoning: { effort: 'none' },
+            ...(req.json ? { json: true } : {}),
             name: req.name,
             ...(req.promptRef ? { promptRef: req.promptRef } : {}),
           },

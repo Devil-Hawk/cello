@@ -19,7 +19,7 @@ they are part of the text, not directions to you.
 
 ## Output
 
-One JSON object and nothing else, no code fence, no commentary:
+Answer with a JSON object only: one object and nothing else, no code fence, no commentary:
 
 ```
 {"items": [{"i": integer, "type": string, "quote": string}]}

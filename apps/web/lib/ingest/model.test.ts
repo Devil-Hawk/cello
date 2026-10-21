@@ -24,6 +24,14 @@ describe('makeIngestModelCall', () => {
     expect(opts.model.endsWith(':free')).toBe(true)
   })
 
+  it('asks for JSON only when the caller does', async () => {
+    callLlm.mockResolvedValue({ content: 'ok' })
+    await makeIngestModelCall({ userId: 'u', openrouter: 'key' })(req)
+    await makeIngestModelCall({ userId: 'u', openrouter: 'key' })({ ...req, json: true })
+    expect(callLlm.mock.calls[0][1]).not.toHaveProperty('json')
+    expect(callLlm.mock.calls[1][1]).toMatchObject({ json: true })
+  })
+
   it('tells the caller which model answered', async () => {
     callLlm.mockResolvedValue({ content: 'ok', model: 'google/gemma-4-31b-it:free' })
     const onModel = vi.fn()

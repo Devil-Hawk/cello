@@ -69,6 +69,18 @@ describe('typeTitles', () => {
     expect(callLlm.mock.calls[0][1].model.endsWith(':free')).toBe(true)
   })
 
+  it('asks for the json_object format with room for 25 items, and moves past a model that answers 404 or 429', async () => {
+    const gone = Object.assign(new Error('gone'), { status: 404 })
+    const busy = Object.assign(new Error('busy'), { status: 429 })
+    callLlm.mockRejectedValueOnce(gone).mockRejectedValueOnce(busy).mockResolvedValueOnce({ content: JSON.stringify({ items: [{ i: 1, type: 'ai-engineer', quote: 'ai engineer' }] }), model: 'c/c:free' })
+    const call = makeIngestModelCall({ userId: 'u', openrouter: 'k' }, { models: ['a/a:free', 'b/b:free', 'c/c:free'] })
+    const [r] = (await typeTitles([item(1, 'AI Engineer')], call, now)) as any[]
+    expect(r).toMatchObject({ type: 'ai-engineer', prov: { model: 'c/c:free' } })
+    expect(callLlm.mock.calls.map((c) => c[1].model)).toEqual(['a/a:free', 'b/b:free', 'c/c:free'])
+    for (const [, opts] of callLlm.mock.calls) expect(opts).toMatchObject({ json: true, name: 'role.type' })
+    expect(callLlm.mock.calls[0][1].maxTokens).toBeGreaterThanOrEqual(1500)
+  })
+
   it('returns the limit and types nothing when the budget is spent', async () => {
     const budget = newModelBudget(0)
     const call = makeIngestModelCall({ userId: 'u', openrouter: 'k' }, { budget })
@@ -216,6 +228,9 @@ describe('the step is declared once', () => {
     const found = others.filter((f) => /(?:loadModeDoc|promptRef)\('role_type'\)|'role\.type'|\btypeTitles\(|\btypeBatches\(/.test(readFileSync(f, 'utf8')))
     expect(found).toEqual([])
     // the routine reaches it only through runTypeStep
-    expect(readFileSync(join(root, 'lib', 'clock', 'routines', 'roles-retype.ts'), 'utf8')).toContain('runTypeStep(')
+    const routine = readFileSync(join(root, 'lib', 'clock', 'routines', 'roles-retype.ts'), 'utf8')
+    expect(routine).toContain('runTypeStep(')
+    // the step reads the AGENT_FREE_MODELS list, not the ingest pair
+    expect(routine).toContain('models: freeFallbackModels()')
   })
 })

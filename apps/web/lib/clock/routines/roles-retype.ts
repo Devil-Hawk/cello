@@ -10,6 +10,7 @@
 //      mapping for review. A person with no titles, or whose titles map to nothing, keeps the old filter
 //      until they choose: their types stay empty.
 
+import { freeFallbackModels } from '../../agents/model'
 import { loadApiKeys } from '../../harness/keys'
 import { freeModelKeys, makeIngestModelCall, newModelBudget, type ModelCall } from '../../ingest/model'
 import { getRoleType, typeTitle, TAXONOMY_VERSION } from '../../jobs/role-types'
@@ -96,13 +97,13 @@ async function mapOldTargets(ctx: RoutineContext): Promise<{ mapped: number; mor
   return { mapped, more: true }
 }
 
-/** The free model on the platform's key, booked to the owner's account; null when either is missing or the guards refuse. */
+/** The free models of AGENT_FREE_MODELS (for this step only) on the platform's key, booked to the owner's account; null when either is missing or the guards refuse. */
 async function platformModel(ctx: RoutineContext): Promise<ModelCall | null> {
   const key = process.env.OPENROUTER_API_KEY?.trim()
   const owner = process.env.OWNER_USER_ID?.trim()
   if (!key || !owner) return null
   try {
-    return makeIngestModelCall(freeModelKeys(await loadApiKeys(ctx.admin, owner), key), { budget: newModelBudget(SLICE_CALLS) })
+    return makeIngestModelCall(freeModelKeys(await loadApiKeys(ctx.admin, owner), key), { budget: newModelBudget(SLICE_CALLS), models: freeFallbackModels() })
   } catch {
     return null
   }
