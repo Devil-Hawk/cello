@@ -48,4 +48,13 @@ describe('one judge', () => {
   ])('has no use of %s outside the judge: it is internal to lib/roles/keep.ts', (_name, re) => {
     expect(hits(re, JUDGE)).toEqual([])
   })
+
+  it('lets only scoring and the shortlist eval import blockReasons: a second path to the dealbreakers must be on purpose', () => {
+    const scripts = readdirSync(path.join(ROOT, 'scripts')).filter((n) => n.endsWith('.ts')).map((n) => path.join('scripts', n))
+    const reads = (f: string) => (text.get(f) ?? readFileSync(path.join(ROOT, f), 'utf8'))
+    const importers = [...files, ...scripts].filter(
+      (f) => !f.endsWith('.test.ts') && /import\s*\{[^}]*\bblockReasons\b[^}]*\}\s*from\s*['"][^'"]*\/keep['"]/.test(reads(f))
+    )
+    expect(importers.sort()).toEqual([path.join('lib', 'scoring', 'pipeline.ts'), path.join('scripts', 'eval-shortlist.ts')])
+  })
 })
