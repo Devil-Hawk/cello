@@ -14,11 +14,11 @@ begin;
 do $$
 declare ids text[];
 begin
-  if (select count(*) from public.measures) <> 68 then
-    raise exception 'expected 68 measures, got %', (select count(*) from public.measures);
+  if (select count(*) from public.measures) <> 72 then
+    raise exception 'expected 72 measures, got %', (select count(*) from public.measures);
   end if;
   if exists (select 1 from public.measures where state <> 'watch') then raise exception 'every measure must start as watch'; end if;
-  if (select count(*) from public.measures where layer = 'true') <> 33
+  if (select count(*) from public.measures where layer = 'true') <> 37
      or (select count(*) from public.measures where layer = 'step') <> 26
      or (select count(*) from public.measures where layer = 'person') <> 9 then
     raise exception 'wrong layer counts';

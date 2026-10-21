@@ -20,7 +20,7 @@ insert into public.measures (id, layer, name, bar, direction, source, gates) val
   ('T1', 'true', 'wrong-employer roles stored', '0', 'equal', 'live check-sourcing.ts on every followed employer', array['K6']::text[]),
   ('T2', 'true', 'roles shown older than 180 days', '0', 'equal', 'SQL over shown lists', array['K5a']::text[]),
   ('T3', 'true', 'stored roles outside every person''s targets (no-target rows counted apart)', '0', 'equal', 'SQL (directive 26)', array['K5a']::text[]),
-  ('T4', 'true', 'followed employers that cannot be read', 'under 5 percent, each with a reason', 'lower', 'heartbeats', array['K4']::text[]),
+  ('T4', 'true', 'followed employers that cannot be read', 'under 5 percent, each with a reason', 'lower', 'companies and company_directory (cannot_read_reason)', array['K4']::text[]),
   ('T5', 'true', 'hours since the last successful role check, per person', 'at most 7', 'lower', 'job_heartbeats', array['K4']::text[]),
   ('T6', 'true', 'hours since the last successful mail read, per connected person', 'at most 2', 'lower', 'job_heartbeats', array['K19']::text[]),
   ('T7', 'true', 'rows and bytes per person per table after a day of checks, no-target rows apart, description_md bytes on their own', 'reported; owner sets the bar after the first week', 'reported', 'catalog sizes', '{}'::text[]),

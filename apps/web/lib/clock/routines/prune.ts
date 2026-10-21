@@ -6,5 +6,8 @@ import type { RoutineContext, RoutineOutcome } from '../routines'
 export async function clockPrune(ctx: RoutineContext): Promise<RoutineOutcome> {
   const { data, error } = await ctx.admin.rpc('clock_prune')
   if (error) return { ok: false, failure: 'clock_prune' }
+  // route timings are kept 30 days (the Companies measures read 7)
+  const { error: timingsError } = await ctx.admin.from('route_timings').delete().lt('at', new Date(Date.now() - 30 * 86_400_000).toISOString())
+  if (timingsError) return { ok: false, failure: 'route_timings' }
   return { ok: true, found: (data ?? {}) as Record<string, unknown> }
 }

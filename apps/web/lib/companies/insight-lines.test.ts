@@ -39,6 +39,12 @@ describe('insightLines', () => {
     expect(lines).toEqual([{ text: 'Hiring 1 role.', source: 'Greenhouse board', at: AT }])
   })
 
+  it('shows a country as US and never nests brackets in the places', () => {
+    const [hiring] = insightLines(row({ locations: [{ name: 'USA', count: 2 }, { name: 'Berlin (Germany)', count: 1 }, { name: 'San Fransisco, CA, USA', count: 1 }], remote_share: null }), acme)
+    expect(hiring.text.endsWith(' US, Berlin, San Fransisco.')).toBe(true)
+    expect(hiring.text).not.toMatch(/\(\(|\)\)/)
+  })
+
   it('has no hiring picture, and so no line at all, for a board with nothing open or never read', () => {
     expect(insightLines(null, acme)).toEqual([])
     expect(insightLines(row({ open: 0 }), acme)).toEqual([])
@@ -63,7 +69,7 @@ describe('insightLines', () => {
     expect(insightLines(null, { ...acme, name: 'Ramp', domain: 'ramp.com' })).toEqual([visa])
     expect(insightLines(null, { ...acme, name: 'Ramp', domain: 'careers.ramp.com' })).toEqual([visa])
     // another company with the same first label, and an employer matched on its name alone, are not on the list
-    for (const domain of ['ramp.network', 'block.xyz', 'snap.org', 'meta.org']) expect(insightLines(null, { ...acme, name: 'Ramp', domain })).toEqual([])
+    for (const domain of ['ramp.network', 'block.xyz', 'snap.org', 'meta.org', 'block.com', 'square.com', 'elastic.com']) expect(insightLines(null, { ...acme, name: 'Ramp', domain })).toEqual([])
     expect(insightLines(null, { ...acme, name: 'Meta', domain: null })).toEqual([])
     expect(insightLines(null, { ...acme, name: 'Somebody Else' })).toEqual([])
   })

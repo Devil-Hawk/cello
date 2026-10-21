@@ -46,7 +46,10 @@ const SENIOR_FIRST = [...SENIORITY_LEVELS].reverse().filter((l) => l !== 'unknow
 // its whole registered domain is one of those (ramp.com, not ramp.network). A name alone never matches: "Meta" or "Block"
 // is also somebody else.
 // ponytail: the registered domain is the last two labels, so a name under a two-part suffix (example.co.uk) is not found.
-const LISTED = new Set(sponsors.sponsors.filter((n) => /^[a-z0-9]+$/.test(n)).map((n) => `${n}.com`))
+// ponytail: the list has no domains, so these three one-word names are left out: their .com is another company
+// (block.com is Square's, square.com is Square's own product domain, elastic.com is not Elastic's). Add their real domains when the list has them.
+const AMBIGUOUS = new Set(['block', 'square', 'elastic'])
+const LISTED = new Set(sponsors.sponsors.filter((n) => /^[a-z0-9]+$/.test(n) && !AMBIGUOUS.has(n)).map((n) => `${n}.com`))
 const registered = (domain: string) => domain.toLowerCase().split('.').slice(-2).join('.')
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`
@@ -67,6 +70,13 @@ function hostOf(url: string | null): string | null {
   }
 }
 
+// The city or country a posting names: "Berlin (Germany)" is Berlin, so the line never nests brackets; "USA" is US.
+// ponytail: only the first comma part is kept; a posting's own spelling ("San Fransisco") passes through as written.
+const placeName = (name: string) => {
+  const first = name.split(',')[0].replace(/\s*\(.*$/, '').trim()
+  return first === 'USA' ? 'US' : first
+}
+
 const label = (p: string) => (p === 'smartrecruiters' ? 'SmartRecruiters' : p.charAt(0).toUpperCase() + p.slice(1))
 
 function hiring(i: InsightsRow): string {
@@ -78,7 +88,7 @@ function hiring(i: InsightsRow): string {
   const posted = [...(i.posted_7d > 0 ? [`${i.posted_7d} posted this week`] : []), ...(i.posted_30d > 0 ? [`${i.posted_30d}${i.posted_7d > 0 ? '' : ' posted'} this month`] : [])]
   const remote = i.remote_share ? `${Math.round(i.remote_share * 100)} % remote` : null
   // "Paris, France" is Paris on this line; the stored places keep what the postings say
-  const places = [...new Set(i.locations.map((p) => p.name.split(',')[0].trim()))].slice(0, SHOWN_PLACES).join(', ')
+  const places = [...new Set(i.locations.map((p) => placeName(p.name)).filter(Boolean))].slice(0, SHOWN_PLACES).join(', ')
   return [
     `Hiring ${plural(i.open, 'role', 'roles')}${types.length ? `: ${types.join(', ')}` : ''}.`,
     levels.length ? `${levels.join(', ')}.` : '',

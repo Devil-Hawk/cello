@@ -7,7 +7,8 @@ const readMock = vi.fn()
 const employerRow = { id: 'e1', ats_provider: 'ashby', ats_token: 'retell-ai' }
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: async () => ({ data: { user }, error: null }) } }) }))
-vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({ admin: true }) }))
+const admin = vi.fn((): unknown => ({ admin: true }))
+vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => admin() }))
 vi.mock('@/lib/companies/add-link', () => ({ addCompany: (...args: unknown[]) => addMock(...args), realAddDeps: { real: true } }))
 vi.mock('@/lib/companies/directory', () => ({ getEmployer: async () => employerRow }))
 vi.mock('@/lib/companies/read-employer', () => ({ loadPerson: vi.fn(async () => [{ userId: 'u1' }]), readEmployer: (...args: unknown[]) => readMock(...args) }))
@@ -23,6 +24,7 @@ const added = { ok: true, companyId: 'c1', already: false, employer: { employerI
 beforeEach(() => {
   user = { id: 'u1' }
   addMock.mockReset().mockResolvedValue(added)
+  admin.mockReset().mockImplementation(() => ({ admin: true }))
   readMock.mockReset().mockResolvedValue({ listed: 12, kept: 2, stored: 2, errors: [] })
 })
 
@@ -158,6 +160,30 @@ describe('POST /api/companies/add', () => {
     const res = await post({ link: 'retellai.com/careers' }, { 'sec-fetch-site': 'cross-site' })
     expect(res.status).toBe(403)
     expect(addMock).not.toHaveBeenCalled()
+  })
+
+  it('writes one timing row per call, and still answers when the timing insert throws', async () => {
+    const insert = vi.fn(async () => ({ error: null }))
+    admin.mockImplementation(() => ({ from: () => ({ insert }) }))
+    expect((await post({ link: 'retellai.com/careers' })).status).toBe(200)
+    expect(insert).toHaveBeenCalledWith({ route: 'add', ms: expect.any(Number), ok: true })
+
+    admin.mockImplementation(() => ({ from: () => { throw new Error('insert failed') } }))
+    const res = await post({ link: 'retellai.com/careers' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ step: 'added', companyId: 'c1' })
+  })
+
+  it('writes no timing row for a call refused at the door: no session, a bad body, or cross-site', async () => {
+    const insert = vi.fn(async () => ({ error: null }))
+    admin.mockImplementation(() => ({ from: () => ({ insert }) }))
+    user = null
+    expect((await post({ link: 'retellai.com/careers' })).status).toBe(401)
+    user = { id: 'u1' }
+    expect((await post({})).status).toBe(400)
+    const crossSite = new NextRequest('http://localhost/api/companies/add', { method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' }, body: JSON.stringify({ link: 'retellai.com/careers' }) })
+    expect((await POST(crossSite)).status).toBe(403)
+    expect(insert).not.toHaveBeenCalled()
   })
 
   it('answers 500 with a plain error line, and nothing else, when the work throws before the stream; an error line after it', async () => {

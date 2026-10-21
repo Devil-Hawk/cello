@@ -179,13 +179,20 @@ describe('stackWords', () => {
   })
 
   it('reads the words that are also English only as written', () => {
-    expect(stackWords('Go beyond. Rust, Swift, Spark, Ruby, Express, React, Rails.').sort()).toEqual(['Express', 'Go', 'React', 'Ruby', 'Rails', 'Rust', 'Spark', 'Swift'].sort())
+    expect(stackWords('Ship it. Go beyond. Rust, Swift, Spark, Ruby, Express, React, Rails.').sort()).toEqual(['Express', 'React', 'Ruby', 'Rails', 'Rust', 'Spark', 'Swift'].sort())
     expect(stackWords('go ahead and react to the spring rails; express yourself')).toEqual([])
   })
 
   it('does not count Spring alone (a season, a benefits vendor) but counts the framework by its full name', () => {
     expect(stackWords('Free, global Spring Health benefits. Spring is here.')).toEqual([])
     expect(stackWords('We build with Spring Boot and spring cloud.').sort()).toEqual(['Spring Boot', 'Spring Cloud'])
+  })
+
+  it('does not count a capital Go that opens a sentence, but counts it inside one', () => {
+    expect(stackWords('Ship fast. Go beyond the basics. Ship fast.')).toEqual([])
+    expect(stackWords('We ship the backend in Go.')).toEqual(['Go'])
+    expect(stackWords('Skills:\nPython\nGo\nRust')).toEqual(['Python', 'Go', 'Rust'])
+    expect(stackWords('Go developer\nShip the API.')).toEqual(['Go'])
   })
 
   it('does not count Go in go-to-market, but counts it in a language list', () => {

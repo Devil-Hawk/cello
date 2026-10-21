@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { isCrossSiteRequest } from '@/lib/security/same-origin'
 import { loadPerson } from '@/lib/companies/read-employer'
 import { followAndRead, unfollowEmployer, type FollowResult } from '@/lib/companies/follow'
+import { recordRouteTiming } from '@/lib/companies/route-timing'
 
 // POST   /api/companies/follow   { employerId, dream? }  follow a verified employer and read its board inside 8 s
 // DELETE /api/companies/follow   { employerId }          take the bookmark off; the row and the employer stay
@@ -35,9 +36,17 @@ export async function POST(request: NextRequest) {
   const dream = (body as { dream?: unknown } | null)?.dream
   if (!employerId || (dream !== undefined && typeof dream !== 'boolean')) return NextResponse.json({ error: 'Send employerId, and dream if you set it.' }, { status: 400 })
 
+  // Timed only once the request has reached the work: a 401, 403 or 400 writes no row.
+  const started = Date.now()
+  const response = await answer(user.id, employerId, dream as boolean | undefined)
+  await recordRouteTiming(createAdminClient, 'follow', Date.now() - started, response.status < 500)
+  return response
+}
+
+async function answer(userId: string, employerId: string, dream: boolean | undefined) {
   try {
     const db = createAdminClient()
-    const result = await followAndRead(db, user.id, employerId, await loadPerson(db, user.id), { dream: dream as boolean | undefined })
+    const result = await followAndRead(db, userId, employerId, await loadPerson(db, userId), { dream })
     if (result.ok) return NextResponse.json(result)
     return NextResponse.json(result, { status: STATUS[result.reason] })
   } catch {

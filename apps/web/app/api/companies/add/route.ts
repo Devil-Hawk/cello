@@ -9,6 +9,7 @@ import { getEmployer } from '@/lib/companies/directory'
 import { ndjson } from '@/lib/companies/ndjson'
 import { HANDOFF_LINE, readWithin } from '@/lib/companies/follow'
 import { loadPerson, readEmployer } from '@/lib/companies/read-employer'
+import { recordRouteTiming } from '@/lib/companies/route-timing'
 
 // POST /api/companies/add   { employerId } | { candidateId } | { link } | { candidate }
 //
@@ -78,8 +79,13 @@ export async function POST(request: NextRequest) {
   if (!by) return NextResponse.json({ error: 'Send one of employerId, candidateId, link or candidate.' }, { status: 400 })
 
   const db = createAdminClient()
+  // Timed only once the request has reached the work: a 401, 403 or 400 writes no row. The timing covers the whole
+  // add, plain or streamed, and is written when the work ends; a refusal is an answer, so it counts as ok.
+  const started = Date.now()
   return ndjson(
     async (emit) => {
+      let ok = true
+      try {
       const result = await addCompany(db, user.id, by, { ...realAddDeps, report: emit })
       if (!result.ok) return emit(result.queued ? { step: 'queued', line: result.queued } : { step: 'refused', reason: result.reason, line: result.line, offers: result.offers })
 
@@ -94,6 +100,12 @@ export async function POST(request: NextRequest) {
         else if (first && !first.failure) read = { listed: first.listed, kept: people.length > 0 ? first.kept : null }
       }
       emit({ step: 'added', companyId: result.companyId, already: result.already, employer: result.employer, read, line })
+      } catch (error) {
+        ok = false
+        throw error
+      } finally {
+        await recordRouteTiming(createAdminClient, 'add', Date.now() - started, ok)
+      }
     },
     {
       streamFrom: (e) => ['reading', 'board_found'].includes((e as { step?: string }).step ?? ''),
