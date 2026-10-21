@@ -3,9 +3,11 @@ import { NextRequest } from 'next/server'
 
 let user: { id: string } | null = { id: 'u1' }
 const findMock = vi.fn()
+const takeMock = vi.fn()
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: async () => ({ data: { user }, error: null }) } }) }))
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({ admin: true }) }))
+vi.mock('@/lib/commands/slots', () => ({ rpcSlotStore: () => ({ take: (...args: unknown[]) => takeMock(...args) }) }))
 vi.mock('@/lib/companies/find', () => ({ findEmployer: (...args: unknown[]) => findMock(...args), realFindDeps: () => ({ deps: true }) }))
 
 import { POST } from './route'
@@ -15,6 +17,7 @@ const lines = async (res: Response) => (await res.text()).split('\n').filter(Boo
 
 beforeEach(() => {
   user = { id: 'u1' }
+  takeMock.mockReset().mockResolvedValue(true)
   findMock.mockReset().mockImplementation(async (_db, _user, _name, _deps, report) => {
     report({ rung: 'directory', line: 'Checking the directory' })
     report({ rung: 'boards', line: 'Checking job boards' })
@@ -50,6 +53,23 @@ describe('POST /api/companies/find', () => {
     expect(findMock).not.toHaveBeenCalled()
     expect((await post({ name: 'ab' })).status).toBe(200)
     expect((await post({ name: 'x'.repeat(120) })).status).toBe(200)
+  })
+
+  it('counts each search against a limit of 60 an hour, and answers 429 with a line before searching once it is spent', async () => {
+    await post({ name: 'Retell AI' })
+    expect(takeMock).toHaveBeenCalledWith({ userId: 'u1', channel: 'companies', bucket: 'find', limit: 60, windowSeconds: 3600 })
+    takeMock.mockResolvedValue(false)
+    findMock.mockClear()
+    const res = await post({ name: 'Retell AI' })
+    expect(res.status).toBe(429)
+    expect(await res.json()).toEqual({ error: 'rate_limited', line: 'You have searched a lot this hour. Try again a little later, or paste the careers link.' })
+    expect(findMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses to search when the limit cannot be counted', async () => {
+    takeMock.mockRejectedValue(new Error('db down'))
+    expect((await post({ name: 'Retell AI' })).status).toBe(503)
+    expect(findMock).not.toHaveBeenCalled()
   })
 
   it('ends the stream with a plain error line, and no detail, when the search throws', async () => {
