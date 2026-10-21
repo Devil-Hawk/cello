@@ -2,7 +2,8 @@
 // modules use. Test support only: nothing in the app imports it.
 //
 // Supported: select, insert, upsert (onConflict, ignoreDuplicates), update,
-// delete, eq, neq, in, lt, gt, is, ilike (trailing % only), or('a.eq.x,b.eq.y'), order, limit,
+// delete, eq, neq, in, lt, gt, is, ilike (trailing % only), or('a.eq.x,b.eq.y'; eq, neq and is inside or, with
+// 'col->>key' for a key of a jsonb column), order, limit,
 // maybeSingle, single, rpc. Filters and writes behave like Postgres for the
 // cases the tests exercise, including unique-constraint violations (23505).
 
@@ -105,11 +106,25 @@ export function fakeDb(seed: Record<string, Row[]> = {}, options: FakeDbOptions 
     // not('col', 'is', null) is the only form the directory reads use.
     q.not = (c: string, _op: string, v: unknown) => add(c, (r) => (v === null ? r[c] != null : r[c] !== v))
     q.is = (c: string, v: unknown) => add(c, (r) => (v === null ? r[c] == null : r[c] === v))
+    // 'metadata->>suggested' reads key "suggested" of the jsonb column "metadata", as PostgREST does. SQL null never
+    // equals anything, so neq is false for a missing value.
+    const jsonOrColumn = (r: Row, c: string): unknown => {
+      const [col, key] = c.split('->>')
+      return key === undefined ? r[col] : (r[col] as Row | null | undefined)?.[key]
+    }
     q.or = (expr: string) => {
       const parts = expr.split(',').map((p) => p.split('.'))
       return add(
         parts.map((p) => p[0]).join('|'),
-        (r) => parts.some(([c, o, ...v]) => o === 'eq' && r[c] === v.join('.'))
+        (r) =>
+          parts.some(([c, o, ...v]) => {
+            const val = v.join('.')
+            const x = jsonOrColumn(r, c)
+            if (o === 'eq') return x === val
+            if (o === 'neq') return x != null && String(x) !== val
+            if (o === 'is') return val === 'null' && x == null
+            return false
+          })
       )
     }
     q.order = (col: string, o?: { ascending?: boolean }) => {
