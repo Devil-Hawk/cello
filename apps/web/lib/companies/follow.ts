@@ -12,6 +12,7 @@ import { saveCompany } from './add'
 import { addsToday, ADD_LINES, DAILY_ADD_LIMIT, followedRow } from './add-link'
 import { getEmployer, type DirectoryRow } from './directory'
 import { readEmployer, REVERIFY_DAYS, type EmployerRead, type Person } from './read-employer'
+import { queueReverify } from './verify-directory'
 
 type Db = SupabaseClient<any, any, any>
 
@@ -63,7 +64,11 @@ export async function followAndRead(db: Db, userId: string, employerId: string, 
   if ((await addsToday(db, userId)) >= DAILY_ADD_LIMIT) return refuse('daily_limit')
 
   const followed = await followEmployer(db, userId, employer, 'known', { dream: opts.dream })
-  if (followed.error !== undefined) return refuse('not_saved')
+  if (followed.error !== undefined) {
+    // A double click or a retry can land the row between the check above and this write: that is a follow that worked.
+    if (await followedRow(db, userId, { employerId })) return { ok: true, following: true, already: true, read: null, line: `Already following ${employer.name}.`, fit: null }
+    return refuse('not_saved')
+  }
   if (!employer.ats_provider || !employer.ats_token) return { ok: true, following: true, already: false, read: null, line: 'Following. Cello checks it with the others, every 6 hours.', fit: null }
 
   // The read runs while the budget runs. Past the budget the person gets the hand-off line and the read goes on.
@@ -111,13 +116,6 @@ export async function reportEmployer(db: Db, userId: string, employerId: string)
   if (unfollowed.was === 'not_following') return { ok: true, was: 'not_following' }
   const { error: reportError } = await db.from('employer_reports').insert({ user_id: userId, employer_id: employerId })
   if (reportError) throw new Error(`could not keep the report: ${reportError.message}`)
-  if (employer.ats_provider) {
-    const now = Date.now()
-    const { error } = await db
-      .from('company_directory')
-      .update({ verified_at: new Date(now - (REVERIFY_DAYS + 1) * DAY_MS).toISOString(), next_read_at: new Date(now).toISOString(), cannot_read_reason: null })
-      .eq('id', employerId)
-    if (error) throw new Error(`could not queue the re-check: ${error.message}`)
-  }
+  if (employer.ats_provider) await queueReverify(db, employerId, new Date(Date.now() - (REVERIFY_DAYS + 1) * DAY_MS).toISOString())
   return { ok: true, was: unfollowed.was }
 }
