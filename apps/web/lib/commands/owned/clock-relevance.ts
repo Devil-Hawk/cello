@@ -7,6 +7,7 @@ export const owned: OwnedTable[] = [
   { table: 'company_suggestion_state', demoWipe: false },
   { table: 'company_suggestions', demoWipe: false },
   { table: 'job_heartbeats', demoWipe: false },
+  { table: 'judge_audit', demoWipe: false },
   { table: 'person_counts', demoWipe: false },
   { table: 'person_roles', demoWipe: false },
   { table: 'role_type_synonyms', demoWipe: false },
