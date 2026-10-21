@@ -87,7 +87,13 @@ export async function POST(request: NextRequest) {
     async (emit) => {
       let ok = true
       try {
-      const result = await addCompany(db, user.id, by, { ...realAddDeps, report: emit })
+      // The verifier's own "Reading the board, N postings so far" is the board read: the route's step only comes when it did not.
+      let boardCounted = false
+      const report = (step: { step: string }) => {
+        if (step.step === 'reading_roles') boardCounted = true
+        emit(step)
+      }
+      const result = await addCompany(db, user.id, by, { ...realAddDeps, report })
       if (!result.ok) return emit(result.queued ? { step: 'queued', line: result.queued } : { step: 'refused', reason: result.reason, line: result.line, offers: result.offers })
 
       // Added: read its board once for this person, so the tile opens with real counts. The read is held to 8 s like a follow's.
@@ -97,7 +103,7 @@ export async function POST(request: NextRequest) {
       if (employer?.ats_provider) {
         const people = await loadPerson(db, user.id)
         // The read is a network step too: the answer streams from here, as the add's own stages do.
-        emit({ step: 'reading_board', line: 'Reading the board' })
+        if (!boardCounted) emit({ step: 'reading_board', line: 'Reading the board' })
         const first = await readWithin(readEmployer(db, employer, people))
         if (first === 'timeout') line = HANDOFF_LINE
         else if (first && !first.failure) read = { listed: first.listed, kept: people.length > 0 ? first.kept : null }

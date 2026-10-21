@@ -80,6 +80,19 @@ describe('POST /api/companies/add', () => {
     expect(readMock.mock.calls[0][2]).toEqual([{ userId: 'u1' }])
   })
 
+  it('does not say Reading the board twice: a board the verifier already counted gets no second step from the route', async () => {
+    addMock.mockImplementationOnce(async (_db, _user, _by, deps) => {
+      deps.report({ step: 'reading', host: 'retellai.com', line: 'Reading retellai.com' })
+      deps.report({ step: 'board_found', provider: 'ashby', line: 'Found an Ashby board' })
+      deps.report({ step: 'reading_roles', count: 12, line: 'Reading the board, 12 postings so far' })
+      return added
+    })
+    const out = await lines(await post({ link: 'retellai.com/careers' }))
+    expect(out.map((l) => l.step)).toEqual(['reading', 'board_found', 'reading_roles', 'added'])
+    expect(out.filter((l) => l.line === 'Reading the board')).toEqual([])
+    expect(readMock).toHaveBeenCalledTimes(1)
+  })
+
   it('reads nothing again for an employer the person already follows, and says so; a read that throws is null, not an error', async () => {
     addMock.mockResolvedValueOnce({ ...added, already: true })
     expect(await last(await post({ link: 'retellai.com/careers' }))).toEqual(expect.objectContaining({ step: 'added', already: true, read: null, line: 'You follow this already.' }))
