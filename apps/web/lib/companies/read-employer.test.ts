@@ -29,13 +29,16 @@ interface Run {
   identity?: { name: string; homeUrls: string[] } | null
   page?: { provider: 'greenhouse'; token: string }[]
   row?: Partial<DirectoryRow>
+  /** The employer's stored rows that closed, for the pace. */
+  closed?: { discovered_at: string; closed_at: string }[]
+  insights?: Record<string, unknown>[]
 }
 
 async function run(o: Run = {}) {
   const row = employer(o.row)
   const rpcs: Record<string, Record<string, unknown>[]> = { upsert_employer_jobs: [], record_employer_sightings: [], bump_employer_stats: [] }
   const { client, tables } = fakeDb(
-    { company_directory: [{ ...row }], companies: Array.from({ length: o.followers ?? 0 }, (_, i) => ({ id: `c${i}`, employer_id: 'e1', watching: true })) },
+    { company_directory: [{ ...row }], jobs: (o.closed ?? []).map((c) => ({ employer_id: 'e1', ...c })), employer_insights: o.insights ?? [], companies: Array.from({ length: o.followers ?? 0 }, (_, i) => ({ id: `c${i}`, employer_id: 'e1', watching: true })) },
     { rpc: Object.fromEntries(Object.keys(rpcs).map((name) => [name, (a: Record<string, unknown>) => (rpcs[name].push(a), 1)])) }
   )
   const deps: ReadDeps = {
@@ -70,6 +73,24 @@ describe('readEmployer: what a sweep read keeps, counts and records', () => {
     // "of 636 open" is the last read
     expect(directory).toMatchObject({ open_count: 4, last_read_at: new Date(NOW).toISOString(), failed_reads: 0, cannot_read_reason: null })
     expect(rpcs.record_employer_sightings[0]).toMatchObject({ p_employer: 'e1', p_external_ids: ['1', '2', '3', '4'] })
+  })
+
+  it('stores what the whole board says, counting the roles nobody kept, and keeps the last insights when a read fails', async () => {
+    const priced = [job('1', 'Software Engineer', 3, { salary: 'USD 100,000–150,000 per year', description: `${desc} Python and Kubernetes.` }), ...board.slice(1)]
+    const closed = Array.from({ length: 10 }, (_, n) => ({ discovered_at: iso(40 + n), closed_at: iso(10) }))
+    const { tables } = await run({ jobs: priced, closed })
+    expect(tables.employer_insights).toHaveLength(1)
+    // 4 listed, 2 kept: the insights are of the 4
+    expect(tables.employer_insights[0]).toMatchObject({
+      employer_id: 'e1', computed_at: new Date(NOW).toISOString(), open: 4, posted_7d: 2, posted_30d: 3, closes_seen: 10, typical_close_days: 35,
+      pay: { stated: 1, min: 100000, max: 150000, currency: 'USD' },
+    })
+    expect(tables.employer_insights[0].stack).toEqual([{ name: 'Kubernetes', count: 1 }, { name: 'Python', count: 1 }])
+    // under ten closings the pace is unknown, not 0
+    expect((await run({ jobs: board, closed: closed.slice(0, 9) })).tables.employer_insights[0]).toMatchObject({ closes_seen: 9, typical_close_days: null })
+    // a board that did not answer leaves the last insights as they were
+    const last = { employer_id: 'e1', open: 99 }
+    expect((await run({ jobs: new HttpError('down', 503), insights: [last] })).tables.employer_insights).toEqual([last])
   })
 
   it('records the most common place of the board as hq, ties to the one seen first, and keeps the old hq when none is named', async () => {

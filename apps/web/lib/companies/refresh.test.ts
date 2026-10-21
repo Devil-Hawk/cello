@@ -39,17 +39,53 @@ function world(over: { tables?: Record<string, Record<string, unknown>[]>; leads
 const hit = (title = 'Backend Engineer'): BoardHit => ({ provider: 'greenhouse', token: 'acme', boardUrl: 'https://boards.greenhouse.io/acme', openRoles: 14, jobs: [{ title, location: 'Remote, USA', url: 'https://boards.greenhouse.io/acme/jobs/1', postedAt: '2026-10-04T00:00:00Z' }] })
 
 describe('refreshSuggestionsForUser', () => {
-  it('ranks a verified employer with a matching role on its own board first, and reads only verified boards', async () => {
+  it('ranks a verified employer with a matching role on its own board first, reads only verified boards, and suggests no company the directory lacks', async () => {
     const w = world({ leads: [lead(), lead({ company: 'Nobody Co', companyDomain: null, externalId: 'n1', url: 'https://remotive.com/jobs/2' })], board: hit() })
     const r = await refreshSuggestionsForUser(w.client, 'u1', w.deps)
     expect(r.status).toBe('ok')
-    // a board is read for the one verified employer, never guessed for the other
+    // a board is read for the one verified employer, never guessed for the other, which is not suggested at all
     expect(w.readBoard).toHaveBeenCalledTimes(1)
     expect(w.readBoard).toHaveBeenCalledWith(expect.objectContaining({ id: 'e1', ats_provider: 'greenhouse', ats_token: 'acme' }))
     const rows = w.tables.company_suggestions
-    expect(rows.map((s) => [s.name, s.tier, s.user_id])).toEqual([['Acme', 1, 'u1'], ['Nobody Co', 3, 'u1']])
+    expect(rows.map((s) => [s.name, s.tier, s.user_id])).toEqual([['Acme', 1, 'u1']])
     expect(rows[0]).toMatchObject({ source_label: 'Greenhouse board', status: 'open', ats: { provider: 'greenhouse', openRoles: 14, matchingRoles: 1 } })
     expect(w.tables.company_suggestion_state[0]).toMatchObject({ user_id: 'u1', status: 'ok' })
+  })
+
+  it('draws its candidates from the directory: a verified employer no lead names, never one the person follows or one that left the rotation', async () => {
+    const employer = (id: string, name: string, over: Record<string, unknown> = {}) => ({ ...acme, id, name, name_norm: name.toLowerCase(), domain: `${name.toLowerCase()}.com`, ats_token: name.toLowerCase(), open_count: 30, cannot_read_reason: null, ...over })
+    const w = world({
+      leads: [],
+      board: hit(),
+      tables: {
+        company_directory: [employer('p', 'Pool'), employer('f', 'Followed'), employer('c', 'Closed', { cannot_read_reason: 'stale' }), employer('u', 'Unverified', { verified_at: null }), employer('n', 'Nothing', { open_count: null })],
+        companies: [{ id: 'c1', user_id: 'u1', name: 'Followed', domain: 'followed.com', name_key: 'followed', canonical_id: null, is_dream_company: false, metadata: null, employer_id: 'f', watching: true }],
+      },
+    })
+    await refreshSuggestionsForUser(w.client, 'u1', w.deps)
+    expect(w.tables.company_suggestions.map((s) => [s.name, s.tier])).toEqual([['Pool', 1]])
+    expect(w.readBoard).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves out employers the person follows, dropped in the last 90 days or said "Not for me" to, and offers a dropped one again after 90 days', async () => {
+    const employer = (id: string, name: string) => ({ ...acme, id, name, name_norm: name.toLowerCase(), domain: `${name.toLowerCase()}.com`, ats_token: name.toLowerCase(), open_count: 30, cannot_read_reason: null })
+    const row = (id: string, name: string, over: Record<string, unknown>) => ({ id, user_id: 'u1', name, domain: `${name.toLowerCase()}.com`, name_key: name.toLowerCase(), canonical_id: null, is_dream_company: false, metadata: null, employer_id: id, watching: true, unfollowed_at: null, ...over })
+    const daysAgo = (d: number) => new Date(NOW.getTime() - d * 86_400_000).toISOString()
+    const w = world({
+      leads: [],
+      board: hit(),
+      tables: {
+        company_directory: [employer('a', 'Fresh'), employer('f', 'Followed'), employer('r', 'Recent'), employer('o', 'Old'), employer('d', 'Dismissed')],
+        companies: [
+          row('f', 'Followed', {}),
+          row('r', 'Recent', { watching: false, unfollowed_at: daysAgo(10) }),
+          row('o', 'Old', { watching: false, unfollowed_at: daysAgo(100) }),
+        ],
+        company_suggestions: [{ id: 's-d', user_id: 'u1', company_key: 'dismissed.com', name: 'Dismissed', domain: 'dismissed.com', tier: 3, rank: 1, reason: 'r', source_url: 'https://x.test', source_label: 'x', signals: [], ats: null, status: 'dismissed' }],
+      },
+    })
+    await refreshSuggestionsForUser(w.client, 'u1', w.deps)
+    expect(w.tables.company_suggestions.filter((s) => s.status === 'open').map((s) => s.name).sort()).toEqual(['Fresh', 'Old'])
   })
 
   it('keeps the posting evidence when a verified board cannot be read, and never makes an employer or a company', async () => {
