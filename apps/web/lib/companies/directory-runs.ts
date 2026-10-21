@@ -7,7 +7,7 @@
 //        be read, or found below the first 3. At least 34 of 35.
 //   T34  find by name: the owner's real past employers and some startups, each through the search ladder (find.ts) with the
 //        real network. A name counts when a candidate for that employer is offered; the row says which rung found it, how
-//        long it took, and for a miss which rung it reached and why nothing was shown. Printed, not recorded.
+//        long it took, and for a miss which rung it reached and why nothing was shown. Recorded with --find --record.
 //   T25  add by link: on 20 real careers links, the right outcome: the right employer verified, added and followed, or
 //        the right reason with its offer. 20 of 20 and no wrong employer added.
 
@@ -121,7 +121,7 @@ export function addLinksRun(r: { rows: LinkRow[]; correct: number; wrongEmployer
 }
 
 /** One measure_runs row, written with the service role. */
-export async function recordMeasureRun(db: Db, id: 'T24' | 'T25', run: { value: number | null; passed: boolean | null; sample_n: number; note: string }): Promise<void> {
+export async function recordMeasureRun(db: Db, id: 'T24' | 'T25' | 'T34', run: { value: number | null; passed: boolean | null; sample_n: number; note: string }): Promise<void> {
   const { error } = await db.from('measure_runs').insert({ measure_id: id, value: run.value, passed: run.passed, sample_n: run.sample_n, note: run.note })
   if (error) throw new Error('could not record the run')
 }
@@ -166,4 +166,26 @@ export async function runFinds(
     }
   }
   return { rows, hits: rows.filter((r) => r.hit).length, total: rows.length }
+}
+
+/**
+ * T34's verdict over a run's rows: the first `owned` rows are the owner's names, and every one must be found; the startups
+ * after them need 4 of every 5 (8 of 10). The note gives both counts and each miss with the rung it reached and its reason.
+ */
+export function findRun(rows: FindRow[], owned: number): { value: number | null; passed: boolean | null; sample_n: number; note: string } {
+  const own = rows.slice(0, owned)
+  const startups = rows.slice(owned)
+  const ownFound = own.filter((r) => r.hit).length
+  const startupHits = startups.filter((r) => r.hit).length
+  const startupBar = Math.ceil(startups.length * 0.8)
+  const misses = rows.filter((r) => !r.hit).map((r) => `${r.name} at ${r.rung}: ${r.reason}`)
+  const note = [`Owner's names found: ${ownFound} of ${own.length}. Startups found: ${startupHits} of ${startups.length} (need ${startupBar}).`, misses.length > 0 ? `Misses: ${misses.join('; ')}.` : '']
+    .filter(Boolean)
+    .join(' ')
+  return {
+    value: rows.length > 0 ? rows.filter((r) => r.hit).length / rows.length : null,
+    passed: rows.length > 0 ? ownFound === own.length && startupHits >= startupBar : null,
+    sample_n: rows.length,
+    note,
+  }
 }
