@@ -18,7 +18,7 @@ import { z } from 'zod'
 import { parseJsonLoose } from '../harness/llm'
 import { composeSystemPrompt, loadModeDoc, promptRef } from '../harness/prompts'
 import { MODEL_LIMIT, type ModelCall } from '../ingest/model'
-import { AMBIGUOUS_TITLES, ROLE_TYPE_IDS, TAXONOMY_VERSION } from '../jobs/role-types'
+import { AMBIGUOUS_TITLES, ROLE_TYPE_IDS, TAXONOMY_VERSION, normaliseTitle } from '../jobs/role-types'
 import type { Prov } from '../provenance/types'
 import { frameJobTextList } from '../security/job-text'
 
@@ -64,6 +64,27 @@ const AnswerSchema = z.object({ items: z.array(z.unknown()) })
 
 const fold = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
 
+/** Words that name a level, a trade in general or no job at all: a quote made only of them proves no type. */
+const GENERIC = new Set(
+  ('engineer engineers engineering developer developers software technical member staff senior sr junior jr lead principal associate ' +
+    'manager analyst specialist scientist researcher consultant director head intern ii iii the a an of and or for in at to').split(' ')
+)
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * Where the quote decides the type, or null when it does not. It must be whole words found in the text (not a
+ * piece of a word), at least two words or eight characters, and not only generic words. A title that names no
+ * particular job cannot be explained by itself, so for it only the posting counts.
+ */
+export function quoteWhere(it: Pick<TypeItem, 'title' | 'postingHead'>, rawQuote: string): 'title' | 'posting' | null {
+  const quote = fold(rawQuote)
+  const words = quote.split(' ').filter(Boolean)
+  if (words.length === 0 || (words.length < 2 && quote.length < 8) || words.every((w) => GENERIC.has(w.replace(/[^\p{L}\p{N}]/gu, '')))) return null
+  const found = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(quote)}(?![\\p{L}\\p{N}])`, 'u')
+  if (!AMBIGUOUS_TITLES.includes(normaliseTitle(it.title).title_norm) && found.test(fold(it.title))) return 'title'
+  return found.test(fold(it.postingHead)) ? 'posting' : null
+}
+
 export function systemPrompt(): string {
   return composeSystemPrompt({ mode: loadModeDoc('role_type'), includeVoice: false })
 }
@@ -108,8 +129,7 @@ export async function typeTitles(items: TypeItem[], call: ModelCall, now: () => 
   return items.map((it) => {
     // an item the answer skips, or answers with a type the taxonomy lacks, is `none`: it was read and nothing decided it
     const a = answers.get(it.i)
-    const quote = a ? fold(a.quote) : ''
-    const where = a && a.type !== 'none' && quote.length >= 2 ? (fold(it.title).includes(quote) ? 'title' : fold(it.postingHead).includes(quote) ? 'posting' : null) : null
+    const where = a && a.type !== 'none' ? quoteWhere(it, a.quote) : null
     const typed = a && where ? a.type : null
     return {
       i: it.i,

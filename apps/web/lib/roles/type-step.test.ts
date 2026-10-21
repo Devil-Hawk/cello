@@ -90,6 +90,39 @@ describe('typeTitles', () => {
   })
 })
 
+describe('the quote must decide the type', () => {
+  const ask = async (title: string, quote: string, type: string, postingHead = '') =>
+    ((await typeTitles([item(1, title, postingHead)], answering([{ i: 1, type, quote }]), now)) as any[])[0]
+
+  it('rejects a bare generic word, a piece of a word and a piece of two words', async () => {
+    expect(await ask('Senior Engineer', 'engineer', 'backend-engineer')).toMatchObject({ type: null, where: null })
+    expect(await ask('Wizard Manager', 'er', 'ai-engineer')).toMatchObject({ type: null, where: null })
+    expect(await ask('Program Manager', 'gram man', 'ai-engineer')).toMatchObject({ type: null, where: null })
+  })
+
+  it('rejects generic words together, and a word too short to prove anything alone', async () => {
+    expect(await ask('Senior Staff Engineer', 'senior staff engineer', 'software-engineer')).toMatchObject({ type: null })
+    expect(await ask('Lead Analyst', 'lead analyst', 'data-analyst')).toMatchObject({ type: null })
+    expect(await ask('Data Wizard', 'data', 'data-engineer')).toMatchObject({ type: null })
+  })
+
+  it('accepts two words that are not all generic, or one long word that names a job', async () => {
+    expect(await ask('Senior Data Engineer', 'data engineer', 'data-engineer')).toMatchObject({ type: 'data-engineer', where: 'title' })
+    expect(await ask('Senior Product Designer', 'designer', 'designer')).toMatchObject({ type: 'designer', where: 'title' })
+  })
+
+  it('matches whole words in the posting too', async () => {
+    expect(await ask('Wizard', 'data pipe', 'data-engineer', 'You build the data pipelines.')).toMatchObject({ type: null })
+    expect(await ask('Wizard', 'data pipelines', 'data-engineer', 'You build the data pipelines.')).toMatchObject({ type: 'data-engineer', where: 'posting' })
+  })
+
+  it('counts only the posting for a title that names no particular job', async () => {
+    expect(await ask('Member of Technical Staff', 'technical staff', 'software-engineer', 'We are hiring.')).toMatchObject({ type: null })
+    expect(await ask('Founding Engineer', 'founding engineer', 'software-engineer', 'We are hiring.')).toMatchObject({ type: null })
+    expect(await ask('Founding Engineer', 'founding engineer', 'software-engineer', 'The founding engineer owns the stack.')).toMatchObject({ type: 'software-engineer', where: 'posting' })
+  })
+})
+
 describe('typeBatches', () => {
   it('slices 60 titles into calls of 25, 25 and 10', async () => {
     const sizes: number[] = []
