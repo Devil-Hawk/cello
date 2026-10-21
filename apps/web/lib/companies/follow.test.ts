@@ -71,6 +71,37 @@ describe('followAndRead: follow, then one read inside the budget', () => {
     expect(writes(queries)).toEqual([])
   })
 
+  it('follow, unfollow, follow again: one row, watching true, one more read', async () => {
+    const { client, tables } = world()
+    const read = readFn()
+    await followAndRead(client, 'u1', 'e1', [engineer], { read })
+    expect(await unfollowEmployer(client, 'u1', 'e1')).toEqual({ ok: true, was: 'following' })
+    const again = await followAndRead(client, 'u1', 'e1', [engineer], { read })
+    expect(again).toMatchObject({ ok: true, following: true, already: false })
+    expect(tables.companies).toHaveLength(1)
+    expect(tables.companies[0]).toMatchObject({ employer_id: 'e1', watching: true })
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('report, then follow again: one row, watching true, one more read', async () => {
+    const { client, tables } = world()
+    const read = readFn()
+    await followAndRead(client, 'u1', 'e1', [engineer], { read })
+    expect(await reportEmployer(client, 'u1', 'e1')).toEqual({ ok: true, was: 'following' })
+    const again = await followAndRead(client, 'u1', 'e1', [engineer], { read })
+    expect(again).toMatchObject({ ok: true, following: true, already: false })
+    expect(tables.companies).toHaveLength(1)
+    expect(tables.companies[0]).toMatchObject({ employer_id: 'e1', watching: true })
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('a follow without a dream flag leaves the person\'s dream flag as it was', async () => {
+    const { client, tables } = world({ companies: [{ id: 'c1', user_id: 'u1', name: 'Acme', domain: 'acme.com', name_key: 'acme', employer_id: 'e1', watching: false, is_dream_company: true, metadata: {} }] })
+    expect(await followAndRead(client, 'u1', 'e1', [engineer], { read: readFn() })).toMatchObject({ ok: true, already: false })
+    expect(tables.companies).toHaveLength(1)
+    expect(tables.companies[0]).toMatchObject({ watching: true, is_dream_company: true })
+  })
+
   it('the 31st follow in a day is refused with the limit line and no read', async () => {
     const today = new Date().toISOString()
     const rows = Array.from({ length: DAILY_ADD_LIMIT }, (_, i) => ({ id: `c${i}`, user_id: 'u1', name: `Co ${i}`, domain: `co${i}.com`, watching: true, created_at: today }))

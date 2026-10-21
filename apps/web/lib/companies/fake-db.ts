@@ -47,6 +47,8 @@ export function fakeDb(seed: Record<string, Row[]> = {}, options: FakeDbOptions 
     let order: { col: string; asc: boolean } | null = null
     let max = Infinity
     let single: 'one' | 'maybe' | null = null
+    // The columns a select names; rows come back with only these, as Postgres returns them.
+    let projection: string[] | null = null
 
     const q: Record<string, unknown> = {}
     const add = (name: string, f: Filter) => {
@@ -56,7 +58,8 @@ export function fakeDb(seed: Record<string, Row[]> = {}, options: FakeDbOptions 
     }
 
     let counted = false
-    q.select = (_cols?: string, o?: { count?: string; head?: boolean }) => {
+    q.select = (cols?: string, o?: { count?: string; head?: boolean }) => {
+      if (cols && cols.trim() !== '*' && !cols.includes('(')) projection = cols.split(',').map((c) => c.trim())
       if (op !== 'select') returning = true
       if (o?.count) counted = true
       return q
@@ -172,7 +175,8 @@ export function fakeDb(seed: Record<string, Row[]> = {}, options: FakeDbOptions 
         if (counted) return { data: null, count: rows.length, error: null } as never
       }
       if (op !== 'select' && !returning) return { data: null, error: null }
-      const out = touched.map((r) => ({ ...r }))
+      const pick = (r: Row): Row => (projection ? Object.fromEntries(projection.map((c) => [c, r[c]])) : { ...r })
+      const out = touched.map(pick)
       if (single === 'maybe') return { data: out[0] ?? null, error: null }
       if (single === 'one') {
         return out[0] ? { data: out[0], error: null } : { data: null, error: { message: 'no rows', code: 'PGRST116' } }

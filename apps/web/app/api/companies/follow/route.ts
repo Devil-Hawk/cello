@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const db = createAdminClient()
-    const result = await followAndRead(db, user.id, employerId, await loadPerson(db, user.id), { dream: dream === true })
+    const result = await followAndRead(db, user.id, employerId, await loadPerson(db, user.id), { dream: dream as boolean | undefined })
     if (result.ok) return NextResponse.json(result)
     return NextResponse.json(result, { status: STATUS[result.reason] })
   } catch {

@@ -165,7 +165,7 @@ export async function addsToday(db: Db, userId: string): Promise<number> {
 const briefOf = (e: DirectoryRow): AddedEmployer => ({ employerId: e.id, name: e.name, domain: e.domain, logoUrl: e.logo_url, openCount: e.open_count })
 
 async function follow(db: Db, userId: string, employer: DirectoryRow, source: 'url' | 'known', dream: boolean): Promise<AddResult> {
-  const f = await followEmployer(db, userId, employer, source, { dream })
+  const f = await followEmployer(db, userId, employer, source, { dream: dream || undefined })
   if (f.error !== undefined) return refuse('not_saved')
   return { ok: true, companyId: f.id, already: false, employer: briefOf(employer) }
 }

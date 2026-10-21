@@ -21,7 +21,7 @@ const DAY_MS = 86_400_000
 const HANDOFF_LINE = 'Following. Cello reads its board within the hour.'
 
 export async function followEmployer(db: Db, userId: string, employer: Pick<DirectoryRow, 'id' | 'name' | 'domain' | 'logo_url' | 'careers_url' | 'ats_provider' | 'ats_token' | 'verified_by'>, source: 'url' | 'known', opts: { dream?: boolean } = {}): Promise<Followed> {
-  const saved = await saveCompany(db, userId, { name: employer.name, domain: employer.domain, careerUrl: employer.careers_url, logoUrl: employer.logo_url, isDream: opts.dream === true })
+  const saved = await saveCompany(db, userId, { name: employer.name, domain: employer.domain, careerUrl: employer.careers_url, logoUrl: employer.logo_url, isDream: opts.dream })
   if (saved.error !== undefined) return { error: saved.error }
 
   // The board the verifier tied to the employer is the pointer a refresh reads first; no guessing by name.
