@@ -2,10 +2,8 @@
 // (the matcher, the batch routes, autopilot, the copilot tools and the API routes)
 // goes through the functions in this file, so there is one system and not several.
 //
-//   runDailyShortlist  the day's picks for one person: filtered on what they stated,
-//                      ranked by what they want and their chance, one exploration pick.
-//                      Switched off until it beats plain ordering (PICKS_ON).
-//   assessJobs         the same assessment for roles on demand, without choosing a list.
+//   runDailyShortlist  the day's picks for one person. Switched off until it beats plain
+//                      ordering (PICKS_ON); roles/page-data replaces it.
 //   triageRole         Interested / Not for me / Applied on one role, with undo.
 //   getRoleFit         what Cello concluded about one role.
 //   readShortlist      a day's list joined with each role and the person's reaction.
@@ -13,14 +11,9 @@
 // What Cello concluded about a role is stored on the person's own row for it
 // (public.person_roles), so one person's verdict is never another's.
 
-import { MissingKeyError } from '@/lib/harness/llm'
 import type { AdminClient, DecryptedApiKeys, LlmRunner } from '@/lib/harness/types'
-import { candidateRoles, countUnassessed, loadScoringInputs, makeEmbedder, type ScoringInputs } from './inputs'
-import { assessRoles, buildShortlist, roleText, type PipelineDeps } from './pipeline'
 import { wantTier } from './shortlist'
 import { FIT_COLUMNS, parseFit, type FitRow } from './read'
-import type { ScoringStore } from './store'
-import { SupabaseScoringStore } from './supabase-store'
 import { PASS_REASONS, type Chance, type PassReason, type PickKind, type Predicted, type Reaction, type RoleFit, type ShortlistPick, type Surface } from './types'
 
 export { FIT_COLUMNS, FIT_EMBED, fitRowOf, parseFit, chanceLabel, fitHighlights, firstGapCopy, WANT_TIER_COPY } from './read'
@@ -55,8 +48,9 @@ export interface ScoringContext {
   llm: LlmRunner
 }
 
-function deps(ctx: ScoringContext, store: ScoringStore): PipelineDeps {
-  return { llm: ctx.llm, embed: ctx.apiKeys ? makeEmbedder(ctx.apiKeys) : null, store }
+/** What the posting says about a role, as kept in a reaction's snapshot. */
+function roleText(r: { id: string; title: string; company: string; location: string | null; description: string | null }): string {
+  return `${r.title}\n${r.company}\n${r.location ?? ''}\n${(r.description ?? '').slice(0, 1500)}`
 }
 
 export function todayUtc(now = new Date()): string {
@@ -96,66 +90,16 @@ export interface DailyShortlistArgs extends ScoringContext {
   skipIfBuilt?: boolean
 }
 
+/** The picks are off, so nothing is read, asked of a model or written. */
 export async function runDailyShortlist(args: DailyShortlistArgs): Promise<ShortlistRun> {
-  const forDate = args.forDate ?? todayUtc()
-  if (!PICKS_ON) {
-    // Nothing is read, asked of a model or written while the picks are off.
-    return {
-      status: 'off',
-      forDate,
-      picks: [],
-      unfinished: 0,
-      counts: { newRoles: 0, filtered: 0 },
-      learning: { nReactions: 0, mode: 'stated' },
-      notes: ['Daily picks are off until they beat plain ordering.'],
-    }
-  }
-  if (args.skipIfBuilt) {
-    const built = await readShortlist(args.admin, args.userId, forDate)
-    if (built.status === 'ready') {
-      return {
-        status: 'ok',
-        forDate,
-        picks: built.picks.map((p) => ({ jobId: p.job?.id ?? '', position: p.position, kind: p.kind, explanation: p.explanation })).filter((p) => p.jobId),
-        unfinished: 0,
-        counts: { newRoles: built.counts.newRoles, filtered: built.counts.filtered },
-        learning: built.learning,
-        notes: [],
-      }
-    }
-  }
-  const inputs = await loadScoringInputs(args.admin, args.userId)
-  const base = { forDate, picks: [], unfinished: 0, counts: { newRoles: 0, filtered: 0 }, learning: { nReactions: inputs.nReactions, mode: learningMode(inputs.nReactions, false) }, notes: [] as string[] }
-  if (!inputs.resumeText) return { ...base, status: 'no_resume' }
-
-  const candidates = await candidateRoles(args.admin, args.userId, inputs.targeting, inputs.stated.titles, { limit: 60 })
-  if (candidates.length === 0) return { ...base, status: 'empty' }
-
-  const store = new SupabaseScoringStore(args.admin, args.userId)
-  try {
-    const result = await buildShortlist(deps(args, store), {
-      userId: args.userId,
-      resumeText: inputs.resumeText,
-      stated: inputs.stated,
-      constraints: inputs.constraints,
-      candidates,
-      forDate,
-      size: args.size ?? 6,
-      exploreCount: args.exploreCount ?? 1,
-    })
-    const unfinished = result.picks.filter((p) => result.assessed.find((a) => a.jobId === p.jobId)?.chance?.chance === 'cannot_assess').length
-    return {
-      status: result.picks.length === 0 ? 'empty' : unfinished > 0 ? 'partial' : 'ok',
-      forDate,
-      picks: result.picks,
-      unfinished,
-      counts: { newRoles: candidates.length, filtered: result.blocked.length },
-      learning: { nReactions: result.taste.nReactions, mode: learningMode(result.taste.nReactions, result.taste.fitted) },
-      notes: result.notes,
-    }
-  } catch (err) {
-    if (err instanceof MissingKeyError) return { ...base, status: 'no_key', counts: { newRoles: candidates.length, filtered: 0 } }
-    throw err
+  return {
+    status: 'off',
+    forDate: args.forDate ?? todayUtc(),
+    picks: [],
+    unfinished: 0,
+    counts: { newRoles: 0, filtered: 0 },
+    learning: { nReactions: 0, mode: 'stated' },
+    notes: ['Daily picks are off until they beat plain ordering.'],
   }
 }
 
@@ -227,77 +171,6 @@ export async function readShortlist(db: Db, userId: string, forDate: string): Pr
         reaction: re ? { reaction: re.reaction, reason: re.reason } : null,
       }
     }),
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Assessing roles on demand
-// ---------------------------------------------------------------------------
-
-export interface AssessJobsArgs extends ScoringContext {
-  /** Assess exactly these roles, even if they were assessed before. Without them, the newest unassessed roles. */
-  jobIds?: string[]
-  limit?: number
-}
-
-export interface AssessJobsResult {
-  assessed: number
-  blocked: number
-  failed: number
-  /** Unassessed roles still waiting, among those worth assessing. */
-  remaining: number
-  skippedReason?: 'no-resume' | 'no-roles' | 'no-llm-key'
-  /** The verdicts, for callers that show them straight away. */
-  fits: Map<string, RoleFit>
-}
-
-export async function assessJobs(args: AssessJobsArgs): Promise<AssessJobsResult> {
-  const empty = (skippedReason: AssessJobsResult['skippedReason'], remaining = 0): AssessJobsResult => ({ assessed: 0, blocked: 0, failed: 0, remaining, skippedReason, fits: new Map() })
-  const inputs = await loadScoringInputs(args.admin, args.userId)
-  if (!inputs.resumeText) return empty('no-resume')
-  const limit = args.limit ?? 25
-  const candidates = await candidateRoles(args.admin, args.userId, inputs.targeting, inputs.stated.titles, {
-    limit,
-    jobIds: args.jobIds,
-    onlyUnassessed: !args.jobIds || args.jobIds.length === 0,
-    includeReacted: true,
-  })
-  if (candidates.length === 0) return empty('no-roles')
-
-  const store = new SupabaseScoringStore(args.admin, args.userId)
-  try {
-    const result = await assessRoles(deps(args, store), {
-      userId: args.userId,
-      resumeText: inputs.resumeText,
-      stated: inputs.stated,
-      constraints: inputs.constraints,
-      candidates,
-      judgePool: candidates.length,
-      chanceFor: Math.min(candidates.length, 12),
-    })
-    const done = new Set([...result.assessed.map((a) => a.jobId), ...result.blocked.map((b) => b.jobId)])
-    const fits = new Map<string, RoleFit>()
-    for (const a of result.assessed) {
-      fits.set(a.jobId, {
-        jobId: a.jobId,
-        assessedAt: new Date().toISOString(),
-        blocked: [],
-        want: a.want ? { p: a.want.p, reason: a.want.reason || null, tier: wantTier(a.want.p), calibrated: a.want.calibrated, nReactions: a.want.nReactions } : null,
-        chance: a.chance ? { label: a.chance.chance, checks: a.chance.checks, gaps: a.chance.gaps, confirm: a.chance.confirm, note: a.chance.note } : null,
-      })
-    }
-    for (const b of result.blocked) fits.set(b.jobId, { jobId: b.jobId, assessedAt: new Date().toISOString(), blocked: b.reasons, want: null, chance: null })
-    const left = await countUnassessed(args.admin, args.userId, inputs.targeting)
-    return {
-      assessed: result.assessed.length,
-      blocked: result.blocked.length,
-      failed: candidates.filter((c) => !done.has(c.id)).length,
-      remaining: left.total,
-      fits,
-    }
-  } catch (err) {
-    if (err instanceof MissingKeyError) return empty('no-llm-key')
-    throw err
   }
 }
 
@@ -445,4 +318,3 @@ export async function undoReaction(args: { db: Db; userId: string; jobId: string
   return { undone: true }
 }
 
-export type { ScoringInputs }

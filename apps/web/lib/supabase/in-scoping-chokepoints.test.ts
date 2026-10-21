@@ -127,11 +127,17 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       'appIds comes from a query already limited to MAX_APPS (50) or a single explicit applicationId; ' +
       'ACTIVE_STAGES is a fixed 3-element const, not user data.',
   },
-  'apps/web/lib/harness/agents/matcher.ts': {
-    calls: [".in('id', jobIds)"],
-    reason:
-      "diagnoseCandidateJobs: the caller is score_jobs, whose id list is capped at SCORE_JOBS_MAX_LIMIT=15 before " +
-      "it reaches here; ownership is enforced separately by ownedJobsQuery's FK join.",
+  'apps/web/lib/roles/judge.ts': {
+    calls: [".in('id', part)"],
+    reason: 'part is one slice of at most 100 ids, cut by chunks() on every call; the query is on the person\'s own role rows (person_jobs, filtered by viewer_id).',
+  },
+  'apps/web/lib/agents/scoring-port.ts': {
+    calls: [".in('id', out.judged)"],
+    reason: 'judged is a subset of the at most assessMissing (a handful) roles this call asked to be judged; the query is on the person\'s own role rows (person_jobs, filtered by viewer_id).',
+  },
+  'apps/web/lib/harness/registry.ts': {
+    calls: [".in('job_id', done.judged)"],
+    reason: 'judged is a subset of the at most MATCHER_STEP_ROLES (12) roles one matcher step judges; the query is filtered by user_id.',
   },
   'apps/web/lib/scoring/index.ts': {
     calls: [".in('id', rows.map((r)"],
@@ -146,7 +152,7 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
     reason: 'knockouts can never exceed the MAX_JOBS (30) batch it was collected from in the same run.',
   },
   'apps/web/lib/harness/copilot-tools.ts': {
-    calls: [".in('id', jobIds)", ".in('id', trgmIds)", ".in('id', contactIds)", ".in('viewer_company_id', trackedIds)"],
+    calls: [".in('id', jobIds)", ".in('id', trgmIds)", ".in('id', contactIds)", ".in('viewer_company_id', trackedIds)", ".in('job_id', out.judged)"],
     reason:
       "loadJobBriefs: jobIds is always ≤20 ids (every caller slices/caps before calling). " +
       'listJobs\' trgmIds and listContacts\' contactIds are both ' +
@@ -251,7 +257,7 @@ describe('every .in() filter is either bounded inline or on the ownership-scopin
         '.slice() — each one needs to be either provably bounded (add it to ALLOWLIST in ' +
         'lib/supabase/in-scoping-chokepoints.test.ts with a one-line reason) or fixed: an ownership-fence ' +
         'array (e.g. every company/job id this user owns) should filter through the FK join instead ' +
-        '(see lib/harness/agents/matcher.ts\'s ownedJobsQuery), and a genuine explicit id subset that can ' +
+        '(see lib/jobs/owned-query.ts\'s ownedJobsQuery), and a genuine explicit id subset that can ' +
         'grow unbounded should go through lib/supabase/chunked-in.ts\'s chunkedIn().'
     ).toEqual([])
   })

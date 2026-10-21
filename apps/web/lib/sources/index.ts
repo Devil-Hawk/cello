@@ -15,7 +15,7 @@ import { mapWithConcurrency } from '../ats/concurrency'
 import { isStalePosting } from '../jobs/freshness'
 import type { JobLead, SourceAdapter, SourceId, SourceQuery } from './types'
 import { rankAndLimit, sanitizeLeads } from './util'
-import { ownedJobsQuery } from '../harness/agents/matcher'
+import { ownedJobsQuery } from '../jobs/owned-query'
 import { normalizeCompanyName, resolveCompany, scanMergeCandidates, type ResolvedCompany } from '../entities/companies'
 
 import { themuse } from './themuse'

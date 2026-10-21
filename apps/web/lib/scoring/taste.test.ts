@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PRIOR_STRENGTH, blendWant, chooseTau, defaultWeights, fitBlend, kernelWant, toExamples } from './taste'
+import { PRIOR_STRENGTH, blendWant, defaultWeights, fitBlend } from './taste'
 import type { PassReason, Predicted, Reaction, ReactionRecord } from './types'
 
 function mulberry(seed: number) {
@@ -28,61 +28,6 @@ function rec(partial: Partial<ReactionRecord> & { reaction: Reaction }): Reactio
     ...partial,
   }
 }
-
-describe('toExamples', () => {
-  it('counts applied twice and ignores level, place and pay passes as taste', () => {
-    const v = [1, 0]
-    const ex = toExamples([
-      rec({ reaction: 'interested', embedding: v }),
-      rec({ reaction: 'applied', embedding: v }),
-      rec({ reaction: 'not_for_me', reason: 'domain', embedding: v }),
-      rec({ reaction: 'not_for_me', reason: null, embedding: v }),
-      ...(['too_junior', 'too_senior', 'location', 'pay'] as PassReason[]).map((reason) =>
-        rec({ reaction: 'not_for_me', reason, embedding: v })
-      ),
-      rec({ reaction: 'interested', embedding: null }),
-    ])
-    expect(ex.map((e) => [e.label, e.mass])).toEqual([
-      [1, 1],
-      [1, 2],
-      [0, 1],
-      [0, 1],
-    ])
-  })
-})
-
-describe('kernelWant', () => {
-  const liked = { vec: [1, 0.1], label: 1 as const, mass: 1 }
-  const passed = { vec: [0.1, 1], label: 0 as const, mass: 1 }
-
-  it('is null with no examples', () => {
-    expect(kernelWant([1, 0], [])).toBeNull()
-  })
-
-  it('leans toward the class a role resembles', () => {
-    const ex = [liked, passed]
-    expect(kernelWant([1, 0], ex)!).toBeGreaterThan(0.6)
-    expect(kernelWant([0, 1], ex)!).toBeLessThan(0.4)
-  })
-
-  it('never reaches certainty from a single example', () => {
-    const p = kernelWant([1, 0.1], [liked])!
-    expect(p).toBeGreaterThan(0.5)
-    expect(p).toBeLessThan(0.8)
-  })
-
-  it('counts an applied role more than a tap', () => {
-    const tap = kernelWant([1, 0.1], [liked, { ...passed, vec: [1, 0.12] }])!
-    const applied = kernelWant([1, 0.1], [{ ...liked, mass: 2 }, { ...passed, vec: [1, 0.12] }])!
-    expect(applied).toBeGreaterThan(tap)
-  })
-})
-
-describe('chooseTau', () => {
-  it('keeps the default with too little history', () => {
-    expect(chooseTau([{ vec: [1, 0], label: 1, mass: 1 }])).toBe(0.06)
-  })
-})
 
 describe('default weights', () => {
   const all = { judge: true, embedding: true, stated: true }

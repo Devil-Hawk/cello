@@ -42,8 +42,7 @@ const RUN_GRAPH = harnessRunGraph as unknown as CompiledGraphLike
 
 const CRON_MAX_USERS = 10
 const CRON_CONCURRENCY = 3
-const DIGEST_GOAL =
-  'Daily digest: source new jobs from my tracked companies, match them against my resume, and surface the top matches with explanations.'
+const DIGEST_GOAL = 'Daily digest: source new jobs from my tracked companies and surface the newest ones with explanations.'
 
 /**
  * A 'running' agent_runs row whose thread has not been touched (graph_threads
@@ -114,36 +113,6 @@ interface ActiveProfile {
 function hasOpenrouter(profile: ActiveProfile): boolean {
   const keys = (profile.preferences?.api_keys ?? {}) as Record<string, unknown>
   return typeof keys.openrouter === 'string' && keys.openrouter.length > 0
-}
-
-interface MatcherRunSummary {
-  status: string
-  scored?: number
-  candidatesConsidered?: number
-  skippedReason?: string
-}
-
-/**
- * Pull the matcher step's own diagnostics out of a completed run so a no-op
- * ("scored 0 jobs") is visible right in this route's JSON response instead of
- * only in the agent_steps journal — the planner picks the step's label, so we
- * find it by agent_type rather than assuming the default plan's 'score-jobs'.
- */
-function extractMatcherSummary(outcome: {
-  steps: { label: string; agent_type: string; status: string }[]
-  outputs: Record<string, unknown>
-}): MatcherRunSummary | undefined {
-  const step = outcome.steps.find((s) => s.agent_type === 'matcher')
-  if (!step) return undefined
-  const output = outcome.outputs[step.label] as
-    | { matches?: unknown[]; skippedReason?: string; candidatesConsidered?: number }
-    | undefined
-  return {
-    status: step.status,
-    scored: Array.isArray(output?.matches) ? output.matches.length : undefined,
-    candidatesConsidered: output?.candidatesConsidered,
-    skippedReason: output?.skippedReason,
-  }
 }
 
 // --- resume pass -------------------------------------------------------------
@@ -361,7 +330,7 @@ export interface DigestPassResult {
   activeUsers: number
   processed: number
   skippedForCapacity: number
-  results: { userId: string; runId?: string; status?: string; error?: string; matcher?: MatcherRunSummary }[]
+  results: { userId: string; runId?: string; status?: string; error?: string }[]
   digest: { userId: string; outcome: DigestOutcome; reason?: string }[]
 }
 
@@ -398,7 +367,7 @@ export async function runDigestPasses(admin: AdminClient): Promise<DigestPassRes
           results.push({ userId: profile.id, runId, status: 'paused' })
         } else {
           const outcome = result as RunOutcome
-          results.push({ userId: profile.id, runId, status: outcome.status, matcher: extractMatcherSummary(outcome) })
+          results.push({ userId: profile.id, runId, status: outcome.status })
         }
       } catch (e) {
         logApiError('harness:digest', e, { userId: profile.id })

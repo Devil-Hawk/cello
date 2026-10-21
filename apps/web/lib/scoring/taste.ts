@@ -4,13 +4,12 @@
 // There is no points formula here. Three signals each produce a probability:
 //
 //   embedding  a similarity vote against the roles the person liked and passed
-//              on (kernelWant). Cheap, and it improves with every reaction.
-//   judge      a model's holistic read, given the person's own recent decisions
-//              and reasons as examples (lib/scoring/want-judge.ts).
-//   stated     the same model's read of the stated preferences ALONE. This is
-//              the cold-start prior. It fades because its blend weight is
-//              n0 / (n0 + reactions): after n0 reactions it carries half of the
-//              weight it started with, and the learned signals take the rest.
+//              on. Retired with the paid embedder; roles/want-and-order replaces the blend.
+//   judge      a model's holistic read. Retired with the want judge.
+//   stated     the read of the stated preferences ALONE. This is the cold-start
+//              prior. It fades because its blend weight is n0 / (n0 + reactions):
+//              after n0 reactions it carries half of the weight it started with,
+//              and the learned signals take the rest.
 //
 // They are combined in logit space. Until there is enough history the weights
 // are the credibility weights above, split evenly between the learned signals.
@@ -21,8 +20,8 @@
 // hand per signal; the single constant is PRIOR_STRENGTH, how many reactions
 // the stated preferences are worth.
 
-import { clampP, cosine, logLoss, logit, sigmoid } from './math'
-import type { PassReason, Predicted, ReactionRecord } from './types'
+import { clampP, logLoss, logit, sigmoid } from './math'
+import type { Predicted, ReactionRecord } from './types'
 
 /** How many reactions the stated preferences are worth as evidence. */
 export const PRIOR_STRENGTH = 5
@@ -30,85 +29,6 @@ export const PRIOR_STRENGTH = 5
 /** Fewest reactions (with at least MIN_PER_CLASS of each outcome) before the blend is fitted. */
 export const MIN_FIT_REACTIONS = 20
 export const MIN_PER_CLASS = 5
-
-/** A pass for one of these reasons is about level, place, the kind of posting, work authorization or pay, not about the role's content. */
-const NOT_A_CONTENT_SIGNAL: ReadonlySet<PassReason> = new Set(['too_junior', 'too_senior', 'location', 'relocation', 'agency', 'sponsorship', 'pay'])
-
-export interface TasteExample {
-  vec: number[]
-  /** 1 for interested or applied, 0 for a pass. */
-  label: 0 | 1
-  /** Applying is a stronger statement than a tap, so it counts twice. */
-  mass: number
-}
-
-/**
- * Reactions that say something about what the role is about. A pass because the
- * role was too senior says nothing against similar roles at the right level, so
- * it does not push similar-looking roles down.
- */
-export function toExamples(reactions: readonly ReactionRecord[]): TasteExample[] {
-  const out: TasteExample[] = []
-  for (const r of reactions) {
-    if (!r.embedding) continue
-    if (r.reaction === 'not_for_me') {
-      if (r.reason && NOT_A_CONTENT_SIGNAL.has(r.reason)) continue
-      out.push({ vec: r.embedding, label: 0, mass: 1 })
-    } else {
-      out.push({ vec: r.embedding, label: 1, mass: r.reaction === 'applied' ? 2 : 1 })
-    }
-  }
-  return out
-}
-
-const NEIGHBOURS = 7
-const TAUS = [0.03, 0.06, 0.12] as const
-const DEFAULT_TAU = 0.06
-
-/**
- * Similarity vote. The nearest examples vote for their own outcome, nearer ones
- * louder; one pseudo-neighbour at 0.5 keeps a single example from producing a
- * certainty. Returns null when there is nothing to compare against.
- */
-export function kernelWant(vec: readonly number[], examples: readonly TasteExample[], tau = DEFAULT_TAU): number | null {
-  if (examples.length === 0) return null
-  const sims = examples.map((e) => ({ s: cosine(vec, e.vec), e }))
-  sims.sort((a, b) => b.s - a.s)
-  const top = sims.slice(0, NEIGHBOURS)
-  const best = top[0].s
-  let num = 0.5
-  let den = 1
-  for (const { s, e } of top) {
-    const w = Math.exp((s - best) / tau) * e.mass
-    num += w * e.label
-    den += w
-  }
-  return clampP(num / den)
-}
-
-/** Picks the vote sharpness that best predicts each reaction from all the others. */
-export function chooseTau(examples: readonly TasteExample[]): number {
-  if (examples.length < 10) return DEFAULT_TAU
-  let bestTau: number = DEFAULT_TAU
-  let bestLoss = Infinity
-  for (const tau of TAUS) {
-    const pred: number[] = []
-    const y: number[] = []
-    examples.forEach((e, i) => {
-      const rest = examples.filter((_, j) => j !== i)
-      const p = kernelWant(e.vec, rest, tau)
-      if (p == null) return
-      pred.push(p)
-      y.push(e.label)
-    })
-    const loss = logLoss(pred, y)
-    if (loss < bestLoss) {
-      bestLoss = loss
-      bestTau = tau
-    }
-  }
-  return bestTau
-}
 
 // ---------------------------------------------------------------------------
 // Blend

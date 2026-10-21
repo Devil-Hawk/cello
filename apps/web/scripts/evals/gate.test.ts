@@ -39,7 +39,8 @@ describe('selectSuites', () => {
   it('a prompt change runs the suite that owns it and nothing else', () => {
     expect(names(['apps/web/prompts/analyst.md'])).toEqual(['quality'])
     expect(names(['apps/web/prompts/outreach.md'])).toEqual(['outputs'])
-    expect(names(['apps/web/lib/scoring/chance.ts'])).toEqual(['scoring'])
+    // The scoring suite measured the retired want study; roles/measures brings the chance suites back.
+    expect(names(['apps/web/lib/scoring/chance.ts'])).toEqual([])
   })
 
   it('a change to the policy or the prompt assembly runs every suite', () => {

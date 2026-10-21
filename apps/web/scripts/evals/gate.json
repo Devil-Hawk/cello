@@ -77,12 +77,6 @@
       "paths": ["prompts/company_resolve.md", "lib/companies/", "scripts/evals/company-resolve*"]
     },
     {
-      "name": "scoring",
-      "scripts": ["scripts/eval-shortlist.ts"],
-      "args": ["--max-requests", "40", "--rounds", "1"],
-      "paths": ["prompts/role_*.md", "prompts/matcher.md", "lib/scoring/", "lib/harness/agents/matcher.ts", "lib/harness/agents/bulk_matcher.ts", "scripts/eval-shortlist.ts", "scripts/eval-shortlist/"]
-    },
-    {
       "name": "ingestion",
       "scripts": ["scripts/eval-ingest.ts"],
       "args": ["--quick"],

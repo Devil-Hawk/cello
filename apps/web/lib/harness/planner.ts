@@ -43,14 +43,13 @@ function systemPrompt(): string {
   })
 }
 
-/** Deterministic fallback: source new jobs, score them, enrich the top matches. */
+/** Deterministic fallback: source new jobs, then enrich them. Judging is the roles.match routine's, not a plan step's. */
 export function defaultPlan(goal: string): Plan {
   return PlanSchema.parse({
     goal,
     steps: [
       { label: 'source-jobs', agent_type: 'sourcer', input: {}, dependsOn: [] },
-      { label: 'score-jobs', agent_type: 'matcher', input: {}, dependsOn: ['source-jobs'] },
-      { label: 'enrich-top', agent_type: 'enricher', input: {}, dependsOn: ['score-jobs'] },
+      { label: 'enrich-top', agent_type: 'enricher', input: {}, dependsOn: ['source-jobs'] },
     ],
   })
 }

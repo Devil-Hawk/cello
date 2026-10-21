@@ -19,7 +19,7 @@
 // about independently.
 
 import type { AdminClient } from '../harness/types'
-import { userCompanyIds, ownedJobsQuery } from '../harness/agents/matcher'
+import { userCompanyIds, ownedJobsQuery } from '../jobs/owned-query'
 import { chunkedIn } from '../supabase/chunked-in'
 import { QUALITY_REJECT_THRESHOLD } from '../jobs/classify'
 import type { Targeting } from '../targeting'
