@@ -25,7 +25,7 @@ function fakeAdmin(jobs: Job[], people: Person[], samples: Record<string, unknow
     from(table: string) {
       const filters: string[] = []
       const b: Record<string, unknown> = {
-        select: () => (selects.push(table), table === 'llm_spend' ? { eq: () => ({ gte: async () => ({ count: 0, error: null }) }) } : b),
+        select: () => (selects.push(table), table === 'llm_spend' ? { eq: () => ({ is: () => ({ gte: async () => ({ count: 0, error: null }) }) }) } : b),
         or: (f: string) => (filters.push(f), b),
         not: () => b,
         is: () => b,

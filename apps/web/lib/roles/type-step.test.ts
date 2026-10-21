@@ -8,7 +8,8 @@ vi.mock('../harness/llm', async (importOriginal) => ({ ...(await importOriginal<
 import { loadModeDoc } from '../harness/prompts'
 import { MODEL_LIMIT, makeIngestModelCall, newModelBudget, type ModelCall } from '../ingest/model'
 import { ROLE_TYPE_IDS, TAXONOMY_VERSION } from '../jobs/role-types'
-import { BATCH, DAILY_CALLS, READS_PER_KEY, cacheRow, runTypeStep, typeBatches, typeTitles, userPrompt, type TypeItem } from './type-step'
+import { FREE_DAILY_CALLS_DEFAULT } from './free-budget'
+import { BATCH, READS_PER_KEY, cacheRow, runTypeStep, typeBatches, typeTitles, userPrompt, type TypeItem } from './type-step'
 
 const AT = new Date('2026-10-22T10:00:00Z')
 const now = () => AT
@@ -186,7 +187,7 @@ function fakeAdmin(pending: Record<string, unknown>[], today = 0) {
   const admin = {
     from: (table: string) => {
       expect(table).toBe('llm_spend')
-      const b: any = { select: () => b, eq: (c: string, v: string) => (expect([c, v]).toEqual(['step', 'role.type']), b), gte: async () => ({ count: today, error: null }) }
+      const b: any = { select: () => b, eq: () => b, is: () => b, gte: async () => ({ count: today, error: null }) }
       return b
     },
     rpc: async (name: string, args: any) => {
@@ -243,11 +244,19 @@ describe('runTypeStep', () => {
   })
 
   it('makes no call once the day\'s calls are used', async () => {
-    const { admin, calls } = fakeAdmin(pending, DAILY_CALLS)
+    const { admin, calls } = fakeAdmin(pending, FREE_DAILY_CALLS_DEFAULT)
     const spy = vi.fn(call)
     expect(await runTypeStep(admin, spy, { now: () => AT.getTime(), deadlineAt: AT.getTime() + 60_000 })).toMatchObject({ stop: 'limit' })
     expect(spy).not.toHaveBeenCalled()
     expect(calls.map((c) => c.name)).toEqual(['apply_model_titles'])
+  })
+
+  it('takes a fifth of the day\'s calls that are left: 10 left allows 2 calls', async () => {
+    const many = Array.from({ length: 200 }, (_, i) => ({ title_norm: `t${i}`, dept_norm: '', job_id: `j${i}`, title: `Title ${i}`, posting_head: '' }))
+    const { admin } = fakeAdmin(many, FREE_DAILY_CALLS_DEFAULT - 10)
+    const spy = vi.fn<Parameters<ModelCall>, ReturnType<ModelCall>>(async (req) => JSON.stringify({ items: [...req.prompt.matchAll(/\[\[POSTING (\d+) /g)].map((m) => ({ i: Number(m[1]), type: 'none', quote: '' })) }))
+    await runTypeStep(admin, spy, { now: () => AT.getTime(), deadlineAt: AT.getTime() + 60_000 })
+    expect(spy).toHaveBeenCalledTimes(2)
   })
 
   it('stops at the slice cap of calls', async () => {

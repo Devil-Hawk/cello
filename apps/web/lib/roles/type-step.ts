@@ -21,6 +21,7 @@ import { MODEL_LIMIT, type ModelCall } from '../ingest/model'
 import { AMBIGUOUS_TITLES, ROLE_TYPE_IDS, TAXONOMY_VERSION, normaliseTitle } from '../jobs/role-types'
 import type { Prov } from '../provenance/types'
 import { frameJobTextList } from '../security/job-text'
+import { freeCallsLeftToday, typingCalls } from './free-budget'
 
 type Db = SupabaseClient<any, any, any>
 
@@ -31,11 +32,6 @@ export const BATCH = 25
 export const HEAD_CHARS = 600
 /** Calls a slice of the clock may make. */
 export const SLICE_CALLS = 40
-/**
- * Calls the step may make in a day, counted from the spend ledger. The free account allows about 1,000 a day
- * for everything; this is a fifth of it. ponytail: a constant, an env value when the owner wants to tune it.
- */
-export const DAILY_CALLS = 200
 /** Roles of one key a slice may read (an ambiguous title is read role by role). */
 export const READS_PER_KEY = 5
 
@@ -174,13 +170,6 @@ export function cacheRow(sample: Pick<Sample, 'title_norm' | 'dept_norm' | 'job_
   return { ...base, role_type: null, status: 'pending', job_id: sample.job_id, read_at: r.prov.at, ...(r.type ? { job_type: r.type, job_prov: r.prov } : {}) }
 }
 
-/** Calls made today, from the spend ledger (one row for each model tried, so this can only overcount). */
-async function callsToday(admin: Db, now: () => number): Promise<number> {
-  const { count, error } = await admin.from('llm_spend').select('id', { count: 'exact', head: true }).eq('step', STEP).gte('created_at', new Date(now() - 86_400_000).toISOString())
-  if (error) throw new Error('count_calls')
-  return count ?? 0
-}
-
 /**
  * The step on the shared cache: pull the roles of titles still open (the most seen first, an ambiguous title
  * role by role), type them, write the answers. Serves the cache to every untyped role first and
@@ -199,7 +188,8 @@ export async function runTypeStep(
   const out = { typed: 0, none: 0, stop: null as TypeStop }
   const since = new Date(opts.now()).toISOString()
   if (!call) return { ...out, stop: 'unavailable' }
-  let left = Math.min(opts.maxCalls ?? SLICE_CALLS, DAILY_CALLS - (await callsToday(admin, opts.now)))
+  // the calls left in the day are shared with the judge and ingestion (lib/roles/free-budget.ts): take a fifth, at most 100
+  let left = Math.min(opts.maxCalls ?? SLICE_CALLS, typingCalls(await freeCallsLeftToday(admin, opts.now)))
   if (left <= 0) return { ...out, stop: 'limit' }
   while (left > 0 && opts.now() < opts.deadlineAt) {
     const calls = Math.min(left, 4)
