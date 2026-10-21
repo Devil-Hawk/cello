@@ -161,12 +161,12 @@ export async function assessChances(llm: LlmRunner, resumeText: string, inputs: 
     try {
       const res = await llm({
         name: 'check-role-requirements',
-        system: scoringSystem('role_chance', resumeBlock),
-        prompt: `${prompt}\n\nCheck every requirement id against the resume.`,
+        system: scoringSystem('role_chance'),
+        // The resume sits beside the question, not at the end of a long system prompt: the small free models lose it there.
+        prompt: `${resumeBlock}\n\n${prompt}\n\nCheck every requirement id against the resume.`,
         json: true,
         temperature: 0,
         maxTokens: 600 * batch.length + 1500,
-        cachePrefix: true,
         promptRef: scoringPromptRef('role_chance'),
       })
       const parsed = parseJsonLoose<{ checks?: unknown }>(res.content)
