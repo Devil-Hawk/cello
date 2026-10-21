@@ -99,7 +99,6 @@ export const PROMPT_DOC_NAMES = [
   'analyst',
   'distill',
   'memory_extract',
-  'company_verify',
   'goal_judge',
   'orchestrator',
   'researcher',

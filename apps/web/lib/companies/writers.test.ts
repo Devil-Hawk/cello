@@ -1,7 +1,7 @@
 // A source scan: who may write the shared directory, and who may write a person's companies from the add path.
 //
-//   company_directory   only companies.verify (verify-directory.ts) writes it. The one other door is the live read's
-//                       "of N open" number (live-roles.ts, set_employer_open_count), named below, never a row.
+//   company_directory   only companies.verify (verify-directory.ts) writes it, and no function writes it
+//                       (set_employer_open_count, the old live read's "of N open" number, has no caller).
 //   companies           the directory's own files (search, add, sweep, seed, the add route) never write it; the add
 //                       path reaches it only through follow.ts, which calls the existing save (add.ts).
 //
@@ -47,8 +47,8 @@ describe('who writes company_directory', () => {
     expect(offenders(writes('company_directory'))).toEqual(['lib/companies/verify-directory.ts'])
   })
 
-  it('and no function writes it except the live read open-count number', () => {
-    expect(offenders(DIRECTORY_RPCS)).toEqual(['lib/companies/live-roles.ts'])
+  it('and no function writes it', () => {
+    expect(offenders(DIRECTORY_RPCS)).toEqual([])
   })
 })
 

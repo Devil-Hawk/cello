@@ -2,11 +2,7 @@
 //
 // Framework-free (no next/* imports) so it can be imported from route handlers,
 // client components, and scripts alike. This is the single source of truth for
-// the KNOWN_COMPANIES map — it used to be duplicated in
-// app/api/companies/verify/route.ts and app/api/companies/fix-names/route.ts;
-// verify/route.ts and app/api/companies/resolve/route.ts both import it from
-// here now. (fix-names/route.ts keeps its own older copy — it's owned by a
-// different workstream and wasn't touched.)
+// the KNOWN_COMPANIES map, read by the verifier, the add flow and the scripts.
 
 import type { AtsProviderId } from '../ats/types'
 
@@ -14,14 +10,13 @@ export interface KnownCompany {
   name: string
   logo?: string
   // Hand-curated, stable careers URL — ONLY set for companies whose ATS is
-  // not one of the ones /api/companies/resolve can probe (Greenhouse/Lever/
+  // not one of the ones a board probe can reach (Greenhouse/Lever/
   // Ashby), i.e. large enterprises running a homegrown or Workday-style board
   // (Amazon, Google, Meta, Apple, Microsoft, Netflix, Tesla, ...). Without
   // this, those companies' "known" candidate always came back with
-  // careerUrl: null (name/domain only) since step (a) is free/no-network and
-  // step (b)'s probes have nothing to find — see resolve/route.ts. Always a
-  // real page with a path (never a bare homepage — matches isBareHomepage's
-  // invariant there). Companies already reliably found by the ATS probes
+  // careerUrl: null (name/domain only) since the board
+  // probes have nothing to find. Always a real page with a path (never a
+  // bare homepage). Companies already reliably found by the ATS probes
   // (Stripe, Notion, Figma, etc.) intentionally have no entry here — the
   // probe is the source of truth for those and stays network-verified.
   careerUrl?: string

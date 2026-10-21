@@ -26,7 +26,6 @@ export const UI_COPY_BASELINE: Record<string, number> = {
   'app/layout.tsx': 1,
   'app/login/page.tsx': 3,
   'app/not-found.tsx': 1,
-  'components/companies/add-company-dialog.tsx': 2,
   'components/contacts/contact-network-panel.tsx': 1,
   'components/contacts/contact-row.tsx': 3,
   'components/contacts/csv-import.tsx': 6,
