@@ -54,6 +54,9 @@ export interface JudgeOutcome {
   stopped: Stopped | null
 }
 
+/** The short reason a step or tool reports when judging stopped early. */
+export const STOP_REASON = { no_model: 'no-llm-key', no_resume: 'no-resume', day: 'day-allowance-used', minute: 'pacing' } as const satisfies Record<Stopped, string>
+
 export const NO_REQUIREMENTS_LINE = 'The posting does not list requirements, so Cello cannot check your chances.'
 const ROLES_PER_CALL = 3
 const MAX_REQUIREMENTS = 12
@@ -293,9 +296,12 @@ export async function judgeStatus(db: AdminClient, userId: string, deps: JudgeDe
   return { judgedToday, waiting, line: spent ? dayLine(judgedToday, waiting) : checkingLine(waiting) }
 }
 
-/** What a route says, and with which status, when a limit stopped the judging. */
-export function stopAnswer(stopped: Stopped, s: JudgeStatus): { status: number; error: string; skippedReason: string } {
-  if (stopped === 'day') return { status: 429, error: dayLine(s.judgedToday, s.waiting), skippedReason: 'day' }
+/** What a route says, and with which status, when a limit stopped the judging. `status` is read only for the day line. */
+export async function stopAnswer(stopped: Stopped, status: () => Promise<JudgeStatus>): Promise<{ status: number; error: string; skippedReason: string }> {
+  if (stopped === 'day') {
+    const s = await status()
+    return { status: 429, error: dayLine(s.judgedToday, s.waiting), skippedReason: 'day' }
+  }
   if (stopped === 'minute') return { status: 429, error: 'Cello is pacing its free checks. Try again in a minute.', skippedReason: 'minute' }
   if (stopped === 'no_resume') return { status: 400, error: 'Add your resume so Cello can check the requirements against it.', skippedReason: 'no-resume' }
   return { status: 400, error: 'Cello needs a model to read this one. Choose a free model.', skippedReason: 'no-llm-key' }

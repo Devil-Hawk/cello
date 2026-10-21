@@ -140,7 +140,6 @@ export interface RunAgentUnitArgs {
 export const UNIT_GENERATION_NAME: Record<UnitType, string> = {
   sourcer: 'source-jobs',
   matcher: 'score-job-match',
-  bulk_matcher: 'score-job-batch',
   enricher: 'enrich-job',
   cv_tailor: 'tailor-cv',
   applier: 'apply-to-job',
@@ -160,7 +159,6 @@ export const UNIT_GENERATION_NAME: Record<UnitType, string> = {
 export const UNIT_AGENT_NAME: Record<UnitType, string> = {
   sourcer: 'run-job-sourcer',
   matcher: 'run-job-matcher',
-  bulk_matcher: 'run-bulk-matcher',
   enricher: 'run-job-enricher',
   cv_tailor: 'run-cv-tailor',
   applier: 'run-applier',

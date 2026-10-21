@@ -6,10 +6,10 @@
 // touch this file (unless a brand-new agent_type is introduced).
 
 import type { AgentFn, StepAgentType, UnitType } from './types'
-import { STEP_AGENT_TYPES, UNIT_TYPES, BulkMatcherInput, DigestInput, OutreachInput, ResumeOptimizerInput } from './schemas'
+import { STEP_AGENT_TYPES, UNIT_TYPES, DigestInput, MatcherInput, OutreachInput, ResumeOptimizerInput } from './schemas'
+import { judgeRoles, nextWaiting, STOP_REASON } from '@/lib/roles/judge'
 
 import { sourcer } from './agents/sourcer'
-import { matcher } from './agents/matcher'
 import { enricher } from './agents/enricher'
 import { cv_tailor } from './agents/cv_tailor'
 import { applier } from './agents/applier'
@@ -18,13 +18,41 @@ import { follow_upper } from './agents/follow_upper'
 import { company_researcher } from './agents/company_researcher'
 import { contact_sourcer } from './agents/contact_sourcer'
 
-import { runBulkMatch } from './agents/bulk_matcher'
 import { composeAndStoreDigest } from './agents/digest'
 import { generateOutreachDraft } from './agents/outreach'
 import { optimizeResume } from './agents/resume_optimizer'
 import { strategist } from './agents/strategist'
 import { analyst } from './agents/analyst'
 import { application_follow_up } from './agents/application_follow_up'
+
+/** Roles one matcher step judges. The clock's roles.match routine does the bulk; a DAG step only tops up. */
+const MATCHER_STEP_ROLES = 12
+
+/**
+ * matcher: judges roles for the person through lib/roles/judge, which reads the model through the free door. The ids come
+ * from the step's input or an upstream step's `jobIds`; with none, the person's next waiting roles (newest kept first).
+ * It reports the bands it wrote. It names no top picks: the daily picks are off.
+ */
+const matcher: AgentFn = async (ctx) => {
+  const input = MatcherInput.parse(ctx.input ?? {})
+  const ids = new Set(input.jobIds ?? [])
+  for (const out of Object.values(ctx.deps)) {
+    const upstream = (out as { jobIds?: unknown } | null)?.jobIds
+    if (Array.isArray(upstream)) for (const id of upstream) if (typeof id === 'string') ids.add(id)
+  }
+  const jobIds = ids.size > 0 ? [...ids].slice(0, MATCHER_STEP_ROLES) : await nextWaiting(ctx.admin, ctx.userId, MATCHER_STEP_ROLES)
+  const done = jobIds.length > 0 ? await judgeRoles(ctx.admin, ctx.userId, jobIds) : { judged: [] as string[], stopped: null }
+  const { data } = done.judged.length > 0 ? await ctx.admin.from('person_roles').select('job_id, band, readings, chance_detail').eq('user_id', ctx.userId).in('job_id', done.judged) : { data: [] }
+  type Row = { job_id: string; band: 'strong' | 'possible' | 'stretch' | 'cannot_assess'; readings: { text: string; status: string; quote: string | null }[] | null; chance_detail: { gaps?: string[] } | null }
+  const matches = ((data as Row[] | null) ?? []).map((r) => ({
+    jobId: r.job_id,
+    chance: r.band,
+    highlights: (r.readings ?? []).filter((x) => x.status === 'met' && x.quote).slice(0, 4).map((x) => `${x.text}: ${x.quote}`),
+    gaps: r.chance_detail?.gaps ?? [],
+  }))
+  const skippedReason = done.stopped ? STOP_REASON[done.stopped] : jobIds.length === 0 ? 'no-candidates' : undefined
+  return { output: { matches, topJobIds: [], skippedReason, candidatesConsidered: jobIds.length }, tokensUsed: 0 }
+}
 
 // Property GETTERS, not value shorthand: this module sits inside import
 // cycles (agents import helpers that import back through here), and a plain
@@ -53,23 +81,6 @@ export const registry: Record<StepAgentType, AgentFn> = {
 // argument shape and its existing return value into an AgentResult. See
 // lib/harness/schemas.ts's "The five graph-port stragglers" section for where
 // each input/output shape was derived from.
-
-/** bulk_matcher: assesses a batch of the person's roles. The resume, stated
- *  preferences and constraints are read inside lib/scoring, so a caller only
- *  names how many roles, or which ones. */
-const bulk_matcher: AgentFn = async (ctx) => {
-  const input = BulkMatcherInput.parse(ctx.input ?? {})
-  const result = await runBulkMatch({
-    admin: ctx.admin,
-    userId: ctx.userId,
-    llm: ctx.llm,
-    limit: input.limit ?? 25,
-    model: input.model,
-    jobIds: input.jobIds,
-    apiKeys: ctx.apiKeys,
-  })
-  return { output: result, tokensUsed: result.tokensUsed }
-}
 
 /** digest — compose + persist only (see schemas.ts's DigestInput doc: no
  *  Gmail provider_token exists in a graph-run context, so this always
@@ -133,7 +144,6 @@ export const UNIT_REGISTRY: Record<UnitType, AgentFn> = {
   get follow_upper() { return follow_upper },
   get company_researcher() { return company_researcher },
   get contact_sourcer() { return contact_sourcer },
-  get bulk_matcher() { return bulk_matcher },
   get digest() { return digest },
   get outreach() { return outreach },
   get resume_optimizer() { return resume_optimizer },

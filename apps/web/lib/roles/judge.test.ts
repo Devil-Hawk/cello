@@ -105,7 +105,7 @@ describe('judgeRole', () => {
     expect(confirm).toHaveLength(1)
     expect(confirm[0]).toMatchObject({ text: 'Must be authorized to work in the United States', status: 'unclear', line: null, quote: null })
     expect(r.chance_detail.confirm).toEqual(['Must be authorized to work in the United States'])
-    expect((t.call.mock.calls[0][1] as { prompt: string }).prompt).not.toContain('authorized')
+    expect((t.call.mock.calls[0][1] as unknown as { prompt: string }).prompt).not.toContain('authorized')
   })
 
   it('never shows a reading as met when its quote is not on the cited resume line', async () => {

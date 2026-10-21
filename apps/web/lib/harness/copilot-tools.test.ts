@@ -19,10 +19,13 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const { webSearchMock, generateDossierMock } = vi.hoisted(() => ({
+const { webSearchMock, generateDossierMock, judgeRolesMock } = vi.hoisted(() => ({
   webSearchMock: vi.fn(),
   generateDossierMock: vi.fn(),
+  judgeRolesMock: vi.fn(),
 }))
+// score_jobs judges through lib/roles/judge, which reads the model through the free door; the judge has its own tests.
+vi.mock('@/lib/roles/judge', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/lib/roles/judge')>()), judgeRoles: judgeRolesMock }))
 vi.mock('@/lib/search', () => ({ webSearch: webSearchMock }))
 // research_company/research_companies' only network+LLM-touching dependency —
 // mocked so the batch-tool tests below (caps, partial failure, concurrency)
@@ -764,6 +767,32 @@ describe('list_contacts — trgm search (ILIKE retired)', () => {
 })
 
 // Every tool call is one Langfuse observation under the active trace.
+describe('score_jobs judges through the roles judge', () => {
+  const tables = () => ({
+    companies: [{ id: 'co-1', name: 'Acme', user_id: 'me' }],
+    jobs: [
+      { id: 'job-1', title: 'Backend Engineer', company_id: 'co-1', description: 'Build payments.' },
+      { id: 'job-2', title: 'Data Engineer', company_id: 'co-1', description: 'Build pipelines.' },
+    ],
+    person_roles: [{ user_id: 'me', job_id: 'job-1', band: 'possible', chance_detail: { note: '2 of 3 required items are shown on your resume.' } }],
+  })
+
+  it('reports a band for each judged role and says what happened to the others', async () => {
+    judgeRolesMock.mockResolvedValue({ judged: ['job-1'], stopped: null })
+    const out = (await dispatchTool(baseCtx(fakeAdmin(tables())), 'score_jobs', { jobIds: ['job-1', 'job-2', 'nope'] })) as { scored: number; failed: number; jobResults: { jobId: string; status: string; chance: string | null; reason: string }[] }
+    expect(judgeRolesMock.mock.calls[0].slice(1)).toEqual(['me', ['job-1', 'job-2', 'nope']])
+    expect(out.scored).toBe(1)
+    expect(out.jobResults.map((r) => [r.jobId, r.status, r.chance])).toEqual([['job-1', 'assessed', 'possible'], ['job-2', 'not-assessed', null], ['nope', 'not-found', null]])
+    expect(out.jobResults[0].reason).toBe('2 of 3 required items are shown on your resume.')
+  })
+
+  it('answers with the line when the free allowance stopped everything', async () => {
+    judgeRolesMock.mockResolvedValue({ judged: [], stopped: 'no_model' })
+    const out = await dispatchTool(baseCtx(fakeAdmin(tables())), 'score_jobs', { jobIds: ['job-1'] })
+    expect(out).toMatchObject({ error: 'Cello needs a model to read this one. Choose a free model.' })
+  })
+})
+
 describe('dispatchTool in Langfuse', () => {
   const configure = (isDemo: boolean) => {
     vi.stubEnv('LANGFUSE_PUBLIC_KEY', 'pk-lf-fake')

@@ -32,7 +32,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const out = await judgeRole(admin, user.id, params.id)
     if (out.judged.length === 0) {
       if (out.stopped === null) return NextResponse.json({ error: 'Role not found' }, { status: 404 })
-      const { status, ...body } = stopAnswer(out.stopped, await judgeStatus(admin, user.id))
+      const { status, ...body } = await stopAnswer(out.stopped, () => judgeStatus(admin, user.id))
       return NextResponse.json(body, { status })
     }
     const [fit, row] = await Promise.all([

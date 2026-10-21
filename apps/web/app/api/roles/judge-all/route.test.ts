@@ -7,6 +7,9 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { g
 let fake = fakeDb()
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => fake.client }))
 
+const trail = vi.fn()
+vi.mock('@/lib/access/session', () => ({ recordDemoEvent: (...a: unknown[]) => trail(...a) }))
+
 const judgeRoles = vi.fn()
 const judgeStatus = vi.fn()
 const nextWaiting = vi.fn()
@@ -46,6 +49,7 @@ describe('POST /api/roles/judge-all', () => {
     const routine = fake.tables.routines[0] as { args: { front: string[] }; next_due_at: string }
     expect(routine.args.front).toEqual(['u1', 'u9'])
     expect(Date.parse(routine.next_due_at)).toBeLessThan(Date.now() + 1000)
+    expect(trail.mock.calls[0][1]).toMatchObject({ action: 'jobs.score_batch', target: '/jobs', detail: { count: 3, failed: 0, considered: 3, remaining: 20 } })
   })
 
   it('answers 429 with the day line when nothing could be judged for want of a free call', async () => {
@@ -55,6 +59,7 @@ describe('POST /api/roles/judge-all', () => {
     expect(res.status).toBe(429)
     expect(await res.json()).toMatchObject({ error: 'Cello judged 40 of your 120 new roles today. The rest continue tomorrow.' })
     expect((fake.tables.routines[0] as { args: { front: string[] } }).args.front).toEqual(['u9'])
+    expect(trail.mock.calls[0][1]).toMatchObject({ detail: { outcome: 'failed', reason: 'day_limit' } })
   })
 
   it('does not queue the caller when nothing waits any more', async () => {
