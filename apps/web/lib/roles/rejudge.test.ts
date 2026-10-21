@@ -26,11 +26,13 @@ describe('rejudgePerson: after a change of targets', () => {
   function store(held: Held[], appliedTo: string[] = [], viewers: Record<string, string> = {}) {
     const rpcs: { name: string; args: Record<string, any> }[] = []
     const selects: string[] = []
+    const limits: number[] = []
     const admin = {
       from(table: string) {
         const filters: ((r: any) => boolean)[] = []
         let op: 'select' | 'delete' | 'update' = 'select'
         let patch: Record<string, unknown> = {}
+        let max = 500
         const b: any = {
           select: (cols: string) => (table === 'person_roles' && selects.push(cols), b),
           delete: () => ((op = 'delete'), b),
@@ -39,21 +41,21 @@ describe('rejudgePerson: after a change of targets', () => {
           in: (c: string, vs: unknown[]) => (filters.push((r) => vs.includes(r[c])), b),
           lt: (c: string, v: number) => (filters.push((r) => r[c] < v), b),
           order: () => b,
-          limit: () => b,
+          limit: (n: number) => (table === 'person_roles' && limits.push(n), (max = n), b),
           then(resolve: (v: unknown) => void) {
             if (table === 'applications') return resolve({ data: appliedTo.map((job_id) => ({ job_id })), error: null })
             if (table === 'person_jobs') return resolve({ data: Object.entries(viewers).map(([id, viewer_company_name]) => ({ id, viewer_company_name })), error: null })
             const hit = held.filter((r) => filters.every((f) => f(r)))
             if (op === 'delete') for (const r of hit) held.splice(held.indexOf(r), 1)
             if (op === 'update') for (const r of hit) Object.assign(r, patch)
-            resolve({ data: op === 'select' ? hit.slice(0, 500) : null, error: null })
+            resolve({ data: op === 'select' ? hit.slice(0, max) : null, error: null })
           },
         }
         return b
       },
       rpc: async (name: string, args: Record<string, any>) => (rpcs.push({ name, args }), { data: 1, error: null }),
     }
-    return { admin: admin as unknown as Admin, rpcs, held, selects }
+    return { admin: admin as unknown as Admin, rpcs, held, selects, limits }
   }
 
   const targets = (over: Record<string, unknown> = {}) => ({
@@ -141,9 +143,11 @@ describe('rejudgePerson: after a change of targets', () => {
 
   it('goes through every page of 100 until nothing is held under an older version', async () => {
     const many = Array.from({ length: 230 }, (_, i) => row(`r${String(i).padStart(3, '0')}`, { jobs: job('Engineer', { country: i % 2 ? 'DE' : 'US' }) }))
-    const { admin, held } = store(many)
+    const { admin, held, limits } = store(many)
     const out = await rejudgePerson(admin, 'u1', { targets: targets(), now: () => START, deadlineAt: START + 200_000 })
     expect(out).toEqual({ checked: 230, removed: 115 })
+    // pages of 100: two full ones, one of 30, and the empty look that ends it
+    expect(limits).toEqual([100, 100, 100, 100])
     expect(held).toHaveLength(115)
     expect(held.every((r) => r.targets_version === 2)).toBe(true)
   })

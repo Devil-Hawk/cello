@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { EMPTY_TARGETING } from '../../targeting'
 import { fakeDb } from '../../companies/fake-db'
 import type { RoutineContext, RoutineRow } from '../routines'
 import { HANDLERS } from './index'
-import { rolesAudit } from './roles-audit'
+import { AUDIT_CAP, auditPerson, rolesAudit } from './roles-audit'
 
 const START = Date.parse('2026-10-22T04:30:00Z')
 const day = 86_400_000
@@ -80,5 +81,28 @@ describe('roles.audit', () => {
     const second = await rolesAudit(context(client, { state: first.next as Record<string, unknown> }))
     expect(second).toEqual({ ok: true, found: { people: 1, rows: 3, outside: 2 } })
     expect(tables.judge_audit).toHaveLength(1)
+  })
+
+  describe('the numbers it promises', () => {
+    const many = (n: number) => Array.from({ length: n }, (_, i) => held('a', `j${String(i).padStart(5, '0')}`, job('Platform Engineer')))
+    const targets = { targeting: { ...EMPTY_TARGETING, countries: ['US'] }, titles: [] }
+    const reads = (queries: { table: string; op: string }[]) => queries.filter((q) => q.table === 'person_roles' && q.op === 'select').length
+
+    it('reads pages of 100', async () => {
+      const { client, queries } = fakeDb({ person_roles: many(250), applications: [], person_jobs: [] })
+      expect((await auditPerson(client as never, 'a', targets)).rows).toBe(250)
+      expect(reads(queries)).toBe(3)
+    })
+
+    it('stops at the cap it is given, exactly, even in the middle of a page', async () => {
+      const { client } = fakeDb({ person_roles: many(250), applications: [], person_jobs: [] })
+      expect((await auditPerson(client as never, 'a', targets, 150)).rows).toBe(150)
+    })
+
+    it('stops a person at 2000 roles', async () => {
+      expect(AUDIT_CAP).toBe(2000)
+      const { client } = fakeDb({ person_roles: many(2100), applications: [], person_jobs: [] })
+      expect((await auditPerson(client as never, 'a', targets)).rows).toBe(2000)
+    })
   })
 })

@@ -28,10 +28,11 @@ export interface Audit {
 }
 
 /** One person's audit: the judge over their shown roles, oldest id first. */
-export async function auditPerson(db: Db, userId: string, targets: Parameters<typeof keepsRole>[1]): Promise<Audit> {
+export async function auditPerson(db: Db, userId: string, targets: Parameters<typeof keepsRole>[1], cap = AUDIT_CAP): Promise<Audit> {
   const out: Audit = { rows: 0, outside: 0, by_reason: {} }
   let cursor = ''
-  while (out.rows < AUDIT_CAP) {
+  while (out.rows < cap) {
+    const size = Math.min(PAGE, cap - out.rows)
     let q = db
       .from('person_roles')
       .select('job_id, saved_at, hidden_reason, ' + HELD_JOB)
@@ -39,7 +40,7 @@ export async function auditPerson(db: Db, userId: string, targets: Parameters<ty
       .is('hidden_reason', null)
       .is('saved_at', null)
       .order('job_id')
-      .limit(PAGE)
+      .limit(size)
     if (cursor) q = q.gt('job_id', cursor)
     const { data, error } = await q
     if (error) throw new Error('list_shown_roles')
@@ -60,7 +61,7 @@ export async function auditPerson(db: Db, userId: string, targets: Parameters<ty
         out.by_reason[verdict.reason] = (out.by_reason[verdict.reason] ?? 0) + 1
       }
     }
-    if (page.length < PAGE) break
+    if (page.length < size) break
   }
   return out
 }
