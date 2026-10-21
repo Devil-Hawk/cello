@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { chooseLabelRows, importLabelSet, labelSetCsv, parseLabelCsv } from './label-set'
+import { chooseLabelRows, collectFileRows, fileNote, importLabelSet, labelSetCsv, parseLabelCsv, parseScoredRows, scoreLabels, scoreReport, stratifiedTitles } from './label-set'
+import { fakeDb } from '../../companies/fake-db'
 
 const held = (n: number, title: string, type: string | null, over: Record<string, unknown> = {}) => ({
   id: `j${n}`,
@@ -46,7 +47,7 @@ describe('the label set', () => {
 
   it('writes a CSV with a blank column to mark, and reads the marked rows back', () => {
     const csv = labelSetCsv([{ title: 'Engineer, "Platform"', title_norm: 'engineer platform', tier1_type: '', employer: 'Acme, Inc', source: 'kept' }])
-    expect(csv.split('\n')[0]).toBe('title,title_norm,tier1_type,your_type,employer,source')
+    expect(csv.split('\n')[0]).toBe('title,title_norm,cello_type,type,employer,source')
     expect(csv).toContain('"Engineer, ""Platform"""')
     const marked = csv.replace(',,"Acme, Inc"', ',platform-engineer,"Acme, Inc"')
     expect(parseLabelCsv(marked)).toEqual({ labelled: [{ title: 'Engineer, "Platform"', title_norm: 'engineer platform', role_type: 'platform-engineer' }], refused: [] })
@@ -72,5 +73,79 @@ describe('the label set', () => {
     expect(calls[1].body).toMatchObject({ datasetName: 'role-types', id: 'role-types:ai engineer', expectedOutput: { role_type: 'ai-engineer' } })
     expect(calls[0].auth).toBe(`Basic ${Buffer.from('pk:sk').toString('base64')}`)
     await expect(importLabelSet([], {}, fake)).rejects.toThrow('LANGFUSE_BASE_URL')
+  })
+})
+
+describe('the file mode', () => {
+  const job = (title: string, type: string | null, origin: string | null = type ? 'code' : null) => ({ title, title_norm: title.toLowerCase(), role_type: type, type_origin: origin })
+
+  it('takes at most 6 titles of a type, spread across the types, then the untyped titles, once each', async () => {
+    const jobs = [
+      ...Array.from({ length: 20 }, (_, i) => job(`Engineer ${i}`, 'software-engineer')),
+      ...Array.from({ length: 3 }, (_, i) => job(`Data ${i}`, 'data-engineer')),
+      job('Data 0', 'data-engineer'),
+      ...Array.from({ length: 30 }, (_, i) => job(`Zookeeper ${i}`, null)),
+      job('Model typed', 'ai-engineer', 'model'),
+      { title: 'No key', title_norm: null, role_type: null, type_origin: null },
+    ]
+    const rows = await collectFileRows(fakeDb({ jobs }).client, null, 100)
+    const typed = rows.filter((r) => r.tier1_type)
+    const untyped = rows.filter((r) => !r.tier1_type)
+    expect(typed.filter((r) => r.tier1_type === 'software-engineer')).toHaveLength(6)
+    expect(typed.filter((r) => r.tier1_type === 'data-engineer')).toHaveLength(3)
+    // the most common title of a type comes first, and the types alternate
+    expect(typed.slice(0, 2).map((r) => r.title_norm)).toEqual(['engineer 0', 'data 0'])
+    expect(typed.some((r) => r.tier1_type === 'ai-engineer')).toBe(false)
+    expect(untyped).toHaveLength(25)
+    expect(new Set(rows.map((r) => r.title_norm)).size).toBe(rows.length)
+    expect(rows.every((r) => r.source === 'common')).toBe(true)
+  })
+
+  it('stops the typed titles at the limit, and leaves out the titles the owner already has', async () => {
+    const jobs = ['a', 'b', 'c', 'd'].flatMap((t) => [job(`${t} one`, `type-${t}`), job(`${t} two`, `type-${t}`)])
+    const rows = await collectFileRows(fakeDb({ jobs }).client, null, 3)
+    expect(rows).toHaveLength(3)
+    expect(stratifiedTitles(jobs, new Set(['a one']), 100).map((r) => r.title_norm)).not.toContain('a one')
+  })
+
+  it('says whose data it is on the first line, and reads the file back with that line there', () => {
+    const sample = [{ title: 'AI Engineer', title_norm: 'ai engineer', tier1_type: 'ai-engineer', employer: '', source: 'common' as const }]
+    const csv = labelSetCsv(sample, fileNote(sample))
+    expect(csv.split('\n')[0]).toBe("# public boards sample, not the owner's roles; rerun with --owner on the owner's database")
+    expect(csv.split('\n')[1]).toBe('title,title_norm,cello_type,type,employer,source')
+    const marked = csv.replace('ai-engineer,,', 'ai-engineer,ai-engineer,')
+    expect(parseScoredRows(marked)).toEqual([{ cello: 'ai-engineer', label: 'ai-engineer' }])
+    expect(parseLabelCsv(marked).labelled).toEqual([{ title: 'AI Engineer', title_norm: 'ai engineer', role_type: 'ai-engineer' }])
+    expect(fileNote([{ ...sample[0], source: 'applied' }])).toMatch(/^# the owner's/)
+  })
+})
+
+describe('scoring the marked file', () => {
+  const rows = (n: number, cello: string, label: string) => Array.from({ length: n }, () => ({ cello, label }))
+
+  it('reads the marked rows with either name of the column', () => {
+    expect(parseScoredRows('title,title_norm,cello_type,type\nA,a,ai-engineer,ai-engineer\nB,b,,')).toEqual([{ cello: 'ai-engineer', label: 'ai-engineer' }])
+    expect(parseScoredRows('title,title_norm,tier1_type,your_type\nA,a,,None')).toEqual([{ cello: '', label: 'none' }])
+  })
+
+  it('gives precision and recall for a type with 10 labels, says too few for the rest, and reads the gate', () => {
+    // 10 ai labels: Cello gave 9 of them ai and 1 untyped, and gave ai to 1 title the owner calls backend
+    const marked = [...rows(9, 'ai-engineer', 'ai-engineer'), ...rows(1, '', 'ai-engineer'), ...rows(1, 'ai-engineer', 'backend-engineer'), ...rows(3, 'backend-engineer', 'backend-engineer'), ...rows(2, '', 'none')]
+    const score = scoreLabels(marked, null)
+    expect(score.perType).toEqual([{ type: 'ai-engineer', labels: 10, precision: 0.9, recall: 0.9 }, { type: 'backend-engineer', labels: 4, precision: null, recall: null }])
+    // 14 wanted titles, 13 kept (the untyped one is not)
+    expect(score).toMatchObject({ keepRecall: 0.929, keepN: 14, gate: false })
+    expect(scoreReport(score, false)).toEqual([
+      'ai-engineer: labels 10, precision 0.9, recall 0.9',
+      'backend-engineer: labels 4. Too few to tell',
+      'Keep-recall over every type you marked (pass --chosen to narrow it): 0.929 on 14 titles',
+      'The 0.95 gate does not hold',
+    ])
+  })
+
+  it('counts keep-recall over the chosen types only, and holds the gate at 0.95', () => {
+    const marked = [...rows(19, 'ai-engineer', 'ai-engineer'), ...rows(1, '', 'ai-engineer'), ...rows(5, '', 'designer')]
+    expect(scoreLabels(marked, ['ai-engineer'])).toMatchObject({ keepRecall: 0.95, keepN: 20, gate: true })
+    expect(scoreLabels(marked, ['data-analyst'])).toMatchObject({ keepRecall: null, gate: null })
   })
 })

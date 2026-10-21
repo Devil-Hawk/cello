@@ -141,6 +141,7 @@ async function fetchJobs(token: string): Promise<AtsJob[]> {
       url,
       externalId: url,
       location: formatLocation(j),
+      department: j.department || undefined,
       description: htmlToPlainText(j.description),
       descriptionHtml: rawHtmlOf(j.description),
       postedAt: toIso(j.published_on) ?? toIso(j.created_at),

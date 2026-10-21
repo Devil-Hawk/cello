@@ -45,7 +45,11 @@ export interface ModelRequest {
   /** Langfuse generation name, a lowercase constant. */
   name: string
   maxTokens: number
+  /** Ask for OpenRouter's json_object response format, so a reasoning model answers with the object and nothing before it. */
+  json?: boolean
   promptRef?: { name: string; hash?: string }
+  /** Told which free model answered, for the provenance of what it said. */
+  onModel?: (model: string) => void
 }
 
 /** The model's text; null when no free model produced one; MODEL_LIMIT when the allowance or the spend cap stopped the call. */
@@ -92,12 +96,16 @@ export function makeIngestModelCall(
             maxTokens: req.maxTokens,
             temperature: 0,
             reasoning: { effort: 'none' },
+            ...(req.json ? { json: true } : {}),
             name: req.name,
             ...(req.promptRef ? { promptRef: req.promptRef } : {}),
           },
           AbortSignal.timeout(60_000)
         )
-        if (result.content?.trim()) return result.content
+        if (result.content?.trim()) {
+          req.onModel?.(result.model || model)
+          return result.content
+        }
       } catch (error) {
         if (error instanceof BudgetCapError) {
           // The user's own cap: nothing further this check, for anything.

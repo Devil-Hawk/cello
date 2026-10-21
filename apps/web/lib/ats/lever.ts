@@ -138,6 +138,7 @@ async function fetchBoard(host: string, token: string): Promise<AtsJob[]> {
       url: j.hostedUrl,
       externalId: j.hostedUrl,
       location: formatLocation(j),
+      department: j.categories?.team || undefined,
       description: fullDescription(j),
       descriptionHtml: fullHtml(j),
       ...(typeof j.applyUrl === 'string' && j.applyUrl ? { applyUrl: j.applyUrl } : {}),

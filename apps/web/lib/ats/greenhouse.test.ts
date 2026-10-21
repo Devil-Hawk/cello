@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { greenhouse } from './greenhouse'
+import { typeTitle } from '../jobs/role-types'
 
 const realFetch = globalThis.fetch
 
@@ -127,5 +128,19 @@ describe('greenhouse.fetch — html-to-text swap parity', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
     const secondCallUrl = fetchMock.mock.calls[1][0] as string
     expect(String(secondCallUrl)).toContain('boards-api.eu.greenhouse.io')
+  })
+})
+
+describe('greenhouse.fetch: the department reaches the type', () => {
+  it('reads "member of technical staff" by the board\'s department, and keeps the first of several', async () => {
+    const posting = { ...REAL_GREENHOUSE_JOB, title: 'Member of Technical Staff', departments: [{ name: 'Forward Deployed' }, { name: 'Engineering' }] }
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({ jobs: [posting] })) as unknown as typeof fetch
+    const [job] = await greenhouse.fetch('stripe')
+    expect(job.department).toBe('Forward Deployed')
+    expect(typeTitle(job.title, job.department)).toMatchObject({ dept_norm: 'forward deployed', role_type: 'forward-deployed-engineer' })
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({ jobs: [{ ...posting, departments: [] }] })) as unknown as typeof fetch
+    const [bare] = await greenhouse.fetch('stripe')
+    expect(bare.department).toBeUndefined()
+    expect(typeTitle(bare.title, bare.department).role_type).toBeNull()
   })
 })

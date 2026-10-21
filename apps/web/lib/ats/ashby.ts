@@ -61,6 +61,8 @@ interface AshbyJob {
   title?: string
   jobUrl?: string
   location?: string
+  department?: string
+  team?: string
   secondaryLocations?: AshbySecondaryLocation[]
   publishedAt?: string
   isListed?: boolean
@@ -193,6 +195,7 @@ async function fetchJobs(token: string, ctx?: FetchContext): Promise<AtsJob[]> {
       url: j.jobUrl,
       externalId: j.jobUrl,
       location: formatLocation(j),
+      department: j.team || j.department || undefined,
       description:
         typeof j.descriptionPlain === 'string' && j.descriptionPlain
           ? j.descriptionPlain.slice(0, MAX_DESCRIPTION_CHARS)

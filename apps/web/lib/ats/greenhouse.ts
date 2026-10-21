@@ -15,6 +15,8 @@ interface GreenhouseJob {
   absolute_url?: string
   title?: string
   location?: { name?: string }
+  /** Present with ?content=true. */
+  departments?: { name?: string }[]
   first_published?: string
   updated_at?: string
   /** Only present when the board is fetched with ?content=true. */
@@ -96,6 +98,7 @@ async function fetchBoard(host: string, token: string): Promise<AtsJob[]> {
       url: j.absolute_url,
       externalId: j.absolute_url,
       location: j.location?.name || undefined,
+      department: j.departments?.[0]?.name || undefined,
       description: typeof j.content === 'string' && j.content ? descriptionToText(j.content) : undefined,
       descriptionHtml: typeof j.content === 'string' && j.content ? unescapeDoubleEncodedHtml(j.content) : undefined,
       linkHosts: typeof j.content === 'string' && j.content ? linkHostsOf(unescapeDoubleEncodedHtml(j.content)) : undefined,

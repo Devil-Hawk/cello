@@ -379,7 +379,7 @@ export function jobRow(
     }),
     requirements_extracted_at: now,
     ...cap,
-    ...typeFields(typeTitle(title)),
+    ...typeFields(typeTitle(title, job.department)),
   }
 }
 
@@ -765,7 +765,7 @@ export async function syncJobs(
   const typed = new Map<string, ReturnType<typeof typeTitle>>()
   const typedFor = (job: AtsJob, title: string) => {
     let t = typed.get(job.externalId)
-    if (!t) typed.set(job.externalId, (t = typeTitle(title)))
+    if (!t) typed.set(job.externalId, (t = typeTitle(title, job.department)))
     return t
   }
   // While the switch is off the old filter decides and the type step is only counted beside it (T20).
@@ -917,7 +917,7 @@ export async function syncJobs(
     const title = job.title.trim()
     if (title && title !== have.title) {
       fields.title = title
-      Object.assign(fields, typeFields(typeTitle(title)))
+      Object.assign(fields, typeFields(typeTitle(title, job.department)))
     }
     if (job.location && job.location !== have.location) {
       fields.location = job.location

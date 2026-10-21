@@ -24,6 +24,21 @@ describe('makeIngestModelCall', () => {
     expect(opts.model.endsWith(':free')).toBe(true)
   })
 
+  it('asks for JSON only when the caller does', async () => {
+    callLlm.mockResolvedValue({ content: 'ok' })
+    await makeIngestModelCall({ userId: 'u', openrouter: 'key' })(req)
+    await makeIngestModelCall({ userId: 'u', openrouter: 'key' })({ ...req, json: true })
+    expect(callLlm.mock.calls[0][1]).not.toHaveProperty('json')
+    expect(callLlm.mock.calls[1][1]).toMatchObject({ json: true })
+  })
+
+  it('tells the caller which model answered', async () => {
+    callLlm.mockResolvedValue({ content: 'ok', model: 'google/gemma-4-31b-it:free' })
+    const onModel = vi.fn()
+    await makeIngestModelCall({ userId: 'u', openrouter: 'key' })({ ...req, onModel })
+    expect(onModel).toHaveBeenCalledWith('google/gemma-4-31b-it:free')
+  })
+
   it('falls through to the next free model when the first fails', async () => {
     callLlm.mockRejectedValueOnce(new Error('429')).mockResolvedValueOnce({ content: 'second' })
     expect(await makeIngestModelCall({ userId: 'u', openrouter: 'key' })(req)).toBe('second')

@@ -40,6 +40,8 @@ export interface AtsJob {
   descriptionSource?: 'api' | 'jsonld' | 'detail' | 'rendered' | 'listing'
   /** The employer's apply link, when it is not the posting's own address. */
   applyUrl?: string
+  /** The department or team the board names, when it does. Only read to type a title that names no particular job. */
+  department?: string
   /** ISO 8601 timestamp when the posting was published, if known. */
   postedAt?: string
   /** Human-readable salary string (annualized when the source uses intervals). */

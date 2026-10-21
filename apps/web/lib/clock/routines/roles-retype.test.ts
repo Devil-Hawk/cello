@@ -15,8 +15,9 @@ interface Person {
 }
 
 /** jobs and profiles in memory: a role leaves the pending list once apply_title_types has seen it, a person once their targeting has role_types. */
-function fakeAdmin(jobs: Job[], people: Person[]) {
+function fakeAdmin(jobs: Job[], people: Person[], samples: Record<string, unknown>[] = []) {
   const pending = [...jobs]
+  const rpcs: { name: string; rows?: Record<string, unknown>[] }[] = []
   const applied: Record<string, unknown>[] = []
   const updates: { id: string; preferences: Record<string, any> }[] = []
   const selects: string[] = []
@@ -24,7 +25,7 @@ function fakeAdmin(jobs: Job[], people: Person[]) {
     from(table: string) {
       const filters: string[] = []
       const b: Record<string, unknown> = {
-        select: () => (selects.push(table), b),
+        select: () => (selects.push(table), table === 'llm_spend' ? { eq: () => ({ is: () => ({ gte: async () => ({ count: 0, error: null }) }) }) } : b),
         or: (f: string) => (filters.push(f), b),
         not: () => b,
         is: () => b,
@@ -48,13 +49,16 @@ function fakeAdmin(jobs: Job[], people: Person[]) {
       return b
     },
     rpc: async (name: string, args: { p_rows: { id: string }[] }) => {
+      rpcs.push({ name, rows: args.p_rows })
+      if (name === 'pending_title_samples') return { data: samples.splice(0), error: null }
+      if (name === 'apply_model_titles') return { data: 0, error: null }
       expect(name).toBe('apply_title_types')
       applied.push(...args.p_rows)
       for (const r of args.p_rows) pending.splice(pending.findIndex((j) => j.id === r.id), 1)
       return { data: args.p_rows.length, error: null }
     },
   }
-  return { admin: admin as unknown as RoutineContext['admin'], applied, updates, selects }
+  return { admin: admin as unknown as RoutineContext['admin'], applied, updates, selects, rpcs }
 }
 
 function context(admin: RoutineContext['admin'], over: Partial<RoutineContext> = {}): RoutineContext {
@@ -65,7 +69,7 @@ describe('roles.retype', () => {
   it('types every stored role by code, and an untyped one records the version it was tried under', async () => {
     const { admin, applied } = fakeAdmin([{ id: 'j1', title: 'Sr. Forward Deployed Engineer - NYC (Hybrid)' }, { id: 'j2', title: 'Zookeeper' }], [])
     const out = await rolesRetype(context(admin))
-    expect(out).toEqual({ ok: true, found: { typed: 2, mapped: 0 } })
+    expect(out).toEqual({ ok: true, found: { typed: 2, mapped: 0, by_model: 0, model_none: 0 } })
     expect(applied[0]).toMatchObject({ id: 'j1', title_norm: 'forward deployed engineer', role_type: 'forward-deployed-engineer', type_origin: 'code', type_prov: { rule: 'synonym', taxonomy_version: TAXONOMY_VERSION } })
     expect(applied[1]).toMatchObject({ id: 'j2', title_norm: 'zookeeper', role_type: null, type_origin: null, type_prov: { taxonomy_version: TAXONOMY_VERSION } })
   })
@@ -79,7 +83,7 @@ describe('roles.retype', () => {
     ]
     const { admin, updates } = fakeAdmin([], people)
     const out = await rolesRetype(context(admin))
-    expect(out).toEqual({ ok: true, found: { typed: 0, mapped: 1 } })
+    expect(out).toEqual({ ok: true, found: { typed: 0, mapped: 1, by_model: 0, model_none: 0 } })
     const p1 = updates.find((u) => u.id === 'p1')!.preferences
     expect(p1.targeting).toMatchObject({ role_types: ['backend-engineer', 'data-scientist', 'ai-engineer'], role_types_review: true, functions: ['engineering', 'data'], countries: ['US'] })
     expect(p1.api_keys).toEqual({ x: 1 })
@@ -102,6 +106,25 @@ describe('roles.retype', () => {
     const second = await rolesRetype(context(admin, { state: first.next as Record<string, unknown> }))
     expect(second.next).toBeUndefined()
     expect(second.found).toMatchObject({ typed: 450 })
+  })
+
+  it('types the titles tier 1 left pending with the step, then serves the cache, and counts what the model typed', async () => {
+    const sample = { title_norm: 'zookeeper', dept_norm: '', job_id: 'j2', title: 'Zookeeper', posting_head: '' }
+    const { admin, rpcs } = fakeAdmin([{ id: 'j2', title: 'Zookeeper' }], [], [sample])
+    const model = async () => JSON.stringify({ items: [{ i: 1, type: 'other', quote: 'zookeeper' }] })
+    const out = await rolesRetype(context(admin), model)
+    expect(out).toEqual({ ok: true, found: { typed: 1, mapped: 0, by_model: 1, model_none: 0 } })
+    // tier 1 first, then the cache served, the pending titles read, the answers written, nothing left
+    expect(rpcs.map((r) => r.name)).toEqual(['apply_title_types', 'apply_model_titles', 'pending_title_samples', 'apply_model_titles', 'pending_title_samples'])
+    expect(rpcs[3].rows![0]).toMatchObject({ title_norm: 'zookeeper', role_type: 'other', status: 'typed', prov: { step: 'role.type', rung: 'R3', evidence: [{ quote: 'zookeeper' }] } })
+  })
+
+  it('leaves the step alone while code still has stored roles to type', async () => {
+    const many = Array.from({ length: 450 }, (_, i) => ({ id: `j${i}`, title: 'Software Engineer' }))
+    const { admin, rpcs } = fakeAdmin(many, [])
+    let now = START
+    await rolesRetype(context(admin, { now: () => (now += 40_000), deadlineAt: START + 100_000 }), async () => null)
+    expect(rpcs.some((r) => r.name === 'pending_title_samples' || r.name === 'apply_model_titles')).toBe(false)
   })
 
   it('fails with a class of failure, never a message from the database', async () => {

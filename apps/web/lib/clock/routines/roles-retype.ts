@@ -1,13 +1,20 @@
-// roles.retype: the backfill of K5c, on the clock, code only (no model call). In slices that stop before the
-// deadline it does two things until nothing is left:
+// roles.retype: the backfill of K5c, on the clock. In slices that stop before the deadline it does three
+// things until nothing is left:
 //
 //   1. types every stored role by tier 1: roles never typed, and roles code typed under an older taxonomy
 //      version (a version bump re-runs code rows and rows still pending; a row a model typed keeps its type)
-//   2. maps each person's old target titles to at most 8 role types, most titles first, and marks the
+//   2. types the titles code left pending with the declared step role.type (lib/roles/type-step.ts), at most
+//      40 calls of 25 titles a slice, and serves the shared cache to every untyped role. This is the only model
+//      call here; without the platform's free key or the owner's account it does not run.
+//   3. maps each person's old target titles to at most 8 role types, most titles first, and marks the
 //      mapping for review. A person with no titles, or whose titles map to nothing, keeps the old filter
 //      until they choose: their types stay empty.
 
+import { freeFallbackModels } from '../../agents/model'
+import { loadApiKeys } from '../../harness/keys'
+import { freeModelKeys, makeIngestModelCall, newModelBudget, type ModelCall } from '../../ingest/model'
 import { getRoleType, typeTitle, TAXONOMY_VERSION } from '../../jobs/role-types'
+import { SLICE_CALLS, runTypeStep } from '../../roles/type-step'
 import { resolveTargetTitles } from '../../targeting/titles'
 import type { RoutineContext, RoutineOutcome } from '../routines'
 
@@ -18,6 +25,7 @@ const MAX_TYPES = 8
 interface JobRow {
   id: string
   title: string
+  dept_norm: string | null
 }
 
 /** Roles to type: never typed, or typed by code under an older version. A model's answer is never overwritten. */
@@ -26,7 +34,7 @@ async function typeStoredRoles(ctx: RoutineContext): Promise<{ typed: number; mo
   while (ctx.now() < ctx.deadlineAt) {
     const { data, error } = await ctx.admin
       .from('jobs')
-      .select('id, title')
+      .select('id, title, dept_norm')
       .or(`title_norm.is.null,type_prov->>taxonomy_version.is.null,type_prov->>taxonomy_version.neq.${TAXONOMY_VERSION}`)
       .or('type_origin.is.null,type_origin.eq.code')
       .order('id')
@@ -35,7 +43,7 @@ async function typeStoredRoles(ctx: RoutineContext): Promise<{ typed: number; mo
     const rows = (data ?? []) as JobRow[]
     if (rows.length === 0) return { typed, more: false }
     const batch = rows.map((r) => {
-      const t = typeTitle(r.title ?? '')
+      const t = typeTitle(r.title ?? '', r.dept_norm)
       // an untyped role still records the version it was tried under, so it is not tried again until the next bump
       return { id: r.id, title_norm: t.title_norm, dept_norm: t.dept_norm, role_type: t.role_type, type_origin: t.type_origin, type_prov: t.type_prov ?? { taxonomy_version: TAXONOMY_VERSION } }
     })
@@ -89,11 +97,30 @@ async function mapOldTargets(ctx: RoutineContext): Promise<{ mapped: number; mor
   return { mapped, more: true }
 }
 
-export async function rolesRetype(ctx: RoutineContext): Promise<RoutineOutcome> {
+/** The free models of AGENT_FREE_MODELS (for this step only) on the platform's key, booked to the owner's account; null when either is missing or the guards refuse. */
+async function platformModel(ctx: RoutineContext): Promise<ModelCall | null> {
+  const key = process.env.OPENROUTER_API_KEY?.trim()
+  const owner = process.env.OWNER_USER_ID?.trim()
+  if (!key || !owner) return null
+  try {
+    return makeIngestModelCall(freeModelKeys(await loadApiKeys(ctx.admin, owner), key), { budget: newModelBudget(SLICE_CALLS), models: freeFallbackModels() })
+  } catch {
+    return null
+  }
+}
+
+export async function rolesRetype(ctx: RoutineContext, model?: ModelCall | null): Promise<RoutineOutcome> {
   try {
     const roles = await typeStoredRoles(ctx)
+    // the step waits for code to finish the slice's backlog: it reads only what tier 1 left pending
+    const step = roles.more ? null : await runTypeStep(ctx.admin, model === undefined ? await platformModel(ctx) : model, { now: ctx.now, deadlineAt: ctx.deadlineAt })
     const people = roles.more ? { mapped: 0, more: true } : await mapOldTargets(ctx)
-    const found = { typed: Number(ctx.state?.typed ?? 0) + roles.typed, mapped: Number(ctx.state?.mapped ?? 0) + people.mapped }
+    const found = {
+      typed: Number(ctx.state?.typed ?? 0) + roles.typed,
+      mapped: Number(ctx.state?.mapped ?? 0) + people.mapped,
+      by_model: Number(ctx.state?.by_model ?? 0) + (step?.typed ?? 0),
+      model_none: Number(ctx.state?.model_none ?? 0) + (step?.none ?? 0),
+    }
     return roles.more || people.more ? { ok: true, next: found } : { ok: true, found }
   } catch (error) {
     return { ok: false, failure: error instanceof Error ? error.message : 'failed' }

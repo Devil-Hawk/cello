@@ -178,7 +178,7 @@ export async function readEmployer(db: Db, employer: DirectoryRow, people: Perso
   const candidates: { job: AtsJob; title: string; c: ReturnType<typeof classifyJob>; t: ReturnType<typeof typeTitle> }[] = []
   for (const job of clean) {
     const title = job.title.trim()
-    const t = typeTitle(title)
+    const t = typeTitle(title, job.department)
     const c = classifyJob({ title, description: job.description, location: job.location, companyName: employer.name })
     const key = `${t.role_type ?? ''}|${c.seniority}`
     const s = stats.get(key) ?? { role_type: t.role_type, seniority: c.seniority, open: 0, opened_30d: 0, opened_90d: 0, stated_pay: null }

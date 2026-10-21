@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { workable } from './workable'
+import { typeTitle } from '../jobs/role-types'
 
 const realFetch = globalThis.fetch
 
@@ -140,5 +141,18 @@ describe('workable.fetch', () => {
     expect(job.description).toContain('the company’s stack')
     expect(job.description).not.toContain('\u0080')
     expect(job.description).not.toContain('�')
+  })
+})
+
+describe('workable.fetch: the department reaches the type', () => {
+  it('reads "member of technical staff" by the board\'s department', async () => {
+    const posting = { ...REAL_JOB, title: 'Member of Technical Staff', department: 'Forward Deployed' }
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({ name: 'Acme', jobs: [posting] })) as unknown as typeof fetch
+    const [job] = await workable.fetch('acme')
+    expect(job.department).toBe('Forward Deployed')
+    expect(typeTitle(job.title, job.department)).toMatchObject({ dept_norm: 'forward deployed', role_type: 'forward-deployed-engineer' })
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({ name: 'Acme', jobs: [{ ...posting, department: '' }] })) as unknown as typeof fetch
+    const [bare] = await workable.fetch('acme')
+    expect(typeTitle(bare.title, bare.department).role_type).toBeNull()
   })
 })
