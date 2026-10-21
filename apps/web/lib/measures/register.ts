@@ -40,10 +40,10 @@ export const REGISTER: readonly MeasureDef[] = [
   {
     id: 'T3',
     layer: 'true',
-    name: "stored roles outside every person's targets (no-target rows counted apart)",
+    name: "stored roles outside their person's targets, by the one judge (the daily audit)",
     bar: '0',
     direction: 'equal',
-    source: 'SQL (directive 26)',
+    source: 'judge_audit (lib/roles/keep.ts)',
     gates: ['K5a'],
   },
   {

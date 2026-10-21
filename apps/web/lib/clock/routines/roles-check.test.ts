@@ -28,6 +28,7 @@ interface DirectoryRow {
   is_remote?: boolean | null
   posted_at?: string | null
   employer_name?: string | null
+  description?: string | null
 }
 
 /** A Supabase-shaped fake with the tables roles.check reads, and the two directory functions. */
@@ -179,6 +180,16 @@ describe('roles.check', () => {
       expect(call?.args).toMatchObject({ p_user: 'u1', p_job_ids: ['j1', 'j4'], p_hidden: ['j4'], p_targets_version: 1 })
       // never held before: every stored role was looked at
       expect(admin.rpcs.find((r) => r.name === 'directory_roles_for')?.args).toMatchObject({ p_user: 'u1', p_since: null })
+    })
+
+    it('lets an excluded word in the description keep a role from the person, as it does when the role is stored', async () => {
+      const admin = fakeAdmin([], {
+        preferences: { targeting: { ...TARGETS.targeting, excludedKeywords: ['crypto'] } },
+        targetsVersion: 1,
+        directory: [dir('j1', 'Platform Engineer', { description: 'We build crypto rails.' }), dir('j2', 'Staff Engineer', { description: 'We build rails.' })],
+      })
+      await rolesCheck(context(admin), { ingest: vi.fn() })
+      expect(admin.rpcs.find((r) => r.name === 'add_person_roles')?.args).toMatchObject({ p_job_ids: ['j2'] })
     })
 
     it('after the first pass looks only at roles stored since the last successful check', async () => {

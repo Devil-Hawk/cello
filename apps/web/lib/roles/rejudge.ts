@@ -9,20 +9,20 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { viewerRoles } from '../jobs/person-jobs'
 import { hasPersonTargets } from '../jobs/target-relevance'
 import { loadTargets, type ReaderTargets } from '../ingest/reader/targets'
-import { keepsRole } from './keep'
+import { keepsRole, type RoleToKeep } from './keep'
 
 type Db = SupabaseClient<any, any, any>
 
 /** Small enough that the id lists below stay inside a request URL (100 uuids is under 4 KB). */
 const PAGE = 100
 
-interface HeldRole {
+export interface HeldRole {
   job_id: string
   saved_at: string | null
   hidden_reason: string | null
   jobs: HeldJob | HeldJob[] | null
 }
-interface HeldJob {
+export interface HeldJob {
   title: string
   description: string | null
   location: string | null
@@ -39,6 +39,34 @@ interface HeldJob {
   role_type: string | null
   /** The employer's directory name: a role the sweep stored has no company_id, so no companies row to name it. */
   employer: { name: string | null } | { name: string | null }[] | null
+}
+
+/** The embed a person_roles query reads to judge the stored role: the columns the judge looks at. */
+export const HELD_JOB = 'jobs(title, description, location, salary_range, job_function, seniority, country, language, is_remote, posted_at, employer_id, company_id, title_norm, role_type, employer:company_directory(name))'
+
+/** A stored role as the judge reads it. `company` is the person's own name for the employer, else the directory's. */
+export function heldRole(r: HeldRole, viewerCompany?: string | null): { job: HeldJob; role: RoleToKeep } | null {
+  const job = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs
+  if (!job) return null
+  const employer = Array.isArray(job.employer) ? job.employer[0] : job.employer
+  return {
+    job,
+    role: {
+      title: job.title,
+      description: job.description,
+      location: job.location,
+      salary_range: job.salary_range,
+      job_function: job.job_function,
+      seniority: job.seniority,
+      country: job.country,
+      language: job.language,
+      is_remote: job.is_remote,
+      postedAt: job.posted_at,
+      title_norm: job.title_norm,
+      role_type: job.role_type,
+      company: viewerCompany ?? employer?.name ?? null,
+    },
+  }
 }
 
 export interface RejudgeOptions {
@@ -62,9 +90,7 @@ export async function rejudgePerson(db: Db, userId: string, opts: RejudgeOptions
 
   while (now() < deadlineAt) {
     const { data, error } = await mine()
-      .select(
-        'job_id, saved_at, hidden_reason, jobs(title, description, location, salary_range, job_function, seniority, country, language, is_remote, posted_at, employer_id, company_id, title_norm, role_type, employer:company_directory(name))'
-      )
+      .select('job_id, saved_at, hidden_reason, ' + HELD_JOB)
       .eq('user_id', userId)
       .lt('targets_version', version)
       .order('job_id')
@@ -82,27 +108,10 @@ export async function rejudgePerson(db: Db, userId: string, opts: RejudgeOptions
     const hide: string[] = []
     const show: string[] = []
     for (const r of rows) {
-      const job = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs
-      if (!job || !stated) continue
-      const employer = Array.isArray(job.employer) ? job.employer[0] : job.employer
-      const verdict = keepsRole(
-        {
-          title: job.title,
-          description: job.description,
-          location: job.location,
-          salary_range: job.salary_range,
-          job_function: job.job_function,
-          seniority: job.seniority,
-          country: job.country,
-          language: job.language,
-          is_remote: job.is_remote,
-          postedAt: job.posted_at,
-          title_norm: job.title_norm,
-          role_type: job.role_type,
-          company: viewer.get(r.job_id)?.viewer_company_name ?? employer?.name ?? null,
-        },
-        targets
-      )
+      const held = heldRole(r, viewer.get(r.job_id)?.viewer_company_name)
+      if (!held || !stated) continue
+      const { job, role } = held
+      const verdict = keepsRole(role, targets)
       if (verdict.keep) {
         if (verdict.hidden && r.hidden_reason === null) hide.push(r.job_id)
         if (!verdict.hidden && r.hidden_reason === 'unclassified') show.push(r.job_id)

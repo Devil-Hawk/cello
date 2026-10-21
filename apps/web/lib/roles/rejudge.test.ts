@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { EMPTY_TARGETING } from '../targeting'
+import { NO_CONSTRAINTS } from '../scoring/constraints'
 import { rejudgePerson } from './rejudge'
 
 const START = Date.parse('2026-10-08T12:00:00Z')
@@ -122,5 +123,28 @@ describe('rejudgePerson: after a change of targets', () => {
     expect(await rejudgePerson(admin, 'u1', { targets: none, now: () => START, deadlineAt: START + 200_000 })).toEqual({ checked: 1, removed: 0 })
     expect(held).toMatchObject([{ job_id: 'a', targets_version: 2 }])
   })
-})
 
+  it('reads the description for an excluded word, and counts a broken dealbreaker as dealbreaker', async () => {
+    const { admin, held, rpcs } = store([
+      row('crypto', { jobs: { ...job('Engineer'), description: 'We build crypto rails.' } as never }),
+      row('nosponsor', { jobs: { ...job('Engineer'), description: 'We cannot provide visa sponsorship.' } as never }),
+      row('lowpay', { jobs: { ...job('Engineer'), salary_range: '$80,000 - $100,000' } as never }),
+      row('fine'),
+    ])
+    const t = { ...targets({ excludedKeywords: ['crypto'] }), constraints: { ...NO_CONSTRAINTS, needsSponsorship: true, salaryFloorUsd: 150_000 } }
+    const out = await rejudgePerson(admin, 'u1', { targets: t, now: () => START, deadlineAt: START + 200_000 })
+    expect(out).toEqual({ checked: 4, removed: 3 })
+    expect(held.map((r) => r.job_id)).toEqual(['fine'])
+    const byReason = Object.fromEntries((rpcs[0].args.p_rows as { reason: string; n: number }[]).map((c) => [c.reason, c.n]))
+    expect(byReason).toEqual({ excluded: 1, dealbreaker: 2 })
+  })
+
+  it('goes through every page of 100 until nothing is held under an older version', async () => {
+    const many = Array.from({ length: 230 }, (_, i) => row(`r${String(i).padStart(3, '0')}`, { jobs: job('Engineer', { country: i % 2 ? 'DE' : 'US' }) }))
+    const { admin, held } = store(many)
+    const out = await rejudgePerson(admin, 'u1', { targets: targets(), now: () => START, deadlineAt: START + 200_000 })
+    expect(out).toEqual({ checked: 230, removed: 115 })
+    expect(held).toHaveLength(115)
+    expect(held.every((r) => r.targets_version === 2)).toBe(true)
+  })
+})
