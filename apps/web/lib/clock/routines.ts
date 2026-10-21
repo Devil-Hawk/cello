@@ -60,6 +60,7 @@ export type RoutineHandler = (ctx: RoutineContext) => Promise<RoutineOutcome>
 export const ROUTINE_LABELS: Record<string, string> = {
   'roles.check': 'Find new roles',
   'roles.retype': 'Sort roles by kind',
+  'roles.audit': 'Check roles against your search',
   'postings.backfill': 'Fill in whole postings',
   'storage.alert': 'Storage check',
   'directory.sweep': 'Check employers and read their boards',

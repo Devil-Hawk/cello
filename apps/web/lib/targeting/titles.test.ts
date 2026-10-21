@@ -4,9 +4,7 @@ import {
   MAX_TITLE_LENGTH,
   normalizeTargetTitle,
   normalizeTargetTitles,
-  parseTargetTitlesParam,
   resolveTargetTitles,
-  serializeTargetTitlesParam,
 } from './titles'
 
 describe('normalizeTargetTitle', () => {
@@ -72,28 +70,5 @@ describe('resolveTargetTitles', () => {
     expect(resolveTargetTitles({ targeting: {} })).toEqual([])
     expect(resolveTargetTitles({ targeting: { titles: 'Data Scientist' } })).toEqual([])
     expect(resolveTargetTitles('nonsense')).toEqual([])
-  })
-})
-
-describe('the ?titles= URL form', () => {
-  it('round-trips exactly', () => {
-    const titles = ['Senior Data Scientist', 'AI Engineer', 'ML Engineer']
-    expect(parseTargetTitlesParam(serializeTargetTitlesParam(titles))).toEqual(titles)
-  })
-
-  it('survives commas inside a title', () => {
-    // The reason the separator is a pipe and not a comma.
-    const titles = ['Data Scientist, Trust & Safety']
-    expect(parseTargetTitlesParam(serializeTargetTitlesParam(titles))).toEqual(titles)
-  })
-
-  it('treats an absent and an empty parameter alike as "no titles"', () => {
-    expect(parseTargetTitlesParam(null)).toEqual([])
-    expect(parseTargetTitlesParam('')).toEqual([])
-    expect(parseTargetTitlesParam('  ')).toEqual([])
-  })
-
-  it('ignores empty segments from a stray separator', () => {
-    expect(parseTargetTitlesParam('Data Scientist||AI Engineer|')).toEqual(['Data Scientist', 'AI Engineer'])
   })
 })

@@ -4,10 +4,9 @@ import { LogoMark } from '@/components/brand/logo'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Briefcase, Building2, Loader2, Plus, SearchX, Target, X } from 'lucide-react'
+import { Briefcase, Building2, Loader2, Plus, SearchX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -44,22 +43,11 @@ import { FIT_COLUMNS, chanceLabel, fitToColumns, type FitRow } from '@/lib/scori
 import type { RoleFit } from '@/lib/scoring/types'
 import { ProvenanceSummaryBar } from '@/components/jobs/provenance-summary-bar'
 import { JOB_FUNCTIONS, QUALITY_REJECT_THRESHOLD, SENIORITY_LEVELS } from '@/lib/jobs/classify'
-import { resolveTargeting, type Targeting } from '@/lib/targeting'
-import {
-  MAX_TARGET_TITLES,
-  normalizeTargetTitle,
-  parseTargetTitlesParam,
-  resolveTargetTitles,
-  serializeTargetTitlesParam,
-} from '@/lib/targeting/titles'
-import { rankJobsByTargetTitles, type TitleMatch } from '@/lib/matching/title-rank'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { VisaSignal } from '@/lib/dossier/store'
 import { isTrackedCompany } from '@/lib/companies/watchlist'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { personJobs } from '@/lib/jobs/person-jobs'
-import { applyRoleTargets, excludedCompanyIds, hasRoleTargets } from '@/lib/targeting/roles'
-import { TargetScopeSwitch, type TargetScope } from '@/components/jobs/target-scope-switch'
 
 const VISA_VALUES = ['all', 'likely', 'unknown', 'unlikely'] as const
 type VisaFilter = (typeof VISA_VALUES)[number]
@@ -169,130 +157,6 @@ async function loadBudgetHint(): Promise<string | null> {
   }
 }
 
-/**
- * The titles the user is looking for, as an add/remove chip list.
- *
- * WHY THE DRAFT NEVER TOUCHES THE URL
- *   This is the same trap the country input fell into (see committedCountry
- *   below): writing per-keystroke to a searchParams-derived value makes every
- *   character a router.replace that races the next one. Here the draft is
- *   plain local state and only a COMPLETED title — Enter, or the + button —
- *   is committed. Nothing re-ranks while you are still typing the word.
- */
-function TargetTitlesBar({
-  titles,
-  onChange,
-  sortLabel,
-  matchedCount,
-  rankedCount,
-}: {
-  titles: string[]
-  onChange: (next: string[]) => void
-  sortLabel: string
-  matchedCount: number
-  rankedCount: number
-}) {
-  const [draft, setDraft] = useState('')
-  const atCap = titles.length >= MAX_TARGET_TITLES
-
-  function commit() {
-    const title = normalizeTargetTitle(draft)
-    if (!title || atCap) return
-    // De-dupe case-insensitively so "data scientist" can't shadow the "Data
-    // Scientist" chip already sitting right there.
-    if (!titles.some((t) => t.toLowerCase() === title.toLowerCase())) onChange([...titles, title])
-    setDraft('')
-  }
-
-  return (
-    <div className="rounded-card border bg-card px-4 py-3 shadow-card">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 className="flex items-center gap-2 text-caption font-medium text-foreground">
-          <Target className="h-4 w-4 text-muted-foreground" aria-hidden />
-          Target titles
-        </h2>
-        <p className="text-caption text-muted-foreground">
-          {titles.length === 0 ? (
-            <>Add the roles you actually want and this list gets ranked by them.</>
-          ) : (
-            <>
-              {/* Say exactly what was reordered and what it was reordered
-                  within. Ranking runs over the rows loaded here, not all
-                  {totalCount} — claiming otherwise would be the same kind of
-                  lie as the old "remaining to score" count. */}
-              <span className="font-readout tabular-nums">{matchedCount}</span> of{' '}
-              <span className="font-readout tabular-nums">{rankedCount}</span> loaded jobs match — ranked first, then{' '}
-              {sortLabel.toLowerCase()}.
-            </>
-          )}
-        </p>
-      </div>
-
-      <div className="mt-2.5 flex gap-2">
-        <Input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              commit()
-            }
-          }}
-          disabled={atCap}
-          placeholder={atCap ? `${MAX_TARGET_TITLES} titles is the limit` : 'Senior Data Scientist'}
-          aria-label="Add a target job title"
-          className="h-9 max-w-xs"
-        />
-        <Button type="button" variant="outline" size="icon" onClick={commit} disabled={atCap} aria-label="Add target title">
-          <Plus className="h-4 w-4" />
-        </Button>
-      </div>
-
-      {titles.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {titles.map((title) => (
-            <span
-              key={title}
-              className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-caption font-medium text-accent-deep"
-            >
-              {title}
-              <button
-                type="button"
-                onClick={() => onChange(titles.filter((t) => t !== title))}
-                aria-label={`Remove target title ${title}`}
-                className="opacity-70 transition-opacity hover:opacity-100"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/**
- * Why this job sits where it does — the target title it matched, and how well.
- *
- * A re-ordered list with no visible reason is indistinguishable from a shuffle,
- * so every row the ranking MOVED says so on the row itself. Accent is the
- * product's one "live" signal colour and this is a live, user-driven signal, so
- * it earns it; rows that matched nothing render nothing and stay quiet.
- */
-function TitleMatchReason({ match }: { match: TitleMatch }) {
-  if (!match.target) return null
-  return (
-    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 pt-2.5 text-caption text-muted-foreground">
-      <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 font-medium text-accent-deep">
-        <Target className="h-3 w-3" aria-hidden />
-        {match.target}
-      </span>
-      <span className="font-readout tabular-nums">{match.score}% title match</span>
-    </p>
-  )
-}
-
 function JobsPageSkeleton() {
   return (
     <div className="space-y-6">
@@ -355,17 +219,9 @@ function JobsPageInner() {
 
   const [jobs, setJobs] = useState<Job[]>([])
   const [totalCount, setTotalCount] = useState(0)
-  // Roles inside the person's targets / all open roles, under the current facets (the switch's two counts).
-  const [matchingCount, setMatchingCount] = useState(0)
-  const [allCount, setAllCount] = useState(0)
   const [page, setPage] = useState(0)
   const [companies, setCompanies] = useState<Company[]>([])
   const [companiesLoaded, setCompaniesLoaded] = useState(false)
-  const [targeting, setTargeting] = useState<Targeting | null>(null)
-  // The titles the user wants, as stored in profiles.preferences.targeting.
-  // Kept separate from `targeting` on purpose: titles RANK the list, they never
-  // filter it, so they are not a Targeting facet — see lib/targeting/titles.ts.
-  const [profileTargetTitles, setProfileTargetTitles] = useState<string[]>([])
   // Plain-language remaining monthly AI budget, e.g. "$6.20 of your $10.00
   // monthly AI budget left" — surfaced next to the "calculate match" trigger
   // because that single click fires a real, metered LLM call with no other
@@ -498,22 +354,6 @@ function JobsPageInner() {
   const langParam = searchParams.get('lang')
   const language: LanguageFacet = langParam !== null && isLanguageFacet(langParam) ? langParam : 'all'
 
-  // The switch: with role targets set, roles inside them show by default and
-  // ?scope=all shows everything. No targets, no switch, everything shows.
-  const roleTargets = targeting !== null && hasRoleTargets(targeting)
-  const scope: TargetScope = roleTargets && searchParams.get('scope') !== 'all' ? 'matching' : 'all'
-
-  // Target titles follow the same override convention as the facets above: the
-  // URL wins when the param is present (deep-linkable, and an empty string is a
-  // real "I cleared them here" answer), otherwise fall back to what the user
-  // configured. Unlike those facets this drives NO server predicate — it never
-  // appears in fetchJobsPage — so changing it re-ranks without a refetch.
-  const titlesParam = searchParams.get('titles')
-  const targetTitles = useMemo(
-    () => (titlesParam !== null ? parseTargetTitlesParam(titlesParam) : profileTargetTitles),
-    [titlesParam, profileTargetTitles]
-  )
-
   const [locationQuery, setLocationQuery] = useState('')
   const [debouncedLocationQuery, setDebouncedLocationQuery] = useState('')
 
@@ -563,12 +403,11 @@ function JobsPageInner() {
 
   /** Delete-on-default param setter, for the pre-existing shareable filters. */
   function setParam(
-    key: 'fresh' | 'company' | 'sort' | 'visa' | 'undated' | 'showLowQuality' | 'scope',
+    key: 'fresh' | 'company' | 'sort' | 'visa' | 'undated' | 'showLowQuality',
     value: string
   ) {
     const params = new URLSearchParams(searchParams.toString())
-    // scope=all is the explicit value (absent means matching targets), so it is kept.
-    if (!value || (value === 'all' && key !== 'scope') || (key === 'sort' && value === 'newest')) {
+    if (!value || value === 'all' || (key === 'sort' && value === 'newest')) {
       params.delete(key)
     } else {
       params.set(key, value)
@@ -578,7 +417,7 @@ function JobsPageInner() {
   }
 
   /** Always-write param setter, for facets with a targeting-derived default. */
-  function setFacetParam(key: 'fn' | 'sr' | 'remote' | 'country' | 'lang' | 'titles', value: string) {
+  function setFacetParam(key: 'fn' | 'sr' | 'remote' | 'country' | 'lang', value: string) {
     const params = new URLSearchParams(searchParams.toString())
     params.set(key, value)
     const qs = params.toString()
@@ -637,8 +476,6 @@ function JobsPageInner() {
       setVisaByCompany(map)
     }
 
-    setTargeting(resolveTargeting(safePrefs))
-    setProfileTargetTitles(resolveTargetTitles(safePrefs))
     void loadBudgetHint().then(setBudgetHint)
 
     setCompaniesLoaded(true)
@@ -656,11 +493,10 @@ function JobsPageInner() {
     if (append) setIsLoadingMore(true)
     else setIsLoading(true)
 
-    // Every facet the person set. Applied to the page query and to the count of
-    // the other side of the switch, so both counts follow the same facets.
+    // Every facet the person set. The list holds kept roles only: the one judge decided what is theirs
+    // when the role was stored, so no targets are applied here.
     // Open roles only: posted in the last 180 days (or undated) and not closed.
-    const excludedIds = targeting ? excludedCompanyIds(companies, targeting) : []
-    const withFacets = (start: JobsQuery, side: TargetScope): JobsQuery => {
+    const withFacets = (start: JobsQuery): JobsQuery => {
       // A role they said is not for them stays out of the list.
       let q = openRolesOnly(start).is('hidden_reason', null)
 
@@ -695,11 +531,10 @@ function JobsPageInner() {
         q = q.ilike('location', `%${debouncedLocationQuery.trim()}%`)
       }
       if (unscoredOnly) q = q.is('assessed_at', null)
-      if (side === 'matching' && targeting) q = applyRoleTargets(q, targeting, excludedIds)
       return q
     }
 
-    let query = withFacets(personJobs(supabase).select(JOB_SELECT_COLUMNS, { count: 'exact' }), scope)
+    let query = withFacets(personJobs(supabase).select(JOB_SELECT_COLUMNS, { count: 'exact' }))
 
     // Sort on posted_at (never discovered_at, a single per-batch timestamp).
     // best_match puts the roles the person is likely to want above unassessed ones via
@@ -716,15 +551,7 @@ function JobsPageInner() {
 
     const from = pageIndex * PAGE_SIZE
     const to = from + PAGE_SIZE - 1
-    // The other side of the switch, counted under the same facets. Without
-    // role targets there is no switch and both counts are the one count.
-    const otherSide: TargetScope = scope === 'matching' ? 'all' : 'matching'
-    const [{ data, count, error }, other] = await Promise.all([
-      query.range(from, to),
-      roleTargets
-        ? withFacets(personJobs(supabase).select('id', { count: 'exact', head: true }), otherSide)
-        : Promise.resolve(null),
-    ])
+    const { data, count, error } = await query.range(from, to)
 
     if (error) {
       console.error('[jobs] fetchJobsPage failed:', error)
@@ -740,10 +567,6 @@ function JobsPageInner() {
       const rows = (data as unknown as JobView[]).map((r) => withOwnCompany(r, companies))
       setJobs((prev) => (append ? [...prev, ...rows] : rows))
       setTotalCount(count ?? 0)
-      const here = count ?? 0
-      const there = other && !other.error ? (other.count ?? 0) : here
-      setMatchingCount(scope === 'matching' ? here : there)
-      setAllCount(scope === 'matching' ? there : here)
       setPage(pageIndex)
     }
 
@@ -771,7 +594,6 @@ function JobsPageInner() {
     debouncedLocationQuery,
     sortBy,
     unscoredOnly,
-    scope,
   ])
 
   function loadMore() {
@@ -979,29 +801,6 @@ function JobsPageInner() {
     return jobs.filter((job) => visaByCompany.get(job.company_id) === visaFilter)
   }, [jobs, visaFilter, visaByCompany])
 
-  // TARGET-TITLE RANKING IS A RE-RANK, NOT A NEW SORT MODE.
-  //   It deliberately does NOT join the `sort` control. A sort mode has to be a
-  //   server ORDER BY, because the server also decides WHICH 30 of ~11,800 rows
-  //   this page holds (see fetchJobsPage's range()). Title similarity isn't a
-  //   jobs column and can't be expressed in that query, so a "Best title match"
-  //   option would claim to sort the whole corpus while only touching the page
-  //   already in memory — the same shape of lie as the old batch "remaining"
-  //   count. Ranking client-side over the loaded rows is exactly as far as the
-  //   data reaches, and TargetTitlesBar says so out loud.
-  //
-  //   It composes with the sort instead: rankJobsByTargetTitles is stable, so
-  //   equal-scoring jobs keep the incoming order — which IS the current sort —
-  //   and a user with no titles configured gets `filteredJobs` back untouched.
-  //   Same client-side-over-the-loaded-page tier as the visa filter above.
-  const rankedJobs = useMemo(
-    () => rankJobsByTargetTitles(filteredJobs, targetTitles),
-    [filteredJobs, targetTitles]
-  )
-  const titleMatchCount = useMemo(
-    () => rankedJobs.reduce((n, r) => n + (r.titleMatch.score > 0 ? 1 : 0), 0),
-    [rankedJobs]
-  )
-
   // Single reason string drives every match/optimize affordance on this page
   // (row trigger, header batch button) — never a boolean that just makes a
   // control vanish. Checked in priority order: a failed status check is
@@ -1031,11 +830,6 @@ function JobsPageInner() {
     country.trim() !== '' ||
     language !== 'all' ||
     !hideLowQuality
-  // Target titles are deliberately NOT in hasActiveFilters: they reorder the
-  // list, they never remove a row from it. Counting them would make "Clear
-  // filters" the offered fix for an empty result set that titles cannot
-  // possibly have caused.
-  const sortLabel = sortBy === 'best_match' ? 'Best for you' : 'Newest first'
   const canLoadMore = jobs.length < totalCount
   // Derived from the live `jobs` array (not captured by value) so a match
   // calculated from a row, its badge, or a batch run updates this modal
@@ -1195,7 +989,7 @@ function JobsPageInner() {
             </Button>
           }
         />
-      ) : allCount === 0 && !hasActiveFilters ? (
+      ) : totalCount === 0 && !hasActiveFilters ? (
         <EmptyState
           icon={Briefcase}
           title="No jobs discovered yet"
@@ -1206,15 +1000,6 @@ function JobsPageInner() {
         />
       ) : (
         <>
-          {roleTargets && (
-            <TargetScopeSwitch
-              scope={scope}
-              matchingCount={matchingCount}
-              allCount={allCount}
-              onScopeChange={(next) => setParam('scope', next === 'all' ? 'all' : '')}
-            />
-          )}
-
           <FacetChips
             freshness={freshness}
             onFreshnessChange={(v) => setParam('fresh', v)}
@@ -1241,26 +1026,7 @@ function JobsPageInner() {
             total={totalCount}
           />
 
-          <TargetTitlesBar
-            titles={targetTitles}
-            onChange={(next) => setFacetParam('titles', serializeTargetTitlesParam(next))}
-            sortLabel={sortLabel}
-            matchedCount={titleMatchCount}
-            rankedCount={rankedJobs.length}
-          />
-
-          {filteredJobs.length === 0 && scope === 'matching' && allCount > 0 ? (
-            <EmptyState
-              icon={SearchX}
-              title="No roles match your targets yet"
-              body={`${allCount} open ${allCount === 1 ? 'role is' : 'roles are'} outside them, or could not be placed in a function or level.`}
-              action={
-                <Button variant="outline" onClick={() => setParam('scope', 'all')}>
-                  Show all roles ({allCount})
-                </Button>
-              }
-            />
-          ) : filteredJobs.length === 0 ? (
+          {filteredJobs.length === 0 ? (
             <EmptyState
               icon={SearchX}
               title="No jobs match these filters"
@@ -1280,13 +1046,8 @@ function JobsPageInner() {
           ) : (
             <>
               <div className="divide-y overflow-hidden rounded-card border bg-card shadow-card">
-                {rankedJobs.map(({ job, titleMatch }) => (
-                  // Wrapper, not a JobRow prop: the reason line belongs to the
-                  // ranking this page owns, and job-row.tsx has no idea target
-                  // titles exist. `divide-y` still separates these wrappers as
-                  // the container's direct children, so the list reads the same.
+                {filteredJobs.map((job) => (
                   <div key={job.id}>
-                    <TitleMatchReason match={titleMatch} />
                     <JobRow
                       job={job}
                       inPipeline={addedToPipeline.has(job.id)}

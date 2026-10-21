@@ -23,7 +23,8 @@ import path from 'node:path'
 import { parseJsonLoose } from '@/lib/harness/llm'
 import type { LlmRunner } from '@/lib/harness/types'
 import { assessChances, type CitationStats } from '@/lib/scoring/chance'
-import { checkConstraints, type StatedConstraints } from '@/lib/scoring/constraints'
+import type { StatedConstraints } from '@/lib/scoring/constraints'
+import { blockReasons } from '@/lib/roles/keep'
 import { classifyJob } from '@/lib/jobs/classify'
 import { parseRequirements } from '@/lib/jobs/requirements'
 import { fromReaderRequirements } from '@/lib/scoring/posting-requirements'
@@ -232,7 +233,7 @@ interface Prepared {
 /** The postings that pass the person's stated constraints, what they said about each, and the stream / held-out split. */
 async function prepare(args: Args, oracle: LlmRunner, persona: SyntheticPersona, jobs: Posting[], seedOffset: number): Promise<Prepared> {
   const constraints = persona.constraints as StatedConstraints
-  const eligible = jobs.filter((j) => checkConstraints(toFacts(j), constraints).length === 0)
+  const eligible = jobs.filter((j) => blockReasons(toFacts(j), constraints).length === 0)
   log(`${persona.id}: ${eligible.length} of ${jobs.length} postings pass the stated constraints`)
   const { labels, missing } = await labelPostings(oracle, persona, eligible)
   const labelled = eligible.filter((j) => labels.has(j.id))
@@ -528,7 +529,7 @@ async function main(): Promise<void> {
 
   if (args.labelsOnly) {
     for (const persona of personas) {
-      const eligible = jobs.filter((j) => checkConstraints(toFacts(j), persona.constraints as StatedConstraints).length === 0)
+      const eligible = jobs.filter((j) => blockReasons(toFacts(j), persona.constraints as StatedConstraints).length === 0)
       const { labels } = await labelPostings(oracle, persona, eligible)
       const lines = eligible.filter((j) => labels.has(j.id)).map((j) => ({ j, l: labels.get(j.id)! })).sort((a, b) => Number(isPositive(b.l)) - Number(isPositive(a.l)))
       const positives = lines.filter((x) => isPositive(x.l)).length

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { HttpError } from '../ats/http'
 import type { AtsJob } from '../ats/types'
 import { postingCapture } from '../ingest/markdown'
-import { prepareTargets } from '../jobs/target-relevance'
 import { EMPTY_TARGETING } from '../targeting'
 import type { DirectoryRow } from './directory'
 import { fakeDb } from './fake-db'
@@ -19,7 +18,7 @@ const employer = (over: Partial<DirectoryRow> = {}): DirectoryRow => ({
   last_read_at: null, next_read_at: null, read_tier: 'board', cannot_read_reason: null, failed_reads: 0, ...over,
 })
 
-const engineer: Person = { userId: 'u1', targets: { targeting: { ...EMPTY_TARGETING, functions: ['engineering'] }, titles: [] }, prepared: prepareTargets([]) }
+const engineer: Person = { userId: 'u1', targets: { targeting: { ...EMPTY_TARGETING, functions: ['engineering'] }, titles: [] } }
 
 interface Run {
   jobs?: AtsJob[] | Error

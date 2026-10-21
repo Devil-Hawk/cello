@@ -37,6 +37,8 @@ export const REGISTER: readonly MeasureDef[] = [
     source: 'SQL over shown lists',
     gates: ['K5a'],
   },
+  // T3 stays as the seed inserted it (register.test.ts compares the two); 20261022000100_roles_one_judge.sql rewrites the live
+  // row's name and source to the one judge's audit, which is what the scorecard shows.
   {
     id: 'T3',
     layer: 'true',

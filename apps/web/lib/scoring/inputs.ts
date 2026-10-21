@@ -7,7 +7,6 @@ import type { AdminClient, DecryptedApiKeys } from '@/lib/harness/types'
 import { QUALITY_REJECT_THRESHOLD } from '@/lib/jobs/classify'
 import { openRolesOnly } from '@/lib/jobs/freshness'
 import { ownedJobsQuery } from '@/lib/jobs/owned-query'
-import { prioritiseByTargetTitles } from '@/lib/jobs/target-relevance'
 import { getMemoryStore } from '@/lib/memory/mem0-store'
 import { resolveTargeting, type Targeting } from '@/lib/targeting'
 import { resolveTargetTitles } from '@/lib/targeting/titles'
@@ -153,7 +152,7 @@ export interface CandidateOptions {
  * assessed so each one carries the reason it was filtered. A role the person hid
  * is not assessed again.
  */
-export async function candidateRoles(admin: AdminClient, userId: string, targeting: Targeting, titles: readonly string[], opts: CandidateOptions): Promise<RoleFacts[]> {
+export async function candidateRoles(admin: AdminClient, userId: string, targeting: Targeting, opts: CandidateOptions): Promise<RoleFacts[]> {
   if (opts.jobIds && opts.jobIds.length > 0) {
     const { data, error } = await ownedJobsQuery(admin, userId, JOB_COLUMNS).in('id', opts.jobIds.slice(0, 200))
     if (error) throw new Error('could not read roles: ' + error.message)
@@ -177,7 +176,7 @@ export async function candidateRoles(admin: AdminClient, userId: string, targeti
     for (const x of (r.data as { job_id: string }[] | null) ?? []) reacted.add(x.job_id)
     rows = rows.filter((x) => !reacted.has(x.id))
   }
-  return prioritiseByTargetTitles(rows, titles).slice(0, opts.limit)
+  return rows.slice(0, opts.limit)
 }
 
 /**

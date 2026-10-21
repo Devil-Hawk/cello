@@ -21,7 +21,8 @@ import { createHash } from 'node:crypto'
 import { scoreTitleAgainstTargets, parseTitle } from '@/lib/matching/title-rank'
 import type { LlmRunner } from '@/lib/harness/types'
 import { assessChances } from './chance'
-import { checkConstraints, type StatedConstraints } from './constraints'
+import type { StatedConstraints } from './constraints'
+import { blockReasons } from '@/lib/roles/keep'
 import { entropy } from './math'
 import { NOT_READ_YET } from './posting-requirements'
 import { chooseShortlist, toPicks, type Rankable } from './shortlist'
@@ -164,7 +165,7 @@ export async function assessRoles(deps: PipelineDeps, req: AssessRequest): Promi
   const blocked: AssessResult['blocked'] = []
   const eligible: RoleFacts[] = []
   for (const role of req.candidates) {
-    const reasons = checkConstraints(role, req.constraints)
+    const reasons = blockReasons(role, req.constraints)
     if (reasons.length > 0) blocked.push({ jobId: role.id, reasons })
     else eligible.push(role)
   }

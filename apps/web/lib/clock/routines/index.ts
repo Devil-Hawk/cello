@@ -10,6 +10,7 @@ import { inboxSync } from './inbox-sync'
 import { clockMeter } from './meter'
 import { ownerHealth } from './owner-health'
 import { clockPrune } from './prune'
+import { rolesAudit } from './roles-audit'
 import { rolesCheck } from './roles-check'
 import { postingsBackfill } from './postings-backfill'
 import { rolesRetype } from './roles-retype'
@@ -19,6 +20,7 @@ import { suggestionsRefresh } from './suggestions-refresh'
 export const HANDLERS: Record<string, RoutineHandler> = {
   'roles.check': (ctx) => rolesCheck(ctx),
   'roles.retype': rolesRetype,
+  'roles.audit': rolesAudit,
   'postings.backfill': postingsBackfill,
   'storage.alert': storageAlert,
   'directory.sweep': directorySweep,

@@ -6,7 +6,6 @@ import { fakeDb } from './fake-db'
 import type { EmployerRead, Person } from './read-employer'
 import { REVERIFY_DAYS } from './read-employer'
 import { EMPTY_TARGETING } from '../targeting'
-import { prepareTargets } from '../jobs/target-relevance'
 
 const NOW = Date.now()
 const iso = (daysAgo: number) => new Date(NOW - daysAgo * 86_400_000).toISOString()
@@ -18,7 +17,7 @@ const employer = (over: Partial<DirectoryRow> = {}): DirectoryRow => ({
   last_read_at: null, next_read_at: null, read_tier: 'board', cannot_read_reason: null, failed_reads: 0, ...over,
 })
 const profile = { id: 'u1', is_demo: false, demo_expires_at: null }
-const engineer: Person = { userId: 'u1', targets: { targeting: { ...EMPTY_TARGETING, functions: ['engineering'] }, titles: [] }, prepared: prepareTargets([]) }
+const engineer: Person = { userId: 'u1', targets: { targeting: { ...EMPTY_TARGETING, functions: ['engineering'] }, titles: [] } }
 const READ: EmployerRead = { listed: 3, kept: 1, stored: 0, errors: [] }
 
 type ReadFn = NonNullable<FollowOpts['read']>

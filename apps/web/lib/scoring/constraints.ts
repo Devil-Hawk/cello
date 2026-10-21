@@ -9,9 +9,7 @@
 // countries they work in and "remote only". The older minimum-score setting is
 // retired with the score it filtered on.
 
-import { classifyJob, parseLocation, type Seniority } from '@/lib/jobs/classify'
 import { resolveTargeting } from '@/lib/targeting'
-import type { BlockReason, RoleFacts } from './types'
 
 export interface StatedConstraints {
   /** Countries (ISO alpha-2) they cannot work in. */
@@ -109,29 +107,6 @@ export function containsWord(haystack: string, needle: string): boolean {
   return n.length > 0 && norm(haystack).includes(` ${n} `)
 }
 
-const COUNTRY_NAMES: Record<string, string> = {
-  US: 'the United States',
-  CA: 'Canada',
-  GB: 'the United Kingdom',
-  DE: 'Germany',
-  FR: 'France',
-  IN: 'India',
-  IE: 'Ireland',
-  NL: 'the Netherlands',
-  ES: 'Spain',
-  AU: 'Australia',
-  SG: 'Singapore',
-  JP: 'Japan',
-  BR: 'Brazil',
-  MX: 'Mexico',
-  PL: 'Poland',
-  IL: 'Israel',
-}
-
-function countryName(code: string): string {
-  return COUNTRY_NAMES[code] ?? code
-}
-
 /** A pay range stated in the posting, normalised to USD per year. Null when it states none. */
 export interface PayRange {
   min: number
@@ -148,6 +123,8 @@ const MONEY = /(?:\$|usd\s?)\s?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s?(k)?/gi
 export function parsePayRange(text: string | null | undefined): PayRange | null {
   if (!text) return null
   const t = text.replace(/ /g, ' ')
+  // A monthly, weekly or daily figure is not a yearly one, and Cello does not guess the conversion.
+  if (/(?:\bper|\ba|\beach|\/)\s?(?:month|mo|week|wk|day)\b|\b(?:monthly|weekly|daily)\b/i.test(t)) return null
   const hourly = /\/\s?(?:hr|hour)|per hour|hourly/i.test(t)
   const nums: number[] = []
   for (const m of t.matchAll(MONEY)) {
@@ -173,97 +150,19 @@ const NO_SPONSORSHIP = [
   /without\s+(?:the\s+need\s+for\s+)?(?:visa\s+)?sponsorship/i,
   /(?:cannot|can't|won't)\s+(?:provide\s+|offer\s+)?(?:visa\s+)?sponsor/i,
   /sponsorship\s+(?:is\s+)?not\s+(?:available|offered|provided)/i,
+  // Citizenship asked for outright: a person who needs sponsorship is not a citizen.
+  /\bmust\s+be\s+(?:a\s+)?(?:u\.?s\.?\s+|united\s+states\s+)?citizen/i,
+  /\bcitizenship\s+(?:is\s+)?(?:required|mandatory)/i,
+  /\bu\.?s\.?\s+(?:citizens?|persons?)\s+only\b/i,
 ]
 
 /** The sentence in which a posting says it will not sponsor, or null when it does not say so. */
 export function sponsorshipRefusal(description: string | null | undefined): string | null {
   if (!description) return null
-  const sentences = description.replace(/\s+/g, ' ').split(/(?<=[.!?])\s+/)
+  const sentences = description.replace(/\s+/g, ' ').split(/(?<=[.!?])(?<!\b[A-Z]\.)\s+/)
   for (const s of sentences) {
     if (s.length > 400) continue
     if (NO_SPONSORSHIP.some((re) => re.test(s))) return s.trim()
   }
   return null
-}
-
-// ---------------------------------------------------------------------------
-// The check
-// ---------------------------------------------------------------------------
-
-/** Every stated constraint this role breaks, each with the reason in plain words. Empty means it stays. */
-export function checkConstraints(role: RoleFacts, c: StatedConstraints): BlockReason[] {
-  const out: BlockReason[] = []
-  const cls = classifyJob({ title: role.title, description: role.description, location: role.location, companyName: role.company })
-  const geo = parseLocation(role.location ?? '')
-  const country = role.country ?? cls.country ?? geo.country
-  const remote = role.isRemote ?? cls.isRemote ?? geo.isRemote
-  const seniority = (role.seniority && role.seniority !== 'unknown' ? role.seniority : cls.seniority) as Seniority
-
-  for (const name of c.excludedCompanies) {
-    if (containsWord(role.company, name)) {
-      out.push({ kind: 'company', text: `You ruled out ${role.company}.` })
-      break
-    }
-  }
-
-  if (country && c.blockedCountries.includes(country)) {
-    out.push({ kind: 'location', text: `It is based in ${countryName(country)}, and you said you cannot work there.` })
-  } else if (country && c.onlyCountries.length > 0 && !c.onlyCountries.includes(country)) {
-    out.push({
-      kind: 'location',
-      text: `It is based in ${countryName(country)}, and you said you work in ${c.onlyCountries.map(countryName).join(' or ')}.`,
-    })
-  }
-
-  if (c.remoteOnly && !remote && (role.location ?? '').trim() !== '') {
-    out.push({ kind: 'remote', text: 'You said remote roles only, and this one is listed with an office location.' })
-  }
-
-  if (
-    c.onsiteCities.length > 0 &&
-    !remote &&
-    (role.location ?? '').trim() !== '' &&
-    !c.onsiteCities.some((city) => containsWord(role.location ?? '', city)) &&
-    // A country-wide or multi-site listing says nothing about where the person would sit.
-    !/\b(?:multiple|various|anywhere|hybrid)\b/i.test(role.location ?? '')
-  ) {
-    out.push({
-      kind: 'location',
-      text: `It is on site in ${role.location}, and you can only work on site in ${c.onsiteCities.join(' or ')}.`,
-    })
-  }
-
-  if (c.needsSponsorship) {
-    const sentence = sponsorshipRefusal(role.description)
-    if (sentence) out.push({ kind: 'sponsorship', text: `You need visa sponsorship and the posting says: "${sentence.slice(0, 200)}"` })
-  }
-
-  if (c.salaryFloorUsd !== null) {
-    const pay = parsePayRange(role.salaryRange) ?? parsePayRange(payParagraph(role.description))
-    if (pay && pay.max < c.salaryFloorUsd) {
-      out.push({
-        kind: 'salary',
-        text: `The posting pays up to $${Math.round(pay.max).toLocaleString('en-US')}, below the $${c.salaryFloorUsd.toLocaleString('en-US')} floor you set.`,
-      })
-    }
-  }
-
-  if (seniority !== 'unknown' && c.refusedSeniority.includes(seniority)) {
-    out.push({ kind: 'seniority', text: `It is a ${seniority} level role, and you said you will not take that level.` })
-  }
-
-  for (const w of c.excludedTitleWords) {
-    if (containsWord(role.title, w)) {
-      out.push({ kind: 'keyword', text: `The title says "${w}", which you ruled out.` })
-      break
-    }
-  }
-  return out
-}
-
-/** The part of a description that talks about pay, so a stray "$5 million" elsewhere is not read as a salary. */
-function payParagraph(description: string | null | undefined): string | null {
-  if (!description) return null
-  const m = /(?:salary|compensation|base pay|pay range|pay scale|annual)[^$]{0,120}(\$[^\n]{0,160})/i.exec(description)
-  return m ? m[1] : null
 }

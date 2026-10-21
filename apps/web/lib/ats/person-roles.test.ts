@@ -6,10 +6,12 @@ import { describe, expect, it } from 'vitest'
 import { emptyResult, syncJobs, tierOfSource, type AtsStore, type CompanyInput, type CountWrite, type JobUpsertRow } from './index'
 import type { AtsJob } from './types'
 import { EMPTY_TARGETING } from '../targeting'
+import { NO_CONSTRAINTS } from '../scoring/constraints'
 
 const COMPANY: CompanyInput = { id: 'c1', name: 'Acme', domain: 'acme.com', career_url: 'https://acme.com/careers', user_id: 'u1', employer_id: 'e1' }
 const day = 86_400_000
 const ago = (d: number) => new Date(Date.now() - d * day).toISOString()
+const POSTED = ago(2)
 
 function memory() {
   const upserted: JobUpsertRow[] = []
@@ -45,7 +47,7 @@ const role = (n: number, title: string, over: Partial<AtsJob> = {}): AtsJob => (
   url: `https://acme.com/jobs/${n}`,
   externalId: `https://acme.com/jobs/${n}`,
   description: 'Build things.',
-  postedAt: ago(2),
+  postedAt: POSTED,
   ...over,
 })
 
@@ -76,13 +78,13 @@ describe('syncJobs: store only what is inside the person\'s targets', () => {
     // the two outside roles are a number, not rows
     expect(counts).toHaveLength(1)
     expect(counts[0].userId).toBe('u1')
-    expect(countOf(counts[0].rows, 'title')).toBe(2)
+    expect(countOf(counts[0].rows, 'type')).toBe(2)
     expect(counts[0].rows.every((r) => r.kind === 'outside_targets' && r.employer_id === 'e1' && r.company_id === null)).toBe(true)
   })
 
   it('sends every reason, so a zero resets the day\'s number', async () => {
     const { counts } = await run(listed, { targeting: { ...EMPTY_TARGETING, functions: ['engineering'] } })
-    expect(counts[0].rows.map((r) => r.reason).sort()).toEqual(['age', 'excluded', 'level', 'place', 'title', 'type', 'untyped'])
+    expect(counts[0].rows.map((r) => r.reason).sort()).toEqual(['age', 'dealbreaker', 'excluded', 'level', 'place', 'type', 'untyped'])
     expect(countOf(counts[0].rows, 'place')).toBe(0)
   })
 
@@ -98,6 +100,20 @@ describe('syncJobs: store only what is inside the person\'s targets', () => {
     expect(countOf(counts[0].rows, 'excluded')).toBe(1)
   })
 
+  it('counts a role that breaks a dealbreaker as dealbreaker, and stores it for nobody', async () => {
+    const constraints = { ...NO_CONSTRAINTS, needsSponsorship: true, salaryFloorUsd: 150_000 }
+    const { upserted, counts } = await run(
+      [
+        role(1, 'Backend Engineer'),
+        role(8, 'Backend Engineer, Growth', { description: 'We are unable to provide visa sponsorship.' }),
+        role(9, 'Backend Engineer, Data', { salary: '$90,000 - $110,000' }),
+      ],
+      { targeting: { ...EMPTY_TARGETING, functions: ['engineering'] }, constraints }
+    )
+    expect(upserted.map((r) => r.title)).toEqual(['Backend Engineer'])
+    expect(countOf(counts[0].rows, 'dealbreaker')).toBe(2)
+  })
+
   it('keeps a role hidden when nothing disagrees but its place could not be read', async () => {
     const { upserted, kept } = await run([role(1, 'Backend Engineer'), role(7, 'Backend Engineer, Payments', { location: 'Berlin, Germany' })], {
       targeting: { ...EMPTY_TARGETING, functions: ['engineering'], countries: ['US'] },
@@ -110,7 +126,7 @@ describe('syncJobs: store only what is inside the person\'s targets', () => {
   it('decides by the typed titles too: a title that matches none is counted as not one of theirs', async () => {
     const { upserted, counts } = await run([role(1, 'Backend Engineer'), role(2, 'Brand Marketing Manager')], { titles: ['Backend Engineer'] })
     expect(upserted.map((r) => r.title)).toEqual(['Backend Engineer'])
-    expect(countOf(counts[0].rows, 'title')).toBe(1)
+    expect(countOf(counts[0].rows, 'type')).toBe(1)
   })
 
   it('with no targets stated, keeps everything up to the cap, under version 0, and counts nothing', async () => {
@@ -171,7 +187,7 @@ describe('syncJobs: role types beside the old filter (K5c)', () => {
     const { upserted, counts } = await run([...listed, role(5, 'Zoo Keeper')], { targeting, typeStep: step(true) })
     expect(upserted.map((r) => r.title).sort()).toEqual(['Backend Engineer', 'Data Engineer'])
     const outside = Object.fromEntries(counts[0].rows.filter((r) => r.kind === 'outside_targets').map((r) => [r.reason, r.n]))
-    expect(outside).toMatchObject({ type: 2, untyped: 1, title: 0 })
+    expect(outside).toMatchObject({ type: 2, untyped: 1 })
     expect(counts[0].rows.some((r) => r.kind.startsWith('shadow'))).toBe(false)
   })
 

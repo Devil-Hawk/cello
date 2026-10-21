@@ -29,7 +29,8 @@ import { judgeRole, MAX_ROLES_PER_COMPANY } from '../ingest/reader/legit'
 import { classifyJob, isLowQuality } from '../jobs/classify'
 import { DIRECTORY_MAX_AGE_DAYS, ROLE_MAX_AGE_DAYS, isStalePosting } from '../jobs/freshness'
 import { typeTitle } from '../jobs/role-types'
-import { hasPersonTargets, judgeForPerson, prepareTargets, type PersonTargets } from '../jobs/target-relevance'
+import { hasPersonTargets, type PersonTargets } from '../jobs/target-relevance'
+import { keepsRole } from '../roles/keep'
 import type { DirectoryRow } from './directory'
 import { computeInsights } from './insights'
 import { checkBoard, realDeps, recordRead, writeEmployer, type DirectorySource, type FailReason, type VerifyDeps } from './verify-directory'
@@ -63,7 +64,6 @@ export function commonLocation(jobs: { location?: string | null }[]): string | n
 export interface Person {
   userId: string
   targets: PersonTargets
-  prepared: ReturnType<typeof prepareTargets>
 }
 
 /**
@@ -83,8 +83,8 @@ export async function loadPeople(db: Db): Promise<Person[]> {
 /** One person's targets as a Person: [] when nothing is stated. The read a person asks for uses only this person. */
 export async function loadPerson(db: Db, userId: string): Promise<Person[]> {
   const t = await loadTargets(db, userId)
-  const targets: PersonTargets = { targeting: t.targeting, titles: t.titles, typeStep: t.typeStep }
-  return hasPersonTargets(targets) ? [{ userId, targets, prepared: prepareTargets(targets.titles) }] : []
+  const targets: PersonTargets = { targeting: t.targeting, titles: t.titles, typeStep: t.typeStep, constraints: t.constraints }
+  return hasPersonTargets(targets) ? [{ userId, targets }] : []
 }
 
 export interface ReadDeps {
@@ -194,8 +194,22 @@ export async function readEmployer(db: Db, employer: DirectoryRow, people: Perso
 
   // Kept when any person's targets keep it. ponytail: people x roles judgements per read; index by role type when it shows.
   const keep = candidates.filter(({ job, title, c, t }) => {
-    const role = { title, description: job.description, job_function: c.jobFunction, seniority: c.seniority, country: c.country, language: c.language, is_remote: c.isRemote, postedAt: job.postedAt, title_norm: t.title_norm, role_type: t.role_type }
-    return people.some((p) => judgeForPerson(role, p.targets, employer.name, p.prepared).keep)
+    const role = {
+      title,
+      description: job.description,
+      job_function: c.jobFunction,
+      seniority: c.seniority,
+      country: c.country,
+      language: c.language,
+      is_remote: c.isRemote,
+      location: job.location,
+      salary_range: job.salary,
+      postedAt: job.postedAt,
+      title_norm: t.title_norm,
+      role_type: t.role_type,
+      company: employer.name,
+    }
+    return people.some((p) => keepsRole(role, p.targets).keep)
   })
   out.kept = keep.length
 

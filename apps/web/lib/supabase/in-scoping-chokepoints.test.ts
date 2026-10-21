@@ -42,16 +42,6 @@ const SCAN_ROOTS = ['apps/web/app', 'apps/web/lib']
  * reason is why that specific variable can never reach an unbounded size.
  */
 const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
-  'apps/web/lib/targeting/roles.ts': {
-    calls: [
-      ".in('job_function', t.functions)",
-      ".in('seniority', t.seniority)",
-      ".in('country', t.countries)",
-      ".in('language', t.languages)",
-    ],
-    reason:
-      "the person's own Settings -> Targeting values (a few slugs or ISO codes each), not an ownership fence or an id list.",
-  },
   'apps/web/lib/agents/approvals.ts': {
     calls: [".in('status', from)"],
     reason: 'from is a list of approval statuses, at most the five values of the status enum: a fixed set, and the row is already fenced by id and user_id.',
@@ -103,7 +93,11 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       'RATIONALE_SAMPLE_SIZE) — capped at 6 before this call ever runs, regardless of how many verdict ids ' +
       "a candidate's own SQL aggregation carries.",
   },
-  'apps/web/lib/clock/routines/roles-check.ts': {
+  'apps/web/lib/clock/routines/roles-audit.ts': {
+    calls: [".in('job_id', ids)"],
+    reason: "ids is the job ids of one PAGE (100) page of the person's own shown roles, never an owned-id set.",
+  },
+  'apps/web/lib/roles/rejudge.ts': {
     calls: [
       ".in('job_id', ids)",
       ".in('job_id', drop)",
@@ -111,7 +105,7 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       ".in('job_id', show)",
       ".in('job_id', left)",
     ],
-    reason: 'every list is a subset of one REJUDGE_PAGE (100) page of the person\'s own held roles, never an owned-id set.',
+    reason: 'every list is a subset of one PAGE (100) page of the person\'s own held roles, never an owned-id set.',
   },
   'apps/web/lib/jobs/role-types/sync.ts': {
     calls: [".in('id', retired)"],

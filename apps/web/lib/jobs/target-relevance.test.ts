@@ -1,72 +1,15 @@
-// The batch scorer used to pick candidates by `posted_at desc` alone, so every
-// click spent metered LLM calls on whatever a watched company posted most
-// recently. Measured against the live table: 35,109 jobs, only 7.2% mentioning
-// AI/ML/GenAI/LLM, and `job_function = engineering` alone matching 12,924 rows.
-// The user's description was exact: it "just scores randomly 25 jobs which you
-// might be bad for".
-//
-// These tests pin the two properties that fix it without breaking anything:
-// ordering puts on-target jobs first, and it is a strict NO-OP when the user
-// has configured no target titles.
+// The title-word filter the one judge (lib/roles/keep.ts) uses while role_types_live is off.
+// It is a strict NO-OP when the user has configured no target titles.
 
 import { describe, expect, it } from 'vitest'
 import {
   assessTargetRelevance,
   filterToTargets,
-  prioritiseByTargetTitles,
   prepareTargets,
   MIN_INGEST_TITLE_SCORE,
 } from './target-relevance'
 
 const TARGETS = ['AI Engineer', 'Machine Learning Engineer']
-
-describe('prioritiseByTargetTitles — spend on the promising jobs first', () => {
-  it('moves on-target jobs ahead of unrelated ones', () => {
-    const pool = [
-      { title: 'Enterprise Account Executive' },
-      { title: 'Regional Sales Manager' },
-      { title: 'Senior AI Engineer' },
-      { title: 'Payroll Specialist' },
-    ]
-    const out = prioritiseByTargetTitles(pool, TARGETS)
-    expect(out[0].title).toBe('Senior AI Engineer')
-  })
-
-  it('is a strict no-op when no target titles are configured', () => {
-    const pool = [{ title: 'Sales Lead' }, { title: 'AI Engineer' }, { title: 'Paralegal' }]
-    expect(prioritiseByTargetTitles(pool, []).map((j) => j.title)).toEqual(pool.map((j) => j.title))
-  })
-
-  it('is stable — equal relevance keeps the incoming freshest-first order', () => {
-    // Three equally-unrelated jobs must not be shuffled; the caller's pool is
-    // already ordered by posted_at desc and that contract still holds within a
-    // relevance band.
-    const pool = [{ title: 'Paralegal' }, { title: 'Office Manager' }, { title: 'Bookkeeper' }]
-    expect(prioritiseByTargetTitles(pool, TARGETS).map((j) => j.title)).toEqual([
-      'Paralegal',
-      'Office Manager',
-      'Bookkeeper',
-    ])
-  })
-
-  it('never drops a job — ordering only, so nothing goes unscored forever', () => {
-    const pool = [
-      { title: 'Enterprise Account Executive' },
-      { title: 'Senior AI Engineer' },
-      { title: 'Paralegal' },
-    ]
-    const out = prioritiseByTargetTitles(pool, TARGETS)
-    expect(out).toHaveLength(pool.length)
-    expect(new Set(out.map((j) => j.title))).toEqual(new Set(pool.map((j) => j.title)))
-  })
-
-  it('does not choke on null or empty titles', () => {
-    const pool = [{ title: null }, { title: '' }, { title: 'AI Engineer' }]
-    const out = prioritiseByTargetTitles(pool, TARGETS)
-    expect(out).toHaveLength(3)
-    expect(out[0].title).toBe('AI Engineer')
-  })
-})
 
 describe('assessTargetRelevance — the ingest gate', () => {
   const targets = prepareTargets(TARGETS)

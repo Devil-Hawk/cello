@@ -92,9 +92,8 @@ export function normalizeTargetTitles(raw: unknown): string[] {
  * app/api/settings/targeting/route.ts round-trips its PUT body through
  * resolveTargeting(), which only copies the fields it knows about, so a
  * `titles` array posted today is dropped on the floor. Until that route and
- * components/settings/targeting-tab.tsx learn the field, the jobs page's
- * `?titles=` URL parameter is the only writer — this reader is already wired
- * for the stored form so no consumer changes when it lands.
+ * components/settings/targeting-tab.tsx learn the field, nothing writes it; the
+ * reader is already wired for the stored form so no consumer changes when it lands.
  *
  * @param preferences the whole `profiles.preferences` object (NOT `.targeting`)
  */
@@ -102,21 +101,4 @@ export function resolveTargetTitles(preferences: unknown): string[] {
   const prefs = (preferences && typeof preferences === 'object' ? preferences : {}) as Record<string, unknown>
   const raw = (prefs.targeting && typeof prefs.targeting === 'object' ? prefs.targeting : {}) as Record<string, unknown>
   return normalizeTargetTitles(raw.titles)
-}
-
-/**
- * Parse the `?titles=` URL form. An EMPTY string is meaningful and distinct
- * from an absent parameter: it means "I explicitly cleared my titles here",
- * which the caller uses to stop falling back to the stored preference — the
- * same always-write override convention the jobs page already uses for its
- * fn/sr/country/lang facets.
- */
-export function parseTargetTitlesParam(param: string | null | undefined): string[] {
-  if (typeof param !== 'string' || param.trim() === '') return []
-  return normalizeTargetTitles(param.split(TITLES_PARAM_SEPARATOR))
-}
-
-/** Serialize for the `?titles=` URL form. Round-trips through parse exactly. */
-export function serializeTargetTitlesParam(titles: readonly string[]): string {
-  return normalizeTargetTitles([...titles]).join(TITLES_PARAM_SEPARATOR)
 }

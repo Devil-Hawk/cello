@@ -271,31 +271,31 @@ begin
   if (select next_due_at from public.routines where user_id = f.a and command = 'roles.check') <= now() then raise exception 'other preferences must not start a check'; end if;
 end $$;
 
--- What is outside a person's targets, in SQL: only what a role states and disagrees with.
+-- has_role_targets stays; the judge itself is lib/roles/keep.ts, so what is outside is no longer decided in SQL.
 do $$
-declare t jsonb := '{"functions": ["engineering"], "seniority": ["senior"], "countries": ["US"], "remoteOnly": false, "excludedKeywords": ["sales"]}'::jsonb;
 begin
-  if public.role_outside_targets(t, 'engineering', 'senior', 'US', 'en', null, 'Platform Engineer', 'X') then raise exception 'an inside role is not outside'; end if;
-  if not public.role_outside_targets(t, 'sales', 'senior', 'US', 'en', null, 'Account Executive', 'X') then raise exception 'a known other function is outside'; end if;
-  if not public.role_outside_targets(t, 'engineering', 'senior', 'DE', 'en', null, 'Platform Engineer', 'X') then raise exception 'a known other country is outside'; end if;
-  if public.role_outside_targets(t, 'engineering', null, null, null, null, 'Platform Engineer', 'X') then raise exception 'what a role does not state is not a disagreement'; end if;
-  if not public.role_outside_targets(t, 'engineering', 'senior', 'US', 'en', null, 'Sales Engineer', 'X') then raise exception 'an excluded word is outside'; end if;
-  if public.has_role_targets('{}'::jsonb) or not public.has_role_targets(t) then raise exception 'has_role_targets'; end if;
+  if public.has_role_targets('{}'::jsonb) or not public.has_role_targets('{"functions": ["engineering"]}'::jsonb) then raise exception 'has_role_targets'; end if;
+  if to_regprocedure('public.role_outside_targets(jsonb, text, text, text, text, boolean, text, text)') is not null then raise exception 'the SQL twin of the judge must be gone'; end if;
 end $$;
 
--- T3: A's targets are engineering in the US. A visible sales role in Germany is outside; once it is hidden it is not counted.
+-- T3 reads the daily audit of the one judge: the latest row of each person. T2 still reads the shown lists.
 insert into public.jobs (id, company_id, title, description, url, external_id, job_function, seniority, country, posted_at)
 select gen_random_uuid(), co_a, 'Account Executive', 'd', 'https://overlap.example/jobs/ae-1', 'ae-1', 'sales', 'senior', 'DE', now() - interval '200 days' from fx;
 select public.sync_person_roles(a, co_a, array['ae-1'], 1, '{}') from fx;
 do $$
-declare t record; s record;
+declare t record; s record; f record;
 begin
+  select * into f from fx;
   select * into t from public.measure_t3();
-  if t.value < 1 or t.passed is not false then raise exception 'T3 must see the stored role outside targets, got % %', t.value, t.passed; end if;
+  if t.value is not null or t.passed is not null then raise exception 'T3 without an audit must not answer, got % %', t.value, t.passed; end if;
+  insert into public.judge_audit (user_id, audited_at, rows, outside, by_reason) values (f.a, now() - interval '1 hour', 1, 1, '{"place": 1}');
+  select * into t from public.measure_t3();
+  if t.value < 1 or t.passed is not false then raise exception 'T3 must see the stored role the judge puts outside targets, got % %', t.value, t.passed; end if;
   select * into s from public.measure_t2();
   if s.value < 1 or s.passed is not false then raise exception 'T2 must see the role older than 180 days, got % %', s.value, s.passed; end if;
   update public.person_roles set hidden_reason = 'not_for_me' where job_id = (select id from public.jobs where external_id = 'ae-1');
-  if (select value from public.measure_t3()) <> 0 then raise exception 'a hidden role is not shown, so not counted'; end if;
+  insert into public.judge_audit (user_id, audited_at, rows, outside, by_reason) values (f.a, now(), 0, 0, '{}');
+  if (select value from public.measure_t3()) <> 0 then raise exception 'the latest audit has nothing outside, so T3 is 0'; end if;
   if (select value from public.measure_t2()) <> 0 then raise exception 'a hidden role is not shown, so not counted by T2'; end if;
 end $$;
 
