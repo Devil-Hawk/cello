@@ -111,9 +111,15 @@ export function computeInsights(jobs: AtsJob[], opts: InsightOpts): Insights {
       places.set(name.toLowerCase(), at)
     }
   }
-  const own = new Set(normalizeCompanyName(opts.employer ?? '').split(' '))
+  // A posting names its own employer in every line, so a term that is the employer's name, one word or several, is left out.
+  const nameWords = new Set(normalizeCompanyName(opts.employer ?? '').split(' ').filter(Boolean))
+  const nameSquashed = [...nameWords].join('')
+  const isEmployer = (term: string) => {
+    const words = term.toLowerCase().split(/\s+/)
+    return words.every((w) => nameWords.has(w)) || term.toLowerCase().replace(/[^a-z0-9]/g, '') === nameSquashed
+  }
   const stack = new Map<string, number>()
-  for (const j of jobs) for (const w of stackWords(`${j.title}\n${j.description ?? ''}`)) if (!own.has(w.toLowerCase())) stack.set(w, (stack.get(w) ?? 0) + 1)
+  for (const j of jobs) for (const w of stackWords(`${j.title}\n${j.description ?? ''}`)) if (!isEmployer(w)) stack.set(w, (stack.get(w) ?? 0) + 1)
   const bySeniority = Object.fromEntries(tally(classes, (c) => c.seniority))
   const types = tally(jobs, (j) => typeTitle(j.title.trim()).role_type ?? '')
   return {

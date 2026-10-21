@@ -154,6 +154,24 @@ describe('computeInsights', () => {
   })
 })
 
+describe('stack counts', () => {
+  const opts = { now: NOW, closes: [] }
+
+  it('counts a term once a posting however many times it is written', () => {
+    const jobs = [job('1', 'Engineer', { description: 'Spring Boot, Spring Boot, spring boot. Spring Boot!' }), job('2', 'Engineer', { description: 'Spring Boot' }), job('3', 'Engineer')]
+    expect(computeInsights(jobs, opts).stack).toEqual([{ name: 'Spring Boot', count: 2 }])
+  })
+
+  it('leaves out an employer whose name is a term of several words, however it is written', () => {
+    const jobs = [job('1', 'Engineer', { description: 'Join Hugging Face, where Hugging Face is open. We use Python.' })]
+    expect(computeInsights(jobs, { ...opts, employer: 'Hugging Face' }).stack).toEqual([{ name: 'Python', count: 1 }])
+    expect(computeInsights(jobs, { ...opts, employer: 'HuggingFace, Inc.' }).stack).toEqual([{ name: 'Python', count: 1 }])
+    // only when the whole term is the employer: a Spring Boot posting at "Spring Health" still names Spring Boot
+    expect(computeInsights([job('1', 'Engineer', { description: 'Spring Boot' })], { ...opts, employer: 'Spring Health' }).stack).toEqual([{ name: 'Spring Boot', count: 1 }])
+    expect(computeInsights(jobs, opts).stack.map((s) => s.name).sort()).toEqual(['Hugging Face', 'Python'])
+  })
+})
+
 describe('stackWords', () => {
   it('matches whole words, with the spelling the list gives', () => {
     expect(stackWords('JAVASCRIPT and typescript, not JavaScripty; Node.js; .NET; C# and C++.').sort()).toEqual(['.NET', 'C#', 'C++', 'JavaScript', 'Node.js', 'TypeScript'])
@@ -161,7 +179,17 @@ describe('stackWords', () => {
   })
 
   it('reads the words that are also English only as written', () => {
-    expect(stackWords('Go beyond. Rust, Swift, Spark, Ruby, Express, React, Spring, Rails.').sort()).toEqual(['Express', 'Go', 'React', 'Ruby', 'Rails', 'Rust', 'Spark', 'Spring', 'Swift'].sort())
+    expect(stackWords('Go beyond. Rust, Swift, Spark, Ruby, Express, React, Rails.').sort()).toEqual(['Express', 'Go', 'React', 'Ruby', 'Rails', 'Rust', 'Spark', 'Swift'].sort())
     expect(stackWords('go ahead and react to the spring rails; express yourself')).toEqual([])
+  })
+
+  it('does not count Spring alone (a season, a benefits vendor) but counts the framework by its full name', () => {
+    expect(stackWords('Free, global Spring Health benefits. Spring is here.')).toEqual([])
+    expect(stackWords('We build with Spring Boot and spring cloud.').sort()).toEqual(['Spring Boot', 'Spring Cloud'])
+  })
+
+  it('does not count Go in go-to-market, but counts it in a language list', () => {
+    expect(stackWords('Own our Go-to-market plan. Go-To-Market（GTM）strategy. Go to market with Go To Market leads.')).toEqual([])
+    expect(stackWords('Own our Go-to-market plan. Languages: Python, Go, Rust.').sort()).toEqual(['Go', 'Python', 'Rust'])
   })
 })
