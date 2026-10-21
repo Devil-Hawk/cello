@@ -30,6 +30,8 @@ each in a browser and posts what it saw back to the app. It never holds a databa
 key. GitHub Actions runs it when jobs are waiting (`directory-read.yml`). Running it
 at home works better for sites that distrust datacenter addresses.
 
+Needs Python 3.11 or newer.
+
 ```bash
 cd packages/scrapers
 python -m venv .venv && source .venv/bin/activate

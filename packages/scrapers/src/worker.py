@@ -6,7 +6,8 @@
 Env: CELLO_URL (the app's address) and CELLO_CONTINUE_SECRET (the same secret the
 app signs its background requests with). The worker never holds a database key. It
 claims one job from POST {CELLO_URL}/api/directory/jobs/claim, does it, and posts
-the outcome to POST {CELLO_URL}/api/directory/jobs/{id}. Both bodies carry an `exp`
+the outcome to POST {CELLO_URL}/api/directory/jobs/{id}. The result also carries its
+job's `id`, which the app checks against the path. Both bodies carry an `exp`
 a minute ahead and are signed the way apps/web/lib/clock/sign.ts signs: HMAC-SHA256
 over the exact bytes sent, hex, in the x-cello-signature header.
 
@@ -142,9 +143,10 @@ def work_one(base: str, secret: str) -> bool:
     result = do_job(job)
     how = result.get("rung") or result.get("error") or ""
     log(f"job {job['id']} {job.get('kind')} ok={result.get('ok')} {how}")
+    posted = {**result, "id": job["id"]}
     for attempt in range(3):  # the server re-queues a claim left for 20 minutes
         try:
-            _post(base, f"/api/directory/jobs/{job['id']}", secret, {**result, "id": job["id"]}).raise_for_status()
+            _post(base, f"/api/directory/jobs/{job['id']}", secret, posted).raise_for_status()
             return True
         except httpx.HTTPError:
             if attempt == 2:

@@ -36,7 +36,7 @@ HOW render.py SHOULD USE THIS
     A headless browser is by far the most expensive and most bot-shaped request
     this package makes, so it is the one that must be gated hardest. The seam is
     may_render(); the intended call site is the top of
-    render.fetch_with_render_fallback, before it escalates:
+    page.fetch_page, before it climbs to a browser rung:
 
         from .polite import may_render
 
@@ -376,7 +376,7 @@ _ROBOTS_MAX_BYTES = 500_000
 def _default_fetcher(url: str, timeout: float = 10.0) -> tuple[int, str]:
     """Fetch a URL with httpx, lazily imported.
 
-    Same lazy-import contract as render.playwright_available(): this package must
+    Same lazy-import contract as the browser rungs in page.py: this package must
     keep working wherever a dependency is not provisioned, and a fetch failure
     must degrade to a status code rather than an exception. Status 0 means "no
     answer at all".
@@ -870,6 +870,6 @@ def may_render(url: str) -> Decision:
     """The seam render.py consults before escalating to a browser.
 
     See the module docstring for the intended call site inside
-    render.fetch_with_render_fallback.
+    page.fetch_page.
     """
     return default_policy().should_render(url)
