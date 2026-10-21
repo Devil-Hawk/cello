@@ -92,9 +92,8 @@ export function normalizeTargetTitles(raw: unknown): string[] {
  * app/api/settings/targeting/route.ts round-trips its PUT body through
  * resolveTargeting(), which only copies the fields it knows about, so a
  * `titles` array posted today is dropped on the floor. Until that route and
- * components/settings/targeting-tab.tsx learn the field, the jobs page's
- * `?titles=` URL parameter is the only writer — this reader is already wired
- * for the stored form so no consumer changes when it lands.
+ * components/settings/targeting-tab.tsx learn the field, nothing writes it; the
+ * reader is already wired for the stored form so no consumer changes when it lands.
  *
  * @param preferences the whole `profiles.preferences` object (NOT `.targeting`)
  */

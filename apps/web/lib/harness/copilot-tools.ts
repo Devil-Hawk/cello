@@ -39,7 +39,7 @@ import { FIT_COLUMNS, fitHighlights, parseFit } from '@/lib/scoring/read'
 import { diagnoseCandidateJobs, type CandidateDiagnosis } from './agents/matcher'
 import { ownedJobsQuery, userCompanyIds } from '../jobs/owned-query'
 import { canRunLlm, missingOpenRouterMessage } from './llm-key-message'
-import { resolveTargeting } from '@/lib/targeting'
+import { isTargetingConfigured, resolveTargeting } from '@/lib/targeting'
 import { formatKbContext, searchKb } from '@/lib/kb/store'
 import { webSearch } from '@/lib/search'
 import { parseRelevanceQuery, rankJobsByRelevance, hasRelevanceTerms } from '@/lib/jobs/relevance'
@@ -56,7 +56,6 @@ import { getServerByName, toConfig, recordConnectionResult, buildMcpPromptContex
 import { callMcpTool } from '../mcp/client'
 import { McpError } from '../mcp/types'
 import { openRolesOnly } from '../jobs/freshness'
-import { applyRoleTargets, excludedCompanyIds, hasRoleTargets, quote } from '../targeting/roles'
 import { isTrackedCompany } from '../companies/watchlist'
 import { REFRESH_MAX_PER_TURN, formatRoleAnswer, pickCompaniesToRefresh, placeMatcher, titleMatcher } from '../jobs/role-search'
 import { ingestCompany, type DueCompany } from '../ingest/run'
@@ -926,12 +925,15 @@ export async function doWebSearch(ctx: CopilotToolContext, args: Args) {
 
 // --- act tools ---------------------------------------------------------------
 
+/** A value for a PostgREST filter string: quoted when it holds list syntax. */
+const quote = (v: string) => (/[,()"]/.test(v) ? `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : v)
+
 /** How many stored roles one search_roles pass reads before the in-memory title and place match. */
 const SEARCH_ROLES_POOL = 300
 
 /**
  * search_roles: the roles stored for the companies the person follows (the
- * rows the Jobs page shows), inside their targets. No feed, no model: the
+ * rows the Jobs page shows, all of them inside their targets). No feed, no model: the
  * answer is written by formatRoleAnswer.
  */
 async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
@@ -960,8 +962,7 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
 
   const { data: profile } = await ctx.admin.from('profiles').select('preferences').eq('id', ctx.userId).maybeSingle()
   const targeting = resolveTargeting((profile?.preferences as Record<string, unknown> | null) ?? null)
-  const hasTargets = hasRoleTargets(targeting)
-  const excludedIds = excludedCompanyIds(tracked, targeting)
+  const hasTargets = isTargetingConfigured(targeting)
   const nameById = new Map(tracked.map((c) => [c.id, c.name]))
   const searched = tracked.map((c) => c.name)
   const notChecked = pickCompaniesToRefresh(tracked, Date.now()).stale
@@ -969,12 +970,9 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
   // The followed companies (or the named one) are resolved above from the watchlist rows, then matched by id.
   // ponytail: the id list rides in the URL; a person following hundreds of companies needs a chunked read.
   const trackedIds = tracked.map((c) => c.id)
-  const base = (scoped: boolean, columns: string, opts?: { count?: 'exact'; head?: boolean }) => {
-    let q: any = openRolesOnly(ownedJobsQuery(ctx.admin, ctx.userId, columns, opts)).in('viewer_company_id', trackedIds)
-    if (scoped && hasTargets) q = applyRoleTargets(q, targeting, excludedIds)
-    return q
-  }
-  const { count, error: countError } = await base(true, 'id', { count: 'exact', head: true })
+  const base = (columns: string, opts?: { count?: 'exact'; head?: boolean }): any =>
+    openRolesOnly(ownedJobsQuery(ctx.admin, ctx.userId, columns, opts)).in('viewer_company_id', trackedIds)
+  const { count, error: countError } = await base('id', { count: 'exact', head: true })
   if (countError) return cannotRead('the stored roles', countError)
 
   type RoleRow = {
@@ -988,8 +986,8 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
     chance: string | null
     is_new: boolean | null
   }
-  const find = async (scoped: boolean): Promise<RoleRow[]> => {
-    let q = base(scoped, 'id, title, url, location, is_remote, posted_at, viewer_company_id, chance, is_new')
+  const find = async (): Promise<RoleRow[]> => {
+    let q = base('id, title, url, location, is_remote, posted_at, viewer_company_id, chance, is_new')
     if (titleM) q = q.or(titleM.keywords.map((k) => `title.ilike.${quote(`%${k}%`)}`).join(','))
     if (placeM) {
       q = q.or(
@@ -1008,14 +1006,8 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
   }
 
   let rows: RoleRow[]
-  let inside = true
   try {
-    rows = await find(true)
-    // The Jobs page shows these under "All roles"; never answer none while they exist.
-    if (rows.length === 0 && hasTargets) {
-      rows = await find(false)
-      inside = rows.length === 0
-    }
+    rows = await find()
   } catch (err) {
     return cannotRead('the stored roles', { message: err instanceof Error ? err.message : String(err) })
   }
@@ -1030,7 +1022,6 @@ async function doSearchRoles(ctx: CopilotToolContext, args: Args) {
     location: r.location,
     postedAt: r.posted_at,
     url: r.url,
-    insideTargets: inside,
   }))
   return {
     jobs,

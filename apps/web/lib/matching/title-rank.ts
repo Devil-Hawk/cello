@@ -24,11 +24,6 @@
 //   history of substring bugs for short tech terms ('%ai%' matches "detail",
 //   "email", "chair"), and tokenizing first makes that bug class impossible.
 
-/** Minimal job shape this module needs — callers map their own row shape in. */
-export interface TitleRankJob {
-  title: string | null | undefined
-}
-
 export interface TitleMatch {
   /**
    * 0 = this title matched none of the user's targets and must NOT be treated
@@ -301,37 +296,4 @@ export function scoreTitleAgainstTargets(
     if (match.score > best.score) best = match
   }
   return best
-}
-
-export interface TitleRankedJob<T> {
-  job: T
-  titleMatch: TitleMatch
-}
-
-/**
- * Re-rank jobs by best target-title match, highest first.
- *
- * STABLE FOR TIES AND FOR NO-MATCH. Equal scores keep their incoming relative
- * order, and an empty target set scores everything 0 so the input order comes
- * back untouched. That is what lets this compose with whatever sort the caller
- * already applied instead of replacing it: a user with no titles configured
- * sees exactly the list they saw before, and within a group of equally
- * on-target jobs the caller's sort still decides.
- *
- * Jobs scoring 0 are kept (at the end), never dropped — this ranks, it does
- * not filter. Hiding rows because they missed a title the user typed once
- * would silently shrink a list they did not ask to shrink.
- */
-export function rankJobsByTargetTitles<T extends TitleRankJob>(
-  jobs: readonly T[],
-  targets: readonly string[]
-): TitleRankedJob<T>[] {
-  // Parse each target ONCE, not once per job: this runs on every render of a
-  // list that can hold hundreds of rows.
-  const parsed = targets.map(parseTitle).filter((t) => t.coreCount > 0)
-
-  return jobs
-    .map((job, index) => ({ job, titleMatch: scoreTitleAgainstTargets(job.title, parsed), index }))
-    .sort((a, b) => b.titleMatch.score - a.titleMatch.score || a.index - b.index)
-    .map(({ job, titleMatch }) => ({ job, titleMatch }))
 }

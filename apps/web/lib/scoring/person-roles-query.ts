@@ -4,8 +4,7 @@
 // query is `from('person_roles').select('<verdict>, jobs!inner(<posting>)')` and
 // every filter on a posting column goes through the embed (`jobs.<column>`).
 //
-// The filters the jobs list already uses (openRolesOnly, applyRoleTargets, the
-// facet chips) are written for a query that starts at jobs. OnJobs lets them run
+// The filters the jobs list already uses (openRolesOnly, the facet chips) are written for a query that starts at jobs. OnJobs lets them run
 // unchanged on this query: it has the same filter methods and puts the embed's
 // name in front of the column. Build the query, wrap it, apply the filters to the
 // wrapper, then take `.query` back.

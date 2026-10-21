@@ -27,7 +27,7 @@ import { pageFetcherFromEnv } from '../lib/ingest/fetch-page'
 import type { ReaderMode } from '../lib/ingest/reader/site-fetch'
 import { onOwnSite } from '../lib/ingest/reader/legit'
 import { ROLE_MAX_AGE_DAYS } from '../lib/jobs/freshness'
-import { targetVerdict } from '../lib/targeting/roles'
+import { keepsRole } from '../lib/roles/keep'
 import { EMPTY_TARGETING } from '../lib/targeting'
 import type { AtsStore, JobUpsertRow } from '../lib/ats/index'
 import type { ReaderTargets } from '../lib/ingest/reader/targets'
@@ -133,13 +133,13 @@ async function main(): Promise<void> {
     const requests = check.requests ?? 0
     const ats = (meta.ats ?? null) as { provider?: string; token?: string; verified_by?: string } | null
 
-    const inside = rows.filter((r) =>
-      targetVerdict(
-        { title: r.title, description: r.description, job_function: r.job_function, seniority: r.seniority, country: r.country, language: r.language, is_remote: r.is_remote },
-        TARGETS.targeting,
-        e.name
-      ) === 'inside'
-    ).length
+    const inside = rows.filter((r) => {
+      const k = keepsRole(
+        { title: r.title, description: r.description, job_function: r.job_function, seniority: r.seniority, country: r.country, language: r.language, is_remote: r.is_remote, company: e.name },
+        TARGETS
+      )
+      return k.keep && !k.hidden
+    }).length
     const dated = rows.map((r) => (r.posted_at ? Date.parse(r.posted_at) : NaN)).filter((t) => !Number.isNaN(t))
     const newest = dated.length ? new Date(Math.max(...dated)).toISOString().slice(0, 10) : 'undated'
     const samples = rows.slice(0, 3).map((r) => r.title)

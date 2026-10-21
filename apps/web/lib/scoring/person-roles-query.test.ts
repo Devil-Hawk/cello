@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { openRolesOnly } from '@/lib/jobs/freshness'
-import { EMPTY_TARGETING } from '@/lib/targeting'
-import { applyRoleTargets } from '@/lib/targeting/roles'
 import { OnJobs } from './person-roles-query'
 
 /** Records every filter call, as the PostgREST builder would receive it. */
@@ -37,15 +35,12 @@ describe('OnJobs', () => {
     expect(calls).toEqual([['or', 'posted_at.is.null,posted_at.gte.2026-01-01', { referencedTable: 'jobs' }]])
   })
 
-  it('lets the open roles rule and the target filters run unchanged on a person_roles query', () => {
+  it('lets the open roles rule run unchanged on a person_roles query', () => {
     const { q, calls } = recorder()
     const on = new OnJobs(q)
     openRolesOnly(on)
-    applyRoleTargets(on, { ...EMPTY_TARGETING, functions: ['engineering'], remoteOnly: true })
     expect(calls.every(([m, a, b]) => (m === 'or' ? (b as { referencedTable?: string }).referencedTable === 'jobs' : String(a).startsWith('jobs.')))).toBe(true)
     expect(calls.some(([m, col]) => m === 'not' && col === 'jobs.still_open')).toBe(true)
-    expect(calls.some(([m, col]) => m === 'in' && col === 'jobs.job_function')).toBe(true)
-    expect(calls.some(([m, col]) => m === 'eq' && col === 'jobs.is_remote')).toBe(true)
   })
 
   it('keeps the query it wraps', () => {

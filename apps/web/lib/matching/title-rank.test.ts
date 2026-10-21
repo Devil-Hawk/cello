@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   parseTitle,
-  rankJobsByTargetTitles,
   scoreTitleAgainstTarget,
   scoreTitleAgainstTargets,
 } from './title-rank'
@@ -135,62 +134,5 @@ describe('scoreTitleAgainstTargets', () => {
     const match = scoreTitleAgainstTargets('Senior Data Scientist', [])
     expect(match.score).toBe(0)
     expect(match.target).toBeNull()
-  })
-})
-
-describe('rankJobsByTargetTitles', () => {
-  const jobs = [
-    { id: 'a', title: 'Warehouse Associate' },
-    { id: 'b', title: 'Data Engineer' },
-    { id: 'c', title: 'Office Manager' },
-    { id: 'd', title: 'Senior Data Engineer' },
-    { id: 'e', title: 'Data Analyst' },
-  ]
-
-  it('puts target matches first and keeps non-matches in their original order', () => {
-    const ranked = rankJobsByTargetTitles(jobs, ['Data Engineer'])
-    const ids = ranked.map((r) => r.job.id)
-    // b and d both fully cover the target, so the incoming order decides
-    // between them; e is a partial; a and c never matched and stay put.
-    expect(ids.slice(0, 2)).toEqual(['b', 'd'])
-    expect(ids[2]).toBe('e')
-    expect(ids.slice(3)).toEqual(['a', 'c'])
-  })
-
-  it('never drops a job — it ranks, it does not filter', () => {
-    const ranked = rankJobsByTargetTitles(jobs, ['Data Engineer'])
-    expect(ranked).toHaveLength(jobs.length)
-    expect(ranked.filter((r) => r.titleMatch.score === 0)).toHaveLength(2)
-  })
-
-  it('preserves the caller ordering exactly when no titles are configured', () => {
-    const ranked = rankJobsByTargetTitles(jobs, [])
-    expect(ranked.map((r) => r.job.id)).toEqual(jobs.map((j) => j.id))
-    expect(ranked.every((r) => r.titleMatch.score === 0 && r.titleMatch.target === null)).toBe(true)
-  })
-
-  it('preserves the caller ordering when every configured title is unusable', () => {
-    const ranked = rankJobsByTargetTitles(jobs, ['', '   ', 'Senior'])
-    expect(ranked.map((r) => r.job.id)).toEqual(jobs.map((j) => j.id))
-  })
-
-  it('reports which target each job matched, so the UI can explain the order', () => {
-    const ranked = rankJobsByTargetTitles(jobs, ['Office Manager', 'Data Engineer'])
-    const byId = new Map(ranked.map((r) => [r.job.id, r.titleMatch]))
-    expect(byId.get('b')?.target).toBe('Data Engineer')
-    expect(byId.get('c')?.target).toBe('Office Manager')
-    expect(byId.get('a')?.target).toBeNull()
-  })
-
-  it('is stable across repeated calls (pure and deterministic)', () => {
-    const first = rankJobsByTargetTitles(jobs, ['Data Engineer', 'Office Manager'])
-    const second = rankJobsByTargetTitles(jobs, ['Data Engineer', 'Office Manager'])
-    expect(first.map((r) => r.job.id)).toEqual(second.map((r) => r.job.id))
-  })
-
-  it('does not mutate the array it was given', () => {
-    const input = [...jobs]
-    rankJobsByTargetTitles(input, ['Data Engineer'])
-    expect(input.map((j) => j.id)).toEqual(jobs.map((j) => j.id))
   })
 })
