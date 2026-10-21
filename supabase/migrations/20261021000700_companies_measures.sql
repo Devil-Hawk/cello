@@ -230,16 +230,28 @@ set search_path = ''
 as $$
 declare
   n integer;
-  n_verified integer;
-  n_unreadable integer;
-  n_unverified integer;
+  n_proven integer;
+  n_left integer;
+  n_waiting integer;
+  n_pending integer;
   reasons text;
 begin
+  -- A report does not check anything itself: it sets the board's verified_at back so the next sweep (every 30 minutes, see
+  -- lib/clock/routines/directory-sweep.ts) proves it again, and it clears cannot_read_reason. So for each report:
+  --   left      the sweep recorded a cannot-read reason after the report (updated_at is stamped by every read)
+  --   re-proven verified_at is later than the report
+  --   pending   neither yet, and the report is younger than one sweep
+  --   waiting   neither yet. A site-only employer has no board for the sweep to read, so it waits here by design.
   select count(*),
-         count(*) filter (where d.verified_at is not null and d.cannot_read_reason is null),
-         count(*) filter (where d.cannot_read_reason is not null),
-         count(*) filter (where d.verified_at is null and d.cannot_read_reason is null)
-    into n, n_verified, n_unreadable, n_unverified
+         count(*) filter (where d.cannot_read_reason is null and d.verified_at > r.created_at),
+         count(*) filter (where d.cannot_read_reason is not null and d.updated_at > r.created_at),
+         count(*) filter (where not (d.cannot_read_reason is not null and d.updated_at > r.created_at)
+                            and not (d.cannot_read_reason is null and d.verified_at > r.created_at)
+                            and r.created_at <= now() - interval '30 minutes'),
+         count(*) filter (where not (d.cannot_read_reason is not null and d.updated_at > r.created_at)
+                            and not (d.cannot_read_reason is null and d.verified_at > r.created_at)
+                            and r.created_at > now() - interval '30 minutes')
+    into n, n_proven, n_left, n_waiting, n_pending
     from public.employer_reports r
     join public.company_directory d on d.id = r.employer_id
    where r.created_at > now() - interval '30 days';
@@ -249,7 +261,7 @@ begin
       select d.cannot_read_reason as reason, count(*) as n
         from public.employer_reports r
         join public.company_directory d on d.id = r.employer_id
-       where r.created_at > now() - interval '30 days' and d.cannot_read_reason is not null
+       where r.created_at > now() - interval '30 days' and d.cannot_read_reason is not null and d.updated_at > r.created_at
        group by 1
     ) x;
 
@@ -261,9 +273,46 @@ begin
     n::numeric,
     null::boolean,
     n,
-    format('%s "Not this company" reports in the last 30 days. Each one checked the board again: %s employers still verified, %s cannot be read%s, %s no longer verified. Reported; no bar yet.',
-      n, n_verified, n_unreadable, coalesce(' (' || reasons || ')', ''), n_unverified);
+    format('%s "Not this company" reports in the last 30 days, and how many of those employers have since been re-proven or left the rotation: re-proven %s, left %s%s, waiting for the re-check %s, pending until the next sweep %s. Reported; no bar yet.',
+      n, n_proven, n_left, coalesce(' (' || reasons || ')', ''), n_waiting, n_pending);
 end;
+$$;
+
+-- Self-check: one report per state (re-proven, left, waiting, pending). The owner's reports are set aside inside the block.
+do $$
+declare
+  uid uuid;
+  e_proven uuid;
+  e_left uuid;
+  e_waiting uuid;
+  e_pending uuid;
+  r record;
+begin
+  select id into uid from public.profiles limit 1;
+  if uid is null then
+    raise notice 'measure_t36 self-check skipped: no profile owns the seeded reports';
+    return;
+  end if;
+  begin
+    delete from public.employer_reports;
+    insert into public.company_directory (name, name_norm, source, verified_at, updated_at) values ('Self check proven', 'self check proven', 'seed', now() - interval '1 hour', now()) returning id into e_proven;
+    insert into public.company_directory (name, name_norm, source, cannot_read_reason, updated_at, verified_at) values ('Self check left', 'self check left', 'seed', 'cannot_read', now() - interval '1 hour', now() - interval '3 days') returning id into e_left;
+    insert into public.company_directory (name, name_norm, source, verified_at) values ('Self check waiting', 'self check waiting', 'seed', now() - interval '3 days') returning id into e_waiting;
+    insert into public.company_directory (name, name_norm, source, verified_at) values ('Self check pending', 'self check pending', 'seed', now() - interval '3 days') returning id into e_pending;
+    insert into public.employer_reports (user_id, employer_id, created_at) values
+      (uid, e_proven, now() - interval '2 hours'),
+      (uid, e_left, now() - interval '2 hours'),
+      (uid, e_waiting, now() - interval '2 hours'),
+      (uid, e_pending, now() - interval '5 minutes');
+    select * into r from public.measure_t36();
+    if r.value <> 4 or r.sample_n <> 4 or r.note not like '%re-proven 1, left 1 (1 cannot_read), waiting for the re-check 1, pending until the next sweep 1.%' then
+      raise exception 'measure_t36: expected one report in each state, got % % %', r.value, r.sample_n, r.note;
+    end if;
+    raise exception 'measure_t36 self-check passed' using errcode = 'P0001';
+  exception when raise_exception then
+    if sqlerrm <> 'measure_t36 self-check passed' then raise; end if;
+  end;
+end
 $$;
 
 -- ---------------------------------------------------------------------------
