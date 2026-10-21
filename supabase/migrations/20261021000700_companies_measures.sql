@@ -331,10 +331,13 @@ declare
   total integer := 0;
   parts text := '';
 begin
+  -- A call that failed is not within its bar. The p95 reads only the calls that answered (ok), and the failures are counted apart.
   for r in
-    select b.route, b.bar_ms, count(t.ms) as n,
-           count(t.ms) filter (where t.ms <= b.bar_ms) as within,
-           percentile_cont(0.95) within group (order by t.ms) as p95
+    select b.route, b.bar_ms,
+           count(t.ms) as n,
+           count(t.ms) filter (where t.ok and t.ms <= b.bar_ms) as within,
+           count(t.ms) filter (where not t.ok) as errors,
+           percentile_cont(0.95) within group (order by t.ms) filter (where t.ok) as p95
       from (values ('add', 60000), ('follow', 8000)) as b (route, bar_ms)
       left join public.route_timings t on t.route = b.route and t.at > now() - interval '7 days'
      group by b.route, b.bar_ms
@@ -345,7 +348,8 @@ begin
       parts := parts || format('%s: no calls in the last 7 days. ', r.route);
     else
       worst := least(coalesce(worst, 1), r.within::numeric / r.n);
-      parts := parts || format('%s: %s of %s within %s ms, p95 %s ms. ', r.route, r.within, r.n, r.bar_ms, round(r.p95::numeric));
+      parts := parts || format('%s: %s of %s within %s s, p95 %s over the calls that answered, %s failed. ',
+        r.route, r.within, r.n, r.bar_ms / 1000, coalesce(round(r.p95::numeric)::text || ' ms', 'none answered'), r.errors);
     end if;
   end loop;
 
@@ -370,12 +374,10 @@ select 'T12', null, true, null, 'Checked in review of the companies/measures pul
 where not exists (select 1 from public.measure_runs where measure_id = 'T12');
 
 -- ---------------------------------------------------------------------------
--- Self-check: the functions return one row each; T37 counts a bar, and the rows are made in a block that always rolls back.
+-- Self-check: the functions return one row each, and the register rows are in place.
 -- ---------------------------------------------------------------------------
 
 do $$
-declare
-  r record;
 begin
   if to_regclass('public.route_timings') is null then raise exception 'route_timings is missing'; end if;
   if (select count(*) from public.measures where id in ('T34', 'T35', 'T36', 'T37')) <> 4 then raise exception 'the Companies measures must be in the register'; end if;
@@ -388,19 +390,36 @@ begin
   if (select count(*) from public.measure_t35()) <> 1 or (select count(*) from public.measure_t36()) <> 1 or (select count(*) from public.measure_t37()) <> 1 then
     raise exception 'each Companies measure must return one row';
   end if;
+end
+$$;
 
+-- T37 self-check: the real calls are set aside inside the block and come back on rollback; the count is compared after.
+do $$
+declare
+  n_before integer;
+  r record;
+begin
+  select count(*) into n_before from public.route_timings;
   begin
+    delete from public.route_timings;
     -- one add within 60 s, one add over it, one follow within 8 s: adds 50 percent, follows 100 percent, so the worst is 50
     insert into public.route_timings (route, ms, ok) values ('add', 1000, true), ('add', 90000, true), ('follow', 2000, true);
     select * into r from public.measure_t37();
     if r.value <> 50 or r.passed or r.sample_n <> 3 then
       raise exception 'measure_t37: the worst bar share must be 50 and not pass, got % % %', r.value, r.passed, r.sample_n;
     end if;
-    raise exception 'companies_measures self-check passed' using errcode = 'P0001';
+    -- a failed add answered in 500 ms is not within its bar: adds 1 of 3, so the worst is 33.3
+    delete from public.route_timings;
+    insert into public.route_timings (route, ms, ok) values ('add', 1000, true), ('add', 90000, true), ('add', 500, false), ('follow', 2000, true);
+    select * into r from public.measure_t37();
+    if r.value <> 33.3 or r.passed or r.sample_n <> 4 or r.note not like '%add: 1 of 3 within 60 s%1 failed%' then
+      raise exception 'measure_t37: a failed call must count against its bar, got % % % %', r.value, r.passed, r.sample_n, r.note;
+    end if;
+    raise exception 'measure_t37 self-check passed' using errcode = 'P0001';
   exception when raise_exception then
-    if sqlerrm <> 'companies_measures self-check passed' then raise; end if;
+    if sqlerrm <> 'measure_t37 self-check passed' then raise; end if;
   end;
-  if exists (select 1 from public.route_timings) then raise exception 'the self-check left route timings behind'; end if;
+  if (select count(*) from public.route_timings) <> n_before then raise exception 'the self-check changed the route timings'; end if;
 end
 $$;
 
