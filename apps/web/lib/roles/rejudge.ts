@@ -41,6 +41,8 @@ export interface HeldJob {
   employer: { name: string | null } | { name: string | null }[] | null
 }
 
+// ponytail: the description comes whole (up to 20000 characters; PostgREST cannot cut it in a select), so a page
+// is at most 2 MB and the audit's 2000 rows at most 40 MB a person a day. The upgrade is a view that cuts it.
 /** The embed a person_roles query reads to judge the stored role: the columns the judge looks at. */
 export const HELD_JOB = 'jobs(title, description, location, salary_range, job_function, seniority, country, language, is_remote, posted_at, employer_id, company_id, title_norm, role_type, employer:company_directory(name))'
 

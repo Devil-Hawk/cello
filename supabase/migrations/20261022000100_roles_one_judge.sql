@@ -15,6 +15,8 @@
 --   profiles_targets_changed  starts the re-judge when preferences.constraints changes too, not only preferences.targeting.
 --   directory_roles_for    also returns description, location and salary_range, so the directory match judges a role
 --                          on what the stored role judges it on (an excluded word in the description, a pay floor).
+--                          The description is cut at 8000 characters (they run to 20000): the judge keeps a role when the word it
+--                          looks for is past the cut, and 2000 rows come to at most 16 MB.
 --   roles.audit            the daily routine (04:30 UTC), enabled; the runner leaves a command it has no handler for alone.
 
 -- ---------------------------------------------------------------------------
@@ -132,7 +134,7 @@ security definer
 set search_path = ''
 as $$
   select j.id, j.title, j.job_function, j.seniority, j.country, j.language, j.is_remote, j.posted_at, d.name, j.title_norm, j.role_type,
-         j.description, j.location, j.salary_range
+         left(j.description, 8000), j.location, j.salary_range
     from public.jobs j
     join public.company_directory d on d.id = j.employer_id
    where j.still_open is not false
