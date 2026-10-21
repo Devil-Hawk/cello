@@ -166,8 +166,6 @@ export interface EmployerWrite {
   readTier: string | null
   /** A person's or a lead's check: an employer already in the directory (by board or domain) is returned and left exactly as it is. */
   keepExisting?: boolean
-  /** Facts from a named public source (lib/companies/wikidata.ts toProfile), kept on a new row. */
-  profile?: Record<string, unknown>
 }
 
 const MS_AFTER_VERIFY = 6 * 3_600_000
@@ -202,7 +200,6 @@ export async function writeEmployer(db: Db, w: EmployerWrite, now: () => number 
     open_count: w.openCount,
     open_count_at: w.openCount === null ? null : at,
     updated_at: at,
-    ...(w.profile ? { profile: w.profile } : {}),
   }
   type Row = { id: string; source: string; ats_provider: string | null; ats_token: string | null }
   let existing: Row | null = null
