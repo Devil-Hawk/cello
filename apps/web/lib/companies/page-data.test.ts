@@ -137,6 +137,12 @@ describe('companyPage', () => {
     expect(p).not.toHaveProperty('keptForYou')
   })
 
+  it('hands over the follow row of a person who follows, and none to one who does not', async () => {
+    const seed = { companies: [{ id: 'c1', user_id: 'u1', employer_id: 'e1', watching: true }, { id: 'c2', user_id: 'u2', employer_id: 'e1', watching: true }] }
+    expect((await companyPage(setup([page({ following: true })], seed).client, 'u1', 'e1'))?.followId).toBe('c1')
+    expect((await companyPage(setup([page()], seed).client, 'u3', 'e1'))?.followId).toBeNull()
+  })
+
   it('a board that did not answer says so in words and has no count', async () => {
     const { client } = setup([page({ cannot_read_reason: 'cannot_read', failed_reads: 3 })])
     const p = await companyPage(client, 'u1', 'e1')

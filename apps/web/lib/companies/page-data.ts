@@ -105,6 +105,8 @@ export interface KeptRole {
 }
 
 export interface CompanyPage extends Omit<CompanyRow, 'keptForYou' | 'topForYou' | 'roleTypes'> {
+  /** The person's follow row (companies.id) while they follow; the dossier, contacts and "Check now" are keyed by it. */
+  followId: string | null
   careersUrl: string | null
   provider: string | null
   profile: Record<string, unknown> | null
@@ -232,8 +234,10 @@ export async function companyPage(db: Db, userId: string, id: string): Promise<C
     | undefined
   if (!r) return null
   const base = headOf(r)
+  const follow = base.following ? await db.from('companies').select('id').eq('user_id', userId).eq('employer_id', base.employerId).eq('watching', true).limit(1).maybeSingle() : null
   return {
     ...base,
+    followId: (follow?.data as { id: string } | null)?.id ?? null,
     // a board that did not answer says why in plain words, and never "0 open"
     checked: base.checked && base.checked.reason === 'cannot_read' ? { ...base.checked, line: REASON_COPY.board_unreachable } : base.checked,
     careersUrl: r.careers_url,

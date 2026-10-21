@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { ArrowLeft, Briefcase, Building2, ExternalLink, Globe } from 'lucide-react'
+import { ArrowLeft, Briefcase, Building2, ExternalLink, Globe, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -12,6 +12,8 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatRow } from '@/components/ui/stat-row'
 import { CompanyLogo, getCompanyLogoSrc } from '@/components/companies/company-logo'
+import { DossierPanel } from '@/components/companies/dossier-panel'
+import { ContactNetworkPanel } from '@/components/contacts/contact-network-panel'
 import { formatShortDate, knownParts } from '@/lib/format'
 import { getRoleType } from '@/lib/jobs/role-types'
 import type { CompanyPage, RoleHit } from '@/lib/companies'
@@ -26,14 +28,36 @@ export default function CompanyPageView() {
   const [roles, setRoles] = useState<RoleHit[]>([])
   const [q, setQ] = useState('')
   const [isLoading, setIsLoading] = useState(true)
+  const [checking, setChecking] = useState(false)
+  const [checkLine, setCheckLine] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetch(`/api/companies/${id}`)
+  const load = useCallback(() => {
+    return fetch(`/api/companies/${id}`)
       .then((res) => (res.ok ? (res.json() as Promise<CompanyPage>) : null))
       .then(setCompany)
       .catch(() => setCompany(null))
       .finally(() => setIsLoading(false))
   }, [id])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  // "Check now": the same one reader the schedule uses, for this employer, through the existing trigger route.
+  async function checkNow(followId: string) {
+    setChecking(true)
+    setCheckLine(null)
+    try {
+      const res = await fetch('/api/scraper/trigger', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyId: followId }) })
+      const data = await res.json()
+      setCheckLine(data.message ?? data.error ?? 'Cello could not check this employer right now.')
+      if (data.success) await load()
+    } catch {
+      setCheckLine('Cello could not check this employer right now.')
+    } finally {
+      setChecking(false)
+    }
+  }
 
   // Search inside the employer runs on the server, 250 ms after the last key.
   useEffect(() => {
@@ -109,8 +133,19 @@ export default function CompanyPageView() {
               </a>
             )}
           </div>
+          {company.followId && (
+            <Button variant="outline" size="sm" className="ml-auto shrink-0" onClick={() => checkNow(company.followId!)} disabled={checking}>
+              <RefreshCw className={`h-4 w-4 ${checking ? 'animate-spin' : ''}`} />
+              Check now
+            </Button>
+          )}
         </div>
       </Card>
+      {checkLine && (
+        <p className="text-body text-foreground" role="status">
+          {checkLine}
+        </p>
+      )}
 
       <StatRow
         stats={[
@@ -126,6 +161,13 @@ export default function CompanyPageView() {
         </p>
       )}
       <p className="text-body text-muted-foreground">Cello has not matched these to your targets yet.</p>
+
+      {company.followId && (
+        <>
+          <DossierPanel companyId={company.followId} />
+          <ContactNetworkPanel companyId={company.followId} variant="card" />
+        </>
+      )}
 
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
