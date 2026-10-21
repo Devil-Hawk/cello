@@ -4,9 +4,10 @@ import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { isCrossSiteRequest } from '@/lib/security/same-origin'
 import { IDENTIFY } from '@/lib/ats/verify'
 import type { AtsProviderId } from '@/lib/ats/types'
-import { addCompany, realAddDeps, type AddBy } from '@/lib/companies/add-link'
+import { addCompany, realAddDeps, type AddBy, type AddFailure } from '@/lib/companies/add-link'
 import { getEmployer } from '@/lib/companies/directory'
 import { ndjson } from '@/lib/companies/ndjson'
+import { HANDOFF_LINE, readWithin } from '@/lib/companies/follow'
 import { loadPerson, readEmployer } from '@/lib/companies/read-employer'
 
 // POST /api/companies/add   { employerId } | { candidateId } | { link } | { candidate }
@@ -14,16 +15,20 @@ import { loadPerson, readEmployer } from '@/lib/companies/read-employer'
 // Follows an employer the directory has verified, checks a candidate the person chose, reads a pasted careers link and
 // verifies whose it is, or proves again and adds a candidate a search found (lib/companies/add-link.ts).
 //
-// The answer is NDJSON, one {"step",...} line per real stage as it happens: directory_hit, reading, board_found,
-// checking_owner, reading_roles, then one last line: added {employer, read: {listed, kept}}, refused {reason, line, offers}
-// or queued {line}. A check that ends in a reason is an answer, not an error. Refusals before the stream starts (not
-// signed in, cross-site, a body that is not one of the above) are plain JSON with their status; once it has started the
-// status is 200 and the last line says how it ended.
+// What is known before any network call is plain JSON with its status: 400 for a link Cello will not read or a body it
+// does not know, 403 for a demo account, 404 for an employer Cello does not have, 429 for the day's limit, 500 for a
+// failure, 200 for an add or a directory hit. The answer becomes NDJSON only at the first network step (reading, or
+// board_found for a proven board): one {"step",...} line per real stage as it happens (reading, board_found,
+// checking_owner, reading_roles), then one last line: added {employer, read}, refused {reason, line, offers} or
+// queued {line}. A check that ends in a reason is an answer, not an error. `read` is {listed, kept}, or null when the
+// board could not be read in 8 s; `kept` is null when the person has stated no targets.
 //
 // ponytail: only adds that succeed count toward the daily limit; add an attempts count if checks are abused.
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
+
+const STATUS: Partial<Record<AddFailure, number>> = { demo: 403, daily_limit: 429, bad_link: 400, not_found: 404, not_saved: 500 }
 
 const UUID = /^[0-9a-f-]{36}$/i
 
@@ -72,13 +77,26 @@ export async function POST(request: NextRequest) {
   if (!by) return NextResponse.json({ error: 'Send one of employerId, candidateId, link or candidate.' }, { status: 400 })
 
   const db = createAdminClient()
-  return ndjson(async (emit) => {
-    const result = await addCompany(db, user.id, by, { ...realAddDeps, report: emit })
-    if (!result.ok) return emit(result.queued ? { step: 'queued', line: result.queued } : { step: 'refused', reason: result.reason, line: result.line, offers: result.offers })
+  return ndjson(
+    async (emit) => {
+      const result = await addCompany(db, user.id, by, { ...realAddDeps, report: emit })
+      if (!result.ok) return emit(result.queued ? { step: 'queued', line: result.queued } : { step: 'refused', reason: result.reason, line: result.line, offers: result.offers })
 
-    // Added: read its board once for this person, so the tile opens with real counts.
-    const employer = !result.already && result.employer.employerId ? await getEmployer(db, result.employer.employerId) : null
-    const read = employer?.ats_provider ? await readEmployer(db, employer, await loadPerson(db, user.id)).then((r) => ({ listed: r.listed, kept: r.kept }), () => null) : null
-    emit({ step: 'added', companyId: result.companyId, already: result.already, employer: result.employer, read, line: result.already ? 'You follow this already.' : 'Following. Cello checks it with the others, every 6 hours.' })
-  })
+      // Added: read its board once for this person, so the tile opens with real counts. The read is held to 8 s like a follow's.
+      const employer = !result.already && result.employer.employerId ? await getEmployer(db, result.employer.employerId) : null
+      let read: { listed: number; kept: number | null } | null = null
+      let line = result.already ? 'You follow this already.' : 'Following. Cello checks it with the others, every 6 hours.'
+      if (employer?.ats_provider) {
+        const people = await loadPerson(db, user.id)
+        const first = await readWithin(readEmployer(db, employer, people))
+        if (first === 'timeout') line = HANDOFF_LINE
+        else if (first && !first.failure) read = { listed: first.listed, kept: people.length > 0 ? first.kept : null }
+      }
+      emit({ step: 'added', companyId: result.companyId, already: result.already, employer: result.employer, read, line })
+    },
+    {
+      streamFrom: (e) => ['reading', 'board_found'].includes((e as { step?: string }).step ?? ''),
+      status: (e) => ((e as { step?: string }).step === 'refused' ? STATUS[(e as { reason: AddFailure }).reason] : undefined) ?? 200,
+    }
+  )
 }

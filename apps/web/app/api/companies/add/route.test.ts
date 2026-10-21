@@ -10,8 +10,9 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { g
 vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({ admin: true }) }))
 vi.mock('@/lib/companies/add-link', () => ({ addCompany: (...args: unknown[]) => addMock(...args), realAddDeps: { real: true } }))
 vi.mock('@/lib/companies/directory', () => ({ getEmployer: async () => employerRow }))
-vi.mock('@/lib/companies/read-employer', () => ({ loadPerson: async () => [{ userId: 'u1' }], readEmployer: (...args: unknown[]) => readMock(...args) }))
+vi.mock('@/lib/companies/read-employer', () => ({ loadPerson: vi.fn(async () => [{ userId: 'u1' }]), readEmployer: (...args: unknown[]) => readMock(...args) }))
 
+import { loadPerson } from '@/lib/companies/read-employer'
 import { POST } from './route'
 
 const ID = '11111111-1111-4111-8111-111111111111'
@@ -74,7 +75,7 @@ describe('POST /api/companies/add', () => {
     expect(readMock.mock.calls[0][2]).toEqual([{ userId: 'u1' }])
   })
 
-  it('reads nothing again for an employer the person already follows, and says so; a read that fails is null, not an error', async () => {
+  it('reads nothing again for an employer the person already follows, and says so; a read that throws is null, not an error', async () => {
     addMock.mockResolvedValueOnce({ ...added, already: true })
     expect(await lines(await post({ link: 'retellai.com/careers' }))).toEqual([expect.objectContaining({ step: 'added', already: true, read: null, line: 'You follow this already.' })])
     expect(readMock).not.toHaveBeenCalled()
@@ -82,15 +83,69 @@ describe('POST /api/companies/add', () => {
     expect(await lines(await post({ link: 'retellai.com/careers' }))).toEqual([expect.objectContaining({ step: 'added', read: null })])
   })
 
-  it('ends a refusal with its reason, one line and the offers; the status is 200 once the stream has started', async () => {
-    addMock.mockResolvedValueOnce({ ok: false, reason: 'other_owner', line: 'a line', offers: [{ kind: 'employer', name: 'Retell AI' }] })
+  it('sends read null, never 0 open, when the first read failed; kept is null when the person has no targets', async () => {
+    readMock.mockResolvedValueOnce({ listed: 0, kept: 0, stored: 0, errors: [], failure: 'cannot_read' })
+    expect(await lines(await post({ link: 'retellai.com/careers' }))).toEqual([expect.objectContaining({ step: 'added', read: null })])
+    vi.mocked(loadPerson).mockResolvedValueOnce([])
+    expect(await lines(await post({ link: 'retellai.com/careers' }))).toEqual([expect.objectContaining({ step: 'added', read: { listed: 12, kept: null } })])
+  })
+
+  it('hands a first read that runs past 8 s off, as a follow does: read null and the hand-off line', async () => {
+    vi.useFakeTimers()
+    try {
+      readMock.mockReturnValueOnce(new Promise(() => {}))
+      const pending = post({ link: 'retellai.com/careers' })
+      await vi.advanceTimersByTimeAsync(8000)
+      expect(await lines(await pending)).toEqual([expect.objectContaining({ step: 'added', read: null, line: 'Following. Cello reads its board within the hour.' })])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('answers a refusal known before any network call as plain JSON with its status, and a streamed one with 200', async () => {
+    const statuses: Record<string, number> = { demo: 403, daily_limit: 429, bad_link: 400, not_found: 404, not_saved: 500, other_owner: 200 }
+    for (const [reason, status] of Object.entries(statuses)) {
+      addMock.mockResolvedValueOnce({ ok: false, reason, line: 'a line', offers: [] })
+      const res = await post({ link: 'retellai.com/careers' })
+      expect(res.status, reason).toBe(status)
+      expect(res.headers.get('content-type'), reason).toContain('application/json')
+      expect(await res.json(), reason).toEqual({ step: 'refused', reason, line: 'a line', offers: [] })
+    }
+    addMock.mockImplementationOnce(async (_db, _user, _by, deps) => {
+      deps.report({ step: 'reading', host: 'retellai.com', line: 'Reading retellai.com' })
+      return { ok: false, reason: 'other_owner', line: 'a line', offers: [{ kind: 'employer', name: 'Retell AI' }] }
+    })
     const res = await post({ link: 'retellai.com/careers' })
     expect(res.status).toBe(200)
-    expect(await lines(res)).toEqual([{ step: 'refused', reason: 'other_owner', line: 'a line', offers: [{ kind: 'employer', name: 'Retell AI' }] }])
-    for (const reason of ['demo', 'daily_limit', 'bad_link', 'not_found', 'not_saved']) {
-      addMock.mockResolvedValueOnce({ ok: false, reason, line: 'a line', offers: [] })
-      expect(await lines(await post({ link: 'retellai.com/careers' })), reason).toEqual([{ step: 'refused', reason, line: 'a line', offers: [] }])
-    }
+    expect(res.headers.get('content-type')).toContain('application/x-ndjson')
+    expect(await lines(res)).toEqual([{ step: 'reading', host: 'retellai.com', line: 'Reading retellai.com' }, { step: 'refused', reason: 'other_owner', line: 'a line', offers: [{ kind: 'employer', name: 'Retell AI' }] }])
+  })
+
+  it('does not start the stream on a directory hit, which can still end in the daily limit', async () => {
+    addMock.mockImplementationOnce(async (_db, _user, _by, deps) => {
+      deps.report({ step: 'directory_hit', following: false, line: 'In the directory, not on your page yet' })
+      return { ok: false, reason: 'daily_limit', line: 'a line', offers: [] }
+    })
+    const res = await post({ employerId: ID })
+    expect(res.status).toBe(429)
+    expect(await res.json()).toMatchObject({ step: 'refused', reason: 'daily_limit' })
+    addMock.mockImplementationOnce(async (_db, _user, _by, deps) => {
+      deps.report({ step: 'directory_hit', following: false, line: 'In the directory, not on your page yet' })
+      return added
+    })
+    const hit = await post({ employerId: ID })
+    expect(hit.status).toBe(200)
+    expect(await hit.json()).toMatchObject({ step: 'added', employer: added.employer })
+  })
+
+  it('streams a proven board from board_found, which is its first network step', async () => {
+    addMock.mockImplementationOnce(async (_db, _user, _by, deps) => {
+      deps.report({ step: 'board_found', provider: 'ashby', line: 'Found an Ashby board' })
+      return { ok: false, reason: 'other_owner', line: 'a line', offers: [] }
+    })
+    const res = await post({ candidate: { provider: 'ashby', token: 'retell-ai', name: 'Retell AI', domain: null } })
+    expect(res.headers.get('content-type')).toContain('application/x-ndjson')
+    expect((await lines(res)).map((l) => l.step)).toEqual(['board_found', 'refused'])
   })
 
   it('ends a page handed to the browser worker with queued and its line', async () => {
@@ -104,9 +159,15 @@ describe('POST /api/companies/add', () => {
     expect(addMock).not.toHaveBeenCalled()
   })
 
-  it('ends the stream with a plain error line, and nothing else, when the work throws', async () => {
+  it('answers 500 with a plain error line, and nothing else, when the work throws before the stream; an error line after it', async () => {
     addMock.mockRejectedValueOnce(new Error('secret detail'))
-    const out = await lines(await post({ link: 'retellai.com/careers' }))
-    expect(out).toEqual([{ step: 'error', line: 'Cello could not finish that right now. Try again.' }])
+    const res = await post({ link: 'retellai.com/careers' })
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ step: 'error', line: 'Cello could not finish that right now. Try again.' })
+    addMock.mockImplementationOnce(async (_db, _user, _by, deps) => {
+      deps.report({ step: 'reading', host: 'retellai.com', line: 'Reading retellai.com' })
+      throw new Error('secret detail')
+    })
+    expect(await lines(await post({ link: 'retellai.com/careers' }))).toEqual([{ step: 'reading', host: 'retellai.com', line: 'Reading retellai.com' }, { step: 'error', line: 'Cello could not finish that right now. Try again.' }])
   })
 })
