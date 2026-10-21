@@ -76,6 +76,14 @@ describe('followAndRead: follow, then one read inside the budget', () => {
     expect(writes(queries)).toEqual([])
   })
 
+  it('unfollowed rows created today still count toward the 30-a-day limit', async () => {
+    const today = new Date().toISOString()
+    const rows = Array.from({ length: DAILY_ADD_LIMIT }, (_, i) => ({ id: `c${i}`, user_id: 'u1', name: `Co ${i}`, domain: `co${i}.com`, watching: false, created_at: today }))
+    const read = readFn()
+    expect(await followAndRead(world({ companies: rows }).client, 'u1', 'e1', [engineer], { read })).toMatchObject({ ok: false, reason: 'daily_limit' })
+    expect(read).not.toHaveBeenCalled()
+  })
+
   it('follow, unfollow, follow again: one row, watching true, one more read', async () => {
     const { client, tables } = world()
     const read = readFn()
