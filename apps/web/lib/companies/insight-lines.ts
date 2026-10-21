@@ -3,7 +3,6 @@
 
 import { SENIORITY_LEVELS } from '../jobs/classify'
 import { getRoleType } from '../jobs/role-types'
-import { normalizeCompanyName } from '../entities/companies'
 import sponsors from '../dossier/h1b-sponsors.json'
 
 export interface InsightLine {
@@ -43,7 +42,12 @@ const SHOWN_TYPES = 3
 const SHOWN_PLACES = 5
 const SHOWN_STACK = 4
 const SENIOR_FIRST = [...SENIORITY_LEVELS].reverse().filter((l) => l !== 'unknown')
-const LISTED = new Set(sponsors.sponsors.map(normalizeCompanyName))
+// The list holds names, not domains. A one-word name is read as that name's .com, and an employer is on the list only when
+// its whole registered domain is one of those (ramp.com, not ramp.network). A name alone never matches: "Meta" or "Block"
+// is also somebody else.
+// ponytail: the registered domain is the last two labels, so a name under a two-part suffix (example.co.uk) is not found.
+const LISTED = new Set(sponsors.sponsors.filter((n) => /^[a-z0-9]+$/.test(n)).map((n) => `${n}.com`))
+const registered = (domain: string) => domain.toLowerCase().split('.').slice(-2).join('.')
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`
 // Sentence case: "ML Engineer" reads "ML engineer" (acronyms stay).
@@ -121,7 +125,7 @@ export function insightLines(row: InsightsRow | null, e: InsightEmployer): Insig
     if (row.stack.length) lines.push({ text: `Named in postings: ${row.stack.slice(0, SHOWN_STACK).map((s) => `${s.name} ${s.count}`).join(', ')}.`, source: board, at })
   }
   // The list holds names only, so the line says an employer is on it and gives no count.
-  if (LISTED.has(normalizeCompanyName(e.name)) || (e.domain && LISTED.has(e.domain.split('.')[0]))) {
+  if (e.domain && LISTED.has(registered(e.domain))) {
     lines.push({ text: 'Has a record of H-1B filings in public U.S. Department of Labor data.', source: 'U.S. Department of Labor H-1B disclosure data, as a list in Cello', at: null })
   }
   const profile = e.profile && company(e.profile)

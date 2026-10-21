@@ -57,10 +57,14 @@ describe('insightLines', () => {
     expect(texts(row({ median_age_days: 0 }))).toContain('Median posting age under a day.')
   })
 
-  it('says an employer on the H-1B list has a record of filings, with no count, by name or by the domain\'s first label', () => {
+  it('says an employer on the H-1B list has a record of filings, with no count, only when its whole registered domain is the listed name\'s .com', () => {
     const visa = { text: 'Has a record of H-1B filings in public U.S. Department of Labor data.', source: 'U.S. Department of Labor H-1B disclosure data, as a list in Cello', at: null }
-    expect(insightLines(null, { ...acme, name: 'Datadog, Inc.' })).toEqual([visa])
     expect(insightLines(null, { ...acme, name: 'Stripe Payments', domain: 'stripe.com' })).toEqual([visa])
+    expect(insightLines(null, { ...acme, name: 'Ramp', domain: 'ramp.com' })).toEqual([visa])
+    expect(insightLines(null, { ...acme, name: 'Ramp', domain: 'careers.ramp.com' })).toEqual([visa])
+    // another company with the same first label, and an employer matched on its name alone, are not on the list
+    for (const domain of ['ramp.network', 'block.xyz', 'snap.org', 'meta.org']) expect(insightLines(null, { ...acme, name: 'Ramp', domain })).toEqual([])
+    expect(insightLines(null, { ...acme, name: 'Meta', domain: null })).toEqual([])
     expect(insightLines(null, { ...acme, name: 'Somebody Else' })).toEqual([])
   })
 
