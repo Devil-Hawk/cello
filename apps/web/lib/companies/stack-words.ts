@@ -32,9 +32,11 @@ const loose = word([...ANY_CASE], 'gi')
 const exact = word([...CASED], 'g')
 // "Go-to-market", "Go To Market" and "Go to market" are sales talk, not the language
 const SALES_GO = /^(?:-to\b|\s+to\s+market)/i
-// A capital "Go" that opens a sentence is the first word of the sentence ("Go beyond."), so it does not count.
-// ponytail: a sentence-opening "Go" that is the language ("Go is our stack.") is missed; a language cue next to it would catch it.
-const SENTENCE_START = /(?:^|[.!?]\s*|\n\s*)$/
+// A capital "Go" that follows a period, exclamation or question mark is the first word of a sentence ("Go beyond."), so it
+// does not count. A "Go" at the start of a line, a title or the text still counts ("Go developer", an unbulleted list).
+// ponytail: a sentence-opening "Go" that is the language ("Go is our stack.") is missed, and "Go beyond" opening a text counts;
+// a language cue next to it would catch both.
+const SENTENCE_START = /[.!?]\s*$/
 const goCounts = (text: string, at: number) => !SALES_GO.test(text.slice(at + 2)) && !SENTENCE_START.test(text.slice(0, at))
 const canonical = new Map(ANY_CASE.map((t) => [t.toLowerCase(), t]))
 
