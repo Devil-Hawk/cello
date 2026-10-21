@@ -5,5 +5,5 @@
 /** Both files that once read `jobs` for the scoring package now read person_jobs; the list stays so the stale check below keeps its shape. */
 export const K8A_READERS: readonly string[] = []
 
-/** The store reads its own employer's rows to diff a refresh, and the retype routine reads the roles no one has typed yet; neither is a person's read. */
-export const STORE_READERS: readonly string[] = ['lib/ats/store.ts', 'lib/clock/routines/roles-retype.ts']
+/** The store reads its own employer's rows to diff a refresh, the retype routine reads the roles no one has typed yet, and a read of an employer's board reads that employer's closed rows for the pace insight; none is a person's read. */
+export const STORE_READERS: readonly string[] = ['lib/ats/store.ts', 'lib/clock/routines/roles-retype.ts', 'lib/companies/read-employer.ts']

@@ -1,5 +1,5 @@
-// "Suggested for you": companies the person does not watch yet, ranked by real
-// hiring evidence. Pure: no database, no network. lib/companies/refresh.ts
+// "Suggested for you": directory employers (verified, with a board Cello reads) the person does not follow yet, ranked by real
+// hiring evidence. A lead or a Y Combinator candidate that is not a directory employer is never suggested. Pure: no database, no network. lib/companies/refresh.ts
 // gathers the inputs and stores the result.
 //
 // RANKING IS TIERS, NOT WEIGHTS. A points blend would hide why one company
@@ -272,6 +272,17 @@ function makeExcluder(inputs: SuggestionInputs) {
   }
 }
 
+/**
+ * Is this company one of the directory's verified employers? Only those are suggested. A company with a domain is the
+ * employer that has that domain; one without is the employer that has its name.
+ */
+function directoryGate(directory: YcRow[]) {
+  const rows = directory.filter((r) => r.source === 'directory')
+  const domains = new Set(rows.map((r) => normalizeDomain(r.domain)).filter((d): d is string => !!d))
+  const names = new Set(rows.map((r) => r.name_key))
+  return (name: string, domain: string | null) => (domain ? domains.has(domain) : names.has(normalizeCompanyName(name)))
+}
+
 const STALE_MS = 60 * 24 * 3600 * 1000
 
 /** A posting older than 60 days is not evidence of hiring now. An unknown date is kept. */
@@ -291,19 +302,24 @@ export interface ProbeTarget {
   domain: string | null
 }
 
-/** Companies the aggregators show hiring that the person has not ruled out, whose own boards are worth checking. */
+/** Directory employers the person has not ruled out whose own boards are worth checking: the ones the aggregators show hiring first, then the rest of the pool. */
 export function leadCompanies(inputs: SuggestionInputs, leads: JobLead[], directory: YcRow[]): ProbeTarget[] {
   const excluded = makeExcluder(inputs)
+  const inDirectory = directoryGate(directory)
   const byNameKey = new Map(directory.map((r) => [r.name_key, r]))
   const out = new Map<string, ProbeTarget>()
+  const add = (name: string, domain: string | null) => {
+    const key = identityKey(domain, null, name)
+    if (!out.has(key) && inDirectory(name, domain) && !excluded(name, domain, key)) out.set(key, { key, name, domain })
+  }
   for (const lead of leads) {
     if (lead.source === 'ycombinator') continue
     const name = lead.company?.trim()
     if (!name) continue
-    const domain = normalizeDomain(lead.companyDomain) ?? normalizeDomain(byNameKey.get(normalizeCompanyName(name))?.domain)
-    const key = identityKey(domain, null, name)
-    if (!out.has(key) && !excluded(name, domain, key)) out.set(key, { key, name, domain })
+    add(name, normalizeDomain(lead.companyDomain) ?? normalizeDomain(byNameKey.get(normalizeCompanyName(name))?.domain))
   }
+  // then the pool itself, in the order it was loaded
+  for (const r of directory) if (r.source === 'directory') add(r.name, normalizeDomain(r.domain))
   return [...out.values()]
 }
 
@@ -322,12 +338,14 @@ export function buildSuggestions(
   const matcher = roleMatcher(inputs)
   if (!matcher) return null
   const excluded = makeExcluder(inputs)
+  const inDirectory = directoryGate(directory)
 
   const byNameKey = new Map<string, YcRow>()
   for (const r of directory) if (!byNameKey.has(r.name_key)) byNameKey.set(r.name_key, r)
 
   const candidates = new Map<string, Candidate>()
-  const ensure = (name: string, domain: string | null): Candidate => {
+  const ensure = (name: string, domain: string | null): Candidate | null => {
+    if (!inDirectory(name, domain)) return null
     const key = identityKey(domain, null, name)
     let c = candidates.get(key)
     if (!c) {
@@ -348,7 +366,7 @@ export function buildSuggestions(
     // Any company the aggregators show hiring is worth a look at its own board,
     // even when this posting is not the role asked for.
     const c = ensure(name, domain)
-    if (stale(lead, now)) continue
+    if (!c || stale(lead, now)) continue
     const role = matcher(lead)
     if (!role.matched) continue
     if (!locationVerdict({ location: lead.location }, inputs.prefs).ok) continue
@@ -356,8 +374,14 @@ export function buildSuggestions(
     if (!c.roleLabel) c.roleLabel = role.label
   }
 
-  // 2. Similarity to companies the person likes, over the YC directory.
-  const vocab: Vocabulary = buildVocabulary(directory)
+  // The rest of the pool: directory employers no lead names. Their own boards decide whether they are suggested.
+  for (const r of directory) {
+    const domain = normalizeDomain(r.domain)
+    if (r.source === 'directory' && !excluded(r.name, domain, identityKey(domain, null, r.name))) ensure(r.name, domain)
+  }
+
+  // 2. Similarity to companies the person likes, over the YC directory. Only those the directory has verified are suggested.
+  const vocab: Vocabulary = buildVocabulary(directory.filter((r) => r.source === 'yc'))
   const liked = inputs.liked.map((l) => ({ ...l, tags: new Set(l.tags) })).filter((l) => l.tags.size > 0)
   if (liked.length > 0) {
     for (const row of directory) {
@@ -374,7 +398,7 @@ export function buildSuggestions(
       }
       if (!best) continue
       const c = ensure(row.name, domain)
-      c.yc = { row, ...best }
+      if (c) c.yc = { row, ...best }
     }
   }
 
