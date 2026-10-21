@@ -20,6 +20,9 @@ function call(body: Record<string, unknown>, opts: { signature?: string | null; 
 }
 const job = (over: Record<string, unknown> = {}) => ({ id: ID, kind: 'careers_page', candidate_id: 'c1', url: 'https://retellai.com/careers', query: null, state: 'claimed', ...over })
 const candidate = { id: 'c1', name: 'Retell AI', domain: 'retellai.com', ats_provider: null, ats_token: null, source: 'person', failed_reads: 0 }
+// A careers page that lists its roles itself, in the markup, and links no applicant system.
+const posting = (title: string, path: string) => ({ '@context': 'https://schema.org', '@type': 'JobPosting', title, url: `https://retellai.com/careers/${path}`, datePosted: new Date().toISOString().slice(0, 10), hiringOrganization: { '@type': 'Organization', name: 'Retell AI' }, jobLocation: { '@type': 'Place', address: { '@type': 'PostalAddress', addressLocality: 'San Francisco' } }, description: 'Build the voice agent platform.' })
+const ROLES_PAGE = `<html><head><title>Careers at Retell AI</title>${[posting('Backend Engineer', 'backend'), posting('Designer', 'designer')].map((p) => `<script type="application/ld+json">${JSON.stringify(p)}</script>`).join('')}</head><body><h1>Open roles</h1></body></html>`
 const PAGE = '<html><body><a href="https://boards.greenhouse.io/retell">Open roles</a></body></html>'
 
 beforeEach(() => {
@@ -62,6 +65,28 @@ describe('POST /api/directory/jobs/[id]', () => {
     settle.mockResolvedValue({ state: 'failed', reason: 'no_board', offers: [] })
     await call({ ok: true, html: '<html></html>', final_url: 'https://retellai.com/careers', rung: 'http' })
     expect(stored()).toMatchObject({ state: 'done', result: { settled: 'failed', reason: 'no_board' } })
+  })
+
+  it('accepts a page that lists roles and links no board as the employer\'s own site, and follows it for the person who asked', async () => {
+    settle.mockResolvedValue({ state: 'failed', reason: 'no_board', offers: [] })
+    held = fakeDb({ render_jobs: [job({ requested_by: 'u1' })], directory_candidates: [candidate], profiles: [{ id: 'u1', is_demo: false, demo_expires_at: null }] })
+    const res = await call({ ok: true, html: ROLES_PAGE, final_url: 'https://retellai.com/careers', rung: 'stealth' })
+    expect(res.status).toBe(200)
+    expect(held.tables.company_directory).toHaveLength(1)
+    expect(held.tables.company_directory[0]).toMatchObject({ domain: 'retellai.com', verified_by: 'careers_url_host', ats_provider: null, careers_url: 'https://retellai.com/careers', source: 'person' })
+    expect(held.tables.directory_candidates[0]).toMatchObject({ state: 'verified', employer_id: held.tables.company_directory[0].id })
+    expect(stored()).toMatchObject({ state: 'done', result: { settled: 'verified', via: 'site' } })
+    expect(held.tables.companies[0]).toMatchObject({ user_id: 'u1', employer_id: held.tables.company_directory[0].id, watching: true })
+  })
+
+  it('does not accept a page that lists no roles, or one read on another domain', async () => {
+    settle.mockResolvedValue({ state: 'failed', reason: 'no_board', offers: [] })
+    await call({ ok: true, html: '<html><body>Welcome</body></html>', final_url: 'https://retellai.com/careers' })
+    expect(held.tables.company_directory ?? []).toHaveLength(0)
+    held = fakeDb({ render_jobs: [job()], directory_candidates: [candidate] })
+    await call({ ok: true, html: ROLES_PAGE, final_url: 'https://evil.example/careers' })
+    expect(held.tables.company_directory ?? []).toHaveLength(0)
+    expect(stored()).toMatchObject({ state: 'done', result: { settled: 'failed' } })
   })
 
   it('marks the job failed with the worker\'s class, never its words', async () => {

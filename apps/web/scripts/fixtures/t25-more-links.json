@@ -1,0 +1,86 @@
+[
+  {
+    "link": "https://jobs.ashbyhq.com/retell-ai",
+    "expect": {
+      "employer": "Retell AI"
+    }
+  },
+  {
+    "link": "https://boards.greenhouse.io/mixpanel",
+    "expect": {
+      "employer": "Mixpanel"
+    }
+  },
+  {
+    "link": "https://jobs.lever.co/palantir",
+    "expect": {
+      "employer": "Palantir Technologies"
+    }
+  },
+  {
+    "link": "https://apply.workable.com/huggingface/",
+    "expect": {
+      "employer": "Hugging Face"
+    }
+  },
+  {
+    "link": "https://jobs.ashbyhq.com/elevenlabs",
+    "expect": {
+      "employer": "ElevenLabs"
+    }
+  },
+  {
+    "link": "https://jobs.ashbyhq.com/linear",
+    "expect": {
+      "employer": "Linear"
+    }
+  },
+  {
+    "link": "https://jobs.ashbyhq.com/cohere",
+    "expect": {
+      "employer": "Cohere"
+    }
+  },
+  {
+    "link": "https://workos.com/careers",
+    "expect": {
+      "employer": "WorkOS"
+    }
+  },
+  {
+    "link": "https://vercel.com/careers",
+    "expect": {
+      "employer": "Vercel"
+    }
+  },
+  {
+    "link": "https://openai.com/careers",
+    "expect": {
+      "employer": "OpenAI"
+    }
+  },
+  {
+    "link": "https://www.indeed.com/cmp/Stripe/jobs",
+    "expect": {
+      "reason": "not_employer_site"
+    }
+  },
+  {
+    "link": "https://jobs.lever.co/cello-no-such-employer-zzz",
+    "expect": {
+      "reason": "no_board"
+    }
+  },
+  {
+    "link": "https://example.com/careers",
+    "expect": {
+      "reason": "no_board"
+    }
+  },
+  {
+    "link": "https://www.amazon.jobs/en/search",
+    "expect": {
+      "employer": "Amazon"
+    }
+  }
+]

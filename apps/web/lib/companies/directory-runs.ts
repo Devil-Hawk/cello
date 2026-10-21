@@ -5,6 +5,9 @@
 //   T24  directory search coverage: of the owner's 35 real past employers, how many companies.search returns by name
 //        among its first 3 verified rows. Each miss says why: not in the seed, still pending, failed its check, cannot
 //        be read, or found below the first 3. At least 34 of 35.
+//   T34  find by name: the owner's real past employers and some startups, each through the search ladder (find.ts) with the
+//        real network. A name counts when a candidate for that employer is offered; the row says which rung found it, how
+//        long it took, and for a miss which rung it reached and why nothing was shown. Printed, not recorded.
 //   T25  add by link: on 20 real careers links, the right outcome: the right employer verified, added and followed, or
 //        the right reason with its offer. 20 of 20 and no wrong employer added.
 
@@ -12,6 +15,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeCompanyName } from '../entities/companies'
 import { addCompany, type AddFailure, type AddResult } from './add-link'
 import { directoryProgress, searchCompanies } from './directory'
+import type { FindResult, Rung } from './find'
 
 type Db = SupabaseClient<any, any, any>
 
@@ -120,4 +124,46 @@ export function addLinksRun(r: { rows: LinkRow[]; correct: number; wrongEmployer
 export async function recordMeasureRun(db: Db, id: 'T24' | 'T25', run: { value: number | null; passed: boolean | null; sample_n: number; note: string }): Promise<void> {
   const { error } = await db.from('measure_runs').insert({ measure_id: id, value: run.value, passed: run.passed, sample_n: run.sample_n, note: run.note })
   if (error) throw new Error('could not record the run')
+}
+
+// --- T34 -----------------------------------------------------------------------------
+
+export interface FindRow {
+  name: string
+  hit: boolean
+  /** How the employer was found (directory, board, wikidata, site, web), or the last rung reached on a miss. */
+  rung: string
+  found?: string
+  reason?: string
+  ms: number
+}
+
+const squash = (s: string) => normalizeCompanyName(s).replace(/ /g, '')
+
+export async function runFinds(
+  names: string[],
+  find: (name: string, report: (e: { rung: Rung; line: string }) => void) => Promise<FindResult>,
+  clock: () => number = Date.now
+): Promise<{ rows: FindRow[]; hits: number; total: number }> {
+  const rows: FindRow[] = []
+  for (const name of names.map((n) => n.trim()).filter(Boolean)) {
+    const reached: Rung[] = []
+    const started = clock()
+    const result = await find(name, (e) => reached.push(e.rung))
+    const ms = clock() - started
+    const want = squash(name)
+    const last = reached[reached.length - 1] ?? 'directory'
+    if ('candidates' in result) {
+      // The name, or the domain it is registered under: "Fireworks AI" is fireworks.ai, whatever the board calls itself.
+      const c = result.candidates.find((x) => squash(x.name) === want || (x.domain != null && [x.domain.split('.')[0], x.domain.replace(/\./g, '')].some((d) => squash(d) === want)))
+      rows.push(
+        c
+          ? { name, hit: true, rung: c.foundBy, found: `${c.name}${c.domain ? ` (${c.domain})` : ''}; ${c.provenBy}`, ms }
+          : { name, hit: false, rung: last, reason: `offered other employers (${result.candidates.map((x) => `${x.name}${x.domain ? ` at ${x.domain}` : ''}`).join(', ')}), not ${name}`, ms }
+      )
+    } else {
+      rows.push({ name, hit: false, rung: last, reason: result.queued ? 'nothing proven; no search key, so the web search was left for the worker' : 'nothing proven', ms })
+    }
+  }
+  return { rows, hits: rows.filter((r) => r.hit).length, total: rows.length }
 }

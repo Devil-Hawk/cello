@@ -134,7 +134,7 @@ const SOURCE_LABELS: Record<SourceId, string> = {
   web_search: 'Web search',
 }
 
-const PROVIDER_LABELS: Record<AtsProviderName, string> = {
+export const PROVIDER_LABELS: Record<AtsProviderName, string> = {
   greenhouse: 'Greenhouse',
   lever: 'Lever',
   ashby: 'Ashby',

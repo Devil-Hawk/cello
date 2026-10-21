@@ -19,7 +19,7 @@ type Db = SupabaseClient<any, any, any>
 export type Followed = { id: string; error?: undefined } | { id?: undefined; error: string }
 
 const DAY_MS = 86_400_000
-const HANDOFF_LINE = 'Following. Cello reads its board within the hour.'
+export const HANDOFF_LINE = 'Following. Cello reads its board within the hour.'
 
 export async function followEmployer(db: Db, userId: string, employer: Pick<DirectoryRow, 'id' | 'name' | 'domain' | 'logo_url' | 'careers_url' | 'ats_provider' | 'ats_token' | 'verified_by'>, source: 'url' | 'known', opts: { dream?: boolean } = {}): Promise<Followed> {
   const saved = await saveCompany(db, userId, { name: employer.name, domain: employer.domain, careerUrl: employer.careers_url, logoUrl: employer.logo_url, isDream: opts.dream })
@@ -49,6 +49,20 @@ export interface FollowOpts {
 }
 
 /**
+ * A first read, held to the person's budget. Past it the person gets the hand-off and the read goes on ('timeout'); a read
+ * that throws is null.
+ */
+export async function readWithin(read: Promise<EmployerRead>, budgetMs = 8000): Promise<EmployerRead | 'timeout' | null> {
+  const work = read.catch(() => null)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const first = await Promise.race([work, new Promise<'timeout'>((resolve) => (timer = setTimeout(() => resolve('timeout'), budgetMs)))])
+  clearTimeout(timer)
+  // ponytail: the +24 h next read holds only when the background read finishes; a host that kills it past its time leaves next_read_at old. Upgrade: queue the first read as a job the sweep finishes.
+  if (first === 'timeout' && process.env.VERCEL) waitUntil(work)
+  return first
+}
+
+/**
  * Follow a verified employer and read its board once, inside the budget. `people` is the person asking, or [] when they
  * have stated no targets: then the line counts open roles and says nothing about fit.
  */
@@ -71,16 +85,8 @@ export async function followAndRead(db: Db, userId: string, employerId: string, 
   }
   if (!employer.ats_provider || !employer.ats_token) return { ok: true, following: true, already: false, read: null, line: 'Following. Cello checks it with the others, every 6 hours.', fit: null }
 
-  // The read runs while the budget runs. Past the budget the person gets the hand-off line and the read goes on.
-  const work = read(employer, people).catch(() => null)
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const first = await Promise.race([work, new Promise<'timeout'>((resolve) => (timer = setTimeout(() => resolve('timeout'), opts.budgetMs ?? 8000)))])
-  clearTimeout(timer)
-  if (first === 'timeout') {
-    // ponytail: the +24 h next read holds only when the background read finishes; a host that kills it past its time leaves next_read_at old. Upgrade: queue the first read as a job the sweep finishes.
-    if (process.env.VERCEL) waitUntil(work)
-    return { ok: true, following: true, already: false, read: null, line: HANDOFF_LINE, fit: null }
-  }
+  const first = await readWithin(read(employer, people), opts.budgetMs)
+  if (first === 'timeout') return { ok: true, following: true, already: false, read: null, line: HANDOFF_LINE, fit: null }
   if (first === null) return { ok: true, following: true, already: false, read: null, line: ADD_LINES.cannot_read, fit: null }
   if (first.failure) return { ok: true, following: true, already: false, read: null, line: ADD_LINES[first.failure], fit: null }
 
