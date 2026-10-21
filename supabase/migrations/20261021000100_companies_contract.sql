@@ -257,7 +257,8 @@ begin
     select matched into n from public.companies_page(gen_random_uuid(), null, false, true, 1, 0);
     if n <> (select count(*) from public.company_directory where verified_at is not null) then raise exception 'companies_page: matched must count every verified employer, got %', n; end if;
     select matched into n from public.companies_page(gen_random_uuid(), 'other', false, true, 1, 0);
-    if n <> 1 then raise exception 'companies_page: matched must follow the type filter, got %', n; end if;
+    -- compared with the table, not a literal: a populated database may hold other employers with open 'other' roles
+    if n <> (select count(distinct d.id) from public.company_directory d where d.verified_at is not null and exists (select 1 from public.employer_stats s where s.employer_id = d.id and s.role_type = 'other' and s.open_count > 0)) then raise exception 'companies_page: matched must follow the type filter, got %', n; end if;
 
     -- the page of one employer
     select * into r from public.company_page(u, open_id);
