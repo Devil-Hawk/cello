@@ -93,6 +93,10 @@ const ALLOWLIST: Record<string, { calls: string[]; reason: string }> = {
       'RATIONALE_SAMPLE_SIZE) — capped at 6 before this call ever runs, regardless of how many verdict ids ' +
       "a candidate's own SQL aggregation carries.",
   },
+  'apps/web/lib/clock/routines/roles-audit.ts': {
+    calls: [".in('job_id', ids)"],
+    reason: "ids is the job ids of one PAGE (100) page of the person's own shown roles, never an owned-id set.",
+  },
   'apps/web/lib/roles/rejudge.ts': {
     calls: [
       ".in('job_id', ids)",
