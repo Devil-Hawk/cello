@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ashby } from '../ats/ashby'
+import { lever } from '../ats/lever'
 import type { AtsJob } from '../ats/types'
 import { computeInsights, MIN_CLOSES } from './insights'
 import { stackWords } from './stack-words'
@@ -54,24 +56,67 @@ describe('computeInsights', () => {
     expect(computeInsights([job('1', 'A')], { now: NOW, closes: [] }).medianAgeDays).toBeNull()
   })
 
-  it('reports pay only as stated: the count, and the yearly range in the most common currency', () => {
+  it('reports one yearly range in one currency and counts only the postings inside it', () => {
     const i = computeInsights(
       [
         job('1', 'A', { salary: 'USD 140,000–240,000 / yr' }),
         job('2', 'B', { salary: 'USD 120,000–200,000 per year' }),
         job('3', 'C', { salary: 'EUR 90,000 per year' }),
         job('4', 'D', { salary: 'USD 60 per hour' }),
-        job('5', 'E'),
+        job('5', 'E', { salary: 'Competitive' }),
+        job('6', 'F'),
       ],
       { now: NOW, closes: [] }
     )
-    expect(i.pay).toEqual({ stated: 4, min: 120000, max: 240000, currency: 'USD' })
+    expect(i.pay).toEqual({ stated: 2, min: 120000, max: 240000, currency: 'USD' })
   })
 
-  it('counts pay that states no yearly figure without inventing a range', () => {
-    const i = computeInsights([job('1', 'A', { salary: 'Competitive' }), job('2', 'B', { salary: 'USD 60 per hour' })], { now: NOW, closes: [] })
-    expect(i.pay).toEqual({ stated: 2, min: null, max: null, currency: null })
-    expect(computeInsights([job('1', 'A')], { now: NOW, closes: [] }).pay).toEqual({ stated: 0, min: null, max: null, currency: null })
+  it('has no pay when no posting gives a yearly range', () => {
+    const none = { stated: 0, min: null, max: null, currency: null }
+    expect(computeInsights([job('1', 'A', { salary: 'Competitive' }), job('2', 'B', { salary: 'USD 60 per hour' })], { now: NOW, closes: [] }).pay).toEqual(none)
+    expect(computeInsights([job('1', 'A')], { now: NOW, closes: [] }).pay).toEqual(none)
+  })
+
+  it('breaks a tie between currencies by count, then USD first, then the code', () => {
+    const gbp = (id: string) => job(id, 'A', { salary: 'GBP 40,000–45,000 / yr' })
+    const usd = (id: string) => job(id, 'B', { salary: 'USD 100,000–120,000 / yr' })
+    const pay = (jobs: AtsJob[]) => computeInsights(jobs, { now: NOW, closes: [] }).pay
+    expect(pay([gbp('1'), usd('2')])).toEqual({ stated: 1, min: 100000, max: 120000, currency: 'USD' })
+    expect(pay([gbp('1'), gbp('2'), usd('3')])).toEqual({ stated: 2, min: 40000, max: 45000, currency: 'GBP' })
+    expect(pay([job('1', 'A', { salary: 'GBP 40,000 / yr' }), job('2', 'B', { salary: 'CAD 70,000 / yr' })]).currency).toBe('CAD')
+  })
+
+  describe('pay as the adapters really write it', () => {
+    const realFetch = globalThis.fetch
+    afterEach(() => {
+      globalThis.fetch = realFetch
+      vi.restoreAllMocks()
+    })
+    const respond = (body: unknown) => {
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch
+    }
+
+    it('reads a Lever posting: per-year-salary is a yearly range, per-hour-wage is not', async () => {
+      const posting = (id: string, salaryRange: unknown) => ({ id, text: `Engineer ${id}`, hostedUrl: `https://jobs.lever.co/acme/${id}`, categories: {}, salaryRange })
+      respond([
+        posting('a', { min: 150000, max: 190000, currency: 'usd', interval: 'per-year-salary' }),
+        posting('b', { min: 120000, max: 160000, currency: 'usd', interval: 'per-year-salary' }),
+        posting('c', { min: 60, max: 80, currency: 'usd', interval: 'per-hour-wage' }),
+      ])
+      const jobs = await lever.fetch('acme')
+      expect(jobs.map((j) => j.salary)).toEqual(['USD 150,000–190,000 per year salary', 'USD 120,000–160,000 per year salary', 'USD 60–80 per hour wage'])
+      expect(computeInsights(jobs, { now: NOW, closes: [] }).pay).toEqual({ stated: 2, min: 120000, max: 190000, currency: 'USD' })
+    })
+
+    it('reads an Ashby posting and names a currency that is not USD', async () => {
+      const posting = (id: string, currencyCode: string, minValue: number, maxValue: number) => ({
+        title: `Engineer ${id}`, jobUrl: `https://jobs.ashbyhq.com/acme/${id}`, isListed: true,
+        compensation: { summaryComponents: [{ compensationType: 'Salary', interval: '1 YEAR', currencyCode, minValue, maxValue }] },
+      })
+      respond({ jobs: [posting('a', 'GBP', 60000, 90000), posting('b', 'GBP', 80000, 120000), posting('c', 'USD', 100000, 150000)] })
+      const jobs = await ashby.fetch('acme')
+      expect(computeInsights(jobs, { now: NOW, closes: [] }).pay).toEqual({ stated: 2, min: 60000, max: 120000, currency: 'GBP' })
+    })
   })
 
   it('gives a typical close time only from ten closings, as the median of the days between first seen and closed', () => {

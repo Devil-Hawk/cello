@@ -44,9 +44,10 @@ describe('insightLines', () => {
     expect(insightLines(row({ open: 0 }), acme)).toEqual([])
   })
 
-  it('counts pay that gives no range without inventing one, and shows a single figure once', () => {
-    expect(texts(row({ pay: { stated: 3, min: null, max: null, currency: null } }))[1]).toBe('Pay stated on 3 of 14.')
+  it('gives no pay line unless a yearly range exists, shows a single figure once, and names a currency that is not dollars', () => {
+    expect(texts(row({ pay: { stated: 0, min: null, max: null, currency: null } })).some((t) => /^Pay/.test(t))).toBe(false)
     expect(texts(row({ pay: { stated: 1, min: 90000, max: 90000, currency: 'EUR' } }))[1]).toBe('Pay stated on 1 of 14: €90,000.')
+    expect(texts(row({ pay: { stated: 12, min: 60000, max: 120000, currency: 'GBP' }, open: 40 }))[1]).toBe('Pay stated on 12 of 40: £60,000 to £120,000.')
   })
 
   it('says a pace in days under two weeks and in months past three, and the age of postings seen today as under a day', () => {

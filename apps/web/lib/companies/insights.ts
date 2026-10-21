@@ -15,7 +15,7 @@ const TOP_STACK = 30
 export const MIN_CLOSES = 10
 
 export interface Pay {
-  /** Postings that state pay at all. */
+  /** Postings whose stated yearly range is inside min to max, in `currency`. */
   stated: number
   /** The lowest and highest yearly figure stated in `currency`; null when no posting states a yearly range Cello can read. */
   min: number | null
@@ -64,10 +64,15 @@ const tally = <T>(items: T[], key: (t: T) => string | null) => {
 }
 
 /**
- * A yearly range as the adapters write it: "USD 140,000–240,000 / yr" (Ashby) or "USD 140,000–240,000 per year" (Lever,
- * Recruitee). Anything else (an hourly rate, a pre-rendered phrase) counts as stated but gives no figure.
+ * A yearly range as the adapters write it: "USD 140,000–240,000 / yr" (Ashby), "USD 150,000–190,000 per year salary"
+ * (Lever) or "USD 75,000 per year" (Recruitee). An hourly or monthly rate, a bonus and a pre-rendered phrase
+ * ("Competitive") give no yearly figure.
+ *
+ * ponytail: Ashby writes "/ yr" for every interval after multiplying (hourly x2080, daily x260, monthly x12, lib/ats/ashby.ts)
+ * and does not mark which it started from, so an hourly Ashby posting reads here as a stated yearly figure. Only the
+ * adapter can tell them apart; the upgrade is for it to leave the multiplied ones unmarked or flagged.
  */
-const YEARLY = /^([A-Z]{3}) ([\d,]+)(?:–([\d,]+))? (?:\/ yr|per year)$/
+const YEARLY = /^([A-Z]{3}) ([\d,]+)(?:–([\d,]+))? (?:\/ yr|per year(?: salary)?)$/
 function yearly(salary: string): { currency: string; lo: number; hi: number } | null {
   const m = YEARLY.exec(salary.trim())
   if (!m) return null
@@ -76,14 +81,19 @@ function yearly(salary: string): { currency: string; lo: number; hi: number } | 
   return Number.isFinite(lo) && Number.isFinite(hi) ? { currency: m[1], lo: Math.min(lo, hi), hi: Math.max(lo, hi) } : null
 }
 
+/**
+ * One range, over the postings that state a yearly amount in one currency, and `stated` is how many postings that is,
+ * so the count never claims more than the range covers. The currency with most postings wins; a tie goes to USD, then
+ * to the code that sorts first. No such posting gives no range at all.
+ */
 function payOf(jobs: AtsJob[]): Pay {
-  const stated = jobs.filter((j) => j.salary?.trim())
-  const ranges = stated.map((j) => yearly(j.salary as string)).filter((r): r is NonNullable<typeof r> => r !== null)
-  // ponytail: one currency per board (the most common); a board paying in two shows the larger group's range.
-  const currencies = tally(ranges, (r) => r.currency)
-  const currency = [...currencies].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null
+  const ranges = jobs.map((j) => (j.salary ? yearly(j.salary) : null)).filter((r): r is NonNullable<typeof r> => r !== null)
+  const byCurrency = tally(ranges, (r) => r.currency)
+  const rank = (c: string) => (c === 'USD' ? 0 : 1)
+  const currency = [...byCurrency].sort((a, b) => b[1] - a[1] || rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]))[0]?.[0]
+  if (!currency) return { stated: 0, min: null, max: null, currency: null }
   const own = ranges.filter((r) => r.currency === currency)
-  return { stated: stated.length, min: own.length ? Math.min(...own.map((r) => r.lo)) : null, max: own.length ? Math.max(...own.map((r) => r.hi)) : null, currency }
+  return { stated: own.length, min: Math.min(...own.map((r) => r.lo)), max: Math.max(...own.map((r) => r.hi)), currency }
 }
 
 export function computeInsights(jobs: AtsJob[], opts: InsightOpts): Insights {

@@ -109,9 +109,8 @@ export function insightLines(row: InsightsRow | null, e: InsightEmployer): Insig
     const at = row.computed_at
     lines.push({ text: hiring(row), source: board, at })
     const { stated, min, max, currency } = row.pay
-    if (stated > 0) {
-      const range = min !== null && max !== null && currency ? `: ${money(min, currency)}${max > min ? ` to ${money(max, currency)}` : ''}` : ''
-      lines.push({ text: `Pay stated on ${stated} of ${row.open}${range}.`, source: board, at })
+    if (stated > 0 && min !== null && max !== null && currency) {
+      lines.push({ text: `Pay stated on ${stated} of ${row.open}: ${money(min, currency)}${max > min ? ` to ${money(max, currency)}` : ''}.`, source: board, at })
     }
     if (row.typical_close_days !== null) {
       lines.push({ text: `Postings typically close in about ${span(row.typical_close_days)} (from ${plural(row.closes_seen, 'posting', 'postings')} Cello watched close here).`, source: "Cello's own record of this board", at })
