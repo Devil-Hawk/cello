@@ -24,6 +24,9 @@ const NAMED: LinkCase[] = [
   // boards checked by hand: their pages link them only through script
   { link: 'datadoghq.com/careers', expect: { employer: 'Datadog' } },
   { link: 'ramp.com/careers', expect: { employer: 'Ramp' } },
+  // a pasted board whose provider names a curated employer is that employer's own
+  { link: 'https://boards.greenhouse.io/anthropic', expect: { employer: 'Anthropic' } },
+  { link: 'https://jobs.ashbyhq.com/ramp', expect: { employer: 'Ramp' } },
   // an applicant system that keeps no record of its owner, on a name no big employer has
   { link: 'https://pfizer.wd1.myworkdayjobs.com/PfizerCareers', expect: { employer: 'Pfizer' } },
   // a job site is not the employer; its offer is the employer's own posting when the page names one

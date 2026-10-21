@@ -6,6 +6,7 @@ import type { SiteRead } from '../ingest/reader'
 import { addCompany, DAILY_ADD_LIMIT, employerDomain, parseLink, type AddDeps, type AddStep } from './add-link'
 import type { WikidataEntity } from './wikidata'
 import { fakeDb } from './fake-db'
+import { KNOWN_COMPANIES, lookupKnownCompanyByName, type KnownCompany } from './known-companies'
 
 const NOW = Date.now()
 const job = (daysAgo: number, i = 0): AtsJob => ({ title: `Engineer ${i}`, url: `https://boards.example/${i}`, externalId: `${i}`, postedAt: new Date(NOW - daysAgo * 86_400_000).toISOString() })
@@ -434,5 +435,44 @@ describe('a board or a site a search proved', () => {
     const { client } = world({ companies: rows })
     const d = deps(setup)
     expect(await addCompany(client, 'u1', { board: retellBoard }, d.value)).toMatchObject({ ok: false, reason: 'daily_limit' })
+  })
+})
+
+describe('a pasted board of a curated employer', () => {
+  const addressOf: Record<string, (token: string) => string> = {
+    greenhouse: (t) => `https://boards.greenhouse.io/${t}`,
+    ashby: (t) => `https://jobs.ashbyhq.com/${t}`,
+    lever: (t) => `https://jobs.lever.co/${t}`,
+    smartrecruiters: (t) => `https://jobs.smartrecruiters.com/${t}`,
+  }
+  const withBoard = Object.entries(KNOWN_COMPANIES).filter(([, k]) => k.board && addressOf[k.board.provider])
+
+  it('is the curated employer\'s own when the provider names it and declares no other home: every curated board', async () => {
+    expect(withBoard.length).toBeGreaterThan(50)
+    for (const [, k] of withBoard) {
+      // a name with two curated domains (Datadog) is written under the one the name lookup gives
+      const domain = lookupKnownCompanyByName(k.name)?.domain
+      const { client, tables } = world()
+      const board = k.board as NonNullable<KnownCompany['board']>
+      const d = deps({ boards: [{ provider: board.provider, token: board.token, via: 'url' }], identity: { name: k.name, homeUrls: [] } })
+      const r = await addCompany(client, 'u1', { link: addressOf[board.provider](board.token) }, d.value)
+      expect(r, `${k.name} ${board.provider}:${board.token}`).toMatchObject({ ok: true, employer: { name: k.name, domain } })
+      expect(tables.company_directory[0]).toMatchObject({ domain, ats_provider: board.provider, ats_token: board.token })
+    }
+  })
+
+  it('is refused when the board declares a home that is not the curated employer\'s', async () => {
+    const { client, tables } = world()
+    const d = deps({ boards: [{ provider: 'greenhouse', token: 'anthropic', via: 'url' }], identity: { name: 'Anthropic', homeUrls: ['https://anthropic-careers.example'] } })
+    const r = await addCompany(client, 'u1', { link: 'https://boards.greenhouse.io/anthropic' }, d.value)
+    expect(r).toMatchObject({ ok: false, reason: 'other_owner' })
+    expect(tables.company_directory ?? []).toHaveLength(0)
+  })
+
+  it('does not take a board for a curated employer when the provider names someone else', async () => {
+    const { client, tables } = world()
+    const d = deps({ boards: [{ provider: 'greenhouse', token: 'stripe', via: 'url' }], identity: { name: 'Stripe Fan Club', homeUrls: [] } })
+    const r = await addCompany(client, 'u1', { link: 'https://boards.greenhouse.io/stripe' }, d.value)
+    expect(r.ok ? tables.company_directory[0].domain : 'refused').not.toBe('stripe.com')
   })
 })

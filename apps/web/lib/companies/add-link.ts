@@ -23,7 +23,7 @@ import { NO_TARGETS } from '../ingest/reader/targets'
 import { getEmployer, type DirectoryRow } from './directory'
 import { normalizeCompanyName } from '../entities/companies'
 import { followEmployer } from './follow'
-import { isKnownEmployer, knownBoard, lookupKnownCompanyByDomain } from './known-companies'
+import { isKnownEmployer, knownBoard, lookupKnownCompanyByDomain, lookupKnownCompanyByName } from './known-companies'
 import { nameFromDomain } from './page-name'
 import { queueRenderJob } from './render-jobs'
 import { PROVIDER_LABELS } from './suggestions'
@@ -341,6 +341,12 @@ async function addLink(db: Db, userId: string, raw: string, deps: AddDeps, dream
   return addVerified(db, userId, await getEmployer(db, verified.employerId), 'url', dream)
 }
 
+/** A pasted board whose provider names a curated employer (and declares no other home) is that employer's: its curated domain. */
+function curatedHome(ok: { name: string; domain: string | null }): string | null {
+  const k = lookupKnownCompanyByName(ok.name)
+  return k && (!ok.domain || registrable(ok.domain) === registrable(k.domain)) ? k.domain : null
+}
+
 /** Why the browser worker may do better than a plain read, in a few words. */
 const BROWSER_FIXES: Record<string, string> = { bot_check: 'the site asked for a bot check', role_pages: 'its roles show only in a browser' }
 
@@ -404,7 +410,7 @@ async function verifyLink(db: Db, url: URL, domain: string | null, directToken: 
       return writeEmployer(db, {
         name: ok.name,
         // the host of the pasted link, never the board's own declared home (whoever owns a board can edit that)
-        domain,
+        domain: domain ?? curatedHome(ok),
         careersUrl: directToken ? null : url.href,
         provider: read.board.provider,
         token: read.board.token,
