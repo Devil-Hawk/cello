@@ -40,7 +40,10 @@ export const REVERIFY_DAYS = 90
 /** Rows per request to the database: a body can be 200,000 characters. */
 const WRITE_CHUNK = 25
 
-/** The place most postings name, counted without case or edge spaces; a tie goes to the one seen first. Null when none names one. */
+/**
+ * The place most postings name, counted without case or edge spaces; a tie goes to the one seen first. Null when none names one.
+ * ponytail: "Remote" becomes the hq when most postings say it; the upgrade is a skip list of non-places (remote, hybrid, anywhere).
+ */
 export function commonLocation(jobs: { location?: string | null }[]): string | null {
   const seen = new Map<string, { text: string; n: number }>()
   for (const j of jobs) {

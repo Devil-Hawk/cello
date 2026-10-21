@@ -20,11 +20,18 @@ import type { CompanyPage, RoleHit } from '@/lib/companies'
 
 // One employer. It only reads: GET /api/companies/<id> and GET /api/companies/<id>/roles?q=.
 
-const typeLabel = (id: string | null) => (id ? (getRoleType(id)?.label ?? id) : 'Other')
+// Sentence case: "ML Engineer" reads "ML engineer" (acronyms stay), and "7 ML engineer" mid-sentence.
+const typeWords = (id: string | null) =>
+  (id ? (getRoleType(id)?.label ?? id) : 'Other')
+    .split(' ')
+    .map((w) => (w === w.toUpperCase() ? w : w.toLowerCase()))
+    .join(' ')
+const typeLabel = (id: string | null) => typeWords(id).replace(/^./, (c) => c.toUpperCase())
 
 export default function CompanyPageView() {
   const { id } = useParams<{ id: string }>()
   const [company, setCompany] = useState<CompanyPage | null>(null)
+  const [failure, setFailure] = useState<'missing' | 'error' | null>(null)
   const [roles, setRoles] = useState<RoleHit[]>([])
   const [q, setQ] = useState('')
   const [isLoading, setIsLoading] = useState(true)
@@ -33,9 +40,12 @@ export default function CompanyPageView() {
 
   const load = useCallback(() => {
     return fetch(`/api/companies/${id}`)
-      .then((res) => (res.ok ? (res.json() as Promise<CompanyPage>) : null))
+      .then((res) => {
+        setFailure(res.ok ? null : res.status === 404 ? 'missing' : 'error')
+        return res.ok ? (res.json() as Promise<CompanyPage>) : null
+      })
       .then(setCompany)
-      .catch(() => setCompany(null))
+      .catch(() => (setFailure('error'), setCompany(null)))
       .finally(() => setIsLoading(false))
   }, [id])
 
@@ -85,9 +95,9 @@ export default function CompanyPageView() {
     return (
       <EmptyState
         icon={Building2}
-        title="Company not found"
+        title={failure === 'error' ? "Couldn't load this company" : 'Company not found'}
         headingLevel="h1"
-        body="Cello does not have that employer, or the link is wrong."
+        body={failure === 'error' ? 'Cello could not load this company right now.' : 'Cello does not have that employer, or the link is wrong.'}
         action={
           <Button variant="outline" asChild>
             <Link href="/companies">
@@ -157,7 +167,7 @@ export default function CompanyPageView() {
 
       {company.openCount !== null && company.byType.length > 0 && (
         <p className="text-body text-muted-foreground">
-          {company.openCount} open: {company.byType.map((t) => `${t.open} ${typeLabel(t.roleType).toLowerCase()}`).join(', ')}.
+          {company.openCount} open: {company.byType.map((t) => `${t.open} ${typeWords(t.roleType)}`).join(', ')}.
         </p>
       )}
       <p className="text-body text-muted-foreground">Cello has not matched these to your targets yet.</p>
