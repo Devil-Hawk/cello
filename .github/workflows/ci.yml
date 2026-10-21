@@ -92,7 +92,7 @@ jobs:
       - name: Install dependencies
         run: |
           cd packages/scrapers
-          pip install -e ".[dev]"
+          pip install -e ".[dev,render]"
 
       - name: Lint with ruff
         run: |

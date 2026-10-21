@@ -57,6 +57,14 @@ jobs:
           cd packages/scrapers
           pip install -e ".[render,browser]"
 
+      # Scrapling's browser for the rendered and stealth rungs of src/page.py. Non-fatal for
+      # the same reason as the browser below.
+      - name: Install Scrapling browser
+        continue-on-error: true
+        run: |
+          cd packages/scrapers
+          scrapling install
+
       # Pages that build their job list with script need a browser (src/render.py,
       # src/browser_tier.py). It says who it is (Cello and the repository) and does
       # nothing to look like a person. Non-fatal: the fetcher degrades to the plain

@@ -7,12 +7,10 @@ hour, escalating too rarely leaves ~70% of a user's watchlist invisible.
 Nothing here touches the network or launches a browser — the heuristic is pure.
 """
 
-from src.render import (
-    ShellVerdict,
-    count_job_links,
-    fetch_with_render_fallback,
-    looks_like_unrendered_shell,
-)
+from scrapling.fetchers import StealthyFetcher
+
+from src import render
+from src.render import ShellVerdict, count_job_links, looks_like_unrendered_shell
 
 # A real-shaped SPA shell: the jobs arrive later, over XHR.
 SPA_SHELL = """
@@ -102,40 +100,49 @@ class TestLooksLikeUnrenderedShell:
         assert v.text_chars < 600
 
 
-class TestFetchWithRenderFallback:
-    def test_static_html_with_jobs_is_returned_untouched(self):
-        html, rendered = fetch_with_render_fallback("https://example.com/careers", STATIC_BOARD)
-        assert rendered is False
-        assert html == STATIC_BOARD
+class FakePage:
+    def __init__(self):
+        self.moves = []
+        self.mouse = self
+        self.waits = 0
 
-    def test_shell_without_playwright_degrades_to_static(self, monkeypatch):
-        # Playwright absent must NEVER raise: the run continues on the httpx path.
-        monkeypatch.setattr("src.render.playwright_available", lambda: False)
-        html, rendered = fetch_with_render_fallback("https://example.com/careers", SPA_SHELL)
-        assert rendered is False
-        assert html == SPA_SHELL
+    def wheel(self, x, y):
+        self.moves.append(y)
 
-    def test_rendered_html_is_used_when_it_adds_postings(self, monkeypatch):
-        monkeypatch.setattr("src.render.fetch_rendered", lambda url, **kw: STATIC_BOARD)
-        html, rendered = fetch_with_render_fallback("https://example.com/careers", SPA_SHELL)
-        assert rendered is True
-        assert html == STATIC_BOARD
+    def wait_for_timeout(self, ms):
+        self.waits += 1
 
-    def test_rendered_html_is_discarded_when_it_adds_nothing(self, monkeypatch):
-        # A site that serves a bot wall to headless Chromium would otherwise
-        # replace usable static HTML with something worse.
-        monkeypatch.setattr(
-            "src.render.fetch_rendered", lambda url, **kw: "<html><body>Access denied</body></html>"
-        )
-        html, rendered = fetch_with_render_fallback("https://example.com/careers", SPA_SHELL)
-        assert rendered is False
-        assert html == SPA_SHELL
 
-    def test_failed_render_degrades_to_static(self, monkeypatch):
-        monkeypatch.setattr("src.render.fetch_rendered", lambda url, **kw: None)
-        html, rendered = fetch_with_render_fallback("https://example.com/careers", SPA_SHELL)
-        assert rendered is False
-        assert html == SPA_SHELL
+class TestFetchRendered:
+    def test_returns_the_html_and_the_final_url_and_scrolls_the_page(self, monkeypatch):
+        seen = {}
+
+        def fetch(url, **kwargs):
+            seen.update(kwargs)
+            kwargs["page_action"](page := FakePage())
+            seen["page"] = page
+            return type("R", (), {"body": b"<html>roles</html>", "encoding": "utf-8", "url": url + "/all"})()
+
+        monkeypatch.setattr(StealthyFetcher, "fetch", staticmethod(fetch))
+        got = render.fetch_rendered("https://example.com/careers")
+        assert got == ("<html>roles</html>", "https://example.com/careers/all")
+        assert render.last_error is None
+        assert seen["solve_cloudflare"] is False and seen["network_idle"] is True and seen["retries"] == 1
+        assert len(seen["page"].moves) == 5
+
+    def test_a_browser_that_cannot_run_is_none_with_the_class(self, monkeypatch):
+        def broken(url, **kwargs):
+            raise ImportError("no browser here")
+
+        monkeypatch.setattr(StealthyFetcher, "fetch", staticmethod(broken))
+        assert render.fetch_rendered("https://example.com/careers") is None
+        assert render.last_error == "ImportError"
+
+    def test_an_empty_page_is_none(self, monkeypatch):
+        empty = type("R", (), {"body": b"", "encoding": "utf-8", "url": "https://example.com/"})()
+        monkeypatch.setattr(StealthyFetcher, "fetch", staticmethod(lambda url, **kw: empty))
+        assert render.fetch_rendered("https://example.com/careers") is None
+        assert render.last_error == "EmptyPage"
 
 
 class TestShellVerdict:

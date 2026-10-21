@@ -1,46 +1,22 @@
 """Browser-rendered fetching, for career pages that plain HTTP cannot read.
 
-WHY THIS EXISTS
-    The scrapers in this package fetch with httpx and parse with BeautifulSoup.
-    That works only for career pages that ship their jobs in the initial HTML.
-    A large share of modern career pages are single-page apps: httpx receives a
-    near-empty shell plus a bundle reference, the parser finds no postings, and
-    the company is silently recorded as having nothing open.
+A large share of modern career pages are single-page apps: a plain request gets a
+near-empty shell and a bundle reference, the parsers find no postings, and the
+employer is recorded as having nothing open. fetch_rendered loads the page in
+Scrapling's browser (StealthyFetcher) so the list the page builds is what the
+caller reads. page.py decides when to call it, rung by rung (see its docstring);
+this module holds the two things every rung shares: what a job link looks like,
+and the browser call itself.
 
-    The cost of that is measurable. Of one user's 436 watched companies, 303
-    (69.5%) have no detectable Greenhouse/Lever/Ashby board, so this generic
-    scraper is their ONLY route into the product — and across a 1000-row sample
-    of stored jobs, exactly 3 carried source="scraper". The generic path is
-    effectively not producing.
-
-    Playwright closes that gap: it drives Chromium, so a rendered SPA yields the
-    page the site builds in a browser, and the existing parsers work on it
-    unchanged. It identifies itself as Cello (polite.USER_AGENT) and does
-    nothing to look like a person.
-
-WHY ESCALATION RATHER THAN REPLACEMENT
-    A headless browser costs roughly two orders of magnitude more time and
-    memory than an HTTP GET. Rendering every company to serve the fraction that
-    needs it would make the hourly cron far slower and more fragile. So httpx
-    stays the first attempt, and this module is consulted only when the cheap
-    path came back with nothing job-shaped.
-
-SCOPE
-    Public career pages only. This module must never be pointed at login-walled
-    or paid vendors, the same rule the TypeScript side states in
-    apps/web/lib/dossier/comp.ts. robots.txt is checked by page.py before this
-    is called.
+Public career pages only. robots.txt is checked by page.py before any rung, and
+polite.guard_browser holds every request the browser makes to the same rules.
 """
 
 from __future__ import annotations
 
-import contextlib
-import logging
 import re
 from dataclasses import dataclass
-
-logger = logging.getLogger(__name__)
-
+from typing import Any
 
 # Anchors that look like they lead to an individual posting. Deliberately broad:
 # a false "this page has jobs" is cheap (we skip rendering a page that was fine),
@@ -84,8 +60,9 @@ def _visible_text_length(html: str) -> int:
 
 def count_job_links(html: str) -> int:
     """How many anchors in this HTML look like links to a specific posting."""
-    hrefs = re.findall(r'href=["\']([^"\']+)["\']', html, re.IGNORECASE)
-    return sum(1 for h in hrefs if _JOB_HREF_RE.search(h))
+    from scrapling.parser import Selector
+
+    return sum(1 for h in Selector(html).css("a::attr(href)").getall() if _JOB_HREF_RE.search(h))
 
 
 def looks_like_unrendered_shell(html: str | None) -> ShellVerdict:
@@ -123,100 +100,55 @@ def looks_like_unrendered_shell(html: str | None) -> ShellVerdict:
     return ShellVerdict(False, f"{links} job-shaped links, {text} chars of text", links, text)
 
 
-def playwright_available() -> bool:
-    """True when Playwright is importable in this environment.
-
-    Checked at call time, never at import time: this package must keep working
-    on the httpx-only path anywhere a browser is not provisioned (CI, a plain
-    `pip install -e .`, a developer machine without browsers).
-    """
-    try:
-        import playwright.sync_api  # noqa: F401
-    except Exception:  # ImportError, or a broken/partial install
-        return False
-    return True
-
-
 # Why the last fetch_rendered returned None: an exception class name, never a url
 # or page text. page.py reports it so a browser that could not run is never read
 # as a site with no roles.
 last_error: str | None = None
 
 
-def fetch_rendered(url: str, timeout_ms: int = 30_000) -> str | None:
-    """Fetch `url` through a browser and return its rendered HTML.
+def _scroll(page: Any) -> None:
+    """Lists below the fold often load as the page scrolls, as for a visitor."""
+    for _ in range(5):
+        page.mouse.wheel(0, 3000)
+        page.wait_for_timeout(800)
 
-    The browser says who it is: the same Cello user agent as every other
-    request, with no fingerprint tricks and no stealth options. A site that
-    answers it with a bot check is not read.
 
-    Returns None, never raises, when Playwright is unavailable or the render
-    fails. A rendering failure must degrade to "this company yielded nothing
-    this run", exactly as a fetch failure already does.
+def body_text(response: Any, limit: int = 5_000_000) -> str:
+    """The page text of a Scrapling response, as received (not re-serialised), capped."""
+    return bytes(response.body).decode(response.encoding or "utf-8", "replace")[:limit]
+
+
+def fetch_rendered(
+    url: str, *, solve_cloudflare: bool = False, timeout_ms: int = 30_000
+) -> tuple[str, str] | None:
+    """Load `url` in Scrapling's browser; return (html, final_url).
+
+    `solve_cloudflare` is the stealth rung: the Cloudflare interstitial or Turnstile
+    is solved before the page is read (directive 55). Nothing here signs in or
+    submits a form. Returns None, never raises, when the browser is missing or the
+    load fails; `last_error` then holds the exception class.
     """
     global last_error
     last_error = None
-    if not playwright_available():
-        logger.info("playwright not installed; skipping rendered fetch")
-        last_error = "PlaywrightMissing"
-        return None
-
     try:
-        from playwright.sync_api import sync_playwright
+        from scrapling.fetchers import StealthyFetcher
 
-        from .polite import USER_AGENT, guard_browser
+        from .polite import guard_browser
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            try:
-                context = browser.new_context(user_agent=USER_AGENT)
-                guard_browser(context)
-                page = context.new_page()
-                # Career pages commonly fill the list after their first XHR
-                # settles, so waiting for network idle rather than DOMContentLoaded
-                # is what distinguishes a rendered board from the shell we started with.
-                page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
-                # A page that never goes quiet is still read as it stands.
-                with contextlib.suppress(Exception):
-                    page.wait_for_load_state("networkidle", timeout=15_000)
-                # Lists below the fold often load as the page scrolls, as for a visitor.
-                for _ in range(5):
-                    page.mouse.wheel(0, 3000)
-                    page.wait_for_timeout(800)
-                content = page.content() or None
-                if content is None:
-                    last_error = "EmptyPage"
-                return content
-            finally:
-                browser.close()
+        response = StealthyFetcher.fetch(
+            url,
+            timeout=timeout_ms,
+            network_idle=True,
+            solve_cloudflare=solve_cloudflare,
+            retries=1,  # the ladder escalates; a rung does not retry for minutes
+            page_setup=guard_browser,
+            page_action=_scroll,
+        )
+        html = body_text(response)
     except Exception as exc:  # noqa: BLE001 - any failure degrades to "no result"
-        logger.warning("rendered fetch failed: %s", type(exc).__name__)
         last_error = type(exc).__name__
         return None
-
-
-def fetch_with_render_fallback(url: str, static_html: str | None) -> tuple[str, bool]:
-    """Return the best HTML available for `url`, and whether a browser produced it.
-
-    Call with whatever the cheap httpx path returned. If that looks like an
-    unrendered shell, this escalates to a browser and returns the rendered HTML
-    when it is genuinely better — measured by job-shaped link count, so a render
-    that produced no more postings is discarded rather than trusted blindly.
-    """
-    verdict = looks_like_unrendered_shell(static_html)
-    if not verdict.is_shell:
-        return static_html or "", False
-
-    logger.info("escalating %s to a rendered fetch: %s", url, verdict.reason)
-    rendered = fetch_rendered(url)
-    if not rendered:
-        return static_html or "", False
-
-    # Only prefer the rendered HTML if it actually surfaced more postings.
-    # Some sites render into an identical shell, and some serve a bot wall to a
-    # headless browser that they do not serve to httpx.
-    if count_job_links(rendered) > verdict.job_links:
-        return rendered, True
-
-    logger.info("rendered fetch of %s added no job links; keeping static HTML", url)
-    return static_html or "", False
+    if not html:
+        last_error = "EmptyPage"
+        return None
+    return html, str(response.url)

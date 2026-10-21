@@ -11,14 +11,17 @@ dependencies = [
     "supabase>=2.3.0",
     "pydantic>=2.5.0",
     "python-dotenv>=1.0.0",
+    "scrapling>=0.5,<0.6",
 ]
 
 [project.optional-dependencies]
-# Browser-rendered fetching for career pages that ship an empty shell to plain
-# HTTP. Optional on purpose: src/render.py imports it lazily and degrades to the
-# httpx-only path when it is absent, so CI and local installs need not provision
-# a browser. Install with `pip install -e ".[render]" && playwright install chromium`.
+# Reading careers pages the way a browser does: Scrapling's HTTP, browser and stealth
+# fetchers (the "fetchers" extra carries curl_cffi and the patchright browser driver)
+# for src/page.py and src/worker.py. Playwright stays for src/browser_tier.py. The
+# imports are lazy. After installing, `scrapling install` fetches the browser; run it
+# on Actions or on your own machine, never in a default install.
 render = [
+    "scrapling[fetchers]>=0.5,<0.6",
     "playwright>=1.40",
 ]
 # The last escalation rung, for boards that sit behind a click rather than

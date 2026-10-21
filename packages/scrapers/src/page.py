@@ -2,29 +2,35 @@
 
     python -m src.page <url> [--render]
 
-This is all Python does for job ingestion now. Reading the page (structured
-data, the model, verification) is TypeScript, so the scheduled check and the
-in-app button read a page identically; the one thing only this side can do is
-get HTML from a page that builds its list with script.
+This is all Python does for job ingestion. Reading the page (structured data, the
+board links, the proof rules) is TypeScript, so every read treats a page the same
+way; the one thing only this side can do is get HTML from a page that builds its
+list with script or sits behind a bot check.
 
-Everything here is plain and honest. The page's robots.txt is read first and
-obeyed. Requests and the browser both send the Cello user agent (polite.py),
-which names the product and its repository; nothing pretends to be a person.
-The ladder is cheapest first: a plain request, then a browser render when the
-result looks like an empty shell, then a click-through to a "see open roles"
-page. Each later rung is used only when it surfaces more job links than the one
-before it. A site that answers with a bot check, a login or a CAPTCHA is not
-read.
+The page's robots.txt is read first and obeyed. The ladder is cheapest first, and
+each later rung runs only with --render and only when the page so far holds no job
+links:
+
+    http      Scrapling's Fetcher, impersonating Chrome with Scrapling's browser headers
+    rendered  Scrapling's browser (StealthyFetcher) without the Cloudflare solver
+    stealth   the same browser with Cloudflare solving, 60 s (owner directive 55)
+    click     the click-through to a "see open roles" page (browser_tier.py)
+
+Scrapling 0.5 has no DynamicFetcher, so the "rendered" rung is its StealthyFetcher
+with the solver off. A sign-in wall, a CAPTCHA that is not Cloudflare's, or a
+Cloudflare wall the solver could not pass is not read and not bypassed. The fetcher
+never signs in or submits anything.
 
 Output is exactly one JSON line on stdout:
 
-    {"ok": true, "html": "...", "final_url": "...", "rendered": false}
-    {"ok": false, "error": "<ExceptionClass>"}
+    {"ok": true, "html": "...", "final_url": "...", "rendered": false, "rung": "http"}
+    {"ok": false, "error": "<ExceptionClass>", "rung": "stealth"}
 
-When --render was asked for and the browser could not produce a page (not
-installed, crashed, timed out), the line carries "render_error": "<Class>" and
-the plain page, so the caller can say the browser failed instead of reading the
-plain page again and finding no roles.
+"rung" is the one that produced the page, or the one that ended the read. When
+--render was asked for and no browser rung produced a page (not installed, crashed,
+timed out), the line carries "render_error": "<Class>" and the plain page, so the
+caller can say the browser failed instead of reading the plain page again and
+finding no roles.
 
 A failure carries only the exception's class name. The repo is public and so are
 its Actions logs, and an exception message can hold the page's address.
@@ -36,19 +42,13 @@ import contextlib
 import json
 import logging
 import sys
-
-import httpx
+from urllib.parse import urljoin
 
 from . import render
 from .browser_tier import fetch_with_browser_fallback
-from .polite import USER_AGENT
 from .polite import is_public as _is_public
 from .polite import robots_allowed as _allowed
-from .render import fetch_rendered, fetch_with_render_fallback
-
-_USER_AGENT = USER_AGENT
-_MAX_BYTES = 5_000_000
-
+from .render import body_text, count_job_links, fetch_rendered, looks_like_unrendered_shell
 
 _MAX_HOPS = 4
 
@@ -57,77 +57,181 @@ class UnsafeRedirect(Exception):  # noqa: N818 - named for what happened, tests 
     """A redirect hop that is not a public http(s) address, or that robots.txt closes."""
 
 
-def _static_get(url: str) -> tuple[str, str]:
-    """A plain request: (html, final_url). Raises on a transport or HTTP error.
+class HttpStatus(Exception):  # noqa: N818 - the class name is what the caller is told
+    """The server answered with an error status."""
 
-    Redirects are followed by hand, at most _MAX_HOPS, and every hop is held to
-    the same rules as the first address: a public http(s) host, and a robots.txt
-    that allows the path.
+
+class RenderFailed(Exception):  # noqa: N818 - carries the browser's own exception class as `label`
+    def __init__(self, label: str):
+        super().__init__("render failed")
+        self.label = label
+
+
+class Wall(Exception):  # noqa: N818 - subclasses are the class names the caller is told
+    """The page is a wall, not a careers page. `passable` walls are worth a browser."""
+
+    passable = False
+
+
+class CloudflareWall(Wall):
+    passable = True
+
+
+class SignInWall(Wall):
+    pass
+
+
+class CaptchaWall(Wall):
+    pass
+
+
+_CF_MARKERS = "#challenge-form, .cf-turnstile, #cf-challenge-running"
+
+
+def _wall(html: str) -> type[Wall] | None:
+    """Which wall this page is, or None. A wall is a small page with no job links."""
+    from scrapling.parser import Selector
+
+    verdict = looks_like_unrendered_shell(html)
+    if verdict.job_links or verdict.text_chars >= 600:
+        return None
+    page = Selector(html)
+    title = (page.css("title::text").get() or "").lower()
+    if "just a moment" in title or page.css(_CF_MARKERS):
+        return CloudflareWall
+    if page.css(
+        'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], .g-recaptcha, .h-captcha, '
+        '#px-captcha, [src*="captcha-delivery.com"]'
+    ):
+        return CaptchaWall
+    if page.css("input[type=password]"):
+        return SignInWall
+    return None
+
+
+def _static_get(url: str) -> tuple[str, str]:
+    """Rung "http": (html, final_url). Raises on a transport error, an error status or a wall.
+
+    Scrapling's Fetcher sends Chrome's TLS fingerprint and Scrapling's browser headers.
+    Redirects are followed by hand, at most _MAX_HOPS, and every hop is held to the
+    same rules as the first address: a public http(s) host, and a robots.txt that
+    allows the path.
     """
-    headers = {"User-Agent": _USER_AGENT}
-    with httpx.Client(timeout=20.0, follow_redirects=False, headers=headers) as client:
-        current = url
-        for _ in range(_MAX_HOPS + 1):
-            response = client.get(current)
-            if response.is_redirect and response.headers.get("location"):
-                current = str(httpx.URL(current).join(response.headers["location"]))
-                if not _is_public(current) or not _allowed(current):
-                    raise UnsafeRedirect("redirect refused")
-                continue
-            response.raise_for_status()
-            return response.text[:_MAX_BYTES], str(response.url)
+    from scrapling.fetchers import Fetcher
+
+    current = url
+    for _ in range(_MAX_HOPS + 1):
+        response = Fetcher.get(
+            current, impersonate="chrome", follow_redirects=False, timeout=20, retries=1
+        )
+        location = {k.lower(): v for k, v in response.headers.items()}.get("location")
+        if 300 <= response.status < 400 and location:
+            current = urljoin(current, location)
+            if not _is_public(current) or not _allowed(current):
+                raise UnsafeRedirect("redirect refused")
+            continue
+        html = body_text(response)
+        wall = _wall(html)
+        if wall:
+            raise wall("wall")
+        if response.status >= 400:
+            raise HttpStatus(str(response.status))
+        return html, str(response.url)
     raise UnsafeRedirect("too many redirects")
+
+
+def browser_get(url: str, solve_cloudflare: bool) -> tuple[str, str]:
+    """Rungs "rendered" and "stealth": (html, final_url), or raises the wall or the class."""
+    got = fetch_rendered(
+        url, solve_cloudflare=solve_cloudflare, timeout_ms=60_000 if solve_cloudflare else 30_000
+    )
+    if got is None:
+        raise RenderFailed(render.last_error or "RenderFailed")
+    wall = _wall(got[0])
+    if wall:
+        raise wall("wall")
+    return got
+
+
+def _name(error: Exception) -> str:
+    return error.label if isinstance(error, RenderFailed) else type(error).__name__
+
+
+def _fail(error: Exception, rung: str) -> dict[str, object]:
+    return {"ok": False, "error": _name(error), "rung": rung}
+
+
+class NoClickThrough(Exception):  # noqa: N818 - internal: the click rung found nothing better
+    pass
 
 
 def fetch_page(url: str, force_render: bool = False) -> dict[str, object]:
     """Fetch `url`; always returns the output dict, never raises.
 
-    `force_render` is for a page the plain tiers already read without finding a
-    role: the browser view is used whenever it differs, whatever the shell
-    heuristic says (a page can have plenty of text and still build its list in
-    the browser).
+    `force_render` climbs the ladder: each later rung runs only when the page so far
+    holds no job links (a page can have plenty of text and still build its list in
+    the browser). A rung's page replaces the best one only when it holds more.
     """
     if not _is_public(url):
         return {"ok": False, "error": "UnsafeUrl"}
     if not _allowed(url):
         return {"ok": False, "error": "RobotsDisallowed"}
-    static_html: str | None = None
-    final_url = url
-    first_error: Exception | None = None
-    render_error: str | None = None
-    try:
-        static_html, final_url = _static_get(url)
-    except UnsafeRedirect:
-        # A hop the plain fetch refused is never handed to the browser.
-        return {"ok": False, "error": "UnsafeRedirect"}
-    except Exception as exc:  # noqa: BLE001 - reported by class name only
-        first_error = exc
+    best: tuple[str, str, str] | None = None  # html, final_url, rung
+    best_links = -1
+    target = url  # where the later rungs go: the address the plain fetch ended on
+    error: Exception | None = None
+    failed_rung = "http"
+    browser_error: str | None = None
+    browser_page = False
 
-    try:
-        if force_render:
-            browser_html = fetch_rendered(final_url)
-            if not browser_html:
-                render_error = render.last_error or "RenderFailed"
-            html = browser_html or static_html or ""
-            rendered = bool(browser_html) and browser_html != static_html
-        else:
-            html, rendered = fetch_with_render_fallback(final_url, static_html)
-        html, clicked = fetch_with_browser_fallback(final_url, html)
-    except Exception as exc:  # noqa: BLE001
-        html, rendered, clicked = static_html or "", False, False
-        first_error = first_error or exc
+    def click() -> tuple[str, str]:
+        html, used = fetch_with_browser_fallback(target, best[0] if best else "")
+        if not used:
+            raise NoClickThrough
+        return html, target
 
-    if not html:
-        error = first_error or RuntimeError("empty")
-        return {"ok": False, "error": type(error).__name__}
+    ladder = [
+        ("http", lambda: _static_get(url)),
+        ("rendered", lambda: browser_get(target, False)),
+        ("stealth", lambda: browser_get(target, True)),
+        ("click", click),
+    ]
+    for rung, step in ladder if force_render else ladder[:1]:
+        if best and not looks_like_unrendered_shell(best[0]).is_shell:
+            break
+        try:
+            html, final = step()
+        except NoClickThrough:
+            continue
+        except UnsafeRedirect as exc:
+            # A hop the plain fetch refused is never handed to the browser.
+            return _fail(exc, rung)
+        except Exception as exc:  # noqa: BLE001 - reported by class name only
+            error, failed_rung = exc, rung
+            if rung in ("rendered", "stealth"):
+                browser_error = _name(exc)
+            if isinstance(exc, Wall) and not exc.passable and best_links < 1:
+                return _fail(exc, rung)
+            continue
+        if rung == "http":
+            target = final
+        elif rung != "click":
+            browser_page = True
+        links = count_job_links(html)
+        if links > best_links:
+            best, best_links = (html, final, rung), links
+    if best is None or not best[0].strip():
+        return _fail(error or RuntimeError("EmptyPage"), failed_rung)
+    html, final, found = best
     out: dict[str, object] = {
         "ok": True,
         "html": html,
-        "final_url": final_url,
-        "rendered": rendered or clicked,
+        "final_url": final,
+        "rendered": found != "http",
+        "rung": found,
     }
-    if render_error:
-        out["render_error"] = render_error
+    if browser_error and not browser_page and found == "http":
+        out["render_error"] = browser_error
     return out
 
 

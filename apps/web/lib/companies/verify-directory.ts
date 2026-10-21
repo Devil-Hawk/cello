@@ -282,7 +282,7 @@ export interface CandidateRow {
   domain: string | null
   ats_provider: AtsProviderId | null
   ats_token: string | null
-  source: 'kalil' | 'yc'
+  source: 'kalil' | 'yc' | 'person'
   failed_reads: number
 }
 
@@ -332,7 +332,7 @@ export async function settleCandidate(db: Db, c: CandidateRow, deps: VerifyDeps 
   const at = new Date(now).toISOString()
   const later = (days: number) => new Date(now + days * DAY_MS).toISOString()
 
-  const v = await verifyEmployer(db, { name: c.name, domain: c.domain, boards: c.ats_provider && c.ats_token ? [{ provider: c.ats_provider, token: c.ats_token }] : [], source: c.source === 'yc' ? 'yc' : 'seed' }, deps).catch(
+  const v = await verifyEmployer(db, { name: c.name, domain: c.domain, boards: c.ats_provider && c.ats_token ? [{ provider: c.ats_provider, token: c.ats_token }] : [], source: c.source === 'yc' ? 'yc' : c.source === 'person' ? 'person' : 'seed' }, deps).catch(
     // A write the database refused (the domain is already another row's) must not leave this candidate first in line forever: it counts as an unread board.
     (): Verified => ({ ok: false, reason: 'cannot_read' })
   )
