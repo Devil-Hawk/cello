@@ -11,8 +11,8 @@
 //   other failure mode in that file — see its own header). lib/graph/
 //   runs.ts's DAG runs always have that row because app/api/harness/run/
 //   route.ts inserts the agent_runs row itself before ever calling
-//   invokeGraphForUser. The four
-//   one-shot routes this port flips onto runAgentUnit (analyze, match/batch,
+//   invokeGraphForUser. The three
+//   one-shot routes this port flips onto runAgentUnit (analyze,
 //   outreach draft, outreach follow-up — step 9 of the langgraph port) call
 //   runAgentUnit DIRECTLY, on purpose (see lib/graph/unit.ts's header: "a
 //   second, schema-checked/metered/journaled door onto the SAME entry

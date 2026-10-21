@@ -258,7 +258,7 @@ export interface JobBriefRow {
  *  than whatever order Postgres happens to return rows in. No ownership check
  *  here — every caller already sourced these ids from an owned/company-scoped
  *  query (ingestLeads only ever creates rows under this user's companies;
- *  bulk_matcher's candidate selection filters by this user's companyIds). */
+ *  score_jobs's candidate selection filters by this user's companyIds). */
 export async function loadJobBriefs(ctx: CopilotToolContext, jobIds: string[]): Promise<JobBriefRow[]> {
   if (jobIds.length === 0) return []
   // the person's own role rows: their verdict, new flag and company, never the shared row's or the first storer's

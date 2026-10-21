@@ -75,7 +75,7 @@ export const registry: Record<StepAgentType, AgentFn> = {
 
 // --- The five graph-port stragglers, wrapped behind the AgentFn shape -------
 //
-// None of runBulkMatch/composeAndStoreDigest/generateOutreachDraft/
+// None of composeAndStoreDigest/generateOutreachDraft/
 // optimizeResume(AndSave) is modified here or anywhere else in this file —
 // each wrapper below only adapts a StepContext into that function's existing
 // argument shape and its existing return value into an AgentResult. See

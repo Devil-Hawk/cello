@@ -8,7 +8,7 @@
 // full UI affordances (match buttons, optimizer) and then a bare "missing
 // key" 400 on click. This module is the ONE place that turns "no usable
 // backend" into a message that explains the actual gap, so
-// /api/settings/status, /api/agents/match, /api/agents/match/batch and
+// /api/settings/status, /api/agents/match and
 // /api/resume/optimize all say the same thing.
 //
 // Now that the model backend is pluggable (lib/harness/providers/*), "usable"

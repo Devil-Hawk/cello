@@ -392,7 +392,7 @@ async function runUnitBody<T extends UnitType>(
   // Sums every ctx.llm call this unit makes — most agent implementations
   // return `tokensUsed: 0` from their own AgentResult on the understanding
   // that a caller meters ctx.llm itself (see e.g.
-  // lib/harness/agents/matcher.ts:832's "already metered per-call through
+  // the old matcher's "already metered per-call through
   // ctx.llm" comment; lib/harness/executor.ts#attemptOnce did this same
   // summing for the pre-port DAG executor). Without it, tokensUsed below
   // would silently read 0 for most units and the run-level budget gate in
