@@ -5,6 +5,8 @@
 --   cannot_assess), one reading per requirement with its resume line and quote, where the reading came from, and when.
 --   judge_budget counts the free model calls of each day, in total and per person, behind take_judge_call().
 --   The reset trigger on a changed posting also clears the four new columns, so a role is judged again when its text changes.
+--   A changed resume (profiles.resume_text, which every resume write mirrors into) marks the person's roles as waiting again by
+--   clearing judged_at only: the old band and readings stay until the new reading lands.
 --   The roles.match routine (every 30 minutes) is seeded on.
 --
 -- The legacy chance and chance_detail columns stay and are still written beside band until the pages read band (PR 6).
@@ -51,6 +53,27 @@ end;
 $fn$;
 
 revoke all on function public.reset_person_roles_on_posting_change() from public, anon, authenticated;
+
+create or replace function public.reset_judged_on_resume_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $fn$
+begin
+  update public.person_roles set judged_at = null where user_id = new.id and judged_at is not null;
+  return null;
+end;
+$fn$;
+
+revoke all on function public.reset_judged_on_resume_change() from public, anon, authenticated;
+
+drop trigger if exists profiles_reset_judged_on_resume on public.profiles;
+create trigger profiles_reset_judged_on_resume
+  after update of resume_text on public.profiles
+  for each row
+  when (old.resume_text is distinct from new.resume_text)
+  execute function public.reset_judged_on_resume_change();
 
 -- ---------------------------------------------------------------------------
 -- The day's free calls
@@ -134,6 +157,9 @@ begin
   end if;
   if not exists (select 1 from pg_trigger where tgname = 'jobs_reset_person_roles_on_change') then
     raise exception 'posting change reset trigger is missing';
+  end if;
+  if not exists (select 1 from pg_trigger where tgname = 'profiles_reset_judged_on_resume') then
+    raise exception 'the resume change trigger is missing';
   end if;
   if not exists (select 1 from public.routines where command = 'roles.match' and user_id is null and enabled) then
     raise exception 'the roles.match routine is not seeded on';
