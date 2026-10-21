@@ -21,7 +21,8 @@ alter table public.company_directory
 -- companies_page
 -- ---------------------------------------------------------------------------
 
--- Following first, alphabetical; then everyone else, most open roles first, then alphabetical.
+-- Following first, alphabetical; then everyone else, most open roles first, then alphabetical. The count that orders is the
+-- count the page shows: an employer with a reason (cannot read, closed) shows none, so it sorts with the unknowns, last.
 -- p_type: keep an employer whose board lists an open role of that type (employer_stats), kept or not.
 -- p_with_roles: keep an employer where this person holds an open role (person_roles).
 -- p_show_closed: false hides closed employers from everyone else; a closed employer the person follows always shows.
@@ -76,7 +77,7 @@ as $$
             where pr.user_id = p_user and j.employer_id = d.id and pr.hidden_reason is null and j.still_open is not false))
    order by coalesce(f.following, false) desc,
             case when f.following then d.name_norm end,
-            d.open_count desc nulls last, d.name_norm, d.id
+            case when d.cannot_read_reason is null then d.open_count end desc nulls last, d.name_norm, d.id
    limit least(greatest(coalesce(p_limit, 50), 1), 100) offset greatest(coalesce(p_offset, 0), 0)
 $$;
 
@@ -196,7 +197,7 @@ begin
     insert into public.company_directory (id, name, name_norm, domain, source, verified_at, open_count, open_count_at, last_read_at, hq) values
       (open_id,   'Selfcheck Open',   'selfcheck open',   'selfcheck-open.invalid',   'seed',   now(), 4, now(), now(), 'Paris'),
       (closed_id, 'Selfcheck Closed', 'selfcheck closed', 'selfcheck-closed.invalid', 'person', now(), 9, now() - interval '30 days', now(), null),
-      (unread_id, 'Selfcheck Unread', 'selfcheck unread', 'selfcheck-unread.invalid', 'seed',   now(), null, null, now(), null);
+      (unread_id, 'Selfcheck Unread', 'selfcheck unread', 'selfcheck-unread.invalid', 'seed',   now(), 50, now() - interval '30 days', now(), null);
     -- the follow row finds its employer by the careers address (companies_link_employer)
     update public.company_directory set cannot_read_reason = 'stale', next_read_at = null, careers_url = 'https://selfcheck-closed.invalid/careers' where id = closed_id;
     update public.company_directory set cannot_read_reason = 'cannot_read', failed_reads = 3 where id = unread_id;
@@ -214,11 +215,15 @@ begin
     select * into r from public.companies_page(u, null, false, false, 50, 0) where name like 'Selfcheck%' limit 1;
     if r.name <> 'Selfcheck Closed' or not r.following or not r.closed then raise exception 'companies_page: the follow must come first and be closed'; end if;
     select * into r from public.companies_page(u, null, false, false, 50, 0) where name = 'Selfcheck Unread';
-    if r.closed or r.open_count is not null or r.cannot_read_reason <> 'cannot_read' then raise exception 'companies_page: an unreadable employer is not closed and has no count'; end if;
+    if r.closed or r.cannot_read_reason <> 'cannot_read' then raise exception 'companies_page: an unreadable employer is not closed'; end if;
     select count(*) into n from public.companies_page(u, 'other', false, true, 50, 0) where name like 'Selfcheck%';
     if n <> 1 then raise exception 'companies_page: the type filter must keep only the employer that lists the type, got %', n; end if;
     select count(*) into n from public.companies_page(u, null, true, true, 50, 0) where name like 'Selfcheck%';
     if n <> 0 then raise exception 'companies_page: with roles must keep nobody before a role is held, got %', n; end if;
+
+    -- everyone else is ordered by the count the page shows: the unreadable employer's stale 50 does not put it first
+    select name into r from public.companies_page(gen_random_uuid(), null, false, true, 50, 0) where name like 'Selfcheck%' limit 1;
+    if r.name <> 'Selfcheck Open' then raise exception 'companies_page: an employer with no shown count must sort last, got %', r.name; end if;
 
     -- the page of one employer
     select * into r from public.company_page(u, open_id);
