@@ -71,7 +71,7 @@ function formatSalary(j: LeverPosting): string | undefined {
   const max = typeof range.max === 'number' && Number.isFinite(range.max) ? range.max : null
   if (min == null && max == null) return undefined
   const currency = typeof range.currency === 'string' && range.currency ? range.currency.toUpperCase() : ''
-  const interval = typeof range.interval === 'string' && range.interval ? ` per ${range.interval.replace(/-/g, ' ')}` : ''
+  const interval = typeof range.interval === 'string' && range.interval ? ` per ${range.interval.replace(/^per-/, '').replace(/-/g, ' ')}` : ''
   const fmt = (n: number) => n.toLocaleString('en-US')
   const span = min != null && max != null && min !== max ? `${fmt(min)}–${fmt(max)}` : fmt((min ?? max) as number)
   return `${currency ? `${currency} ` : ''}${span}${interval}`.trim()

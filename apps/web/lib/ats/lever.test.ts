@@ -57,7 +57,7 @@ describe('lever.fetch', () => {
       location: 'Remote - US',
     })
     expect(job.postedAt).toBe(new Date(1_790_000_000_000).toISOString())
-    expect(job.salary).toContain('150,000')
+    expect(job.salary).toBe('USD 150,000–190,000 per year salary')
   })
 
   it('still returns the opening paragraph when a posting has no lists', async () => {
