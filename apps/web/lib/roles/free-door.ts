@@ -108,10 +108,15 @@ async function peopleWaiting(db: AdminClient, userId: string): Promise<number> {
   return new Set([userId, ...((data as { user_id: string }[] | null) ?? []).map((r) => r.user_id)]).size
 }
 
+/** The day's cap and this person's share of it. */
+export async function shareFor(db: AdminClient, userId: string, deps: DoorDeps = realDoor): Promise<{ cap: number; share: number }> {
+  const cap = deps.dailyCap()
+  return { cap, share: dayShare(cap, await peopleWaiting(db, userId)) }
+}
+
 /** Takes one call from the day's budget for the person. False when the day's cap or their share is used. */
 async function takeFreeCall(db: AdminClient, userId: string, deps: DoorDeps): Promise<boolean> {
-  const cap = deps.dailyCap()
-  const share = dayShare(cap, await peopleWaiting(db, userId))
+  const { cap, share } = await shareFor(db, userId, deps)
   const { data, error } = await db.rpc('take_judge_call', { p_day: deps.now().toISOString().slice(0, 10), p_user: userId, p_share: share, p_cap: cap })
   return !error && data === true
 }

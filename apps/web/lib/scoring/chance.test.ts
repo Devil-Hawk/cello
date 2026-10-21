@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { LlmResult, LlmRunOptions } from '@/lib/harness/types'
 import { MissingKeyError } from '@/lib/harness/llm'
-import { assessChances, labelChance, resumeLines, verifyChecks, type CitationStats } from './chance'
+import { assessChances, ChanceStop, labelChance, resumeLines, verifyChecks, type CitationStats } from './chance'
 import type { Requirement, RequirementsOutcome } from './posting-requirements'
 import type { RequirementCheck, RoleFacts } from './types'
 
@@ -200,6 +200,11 @@ describe('assessChances', () => {
   it('lets a missing key through to the caller', async () => {
     const { fn } = llmReturning(new MissingKeyError('no key'))
     await expect(assessChances(fn, RESUME, [{ role: role('a'), outcome: ok(reqs) }])).rejects.toThrow('no key')
+  })
+
+  it('lets a stop through, so the roles are not marked as cannot assess', async () => {
+    const { fn } = llmReturning(new ChanceStop('day'))
+    await expect(assessChances(fn, RESUME, [{ role: role('a'), outcome: ok(reqs) }])).rejects.toBeInstanceOf(ChanceStop)
   })
 
   it('checks three roles in one call', async () => {
