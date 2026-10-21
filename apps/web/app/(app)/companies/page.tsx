@@ -45,6 +45,7 @@ export default function CompaniesPageView() {
   const [page, setPage] = useState<CompaniesPage | null>(null)
   const [rows, setRows] = useState<CompanyRow[]>([])
   const [more, setMore] = useState(false)
+  const [matched, setMatched] = useState<number | null>(null)
   const [showClosed, setShowClosed] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -61,6 +62,7 @@ export default function CompaniesPageView() {
         if (!res.ok) throw new Error('load')
         const data = (await res.json()) as CompaniesPage
         setPage(data)
+        setMatched((m) => data.matched ?? m)
         setRows((prev) => (offset === 0 ? data.rows : [...prev, ...data.rows]))
         setMore(data.rows.length === PAGE)
       } catch {
@@ -151,6 +153,7 @@ export default function CompaniesPageView() {
         <EmptyState icon={Building2} title="No companies yet" body="Paste an employer's careers link, and Cello will read its open roles." />
       ) : (
         <>
+          {matched !== null && <p className="text-caption text-muted-foreground">{matched === 1 ? '1 employer matches' : `${matched.toLocaleString('en-US')} employers match`}</p>}
           {following.length > 0 && (
             <section className="space-y-2">
               <h2 className="font-display text-section text-foreground">Following</h2>

@@ -26,7 +26,10 @@ alter table public.company_directory
 -- p_type: keep an employer whose board lists an open role of that type (employer_stats), kept or not.
 -- p_with_roles: keep an employer where this person holds an open role (person_roles).
 -- p_show_closed: false hides closed employers from everyone else; a closed employer the person follows always shows.
-create or replace function public.companies_page(
+-- matched: how many employers pass these filters in all, whatever the page size, for "12 employers match".
+-- (dropped first so the migration reruns when the columns change)
+drop function if exists public.companies_page(uuid, text, boolean, boolean, integer, integer);
+create function public.companies_page(
   p_user uuid,
   p_type text,
   p_with_roles boolean,
@@ -50,7 +53,8 @@ returns table (
   closed boolean,
   following boolean,
   is_dream boolean,
-  role_types text[]
+  role_types text[],
+  matched integer
 )
 language sql
 stable
@@ -60,7 +64,8 @@ as $$
   select d.id, d.name, d.domain, d.logo_url, d.hq, d.source,
          d.open_count, d.open_count_at, d.last_read_at, d.next_read_at, d.failed_reads, d.cannot_read_reason,
          x.closed, coalesce(f.following, false), coalesce(f.dream, false),
-         array(select distinct s.role_type from public.employer_stats s where s.employer_id = d.id and s.role_type is not null and s.open_count > 0 order by 1)
+         array(select distinct s.role_type from public.employer_stats s where s.employer_id = d.id and s.role_type is not null and s.open_count > 0 order by 1),
+         count(*) over ()::integer
     from public.company_directory d
     cross join lateral (select d.cannot_read_reason is not null and d.cannot_read_reason <> 'cannot_read' as closed) x
     left join lateral (
@@ -224,6 +229,12 @@ begin
     -- everyone else is ordered by the count the page shows: the unreadable employer's stale 50 does not put it first
     select name into r from public.companies_page(gen_random_uuid(), null, false, true, 50, 0) where name like 'Selfcheck%' limit 1;
     if r.name <> 'Selfcheck Open' then raise exception 'companies_page: an employer with no shown count must sort last, got %', r.name; end if;
+
+    -- matched counts every employer behind the filters, not the page, and follows them
+    select matched into n from public.companies_page(gen_random_uuid(), null, false, true, 1, 0);
+    if n <> (select count(*) from public.company_directory where verified_at is not null) then raise exception 'companies_page: matched must count every verified employer, got %', n; end if;
+    select matched into n from public.companies_page(gen_random_uuid(), 'other', false, true, 1, 0);
+    if n <> 1 then raise exception 'companies_page: matched must follow the type filter, got %', n; end if;
 
     -- the page of one employer
     select * into r from public.company_page(u, open_id);

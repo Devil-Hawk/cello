@@ -72,8 +72,11 @@ export interface CompanyRow {
 }
 
 export interface CompaniesPage {
+  /** Global facts: they do not follow the filters. */
   header: CompaniesHeader
   rows: CompanyRow[]
+  /** Employers behind the current filters in all, whatever the page size ("12 employers match"); null past the last page, where no row says. */
+  matched: number | null
   limit: number
   offset: number
 }
@@ -195,8 +198,9 @@ export async function companiesPage(db: Db, userId: string, opts: CompaniesPageO
     db.rpc('companies_page', { p_user: userId, p_type: opts.type ?? null, p_with_roles: opts.withRolesForYou ?? false, p_show_closed: opts.showClosed ?? false, p_limit: limit, p_offset: offset }),
   ])
   if (list.error) throw new Error('could not read the companies')
-  const rows = ((list.data ?? []) as (Head & { role_types: string[] | null })[]).map((r) => ({ ...headOf(r), keptForYou: null, topForYou: null, roleTypes: r.role_types ?? [] }))
-  return { header: h, rows, limit, offset }
+  const found = (list.data ?? []) as (Head & { role_types: string[] | null; matched: number })[]
+  const rows = found.map((r) => ({ ...headOf(r), keptForYou: null, topForYou: null, roleTypes: r.role_types ?? [] }))
+  return { header: h, rows, matched: found[0]?.matched ?? (offset === 0 ? 0 : null), limit, offset }
 }
 
 /**

@@ -42,6 +42,14 @@ describe('companiesPage', () => {
     expect(rows[1]).toMatchObject({ foundBy: 'person', following: true, isDream: true, hq: null })
   })
 
+  it('says how many employers match the filters, not how many are on the page', async () => {
+    const { client } = setup([sql({ matched: 120 }), sql({ employer_id: 'e2', matched: 120 })])
+    expect((await companiesPage(client, 'u1', { limit: 2, now: NOW })).matched).toBe(120)
+    const none = setup([])
+    expect((await companiesPage(none.client, 'u1', { now: NOW })).matched).toBe(0)
+    expect((await companiesPage(none.client, 'u1', { offset: 50, now: NOW })).matched).toBeNull()
+  })
+
   it('asks for the first 50 without closed employers, and passes the filters through', async () => {
     const { client, calls } = setup([])
     await companiesPage(client, 'u1', { now: NOW })
