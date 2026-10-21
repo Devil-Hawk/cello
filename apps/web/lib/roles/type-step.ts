@@ -2,9 +2,13 @@
 //
 // The answer is one role type id from the taxonomy, or `none`, and the words that decide it, quoted. The
 // quote must be found in the title or in the first 600 characters of the posting, else the answer is `none`.
-// A quote found in the title is about the title: it is written to the shared cache `title_types`, which
-// serves every person. A quote found only in the posting is about that one posting: it is written to that
-// `jobs` row only, and the shared cache records that the title alone decides nothing.
+//
+// What reaches the shared cache `title_types` (which serves every person) is only what the title alone decides:
+// a quote found in the title of a title that names a job. A quote found only in the posting, and any answer
+// for a title that names no particular job ("member of technical staff"), is about that one role: it is
+// written to that `jobs` row only and the key stays `pending`, so the next role with that title is read too.
+// Each role is read once (`jobs.type_read_at`), at most READS_PER_KEY roles of a key in a slice. A `none`
+// from the title alone is cached, and expires when TAXONOMY_VERSION changes.
 //
 // The model runs through the ingest free-model call (lib/ingest/model.ts) and nowhere else; this file is the
 // only one that calls the step. Provenance (lib/provenance/types.ts) is written with every answer.
@@ -14,7 +18,7 @@ import { z } from 'zod'
 import { parseJsonLoose } from '../harness/llm'
 import { composeSystemPrompt, loadModeDoc, promptRef } from '../harness/prompts'
 import { MODEL_LIMIT, type ModelCall } from '../ingest/model'
-import { ROLE_TYPE_IDS, TAXONOMY_VERSION } from '../jobs/role-types'
+import { AMBIGUOUS_TITLES, ROLE_TYPE_IDS, TAXONOMY_VERSION } from '../jobs/role-types'
 import type { Prov } from '../provenance/types'
 import { frameJobTextList } from '../security/job-text'
 
@@ -32,6 +36,8 @@ export const SLICE_CALLS = 40
  * for everything; this is a fifth of it. ponytail: a constant, an env value when the owner wants to tune it.
  */
 export const DAILY_CALLS = 200
+/** Roles of one key a slice may read (an ambiguous title is read role by role). */
+export const READS_PER_KEY = 5
 
 export interface TypeItem {
   i: number
@@ -135,19 +141,17 @@ interface Sample {
   posting_head: string
 }
 
-/** What apply_model_titles takes for one title. */
+/**
+ * What apply_model_titles takes for one sampled role. The cache gets a typed answer only when the title alone
+ * decided it, and a `none` only for a title that names a job. Otherwise the key stays `pending` and the role is
+ * marked read (with its own type when the posting decided it).
+ */
 export function cacheRow(sample: Pick<Sample, 'title_norm' | 'dept_norm' | 'job_id'>, r: TypeResult): Record<string, unknown> {
-  const shared = r.where === 'title'
-  return {
-    title_norm: sample.title_norm,
-    dept_norm: sample.dept_norm,
-    taxonomy_version: TAXONOMY_VERSION,
-    // a title the posting had to explain decides nothing for other postings: the cache says none, this one role keeps its type
-    role_type: shared ? r.type : null,
-    status: shared ? 'typed' : 'none',
-    prov: r.prov,
-    ...(r.where === 'posting' ? { job_id: sample.job_id, job_type: r.type, job_prov: r.prov } : {}),
-  }
+  const base = { title_norm: sample.title_norm, dept_norm: sample.dept_norm, taxonomy_version: TAXONOMY_VERSION, prov: r.prov }
+  const ambiguous = AMBIGUOUS_TITLES.includes(sample.title_norm)
+  if (r.where === 'title' && !ambiguous) return { ...base, role_type: r.type, status: 'typed' }
+  if (!r.type && !ambiguous) return { ...base, role_type: null, status: 'none' }
+  return { ...base, role_type: null, status: 'pending', job_id: sample.job_id, read_at: r.prov.at, ...(r.type ? { job_type: r.type, job_prov: r.prov } : {}) }
 }
 
 /** Calls made today, from the spend ledger (one row for each model tried, so this can only overcount). */
@@ -158,8 +162,8 @@ async function callsToday(admin: Db, now: () => number): Promise<number> {
 }
 
 /**
- * The step on the shared cache: pull titles code left pending (the most seen first, each with one open
- * untyped role to read), type them, write the answers. Serves the cache to every untyped role first and
+ * The step on the shared cache: pull the roles of titles still open (the most seen first, an ambiguous title
+ * role by role), type them, write the answers. Serves the cache to every untyped role first and
  * last, so a title typed once reaches every role with it, new ones included.
  */
 export async function runTypeStep(
@@ -173,12 +177,13 @@ export async function runTypeStep(
   }
   await apply([])
   const out = { typed: 0, none: 0, stop: null as TypeStop }
+  const since = new Date(opts.now()).toISOString()
   if (!call) return { ...out, stop: 'unavailable' }
   let left = Math.min(opts.maxCalls ?? SLICE_CALLS, DAILY_CALLS - (await callsToday(admin, opts.now)))
   if (left <= 0) return { ...out, stop: 'limit' }
   while (left > 0 && opts.now() < opts.deadlineAt) {
     const calls = Math.min(left, 4)
-    const { data, error } = await admin.rpc('pending_title_samples', { p_limit: calls * BATCH })
+    const { data, error } = await admin.rpc('pending_title_samples', { p_limit: calls * BATCH, p_version: TAXONOMY_VERSION, p_since: since, p_per_key: READS_PER_KEY, p_ambiguous: AMBIGUOUS_TITLES })
     if (error) throw new Error('pending_title_samples')
     const samples = (data ?? []) as Sample[]
     if (samples.length === 0) break

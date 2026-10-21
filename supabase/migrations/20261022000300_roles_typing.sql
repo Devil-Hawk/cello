@@ -1,7 +1,8 @@
 -- Roles PR 3: the role.type step writes the shared title cache (lib/roles/type-step.ts).
 --
 --   title_types.created_at     when a title first appeared, so T19 can count new titles a week
---   pending_title_samples      the titles code left pending, most seen first, each with one open untyped role to read
+--   jobs.type_read_at          when the step read a role (each role is read once)
+--   pending_title_samples      the titles still open to the step, most seen first, each with the roles to read
 --   apply_model_titles         writes the step's answers to title_types and to single roles, then serves the cache
 --                              to every untyped role with a typed title (new roles included)
 --   measure_t19                new titles a week typed by code, by the model step, or not; untyped share of stored roles
@@ -13,8 +14,21 @@ update public.title_types set created_at = coalesce(typed_at, now() - interval '
 alter table public.title_types alter column created_at set default now();
 alter table public.title_types alter column created_at set not null;
 
--- The titles the step reads: tier 1 left them pending and an open role still holds each one.
-create or replace function public.pending_title_samples(p_limit integer default 100)
+-- The titles the step reads, and the roles to read them from. A key is read when tier 1 left it pending, or when a
+-- model said `none` under an older taxonomy version (a `none` expires when the version changes). Each role is read
+-- once (type_read_at), a key gives at most p_per_key roles to a slice (reads since p_since count), and a title that
+-- names a job gives one role, because its answer serves them all. A title in p_ambiguous names no job, so every one
+-- of its roles is read for its own posting.
+alter table public.jobs add column if not exists type_read_at timestamptz;
+
+drop function if exists public.pending_title_samples(integer);
+create or replace function public.pending_title_samples(
+  p_limit integer default 100,
+  p_version integer default 0,
+  p_since timestamptz default now(),
+  p_per_key integer default 5,
+  p_ambiguous text[] default '{}'
+)
 returns table (title_norm text, dept_norm text, job_id uuid, title text, posting_head text)
 language sql
 stable
@@ -30,18 +44,28 @@ as $$
          and coalesce(j.dept_norm, '') = t.dept_norm
          and j.role_type is null
          and j.type_origin is null
+         and j.type_read_at is null
          and j.still_open is not false
-       order by j.discovered_at desc nulls last
-       limit 1
+       order by j.discovered_at desc nulls last, j.id
+       limit least(
+         case when t.title_norm = any (coalesce(p_ambiguous, '{}')) then greatest(p_per_key, 0) else 1 end,
+         greatest(p_per_key - (select count(*) from public.jobs r
+                                where r.title_norm = t.title_norm
+                                  and coalesce(r.dept_norm, '') = t.dept_norm
+                                  and r.type_read_at >= p_since), 0)
+       )
     ) s
-   where t.status = 'pending' and t.origin = 'code'
+   where (t.status = 'pending' and t.origin = 'code')
+      or (t.status = 'none' and t.origin = 'model' and t.taxonomy_version <> p_version)
    order by t.n_seen desc, t.title_norm
    limit least(greatest(p_limit, 1), 200)
 $$;
 
--- The step's answers. Rows: title_norm, dept_norm, role_type, status (typed|none), prov, taxonomy_version, and for an
--- answer that leaned on one posting: job_id, job_type, job_prov. The shared cache takes an answer only for a title
--- code left pending. A role a model or code already typed is left as it is.
+-- The step's answers. Rows: title_norm, dept_norm, role_type, status, prov, taxonomy_version, and for a role that was
+-- read: job_id, read_at, and when the answer leaned on its posting job_type, job_prov.
+--   status typed|none   the shared cache takes the answer, for a title code left pending, or a `none` under an older version
+--   status pending      the cache is left as it is (a posting-led or ambiguous title never freezes the key); the role is marked read
+-- A role a model or code already typed is left as it is.
 create or replace function public.apply_model_titles(p_rows jsonb default '[]'::jsonb)
 returns integer
 language plpgsql
@@ -56,17 +80,23 @@ begin
   select r.title_norm, r.dept_norm, r.role_type, 'model', r.prov, r.taxonomy_version, r.status, 0, case when r.status = 'typed' then now() end
     from jsonb_to_recordset(coalesce(p_rows, '[]'::jsonb))
          as r(title_norm text, dept_norm text, role_type text, prov jsonb, taxonomy_version integer, status text)
+   where r.status in ('typed', 'none')
   on conflict (title_norm, dept_norm) do update
     set role_type = excluded.role_type, origin = 'model', prov = excluded.prov, taxonomy_version = excluded.taxonomy_version,
         status = excluded.status, typed_at = excluded.typed_at
-    where public.title_types.origin = 'code' and public.title_types.status = 'pending';
+    where (public.title_types.origin = 'code' and public.title_types.status = 'pending')
+       or (public.title_types.origin = 'model' and public.title_types.status = 'none'
+           and public.title_types.taxonomy_version <> excluded.taxonomy_version);
   get diagnostics m = row_count;
   n := n + m;
 
   update public.jobs j
-     set role_type = r.job_type, type_origin = 'model', type_prov = r.job_prov
-    from jsonb_to_recordset(coalesce(p_rows, '[]'::jsonb)) as r(job_id uuid, job_type text, job_prov jsonb)
-   where j.id = r.job_id and r.job_type is not null and j.role_type is null and j.type_origin is null;
+     set type_read_at = coalesce(r.read_at, now()),
+         role_type = r.job_type,
+         type_origin = case when r.job_type is not null then 'model' end,
+         type_prov = case when r.job_type is not null then r.job_prov else j.type_prov end
+    from jsonb_to_recordset(coalesce(p_rows, '[]'::jsonb)) as r(job_id uuid, job_type text, job_prov jsonb, read_at timestamptz)
+   where j.id = r.job_id and j.role_type is null and j.type_origin is null;
   get diagnostics m = row_count;
   n := n + m;
 
@@ -82,8 +112,8 @@ begin
 end;
 $$;
 
-revoke execute on function public.pending_title_samples(integer), public.apply_model_titles(jsonb) from public, anon, authenticated;
-grant execute on function public.pending_title_samples(integer), public.apply_model_titles(jsonb) to service_role;
+revoke execute on function public.pending_title_samples(integer, integer, timestamptz, integer, text[]), public.apply_model_titles(jsonb) from public, anon, authenticated;
+grant execute on function public.pending_title_samples(integer, integer, timestamptz, integer, text[]), public.apply_model_titles(jsonb) to service_role;
 
 -- T19 (reported): of the titles first seen in the last 7 days, how many code typed, how many the model step typed,
 -- how many neither (the model said none, or no rule or model has read them yet); and the untyped share of stored roles.
@@ -127,6 +157,9 @@ do $$
 begin
   if exists (select 1 from public.title_types where created_at is null) then
     raise exception 'title_types.created_at must be filled';
+  end if;
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'jobs' and column_name = 'type_read_at') then
+    raise exception 'jobs.type_read_at is missing';
   end if;
   if (select "on" from public.instance_flags where key = 'role_types_live') then
     raise exception 'role_types_live must stay off';

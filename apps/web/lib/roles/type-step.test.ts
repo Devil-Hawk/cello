@@ -8,7 +8,7 @@ vi.mock('../harness/llm', async (importOriginal) => ({ ...(await importOriginal<
 import { loadModeDoc } from '../harness/prompts'
 import { MODEL_LIMIT, makeIngestModelCall, newModelBudget, type ModelCall } from '../ingest/model'
 import { ROLE_TYPE_IDS, TAXONOMY_VERSION } from '../jobs/role-types'
-import { BATCH, DAILY_CALLS, cacheRow, runTypeStep, typeBatches, typeTitles, userPrompt, type TypeItem } from './type-step'
+import { BATCH, DAILY_CALLS, READS_PER_KEY, cacheRow, runTypeStep, typeBatches, typeTitles, userPrompt, type TypeItem } from './type-step'
 
 const AT = new Date('2026-10-22T10:00:00Z')
 const now = () => AT
@@ -116,27 +116,39 @@ describe('typeBatches', () => {
 
 describe('cacheRow', () => {
   const sample = { title_norm: 'ai engineer', dept_norm: '', job_id: 'job-1' }
+  const mts = { title_norm: 'member of technical staff', dept_norm: 'data', job_id: 'job-2' }
   const prov = { step: 'role.type', model: 'm', rung: 'R3' as const, evidence: [{ quote: 'ai engineer' }], at: AT.toISOString() }
+  const none = { i: 1, type: null, quote: '', where: null, prov: { ...prov, evidence: [] } }
 
-  it('writes a title answer to the shared cache, for every role with that title', () => {
-    expect(cacheRow(sample, { i: 1, type: 'ai-engineer', quote: 'ai engineer', where: 'title', prov })).toEqual({ title_norm: 'ai engineer', dept_norm: '', taxonomy_version: TAXONOMY_VERSION, role_type: 'ai-engineer', status: 'typed', prov })
+  it('writes a title answer to the shared cache, for every role with that title, and marks no role read', () => {
+    const row = cacheRow(sample, { i: 1, type: 'ai-engineer', quote: 'ai engineer', where: 'title', prov })
+    expect(row).toEqual({ title_norm: 'ai engineer', dept_norm: '', taxonomy_version: TAXONOMY_VERSION, role_type: 'ai-engineer', status: 'typed', prov })
   })
 
-  it('writes a posting answer to that role only, and the cache says the title alone decides nothing', () => {
+  it('types a posting-led answer on that one role and leaves the key pending, so the next role is read too', () => {
     const row = cacheRow(sample, { i: 1, type: 'ai-engineer', quote: 'build agents', where: 'posting', prov })
-    expect(row).toMatchObject({ role_type: null, status: 'none', job_id: 'job-1', job_type: 'ai-engineer', job_prov: prov })
+    expect(row).toMatchObject({ status: 'pending', role_type: null, job_id: 'job-1', job_type: 'ai-engineer', job_prov: prov, read_at: AT.toISOString() })
   })
 
-  it('writes none to the cache with no job row', () => {
-    const row = cacheRow(sample, { i: 1, type: null, quote: '', where: null, prov: { ...prov, evidence: [] } })
-    expect(row).toMatchObject({ role_type: null, status: 'none' })
+  it('never caches an answer for an ambiguous title: a typed role and a none both leave the key pending', () => {
+    expect(cacheRow(mts, { i: 1, type: 'data-engineer', quote: 'build the data pipelines', where: 'posting', prov })).toMatchObject({ status: 'pending', job_id: 'job-2', job_type: 'data-engineer' })
+    // even a title answer (which typeTitles no longer lets through) cannot freeze the key
+    expect(cacheRow(mts, { i: 1, type: 'data-engineer', quote: 'x', where: 'title', prov })).toMatchObject({ status: 'pending', job_id: 'job-2' })
+    const row = cacheRow(mts, none)
+    expect(row).toMatchObject({ status: 'pending', role_type: null, job_id: 'job-2', read_at: AT.toISOString() })
+    expect(row).not.toHaveProperty('job_type')
+  })
+
+  it('writes a none for a title that names a job to the cache, with the version that expires it, and marks no role', () => {
+    const row = cacheRow(sample, none)
+    expect(row).toMatchObject({ role_type: null, status: 'none', taxonomy_version: TAXONOMY_VERSION })
     expect(row).not.toHaveProperty('job_id')
   })
 })
 
 /** A database that holds pending titles and records what the step writes. */
 function fakeAdmin(pending: Record<string, unknown>[], today = 0) {
-  const calls: { name: string; rows?: Record<string, unknown>[]; limit?: number }[] = []
+  const calls: { name: string; rows?: Record<string, unknown>[]; limit?: number; args: any }[] = []
   let at = 0
   const admin = {
     from: (table: string) => {
@@ -145,7 +157,7 @@ function fakeAdmin(pending: Record<string, unknown>[], today = 0) {
       return b
     },
     rpc: async (name: string, args: any) => {
-      calls.push({ name, rows: args.p_rows, limit: args.p_limit })
+      calls.push({ name, rows: args.p_rows, limit: args.p_limit, args })
       if (name === 'pending_title_samples') {
         const data = pending.slice(at, at + args.p_limit)
         at += data.length
@@ -160,7 +172,7 @@ function fakeAdmin(pending: Record<string, unknown>[], today = 0) {
 describe('runTypeStep', () => {
   const pending = [
     { title_norm: 'ai engineer', dept_norm: '', job_id: 'j1', title: 'AI Engineer', posting_head: '' },
-    { title_norm: 'mts', dept_norm: 'data', job_id: 'j2', title: 'Member of Technical Staff', posting_head: 'You will build the data pipelines.' },
+    { title_norm: 'member of technical staff', dept_norm: 'data', job_id: 'j2', title: 'Member of Technical Staff', posting_head: 'You will build the data pipelines.' },
     { title_norm: 'wizard', dept_norm: '', job_id: 'j3', title: 'Wizard', posting_head: '' },
   ]
   const call: ModelCall = answering([
@@ -178,8 +190,17 @@ describe('runTypeStep', () => {
     const rows = calls[2].rows!
     expect(rows[0]).toMatchObject({ title_norm: 'ai engineer', role_type: 'ai-engineer', status: 'typed' })
     expect(rows[0]).not.toHaveProperty('job_id')
-    expect(rows[1]).toMatchObject({ title_norm: 'mts', dept_norm: 'data', role_type: null, status: 'none', job_id: 'j2', job_type: 'data-engineer' })
+    expect(rows[1]).toMatchObject({ title_norm: 'member of technical staff', dept_norm: 'data', role_type: null, status: 'pending', job_id: 'j2', job_type: 'data-engineer' })
     expect(rows[2]).toMatchObject({ title_norm: 'wizard', role_type: null, status: 'none' })
+  })
+
+  it('asks the sampler for at most 5 roles of a key since the slice began, and for a none older than this taxonomy version', async () => {
+    const { admin, calls } = fakeAdmin(pending)
+    await runTypeStep(admin, call, { now: () => AT.getTime(), deadlineAt: AT.getTime() + 60_000 })
+    const asked = calls.find((c) => c.name === 'pending_title_samples')!.args
+    expect(asked).toMatchObject({ p_per_key: READS_PER_KEY, p_version: TAXONOMY_VERSION, p_since: AT.toISOString() })
+    expect(READS_PER_KEY).toBe(5)
+    expect(asked.p_ambiguous).toContain('member of technical staff')
   })
 
   it('only serves the cache when there is no model', async () => {
