@@ -122,6 +122,8 @@ def do_job(job: dict[str, Any]) -> dict[str, Any]:
         if job.get("kind") == "web_search":
             return {"ok": True, "domains": search_domains(str(job["query"]))}
         out = dict(fetch_page(str(job["url"]), True))
+        if out.get("render_error"):  # the browser failed; the plain page is only an empty shell
+            return {"ok": False, "error": str(out["render_error"])}
         if isinstance(out.get("html"), str):
             out["html"] = out["html"][:_MAX_HTML]
         return {k: out[k] for k in ("ok", "html", "final_url", "rung", "error") if k in out}

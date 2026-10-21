@@ -110,6 +110,16 @@ def test_once_does_one_job_and_posts_the_page_signed(serve, monkeypatch, capsys)
     assert "acme.example" not in logged and "1 job(s) done" in logged
 
 
+def test_a_browser_that_failed_posts_its_class_not_the_empty_shell(serve, monkeypatch):
+    server = serve([JOB])
+    shell = {"ok": True, "html": "<div id=root></div>", "final_url": "https://acme.example/careers", "rung": "http", "render_error": "TimeoutError"}
+    monkeypatch.setattr(worker, "fetch_page", lambda url, render: shell)
+    worker.main(["--once"])
+    sent = json.loads(server.results[0][2])
+    assert (sent["ok"], sent["error"]) == (False, "TimeoutError")
+    assert "html" not in sent
+
+
 def test_an_empty_queue_ends_the_once_run_with_nothing_posted(serve):
     server = serve([])
     assert worker.main(["--once", "--max", "50"]) == 0
