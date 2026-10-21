@@ -6,6 +6,7 @@
 //   keeps    a role is stored only when it is inside the targets of at least one person (directive 26), through the
 //            same capture a person's own read uses (Markdown body, requirements, type); roles nobody wants are counted
 //   closes   the roles the board no longer lists count a miss and close at the second
+//   insights what the whole board says about the employer (insights.ts), stored once for everyone who reads the page
 // Roles are judged by the same code as everywhere: the employer's own, open, real (legit.ts), then each person's
 // targets (target-relevance.ts). An employer nobody follows keeps only roles from the last 30 days; one somebody
 // follows keeps up to 180 (freshness.ts).
@@ -30,6 +31,7 @@ import { DIRECTORY_MAX_AGE_DAYS, ROLE_MAX_AGE_DAYS, isStalePosting } from '../jo
 import { typeTitle } from '../jobs/role-types'
 import { hasPersonTargets, judgeForPerson, prepareTargets, type PersonTargets } from '../jobs/target-relevance'
 import type { DirectoryRow } from './directory'
+import { computeInsights } from './insights'
 import { checkBoard, realDeps, recordRead, writeEmployer, type DirectorySource, type FailReason, type VerifyDeps } from './verify-directory'
 
 type Db = SupabaseClient<any, any, any>
@@ -223,6 +225,20 @@ export async function readEmployer(db: Db, employer: DirectoryRow, people: Perso
   }
   const { error: statsError } = await db.rpc('bump_employer_stats', { p_employer: employer.id, p_rows: [...stats.values()] })
   if (statsError) out.errors.push('bump_employer_stats')
+
+  // The shared insights come from every listing, not only the kept ones. The pace is Cello's own: how long this employer's
+  // closed roles stood between jobs.discovered_at and jobs.closed_at. Only roles inside someone's targets are stored, so it
+  // is the pace of those.
+  const { data: closed } = await db.from('jobs').select('discovered_at, closed_at').eq('employer_id', employer.id).not('closed_at', 'is', null).limit(5000)
+  const i = computeInsights(clean, { now, closes: ((closed ?? []) as { discovered_at: string; closed_at: string }[]).map((c) => ({ firstSeen: c.discovered_at, closedAt: c.closed_at })) })
+  const { error: insightsError } = await db.from('employer_insights').upsert(
+    {
+      employer_id: employer.id, computed_at: nowIso, open: i.open, by_type: i.byType, by_seniority: i.bySeniority, locations: i.locations, remote_share: i.remoteShare,
+      posted_7d: i.posted7d, posted_30d: i.posted30d, pay: i.pay, median_age_days: i.medianAgeDays, typical_close_days: i.typicalCloseDays, closes_seen: i.closesSeen, stack: i.stack,
+    },
+    { onConflict: 'employer_id' }
+  )
+  if (insightsError) out.errors.push('employer_insights')
 
   await recordRead(db, employer, { ok: true, openCount: clean.length, hq: commonLocation(clean) }, deps.verify.now)
   return out
