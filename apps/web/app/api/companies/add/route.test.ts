@@ -47,7 +47,7 @@ describe('POST /api/companies/add', () => {
   })
 
   it('hands a chosen candidate to the add as a board or a site to prove again', async () => {
-    await post({ candidate: { provider: 'ashby', token: 'retell-ai', name: 'Retell AI', domain: 'RetellAI.com', qid: 'Q1', jobs: 99, profile: { hq: 'forged' } } })
+    await post({ candidate: { provider: 'ashby', token: 'retell-ai', name: 'Retell AI', domain: 'RetellAI.com', jobs: 99, profile: { qid: 'Q1', hq: 'forged' } } })
     expect(addMock.mock.calls[0][2]).toEqual({ board: { provider: 'ashby', token: 'retell-ai', name: 'Retell AI', domain: 'retellai.com', qid: 'Q1' } })
     await post({ candidate: { domain: 'amazon.jobs', careersUrl: 'https://www.amazon.jobs/en/search', name: 'Amazon' } })
     expect(addMock.mock.calls[1][2]).toEqual({ site: { domain: 'amazon.jobs', careersUrl: 'https://www.amazon.jobs/en/search', name: 'Amazon', qid: undefined } })

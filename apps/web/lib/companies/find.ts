@@ -71,6 +71,7 @@ export function realFindDeps(db: Db, userId: string | null): FindDeps {
     read: realAddDeps.read,
     wikidata: (name) => lookupWikidata(name),
     web: async (name) => searchCareersDomains(name, process.env.TAVILY_API_KEY?.trim() || (userId ? await getTavilyKey(db, userId).catch(() => undefined) : undefined)),
+    // ponytail: one job per set of words, so a second person asking the same words while it waits is not followed when it lands; keep a list of requesters when that matters.
     queue: async (name) => {
       if (!userId) return null
       // A demo account may search, but it queues nothing.

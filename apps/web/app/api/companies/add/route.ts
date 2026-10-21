@@ -34,7 +34,9 @@ function parseCandidate(c: unknown): AddBy | null {
   const text = (x: unknown, max: number) => (typeof x === 'string' && x.trim() !== '' && x.length <= max ? x.trim() : null)
   if (typeof v.employerId === 'string') return UUID.test(v.employerId) ? { employerId: v.employerId } : null
   if (typeof v.candidateId === 'string') return UUID.test(v.candidateId) ? { candidateId: v.candidateId } : null
-  const qid = typeof v.qid === 'string' && /^Q\d{1,12}$/.test(v.qid) ? v.qid : undefined
+  // The Q-id is all that is taken from a Wikidata profile: the add reads the rest from Wikidata itself.
+  const qidOf = (x: unknown) => (typeof x === 'string' && /^Q\d{1,12}$/.test(x) ? x : undefined)
+  const qid = qidOf(v.qid) ?? qidOf((v.profile as { qid?: unknown } | null | undefined)?.qid)
   const name = text(v.name, 200)
   if (typeof v.provider === 'string' && typeof v.token === 'string') {
     const domain = v.domain == null ? null : text(v.domain, 253)?.toLowerCase() ?? null
