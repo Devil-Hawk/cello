@@ -5,7 +5,8 @@ let user: { id: string } | null = { id: 'u1' }
 const addMock = vi.fn()
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({ auth: { getUser: async () => ({ data: { user }, error: null }) } }) }))
-vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => ({ admin: true }) }))
+const admin = vi.fn((): unknown => ({ admin: true }))
+vi.mock('@/lib/harness/supabase-admin', () => ({ createAdminClient: () => admin() }))
 vi.mock('@/lib/companies/add-link', () => ({ addCompany: (...args: unknown[]) => addMock(...args) }))
 
 import { POST } from './route'
@@ -16,6 +17,7 @@ const post = (body: unknown) => POST(new NextRequest('http://localhost/api/compa
 beforeEach(() => {
   user = { id: 'u1' }
   addMock.mockReset().mockResolvedValue({ ok: true, companyId: 'c1', already: false, employer: { name: 'Retell AI' } })
+  admin.mockReset().mockImplementation(() => ({ admin: true }))
 })
 
 describe('POST /api/companies/add', () => {
@@ -59,6 +61,18 @@ describe('POST /api/companies/add', () => {
     const res = await POST(new NextRequest('http://localhost/api/companies/add', { method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' }, body: JSON.stringify({ link: 'retellai.com/careers' }) }))
     expect(res.status).toBe(403)
     expect(addMock).not.toHaveBeenCalled()
+  })
+
+  it('writes one timing row per call, and still answers when the timing insert throws', async () => {
+    const insert = vi.fn(async () => ({ error: null }))
+    admin.mockImplementation(() => ({ from: () => ({ insert }) }))
+    expect((await post({ link: 'retellai.com/careers' })).status).toBe(200)
+    expect(insert).toHaveBeenCalledWith({ route: 'add', ms: expect.any(Number), ok: true })
+
+    admin.mockImplementation(() => ({ from: () => { throw new Error('insert failed') } }))
+    const res = await post({ link: 'retellai.com/careers' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ ok: true, companyId: 'c1' })
   })
 
   it('says it could not add, and nothing else, when the work throws', async () => {

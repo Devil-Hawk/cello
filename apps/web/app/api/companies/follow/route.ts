@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { isCrossSiteRequest } from '@/lib/security/same-origin'
 import { loadPerson } from '@/lib/companies/read-employer'
 import { followAndRead, unfollowEmployer, type FollowResult } from '@/lib/companies/follow'
+import { recordRouteTiming } from '@/lib/companies/route-timing'
 
 // POST   /api/companies/follow   { employerId, dream? }  follow a verified employer and read its board inside 8 s
 // DELETE /api/companies/follow   { employerId }          take the bookmark off; the row and the employer stay
@@ -23,6 +24,13 @@ function employerIdOf(body: unknown): string | null {
 }
 
 export async function POST(request: NextRequest) {
+  const started = Date.now()
+  const response = await follow(request)
+  await recordRouteTiming(createAdminClient, 'follow', Date.now() - started, response.status < 500)
+  return response
+}
+
+async function follow(request: NextRequest) {
   if (isCrossSiteRequest(request.headers)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const supabase = await createClient()
   const {

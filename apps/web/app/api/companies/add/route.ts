@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/harness/supabase-admin'
 import { isCrossSiteRequest } from '@/lib/security/same-origin'
 import { addCompany, type AddBy, type AddFailure } from '@/lib/companies/add-link'
+import { recordRouteTiming } from '@/lib/companies/route-timing'
 
 // POST /api/companies/add   { employerId } | { candidateId } | { link }
 //
@@ -29,6 +30,13 @@ function parseBody(body: unknown): AddBy | null {
 }
 
 export async function POST(request: NextRequest) {
+  const started = Date.now()
+  const response = await answer(request)
+  await recordRouteTiming(createAdminClient, 'add', Date.now() - started, response.status < 500)
+  return response
+}
+
+async function answer(request: NextRequest) {
   if (isCrossSiteRequest(request.headers)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const supabase = await createClient()
   const {
