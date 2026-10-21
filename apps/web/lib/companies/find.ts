@@ -61,9 +61,13 @@ export interface FindDeps {
   /** Hand the search to the pull worker; its job id, or null when it was not queued. */
   queue: (name: string) => Promise<string | null>
   timeoutMs?: number
+  /** How long each later rung may take once something is found; a rung that runs past it adds nothing. */
+  extraRungMs?: number
 }
 
 export const SEARCH_BUDGET_MS = 30_000
+// ponytail: a rung cut at this allowance adds nothing, even the guesses that had already answered. Upgrade: let a rung hand back what it has when time is called.
+export const EXTRA_RUNG_MS = 6_000
 const MAX_CANDIDATES = 3
 
 export function realFindDeps(db: Db, userId: string | null): FindDeps {
@@ -258,7 +262,10 @@ export async function findEmployer(db: Db, userId: string, rawName: string, deps
     if (rung === 'web' && found.length > 0) break
     report({ rung, line })
     // A rung that fails or runs the budget out finds nothing; the next one still gets its turn if there is time.
-    const hits = await Promise.race([run().catch((): Candidate[] => []), outOfTime])
+    // Once there is an answer the rungs after it are for a second employer, not for the first: they get a short allowance.
+    const allowance = found.length > 0 ? AbortSignal.timeout(deps.extraRungMs ?? EXTRA_RUNG_MS) : null
+    const late = allowance ? new Promise<'time'>((resolve) => allowance.addEventListener('abort', () => resolve('time'), { once: true })) : outOfTime
+    const hits = await Promise.race([run().catch((): Candidate[] => []), outOfTime, late])
     if (hits === 'time') break
     found = dedupe([...found, ...hits]).slice(0, MAX_CANDIDATES)
     if ((rung === 'directory' && direct.exact && found.length > 0) || found.length >= MAX_CANDIDATES) break

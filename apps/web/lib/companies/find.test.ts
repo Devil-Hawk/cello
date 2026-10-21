@@ -25,6 +25,7 @@ interface World {
   directory?: Record<string, unknown>[]
   tables?: Record<string, Record<string, unknown>[]>
   timeoutMs?: number
+  extraRungMs?: number
 }
 
 const entity = (over: Partial<WikidataEntity> = {}): WikidataEntity => ({ qid: 'Q1', label: 'Retell AI', website: 'https://www.retellai.com/', hq: 'San Francisco', employees: 75, industry: null, logo: null, founded: 2023, ticker: null, github: null, fetchedAt: '2026-10-21T00:00:00.000Z', ...over })
@@ -51,6 +52,7 @@ function setup(w: World = {}) {
     web,
     queue,
     timeoutMs: w.timeoutMs,
+    extraRungMs: w.extraRungMs,
   }
   const db = fakeDb({ profiles: [{ id: 'u1', is_demo: false, demo_expires_at: null }], companies: [], ...w.tables }, { rpc: { search_company_directory: () => w.directory ?? [] }, autoId: ['companies', 'company_directory', 'directory_candidates', 'render_jobs'] })
   const events: { rung: string; line: string }[] = []
@@ -290,6 +292,16 @@ describe('the search itself', () => {
     const none = setup({ web: null })
     await none.find('Retell AI')
     expect(none.queue).toHaveBeenCalledTimes(1)
+  })
+
+  it('gives the rungs after an answer a short allowance: a slow one adds nothing and the answer already found is returned', async () => {
+    const s = setup({ boards: retell, extraRungMs: 40 })
+    s.wikidata.mockImplementation(() => new Promise(() => {}))
+    const started = Date.now()
+    const r = await s.find('Retell AI')
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(found(r).map((x) => x.name)).toEqual(['Retell AI'])
+    expect(s.events.map((e) => e.rung)).toEqual(['directory', 'boards', 'lookup'])
   })
 
   it('returns what it found when the budget runs out after a rung found something', async () => {
