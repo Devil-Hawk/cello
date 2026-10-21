@@ -72,6 +72,19 @@ describe('rung 1: the directory', () => {
     expect(s.wikidata).not.toHaveBeenCalled()
   })
 
+  it('ends the search on an exact hit, and offers a longer verified name by its start without ending it', async () => {
+    const exact = setup({ directory: [{ ...row, name: 'Modal', domain: 'modal.com', id: 'e5' }, { ...row, id: 'e6', name: 'Modal Trouble', domain: 'modaltrouble.com' }] })
+    expect(found(await exact.find('Modal')).map((c) => c.name)).toEqual(['Modal'])
+    expect(exact.events.map((e) => e.rung)).toEqual(['directory'])
+    const prefix = setup({ directory: [row, { ...row, id: 'e7', name: 'Retelling Co', domain: 'retelling.co', ats_token: 'retelling' }, { ...row, id: 'e8', name: 'Cretell', domain: 'cretell.com', ats_token: 'cretell' }] })
+    const c = found(await prefix.find('Retell'))
+    expect(c.map((x) => [x.foundBy, x.name]).slice(0, 2)).toEqual([['directory', 'Retell AI'], ['directory', 'Retelling Co']])
+    expect(prefix.events.map((e) => e.rung)).toContain('boards')
+    // under four characters a prefix is too loose to offer
+    const short = setup({ directory: [{ ...row, name: 'Ace Hardware', id: 'e9', domain: 'acehardware.com' }] })
+    expect(found(await short.find('Ace'))).toEqual([])
+  })
+
   it('finds an employer by the first label of its domain', async () => {
     const s = setup({ directory: [row] })
     expect(found(await s.find('retellai'))[0]).toMatchObject({ employerId: 'e1', following: false })
@@ -104,7 +117,7 @@ describe('rung 2: job boards', () => {
     const s = setup({ boards: retell })
     const r = await s.find('Retell AI')
     expect(found(r)).toEqual([{ name: 'Retell AI', domain: 'retellai.com', provider: 'ashby', token: 'retell-ai', foundBy: 'board', provenBy: 'the board declares retellai.com as home', jobs: 2 }])
-    expect(s.events.map((e) => e.rung)).toEqual(['directory', 'boards'])
+    expect(s.events.map((e) => e.rung)).toEqual(['directory', 'boards', 'lookup', 'site'])
     const asked = new Set(s.fetchBoard.mock.calls.map((c) => c[0]))
     expect([...asked].sort()).toEqual(['ashby', 'greenhouse', 'lever', 'recruitee', 'smartrecruiters', 'workable'])
     expect(s.fetchBoard.mock.calls.map((c) => c[1])).toEqual(expect.arrayContaining(['retellai', 'retell-ai']))
@@ -116,6 +129,8 @@ describe('rung 2: job boards', () => {
         'workable:retellai': { identity: { name: 'Retell Inc', homeUrls: [] } },
         'lever:retell-ai': { identity: { name: 'Retell Corp', homeUrls: ['https://retell.io'] } },
         'greenhouse:retellai': { identity: null },
+        // names the employer exactly but declares no home: Workable never does
+        'workable:retell-ai': { identity: { name: 'Retell AI', homeUrls: [] } },
       },
     })
     const r = await s.find('Retell AI')
@@ -149,7 +164,7 @@ describe('rung 3: Wikidata', () => {
     const [c] = found(r)
     expect(c).toMatchObject({ name: 'Retell AI', domain: 'retellai.com', provider: 'ashby', token: 'retell-ai', foundBy: 'wikidata', jobs: 2, city: 'San Francisco', provenBy: 'Wikidata names retellai.com; its site links the board' })
     expect(c.profile).toEqual(toProfile(entity()))
-    expect(s.events.map((e) => e.rung)).toEqual(['directory', 'boards', 'lookup'])
+    expect(s.events.map((e) => e.rung)).toEqual(['directory', 'boards', 'lookup', 'site'])
     expect(addByOf(c)).toMatchObject({ board: { provider: 'ashby', token: 'retell-ai', domain: 'retellai.com', qid: 'Q1' } })
   })
 
@@ -242,11 +257,47 @@ describe('the search itself', () => {
     expect(s.events.map((e) => e.rung)).toEqual(['directory', 'boards'])
   })
 
-  it('runs the rungs in order and stops at the first that finds an employer', async () => {
-    const s = setup({ boards: retell, wikidata: [entity()] })
-    await s.find('Retell AI')
+  it('runs the rungs in order and adds what each finds, deduped: two rungs finding different employers offer both', async () => {
+    const acmeBoard = { 'ashby:acme': { jobs: fresh, identity: { name: 'Acme', homeUrls: ['https://acme.com'] } } }
+    const s = setup({ boards: acmeBoard, wikidata: [entity({ qid: 'Q9', label: 'Acme Corp', website: 'https://acme.org/', hq: 'Austin' })], sites: { 'acme.org': fresh } })
+    const c = found(await s.find('Acme'))
+    expect(c.map((x) => [x.foundBy, x.domain])).toEqual([['board', 'acme.com'], ['wikidata', 'acme.org']])
+    expect(s.events.map((e) => e.rung)).toEqual(['directory', 'boards', 'lookup', 'site'])
+    expect(s.web).not.toHaveBeenCalled()
+    expect(s.queue).not.toHaveBeenCalled()
+  })
+
+  it('shows one employer once when two rungs find it, with the profile and city the later rung read', async () => {
+    const s = setup({ boards: retell, wikidata: [entity()], pages: { 'retellai.com': [{ provider: 'ashby', token: 'retell-ai' }] } })
+    const c = found(await s.find('Retell AI'))
+    expect(c).toHaveLength(1)
+    expect(c[0]).toMatchObject({ foundBy: 'board', provider: 'ashby', token: 'retell-ai', city: 'San Francisco', profile: toProfile(entity()) })
+  })
+
+  it('stops at three employers and does not run the later rungs', async () => {
+    const home = (d: string) => ({ jobs: fresh, identity: { name: 'Retell AI', homeUrls: [`https://${d}`] } })
+    const s = setup({ boards: { 'ashby:retell-ai': home('a.com'), 'lever:retell-ai': home('b.com'), 'workable:retell-ai': home('c.com') }, wikidata: [entity()] })
+    expect(found(await s.find('Retell AI'))).toHaveLength(3)
     expect(s.events.map((e) => e.rung)).toEqual(['directory', 'boards'])
     expect(s.wikidata).not.toHaveBeenCalled()
+  })
+
+  it('runs the web rung only when nothing was found, so an answered search never queues the worker', async () => {
+    const found1 = setup({ web: null, boards: retell })
+    await found1.find('Retell AI')
+    expect(found1.web).not.toHaveBeenCalled()
+    expect(found1.queue).not.toHaveBeenCalled()
+    const none = setup({ web: null })
+    await none.find('Retell AI')
+    expect(none.queue).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns what it found when the budget runs out after a rung found something', async () => {
+    const s = setup({ boards: retell, timeoutMs: 80 })
+    s.wikidata.mockImplementation(() => new Promise(() => {}))
+    const r = await s.find('Retell AI')
+    expect(found(r).map((x) => x.name)).toEqual(['Retell AI'])
+    expect(s.events.map((e) => e.rung)).toEqual(['directory', 'boards', 'lookup'])
   })
 })
 

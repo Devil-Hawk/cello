@@ -1,6 +1,7 @@
 // companies.find: look for an employer by its name, the way a person would, cheapest and most trustworthy first.
 //
-// Five rungs run in order, each a function that returns candidates; the first rung that finds any ends the search (a
+// Five rungs run in order, each a function that returns candidates. An exact directory hit ends the search; otherwise
+// the rungs keep adding deduped candidates until there are three, and the web rung runs only when nothing was found (a
 // sixth, the paste-a-link line, is what is said when none does). Every candidate is proven before it is shown: a board the
 // provider ties to the employer, a board the employer's site links, or roles the site lists itself. A name that merely
 // looks right is never a candidate. The whole search has a time budget, and ends with what it has when that runs out.
@@ -123,37 +124,46 @@ const settled = async <T>(work: Promise<T>[]): Promise<NonNullable<T>[]> =>
 
 // --- the rungs ---------------------------------------------------------------------
 
-/** Rung 1: a verified employer by exact name or domain, a seed candidate by exact name, a big employer from its curated address. */
-async function fromDirectory(db: Db, userId: string, name: string): Promise<Candidate[]> {
+/** A verified employer, as the person is offered it. */
+const directoryCandidate = async (db: Db, userId: string, r: DirectoryRow): Promise<Candidate> => ({
+  name: r.name,
+  domain: r.domain,
+  provider: (r.ats_provider as AtsProviderId | null) ?? undefined,
+  token: r.ats_token ?? undefined,
+  foundBy: 'directory',
+  provenBy: provenBy(r.verified_by ?? '', r.domain),
+  jobs: r.open_count,
+  city: r.hq ?? null,
+  profile: (r.profile as Candidate['profile']) ?? undefined,
+  employerId: r.id,
+  following: !!(await followedRow(db, userId, { employerId: r.id, domain: r.domain })),
+})
+
+/** The typed name must be at least this long to match the start of a longer verified name ("Retell" finds Retell AI). */
+const MIN_PREFIX = 4
+
+/**
+ * Rung 1: a verified employer by exact name or domain, a seed candidate by exact name, a big employer from its curated
+ * address. Any of these ends the search (`state.exact`). Without one, verified employers whose name starts with the typed
+ * name are offered and the search goes on, so a "Modal Trouble" row does not stop the search for "Modal".
+ */
+async function fromDirectory(db: Db, userId: string, name: string, state: { exact: boolean }): Promise<Candidate[]> {
   const want = squash(name)
   const { data } = await db.rpc('search_company_directory', { p_query: name, p_limit: 8 })
-  const rows = ((data ?? []) as DirectoryRow[]).filter((r) => squash(r.name) === want || (r.domain != null && (r.domain === name.toLowerCase() || squash(r.domain.split('.')[0]) === want)))
-  if (rows.length > 0) {
-    return Promise.all(
-      rows.slice(0, MAX_CANDIDATES).map(async (r): Promise<Candidate> => ({
-        name: r.name,
-        domain: r.domain,
-        provider: (r.ats_provider as AtsProviderId | null) ?? undefined,
-        token: r.ats_token ?? undefined,
-        foundBy: 'directory',
-        provenBy: provenBy(r.verified_by ?? '', r.domain),
-        jobs: r.open_count,
-        city: r.hq ?? null,
-        profile: (r.profile as Candidate['profile']) ?? undefined,
-        employerId: r.id,
-        following: !!(await followedRow(db, userId, { employerId: r.id, domain: r.domain })),
-      }))
-    )
-  }
+  const all = (data ?? []) as DirectoryRow[]
+  const exact = all.filter((r) => squash(r.name) === want || (r.domain != null && (r.domain === name.toLowerCase() || squash(r.domain.split('.')[0]) === want)))
+  state.exact = true
+  if (exact.length > 0) return Promise.all(exact.slice(0, MAX_CANDIDATES).map((r) => directoryCandidate(db, userId, r)))
   const { data: pending } = await db.from('directory_candidates').select('id, name, domain').eq('state', 'pending').eq('name_norm', normalizeCompanyName(name)).limit(MAX_CANDIDATES)
   const seeds = ((pending ?? []) as { id: string; name: string; domain: string | null }[]).map((c): Candidate => ({ name: c.name, domain: c.domain, foundBy: 'directory', provenBy: 'on the seed list, not checked yet', jobs: null, candidateId: c.id }))
   if (seeds.length > 0) return seeds
   const known = lookupKnownCompanyByName(name)
-  if (!known) return []
-  const board = knownBoard({ domain: known.domain })
-  if (board) return [{ name: known.name, domain: known.domain, ...board, foundBy: 'directory', provenBy: provenBy('known_board', known.domain), jobs: null }]
-  if (known.careerUrl) return [{ name: known.name, domain: employerDomain(new URL(known.careerUrl).hostname), careersUrl: known.careerUrl, foundBy: 'directory', provenBy: 'its curated careers address', jobs: null }]
-  return []
+  const board = known && knownBoard({ domain: known.domain })
+  if (known && board) return [{ name: known.name, domain: known.domain, ...board, foundBy: 'directory', provenBy: provenBy('known_board', known.domain), jobs: null }]
+  if (known?.careerUrl) return [{ name: known.name, domain: employerDomain(new URL(known.careerUrl).hostname), careersUrl: known.careerUrl, foundBy: 'directory', provenBy: 'its curated careers address', jobs: null }]
+  state.exact = false
+  const prefixed = want.length >= MIN_PREFIX ? all.filter((r) => squash(r.name).startsWith(want)) : []
+  return Promise.all(prefixed.slice(0, MAX_CANDIDATES).map((r) => directoryCandidate(db, userId, r)))
 }
 
 /** Rung 2: the name's slug forms on every applicant system that can be asked safely, each hit through the verifier. */
@@ -162,7 +172,8 @@ async function fromBoards(name: string, deps: FindDeps): Promise<Candidate[]> {
   return settled(
     probes.map(async ({ provider, token }): Promise<Candidate | null> => {
       const check = await checkBoard({ name, domain: null, provider, token }, deps.verify)
-      return check.ok ? { name: check.name, domain: check.domain, provider, token, foundBy: 'board', provenBy: check.domain ? provenBy('board_links_home', check.domain) : provenBy(check.verifiedBy, null), jobs: check.jobs.length } : null
+      // The provider must declare the employer's home too, so a namesake's board with no home never becomes a candidate.
+      return check.ok && check.domain ? { name: check.name, domain: check.domain, provider, token, foundBy: 'board', provenBy: provenBy('board_links_home', check.domain), jobs: check.jobs.length } : null
     })
   )
 }
@@ -208,15 +219,20 @@ async function fromWeb(name: string, deps: FindDeps, asked: { queued: boolean })
 
 // --- the ladder --------------------------------------------------------------------
 
-/** One employer once: by domain, then by board, then by directory row. */
+/** One employer once: by domain, then by board, then by directory row. A later duplicate lends its profile and city to the one kept. */
 function dedupe(candidates: Candidate[]): Candidate[] {
-  const seen = new Set<string>()
-  return candidates.filter((c) => {
+  const seen = new Map<string, Candidate>()
+  const kept: Candidate[] = []
+  for (const c of candidates) {
     const keys = [c.domain && `d:${c.domain}`, c.provider && c.token && `b:${c.provider}:${c.token.toLowerCase()}`, c.employerId && `e:${c.employerId}`].filter((k): k is string => !!k)
-    if (keys.some((k) => seen.has(k))) return false
-    keys.forEach((k) => seen.add(k))
-    return true
-  })
+    const same = keys.map((k) => seen.get(k)).find(Boolean)
+    if (same) {
+      same.profile ??= c.profile
+      same.city ??= c.city
+    } else kept.push(c)
+    keys.forEach((k) => seen.set(k, same ?? c))
+  }
+  return kept
 }
 
 export async function findEmployer(db: Db, userId: string, rawName: string, deps: FindDeps, report: (event: { rung: Rung; line: string }) => void = () => {}): Promise<FindResult> {
@@ -224,10 +240,11 @@ export async function findEmployer(db: Db, userId: string, rawName: string, deps
   const budget = AbortSignal.timeout(deps.timeoutMs ?? SEARCH_BUDGET_MS)
   const outOfTime = new Promise<'time'>((resolve) => budget.addEventListener('abort', () => resolve('time'), { once: true }))
   const asked = { queued: false }
+  const direct = { exact: false }
   // The big employers are offered from their curated address and never slug-matched onto a namesake's board.
   const big = isKnownEmployer({ name })
   const rungs: [Rung, string, boolean, () => Promise<Candidate[]>][] = [
-    ['directory', 'Checking the directory', true, () => fromDirectory(db, userId, name)],
+    ['directory', 'Checking the directory', true, () => fromDirectory(db, userId, name, direct)],
     ['boards', 'Checking job boards', !big, () => fromBoards(name, deps)],
     ['lookup', 'Looking it up', true, () => fromWikidata(name, deps)],
     ['site', 'Trying its website', true, () => fromGuesses(name, deps)],
@@ -237,12 +254,14 @@ export async function findEmployer(db: Db, userId: string, rawName: string, deps
   for (const [rung, line, runs, run] of rungs) {
     if (!runs) continue
     if (budget.aborted) break
+    // The web is the last try: a search that already has an answer never asks it (or queues the worker for it).
+    if (rung === 'web' && found.length > 0) break
     report({ rung, line })
     // A rung that fails or runs the budget out finds nothing; the next one still gets its turn if there is time.
     const hits = await Promise.race([run().catch((): Candidate[] => []), outOfTime])
     if (hits === 'time') break
-    found = dedupe(hits).slice(0, MAX_CANDIDATES)
-    if (found.length > 0) break
+    found = dedupe([...found, ...hits]).slice(0, MAX_CANDIDATES)
+    if ((rung === 'directory' && direct.exact && found.length > 0) || found.length >= MAX_CANDIDATES) break
   }
   if (found.length > 0) return { candidates: found }
   return asked.queued
