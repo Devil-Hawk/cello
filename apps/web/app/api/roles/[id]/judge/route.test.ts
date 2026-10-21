@@ -34,7 +34,7 @@ describe('POST /api/roles/:id/judge', () => {
   })
 
   it('judges the role for the signed-in person and returns the band, readings and provenance', async () => {
-    judgeRole.mockResolvedValue({ judged: [ID], stopped: null })
+    judgeRole.mockResolvedValue({ judged: [ID], failed: [], stopped: null })
     const res = await post(ID, { 'sec-fetch-site': 'same-origin' })
     expect(res.status).toBe(200)
     expect(judgeRole.mock.calls[0].slice(1, 3)).toEqual(['u1', ID])
@@ -42,20 +42,24 @@ describe('POST /api/roles/:id/judge', () => {
   })
 
   it('answers 429 with the day line when no free call is left', async () => {
-    judgeRole.mockResolvedValue({ judged: [], stopped: 'day' })
+    judgeRole.mockResolvedValue({ judged: [], failed: [], stopped: 'day' })
     const res = await post()
     expect(res.status).toBe(429)
     expect(await res.json()).toEqual({ error: 'Cello judged 40 of your 120 new roles today. The rest continue tomorrow.', skippedReason: 'day' })
   })
 
   it('answers 429 when the minute is full, 400 without a model or a resume, 404 for a role the person does not hold', async () => {
-    judgeRole.mockResolvedValueOnce({ judged: [], stopped: 'minute' })
+    judgeRole.mockResolvedValueOnce({ judged: [], failed: [], stopped: 'minute' })
     expect((await post()).status).toBe(429)
-    judgeRole.mockResolvedValueOnce({ judged: [], stopped: 'no_model' })
+    judgeRole.mockResolvedValueOnce({ judged: [], failed: [], stopped: 'no_model' })
     expect(await (await post()).json()).toMatchObject({ error: 'Cello needs a model to read this one. Choose a free model.' })
-    judgeRole.mockResolvedValueOnce({ judged: [], stopped: 'no_resume' })
+    judgeRole.mockResolvedValueOnce({ judged: [], failed: [], stopped: 'no_resume' })
     expect((await post()).status).toBe(400)
-    judgeRole.mockResolvedValueOnce({ judged: [], stopped: null })
+    judgeRole.mockResolvedValueOnce({ judged: [], failed: [], stopped: null })
     expect((await post()).status).toBe(404)
+    judgeRole.mockResolvedValueOnce({ judged: [], failed: [ID], stopped: null })
+    const unusable = await post()
+    expect(unusable.status).toBe(503)
+    expect(await unusable.json()).toMatchObject({ error: 'The free models gave no usable answer just now. Try again in a minute.' })
   })
 })

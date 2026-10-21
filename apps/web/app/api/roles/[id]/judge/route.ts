@@ -1,7 +1,7 @@
 // POST /api/roles/:id/judge   judges this role now, on the person's own key or the free allowance they have left.
 //
 // 200 with the verdict (band, readings, provenance and the legacy fit shape the jobs page still reads), 404 for a role the
-// person does not hold, 429 with the day line when no free call is left (or when the minute is full), 400 when there is no
+// person does not hold, 503 when no model gave a usable answer, 429 with the day line when no free call is left (or when the minute is full), 400 when there is no
 // resume or no model. Behind the session and the cross-site check.
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -31,6 +31,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     setTraceMeta({ job_id: params.id })
     const out = await judgeRole(admin, user.id, params.id)
     if (out.judged.length === 0) {
+      if (out.stopped === null && out.failed.length > 0) return NextResponse.json({ error: 'The free models gave no usable answer just now. Try again in a minute.', skippedReason: 'bad-answer' }, { status: 503 })
       if (out.stopped === null) return NextResponse.json({ error: 'Role not found' }, { status: 404 })
       const { status, ...body } = await stopAnswer(out.stopped, () => judgeStatus(admin, user.id))
       return NextResponse.json(body, { status })

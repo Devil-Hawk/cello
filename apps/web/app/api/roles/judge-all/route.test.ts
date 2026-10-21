@@ -40,7 +40,7 @@ describe('POST /api/roles/judge-all', () => {
   })
 
   it('judges up to 12 waiting roles for the caller and puts them at the front of the next roles.match slice', async () => {
-    judgeRoles.mockResolvedValue({ judged: ['a', 'b', 'c'], stopped: null })
+    judgeRoles.mockResolvedValue({ judged: ['a', 'b', 'c'], failed: [], stopped: null })
     judgeStatus.mockResolvedValue({ judgedToday: 3, waiting: 20, line: '20 more are being checked. Until then they are listed by title and date.' })
     const res = await post()
     expect(nextWaiting.mock.calls[0].slice(1)).toEqual(['u1', 12])
@@ -53,7 +53,7 @@ describe('POST /api/roles/judge-all', () => {
   })
 
   it('answers 429 with the day line when nothing could be judged for want of a free call', async () => {
-    judgeRoles.mockResolvedValue({ judged: [], stopped: 'day' })
+    judgeRoles.mockResolvedValue({ judged: [], failed: [], stopped: 'day' })
     judgeStatus.mockResolvedValue({ judgedToday: 40, waiting: 80, line: null })
     const res = await post()
     expect(res.status).toBe(429)
@@ -63,7 +63,7 @@ describe('POST /api/roles/judge-all', () => {
   })
 
   it('does not queue the caller when nothing waits any more', async () => {
-    judgeRoles.mockResolvedValue({ judged: ['a'], stopped: null })
+    judgeRoles.mockResolvedValue({ judged: ['a'], failed: [], stopped: null })
     judgeStatus.mockResolvedValue({ judgedToday: 1, waiting: 0, line: null })
     await post()
     expect((fake.tables.routines[0] as { args: { front: string[] } }).args.front).toEqual(['u9'])

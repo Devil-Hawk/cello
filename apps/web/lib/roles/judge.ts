@@ -50,6 +50,8 @@ export type Stopped = 'minute' | 'day' | 'no_model' | 'no_resume'
 export interface JudgeOutcome {
   /** Roles that now carry a band. */
   judged: string[]
+  /** Roles whose check came back unusable this time and will be tried again. */
+  failed: string[]
   /** Why the rest were left waiting, when something stopped the run. */
   stopped: Stopped | null
 }
@@ -61,6 +63,8 @@ export const NO_REQUIREMENTS_LINE = 'The posting does not list requirements, so 
 const ROLES_PER_CALL = 3
 const MAX_REQUIREMENTS = 12
 const WAITING_WINDOW = 300
+/** A role whose check comes back unusable this many times is marked cannot assess, so one bad posting cannot hold up the rest. */
+const MAX_TRIES = 3
 
 /** Work authorization, clearance and where the person must be: facts only the person can state. */
 const CONFIRM =
@@ -68,6 +72,12 @@ const CONFIRM =
 const CREDENTIAL = /\b(?:certifi\w*|licen[cs]e\w*)\b/i
 
 const ChecksAnswer = z.object({ checks: z.array(z.object({ id: z.string() }).passthrough()) })
+
+/** The answer must carry a check for every requirement id the prompt listed (`j1.r1`, ...): `{ "checks": [] }` is not an answer. */
+const answerFor = (prompt: string) => {
+  const expected = [...prompt.matchAll(/^(j\d+\.r\d+) /gm)].map((m) => m[1])
+  return ChecksAnswer.refine((a) => expected.every((id) => a.checks.some((c) => c.id === id)), { message: 'a requirement has no check' })
+}
 
 const chunks = <T>(xs: readonly T[], n: number): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n))
 
@@ -178,14 +188,28 @@ async function write(db: AdminClient, userId: string, jobId: string, row: { band
 }
 
 /**
+ * Counts one more unusable check on the role (kept on its provenance while it waits). True once it has had MAX_TRIES,
+ * and the caller then writes cannot assess; false while it stays waiting for another try.
+ */
+async function giveUp(db: AdminClient, userId: string, jobId: string, now: () => Date): Promise<boolean> {
+  const { data } = await db.from('person_roles').select('prov').eq('user_id', userId).eq('job_id', jobId).maybeSingle()
+  const before = (data as { prov: { rule?: string; tries?: number } | null } | null)?.prov
+  const tries = (before?.rule === 'check_failed' ? (before.tries ?? 0) : 0) + 1
+  if (tries >= MAX_TRIES) return true
+  await db.from('person_roles').update({ prov: { rule: 'check_failed', tries, at: now().toISOString() } }).eq('user_id', userId).eq('job_id', jobId)
+  return false
+}
+
+/**
  * Judges the person's own roles among `jobIds`, three to a model call. A role the person does not hold is ignored. Stops at the
  * first limit the door answers and leaves the rest waiting. Never throws on a model failure.
  */
 export async function judgeRoles(db: AdminClient, userId: string, jobIds: readonly string[], deps: JudgeDeps = {}): Promise<JudgeOutcome> {
   const now = deps.now ?? (() => new Date())
   const judged: string[] = []
+  const failed: string[] = []
   const resume = await loadResume(db, userId)
-  if (!resume) return { judged, stopped: 'no_resume' }
+  if (!resume) return { judged, failed, stopped: 'no_resume' }
   const source = sourceOf(resume.version)
   const resumeEvidence: Evidence[] = resume.id ? [{ table: 'resume_documents', id: resume.id }] : []
 
@@ -199,7 +223,7 @@ export async function judgeRoles(db: AdminClient, userId: string, jobIds: readon
     const job = byId.get(id)
     if (!job) continue
     const { req, stop } = await requirementsOf(db, userId, job, deps)
-    if (stop) return { judged, stopped: stop }
+    if (stop) return { judged, failed, stopped: stop }
     const prepared = prepare(req)
     if (prepared.scored.length < MIN_REQUIREMENTS) {
       const detail = { checks: [], gaps: [], confirm: prepared.confirm.map((c) => c.text), note: NO_REQUIREMENTS_LINE }
@@ -212,7 +236,7 @@ export async function judgeRoles(db: AdminClient, userId: string, jobIds: readon
   for (const group of chunks(ready, ROLES_PER_CALL)) {
     let prov: Prov | null = null
     const runner: LlmRunner = async (opts) => {
-      const out = await judgeCall(db, { userId, step: 'role.evidence', prompt: opts.system ?? '', input: opts.prompt ?? '', schema: ChecksAnswer, promptRef: opts.promptRef, maxTokens: opts.maxTokens }, deps.door)
+      const out = await judgeCall(db, { userId, step: 'role.evidence', prompt: opts.system ?? '', input: opts.prompt ?? '', schema: answerFor(opts.prompt ?? ''), promptRef: opts.promptRef, maxTokens: opts.maxTokens }, deps.door)
       if (!out.ok) throw out.limit === 'bad_answer' ? new Error('bad_answer') : new ChanceStop(out.limit)
       prov = out.prov
       return { content: JSON.stringify(out.json), tokensUsed: 0, promptTokens: 0, completionTokens: 0, model: out.prov.model }
@@ -228,21 +252,25 @@ export async function judgeRoles(db: AdminClient, userId: string, jobIds: readon
         }))
       )
     } catch (error) {
-      if (error instanceof ChanceStop) return { judged, stopped: error.limit as Stopped }
+      if (error instanceof ChanceStop) return { judged, failed, stopped: error.limit as Stopped }
       throw error
     }
     for (const { job, prepared } of group) {
       const result = results.get(job.id)!
       const p = prov as Prov | null
+      if (!p && !(await giveUp(db, userId, job.id, now))) {
+        failed.push(job.id)
+        continue
+      }
       const provRow = p
         ? { ...p, evidence: [{ table: 'jobs', id: job.id }, ...resumeEvidence], at: now().toISOString() }
-        : { rule: 'check_failed', at: now().toISOString() }
+        : { rule: 'check_failed', tries: MAX_TRIES, at: now().toISOString() }
       const detail = { checks: result.checks, gaps: result.gaps, confirm: prepared.confirm.map((c) => c.text), note: result.note }
       await write(db, userId, job.id, { band: result.chance, readings: readingsOf(prepared, result.checks, source), prov: provRow, detail }, now())
       judged.push(job.id)
     }
   }
-  return { judged, stopped: null }
+  return { judged, failed, stopped: null }
 }
 
 export const judgeRole = (db: AdminClient, userId: string, jobId: string, deps?: JudgeDeps) => judgeRoles(db, userId, [jobId], deps)

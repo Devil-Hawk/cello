@@ -17,11 +17,11 @@ function setup(queues: Record<string, string[]>, opts: { front?: string[]; used?
   const judge = vi.fn(async (_db: unknown, user: string, ids: readonly string[]) => {
     calls.push([user, [...ids]])
     const custom = opts.judge?.(user, [...ids])
-    if (custom?.stopped) return { judged: custom.judged ?? [], stopped: custom.stopped }
+    if (custom?.stopped) return { judged: custom.judged ?? [], failed: [], stopped: custom.stopped }
     const got = custom?.judged ?? [...ids]
     queue.set(user, (queue.get(user) ?? []).filter((id) => !got.includes(id)))
     for (const r of tables.person_roles) if (r.user_id === user && got.includes(r.job_id as string)) r.judged_at = 'now'
-    return { judged: got, stopped: null }
+    return { judged: got, failed: [], stopped: null }
   })
   const sleeps: number[] = []
   const deps = {
@@ -78,6 +78,14 @@ describe('roles.match', () => {
     const next = setup({ a: ['a1'], b: ['b1'] }, { state: { done: ['a'], judged: 1, front: [] } })
     expect(await next.run()).toEqual({ ok: true, found: { judged: 2, waiting: 1, people: 2 } })
     expect(next.calls.map((c) => c[0])).toEqual(['b'])
+  })
+
+  it('does not ask again in the same slice for a role whose check came back unusable', async () => {
+    // b2 and b3 stay waiting after the first call; the slice moves on to b4 instead of asking for them again
+    const t = setup({ a: [], b: ['b1', 'b2', 'b3', 'b4'] }, { judge: (_u, ids) => (ids.includes('b2') ? { judged: ['b1'] } : undefined) })
+    const out = await t.run()
+    expect(t.calls).toEqual([['b', ['b1', 'b2', 'b3']], ['b', ['b4']]])
+    expect(out).toEqual({ ok: true, found: { judged: 2, waiting: 2, people: 1 } })
   })
 
   it('does nothing when no role waits', async () => {

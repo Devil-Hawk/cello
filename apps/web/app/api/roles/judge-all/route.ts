@@ -62,6 +62,6 @@ export async function POST(request: NextRequest) {
           .eq('id', routine.id)
       }
     }
-    return NextResponse.json({ scored: out.judged.length, failed: 0, remaining: status.waiting, line: status.line, stopped: out.stopped })
+    return NextResponse.json({ scored: out.judged.length, failed: out.failed.length, remaining: status.waiting, line: status.line, stopped: out.stopped })
   })
 }

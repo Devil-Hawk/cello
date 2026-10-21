@@ -52,16 +52,20 @@ export async function matchWith(ctx: RoutineContext, deps: MatchDeps): Promise<R
   let patience = 0
   for (const person of people) {
     let finished = false
+    // Roles tried in this slice are not asked for again in it: a check that came back unusable is retried by a later slice.
+    const tried = new Set<string>()
     while (ctx.now() < ctx.deadlineAt && !stopped) {
-      const ids = await deps.waiting(db, person, PER_CALL)
+      const ids = (await deps.waiting(db, person, PER_CALL + tried.size)).filter((id) => !tried.has(id)).slice(0, PER_CALL)
       if (ids.length === 0) {
         finished = true
         break
       }
+      for (const id of ids) tried.add(id)
       const out = await deps.judge(db, person, ids, deps.judgeDeps)
       judged += out.judged.length
       if (out.stopped === 'no_model') stopped = 'no_model'
       else if (out.stopped === 'minute') {
+        for (const id of ids) tried.delete(id)
         if (++patience > MINUTE_PATIENCE) stopped = 'minute'
         else await deps.sleep(MINUTE_WAIT_MS)
         continue

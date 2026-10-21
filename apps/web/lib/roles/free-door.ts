@@ -76,7 +76,12 @@ export interface DoorDeps {
   now: () => Date
   dailyCap: () => number
   models: () => string[]
+  /** Free models that failed or answered out of shape, and until when they are left alone. */
+  cooling: Map<string, number>
 }
+
+/** How long a free model that failed is skipped. ponytail: in-process, like the minute bucket; the next process asks it again. */
+export const COOLDOWN_MS = 5 * 60_000
 
 const intFromEnv = (v: string | undefined, fallback: number) => {
   const n = Number.parseInt(v ?? '', 10)
@@ -92,6 +97,7 @@ export const realDoor: DoorDeps = {
   now: () => new Date(),
   dailyCap: () => intFromEnv(process.env.JUDGE_FREE_DAILY_CALLS, DEFAULT_DAILY_CALLS),
   models: () => freeFallbackModels(),
+  cooling: new Map(),
 }
 
 /** The day's share of the free calls for one person: the cap over the people with roles waiting, at least MIN_SHARE. */
@@ -172,15 +178,18 @@ export async function judgeCall<T>(db: AdminClient, args: JudgeCallInput<T>, dep
     if (!(await takeFreeCall(db, args.userId, deps))) return { ok: false, limit: 'day' }
     const free = freeModelKeys(keys, platform)
     let failure: unknown = null
+    const cool = (model: string) => deps.cooling.set(model, deps.now().getTime() + COOLDOWN_MS)
     for (const model of deps.models()) {
-      if (!model.endsWith(':free')) continue
+      if (!model.endsWith(':free') || (deps.cooling.get(model) ?? 0) > deps.now().getTime()) continue
       try {
         const result = await deps.call(free, { ...request, model, reasoning: { effort: 'none' } }, AbortSignal.timeout(60_000))
         const json = checked(result.content, args.schema)
         if (json !== null) return { ok: true, json, prov: provOf(args.step, result, 'openrouter', deps) }
         answered = 'bad'
+        cool(model)
       } catch (error) {
         failure = error
+        cool(model)
       }
     }
     if (answered === 'bad') return { ok: false, limit: 'bad_answer' }

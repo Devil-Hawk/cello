@@ -29,7 +29,7 @@ function job(id: string, md: string, extra: Record<string, unknown> = {}) {
 }
 
 type Answer = Record<string, unknown>
-function setup(opts: { jobs?: Record<string, unknown>[]; answers?: (name: string, system: string) => Answer | Error; day?: boolean; resume?: boolean } = {}) {
+function setup(opts: { jobs?: Record<string, unknown>[]; answers?: (name: string, system: string, prompt: string) => Answer | Error; day?: boolean; resume?: boolean } = {}) {
   const jobs = opts.jobs ?? [job('j1', MD)]
   const { client, tables } = fakeDb(
     {
@@ -41,8 +41,8 @@ function setup(opts: { jobs?: Record<string, unknown>[]; answers?: (name: string
     },
     { rpc: { take_judge_call: () => opts.day !== true } }
   )
-  const call = vi.fn(async (_keys: unknown, req: { name: string; system: string }) => {
-    const a = opts.answers?.(req.name, req.system) ?? { checks: [] }
+  const call = vi.fn(async (_keys: unknown, req: { name: string; system: string; prompt: string }) => {
+    const a = opts.answers?.(req.name, req.system, req.prompt) ?? { checks: [] }
     if (a instanceof Error) throw a
     return { content: JSON.stringify(a), model: 'google/gemma-4-31b-it:free', promptTokens: 1, completionTokens: 1, tokensUsed: 2 }
   })
@@ -55,6 +55,7 @@ function setup(opts: { jobs?: Record<string, unknown>[]; answers?: (name: string
     now: () => NOW,
     dailyCap: () => 800,
     models: () => ['google/gemma-4-31b-it:free'],
+    cooling: new Map<string, number>(),
   } satisfies DoorDeps
   const row = (id: string) => tables.person_roles.find((r) => r.job_id === id)!
   return { db: client, tables, call, door, row, deps: { door, now: () => NOW } }
@@ -73,7 +74,7 @@ describe('judgeRole', () => {
   it('turns the items into readings with their quotes and a band, with provenance and the time', async () => {
     const t = setup({ answers: () => strongAnswer })
     const out = await judgeRole(t.db, 'u1', 'j1', t.deps)
-    expect(out).toEqual({ judged: ['j1'], stopped: null })
+    expect(out).toEqual({ judged: ['j1'], failed: [], stopped: null })
     const r = t.row('j1') as { band: string; readings: Record<string, unknown>[]; prov: Record<string, unknown>; judged_at: string; chance: string }
     expect(r.band).toBe('strong')
     expect(r.chance).toBe('strong')
@@ -129,7 +130,7 @@ describe('judgeRole', () => {
   it('writes cannot_assess with the reason no_requirements for a thin posting, and makes no call', async () => {
     const thin = 'We are hiring a backend engineer. Come and build with us.'
     const t = setup({ jobs: [job('j1', thin)] })
-    expect(await judgeRole(t.db, 'u1', 'j1', t.deps)).toEqual({ judged: ['j1'], stopped: null })
+    expect(await judgeRole(t.db, 'u1', 'j1', t.deps)).toEqual({ judged: ['j1'], failed: [], stopped: null })
     const r = t.row('j1') as { band: string; prov: Record<string, unknown>; judged_at: string; chance_detail: { note: string } }
     expect(r.band).toBe('cannot_assess')
     expect(r.prov).toMatchObject({ rule: 'no_requirements' })
@@ -168,29 +169,39 @@ describe('judgeRole', () => {
 
   it('leaves the role waiting and says why when the day share is used', async () => {
     const t = setup({ day: true })
-    expect(await judgeRole(t.db, 'u1', 'j1', t.deps)).toEqual({ judged: [], stopped: 'day' })
+    expect(await judgeRole(t.db, 'u1', 'j1', t.deps)).toEqual({ judged: [], failed: [], stopped: 'day' })
     expect(t.call).not.toHaveBeenCalled()
     expect((t.row('j1') as { judged_at: unknown }).judged_at).toBeNull()
   })
 
   it('stops with no_resume when there is no resume, and ignores a role the person does not hold', async () => {
     const none = setup({ resume: false })
-    expect(await judgeRole(none.db, 'u1', 'j1', none.deps)).toEqual({ judged: [], stopped: 'no_resume' })
+    expect(await judgeRole(none.db, 'u1', 'j1', none.deps)).toEqual({ judged: [], failed: [], stopped: 'no_resume' })
     const t = setup({ answers: () => strongAnswer })
-    expect(await judgeRoles(t.db, 'u1', ['someone-elses'], t.deps)).toEqual({ judged: [], stopped: null })
+    expect(await judgeRoles(t.db, 'u1', ['someone-elses'], t.deps)).toEqual({ judged: [], failed: [], stopped: null })
     expect(t.call).not.toHaveBeenCalled()
   })
 
-  it('marks the role cannot_assess with a code reason when the model answers nothing usable, keeping the run going', async () => {
-    const t = setup({ answers: () => ({ nope: 1 }) })
-    expect(await judgeRole(t.db, 'u1', 'j1', t.deps)).toEqual({ judged: ['j1'], stopped: null })
-    expect(t.row('j1')).toMatchObject({ band: 'cannot_assess', prov: { rule: 'check_failed' } })
+  it('leaves the role waiting when the check comes back unusable, counts the tries, and gives up on the third', async () => {
+    // an empty list of checks is not an answer: every requirement id the prompt listed needs one
+    const t = setup({ answers: () => ({ checks: [] }) })
+    expect(await judgeRole(t.db, 'u1', 'j1', t.deps)).toEqual({ judged: [], failed: ['j1'], stopped: null })
+    expect(t.row('j1')).toMatchObject({ judged_at: null, prov: { rule: 'check_failed', tries: 1 } })
+    // the model that answered out of shape is left alone for a while, so the next try waits for it (or another model)
+    expect(await judgeRole(t.db, 'u1', 'j1', t.deps)).toEqual({ judged: [], failed: [], stopped: 'minute' })
+    t.door.cooling.clear()
+    expect(await judgeRole(t.db, 'u1', 'j1', t.deps)).toEqual({ judged: [], failed: ['j1'], stopped: null })
+    expect(t.row('j1')).toMatchObject({ judged_at: null, prov: { rule: 'check_failed', tries: 2 } })
+    t.door.cooling.clear()
+    expect(await judgeRole(t.db, 'u1', 'j1', t.deps)).toEqual({ judged: ['j1'], failed: [], stopped: null })
+    expect(t.row('j1')).toMatchObject({ band: 'cannot_assess', judged_at: NOW.toISOString(), prov: { rule: 'check_failed', tries: 3 } })
   })
 
   it('judges three roles in one call', async () => {
     const jobs = ['j1', 'j2', 'j3', 'j4'].map((id) => job(id, MD))
-    const t = setup({ jobs, answers: () => ({ checks: [] }) })
-    await judgeRoles(t.db, 'u1', ['j1', 'j2', 'j3', 'j4'], t.deps)
+    const allNotMet = (_name: string, _system: string, prompt: string) => ({ checks: [...prompt.matchAll(/^(j\d+\.r\d+) /gm)].map((m) => ({ id: m[1], status: 'not_met', line: null, quote: null })) })
+    const t = setup({ jobs, answers: allNotMet })
+    expect((await judgeRoles(t.db, 'u1', ['j1', 'j2', 'j3', 'j4'], t.deps)).judged).toHaveLength(4)
     expect(t.call).toHaveBeenCalledTimes(2)
   })
 })

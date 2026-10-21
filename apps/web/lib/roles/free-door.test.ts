@@ -39,9 +39,10 @@ function setup(opts: { keys?: Record<string, unknown>; platform?: string | undef
     now: () => NOW,
     dailyCap: () => opts.cap ?? 800,
     models: () => ['google/gemma-4-31b-it:free', 'some/paid-model', 'nvidia/nemotron-3-super-120b-a12b:free'],
+    cooling: new Map<string, number>(),
   } satisfies DoorDeps
   const run = () => judgeCall(client, { userId: 'u1', step: 'role.evidence', prompt: 'sys', input: 'in', schema }, deps)
-  return { run, call, budget, bucket }
+  return { run, call, budget, bucket, deps }
 }
 
 describe('the path order', () => {
@@ -60,6 +61,18 @@ describe('the path order', () => {
     expect(t.call.mock.calls.map((c) => (c[1] as { model: string }).model)).toEqual(['google/gemma-4-31b-it:free', 'nvidia/nemotron-3-super-120b-a12b:free'])
     expect((t.call.mock.calls[0][0] as { openrouter: string }).openrouter).toBe('sk-platform')
     expect(t.budget.used).toBe(1)
+  })
+
+  it('leaves a model that failed or answered out of shape alone for five minutes, then asks it again', async () => {
+    const t = setup({ replies: (m) => (m?.startsWith('google') ? new Error('429') : m?.startsWith('nvidia') && t.call.mock.calls.length < 3 ? answer(m, '{"nope":1}') : answer(m!)) })
+    expect(await t.run()).toEqual({ ok: false, limit: 'bad_answer' })
+    expect(t.call).toHaveBeenCalledTimes(2)
+    // both are cooling: nothing is asked, and the answer is to try again soon
+    expect(await t.run()).toEqual({ ok: false, limit: 'minute' })
+    expect(t.call).toHaveBeenCalledTimes(2)
+    t.deps.cooling.clear()
+    expect(await t.run()).toMatchObject({ ok: true, prov: { model: 'nvidia/nemotron-3-super-120b-a12b:free' } })
+    expect(t.call).toHaveBeenCalledTimes(4)
   })
 
   it('falls back to the free models when the own key fails', async () => {
