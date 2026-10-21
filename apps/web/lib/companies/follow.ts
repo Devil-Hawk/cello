@@ -64,7 +64,7 @@ export async function followAndRead(db: Db, userId: string, employerId: string, 
 
   const followed = await followEmployer(db, userId, employer, 'known', { dream: opts.dream })
   if (followed.error !== undefined) return refuse('not_saved')
-  if (!employer.ats_provider || !employer.ats_token) return { ok: true, following: true, already: false, read: null, line: 'Following. Cello has no job board for it to read yet.', fit: null }
+  if (!employer.ats_provider || !employer.ats_token) return { ok: true, following: true, already: false, read: null, line: 'Following. Cello checks it with the others, every 6 hours.', fit: null }
 
   // The read runs while the budget runs. Past the budget the person gets the hand-off line and the read goes on.
   const work = read(employer, people).catch(() => null)
