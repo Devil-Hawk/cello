@@ -14,19 +14,24 @@
 //   closed        the board left the rotation for good: cannot_read_reason is set and is not 'cannot_read'
 //                 (gone, no longer proven, or no posting in 120 days; see the migration). A board that did not answer
 //                 three times is "Cannot read", not closed.
-//   keptForYou, topForYou, the "for you" insights, the shared insights
-//                 null until Roles writes person_roles and PR 5 writes employer_insights
+//   keptForYou, topForYou, the "for you" insights
+//                 null until Roles writes person_roles for this person at this employer (companies_page.for_you)
+//   insights.shared  empty before the first read of the board (no employer_insights row) and for a fact Cello does not
+//                 have: a line is absent, never 0 (insight-lines.ts)
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { meterState } from '../clock/meter'
 import { routineStatus, type RoutineStatus } from '../clock/status'
 import { directoryProgress } from './directory'
+import { insightLines, type InsightLine, type InsightsRow } from './insight-lines'
 import { REASON_COPY } from './roles-status'
 
 type Db = SupabaseClient<any, any, any>
 
 export const PAGE_SIZE = 50
 const WEEK_MS = 7 * 86_400_000
+/** Top how many: 3 on the wall tile (companies_page), 5 on the page. */
+const TOP_ON_PAGE = 5
 
 /** An id the database will accept as a uuid; anything else is a 404 before it reaches Postgres. */
 export const isUuid = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
@@ -68,6 +73,7 @@ export interface CompanyRow {
   nextReadAt: string | null
   closed: boolean
   keptForYou: number | null
+  /** The best three open roles this person holds here, in the order of CompanyPage.insights.forYou.topForYou. */
   topForYou: { title: string; chance: string }[] | null
   following: boolean
   isDream: boolean
@@ -115,8 +121,18 @@ export interface CompanyPage extends Omit<CompanyRow, 'keptForYou' | 'topForYou'
   /** The open roles this person holds here (person_roles x jobs); the most recent 100. */
   kept: KeptRole[]
   insights: {
-    shared: null
-    forYou: { topForYou: null; yourTypesCount: null; asks: null }
+    /** The shared half, one line per known fact with its source and time. */
+    shared: InsightLine[]
+    forYou: {
+      /** The honest line while Roles has not matched anything for this person here; null once it has. */
+      line: string | null
+      /** The five best open roles this person holds here: Strong, then Possible, then Stretch, newest first within each. */
+      topForYou: KeptRole[] | null
+      /** Open roles this person holds here (person_roles), not capped at the 100 in `kept`. */
+      yourTypesCount: number | null
+      /** What their postings ask for against the resume. ponytail: Roles' requirement judgements do not exist yet; this stays null until they do. */
+      asks: null
+    }
   }
 }
 
@@ -206,8 +222,8 @@ export async function companiesPage(db: Db, userId: string, opts: CompaniesPageO
     db.rpc('companies_page', { p_user: userId, p_type: opts.type ?? null, p_with_roles: opts.withRolesForYou ?? false, p_show_closed: opts.showClosed ?? false, p_limit: limit, p_offset: offset }),
   ])
   if (list.error) throw new Error('could not read the companies')
-  const found = (list.data ?? []) as (Head & { role_types: string[] | null; matched: number })[]
-  const rows = found.map((r) => ({ ...headOf(r), keptForYou: null, topForYou: null, roleTypes: r.role_types ?? [] }))
+  const found = (list.data ?? []) as (Head & { role_types: string[] | null; matched: number; for_you: { count: number; top: { title: string; chance: string }[] } | null })[]
+  const rows = found.map((r) => ({ ...headOf(r), keptForYou: r.for_you?.count ?? null, topForYou: r.for_you?.top ?? null, roleTypes: r.role_types ?? [] }))
   return { header: h, rows, matched: found[0]?.matched ?? (offset === 0 ? 0 : null), limit, offset }
 }
 
@@ -230,11 +246,14 @@ export async function companyPage(db: Db, userId: string, id: string): Promise<C
         profile: Record<string, unknown> | null
         by_type: { role_type: string | null; open: number }[]
         kept: { id: string; title: string; role_type: string | null; location: string | null; url: string; posted_at: string | null; chance: string | null }[]
+        insights: InsightsRow | null
+        kept_count: number
       })
     | undefined
   if (!r) return null
   const base = headOf(r)
   const follow = base.following ? await db.from('companies').select('id').eq('user_id', userId).eq('employer_id', base.employerId).eq('watching', true).limit(1).maybeSingle() : null
+  const kept = (r.kept ?? []).map((k) => ({ id: k.id, title: k.title, roleType: k.role_type, location: k.location, url: k.url, postedAt: k.posted_at, chance: k.chance }))
   return {
     ...base,
     followId: (follow?.data as { id: string } | null)?.id ?? null,
@@ -244,8 +263,13 @@ export async function companyPage(db: Db, userId: string, id: string): Promise<C
     provider: r.ats_provider,
     profile: r.profile,
     byType: (r.by_type ?? []).map((t) => ({ roleType: t.role_type, open: t.open })),
-    kept: (r.kept ?? []).map((k) => ({ id: k.id, title: k.title, roleType: k.role_type, location: k.location, url: k.url, postedAt: k.posted_at, chance: k.chance })),
-    insights: { shared: null, forYou: { topForYou: null, yourTypesCount: null, asks: null } },
+    kept,
+    insights: {
+      shared: insightLines(r.insights, { name: r.name, domain: r.domain, careersUrl: r.careers_url, provider: r.ats_provider, profile: r.profile }),
+      forYou: kept.length
+        ? { line: null, topForYou: kept.slice(0, TOP_ON_PAGE), yourTypesCount: r.kept_count, asks: null }
+        : { line: 'Cello has not matched these to your targets yet.', topForYou: null, yourTypesCount: null, asks: null },
+    },
   }
 }
 

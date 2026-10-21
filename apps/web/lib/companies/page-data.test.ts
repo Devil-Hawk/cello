@@ -42,6 +42,13 @@ describe('companiesPage', () => {
     expect(rows[1]).toMatchObject({ foundBy: 'person', following: true, isDream: true, hq: null })
   })
 
+  it('puts the count of roles held and the best three on the tile, and nothing where Roles has judged none', async () => {
+    const { client } = setup([sql({ for_you: { count: 5, top: [{ title: 'FDE', chance: 'strong' }, { title: 'ML engineer', chance: 'possible' }] } }), sql({ employer_id: 'e2', for_you: null })])
+    const { rows } = await companiesPage(client, 'u1', { now: NOW })
+    expect(rows[0]).toMatchObject({ keptForYou: 5, topForYou: [{ title: 'FDE', chance: 'strong' }, { title: 'ML engineer', chance: 'possible' }] })
+    expect(rows[1]).toMatchObject({ keptForYou: null, topForYou: null })
+  })
+
   it('says how many employers match the filters, not how many are on the page', async () => {
     const { client } = setup([sql({ matched: 120 }), sql({ employer_id: 'e2', matched: 120 })])
     expect((await companiesPage(client, 'u1', { limit: 2, now: NOW })).matched).toBe(120)
@@ -119,12 +126,12 @@ describe('companiesPage', () => {
 describe('companyPage', () => {
   const page = (over: Record<string, unknown> = {}) => ({
     ...sql(), careers_url: 'https://jobs.ashbyhq.com/retell', ats_provider: 'ashby', profile: null,
-    by_type: [{ role_type: 'ai-engineer', open: 6 }, { role_type: null, open: 6 }],
+    by_type: [{ role_type: 'ai-engineer', open: 6 }, { role_type: null, open: 6 }], insights: null, kept_count: 1,
     kept: [{ id: 'j1', title: 'Forward Deployed Engineer', role_type: 'forward-deployed-engineer', location: 'Remote', url: 'https://x/1', posted_at: ago(2), chance: 'strong' }],
     ...over,
   })
 
-  it('gives the head, the count by type, the roles this person holds, and nothing invented for Roles or insights', async () => {
+  it('gives the head, the count by type, the roles this person holds, and no insight line for a board never read', async () => {
     const { client, calls } = setup([page()])
     const p = await companyPage(client, 'u1', 'e1')
     expect(calls[0]).toEqual({ p_user: 'u1', p_employer: 'e1' })
@@ -132,9 +139,30 @@ describe('companyPage', () => {
       employerId: 'e1', name: 'Retell AI', openCount: 12, closed: false, careersUrl: 'https://jobs.ashbyhq.com/retell', provider: 'ashby',
       byType: [{ roleType: 'ai-engineer', open: 6 }, { roleType: null, open: 6 }],
       kept: [{ id: 'j1', title: 'Forward Deployed Engineer', roleType: 'forward-deployed-engineer', chance: 'strong', postedAt: ago(2) }],
-      insights: { shared: null, forYou: { topForYou: null, yourTypesCount: null, asks: null } },
+      insights: { shared: [], forYou: { line: null, yourTypesCount: 1, asks: null } },
     })
+    expect(p?.insights.forYou.topForYou?.map((k) => k.id)).toEqual(['j1'])
     expect(p).not.toHaveProperty('keptForYou')
+  })
+
+  it('shows the shared insight lines with their source and time, the five best roles, and the count that is not capped at the page', async () => {
+    const kept = Array.from({ length: 7 }, (_, n) => ({ id: `j${n}`, title: `Role ${n}`, role_type: null, location: null, url: `https://x/${n}`, posted_at: null, chance: 'possible' }))
+    const insights = {
+      computed_at: hoursAgo(3), open: 12, by_type: [{ roleType: null, open: 12 }], by_seniority: {}, locations: [], remote_share: null, posted_7d: 0, posted_30d: 0,
+      pay: { stated: 0, min: null, max: null, currency: null }, median_age_days: null, typical_close_days: null, closes_seen: 0, stack: [{ name: 'Python', count: 3 }],
+    }
+    const p = await companyPage(setup([page({ kept, kept_count: 140, insights })]).client, 'u1', 'e1')
+    expect(p?.insights.shared).toEqual([
+      { text: 'Hiring 12 roles.', source: 'jobs.ashbyhq.com', at: hoursAgo(3) },
+      { text: 'Named in postings: Python 3.', source: 'jobs.ashbyhq.com', at: hoursAgo(3) },
+    ])
+    expect(p?.insights.forYou.topForYou).toHaveLength(5)
+    expect(p?.insights.forYou).toMatchObject({ line: null, yourTypesCount: 140, asks: null })
+  })
+
+  it('says Cello has not matched the roles to the person yet while Roles has written none, and asks for nothing', async () => {
+    const p = await companyPage(setup([page({ kept: [], kept_count: 0 })]).client, 'u1', 'e1')
+    expect(p?.insights.forYou).toEqual({ line: 'Cello has not matched these to your targets yet.', topForYou: null, yourTypesCount: null, asks: null })
   })
 
   it('hands over the follow row of a person who follows, and none to one who does not', async () => {
