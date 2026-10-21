@@ -230,7 +230,7 @@ export async function readEmployer(db: Db, employer: DirectoryRow, people: Perso
   // closed roles stood between jobs.discovered_at and jobs.closed_at. Only roles inside someone's targets are stored, so it
   // is the pace of those.
   const { data: closed } = await db.from('jobs').select('discovered_at, closed_at').eq('employer_id', employer.id).not('closed_at', 'is', null).limit(5000)
-  const i = computeInsights(clean, { now, closes: ((closed ?? []) as { discovered_at: string; closed_at: string }[]).map((c) => ({ firstSeen: c.discovered_at, closedAt: c.closed_at })) })
+  const i = computeInsights(clean, { now, employer: employer.name, closes: ((closed ?? []) as { discovered_at: string; closed_at: string }[]).map((c) => ({ firstSeen: c.discovered_at, closedAt: c.closed_at })) })
   const { error: insightsError } = await db.from('employer_insights').upsert(
     {
       employer_id: employer.id, computed_at: nowIso, open: i.open, by_type: i.byType, by_seniority: i.bySeniority, locations: i.locations, remote_share: i.remoteShare,

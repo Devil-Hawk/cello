@@ -6,7 +6,7 @@ const row = (over: Partial<InsightsRow> = {}): InsightsRow => ({
   computed_at: AT, open: 14,
   by_type: [{ roleType: 'software-engineer', open: 6 }, { roleType: 'product-manager', open: 3 }, { roleType: null, open: 5 }],
   by_seniority: { senior: 2, mid: 9, junior: 3, unknown: 0 },
-  locations: [{ name: 'New York', count: 5 }, { name: 'Boston', count: 3 }, { name: 'Paris', count: 2 }],
+  locations: [{ name: 'New York, New York, USA', count: 5 }, { name: 'Boston, Massachusetts, USA', count: 3 }, { name: 'Paris, France', count: 2 }, { name: 'New York, NY', count: 1 }],
   remote_share: 0.4, posted_7d: 4, posted_30d: 11,
   pay: { stated: 9, min: 140000, max: 240000, currency: 'USD' },
   median_age_days: 18, typical_close_days: 35, closes_seen: 31,

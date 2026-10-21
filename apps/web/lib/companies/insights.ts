@@ -4,6 +4,7 @@
 
 import type { AtsJob } from '../ats/types'
 import { classifyJob } from '../jobs/classify'
+import { normalizeCompanyName } from '../entities/companies'
 import { typeTitle } from '../jobs/role-types'
 import { stackWords } from './stack-words'
 
@@ -42,6 +43,8 @@ export interface InsightOpts {
   now: number
   /** This employer's closed postings: when Cello first saw each (jobs.discovered_at) and when it closed (jobs.closed_at). */
   closes: { firstSeen: string; closedAt: string }[]
+  /** The employer's name: a posting names its own employer in every line, so a stack word that is the employer is left out. */
+  employer?: string
 }
 
 function median(xs: number[]): number | null {
@@ -89,17 +92,18 @@ export function computeInsights(jobs: AtsJob[], opts: InsightOpts): Insights {
   const ages = jobs.map((j) => (j.postedAt ? (opts.now - Date.parse(j.postedAt)) / DAY_MS : NaN)).filter((a) => !Number.isNaN(a)).map((a) => Math.max(0, a))
   const closeDays = opts.closes.map((c) => (Date.parse(c.closedAt) - Date.parse(c.firstSeen)) / DAY_MS).filter((d) => Number.isFinite(d) && d >= 0)
   const typical = closeDays.length >= MIN_CLOSES ? median(closeDays) : null
-  // A place is counted once per posting; Ashby joins a posting's extra places with " · ".
+  // A place is counted once per posting; Ashby joins a posting's extra places with " · ", Greenhouse with ";".
   const places = new Map<string, { name: string; count: number }>()
   for (const j of jobs) {
-    for (const name of new Set((j.location ?? '').split(' · ').map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean))) {
+    for (const name of new Set((j.location ?? '').split(/ · |;/).map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean))) {
       const at = places.get(name.toLowerCase()) ?? { name, count: 0 }
       at.count++
       places.set(name.toLowerCase(), at)
     }
   }
+  const own = new Set(normalizeCompanyName(opts.employer ?? '').split(' '))
   const stack = new Map<string, number>()
-  for (const j of jobs) for (const w of stackWords(`${j.title}\n${j.description ?? ''}`)) stack.set(w, (stack.get(w) ?? 0) + 1)
+  for (const j of jobs) for (const w of stackWords(`${j.title}\n${j.description ?? ''}`)) if (!own.has(w.toLowerCase())) stack.set(w, (stack.get(w) ?? 0) + 1)
   const bySeniority = Object.fromEntries(tally(classes, (c) => c.seniority))
   const types = tally(jobs, (j) => typeTitle(j.title.trim()).role_type ?? '')
   return {

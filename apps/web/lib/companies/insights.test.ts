@@ -24,21 +24,23 @@ describe('computeInsights', () => {
         job('2', 'Software Engineer', { location: ' new york, ny ' }),
         job('3', 'Account Executive', { location: 'Paris · Berlin' }),
         job('4', 'Junior Software Engineer', { location: 'Remote - US' }),
+        job('5', 'Support Engineer', { location: 'Tokyo, Japan; Paris' }),
       ],
       { now: NOW, closes: [] }
     )
-    expect(i.open).toBe(4)
-    expect(i.byType.reduce((n, t) => n + t.open, 0)).toBe(4)
+    expect(i.open).toBe(5)
+    expect(i.byType.reduce((n, t) => n + t.open, 0)).toBe(5)
     expect(i.byType[0].open).toBeGreaterThanOrEqual(i.byType[i.byType.length - 1].open)
     expect(i.bySeniority).toMatchObject({ senior: 1, junior: 1 })
-    // places are folded by case and spacing, counted once a posting, and an Ashby join is split
+    // places are folded by case and spacing, counted once a posting, and a posting's several places (Ashby's " · ", Greenhouse's ";") are split
     expect(i.locations).toEqual([
       { name: 'New York, NY', count: 2 },
+      { name: 'Paris', count: 2 },
       { name: 'Berlin', count: 1 },
-      { name: 'Paris', count: 1 },
       { name: 'Remote - US', count: 1 },
+      { name: 'Tokyo, Japan', count: 1 },
     ])
-    expect(i.remoteShare).toBe(0.25)
+    expect(i.remoteShare).toBe(0.2)
   })
 
   it('keeps the eight most common places', () => {
@@ -98,6 +100,12 @@ describe('computeInsights', () => {
       { name: 'PostgreSQL', count: 1 },
       { name: 'Python', count: 1 },
     ])
+  })
+
+  it('leaves the employer itself out of the stack: a Datadog posting names Datadog every time', () => {
+    const jobs = [job('1', 'Engineer', { description: 'Join Datadog. We run Kubernetes.' })]
+    expect(computeInsights(jobs, { now: NOW, closes: [], employer: 'Datadog, Inc.' }).stack).toEqual([{ name: 'Kubernetes', count: 1 }])
+    expect(computeInsights(jobs, { now: NOW, closes: [] }).stack).toEqual([{ name: 'Datadog', count: 1 }, { name: 'Kubernetes', count: 1 }])
   })
 })
 

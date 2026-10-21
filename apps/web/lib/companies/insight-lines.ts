@@ -73,7 +73,8 @@ function hiring(i: InsightsRow): string {
   const levels = SENIOR_FIRST.filter((l) => i.by_seniority[l] > 0).map((l) => `${i.by_seniority[l]} ${l}`)
   const posted = [...(i.posted_7d > 0 ? [`${i.posted_7d} posted this week`] : []), ...(i.posted_30d > 0 ? [`${i.posted_30d}${i.posted_7d > 0 ? '' : ' posted'} this month`] : [])]
   const remote = i.remote_share ? `${Math.round(i.remote_share * 100)} % remote` : null
-  const places = i.locations.slice(0, SHOWN_PLACES).map((p) => p.name).join(', ')
+  // "Paris, France" is Paris on this line; the stored places keep what the postings say
+  const places = [...new Set(i.locations.map((p) => p.name.split(',')[0].trim()))].slice(0, SHOWN_PLACES).join(', ')
   return [
     `Hiring ${plural(i.open, 'role', 'roles')}${types.length ? `: ${types.join(', ')}` : ''}.`,
     levels.length ? `${levels.join(', ')}.` : '',
