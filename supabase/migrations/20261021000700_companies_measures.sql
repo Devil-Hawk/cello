@@ -368,10 +368,15 @@ $$;
 revoke all on function public.measure_t35(), public.measure_t36(), public.measure_t37() from public, anon, authenticated;
 grant execute on function public.measure_t35(), public.measure_t36(), public.measure_t37() to service_role;
 
--- T12 is a static row: the review of this pull request traced every number to its column.
+-- T12 is a static row: the numbers on the Companies pages and in the scorecard each name their column. The column list is in
+-- the pull request bodies: PR 76 (the table of the Companies page's numbers) and PR 80 (the columns this feature added).
 insert into public.measure_runs (measure_id, value, passed, sample_n, note)
-select 'T12', null, true, null, 'Checked in review of the companies/measures pull request: every number on the Companies pages and the scorecard names its column in that pull request body.'
+select 'T12', null, true, null, 'Checked in review: every number on the Companies pages and the scorecard names its column. The column list is in the PR 76 body (the table) and the PR 80 body (the columns this feature added).'
 where not exists (select 1 from public.measure_runs where measure_id = 'T12');
+
+update public.measure_runs
+   set note = 'Checked in review: every number on the Companies pages and the scorecard names its column. The column list is in the PR 76 body (the table) and the PR 80 body (the columns this feature added).'
+ where measure_id = 'T12' and note like 'Checked in review of the companies/measures pull request%';
 
 -- ---------------------------------------------------------------------------
 -- Self-check: the functions return one row each, and the register rows are in place.
