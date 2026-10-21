@@ -3,7 +3,8 @@
 //   write   100 titles from the owner's kept roles and application history, one for each distinct
 //           normalised title, every type the owner holds first, to a CSV with the type Cello gave (code or
 //           the role.type step) and a blank `type` column to mark. When the owner holds fewer than 100, the
-//           most common titles in stored roles fill the rest.
+//           stratified sample of stored titles fills the rest (--file: at most 6 titles of a type, and 25 titles
+//           tier 1 leaves untyped), and the first line of the file says whose data it is.
 //   score   the marked CSV: per-type precision and recall, keep-recall over the chosen types, the 0.95 gate
 //   import  the marked CSV as the Langfuse dataset `role-types` (input: the title; expected output: the type)
 //
@@ -75,31 +76,71 @@ export async function collectLabelRows(db: Db, userId: string, limit = LABEL_SET
   return chooseLabelRows((data ?? []) as Held[], new Set(((apps ?? []) as { job_id: string }[]).map((a) => a.job_id)), limit)
 }
 
-/** The most common titles in stored roles that are not in `have`, for a set the owner's own roles do not fill. */
-export async function commonTitles(db: Db, have: ReadonlySet<string>, limit: number): Promise<LabelRow[]> {
-  const { data, error } = await db.from('jobs').select('title, title_norm, role_type').not('title_norm', 'is', null).neq('title_norm', '').limit(50_000)
-  if (error) throw new Error('could not read the stored roles')
+/** Most titles of one type the file takes, so no type fills the 100, and the titles tier 1 left untyped it adds. */
+export const PER_TYPE_CAP = 6
+export const UNTYPED_EXTRA = 25
+
+interface Stored {
+  title: string
+  title_norm: string
+  role_type: string | null
+  type_origin?: string | null
+}
+
+/**
+ * Pure. `typedLimit` titles that tier 1 (code) typed, round-robin across the types, the most common titles of
+ * a type first and at most PER_TYPE_CAP of a type; then `untypedLimit` of the most common titles it left
+ * untyped. One row for each distinct title_norm, none that is in `have`.
+ */
+export function stratifiedTitles(stored: Stored[], have: ReadonlySet<string>, typedLimit: number, untypedLimit = UNTYPED_EXTRA): LabelRow[] {
   const seen = new Map<string, { row: LabelRow; n: number }>()
-  for (const j of (data ?? []) as { title: string; title_norm: string; role_type: string | null }[]) {
-    if (have.has(j.title_norm)) continue
+  for (const j of stored) {
+    if (!j.title_norm || have.has(j.title_norm) || j.type_origin === 'model') continue
     const at = seen.get(j.title_norm)
     if (at) at.n++
     else seen.set(j.title_norm, { n: 1, row: { title: j.title, title_norm: j.title_norm, tier1_type: j.role_type ?? '', employer: '', source: 'common' } })
   }
-  return [...seen.values()].sort((a, b) => b.n - a.n || a.row.title_norm.localeCompare(b.row.title_norm)).slice(0, limit).map((s) => s.row)
+  const byType = new Map<string, { row: LabelRow; n: number }[]>()
+  for (const s of seen.values()) byType.set(s.row.tier1_type, [...(byType.get(s.row.tier1_type) ?? []), s])
+  for (const list of byType.values()) list.sort((a, b) => b.n - a.n || a.row.title_norm.localeCompare(b.row.title_norm))
+  const untyped = (byType.get('') ?? []).slice(0, untypedLimit).map((s) => s.row)
+  byType.delete('')
+  const order = [...byType.keys()].sort((a, b) => byType.get(b)!.length - byType.get(a)!.length || a.localeCompare(b))
+  const typed: LabelRow[] = []
+  for (let i = 0; i < PER_TYPE_CAP && typed.length < typedLimit; i++) {
+    for (const type of order) {
+      const s = byType.get(type)![i]
+      if (s && typed.length < typedLimit) typed.push(s.row)
+    }
+  }
+  return [...typed, ...untyped]
 }
 
-/** The owner's own roles first (when there is an owner), then the most common stored titles, 100 in all. */
+/** A sample of stored roles that are not in `have`, for a set the owner's own roles do not fill. */
+export async function commonTitles(db: Db, have: ReadonlySet<string>, limit: number): Promise<LabelRow[]> {
+  const { data, error } = await db.from('jobs').select('title, title_norm, role_type, type_origin').not('title_norm', 'is', null).neq('title_norm', '').limit(50_000)
+  if (error) throw new Error('could not read the stored roles')
+  return stratifiedTitles((data ?? []) as Stored[], have, limit)
+}
+
+/** The owner's own roles first (when there is an owner), then a stratified sample of stored titles for the rest. */
 export async function collectFileRows(db: Db, userId: string | null, limit = LABEL_SET_SIZE): Promise<LabelRow[]> {
   const own = userId ? await collectLabelRows(db, userId, limit) : []
   if (own.length >= limit) return own
   return [...own, ...(await commonTitles(db, new Set(own.map((r) => r.title_norm)), limit - own.length))]
 }
 
+/** The first line of the file: whose data it is. A line beginning with # is skipped when the file is read back. */
+export function fileNote(rows: LabelRow[]): string {
+  return rows.some((r) => r.source !== 'common')
+    ? "# the owner's applied, saved and kept roles first, then a public boards sample for the rest (source common); the sample is not the owner's roles"
+    : "# public boards sample, not the owner's roles; rerun with --owner on the owner's database"
+}
+
 const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v)
 
-export function labelSetCsv(rows: LabelRow[]): string {
-  const lines = ['title,title_norm,cello_type,type,employer,source']
+export function labelSetCsv(rows: LabelRow[], note?: string): string {
+  const lines = [...(note ? [note] : []), 'title,title_norm,cello_type,type,employer,source']
   for (const r of rows) lines.push([r.title, r.title_norm, r.tier1_type, '', r.employer, r.source].map(cell).join(','))
   return lines.join('\n') + '\n'
 }
@@ -142,7 +183,7 @@ export interface Labelled {
 
 /** The marked rows: a row with `type` blank is not marked yet, and one with a type the taxonomy does not have is refused. */
 export function parseLabelCsv(csv: string): { labelled: Labelled[]; refused: string[] } {
-  const [header, ...rows] = csv.split(/\r?\n/).filter((l) => l.trim())
+  const [header, ...rows] = csv.split(/\r?\n/).filter((l) => l.trim() && !l.startsWith('#'))
   const cols = cells(header ?? '')
   const at = (name: string) => cols.indexOf(name)
   // the column to mark was once called your_type
@@ -221,7 +262,7 @@ export function scoreReport(score: LabelScore, chosenGiven: boolean): string[] {
 
 /** The CSV a person marked: what Cello gave and what they say, for the rows they marked. Reads the old column names too. */
 export function parseScoredRows(csv: string): { cello: string; label: string }[] {
-  const [header, ...rows] = csv.split(/\r?\n/).filter((l) => l.trim())
+  const [header, ...rows] = csv.split(/\r?\n/).filter((l) => l.trim() && !l.startsWith('#'))
   const cols = cells(header ?? '')
   const find = (...names: string[]) => names.map((n) => cols.indexOf(n)).find((i) => i >= 0) ?? -1
   const celloAt = find('cello_type', 'tier1_type')

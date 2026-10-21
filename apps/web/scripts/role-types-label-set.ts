@@ -8,7 +8,8 @@
 //
 //   cd apps/web && pnpm role-types:label-set --file <path> [--owner <your user id>]
 //       writes the 100 titles to <path> with an empty `type` column to fill: your own roles and applications
-//       first (with --owner), then the most common titles in stored roles
+//       first (with --owner), then a sample of stored titles: at most 6 of each type tier 1 gives, and 25 titles
+//       it leaves untyped. The first line says whose data it is.
 //   cd apps/web && pnpm role-types:label-set --score <path> [--chosen ai-engineer,ml-engineer]
 //       reads the filled file and prints precision and recall for each type with at least 10 labels
 //       ("Too few to tell" for the rest), keep-recall over your chosen types and whether the 0.95 gate holds
@@ -19,7 +20,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createAdminClient } from '../lib/harness/supabase-admin'
 import { isOwner } from '../lib/measures/owner'
-import { collectFileRows, collectLabelRows, importLabelSet, labelSetCsv, parseLabelCsv, parseScoredRows, scoreLabels, scoreReport } from '../lib/jobs/role-types/label-set'
+import { collectFileRows, collectLabelRows, fileNote, importLabelSet, labelSetCsv, parseLabelCsv, parseScoredRows, scoreLabels, scoreReport } from '../lib/jobs/role-types/label-set'
 
 const arg = (name: string) => {
   const at = process.argv.indexOf(name)
@@ -63,7 +64,7 @@ async function main(): Promise<void> {
       process.exit(1)
     }
     const rows = await collectFileRows(db, who ?? null)
-    writeFileSync(path, labelSetCsv(rows))
+    writeFileSync(path, labelSetCsv(rows, fileNote(rows)))
     console.log(`${rows.length} titles written to ${path}. Fill the type column with a role type id (or none), then run with --score.`)
     process.exit(0)
   }

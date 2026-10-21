@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chooseLabelRows, collectFileRows, importLabelSet, labelSetCsv, parseLabelCsv, parseScoredRows, scoreLabels, scoreReport } from './label-set'
+import { chooseLabelRows, collectFileRows, fileNote, importLabelSet, labelSetCsv, parseLabelCsv, parseScoredRows, scoreLabels, scoreReport, stratifiedTitles } from './label-set'
 import { fakeDb } from '../../companies/fake-db'
 
 const held = (n: number, title: string, type: string | null, over: Record<string, unknown> = {}) => ({
@@ -77,15 +77,46 @@ describe('the label set', () => {
 })
 
 describe('the file mode', () => {
-  it('fills a set the owner does not fill with the most common stored titles, once each', async () => {
+  const job = (title: string, type: string | null, origin: string | null = type ? 'code' : null) => ({ title, title_norm: title.toLowerCase(), role_type: type, type_origin: origin })
+
+  it('takes at most 6 titles of a type, spread across the types, then the untyped titles, once each', async () => {
     const jobs = [
-      ...Array.from({ length: 3 }, () => ({ title: 'Software Engineer', title_norm: 'software engineer', role_type: 'software-engineer' })),
-      ...Array.from({ length: 2 }, () => ({ title: 'Data Engineer', title_norm: 'data engineer', role_type: 'data-engineer' })),
-      { title: 'Zookeeper', title_norm: 'zookeeper', role_type: null },
-      { title: 'No key', title_norm: null, role_type: null },
+      ...Array.from({ length: 20 }, (_, i) => job(`Engineer ${i}`, 'software-engineer')),
+      ...Array.from({ length: 3 }, (_, i) => job(`Data ${i}`, 'data-engineer')),
+      job('Data 0', 'data-engineer'),
+      ...Array.from({ length: 30 }, (_, i) => job(`Zookeeper ${i}`, null)),
+      job('Model typed', 'ai-engineer', 'model'),
+      { title: 'No key', title_norm: null, role_type: null, type_origin: null },
     ]
+    const rows = await collectFileRows(fakeDb({ jobs }).client, null, 100)
+    const typed = rows.filter((r) => r.tier1_type)
+    const untyped = rows.filter((r) => !r.tier1_type)
+    expect(typed.filter((r) => r.tier1_type === 'software-engineer')).toHaveLength(6)
+    expect(typed.filter((r) => r.tier1_type === 'data-engineer')).toHaveLength(3)
+    // the most common title of a type comes first, and the types alternate
+    expect(typed.slice(0, 2).map((r) => r.title_norm)).toEqual(['engineer 0', 'data 0'])
+    expect(typed.some((r) => r.tier1_type === 'ai-engineer')).toBe(false)
+    expect(untyped).toHaveLength(25)
+    expect(new Set(rows.map((r) => r.title_norm)).size).toBe(rows.length)
+    expect(rows.every((r) => r.source === 'common')).toBe(true)
+  })
+
+  it('stops the typed titles at the limit, and leaves out the titles the owner already has', async () => {
+    const jobs = ['a', 'b', 'c', 'd'].flatMap((t) => [job(`${t} one`, `type-${t}`), job(`${t} two`, `type-${t}`)])
     const rows = await collectFileRows(fakeDb({ jobs }).client, null, 3)
-    expect(rows.map((r) => [r.title_norm, r.tier1_type, r.source])).toEqual([['software engineer', 'software-engineer', 'common'], ['data engineer', 'data-engineer', 'common'], ['zookeeper', '', 'common']])
+    expect(rows).toHaveLength(3)
+    expect(stratifiedTitles(jobs, new Set(['a one']), 100).map((r) => r.title_norm)).not.toContain('a one')
+  })
+
+  it('says whose data it is on the first line, and reads the file back with that line there', () => {
+    const sample = [{ title: 'AI Engineer', title_norm: 'ai engineer', tier1_type: 'ai-engineer', employer: '', source: 'common' as const }]
+    const csv = labelSetCsv(sample, fileNote(sample))
+    expect(csv.split('\n')[0]).toBe("# public boards sample, not the owner's roles; rerun with --owner on the owner's database")
+    expect(csv.split('\n')[1]).toBe('title,title_norm,cello_type,type,employer,source')
+    const marked = csv.replace('ai-engineer,,', 'ai-engineer,ai-engineer,')
+    expect(parseScoredRows(marked)).toEqual([{ cello: 'ai-engineer', label: 'ai-engineer' }])
+    expect(parseLabelCsv(marked).labelled).toEqual([{ title: 'AI Engineer', title_norm: 'ai engineer', role_type: 'ai-engineer' }])
+    expect(fileNote([{ ...sample[0], source: 'applied' }])).toMatch(/^# the owner's/)
   })
 })
 
