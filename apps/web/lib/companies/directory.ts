@@ -40,15 +40,6 @@ export interface NotChecked {
   domain: string | null
 }
 
-export const LIST_PAGE = 50
-
-/** The verified employers, most open roles first, a page at a time. */
-export async function listCompanies(db: Db, opts: { limit?: number; offset?: number } = {}): Promise<DirectoryRow[]> {
-  const { data, error } = await db.rpc('list_company_directory', { p_limit: opts.limit ?? LIST_PAGE, p_offset: opts.offset ?? 0 })
-  if (error) throw new Error('could not list employers')
-  return (data ?? []) as DirectoryRow[]
-}
-
 /** Verified employers by name, domain or board token, then pending candidates by name. A query with nothing to match is empty. */
 export async function searchCompanies(db: Db, query: string, opts: { limit?: number } = {}): Promise<{ employers: DirectoryRow[]; notChecked: NotChecked[] }> {
   const q = query.trim().slice(0, 120)

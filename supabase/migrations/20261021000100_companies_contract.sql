@@ -13,6 +13,9 @@
 -- not_employer_site) or has no posting in 120 days (stale). 'cannot_read' is the one reason that is not closed: the board
 -- did not answer three times, and the page says "Cannot read" with the reason, never "0 open".
 
+-- companies_page replaces list_company_directory: the wall was its only reader.
+drop function if exists public.list_company_directory(integer, integer);
+
 alter table public.company_directory
   add column if not exists hq text,
   add column if not exists profile jsonb;
