@@ -143,7 +143,7 @@ def work_one(base: str, secret: str) -> bool:
     log(f"job {job['id']} {job.get('kind')} ok={result.get('ok')} {how}")
     for attempt in range(3):  # the server re-queues a claim left for 20 minutes
         try:
-            _post(base, f"/api/directory/jobs/{job['id']}", secret, result).raise_for_status()
+            _post(base, f"/api/directory/jobs/{job['id']}", secret, {**result, "id": job["id"]}).raise_for_status()
             return True
         except httpx.HTTPError:
             if attempt == 2:

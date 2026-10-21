@@ -15,6 +15,7 @@ export const maxDuration = 60
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   const signed = readSigned(await request.text(), request.headers.get('x-cello-signature'))
   if (!signed.ok) return NextResponse.json({ error: signed.status === 503 ? 'not_configured' : signed.status === 400 ? 'bad_request' : 'unauthorized' }, { status: signed.status })
+  if (signed.body.id !== params.id) return NextResponse.json({ error: 'unauthorized' }, { status: 401 }) // signed for another job
   if (!/^[0-9a-f-]{36}$/i.test(params.id)) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
   const db = createAdminClient()

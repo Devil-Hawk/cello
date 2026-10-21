@@ -103,6 +103,7 @@ def test_once_does_one_job_and_posts_the_page_signed(serve, monkeypatch, capsys)
         "ok": True, "html": "<p>roles</p>", "final_url": "https://acme.example/careers/", "rung": "stealth",
     }
     assert "rendered" not in sent
+    assert sent["id"] == JOB["id"]
     assert 0 < sent["exp"] - time.time() <= 61
     claim = next(r for r in server.requests if r[0].endswith("/claim"))
     assert claim[1] == worker.sign(claim[2], SECRET) and json.loads(claim[2]).keys() == {"exp"}

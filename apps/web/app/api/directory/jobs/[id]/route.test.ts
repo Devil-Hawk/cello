@@ -14,7 +14,7 @@ import { POST } from './route'
 
 const exp = () => Math.floor(Date.now() / 1000) + 60
 function call(body: Record<string, unknown>, opts: { signature?: string | null; id?: string } = {}) {
-  const raw = JSON.stringify({ exp: exp(), ...body })
+  const raw = JSON.stringify({ exp: exp(), id: opts.id ?? ID, ...body })
   const signature = opts.signature === undefined ? signContinue(raw, SECRET) : opts.signature
   return POST(new NextRequest(`http://localhost/api/directory/jobs/${opts.id ?? ID}`, { method: 'POST', body: raw, headers: signature ? { 'x-cello-signature': signature } : {} }), { params: { id: opts.id ?? ID } })
 }
@@ -94,6 +94,17 @@ describe('POST /api/directory/jobs/[id]', () => {
     expect((await call({ ok: true, html: PAGE })).status).toBe(409)
     expect((await call({ ok: true }, { id: 'not-an-id' })).status).toBe(404)
     expect(settle).not.toHaveBeenCalled()
+  })
+
+  it('refuses an answer signed for another job, and a second answer that lands during the settle writes nothing', async () => {
+    expect((await call({ ok: true, html: PAGE, id: '22222222-2222-4222-8222-222222222222' })).status).toBe(401)
+    expect(settle).not.toHaveBeenCalled()
+    settle.mockImplementation(async () => {
+      held.tables.render_jobs[0] = { ...job(), state: 'done', result: { from: 'the other post' } }
+      return { state: 'verified', employerId: 'e1' }
+    })
+    await call({ ok: true, html: PAGE, final_url: 'https://retellai.com/careers' })
+    expect(stored()).toMatchObject({ state: 'done', result: { from: 'the other post' } })
   })
 
   it('leaves the job claimed when the settle throws', async () => {

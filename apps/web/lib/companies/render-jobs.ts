@@ -122,8 +122,9 @@ const onDomain = (host: string, domain: string) => host === domain || host.endsW
  * listing tier needs the role pages themselves. Add a posted-page fetcher for readSite when that is wanted.
  */
 export async function finishRenderJob(db: Db, job: RenderJob, body: Record<string, unknown>, deps: VerifyDeps): Promise<void> {
+  // Only a job still claimed is finished here: a second answer that lands while the first is settling writes nothing.
   const finish = (state: 'done' | 'failed', patch: { result?: unknown; failure?: string }) =>
-    db.from('render_jobs').update({ state, done_at: new Date(deps.now()).toISOString(), ...patch }).eq('id', job.id)
+    db.from('render_jobs').update({ state, done_at: new Date(deps.now()).toISOString(), ...patch }).eq('id', job.id).eq('state', 'claimed')
 
   if (body.ok !== true) {
     await finish('failed', { failure: failureClass(body.error) })
