@@ -16,8 +16,8 @@ describe('queueRenderJob', () => {
 
   it('queues a careers page and rests its candidate for a day', async () => {
     const { client, tables } = db({ directory_candidates: [{ id: 'c1', next_check_at: '2020-01-01T00:00:00Z' }] })
-    const id = await queueRenderJob(client, { kind: 'careers_page', candidateId: 'c1', url: 'https://retellai.com/careers' })
-    expect(tables.render_jobs).toEqual([{ id, kind: 'careers_page', candidate_id: 'c1', url: 'https://retellai.com/careers', query: null }])
+    const id = await queueRenderJob(client, { kind: 'careers_page', candidateId: 'c1', url: 'https://retellai.com/careers', requestedBy: 'u1' })
+    expect(tables.render_jobs).toEqual([{ id, kind: 'careers_page', candidate_id: 'c1', url: 'https://retellai.com/careers', query: null, requested_by: 'u1' }])
     expect(Date.parse(tables.directory_candidates[0].next_check_at as string)).toBeGreaterThan(Date.now() + 23 * 3_600_000)
   })
 

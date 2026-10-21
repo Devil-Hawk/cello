@@ -9,7 +9,10 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { findBoardLinks } from '../ats/careers-page'
 import { detectFromUrl } from '../ats/detect'
 import { continueSecret, MAX_EXP_AHEAD_S, verifySigned } from '../clock/sign'
-import { settleCandidate, type CandidateRow, type VerifyDeps } from './verify-directory'
+import { readSite } from '../ingest/reader'
+import { ReaderError, type SiteFetcher } from '../ingest/reader/site-fetch'
+import { NO_TARGETS } from '../ingest/reader/targets'
+import { settleCandidate, writeEmployer, type CandidateRow, type VerifyDeps } from './verify-directory'
 
 type Db = SupabaseClient<any, any, any>
 
@@ -22,6 +25,8 @@ export interface RenderJob {
   url: string | null
   query: string | null
   state: string
+  /** The person who asked, who follows the employer when the answer proves one. */
+  requested_by?: string | null
 }
 
 export interface QueueInput {
@@ -29,6 +34,7 @@ export interface QueueInput {
   candidateId?: string | null
   url?: string | null
   query?: string | null
+  requestedBy?: string | null
 }
 
 const isHttp = (u: string) => u.length <= 2000 && /^https?:\/\/[^\s]+$/i.test(u)
@@ -49,7 +55,7 @@ export async function queueRenderJob(db: Db, input: QueueInput): Promise<string 
 
   const { data, error } = await db
     .from('render_jobs')
-    .insert({ kind: input.kind, candidate_id: input.candidateId ?? null, url: input.kind === 'careers_page' ? url : null, query: input.kind === 'web_search' ? query : null })
+    .insert({ kind: input.kind, candidate_id: input.candidateId ?? null, url: input.kind === 'careers_page' ? url : null, query: input.kind === 'web_search' ? query : null, requested_by: input.requestedBy ?? null })
     .select('id')
     .single()
   if (error || !data) return null
@@ -114,42 +120,97 @@ const hostOf = (url: unknown): string | null => {
 
 const onDomain = (host: string, domain: string) => host === domain || host.endsWith(`.${domain}`)
 
+/** Is `url` the page the worker was sent to? Scheme, a leading www. and a trailing slash do not matter. */
+function samePage(url: string, page: string): boolean {
+  try {
+    const [a, b] = [new URL(url), new URL(page)]
+    const key = (u: URL) => `${u.hostname.replace(/^www\./, '')}${u.pathname.replace(/\/$/, '')}${u.search}`
+    return key(a) === key(b)
+  } catch {
+    return false
+  }
+}
+
+/** A fetcher that answers the one address the worker read with the HTML it posted, and refuses every other: nothing else is fetched. */
+function postedPage(pageUrl: string, html: string): SiteFetcher {
+  let requests = 0
+  const refuse = (): never => {
+    throw new ReaderError('unreachable')
+  }
+  return {
+    mode: 'inline',
+    async get(url) {
+      requests++
+      if (!samePage(url, pageUrl)) return refuse()
+      return { status: 200, ok: true, text: html, finalUrl: pageUrl, contentType: 'text/html' }
+    },
+    async json() {
+      return refuse()
+    },
+    async gate() {
+      refuse()
+    },
+    async redirectOf() {
+      return null
+    },
+    async allowed(url) {
+      return samePage(url, pageUrl)
+    },
+    async sitemapsOf() {
+      return []
+    },
+    spent: () => ({ requests, bytes: html.length }),
+  }
+}
+
 /**
  * Settle one claimed job from the worker's posted result. A page that was read is verified like any candidate's
- * (settleCandidate, as a person's check): the boards its HTML links to are the evidence, and nothing else is fetched
- * from the page's site. The HTML is used only when it was read on the candidate's own domain.
- * ponytail: a site that lists roles with no applicant system (no board link in the HTML) is not settled here; the
- * listing tier needs the role pages themselves. Add a posted-page fetcher for readSite when that is wanted.
+ * (settleCandidate, as a person's check): the boards its HTML links to are the evidence. A page that links no board but
+ * lists roles itself is read from the posted HTML alone (postedPage) and accepted as the employer's own site
+ * (verified_by careers_url_host), as a live read of it would be. The HTML is used only when it was read on the
+ * candidate's own domain. Returns the employer that was proven, if any, so the caller can follow it for the requester.
  */
-export async function finishRenderJob(db: Db, job: RenderJob, body: Record<string, unknown>, deps: VerifyDeps): Promise<void> {
+export async function finishRenderJob(db: Db, job: RenderJob, body: Record<string, unknown>, deps: VerifyDeps): Promise<{ employerId: string | null }> {
   // Only a job still claimed is finished here: a second answer that lands while the first is settling writes nothing.
-  const finish = (state: 'done' | 'failed', patch: { result?: unknown; failure?: string }) =>
-    db.from('render_jobs').update({ state, done_at: new Date(deps.now()).toISOString(), ...patch }).eq('id', job.id).eq('state', 'claimed')
-
-  if (body.ok !== true) {
-    await finish('failed', { failure: failureClass(body.error) })
-    return
+  const finish = async (state: 'done' | 'failed', patch: { result?: unknown; failure?: string }) => {
+    await db.from('render_jobs').update({ state, done_at: new Date(deps.now()).toISOString(), ...patch }).eq('id', job.id).eq('state', 'claimed')
+    return { employerId: null as string | null }
   }
+
+  if (body.ok !== true) return finish('failed', { failure: failureClass(body.error) })
   if (job.kind === 'web_search') {
     const domains = cleanDomains(body.domains)
-    await (domains ? finish('done', { result: { domains } }) : finish('failed', { failure: 'BadResult' }))
-    return
+    return domains ? finish('done', { result: { domains } }) : finish('failed', { failure: 'BadResult' })
   }
 
   const html = typeof body.html === 'string' ? body.html : ''
   const rung = typeof body.rung === 'string' ? body.rung.slice(0, 20) : null
-  if (!html) {
-    await finish('failed', { failure: 'EmptyPage' })
-    return
-  }
+  if (!html) return finish('failed', { failure: 'EmptyPage' })
   const { data } = job.candidate_id ? await db.from('directory_candidates').select('id, name, domain, ats_provider, ats_token, source, failed_reads').eq('id', job.candidate_id).maybeSingle() : { data: null }
   const candidate = data as CandidateRow | null
-  if (!candidate) {
-    await finish('done', { result: { rung } }) // a read with nobody waiting on it
-    return
-  }
+  if (!candidate) return finish('done', { result: { rung } }) // a read with nobody waiting on it
   const host = hostOf(body.final_url) ?? hostOf(job.url)
-  const boards = host && candidate.domain && onDomain(host, candidate.domain) ? findBoardLinks(html, (u) => detectFromUrl({ careerUrl: u, domain: null })) : []
+  const own = !!(host && candidate.domain && onDomain(host, candidate.domain))
+  const boards = own ? findBoardLinks(html, (u) => detectFromUrl({ careerUrl: u, domain: null })) : []
   const settled = await settleCandidate(db, candidate, { ...deps, pageBoards: async () => boards }, { person: true })
-  await finish('done', { result: { rung, settled: settled.state, ...(settled.state === 'verified' ? { employer_id: settled.employerId } : settled.state === 'failed' ? { reason: settled.reason } : {}) } })
+  if (settled.state === 'verified') {
+    await finish('done', { result: { rung, settled: 'verified', employer_id: settled.employerId } })
+    return { employerId: settled.employerId }
+  }
+
+  // No board proved it: the page may list roles itself.
+  const pageUrl = typeof body.final_url === 'string' && own && hostOf(body.final_url) ? body.final_url : job.url
+  if (own && pageUrl) {
+    const read = await readSite({ company: { name: candidate.name, domain: candidate.domain, careerUrl: pageUrl }, targets: NO_TARGETS }, { fetcher: postedPage(pageUrl, html), renderedLater: false })
+    if (read.tier && read.tier !== 'board' && read.jobs.length > 0) {
+      const written = await writeEmployer(db, { name: candidate.name, domain: candidate.domain, careersUrl: pageUrl, provider: null, token: null, verifiedBy: 'careers_url_host', source: 'person', openCount: read.complete ? read.jobs.length : null, readTier: read.tier, keepExisting: true }, deps.now)
+      if (written.ok) {
+        const at = new Date(deps.now()).toISOString()
+        await db.from('directory_candidates').update({ state: 'verified', employer_id: written.employerId, fail_reason: null, failed_reads: 0, checked_at: at }).eq('id', candidate.id)
+        await finish('done', { result: { rung, settled: 'verified', employer_id: written.employerId, via: 'site' } })
+        return { employerId: written.employerId }
+      }
+    }
+  }
+  return finish('done', { result: { rung, settled: settled.state, ...(settled.state === 'failed' ? { reason: settled.reason } : {}) } })
 }
