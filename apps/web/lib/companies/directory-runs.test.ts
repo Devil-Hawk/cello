@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AddResult } from './add-link'
-import { addLinksRun, coverageRun, findRun, recordMeasureRun, runAddLinks, runCoverage, runFinds, type FindRow } from './directory-runs'
+import { addLinksRun, coverageRun, findRun, recordMeasureRun, runAddLinks, runCoverage, runFinds, t34Recordable, type FindRow } from './directory-runs'
 import { fakeDb } from './fake-db'
 
 describe('T24: directory search coverage', () => {
@@ -143,5 +143,15 @@ describe('T34: the verdict and its note', () => {
 
   it('reports no verdict when there is no row to judge', () => {
     expect(findRun([], 0)).toMatchObject({ passed: null, value: null, sample_n: 0 })
+  })
+})
+
+describe('T34: which names file may write the row', () => {
+  it('writes from the pinned fixture, or from a file of 21 names or more, and never from a partial file', () => {
+    const names = Array.from({ length: 21 }, (_, i) => `Name ${i}`)
+    expect(t34Recordable(names.slice(0, 2), true)).toBe(true)
+    expect(t34Recordable(names, false)).toBe(true)
+    expect(t34Recordable(names.slice(0, 20), false)).toBe(false)
+    expect(t34Recordable(['Amazon', 'Apple', ''], false)).toBe(false)
   })
 })

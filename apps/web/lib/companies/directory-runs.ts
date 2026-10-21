@@ -189,3 +189,9 @@ export function findRun(rows: FindRow[], owned: number): { value: number | null;
     note,
   }
 }
+
+/** The T34 row is written only from the full set: the pinned fixture, or a names file of at least 21 names. */
+export const T34_FULL_SET = 21
+export function t34Recordable(names: string[], fromFixture: boolean): boolean {
+  return fromFixture || names.filter((n) => n.trim() !== '').length >= T34_FULL_SET
+}

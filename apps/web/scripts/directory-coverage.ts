@@ -12,12 +12,13 @@
 // With --find each name goes through companies.find instead (the five rungs, the real network): it counts when a
 // candidate for that employer is offered, and the row says which rung found it, how long it took, and for a miss how far
 // it got. A search writes nothing about an employer, and a web search that would be queued for the pull worker is only
-// reported. --record writes the T34 measure_runs row; without it nothing is written. Add --owner <user id> to use that
+// reported. --record writes the T34 measure_runs row, only from the full set (the fixture or 21 names or more); without it nothing is written. Add --owner <user id> to use that
 // person's own Tavily key; TAVILY_API_KEY also works. The names above a "# startups" line in the file are the owner's
 // own: any miss among them exits 1. The names below it need 4 of every 5 (8 of 10). Lines starting with # are otherwise ignored.
 
 import { readFileSync } from 'node:fs'
-import { coverageRun, findRun, recordMeasureRun, runCoverage, runFinds } from '../lib/companies/directory-runs'
+import { resolve } from 'node:path'
+import { coverageRun, findRun, recordMeasureRun, runCoverage, runFinds, T34_FULL_SET, t34Recordable } from '../lib/companies/directory-runs'
 import { findEmployer, realFindDeps } from '../lib/companies/find'
 import { createAdminClient } from '../lib/harness/supabase-admin'
 
@@ -33,6 +34,8 @@ async function namesOf(admin: ReturnType<typeof createAdminClient>, owner: strin
   const { data } = await admin.from('person_jobs').select('viewer_company_name').eq('viewer_id', owner).in('id', ids.slice(0, 500))
   return [...new Set(((data ?? []) as { viewer_company_name: string | null }[]).map((r) => r.viewer_company_name?.trim()).filter((n): n is string => !!n))]
 }
+
+const T34_FIXTURE = 'scripts/fixtures/t34-names.txt'
 
 async function main(): Promise<void> {
   let admin
@@ -61,7 +64,10 @@ async function main(): Promise<void> {
     // The bar: every name the owner gave, and 4 of every 5 of the startups (8 of 10).
     const t34 = findRun(run.rows, owned)
     console.log(t34.note)
-    if (process.argv.includes('--record')) await recordMeasureRun(admin, 'T34', t34)
+    if (process.argv.includes('--record')) {
+      if (t34Recordable(names, file !== undefined && resolve(file) === resolve(T34_FIXTURE))) await recordMeasureRun(admin, 'T34', t34)
+      else console.log(`Not recorded: T34 is written only from ${T34_FIXTURE} or a names file of ${T34_FULL_SET} or more. This file has ${names.filter((n) => n.trim() !== '').length}.`)
+    }
     process.exit(t34.passed ? 0 : 1)
   }
   const result = await runCoverage(admin, names)
