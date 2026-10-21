@@ -31,6 +31,8 @@ import { buildVocabulary, tagsFromText } from './similarity'
 import { buildSuggestions, leadCompanies, roleMatcher, type ProbeTarget, type SuggestionDraft, type SuggestionInputs } from './suggestions'
 import type { BoardHit, YcRow } from './types'
 
+/** An employer the person stopped following stays out of their suggestions for this long, then may be suggested again. */
+export const UNFOLLOW_QUIET_DAYS = 90
 /** The next daily tick should find a list due: 20 hours, not 24. */
 export const REFRESH_AFTER_MS = 20 * 3600 * 1000
 const SOURCE_TIMEOUT_MS = 60_000
@@ -107,6 +109,9 @@ interface OwnCompany {
   canonical_id: string | null
   is_dream_company: boolean | null
   metadata: unknown
+  watching: boolean
+  /** When watching went from true to false (a trigger stamps it); null when the person follows it. */
+  unfollowed_at: string | null
 }
 
 function isShell(metadata: unknown): boolean {
@@ -156,7 +161,7 @@ export interface LoadedInputs {
 }
 
 /** Read everything the ranking needs about one person. Every query is scoped to them. */
-export async function loadSuggestionInputs(admin: AdminClient, userId: string, yc?: YcRow[]): Promise<LoadedInputs> {
+export async function loadSuggestionInputs(admin: AdminClient, userId: string, yc?: YcRow[], now: Date = new Date()): Promise<LoadedInputs> {
   const { data: profile } = await admin.from('profiles').select('resume_text, preferences').eq('id', userId).maybeSingle()
   const resumeText = (profile?.resume_text as string | null) ?? null
   const preferences = profile?.preferences ?? null
@@ -165,10 +170,14 @@ export async function loadSuggestionInputs(admin: AdminClient, userId: string, y
 
   const { data: ownRows } = await admin
     .from('companies')
-    .select('id, name, domain, name_key, canonical_id, is_dream_company, metadata')
+    .select('id, name, domain, name_key, canonical_id, is_dream_company, metadata, watching, unfollowed_at')
     .eq('user_id', userId)
   const own = (ownRows as OwnCompany[] | null) ?? []
-  const watched = own.filter((c) => !isShell(c.metadata)).map((c) => ({ name: c.name, domain: c.domain }))
+  // Out of the pool: what the person follows, and what they dropped within UNFOLLOW_QUIET_DAYS (an unknown time counts as recent).
+  // Dismissed ones ("Not for me") are permanent and come from company_suggestions below.
+  const quietSince = now.getTime() - UNFOLLOW_QUIET_DAYS * 86_400_000
+  const stillOut = (c: OwnCompany) => c.watching || !c.unfollowed_at || Date.parse(c.unfollowed_at) > quietSince
+  const watched = own.filter((c) => !isShell(c.metadata) && stillOut(c)).map((c) => ({ name: c.name, domain: c.domain }))
 
   const { data: acted } = await admin
     .from('company_suggestions')
@@ -390,7 +399,7 @@ export async function refreshSuggestionsForUser(
   const now = deps.now()
   const nextRefreshAt = new Date(now.getTime() + REFRESH_AFTER_MS).toISOString()
   const yc = await loadYc(admin)
-  const { inputs, resumeText, preferences } = await loadSuggestionInputs(admin, userId, yc)
+  const { inputs, resumeText, preferences } = await loadSuggestionInputs(admin, userId, yc, now)
 
   if (!roleMatcher(inputs)) {
     await writeState(admin, userId, { status: 'needs_targeting', next_refresh_at: nextRefreshAt, counts: {} })

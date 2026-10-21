@@ -67,6 +67,27 @@ describe('refreshSuggestionsForUser', () => {
     expect(w.readBoard).toHaveBeenCalledTimes(1)
   })
 
+  it('leaves out employers the person follows, dropped in the last 90 days or said "Not for me" to, and offers a dropped one again after 90 days', async () => {
+    const employer = (id: string, name: string) => ({ ...acme, id, name, name_norm: name.toLowerCase(), domain: `${name.toLowerCase()}.com`, ats_token: name.toLowerCase(), open_count: 30, cannot_read_reason: null })
+    const row = (id: string, name: string, over: Record<string, unknown>) => ({ id, user_id: 'u1', name, domain: `${name.toLowerCase()}.com`, name_key: name.toLowerCase(), canonical_id: null, is_dream_company: false, metadata: null, employer_id: id, watching: true, unfollowed_at: null, ...over })
+    const daysAgo = (d: number) => new Date(NOW.getTime() - d * 86_400_000).toISOString()
+    const w = world({
+      leads: [],
+      board: hit(),
+      tables: {
+        company_directory: [employer('a', 'Fresh'), employer('f', 'Followed'), employer('r', 'Recent'), employer('o', 'Old'), employer('d', 'Dismissed')],
+        companies: [
+          row('f', 'Followed', {}),
+          row('r', 'Recent', { watching: false, unfollowed_at: daysAgo(10) }),
+          row('o', 'Old', { watching: false, unfollowed_at: daysAgo(100) }),
+        ],
+        company_suggestions: [{ id: 's-d', user_id: 'u1', company_key: 'dismissed.com', name: 'Dismissed', domain: 'dismissed.com', tier: 3, rank: 1, reason: 'r', source_url: 'https://x.test', source_label: 'x', signals: [], ats: null, status: 'dismissed' }],
+      },
+    })
+    await refreshSuggestionsForUser(w.client, 'u1', w.deps)
+    expect(w.tables.company_suggestions.filter((s) => s.status === 'open').map((s) => s.name).sort()).toEqual(['Fresh', 'Old'])
+  })
+
   it('keeps the posting evidence when a verified board cannot be read, and never makes an employer or a company', async () => {
     const w = world({ board: null })
     await refreshSuggestionsForUser(w.client, 'u1', w.deps)
