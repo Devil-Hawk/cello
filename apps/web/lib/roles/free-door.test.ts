@@ -68,8 +68,10 @@ describe('the path order', () => {
     expect(await t.run()).toEqual({ ok: false, limit: 'bad_answer' })
     expect(t.call).toHaveBeenCalledTimes(2)
     // both are cooling: nothing is asked, and the answer is to try again soon
+    const spent = t.budget.used
     expect(await t.run()).toEqual({ ok: false, limit: 'minute' })
     expect(t.call).toHaveBeenCalledTimes(2)
+    expect(t.budget.used).toBe(spent)
     t.deps.cooling.clear()
     expect(await t.run()).toMatchObject({ ok: true, prov: { model: 'nvidia/nemotron-3-super-120b-a12b:free' } })
     expect(t.call).toHaveBeenCalledTimes(4)

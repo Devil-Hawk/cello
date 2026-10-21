@@ -174,13 +174,15 @@ export async function judgeCall<T>(db: AdminClient, args: JudgeCallInput<T>, dep
   // 2. The platform's free models, paced and budgeted. Models are tried in order; the first that answers in shape wins.
   const platform = deps.platformKey()
   if (platform) {
+    // Models resting after a failure are not asked, and a call with none left to ask costs neither a token nor a budget unit.
+    const open = deps.models().filter((m) => m.endsWith(':free') && (deps.cooling.get(m) ?? 0) <= deps.now().getTime())
+    if (open.length === 0) return { ok: false, limit: 'minute' }
     if (!deps.bucket.take()) return { ok: false, limit: 'minute' }
     if (!(await takeFreeCall(db, args.userId, deps))) return { ok: false, limit: 'day' }
     const free = freeModelKeys(keys, platform)
     let failure: unknown = null
     const cool = (model: string) => deps.cooling.set(model, deps.now().getTime() + COOLDOWN_MS)
-    for (const model of deps.models()) {
-      if (!model.endsWith(':free') || (deps.cooling.get(model) ?? 0) > deps.now().getTime()) continue
+    for (const model of open) {
       try {
         const result = await deps.call(free, { ...request, model, reasoning: { effort: 'none' } }, AbortSignal.timeout(60_000))
         const json = checked(result.content, args.schema)
