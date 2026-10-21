@@ -9,6 +9,7 @@ Retell AI
 WorkOS
 Cursor
 Linear
+# startups
 Harvey
 Sierra
 Cognition

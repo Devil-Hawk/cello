@@ -12,6 +12,8 @@
 // candidate for that employer is offered, and the row says which rung found it, how long it took, and for a miss how far
 // it got. Nothing is written and nothing is recorded: a search writes nothing, and a web search that would be queued for
 // the pull worker is only reported. Add --owner <user id> to use that person's own Tavily key; TAVILY_API_KEY also works.
+// The names above a "# startups" line in the file are the owner's own: any miss among them exits 1. The names below it
+// need 4 of every 5 (8 of 10). Lines starting with # are otherwise ignored.
 
 import { readFileSync } from 'node:fs'
 import { coverageRun, recordMeasureRun, runCoverage, runFinds } from '../lib/companies/directory-runs'
@@ -45,14 +47,23 @@ async function main(): Promise<void> {
     console.error('directory:coverage: give --names <file> or --owner <user id>')
     process.exit(1)
   }
-  const names = file ? readFileSync(file, 'utf8').split(/\r?\n/) : await namesOf(admin, owner as string)
+  const lines = file ? readFileSync(file, 'utf8').split(/\r?\n/) : await namesOf(admin, owner as string)
+  const marker = lines.findIndex((l) => /^#\s*startups\b/i.test(l.trim()))
+  const names = lines.filter((l) => !l.trim().startsWith('#'))
+  const owned = (marker < 0 ? lines : lines.slice(0, marker)).filter((l) => l.trim() !== '' && !l.trim().startsWith('#')).length
   if (process.argv.includes('--find')) {
     const user = owner ?? '00000000-0000-0000-0000-000000000000'
     const deps = { ...realFindDeps(admin, owner ?? null), queue: async () => 'not queued by this script' }
     const run = await runFinds(names, (name, report) => findEmployer(admin, user, name, deps, report))
     for (const r of run.rows) console.log(`${r.hit ? 'found ' : 'MISS  '} ${r.name} [${r.hit ? 'rung' : 'reached'}: ${r.rung}, ${r.ms} ms] ${r.hit ? `-> ${r.found}` : `: ${r.reason}`}`)
     console.log(`\n${run.hits} of ${run.total} names offered as the right employer.`)
-    process.exit(0)
+    // The bar: every name the owner gave, and 4 of every 5 of the startups (8 of 10).
+    const ownedMisses = run.rows.slice(0, owned).filter((r) => !r.hit).length
+    const startups = run.rows.slice(owned)
+    const startupHits = startups.filter((r) => r.hit).length
+    const startupBar = Math.ceil(startups.length * 0.8)
+    console.log(`owner's names: ${owned - ownedMisses} of ${owned}; startups: ${startupHits} of ${startups.length} (need ${startupBar}).`)
+    process.exit(ownedMisses > 0 || startupHits < startupBar ? 1 : 0)
   }
   const result = await runCoverage(admin, names)
   for (const r of result.rows) console.log(`${r.hit ? 'found ' : 'MISS  '} ${r.name}${r.hit ? ` -> ${r.found}` : `: ${r.reason}${r.detail ? ` (${r.detail})` : ''}`}`)
