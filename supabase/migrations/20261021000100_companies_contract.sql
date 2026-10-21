@@ -198,6 +198,7 @@ declare
   unread_id uuid := gen_random_uuid();
   job_id uuid := gen_random_uuid();
   n integer;
+  names text;
   r record;
 begin
   begin
@@ -229,9 +230,28 @@ begin
     select count(*) into n from public.companies_page(u, null, true, true, 50, 0) where name like 'Selfcheck%';
     if n <> 0 then raise exception 'companies_page: with roles must keep nobody before a role is held, got %', n; end if;
 
-    -- everyone else is ordered by the count the page shows: the unreadable employer's stale 50 does not put it first
-    select name into r from public.companies_page(gen_random_uuid(), null, false, true, 50, 0) where name like 'Selfcheck%' limit 1;
-    if r.name <> 'Selfcheck Open' then raise exception 'companies_page: an employer with no shown count must sort last, got %', r.name; end if;
+    -- more rows to prove the filters: a stat row at zero (Closed), one above zero (Open), and a role this person holds
+    insert into public.employer_stats (employer_id, role_type, seniority, open_count) values (closed_id, 'ml-engineer', 'mid', 0), (open_id, 'ml-engineer', 'mid', 2);
+    insert into public.person_roles (user_id, job_id, chance) values (u, job_id, 'strong');
+
+    -- everyone else is ordered by the count the page shows: Open (4), then the two with no shown count, by name; the
+    -- unreadable employer's stale 50 and the closed one's 9 do not put them first
+    select string_agg(name, ', ') into names from (select name from public.companies_page(gen_random_uuid(), null, false, true, 50, 0) where name like 'Selfcheck%') x;
+    if names <> 'Selfcheck Open, Selfcheck Closed, Selfcheck Unread' then raise exception 'companies_page: wrong order for someone who follows nobody, got %', names; end if;
+
+    -- following is this person's own: the employer u follows is not followed by anyone else
+    select * into r from public.companies_page(gen_random_uuid(), null, false, true, 50, 0) where name = 'Selfcheck Closed';
+    if r.following then raise exception 'companies_page: another person must not see this follow'; end if;
+
+    -- the type filter counts open roles, not stat rows: Closed has a row at zero and is left out
+    select string_agg(name, ', ') into names from public.companies_page(u, 'ml-engineer', false, true, 50, 0) where name like 'Selfcheck%';
+    if names is distinct from 'Selfcheck Open' then raise exception 'companies_page: a stat row at zero must not match the type, got %', names; end if;
+
+    -- with roles keeps the employer where this person holds an open role, and only for this person
+    select string_agg(name, ', ') into names from public.companies_page(u, null, true, true, 50, 0) where name like 'Selfcheck%';
+    if names is distinct from 'Selfcheck Open' then raise exception 'companies_page: with roles must keep the employer where a role is held, got %', names; end if;
+    select count(*) into n from public.companies_page(gen_random_uuid(), null, true, true, 50, 0) where name like 'Selfcheck%';
+    if n <> 0 then raise exception 'companies_page: with roles must not keep another person''s roles, got %', n; end if;
 
     -- matched counts every employer behind the filters, not the page, and follows them
     select matched into n from public.companies_page(gen_random_uuid(), null, false, true, 1, 0);
@@ -241,8 +261,12 @@ begin
 
     -- the page of one employer
     select * into r from public.company_page(u, open_id);
-    if r.name <> 'Selfcheck Open' or r.hq <> 'Paris' or r.following or jsonb_array_length(r.by_type) <> 1 then raise exception 'company_page: wrong head'; end if;
+    if r.name <> 'Selfcheck Open' or r.hq <> 'Paris' or r.following or jsonb_array_length(r.by_type) <> 2 then raise exception 'company_page: wrong head'; end if;
     if exists (select 1 from public.company_page(u, gen_random_uuid())) then raise exception 'company_page: an unknown employer must give no row'; end if;
+    -- kept: the role this person holds, with its chance, and nothing for anyone else
+    if jsonb_array_length(r.kept) <> 1 or r.kept->0->>'title' <> 'Selfcheck Engineer' or r.kept->0->>'chance' <> 'strong' then raise exception 'company_page: kept must hold the role the person holds'; end if;
+    select * into r from public.company_page(gen_random_uuid(), open_id);
+    if jsonb_array_length(r.kept) <> 0 then raise exception 'company_page: kept must be empty for someone who holds nothing there'; end if;
 
     -- search inside: the title, the description, and a miss
     select count(*) into n from public.company_roles(u, open_id, 'engineer');
