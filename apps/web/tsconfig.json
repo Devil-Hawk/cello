@@ -32,13 +32,12 @@
     "target": "ES2017"
   },
   "include": [
+    "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
-    ".next-3311/types/**/*.ts",
-    ".next-verify/types/**/*.ts",
     ".next/types/**/*.ts",
-    "next-env.d.ts",
-    ".next-smoke/types/**/*.ts"
+    ".next-verify/types/**/*.ts",
+    ".next-3311/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"
