@@ -53,21 +53,21 @@ describe('GET /api/artifacts', () => {
 describe('GET and POST /api/artifacts/[id]', () => {
   it('shows every version with who wrote it, newest first, and saves an edit as the person', async () => {
     const a = await createArtifact(admin, { userId: 'u1', type: 'cover_letter', title: 'Letter', content: { text: 'First draft.' }, author: 'cello' })
-    const saved = await edit(post({ content: { text: 'Second draft by me.' } }), { params: { id: a.id } })
+    const saved = await edit(post({ content: { text: 'Second draft by me.' } }), { params: Promise.resolve({ id: a.id }) })
     expect(saved.status).toBe(201)
     expect(await saved.json()).toEqual({ version: 2 })
-    const body = await (await one(get(`/api/artifacts/${a.id}`), { params: { id: a.id } })).json()
+    const body = await (await one(get(`/api/artifacts/${a.id}`), { params: Promise.resolve({ id: a.id }) })).json()
     expect(body.artifact.id).toBe(a.id)
     expect(body.versions.map((v: { version: number; author: string }) => [v.version, v.author])).toEqual([[2, 'user'], [1, 'cello']])
   })
 
   it("someone else's document and a missing one are the same 404; a body of the wrong kind is a 400 that adds nothing", async () => {
     const a = await createArtifact(admin, { userId: 'u2', type: 'cover_letter', title: 'Theirs', content: { text: 'x' }, author: 'cello' })
-    expect((await one(get('/x'), { params: { id: a.id } })).status).toBe(404)
-    expect((await edit(post({ content: { text: 'mine now' } }), { params: { id: a.id } })).status).toBe(404)
+    expect((await one(get('/x'), { params: Promise.resolve({ id: a.id }) })).status).toBe(404)
+    expect((await edit(post({ content: { text: 'mine now' } }), { params: Promise.resolve({ id: a.id }) })).status).toBe(404)
     const mine = await createArtifact(admin, { userId: 'u1', type: 'cover_letter', title: 'Mine', content: { text: 'x' }, author: 'cello' })
-    expect((await edit(post({ content: { nonsense: 1 } }), { params: { id: mine.id } })).status).toBe(400)
-    expect((await edit(post({}), { params: { id: mine.id } })).status).toBe(400)
+    expect((await edit(post({ content: { nonsense: 1 } }), { params: Promise.resolve({ id: mine.id }) })).status).toBe(400)
+    expect((await edit(post({}), { params: Promise.resolve({ id: mine.id }) })).status).toBe(400)
     expect(admin.tables.artifact_versions.filter((v) => v.artifact_id === mine.id)).toHaveLength(1)
   })
 })

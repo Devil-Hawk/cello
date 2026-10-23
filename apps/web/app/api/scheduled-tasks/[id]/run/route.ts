@@ -13,7 +13,8 @@ import { SCHEDULED_TASKS_ON } from '@/lib/agents/schedule-schemas'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-export async function POST(_request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   if (!SCHEDULED_TASKS_ON) return new NextResponse(null, { status: 404 })
   const supabase = await createClient()
   const {

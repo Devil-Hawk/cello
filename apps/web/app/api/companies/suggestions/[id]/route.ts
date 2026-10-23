@@ -23,7 +23,8 @@ const Body = z.discriminatedUnion('action', [
 
 const IdSchema = z.string().uuid()
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },

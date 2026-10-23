@@ -23,9 +23,10 @@ const Body = z.object({
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-type Ctx = { params: { id: string } }
+type Ctx = { params: Promise<{ id: string }> }
 
-export async function POST(request: NextRequest, { params }: Ctx) {
+export async function POST(request: NextRequest, props: Ctx) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },
@@ -44,7 +45,8 @@ export async function POST(request: NextRequest, { params }: Ctx) {
   }
 }
 
-export async function DELETE(_request: NextRequest, { params }: Ctx) {
+export async function DELETE(_request: NextRequest, props: Ctx) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },

@@ -20,8 +20,8 @@ import { ScoringInputError } from '@/lib/scoring'
 import { DELETE, POST } from './route'
 
 const ID = '4f5ad7eb-912c-4e15-ab3c-0f8248113d69'
-const post = (body: unknown, id = ID) => POST(new NextRequest(`http://localhost/api/roles/${id}/reaction`, { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body), headers: { 'content-type': 'application/json' } }), { params: { id } })
-const del = (id = ID) => DELETE(new NextRequest(`http://localhost/api/roles/${id}/reaction`, { method: 'DELETE' }), { params: { id } })
+const post = (body: unknown, id = ID) => POST(new NextRequest(`http://localhost/api/roles/${id}/reaction`, { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body), headers: { 'content-type': 'application/json' } }), { params: Promise.resolve({ id }) })
+const del = (id = ID) => DELETE(new NextRequest(`http://localhost/api/roles/${id}/reaction`, { method: 'DELETE' }), { params: Promise.resolve({ id }) })
 
 beforeEach(() => {
   vi.clearAllMocks()

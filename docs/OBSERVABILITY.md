@@ -33,9 +33,8 @@ SENTRY_DSN=https://examplePublicKey@o0.ingest.sentry.io/0
   worthwhile trade to keep `next build` fully offline by default. Error
   *capture* itself is unaffected.
 
-Where it's wired in: `instrumentation.ts` (Next's official boot hook — see
-`experimental.instrumentationHook` in `next.config.js`, required on Next
-14.1) calls `initObservability()` once per server/edge runtime instance.
+Where it's wired in: `instrumentation.ts` (Next's official boot hook, loaded
+automatically on Next 15) calls `initObservability()` once per server/edge runtime instance.
 From there, individual `app/api/**` route catch blocks call `captureError()` /
 `logApiError()` at the points that matter — this is **manual, targeted
 capture**, not blanket auto-instrumentation of every route. (`logHarnessError()`

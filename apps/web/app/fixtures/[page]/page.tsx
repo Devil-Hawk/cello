@@ -9,7 +9,8 @@ import { fixtureRows } from '../_data'
 // Any page that has no fixture of its own yet: the primitives on the ground,
 // 25 rows, one bar mark. Each page package adds a static fixtures/<page>/page.tsx,
 // which wins over this one. Made-up data only, no database calls.
-export default function FixturePage({ params }: { params: { page: string } }) {
+export default async function FixturePage(props: { params: Promise<{ page: string }> }) {
+  const params = await props.params
   const rows = fixtureRows(25)
   return (
     <main id="main-content" className="mx-auto max-w-[1200px] px-4 pb-24 pt-3 sm:px-6">

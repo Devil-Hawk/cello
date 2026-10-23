@@ -93,7 +93,7 @@ describe('POST /api/agent/stream', () => {
 })
 
 describe('GET /api/agent/threads/[id]/state', () => {
-  const get = (id: string) => threadState(new NextRequest(`http://localhost/api/agent/threads/${id}/state`), { params: { id } })
+  const get = (id: string) => threadState(new NextRequest(`http://localhost/api/agent/threads/${id}/state`), { params: Promise.resolve({ id }) })
 
   it('needs a signed in person', async () => {
     state.user = null

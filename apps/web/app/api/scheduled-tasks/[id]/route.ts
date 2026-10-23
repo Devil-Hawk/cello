@@ -14,7 +14,8 @@ export const dynamic = 'force-dynamic'
 
 const NOT_FOUND = { error: 'Not found', fix: 'Open Scheduled tasks and choose one from the list.' }
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   if (!SCHEDULED_TASKS_ON) return new NextResponse(null, { status: 404 })
   const supabase = await createClient()
   const {
@@ -35,7 +36,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   }
 }
 
-export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   if (!SCHEDULED_TASKS_ON) return new NextResponse(null, { status: 404 })
   const supabase = await createClient()
   const {

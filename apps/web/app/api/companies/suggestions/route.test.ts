@@ -56,7 +56,7 @@ function setup(over: { profile?: Record<string, unknown>; state?: Record<string,
 }
 
 const json = (body: unknown) => new NextRequest('http://localhost/api/companies/suggestions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-const act = (id: string, body: unknown) => ACT(new NextRequest(`http://localhost/api/companies/suggestions/${id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), { params: { id } })
+const act = (id: string, body: unknown) => ACT(new NextRequest(`http://localhost/api/companies/suggestions/${id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), { params: Promise.resolve({ id }) })
 
 beforeEach(() => {
   user = { id: ME }

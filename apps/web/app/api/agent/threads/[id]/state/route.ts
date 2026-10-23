@@ -12,7 +12,8 @@ import { withAgentPersistence } from '@/lib/agents/persistence'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
-export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },
