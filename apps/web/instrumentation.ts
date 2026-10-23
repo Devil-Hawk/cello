@@ -1,8 +1,6 @@
-// Next.js 14 instrumentation hook — `register()` runs once per server/edge
-// runtime instance at boot, before any request is handled. Requires
-// `experimental.instrumentationHook: true` in next.config.js on Next 14.1
-// (this file is silently never loaded without it — see the comment on that
-// flag in next.config.js).
+// Next.js instrumentation hook — `register()` runs once per server/edge
+// runtime instance at boot, before any request is handled. Next 15 loads it
+// without a config flag (Next 14 needed `experimental.instrumentationHook`).
 //
 // STRICTLY OPTIONAL: initObservability() is a synchronous no-op — it never
 // even imports `@sentry/nextjs` — unless SENTRY_DSN is set in the

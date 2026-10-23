@@ -36,7 +36,7 @@ interface HeaderProps {
   /** Opens the mobile nav drawer (see sidebar.tsx). */
   onOpenNav: () => void
   /** So the drawer can return focus to the control that opened it on close. */
-  menuButtonRef: RefObject<HTMLButtonElement>
+  menuButtonRef: RefObject<HTMLButtonElement | null>
 }
 
 export function Header({ onOpenNav, menuButtonRef }: HeaderProps) {
