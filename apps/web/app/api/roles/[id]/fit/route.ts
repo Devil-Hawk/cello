@@ -18,9 +18,10 @@ export const maxDuration = 120
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-type Ctx = { params: { id: string } }
+type Ctx = { params: Promise<{ id: string }> }
 
-export async function GET(_request: NextRequest, { params }: Ctx) {
+export async function GET(_request: NextRequest, props: Ctx) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },
@@ -32,7 +33,8 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
   return NextResponse.json(fit)
 }
 
-export async function POST(_request: NextRequest, { params }: Ctx) {
+export async function POST(_request: NextRequest, props: Ctx) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },

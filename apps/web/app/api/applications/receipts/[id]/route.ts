@@ -53,7 +53,8 @@ function parsePatch(body: unknown): ReceiptPatch {
   return patch
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },
@@ -83,7 +84,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   return NextResponse.json({ receipt: updated })
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },

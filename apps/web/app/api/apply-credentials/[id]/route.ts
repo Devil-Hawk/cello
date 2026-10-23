@@ -16,7 +16,8 @@ import { NO_STORE, vaultErrorResponse } from '../http'
 
 export const dynamic = 'force-dynamic'
 
-export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },

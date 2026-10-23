@@ -21,7 +21,8 @@ const Body = z.object({
   acknowledge_version: z.number().int().positive().optional(),
 })
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },

@@ -11,7 +11,8 @@ import { indexPasteDocument } from '@/lib/kb/connectors/paste'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },
@@ -26,7 +27,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   return NextResponse.json({ ok: true, documents })
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },

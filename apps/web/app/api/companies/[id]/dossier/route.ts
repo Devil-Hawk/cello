@@ -21,7 +21,8 @@ import { personJobs } from '@/lib/jobs/person-jobs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },
@@ -42,7 +43,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   })
 }
 
-export async function POST(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },

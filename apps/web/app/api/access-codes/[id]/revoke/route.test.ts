@@ -75,7 +75,7 @@ import { POST } from './route'
 
 function post(id: string = CODE, headers: Record<string, string> = { 'sec-fetch-site': 'same-origin' }) {
   return POST(new NextRequest(`http://localhost/api/access-codes/${id}/revoke`, { method: 'POST', headers }), {
-    params: { id },
+    params: Promise.resolve({ id }),
   })
 }
 

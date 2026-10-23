@@ -24,7 +24,7 @@ beforeEach(() => {
 })
 
 const req = (body?: unknown, url = 'http://localhost/api/approvals/a1') => new NextRequest(url, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) })
-const at = { params: { id: 'a1' } }
+const at = { params: Promise.resolve({ id: 'a1' }) }
 
 describe('GET /api/approvals', () => {
   it('lists pending by default, and refuses a status it does not know', async () => {

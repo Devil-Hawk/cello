@@ -30,8 +30,8 @@ import { GET, POST } from './route'
 
 const ID = '4f5ad7eb-912c-4e15-ab3c-0f8248113d69'
 const FIT = { jobId: ID, assessedAt: '2026-10-06T08:00:00Z', blocked: [], want: { p: 0.7, reason: 'Payments work.', tier: 'high', calibrated: false, nReactions: 2 }, chance: { label: 'possible', checks: [], gaps: [], confirm: [], note: null } }
-const get = (id = ID) => GET(new NextRequest(`http://localhost/api/roles/${id}/fit`), { params: { id } })
-const post = (id = ID) => POST(new NextRequest(`http://localhost/api/roles/${id}/fit`, { method: 'POST' }), { params: { id } })
+const get = (id = ID) => GET(new NextRequest(`http://localhost/api/roles/${id}/fit`), { params: Promise.resolve({ id }) })
+const post = (id = ID) => POST(new NextRequest(`http://localhost/api/roles/${id}/fit`, { method: 'POST' }), { params: Promise.resolve({ id }) })
 
 beforeEach(() => {
   vi.clearAllMocks()

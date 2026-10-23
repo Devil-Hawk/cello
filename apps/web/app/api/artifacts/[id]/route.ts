@@ -16,7 +16,8 @@ export const dynamic = 'force-dynamic'
 
 const NOT_FOUND = { error: 'Not found', fix: 'Open the list of your documents and choose one from it.' }
 
-export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },
@@ -31,7 +32,8 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
 
 const Body = z.object({ content: z.record(z.string(), z.unknown()) })
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },

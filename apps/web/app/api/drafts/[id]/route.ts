@@ -11,7 +11,8 @@ import { createAdminClient } from '@/lib/harness/supabase-admin'
 
 export const dynamic = 'force-dynamic'
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   const supabase = await createClient()
   const {
     data: { user },

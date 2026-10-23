@@ -292,7 +292,7 @@ describe('DELETE /api/apply-credentials/:id', () => {
     const created = await read(await POST(postRequest(VALID)))
     const id = (created.credential as Record<string, unknown>).id as string
 
-    const response = await DELETE(deleteRequest(), { params: { id } })
+    const response = await DELETE(deleteRequest(), { params: Promise.resolve({ id }) })
     expect(response.status).toBe(200)
     await read(response)
     expect(rows).toHaveLength(0)
@@ -300,14 +300,14 @@ describe('DELETE /api/apply-credentials/:id', () => {
 
   it('answers 404 for an unknown id and for a malformed one alike', async () => {
     const unknown = await DELETE(deleteRequest(), {
-      params: { id: '00000099-0000-4000-8000-000000000000' },
+      params: Promise.resolve({ id: '00000099-0000-4000-8000-000000000000' }),
     })
     expect(unknown.status).toBe(404)
     await read(unknown)
 
     // A malformed id must not become a 500 from a failed uuid cast — and the
     // answer must be identical, so this route never confirms an id exists.
-    const malformed = await DELETE(deleteRequest(), { params: { id: 'not-a-uuid' } })
+    const malformed = await DELETE(deleteRequest(), { params: Promise.resolve({ id: 'not-a-uuid' }) })
     expect(malformed.status).toBe(404)
     await read(malformed)
   })
@@ -320,7 +320,7 @@ describe('DELETE /api/apply-credentials/:id', () => {
     const id = (created.credential as Record<string, unknown>).id as string
 
     delete process.env.API_ENCRYPTION_KEY
-    const response = await DELETE(deleteRequest(), { params: { id } })
+    const response = await DELETE(deleteRequest(), { params: Promise.resolve({ id }) })
     expect(response.status).toBe(200)
     await read(response)
     expect(rows).toHaveLength(0)

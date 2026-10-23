@@ -30,7 +30,7 @@ describe('PATCH /api/drafts/[id]', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const res = await PATCH(
       new NextRequest('http://localhost/api/drafts/d1', { method: 'PATCH', body: JSON.stringify({ cover_letter: 'hi' }) }),
-      { params: { id: 'd1' } }
+      { params: Promise.resolve({ id: 'd1' }) }
     )
     expect(res.status).toBe(500)
     const text = JSON.stringify(await res.json())

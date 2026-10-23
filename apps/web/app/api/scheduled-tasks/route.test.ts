@@ -77,7 +77,7 @@ describe('POST and GET /api/scheduled-tasks', () => {
 })
 
 describe('PATCH and DELETE /api/scheduled-tasks/[id]', () => {
-  const at = (id: string) => ({ params: { id } })
+  const at = (id: string) => ({ params: Promise.resolve({ id }) })
 
   async function made() {
     return (await (await POST(req('POST', valid))).json()).task.id as string
@@ -116,7 +116,7 @@ describe('PATCH and DELETE /api/scheduled-tasks/[id]', () => {
 })
 
 describe('POST /api/scheduled-tasks/[id]/run', () => {
-  const at = (id: string) => ({ params: { id } })
+  const at = (id: string) => ({ params: Promise.resolve({ id }) })
 
   it('starts the task now with a signed request that forces it, and answers 202', async () => {
     const id = (await (await POST(req('POST', valid))).json()).task.id as string
@@ -139,7 +139,7 @@ describe('POST /api/scheduled-tasks/[id]/run', () => {
 })
 
 describe('while scheduled tasks are closed', () => {
-  const at = (id: string) => ({ params: { id } })
+  const at = (id: string) => ({ params: Promise.resolve({ id }) })
 
   it('every method answers 404 and touches nothing', async () => {
     flag.on = false

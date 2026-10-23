@@ -37,7 +37,8 @@ const CROSS_SITE = "This request didn't come from Cello. Reload the page and try
 /** A ban long enough to be permanent (10 years). The demo user is never reused. */
 const BAN_DURATION = '87600h'
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params
   if (!isSameOriginRequest(request.headers)) {
     return NextResponse.json({ error: CROSS_SITE }, { status: 403, headers: NO_STORE })
   }

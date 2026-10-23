@@ -29,7 +29,7 @@ function patch(body: unknown) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     }),
-    { params: { id: 'msg-1' } }
+    { params: Promise.resolve({ id: 'msg-1' }) }
   )
 }
 
