@@ -28,7 +28,7 @@ const REQUEST_TIMEOUT_MS = 15_000
  * scraping; the user is responsible for verifying its pricing and terms, and
  * can point this at ANY actor id they own or trust.
  */
-export const DEFAULT_APIFY_ACTOR_ID = 'apify~linkedin-profile-scraper'
+export const DEFAULT_APIFY_ACTOR_ID = 'johnvc~linkedin-profile-api'
 
 const TERMINAL_STATUSES: ReadonlySet<ApifyRunStatus> = new Set([
   'SUCCEEDED',

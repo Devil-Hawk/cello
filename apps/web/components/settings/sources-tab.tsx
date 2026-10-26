@@ -574,7 +574,7 @@ export function SourcesTab({ onStatus }: SourcesTabProps) {
               <Textarea
                 value={actorInput}
                 onChange={(e) => setActorInput(e.target.value)}
-                placeholder='{"startUrls": [...]}'
+                placeholder='{"profileUrls": [...]}'
                 className="min-h-[80px] font-mono text-caption"
               />
             )}
